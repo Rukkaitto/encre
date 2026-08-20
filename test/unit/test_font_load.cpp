@@ -60,11 +60,41 @@ TEST_CASE("Font::load rejects a bad magic") {
 }
 
 TEST_CASE("Font::load rejects an unknown version") {
+  // 1 and 2 are the formats that exist; 3 is not one of them, and neither is 0.
+  for (uint16_t version : {uint16_t(0), uint16_t(3), uint16_t(255)}) {
+    auto b = minimalFont();
+    b.version = version;
+    const auto bytes = b.build();
+    reader::Font font;
+    CAPTURE(version);
+    CHECK_FALSE(font.load(bytes.data(), bytes.size()));
+  }
+}
+
+TEST_CASE("Font::load reads format 2's declared size and weight, and format 1 has none") {
+  // Format 2 appends ppem and weight after the kern count. They are what the
+  // type ramp binds a role to a face by (reader/fontset.h), so a loader that
+  // read them from the wrong offset would silently make every role unbindable.
   auto b = minimalFont();
   b.version = 2;
+  b.ppem = 29;
+  b.weight = 400;
   const auto bytes = b.build();
   reader::Font font;
-  CHECK_FALSE(font.load(bytes.data(), bytes.size()));
+  REQUIRE(font.load(bytes.data(), bytes.size()));
+  CHECK(font.ppem() == 29);
+  CHECK(font.weight() == 400);
+  // The glyph table moved 4 bytes along with the header and is still read.
+  CHECK(font.glyph(U'A') != nullptr);
+
+  // A format-1 asset declares neither and says so with 0 rather than with a
+  // plausible-looking guess.
+  const auto v1 = minimalFont().build();
+  reader::Font old;
+  REQUIRE(old.load(v1.data(), v1.size()));
+  CHECK(old.ppem() == 0);
+  CHECK(old.weight() == 0);
+  CHECK(old.glyph(U'A') != nullptr);
 }
 
 TEST_CASE("Font::load rejects a short header") {
@@ -158,7 +188,14 @@ TEST_CASE("Font::load leaves no state behind after a failure") {
   CHECK(font.ascent() == 0);
   CHECK(font.descent() == 0);
   CHECK(font.lineHeight() == 0);
-  CHECK(font.measure("A") == 0);
+  CHECK(font.ppem() == 0);
+  CHECK(font.weight() == 0);
+  // Not measure("A") == 0: an empty font has no glyph for 'A', and measure now
+  // reports the width of the notdef box drawText paints for it (see
+  // Font::notdefAdvance) rather than skipping it. On a zeroed face that box is
+  // degenerate, which is the only reason the number is small -- it is not
+  // evidence of a clean slate, so the assertions above are.
+  CHECK(font.measure("A") == font.notdefAdvance());
 }
 
 TEST_CASE("Font::load is idempotent when called twice with the same font") {

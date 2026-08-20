@@ -4,12 +4,13 @@
 #include <SPI.h>
 #include <XteinkDetect.h>
 
-#include "font_body.h"
-#include "font_display.h"
-#include "font_label.h"
-#include "font_meta.h"
-#include "font_title.h"
-#include "font_value.h"
+#include "font_body400.h"
+#include "font_body500.h"
+#include "font_display700.h"
+#include "font_label500.h"
+#include "font_meta400.h"
+#include "font_title700.h"
+#include "font_value700.h"
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
 #include "reader/rotate.h"
@@ -98,12 +99,17 @@ void setup() {
   Serial.flush();
 
   reader::FontSet fonts;
-  const bool fontsOk = fonts.load(reader::Role::Meta, kFontMeta, kFontMetaSize) &&
-                       fonts.load(reader::Role::Label, kFontLabel, kFontLabelSize) &&
-                       fonts.load(reader::Role::Value, kFontValue, kFontValueSize) &&
-                       fonts.load(reader::Role::Body, kFontBody, kFontBodySize) &&
-                       fonts.load(reader::Role::Title, kFontTitle, kFontTitleSize) &&
-                       fonts.load(reader::Role::Display, kFontDisplay, kFontDisplaySize);
+  // Each role names its weight and FontSet::load checks the asset against it,
+  // so a mis-wired pair here is a loud "font-load-FAILED" at boot rather than a
+  // screen drawn in the wrong weight for the rest of the project.
+  const bool fontsOk =
+      fonts.load(reader::Role::Meta400, kFontMeta400, kFontMeta400Size) &&
+      fonts.load(reader::Role::Label500, kFontLabel500, kFontLabel500Size) &&
+      fonts.load(reader::Role::Value700, kFontValue700, kFontValue700Size) &&
+      fonts.load(reader::Role::Body400, kFontBody400, kFontBody400Size) &&
+      fonts.load(reader::Role::Body500, kFontBody500, kFontBody500Size) &&
+      fonts.load(reader::Role::Title700, kFontTitle700, kFontTitle700Size) &&
+      fonts.load(reader::Role::Display700, kFontDisplay700, kFontDisplay700Size);
   if (!fontsOk || !fonts.ready()) {
     mark("font-load-FAILED");
     return;

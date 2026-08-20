@@ -51,14 +51,15 @@ TEST_CASE("measure accounts for tracking and agrees with drawText") {
   reader::Font font;
   REQUIRE(font.load(bytes.data(), bytes.size()));
 
+  const reader::Tracking two = reader::Tracking::px(2);
   const int plain = font.measure("LIBRARY");
-  const int tracked = font.measure("LIBRARY", 2);
-  CHECK(tracked == plain + 2 * 7);  // 7 glyphs, 2px each
+  const int tracked = font.measure("LIBRARY", two);
+  CHECK(tracked == plain + 2 * 7);  // 7 glyphs, 2px each -- and the last one too
 
   // The advance drawText reports must equal what measure predicts, or
   // right-aligned chrome drifts.
   reader::Framebuffer fb(400, 40);
-  CHECK(reader::drawText(fb, font, 0, 30, "LIBRARY", reader::Ink::Black, 2) == tracked);
+  CHECK(reader::drawText(fb, font, 0, 30, "LIBRARY", reader::Ink::Black, two) == tracked);
 }
 
 TEST_CASE("a missing glyph draws a visible box rather than nothing") {
@@ -101,7 +102,7 @@ TEST_CASE("each plane emits its own bit of a glyph's coverage") {
 
   auto inkAt = [&](reader::Plane plane, int px) {
     reader::Framebuffer fb(16, 4);
-    reader::drawText(fb, f, 0, 1, "A", reader::Ink::Black, 0, plane);
+    reader::drawText(fb, f, 0, 1, "A", reader::Ink::Black, {}, plane);
     return !fb.getPixel(px, 0);  // true when this pixel got ink
   };
 
@@ -130,7 +131,7 @@ TEST_CASE("a 1bpp font is identical in every plane") {
   REQUIRE(f.load(bytes.data(), bytes.size()));
   auto render = [&](reader::Plane plane) {
     reader::Framebuffer fb(200, 40);
-    reader::drawText(fb, f, 4, 30, "Aa", reader::Ink::Black, 0, plane);
+    reader::drawText(fb, f, 4, 30, "Aa", reader::Ink::Black, {}, plane);
     int n = 0;
     for (int y = 0; y < 40; ++y)
       for (int x = 0; x < 200; ++x)

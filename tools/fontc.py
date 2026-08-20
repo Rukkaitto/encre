@@ -12,7 +12,8 @@ Exactly one of --pt or --size sets the size, and they are not interchangeable:
         chrome ramp is authored in (see design/Main.dc.html). ppem works out to
         pt * 150 / 72, so 10pt is 20.83 -> FreeType's own rounding, not ours.
   --size  a pixel size, via set_pixel_sizes. Kept for the Literata body face,
-        whose asset predates the pt ramp and must stay byte-identical.
+        whose asset predates the pt ramp and whose glyph tables must stay
+        byte-identical (the format-2 header fields are additive).
 
 The two paths are deliberately NOT one path with a conversion in front: rounding
 a pt size to an integer ppem and calling set_pixel_sizes gives FreeType a
@@ -32,8 +33,12 @@ pixel grid instead of trusting the face's (mono-hostile) TrueType hints.
 stem is 1-1.5px, so thresholding either drops it or leaves a jagged single-pixel
 stroke, which is what made the chrome illegible on the X3 panel. Two bits give
 four levels, which the panel can actually paint. The bit depth rides in the high
-byte of the version word (1 = v1/1bpp, 1 | (2 << 8) = v2/2bpp), so v1 assets
-stay byte-valid and the loader accepts both.
+byte of the version word (2 = 1bpp, 2 | (2 << 8) = 2bpp), independent of the
+format version in the low byte; the loader accepts both depths and both formats.
+
+The container is format 2, whose header carries the resolved ppem and the pinned
+weight after the kern count (see the write below for why). Format 1 assets omit
+those two fields and still load.
 
 --coverage-gamma is the transfer curve applied to coverage before it is
 quantised, and it is why the chrome no longer renders thinner than the design.
@@ -266,10 +271,31 @@ def main() -> None:
     descent = face.size.descender // 64  # negative
     line_gap = (face.size.height // 64) - ascent + descent
 
+    # Format 2 records what the face IS, not only how it measures: the nominal
+    # pixel size FreeType resolved the request to, and the weight the variation
+    # axis was pinned to. Both are things only this tool knows, and both had
+    # callers that were guessing.
+    #
+    # ppem: the design states letter-spacing in em, which needs a pixel size to
+    # resolve. Without it in the asset, core/ kept its own table of the ramp's
+    # sizes -- a second source of truth, covering only the roles that happened
+    # to be tracked, checked by nothing.
+    #
+    # weight: the type ramp's roles name a weight (see core/include/reader/
+    # fontset.h), and until the asset declared its own nothing could tell a 400
+    # face from a 500 one. That is how Home's author line came to be drawn in
+    # the 500 body face against a board that asks for 400.
+    #
+    # Only the header grew; the glyph and kern tables are byte-identical, so a
+    # v1 asset still loads and renders the same (Font::load accepts both, and
+    # reports 0/0 for an asset that declares neither).
+    weight = int(round(args.weight)) if args.weight is not None else 0
+    if not 0 <= weight <= 0xFFFF or not 0 <= ppem <= 0xFFFF:
+        sys.exit(f"error: ppem {ppem} / weight {weight} do not fit the v2 header")
     with open(args.out, "wb") as f:
-        # bpp 1 leaves the version word bare, so v1 assets are byte-identical.
-        version = 1 if args.bpp == 1 else 1 | (args.bpp << 8)
-        f.write(struct.pack("<4sHHhhhH", b"RFNT", version, len(glyphs), ascent, descent, line_gap, min(len(kerns), 0xFFFF)))
+        version = 2 if args.bpp == 1 else 2 | (args.bpp << 8)
+        f.write(struct.pack("<4sHHhhhHHH", b"RFNT", version, len(glyphs), ascent, descent,
+                            line_gap, min(len(kerns), 0xFFFF), ppem, weight))
         for cp, adv, w, h, xo, yo, off in glyphs:
             f.write(struct.pack("<IhhhhhI", cp, adv, w, h, xo, yo, off))
         for left, right, adj in kerns[:0xFFFF]:

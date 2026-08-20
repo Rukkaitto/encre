@@ -25,6 +25,7 @@ bool Font::load(const uint8_t* d, size_t size) {
   glyphs_.clear();
   kerns_.clear();
   ascent_ = descent_ = lineGap_ = 0;
+  ppem_ = weight_ = 0;
   bpp_ = 1;
 
   if (size < 16 || std::memcmp(d, "RFNT", 4) != 0) return false;
@@ -33,12 +34,19 @@ bool Font::load(const uint8_t* d, size_t size) {
   const uint16_t versionWord = rd<uint16_t>(d + 4);
   const uint8_t version = versionWord & 0xFF;
   const uint8_t depth = (versionWord >> 8) ? static_cast<uint8_t>(versionWord >> 8) : 1;
-  if (version != 1 || (depth != 1 && depth != 2)) return false;
+  // Format 2 appends two declarations to the header -- the nominal pixel size
+  // FreeType resolved the request to, and the weight the variation axis was
+  // pinned to (see Font::ppem/weight). Format 1 is still accepted and reports
+  // both as 0: the container grew, the glyph and kern tables did not, so an old
+  // asset loads and renders identically.
+  const size_t headerAt = version >= 2 ? 20u : 16u;
+  if (version < 1 || version > 2 || (depth != 1 && depth != 2)) return false;
+  if (size < headerAt) return false;
   bpp_ = depth;
   const uint16_t glyphCount = rd<uint16_t>(d + 6);
   const uint16_t kernCount = rd<uint16_t>(d + 14);
 
-  const size_t glyphsAt = 16;
+  const size_t glyphsAt = headerAt;
   const size_t kernsAt = glyphsAt + glyphCount * 18u;
   const size_t blobAt = kernsAt + kernCount * 12u;
   if (blobAt > size) return false;
@@ -81,6 +89,10 @@ bool Font::load(const uint8_t* d, size_t size) {
   ascent_ = rd<int16_t>(d + 8);
   descent_ = rd<int16_t>(d + 10);
   lineGap_ = rd<int16_t>(d + 12);
+  if (version >= 2) {
+    ppem_ = rd<uint16_t>(d + 16);
+    weight_ = rd<uint16_t>(d + 18);
+  }
   return true;
 }
 
@@ -102,18 +114,35 @@ int Font::kerning(char32_t l, char32_t r) const {
   return it == kerns_.end() ? 0 : it->second;
 }
 
-int Font::measure(std::string_view utf8, int tracking) const {
-  int w = 0;
+// The hollow box drawText paints in place of a missing glyph: h = ascent * 2/3,
+// w = h / 2 + 1, then two pixels of side bearing. Spelled once, read by both.
+int Font::notdefAdvance() const { return (ascent_ * 2 / 3) / 2 + 1 + 2; }
+
+int Font::measure(std::string_view utf8, Tracking tracking) const {
+  // Accumulated in 1/64 px and rounded once, exactly as drawText does it, so
+  // measure() == drawText()'s returned advance for every string and every
+  // tracking value -- including fractional ones, where a per-glyph rounding
+  // here and there would part company after the second character. Right
+  // alignment is `edge - measure(s)`, so a disagreement of even one pixel is a
+  // run that does not end on the margin it was aligned to.
+  int penF = 0;
   char32_t prev = 0;
   for (size_t i = 0; i < utf8.size();) {
     const char32_t cp = utf8Next(utf8, i);
     const Glyph* g = glyph(cp);
-    if (!g) continue;
-    if (prev) w += kerning(prev, cp);
-    w += g->advance + tracking;
+    if (!g) {
+      // Not `continue`: drawText draws a box here and advances past it, so
+      // skipping it made a run with one unmapped codepoint measure short by the
+      // box's width and kern across the hole as if it were not there.
+      penF += pxToF26(notdefAdvance()) + tracking.f26();
+      prev = 0;
+      continue;
+    }
+    if (prev) penF += pxToF26(kerning(prev, cp));
+    penF += pxToF26(g->advance) + tracking.f26();
     prev = cp;
   }
-  return w;
+  return f26ToPx(penF);
 }
 
 char32_t utf8Next(std::string_view s, size_t& i) {

@@ -3,16 +3,23 @@
 // inputs no real font file would contain (corrupt offsets, kern pairs,
 // truncated tables). Mirrors the layout tools/fontc.py writes:
 //   header 16B  <4sHHhhhH>  magic, version, glyphCount, ascent, descent,
-//                           lineGap, kernCount
+//                           lineGap, kernCount            (format 1)
+//          +4B  <HH>       ppem, weight                   (format 2 only)
 //   glyph  18B  <IhhhhhI>   codepoint, advance, bitmapW, bitmapH, xOff, yOff,
 //                           bitmapOffset (relative to the blob)
 //   kern   12B  <IIi>       left, right, adjust
 //   blob             packed MSB-first rows, ceil(bitmapW * bpp / 8) per row
 //
-// `bpp` selects the depth: 1 writes the version word untouched (so a v1 buffer
-// is byte-identical to what it was before v2 existed), 2 ORs the depth into the
-// version word's high byte. The blob itself is supplied verbatim by the caller,
-// so a test can hand-write the exact coverage bytes it wants to see read back.
+// `bpp` selects the depth: 1 writes the version word's low byte untouched (so a
+// buffer is byte-identical to what it was before 2bpp existed), 2 ORs the depth
+// into the version word's high byte. The blob itself is supplied verbatim by the
+// caller, so a test can hand-write the exact coverage bytes it wants to see read
+// back.
+//
+// `version` selects the container format, which is independent of the depth: 1
+// stops after the kern count, 2 appends the declared ppem and weight. It
+// defaults to 1 so the existing corrupt-input cases keep exercising the older
+// header they were written against -- both formats have to keep loading.
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -37,6 +44,9 @@ class Builder {
   uint16_t version = 1;
   int bpp = 1;  // 1 or 2; rides in the high byte of the version word
   int16_t ascent = 12, descent = -4, lineGap = 2;
+  // Only written when version >= 2. 0 means "undeclared", which is what a
+  // format-1 asset reports.
+  uint16_t ppem = 0, weight = 0;
   std::vector<GlyphRec> glyphs;
   std::vector<KernRec> kerns;
   std::vector<uint8_t> blob;
@@ -52,6 +62,10 @@ class Builder {
     put<int16_t>(out, descent);
     put<int16_t>(out, lineGap);
     put<uint16_t>(out, static_cast<uint16_t>(kernCountOverride >= 0 ? kernCountOverride : kerns.size()));
+    if (version >= 2) {
+      put<uint16_t>(out, ppem);
+      put<uint16_t>(out, weight);
+    }
     for (const GlyphRec& g : glyphs) {
       put<uint32_t>(out, g.cp);
       put<int16_t>(out, g.advance);

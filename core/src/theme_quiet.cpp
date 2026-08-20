@@ -90,10 +90,16 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   drawCoverPlaceholder(fb, kMargin, y);
 
   const int rightX = kMargin + kCoverW + kGutter;
-  const Font& title = fonts[Role::Title];
-  const Font& body = fonts[Role::Body];
-  const Font& meta = fonts[Role::Meta];
-  const Font& display = fonts[Role::Display];
+  const Font& title = fonts[Role::Title700];
+  // Body400, not Body500: the board's author line is `font-size: var(--t-body)`
+  // with no font-weight, so it is CSS default 400. The ramp used to carry one
+  // 29px face at 500 -- the weight the *other* --t-body runs ask for -- and this
+  // line was drawn in it, measuring 19% over the board's ink. The role names the
+  // weight now, so asking for the wrong one is a visible mistake in this line
+  // rather than an invisible property of the asset.
+  const Font& body = fonts[Role::Body400];
+  const Font& meta = fonts[Role::Meta400];
+  const Font& display = fonts[Role::Display700];
 
   // The stats column flows downward from its own top, with the board's gaps
   // between runs. It used to hang the numeral off the cover's *bottom* edge,
@@ -105,28 +111,28 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   // presentation decision, so the theme applies it rather than the view-model
   // carrying a pre-shouted string.
   drawText(fb, title, rightX, baselineIn(title, ry, kTitleLineH), upperAscii(vm.title), Ink::Black,
-           0, plane);
+           {}, plane);
   ry += kTitleLineH + kTitleAuthorGap;
 
-  drawText(fb, body, rightX, baselineIn(body, ry, body.lineHeight()), vm.author, Ink::Black, 0,
+  drawText(fb, body, rightX, baselineIn(body, ry, body.lineHeight()), vm.author, Ink::Black, {},
            plane);
   ry += body.lineHeight() + kGroupGap;
 
   // The percentage is the one display-scale run on the screen: 32pt against the
   // title's 20, so it outranks the book's name instead of tying with it.
   drawText(fb, display, rightX, baselineIn(display, ry, kDisplayLineH),
-           std::to_string(vm.percent) + "%", Ink::Black, 0, plane);
+           std::to_string(vm.percent) + "%", Ink::Black, {}, plane);
   ry += kDisplayLineH + kMetaGap;
 
   // Two meta lines, two trackings: the board sets the page count at 0.16em and
   // the chapter label at 0.10em. They are not the same run.
   drawText(fb, meta, rightX, baselineIn(meta, ry, meta.lineHeight()),
            "PAGE " + std::to_string(vm.currentPage) + " / " + std::to_string(vm.pageCount),
-           Ink::Black, kMetaTracking, plane);
+           Ink::Black, trackingEm(meta, kMetaEm), plane);
   ry += meta.lineHeight() + kMetaGap;
 
   drawText(fb, meta, rightX, baselineIn(meta, ry, meta.lineHeight()), vm.chapterLabel, Ink::Black,
-           kTightMetaTracking, plane);
+           trackingEm(meta, kTightMetaEm), plane);
   ry += meta.lineHeight();
 
   // The block is as tall as its taller column. The stats column now normally
@@ -150,7 +156,7 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
 
   // Continue block: focused when no menu row is.
   const bool continueFocused = (vm.focusedMenuIndex < 0);
-  const Font& label = fonts[Role::Label];
+  const Font& label = fonts[Role::Label500];
   if (continueFocused) {
     fb.fillRect(kMargin, y, barW, kBlockH, false);
   } else {
@@ -164,13 +170,14 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   // and its mark are placed by the same two shared helpers every other box uses
   // -- there is nothing about a 72px action block that makes it a special case.
   const int cbase = baselineIn(label, y, kBlockH);
-  drawText(fb, label, kMargin + kBlockPadX, cbase, "CONTINUE", cink, kBlockLabelTracking, plane);
+  drawText(fb, label, kMargin + kBlockPadX, cbase, "CONTINUE", cink,
+           trackingEm(label, kBlockLabelEm), plane);
   // kForward, not kChevron: the board draws a 32x25 long arrow with a shaft here
   // (`M1 7h15M11 1l6 6-6 6`), and the 25x25 chevron this used to draw is the
   // *menu row's* disclosure -- a different mark for a different job. An action
   // block proceeds; a row discloses.
   const Icon& mark = icons::kForward;
-  drawIcon(fb, mark, kMargin + barW - kBlockPadX - mark.w, iconTopFor(label, cbase, mark.h), cink,
+  drawIcon(fb, mark, kMargin + barW - kBlockPadX - mark.w, iconTopIn(y, kBlockH, mark.h), cink,
            plane);
 
   const Hint hints[4] = {{&icons::kBook, vm.hints[0], ""},

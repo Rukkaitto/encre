@@ -3,40 +3,34 @@
 #include <vector>
 
 #include "doctest.h"
+#include "ramp.h"
+#include "rfnt_builder.h"
 #include "reader/components.h"
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
 #include "reader/text.h"
 
-static std::vector<uint8_t> slurp(const std::string& p) {
-  std::ifstream f(p, std::ios::binary);
-  REQUIRE(f.good());
-  return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)), {});
+using ramp::Ramp;
+
+// A face that declares itself Role::Label500's 23px/500 -- so FontSet::load
+// accepts it -- whose line box is `lineH` tall instead of the real face's 29.
+// It carries no glyphs: the tests that use it are about box geometry, and
+// drawText's notdef box is enough ink to locate a run.
+static std::vector<uint8_t> tallLabelFace(int lineH) {
+  const reader::RoleSpec spec = reader::roleSpec(reader::Role::Label500);
+  rfnt::Builder b;
+  b.version = 2;
+  b.bpp = 2;
+  b.ppem = static_cast<uint16_t>(spec.ppem);
+  b.weight = static_cast<uint16_t>(spec.weight);
+  b.ascent = static_cast<int16_t>(lineH * 3 / 4);
+  b.descent = static_cast<int16_t>(-(lineH / 4));
+  b.lineGap = static_cast<int16_t>(lineH - (b.ascent - b.descent));
+  return b.build();
 }
 
-struct Fixture {
-  std::vector<uint8_t> a, b, c, d, e, g;
-  reader::FontSet fonts;
-  Fixture() {
-    const std::string dir = std::string(ASSETS_DIR) + "/built/";
-    a = slurp(dir + "spacegrotesk_400_10pt.rfnt");
-    b = slurp(dir + "spacegrotesk_500_11pt.rfnt");
-    c = slurp(dir + "spacegrotesk_700_12pt.rfnt");
-    d = slurp(dir + "spacegrotesk_500_14pt.rfnt");
-    e = slurp(dir + "spacegrotesk_700_20pt.rfnt");
-    g = slurp(dir + "spacegrotesk_700_32pt.rfnt");
-    fonts.load(reader::Role::Meta, a.data(), a.size());
-    fonts.load(reader::Role::Label, b.data(), b.size());
-    fonts.load(reader::Role::Value, c.data(), c.size());
-    fonts.load(reader::Role::Body, d.data(), d.size());
-    fonts.load(reader::Role::Title, e.data(), e.size());
-    fonts.load(reader::Role::Display, g.data(), g.size());
-    REQUIRE(fonts.ready());
-  }
-};
-
 TEST_CASE("the header band right-aligns its value on any canvas width") {
-  Fixture f;
+  Ramp f;
   for (int width : {480, 528}) {
     reader::Framebuffer fb(width, 200);
     const int h = reader::drawHeaderBand(fb, f.fonts, "NOW READING", "87%");
@@ -59,9 +53,9 @@ TEST_CASE("the header band right-aligns its value on any canvas width") {
 }
 
 TEST_CASE("the header band's height follows the type role it draws") {
-  Fixture f;
-  const reader::Font& lf = f.fonts[reader::Role::Label];
-  const reader::Font& vf = f.fonts[reader::Role::Value];
+  Ramp f;
+  const reader::Font& lf = f.fonts[reader::Role::Label500];
+  const reader::Font& vf = f.fonts[reader::Role::Value700];
   const int chrome = reader::kBandPadTop + reader::kBandPadBottom + reader::kBandRuleH;
 
   // The board declares no height for the band: `padding: 18px 24px 14px` around
@@ -78,15 +72,18 @@ TEST_CASE("the header band's height follows the type role it draws") {
   // difference in line box, with nothing else to update. This is the property a
   // pinned constant cannot have, and the reason six unbuilt screens can set
   // their band label to whatever the board says.
+  //
+  // The substitute face is synthetic rather than another asset off the ramp,
+  // because FontSet::load now checks a blob's declared size and weight against
+  // the role's and would (correctly) refuse the 20pt face for Role::Label500.
+  // So this is a face that declares itself the band label's 23px/500 and
+  // differs from it in one respect only: a taller line box.
   reader::FontSet bigger;
-  bigger.load(reader::Role::Meta, f.a.data(), f.a.size());
-  bigger.load(reader::Role::Label, f.e.data(), f.e.size());  // Title's 20pt face
-  bigger.load(reader::Role::Value, f.c.data(), f.c.size());
-  bigger.load(reader::Role::Body, f.d.data(), f.d.size());
-  bigger.load(reader::Role::Title, f.e.data(), f.e.size());
-  bigger.load(reader::Role::Display, f.g.data(), f.g.size());
+  REQUIRE(f.load(bigger));
+  const auto tallFace = tallLabelFace(53);
+  REQUIRE(bigger.load(reader::Role::Label500, tallFace.data(), tallFace.size()));
   REQUIRE(bigger.ready());
-  const int bigLabel = bigger[reader::Role::Label].lineHeight();
+  const int bigLabel = bigger[reader::Role::Label500].lineHeight();
   REQUIRE(bigLabel > tallest);
   CHECK(reader::headerBandHeight(bigger) == chrome + bigLabel);
   CHECK(reader::headerBandHeight(bigger) > reader::headerBandHeight(f.fonts));
@@ -110,7 +107,7 @@ TEST_CASE("the header band's height follows the type role it draws") {
 }
 
 TEST_CASE("a focused row inverts: black field, white text") {
-  Fixture f;
+  Ramp f;
   reader::Framebuffer fb(480, 120);
   reader::drawRow(fb, f.fonts, 0, "LIBRARY", "12", /*focused=*/true);
   // The row's field is black...
@@ -133,7 +130,7 @@ static int rightmostInk(const reader::Framebuffer& fb, int y0, int y1) {
 }
 
 TEST_CASE("the header band keeps value plus battery glyph inside the right margin") {
-  Fixture f;
+  Ramp f;
   for (int width : {480, 528}) {
     reader::Framebuffer fb(width, 200);
     const int h = reader::drawHeaderBand(fb, f.fonts, "NOW READING", "87%");
@@ -167,7 +164,7 @@ TEST_CASE("the header band keeps value plus battery glyph inside the right margi
 }
 
 TEST_CASE("a row can carry a trailing icon, a value, or neither") {
-  Fixture f;
+  Ramp f;
   const int width = 480;
   const int edge = width - reader::kMargin;
 
@@ -235,7 +232,7 @@ static Rows inkRowsIn(const reader::Framebuffer& fb, int y0, int y1, int x0, int
 static int centre2(const Rows& r) { return r.top + r.bottom; }
 
 TEST_CASE("a hold line stays inside the bar wherever its slot sits") {
-  Fixture f;
+  Ramp f;
   // The real bars carry the hold on the Confirm slot, not the first one, so the
   // vertical placement cannot be decided by looking at slot 0 alone.
   for (int holdSlot : {0, 1, 2, 3}) {
@@ -262,7 +259,7 @@ TEST_CASE("a hold line stays inside the bar wherever its slot sits") {
 }
 
 TEST_CASE("a hold line in one slot does not pull the other slots off centre") {
-  Fixture f;
+  Ramp f;
   // A hold line makes its own slot taller, and a taller slot makes the bar
   // taller -- the boards size a hint bar from its content, so Library's bar is
   // genuinely taller than Home's. So this cannot assert that the other slots
@@ -304,12 +301,12 @@ TEST_CASE("a hold line in one slot does not pull the other slots off centre") {
 }
 
 TEST_CASE("the hint bar's height is the board's padding plus its own content") {
-  Fixture f;
+  Ramp f;
   const reader::Hint plain[4] = {{&reader::icons::kBook, "READ", ""},
                                  {&reader::icons::kDot, "SELECT", ""},
                                  {&reader::icons::kUp, "UP", ""},
                                  {&reader::icons::kDown, "DOWN", ""}};
-  const int lineH = f.fonts[reader::Role::Meta].lineHeight();
+  const int lineH = f.fonts[reader::Role::Meta400].lineHeight();
   const int chrome = reader::kHintRuleH + reader::kHintPadTop + reader::kHintPadBottom;
 
   // Home's bar: `padding: 20px 24px 16px` + a 1px rule around one 27px line box
@@ -336,7 +333,7 @@ TEST_CASE("the hint bar's height is the board's padding plus its own content") {
 }
 
 TEST_CASE("the hint bar honours the board's asymmetric padding") {
-  Fixture f;
+  Ramp f;
   // `padding: 20px 24px 16px 24px`. The primitive used to centre its content in
   // the bar, which is only correct for symmetric padding and left every hint
   // label on every screen 3px high. What follows measures that 4px asymmetry
@@ -378,7 +375,7 @@ TEST_CASE("the hint bar honours the board's asymmetric padding") {
 }
 
 TEST_CASE("structural drawing is identical in every plane") {
-  Fixture f;
+  Ramp f;
 
   // drawRow: the hairline at row 0 sits well above any glyph the label or
   // value could ever reach, so it must be bit-identical across all three
@@ -464,9 +461,9 @@ static int iconInkOffset2(const reader::Icon& icon) {
 }
 
 TEST_CASE("baselineIn centres the em box, and sits higher than centring the ascent") {
-  Fixture f;
-  for (reader::Role role : {reader::Role::Meta, reader::Role::Label, reader::Role::Value,
-                            reader::Role::Body, reader::Role::Title, reader::Role::Display}) {
+  Ramp f;
+  for (reader::Role role : {reader::Role::Meta400, reader::Role::Label500, reader::Role::Value700,
+                            reader::Role::Body400, reader::Role::Title700, reader::Role::Display700}) {
     const reader::Font& font = f.fonts[role];
     for (int boxTop : {0, 7, 240}) {
       for (int boxH : {64, 72, 80, 100}) {
@@ -495,30 +492,64 @@ TEST_CASE("baselineIn centres the em box, and sits higher than centring the asce
   }
 }
 
-TEST_CASE("iconTopFor is the exact inverse of baselineIn") {
-  Fixture f;
-  // An icon placed with iconTopFor and text placed with baselineIn out of the
-  // same box must share a centre for *any* icon height -- that is the whole
-  // point, since the design's bars mix a 25px square mark with a 38x21 battery.
-  for (reader::Role role : {reader::Role::Meta, reader::Role::Label, reader::Role::Value}) {
-    const reader::Font& font = f.fonts[role];
-    for (int boxH : {64, 72, 80}) {
-      const int base = reader::baselineIn(font, 0, boxH);
-      for (int iconH : {9, 12, 21, 25, 39, 46}) {
-        CAPTURE(iconH);
-        const int top = reader::iconTopFor(font, base, iconH);
-        // Doubled centres, so an odd icon height needs no rounding fudge.
-        const int iconCentre2 = 2 * top + iconH;
-        const int boxCentre2 = boxH;
-        CHECK(iconCentre2 >= boxCentre2 - 2);
-        CHECK(iconCentre2 <= boxCentre2 + 2);
+TEST_CASE("iconTopIn centres an item on its flex line, rounding once") {
+  // CSS `align-items: center` puts every child's box on one cross-axis centre
+  // line, so the answer is `boxTop + (boxH - itemH) / 2` with a single rounding
+  // -- and halves go up, which is what Chrome's pixel snapping does.
+  for (int boxTop : {0, 1, 18, 241}) {
+    for (int boxH : {21, 27, 32, 72, 80}) {
+      for (int itemH : {9, 12, 21, 25, 32, 46}) {
+        CAPTURE(boxTop);
+        CAPTURE(boxH);
+        CAPTURE(itemH);
+        const int top = reader::iconTopIn(boxTop, boxH, itemH);
+        // Exact, in doubled units, against the fractional truth. No tolerance:
+        // that is the point of rounding once instead of three times.
+        CHECK(2 * top + itemH == 2 * boxTop + boxH + ((boxH - itemH) % 2 != 0 ? 1 : 0));
       }
+    }
+  }
+  // And the specific number the board renders: a 21px battery on the header
+  // band's 32px content box, whose top edge is the band's 18px padding, lands
+  // on row 24 -- measured off the rasterised board, which puts its ink on rows
+  // 24..44. Deriving the centre from the value's baseline instead landed it on
+  // 25, and the percentage's ink centre 1.5px above the glyph's.
+  CHECK(reader::iconTopIn(reader::kBandPadTop, 32, reader::icons::kBattery.h) == 24);
+}
+
+TEST_CASE("an icon aligns on the line box of text of any size beside it") {
+  Ramp f;
+  // The regression pin for the header band's battery. The band draws its value
+  // in one role and centres the battery in the same box; the icon is 21px and
+  // the box is the *value's* 32px line box, so the two heights differ and the
+  // rounding cannot cancel. Both must land on one centre for every role in the
+  // ramp -- Reader's band sets its value at a different size than Home's.
+  for (reader::Role role : {reader::Role::Meta400, reader::Role::Label500,
+                            reader::Role::Value700, reader::Role::Body400}) {
+    const reader::Font& font = f.fonts[role];
+    const int boxTop = reader::kBandPadTop;
+    const int boxH = font.lineHeight();
+    const int base = reader::baselineIn(font, boxTop, boxH);
+    for (int iconH : {9, 21, 25, 38}) {
+      CAPTURE(iconH);
+      const int top = reader::iconTopIn(boxTop, boxH, iconH);
+      // The icon's box centre is the line box's centre, to within the half
+      // pixel a whole-pixel grid cannot express...
+      CHECK(2 * top + iconH >= 2 * boxTop + boxH);
+      CHECK(2 * top + iconH <= 2 * boxTop + boxH + 1);
+      // ...and it is *not* the number the baseline-derived formula gave, once
+      // the roundings stop cancelling. That formula is
+      // `base - (ascent + descent) / 2 - iconH / 2`; where it differs it is
+      // always low, never high, which is exactly how the battery drifted below
+      // its percentage.
+      const int oldTop = base - (font.ascent() + font.descent()) / 2 - iconH / 2;
+      CHECK(oldTop >= top);
     }
   }
 }
 
 TEST_CASE("a row's label is optically centred in the row") {
-  Fixture f;
+  Ramp f;
   reader::Framebuffer fb(480, 200);
   reader::drawRow(fb, f.fonts, 0, "LIBRARY", "", /*focused=*/false);
   // Left of centre is the label and nothing else; skip the hairline at y == 0.
@@ -534,7 +565,7 @@ TEST_CASE("a row's label is optically centred in the row") {
 }
 
 TEST_CASE("the header band's battery is aligned with its percentage") {
-  Fixture f;
+  Ramp f;
   const int width = 480;
   reader::Framebuffer fb(width, 200);
   reader::drawHeaderBand(fb, f.fonts, "NOW READING", "87%");
@@ -545,18 +576,45 @@ TEST_CASE("the header band's battery is aligned with its percentage") {
   const Rows value = inkRowsIn(fb, 0, aboveRule, width / 2, iconX);
   REQUIRE(bat.bottom > 0);
   REQUIRE(value.bottom > 0);
-  // The battery is 21px tall against a 25px mark elsewhere in the same design,
-  // so this can only hold if the placement is derived from the text rather than
-  // offset from the baseline by a constant. Caps have no descender, so the box
-  // sits a pixel below the ink it is centred on -- hence 3 doubled, not 0. The
-  // formula this replaced was off by 3 *pixels*.
+
+  // Where the glyph's *box* actually landed, read off the render rather than
+  // recomputed: the battery's outline is a full column of ink at its left edge,
+  // exactly kBattery.h rows of it, so that column's first row is the box's top.
+  int boxTop = -1, outlineRows = 0;
+  for (int y = 0; y < aboveRule; ++y)
+    if (!fb.getPixel(iconX, y)) {
+      if (boxTop < 0) boxTop = y;
+      ++outlineRows;
+    }
+  REQUIRE(outlineRows == reader::icons::kBattery.h);
+
+  // The band's content box is its padding-derived strip, and `align-items:
+  // center` puts the glyph's box on that box's centre. Exact, not a tolerance:
+  // the battery is 21px against a 32px box, so the halves do not cancel, and
+  // the previous formula -- which reached the same centre through the value's
+  // baseline and two more integer divisions -- landed on 25 instead of 24 and
+  // put the glyph 1.5px below the percentage's optical centre. The rasterised
+  // board puts this glyph's ink on rows 24..44.
+  const int contentH = reader::headerBandHeight(f.fonts) - reader::kBandPadTop -
+                       reader::kBandPadBottom - reader::kBandRuleH;
+  CHECK(boxTop == reader::iconTopIn(reader::kBandPadTop, contentH, reader::icons::kBattery.h));
+  CHECK(boxTop == 24);
+  // And the box shares the value's line-box centre to within the half pixel a
+  // whole-pixel grid cannot express. Doubled units, so half a pixel is 1.
+  const int valueBoxCentre2 = 2 * reader::kBandPadTop + contentH;
+  const int batBoxCentre2 = 2 * boxTop + reader::icons::kBattery.h;
+  CHECK(batBoxCentre2 - valueBoxCentre2 >= 0);
+  CHECK(batBoxCentre2 - valueBoxCentre2 <= 1);
+  // The ink agrees with the box: the glyph's ink centre sits where the value's
+  // does, allowing for the caps having no descender (hence a doubled tolerance
+  // of 2, not the 3 the off-by-1.5px placement needed to pass).
   const int boxCentre2 = centre2(bat) - iconInkOffset2(reader::icons::kBattery);
-  CHECK(boxCentre2 >= centre2(value) - 3);
-  CHECK(boxCentre2 <= centre2(value) + 3);
+  CHECK(boxCentre2 >= centre2(value) - 2);
+  CHECK(boxCentre2 <= centre2(value) + 2);
 }
 
 TEST_CASE("every hint mark is aligned with the label it labels") {
-  Fixture f;
+  Ramp f;
   for (int width : {480, 528}) {
     reader::Framebuffer fb(width, 120);
     const reader::Hint hints[4] = {{&reader::icons::kBook, "READ", ""},
@@ -578,34 +636,107 @@ TEST_CASE("every hint mark is aligned with the label it labels") {
       const int boxCentre2 = centre2(mark) - iconInkOffset2(*hints[i].icon);
       CHECK(boxCentre2 >= centre2(text) - 3);
       CHECK(boxCentre2 <= centre2(text) + 3);
+      // And exactly where flex centring puts it, not merely within a pixel and
+      // a half of it. The mark and the label are two children of one
+      // `align-items: center` row whose cross size is the taller of the label's
+      // line box and the mark, so:
+      const reader::Font& mf = f.fonts[reader::Role::Meta400];
+      const int firstH = mf.lineHeight() > hints[i].icon->h ? mf.lineHeight() : hints[i].icon->h;
+      const int slotTop = barTop + reader::kHintRuleH + reader::kHintPadTop;
+      const int want = reader::iconTopIn(slotTop, firstH, hints[i].icon->h);
+      // Read the mark's box top off the render: its ink starts a known number
+      // of rows into its box (the icon's own top bearing). Coverage >= 2 is the
+      // threshold the Bw plane paints at, which is the plane this framebuffer
+      // holds -- a row of coverage 1 shows in the grey planes and not here.
+      int inkTop = -1;
+      for (int y = 0; y < hints[i].icon->h && inkTop < 0; ++y)
+        for (int x = 0; x < hints[i].icon->w; ++x)
+          if (reader::coverage(*hints[i].icon, x, y) >= 2) {
+            inkTop = y;
+            break;
+          }
+      REQUIRE(inkTop >= 0);
+      CHECK(mark.top - inkTop == want);
     }
   }
 }
 
 // --- The row's type role and tracking ---------------------------------------
 
-TEST_CASE("tracking is the board's letter-spacing, resolved from the type ramp") {
+TEST_CASE("tracking is the board's letter-spacing, kept as a fraction") {
+  Ramp f;
+  const reader::Font& meta = f.fonts[reader::Role::Meta400];
+  const reader::Font& label = f.fonts[reader::Role::Label500];
+  // Resolved against the face's own declared size, not a table of sizes kept
+  // beside these constants.
+  CHECK(meta.ppem() == 21);
+  CHECK(label.ppem() == 23);
+
   // The boards state letter-spacing in em per run and the runs disagree. These
-  // are those six values at the ramp's pixel sizes; if one drifts, the run it
-  // belongs to is no longer the design's.
-  CHECK(reader::kBandLabelTracking == 5);   // 0.22em at 23px = 5.06
-  CHECK(reader::kRowLabelTracking == 4);    // 0.18em at 23px = 4.14
-  CHECK(reader::kBlockLabelTracking == 5);  // 0.20em at 23px = 4.60
-  CHECK(reader::kHintTracking == 3);        // 0.12em at 21px = 2.52
-  CHECK(reader::kMetaTracking == 3);        // 0.16em at 21px = 3.36
-  CHECK(reader::kTightMetaTracking == 2);   // 0.10em at 21px = 2.10
-  // Not all one number, which is the defect this replaced: a single shared
+  // are those six values at the ramp's pixel sizes, in 1/64 px; if one drifts,
+  // the run it belongs to is no longer the design's. Every one of them is
+  // fractional, which is the whole defect: rounded to whole pixels, four of the
+  // six were wrong by 0.4-0.5px *per character*.
+  struct Case { reader::Tracking t; double px; };
+  const Case cases[] = {
+      {reader::trackingEm(label, reader::kBandLabelEm), 5.06},   // 0.22em at 23px
+      {reader::trackingEm(label, reader::kRowLabelEm), 4.14},    // 0.18em at 23px
+      {reader::trackingEm(label, reader::kBlockLabelEm), 4.60},  // 0.20em at 23px
+      {reader::trackingEm(meta, reader::kHintEm), 2.52},         // 0.12em at 21px
+      {reader::trackingEm(meta, reader::kMetaEm), 3.36},         // 0.16em at 21px
+      {reader::trackingEm(meta, reader::kTightMetaEm), 2.10},    // 0.10em at 21px
+  };
+  for (const Case& c : cases) {
+    CAPTURE(c.px);
+    // Within a 64th of the board's exact value...
+    CHECK(c.t.f26() == static_cast<int>(c.px * 64 + 0.5));
+    // ...and genuinely not a whole pixel, so a test that only ever compared
+    // integers could not tell this apart from the rounding it replaced.
+    CHECK(c.t.f26() % 64 != 0);
+  }
+  // Not all one number, which is the defect before that: a single shared
   // constant cannot be right for six different runs.
-  CHECK(reader::kRowLabelTracking != reader::kTightMetaTracking);
+  CHECK_FALSE(cases[1].t == cases[5].t);
 }
 
-TEST_CASE("a row sets its label in Role::Label with the board's tracking") {
-  Fixture f;
+TEST_CASE("a fractional tracking does not accumulate, and measure agrees with drawText") {
+  Ramp f;
+  const reader::Font& meta = f.fonts[reader::Role::Meta400];
+  const reader::Tracking hint = reader::trackingEm(meta, reader::kHintEm);
+  REQUIRE(hint.f26() % 64 != 0);  // 2.52px: the case a whole-pixel API cannot hold
+
+  // The pin. Per-glyph rounding to 3px would put a six-character label 6 * 0.48
+  // = 2.9px wide of the board; the fraction has to survive the accumulation.
+  // 2.52 * 6 = 15.12 -> 15, where 3 * 6 = 18.
+  const int plain = meta.measure("SELECT");
+  CHECK(meta.measure("SELECT", hint) == plain + 15);
+  CHECK(meta.measure("SELECT", reader::Tracking::px(3)) == plain + 18);
+
+  // measure() must equal drawText()'s reported advance for every string, every
+  // tracking and every origin -- right-aligned runs are placed at
+  // `edge - measure(s)`, so a disagreement is a run that misses its margin.
+  for (const char* s : {"", "UP", "SELECT", "CH. 01 \xE2\x80\x94 MISS BROOKE",
+                        "\xE4\xB8\xAD\xE6\x96\x87"}) {  // last: no glyphs in the subset
+    for (const reader::Tracking t : {reader::Tracking(), hint, reader::Tracking::px(3),
+                                     reader::Tracking::em(21, 220)}) {
+      for (int x : {0, 1, 24, 137}) {
+        CAPTURE(s);
+        CAPTURE(t.f26());
+        CAPTURE(x);
+        reader::Framebuffer fb(600, 60);
+        CHECK(reader::drawText(fb, meta, x, 40, s, reader::Ink::Black, t) == meta.measure(s, t));
+      }
+    }
+  }
+}
+
+TEST_CASE("a row sets its label in Role::Label500 with the board's tracking") {
+  Ramp f;
   const int width = 480;
   // Inked width of a reference run drawn the same way, so this compares like
   // with like rather than against Font::measure (which counts the trailing
   // advance and the last glyph's side bearing).
-  auto refInkWidth = [&](reader::Role role, int tracking) {
+  auto refInkWidth = [&](reader::Role role, reader::Tracking tracking) {
     reader::Framebuffer ref(width, 200);
     reader::drawText(ref, f.fonts[role], reader::kMargin, 120, "LIBRARY", reader::Ink::Black,
                      tracking);
@@ -631,21 +762,23 @@ TEST_CASE("a row sets its label in Role::Label with the board's tracking") {
   const int rowW = hi - lo;
 
   // Exactly the Label face at the board's 0.18em...
-  CHECK(rowW == refInkWidth(reader::Role::Label, reader::kRowLabelTracking));
+  CHECK(rowW == refInkWidth(reader::Role::Label500,
+                            reader::trackingEm(f.fonts[reader::Role::Label500],
+                                               reader::kRowLabelEm)));
   // ...and demonstrably neither of the two things it used to be: Body, and
   // untracked. Without these the equality above would still pass if every role
   // happened to measure alike.
-  CHECK(rowW != refInkWidth(reader::Role::Label, 0));
-  CHECK(rowW != refInkWidth(reader::Role::Body, 0));
+  CHECK(rowW != refInkWidth(reader::Role::Label500, {}));
+  CHECK(rowW != refInkWidth(reader::Role::Body400, {}));
 
   // And the label is set at Label's size, not Body's: the run is shorter than
   // the 14pt face's caps by the four pixels between a 23px and a 29px ramp step.
   const Rows ink = inkRowsIn(fb, 1, reader::kRowH, reader::kMargin, 240);
-  CHECK(ink.bottom - ink.top < f.fonts[reader::Role::Body].ascent());
+  CHECK(ink.bottom - ink.top < f.fonts[reader::Role::Body400].ascent());
 }
 
 TEST_CASE("hint slots distribute across the canvas and never overlap") {
-  Fixture f;
+  Ramp f;
   for (int width : {480, 528}) {
     reader::Framebuffer fb(width, 120);
     const reader::Hint hints[4] = {{&reader::icons::kBack, "BACK", ""},

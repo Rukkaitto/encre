@@ -35,7 +35,7 @@ inline constexpr int kRowH = kRowContentH + kRowRuleH;
 // is asymmetric and the primitive centred its content symmetrically.
 //
 // A pinned sum cannot be right for more than one type size, and the ramp has
-// six roles. So the padding is what is stated here -- which is what the boards
+// seven roles. So the padding is what is stated here -- which is what the boards
 // state -- and the height is derived from it plus the content, the way Chrome
 // derives it. That makes a bar's height depend on the type role it draws, which
 // is the correct dependency: a screen whose band label is set larger gets a
@@ -69,23 +69,29 @@ inline constexpr int kHintHoldGap = 3;
 // shared `kLabelTracking = 2` stood in for all six, which is right for exactly
 // one of them and left every tracked label on every screen at the wrong width.
 //
-// A Font cannot report its own ppem (an .rfnt carries ascent, descent and line
-// gap, not a size), so em cannot be resolved from the face. It is resolved here
-// instead, against the type ramp's pixel sizes, which are fixed by the ramp
-// itself -- ppem = pt * 150 / 72. Spelling the conversion out as a constexpr
-// rather than as six magic integers is what lets a reviewer check a value
-// against the board without doing the arithmetic themselves.
-inline constexpr int kMetaPx = 21;   // 10pt at 150 DPI
-inline constexpr int kLabelPx = 23;  // 11pt at 150 DPI
-// em given in thousandths; rounded to whole pixels, which is drawText's unit.
-constexpr int trackingPx(int sizePx, int em1000) { return (sizePx * em1000 + 500) / 1000; }
+// What is stated here is the design's own number -- em in thousandths, nothing
+// resolved, nothing rounded. Resolving it needs a pixel size, and the size now
+// comes from the face itself (Font::ppem, declared by the asset), not from a
+// private copy of the ramp's sizes kept alongside these constants. That copy was
+// a second source of truth for every role, and it only covered the two roles
+// today's screens tracked; a screen setting tracked text in Value or Title had
+// nowhere to look. `trackingEm(font, kHintEm)` works for any role, including
+// ones that do not exist yet.
+//
+// Nor is the product rounded to a whole pixel any more: 0.12em at 21px is
+// 2.52px, and see reader/tracking.h for why that fraction has to survive.
+inline constexpr int kBandLabelEm = 220;   // 0.22em, header band label
+inline constexpr int kRowLabelEm = 180;    // 0.18em, menu row label
+inline constexpr int kBlockLabelEm = 200;  // 0.20em, action block label
+inline constexpr int kHintEm = 120;        // 0.12em, hint bar label
+inline constexpr int kMetaEm = 160;        // 0.16em, the page-count meta line
+inline constexpr int kTightMetaEm = 100;   // 0.10em, the chapter meta line
 
-inline constexpr int kBandLabelTracking = trackingPx(kLabelPx, 220);   // 0.22em -> 5
-inline constexpr int kRowLabelTracking = trackingPx(kLabelPx, 180);    // 0.18em -> 4
-inline constexpr int kBlockLabelTracking = trackingPx(kLabelPx, 200);  // 0.20em -> 5
-inline constexpr int kHintTracking = trackingPx(kMetaPx, 120);         // 0.12em -> 3
-inline constexpr int kMetaTracking = trackingPx(kMetaPx, 160);         // 0.16em -> 3
-inline constexpr int kTightMetaTracking = trackingPx(kMetaPx, 100);    // 0.10em -> 2
+// The design's em value, resolved against the face that will draw it.
+inline Tracking trackingEm(const Font& font, int em1000) {
+  return Tracking::em(font.ppem(), em1000);
+}
+
 // The design's `gap: 7px` between the header band's value and its battery
 // glyph, and the same breathing room between a row's value and a trailing mark
 // and between a hint's mark and its label -- the boards use one gap for all

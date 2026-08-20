@@ -3,6 +3,8 @@
 #include <string_view>
 #include <unordered_map>
 
+#include "reader/tracking.h"
+
 namespace reader {
 
 struct Glyph {
@@ -23,8 +25,34 @@ class Font {
   int ascent() const { return ascent_; }
   int descent() const { return descent_; }
   int lineHeight() const { return ascent_ - descent_ + lineGap_; }
-  // `tracking` adds that many pixels after every glyph, matching drawText.
-  int measure(std::string_view utf8, int tracking = 0) const;
+
+  // --- What this face IS, not merely how it measures ------------------------
+  //
+  // An .rfnt used to carry ascent, descent and line gap and nothing else, so a
+  // Font could not answer "what size are you?" or "what weight are you?". Both
+  // questions have callers. The design states letter-spacing in em, which is
+  // meaningless without a pixel size, and it was resolved instead against a
+  // duplicate table of the ramp's sizes kept in components.h -- a second
+  // source of truth that no build step checked against the assets. And the
+  // roles of the type ramp name a weight (see reader/fontset.h): nothing could
+  // verify that the blob bound to a 400 role was not in fact the 500 asset,
+  // which is precisely the mistake that shipped -- Home's author line rendered
+  // ~19% heavier than the board for exactly that reason.
+  //
+  // Both are declared by the generator (tools/fontc.py knows the --pt it asked
+  // FreeType for and the --weight it pinned the variation axis to) and ride in
+  // the v2 header. A v1 asset reports 0 for both, meaning "undeclared".
+  int ppem() const { return ppem_; }
+  int weight() const { return weight_; }
+
+  // `tracking` is added after every glyph, matching drawText, and accumulated
+  // in the same 1/64 px unit -- the two must agree exactly or right-aligned
+  // text drifts against the run it is aligned on.
+  int measure(std::string_view utf8, Tracking tracking = {}) const;
+  // Advance of the hollow box drawText paints for a codepoint this face has no
+  // glyph for. Lives here so measure() and drawText() cannot disagree about the
+  // width of a run containing one.
+  int notdefAdvance() const;
   // 1 or 2. A 1bpp font reports coverage 0 or 3, so callers never branch on it.
   int bpp() const { return bpp_; }
   // Coverage of one glyph pixel, 0 (none) to 3 (full). Both depths are packed
@@ -36,6 +64,7 @@ class Font {
   std::unordered_map<char32_t, Glyph> glyphs_;
   std::unordered_map<uint64_t, int32_t> kerns_;
   int ascent_ = 0, descent_ = 0, lineGap_ = 0;
+  int ppem_ = 0, weight_ = 0;  // 0 = undeclared (a v1 asset)
   int bpp_ = 1;
 };
 

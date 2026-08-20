@@ -4,18 +4,13 @@
 
 #include "doctest.h"
 #include "golden.h"
+#include "ramp.h"
 #include "reader/components.h"
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
 #include "reader/icons.h"
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
-
-static std::vector<uint8_t> slurp(const std::string& p) {
-  std::ifstream f(p, std::ios::binary);
-  REQUIRE(f.good());
-  return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)), {});
-}
 
 static reader::HomeViewModel sampleHome() {
   reader::HomeViewModel vm;
@@ -33,28 +28,7 @@ static reader::HomeViewModel sampleHome() {
   return vm;
 }
 
-// The chrome ramp, loaded from the built assets. Blobs are members because a
-// Font is a zero-copy view over one.
-struct Ramp {
-  std::vector<uint8_t> a, b, c, d, e, g;
-  reader::FontSet fonts;
-  Ramp() {
-    const std::string dir = std::string(ASSETS_DIR) + "/built/";
-    a = slurp(dir + "spacegrotesk_400_10pt.rfnt");
-    b = slurp(dir + "spacegrotesk_500_11pt.rfnt");
-    c = slurp(dir + "spacegrotesk_700_12pt.rfnt");
-    d = slurp(dir + "spacegrotesk_500_14pt.rfnt");
-    e = slurp(dir + "spacegrotesk_700_20pt.rfnt");
-    g = slurp(dir + "spacegrotesk_700_32pt.rfnt");
-    fonts.load(reader::Role::Meta, a.data(), a.size());
-    fonts.load(reader::Role::Label, b.data(), b.size());
-    fonts.load(reader::Role::Value, c.data(), c.size());
-    fonts.load(reader::Role::Body, d.data(), d.size());
-    fonts.load(reader::Role::Title, e.data(), e.size());
-    fonts.load(reader::Role::Display, g.data(), g.size());
-    REQUIRE(fonts.ready());
-  }
-};
+using ramp::Ramp;
 
 TEST_CASE("QuietTheme renders Home to golden on both panel geometries") {
   Ramp ramp;
