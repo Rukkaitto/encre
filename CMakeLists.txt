@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 file(GLOB READER_CORE_SOURCES ${CMAKE_SOURCE_DIR}/core/src/*.cpp)
 add_library(reader_core STATIC ${READER_CORE_SOURCES})
 target_include_directories(reader_core PUBLIC ${CMAKE_SOURCE_DIR}/core/include)
+target_include_directories(reader_core PRIVATE ${CMAKE_SOURCE_DIR}/test/vendor)
+target_compile_definitions(reader_core PRIVATE READER_DESKTOP=1)
 # A library needs at least one TU before core sources exist:
 if(NOT READER_CORE_SOURCES)
   file(WRITE ${CMAKE_BINARY_DIR}/_empty.cpp "namespace { int _unused; }\n")
