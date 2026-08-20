@@ -180,11 +180,12 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   drawIcon(fb, mark, kMargin + barW - kBlockPadX - mark.w, iconTopIn(y, kBlockH, mark.h), cink,
            plane);
 
-  // No slot on Home has a long-press action, so no slot carries the hold ring.
-  const Hint hints[4] = {{&icons::kBook, vm.hints[0], false},
-                         {&icons::kDot, vm.hints[1], false},
-                         {&icons::kUp, vm.hints[2], false},
-                         {&icons::kDown, vm.hints[3], false}};
+  // The ring comes from the view model, not from this function: a slot shows a
+  // hold mark if and only if the screen bound a long-press to that button.
+  const Hint hints[4] = {{&icons::kBook, vm.hints[0], vm.holds[0]},
+                         {&icons::kDot, vm.hints[1], vm.holds[1]},
+                         {&icons::kUp, vm.hints[2], vm.holds[2]},
+                         {&icons::kDown, vm.hints[3], vm.holds[3]}};
 
   // Menu rows sit above the hint bar, so the bar's height decides where they
   // start. That height is the bar's to compute -- from its own padding and its

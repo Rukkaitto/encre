@@ -1,14 +1,17 @@
+#include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
 
 #include "doctest.h"
+#include "home_vm.h"
 #include "ramp.h"
 #include "rfnt_builder.h"
 #include "reader/components.h"
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
 #include "reader/text.h"
+#include "reader/theme_quiet.h"
 
 using ramp::Ramp;
 
@@ -934,4 +937,27 @@ TEST_CASE("hint slots distribute across the canvas and never overlap") {
     CHECK(slotX[0] >= reader::kMargin);
     CHECK(slotX[3] < width - reader::kMargin);
   }
+}
+
+TEST_CASE("the theme draws a hold ring exactly on the slots the view model marks") {
+  // The ring is an affordance for a binding. If the theme sourced it from
+  // anywhere but the view model's holds array, a screen could promise a hold it
+  // does not have -- or bind one with nothing on screen to suggest it.
+  Ramp r;
+  reader::QuietTheme theme;
+
+  reader::HomeViewModel vm = sampleHome();
+  vm.holds = {false, true, false, false};  // Confirm only
+  reader::Framebuffer with(480, 800);
+  theme.renderHome(with, r.fonts, vm, reader::Plane::Bw);
+
+  vm.holds = {false, false, false, false};
+  reader::Framebuffer without(480, 800);
+  theme.renderHome(without, r.fonts, vm, reader::Plane::Bw);
+
+  REQUIRE(with.sizeBytes() == without.sizeBytes());
+  // The bar is the same height either way -- the ring rides on the label's line
+  // -- but the Confirm slot is wider, so the frames must differ.
+  CHECK(std::memcmp(with.data(), without.data(),
+                    static_cast<size_t>(with.sizeBytes())) != 0);
 }

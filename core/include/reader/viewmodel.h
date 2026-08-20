@@ -26,6 +26,12 @@ struct HomeViewModel {
   std::vector<MenuEntry> menu;
   int focusedMenuIndex = -1;                 // -1 = Continue block focused
   std::array<std::string, 4> hints{};        // Back, Confirm, Up, Down slots
+  // Which of those four buttons also has a long-press action. The theme draws a
+  // hollow ring on the slot (design 662557d) and the screen builds its
+  // long-press mask from the same array, so the affordance and the behaviour
+  // cannot drift apart -- a ring always means a hold is bound, and a bound hold
+  // always shows a ring.
+  std::array<bool, 4> holds{};
 };
 
 }  // namespace reader
