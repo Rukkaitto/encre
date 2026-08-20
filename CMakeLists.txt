@@ -45,3 +45,8 @@ target_link_libraries(reader_sim PRIVATE reader_core)
 target_compile_options(reader_sim PRIVATE ${READER_WARNINGS})
 target_compile_definitions(reader_sim PRIVATE ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME sim_home COMMAND reader_sim home ${CMAKE_BINARY_DIR}/sim_home.png)
+# The scripted-input path, as a smoke test: Home -> Settings -> Input Monitor,
+# with a held Confirm logged there. Catches a broken factory or key parser
+# without needing a golden.
+add_test(NAME sim_app COMMAND reader_sim app ${CMAKE_BINARY_DIR}/sim_app.png
+         --keys DOWN,DOWN,CONFIRM,CONFIRM,CONFIRM+)
