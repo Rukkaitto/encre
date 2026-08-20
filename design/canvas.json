@@ -1,0 +1,615 @@
+{
+  "artboards": [
+    {
+      "file": "DirectionClassic.dc.html",
+      "title": "A · Quiet Classic",
+      "x": 0,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-1"
+    },
+    {
+      "file": "DirectionInkBar.dc.html",
+      "title": "B · Ink Bar",
+      "x": 580,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-1"
+    },
+    {
+      "file": "DirectionEditorial.dc.html",
+      "title": "C · Editorial",
+      "x": 1160,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-1"
+    },
+    {
+      "file": "Main.dc.html",
+      "title": "Home",
+      "x": 0,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-2"
+    },
+    {
+      "file": "Library.dc.html",
+      "x": 580,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-2",
+      "title": "Library"
+    },
+    {
+      "file": "Reader.dc.html",
+      "x": 1160,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-2",
+      "title": "Reader"
+    },
+    {
+      "file": "ReaderMenu.dc.html",
+      "title": "Reader Menu",
+      "x": 1740,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-2"
+    },
+    {
+      "file": "Articles.dc.html",
+      "x": 0,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-2",
+      "title": "Articles"
+    },
+    {
+      "file": "Settings.dc.html",
+      "x": 580,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-2",
+      "title": "Settings"
+    },
+    {
+      "file": "Transfer.dc.html",
+      "x": 1160,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-2",
+      "title": "Transfer"
+    },
+    {
+      "file": "Sleep.dc.html",
+      "x": 1740,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-2",
+      "title": "Sleep"
+    },
+    {
+      "file": "DirectionTerminal.dc.html",
+      "title": "D · Terminal",
+      "x": 1740,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-1"
+    },
+    {
+      "file": "DirectionPlaybill.dc.html",
+      "title": "E · Playbill",
+      "x": 2320,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-1"
+    },
+    {
+      "file": "DirectionSpine.dc.html",
+      "title": "F · Spine",
+      "x": 2900,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-1"
+    },
+    {
+      "file": "VariantBase.dc.html",
+      "title": "B · Base",
+      "x": 0,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-3"
+    },
+    {
+      "file": "VariantSpine.dc.html",
+      "title": "B1 · Spine",
+      "x": 580,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-3"
+    },
+    {
+      "file": "VariantQuiet.dc.html",
+      "title": "B2 · Quiet",
+      "x": 1160,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-3"
+    },
+    {
+      "file": "VariantInverted.dc.html",
+      "title": "B3 · Inverted",
+      "x": 1740,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-3"
+    },
+    {
+      "file": "HomeEmpty.dc.html",
+      "title": "Home · Empty",
+      "x": 0,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "HomeMissing.dc.html",
+      "title": "Home · Missing Book",
+      "x": 580,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "LibraryActions.dc.html",
+      "title": "Library Actions",
+      "x": 1160,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "DeleteConfirm.dc.html",
+      "title": "Delete Confirm",
+      "x": 1740,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "BookDetails.dc.html",
+      "title": "Book Details",
+      "x": 2320,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "BookError.dc.html",
+      "title": "Book Error",
+      "x": 2900,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "Typography.dc.html",
+      "title": "Typography",
+      "x": 0,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "Contents.dc.html",
+      "title": "Contents",
+      "x": 580,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "GoToPage.dc.html",
+      "title": "Go To Page",
+      "x": 1160,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "Bookmarks.dc.html",
+      "title": "Bookmarks",
+      "x": 1740,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "ArticleActions.dc.html",
+      "title": "Article Actions",
+      "x": 2320,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "ArticleEnd.dc.html",
+      "title": "Article End",
+      "x": 2900,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "WifiConnect.dc.html",
+      "title": "Wi-Fi Connect",
+      "x": 0,
+      "y": 1800,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "WifiSettings.dc.html",
+      "title": "Wi-Fi Settings",
+      "x": 580,
+      "y": 1800,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "SdMissing.dc.html",
+      "title": "No SD Card",
+      "x": 1160,
+      "y": 1800,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "LowBattery.dc.html",
+      "title": "Low Battery",
+      "x": 1740,
+      "y": 1800,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "WifiPicker.dc.html",
+      "title": "Join Network",
+      "x": 0,
+      "y": 2700,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "WifiPassword.dc.html",
+      "title": "Password Entry",
+      "x": 580,
+      "y": 2700,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "WifiError.dc.html",
+      "title": "Join Failed",
+      "x": 1160,
+      "y": 2700,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "SetupHotspot.dc.html",
+      "title": "Setup Hotspot",
+      "x": 1740,
+      "y": 2700,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "SyncDone.dc.html",
+      "title": "Sync Complete",
+      "x": 2320,
+      "y": 2700,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "ArticlesSetup.dc.html",
+      "title": "Articles · Not Set Up",
+      "x": 0,
+      "y": 3600,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "InstapaperConnect.dc.html",
+      "title": "Instapaper Sign-In",
+      "x": 580,
+      "y": 3600,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "InstapaperAccount.dc.html",
+      "title": "Instapaper Account",
+      "x": 1160,
+      "y": 3600,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "BookEnd.dc.html",
+      "title": "Book Finished",
+      "x": 1740,
+      "y": 3600,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "BatteryEmpty.dc.html",
+      "title": "Battery Empty",
+      "x": 2320,
+      "y": 3600,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "Boot.dc.html",
+      "title": "Boot Splash",
+      "x": 2900,
+      "y": 3600,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "WebUpload.dc.html",
+      "title": "Web · Send Books",
+      "x": 0,
+      "y": 0,
+      "w": 960,
+      "h": 620,
+      "page": "page-5"
+    },
+    {
+      "file": "WebSetup.dc.html",
+      "title": "Web · Setup",
+      "x": 1060,
+      "y": 0,
+      "w": 960,
+      "h": 620,
+      "page": "page-5"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "directions-brief",
+      "x": 0,
+      "y": -180,
+      "w": 460,
+      "text": "Round 1: six aesthetic directions for the firmware Home screen. Outcome: B (Ink Bar) chosen as the base, refined on the B Variants page; the V1 theme is B2 · Quiet.\nAll artboards are exact panel size (480x800, Xteink X4 portrait), strict black/white; dot patterns stand in for dithered grays.",
+      "page": "page-1"
+    },
+    {
+      "id": "note-dir-a",
+      "x": 0,
+      "y": 830,
+      "w": 300,
+      "text": "A · Quiet Classic — bookish serif (Literata), hairline rules, hard offset shadows. Chrome recedes; typography carries the brand.\nTradeoff: understated — risks feeling anonymous.",
+      "page": "page-1"
+    },
+    {
+      "id": "note-dir-b",
+      "x": 580,
+      "y": 830,
+      "w": 300,
+      "text": "B · Ink Bar — geometric sans (Space Grotesk), heavy black bars, big numerals, blocky buttons. Confident, device-like, very legible focus states.\nTradeoff: loud chrome competes with book covers.",
+      "page": "page-1"
+    },
+    {
+      "id": "note-dir-c",
+      "x": 1160,
+      "y": 830,
+      "w": 300,
+      "text": "C · Editorial — serif + mono pairing, masthead rules, dotted leaders like a table of contents. Literary and distinctive.\nTradeoff: densest of the three; mono metadata may feel fussy at e-ink sizes.",
+      "page": "page-1"
+    },
+    {
+      "id": "screens-brief",
+      "x": 0,
+      "y": -180,
+      "w": 460,
+      "text": "All eight V1 screens in the chosen theme: B2 · Quiet (Space Grotesk chrome, hairline rows, black fill = focus). Book body text stays Literata — content typography belongs to reader settings, not the theme. Inverted rows show button-navigation focus; there is no touch. Book content is Middlemarch (public domain); Instapaper items are sample data.",
+      "page": "page-2"
+    },
+    {
+      "id": "note-dir-d",
+      "x": 1740,
+      "y": 830,
+      "w": 300,
+      "text": "D · Terminal — command-line reader: Space Mono, inverse-video focus, segmented progress cells, dotted leaders. Unapologetically hacker.\nTradeoff: mono eats width; long titles truncate fast.",
+      "page": "page-1"
+    },
+    {
+      "id": "note-dir-e",
+      "x": 2320,
+      "y": 830,
+      "w": 300,
+      "text": "E · Playbill — Victorian handbill: IM Fell English, double-rule frame, stacked centered type, diamond ornaments, period copy. The device as a printed object.\nTradeoff: centered layout fights long metadata; the voice is a commitment.",
+      "page": "page-1"
+    },
+    {
+      "id": "note-dir-f",
+      "x": 2900,
+      "y": 830,
+      "w": 300,
+      "text": "F · Spine — constructivist poster: rotated book-spine title (Archivo Black), giant percent numeral, hard diagonal, condensed menu. Boldest hierarchy of the six.\nTradeoff: rotated text costs a beat of readability; loudest chrome.",
+      "page": "page-1"
+    },
+    {
+      "id": "bvariants-brief",
+      "x": 0,
+      "y": -180,
+      "w": 460,
+      "text": "Direction B (Ink Bar) won as the default-theme base, and B2 · Quiet was picked as the V1 theme — the V1 Screens page is styled with it. Themes can also change layout structure entirely, so louder ideas (like F) can ship as selectable themes post-V1.",
+      "page": "page-3"
+    },
+    {
+      "id": "note-bvar-base",
+      "x": 0,
+      "y": 830,
+      "w": 300,
+      "text": "B · Base — the original Ink Bar, unchanged, for side-by-side comparison.",
+      "page": "page-3"
+    },
+    {
+      "id": "note-bvar-spine",
+      "x": 580,
+      "y": 830,
+      "w": 300,
+      "text": "B1 · Spine — F&apos;s signature move in B&apos;s register: black spine band with the title set vertically in Space Grotesk; big percent numeral instead of a cover.\nTradeoff: no cover art on Home.",
+      "page": "page-3"
+    },
+    {
+      "id": "note-bvar-quiet",
+      "x": 1160,
+      "y": 830,
+      "w": 300,
+      "text": "B2 · Quiet — B&apos;s geometry with lighter chrome: white header with a rule instead of a black bar, hairline menu rows, dot-dither cover. Easier to live with daily.\nTradeoff: less of B&apos;s punch; focus relies on the single filled block.",
+      "page": "page-3"
+    },
+    {
+      "id": "note-bvar-inverted",
+      "x": 1740,
+      "y": 830,
+      "w": 300,
+      "text": "B3 · Inverted — the whole theme flipped white-on-black (the display driver supports polarity inversion, so this is nearly free to ship as a theme).\nTradeoff: full black fields cost refresh ghosting and look patchy on some e-ink panels.",
+      "page": "page-3"
+    },
+    {
+      "id": "flows-brief",
+      "x": 0,
+      "y": -180,
+      "w": 480,
+      "text": "Every remaining UX path in the B2 theme: empty and error states, hold-action menus, reader tools, and the on-demand Wi-Fi flow.\nHint bars always show 4 slots, one per hardware button (Back / Confirm / Up / Down); a button with no action leaves its slot empty, and a hold action stacks inside its button&apos;s slot.\nBottom row: the full Wi-Fi joining path — scan, password entry, failure, hotspot setup, and sync feedback.\nRow 4: Instapaper setup, end-of-book, battery-empty, and boot states.",
+      "page": "page-4"
+    },
+    {
+      "id": "note-empty-model",
+      "x": 2320,
+      "y": 1800,
+      "w": 300,
+      "text": "Empty &amp; missing: first-run Home points at the two loading paths. If the current book disappears (SD card edited elsewhere), Home falls back to the most recent existing book and says why once.",
+      "page": "page-4"
+    },
+    {
+      "id": "note-hold-model",
+      "x": 2320,
+      "y": 2060,
+      "w": 300,
+      "text": "Hold Confirm on a list item opens contextual actions (library: open / details / mark finished / delete; articles: read / archive / like). Destructive actions always get a confirm step and never erase reading progress.",
+      "page": "page-4"
+    },
+    {
+      "id": "note-wifi-model",
+      "x": 2320,
+      "y": 2340,
+      "w": 300,
+      "text": "Wi-Fi is strictly on-demand: Wi-Fi is off except during sync, transfers, and setup. The connect dialog appears when an action needs the network, and Wi-Fi turns off when it finishes.",
+      "page": "page-4"
+    },
+    {
+      "id": "note-wifi-join",
+      "x": 2900,
+      "y": 2700,
+      "w": 300,
+      "text": "Joining a network on-device: scan list, then a button-driven keyboard (Up/Down between rows, side page buttons along a row, Confirm types, Back deletes / hold cancels). The setup hotspot is the no-typing alternative and also carries Instapaper sign-in via the web page. Failure states say Wi-Fi is off again.",
+      "page": "page-4"
+    },
+    {
+      "id": "note-instapaper-flow",
+      "x": 3480,
+      "y": 3600,
+      "w": 320,
+      "text": "Instapaper connect: Articles (not set up) -> device shows QR/URL -> user signs in on the web Setup page -> device stores only the OAuth token and runs the first sync. Reachable over the saved network, or via the setup hotspot when no Wi-Fi is configured yet. Sign out lives in the account screen; it removes token + downloads, never touching the Instapaper account.",
+      "page": "page-4"
+    },
+    {
+      "id": "web-brief",
+      "x": 0,
+      "y": -160,
+      "w": 460,
+      "text": "The browser side of the product, served by the device itself: drag-and-drop book uploads and the Setup page (Wi-Fi networks + Instapaper sign-in). Same voice as the firmware. The Setup page is where credentials are typed, so nothing is ever typed on the device.",
+      "page": "page-5"
+    }
+  ],
+  "pages": [
+    {
+      "id": "page-1",
+      "name": "Directions"
+    },
+    {
+      "id": "page-2",
+      "name": "V1 Screens"
+    },
+    {
+      "id": "page-3",
+      "name": "B Variants"
+    },
+    {
+      "id": "page-4",
+      "name": "Flows & States"
+    },
+    {
+      "id": "page-5",
+      "name": "Web UI"
+    }
+  ],
+  "launch": {
+    "view": "canvas",
+    "page": "page-4"
+  }
+}

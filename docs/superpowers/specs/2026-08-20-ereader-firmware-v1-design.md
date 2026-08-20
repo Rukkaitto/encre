@@ -160,7 +160,7 @@ ground truth for the visual design pass (Claude Design handoff).
   option, dithered cover thumbnails where available, Confirm opens,
   long-press for item actions (see 4.0).
 - **Reader:** full-bleed text. Left/Right (and Up/Down) turn pages. Confirm
-  opens the reader menu overlay: chapters, typography panel, go to %,
+  opens the reader menu overlay: chapters, typography panel, go to page,
   bookmarks, book info, exit. Back short-press closes any overlay; Back
   long-press exits straight to Home.
   The typography panel adjusts family / size / margins / line spacing /
@@ -194,8 +194,16 @@ setup hotspot (AP + QR + credentials + web page) is the no-typing
 alternative and doubles as the Instapaper sign-in path. Join failure offers
 edit / retry / cancel and states Wi-Fi is off again; a completed sync
 shows a result banner on Articles (new-article and pushed-action counts). Error/empty: first-run Home, missing-book Home, no-SD-card screen,
-corrupt-book dialog, low-battery banner (any button dismisses; critical
-level forces clean shutdown). Settings displays Wi-Fi as **"on demand"** —
+corrupt-book dialog, low-battery banner (any button dismisses), the
+battery-empty shutdown screen (page saved; charge to wake), the boot
+splash, and the end-of-book screen (mark finished / back to library /
+read an article). The web pages the device serves are designed too
+(canvas page "Web UI"): the drag-and-drop upload page and the Setup page
+(Wi-Fi + Instapaper forms). Documented variants without their own board:
+Library inside a folder (same layout, path in the header, Back exits the
+folder), Transfer before any file arrives (progress block absent), the
+sleep screen while charging (small charging glyph on the plaque), and the
+connect dialog stepping its label Joining -> Syncing. Settings displays Wi-Fi as **"on demand"** —
 never "connected" — matching the Wi-Fi policy in 3.3.
 
 ### 4.2 Sleep screens
@@ -206,11 +214,17 @@ per setting. Falls back to a clean typographic default when neither exists.
 
 ### 4.3 Instapaper flow
 
-1. One-time: user requests an Instapaper API consumer key (short form to
-   Instapaper; the only external dependency). Credentials + username/password
-   are entered on the **web setup page** served by the device (same server as
-   uploads); the device performs xAuth and stores only the resulting token in
-   NVS.
+1. One-time connect (designed end-to-end on the canvas): Articles opens in a
+   **"not set up"** state whose single action starts setup. The device brings
+   Wi-Fi up (saved network, or the setup hotspot when none is saved), serves
+   the **web Setup page**, and shows its QR/URL with a "waiting for sign-in"
+   status. The user signs in to Instapaper **in their browser** — username
+   and password never touch the device UI; the device performs xAuth, stores
+   only the resulting token in NVS, and runs the first sync. (Prereq: an
+   Instapaper API consumer key — the only external dependency.) A
+   **connected-account screen** under Settings shows account, unread count,
+   last sync, offline quota, pending actions, and Sign out (confirmation
+   dialog; removes token + downloaded articles, never touches the account).
 2. Sync (user-initiated from Articles): fetch bookmark list diff → download
    text for new items (bounded: newest 50 unread) → push queued archive/like
    actions → update read state. Images in articles are downloaded and cached

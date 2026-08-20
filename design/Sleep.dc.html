@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+    .dither-field { background-color: #ffffff; background-image: radial-gradient(circle, #000000 1.1px, transparent 1.3px); background-size: 4px 4px; }
+  </style>
+</helmet>
+<div class="dither-field" style="width: 480px; height: 800px; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; box-sizing: border-box; position: relative;">
+
+  <div style="background: #ffffff; border: 2px solid #000000; padding: 38px 42px; display: flex; flex-direction: column; align-items: center; gap: 14px; max-width: 330px;">
+    <div style="font-size: 12px; letter-spacing: 0.26em; font-weight: 500;">NOW READING</div>
+    <div style="width: 44px; border-top: 2px solid #000000;"></div>
+    <div style="font-size: 30px; font-weight: 700; text-align: center; line-height: 1.1; text-transform: uppercase;">Middle&shy;march</div>
+    <div style="font-size: 13px; letter-spacing: 0.22em;">GEORGE ELIOT</div>
+    <div style="width: 170px; height: 8px; border: 1px solid #000000; box-sizing: border-box; margin-top: 8px;">
+      <div style="width: 6%; height: 100%; background: #000000;"></div>
+    </div>
+    <div style="font-size: 13px; letter-spacing: 0.14em; font-weight: 700;">6% &middot; CH. 01</div>
+  </div>
+
+  <div style="position: absolute; bottom: 34px; background: #ffffff; border: 1px solid #000000; padding: 8px 18px;">
+    <div style="font-size: 12px; letter-spacing: 0.2em;">ASLEEP &middot; PRESS POWER TO WAKE</div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

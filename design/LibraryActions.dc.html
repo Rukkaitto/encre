@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+    .dither-dots { background-color: #ffffff; background-image: radial-gradient(circle, #000000 1.1px, transparent 1.3px); background-size: 4px 4px; }
+    .dither-dots-inv { background-color: #000000; background-image: radial-gradient(circle, #ffffff 1.1px, transparent 1.3px); background-size: 4px 4px; }
+    .dim-veil { background-image: radial-gradient(circle, #ffffff 1.3px, transparent 1.5px); background-size: 3px 3px; }
+  </style>
+</helmet>
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; position: relative;">
+
+  <div style="position: absolute; top: 0; left: 0; width: 480px; height: 800px; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;">
+<div style="display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
+  <div style="font-size: 13px; letter-spacing: 0.22em; font-weight: 500;">LIBRARY</div>
+  <div style="font-size: 14px; font-weight: 700;">12 BOOKS</div>
+</div>
+<div style="display: flex; align-items: center; gap: 16px; padding: 13px 24px; border-bottom: 1px solid #000000;">
+  <div style="width: 38px; height: 56px; display: flex; align-items: center; justify-content: center;"><svg width="26" height="22" viewBox="0 0 26 22" fill="none"><path d="M1 4a2 2 0 0 1 2-2h6l3 3h11a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V4z" stroke="#000000" stroke-width="1.8"></path></svg></div>
+  <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1;">
+    <div style="font-size: 17px; font-weight: 500;">Classics</div>
+    <div style="font-size: 12px; letter-spacing: 0.1em;">FOLDER &middot; 6 BOOKS</div>
+  </div>
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
+</div>
+<div style="display: flex; align-items: center; gap: 16px; padding: 13px 24px; border-bottom: 1px solid #000000;">
+  <div class="dither-dots" style="width: 38px; height: 56px; border: 1px solid #000000; box-sizing: border-box;"></div>
+  <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1;">
+    <div style="font-size: 17px; font-weight: 500;">Middlemarch</div>
+    <div style="font-size: 12px; letter-spacing: 0.1em;">GEORGE ELIOT</div>
+  </div>
+  <div style="font-size: 14px; font-weight: 700;">6%</div>
+</div>
+<div style="display: flex; align-items: center; gap: 16px; padding: 13px 24px; border-bottom: 1px solid #000000;">
+  <div class="dither-dots" style="width: 38px; height: 56px; border: 1px solid #000000; box-sizing: border-box;"></div>
+  <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1;">
+    <div style="font-size: 17px; font-weight: 500;">Jane Eyre</div>
+    <div style="font-size: 12px; letter-spacing: 0.1em;">CHARLOTTE BRONT&Euml;</div>
+  </div>
+  <div style="font-size: 14px; font-weight: 700;">DONE</div>
+</div>
+<div style="display: flex; align-items: center; gap: 16px; padding: 13px 24px; border-bottom: 1px solid #000000;">
+  <div class="dither-dots" style="width: 38px; height: 56px; border: 1px solid #000000; box-sizing: border-box;"></div>
+  <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1;">
+    <div style="font-size: 17px; font-weight: 500;">Walden</div>
+    <div style="font-size: 12px; letter-spacing: 0.1em;">HENRY DAVID THOREAU</div>
+  </div>
+  <div style="font-size: 14px; font-weight: 700;">48%</div>
+</div>
+<div style="display: flex; align-items: center; gap: 16px; padding: 13px 24px; border-bottom: 1px solid #000000;">
+  <div class="dither-dots" style="width: 38px; height: 56px; border: 1px solid #000000; box-sizing: border-box;"></div>
+  <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1;">
+    <div style="font-size: 17px; font-weight: 500;">Meditations</div>
+    <div style="font-size: 12px; letter-spacing: 0.1em;">MARCUS AURELIUS</div>
+  </div>
+  <div style="font-size: 14px; font-weight: 700;">NEW</div>
+</div>
+<div style="display: flex; align-items: center; gap: 16px; padding: 13px 24px; background: #000000; color: #ffffff;">
+  <div class="dither-dots-inv" style="width: 38px; height: 56px; border: 2px solid #ffffff; box-sizing: border-box;"></div>
+  <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1;">
+    <div style="font-size: 17px; font-weight: 700;">Dubliners</div>
+    <div style="font-size: 12px; letter-spacing: 0.1em;">JAMES JOYCE</div>
+  </div>
+  <div style="font-size: 14px; font-weight: 700;">31%</div>
+</div>
+<div style="display: flex; align-items: center; gap: 16px; padding: 13px 24px; border-bottom: 1px solid #000000;">
+  <div class="dither-dots" style="width: 38px; height: 56px; border: 1px solid #000000; box-sizing: border-box;"></div>
+  <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1;">
+    <div style="font-size: 17px; font-weight: 500;">The Odyssey</div>
+    <div style="font-size: 12px; letter-spacing: 0.1em;">HOMER &middot; TR. BUTLER</div>
+  </div>
+  <div style="font-size: 14px; font-weight: 700;">NEW</div>
+</div>
+  </div>
+  <div class="dim-veil" style="position: absolute; top: 0; left: 0; width: 480px; height: 800px;"></div>
+  <div style="position: absolute; top: 240px; left: 70px; width: 340px; background: #ffffff; border: 2px solid #000000; box-sizing: border-box;">
+
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 2px solid #000000;">
+  <div style="font-size: 13px; letter-spacing: 0.22em; font-weight: 500;">DUBLINERS</div>
+  <div style="font-size: 12px; letter-spacing: 0.12em;">31%</div>
+</div>
+  <div style="display: flex; justify-content: space-between; align-items: center; height: 52px; padding: 0 20px; background: #000000; color: #ffffff;">
+  <div style="font-size: 15px; font-weight: 700;">Open</div>
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#ffffff" stroke-width="2"></path></svg>
+</div>
+  <div style="display: flex; justify-content: space-between; align-items: center; height: 52px; padding: 0 20px; border-bottom: 1px solid #000000;">
+  <div style="font-size: 15px; font-weight: 500;">Book details</div>
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
+</div>
+  <div style="display: flex; justify-content: space-between; align-items: center; height: 52px; padding: 0 20px; border-bottom: 1px solid #000000;">
+  <div style="font-size: 15px; font-weight: 500;">Mark as finished</div>
+  
+</div>
+  <div style="display: flex; justify-content: space-between; align-items: center; height: 52px; padding: 0 20px;">
+  <div style="font-size: 15px; font-weight: 500;">Delete&hellip;</div>
+  
+</div>
+  </div>
+<div style="position: absolute; bottom: 0; left: 0; width: 480px; background: #ffffff; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center; padding: 14px 24px 16px 24px; border-top: 1px solid #000000;">
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: 12px; letter-spacing: 0.12em;">CLOSE</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="11" height="11" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="#000000"></circle></svg><div style="font-size: 12px; letter-spacing: 0.12em;">SELECT</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 11V5M5 8l3-3 3 3" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: 12px; letter-spacing: 0.12em;">UP</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 5v6M5 8l3 3 3-3" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: 12px; letter-spacing: 0.12em;">DOWN</div></div>
+</div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

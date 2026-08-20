@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+    
+  </style>
+</helmet>
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
+
+  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; flex-grow: 1;">
+    <div style="width: 56px; border-top: 2px solid #000000;"></div>
+    <div style="font-size: 34px; font-weight: 700; letter-spacing: 0.32em; padding-left: 0.32em;">READER</div>
+    <div style="width: 56px; border-top: 2px solid #000000;"></div>
+    <div style="font-size: 12px; letter-spacing: 0.2em; padding-top: 6px;">V 0.1.0</div>
+  </div>
+  <div style="display: flex; justify-content: center; padding-bottom: 40px;">
+    <div style="font-size: 12px; letter-spacing: 0.16em;">OPENING YOUR BOOK&hellip;</div>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
