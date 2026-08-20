@@ -36,7 +36,7 @@ TEST_CASE("a zero timeout never sleeps") {
   CHECK(t.tick(0xFFFFFFFFu) == PowerAction::None);
 }
 
-TEST_CASE("the millisecond clock is allowed to wrap") {
+TEST_CASE("an idle period measured across a millisecond-clock wrap still sleeps") {
   IdleTimer t(1000);
   const uint32_t before = 0xFFFFFF00u;
   t.noteActivity(before);

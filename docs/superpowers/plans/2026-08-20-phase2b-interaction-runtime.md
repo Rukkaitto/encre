@@ -365,7 +365,7 @@ TEST_CASE("two buttons held at once classify independently") {
   CHECK(second.ev[0].kind == PressKind::Short);
 }
 
-TEST_CASE("the millisecond clock is allowed to wrap") {
+TEST_CASE("a hold measured across a millisecond-clock wrap still fires") {
   // millis() is uint32 and rolls over about every 49 days. Unsigned subtraction
   // gets this right; a signed comparison would fire a spurious Long on the very
   // first tick after a press that straddles the rollover.
@@ -742,7 +742,7 @@ TEST_CASE("a zero timeout never sleeps") {
   CHECK(t.tick(0xFFFFFFFFu) == PowerAction::None);
 }
 
-TEST_CASE("the millisecond clock is allowed to wrap") {
+TEST_CASE("an idle period measured across a millisecond-clock wrap still sleeps") {
   IdleTimer t(1000);
   const uint32_t before = 0xFFFFFF00u;
   t.noteActivity(before);
@@ -799,7 +799,8 @@ git commit -m "feat(power): one-shot idle-to-sleep timer"
 **Files:**
 - Create: `test/unit/home_vm.h`
 - Modify: `core/include/reader/viewmodel.h`
-- Modify: `core/src/theme_quiet.cpp:182` (the hardcoded `false` hint array)
+- Modify: `core/src/theme_quiet.cpp` (the hardcoded `false` hint array, currently
+  line 184 — **match on the `const Hint hints[4] = {` text, not the line number**)
 - Modify: `test/unit/test_theme_home_golden.cpp` (use the shared view-model)
 - Test: `test/unit/test_components.cpp` (add one case)
 
@@ -855,34 +856,28 @@ In `core/include/reader/viewmodel.h`, inside `HomeViewModel`, immediately after 
 Add to `test/unit/test_components.cpp`:
 
 ```cpp
+// test/unit/test_components.cpp -- needs #include <cstring> and #include "home_vm.h"
 TEST_CASE("the theme draws a hold ring exactly on the slots the view model marks") {
   // The ring is an affordance for a binding. If the theme sourced it from
   // anywhere but the view model's holds array, a screen could promise a hold it
-  // does not have.
-  const reader::FontSet& fonts = testRamp();
-  reader::HomeViewModel vm = testHomeVm();
-  vm.holds = {false, true, false, false};  // Confirm only
-
-  reader::Framebuffer with(480, 800), without(480, 800);
-  reader::QuietTheme theme;
-  theme.renderHome(with, fonts, vm, reader::Plane::Bw);
-  vm.holds = {false, false, false, false};
-  theme.renderHome(without, fonts, vm, reader::Plane::Bw);
-
-  // Same bar height either way (the ring rides on the label's line), but the
-  // Confirm slot is wider, so the two frames must differ somewhere.
-  CHECK(std::memcmp(with.data(), without.data(), with.sizeBytes()) != 0);
-}
-```
-
-Written against the real helpers:
-
-```cpp
-TEST_CASE("the theme draws a hold ring exactly on the slots the view model marks") {
+  // does not have -- or bind one with nothing on screen to suggest it.
   Ramp r;
-  reader::HomeViewModel vm = sampleHome();  // from test/unit/home_vm.h
-  vm.holds = {false, true, false, false};   // Confirm only
-  ...
+  reader::QuietTheme theme;
+
+  reader::HomeViewModel vm = sampleHome();
+  vm.holds = {false, true, false, false};  // Confirm only
+  reader::Framebuffer with(480, 800);
+  theme.renderHome(with, r.fonts, vm, reader::Plane::Bw);
+
+  vm.holds = {false, false, false, false};
+  reader::Framebuffer without(480, 800);
+  theme.renderHome(without, r.fonts, vm, reader::Plane::Bw);
+
+  REQUIRE(with.sizeBytes() == without.sizeBytes());
+  // The bar is the same height either way -- the ring rides on the label's line
+  // -- but the Confirm slot is wider, so the frames must differ.
+  CHECK(std::memcmp(with.data(), without.data(),
+                    static_cast<size_t>(with.sizeBytes())) != 0);
 }
 ```
 
@@ -897,7 +892,9 @@ hardcodes `false` in every slot.
 
 - [ ] **Step 4: Read the array in the theme**
 
-In `core/src/theme_quiet.cpp`, replace the hint array with:
+In `core/src/theme_quiet.cpp`, replace the hint array **and the comment above it**
+(`// No slot on Home has a long-press action, so no slot carries the hold ring.` —
+which stops being true) with:
 
 ```cpp
   // The ring comes from the view model, not from this function: a slot shows a
@@ -1027,6 +1024,9 @@ class App {
   ButtonMask longPressable() const { return top().longPressable(); }
 
  private:
+  // V1's deepest path is Home > Library > item actions > delete confirm.
+  static constexpr size_t kMaxDepth = 8;
+
   std::vector<std::unique_ptr<Screen>> stack_;
   ScreenFactory& factory_;
   bool dirty_ = true;  // the first frame always needs painting
@@ -1226,6 +1226,13 @@ Expected: link error on `App::App` / `App::dispatch`.
 namespace reader {
 
 App::App(std::unique_ptr<Screen> root, ScreenFactory& factory) : factory_(factory) {
+  // Reserve up front. The firmware is built -fno-exceptions, so a vector that
+  // cannot grow calls abort() and takes the whole device down with no
+  // diagnostic -- this project has already lost a boot to exactly that. V1's
+  // deepest path is Home > Library > actions overlay > delete confirm, so four
+  // is the real ceiling and eight is slack; reserving means a push allocates
+  // only the screen itself.
+  stack_.reserve(kMaxDepth);
   stack_.push_back(std::move(root));
 }
 

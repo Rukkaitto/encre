@@ -88,7 +88,7 @@ TEST_CASE("two buttons held at once classify independently") {
   CHECK(second.ev[0].kind == PressKind::Short);
 }
 
-TEST_CASE("the millisecond clock is allowed to wrap") {
+TEST_CASE("a hold measured across a millisecond-clock wrap still fires") {
   // millis() is uint32 and rolls over about every 49 days. Unsigned subtraction
   // gets this right; a signed comparison would fire a spurious Long on the very
   // first tick after a press that straddles the rollover.
