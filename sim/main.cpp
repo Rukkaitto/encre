@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
   }
 
   const std::string dir = std::string(ASSETS_DIR) + "/built/";
-  auto a = slurp(dir + "spacegrotesk_500_10pt.rfnt");
+  auto a = slurp(dir + "spacegrotesk_400_10pt.rfnt");
   auto b = slurp(dir + "spacegrotesk_500_11pt.rfnt");
   auto c = slurp(dir + "spacegrotesk_700_12pt.rfnt");
   auto d = slurp(dir + "spacegrotesk_500_14pt.rfnt");

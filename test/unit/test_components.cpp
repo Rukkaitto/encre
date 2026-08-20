@@ -19,7 +19,7 @@ struct Fixture {
   reader::FontSet fonts;
   Fixture() {
     const std::string dir = std::string(ASSETS_DIR) + "/built/";
-    a = slurp(dir + "spacegrotesk_500_10pt.rfnt");
+    a = slurp(dir + "spacegrotesk_400_10pt.rfnt");
     b = slurp(dir + "spacegrotesk_500_11pt.rfnt");
     c = slurp(dir + "spacegrotesk_700_12pt.rfnt");
     d = slurp(dir + "spacegrotesk_500_14pt.rfnt");
@@ -281,6 +281,221 @@ TEST_CASE("structural drawing is identical in every plane") {
       CHECK(bw.getPixel(x, top) == msb.getPixel(x, top));
     }
   }
+}
+
+// --- Vertical centring, and icons aligned to it -----------------------------
+
+// Inked rows of a horizontal band, restricted to columns [x0, x1).
+static Rows inkRowsIn(const reader::Framebuffer& fb, int y0, int y1, int x0, int x1) {
+  Rows r;
+  for (int y = y0; y < y1; ++y)
+    for (int x = x0; x < x1; ++x)
+      if (!fb.getPixel(x, y)) {
+        if (y < r.top) r.top = y;
+        if (y > r.bottom) r.bottom = y;
+      }
+  return r;
+}
+// Doubled, so a half-pixel centre stays exact instead of rounding.
+static int centre2(const Rows& r) { return r.top + r.bottom; }
+
+// How far an icon's own ink sits from the centre of its own box, doubled.
+//
+// It is not always zero, and that is the design's business rather than a bug in
+// the placement: the boards' up and down arrows are drawn from paths whose ink
+// lands a pixel high and a pixel low of their 25px box respectively. Alignment
+// assertions below subtract this out, so they measure where the primitive *put
+// the box* -- which is what the primitive promises -- instead of also measuring
+// Chrome's sub-pixel rasterisation of one arrowhead.
+static int iconInkOffset2(const reader::Icon& icon) {
+  int top = icon.h, bottom = -1;
+  for (int y = 0; y < icon.h; ++y)
+    for (int x = 0; x < icon.w; ++x)
+      if (reader::coverage(icon, x, y) > 0) {
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
+      }
+  return (top + bottom) - (icon.h - 1);
+}
+
+TEST_CASE("baselineIn centres the em box, and sits higher than centring the ascent") {
+  Fixture f;
+  for (reader::Role role : {reader::Role::Meta, reader::Role::Label, reader::Role::Value,
+                            reader::Role::Body, reader::Role::Title, reader::Role::Display}) {
+    const reader::Font& font = f.fonts[role];
+    for (int boxTop : {0, 7, 240}) {
+      for (int boxH : {64, 72, 80, 100}) {
+        CAPTURE(boxTop);
+        CAPTURE(boxH);
+        const int base = reader::baselineIn(font, boxTop, boxH);
+        // The ascent..descent extent is centred: the slack above the run equals
+        // the slack below it, to within the odd pixel integer division cannot
+        // split. The slack may be *negative* -- the boards tighten some line
+        // boxes below the face's own extent (a 42px title at line-height 1.05,
+        // a 67px numeral at 1) and CSS lets the run overhang symmetrically
+        // rather than clipping it. Asserting non-negative slack here would be
+        // asserting that those boxes are illegal, and they are the design's.
+        const int above = (base - font.ascent()) - boxTop;
+        const int below = (boxTop + boxH) - (base - font.descent());
+        CHECK(above - below >= -1);
+        CHECK(above - below <= 1);
+        // The regression pin. `boxTop + boxH / 2 + ascent / 2` is the formula
+        // this replaced; it reads like centring but centres the ascent, and
+        // ascent reserves accent room above the caps. It is lower by half the
+        // descent, on every face and every box, which is why every label on the
+        // screen sat low in its box.
+        CHECK(base < boxTop + boxH / 2 + font.ascent() / 2);
+      }
+    }
+  }
+}
+
+TEST_CASE("iconTopFor is the exact inverse of baselineIn") {
+  Fixture f;
+  // An icon placed with iconTopFor and text placed with baselineIn out of the
+  // same box must share a centre for *any* icon height -- that is the whole
+  // point, since the design's bars mix a 25px square mark with a 38x21 battery.
+  for (reader::Role role : {reader::Role::Meta, reader::Role::Label, reader::Role::Value}) {
+    const reader::Font& font = f.fonts[role];
+    for (int boxH : {64, 72, 80}) {
+      const int base = reader::baselineIn(font, 0, boxH);
+      for (int iconH : {9, 12, 21, 25, 39, 46}) {
+        CAPTURE(iconH);
+        const int top = reader::iconTopFor(font, base, iconH);
+        // Doubled centres, so an odd icon height needs no rounding fudge.
+        const int iconCentre2 = 2 * top + iconH;
+        const int boxCentre2 = boxH;
+        CHECK(iconCentre2 >= boxCentre2 - 2);
+        CHECK(iconCentre2 <= boxCentre2 + 2);
+      }
+    }
+  }
+}
+
+TEST_CASE("a row's label is optically centred in the row") {
+  Fixture f;
+  reader::Framebuffer fb(480, 200);
+  reader::drawRow(fb, f.fonts, 0, "LIBRARY", "", /*focused=*/false);
+  // Left of centre is the label and nothing else; skip the hairline at y == 0.
+  const Rows ink = inkRowsIn(fb, 1, reader::kRowH, reader::kMargin, 240);
+  REQUIRE(ink.bottom > 0);
+  // Caps sit a hair above the box's middle -- the box centres the em, and the
+  // descent below the baseline is empty for a word with no descender -- so this
+  // is a tolerance rather than an equality. Two pixels is tight enough to fail
+  // the ascent-centred formula, which put this ink 3px low.
+  const int boxCentre2 = reader::kRowH;
+  CHECK(centre2(ink) >= boxCentre2 - 4);
+  CHECK(centre2(ink) <= boxCentre2 + 4);
+}
+
+TEST_CASE("the header band's battery is aligned with its percentage") {
+  Fixture f;
+  const int width = 480;
+  reader::Framebuffer fb(width, 200);
+  reader::drawHeaderBand(fb, f.fonts, "NOW READING", "87%");
+  const int iconX = width - reader::kMargin - reader::icons::kBattery.w;
+  // Above the 2px rule, so the full-bleed rule cannot dominate either band.
+  const Rows bat = inkRowsIn(fb, 0, reader::kBandH - 2, iconX, width);
+  const Rows value = inkRowsIn(fb, 0, reader::kBandH - 2, width / 2, iconX);
+  REQUIRE(bat.bottom > 0);
+  REQUIRE(value.bottom > 0);
+  // The battery is 21px tall against a 25px mark elsewhere in the same design,
+  // so this can only hold if the placement is derived from the text rather than
+  // offset from the baseline by a constant. Caps have no descender, so the box
+  // sits a pixel below the ink it is centred on -- hence 3 doubled, not 0. The
+  // formula this replaced was off by 3 *pixels*.
+  const int boxCentre2 = centre2(bat) - iconInkOffset2(reader::icons::kBattery);
+  CHECK(boxCentre2 >= centre2(value) - 3);
+  CHECK(boxCentre2 <= centre2(value) + 3);
+}
+
+TEST_CASE("every hint mark is aligned with the label it labels") {
+  Fixture f;
+  for (int width : {480, 528}) {
+    reader::Framebuffer fb(width, 120);
+    const reader::Hint hints[4] = {{&reader::icons::kBook, "READ", ""},
+                                   {&reader::icons::kDot, "SELECT", ""},
+                                   {&reader::icons::kUp, "UP", ""},
+                                   {&reader::icons::kDown, "DOWN", ""}};
+    int slotX[4] = {};
+    const int barH = reader::drawHintBar(fb, f.fonts, hints, slotX);
+    const int barTop = fb.height() - barH;
+    for (int i = 0; i < 4; ++i) {
+      CAPTURE(i);
+      const int iconW = hints[i].icon->w;
+      const int textX = slotX[i] + iconW + reader::kHintIconGap;
+      const int slotEnd = i < 3 ? slotX[i + 1] : width - reader::kMargin;
+      const Rows mark = inkRowsIn(fb, barTop + 1, fb.height(), slotX[i], slotX[i] + iconW);
+      const Rows text = inkRowsIn(fb, barTop + 1, fb.height(), textX, slotEnd);
+      REQUIRE(mark.bottom > 0);
+      REQUIRE(text.bottom > 0);
+      const int boxCentre2 = centre2(mark) - iconInkOffset2(*hints[i].icon);
+      CHECK(boxCentre2 >= centre2(text) - 3);
+      CHECK(boxCentre2 <= centre2(text) + 3);
+    }
+  }
+}
+
+// --- The row's type role and tracking ---------------------------------------
+
+TEST_CASE("tracking is the board's letter-spacing, resolved from the type ramp") {
+  // The boards state letter-spacing in em per run and the runs disagree. These
+  // are those six values at the ramp's pixel sizes; if one drifts, the run it
+  // belongs to is no longer the design's.
+  CHECK(reader::kBandLabelTracking == 5);   // 0.22em at 23px = 5.06
+  CHECK(reader::kRowLabelTracking == 4);    // 0.18em at 23px = 4.14
+  CHECK(reader::kBlockLabelTracking == 5);  // 0.20em at 23px = 4.60
+  CHECK(reader::kHintTracking == 3);        // 0.12em at 21px = 2.52
+  CHECK(reader::kMetaTracking == 3);        // 0.16em at 21px = 3.36
+  CHECK(reader::kTightMetaTracking == 2);   // 0.10em at 21px = 2.10
+  // Not all one number, which is the defect this replaced: a single shared
+  // constant cannot be right for six different runs.
+  CHECK(reader::kRowLabelTracking != reader::kTightMetaTracking);
+}
+
+TEST_CASE("a row sets its label in Role::Label with the board's tracking") {
+  Fixture f;
+  const int width = 480;
+  // Inked width of a reference run drawn the same way, so this compares like
+  // with like rather than against Font::measure (which counts the trailing
+  // advance and the last glyph's side bearing).
+  auto refInkWidth = [&](reader::Role role, int tracking) {
+    reader::Framebuffer ref(width, 200);
+    reader::drawText(ref, f.fonts[role], reader::kMargin, 120, "LIBRARY", reader::Ink::Black,
+                     tracking);
+    int lo = width, hi = -1;
+    for (int y = 0; y < 200; ++y)
+      for (int x = 0; x < width; ++x)
+        if (!ref.getPixel(x, y)) {
+          if (x < lo) lo = x;
+          if (x > hi) hi = x;
+        }
+    return hi - lo;
+  };
+
+  reader::Framebuffer fb(width, 200);
+  reader::drawRow(fb, f.fonts, 0, "LIBRARY", "", /*focused=*/false);
+  int lo = width, hi = -1;
+  for (int y = 1; y < reader::kRowH; ++y)
+    for (int x = 0; x < 240; ++x)
+      if (!fb.getPixel(x, y)) {
+        if (x < lo) lo = x;
+        if (x > hi) hi = x;
+      }
+  const int rowW = hi - lo;
+
+  // Exactly the Label face at the board's 0.18em...
+  CHECK(rowW == refInkWidth(reader::Role::Label, reader::kRowLabelTracking));
+  // ...and demonstrably neither of the two things it used to be: Body, and
+  // untracked. Without these the equality above would still pass if every role
+  // happened to measure alike.
+  CHECK(rowW != refInkWidth(reader::Role::Label, 0));
+  CHECK(rowW != refInkWidth(reader::Role::Body, 0));
+
+  // And the label is set at Label's size, not Body's: the run is shorter than
+  // the 14pt face's caps by the four pixels between a 23px and a 29px ramp step.
+  const Rows ink = inkRowsIn(fb, 1, reader::kRowH, reader::kMargin, 240);
+  CHECK(ink.bottom - ink.top < f.fonts[reader::Role::Body].ascent());
 }
 
 TEST_CASE("hint slots distribute across the canvas and never overlap") {

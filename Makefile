@@ -26,15 +26,30 @@ firmware:
 # authored on a monitor and measured illegible on the ~220 PPI panel. Assets are
 # named by pt so the unit is unambiguous in the filename; Literata stays on
 # --size (pixels) until body text is revisited in Phase 3.
+#
+# Each face's weight is the weight the boards set on the runs that use its role,
+# counted across all 46 of them rather than picked off one screen:
+#   --t-meta     209 runs, 188 of them at the CSS default 400  -> 400
+#   --t-label     59 runs, 49 explicitly 500                   -> 500
+#   --t-value    191 runs, 122 explicitly 700                  -> 700
+#   --t-body      39 runs, 24 explicitly 500                   -> 500
+#   --t-title      6 runs, all 700                             -> 700
+#   --t-display    2 runs, both 700                            -> 700
+# The ramp has one face per role, so where a role's runs disagree the majority
+# wins and the minority is a known, measured deviation -- Home's author line is
+# one of the eleven 400-weight --t-body runs and so renders ~19% heavier in ink
+# than the board. Meta was at 500 against a design that asks for 400 in 90% of
+# its uses, which measured 19-21% over the board's ink on every hint bar and
+# every metadata line on every screen.
 fonts:
-	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 10 --weight 500 --autohint --bpp 2 --out assets/built/spacegrotesk_500_10pt.rfnt
+	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 10 --weight 400 --autohint --bpp 2 --out assets/built/spacegrotesk_400_10pt.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 11 --weight 500 --autohint --bpp 2 --out assets/built/spacegrotesk_500_11pt.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 12 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_12pt.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 14 --weight 500 --autohint --bpp 2 --out assets/built/spacegrotesk_500_14pt.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 20 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_20pt.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 32 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_32pt.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/Literata.ttf --size 18 --weight 400 --opsz 12 --out assets/built/literata_18.rfnt
-	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_10pt.rfnt --out shell/src/font_meta.h --symbol kFontMeta
+	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_400_10pt.rfnt --out shell/src/font_meta.h --symbol kFontMeta
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_11pt.rfnt --out shell/src/font_label.h --symbol kFontLabel
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_12pt.rfnt --out shell/src/font_value.h --symbol kFontValue
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_14pt.rfnt --out shell/src/font_body.h --symbol kFontBody

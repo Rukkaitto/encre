@@ -34,6 +34,26 @@ stroke, which is what made the chrome illegible on the X3 panel. Two bits give
 four levels, which the panel can actually paint. The bit depth rides in the high
 byte of the version word (1 = v1/1bpp, 1 | (2 << 8) = v2/2bpp), so v1 assets
 stay byte-valid and the loader accepts both.
+
+--coverage-gamma is the transfer curve applied to coverage before it is
+quantised, and it is why the chrome no longer renders thinner than the design.
+FreeType hands back *linear* coverage: the fraction of the pixel the outline
+covers, and nothing else. No shipping text rasteriser puts that on screen
+unmodified -- Skia (so Chrome, so the design boards) runs the glyph mask through
+a gamma/contrast LUT first, because compositing linear coverage in a non-linear
+colour space thins black-on-white type. Quantising FreeType's raw coverage
+skipped that stage, and the result measured 88% of the browser's ink mass on the
+same string at the same nominal size and weight. The 2-bit quantisation itself
+was not the culprit; it is mass-neutral to within 0.2%. The missing curve was.
+
+  gamma 1.0 is the identity and reproduces the pre-correction bytes exactly.
+  gamma 2.0 (the default) brings the chrome faces to ~95% of Chrome's ink mass,
+    which is as close as four levels reach; the remainder is quantisation floor.
+  Past ~2.4 counters begin to silt up at 21px, which is a worse defect than
+    being slightly light, so this is not a knob to keep turning.
+
+This is a coverage correction, not a weight change: --weight still says exactly
+what the design says, and the outline is the one the design asked for.
 """
 import argparse
 import struct
@@ -51,6 +71,23 @@ CODEPOINTS = (
     + [0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x2026, 0x2039, 0x203A]
     + [0xFFFD]
 )
+
+DEFAULT_COVERAGE_GAMMA = 2.0
+
+
+def coverage_lut(gamma: float) -> list:
+    """8-bit linear coverage -> 2-bit level, 256 entries.
+
+    At gamma == 1.0 this is exactly the arithmetic it replaces,
+    `(v * 3 + 127) // 255`: that expression is floor(3v/255 + 127/255) and this
+    one is floor(3v/255 + 0.5), and 255k - 3v is an integer so no v can fall
+    between the two. The identity holding *bit for bit* is what makes the
+    correction auditable -- the only difference in a generated asset is the
+    curve, not a second rounding change smuggled in beside it.
+    """
+    if gamma <= 0:
+        sys.exit(f"error: --coverage-gamma must be positive, got {gamma:g}")
+    return [min(3, int((v / 255.0) ** (1.0 / gamma) * 3 + 0.5)) for v in range(256)]
 
 
 def apply_variations(face, requested: dict) -> str:
@@ -115,7 +152,23 @@ def main() -> None:
         choices=(1, 2),
         help="bits of coverage per pixel: 1 thresholds, 2 keeps anti-aliasing",
     )
+    ap.add_argument(
+        "--coverage-gamma",
+        type=float,
+        default=None,
+        help=f"transfer curve on coverage before quantising (default "
+             f"{DEFAULT_COVERAGE_GAMMA:g}, 1.0 = none); --bpp 2 only",
+    )
     args = ap.parse_args()
+
+    if args.coverage_gamma is not None and args.bpp == 1:
+        sys.exit(
+            "error: --coverage-gamma applies to 2-bit coverage and --bpp 1 has none.\n"
+            "  A 1bpp face is thresholded by FreeType before this tool sees it, so the\n"
+            "  flag would be silently doing nothing. Drop it, or pass --bpp 2."
+        )
+    gamma = DEFAULT_COVERAGE_GAMMA if args.coverage_gamma is None else args.coverage_gamma
+    lut = coverage_lut(gamma) if args.bpp == 2 else None
 
     if args.pt is not None and args.size is not None:
         sys.exit(
@@ -162,6 +215,13 @@ def main() -> None:
         load_flags |= freetype.FT_LOAD_FORCE_AUTOHINT
 
     glyphs, blob = [], bytearray()
+    # Reported, not eyeballed: the level histogram and the ink mass are how a
+    # change to the coverage curve is judged. `linear_mass` is FreeType's own
+    # coverage summed as a pixel area, so the ratio below states exactly how much
+    # ink the stored 4-level approximation carries against the outline's true
+    # area -- above 1.0 once the gamma curve is on, which is the point.
+    hist = [0, 0, 0, 0]
+    linear_mass = 0.0
     for cp in CODEPOINTS:
         if face.get_char_index(cp) == 0:
             continue
@@ -176,7 +236,10 @@ def main() -> None:
             packed = bytearray(row_bytes * bmp.rows)
             for row in range(bmp.rows):
                 for col in range(bmp.width):
-                    level = (bmp.buffer[row * bmp.pitch + col] * 3 + 127) // 255
+                    v = bmp.buffer[row * bmp.pitch + col]
+                    linear_mass += v / 255.0
+                    level = lut[v]
+                    hist[level] += 1
                     if level:
                         packed[row * row_bytes + col // 4] |= level << (6 - 2 * (col % 4))
         else:
@@ -223,10 +286,19 @@ def main() -> None:
         axis_summary or "static",
         "autohint" if args.autohint else "hinted",
     ]
+    if args.bpp == 2:
+        traits.append(f"gamma={gamma:g}")
     print(
         f"{args.out}: {len(glyphs)} glyphs, {len(kerns)} kern pairs, "
         f"blob {len(blob)} bytes, {', '.join(t for t in traits if t)}"
     )
+    if args.bpp == 2:
+        quantised_mass = sum(i * n for i, n in enumerate(hist)) / 3.0
+        print(
+            f"  levels 0/1/2/3 = {hist[0]}/{hist[1]}/{hist[2]}/{hist[3]}, "
+            f"ink mass {quantised_mass:.1f}px vs {linear_mass:.1f}px linear "
+            f"({100 * quantised_mass / linear_mass:.1f}%)"
+        )
 
 
 if __name__ == "__main__":

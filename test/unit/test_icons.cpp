@@ -26,10 +26,10 @@ constexpr int kAt = 8;
 }  // namespace
 
 TEST_CASE("every icon draws something inside its own box and nothing outside") {
-  // The sizes are each icon's own -- 23x23 for the button marks, 25x25 for the
-  // book, 46x39 for the folder, 38x21 for the battery -- so the box is read off
-  // the icon, never a shared constant. A uniform box is exactly the assumption
-  // that let the hand-drawn set stay at 13x13 after the design's icons grew.
+  // The sizes are each icon's own -- the button marks share a box but the folder
+  // and the battery do not -- so the box is read off the icon, never a shared
+  // constant. A uniform box is exactly the assumption that let the hand-drawn
+  // set stay at 13x13 after the design's icons grew.
   for (const Named& n : kAll) {
     CAPTURE(n.name);
     reader::Framebuffer fb(kCanvas, kCanvas);
@@ -56,20 +56,84 @@ TEST_CASE("icons are the sizes the design boards draw them at") {
   // Pinned deliberately: the previous failure was not a wrong shape but a right
   // shape at the wrong scale, which no shape-agnostic assertion notices.
   // Each value is the width/height its design board renders that SVG at, which
-  // is the authority -- tools/iconc.py sources both the geometry and the size
-  // from the board.
+  // is the authority -- tools/iconc.py reads both the geometry and the size out
+  // of the board at generation time, so these follow the design rather than
+  // leading it. When a board resizes a mark this test is *expected* to fail;
+  // re-read the board and update it, do not adjust the generator.
   CHECK(reader::icons::kBack.w == 25);
   CHECK(reader::icons::kBack.h == 25);
-  CHECK(reader::icons::kDot.w == 19);
-  CHECK(reader::icons::kUp.w == 23);
-  CHECK(reader::icons::kDown.w == 23);
+  CHECK(reader::icons::kDot.w == 25);
+  CHECK(reader::icons::kUp.w == 25);
+  CHECK(reader::icons::kDown.w == 25);
   CHECK(reader::icons::kChevron.w == 25);
-  CHECK(reader::icons::kBook.w == 26);
-  CHECK(reader::icons::kBook.h == 26);
+  CHECK(reader::icons::kBook.w == 25);
+  CHECK(reader::icons::kBook.h == 25);
   CHECK(reader::icons::kFolder.w == 46);
   CHECK(reader::icons::kFolder.h == 39);
   CHECK(reader::icons::kBattery.w == 38);
   CHECK(reader::icons::kBattery.h == 21);
+}
+
+TEST_CASE("every mark that can appear in a hint bar shares one box") {
+  // A design rule, not a coincidence: the boards normalised every hint-bar mark
+  // to a single box so the four slots sit on one optical line. The bar used to
+  // mix 19/23/26px marks and read as ragged. This is the assertion that catches
+  // a board reverting one of them in isolation -- the sizes above would still
+  // pass individually while the bar went crooked again.
+  const reader::Icon* bar[] = {&reader::icons::kBack, &reader::icons::kDot,
+                               &reader::icons::kUp, &reader::icons::kDown,
+                               &reader::icons::kBook, &reader::icons::kChevron};
+  for (const reader::Icon* i : bar) {
+    CHECK(i->w == bar[0]->w);
+    CHECK(i->h == bar[0]->h);
+    CHECK(i->w == i->h);  // and each is square
+  }
+}
+
+TEST_CASE("every icon's ink is centred in its own box") {
+  // The shared placement helpers centre an icon's *box* on its label. That only
+  // puts the mark where the eye expects it if the mark is itself centred in its
+  // box, so the two halves of the guarantee are asserted separately -- here, and
+  // in test_components.cpp against real labels. A pixel of slack is allowed
+  // because several of these marks are an odd number of ink rows in an odd-sized
+  // box; more than that means a board has drawn a mark off-centre in its viewBox
+  // and no amount of correct placement will look right.
+  for (const Named& n : kAll) {
+    CAPTURE(n.name);
+    int top = n.icon->h, bottom = -1;
+    for (int y = 0; y < n.icon->h; ++y)
+      for (int x = 0; x < n.icon->w; ++x)
+        if (reader::coverage(*n.icon, x, y) > 0) {
+          if (y < top) top = y;
+          if (y > bottom) bottom = y;
+        }
+    REQUIRE(bottom >= 0);
+    // Doubled, so a mark with an even ink height in an odd box needs no fudge.
+    const int off = (top + bottom) - (n.icon->h - 1);
+    CHECK(off >= -2);
+    CHECK(off <= 2);
+  }
+}
+
+TEST_CASE("the up and down arrows fill their box as fully as the chevron") {
+  // The defect this pins was in the *design*: the arrows spanned 37% of their
+  // viewBox where the chevron spanned 62%, so they read as undersized however
+  // faithfully they were rasterised. Measured on the bitmap rather than on the
+  // path data, because the bitmap is what the panel shows.
+  auto inkExtent = [](const reader::Icon& icon) {
+    int top = icon.h, bottom = -1;
+    for (int y = 0; y < icon.h; ++y)
+      for (int x = 0; x < icon.w; ++x)
+        if (reader::coverage(icon, x, y) > 0) {
+          if (y < top) top = y;
+          if (y > bottom) bottom = y;
+        }
+    return bottom - top + 1;
+  };
+  const int chevron = inkExtent(reader::icons::kChevron);
+  for (const reader::Icon* a : {&reader::icons::kUp, &reader::icons::kDown}) {
+    CHECK(inkExtent(*a) >= chevron - 1);
+  }
 }
 
 TEST_CASE("every icon carries anti-aliased coverage, not a hard mask") {

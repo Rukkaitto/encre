@@ -18,6 +18,9 @@ constexpr int kCoverW = 112;
 constexpr int kCoverH = 168;
 constexpr int kGutter = 16;
 constexpr int kBlockH = 72;
+// The action block's own `padding: 0 20px`, which insets its label and its mark
+// from the block's edges rather than from the screen margin.
+constexpr int kBlockPadX = 20;
 // Vertical rhythm, all straight off the board: the gap under the header band
 // (`padding: 30px 24px 0`), the same 26px lead-in the progress bar and the
 // CONTINUE block each get, and the bar's own height.
@@ -52,16 +55,13 @@ std::string upperAscii(std::string_view s) {
   return out;
 }
 
-// Baseline of one text run, given the top of its CSS line box and that box's
-// height. This is CSS half-leading: the font's ascent+descent is centred in the
-// line box, so a box shorter than the glyphs (the board's `line-height: 1.05` on
-// the title, `1` on the numeral) pulls the baseline up rather than letting the
-// run sit flush to the top. Getting this right is what keeps the 67px numeral
-// clear of the author line above it instead of butting into it.
-int baselineIn(const Font& f, int boxTop, int boxH) {
-  const int natural = f.ascent() - f.descent();
-  return boxTop + (boxH - natural) / 2 + f.ascent();
-}
+// NOTE: this theme used to carry its own copy of the half-leading baseline
+// formula, and it was the *correct* copy while the shared primitives in
+// components.cpp used a different, wrong one. That is the worst arrangement of
+// the two: the theme's runs were centred and the shared boxes were not, so the
+// screen was subtly inconsistent with itself and the bug was invisible to
+// anyone reading either file alone. reader::baselineIn in core/src/text.cpp is
+// now the only copy, and this theme is one of its callers like any other.
 
 // A dithered stand-in until Phase 3 decodes real cover images: a bordered panel,
 // and nothing else. The board used to reverse the title out of a filled strip
@@ -118,13 +118,15 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
            std::to_string(vm.percent) + "%", Ink::Black, 0, plane);
   ry += kDisplayLineH + kMetaGap;
 
+  // Two meta lines, two trackings: the board sets the page count at 0.16em and
+  // the chapter label at 0.10em. They are not the same run.
   drawText(fb, meta, rightX, baselineIn(meta, ry, meta.lineHeight()),
            "PAGE " + std::to_string(vm.currentPage) + " / " + std::to_string(vm.pageCount),
-           Ink::Black, kLabelTracking, plane);
+           Ink::Black, kMetaTracking, plane);
   ry += meta.lineHeight() + kMetaGap;
 
   drawText(fb, meta, rightX, baselineIn(meta, ry, meta.lineHeight()), vm.chapterLabel, Ink::Black,
-           kLabelTracking, plane);
+           kTightMetaTracking, plane);
   ry += meta.lineHeight();
 
   // The block is as tall as its taller column. The stats column now normally
@@ -154,10 +156,13 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
     fb.fillRect(kMargin + barW - 2, y, 2, kBlockH, false);
   }
   const Ink cink = continueFocused ? Ink::White : Ink::Black;
-  drawText(fb, label, kMargin + 20, y + kBlockH / 2 + label.ascent() / 2, "CONTINUE", cink,
-           kLabelTracking, plane);
-  drawIcon(fb, icons::kChevron, kMargin + barW - 20 - icons::kChevron.w,
-           y + kBlockH / 2 - icons::kChevron.h / 2, cink, plane);
+  // The block is an `align-items: center` flex row on the board, so its label
+  // and its mark are placed by the same two shared helpers every other box uses
+  // -- there is nothing about a 72px action block that makes it a special case.
+  const int cbase = baselineIn(label, y, kBlockH);
+  drawText(fb, label, kMargin + kBlockPadX, cbase, "CONTINUE", cink, kBlockLabelTracking, plane);
+  drawIcon(fb, icons::kChevron, kMargin + barW - kBlockPadX - icons::kChevron.w,
+           iconTopFor(label, cbase, icons::kChevron.h), cink, plane);
 
   // Menu rows sit above the hint bar.
   const int menuTop = fb.height() - kHintBarH - static_cast<int>(vm.menu.size()) * kRowH;

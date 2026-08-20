@@ -32,17 +32,20 @@ uint8_t coverage(const Icon& icon, int col, int row);
 void drawIcon(Framebuffer& fb, const Icon& icon, int x, int y, Ink ink = Ink::Black,
               Plane plane = Plane::Bw);
 
-// Sizes are each icon's own -- they are the design's, not a shared grid. See
-// tools/iconc.py for the source board and viewBox behind each one.
+// Sizes are each icon's own -- they are the design's, not a shared grid, and
+// they are read off the board by the generator rather than declared anywhere in
+// core/. No size is repeated here for that reason: a comment stating 23x23 is
+// the same stale transcript the generator used to keep, and it outlived two
+// design changes. Ask the Icon. tools/iconc.py names the source board for each.
 namespace icons {
-extern const Icon kBack;     // 23x23 arrow curving left
-extern const Icon kDot;      // 23x23 filled circle: the Confirm button
-extern const Icon kUp;       // 23x23 stem with a chevron head, pointing up
-extern const Icon kDown;     // 23x23 the same, pointing down
-extern const Icon kChevron;  // 23x23 right-pointing disclosure
-extern const Icon kBook;     // 25x25 open book: the Read action
-extern const Icon kFolder;   // 46x39 folder: a Library directory row
-extern const Icon kBattery;  // 38x21 the header band's charge cell
+extern const Icon kBack;     // arrow curving left: the Back button
+extern const Icon kDot;      // filled circle: the Confirm button
+extern const Icon kUp;       // stem with a chevron head, pointing up
+extern const Icon kDown;     // the same, pointing down
+extern const Icon kChevron;  // right-pointing disclosure
+extern const Icon kBook;     // open book: the Read action
+extern const Icon kFolder;   // folder: a Library directory row
+extern const Icon kBattery;  // the header band's charge cell
 }  // namespace icons
 
 }  // namespace reader

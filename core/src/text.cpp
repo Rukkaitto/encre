@@ -55,4 +55,18 @@ int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::strin
   return pen - x;
 }
 
+// descent() is negative, so `ascent - descent` is the run's full extent and
+// `(ascent + descent) / 2` is the signed distance from the baseline up to the
+// extent's midpoint. The two spellings below are the same identity; each is
+// written the way its caller thinks about the problem.
+int baselineIn(const Font& font, int boxTop, int boxH) {
+  const int extent = font.ascent() - font.descent();
+  return boxTop + (boxH - extent) / 2 + font.ascent();
+}
+
+int iconTopFor(const Font& font, int baseline, int iconH) {
+  const int textCentre = baseline - (font.ascent() + font.descent()) / 2;
+  return textCentre - iconH / 2;
+}
+
 }  // namespace reader

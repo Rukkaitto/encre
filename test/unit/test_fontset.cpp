@@ -13,7 +13,7 @@ static std::vector<uint8_t> slurp(const std::string& p) {
 
 TEST_CASE("FontSet exposes one loaded face per role and reports readiness") {
   const std::string dir = std::string(ASSETS_DIR) + "/built/";
-  auto meta  = slurp(dir + "spacegrotesk_500_10pt.rfnt");
+  auto meta  = slurp(dir + "spacegrotesk_400_10pt.rfnt");
   auto label = slurp(dir + "spacegrotesk_500_11pt.rfnt");
   auto value = slurp(dir + "spacegrotesk_700_12pt.rfnt");
   auto body  = slurp(dir + "spacegrotesk_500_14pt.rfnt");
