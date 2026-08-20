@@ -534,7 +534,7 @@
       "x": 0,
       "y": -180,
       "w": 480,
-      "text": "Every remaining UX path in the B2 theme: empty and error states, hold-action menus, reader tools, and the on-demand Wi-Fi flow.\nHint bars always show 4 slots, one per hardware button (Back / Confirm / Up / Down); a button with no action leaves its slot empty, and a hold action stacks inside its button&apos;s slot.\nBottom row: the full Wi-Fi joining path — scan, password entry, failure, hotspot setup, and sync feedback.\nRow 4: Instapaper setup, end-of-book, battery-empty, and boot states.",
+      "text": "Every remaining UX path in the B2 theme: empty and error states, hold-action menus, reader tools, and the on-demand Wi-Fi flow.\nHint bars always show 4 slots, one per hardware button (Back / Confirm / Up / Down); a button with no action leaves its slot empty, and a hold action stacks inside its button&apos;s slot.\nRow 4: the full Wi-Fi joining path — scan, password entry, failure, hotspot setup, and sync feedback.\nRow 5: Instapaper setup, end-of-book, battery-empty, and boot states.",
       "page": "page-4"
     },
     {
