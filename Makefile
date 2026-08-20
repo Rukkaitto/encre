@@ -20,12 +20,12 @@ firmware:
 # The chrome ramp is a fixed set of six roles (see the Phase 2A plan): bitmaps
 # are pre-rendered, so each distinct pixel size is its own asset.
 fonts:
-	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 12 --weight 500 --autohint --out assets/built/spacegrotesk_500_12.rfnt
-	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 13 --weight 500 --autohint --out assets/built/spacegrotesk_500_13.rfnt
-	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 14 --weight 700 --autohint --out assets/built/spacegrotesk_700_14.rfnt
-	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 17 --weight 500 --autohint --out assets/built/spacegrotesk_500_17.rfnt
-	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 24 --weight 700 --autohint --out assets/built/spacegrotesk_700_24.rfnt
-	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 44 --weight 700 --autohint --out assets/built/spacegrotesk_700_44.rfnt
+	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 12 --weight 500 --autohint --bpp 2 --out assets/built/spacegrotesk_500_12.rfnt
+	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 13 --weight 500 --autohint --bpp 2 --out assets/built/spacegrotesk_500_13.rfnt
+	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 14 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_14.rfnt
+	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 17 --weight 500 --autohint --bpp 2 --out assets/built/spacegrotesk_500_17.rfnt
+	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 24 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_24.rfnt
+	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 44 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_44.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/Literata.ttf --size 18 --weight 400 --opsz 12 --out assets/built/literata_18.rfnt
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_12.rfnt --out shell/src/font_meta.h --symbol kFontMeta
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_13.rfnt --out shell/src/font_label.h --symbol kFontLabel

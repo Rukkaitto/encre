@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""fontc: TTF/OTF -> .rfnt v1 bitmap font (1bpp, mono-rendered, with kerning).
+"""fontc: TTF/OTF -> .rfnt bitmap font (1 or 2 bpp, with kerning).
 
 Usage: python3 tools/fontc.py FONT.ttf --size 18 --out out.rfnt
        python3 tools/fontc.py FONT.ttf --size 16 --weight 500 --autohint --out out.rfnt
+       python3 tools/fontc.py FONT.ttf --size 13 --weight 500 --bpp 2 --out out.rfnt
 
 The bundled faces are variable fonts, and their variable *defaults* are not the
 weights the UI asks for (Space Grotesk defaults to 300 Light). Left unset, every
@@ -12,8 +13,12 @@ generated asset is a deliberate choice rather than whatever the font shipped
 with; --autohint forces FreeType's own autohinter, which snaps stems to the
 pixel grid instead of trusting the face's (mono-hostile) TrueType hints.
 
-The output format is unchanged by any of this: .rfnt v1, byte-for-byte the same
-layout, so the C++ loader is untouched.
+--bpp 2 stores anti-aliased coverage instead of a hard threshold. At 12-13px a
+stem is 1-1.5px, so thresholding either drops it or leaves a jagged single-pixel
+stroke, which is what made the chrome illegible on the X3 panel. Two bits give
+four levels, which the panel can actually paint. The bit depth rides in the high
+byte of the version word (1 = v1/1bpp, 1 | (2 << 8) = v2/2bpp), so v1 assets
+stay byte-valid and the loader accepts both.
 """
 import argparse
 import struct
@@ -84,6 +89,13 @@ def main() -> None:
         action="store_true",
         help="force FreeType's autohinter (snaps stems to the pixel grid)",
     )
+    ap.add_argument(
+        "--bpp",
+        type=int,
+        default=1,
+        choices=(1, 2),
+        help="bits of coverage per pixel: 1 thresholds, 2 keeps anti-aliasing",
+    )
     args = ap.parse_args()
 
     requested = {}
@@ -97,7 +109,11 @@ def main() -> None:
     axis_summary = apply_variations(face, requested)
     face.set_pixel_sizes(0, args.size)
 
-    load_flags = freetype.FT_LOAD_RENDER | freetype.FT_LOAD_TARGET_MONO
+    # At 2bpp the mono target must be off, or FreeType hands back a 1-bit bitmap
+    # and there is no anti-aliasing left to quantise.
+    load_flags = freetype.FT_LOAD_RENDER
+    if args.bpp == 1:
+        load_flags |= freetype.FT_LOAD_TARGET_MONO
     if args.autohint:
         load_flags |= freetype.FT_LOAD_FORCE_AUTOHINT
 
@@ -108,11 +124,23 @@ def main() -> None:
         face.load_char(chr(cp), load_flags)
         g = face.glyph
         bmp = g.bitmap
-        row_bytes = (bmp.width + 7) // 8
-        packed = bytearray(row_bytes * bmp.rows)
-        for row in range(bmp.rows):
-            src = bmp.buffer[row * bmp.pitch : row * bmp.pitch + row_bytes]
-            packed[row * row_bytes : (row + 1) * row_bytes] = bytes(src)
+        if args.bpp == 2:
+            # 8-bit coverage -> 2-bit level, four pixels per byte, MSB-first:
+            # pixel `col` occupies bits 6 - 2 * (col % 4). Font::coverage in
+            # core/src/font.cpp unpacks exactly this layout.
+            row_bytes = (bmp.width * 2 + 7) // 8
+            packed = bytearray(row_bytes * bmp.rows)
+            for row in range(bmp.rows):
+                for col in range(bmp.width):
+                    level = (bmp.buffer[row * bmp.pitch + col] * 3 + 127) // 255
+                    if level:
+                        packed[row * row_bytes + col // 4] |= level << (6 - 2 * (col % 4))
+        else:
+            row_bytes = (bmp.width + 7) // 8
+            packed = bytearray(row_bytes * bmp.rows)
+            for row in range(bmp.rows):
+                src = bmp.buffer[row * bmp.pitch : row * bmp.pitch + row_bytes]
+                packed[row * row_bytes : (row + 1) * row_bytes] = bytes(src)
         glyphs.append(
             (cp, g.advance.x // 64, bmp.width, bmp.rows, g.bitmap_left, g.bitmap_top, len(blob))
         )
@@ -132,7 +160,9 @@ def main() -> None:
     line_gap = (face.size.height // 64) - ascent + descent
 
     with open(args.out, "wb") as f:
-        f.write(struct.pack("<4sHHhhhH", b"RFNT", 1, len(glyphs), ascent, descent, line_gap, min(len(kerns), 0xFFFF)))
+        # bpp 1 leaves the version word bare, so v1 assets are byte-identical.
+        version = 1 if args.bpp == 1 else 1 | (args.bpp << 8)
+        f.write(struct.pack("<4sHHhhhH", b"RFNT", version, len(glyphs), ascent, descent, line_gap, min(len(kerns), 0xFFFF)))
         for cp, adv, w, h, xo, yo, off in glyphs:
             f.write(struct.pack("<IhhhhhI", cp, adv, w, h, xo, yo, off))
         for left, right, adj in kerns[:0xFFFF]:
@@ -140,7 +170,12 @@ def main() -> None:
         f.write(bytes(blob))
     # Axes and hinting go in the summary so a generated asset is traceable to
     # the exact rendering settings that produced it.
-    traits = [f"{args.size}px", axis_summary or "static", "autohint" if args.autohint else "hinted"]
+    traits = [
+        f"{args.size}px",
+        f"bpp={args.bpp}",
+        axis_summary or "static",
+        "autohint" if args.autohint else "hinted",
+    ]
     print(
         f"{args.out}: {len(glyphs)} glyphs, {len(kerns)} kern pairs, "
         f"blob {len(blob)} bytes, {', '.join(t for t in traits if t)}"
