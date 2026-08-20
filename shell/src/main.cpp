@@ -4,8 +4,12 @@
 #include <SPI.h>
 #include <XteinkDetect.h>
 
-#include "font_spacegrotesk_500_16.h"
-#include "font_spacegrotesk_700_16.h"
+#include "font_body.h"
+#include "font_label.h"
+#include "font_meta.h"
+#include "font_title.h"
+#include "font_value.h"
+#include "reader/fontset.h"
 #include "reader/framebuffer.h"
 #include "reader/rotate.h"
 #include "reader/theme_quiet.h"
@@ -91,11 +95,17 @@ void setup() {
                 (unsigned)ESP.getMaxAllocHeap());
   Serial.flush();
 
-  reader::QuietTheme theme;
-  if (!theme.loadFonts(kUiLabelFont, kUiLabelFontSize, kUiValueFont, kUiValueFontSize)) {
+  reader::FontSet fonts;
+  const bool fontsOk = fonts.load(reader::Role::Meta, kFontMeta, kFontMetaSize) &&
+                       fonts.load(reader::Role::Label, kFontLabel, kFontLabelSize) &&
+                       fonts.load(reader::Role::Value, kFontValue, kFontValueSize) &&
+                       fonts.load(reader::Role::Body, kFontBody, kFontBodySize) &&
+                       fonts.load(reader::Role::Title, kFontTitle, kFontTitleSize);
+  if (!fontsOk || !fonts.ready()) {
     mark("font-load-FAILED");
     return;
   }
+  reader::QuietTheme theme;
   mark("fonts-ok");
 
   reader::HomeViewModel vm;
@@ -106,6 +116,7 @@ void setup() {
   vm.currentPage = 53;
   vm.pageCount = 890;
   vm.batteryPercent = 87;
+  vm.hasCover = false;
   vm.menu = {{"LIBRARY", "12"}, {"SETTINGS", ""}};
   vm.focusedMenuIndex = -1;
   vm.hints = {"READ", "SELECT", "UP", "DOWN"};
@@ -114,13 +125,13 @@ void setup() {
   const int panelH = display.getDisplayHeight();
   reader::Framebuffer portrait(panelH, panelW);
   mark("portrait-allocated");
-  theme.renderHome(portrait, vm);
+  theme.renderHome(portrait, fonts, vm);
   mark("rendered-to-framebuffer");
 
-  // Order matters: renderHome's inverted-text path allocates a full-screen
-  // scratch framebuffer, so the landscape buffer is constructed only after
-  // renderHome returns. Constructing it earlier keeps that memory live across
-  // the allocation and needlessly raises peak heap on a 320 KB part.
+  // The landscape buffer is still constructed only after renderHome returns.
+  // Ink::White made the old full-screen scratch buffer redundant, so the render
+  // no longer spikes the heap, but two full framebuffers is 96 KB on a 320 KB
+  // part and there is no reason to hold both live any longer than the rotate.
   reader::Framebuffer landscape(panelW, panelH);
   // CCW is the correct direction, verified on X3 hardware: CW renders the whole
   // screen 180 degrees out (the two directions differ by exactly half a turn).

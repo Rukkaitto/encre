@@ -1,8 +1,10 @@
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
 
+#include "reader/fontset.h"
 #include "reader/framebuffer.h"
 #include "reader/png.h"
 #include "reader/theme_quiet.h"
@@ -15,18 +17,36 @@ static std::vector<uint8_t> slurp(const std::string& p) {
 }
 
 int main(int argc, char** argv) {
-  if (argc < 3 || std::string(argv[1]) != "home") {
-    std::fprintf(stderr, "usage: reader_sim home OUT.png\n");
+  if (argc < 3) {
+    std::fprintf(stderr, "usage: reader_sim SCREEN OUT.png [--canvas WxH]\n");
     return 2;
   }
-  auto labelFont = slurp(std::string(ASSETS_DIR) + "/built/spacegrotesk_500_16.rfnt");
-  auto valueFont = slurp(std::string(ASSETS_DIR) + "/built/spacegrotesk_700_16.rfnt");
-  reader::QuietTheme theme;
-  if (labelFont.empty() || valueFont.empty() ||
-      !theme.loadFonts(labelFont.data(), labelFont.size(), valueFont.data(), valueFont.size())) {
-    std::fprintf(stderr, "failed to load ui fonts (run: make fonts)\n");
+  int w = 480, h = 800;
+  for (int i = 3; i + 1 < argc; ++i)
+    if (std::strcmp(argv[i], "--canvas") == 0) std::sscanf(argv[i + 1], "%dx%d", &w, &h);
+
+  if (std::strcmp(argv[1], "home") != 0) {
+    std::fprintf(stderr, "unknown screen '%s' (only 'home' so far)\n", argv[1]);
+    return 3;
+  }
+
+  const std::string dir = std::string(ASSETS_DIR) + "/built/";
+  auto a = slurp(dir + "spacegrotesk_500_12.rfnt");
+  auto b = slurp(dir + "spacegrotesk_500_13.rfnt");
+  auto c = slurp(dir + "spacegrotesk_700_14.rfnt");
+  auto d = slurp(dir + "spacegrotesk_500_17.rfnt");
+  auto e = slurp(dir + "spacegrotesk_700_24.rfnt");
+  reader::FontSet fonts;
+  fonts.load(reader::Role::Meta, a.data(), a.size());
+  fonts.load(reader::Role::Label, b.data(), b.size());
+  fonts.load(reader::Role::Value, c.data(), c.size());
+  fonts.load(reader::Role::Body, d.data(), d.size());
+  fonts.load(reader::Role::Title, e.data(), e.size());
+  if (!fonts.ready()) {
+    std::fprintf(stderr, "font ramp failed to load from %s\n", dir.c_str());
     return 1;
   }
+
   reader::HomeViewModel vm;
   vm.title = "Middlemarch";
   vm.author = "George Eliot";
@@ -35,13 +55,15 @@ int main(int argc, char** argv) {
   vm.currentPage = 53;
   vm.pageCount = 890;
   vm.batteryPercent = 87;
+  vm.hasCover = false;
   vm.menu = {{"LIBRARY", "12"}, {"SETTINGS", ""}};
   vm.focusedMenuIndex = -1;
   vm.hints = {"READ", "SELECT", "UP", "DOWN"};
 
-  reader::Framebuffer fb(480, 800);
-  theme.renderHome(fb, vm);
+  reader::Framebuffer fb(w, h);
+  reader::QuietTheme theme;
+  theme.renderHome(fb, fonts, vm);
   if (!reader::writePng(fb, argv[2])) return 1;
-  std::printf("wrote %s\n", argv[2]);
+  std::printf("wrote %s (%dx%d)\n", argv[2], w, h);
   return 0;
 }
