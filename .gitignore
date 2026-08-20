@@ -1,0 +1,7 @@
+build/
+.pio/
+.cache/
+__pycache__/
+*.pyc
+.DS_Store
+platformio.local.ini
