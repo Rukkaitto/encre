@@ -66,11 +66,11 @@
     {
       "file": "Articles.dc.html",
       "x": 0,
-      "y": 900,
+      "y": 0,
       "w": 480,
       "h": 800,
-      "page": "page-2",
-      "title": "Articles"
+      "page": "page-6",
+      "title": "Articles List"
     },
     {
       "file": "Settings.dc.html",
@@ -255,20 +255,20 @@
     {
       "file": "ArticleActions.dc.html",
       "title": "Article Actions",
-      "x": 2320,
-      "y": 900,
+      "x": 580,
+      "y": 0,
       "w": 480,
       "h": 800,
-      "page": "page-4"
+      "page": "page-6"
     },
     {
       "file": "ArticleEnd.dc.html",
       "title": "Article End",
-      "x": 2900,
-      "y": 900,
+      "x": 1160,
+      "y": 0,
       "w": 480,
       "h": 800,
-      "page": "page-4"
+      "page": "page-6"
     },
     {
       "file": "WifiConnect.dc.html",
@@ -345,43 +345,43 @@
     {
       "file": "SyncDone.dc.html",
       "title": "Sync Complete",
-      "x": 2320,
-      "y": 2700,
+      "x": 1740,
+      "y": 0,
       "w": 480,
       "h": 800,
-      "page": "page-4"
+      "page": "page-6"
     },
     {
       "file": "ArticlesSetup.dc.html",
-      "title": "Articles · Not Set Up",
-      "x": 0,
-      "y": 3600,
+      "title": "Not Set Up",
+      "x": 2320,
+      "y": 0,
       "w": 480,
       "h": 800,
-      "page": "page-4"
+      "page": "page-6"
     },
     {
       "file": "InstapaperConnect.dc.html",
-      "title": "Instapaper Sign-In",
-      "x": 580,
-      "y": 3600,
+      "title": "Browser Sign-In",
+      "x": 2900,
+      "y": 0,
       "w": 480,
       "h": 800,
-      "page": "page-4"
+      "page": "page-6"
     },
     {
       "file": "InstapaperAccount.dc.html",
-      "title": "Instapaper Account",
-      "x": 1160,
-      "y": 3600,
+      "title": "Account",
+      "x": 3480,
+      "y": 0,
       "w": 480,
       "h": 800,
-      "page": "page-4"
+      "page": "page-6"
     },
     {
       "file": "BookEnd.dc.html",
       "title": "Book Finished",
-      "x": 1740,
+      "x": 0,
       "y": 3600,
       "w": 480,
       "h": 800,
@@ -390,7 +390,7 @@
     {
       "file": "BatteryEmpty.dc.html",
       "title": "Battery Empty",
-      "x": 2320,
+      "x": 580,
       "y": 3600,
       "w": 480,
       "h": 800,
@@ -399,7 +399,7 @@
     {
       "file": "Boot.dc.html",
       "title": "Boot Splash",
-      "x": 2900,
+      "x": 1160,
       "y": 3600,
       "w": 480,
       "h": 800,
@@ -462,7 +462,7 @@
       "x": 0,
       "y": -180,
       "w": 460,
-      "text": "All eight V1 screens in the chosen theme: B2 · Quiet (Space Grotesk chrome, hairline rows, black fill = focus). Book body text stays Literata — content typography belongs to reader settings, not the theme. Inverted rows show button-navigation focus; there is no touch. Book content is Middlemarch (public domain); Instapaper items are sample data.",
+      "text": "All eight V1 screens in the chosen theme: B2 · Quiet (Space Grotesk chrome, hairline rows, black fill = focus). Book body text stays Literata — content typography belongs to reader settings, not the theme. Inverted rows show button-navigation focus; there is no touch. Book content is Middlemarch (public domain). Instapaper/Articles is V2 — see the V2 page.",
       "page": "page-2"
     },
     {
@@ -534,7 +534,7 @@
       "x": 0,
       "y": -180,
       "w": 480,
-      "text": "Every remaining UX path in the B2 theme: empty and error states, hold-action menus, reader tools, and the on-demand Wi-Fi flow.\nHint bars always show 4 slots, one per hardware button (Back / Confirm / Up / Down); a button with no action leaves its slot empty, and a hold action stacks inside its button&apos;s slot.\nRow 4: the full Wi-Fi joining path — scan, password entry, failure, hotspot setup, and sync feedback.\nRow 5: Instapaper setup, end-of-book, battery-empty, and boot states.",
+      "text": "Every remaining UX path in the B2 theme: empty and error states, hold-action menus, reader tools, and the on-demand Wi-Fi flow.\nHint bars always show 4 slots, one per hardware button (Back / Confirm / Up / Down); a button with no action leaves its slot empty, and a hold action stacks inside its button&apos;s slot.\nRow 4: the full Wi-Fi joining path — scan, password entry, failure, hotspot setup, and sync feedback.\nRow 5: end-of-book, battery-empty, and boot states (the Instapaper boards moved to the V2 page).",
       "page": "page-4"
     },
     {
@@ -558,7 +558,7 @@
       "x": 2320,
       "y": 2340,
       "w": 300,
-      "text": "Wi-Fi is strictly on-demand: Wi-Fi is off except during sync, transfers, and setup. The connect dialog appears when an action needs the network, and Wi-Fi turns off when it finishes.",
+      "text": "Wi-Fi is strictly on-demand: Wi-Fi is off except during book transfers and setup. The connect dialog appears when an action needs the network, and Wi-Fi turns off when it finishes.",
       "page": "page-4"
     },
     {
@@ -570,20 +570,20 @@
       "page": "page-4"
     },
     {
-      "id": "note-instapaper-flow",
-      "x": 3480,
-      "y": 3600,
-      "w": 320,
-      "text": "Instapaper connect: Articles (not set up) -> device shows QR/URL -> user signs in on the web Setup page -> device stores only the OAuth token and runs the first sync. Reachable over the saved network, or via the setup hotspot when no Wi-Fi is configured yet. Sign out lives in the account screen; it removes token + downloads, never touching the Instapaper account.",
-      "page": "page-4"
-    },
-    {
       "id": "web-brief",
       "x": 0,
       "y": -160,
       "w": 460,
-      "text": "The browser side of the product, served by the device itself: drag-and-drop book uploads and the Setup page (Wi-Fi networks + Instapaper sign-in). Same voice as the firmware. The Setup page is where credentials are typed, so nothing is ever typed on the device.",
+      "text": "The browser side of the product, served by the device itself: drag-and-drop book uploads and the Setup page (Wi-Fi networks). Same voice as the firmware. Typing happens here, so nothing needs typing on the device.",
       "page": "page-5"
+    },
+    {
+      "id": "v2-instapaper-brief",
+      "x": 0,
+      "y": -180,
+      "w": 480,
+      "text": "Instapaper was cut from V1 on 2026-08-20 to keep the first release achievable — these boards are finished design waiting for V2, not V1 scope.\nThe flow: Articles opens \"not set up\" -> the device shows a QR/URL -> the user signs in on the device-served web page (nothing typed on the device) -> the device keeps only an access token and syncs. Reading is offline; archive/like queue locally and push on the next sync.",
+      "page": "page-6"
     }
   ],
   "pages": [
@@ -606,10 +606,14 @@
     {
       "id": "page-5",
       "name": "Web UI"
+    },
+    {
+      "id": "page-6",
+      "name": "V2 · Instapaper"
     }
   ],
   "launch": {
     "view": "canvas",
-    "page": "page-4"
+    "page": "page-2"
   }
 }

@@ -989,7 +989,7 @@ TEST_CASE("QuietTheme renders Home to golden") {
   vm.currentPage = 53;
   vm.pageCount = 890;
   vm.batteryPercent = 87;
-  vm.menu = {{"LIBRARY", "12"}, {"ARTICLES", "3 UNREAD"}, {"SETTINGS", ""}};
+  vm.menu = {{"LIBRARY", "12"}, {"SETTINGS", ""}};
   vm.focusedMenuIndex = -1;  // focus on Continue
   vm.hints = {"READ", "SELECT", "UP", "DOWN"};
 
@@ -1258,7 +1258,7 @@ int main(int argc, char** argv) {
   vm.currentPage = 53;
   vm.pageCount = 890;
   vm.batteryPercent = 87;
-  vm.menu = {{"LIBRARY", "12"}, {"ARTICLES", "3 UNREAD"}, {"SETTINGS", ""}};
+  vm.menu = {{"LIBRARY", "12"}, {"SETTINGS", ""}};
   vm.focusedMenuIndex = -1;
   vm.hints = {"READ", "SELECT", "UP", "DOWN"};
 
@@ -1484,7 +1484,7 @@ void setup() {
   vm.currentPage = 53;
   vm.pageCount = 890;
   vm.batteryPercent = 87;
-  vm.menu = {{"LIBRARY", "12"}, {"ARTICLES", "3 UNREAD"}, {"SETTINGS", ""}};
+  vm.menu = {{"LIBRARY", "12"}, {"SETTINGS", ""}};
   vm.focusedMenuIndex = -1;
   vm.hints = {"READ", "SELECT", "UP", "DOWN"};
 
