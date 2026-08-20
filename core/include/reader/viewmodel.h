@@ -34,4 +34,19 @@ struct HomeViewModel {
   std::array<bool, 4> holds{};
 };
 
+// A provisional titled-list surface: Phase 2B's Library and Settings
+// placeholders and its Input Monitor. It exists so the interaction runtime can
+// be navigated and verified before the real screens are built, and Phase 2C
+// deletes it. Deliberately plain, and it carries `note` so nobody reads it as a
+// design.
+struct StubViewModel {
+  std::string title;
+  std::string note;                    // e.g. "PLACEHOLDER - PHASE 2C"
+  std::vector<std::string> lines;
+  int focusedLine = -1;                // -1 = nothing focused
+  int batteryPercent = 0;
+  std::array<std::string, 4> hints{};  // Back, Confirm, Up, Down
+  std::array<bool, 4> holds{};
+};
+
 }  // namespace reader
