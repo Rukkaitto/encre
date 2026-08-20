@@ -13,6 +13,7 @@
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
 #include "reader/rotate.h"
+#include "reader/text.h"  // reader::Plane
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
 
@@ -125,25 +126,82 @@ void setup() {
 
   const int panelW = display.getDisplayWidth();
   const int panelH = display.getDisplayHeight();
-  reader::Framebuffer portrait(panelH, panelW);
-  mark("portrait-allocated");
-  theme.renderHome(portrait, fonts, vm);
-  mark("rendered-to-framebuffer");
 
-  // The landscape buffer is still constructed only after renderHome returns.
-  // Ink::White made the old full-screen scratch buffer redundant, so the render
-  // no longer spikes the heap, but two full framebuffers is 96 KB on a 320 KB
-  // part and there is no reason to hold both live any longer than the rotate.
+  // Three 1-bit frames, all live at once: the portrait render target, the
+  // landscape scratch the two grey planes are rotated into, and the landscape
+  // B/W base frame, which has to survive until cleanupGrayscaleBuffers() rebases
+  // the controller off it. That retained third frame is the whole memory cost of
+  // 4-level grey here — a 2 bpp framebuffer would have needed roughly double.
+  reader::Framebuffer portrait(panelH, panelW);
   reader::Framebuffer landscape(panelW, panelH);
+  reader::Framebuffer bwLandscape(panelW, panelH);
+  mark("frames-allocated");
+
+  // Measured, not asserted: the plan claims ~157 KB for three frames against
+  // ~313 KB for a 2 bpp double-buffer, and this is the line that proves it.
+  Serial.printf("[info] three frames live: %d + %d + %d bytes; free heap %u, largest block %u\n",
+                portrait.sizeBytes(), landscape.sizeBytes(), bwLandscape.sizeBytes(),
+                (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+  Serial.flush();
+
+  // A short buffer would make setFramebuffer's memcpy read past the end, and a
+  // zero-length one means the panel geometry came back wrong.
+  if (landscape.sizeBytes() != (int)display.getBufferSize() ||
+      portrait.sizeBytes() != (int)display.getBufferSize()) {
+    Serial.printf("[fatal] frame size %d/%d != driver buffer %u\n", portrait.sizeBytes(),
+                  landscape.sizeBytes(), (unsigned)display.getBufferSize());
+    mark("frame-size-MISMATCH");
+    return;
+  }
+
+  // Which grayscale path the selected driver actually offers. Logged because
+  // the sequence below is only correct for a driver that does NOT combine the
+  // base frame into the gray waveform (X3/X4 do not; only Paper Mono does).
+  Serial.printf("[info] gray caps: combinesBase=%d busyStaging=%d strip=%d\n",
+                display.combinesGrayscaleBase(), display.supportsBusyGrayscaleStaging(),
+                display.supportsStripGrayscale());
+  Serial.flush();
+
+  // One render pass: draw the plane portrait-side, then rotate into `out`.
   // CCW is the correct direction, verified on X3 hardware: CW renders the whole
   // screen 180 degrees out (the two directions differ by exactly half a turn).
   // Unverified on X4 — if an X4 comes out upside down, this is the line.
-  reader::rotate90CCW(portrait, landscape);
-  mark("rotated");
+  auto paint = [&](reader::Plane plane, reader::Framebuffer& out) {
+    portrait.clear(true);
+    theme.renderHome(portrait, fonts, vm, plane);
+    reader::rotate90CCW(portrait, out);
+  };
 
-  display.setFramebuffer(landscape.data());
-  mark("framebuffer-handed-to-driver");
-  display.displayBuffer(EInkDisplay::FULL_REFRESH);
+  // 1. The B/W base frame the panel paints first. displayGrayscaleBase() takes
+  //    no buffer argument — it drives the driver's own frameBuffer — so
+  //    setFramebuffer() (a memcpy) has to land the frame there first.
+  paint(reader::Plane::Bw, bwLandscape);
+  display.setFramebuffer(bwLandscape.data());
+  display.displayGrayscaleBase(EInkDisplay::HALF_REFRESH);
+  mark("gray-base-displayed");
+
+  // 2. The X3 settle pass, which leaves the particles receptive to the weak
+  //    grayscale nudge waveform. Must run BEFORE the planes are written: the
+  //    driver skips it once grayscale planes have overwritten DTM1/DTM2.
+  display.preconditionGrayscale();
+  mark("gray-preconditioned");
+
+  // 3. The two bit-planes. Both copies go straight out over SPI into controller
+  //    RAM and retain no pointer, so a single landscape buffer serves both —
+  //    that is what keeps this to three frames. LSB must go first: the MSB copy
+  //    is dropped unless the driver has already seen a valid LSB plane.
+  paint(reader::Plane::Lsb, landscape);
+  display.copyGrayscaleLsbBuffers(landscape.data());
+  paint(reader::Plane::Msb, landscape);
+  display.copyGrayscaleMsbBuffers(landscape.data());
+  mark("gray-planes-written");
+
+  // 4. Paint the combined 4-level image (the driver reads the planes it was
+  //    handed, not any framebuffer), then put the controller back on a valid
+  //    B/W baseline so the next ordinary refresh is differentially sane.
+  display.displayGrayBuffer();
+  mark("gray-displayed");
+  display.cleanupGrayscaleBuffers(bwLandscape.data());
   mark("refresh-complete");
 }
 
