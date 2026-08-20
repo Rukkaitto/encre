@@ -162,7 +162,7 @@ ones:
 - Tracking constants live in `core/include/reader/components.h`: `kBandLabelEm`,
   `kRowLabelEm`, `kBlockLabelEm`, `kHintEm`, `kMetaEm`, `kTightMetaEm`.
 - `sampleHome()` currently exists as a `static` inside
-  `test/unit/test_theme_home_golden.cpp`. **Task 9 Step 0 extracts it** into
+  `test/unit/test_theme_home_golden.cpp`. **Task 4 Step 0 extracts it** into
   `test/unit/home_vm.h` so the focused-Home golden cannot drift from the plain Home
   golden's content.
 
