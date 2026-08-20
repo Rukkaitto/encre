@@ -25,8 +25,16 @@ bool Font::load(const uint8_t* d, size_t size) {
   glyphs_.clear();
   kerns_.clear();
   ascent_ = descent_ = lineGap_ = 0;
+  bpp_ = 1;
 
-  if (size < 16 || std::memcmp(d, "RFNT", 4) != 0 || rd<uint16_t>(d + 4) != 1) return false;
+  if (size < 16 || std::memcmp(d, "RFNT", 4) != 0) return false;
+  // The bit depth rides in the high byte of the version word: version 1 alone
+  // is v1/1bpp, 1 | (2 << 8) is v2/2bpp. A v1 file therefore stays byte-valid.
+  const uint16_t versionWord = rd<uint16_t>(d + 4);
+  const uint8_t version = versionWord & 0xFF;
+  const uint8_t depth = (versionWord >> 8) ? static_cast<uint8_t>(versionWord >> 8) : 1;
+  if (version != 1 || (depth != 1 && depth != 2)) return false;
+  bpp_ = depth;
   const uint16_t glyphCount = rd<uint16_t>(d + 6);
   const uint16_t kernCount = rd<uint16_t>(d + 14);
 
@@ -49,14 +57,17 @@ bool Font::load(const uint8_t* d, size_t size) {
         gl.bitmapH > kMaxGlyphDim) {
       glyphs_.clear();  // metrics are still zero: they are only set on success
       kerns_.clear();
+      bpp_ = 1;
       return false;
     }
+    gl.stride = static_cast<int16_t>((gl.bitmapW * bpp_ + 7) / 8);
     // The whole bitmap, not just its first byte, must lie inside the blob.
     const size_t extent = blobAt + bitmapOffset +
                           static_cast<size_t>(gl.rowBytes()) * static_cast<size_t>(gl.bitmapH);
     if (extent < blobAt || extent > size) {  // extent < blobAt catches wraparound
       glyphs_.clear();
       kerns_.clear();
+      bpp_ = 1;
       return false;
     }
     gl.bitmap = d + blobAt + bitmapOffset;
@@ -76,6 +87,14 @@ bool Font::load(const uint8_t* d, size_t size) {
 const Glyph* Font::glyph(char32_t cp) const {
   auto it = glyphs_.find(cp);
   return it == glyphs_.end() ? nullptr : &it->second;
+}
+
+uint8_t Font::coverage(const Glyph& g, int col, int row) const {
+  const uint8_t* r = g.bitmap + static_cast<size_t>(row) * g.stride;
+  if (bpp_ == 1) return ((r[col / 8] >> (7 - col % 8)) & 1) ? 3 : 0;
+  // 2bpp, MSB-first: two bits per pixel, four pixels per byte.
+  const int shift = 6 - 2 * (col % 4);
+  return static_cast<uint8_t>((r[col / 4] >> shift) & 0x3);
 }
 
 int Font::kerning(char32_t l, char32_t r) const {

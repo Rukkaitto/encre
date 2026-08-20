@@ -7,8 +7,11 @@ namespace reader {
 
 struct Glyph {
   int16_t advance, bitmapW, bitmapH, xOff, yOff;  // yOff: baseline to bitmap top, +up
-  const uint8_t* bitmap;                          // 1bpp MSB-first, 1 = ink
-  int rowBytes() const { return (bitmapW + 7) / 8; }
+  const uint8_t* bitmap;                          // MSB-first coverage, see Font::coverage
+  // Bytes per bitmap row, ceil(bitmapW * bpp / 8). Stored rather than computed
+  // because a Glyph does not know its font's bit depth.
+  int16_t stride;
+  int rowBytes() const { return stride; }
 };
 
 // Zero-copy view over an .rfnt blob; the blob must outlive the Font.
@@ -22,11 +25,18 @@ class Font {
   int lineHeight() const { return ascent_ - descent_ + lineGap_; }
   // `tracking` adds that many pixels after every glyph, matching drawText.
   int measure(std::string_view utf8, int tracking = 0) const;
+  // 1 or 2. A 1bpp font reports coverage 0 or 3, so callers never branch on it.
+  int bpp() const { return bpp_; }
+  // Coverage of one glyph pixel, 0 (none) to 3 (full). Both depths are packed
+  // MSB-first: 1bpp is one bit per pixel, 2bpp two bits, four pixels per byte,
+  // pixel `col` occupying bits 6 - 2 * (col % 4).
+  uint8_t coverage(const Glyph& g, int col, int row) const;
 
  private:
   std::unordered_map<char32_t, Glyph> glyphs_;
   std::unordered_map<uint64_t, int32_t> kerns_;
   int ascent_ = 0, descent_ = 0, lineGap_ = 0;
+  int bpp_ = 1;
 };
 
 // Decodes one UTF-8 code point starting at s[i] (i must be < s.size()) and
