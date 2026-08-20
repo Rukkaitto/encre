@@ -35,5 +35,8 @@ fonts:
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_44.rfnt --out shell/src/font_display.h --symbol kFontDisplay
 # Design-vs-firmware contact sheet for every screen (needs Chrome + Pillow).
 # COMPARE_ARGS=--all includes the flows and states.
+# COMPARE_ARGS=--geometry x3 narrows to one device panel (x4 480x800, x3
+# 528x792); default renders and pairs both. --only screen_id,... filters
+# screens.
 compare: sim
 	$(PYTHON) tools/compare-design.py $(COMPARE_ARGS)
