@@ -13,12 +13,21 @@ T rd(const uint8_t* p) {  // little-endian read
 }
 }  // namespace
 
+// No bitmap font at the sizes this reader uses has a glyph anywhere near this
+// large; a bigger dimension means the record is corrupt, not merely unusual.
+static constexpr int kMaxGlyphDim = 512;
+
 bool Font::load(const uint8_t* d, size_t size) {
+  // load() is the trust boundary: callers draw with the font as soon as this
+  // returns true, so every offset it hands out must already be in range.
+  // Reset first so a second call cannot inherit a previous font's tables and a
+  // rejected font leaves the object empty rather than half-populated.
+  glyphs_.clear();
+  kerns_.clear();
+  ascent_ = descent_ = lineGap_ = 0;
+
   if (size < 16 || std::memcmp(d, "RFNT", 4) != 0 || rd<uint16_t>(d + 4) != 1) return false;
   const uint16_t glyphCount = rd<uint16_t>(d + 6);
-  ascent_ = rd<int16_t>(d + 8);
-  descent_ = rd<int16_t>(d + 10);
-  lineGap_ = rd<int16_t>(d + 12);
   const uint16_t kernCount = rd<uint16_t>(d + 14);
 
   const size_t glyphsAt = 16;
@@ -35,7 +44,22 @@ bool Font::load(const uint8_t* d, size_t size) {
     gl.bitmapH = rd<int16_t>(g + 8);
     gl.xOff = rd<int16_t>(g + 10);
     gl.yOff = rd<int16_t>(g + 12);
-    gl.bitmap = d + blobAt + rd<uint32_t>(g + 14);
+    const uint32_t bitmapOffset = rd<uint32_t>(g + 14);
+    if (gl.bitmapW < 0 || gl.bitmapH < 0 || gl.bitmapW > kMaxGlyphDim ||
+        gl.bitmapH > kMaxGlyphDim) {
+      glyphs_.clear();  // metrics are still zero: they are only set on success
+      kerns_.clear();
+      return false;
+    }
+    // The whole bitmap, not just its first byte, must lie inside the blob.
+    const size_t extent = blobAt + bitmapOffset +
+                          static_cast<size_t>(gl.rowBytes()) * static_cast<size_t>(gl.bitmapH);
+    if (extent < blobAt || extent > size) {  // extent < blobAt catches wraparound
+      glyphs_.clear();
+      kerns_.clear();
+      return false;
+    }
+    gl.bitmap = d + blobAt + bitmapOffset;
     glyphs_.emplace(static_cast<char32_t>(cp), gl);
   }
   for (uint16_t i = 0; i < kernCount; ++i) {
@@ -43,6 +67,9 @@ bool Font::load(const uint8_t* d, size_t size) {
     const uint64_t key = (static_cast<uint64_t>(rd<uint32_t>(k)) << 32) | rd<uint32_t>(k + 4);
     kerns_.emplace(key, rd<int32_t>(k + 8));
   }
+  ascent_ = rd<int16_t>(d + 8);
+  descent_ = rd<int16_t>(d + 10);
+  lineGap_ = rd<int16_t>(d + 12);
   return true;
 }
 
