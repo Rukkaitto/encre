@@ -122,10 +122,14 @@ ground truth for the visual design pass (Claude Design handoff).
 
 - The hint bar always shows **exactly four slots**, one per front button, in
   hardware order: Back, Confirm, Up, Down. A button with no action leaves its
-  slot empty (alignment is preserved); a long-press variant is rendered as a
-  second line inside its button's slot ("OPEN / HOLD · ACTIONS") — never as a
-  fifth hint. Side buttons (Left/Right) turn pages in the Reader and get no
-  on-screen hints.
+  slot empty (alignment is preserved). **The bar is always exactly one line
+  tall.** A long-press variant is a hollow ring mark beside that button's label
+  — never a second line and never a fifth hint. Two-line slots were tried and
+  rejected: a bar whose height varies by screen also moves every list above it,
+  and the word "HOLD" does not fit a four-slot bar at 10pt on the narrower X4
+  canvas. Labels carry `white-space: nowrap`, so one that does not fit overflows
+  visibly instead of silently reflowing the bar taller. Side buttons
+  (Left/Right) turn pages in the Reader and get no on-screen hints.
 - **Long-press Confirm on any list item = contextual actions overlay.**
   Library items: Open / Book details / Mark as finished / Delete… (delete has
   a confirmation step and never erases reading progress). Saved Wi-Fi
@@ -189,6 +193,16 @@ folder), Transfer before any file arrives (progress block absent), the
 sleep screen while charging (small charging glyph on the plaque), and the
 connect dialog stepping its label Joining -> Ready. Settings displays Wi-Fi as **"on demand"** —
 never "connected" — matching the Wi-Fi policy in 3.3.
+
+### 4.1c Overlay and reading-surface conventions
+
+- **Overlay panels are vertically centred** in the canvas, not positioned from
+  the top. Hand-picked offsets put several of them close enough to the hint bar
+  to read as crowded, and centring is geometry-independent so one board is
+  correct at both 800 and 792 tall.
+- **The reading surface uses minimal side margins** (18px). 40px each side cost
+  80px of a 528px panel — 15% of the measure — on a device whose entire job is
+  showing text. 18px clears the bezel while buying back 44px of line length.
 
 ### 4.2 Sleep screens
 
