@@ -55,14 +55,17 @@ TEST_CASE("every icon draws something inside its own box and nothing outside") {
 TEST_CASE("icons are the sizes the design boards draw them at") {
   // Pinned deliberately: the previous failure was not a wrong shape but a right
   // shape at the wrong scale, which no shape-agnostic assertion notices.
-  CHECK(reader::icons::kBack.w == 23);
-  CHECK(reader::icons::kBack.h == 23);
-  CHECK(reader::icons::kDot.w == 23);
+  // Each value is the width/height its design board renders that SVG at, which
+  // is the authority -- tools/iconc.py sources both the geometry and the size
+  // from the board.
+  CHECK(reader::icons::kBack.w == 25);
+  CHECK(reader::icons::kBack.h == 25);
+  CHECK(reader::icons::kDot.w == 19);
   CHECK(reader::icons::kUp.w == 23);
   CHECK(reader::icons::kDown.w == 23);
-  CHECK(reader::icons::kChevron.w == 23);
-  CHECK(reader::icons::kBook.w == 25);
-  CHECK(reader::icons::kBook.h == 25);
+  CHECK(reader::icons::kChevron.w == 25);
+  CHECK(reader::icons::kBook.w == 26);
+  CHECK(reader::icons::kBook.h == 26);
   CHECK(reader::icons::kFolder.w == 46);
   CHECK(reader::icons::kFolder.h == 39);
   CHECK(reader::icons::kBattery.w == 38);
