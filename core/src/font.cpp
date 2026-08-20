@@ -99,21 +99,44 @@ int Font::measure(std::string_view utf8) const {
 
 char32_t utf8Next(std::string_view s, size_t& i) {
   const auto b0 = static_cast<uint8_t>(s[i]);
-  auto cont = [&](size_t n) -> char32_t {
-    char32_t cp = b0 & (0x7F >> (n + 1));
-    for (size_t k = 1; k <= n; ++k) {
-      if (i + k >= s.size()) { i = s.size(); return 0xFFFD; }
-      cp = (cp << 6) | (static_cast<uint8_t>(s[i + k]) & 0x3F);
-    }
-    i += n + 1;
-    return cp;
-  };
   if (b0 < 0x80) { ++i; return b0; }
-  if ((b0 >> 5) == 0x6) return cont(1);
-  if ((b0 >> 4) == 0xE) return cont(2);
-  if ((b0 >> 3) == 0x1E) return cont(3);
-  ++i;
-  return 0xFFFD;
+
+  // Sequence length, the lead byte's payload bits, and the smallest code point
+  // that legally uses this length (anything below it is an overlong encoding).
+  size_t extra;
+  char32_t cp, lowest;
+  if ((b0 & 0xE0) == 0xC0) {
+    extra = 1; cp = b0 & 0x1Fu; lowest = 0x80;
+  } else if ((b0 & 0xF0) == 0xE0) {
+    extra = 2; cp = b0 & 0x0Fu; lowest = 0x800;
+  } else if ((b0 & 0xF8) == 0xF0) {
+    extra = 3; cp = b0 & 0x07u; lowest = 0x10000;
+  } else {
+    ++i;  // bare continuation byte, or a 5+ byte lead that UTF-8 has no room for
+    return 0xFFFD;
+  }
+
+  for (size_t k = 1; k <= extra; ++k) {
+    if (i + k >= s.size()) {  // truncated at end of input: nothing left to skip to
+      i = s.size();
+      return 0xFFFD;
+    }
+    const auto b = static_cast<uint8_t>(s[i + k]);
+    if ((b & 0xC0) != 0x80) {
+      // Not a continuation byte. Advance exactly one byte past the lead so the
+      // character that follows the broken sequence is decoded, not swallowed.
+      ++i;
+      return 0xFFFD;
+    }
+    cp = (cp << 6) | (b & 0x3Fu);
+  }
+  // Overlong, surrogate half, or beyond the Unicode range: not a code point.
+  if (cp < lowest || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+    ++i;
+    return 0xFFFD;
+  }
+  i += extra + 1;
+  return cp;
 }
 
 }  // namespace reader

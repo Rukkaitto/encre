@@ -8,11 +8,15 @@ import struct
 
 import freetype
 
-# ASCII + Latin-1 + typographic set used by the UI and books.
+# ASCII + Latin-1 + typographic set used by the UI and books, plus U+FFFD
+# REPLACEMENT CHARACTER so malformed UTF-8 (which the decoder turns into
+# U+FFFD) renders as a visible box instead of vanishing. Appended last so
+# adding it cannot shift any existing glyph's record or bitmap offset.
 CODEPOINTS = (
     list(range(0x20, 0x7F))
     + list(range(0xA0, 0x100))
     + [0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x2026, 0x2039, 0x203A]
+    + [0xFFFD]
 )
 
 
