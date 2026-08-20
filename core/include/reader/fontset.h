@@ -35,14 +35,16 @@ namespace reader {
 //
 // So Body is two roles, because the design genuinely sets 29px at two weights.
 // The sizes whose second weight no implemented screen reaches yet (Value at
-// 500, Meta at 500, Label at 400) are deliberately not shipped: an unused face
-// is ~15-20KB of flash. Adding one when its screen lands is an enum entry, a
-// line in the Makefile's `fonts` target and a line in each loader -- and
-// FontSet::load will then refuse to bind it to the wrong asset. What must never
-// happen again is a screen quietly drawing 400 in a 500 face.
+// Every (size, weight) pair the boards actually use is now shipped, so a screen
+// can always ask for the face its board declares. FontSet::load refuses to bind
+// a role to an asset built at a different size or weight, so what must never
+// happen again -- a screen quietly drawing 400 in a 500 face -- cannot.
 enum class Role : uint8_t {
   Meta400,
+  Meta500,
+  Label400,
   Label500,
+  Value500,
   Value700,
   Body400,
   Body500,
@@ -64,7 +66,10 @@ struct RoleSpec {
 constexpr RoleSpec roleSpec(Role r) {
   switch (r) {
     case Role::Meta400:    return {21, 400, 10};
+    case Role::Meta500:    return {21, 500, 10};
+    case Role::Label400:   return {23, 400, 11};
     case Role::Label500:   return {23, 500, 11};
+    case Role::Value500:   return {25, 500, 12};
     case Role::Value700:   return {25, 700, 12};
     case Role::Body400:    return {29, 400, 14};
     case Role::Body500:    return {29, 500, 14};

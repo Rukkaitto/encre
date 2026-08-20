@@ -7,9 +7,12 @@
 #include "font_body400.h"
 #include "font_body500.h"
 #include "font_display700.h"
+#include "font_label400.h"
 #include "font_label500.h"
 #include "font_meta400.h"
+#include "font_meta500.h"
 #include "font_title700.h"
+#include "font_value500.h"
 #include "font_value700.h"
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
@@ -104,7 +107,10 @@ void setup() {
   // screen drawn in the wrong weight for the rest of the project.
   const bool fontsOk =
       fonts.load(reader::Role::Meta400, kFontMeta400, kFontMeta400Size) &&
+      fonts.load(reader::Role::Meta500, kFontMeta500, kFontMeta500Size) &&
+      fonts.load(reader::Role::Label400, kFontLabel400, kFontLabel400Size) &&
       fonts.load(reader::Role::Label500, kFontLabel500, kFontLabel500Size) &&
+      fonts.load(reader::Role::Value500, kFontValue500, kFontValue500Size) &&
       fonts.load(reader::Role::Value700, kFontValue700, kFontValue700Size) &&
       fonts.load(reader::Role::Body400, kFontBody400, kFontBody400Size) &&
       fonts.load(reader::Role::Body500, kFontBody500, kFontBody500Size) &&

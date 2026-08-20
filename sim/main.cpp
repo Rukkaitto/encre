@@ -36,7 +36,10 @@ int main(int argc, char** argv) {
   // wrong weight.
   const std::string dir = std::string(ASSETS_DIR) + "/built/";
   auto meta400 = slurp(dir + "spacegrotesk_400_10pt.rfnt");
+  auto meta500 = slurp(dir + "spacegrotesk_500_10pt.rfnt");
+  auto label400 = slurp(dir + "spacegrotesk_400_11pt.rfnt");
   auto label500 = slurp(dir + "spacegrotesk_500_11pt.rfnt");
+  auto value500 = slurp(dir + "spacegrotesk_500_12pt.rfnt");
   auto value700 = slurp(dir + "spacegrotesk_700_12pt.rfnt");
   auto body400 = slurp(dir + "spacegrotesk_400_14pt.rfnt");
   auto body500 = slurp(dir + "spacegrotesk_500_14pt.rfnt");
@@ -44,7 +47,10 @@ int main(int argc, char** argv) {
   auto display700 = slurp(dir + "spacegrotesk_700_32pt.rfnt");
   reader::FontSet fonts;
   fonts.load(reader::Role::Meta400, meta400.data(), meta400.size());
+  fonts.load(reader::Role::Meta500, meta500.data(), meta500.size());
+  fonts.load(reader::Role::Label400, label400.data(), label400.size());
   fonts.load(reader::Role::Label500, label500.data(), label500.size());
+  fonts.load(reader::Role::Value500, value500.data(), value500.size());
   fonts.load(reader::Role::Value700, value700.data(), value700.size());
   fonts.load(reader::Role::Body400, body400.data(), body400.size());
   fonts.load(reader::Role::Body500, body500.data(), body500.size());
