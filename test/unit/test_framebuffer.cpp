@@ -1,3 +1,5 @@
+#include <utility>
+
 #include "doctest.h"
 #include "reader/framebuffer.h"
 
@@ -33,4 +35,42 @@ TEST_CASE("clear repaints everything") {
   fb.fillRect(0, 0, 8, 1, false);
   fb.clear(true);
   CHECK(fb.data()[0] == 0xFF);
+}
+
+TEST_CASE("a width that is not a multiple of 8 still has backing storage") {
+  // The docs say width % 8 == 0, but nothing enforced it: storage was sized
+  // width/8 (= 1 byte/row for width 12) while width_ kept the full 12, so
+  // setPixel's bounds check passed for columns 8..11 with nothing behind them
+  // (ASAN: heap-buffer-overflow). Round the stride up instead.
+  Framebuffer fb(12, 4);
+  CHECK(fb.width() == 12);
+  CHECK(fb.rowBytes() == 2);  // ceil(12 / 8)
+  CHECK(fb.sizeBytes() == fb.rowBytes() * fb.height());
+
+  // Every in-bounds coordinate must be writable without leaving the buffer.
+  for (int y = 0; y < fb.height(); ++y)
+    for (int x = 0; x < fb.width(); ++x) fb.setPixel(x, y, false);
+  for (int y = 0; y < fb.height(); ++y)
+    for (int x = 0; x < fb.width(); ++x) CHECK_FALSE(fb.getPixel(x, y));
+
+  // The last row's last pixel is the one that used to run off the end.
+  fb.clear(true);
+  fb.setPixel(11, 3, false);
+  CHECK_FALSE(fb.getPixel(11, 3));
+  CHECK(fb.getPixel(10, 3));
+}
+
+TEST_CASE("non-positive dimensions give an inert empty buffer") {
+  for (auto [w, h] : {std::pair{0, 4}, std::pair{4, 0}, std::pair{-8, 4}, std::pair{8, -4}}) {
+    Framebuffer fb(w, h);
+    CHECK(fb.width() == 0);
+    CHECK(fb.height() == 0);
+    CHECK(fb.rowBytes() == 0);
+    CHECK(fb.sizeBytes() == 0);
+    // Every operation must be a safe no-op rather than touching storage.
+    fb.clear(false);
+    fb.setPixel(0, 0, false);
+    fb.fillRect(-4, -4, 100, 100, false);
+    CHECK(fb.getPixel(0, 0));
+  }
 }
