@@ -1,137 +1,54 @@
 #include "reader/icons.h"
 
+#include "icons_data.h"
 #include "reader/framebuffer.h"
 
 namespace reader {
 
-void drawIcon(Framebuffer& fb, const Icon& icon, int x, int y, Ink ink) {
-  const bool white = (ink == Ink::White);
-  const int rowBytes = (icon.w + 7) / 8;
-  for (int row = 0; row < icon.h; ++row) {
-    const uint8_t* src = icon.rows + row * rowBytes;
-    for (int col = 0; col < icon.w; ++col)
-      if ((src[col / 8] >> (7 - col % 8)) & 1) fb.setPixel(x + col, y + row, white);
-  }
+uint8_t coverage(const Icon& icon, int col, int row) {
+  const int rowBytes = (icon.w * icon.bpp + 7) / 8;
+  const uint8_t* r = icon.rows + static_cast<size_t>(row) * rowBytes;
+  if (icon.bpp == 1) return ((r[col / 8] >> (7 - col % 8)) & 1) ? 3 : 0;
+  // 2bpp, MSB-first: two bits per pixel, four pixels per byte. Font::coverage
+  // in core/src/font.cpp reads the identical layout.
+  const int shift = 6 - 2 * (col % 4);
+  return static_cast<uint8_t>((r[col / 4] >> shift) & 0x3);
 }
 
+void drawIcon(Framebuffer& fb, const Icon& icon, int x, int y, Ink ink, Plane plane) {
+  const bool white = (ink == Ink::White);
+  for (int row = 0; row < icon.h; ++row)
+    for (int col = 0; col < icon.w; ++col) {
+      const uint8_t cov = coverage(icon, col, row);
+      bool emit = false;
+      switch (plane) {
+        case Plane::Bw:
+          emit = cov >= 2;
+          break;
+        case Plane::Lsb:
+          emit = (cov & 1) != 0;
+          break;
+        case Plane::Msb:
+          emit = (cov & 2) != 0;
+          break;
+      }
+      if (emit) fb.setPixel(x + col, y + row, white);
+    }
+}
+
+// The bitmaps live in the generated icons_data.h; this file only names them.
+// Nothing here is hand-authored, so nothing here can disagree with the boards:
+// to change an icon, edit its entry in tools/iconc.py and run `make icons`.
 namespace icons {
-namespace {
-// 13x13 marks, one byte per row (13 bits rounded to 2 bytes). Authored as
-// binary literals so the shape is readable and editable in place.
-//
-// The arrows and the book are solid masses rather than strokes: rendered and
-// reviewed at size, hollow outlines did not survive 13x13 on a 1-bit panel --
-// the book read as the letters "OC" and the arrows as a chevron with a
-// detached square. Solid heads with a connected stem, and two page blocks
-// split by a 1px spine, do read.
-#define R2(a, b) 0b##a, 0b##b
-
-const uint8_t kBackBits[] = {
-    R2(00000000, 00000000), R2(00000100, 00000000), R2(00001100, 00000000),
-    R2(00011100, 00000000), R2(00111111, 11100000), R2(01111111, 11110000),
-    R2(11100000, 00111000), R2(01110000, 00111000), R2(00111000, 00111000),
-    R2(00011100, 00111000), R2(00000000, 00111000), R2(00000000, 00000000),
-    R2(00000000, 00000000),
-};
-const uint8_t kDotBits[] = {
-    R2(00000000, 00000000), R2(00000000, 00000000), R2(00001110, 00000000),
-    R2(00111111, 10000000), R2(01111111, 11000000), R2(01111111, 11000000),
-    R2(11111111, 11100000), R2(01111111, 11000000), R2(01111111, 11000000),
-    R2(00111111, 10000000), R2(00001110, 00000000), R2(00000000, 00000000),
-    R2(00000000, 00000000),
-};
-const uint8_t kUpBits[] = {
-    R2(00000000, 00000000),
-    R2(00000010, 00000000),
-    R2(00000111, 00000000),
-    R2(00001111, 10000000),
-    R2(00011111, 11000000),
-    R2(00111111, 11100000),
-    R2(00000111, 00000000),
-    R2(00000111, 00000000),
-    R2(00000111, 00000000),
-    R2(00000111, 00000000),
-    R2(00000111, 00000000),
-    R2(00000000, 00000000),
-    R2(00000000, 00000000),
-};
-const uint8_t kDownBits[] = {
-    R2(00000000, 00000000),
-    R2(00000111, 00000000),
-    R2(00000111, 00000000),
-    R2(00000111, 00000000),
-    R2(00000111, 00000000),
-    R2(00000111, 00000000),
-    R2(00111111, 11100000),
-    R2(00011111, 11000000),
-    R2(00001111, 10000000),
-    R2(00000111, 00000000),
-    R2(00000010, 00000000),
-    R2(00000000, 00000000),
-    R2(00000000, 00000000),
-};
-const uint8_t kChevronBits[] = {
-    R2(00000000, 00000000), R2(00110000, 00000000), R2(00111000, 00000000),
-    R2(00011100, 00000000), R2(00001110, 00000000), R2(00000111, 00000000),
-    R2(00000011, 10000000), R2(00000111, 00000000), R2(00001110, 00000000),
-    R2(00011100, 00000000), R2(00111000, 00000000), R2(00110000, 00000000),
-    R2(00000000, 00000000),
-};
-const uint8_t kBookBits[] = {
-    R2(00000000, 00000000),
-    R2(00111101, 11100000),
-    R2(01111101, 11110000),
-    R2(11111101, 11111000),
-    R2(11111101, 11111000),
-    R2(11111101, 11111000),
-    R2(11111101, 11111000),
-    R2(11111101, 11111000),
-    R2(11111101, 11111000),
-    R2(01111101, 11110000),
-    R2(00111101, 11100000),
-    R2(00000000, 00000000),
-    R2(00000000, 00000000),
-};
-const uint8_t kFolderBits[] = {
-    R2(00000000, 00000000), R2(11111000, 00000000), R2(11111100, 00000000),
-    R2(11111111, 11111000), R2(10000000, 00001000), R2(10000000, 00001000),
-    R2(10000000, 00001000), R2(10000000, 00001000), R2(10000000, 00001000),
-    R2(11111111, 11111000), R2(00000000, 00000000), R2(00000000, 00000000),
-    R2(00000000, 00000000),
-};
-#undef R2
-
-// 22x12, three bytes per row: the battery is the one mark the design does not
-// draw on the 13x13 grid, so it gets its own width rather than being squeezed
-// into one. Traced from the board's SVG: a 19x12 outline, a level bar inset one
-// pixel all round and stopping short of the right wall so the cell reads as
-// nearly-but-not-quite full, and a two-pixel terminal nub past a one-pixel gap.
-#define R3(a, b, c) 0b##a, 0b##b, 0b##c
-const uint8_t kBatteryBits[] = {
-    R3(11111111, 11111111, 11100000),  // outline top
-    R3(10000000, 00000000, 00100000),
-    R3(10111111, 11111111, 00100000),
-    R3(10111111, 11111111, 00100000),
-    R3(10111111, 11111111, 00101100),  // nub starts
-    R3(10111111, 11111111, 00101100),
-    R3(10111111, 11111111, 00101100),
-    R3(10111111, 11111111, 00101100),  // nub ends
-    R3(10111111, 11111111, 00100000),
-    R3(10111111, 11111111, 00100000),
-    R3(10000000, 00000000, 00100000),
-    R3(11111111, 11111111, 11100000),  // outline bottom
-};
-#undef R3
-}  // namespace
-
-const Icon kBack{13, 13, kBackBits};
-const Icon kDot{13, 13, kDotBits};
-const Icon kUp{13, 13, kUpBits};
-const Icon kDown{13, 13, kDownBits};
-const Icon kChevron{13, 13, kChevronBits};
-const Icon kBook{13, 13, kBookBits};
-const Icon kFolder{13, 13, kFolderBits};
-const Icon kBattery{22, 12, kBatteryBits};
+const Icon kBack{data::kBackW, data::kBackH, 2, data::kBackBits};
+const Icon kForward{data::kForwardW, data::kForwardH, 2, data::kForwardBits};
+const Icon kDot{data::kDotW, data::kDotH, 2, data::kDotBits};
+const Icon kUp{data::kUpW, data::kUpH, 2, data::kUpBits};
+const Icon kDown{data::kDownW, data::kDownH, 2, data::kDownBits};
+const Icon kChevron{data::kChevronW, data::kChevronH, 2, data::kChevronBits};
+const Icon kBook{data::kBookW, data::kBookH, 2, data::kBookBits};
+const Icon kFolder{data::kFolderW, data::kFolderH, 2, data::kFolderBits};
+const Icon kBattery{data::kBatteryW, data::kBatteryH, 2, data::kBatteryBits};
 }  // namespace icons
 
 }  // namespace reader

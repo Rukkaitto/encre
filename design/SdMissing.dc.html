@@ -9,6 +9,18 @@
 <helmet>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
   <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
     body { margin: 0; background: #ffffff; }
     a { color: #000000; } a:hover { color: #000000; }
     
@@ -17,16 +29,16 @@
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
 
   <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; flex-grow: 1; text-align: center; padding: 0 24px;">
-    <svg width="48" height="60" viewBox="0 0 20 25" fill="none"><path d="M4 1h9l6 6v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z" stroke="#000000" stroke-width="1.2"></path><rect x="6" y="3" width="2" height="4" fill="#000000"></rect><rect x="9.5" y="3" width="2" height="4" fill="#000000"></rect><rect x="13" y="3" width="2" height="4" fill="#000000"></rect></svg>
-    <div style="font-size: 24px; font-weight: 700; letter-spacing: 0.06em;">NO SD CARD</div>
-    <div style="font-size: 14px; line-height: 1.55; max-width: 300px;">Books, articles, fonts, and reading progress live on the card. Insert one, then retry.</div>
-    <div style="width: 220px;"><div style="background: #000000; color: #ffffff; height: 48px; display: flex; align-items: center; justify-content: center;">
-  <div style="font-size: 14px; letter-spacing: 0.18em; font-weight: 700;">RETRY</div>
+    <svg width="84" height="105" viewBox="0 0 20 25" fill="none"><path d="M4 1h9l6 6v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z" stroke="#000000" stroke-width="1.2"></path><rect x="6" y="3" width="2" height="4" fill="#000000"></rect><rect x="9.5" y="3" width="2" height="4" fill="#000000"></rect><rect x="13" y="3" width="2" height="4" fill="#000000"></rect></svg>
+    <div style="font-size: var(--t-title); font-weight: 700; letter-spacing: 0.06em;">NO SD CARD</div>
+    <div style="font-size: var(--t-body); line-height: 1.55; max-width: 400px;">Books, articles, fonts, and reading progress live on the card. Insert one, then retry.</div>
+    <div style="width: 260px;"><div style="background: #000000; color: #ffffff; height: 68px; display: flex; align-items: center; justify-content: center;">
+  <div style="font-size: var(--t-value); letter-spacing: 0.18em; font-weight: 700;">RETRY</div>
 </div></div>
   </div>
-  <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 24px 16px 24px; border-top: 1px solid #000000;">
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
   <div style="width: 36px;"></div>
-  <div style="display: flex; align-items: center; gap: 7px;"><svg width="11" height="11" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="#000000"></circle></svg><div style="font-size: 12px; letter-spacing: 0.12em;">RETRY</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em;">RETRY</div></div>
   <div style="width: 36px;"></div>
   <div style="width: 36px;"></div>
 </div>

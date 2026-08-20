@@ -48,7 +48,7 @@ Structural drawing (rules, fills, dither, icons) is opaque: coverage is 0 or 3, 
 
 - [ ] **Step 1: Extend the synthetic-font builder to emit v2**
 
-`test/unit/rfnt_builder.h` already builds `.rfnt` byte buffers for tests. Add a bit-depth parameter. The existing header is `magic "RFNT" | u16 version | u16 glyphCount | i16 ascent | i16 descent | i16 lineGap | u16 kernCount` (16 bytes). For v2, the `lineGap` field is followed by the same `kernCount`, and **bpp is carried in the high byte of `version`**: version `1` means v1/1 bpp, version `0x0102` means v2 with bpp 2 — no struct change, so v1 files stay byte-valid. Write a helper `buildRfnt(..., int bpp = 1)` that sets the version word accordingly and sizes glyph rows as `ceil(w * bpp / 8)`.
+`test/unit/rfnt_builder.h` already builds `.rfnt` byte buffers for tests. Add a bit-depth parameter. The existing header is `magic "RFNT" | u16 version | u16 glyphCount | i16 ascent | i16 descent | i16 lineGap | u16 kernCount` (16 bytes). For v2, the `lineGap` field is followed by the same `kernCount`, and **bpp is carried in the high byte of `version`**: version `1` means v1/1 bpp, version `0x0201` (`1 | (2 << 8)`) means v2 with bpp 2 — no struct change, so v1 files stay byte-valid. Write a helper `buildRfnt(..., int bpp = 1)` that sets the version word accordingly and sizes glyph rows as `ceil(w * bpp / 8)`.
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -588,6 +588,15 @@ The two conventions this plan could not derive from the SDK header get settled h
 
 **Files:** possibly one line in `shell/src/main.cpp` or `core/src/text.cpp` (see Task 3's polarity note).
 
+Two ordering constraints found by reading the X3 driver, which the sequence
+already satisfies but which constrain any fix: `copyGrayscaleMsb` requires
+`lsbValid`, so LSB is always written first; and `preconditionGrayscale` must run
+before the plane writes (it self-guards and no-ops otherwise). Also expected on
+a fresh boot: one redundant settle refresh, because `requestResync()` makes
+`displayGrayscaleBase` take a fallback branch that already fires the same
+settle bank our explicit `preconditionGrayscale()` then repeats. An extra flash
+between `gray-base-displayed` and `gray-preconditioned` is that, not a fault.
+
 - [ ] **Step 1: Flash and capture the log**
 
 ```bash
@@ -604,7 +613,7 @@ Expected stages: `gray-base-displayed`, `gray-preconditioned`, `gray-planes-writ
 |---|---|---|
 | Text smoother and clearly legible | Correct | none |
 | Text legible but *lighter* than the base frame | plane levels inverted | invert `emit` for `Lsb`/`Msb` in `core/src/text.cpp` |
-| Text has a hard halo or doubled edge | LSB/MSB swapped | swap the two `copyGrayscale*` calls in the shell |
+| Text has a hard halo or doubled edge | LSB/MSB swapped | swap which plane each call is *fed* — `paint(Plane::Msb, ...)` before `copyGrayscaleLsbBuffers` and vice versa. **Do not reorder the two `copyGrayscale*` calls**: `Uc8253X3Driver::copyGrayscaleMsb` returns early unless `lsbValid` is set, so LSB must always be written first or the MSB plane is silently dropped. |
 | Whole screen inverted | base-frame polarity | `display.setInverted(true)` after `begin()` |
 
 Change **one** thing, reflash, look again. Record each attempt and its result.

@@ -138,6 +138,10 @@ def render_board(board_path, out_png, w, h):
         subprocess.run(
             [CHROME, "--headless", "--disable-gpu", "--force-device-scale-factor=1",
              "--hide-scrollbars", "--default-background-color=FFFFFFFF",
+             # Without a virtual-time budget the screenshot can fire before the
+             # Google Fonts webfont arrives, silently rendering the board in a
+             # fallback face -- which made X4 and X3 panels disagree on type.
+             "--virtual-time-budget=8000",
              f"--window-size={w},{h}", f"--screenshot={out_png}",
              f"http://127.0.0.1:{port}/index.html"],
             check=True, capture_output=True)
@@ -230,6 +234,12 @@ def main():
                           "x3 (528x792), or both (default)")
     ap.add_argument("--out", default=str(ROOT / "build" / "design-vs-firmware.png"))
     ap.add_argument("--pairs-per-row", type=int, default=2)
+    ap.add_argument("--export", metavar="DIR",
+                    help="also write every render as a bare panel-size PNG into DIR, "
+                         "named <screen>_<x4|x3>_<design|firmware>.png. No labels, "
+                         "borders or padding -- suitable for overlaying in a design tool. "
+                         "Unimplemented screens get no firmware file rather than a "
+                         "placeholder, which would be useless to overlay.")
     args = ap.parse_args()
 
     screens = V1_SCREENS + (FLOW_SCREENS if args.all else [])
@@ -242,6 +252,7 @@ def main():
     geom_keys = GEOMETRY_ORDER if args.geometry == "both" else [args.geometry]
 
     rows = []
+    exported = []
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
         for sid, board, label in screens:
@@ -264,12 +275,26 @@ def main():
                 fimg = (normalise(Image.open(simg), gw, gh) if impl
                         else placeholder("NOT IMPLEMENTED", gw, gh))
                 geom_entries.append((key, device, gw, gh, dimg, fimg))
+
+                if args.export:
+                    outdir = pathlib.Path(args.export)
+                    outdir.mkdir(parents=True, exist_ok=True)
+                    # Bare renders at exact panel size: what a design tool wants to
+                    # stack. Skip a firmware file the screen does not have.
+                    if bimg:
+                        dimg.save(outdir / f"{sid}_{key}_design.png")
+                        exported.append(f"{sid}_{key}_design.png")
+                    if impl:
+                        fimg.save(outdir / f"{sid}_{key}_firmware.png")
+                        exported.append(f"{sid}_{key}_firmware.png")
                 print(f"  {label:22s} [{device} {gw}x{gh}] design {'ok' if bimg else 'FAIL'}   "
                       f"firmware {'ok' if impl else 'not implemented'}")
 
             rows.append((label, geom_entries, any_impl))
         size, done, total = compose(rows, args.out, geom_keys, args.pairs_per_row)
     print(f"\nwrote {args.out} {size}  -  {done}/{total} screens implemented")
+    if args.export:
+        print(f"exported {len(exported)} bare panel PNGs to {args.export}/")
 
 
 if __name__ == "__main__":

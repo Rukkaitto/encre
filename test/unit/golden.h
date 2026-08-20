@@ -70,4 +70,50 @@ inline void checkGolden(const reader::Framebuffer& fb, const std::string& name) 
   FAIL_CHECK(msg);
 }
 
+// The 4-level sibling of checkGolden, for screens drawn through the grayscale
+// path: the two plane buffers are composed into one level per pixel exactly as
+// the panel combines them, and the composed image is what the golden holds.
+// Same contract as checkGolden - the golden is never rewritten by the suite,
+// the candidate goes to build/<name>_candidate.png for a human to inspect.
+inline void checkGoldenGray(const reader::Framebuffer& lsb, const reader::Framebuffer& msb,
+                            const std::string& name) {
+  const std::string gold = goldenPath(name);
+  const std::string candidate = candidatePath(name);
+
+  const bool sameSize = lsb.width() == msb.width() && lsb.height() == msb.height();
+  REQUIRE_MESSAGE(sameSize, "plane buffers disagree on size for " << name);
+
+  if (!std::ifstream(gold).good()) {
+    reader::writeGrayPng(lsb, msb, candidate.c_str());
+    FAIL("golden missing - inspect " << candidate << ", then copy to " << gold);
+  }
+
+  const reader::PngDiff d = reader::diffGrayPng(lsb, msb, gold.c_str());
+  if (d.ok()) return;
+
+  const bool wrote = reader::writeGrayPng(lsb, msb, candidate.c_str());
+  std::string msg = "golden mismatch (" + std::string(reader::pngDiffStatusName(d.status)) +
+                    ")\n  golden:    " + gold + "\n  candidate: " + candidate +
+                    (wrote ? "" : " (FAILED TO WRITE)");
+  switch (d.status) {
+    case reader::PngDiff::Status::kDecodeFailed:
+      msg += "\n  the golden exists but could not be decoded as an image";
+      break;
+    case reader::PngDiff::Status::kSizeMismatch:
+      msg += "\n  golden is " + std::to_string(d.width) + "x" + std::to_string(d.height) +
+             ", render is " + std::to_string(lsb.width()) + "x" + std::to_string(lsb.height());
+      break;
+    case reader::PngDiff::Status::kPixelMismatch:
+      msg += "\n  " + std::to_string(d.diffPixels) + " of " +
+             std::to_string(static_cast<long>(lsb.width()) * lsb.height()) +
+             " pixels differ; first at (" + std::to_string(d.firstDiffX) + ", " +
+             std::to_string(d.firstDiffY) + ")";
+      break;
+    case reader::PngDiff::Status::kMatch:
+      break;
+  }
+  msg += "\n  do NOT re-bless the golden: find the rendering change that caused this";
+  FAIL_CHECK(msg);
+}
+
 }  // namespace golden

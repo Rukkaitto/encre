@@ -30,20 +30,32 @@ int main(int argc, char** argv) {
     return 3;
   }
 
+  // One asset per role, and the role names the weight it wants: FontSet::load
+  // refuses a blob whose declared size or weight is not the role's, so a
+  // transposed pair here fails at startup instead of drawing a screen in the
+  // wrong weight.
   const std::string dir = std::string(ASSETS_DIR) + "/built/";
-  auto a = slurp(dir + "spacegrotesk_500_12.rfnt");
-  auto b = slurp(dir + "spacegrotesk_500_13.rfnt");
-  auto c = slurp(dir + "spacegrotesk_700_14.rfnt");
-  auto d = slurp(dir + "spacegrotesk_500_17.rfnt");
-  auto e = slurp(dir + "spacegrotesk_700_24.rfnt");
-  auto g = slurp(dir + "spacegrotesk_700_44.rfnt");
+  auto meta400 = slurp(dir + "spacegrotesk_400_10pt.rfnt");
+  auto meta500 = slurp(dir + "spacegrotesk_500_10pt.rfnt");
+  auto label400 = slurp(dir + "spacegrotesk_400_11pt.rfnt");
+  auto label500 = slurp(dir + "spacegrotesk_500_11pt.rfnt");
+  auto value500 = slurp(dir + "spacegrotesk_500_12pt.rfnt");
+  auto value700 = slurp(dir + "spacegrotesk_700_12pt.rfnt");
+  auto body400 = slurp(dir + "spacegrotesk_400_14pt.rfnt");
+  auto body500 = slurp(dir + "spacegrotesk_500_14pt.rfnt");
+  auto title700 = slurp(dir + "spacegrotesk_700_20pt.rfnt");
+  auto display700 = slurp(dir + "spacegrotesk_700_32pt.rfnt");
   reader::FontSet fonts;
-  fonts.load(reader::Role::Meta, a.data(), a.size());
-  fonts.load(reader::Role::Label, b.data(), b.size());
-  fonts.load(reader::Role::Value, c.data(), c.size());
-  fonts.load(reader::Role::Body, d.data(), d.size());
-  fonts.load(reader::Role::Title, e.data(), e.size());
-  fonts.load(reader::Role::Display, g.data(), g.size());
+  fonts.load(reader::Role::Meta400, meta400.data(), meta400.size());
+  fonts.load(reader::Role::Meta500, meta500.data(), meta500.size());
+  fonts.load(reader::Role::Label400, label400.data(), label400.size());
+  fonts.load(reader::Role::Label500, label500.data(), label500.size());
+  fonts.load(reader::Role::Value500, value500.data(), value500.size());
+  fonts.load(reader::Role::Value700, value700.data(), value700.size());
+  fonts.load(reader::Role::Body400, body400.data(), body400.size());
+  fonts.load(reader::Role::Body500, body500.data(), body500.size());
+  fonts.load(reader::Role::Title700, title700.data(), title700.size());
+  fonts.load(reader::Role::Display700, display700.data(), display700.size());
   if (!fonts.ready()) {
     std::fprintf(stderr, "font ramp failed to load from %s\n", dir.c_str());
     return 1;
@@ -62,10 +74,17 @@ int main(int argc, char** argv) {
   vm.focusedMenuIndex = -1;
   vm.hints = {"READ", "SELECT", "UP", "DOWN"};
 
-  reader::Framebuffer fb(w, h);
+  // Three passes, exactly as the firmware drives the panel: a thresholded base
+  // frame plus the two bit-planes the controller combines into 4 levels. The
+  // simulator recomposes the planes into one greyscale image so the desktop
+  // sees what the panel will paint. `bw` is rendered (not skipped) so the
+  // simulator exercises the same call sequence the shell does.
+  reader::Framebuffer bw(w, h), lsb(w, h), msb(w, h);
   reader::QuietTheme theme;
-  theme.renderHome(fb, fonts, vm);
-  if (!reader::writePng(fb, argv[2])) return 1;
+  theme.renderHome(bw, fonts, vm, reader::Plane::Bw);
+  theme.renderHome(lsb, fonts, vm, reader::Plane::Lsb);
+  theme.renderHome(msb, fonts, vm, reader::Plane::Msb);
+  if (!reader::writeGrayPng(lsb, msb, argv[2])) return 1;
   std::printf("wrote %s (%dx%d)\n", argv[2], w, h);
   return 0;
 }

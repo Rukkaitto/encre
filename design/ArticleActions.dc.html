@@ -9,6 +9,18 @@
 <helmet>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
   <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
     body { margin: 0; background: #ffffff; }
     a { color: #000000; } a:hover { color: #000000; }
     .dither-dots { background-color: #ffffff; background-image: radial-gradient(circle, #000000 1.1px, transparent 1.3px); background-size: 4px 4px; }
@@ -20,56 +32,56 @@
 
   <div style="position: absolute; top: 0; left: 0; width: 480px; height: 800px; display: flex; flex-direction: column; box-sizing: border-box;">
 <div style="display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
-  <div style="font-size: 13px; letter-spacing: 0.22em; font-weight: 500;">ARTICLES</div>
-  <div style="font-size: 14px; font-weight: 700;">3 UNREAD</div>
+  <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">ARTICLES</div>
+  <div style="font-size: var(--t-value); font-weight: 700;">3 UNREAD</div>
 </div>
 <div style="display: flex; align-items: flex-start; gap: 14px; padding: 16px 24px; border-bottom: 1px solid #000000;">
   <div style="width: 8px; height: 8px; background: #000000; margin-top: 7px; flex-shrink: 0;"></div>
   <div style="display: flex; flex-direction: column; gap: 5px;">
-    <div style="font-size: 17px; font-weight: 500; line-height: 1.3;">The Death and Life of the Great American Essay</div>
-    <div style="font-size: 12px; letter-spacing: 0.14em;">LONGREADS &middot; 22 MIN</div>
+    <div style="font-size: var(--t-value); font-weight: 500; line-height: 1.3;">The Death and Life of the Great American Essay</div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">LONGREADS &middot; 22 MIN</div>
   </div>
 </div>
 <div style="display: flex; align-items: flex-start; gap: 14px; padding: 16px 24px; background: #000000; color: #ffffff;">
   <div style="width: 8px; height: 8px; background: #ffffff; margin-top: 7px; flex-shrink: 0;"></div>
   <div style="display: flex; flex-direction: column; gap: 5px;">
-    <div style="font-size: 17px; font-weight: 700; line-height: 1.3;">Why We Forget Most of the Books We Read</div>
-    <div style="font-size: 12px; letter-spacing: 0.14em;">THE ATLANTIC &middot; 9 MIN</div>
+    <div style="font-size: var(--t-value); font-weight: 700; line-height: 1.3;">Why We Forget Most of the Books We Read</div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">THE ATLANTIC &middot; 9 MIN</div>
   </div>
 </div>
 <div style="display: flex; align-items: flex-start; gap: 14px; padding: 16px 24px; border-bottom: 1px solid #000000;">
   <div style="width: 8px; height: 8px; background: #000000; margin-top: 7px; flex-shrink: 0;"></div>
   <div style="display: flex; flex-direction: column; gap: 5px;">
-    <div style="font-size: 17px; font-weight: 500; line-height: 1.3;">In Praise of Slow Reading</div>
-    <div style="font-size: 12px; letter-spacing: 0.14em;">AEON &middot; 14 MIN</div>
+    <div style="font-size: var(--t-value); font-weight: 500; line-height: 1.3;">In Praise of Slow Reading</div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">AEON &middot; 14 MIN</div>
   </div>
 </div>
   </div>
   <div class="dim-veil" style="position: absolute; top: 0; left: 0; width: 480px; height: 800px;"></div>
-  <div style="position: absolute; top: 260px; left: 70px; width: 340px; background: #ffffff; border: 2px solid #000000; box-sizing: border-box;">
+  <div style="position: absolute; top: 260px; left: 50px; width: 380px; background: #ffffff; border: 2px solid #000000; box-sizing: border-box;">
 
-  <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 2px solid #000000;">
-  <div style="font-size: 13px; letter-spacing: 0.22em; font-weight: 500;">WHY WE FORGET MOST OF&hellip;</div>
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 21px 20px; border-bottom: 2px solid #000000;">
+  <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">WHY WE FORGET&hellip;</div>
   
 </div>
-  <div style="display: flex; justify-content: space-between; align-items: center; height: 52px; padding: 0 20px; background: #000000; color: #ffffff;">
-  <div style="font-size: 15px; font-weight: 700;">Read</div>
-  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#ffffff" stroke-width="2"></path></svg>
+  <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 20px; background: #000000; color: #ffffff;">
+  <div style="font-size: var(--t-value); font-weight: 700;">Read</div>
+  <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#ffffff" stroke-width="2"></path></svg>
 </div>
-  <div style="display: flex; justify-content: space-between; align-items: center; height: 52px; padding: 0 20px; border-bottom: 1px solid #000000;">
-  <div style="font-size: 15px; font-weight: 500;">Archive</div>
+  <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 20px; border-bottom: 1px solid #000000;">
+  <div style="font-size: var(--t-value); font-weight: 500;">Archive</div>
   
 </div>
-  <div style="display: flex; justify-content: space-between; align-items: center; height: 52px; padding: 0 20px;">
-  <div style="font-size: 15px; font-weight: 500;">Like</div>
+  <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 20px;">
+  <div style="font-size: var(--t-value); font-weight: 500;">Like</div>
   
 </div>
   </div>
-<div style="position: absolute; bottom: 0; left: 0; width: 480px; background: #ffffff; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center; padding: 14px 24px 16px 24px; border-top: 1px solid #000000;">
-  <div style="display: flex; align-items: center; gap: 7px;"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: 12px; letter-spacing: 0.12em;">CLOSE</div></div>
-  <div style="display: flex; align-items: center; gap: 7px;"><svg width="11" height="11" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="#000000"></circle></svg><div style="font-size: 12px; letter-spacing: 0.12em;">SELECT</div></div>
-  <div style="display: flex; align-items: center; gap: 7px;"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 11V5M5 8l3-3 3 3" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: 12px; letter-spacing: 0.12em;">UP</div></div>
-  <div style="display: flex; align-items: center; gap: 7px;"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 5v6M5 8l3 3 3-3" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: 12px; letter-spacing: 0.12em;">DOWN</div></div>
+<div style="position: absolute; bottom: 0; left: 0; width: 480px; background: #ffffff; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em;">CLOSE</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em;">SELECT</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em;">UP</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M4 9l4 4 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em;">DOWN</div></div>
 </div>
 </div>
 </x-dc>
