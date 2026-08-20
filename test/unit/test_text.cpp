@@ -6,6 +6,7 @@
 #include "reader/font.h"
 #include "reader/framebuffer.h"
 #include "reader/text.h"
+#include "rfnt_builder.h"
 
 static std::vector<uint8_t> slurpFont(const char* name) {
   std::ifstream f(std::string(ASSETS_DIR) + "/built/" + name, std::ios::binary);
@@ -79,4 +80,65 @@ TEST_CASE("a missing glyph draws a visible box rather than nothing") {
   // A hollow box: its interior is untouched, so it reads as a placeholder
   // rather than a solid blob.
   CHECK(inked < 4 * font.ascent());
+}
+
+TEST_CASE("each plane emits its own bit of a glyph's coverage") {
+  // Synthetic 2bpp glyph: one row, coverage 0,1,2,3.
+  rfnt::Builder b;
+  b.bpp = 2;
+  rfnt::GlyphRec g;
+  g.cp = U'A';
+  g.advance = 5;
+  g.bitmapW = 4;
+  g.bitmapH = 1;
+  g.yOff = 1;
+  b.glyphs.push_back(g);
+  b.blob = {0b00011011};
+  const auto bytes = b.build();
+
+  reader::Font f;
+  REQUIRE(f.load(bytes.data(), bytes.size()));
+
+  auto inkAt = [&](reader::Plane plane, int px) {
+    reader::Framebuffer fb(16, 4);
+    reader::drawText(fb, f, 0, 1, "A", reader::Ink::Black, 0, plane);
+    return !fb.getPixel(px, 0);  // true when this pixel got ink
+  };
+
+  // Bw: ink where coverage >= 2, i.e. pixels 2 and 3.
+  CHECK_FALSE(inkAt(reader::Plane::Bw, 0));
+  CHECK_FALSE(inkAt(reader::Plane::Bw, 1));
+  CHECK(inkAt(reader::Plane::Bw, 2));
+  CHECK(inkAt(reader::Plane::Bw, 3));
+
+  // Lsb: bit 0 set, i.e. coverage 1 and 3.
+  CHECK_FALSE(inkAt(reader::Plane::Lsb, 0));
+  CHECK(inkAt(reader::Plane::Lsb, 1));
+  CHECK_FALSE(inkAt(reader::Plane::Lsb, 2));
+  CHECK(inkAt(reader::Plane::Lsb, 3));
+
+  // Msb: bit 1 set, i.e. coverage 2 and 3.
+  CHECK_FALSE(inkAt(reader::Plane::Msb, 0));
+  CHECK_FALSE(inkAt(reader::Plane::Msb, 1));
+  CHECK(inkAt(reader::Plane::Msb, 2));
+  CHECK(inkAt(reader::Plane::Msb, 3));
+}
+
+TEST_CASE("a 1bpp font is identical in every plane") {
+  auto bytes = slurpFont("literata_18.rfnt");  // still 1bpp
+  reader::Font f;
+  REQUIRE(f.load(bytes.data(), bytes.size()));
+  auto render = [&](reader::Plane plane) {
+    reader::Framebuffer fb(200, 40);
+    reader::drawText(fb, f, 4, 30, "Aa", reader::Ink::Black, 0, plane);
+    int n = 0;
+    for (int y = 0; y < 40; ++y)
+      for (int x = 0; x < 200; ++x)
+        if (!fb.getPixel(x, y)) ++n;
+    return n;
+  };
+  const int bw = render(reader::Plane::Bw);
+  CHECK(bw > 0);
+  CHECK(render(reader::Plane::Lsb) == bw);
+  CHECK(render(reader::Plane::Msb) == bw);
 }

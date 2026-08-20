@@ -6,7 +6,7 @@
 namespace reader {
 
 int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::string_view utf8,
-             Ink ink, int tracking) {
+             Ink ink, int tracking, Plane plane) {
   const bool white = (ink == Ink::White);
   int pen = x;
   char32_t prev = 0;
@@ -32,12 +32,23 @@ int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::strin
       continue;
     }
     if (prev) pen += font.kerning(prev, cp);
-    for (int row = 0; row < g->bitmapH; ++row) {
-      const uint8_t* src = g->bitmap + row * g->rowBytes();
-      for (int col = 0; col < g->bitmapW; ++col)
-        if ((src[col / 8] >> (7 - col % 8)) & 1)
-          fb.setPixel(pen + g->xOff + col, baselineY - g->yOff + row, white);
-    }
+    for (int row = 0; row < g->bitmapH; ++row)
+      for (int col = 0; col < g->bitmapW; ++col) {
+        const uint8_t cov = font.coverage(*g, col, row);
+        bool emit = false;
+        switch (plane) {
+          case Plane::Bw:
+            emit = cov >= 2;
+            break;
+          case Plane::Lsb:
+            emit = (cov & 1) != 0;
+            break;
+          case Plane::Msb:
+            emit = (cov & 2) != 0;
+            break;
+        }
+        if (emit) fb.setPixel(pen + g->xOff + col, baselineY - g->yOff + row, white);
+      }
     pen += g->advance + tracking;
     prev = cp;
   }
