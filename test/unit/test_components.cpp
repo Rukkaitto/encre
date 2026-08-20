@@ -6,6 +6,7 @@
 #include "reader/components.h"
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
+#include "reader/text.h"
 
 static std::vector<uint8_t> slurp(const std::string& p) {
   std::ifstream f(p, std::ios::binary);
@@ -210,6 +211,70 @@ TEST_CASE("a hold line in one slot does not move the other slots") {
 
   CHECK(after.top == before.top);
   CHECK(after.bottom == before.bottom);
+}
+
+TEST_CASE("structural drawing is identical in every plane") {
+  Fixture f;
+
+  // drawRow: the hairline at row 0 sits well above any glyph the label or
+  // value could ever reach, so it must be bit-identical across all three
+  // planes -- a plane bug here would show up as furniture damage, not
+  // fringing.
+  {
+    auto render = [&](reader::Plane plane) {
+      reader::Framebuffer fb(480, 200);
+      reader::drawRow(fb, f.fonts, 0, "LIBRARY", "12", /*focused=*/false, nullptr, plane);
+      return fb;
+    };
+    const reader::Framebuffer bw = render(reader::Plane::Bw);
+    const reader::Framebuffer lsb = render(reader::Plane::Lsb);
+    const reader::Framebuffer msb = render(reader::Plane::Msb);
+    for (int x = 0; x < 480; ++x) {
+      CHECK(bw.getPixel(x, 0) == lsb.getPixel(x, 0));
+      CHECK(bw.getPixel(x, 0) == msb.getPixel(x, 0));
+    }
+  }
+
+  // drawHeaderBand: the 2px full-bleed rule at the band's bottom edge is the
+  // same kind of opaque furniture.
+  {
+    auto render = [&](reader::Plane plane) {
+      reader::Framebuffer fb(480, 200);
+      reader::drawHeaderBand(fb, f.fonts, "NOW READING", "87%", plane);
+      return fb;
+    };
+    const reader::Framebuffer bw = render(reader::Plane::Bw);
+    const reader::Framebuffer lsb = render(reader::Plane::Lsb);
+    const reader::Framebuffer msb = render(reader::Plane::Msb);
+    for (int x = 0; x < 480; ++x)
+      for (int y : {reader::kBandH - 2, reader::kBandH - 1}) {
+        CHECK(bw.getPixel(x, y) == lsb.getPixel(x, y));
+        CHECK(bw.getPixel(x, y) == msb.getPixel(x, y));
+      }
+  }
+
+  // drawHintBar: the top rule, drawn before any icon or label, is furniture
+  // too.
+  {
+    auto render = [&](reader::Plane plane) {
+      reader::Framebuffer fb(480, 120);
+      const reader::Hint hints[4] = {{&reader::icons::kBack, "BACK", ""},
+                                     {&reader::icons::kDot, "OPEN", ""},
+                                     {&reader::icons::kUp, "UP", ""},
+                                     {&reader::icons::kDown, "DOWN", ""}};
+      int slotX[4] = {};
+      reader::drawHintBar(fb, f.fonts, hints, slotX, plane);
+      return fb;
+    };
+    const reader::Framebuffer bw = render(reader::Plane::Bw);
+    const reader::Framebuffer lsb = render(reader::Plane::Lsb);
+    const reader::Framebuffer msb = render(reader::Plane::Msb);
+    const int top = bw.height() - reader::kHintBarH;
+    for (int x = 0; x < 480; ++x) {
+      CHECK(bw.getPixel(x, top) == lsb.getPixel(x, top));
+      CHECK(bw.getPixel(x, top) == msb.getPixel(x, top));
+    }
+  }
 }
 
 TEST_CASE("hint slots distribute across the canvas and never overlap") {

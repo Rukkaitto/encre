@@ -10,7 +10,8 @@ namespace reader {
 // on the X4's 480x800 and the X3's 528x792.
 class QuietTheme : public Theme {
  public:
-  void renderHome(Framebuffer& fb, const FontSet& fonts, const HomeViewModel& vm) override;
+  void renderHome(Framebuffer& fb, const FontSet& fonts, const HomeViewModel& vm,
+                  Plane plane = Plane::Bw) override;
 };
 
 }  // namespace reader

@@ -32,7 +32,7 @@ std::string upperAscii(std::string_view s) {
 // A dithered stand-in until Phase 3 decodes real cover images: a bordered
 // panel with the title reversed out of a filled strip along its bottom.
 void drawCoverPlaceholder(Framebuffer& fb, const FontSet& fonts, int x, int y,
-                          std::string_view title) {
+                          std::string_view title, Plane plane) {
   // Level 1, not 2: the board's `.dither-dots` is a 4px-pitch radial-gradient
   // dot, roughly a fifth coverage. Level 2 is a 50% checkerboard, which reads as
   // grey mesh rather than a sparse tint and swamped the strip's border.
@@ -50,17 +50,18 @@ void drawCoverPlaceholder(Framebuffer& fb, const FontSet& fonts, int x, int y,
   const int stripY = y + kCoverH - stripH - 2;
   fb.fillRect(x + 2, stripY, kCoverW - 4, stripH, true);
   fb.fillRect(x + 2, stripY, kCoverW - 4, 2, false);
-  drawText(fb, bf, x + 10, stripY + stripH - 8, stripTitle);
+  drawText(fb, bf, x + 10, stripY + stripH - 8, stripTitle, Ink::Black, 0, plane);
 }
 }  // namespace
 
-void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeViewModel& vm) {
+void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeViewModel& vm,
+                            Plane plane) {
   fb.clear(true);
-  int y = drawHeaderBand(fb, fonts, "NOW READING", std::to_string(vm.batteryPercent) + "%");
+  int y = drawHeaderBand(fb, fonts, "NOW READING", std::to_string(vm.batteryPercent) + "%", plane);
 
   // Two columns: cover on the left, the reading state stacked on the right.
   y += 28;
-  drawCoverPlaceholder(fb, fonts, kMargin, y, vm.title);
+  drawCoverPlaceholder(fb, fonts, kMargin, y, vm.title, plane);
 
   const int rightX = kMargin + kCoverW + kGutter;
   const Font& title = fonts[Role::Title];
@@ -70,20 +71,21 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   // The board sets the title in caps (text-transform: uppercase). Casing is a
   // presentation decision, so the theme applies it rather than the view-model
   // carrying a pre-shouted string.
-  drawText(fb, title, rightX, ry, upperAscii(vm.title));
+  drawText(fb, title, rightX, ry, upperAscii(vm.title), Ink::Black, 0, plane);
   ry += body.lineHeight() + 6;
-  drawText(fb, body, rightX, ry, vm.author);
+  drawText(fb, body, rightX, ry, vm.author, Ink::Black, 0, plane);
 
   // The percentage is the one display-scale number on the screen: 44px against
   // the title's 24, so it outranks the book's name instead of tying with it.
   ry = y + kCoverH - meta.lineHeight() * 2 - 8;
-  drawText(fb, fonts[Role::Display], rightX, ry, std::to_string(vm.percent) + "%");
+  drawText(fb, fonts[Role::Display], rightX, ry, std::to_string(vm.percent) + "%", Ink::Black, 0,
+           plane);
   ry += meta.lineHeight() + 4;
   drawText(fb, meta, rightX, ry,
            "PAGE " + std::to_string(vm.currentPage) + " / " + std::to_string(vm.pageCount),
-           Ink::Black, kLabelTracking);
+           Ink::Black, kLabelTracking, plane);
   ry += meta.lineHeight() + 2;
-  drawText(fb, meta, rightX, ry, vm.chapterLabel, Ink::Black, kLabelTracking);
+  drawText(fb, meta, rightX, ry, vm.chapterLabel, Ink::Black, kLabelTracking, plane);
 
   y += kCoverH + 22;
 
@@ -108,7 +110,7 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   }
   const Ink cink = continueFocused ? Ink::White : Ink::Black;
   drawText(fb, label, kMargin + 20, y + kBlockH / 2 + label.ascent() / 2, "CONTINUE", cink,
-           kLabelTracking);
+           kLabelTracking, plane);
   drawIcon(fb, icons::kChevron, kMargin + barW - 20 - icons::kChevron.w,
            y + kBlockH / 2 - icons::kChevron.h / 2, cink);
 
@@ -121,7 +123,8 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
     // adding a per-entry icon field the view model has no opinion about.
     const bool discloses = vm.menu[i].value.empty();
     drawRow(fb, fonts, menuTop + static_cast<int>(i) * kRowH, vm.menu[i].label, vm.menu[i].value,
-            static_cast<int>(i) == vm.focusedMenuIndex, discloses ? &icons::kChevron : nullptr);
+            static_cast<int>(i) == vm.focusedMenuIndex, discloses ? &icons::kChevron : nullptr,
+            plane);
   }
 
   const Hint hints[4] = {{&icons::kBook, vm.hints[0], ""},
@@ -129,7 +132,7 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
                          {&icons::kUp, vm.hints[2], ""},
                          {&icons::kDown, vm.hints[3], ""}};
   int slots[4] = {};
-  drawHintBar(fb, fonts, hints, slots);
+  drawHintBar(fb, fonts, hints, slots, plane);
 }
 
 }  // namespace reader

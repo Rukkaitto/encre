@@ -6,11 +6,11 @@
 namespace reader {
 
 int drawHeaderBand(Framebuffer& fb, const FontSet& fonts, std::string_view label,
-                   std::string_view value) {
+                   std::string_view value, Plane plane) {
   const Font& lf = fonts[Role::Label];
   const Font& vf = fonts[Role::Value];
   const int baseline = kBandH / 2 + lf.ascent() / 2;
-  drawText(fb, lf, kMargin, baseline, label, Ink::Black, kLabelTracking);
+  drawText(fb, lf, kMargin, baseline, label, Ink::Black, kLabelTracking, plane);
   // The value and the battery glyph are one right-aligned group: the icon's
   // right edge, not the text's, lands on the margin. Right-aligning the value
   // alone and hanging the icon off it would push the glyph past the margin.
@@ -18,7 +18,7 @@ int drawHeaderBand(Framebuffer& fb, const FontSet& fonts, std::string_view label
   const int vw = vf.measure(value);
   const int groupW = vw + kBandGap + bat.w;
   const int groupX = fb.width() - kMargin - groupW;
-  drawText(fb, vf, groupX, baseline, value);
+  drawText(fb, vf, groupX, baseline, value, Ink::Black, 0, plane);
   // Centred on the band's midline rather than hung off the text baseline, which
   // is what the design's `align-items: center` does to the SVG.
   drawIcon(fb, bat, groupX + vw + kBandGap, (kBandH - 2) / 2 - bat.h / 2);
@@ -27,7 +27,7 @@ int drawHeaderBand(Framebuffer& fb, const FontSet& fonts, std::string_view label
 }
 
 int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label,
-            std::string_view value, bool focused, const Icon* trailing) {
+            std::string_view value, bool focused, const Icon* trailing, Plane plane) {
   const Font& lf = fonts[Role::Body];
   const Font& vf = fonts[Role::Value];
   const Ink ink = focused ? Ink::White : Ink::Black;
@@ -36,7 +36,7 @@ int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label
   else
     fb.fillRect(0, y, fb.width(), 1, false);  // hairline above
   const int baseline = y + kRowH / 2 + lf.ascent() / 2;
-  drawText(fb, lf, kMargin, baseline, label, ink);
+  drawText(fb, lf, kMargin, baseline, label, ink, 0, plane);
   // A row carries a value, a trailing mark, or neither -- the design has one of
   // each (LIBRARY's count, SETTINGS' chevron). Both are right-aligned on the
   // margin; the icon takes the row's ink, so it inverts with a focused row.
@@ -45,11 +45,13 @@ int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label
     drawIcon(fb, *trailing, rightEdge - trailing->w, y + kRowH / 2 - trailing->h / 2, ink);
     rightEdge -= trailing->w + kRowGap;
   }
-  if (!value.empty()) drawText(fb, vf, rightEdge - vf.measure(value), baseline, value, ink);
+  if (!value.empty())
+    drawText(fb, vf, rightEdge - vf.measure(value), baseline, value, ink, 0, plane);
   return kRowH;
 }
 
-int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], int slotXOut[4]) {
+int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], int slotXOut[4],
+                Plane plane) {
   const Font& mf = fonts[Role::Meta];
   const int top = fb.height() - kHintBarH;
   fb.fillRect(0, top, fb.width(), 1, false);
@@ -87,10 +89,10 @@ int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], int 
       drawIcon(fb, *hints[i].icon, x, baseline - hints[i].icon->h + 2);
       textX += hints[i].icon->w + 6;
     }
-    drawText(fb, mf, textX, baseline, hints[i].label, Ink::Black, kLabelTracking);
+    drawText(fb, mf, textX, baseline, hints[i].label, Ink::Black, kLabelTracking, plane);
     if (!hints[i].hold.empty())
       drawText(fb, mf, textX, baseline + mf.lineHeight(), hints[i].hold, Ink::Black,
-               kLabelTracking);
+               kLabelTracking, plane);
     x += widths[i] + gap;
   }
   return kHintBarH;
