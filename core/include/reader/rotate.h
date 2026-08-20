@@ -13,6 +13,9 @@ class Framebuffer;
 // main.cpp to the other function -- both mappings are provided so bring-up is a
 // one-line change. Note this is a 180-degree difference, not a flip, so it is
 // not the fix for a mirrored image.
+//
+// Measured on Xteink X3 hardware: CCW is the correct direction (CW renders the
+// UI upside down). Not yet verified on X4.
 void rotate90CW(const Framebuffer& src, Framebuffer& dst);
 void rotate90CCW(const Framebuffer& src, Framebuffer& dst);
 }  // namespace reader
