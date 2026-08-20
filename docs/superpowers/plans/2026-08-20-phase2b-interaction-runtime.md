@@ -133,6 +133,7 @@ clamp.
 | `core/include/reader/screen_home.h` + `core/src/screen_home.cpp` | `HomeScreen`: owns a `HomeViewModel`, moves focus, pushes targets. |
 | `core/include/reader/screen_stub.h` + `core/src/screen_stub.cpp` | `StubScreen`: the provisional titled-list surface, focusable rows with optional push targets. |
 | `core/include/reader/screen_input_monitor.h` + `core/src/screen_input_monitor.cpp` | `InputMonitorScreen`: `Mono` fidelity, logs classified events, one hold slot. |
+| `core/include/reader/screens.h` + `core/src/screens.cpp` | `demoHomeVm()` and `DemoScreenFactory`: the one screen catalogue **both** the simulator and the shell build from. |
 
 **Modified:**
 
@@ -1601,7 +1602,9 @@ void QuietTheme::renderStub(Framebuffer& fb, const FontSet& fonts, const StubVie
   // Built only from primitives already matched to boards -- header band, rows,
   // hint bar. Nothing here invents a measurement, so this surface cannot
   // introduce a fidelity defect the real screens would inherit.
-  int y = drawHeaderBand(fb, fonts, vm.title, vm.batteryPercent, plane);
+  // drawHeaderBand's value parameter is a std::string_view, not an int -- pass
+  // the formatted percentage exactly as renderHome does.
+  int y = drawHeaderBand(fb, fonts, vm.title, std::to_string(vm.batteryPercent) + "%", plane);
 
   const Font& meta = fonts[Role::Meta400];
   y += kMargin;
@@ -1760,6 +1763,9 @@ class InputMonitorScreen : public Screen {
 
   ScreenId id() const override { return ScreenId::InputMonitor; }
   Fidelity fidelity() const override { return Fidelity::Mono; }
+  // The log has to be readable for a test to assert what was classified;
+  // inferring it from pixels would test the theme instead of the screen.
+  const StubViewModel& vm() const { return vm_; }
   ButtonMask longPressable() const override { return hintHoldMask(vm_.holds); }
   Action onEvent(const InputEvent& ev) override;
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
@@ -1848,8 +1854,9 @@ git commit -m "feat(screens): provisional stub surface and the input monitor dia
 ## Task 8: Scripted input in the simulator
 
 **Files:**
-- Modify: `sim/main.cpp`
-- Modify: `CMakeLists.txt`
+- Create: `core/include/reader/screens.h`, `core/src/screens.cpp`
+- Create: `test/unit/test_screens.cpp`
+- Modify: `sim/main.cpp`, `test/unit/home_vm.h`, `CMakeLists.txt`
 
 The simulator is where navigation gets regression-tested (spec §3.4: "driven by
 scripted button events"). `reader_sim home` must keep working exactly as it does —
@@ -1861,43 +1868,151 @@ the `sim_home` test and `tools/compare-design.py` both call it.
 `static bool loadRamp(reader::FontSet& fonts)` returning false on failure, so both
 subcommands use one copy. Keep the existing comment about roles naming weights.
 
-- [ ] **Step 2: Add the app subcommand**
+- [ ] **Step 2: Put the screen catalogue in `core/`, not in the simulator**
+
+The simulator's PNGs are only evidence about the device if the device navigates the
+same screens. Two hand-written factories — one here, one in the shell — would drift
+on their row lists, titles and battery values, and the drift would be invisible
+because each half would keep passing its own checks. So the catalogue is shared.
+
+Create `core/include/reader/screens.h`:
+
+```cpp
+#pragma once
+#include "reader/app.h"
+#include "reader/viewmodel.h"
+
+namespace reader {
+
+// The demo content Phase 2B navigates. Real content arrives in Phase 2C from the
+// SD card and the settings store; until then this is the single definition both
+// the simulator and the shell build from, so a screenshot from the desktop is
+// evidence about the device rather than about a second, similar-looking
+// catalogue.
+HomeViewModel demoHomeVm();
+
+// Home's menu rows, in order, and the screen each one opens.
+std::vector<ScreenId> demoHomeTargets();
+
+class DemoScreenFactory : public ScreenFactory {
+ public:
+  std::unique_ptr<Screen> create(ScreenId id) override;
+};
+
+}  // namespace reader
+```
+
+`core/src/screens.cpp`:
+
+```cpp
+#include "reader/screens.h"
+
+#include "reader/screen_input_monitor.h"
+#include "reader/screen_stub.h"
+
+namespace reader {
+
+HomeViewModel demoHomeVm() {
+  HomeViewModel vm;
+  vm.title = "Middlemarch";
+  vm.author = "George Eliot";
+  vm.chapterLabel = "CH. 01 \xE2\x80\x94 MISS BROOKE";
+  vm.percent = 6;
+  vm.currentPage = 53;
+  vm.pageCount = 890;
+  vm.batteryPercent = 87;
+  vm.hasCover = false;
+  vm.menu = {{"LIBRARY", "12"}, {"SETTINGS", ""}};
+  vm.focusedMenuIndex = -1;
+  vm.hints = {"READ", "SELECT", "UP", "DOWN"};
+  // Home binds no long press, so no slot shows a ring.
+  vm.holds = {false, false, false, false};
+  return vm;
+}
+
+std::vector<ScreenId> demoHomeTargets() { return {ScreenId::Library, ScreenId::Settings}; }
+
+std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
+  using Row = StubScreen::Row;
+  switch (id) {
+    case ScreenId::Library:
+      return std::make_unique<StubScreen>(
+          ScreenId::Library, "LIBRARY",
+          std::vector<Row>{{"CLASSICS", std::nullopt}, {"MIDDLEMARCH", std::nullopt}});
+    case ScreenId::Settings:
+      // The Input Monitor is reachable ONLY from here. Nothing else lists it, and
+      // without a way in, the phase loses the one place short-versus-long
+      // classification and the FAST refresh path are visible on the panel.
+      return std::make_unique<StubScreen>(
+          ScreenId::Settings, "SETTINGS",
+          std::vector<Row>{{"INPUT MONITOR", ScreenId::InputMonitor}, {"ABOUT", std::nullopt}});
+    case ScreenId::InputMonitor:
+      return std::make_unique<InputMonitorScreen>();
+    case ScreenId::Home:
+      // The root is never rebuilt: popping to Home returns the original object,
+      // with its focus intact.
+      return nullptr;
+  }
+  return nullptr;
+}
+
+}  // namespace reader
+```
+
+Add a test, `test/unit/test_screens.cpp`, asserting the catalogue is navigable rather
+than just constructible — that from Home you can reach the Input Monitor:
+
+```cpp
+#include "doctest.h"
+#include "reader/screen_home.h"
+#include "reader/screens.h"
+
+using namespace reader;
+
+TEST_CASE("the demo catalogue can reach the input monitor from Home") {
+  DemoScreenFactory f;
+  App app(std::make_unique<HomeScreen>(demoHomeVm(), demoHomeTargets()), f);
+  const InputEvent down{Button::Down, PressKind::Short};
+  const InputEvent confirm{Button::Confirm, PressKind::Short};
+  const InputEvent back{Button::Back, PressKind::Short};
+
+  app.dispatch(down);     // focus LIBRARY
+  app.dispatch(down);     // focus SETTINGS
+  app.dispatch(confirm);  // push Settings
+  REQUIRE(app.top().id() == ScreenId::Settings);
+  app.dispatch(confirm);  // its first row is INPUT MONITOR
+  REQUIRE(app.top().id() == ScreenId::InputMonitor);
+  CHECK(app.top().fidelity() == Fidelity::Mono);
+  // Confirm carries the hold here, and the ring on that slot is the same array.
+  CHECK(app.top().longPressable() == buttonBit(Button::Confirm));
+
+  app.dispatch(back);
+  CHECK(app.top().id() == ScreenId::Settings);
+  app.dispatch(back);
+  CHECK(app.top().id() == ScreenId::Home);
+  CHECK(app.depth() == 1);
+  app.dispatch(back);  // Home's Back is inert; the root must survive
+  CHECK(app.depth() == 1);
+}
+
+TEST_CASE("Home is never rebuilt by the factory") {
+  // Popping back to Home must return the ORIGINAL screen with its focus, not a
+  // fresh one -- which is why create(Home) is null.
+  DemoScreenFactory f;
+  CHECK(f.create(ScreenId::Home) == nullptr);
+}
+```
+
+- [ ] **Step 2b: Add the app subcommand, building from the shared catalogue**
 
 Add to `sim/main.cpp`:
 
 ```cpp
 #include "reader/app.h"
 #include "reader/screen_home.h"
-#include "reader/screen_input_monitor.h"
-#include "reader/screen_stub.h"
+#include "reader/screens.h"
 
 namespace {
-
-// Builds the screen catalogue. The same wiring the shell uses, so what the
-// simulator navigates is what the device navigates.
-class SimFactory : public reader::ScreenFactory {
- public:
-  std::unique_ptr<reader::Screen> create(reader::ScreenId id) override {
-    using reader::ScreenId;
-    switch (id) {
-      case ScreenId::Library:
-        return std::make_unique<reader::StubScreen>(ScreenId::Library, "LIBRARY",
-                                                    std::vector<reader::StubScreen::Row>{
-                                                        {"CLASSICS", std::nullopt},
-                                                        {"MIDDLEMARCH", std::nullopt}});
-      case ScreenId::Settings:
-        return std::make_unique<reader::StubScreen>(
-            ScreenId::Settings, "SETTINGS",
-            std::vector<reader::StubScreen::Row>{{"INPUT MONITOR", ScreenId::InputMonitor},
-                                                {"ABOUT", std::nullopt}});
-      case ScreenId::InputMonitor:
-        return std::make_unique<reader::InputMonitorScreen>();
-      case ScreenId::Home:
-        return nullptr;  // the root is never rebuilt
-    }
-    return nullptr;
-  }
-};
 
 // "DOWN,CONFIRM,CONFIRM+" -> events. A trailing '+' means a long press, which is
 // how a scripted run reaches a hold without a clock.
@@ -1937,12 +2052,36 @@ bool parseKeys(const char* spec, std::vector<reader::InputEvent>& out) {
 ```
 
 In `main`, after parsing `--canvas`, also parse `--keys SPEC`, and add the `app`
-branch: build the Home view-model exactly as the `home` branch does (extract it into
-one `static reader::HomeViewModel demoHomeVm()` so the two branches cannot drift),
-construct `HomeScreen(demoHomeVm(), {ScreenId::Library, ScreenId::Settings})`, wrap it
-in an `App` with a `SimFactory`, dispatch every parsed event, then render the top
-screen three times (Bw/Lsb/Msb) and write the PNG — the same three-pass sequence the
-`home` branch uses, because that is what the panel does.
+branch: build `HomeScreen(reader::demoHomeVm(), reader::demoHomeTargets())`, wrap it in
+an `App` with a `reader::DemoScreenFactory`, dispatch every parsed event, then render
+the top screen three times (Bw/Lsb/Msb) and write the PNG — the same three-pass
+sequence the `home` branch uses, because that is what the panel does.
+
+**Also repoint the existing `home` branch at `reader::demoHomeVm()`** and delete its
+inline view-model, so the two subcommands cannot disagree about Home's content. Run
+`make test` immediately after: `sim_home` and the Home goldens still passing is the
+proof the move changed nothing.
+
+**And collapse `sampleHome()` into it.** Task 4 Step 0 made `test/unit/home_vm.h` the
+one definition the goldens are blessed against; `demoHomeVm()` is now the one the
+device shows. Two definitions of the same content is the drift this whole step exists
+to prevent, and the version the goldens pin should be the version that ships. Reduce
+the header to a forwarder:
+
+```cpp
+#pragma once
+// The Home view-model the goldens are blessed against -- which is the same one the
+// firmware and the simulator show, deliberately: a golden pinning content the
+// device does not display would pass while the screen was wrong.
+#include "reader/screens.h"
+
+inline reader::HomeViewModel sampleHome() { return reader::demoHomeVm(); }
+```
+
+Run `make test` again. **The Home goldens must still pass** — that is what proves
+`demoHomeVm()` reproduces the blessed content exactly. If they fail, the two
+definitions had already diverged, and the difference is the bug: find it before
+going further, and do not re-bless.
 
 Print the resulting stack so a scripted run is self-describing:
 
@@ -2279,34 +2418,15 @@ static reader::IdleTimer gIdle(kSleepAfterMs);
 static InputManager gInput;
 ```
 
-The screen factory, mirroring the simulator's so device and desktop navigate the
-same catalogue:
+The screen catalogue is `reader::DemoScreenFactory` from Task 8 — **do not write a
+second one here.** A shell-local copy would drift from the simulator's on its row
+lists and titles, and the drift would be invisible because each half would keep
+passing its own checks:
 
 ```cpp
-class ShellFactory : public reader::ScreenFactory {
- public:
-  std::unique_ptr<reader::Screen> create(reader::ScreenId id) override {
-    using reader::ScreenId;
-    using Row = reader::StubScreen::Row;
-    switch (id) {
-      case ScreenId::Library:
-        return std::make_unique<reader::StubScreen>(
-            ScreenId::Library, "LIBRARY",
-            std::vector<Row>{{"CLASSICS", std::nullopt}, {"MIDDLEMARCH", std::nullopt}});
-      case ScreenId::Settings:
-        return std::make_unique<reader::StubScreen>(
-            ScreenId::Settings, "SETTINGS",
-            std::vector<Row>{{"INPUT MONITOR", ScreenId::InputMonitor},
-                             {"ABOUT", std::nullopt}});
-      case ScreenId::InputMonitor:
-        return std::make_unique<reader::InputMonitorScreen>();
-      case ScreenId::Home:
-        return nullptr;
-    }
-    return nullptr;
-  }
-};
-static ShellFactory gFactory;
+#include "reader/screens.h"
+
+static reader::DemoScreenFactory gFactory;
 ```
 
 Rework `setup()` to assign into these instead of declaring locals, keeping every
@@ -2314,10 +2434,7 @@ existing check and `mark()` call in place, then build the app and paint once:
 
 ```cpp
   gApp = std::make_unique<reader::App>(
-      std::make_unique<reader::HomeScreen>(demoHomeVm(),
-                                          std::vector<reader::ScreenId>{
-                                              reader::ScreenId::Library,
-                                              reader::ScreenId::Settings}),
+      std::make_unique<reader::HomeScreen>(reader::demoHomeVm(), reader::demoHomeTargets()),
       gFactory);
   gPresses.setLongPressable(gApp->longPressable());
   gInput.begin();
