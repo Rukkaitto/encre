@@ -48,7 +48,7 @@ Structural drawing (rules, fills, dither, icons) is opaque: coverage is 0 or 3, 
 
 - [ ] **Step 1: Extend the synthetic-font builder to emit v2**
 
-`test/unit/rfnt_builder.h` already builds `.rfnt` byte buffers for tests. Add a bit-depth parameter. The existing header is `magic "RFNT" | u16 version | u16 glyphCount | i16 ascent | i16 descent | i16 lineGap | u16 kernCount` (16 bytes). For v2, the `lineGap` field is followed by the same `kernCount`, and **bpp is carried in the high byte of `version`**: version `1` means v1/1 bpp, version `0x0102` means v2 with bpp 2 — no struct change, so v1 files stay byte-valid. Write a helper `buildRfnt(..., int bpp = 1)` that sets the version word accordingly and sizes glyph rows as `ceil(w * bpp / 8)`.
+`test/unit/rfnt_builder.h` already builds `.rfnt` byte buffers for tests. Add a bit-depth parameter. The existing header is `magic "RFNT" | u16 version | u16 glyphCount | i16 ascent | i16 descent | i16 lineGap | u16 kernCount` (16 bytes). For v2, the `lineGap` field is followed by the same `kernCount`, and **bpp is carried in the high byte of `version`**: version `1` means v1/1 bpp, version `0x0201` (`1 | (2 << 8)`) means v2 with bpp 2 — no struct change, so v1 files stay byte-valid. Write a helper `buildRfnt(..., int bpp = 1)` that sets the version word accordingly and sizes glyph rows as `ceil(w * bpp / 8)`.
 
 - [ ] **Step 2: Write the failing tests**
 
