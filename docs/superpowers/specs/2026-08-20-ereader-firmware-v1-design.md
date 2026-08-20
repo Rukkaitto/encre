@@ -86,6 +86,16 @@ RTC presence.
 - **Screen stack + input dispatch:** push/pop screen manager; screens receive
   button events (with short/long press distinction) and draw into the shared
   1-bit framebuffer.
+- **Theme layer:** screens describe structure (what elements exist, their
+  hierarchy and behavior); all visual decisions — type faces/sizes for each
+  role, rule weights, chrome density, button/list/progress styling, hint-bar
+  rendering — come from a theme object consulted at draw time. V1 ships
+  exactly one built-in theme (derived from the chosen visual direction) and
+  no picker, but nothing outside the theme layer hardcodes style, so
+  selectable and user-defined themes are an additive V2 feature, not a
+  refactor. UI conventions fixed across themes: hint bar order matches the
+  hardware (Back left, Confirm center, Up/Down right, one hint per button,
+  evenly spaced), and focus is always shown by inversion.
 - **Refresh policy:** owned by the shell, not by individual screens — FAST for
   page turns, FULL every N page turns (default 15, configurable) and on every
   screen transition, to keep text crisp and ghost-free.
@@ -199,7 +209,11 @@ NVS (on-chip): WiFi credentials, Instapaper OAuth token, last-open pointer.
 
 OPDS browsing, Calibre wireless, dictionary lookups, reading stats, OTA
 updates, KOReader sync, Instapaper folders/highlights/two-way progress,
-RTL/bidi text, tilt page-turn (X3 IMU), audio anything.
+RTL/bidi text, tilt page-turn (X3 IMU), audio anything. Also: the theme
+picker and user-installable themes — the theme layer itself ships in V1
+(Section 3.3) with a single built-in theme; alternate themes (e.g. the
+louder "Spine"/constructivist direction from the design exploration) arrive
+as V2 content on top of it.
 
 ## 9. Design handoff notes (for the visual design pass)
 
