@@ -5,7 +5,9 @@
 
 namespace reader {
 
-int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::string_view utf8) {
+int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::string_view utf8,
+             Ink ink, int tracking) {
+  const bool white = (ink == Ink::White);
   int pen = x;
   char32_t prev = 0;
   for (size_t i = 0; i < utf8.size();) {
@@ -17,9 +19,9 @@ int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::strin
       const uint8_t* src = g->bitmap + row * g->rowBytes();
       for (int col = 0; col < g->bitmapW; ++col)
         if ((src[col / 8] >> (7 - col % 8)) & 1)
-          fb.setPixel(pen + g->xOff + col, baselineY - g->yOff + row, false);
+          fb.setPixel(pen + g->xOff + col, baselineY - g->yOff + row, white);
     }
-    pen += g->advance;
+    pen += g->advance + tracking;
     prev = cp;
   }
   return pen - x;
