@@ -44,3 +44,18 @@ TEST_CASE("black ink is still the default") {
       if (!white.getPixel(x, y)) anyBlack = true;
   CHECK(anyBlack);
 }
+
+TEST_CASE("measure accounts for tracking and agrees with drawText") {
+  auto bytes = slurpFont("spacegrotesk_500_16.rfnt");
+  reader::Font font;
+  REQUIRE(font.load(bytes.data(), bytes.size()));
+
+  const int plain = font.measure("LIBRARY");
+  const int tracked = font.measure("LIBRARY", 2);
+  CHECK(tracked == plain + 2 * 7);  // 7 glyphs, 2px each
+
+  // The advance drawText reports must equal what measure predicts, or
+  // right-aligned chrome drifts.
+  reader::Framebuffer fb(400, 40);
+  CHECK(reader::drawText(fb, font, 0, 30, "LIBRARY", reader::Ink::Black, 2) == tracked);
+}
