@@ -4,6 +4,7 @@
 
 #include "doctest.h"
 #include "golden.h"
+#include "home_vm.h"
 #include "ramp.h"
 #include "reader/components.h"
 #include "reader/fontset.h"
@@ -11,22 +12,6 @@
 #include "reader/icons.h"
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
-
-static reader::HomeViewModel sampleHome() {
-  reader::HomeViewModel vm;
-  vm.title = "Middlemarch";
-  vm.author = "George Eliot";
-  vm.chapterLabel = "CH. 01 — MISS BROOKE";
-  vm.percent = 6;
-  vm.currentPage = 53;
-  vm.pageCount = 890;
-  vm.batteryPercent = 87;
-  vm.hasCover = false;
-  vm.menu = {{"LIBRARY", "12"}, {"SETTINGS", ""}};
-  vm.focusedMenuIndex = -1;
-  vm.hints = {"READ", "SELECT", "UP", "DOWN"};
-  return vm;
-}
 
 using ramp::Ramp;
 
