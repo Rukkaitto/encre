@@ -14,9 +14,9 @@ namespace {
 // The board's own numbers. The cover shrank from 156x234 to 128x192 when the pt
 // type ramp landed: at legible sizes the stats column beside it needs the width,
 // and a 234px-tall cover no longer bounded that column's height anyway.
-constexpr int kCoverW = 128;
-constexpr int kCoverH = 192;
-constexpr int kGutter = 22;
+constexpr int kCoverW = 112;
+constexpr int kCoverH = 168;
+constexpr int kGutter = 16;
 constexpr int kBlockH = 72;
 // Vertical rhythm, all straight off the board: the gap under the header band
 // (`padding: 30px 24px 0`), the same 26px lead-in the progress bar and the

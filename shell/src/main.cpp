@@ -127,22 +127,28 @@ void setup() {
   const int panelW = display.getDisplayWidth();
   const int panelH = display.getDisplayHeight();
 
-  // Three 1-bit frames, all live at once: the portrait render target, the
-  // landscape scratch the two grey planes are rotated into, and the landscape
-  // B/W base frame, which has to survive until cleanupGrayscaleBuffers() rebases
-  // the controller off it. That retained third frame is the whole memory cost of
-  // 4-level grey here — a 2 bpp framebuffer would have needed roughly double.
+  // TWO 1-bit frames, not three. Three (portrait + gray scratch + a retained
+  // B/W base for the cleanup rebase) aborts on this hardware: measured free
+  // heap is ~233 KB but the largest contiguous block is only ~115 KB, so the
+  // third 52 KB allocation finds no block big enough even though the total
+  // would cover it. std::vector then throws, and the firmware is built
+  // -fno-exceptions, so that is an abort() and a boot loop. Re-rendering the
+  // B/W pass for the cleanup rebase costs one extra render and saves a frame.
+  const unsigned frameBytes = display.getBufferSize();
+  const unsigned largest = ESP.getMaxAllocHeap();
+  Serial.printf("[info] frame %u bytes x2; free heap %u, largest block %u\n", frameBytes,
+                (unsigned)ESP.getFreeHeap(), largest);
+  Serial.flush();
+  // Fail loudly rather than aborting inside a constructor: a vector that cannot
+  // allocate takes the whole firmware down with no diagnostic.
+  if (largest < frameBytes * 2) {
+    Serial.printf("[fatal] largest block %u < two frames (%u)\n", largest, frameBytes * 2);
+    mark("frame-alloc-WOULD-FAIL");
+    return;
+  }
   reader::Framebuffer portrait(panelH, panelW);
   reader::Framebuffer landscape(panelW, panelH);
-  reader::Framebuffer bwLandscape(panelW, panelH);
   mark("frames-allocated");
-
-  // Measured, not asserted: the plan claims ~157 KB for three frames against
-  // ~313 KB for a 2 bpp double-buffer, and this is the line that proves it.
-  Serial.printf("[info] three frames live: %d + %d + %d bytes; free heap %u, largest block %u\n",
-                portrait.sizeBytes(), landscape.sizeBytes(), bwLandscape.sizeBytes(),
-                (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
-  Serial.flush();
 
   // A short buffer would make setFramebuffer's memcpy read past the end, and a
   // zero-length one means the panel geometry came back wrong.
@@ -175,8 +181,8 @@ void setup() {
   // 1. The B/W base frame the panel paints first. displayGrayscaleBase() takes
   //    no buffer argument — it drives the driver's own frameBuffer — so
   //    setFramebuffer() (a memcpy) has to land the frame there first.
-  paint(reader::Plane::Bw, bwLandscape);
-  display.setFramebuffer(bwLandscape.data());
+  paint(reader::Plane::Bw, landscape);
+  display.setFramebuffer(landscape.data());
   display.displayGrayscaleBase(EInkDisplay::HALF_REFRESH);
   mark("gray-base-displayed");
 
@@ -187,9 +193,9 @@ void setup() {
   mark("gray-preconditioned");
 
   // 3. The two bit-planes. Both copies go straight out over SPI into controller
-  //    RAM and retain no pointer, so a single landscape buffer serves both —
-  //    that is what keeps this to three frames. LSB must go first: the MSB copy
-  //    is dropped unless the driver has already seen a valid LSB plane.
+  //    RAM and retain no pointer, so one landscape buffer serves both — and the
+  //    base frame above, which the driver has already memcpy'd. LSB must go
+  //    first: the MSB copy is dropped unless the driver has seen a valid LSB.
   paint(reader::Plane::Lsb, landscape);
   display.copyGrayscaleLsbBuffers(landscape.data());
   paint(reader::Plane::Msb, landscape);
@@ -201,7 +207,9 @@ void setup() {
   //    B/W baseline so the next ordinary refresh is differentially sane.
   display.displayGrayBuffer();
   mark("gray-displayed");
-  display.cleanupGrayscaleBuffers(bwLandscape.data());
+  // Re-render the B/W pass rather than having kept a third frame alive for it.
+  paint(reader::Plane::Bw, landscape);
+  display.cleanupGrayscaleBuffers(landscape.data());
   mark("refresh-complete");
 }
 
