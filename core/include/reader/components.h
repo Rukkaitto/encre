@@ -13,29 +13,48 @@ class Framebuffer;
 // PPI, so a margin should be the same physical size on both. What must adapt is
 // the canvas width, which every primitive reads from the framebuffer.
 inline constexpr int kMargin = 24;
-// Sized for the pt-at-150dpi type ramp, not the earlier px one: the chrome faces
-// roughly doubled (Label 13px -> 23px, Meta 12px -> 21px), so every box that
-// holds a line of text had to grow with them or the text would fill it edge to
-// edge. The CONTINUE block is 72 tall and a menu row 80 because the boards say
-// so in so many words (`height: 72px`, `height: 80px`).
-//
-// The other two are inferred, and measuring the boards says both inferences are
-// a little off. The header band declares no height at all: it is `padding: 18px
-// 24px 14px` around its tallest flex item plus a 2px rule, and Chrome renders
-// that 66 tall, not 72 -- so content below it currently starts 6px low on every
-// screen. `make compare` shows it directly: the band's rule lands at y=64 on
-// the board and y=70 in the firmware, and the whole stats column follows it
-// down. The hint bar's 20 + 27 + 16 + 1 does come to 64, but that padding is
-// asymmetric where the primitives centre their content symmetrically, which
-// leaves the bar's text 2px high.
-//
-// Both are left alone here on purpose: correcting them moves every screen, and
-// that is a layout change to review on its own rather than a rider on the
-// centring and tracking fixes these primitives just had. They are the largest
-// remaining deviation from the boards on Home.
-inline constexpr int kBandH = 72;
+// A menu row is 80 tall because the board says so in so many words
+// (`height: 80px`), and the CONTINUE block 72 for the same reason.
 inline constexpr int kRowH = 80;
-inline constexpr int kHintBarH = 64;
+
+// --- The two bars that state a padding, not a height ------------------------
+//
+// The header band and the hint bar are the only chrome the boards size
+// *implicitly*: neither declares a height. Each is padding around its tallest
+// flex item plus a rule, and the browser adds them up. Both used to be pinned
+// here as a single integer, and both integers were wrong -- the band by 6px,
+// which put every screen's content 6px low, and the hint bar's text by 3px,
+// because 20 + 27 + 16 + 1 happens to come to the pinned 64 while the padding
+// is asymmetric and the primitive centred its content symmetrically.
+//
+// A pinned sum cannot be right for more than one type size, and the ramp has
+// six roles. So the padding is what is stated here -- which is what the boards
+// state -- and the height is derived from it plus the content, the way Chrome
+// derives it. That makes a bar's height depend on the type role it draws, which
+// is the correct dependency: a screen whose band label is set larger gets a
+// taller band, with no constant to remember to change.
+//
+// Both values are the boards' own, and they agree across every screen that has
+// one: `padding: 18px 24px 14px 24px; border-bottom: 2px solid` on all 27
+// screen header bands, `padding: 20px 24px 16px 24px; border-top: 1px solid` on
+// 29 of the 30 hint bars (the exception is DirectionTerminal, an exploration
+// board, not a V1 screen).
+//
+// The 8 boards that state something else for a top rule -- ReaderMenu,
+// DeleteConfirm, GoToPage and the other overlays, all `padding: 21px 20px` --
+// are not header bands: they are the caption of a modal panel, inset from the
+// panel's own edge rather than the screen margin. When those screens are built
+// they want their own primitive, not a widened kBandPadTop.
+inline constexpr int kBandPadTop = 18;
+inline constexpr int kBandPadBottom = 14;
+inline constexpr int kBandRuleH = 2;
+inline constexpr int kHintPadTop = 20;
+inline constexpr int kHintPadBottom = 16;
+inline constexpr int kHintRuleH = 1;
+// `gap: 3px` between a hint's label and its hold line -- the boards set the
+// two-line slot up as a flex column with that gap, so the second line is not
+// simply the next line box down.
+inline constexpr int kHintHoldGap = 3;
 
 // Letter-spacing. The boards state it per run, in em, and the runs do not agree:
 // 0.22em on the band's label, 0.18em on a menu row's, 0.20em on an action
@@ -75,6 +94,30 @@ struct Hint {
   std::string_view label;
   std::string_view hold;
 };
+
+// --- Derived heights -------------------------------------------------------
+//
+// The two bars' heights, computed the way the boards compute them: the padding
+// above, the tallest thing inside, the padding below, and the rule. Both are
+// exposed rather than left private to the draw calls because a caller sometimes
+// has to know a bar's height *before* it draws it -- the hint bar draws itself
+// at the bottom of the framebuffer, so a screen stacking menu rows above it
+// needs the height to find their top edge. Asking the primitive is how that
+// caller stays correct when the bar's content changes; a `kHintBarH` constant
+// alongside it would just be the pinned number again under another name.
+
+// Padding, the tallest of the band's own items, padding, rule. The items are a
+// label, a value and the battery glyph, so the band tracks whichever of those
+// roles is tallest -- which is the Value face on today's ramp (32 against the
+// Label's 29 and the battery's 21), and would be the label on a screen that set
+// its band label larger.
+int headerBandHeight(const FontSet& fonts);
+
+// The same, for the hint bar. A slot is one line of Meta, or two with the
+// board's `gap: 3px` when it carries a hold line, and at least as tall as its
+// own mark; the bar takes the tallest slot. A bar with a hold line is therefore
+// taller than one without, exactly as the boards render it.
+int hintBarHeight(const FontSet& fonts, const Hint hints[4]);
 
 // Each returns the height it consumed, so callers stack without recomputing.
 // The band's value is drawn as one right-aligned group with the battery glyph.

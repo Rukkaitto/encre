@@ -39,6 +39,7 @@ void drawIcon(Framebuffer& fb, const Icon& icon, int x, int y, Ink ink = Ink::Bl
 // design changes. Ask the Icon. tools/iconc.py names the source board for each.
 namespace icons {
 extern const Icon kBack;     // arrow curving left: the Back button
+extern const Icon kForward;  // long arrow: an action block's proceed mark
 extern const Icon kDot;      // filled circle: the Confirm button
 extern const Icon kUp;       // stem with a chevron head, pointing up
 extern const Icon kDown;     // the same, pointing down

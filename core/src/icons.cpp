@@ -41,6 +41,7 @@ void drawIcon(Framebuffer& fb, const Icon& icon, int x, int y, Ink ink, Plane pl
 // to change an icon, edit its entry in tools/iconc.py and run `make icons`.
 namespace icons {
 const Icon kBack{data::kBackW, data::kBackH, 2, data::kBackBits};
+const Icon kForward{data::kForwardW, data::kForwardH, 2, data::kForwardBits};
 const Icon kDot{data::kDotW, data::kDotH, 2, data::kDotBits};
 const Icon kUp{data::kUpW, data::kUpH, 2, data::kUpBits};
 const Icon kDown{data::kDownW, data::kDownH, 2, data::kDownBits};

@@ -77,6 +77,19 @@ ICONS = {
         "source": "design/Library.dc.html",
         "match": "M6 4L2 8l4 4",
     },
+    # kBack's counterpart, and the only mark in the set that is not a hint-bar
+    # button: it is the disclosure on an action block (Main's CONTINUE, and every
+    # primary action on the flow boards). A long arrow with a shaft, 32x25 --
+    # deliberately not the 25x25 chevron a menu row uses, which the firmware drew
+    # here for want of this icon. The board authors it in white for the inverted
+    # block; extract() re-colours it, since colour is Ink's business, not an
+    # icon's.
+    "forward": {
+        "symbol": "kForward",
+        "note": "long arrow: an action block's proceed mark",
+        "source": "design/Main.dc.html",
+        "match": "M1 7h15M11 1l6 6-6 6",
+    },
     "dot": {
         "symbol": "kDot",
         "note": "filled circle: the Confirm button",

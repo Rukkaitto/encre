@@ -58,6 +58,57 @@ TEST_CASE("the header band right-aligns its value on any canvas width") {
   }
 }
 
+TEST_CASE("the header band's height follows the type role it draws") {
+  Fixture f;
+  const reader::Font& lf = f.fonts[reader::Role::Label];
+  const reader::Font& vf = f.fonts[reader::Role::Value];
+  const int chrome = reader::kBandPadTop + reader::kBandPadBottom + reader::kBandRuleH;
+
+  // The board declares no height for the band: `padding: 18px 24px 14px` around
+  // its tallest flex item plus a 2px rule. On today's ramp the tallest item is
+  // the value's 32px line box (the label's is 29, the battery 21), and Chrome
+  // renders the band 66 tall -- not the 72 that used to be pinned here, which
+  // put every screen's content 6px low.
+  const int tallest = vf.lineHeight() > lf.lineHeight() ? vf.lineHeight() : lf.lineHeight();
+  CHECK(reader::headerBandHeight(f.fonts) == chrome + tallest);
+  CHECK(reader::headerBandHeight(f.fonts) == 66);
+
+  // ...and it is genuinely derived, not a coincidence at one size. Give the
+  // band's label role a bigger face and the band gets taller by exactly the
+  // difference in line box, with nothing else to update. This is the property a
+  // pinned constant cannot have, and the reason six unbuilt screens can set
+  // their band label to whatever the board says.
+  reader::FontSet bigger;
+  bigger.load(reader::Role::Meta, f.a.data(), f.a.size());
+  bigger.load(reader::Role::Label, f.e.data(), f.e.size());  // Title's 20pt face
+  bigger.load(reader::Role::Value, f.c.data(), f.c.size());
+  bigger.load(reader::Role::Body, f.d.data(), f.d.size());
+  bigger.load(reader::Role::Title, f.e.data(), f.e.size());
+  bigger.load(reader::Role::Display, f.g.data(), f.g.size());
+  REQUIRE(bigger.ready());
+  const int bigLabel = bigger[reader::Role::Label].lineHeight();
+  REQUIRE(bigLabel > tallest);
+  CHECK(reader::headerBandHeight(bigger) == chrome + bigLabel);
+  CHECK(reader::headerBandHeight(bigger) > reader::headerBandHeight(f.fonts));
+
+  // The draw call reports that height and puts its rule at the bottom of it, so
+  // a caller stacking below the band lands where the board's next block starts.
+  for (const reader::FontSet* set : {&f.fonts, &bigger}) {
+    reader::Framebuffer fb(480, 200);
+    const int h = reader::drawHeaderBand(fb, *set, "NOW READING", "87%");
+    CHECK(h == reader::headerBandHeight(*set));
+    for (int y = h - reader::kBandRuleH; y < h; ++y) {
+      CHECK_FALSE(fb.getPixel(0, y));         // rule, full bleed
+      CHECK_FALSE(fb.getPixel(479, y));
+    }
+    CHECK(fb.getPixel(0, h));                 // and nothing below it
+    CHECK(fb.getPixel(479, h));
+    // The rule is the band's own bottom edge: the row above the padding-derived
+    // content box must be clear of it on the left margin, where no glyph sits.
+    CHECK(fb.getPixel(0, reader::kBandPadTop));
+  }
+}
+
 TEST_CASE("a focused row inverts: black field, white text") {
   Fixture f;
   reader::Framebuffer fb(480, 120);
@@ -169,6 +220,20 @@ static Rows inkRows(const reader::Framebuffer& fb, int barTop, int x0, int x1) {
   return r;
 }
 
+// Inked rows of a horizontal band, restricted to columns [x0, x1).
+static Rows inkRowsIn(const reader::Framebuffer& fb, int y0, int y1, int x0, int x1) {
+  Rows r;
+  for (int y = y0; y < y1; ++y)
+    for (int x = x0; x < x1; ++x)
+      if (!fb.getPixel(x, y)) {
+        if (y < r.top) r.top = y;
+        if (y > r.bottom) r.bottom = y;
+      }
+  return r;
+}
+// Doubled, so a half-pixel centre stays exact instead of rounding.
+static int centre2(const Rows& r) { return r.top + r.bottom; }
+
 TEST_CASE("a hold line stays inside the bar wherever its slot sits") {
   Fixture f;
   // The real bars carry the hold on the Confirm slot, not the first one, so the
@@ -196,27 +261,120 @@ TEST_CASE("a hold line stays inside the bar wherever its slot sits") {
   }
 }
 
-TEST_CASE("a hold line in one slot does not move the other slots") {
+TEST_CASE("a hold line in one slot does not pull the other slots off centre") {
   Fixture f;
+  // A hold line makes its own slot taller, and a taller slot makes the bar
+  // taller -- the boards size a hint bar from its content, so Library's bar is
+  // genuinely taller than Home's. So this cannot assert that the other slots
+  // land on the same *screen row*; what it asserts is the invariant that
+  // survives the bar growing: every single-line slot stays on the content box's
+  // centre line, wherever that line has moved to.
+  //
+  // The centre line is the *content box's*, not the bar's: the board's padding
+  // is 20 above and 16 below, so the two are 2px apart. Centring in the bar is
+  // what put every hint label 3px high.
   reader::Hint plain[4] = {{&reader::icons::kBack, "BACK", ""},
                            {&reader::icons::kDot, "OPEN", ""},
                            {&reader::icons::kUp, "UP", ""},
                            {&reader::icons::kDown, "DOWN", ""}};
-  reader::Framebuffer noHold(480, 120);
-  int ax[4] = {};
-  const int barH = reader::drawHintBar(noHold, f.fonts, plain, ax);
-  const int barTop = noHold.height() - barH;
-  const Rows before = inkRows(noHold, barTop, ax[2], ax[3]);
-
   reader::Hint withHold[4] = {plain[0], plain[1], plain[2], plain[3]};
   withHold[0].hold = "HOLD";
-  reader::Framebuffer held(480, 120);
-  int bx[4] = {};
-  reader::drawHintBar(held, f.fonts, withHold, bx);
-  const Rows after = inkRows(held, barTop, bx[2], bx[3]);
 
-  CHECK(after.top == before.top);
-  CHECK(after.bottom == before.bottom);
+  // Doubled offset of slot 2's ink from the content box's centre line.
+  auto slot2Offset2 = [&](const reader::Hint hints[4]) {
+    reader::Framebuffer fb(480, 160);
+    int x[4] = {};
+    const int barH = reader::drawHintBar(fb, f.fonts, hints, x);
+    const int barTop = fb.height() - barH;
+    const int contentTop = barTop + reader::kHintRuleH + reader::kHintPadTop;
+    const int contentH = barH - reader::kHintRuleH - reader::kHintPadTop - reader::kHintPadBottom;
+    const Rows ink = inkRows(fb, barTop, x[2], x[3]);
+    REQUIRE(ink.bottom > 0);
+    return centre2(ink) - (2 * contentTop + contentH);
+  };
+
+  const int before = slot2Offset2(plain);
+  const int after = slot2Offset2(withHold);
+  CHECK(after == before);
+  // And that shared offset really is "on the centre line": caps have no
+  // descender, so the ink sits a hair above the box's middle, never 3px below
+  // it as symmetric centring in the whole bar would leave it.
+  CHECK(before <= 0);
+  CHECK(before >= -3);
+}
+
+TEST_CASE("the hint bar's height is the board's padding plus its own content") {
+  Fixture f;
+  const reader::Hint plain[4] = {{&reader::icons::kBook, "READ", ""},
+                                 {&reader::icons::kDot, "SELECT", ""},
+                                 {&reader::icons::kUp, "UP", ""},
+                                 {&reader::icons::kDown, "DOWN", ""}};
+  const int lineH = f.fonts[reader::Role::Meta].lineHeight();
+  const int chrome = reader::kHintRuleH + reader::kHintPadTop + reader::kHintPadBottom;
+
+  // Home's bar: `padding: 20px 24px 16px` + a 1px rule around one 27px line box
+  // of Meta, which is what Chrome renders 64 tall. The marks are 25px, shorter
+  // than the line, so they do not raise it.
+  CHECK(reader::hintBarHeight(f.fonts, plain) == chrome + lineH);
+  CHECK(reader::hintBarHeight(f.fonts, plain) == 64);
+
+  // A hold line is a second line box with the board's `gap: 3px`, and the bar
+  // grows by exactly that -- it is not a fixed-height bar that a second line
+  // has to be squeezed into.
+  reader::Hint held[4] = {plain[0], plain[1], plain[2], plain[3]};
+  held[1].hold = "HOLD - ACTIONS";
+  CHECK(reader::hintBarHeight(f.fonts, held) == chrome + 2 * lineH + reader::kHintHoldGap);
+  CHECK(reader::hintBarHeight(f.fonts, held) > reader::hintBarHeight(f.fonts, plain));
+
+  // A mark taller than the line box raises the bar too: the slot's first line is
+  // a flex row of the mark and the label, so it is as tall as the taller of the
+  // two. kFolder (46x39) is not a hint mark today, which is exactly why it
+  // serves here -- the rule must not depend on today's 25px set.
+  reader::Hint big[4] = {plain[0], plain[1], plain[2], plain[3]};
+  big[3].icon = &reader::icons::kFolder;
+  CHECK(reader::hintBarHeight(f.fonts, big) == chrome + reader::icons::kFolder.h);
+}
+
+TEST_CASE("the hint bar honours the board's asymmetric padding") {
+  Fixture f;
+  // `padding: 20px 24px 16px 24px`. The primitive used to centre its content in
+  // the bar, which is only correct for symmetric padding and left every hint
+  // label on every screen 3px high. What follows measures that 4px asymmetry
+  // rather than the absolute row, so it holds on either panel geometry.
+  for (int width : {480, 528}) {
+    const reader::Hint hints[4] = {{&reader::icons::kBook, "READ", ""},
+                                   {&reader::icons::kDot, "SELECT", ""},
+                                   {&reader::icons::kUp, "UP", ""},
+                                   {&reader::icons::kDown, "DOWN", ""}};
+    reader::Framebuffer fb(width, 160);
+    int slotX[4] = {};
+    const int barH = reader::drawHintBar(fb, f.fonts, hints, slotX);
+    const int barTop = fb.height() - barH;
+    const int contentTop = barTop + reader::kHintRuleH + reader::kHintPadTop;
+    const int contentH = barH - reader::kHintRuleH - reader::kHintPadTop - reader::kHintPadBottom;
+
+    // The label's own ink, clear of its mark.
+    const int textX = slotX[0] + hints[0].icon->w + reader::kHintIconGap;
+    const Rows text = inkRowsIn(fb, barTop + 1, fb.height(), textX, slotX[1]);
+    REQUIRE(text.bottom > 0);
+
+    // Centred in the content box: an all-caps run has no descender, so its ink
+    // sits a hair above the box's middle. Never below it.
+    const int contentCentre2 = 2 * contentTop + contentH;
+    CHECK(centre2(text) <= contentCentre2);
+    CHECK(centre2(text) >= contentCentre2 - 3);
+
+    // And therefore *below* the bar's own centre line, by the 2px the padding
+    // is heavier on top. This is the assertion symmetric centring cannot pass:
+    // it put this ink on the bar's centre line, 3px high of the board.
+    const int barCentre2 = 2 * barTop + barH;
+    CHECK(centre2(text) >= barCentre2 + 2);
+
+    // The line box itself is where the padding puts it, so nothing is clipped
+    // against either edge and the bottom padding is really 16.
+    CHECK(text.top >= contentTop);
+    CHECK(text.bottom < contentTop + contentH);
+  }
 }
 
 TEST_CASE("structural drawing is identical in every plane") {
@@ -252,8 +410,9 @@ TEST_CASE("structural drawing is identical in every plane") {
     const reader::Framebuffer bw = render(reader::Plane::Bw);
     const reader::Framebuffer lsb = render(reader::Plane::Lsb);
     const reader::Framebuffer msb = render(reader::Plane::Msb);
+    const int bandH = reader::headerBandHeight(f.fonts);
     for (int x = 0; x < 480; ++x)
-      for (int y : {reader::kBandH - 2, reader::kBandH - 1}) {
+      for (int y : {bandH - 2, bandH - 1}) {
         CHECK(bw.getPixel(x, y) == lsb.getPixel(x, y));
         CHECK(bw.getPixel(x, y) == msb.getPixel(x, y));
       }
@@ -262,12 +421,12 @@ TEST_CASE("structural drawing is identical in every plane") {
   // drawHintBar: the top rule, drawn before any icon or label, is furniture
   // too.
   {
+    const reader::Hint hints[4] = {{&reader::icons::kBack, "BACK", ""},
+                                   {&reader::icons::kDot, "OPEN", ""},
+                                   {&reader::icons::kUp, "UP", ""},
+                                   {&reader::icons::kDown, "DOWN", ""}};
     auto render = [&](reader::Plane plane) {
       reader::Framebuffer fb(480, 120);
-      const reader::Hint hints[4] = {{&reader::icons::kBack, "BACK", ""},
-                                     {&reader::icons::kDot, "OPEN", ""},
-                                     {&reader::icons::kUp, "UP", ""},
-                                     {&reader::icons::kDown, "DOWN", ""}};
       int slotX[4] = {};
       reader::drawHintBar(fb, f.fonts, hints, slotX, plane);
       return fb;
@@ -275,7 +434,7 @@ TEST_CASE("structural drawing is identical in every plane") {
     const reader::Framebuffer bw = render(reader::Plane::Bw);
     const reader::Framebuffer lsb = render(reader::Plane::Lsb);
     const reader::Framebuffer msb = render(reader::Plane::Msb);
-    const int top = bw.height() - reader::kHintBarH;
+    const int top = bw.height() - reader::hintBarHeight(f.fonts, hints);
     for (int x = 0; x < 480; ++x) {
       CHECK(bw.getPixel(x, top) == lsb.getPixel(x, top));
       CHECK(bw.getPixel(x, top) == msb.getPixel(x, top));
@@ -284,20 +443,6 @@ TEST_CASE("structural drawing is identical in every plane") {
 }
 
 // --- Vertical centring, and icons aligned to it -----------------------------
-
-// Inked rows of a horizontal band, restricted to columns [x0, x1).
-static Rows inkRowsIn(const reader::Framebuffer& fb, int y0, int y1, int x0, int x1) {
-  Rows r;
-  for (int y = y0; y < y1; ++y)
-    for (int x = x0; x < x1; ++x)
-      if (!fb.getPixel(x, y)) {
-        if (y < r.top) r.top = y;
-        if (y > r.bottom) r.bottom = y;
-      }
-  return r;
-}
-// Doubled, so a half-pixel centre stays exact instead of rounding.
-static int centre2(const Rows& r) { return r.top + r.bottom; }
 
 // How far an icon's own ink sits from the centre of its own box, doubled.
 //
@@ -395,8 +540,9 @@ TEST_CASE("the header band's battery is aligned with its percentage") {
   reader::drawHeaderBand(fb, f.fonts, "NOW READING", "87%");
   const int iconX = width - reader::kMargin - reader::icons::kBattery.w;
   // Above the 2px rule, so the full-bleed rule cannot dominate either band.
-  const Rows bat = inkRowsIn(fb, 0, reader::kBandH - 2, iconX, width);
-  const Rows value = inkRowsIn(fb, 0, reader::kBandH - 2, width / 2, iconX);
+  const int aboveRule = reader::headerBandHeight(f.fonts) - reader::kBandRuleH;
+  const Rows bat = inkRowsIn(fb, 0, aboveRule, iconX, width);
+  const Rows value = inkRowsIn(fb, 0, aboveRule, width / 2, iconX);
   REQUIRE(bat.bottom > 0);
   REQUIRE(value.bottom > 0);
   // The battery is 21px tall against a 25px mark elsewhere in the same design,

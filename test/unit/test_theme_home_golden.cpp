@@ -4,8 +4,10 @@
 
 #include "doctest.h"
 #include "golden.h"
+#include "reader/components.h"
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
+#include "reader/icons.h"
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
 
@@ -31,23 +33,32 @@ static reader::HomeViewModel sampleHome() {
   return vm;
 }
 
-TEST_CASE("QuietTheme renders Home to golden on both panel geometries") {
-  const std::string dir = std::string(ASSETS_DIR) + "/built/";
-  auto a = slurp(dir + "spacegrotesk_400_10pt.rfnt");
-  auto b = slurp(dir + "spacegrotesk_500_11pt.rfnt");
-  auto c = slurp(dir + "spacegrotesk_700_12pt.rfnt");
-  auto d = slurp(dir + "spacegrotesk_500_14pt.rfnt");
-  auto e = slurp(dir + "spacegrotesk_700_20pt.rfnt");
-  auto g = slurp(dir + "spacegrotesk_700_32pt.rfnt");
+// The chrome ramp, loaded from the built assets. Blobs are members because a
+// Font is a zero-copy view over one.
+struct Ramp {
+  std::vector<uint8_t> a, b, c, d, e, g;
   reader::FontSet fonts;
-  fonts.load(reader::Role::Meta, a.data(), a.size());
-  fonts.load(reader::Role::Label, b.data(), b.size());
-  fonts.load(reader::Role::Value, c.data(), c.size());
-  fonts.load(reader::Role::Body, d.data(), d.size());
-  fonts.load(reader::Role::Title, e.data(), e.size());
-  fonts.load(reader::Role::Display, g.data(), g.size());
-  REQUIRE(fonts.ready());
+  Ramp() {
+    const std::string dir = std::string(ASSETS_DIR) + "/built/";
+    a = slurp(dir + "spacegrotesk_400_10pt.rfnt");
+    b = slurp(dir + "spacegrotesk_500_11pt.rfnt");
+    c = slurp(dir + "spacegrotesk_700_12pt.rfnt");
+    d = slurp(dir + "spacegrotesk_500_14pt.rfnt");
+    e = slurp(dir + "spacegrotesk_700_20pt.rfnt");
+    g = slurp(dir + "spacegrotesk_700_32pt.rfnt");
+    fonts.load(reader::Role::Meta, a.data(), a.size());
+    fonts.load(reader::Role::Label, b.data(), b.size());
+    fonts.load(reader::Role::Value, c.data(), c.size());
+    fonts.load(reader::Role::Body, d.data(), d.size());
+    fonts.load(reader::Role::Title, e.data(), e.size());
+    fonts.load(reader::Role::Display, g.data(), g.size());
+    REQUIRE(fonts.ready());
+  }
+};
 
+TEST_CASE("QuietTheme renders Home to golden on both panel geometries") {
+  Ramp ramp;
+  reader::FontSet& fonts = ramp.fonts;
   reader::QuietTheme theme;
 
   // Home goes through the grayscale path: three passes, and the golden holds
@@ -64,4 +75,68 @@ TEST_CASE("QuietTheme renders Home to golden on both panel geometries") {
 
   SUBCASE("X4 480x800") { renderThree(480, 800, "home_quiet"); }
   SUBCASE("X3 528x792") { renderThree(528, 792, "home_quiet_x3"); }
+}
+
+TEST_CASE("Home's action block carries the long arrow, not the row chevron") {
+  // design/Main.dc.html:63 puts a 32x25 shafted arrow in the CONTINUE block;
+  // :74 puts a 25x25 chevron on the SETTINGS row. They are different marks for
+  // different jobs, and the block drew the chevron. Asserted on the render
+  // rather than on the drawIcon argument, because what was wrong was the pixels.
+  Ramp ramp;
+  reader::QuietTheme theme;
+  for (int width : {480, 528}) {
+    const int height = width == 480 ? 800 : 792;
+    reader::Framebuffer fb(width, height);
+    reader::HomeViewModel vm = sampleHome();
+    theme.renderHome(fb, ramp.fonts, vm, reader::Plane::Bw);
+
+    // Find the block: the only run of rows filled solid black across the usable
+    // width. CONTINUE is focused in this view model, so the mark is knocked out
+    // in white and the block's own field is the surrounding ink.
+    // The longest unbroken run of ink in a column just inside the left margin:
+    // the block's field is solid there (its own `padding: 0 20px` keeps the
+    // label clear of it), while the cover's dither and the progress bar's fill
+    // are only a few rows deep.
+    const int barW = width - 2 * reader::kMargin;
+    const int probeX = reader::kMargin + 5;
+    int blockTop = -1, blockBot = -2, runTop = -1;
+    for (int y = 0; y <= height; ++y) {
+      const bool solid = y < height && !fb.getPixel(probeX, y);
+      if (solid && runTop < 0) runTop = y;
+      if (!solid && runTop >= 0) {
+        if (y - runTop > blockBot - blockTop) {
+          blockTop = runTop;
+          blockBot = y - 1;
+        }
+        runTop = -1;
+      }
+    }
+    REQUIRE(blockBot - blockTop >= 40);
+
+    // The knocked-out mark, in the block's right-hand end.
+    const int right = reader::kMargin + barW;
+    int x0 = right, x1 = -1, y0 = height, y1 = -1;
+    for (int y = blockTop; y <= blockBot; ++y)
+      for (int x = right - 120; x < right; ++x)
+        if (fb.getPixel(x, y)) {
+          if (x < x0) x0 = x;
+          if (x > x1) x1 = x;
+          if (y < y0) y0 = y;
+          if (y > y1) y1 = y;
+        }
+    REQUIRE(x1 > 0);
+    // 32 wide, not 25: the chevron cannot span this.
+    CHECK(x1 - x0 + 1 > reader::icons::kChevron.w);
+    CHECK(x1 - x0 + 1 <= reader::icons::kForward.w);
+    // And it has a shaft: its middle row is inked nearly edge to edge, where a
+    // chevron's carries only its vertex.
+    int mid = 0;
+    for (int x = x0; x <= x1; ++x)
+      if (fb.getPixel(x, (y0 + y1) / 2)) ++mid;
+    CHECK(mid >= (x1 - x0 + 1) * 3 / 4);
+    // Right-aligned on the block's own `padding: 0 20px`, measured off the mark
+    // the board actually puts there.
+    CHECK(x1 <= right - 20);
+    CHECK(x1 >= right - 20 - 3);
+  }
 }

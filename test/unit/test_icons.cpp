@@ -5,12 +5,13 @@
 #include "reader/icons.h"
 
 namespace {
-// Named so a failure says which icon, not just "one of eight".
+// Named so a failure says which icon, not just "one of nine".
 struct Named {
   const char* name;
   const reader::Icon* icon;
 };
 const Named kAll[] = {{"kBack", &reader::icons::kBack},
+                      {"kForward", &reader::icons::kForward},
                       {"kDot", &reader::icons::kDot},
                       {"kUp", &reader::icons::kUp},
                       {"kDown", &reader::icons::kDown},
@@ -72,6 +73,33 @@ TEST_CASE("icons are the sizes the design boards draw them at") {
   CHECK(reader::icons::kFolder.h == 39);
   CHECK(reader::icons::kBattery.w == 38);
   CHECK(reader::icons::kBattery.h == 21);
+  // The action block's mark is the one non-square mark in the button set: the
+  // board draws it 32x25 (design/Main.dc.html:63), wider than the 25x25 menu-row
+  // chevron it is not.
+  CHECK(reader::icons::kForward.w == 32);
+  CHECK(reader::icons::kForward.h == 25);
+}
+
+TEST_CASE("the action block's mark is a shafted arrow, not a disclosure chevron") {
+  // The firmware drew kChevron in the CONTINUE block for want of this icon, and
+  // no size or centring assertion notices a mark that is simply the wrong mark.
+  // What separates the two is the shaft: `M1 7h15` runs almost the full width of
+  // the arrow's viewBox, so the arrow's middle row is inked nearly edge to edge
+  // where the chevron's carries only its vertex. Measured on the bitmap, since
+  // that is what the panel shows.
+  auto midRowInk = [](const reader::Icon& icon) {
+    int n = 0;
+    for (int x = 0; x < icon.w; ++x)
+      if (reader::coverage(icon, x, icon.h / 2) > 0) ++n;
+    return n;
+  };
+  const reader::Icon& arrow = reader::icons::kForward;
+  const reader::Icon& chevron = reader::icons::kChevron;
+  CHECK(midRowInk(arrow) >= arrow.w * 3 / 4);
+  CHECK(midRowInk(chevron) <= chevron.w / 4);
+  // And it is wider than it is tall, which the chevron and every hint mark is
+  // not -- so a caller that right-aligns it cannot reuse a square mark's width.
+  CHECK(arrow.w > arrow.h);
 }
 
 TEST_CASE("every mark that can appear in a hint bar shares one box") {

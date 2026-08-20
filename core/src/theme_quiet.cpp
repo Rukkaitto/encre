@@ -161,11 +161,26 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   // -- there is nothing about a 72px action block that makes it a special case.
   const int cbase = baselineIn(label, y, kBlockH);
   drawText(fb, label, kMargin + kBlockPadX, cbase, "CONTINUE", cink, kBlockLabelTracking, plane);
-  drawIcon(fb, icons::kChevron, kMargin + barW - kBlockPadX - icons::kChevron.w,
-           iconTopFor(label, cbase, icons::kChevron.h), cink, plane);
+  // kForward, not kChevron: the board draws a 32x25 long arrow with a shaft here
+  // (`M1 7h15M11 1l6 6-6 6`), and the 25x25 chevron this used to draw is the
+  // *menu row's* disclosure -- a different mark for a different job. An action
+  // block proceeds; a row discloses.
+  const Icon& mark = icons::kForward;
+  drawIcon(fb, mark, kMargin + barW - kBlockPadX - mark.w, iconTopFor(label, cbase, mark.h), cink,
+           plane);
 
-  // Menu rows sit above the hint bar.
-  const int menuTop = fb.height() - kHintBarH - static_cast<int>(vm.menu.size()) * kRowH;
+  const Hint hints[4] = {{&icons::kBook, vm.hints[0], ""},
+                         {&icons::kDot, vm.hints[1], ""},
+                         {&icons::kUp, vm.hints[2], ""},
+                         {&icons::kDown, vm.hints[3], ""}};
+
+  // Menu rows sit above the hint bar, so the bar's height decides where they
+  // start. That height is the bar's to compute -- from its own padding and its
+  // own content -- and asking it is what keeps this stacking correct when a bar
+  // gains a hold line or a screen sets its hints in a larger role. A constant
+  // here would be a second, private copy of the bar's box model.
+  const int menuTop =
+      fb.height() - hintBarHeight(fonts, hints) - static_cast<int>(vm.menu.size()) * kRowH;
   for (size_t i = 0; i < vm.menu.size(); ++i) {
     // A row states a quantity or discloses a screen, never both: the design gives
     // LIBRARY its count and SETTINGS a chevron. Keying the mark on an absent
@@ -177,10 +192,6 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
             plane);
   }
 
-  const Hint hints[4] = {{&icons::kBook, vm.hints[0], ""},
-                         {&icons::kDot, vm.hints[1], ""},
-                         {&icons::kUp, vm.hints[2], ""},
-                         {&icons::kDown, vm.hints[3], ""}};
   int slots[4] = {};
   drawHintBar(fb, fonts, hints, slots, plane);
 }
