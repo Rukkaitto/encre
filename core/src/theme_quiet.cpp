@@ -133,6 +133,10 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   // wins, but keying off whichever is taller keeps a short view model (no
   // chapter label, a one-digit percentage) from letting the progress bar ride up
   // over the cover's bottom edge.
+  // The board gives the stats column `padding: 2px 0` -- both edges, not just the
+  // top -- and that column is the taller of the two, so it sets the section's
+  // height. Omitting the bottom padding lands everything below it 2px high.
+  ry += kColPadTop;
   const int coverBottom = y + kCoverH;
   y = (ry > coverBottom ? ry : coverBottom) + kBlockGap;
 

@@ -15,7 +15,14 @@ class Framebuffer;
 inline constexpr int kMargin = 24;
 // A menu row is 80 tall because the board says so in so many words
 // (`height: 80px`), and the CONTINUE block 72 for the same reason.
-inline constexpr int kRowH = 80;
+// A menu row is the board's content box plus its own top border. The boards say
+// `height: 80px` with `border-top: 1px`, and box-sizing is content-box there, so
+// the rendered box is 81 -- the same pinned-number-ignoring-the-border mistake
+// the two bars had. Every menu screen (Library, Settings, Wi-Fi settings...)
+// stacks these, so a 1px error compounds per row.
+inline constexpr int kRowContentH = 80;
+inline constexpr int kRowRuleH = 1;
+inline constexpr int kRowH = kRowContentH + kRowRuleH;
 
 // --- The two bars that state a padding, not a height ------------------------
 //

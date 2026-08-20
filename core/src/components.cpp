@@ -89,8 +89,9 @@ int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label
     fb.fillRect(0, y, fb.width(), kRowH, false);
   else
     fb.fillRect(0, y, fb.width(), 1, false);  // hairline above
-  const int labelBase = baselineIn(lf, y, kRowH);
-  const int valueBase = baselineIn(vf, y, kRowH);
+  // Content is centred in the content box, below the row's own rule.
+  const int labelBase = baselineIn(lf, y + kRowRuleH, kRowContentH);
+  const int valueBase = baselineIn(vf, y + kRowRuleH, kRowContentH);
   drawText(fb, lf, kMargin, labelBase, label, ink, kRowLabelTracking, plane);
   // A row carries a value, a trailing mark, or neither -- the design has one of
   // each (LIBRARY's count, SETTINGS' chevron). Both are right-aligned on the
