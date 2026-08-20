@@ -39,8 +39,13 @@ void setup() {
   const int panelW = display.getDisplayWidth();    // 800 on X4
   const int panelH = display.getDisplayHeight();   // 480 on X4
   reader::Framebuffer portrait(panelH, panelW);    // 480 x 800
-  reader::Framebuffer landscape(panelW, panelH);   // 800 x 480
   theme.renderHome(portrait, vm);
+
+  // Order matters: renderHome's inverted-text path allocates a full-screen
+  // 48 KB scratch framebuffer, so the landscape buffer is constructed only
+  // after renderHome returns. Constructing it earlier keeps 48 KB live across
+  // that allocation and pushes peak heap from 139 KB to 187 KB on a 320 KB part.
+  reader::Framebuffer landscape(panelW, panelH);   // 800 x 480
   reader::rotate90CW(portrait, landscape);
 
   display.setFramebuffer(landscape.data());
