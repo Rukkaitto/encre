@@ -126,14 +126,39 @@ ground truth for the visual design pass (Claude Design handoff).
 
 ## 4. UX structure
 
+### 4.0 Interaction model (fixed across themes)
+
+- The hint bar always shows **exactly four slots**, one per front button, in
+  hardware order: Back, Confirm, Up, Down. A button with no action leaves its
+  slot empty (alignment is preserved); a long-press variant is rendered as a
+  second line inside its button's slot ("OPEN / HOLD · ACTIONS") — never as a
+  fifth hint. Side buttons (Left/Right) turn pages in the Reader and get no
+  on-screen hints.
+- **Long-press Confirm on any list item = contextual actions overlay.**
+  Library items: Open / Book details / Mark as finished / Delete… (delete has
+  a confirmation step and never erases reading progress). Article items:
+  Read / Archive / Like. Saved Wi-Fi networks: hold to forget.
+- Actions that need more than a press get their own screen, not a hint:
+  Instapaper sync is a selectable row at the top of Articles, not a button
+  binding.
+
 ### 4.1 Screens
 
-- **Home:** the current book front and center — large dithered cover, title,
-  author, progress. One press of Confirm resumes reading. Below: Library,
-  Articles (with unread count), Settings.
+- **Home:** the current book front and center — cover, title, author,
+  progress. Confirm resumes reading, and on Home the **Back button also
+  opens the current book** ("Read") since there is nothing to go back to.
+  Below: Library, Articles (with unread count), Settings.
+  - *Empty state (first run / no books):* a welcome screen naming the two
+    loading paths (SD copy, Wi-Fi send) with "Send books over Wi-Fi" as the
+    focused action; menu rows show Library — empty, Articles — set up.
+  - *Missing current book:* if the last-read file is gone (card edited
+    elsewhere), Home falls back to the most recent existing book and shows a
+    one-time banner saying why; with no books left it falls back to the
+    empty state. Progress/bookmarks of the missing book are retained in case
+    the file returns.
 - **Library:** file browser over `/books` (folders respected), recent-first
   option, dithered cover thumbnails where available, Confirm opens,
-  long-press for item actions (delete, details).
+  long-press for item actions (see 4.0).
 - **Reader:** full-bleed text. Left/Right (and Up/Down) turn pages. Confirm
   opens the reader menu overlay: chapters, typography panel, go to %,
   bookmarks, book info, exit. Back short-press closes any overlay; Back
@@ -142,15 +167,29 @@ ground truth for the visual design pass (Claude Design handoff).
   alignment with a live preview line and applies on close (background
   re-pagination from the current position).
 - **Articles:** Instapaper unread queue, newest first — title, source, length
-  estimate. Sync action on the screen. Articles read in the same Reader.
-  End-of-article screen offers Archive / Like / Next article. Archive/like
-  also available from the list via long-press.
+  estimate. "Sync now" is the first row of the list (shows last-sync time);
+  selecting it triggers the on-demand Wi-Fi connect flow. Articles read in
+  the same Reader. End-of-article screen offers Archive / Like / Next
+  article. Archive/like also available from the list via long-press.
 - **Settings:** device (sleep timers, full-refresh cadence, button remap for
   page-turn direction), typography defaults, WiFi networks, Instapaper account
   (xAuth login form via the web setup page — never typed on-device), sleep
   screen mode, about/version.
 - **Transfer screen:** shown while the HTTP server runs — URL + QR code,
   upload progress, done/cancel.
+
+### 4.1b Secondary screens (all designed in the canvas, "Flows & States" page)
+
+Reader tools: Typography panel (live preview line, applies from the current
+page), Contents (chapter list with current position), Go to page (Up/Down
+with hold-to-accelerate), Bookmarks (hold to remove), About this book.
+Flows: item-actions overlays and delete confirmation, end-of-article screen,
+Wi-Fi settings (saved networks, join, setup hotspot) and the on-demand
+connect dialog ("radio turns off when the sync finishes" is stated in the
+UI). Error/empty: first-run Home, missing-book Home, no-SD-card screen,
+corrupt-book dialog, low-battery banner (any button dismisses; critical
+level forces clean shutdown). Settings displays Wi-Fi as **"on demand"** —
+never "connected" — matching the radio policy in 3.3.
 
 ### 4.2 Sleep screens
 
