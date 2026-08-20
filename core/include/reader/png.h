@@ -7,6 +7,13 @@ class Framebuffer;
 bool writePng(const Framebuffer& fb, const char* path);
 bool comparePng(const Framebuffer& fb, const char* path, int* wOut = nullptr, int* hOut = nullptr);
 
+// Compose two single-plane framebuffers into one 4-level greyscale image and
+// write it. Level per pixel is (msb << 1) | lsb, mapped 0..3 -> white..black,
+// so an anti-aliased render is inspectable and diffable on the desktop exactly
+// as a 1-bit one is. The Bw base pass is not part of the composition: it is a
+// thresholded duplicate of the same coverage and carries no extra information.
+bool writeGrayPng(const Framebuffer& lsb, const Framebuffer& msb, const char* path);
+
 // Why a comparison failed, and by how much. comparePng answers only yes/no,
 // which makes a golden-test failure impossible to triage: a missing file, a
 // resized framebuffer and a one-pixel drawing change all look identical.
@@ -25,5 +32,10 @@ struct PngDiff {
 };
 
 PngDiff diffPng(const Framebuffer& fb, const char* path);
+
+// The 4-level sibling of diffPng: composes lsb/msb the same way writeGrayPng
+// does and diffs the result against the image on disk.
+PngDiff diffGrayPng(const Framebuffer& lsb, const Framebuffer& msb, const char* path);
+
 const char* pngDiffStatusName(PngDiff::Status status);
 }  // namespace reader

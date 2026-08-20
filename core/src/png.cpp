@@ -20,27 +20,37 @@ static std::vector<unsigned char> toGray(const Framebuffer& fb) {
   return px;
 }
 
-bool writePng(const Framebuffer& fb, const char* path) {
-  auto px = toGray(fb);
-  return stbi_write_png(path, fb.width(), fb.height(), 1, px.data(), fb.width()) != 0;
+// The 4-level ramp, indexed by (msb << 1) | lsb: no ink in either plane is
+// paper, ink in both is full black, one plane each gives the two mid greys.
+static const unsigned char kRamp[4] = {0xFF, 0xAA, 0x55, 0x00};
+
+static std::vector<unsigned char> composeGray(const Framebuffer& lsb, const Framebuffer& msb) {
+  std::vector<unsigned char> px(static_cast<size_t>(lsb.width()) * lsb.height());
+  for (int y = 0; y < lsb.height(); ++y)
+    for (int x = 0; x < lsb.width(); ++x) {
+      const int l = lsb.getPixel(x, y) ? 0 : 1;  // ink (false == black) == level bit set
+      const int m = msb.getPixel(x, y) ? 0 : 1;
+      px[static_cast<size_t>(y) * lsb.width() + x] = kRamp[(m << 1) | l];
+    }
+  return px;
 }
 
-PngDiff diffPng(const Framebuffer& fb, const char* path) {
+// Compares an already-composed greyscale raster against the image on disk.
+static PngDiff diffRaster(const std::vector<unsigned char>& px, int w, int h, const char* path) {
   PngDiff d;
-  int w = 0, h = 0, n = 0;
-  unsigned char* img = stbi_load(path, &w, &h, &n, 1);
+  int fw = 0, fh = 0, n = 0;
+  unsigned char* img = stbi_load(path, &fw, &fh, &n, 1);
   if (!img) {
     d.status = PngDiff::Status::kDecodeFailed;
     return d;
   }
-  d.width = w;
-  d.height = h;
-  if (w != fb.width() || h != fb.height()) {
+  d.width = fw;
+  d.height = fh;
+  if (fw != w || fh != h) {
     d.status = PngDiff::Status::kSizeMismatch;
     stbi_image_free(img);
     return d;
   }
-  const auto px = toGray(fb);
   for (size_t i = 0; i < px.size(); ++i) {
     if (px[i] == img[i]) continue;
     ++d.diffPixels;
@@ -52,6 +62,33 @@ PngDiff diffPng(const Framebuffer& fb, const char* path) {
   d.status = d.diffPixels == 0 ? PngDiff::Status::kMatch : PngDiff::Status::kPixelMismatch;
   stbi_image_free(img);
   return d;
+}
+
+bool writePng(const Framebuffer& fb, const char* path) {
+  auto px = toGray(fb);
+  return stbi_write_png(path, fb.width(), fb.height(), 1, px.data(), fb.width()) != 0;
+}
+
+bool writeGrayPng(const Framebuffer& lsb, const Framebuffer& msb, const char* path) {
+  if (lsb.width() != msb.width() || lsb.height() != msb.height()) return false;
+  const auto px = composeGray(lsb, msb);
+  if (px.empty()) return false;
+  return stbi_write_png(path, lsb.width(), lsb.height(), 1, px.data(), lsb.width()) != 0;
+}
+
+PngDiff diffPng(const Framebuffer& fb, const char* path) {
+  return diffRaster(toGray(fb), fb.width(), fb.height(), path);
+}
+
+PngDiff diffGrayPng(const Framebuffer& lsb, const Framebuffer& msb, const char* path) {
+  PngDiff d;
+  if (lsb.width() != msb.width() || lsb.height() != msb.height()) {
+    // Not a decode problem, but the caller's inputs are unusable; reporting a
+    // size mismatch is the closest honest answer.
+    d.status = PngDiff::Status::kSizeMismatch;
+    return d;
+  }
+  return diffRaster(composeGray(lsb, msb), lsb.width(), lsb.height(), path);
 }
 
 const char* pngDiffStatusName(PngDiff::Status status) {

@@ -50,14 +50,18 @@ TEST_CASE("QuietTheme renders Home to golden on both panel geometries") {
 
   reader::QuietTheme theme;
 
-  SUBCASE("X4 480x800") {
-    reader::Framebuffer fb(480, 800);
-    theme.renderHome(fb, fonts, sampleHome());
-    golden::checkGolden(fb, "home_quiet");
-  }
-  SUBCASE("X3 528x792") {
-    reader::Framebuffer fb(528, 792);
-    theme.renderHome(fb, fonts, sampleHome());
-    golden::checkGolden(fb, "home_quiet_x3");
-  }
+  // Home goes through the grayscale path: three passes, and the golden holds
+  // the 4-level composition of the two planes. The Bw pass is rendered too, so
+  // the test drives the same sequence the shell and the simulator do.
+  auto renderThree = [&](int w, int h, const std::string& name) {
+    reader::Framebuffer bw(w, h), lsb(w, h), msb(w, h);
+    const reader::HomeViewModel vm = sampleHome();
+    theme.renderHome(bw, fonts, vm, reader::Plane::Bw);
+    theme.renderHome(lsb, fonts, vm, reader::Plane::Lsb);
+    theme.renderHome(msb, fonts, vm, reader::Plane::Msb);
+    golden::checkGoldenGray(lsb, msb, name);
+  };
+
+  SUBCASE("X4 480x800") { renderThree(480, 800, "home_quiet"); }
+  SUBCASE("X3 528x792") { renderThree(528, 792, "home_quiet_x3"); }
 }

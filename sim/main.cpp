@@ -62,10 +62,17 @@ int main(int argc, char** argv) {
   vm.focusedMenuIndex = -1;
   vm.hints = {"READ", "SELECT", "UP", "DOWN"};
 
-  reader::Framebuffer fb(w, h);
+  // Three passes, exactly as the firmware drives the panel: a thresholded base
+  // frame plus the two bit-planes the controller combines into 4 levels. The
+  // simulator recomposes the planes into one greyscale image so the desktop
+  // sees what the panel will paint. `bw` is rendered (not skipped) so the
+  // simulator exercises the same call sequence the shell does.
+  reader::Framebuffer bw(w, h), lsb(w, h), msb(w, h);
   reader::QuietTheme theme;
-  theme.renderHome(fb, fonts, vm);
-  if (!reader::writePng(fb, argv[2])) return 1;
+  theme.renderHome(bw, fonts, vm, reader::Plane::Bw);
+  theme.renderHome(lsb, fonts, vm, reader::Plane::Lsb);
+  theme.renderHome(msb, fonts, vm, reader::Plane::Msb);
+  if (!reader::writeGrayPng(lsb, msb, argv[2])) return 1;
   std::printf("wrote %s (%dx%d)\n", argv[2], w, h);
   return 0;
 }
