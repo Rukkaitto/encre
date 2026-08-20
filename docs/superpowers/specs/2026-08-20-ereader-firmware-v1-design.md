@@ -86,16 +86,22 @@ RTC presence.
 - **Screen stack + input dispatch:** push/pop screen manager; screens receive
   button events (with short/long press distinction) and draw into the shared
   1-bit framebuffer.
-- **Theme layer:** screens describe structure (what elements exist, their
-  hierarchy and behavior); all visual decisions — type faces/sizes for each
-  role, rule weights, chrome density, button/list/progress styling, hint-bar
-  rendering — come from a theme object consulted at draw time. V1 ships
-  exactly one built-in theme (derived from the chosen visual direction) and
-  no picker, but nothing outside the theme layer hardcodes style, so
-  selectable and user-defined themes are an additive V2 feature, not a
-  refactor. UI conventions fixed across themes: hint bar order matches the
-  hardware (Back left, Confirm center, Up/Down right, one hint per button,
-  evenly spaced), and focus is always shown by inversion.
+- **Theme layer:** themes own the *entire presentation*, layout structure
+  included — not just colors and fonts. Each screen produces a **view-model**
+  (semantic content plus interaction state, no geometry): for Home that is
+  {current book, author, progress, chapter, menu entries with counts, focused
+  element, battery/date, hint set}. The active theme renders the view-model
+  however it likes — a cover-led centered column, a vertical spine band with
+  a giant numeral, a terminal-style list — and screens never draw pixels
+  directly. Two radically different structures (e.g. the "Quiet" default and
+  the constructivist "Spine" exploration) are both just themes over the same
+  view-models. V1 ships exactly one built-in theme (B2 "Quiet", from the
+  design exploration) and no picker, but the screen/theme split is built this
+  way from the first commit so themes are additive content, never a refactor.
+  Fixed across all themes (ergonomics, not style): hints appear in hardware
+  order (Back left, Confirm center, Up/Down right, one hint per button,
+  evenly spaced), every screen renders a visible focus state, and the
+  view-model's full content must be represented.
 - **Refresh policy:** owned by the shell, not by individual screens — FAST for
   page turns, FULL every N page turns (default 15, configurable) and on every
   screen transition, to keep text crisp and ghost-free.
@@ -211,9 +217,10 @@ OPDS browsing, Calibre wireless, dictionary lookups, reading stats, OTA
 updates, KOReader sync, Instapaper folders/highlights/two-way progress,
 RTL/bidi text, tilt page-turn (X3 IMU), audio anything. Also: the theme
 picker and user-installable themes — the theme layer itself ships in V1
-(Section 3.3) with a single built-in theme; alternate themes (e.g. the
-louder "Spine"/constructivist direction from the design exploration) arrive
-as V2 content on top of it.
+(Section 3.3) with the single built-in "Quiet" theme; alternate themes,
+including structurally different ones (the constructivist "Spine"/F
+direction, an inverted white-on-black theme riding the display driver's
+polarity support), arrive as V2 content on top of it.
 
 ## 9. Design handoff notes (for the visual design pass)
 
