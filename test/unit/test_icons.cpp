@@ -13,6 +13,7 @@ struct Named {
 const Named kAll[] = {{"kBack", &reader::icons::kBack},
                       {"kForward", &reader::icons::kForward},
                       {"kDot", &reader::icons::kDot},
+                      {"kHold", &reader::icons::kHold},
                       {"kUp", &reader::icons::kUp},
                       {"kDown", &reader::icons::kDown},
                       {"kChevron", &reader::icons::kChevron},
@@ -64,6 +65,8 @@ TEST_CASE("icons are the sizes the design boards draw them at") {
   CHECK(reader::icons::kBack.w == 25);
   CHECK(reader::icons::kBack.h == 25);
   CHECK(reader::icons::kDot.w == 25);
+  CHECK(reader::icons::kHold.w == 25);
+  CHECK(reader::icons::kHold.h == 25);
   CHECK(reader::icons::kUp.w == 25);
   CHECK(reader::icons::kDown.w == 25);
   CHECK(reader::icons::kChevron.w == 25);
@@ -109,13 +112,49 @@ TEST_CASE("every mark that can appear in a hint bar shares one box") {
   // a board reverting one of them in isolation -- the sizes above would still
   // pass individually while the bar went crooked again.
   const reader::Icon* bar[] = {&reader::icons::kBack, &reader::icons::kDot,
-                               &reader::icons::kUp, &reader::icons::kDown,
-                               &reader::icons::kBook, &reader::icons::kChevron};
+                               &reader::icons::kHold, &reader::icons::kUp,
+                               &reader::icons::kDown, &reader::icons::kBook,
+                               &reader::icons::kChevron};
   for (const reader::Icon* i : bar) {
     CHECK(i->w == bar[0]->w);
     CHECK(i->h == bar[0]->h);
     CHECK(i->w == i->h);  // and each is square
   }
+}
+
+TEST_CASE("the hold ring is the dot drawn hollow, not the dot") {
+  // The two marks are the same circle on the same viewBox at the same size and
+  // differ only in `fill` -- so the generator's `match` for one of them could
+  // silently pick up the other, and no size or placement assertion would notice.
+  // What separates them is the interior: the ring's centre is paper, the dot's is
+  // ink. Measured on the bitmaps, which is what the panel shows.
+  const reader::Icon& ring = reader::icons::kHold;
+  const reader::Icon& dot = reader::icons::kDot;
+  CHECK(reader::coverage(dot, dot.w / 2, dot.h / 2) == 3);
+  CHECK(reader::coverage(ring, ring.w / 2, ring.h / 2) == 0);
+  // And the ring is a ring, not an arc: its middle row crosses two strokes, so
+  // the row has ink on both sides of that empty centre.
+  int left = -1, right = -1;
+  for (int x = 0; x < ring.w; ++x)
+    if (reader::coverage(ring, x, ring.h / 2) > 0) {
+      if (left < 0) left = x;
+      right = x;
+    }
+  REQUIRE(left >= 0);
+  CHECK(right > left);
+  CHECK(left < ring.w / 2);
+  CHECK(right > ring.w / 2);
+  // Being hollow, it carries markedly less ink than the disc of the same radius
+  // -- it is a lighter mark on the bar, which is the design intent. Not "half":
+  // the board strokes it 1 unit wide on a 10-unit viewBox, so at 25px that is a
+  // 2.5px stroke and the ring keeps about three fifths of the disc's ink.
+  auto ink = [](const reader::Icon& i) {
+    int n = 0;
+    for (int y = 0; y < i.h; ++y)
+      for (int x = 0; x < i.w; ++x) n += reader::coverage(i, x, y);
+    return n;
+  };
+  CHECK(ink(ring) < ink(dot) * 3 / 4);
 }
 
 TEST_CASE("every icon's ink is centred in its own box") {

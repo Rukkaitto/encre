@@ -12,12 +12,12 @@
 
 using ramp::Ramp;
 
-// A face that declares itself Role::Label500's 23px/500 -- so FontSet::load
-// accepts it -- whose line box is `lineH` tall instead of the real face's 29.
-// It carries no glyphs: the tests that use it are about box geometry, and
-// drawText's notdef box is enough ink to locate a run.
-static std::vector<uint8_t> tallLabelFace(int lineH) {
-  const reader::RoleSpec spec = reader::roleSpec(reader::Role::Label500);
+// A face that declares itself `role`'s own size and weight -- so FontSet::load
+// accepts it -- whose line box is `lineH` tall instead of the real face's. It
+// carries no glyphs: the tests that use it are about box geometry, and drawText's
+// notdef box is enough ink to locate a run.
+static std::vector<uint8_t> tallFace(reader::Role role, int lineH) {
+  const reader::RoleSpec spec = reader::roleSpec(role);
   rfnt::Builder b;
   b.version = 2;
   b.bpp = 2;
@@ -27,6 +27,12 @@ static std::vector<uint8_t> tallLabelFace(int lineH) {
   b.descent = static_cast<int16_t>(-(lineH / 4));
   b.lineGap = static_cast<int16_t>(lineH - (b.ascent - b.descent));
   return b.build();
+}
+static std::vector<uint8_t> tallLabelFace(int lineH) {
+  return tallFace(reader::Role::Label500, lineH);
+}
+static std::vector<uint8_t> tallMetaFace(int lineH) {
+  return tallFace(reader::Role::Meta400, lineH);
 }
 
 TEST_CASE("the header band right-aligns its value on any canvas width") {
@@ -231,81 +237,223 @@ static Rows inkRowsIn(const reader::Framebuffer& fb, int y0, int y1, int x0, int
 // Doubled, so a half-pixel centre stays exact instead of rounding.
 static int centre2(const Rows& r) { return r.top + r.bottom; }
 
-TEST_CASE("a hold line stays inside the bar wherever its slot sits") {
-  Ramp f;
-  // The real bars carry the hold on the Confirm slot, not the first one, so the
-  // vertical placement cannot be decided by looking at slot 0 alone.
-  for (int holdSlot : {0, 1, 2, 3}) {
-    reader::Framebuffer fb(480, 120);
-    reader::Hint hints[4] = {{&reader::icons::kBack, "BACK", ""},
-                             {&reader::icons::kDot, "OPEN", ""},
-                             {&reader::icons::kUp, "UP", ""},
-                             {&reader::icons::kDown, "DOWN", ""}};
-    hints[holdSlot].hold = "HOLD: Q";  // Q descends below the baseline
-    int slotX[4] = {};
-    const int barH = reader::drawHintBar(fb, f.fonts, hints, slotX);
-    const int barTop = fb.height() - barH;
-    const Rows all = inkRows(fb, barTop, 0, 480);
-    // Nothing may reach the last row: that is where a clipped descender lands.
-    CHECK(all.bottom < fb.height() - 1);
-    CHECK(all.top > barTop);
-    // The two-line slot straddles the bar's centre rather than hanging below it.
-    const int slotEnd = holdSlot < 3 ? slotX[holdSlot + 1] : 480;
-    const Rows held = inkRows(fb, barTop, slotX[holdSlot], slotEnd);
-    const int barCentre = barTop + barH / 2;
-    CHECK(held.top < barCentre);
-    CHECK(held.bottom > barCentre);
-  }
+// How far an icon's own ink sits from the centre of its own box, doubled.
+//
+// It is not always zero, and that is the design's business rather than a bug in
+// the placement: the boards' up and down arrows are drawn from paths whose ink
+// lands a pixel high and a pixel low of their 25px box respectively. Alignment
+// assertions below subtract this out, so they measure where the primitive *put
+// the box* -- which is what the primitive promises -- instead of also measuring
+// Chrome's sub-pixel rasterisation of one arrowhead.
+static int iconInkOffset2(const reader::Icon& icon) {
+  int top = icon.h, bottom = -1;
+  for (int y = 0; y < icon.h; ++y)
+    for (int x = 0; x < icon.w; ++x)
+      if (reader::coverage(icon, x, y) > 0) {
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
+      }
+  return (top + bottom) - (icon.h - 1);
 }
 
-TEST_CASE("a hold line in one slot does not pull the other slots off centre") {
-  Ramp f;
-  // A hold line makes its own slot taller, and a taller slot makes the bar
-  // taller -- the boards size a hint bar from its content, so Library's bar is
-  // genuinely taller than Home's. So this cannot assert that the other slots
-  // land on the same *screen row*; what it asserts is the invariant that
-  // survives the bar growing: every single-line slot stays on the content box's
-  // centre line, wherever that line has moved to.
-  //
-  // The centre line is the *content box's*, not the bar's: the board's padding
-  // is 20 above and 16 below, so the two are 2px apart. Centring in the bar is
-  // what put every hint label 3px high.
-  reader::Hint plain[4] = {{&reader::icons::kBack, "BACK", ""},
-                           {&reader::icons::kDot, "OPEN", ""},
-                           {&reader::icons::kUp, "UP", ""},
-                           {&reader::icons::kDown, "DOWN", ""}};
-  reader::Hint withHold[4] = {plain[0], plain[1], plain[2], plain[3]};
-  withHold[0].hold = "HOLD";
+// The hint bar is exactly one line tall whatever its slots carry, and a
+// long-press variant is a hollow ring beside its label rather than a second line
+// under it (design 662557d). The cases below pin the consequences of that: the
+// bar's height stops depending on a hold, the hold's slot gets wider instead, and
+// the ring sits on the label's own line.
 
-  // Doubled offset of slot 2's ink from the content box's centre line.
-  auto slot2Offset2 = [&](const reader::Hint hints[4]) {
-    reader::Framebuffer fb(480, 160);
-    int x[4] = {};
-    const int barH = reader::drawHintBar(fb, f.fonts, hints, x);
+TEST_CASE("a hold does not change the bar's height, on any slot") {
+  Ramp f;
+  const reader::Hint plain[4] = {{&reader::icons::kBack, "BACK", false},
+                                 {&reader::icons::kDot, "OPEN", false},
+                                 {&reader::icons::kUp, "UP", false},
+                                 {&reader::icons::kDown, "DOWN", false}};
+  const int plainH = reader::hintBarHeight(f.fonts, plain);
+  // Whichever slot carries it, and however many do. A bar whose height varies by
+  // screen also moves every list stacked above it, which is the whole reason the
+  // hold stopped being a second line.
+  for (int holdSlot : {0, 1, 2, 3}) {
+    CAPTURE(holdSlot);
+    reader::Hint hints[4] = {plain[0], plain[1], plain[2], plain[3]};
+    hints[holdSlot].hasHold = true;
+    CHECK(reader::hintBarHeight(f.fonts, hints) == plainH);
+  }
+  reader::Hint all[4] = {plain[0], plain[1], plain[2], plain[3]};
+  for (auto& h : all) h.hasHold = true;
+  CHECK(reader::hintBarHeight(f.fonts, all) == plainH);
+
+  // And the drawn bar agrees with the measured one: nothing is clipped against
+  // the bottom edge, and the ring's ink stays inside the content box the padding
+  // leaves rather than hanging below it the way a second line did.
+  for (int holdSlot : {0, 1, 2, 3}) {
+    CAPTURE(holdSlot);
+    reader::Framebuffer fb(480, 120);
+    reader::Hint hints[4] = {plain[0], plain[1], plain[2], plain[3]};
+    hints[holdSlot].hasHold = true;
+    int slotX[4] = {};
+    const int barH = reader::drawHintBar(fb, f.fonts, hints, slotX);
+    CHECK(barH == plainH);
     const int barTop = fb.height() - barH;
     const int contentTop = barTop + reader::kHintRuleH + reader::kHintPadTop;
     const int contentH = barH - reader::kHintRuleH - reader::kHintPadTop - reader::kHintPadBottom;
-    const Rows ink = inkRows(fb, barTop, x[2], x[3]);
-    REQUIRE(ink.bottom > 0);
-    return centre2(ink) - (2 * contentTop + contentH);
-  };
+    const Rows all = inkRows(fb, barTop, 0, 480);
+    CHECK(all.top >= contentTop);
+    CHECK(all.bottom < contentTop + contentH);
+  }
+}
 
-  const int before = slot2Offset2(plain);
-  const int after = slot2Offset2(withHold);
-  CHECK(after == before);
-  // And that shared offset really is "on the centre line": caps have no
-  // descender, so the ink sits a hair above the box's middle, never 3px below
-  // it as symmetric centring in the whole bar would leave it.
-  CHECK(before <= 0);
-  CHECK(before >= -3);
+TEST_CASE("a hold slot is wider than the same slot without one") {
+  Ramp f;
+  // The ring is a child of the slot's flex row, so it is part of what the slot
+  // measures -- gap included. If the measure ignored it, `space-between` would
+  // hand out gaps that are too wide and the ring would lap into its neighbour.
+  const reader::Hint plain[4] = {{&reader::icons::kBack, "BACK", false},
+                                 {&reader::icons::kDot, "OPEN", false},
+                                 {&reader::icons::kUp, "UP", false},
+                                 {&reader::icons::kDown, "DOWN", false}};
+  reader::Hint held[4] = {plain[0], plain[1], plain[2], plain[3]};
+  held[1].hasHold = true;
+
+  // A slot's measured width is not returned, but `space-between` makes it
+  // observable twice over.
+  auto slots = [&](const reader::Hint hints[4], int out[4]) {
+    reader::Framebuffer fb(480, 120);
+    reader::drawHintBar(fb, f.fonts, hints, out);
+  };
+  int a[4] = {}, b[4] = {};
+  slots(plain, a);
+  slots(held, b);
+
+  // First: the leftover is smaller, so the three gaps are narrower and every slot
+  // after the first sits left of where it did. A measure that ignored the ring
+  // would leave the distribution byte-identical to the plain bar's.
+  CHECK(a[0] == b[0]);  // the first slot is always on the margin
+  CHECK(b[1] < a[1]);
+  CHECK(b[2] < a[2] + reader::kHintIconGap + reader::icons::kHold.w);
+
+  // Second: the three gaps between one slot's content and the next slot's start
+  // stay equal, which is what `space-between` means. The ring is the widest thing
+  // in slot 1 after its label, so an unmeasured ring shows up here as a gap after
+  // slot 1 narrower than the other two by the ring and its gap.
+  const reader::Font& mf = f.fonts[reader::Role::Meta400];
+  const reader::Tracking tr = reader::trackingEm(mf, reader::kHintEm);
+  auto contentW = [&](const reader::Hint& h) {
+    int w = h.icon->w + reader::kHintIconGap + mf.measure(h.label, tr);
+    if (h.hasHold) w += reader::kHintIconGap + reader::icons::kHold.w;
+    return w;
+  };
+  int gaps[3] = {};
+  for (int i = 0; i < 3; ++i) gaps[i] = b[i + 1] - (b[i] + contentW(held[i]));
+  for (int i = 0; i < 3; ++i) {
+    CAPTURE(i);
+    CHECK(gaps[i] > 0);
+    CHECK(gaps[i] >= gaps[0] - 1);  // one rounding per gap, no more
+    CHECK(gaps[i] <= gaps[0] + 1);
+  }
+}
+
+TEST_CASE("the hold ring rides on its label's line, after the label") {
+  Ramp f;
+  // Vertically it aligns like every other mark on the screen (iconTopIn on the
+  // slot's box), so its box centre lands on the label's. Horizontally it is the
+  // row's last child: one flex gap past the label, and still inside the slot.
+  for (int width : {480, 528}) {
+    CAPTURE(width);
+    reader::Framebuffer fb(width, 120);
+    const reader::Hint hints[4] = {{&reader::icons::kBack, "BACK", false},
+                                   {&reader::icons::kDot, "OPEN", true},
+                                   {&reader::icons::kUp, "UP", false},
+                                   {&reader::icons::kDown, "DOWN", false}};
+    int slotX[4] = {};
+    const int barH = reader::drawHintBar(fb, f.fonts, hints, slotX);
+    const int barTop = fb.height() - barH;
+    const reader::Font& mf = f.fonts[reader::Role::Meta400];
+    const reader::Tracking tr = reader::trackingEm(mf, reader::kHintEm);
+    const int textX = slotX[1] + hints[1].icon->w + reader::kHintIconGap;
+    const int labelW = mf.measure(hints[1].label, tr);
+    const int ringX = textX + labelW + reader::kHintIconGap;
+
+    // The ring is where the flex row puts it: past the label, before the next
+    // slot, and drawn -- there is ink in its box and none in the gap before it.
+    CHECK(ringX + reader::icons::kHold.w <= slotX[2]);
+    const Rows label = inkRowsIn(fb, barTop + 1, fb.height(), textX, textX + labelW);
+    const Rows ring = inkRowsIn(fb, barTop + 1, fb.height(), ringX,
+                                ringX + reader::icons::kHold.w);
+    REQUIRE(label.bottom > 0);
+    REQUIRE(ring.bottom > 0);
+    const Rows between = inkRowsIn(fb, barTop + 1, fb.height(), textX + labelW, ringX);
+    CHECK(between.bottom == -1);
+
+    // Vertically aligned with the label it modifies: the ring's *box* centre,
+    // recovered from its ink by its own top bearing, sits on the label's.
+    const int boxCentre2 = centre2(ring) - iconInkOffset2(reader::icons::kHold);
+    CHECK(boxCentre2 >= centre2(label) - 3);
+    CHECK(boxCentre2 <= centre2(label) + 3);
+    // And exactly where iconTopIn puts it in the slot's box, not merely within a
+    // pixel and a half of it.
+    const int slotH = mf.lineHeight() > hints[1].icon->h ? mf.lineHeight() : hints[1].icon->h;
+    const int slotTop = barTop + reader::kHintRuleH + reader::kHintPadTop;
+    const int want = reader::iconTopIn(slotTop, slotH, reader::icons::kHold.h);
+    int inkTop = -1;
+    for (int y = 0; y < reader::icons::kHold.h && inkTop < 0; ++y)
+      for (int x = 0; x < reader::icons::kHold.w; ++x)
+        if (reader::coverage(reader::icons::kHold, x, y) >= 2) {
+          inkTop = y;
+          break;
+        }
+    REQUIRE(inkTop >= 0);
+    CHECK(ring.top - inkTop == want);
+  }
+}
+
+TEST_CASE("four slots with a hold fit inside the margins at both geometries") {
+  Ramp f;
+  // The regression that motivated the change: the words "- HOLD" on a second
+  // line, or any hold rendered as text, do not fit a four-slot bar at 10pt on the
+  // 480-wide X4. So this measures the whole bar's fit rather than any one slot's
+  // position -- every slot's content, its ring included, inside the margins with
+  // no slot lapping the next.
+  const reader::Font& mf = f.fonts[reader::Role::Meta400];
+  const reader::Tracking tr = reader::trackingEm(mf, reader::kHintEm);
+  for (int width : {480, 528}) {
+    CAPTURE(width);
+    reader::Framebuffer fb(width, 120);
+    // Library's own bar, the widest four-slot set the V1 boards ask for.
+    const reader::Hint hints[4] = {{&reader::icons::kBack, "BACK", false},
+                                   {&reader::icons::kDot, "OPEN", true},
+                                   {&reader::icons::kUp, "UP", false},
+                                   {&reader::icons::kDown, "DOWN", false}};
+    int slotX[4] = {};
+    reader::drawHintBar(fb, f.fonts, hints, slotX);
+    int end[4] = {};
+    for (int i = 0; i < 4; ++i) {
+      int w = hints[i].icon->w + reader::kHintIconGap + mf.measure(hints[i].label, tr);
+      if (hints[i].hasHold) w += reader::kHintIconGap + reader::icons::kHold.w;
+      end[i] = slotX[i] + w;
+    }
+    CHECK(slotX[0] >= reader::kMargin);
+    for (int i = 1; i < 4; ++i) {
+      CAPTURE(i);
+      CHECK(slotX[i] >= end[i - 1]);  // no slot laps the one before it
+    }
+    CHECK(end[3] <= width - reader::kMargin);
+    // And the render agrees: no ink crosses either margin.
+    const int barTop = fb.height() - reader::hintBarHeight(f.fonts, hints);
+    for (int y = barTop + 1; y < fb.height(); ++y)
+      for (int x = 0; x < width; ++x)
+        if (!fb.getPixel(x, y)) {
+          CHECK(x >= reader::kMargin);
+          CHECK(x < width - reader::kMargin);
+        }
+  }
 }
 
 TEST_CASE("the hint bar's height is the board's padding plus its own content") {
   Ramp f;
-  const reader::Hint plain[4] = {{&reader::icons::kBook, "READ", ""},
-                                 {&reader::icons::kDot, "SELECT", ""},
-                                 {&reader::icons::kUp, "UP", ""},
-                                 {&reader::icons::kDown, "DOWN", ""}};
+  const reader::Hint plain[4] = {{&reader::icons::kBook, "READ", false},
+                                 {&reader::icons::kDot, "SELECT", false},
+                                 {&reader::icons::kUp, "UP", false},
+                                 {&reader::icons::kDown, "DOWN", false}};
   const int lineH = f.fonts[reader::Role::Meta400].lineHeight();
   const int chrome = reader::kHintRuleH + reader::kHintPadTop + reader::kHintPadBottom;
 
@@ -315,18 +463,31 @@ TEST_CASE("the hint bar's height is the board's padding plus its own content") {
   CHECK(reader::hintBarHeight(f.fonts, plain) == chrome + lineH);
   CHECK(reader::hintBarHeight(f.fonts, plain) == 64);
 
-  // A hold line is a second line box with the board's `gap: 3px`, and the bar
-  // grows by exactly that -- it is not a fixed-height bar that a second line
-  // has to be squeezed into.
+  // A hold adds nothing: the ring is a mark on the label's own line, shorter
+  // than that line box, so the bar is the same height as Home's. It is still
+  // *derived* from the content -- the two checks below prove the derivation is
+  // live -- it just does not depend on a hold any more.
   reader::Hint held[4] = {plain[0], plain[1], plain[2], plain[3]};
-  held[1].hold = "HOLD - ACTIONS";
-  CHECK(reader::hintBarHeight(f.fonts, held) == chrome + 2 * lineH + reader::kHintHoldGap);
-  CHECK(reader::hintBarHeight(f.fonts, held) > reader::hintBarHeight(f.fonts, plain));
+  held[1].hasHold = true;
+  CHECK(reader::hintBarHeight(f.fonts, held) == chrome + lineH);
+  CHECK(reader::hintBarHeight(f.fonts, held) == reader::hintBarHeight(f.fonts, plain));
 
-  // A mark taller than the line box raises the bar too: the slot's first line is
-  // a flex row of the mark and the label, so it is as tall as the taller of the
-  // two. kFolder (46x39) is not a hint mark today, which is exactly why it
-  // serves here -- the rule must not depend on today's 25px set.
+  // Derived from the type role: a taller Meta line box makes a taller bar, with
+  // no constant to remember. Role::Meta400 is what a hint is set in, so this is
+  // the dependency the boards actually have.
+  reader::FontSet bigger;
+  REQUIRE(f.load(bigger));
+  const auto tallFace = tallMetaFace(41);
+  REQUIRE(bigger.load(reader::Role::Meta400, tallFace.data(), tallFace.size()));
+  REQUIRE(bigger.ready());
+  CHECK(bigger[reader::Role::Meta400].lineHeight() == 41);
+  CHECK(reader::hintBarHeight(bigger, plain) == chrome + 41);
+  CHECK(reader::hintBarHeight(bigger, held) == reader::hintBarHeight(bigger, plain));
+
+  // A mark taller than the line box raises the bar too: a slot is a flex row of
+  // its marks and its label, so it is as tall as the tallest of them. kFolder
+  // (46x39) is not a hint mark today, which is exactly why it serves here -- the
+  // rule must not depend on today's 25px set.
   reader::Hint big[4] = {plain[0], plain[1], plain[2], plain[3]};
   big[3].icon = &reader::icons::kFolder;
   CHECK(reader::hintBarHeight(f.fonts, big) == chrome + reader::icons::kFolder.h);
@@ -339,10 +500,10 @@ TEST_CASE("the hint bar honours the board's asymmetric padding") {
   // label on every screen 3px high. What follows measures that 4px asymmetry
   // rather than the absolute row, so it holds on either panel geometry.
   for (int width : {480, 528}) {
-    const reader::Hint hints[4] = {{&reader::icons::kBook, "READ", ""},
-                                   {&reader::icons::kDot, "SELECT", ""},
-                                   {&reader::icons::kUp, "UP", ""},
-                                   {&reader::icons::kDown, "DOWN", ""}};
+    const reader::Hint hints[4] = {{&reader::icons::kBook, "READ", false},
+                                   {&reader::icons::kDot, "SELECT", false},
+                                   {&reader::icons::kUp, "UP", false},
+                                   {&reader::icons::kDown, "DOWN", false}};
     reader::Framebuffer fb(width, 160);
     int slotX[4] = {};
     const int barH = reader::drawHintBar(fb, f.fonts, hints, slotX);
@@ -418,10 +579,10 @@ TEST_CASE("structural drawing is identical in every plane") {
   // drawHintBar: the top rule, drawn before any icon or label, is furniture
   // too.
   {
-    const reader::Hint hints[4] = {{&reader::icons::kBack, "BACK", ""},
-                                   {&reader::icons::kDot, "OPEN", ""},
-                                   {&reader::icons::kUp, "UP", ""},
-                                   {&reader::icons::kDown, "DOWN", ""}};
+    const reader::Hint hints[4] = {{&reader::icons::kBack, "BACK", false},
+                                   {&reader::icons::kDot, "OPEN", false},
+                                   {&reader::icons::kUp, "UP", false},
+                                   {&reader::icons::kDown, "DOWN", false}};
     auto render = [&](reader::Plane plane) {
       reader::Framebuffer fb(480, 120);
       int slotX[4] = {};
@@ -441,24 +602,6 @@ TEST_CASE("structural drawing is identical in every plane") {
 
 // --- Vertical centring, and icons aligned to it -----------------------------
 
-// How far an icon's own ink sits from the centre of its own box, doubled.
-//
-// It is not always zero, and that is the design's business rather than a bug in
-// the placement: the boards' up and down arrows are drawn from paths whose ink
-// lands a pixel high and a pixel low of their 25px box respectively. Alignment
-// assertions below subtract this out, so they measure where the primitive *put
-// the box* -- which is what the primitive promises -- instead of also measuring
-// Chrome's sub-pixel rasterisation of one arrowhead.
-static int iconInkOffset2(const reader::Icon& icon) {
-  int top = icon.h, bottom = -1;
-  for (int y = 0; y < icon.h; ++y)
-    for (int x = 0; x < icon.w; ++x)
-      if (reader::coverage(icon, x, y) > 0) {
-        if (y < top) top = y;
-        if (y > bottom) bottom = y;
-      }
-  return (top + bottom) - (icon.h - 1);
-}
 
 TEST_CASE("baselineIn centres the em box, and sits higher than centring the ascent") {
   Ramp f;
@@ -617,10 +760,10 @@ TEST_CASE("every hint mark is aligned with the label it labels") {
   Ramp f;
   for (int width : {480, 528}) {
     reader::Framebuffer fb(width, 120);
-    const reader::Hint hints[4] = {{&reader::icons::kBook, "READ", ""},
-                                   {&reader::icons::kDot, "SELECT", ""},
-                                   {&reader::icons::kUp, "UP", ""},
-                                   {&reader::icons::kDown, "DOWN", ""}};
+    const reader::Hint hints[4] = {{&reader::icons::kBook, "READ", false},
+                                   {&reader::icons::kDot, "SELECT", false},
+                                   {&reader::icons::kUp, "UP", false},
+                                   {&reader::icons::kDown, "DOWN", false}};
     int slotX[4] = {};
     const int barH = reader::drawHintBar(fb, f.fonts, hints, slotX);
     const int barTop = fb.height() - barH;
@@ -781,10 +924,10 @@ TEST_CASE("hint slots distribute across the canvas and never overlap") {
   Ramp f;
   for (int width : {480, 528}) {
     reader::Framebuffer fb(width, 120);
-    const reader::Hint hints[4] = {{&reader::icons::kBack, "BACK", ""},
-                                   {&reader::icons::kDot, "OPEN", "HOLD"},
-                                   {&reader::icons::kUp, "UP", ""},
-                                   {&reader::icons::kDown, "DOWN", ""}};
+    const reader::Hint hints[4] = {{&reader::icons::kBack, "BACK", false},
+                                   {&reader::icons::kDot, "OPEN", true},
+                                   {&reader::icons::kUp, "UP", false},
+                                   {&reader::icons::kDown, "DOWN", false}};
     int slotX[4] = {};
     reader::drawHintBar(fb, f.fonts, hints, slotX);
     for (int i = 1; i < 4; ++i) CHECK(slotX[i] > slotX[i - 1]);

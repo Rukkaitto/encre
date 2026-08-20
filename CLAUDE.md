@@ -113,9 +113,13 @@ silently wrong screen. `core/` never picks its own fonts — the caller supplies
 - **Assets are generated from the design, not transcribed.** `iconc.py` reads
   each icon's SVG and size from its named board at generation time. It once held
   copies and silently swallowed a design fix.
-- **The hint bar has exactly four slots**, one per front button, in hardware
-  order (Back, Confirm, Up, Down). A button with no action gets an empty slot; a
-  long-press variant is a second line inside its own slot, never a fifth hint.
+- **The hint bar has exactly four slots and is always one line tall**, one slot
+  per front button, in hardware order (Back, Confirm, Up, Down). A button with no
+  action gets an empty slot. A long-press variant is a **hollow ring after that
+  slot's label** — never a second line and never a fifth hint. Two lines were
+  tried and rejected: a bar whose height varies by screen moves every list
+  stacked above it, and "· HOLD" does not fit four slots at 10pt on the 480-wide
+  X4.
 
 ## Goldens
 

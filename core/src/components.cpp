@@ -16,13 +16,21 @@ int bandContentH(const FontSet& fonts) {
                icons::kBattery.h);
 }
 
-// One hint slot's height. The first line is a flex row of the mark and the
-// label, so it is as tall as the taller of the two; a hold line adds the
-// board's gap and a second line box below it.
+// One hint slot's height. The slot is a single flex row of the leading mark, the
+// label and -- when the button has a long-press action -- the hollow hold ring,
+// so it is as tall as the tallest of them. Nothing here adds a second line box:
+// design 662557d made the hold a mark on this row rather than a line under it,
+// so a hold cannot change a slot's height and therefore cannot change the bar's.
+// The height is still *derived* from the content rather than pinned, which is
+// what keeps it correct for a screen that sets its hints in a larger role or
+// pairs them with a taller mark.
 int hintSlotH(const Font& mf, const Hint& hint) {
   int h = mf.lineHeight();
   if (hint.icon) h = maxOf(h, hint.icon->h);
-  if (!hint.hold.empty()) h += kHintHoldGap + mf.lineHeight();
+  // The ring is 25px against Meta's 27px line box today, so this max is a no-op
+  // on today's ramp -- and it is here for the same reason the leading mark's is:
+  // the rule must not depend on that happening to be true.
+  if (hint.hasHold) h = maxOf(h, icons::kHold.h);
   return h;
 }
 
@@ -127,8 +135,12 @@ int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], int 
   for (int i = 0; i < 4; ++i) {
     const int iconW = hints[i].icon ? hints[i].icon->w + kHintIconGap : 0;
     const int textW = mf.measure(hints[i].label, hintTracking);
-    const int holdW = hints[i].hold.empty() ? 0 : mf.measure(hints[i].hold, hintTracking);
-    widths[i] = iconW + (textW > holdW ? textW : holdW);
+    // The hold ring is part of the slot's flex row, so it is part of the slot's
+    // measured width -- gap included. Leaving it out would not make the ring
+    // vanish, it would make every space-between gap this bar computes too wide
+    // by 32px and let the ring lap the next slot's mark.
+    const int holdW = hints[i].hasHold ? kHintIconGap + icons::kHold.w : 0;
+    widths[i] = iconW + textW + holdW;
     total += widths[i];
   }
   const int usable = fb.width() - 2 * kMargin;
@@ -141,52 +153,49 @@ int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], int 
 
   // Every slot is centred in the bar's *content box* -- the strip the board's
   // padding leaves between the rule and the bottom edge -- which is what the
-  // design's `align-items: center` does: a single-line slot sits on the content
-  // box's centre line, and a slot carrying a hold line straddles it so the
-  // two-line block stays centred. The baseline is therefore per slot, not
-  // shared. One shared baseline keyed on slot 0 would miss the real bars
-  // entirely — Home's and Library's hold sits on the Confirm slot, so no shift
-  // would happen and the hold line's baseline would land 1px above the bar's
-  // last row, clipping any descender against the bottom edge; and when slot 0
-  // *did* carry the hold it would drag the single-line slots off centre with it.
+  // design's `align-items: center` does. The content box, not the bar, is the box
+  // that matters, and the difference is measurable: the padding is 20 above and
+  // 16 below, so the content's centre line sits 2px below the bar's. Centring in
+  // the bar put every hint label on every screen 3px high.
   //
-  // The content box, not the bar, is the box that matters, and the difference is
-  // measurable: the padding is 20 above and 16 below, so the content's centre
-  // line sits 2px below the bar's. Centring in the bar put every hint label on
-  // every screen 3px high.
-  const int lineH = mf.lineHeight();
+  // The baseline is still per slot rather than shared. Every slot is one line now,
+  // so on today's screens they agree -- but a slot is only as tall as its own
+  // tallest mark, and one slot carrying a taller mark than its neighbours makes
+  // the boxes differ again. A baseline keyed on slot 0 would then pull the rest
+  // off the centre line with it.
   const int contentTop = top + kHintRuleH + kHintPadTop;
   const int contentH = hintContentH(fonts, hints);
   int prefix = 0;  // sum of the slot widths before this one
   for (int i = 0; i < 4; ++i) {
     const int x = kMargin + prefix + (leftover * i + 1) / 3;
-    // The slot's own box, centred in the content box. On a bar where every slot
-    // is the same height this is the content box itself; on one where a hold
-    // line makes a slot taller it is what keeps the short slots on the centre
-    // line the tall one straddles.
+    // The slot's own box, centred in the content box: one flex row of the mark,
+    // the label and the hold ring, as tall as the tallest of them. On a bar where
+    // every slot is the same height this is the content box itself; on one where
+    // a taller mark makes a slot taller it is what keeps the short slots on the
+    // centre line the tall one straddles.
     const int slotH = hintSlotH(mf, hints[i]);
     const int slotTop = contentTop + (contentH - slotH) / 2;
-    // The first line is the mark-and-label flex row, so its box is as tall as
-    // the taller of the two and the label is centred in *that*.
-    const int firstH = hints[i].icon ? maxOf(lineH, hints[i].icon->h) : lineH;
-    const int baseline = baselineIn(mf, slotTop, firstH);
+    const int baseline = baselineIn(mf, slotTop, slotH);
     slotXOut[i] = x;
     int textX = x;
     if (hints[i].icon) {
-      // Centred in the same first-line box the label is centred in -- the mark
-      // and the label are two children of one `align-items: center` flex row on
-      // the board. The bar's marks are a uniform box today, but the placement
-      // must not depend on that: Reader's bar pairs a 21px battery with them.
-      drawIcon(fb, *hints[i].icon, x, iconTopIn(slotTop, firstH, hints[i].icon->h), Ink::Black,
+      // Centred in the same box the label is centred in -- the mark and the label
+      // are two children of one `align-items: center` flex row on the board. The
+      // bar's marks are a uniform box today, but the placement must not depend on
+      // that: Reader's bar pairs a 21px battery with them.
+      drawIcon(fb, *hints[i].icon, x, iconTopIn(slotTop, slotH, hints[i].icon->h), Ink::Black,
                plane);
       textX += hints[i].icon->w + kHintIconGap;
     }
     drawText(fb, mf, textX, baseline, hints[i].label, Ink::Black, hintTracking, plane);
-    if (!hints[i].hold.empty()) {
-      // The board's flex column puts `gap: 3px` between the two lines, so the
-      // hold line is not simply the next line box down.
-      const int holdBase = baselineIn(mf, slotTop + firstH + kHintHoldGap, lineH);
-      drawText(fb, mf, textX, holdBase, hints[i].hold, Ink::Black, hintTracking, plane);
+    if (hints[i].hasHold) {
+      // The hold ring is the row's last child: after the label, one flex gap
+      // along, aligned by iconTopIn like every other mark on the screen. Drawn
+      // after the label because the board orders it after the label -- it reads
+      // as a modifier of that word, not as a second button.
+      const Icon& ring = icons::kHold;
+      const int ringX = textX + mf.measure(hints[i].label, hintTracking) + kHintIconGap;
+      drawIcon(fb, ring, ringX, iconTopIn(slotTop, slotH, ring.h), Ink::Black, plane);
     }
     prefix += widths[i];
   }

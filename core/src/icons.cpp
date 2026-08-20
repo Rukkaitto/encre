@@ -43,6 +43,7 @@ namespace icons {
 const Icon kBack{data::kBackW, data::kBackH, 2, data::kBackBits};
 const Icon kForward{data::kForwardW, data::kForwardH, 2, data::kForwardBits};
 const Icon kDot{data::kDotW, data::kDotH, 2, data::kDotBits};
+const Icon kHold{data::kHoldW, data::kHoldH, 2, data::kHoldBits};
 const Icon kUp{data::kUpW, data::kUpH, 2, data::kUpBits};
 const Icon kDown{data::kDownW, data::kDownH, 2, data::kDownBits};
 const Icon kChevron{data::kChevronW, data::kChevronH, 2, data::kChevronBits};

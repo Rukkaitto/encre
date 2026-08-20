@@ -58,10 +58,12 @@ inline constexpr int kBandRuleH = 2;
 inline constexpr int kHintPadTop = 20;
 inline constexpr int kHintPadBottom = 16;
 inline constexpr int kHintRuleH = 1;
-// `gap: 3px` between a hint's label and its hold line -- the boards set the
-// two-line slot up as a flex column with that gap, so the second line is not
-// simply the next line box down.
-inline constexpr int kHintHoldGap = 3;
+// There is no second line in a hint slot any more, and so no column gap: the
+// long-press variant is a hollow ring beside the label (design 662557d). The
+// board sets one `gap: 7px` on that flex row, which is kHintIconGap below, and
+// it applies to the ring exactly as it applies to the leading mark. What used to
+// be kHintHoldGap (`gap: 3px` on a flex *column*) describes a box the boards no
+// longer draw, so it is gone rather than kept as a number nothing reads.
 
 // Letter-spacing. The boards state it per run, in em, and the runs do not agree:
 // 0.22em on the band's label, 0.18em on a menu row's, 0.20em on an action
@@ -95,17 +97,27 @@ inline Tracking trackingEm(const Font& font, int em1000) {
 // The design's `gap: 7px` between the header band's value and its battery
 // glyph, and the same breathing room between a row's value and a trailing mark
 // and between a hint's mark and its label -- the boards use one gap for all
-// three, so this is one number three times rather than three numbers.
+// three, so this is one number three times rather than three numbers. The hint
+// slot's gap is a flex `gap`, so it separates every child of that row: the
+// leading mark from the label, and the label from the trailing hold ring.
 inline constexpr int kBandGap = 7;
 inline constexpr int kRowGap = 7;
 inline constexpr int kHintIconGap = 7;
 
-// One hint-bar slot. `hold` is the second line a long-press variant gets, drawn
-// inside the owning button's slot rather than as a fifth hint.
+// One hint-bar slot: a leading mark, a label, and whether that button also has a
+// long-press action.
+//
+// `hasHold` is a flag, not text. It used to be the second line of the slot
+// (`"HOLD - ACTIONS"`), and the boards now say a long-press variant with a
+// hollow ring after the label instead -- so there is nothing left to print, and
+// a `std::string_view hold` would be a field whose contents no caller could see.
+// Two real reasons for the change, both in design 662557d: a bar whose height
+// varies with a hold moves every list stacked above it from screen to screen,
+// and "- HOLD" does not fit a four-slot bar at 10pt on the 480-wide X4.
 struct Hint {
   const Icon* icon;
   std::string_view label;
-  std::string_view hold;
+  bool hasHold;
 };
 
 // --- Derived heights -------------------------------------------------------
@@ -126,10 +138,13 @@ struct Hint {
 // its band label larger.
 int headerBandHeight(const FontSet& fonts);
 
-// The same, for the hint bar. A slot is one line of Meta, or two with the
-// board's `gap: 3px` when it carries a hold line, and at least as tall as its
-// own mark; the bar takes the tallest slot. A bar with a hold line is therefore
-// taller than one without, exactly as the boards render it.
+// The same, for the hint bar. A slot is exactly one line of Meta, at least as
+// tall as the marks on that line; the bar takes the tallest slot. So the bar's
+// height does *not* depend on whether any slot has a hold -- the ring rides on
+// the same line as the label -- which is the point of the change: a bar that
+// grew for a hold moved every list stacked above it. It still depends on the type
+// role and on the marks, because that is what the board's box model depends on;
+// the height is derived, never pinned.
 int hintBarHeight(const FontSet& fonts, const Hint hints[4]);
 
 // Each returns the height it consumed, so callers stack without recomputing.

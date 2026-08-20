@@ -41,6 +41,7 @@ namespace icons {
 extern const Icon kBack;     // arrow curving left: the Back button
 extern const Icon kForward;  // long arrow: an action block's proceed mark
 extern const Icon kDot;      // filled circle: the Confirm button
+extern const Icon kHold;     // hollow ring: this button has a long-press action
 extern const Icon kUp;       // stem with a chevron head, pointing up
 extern const Icon kDown;     // the same, pointing down
 extern const Icon kChevron;  // right-pointing disclosure

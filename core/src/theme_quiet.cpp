@@ -180,16 +180,17 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   drawIcon(fb, mark, kMargin + barW - kBlockPadX - mark.w, iconTopIn(y, kBlockH, mark.h), cink,
            plane);
 
-  const Hint hints[4] = {{&icons::kBook, vm.hints[0], ""},
-                         {&icons::kDot, vm.hints[1], ""},
-                         {&icons::kUp, vm.hints[2], ""},
-                         {&icons::kDown, vm.hints[3], ""}};
+  // No slot on Home has a long-press action, so no slot carries the hold ring.
+  const Hint hints[4] = {{&icons::kBook, vm.hints[0], false},
+                         {&icons::kDot, vm.hints[1], false},
+                         {&icons::kUp, vm.hints[2], false},
+                         {&icons::kDown, vm.hints[3], false}};
 
   // Menu rows sit above the hint bar, so the bar's height decides where they
   // start. That height is the bar's to compute -- from its own padding and its
-  // own content -- and asking it is what keeps this stacking correct when a bar
-  // gains a hold line or a screen sets its hints in a larger role. A constant
-  // here would be a second, private copy of the bar's box model.
+  // own content -- and asking it is what keeps this stacking correct when a
+  // screen sets its hints in a larger role or pairs them with a taller mark. A
+  // constant here would be a second, private copy of the bar's box model.
   const int menuTop =
       fb.height() - hintBarHeight(fonts, hints) - static_cast<int>(vm.menu.size()) * kRowH;
   for (size_t i = 0; i < vm.menu.size(); ++i) {

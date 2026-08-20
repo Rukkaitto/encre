@@ -96,6 +96,20 @@ ICONS = {
         "source": "design/Main.dc.html",
         "match": "<circle",
     },
+    # The hollow twin of the dot, and the one mark that is not a button: it sits
+    # *after* a hint's label to say that button has a long-press action. It shares
+    # the dot's geometry exactly (`cx=5 cy=5 r=3.2` on a 0 0 10 10 viewBox) and
+    # differs only in being stroked rather than filled -- so `<circle`, which is
+    # all the dot needs on its own board, would match both here. The match keys on
+    # the difference that identifies it: the dot's radius, drawn hollow. That
+    # survives a stroke-width retune, and `stroke-width="1"` would not identify it
+    # at all.
+    "hold": {
+        "symbol": "kHold",
+        "note": "hollow ring: this button has a long-press action",
+        "source": "design/Library.dc.html",
+        "match": 'r="3.2" fill="none"',
+    },
     "up": {
         "symbol": "kUp",
         "note": "stem with a chevron head, pointing up",
