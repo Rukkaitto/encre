@@ -1,4 +1,4 @@
-.PHONY: test sim firmware fonts
+.PHONY: test sim firmware fonts compare
 # PlatformIO installs outside PATH by default; allow an override: make firmware PIO=/path/to/pio
 PIO ?= $(shell command -v pio 2>/dev/null || echo $(HOME)/.platformio/penv/bin/pio)
 PYTHON ?= python3
@@ -23,3 +23,7 @@ fonts:
 	$(PYTHON) tools/fontc.py assets/fonts/Literata.ttf --size 18 --weight 400 --opsz 12 --out assets/built/literata_18.rfnt
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_16.rfnt --out shell/src/font_spacegrotesk_500_16.h --symbol kUiLabelFont
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_16.rfnt --out shell/src/font_spacegrotesk_700_16.h --symbol kUiValueFont
+# Design-vs-firmware contact sheet for every screen (needs Chrome + Pillow).
+# COMPARE_ARGS=--all includes the flows and states.
+compare: sim
+	$(PYTHON) tools/compare-design.py $(COMPARE_ARGS)
