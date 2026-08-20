@@ -186,7 +186,14 @@ with hold-to-accelerate), Bookmarks (hold to remove), About this book.
 Flows: item-actions overlays and delete confirmation, end-of-article screen,
 Wi-Fi settings (saved networks, join, setup hotspot) and the on-demand
 connect dialog ("radio turns off when the sync finishes" is stated in the
-UI). Error/empty: first-run Home, missing-book Home, no-SD-card screen,
+UI). Joining a network on-device: scan list (signal + lock indicators, open
+networks join directly) → password entry on a button-driven keyboard
+(Up/Down between rows, the side page buttons move along a row, Confirm
+types, Back deletes / hold cancels; password visible while typing). The
+setup hotspot (AP + QR + credentials + web page) is the no-typing
+alternative and doubles as the Instapaper sign-in path. Join failure offers
+edit / retry / cancel and states the radio is off again; a completed sync
+shows a result banner on Articles (new-article and pushed-action counts). Error/empty: first-run Home, missing-book Home, no-SD-card screen,
 corrupt-book dialog, low-battery banner (any button dismisses; critical
 level forces clean shutdown). Settings displays Wi-Fi as **"on demand"** —
 never "connected" — matching the radio policy in 3.3.
