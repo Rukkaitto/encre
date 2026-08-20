@@ -157,7 +157,7 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   drawText(fb, label, kMargin + 20, y + kBlockH / 2 + label.ascent() / 2, "CONTINUE", cink,
            kLabelTracking, plane);
   drawIcon(fb, icons::kChevron, kMargin + barW - 20 - icons::kChevron.w,
-           y + kBlockH / 2 - icons::kChevron.h / 2, cink);
+           y + kBlockH / 2 - icons::kChevron.h / 2, cink, plane);
 
   // Menu rows sit above the hint bar.
   const int menuTop = fb.height() - kHintBarH - static_cast<int>(vm.menu.size()) * kRowH;

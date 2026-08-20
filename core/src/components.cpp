@@ -21,7 +21,7 @@ int drawHeaderBand(Framebuffer& fb, const FontSet& fonts, std::string_view label
   drawText(fb, vf, groupX, baseline, value, Ink::Black, 0, plane);
   // Centred on the band's midline rather than hung off the text baseline, which
   // is what the design's `align-items: center` does to the SVG.
-  drawIcon(fb, bat, groupX + vw + kBandGap, (kBandH - 2) / 2 - bat.h / 2);
+  drawIcon(fb, bat, groupX + vw + kBandGap, (kBandH - 2) / 2 - bat.h / 2, Ink::Black, plane);
   fb.fillRect(0, kBandH - 2, fb.width(), 2, false);
   return kBandH;
 }
@@ -42,7 +42,7 @@ int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label
   // margin; the icon takes the row's ink, so it inverts with a focused row.
   int rightEdge = fb.width() - kMargin;
   if (trailing) {
-    drawIcon(fb, *trailing, rightEdge - trailing->w, y + kRowH / 2 - trailing->h / 2, ink);
+    drawIcon(fb, *trailing, rightEdge - trailing->w, y + kRowH / 2 - trailing->h / 2, ink, plane);
     rightEdge -= trailing->w + kRowGap;
   }
   if (!value.empty())
@@ -86,7 +86,7 @@ int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], int 
     slotXOut[i] = x;
     int textX = x;
     if (hints[i].icon) {
-      drawIcon(fb, *hints[i].icon, x, baseline - hints[i].icon->h + 2);
+      drawIcon(fb, *hints[i].icon, x, baseline - hints[i].icon->h + 2, Ink::Black, plane);
       textX += hints[i].icon->w + 6;
     }
     drawText(fb, mf, textX, baseline, hints[i].label, Ink::Black, kLabelTracking, plane);

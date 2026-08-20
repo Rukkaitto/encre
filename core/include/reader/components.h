@@ -40,8 +40,10 @@ struct Hint {
 // The band's value is drawn as one right-aligned group with the battery glyph.
 // `plane` selects which bit-plane of a 2-bit grey level the text emits (see
 // reader/text.h); it defaults to Plane::Bw so existing call sites are
-// unaffected. drawIcon, fillRect and ditherRect need no plane: they are opaque
-// by construction (coverage 0 or 3), identical in every plane already.
+// unaffected. It is passed on to drawIcon too, now that icons carry 2-bit
+// anti-aliased coverage generated from the design's SVG and so differ per plane
+// on every curve and diagonal. fillRect and ditherRect still need no plane:
+// they are opaque by construction (coverage 0 or 3), identical in every plane.
 int drawHeaderBand(Framebuffer& fb, const FontSet& fonts, std::string_view label,
                    std::string_view value, Plane plane = Plane::Bw);
 // `value` may be empty and `trailing` may be null; a row may carry either, both

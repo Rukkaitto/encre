@@ -1,4 +1,4 @@
-.PHONY: test sim firmware fonts compare
+.PHONY: test sim firmware fonts icons compare
 # PlatformIO installs outside PATH by default; allow an override: make firmware PIO=/path/to/pio
 PIO ?= $(shell command -v pio 2>/dev/null || echo $(HOME)/.platformio/penv/bin/pio)
 PYTHON ?= python3
@@ -40,6 +40,18 @@ fonts:
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_14pt.rfnt --out shell/src/font_body.h --symbol kFontBody
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_20pt.rfnt --out shell/src/font_title.h --symbol kFontTitle
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_32pt.rfnt --out shell/src/font_display.h --symbol kFontDisplay
+# Rebuilds the UI icon bitmaps from the design boards' own inline SVG, the same
+# relationship `fonts` gives type. Needs Google Chrome (the only SVG rasteriser
+# on this machine, and the one tools/compare-design.py measures the design with)
+# and Pillow. The generated header is committed, so this only needs running when
+# an icon's SVG or target size changes in tools/iconc.py.
+#
+# --sheet is optional and writes to build/, which is not committed: it is the
+# 1:1-plus-6x contact sheet for eyeballing the set before re-blessing goldens.
+# Reviewing that sheet is not optional -- the hand-drawn bitmaps this replaces
+# passed review twice while the book icon read as the letters "OC".
+icons:
+	$(PYTHON) tools/iconc.py --out core/src/icons_data.h --sheet build/icons_sheet.png
 # Design-vs-firmware contact sheet for every screen (needs Chrome + Pillow).
 # COMPARE_ARGS=--all includes the flows and states.
 # COMPARE_ARGS=--geometry x3 narrows to one device panel (x4 480x800, x3

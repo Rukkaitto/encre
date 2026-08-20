@@ -88,9 +88,15 @@ TEST_CASE("the header band keeps value plus battery glyph inside the right margi
     const int h = reader::drawHeaderBand(fb, f.fonts, "NOW READING", "87%");
     // Scan above the full-bleed 2px rule, as the alignment test above does.
     const int rightmost = rightmostInk(fb, 0, h - 2);
-    // The group is right-aligned on the icon, so the last inked column is the
-    // battery's terminal nub, one pixel short of the icon's right edge.
-    CHECK(rightmost == width - reader::kMargin - 1);
+    // The group is right-aligned on the icon's box, so the last inked column is
+    // the battery's terminal nub. Not the box's very last column, though: the
+    // design's own SVG puts the nub at x=19.5..21.5 of a 22-unit viewBox, so
+    // rasterised at 38px the final column carries ~14% coverage and quantises
+    // to nothing. A range, not an equality -- what matters is that the mark
+    // reaches the margin and never crosses it, which no exact column can say
+    // without being re-derived every time the icon's scale changes.
+    CHECK(rightmost <= width - reader::kMargin - 1);
+    CHECK(rightmost >= width - reader::kMargin - 3);
     // The battery is a distinct mark, not just the value: its outline's left
     // edge is a full column of ink 22px in from the margin.
     const int iconX = width - reader::kMargin - reader::icons::kBattery.w;
