@@ -138,6 +138,10 @@ def render_board(board_path, out_png, w, h):
         subprocess.run(
             [CHROME, "--headless", "--disable-gpu", "--force-device-scale-factor=1",
              "--hide-scrollbars", "--default-background-color=FFFFFFFF",
+             # Without a virtual-time budget the screenshot can fire before the
+             # Google Fonts webfont arrives, silently rendering the board in a
+             # fallback face -- which made X4 and X3 panels disagree on type.
+             "--virtual-time-budget=8000",
              f"--window-size={w},{h}", f"--screenshot={out_png}",
              f"http://127.0.0.1:{port}/index.html"],
             check=True, capture_output=True)
