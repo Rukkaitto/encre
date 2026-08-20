@@ -18,6 +18,7 @@ TEST_CASE("FontSet exposes one loaded face per role and reports readiness") {
   auto value = slurp(dir + "spacegrotesk_700_14.rfnt");
   auto body  = slurp(dir + "spacegrotesk_500_17.rfnt");
   auto title = slurp(dir + "spacegrotesk_700_24.rfnt");
+  auto display = slurp(dir + "spacegrotesk_700_44.rfnt");
 
   reader::FontSet fonts;
   CHECK_FALSE(fonts.ready());
@@ -26,9 +27,13 @@ TEST_CASE("FontSet exposes one loaded face per role and reports readiness") {
   REQUIRE(fonts.load(reader::Role::Value, value.data(), value.size()));
   REQUIRE(fonts.load(reader::Role::Body,  body.data(),  body.size()));
   REQUIRE(fonts.load(reader::Role::Title, title.data(), title.size()));
+  REQUIRE(fonts.load(reader::Role::Display, display.data(), display.size()));
   CHECK(fonts.ready());
 
-  // The ramp must actually be a ramp, or the design's hierarchy is lost.
+  // The ramp must actually be a ramp, or the design's hierarchy is lost. Display
+  // tops it: the board's percentage is the dominant number on the screen, so it
+  // has to out-measure the title rather than tie with it.
+  CHECK(fonts[reader::Role::Display].ascent() > fonts[reader::Role::Title].ascent());
   CHECK(fonts[reader::Role::Title].ascent() > fonts[reader::Role::Body].ascent());
   CHECK(fonts[reader::Role::Body].ascent()  > fonts[reader::Role::Value].ascent());
   CHECK(fonts[reader::Role::Label].ascent() >= fonts[reader::Role::Meta].ascent());

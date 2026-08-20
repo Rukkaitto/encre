@@ -10,7 +10,11 @@ namespace reader {
 // pre-rendered so each size is its own asset; enumerating the roles keeps the
 // asset list finite and lets a theme ask for meaning ("this is a value")
 // instead of numbers.
-enum class Role : uint8_t { Meta, Label, Value, Body, Title, Count_ };
+// Display tops the ramp: the design gives the reading percentage 44px/700, well
+// above the 24px title, so the number -- not the book's name -- is the first
+// thing read on Home. Title cannot simply grow to fill that slot: the two sit
+// side by side in the same column block and must stay distinguishable.
+enum class Role : uint8_t { Meta, Label, Value, Body, Title, Display, Count_ };
 
 // Owns nothing: each Font is a zero-copy view, so every blob passed to load()
 // must outlive the FontSet. The caller (shell or simulator) picks which asset

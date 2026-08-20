@@ -11,26 +11,46 @@
 namespace reader {
 
 namespace {
-constexpr int kCoverW = 140;
-constexpr int kCoverH = 210;
+constexpr int kCoverW = 156;
+constexpr int kCoverH = 234;
 constexpr int kGutter = 22;
 constexpr int kBlockH = 52;
+
+// ASCII-only uppercase, local to the theme. The design sets `text-transform:
+// uppercase` on both title runs; the strip's is small enough that mixed case
+// reads as a different element. A general Unicode case mapping is not something
+// core/ should carry for one label, and the titles that need it (accented Latin,
+// Greek, Cyrillic) arrive with real metadata in Phase 3 -- non-ASCII bytes are
+// passed through untouched rather than mangled.
+std::string upperAscii(std::string_view s) {
+  std::string out(s);
+  for (char& c : out)
+    if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+  return out;
+}
 
 // A dithered stand-in until Phase 3 decodes real cover images: a bordered
 // panel with the title reversed out of a filled strip along its bottom.
 void drawCoverPlaceholder(Framebuffer& fb, const FontSet& fonts, int x, int y,
                           std::string_view title) {
-  ditherRect(fb, x, y, kCoverW, kCoverH, 2);
+  // Level 1, not 2: the board's `.dither-dots` is a 4px-pitch radial-gradient
+  // dot, roughly a fifth coverage. Level 2 is a 50% checkerboard, which reads as
+  // grey mesh rather than a sparse tint and swamped the strip's border.
+  ditherRect(fb, x, y, kCoverW, kCoverH, 1);
   fb.fillRect(x, y, kCoverW, 2, false);
   fb.fillRect(x, y + kCoverH - 2, kCoverW, 2, false);
   fb.fillRect(x, y, 2, kCoverH, false);
   fb.fillRect(x + kCoverW - 2, y, 2, kCoverH, false);
-  const Font& bf = fonts[Role::Body];
+  // The strip's title is the board's 16px/700 uppercase, so Value (14/700), not
+  // Body (17/500): the weight is what makes it read at this size, and mixed case
+  // in a bold face at cover scale competes with the real title beside it.
+  const Font& bf = fonts[Role::Value];
+  const std::string stripTitle = upperAscii(title);
   const int stripH = bf.lineHeight() + 10;
   const int stripY = y + kCoverH - stripH - 2;
   fb.fillRect(x + 2, stripY, kCoverW - 4, stripH, true);
   fb.fillRect(x + 2, stripY, kCoverW - 4, 2, false);
-  drawText(fb, bf, x + 10, stripY + stripH - 8, title);
+  drawText(fb, bf, x + 10, stripY + stripH - 8, stripTitle);
 }
 }  // namespace
 
@@ -51,9 +71,10 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   ry += body.lineHeight() + 6;
   drawText(fb, body, rightX, ry, vm.author);
 
-  // The percentage is the one display-scale number on the screen.
+  // The percentage is the one display-scale number on the screen: 44px against
+  // the title's 24, so it outranks the book's name instead of tying with it.
   ry = y + kCoverH - meta.lineHeight() * 2 - 8;
-  drawText(fb, title, rightX, ry, std::to_string(vm.percent) + "%");
+  drawText(fb, fonts[Role::Display], rightX, ry, std::to_string(vm.percent) + "%");
   ry += meta.lineHeight() + 4;
   drawText(fb, meta, rightX, ry,
            "PAGE " + std::to_string(vm.currentPage) + " / " + std::to_string(vm.pageCount),
@@ -90,9 +111,15 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
 
   // Menu rows sit above the hint bar.
   const int menuTop = fb.height() - kHintBarH - static_cast<int>(vm.menu.size()) * kRowH;
-  for (size_t i = 0; i < vm.menu.size(); ++i)
+  for (size_t i = 0; i < vm.menu.size(); ++i) {
+    // A row states a quantity or discloses a screen, never both: the design gives
+    // LIBRARY its count and SETTINGS a chevron. Keying the mark on an absent
+    // value keeps that rule in the theme, where the design lives, rather than
+    // adding a per-entry icon field the view model has no opinion about.
+    const bool discloses = vm.menu[i].value.empty();
     drawRow(fb, fonts, menuTop + static_cast<int>(i) * kRowH, vm.menu[i].label, vm.menu[i].value,
-            static_cast<int>(i) == vm.focusedMenuIndex);
+            static_cast<int>(i) == vm.focusedMenuIndex, discloses ? &icons::kChevron : nullptr);
+  }
 
   const Hint hints[4] = {{&icons::kBook, vm.hints[0], ""},
                          {&icons::kDot, vm.hints[1], ""},

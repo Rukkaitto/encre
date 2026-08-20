@@ -5,6 +5,7 @@
 #include <XteinkDetect.h>
 
 #include "font_body.h"
+#include "font_display.h"
 #include "font_label.h"
 #include "font_meta.h"
 #include "font_title.h"
@@ -100,7 +101,8 @@ void setup() {
                        fonts.load(reader::Role::Label, kFontLabel, kFontLabelSize) &&
                        fonts.load(reader::Role::Value, kFontValue, kFontValueSize) &&
                        fonts.load(reader::Role::Body, kFontBody, kFontBodySize) &&
-                       fonts.load(reader::Role::Title, kFontTitle, kFontTitleSize);
+                       fonts.load(reader::Role::Title, kFontTitle, kFontTitleSize) &&
+                       fonts.load(reader::Role::Display, kFontDisplay, kFontDisplaySize);
   if (!fontsOk || !fonts.ready()) {
     mark("font-load-FAILED");
     return;

@@ -14,7 +14,7 @@ static std::vector<uint8_t> slurp(const std::string& p) {
 }
 
 struct Fixture {
-  std::vector<uint8_t> a, b, c, d, e;
+  std::vector<uint8_t> a, b, c, d, e, g;
   reader::FontSet fonts;
   Fixture() {
     const std::string dir = std::string(ASSETS_DIR) + "/built/";
@@ -23,11 +23,13 @@ struct Fixture {
     c = slurp(dir + "spacegrotesk_700_14.rfnt");
     d = slurp(dir + "spacegrotesk_500_17.rfnt");
     e = slurp(dir + "spacegrotesk_700_24.rfnt");
+    g = slurp(dir + "spacegrotesk_700_44.rfnt");
     fonts.load(reader::Role::Meta, a.data(), a.size());
     fonts.load(reader::Role::Label, b.data(), b.size());
     fonts.load(reader::Role::Value, c.data(), c.size());
     fonts.load(reader::Role::Body, d.data(), d.size());
     fonts.load(reader::Role::Title, e.data(), e.size());
+    fonts.load(reader::Role::Display, g.data(), g.size());
     REQUIRE(fonts.ready());
   }
 };
@@ -67,6 +69,82 @@ TEST_CASE("a focused row inverts: black field, white text") {
     for (int x = 0; x < 480 && !anyWhite; ++x)
       if (fb.getPixel(x, y)) anyWhite = true;
   CHECK(anyWhite);
+}
+
+// Rightmost inked column in rows [y0, y1), or -1 when that band is blank.
+static int rightmostInk(const reader::Framebuffer& fb, int y0, int y1) {
+  int r = -1;
+  for (int y = y0; y < y1; ++y)
+    for (int x = fb.width() - 1; x > r; --x)
+      if (!fb.getPixel(x, y)) r = x;
+  return r;
+}
+
+TEST_CASE("the header band keeps value plus battery glyph inside the right margin") {
+  Fixture f;
+  for (int width : {480, 528}) {
+    reader::Framebuffer fb(width, 200);
+    const int h = reader::drawHeaderBand(fb, f.fonts, "NOW READING", "87%");
+    // Scan above the full-bleed 2px rule, as the alignment test above does.
+    const int rightmost = rightmostInk(fb, 0, h - 2);
+    // The group is right-aligned on the icon, so the last inked column is the
+    // battery's terminal nub, one pixel short of the icon's right edge.
+    CHECK(rightmost == width - reader::kMargin - 1);
+    // The battery is a distinct mark, not just the value: its outline's left
+    // edge is a full column of ink 22px in from the margin.
+    const int iconX = width - reader::kMargin - reader::icons::kBattery.w;
+    int outlineRows = 0;
+    for (int y = 0; y < h - 2; ++y)
+      if (!fb.getPixel(iconX, y)) ++outlineRows;
+    CHECK(outlineRows == reader::icons::kBattery.h);
+    // The value sits immediately left of the glyph rather than under it or
+    // stranded mid-band: a small gap, the board's 7px, separates the two.
+    int valueRight = -1;
+    for (int y = 0; y < h - 2; ++y)
+      for (int x = 0; x < iconX; ++x)
+        if (!fb.getPixel(x, y) && x > valueRight) valueRight = x;
+    CHECK(valueRight < iconX);
+    CHECK(iconX - valueRight <= 10);
+  }
+}
+
+TEST_CASE("a row can carry a trailing icon, a value, or neither") {
+  Fixture f;
+  const int width = 480;
+  const int edge = width - reader::kMargin;
+
+  SUBCASE("trailing icon inks near the right margin and never past it") {
+    reader::Framebuffer fb(width, 120);
+    reader::drawRow(fb, f.fonts, 0, "SETTINGS", "", /*focused=*/false, &reader::icons::kChevron);
+    // Skip the hairline at y == 0.
+    const int rightmost = rightmostInk(fb, 1, reader::kRowH);
+    CHECK(rightmost < edge);
+    CHECK(rightmost >= edge - reader::icons::kChevron.w);
+  }
+
+  SUBCASE("a focused row draws its trailing icon in white") {
+    reader::Framebuffer fb(width, 120);
+    reader::drawRow(fb, f.fonts, 0, "SETTINGS", "", /*focused=*/true, &reader::icons::kChevron);
+    bool anyWhite = false;
+    for (int y = 0; y < reader::kRowH && !anyWhite; ++y)
+      for (int x = edge - reader::icons::kChevron.w; x < edge && !anyWhite; ++x)
+        if (fb.getPixel(x, y)) anyWhite = true;
+    CHECK(anyWhite);
+  }
+
+  SUBCASE("no value and no trailing icon leaves the right half empty") {
+    reader::Framebuffer fb(width, 120);
+    reader::drawRow(fb, f.fonts, 0, "SETTINGS", "", /*focused=*/false, nullptr);
+    CHECK(rightmostInk(fb, 1, reader::kRowH) < width / 2);
+  }
+
+  SUBCASE("a value still right-aligns when no trailing icon is given") {
+    reader::Framebuffer fb(width, 120);
+    reader::drawRow(fb, f.fonts, 0, "LIBRARY", "12", /*focused=*/false);
+    const int rightmost = rightmostInk(fb, 1, reader::kRowH);
+    CHECK(rightmost < edge);
+    CHECK(rightmost > edge - 20);
+  }
 }
 
 // Lowest and highest ink row inside [x0, x1), ignoring the bar's top rule.

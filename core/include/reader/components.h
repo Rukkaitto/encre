@@ -16,6 +16,10 @@ inline constexpr int kBandH = 52;
 inline constexpr int kRowH = 56;
 inline constexpr int kHintBarH = 46;
 inline constexpr int kLabelTracking = 2;
+// The design's `gap: 7px` between the header band's value and its battery
+// glyph, and the same breathing room between a row's value and a trailing mark.
+inline constexpr int kBandGap = 7;
+inline constexpr int kRowGap = 7;
 
 // One hint-bar slot. `hold` is the second line a long-press variant gets, drawn
 // inside the owning button's slot rather than as a fifth hint.
@@ -26,10 +30,14 @@ struct Hint {
 };
 
 // Each returns the height it consumed, so callers stack without recomputing.
+// The band's value is drawn as one right-aligned group with the battery glyph.
 int drawHeaderBand(Framebuffer& fb, const FontSet& fonts, std::string_view label,
                    std::string_view value);
+// `value` may be empty and `trailing` may be null; a row may carry either, both
+// or neither. A trailing mark is right-aligned on the margin and takes the row's
+// ink, so it reverses out of a focused row along with the text.
 int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label,
-            std::string_view value, bool focused);
+            std::string_view value, bool focused, const Icon* trailing = nullptr);
 // Draws at the bottom of fb. Reports each slot's x in slotXOut[4] so tests and
 // callers can assert the distribution.
 int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], int slotXOut[4]);

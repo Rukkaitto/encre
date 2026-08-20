@@ -24,6 +24,7 @@ extern const Icon kDown;     // chevron down
 extern const Icon kChevron;  // right-pointing disclosure
 extern const Icon kBook;     // open book: the Read action
 extern const Icon kFolder;   // folder: a Library directory row
+extern const Icon kBattery;  // 22x12, not 13x13: the header band's charge cell
 }  // namespace icons
 
 }  // namespace reader

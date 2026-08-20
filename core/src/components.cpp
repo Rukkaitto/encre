@@ -11,14 +11,23 @@ int drawHeaderBand(Framebuffer& fb, const FontSet& fonts, std::string_view label
   const Font& vf = fonts[Role::Value];
   const int baseline = kBandH / 2 + lf.ascent() / 2;
   drawText(fb, lf, kMargin, baseline, label, Ink::Black, kLabelTracking);
+  // The value and the battery glyph are one right-aligned group: the icon's
+  // right edge, not the text's, lands on the margin. Right-aligning the value
+  // alone and hanging the icon off it would push the glyph past the margin.
+  const Icon& bat = icons::kBattery;
   const int vw = vf.measure(value);
-  drawText(fb, vf, fb.width() - kMargin - vw, baseline, value);
+  const int groupW = vw + kBandGap + bat.w;
+  const int groupX = fb.width() - kMargin - groupW;
+  drawText(fb, vf, groupX, baseline, value);
+  // Centred on the band's midline rather than hung off the text baseline, which
+  // is what the design's `align-items: center` does to the SVG.
+  drawIcon(fb, bat, groupX + vw + kBandGap, (kBandH - 2) / 2 - bat.h / 2);
   fb.fillRect(0, kBandH - 2, fb.width(), 2, false);
   return kBandH;
 }
 
 int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label,
-            std::string_view value, bool focused) {
+            std::string_view value, bool focused, const Icon* trailing) {
   const Font& lf = fonts[Role::Body];
   const Font& vf = fonts[Role::Value];
   const Ink ink = focused ? Ink::White : Ink::Black;
@@ -28,10 +37,15 @@ int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label
     fb.fillRect(0, y, fb.width(), 1, false);  // hairline above
   const int baseline = y + kRowH / 2 + lf.ascent() / 2;
   drawText(fb, lf, kMargin, baseline, label, ink);
-  if (!value.empty()) {
-    const int vw = vf.measure(value);
-    drawText(fb, vf, fb.width() - kMargin - vw, baseline, value, ink);
+  // A row carries a value, a trailing mark, or neither -- the design has one of
+  // each (LIBRARY's count, SETTINGS' chevron). Both are right-aligned on the
+  // margin; the icon takes the row's ink, so it inverts with a focused row.
+  int rightEdge = fb.width() - kMargin;
+  if (trailing) {
+    drawIcon(fb, *trailing, rightEdge - trailing->w, y + kRowH / 2 - trailing->h / 2, ink);
+    rightEdge -= trailing->w + kRowGap;
   }
+  if (!value.empty()) drawText(fb, vf, rightEdge - vf.measure(value), baseline, value, ink);
   return kRowH;
 }
 

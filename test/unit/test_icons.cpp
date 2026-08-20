@@ -3,12 +3,18 @@
 #include "reader/icons.h"
 
 TEST_CASE("every icon draws something inside its own box and nothing outside") {
-  const reader::Icon* all[] = {&reader::icons::kBack,   &reader::icons::kDot,
+  // Not all icons are 13x13 -- kBattery is 22x12 -- so the box is each icon's
+  // own w/h, never a shared constant.
+  const reader::Icon* all[] = {&reader::icons::kBack,    &reader::icons::kDot,
                               &reader::icons::kUp,      &reader::icons::kDown,
                               &reader::icons::kChevron, &reader::icons::kBook,
-                              &reader::icons::kFolder};
+                              &reader::icons::kFolder,  &reader::icons::kBattery};
   for (const reader::Icon* ic : all) {
     reader::Framebuffer fb(48, 48);
+    REQUIRE(ic->w > 0);
+    REQUIRE(ic->h > 0);
+    REQUIRE(8 + ic->w <= 48);
+    REQUIRE(8 + ic->h <= 48);
     reader::drawIcon(fb, *ic, 8, 8, reader::Ink::Black);
     int inked = 0, outside = 0;
     for (int y = 0; y < 48; ++y)

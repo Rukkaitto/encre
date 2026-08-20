@@ -36,12 +36,14 @@ int main(int argc, char** argv) {
   auto c = slurp(dir + "spacegrotesk_700_14.rfnt");
   auto d = slurp(dir + "spacegrotesk_500_17.rfnt");
   auto e = slurp(dir + "spacegrotesk_700_24.rfnt");
+  auto g = slurp(dir + "spacegrotesk_700_44.rfnt");
   reader::FontSet fonts;
   fonts.load(reader::Role::Meta, a.data(), a.size());
   fonts.load(reader::Role::Label, b.data(), b.size());
   fonts.load(reader::Role::Value, c.data(), c.size());
   fonts.load(reader::Role::Body, d.data(), d.size());
   fonts.load(reader::Role::Title, e.data(), e.size());
+  fonts.load(reader::Role::Display, g.data(), g.size());
   if (!fonts.ready()) {
     std::fprintf(stderr, "font ramp failed to load from %s\n", dir.c_str());
     return 1;

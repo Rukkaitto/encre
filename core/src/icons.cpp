@@ -100,6 +100,28 @@ const uint8_t kFolderBits[] = {
     R2(00000000, 00000000),
 };
 #undef R2
+
+// 22x12, three bytes per row: the battery is the one mark the design does not
+// draw on the 13x13 grid, so it gets its own width rather than being squeezed
+// into one. Traced from the board's SVG: a 19x12 outline, a level bar inset one
+// pixel all round and stopping short of the right wall so the cell reads as
+// nearly-but-not-quite full, and a two-pixel terminal nub past a one-pixel gap.
+#define R3(a, b, c) 0b##a, 0b##b, 0b##c
+const uint8_t kBatteryBits[] = {
+    R3(11111111, 11111111, 11100000),  // outline top
+    R3(10000000, 00000000, 00100000),
+    R3(10111111, 11111111, 00100000),
+    R3(10111111, 11111111, 00100000),
+    R3(10111111, 11111111, 00101100),  // nub starts
+    R3(10111111, 11111111, 00101100),
+    R3(10111111, 11111111, 00101100),
+    R3(10111111, 11111111, 00101100),  // nub ends
+    R3(10111111, 11111111, 00100000),
+    R3(10111111, 11111111, 00100000),
+    R3(10000000, 00000000, 00100000),
+    R3(11111111, 11111111, 11100000),  // outline bottom
+};
+#undef R3
 }  // namespace
 
 const Icon kBack{13, 13, kBackBits};
@@ -109,6 +131,7 @@ const Icon kDown{13, 13, kDownBits};
 const Icon kChevron{13, 13, kChevronBits};
 const Icon kBook{13, 13, kBookBits};
 const Icon kFolder{13, 13, kFolderBits};
+const Icon kBattery{22, 12, kBatteryBits};
 }  // namespace icons
 
 }  // namespace reader
