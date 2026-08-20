@@ -50,7 +50,7 @@ CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 # The curated icon set, in one place on purpose: the SVG body, the viewBox it
 # was authored in, and the pixel size the firmware wants it at. `source` is the
 # board and line the markup was lifted from, so a reviewer can diff it against
-# the design without searching; `board_size` is the width/height that board
+# the design without searching; `size` is the width/height that board
 # renders it at, recorded because it is *not* always the target below and a
 # future pass may want to reconcile the two (see NOTE).
 #
@@ -68,18 +68,16 @@ ICONS = {
             '<path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path>'
             '<path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path>'
         ),
-        "size": (23, 23),
+        "size": (25, 25),
         "source": "design/Library.dc.html",
-        "board_size": (25, 25),
     },
     "dot": {
         "symbol": "kDot",
         "note": "filled circle: the Confirm button",
         "viewbox": "0 0 10 10",
         "body": '<circle cx="5" cy="5" r="4" fill="#000000"></circle>',
-        "size": (23, 23),
+        "size": (19, 19),
         "source": "design/Main.dc.html",
-        "board_size": (19, 19),
     },
     "up": {
         "symbol": "kUp",
@@ -88,7 +86,6 @@ ICONS = {
         "body": '<path d="M8 11V5M5 8l3-3 3 3" stroke="#000000" stroke-width="1.6"></path>',
         "size": (23, 23),
         "source": "design/Main.dc.html",
-        "board_size": (23, 23),
     },
     "down": {
         "symbol": "kDown",
@@ -97,16 +94,14 @@ ICONS = {
         "body": '<path d="M8 5v6M5 8l3 3 3-3" stroke="#000000" stroke-width="1.6"></path>',
         "size": (23, 23),
         "source": "design/Main.dc.html",
-        "board_size": (23, 23),
     },
     "chevron": {
         "symbol": "kChevron",
         "note": "right-pointing disclosure",
         "viewbox": "0 0 16 16",
         "body": '<path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path>',
-        "size": (23, 23),
+        "size": (25, 25),
         "source": "design/Main.dc.html",
-        "board_size": (25, 25),
     },
     "book": {
         "symbol": "kBook",
@@ -117,9 +112,8 @@ ICONS = {
             ' stroke="#000000" stroke-width="1.4"></path>'
             '<path d="M8 3.2v11" stroke="#000000" stroke-width="1.4"></path>'
         ),
-        "size": (25, 25),
+        "size": (26, 26),
         "source": "design/Main.dc.html",
-        "board_size": (26, 26),
     },
     "folder": {
         "symbol": "kFolder",
@@ -131,7 +125,6 @@ ICONS = {
         ),
         "size": (46, 39),
         "source": "design/Library.dc.html",
-        "board_size": (46, 39),
     },
     "battery": {
         "symbol": "kBattery",
@@ -144,7 +137,6 @@ ICONS = {
         ),
         "size": (38, 21),
         "source": "design/Main.dc.html",
-        "board_size": (38, 21),
     },
 }
 
@@ -274,8 +266,7 @@ def main() -> None:
             "",
             f"// {name}: {spec['note']}",
             f"// {spec['source']}, viewBox \"{spec['viewbox']}\", drawn {w}x{h}"
-            + ("" if spec["board_size"] == spec["size"]
-               else f" (that board renders it {spec['board_size'][0]}x{spec['board_size'][1]})"),
+            ,
             f"// coverage levels 0/1/2/3: {hist[0]}/{hist[1]}/{hist[2]}/{hist[3]} px",
             f"inline constexpr int {sym}W = {w};",
             f"inline constexpr int {sym}H = {h};",
