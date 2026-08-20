@@ -19,12 +19,12 @@ struct Fixture {
   reader::FontSet fonts;
   Fixture() {
     const std::string dir = std::string(ASSETS_DIR) + "/built/";
-    a = slurp(dir + "spacegrotesk_500_12.rfnt");
-    b = slurp(dir + "spacegrotesk_500_13.rfnt");
-    c = slurp(dir + "spacegrotesk_700_14.rfnt");
-    d = slurp(dir + "spacegrotesk_500_17.rfnt");
-    e = slurp(dir + "spacegrotesk_700_24.rfnt");
-    g = slurp(dir + "spacegrotesk_700_44.rfnt");
+    a = slurp(dir + "spacegrotesk_500_10pt.rfnt");
+    b = slurp(dir + "spacegrotesk_500_11pt.rfnt");
+    c = slurp(dir + "spacegrotesk_700_12pt.rfnt");
+    d = slurp(dir + "spacegrotesk_500_14pt.rfnt");
+    e = slurp(dir + "spacegrotesk_700_20pt.rfnt");
+    g = slurp(dir + "spacegrotesk_700_32pt.rfnt");
     fonts.load(reader::Role::Meta, a.data(), a.size());
     fonts.load(reader::Role::Label, b.data(), b.size());
     fonts.load(reader::Role::Value, c.data(), c.size());

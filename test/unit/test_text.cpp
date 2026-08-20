@@ -15,7 +15,7 @@ static std::vector<uint8_t> slurpFont(const char* name) {
 }
 
 TEST_CASE("drawText can draw white ink on a black field") {
-  auto bytes = slurpFont("spacegrotesk_500_17.rfnt");
+  auto bytes = slurpFont("spacegrotesk_500_14pt.rfnt");
   reader::Font font;
   REQUIRE(font.load(bytes.data(), bytes.size()));
 
@@ -34,7 +34,7 @@ TEST_CASE("drawText can draw white ink on a black field") {
 }
 
 TEST_CASE("black ink is still the default") {
-  auto bytes = slurpFont("spacegrotesk_500_17.rfnt");
+  auto bytes = slurpFont("spacegrotesk_500_14pt.rfnt");
   reader::Font font;
   REQUIRE(font.load(bytes.data(), bytes.size()));
   reader::Framebuffer white(64, 32);
@@ -47,7 +47,7 @@ TEST_CASE("black ink is still the default") {
 }
 
 TEST_CASE("measure accounts for tracking and agrees with drawText") {
-  auto bytes = slurpFont("spacegrotesk_500_17.rfnt");
+  auto bytes = slurpFont("spacegrotesk_500_14pt.rfnt");
   reader::Font font;
   REQUIRE(font.load(bytes.data(), bytes.size()));
 
@@ -62,7 +62,7 @@ TEST_CASE("measure accounts for tracking and agrees with drawText") {
 }
 
 TEST_CASE("a missing glyph draws a visible box rather than nothing") {
-  auto bytes = slurpFont("spacegrotesk_500_17.rfnt");
+  auto bytes = slurpFont("spacegrotesk_500_14pt.rfnt");
   reader::Font font;
   REQUIRE(font.load(bytes.data(), bytes.size()));
   REQUIRE(font.glyph(0x4E2D) == nullptr);   // CJK, definitely not in the subset

@@ -13,12 +13,12 @@ static std::vector<uint8_t> slurp(const std::string& p) {
 
 TEST_CASE("FontSet exposes one loaded face per role and reports readiness") {
   const std::string dir = std::string(ASSETS_DIR) + "/built/";
-  auto meta  = slurp(dir + "spacegrotesk_500_12.rfnt");
-  auto label = slurp(dir + "spacegrotesk_500_13.rfnt");
-  auto value = slurp(dir + "spacegrotesk_700_14.rfnt");
-  auto body  = slurp(dir + "spacegrotesk_500_17.rfnt");
-  auto title = slurp(dir + "spacegrotesk_700_24.rfnt");
-  auto display = slurp(dir + "spacegrotesk_700_44.rfnt");
+  auto meta  = slurp(dir + "spacegrotesk_500_10pt.rfnt");
+  auto label = slurp(dir + "spacegrotesk_500_11pt.rfnt");
+  auto value = slurp(dir + "spacegrotesk_700_12pt.rfnt");
+  auto body  = slurp(dir + "spacegrotesk_500_14pt.rfnt");
+  auto title = slurp(dir + "spacegrotesk_700_20pt.rfnt");
+  auto display = slurp(dir + "spacegrotesk_700_32pt.rfnt");
 
   reader::FontSet fonts;
   CHECK_FALSE(fonts.ready());

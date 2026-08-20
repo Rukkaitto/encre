@@ -18,21 +18,28 @@ firmware:
 # body text is revisited in Phase 3.
 #
 # The chrome ramp is a fixed set of six roles (see the Phase 2A plan): bitmaps
-# are pre-rendered, so each distinct pixel size is its own asset.
+# are pre-rendered, so each distinct size is its own asset.
+#
+# Chrome is sized in POINTS at 150 DPI, which is CrossPoint's unit and the ramp
+# design/Main.dc.html declares. ppem = pt * 150 / 72, so the six roles land on
+# 21/23/25/29/42/67 device pixels - roughly double the earlier px ramp, which was
+# authored on a monitor and measured illegible on the ~220 PPI panel. Assets are
+# named by pt so the unit is unambiguous in the filename; Literata stays on
+# --size (pixels) until body text is revisited in Phase 3.
 fonts:
-	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 12 --weight 500 --autohint --bpp 2 --out assets/built/spacegrotesk_500_12.rfnt
-	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 13 --weight 500 --autohint --bpp 2 --out assets/built/spacegrotesk_500_13.rfnt
-	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 14 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_14.rfnt
-	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 17 --weight 500 --autohint --bpp 2 --out assets/built/spacegrotesk_500_17.rfnt
-	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 24 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_24.rfnt
-	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --size 44 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_44.rfnt
+	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 10 --weight 500 --autohint --bpp 2 --out assets/built/spacegrotesk_500_10pt.rfnt
+	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 11 --weight 500 --autohint --bpp 2 --out assets/built/spacegrotesk_500_11pt.rfnt
+	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 12 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_12pt.rfnt
+	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 14 --weight 500 --autohint --bpp 2 --out assets/built/spacegrotesk_500_14pt.rfnt
+	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 20 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_20pt.rfnt
+	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 32 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_32pt.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/Literata.ttf --size 18 --weight 400 --opsz 12 --out assets/built/literata_18.rfnt
-	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_12.rfnt --out shell/src/font_meta.h --symbol kFontMeta
-	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_13.rfnt --out shell/src/font_label.h --symbol kFontLabel
-	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_14.rfnt --out shell/src/font_value.h --symbol kFontValue
-	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_17.rfnt --out shell/src/font_body.h --symbol kFontBody
-	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_24.rfnt --out shell/src/font_title.h --symbol kFontTitle
-	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_44.rfnt --out shell/src/font_display.h --symbol kFontDisplay
+	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_10pt.rfnt --out shell/src/font_meta.h --symbol kFontMeta
+	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_11pt.rfnt --out shell/src/font_label.h --symbol kFontLabel
+	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_12pt.rfnt --out shell/src/font_value.h --symbol kFontValue
+	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_14pt.rfnt --out shell/src/font_body.h --symbol kFontBody
+	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_20pt.rfnt --out shell/src/font_title.h --symbol kFontTitle
+	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_32pt.rfnt --out shell/src/font_display.h --symbol kFontDisplay
 # Design-vs-firmware contact sheet for every screen (needs Chrome + Pillow).
 # COMPARE_ARGS=--all includes the flows and states.
 # COMPARE_ARGS=--geometry x3 narrows to one device panel (x4 480x800, x3

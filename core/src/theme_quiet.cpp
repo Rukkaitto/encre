@@ -11,14 +11,37 @@
 namespace reader {
 
 namespace {
-constexpr int kCoverW = 156;
-constexpr int kCoverH = 234;
+// The board's own numbers. The cover shrank from 156x234 to 128x192 when the pt
+// type ramp landed: at legible sizes the stats column beside it needs the width,
+// and a 234px-tall cover no longer bounded that column's height anyway.
+constexpr int kCoverW = 128;
+constexpr int kCoverH = 192;
 constexpr int kGutter = 22;
-constexpr int kBlockH = 52;
+constexpr int kBlockH = 72;
+// Vertical rhythm, all straight off the board: the gap under the header band
+// (`padding: 30px 24px 0`), the same 26px lead-in the progress bar and the
+// CONTINUE block each get, and the bar's own height.
+constexpr int kCoverTopGap = 30;
+constexpr int kBlockGap = 26;
+constexpr int kBarH = 8;
+// The stats column's internal gaps: 2px of column padding, 5px between title
+// and author, 22px between that group and the progress group, 4px between the
+// numeral and each meta line.
+constexpr int kColPadTop = 2;
+constexpr int kTitleAuthorGap = 5;
+constexpr int kGroupGap = 22;
+constexpr int kMetaGap = 4;
+// The two line boxes the board tightens below the font's natural line height:
+// `line-height: 1.05` on the 42px title and `1` on the 67px numeral. Spelled out
+// in pixels like every other number here, because a Font reports ascent and
+// descent but not its own ppem, so 1.05em is not derivable from it. Both are
+// shorter than the glyphs they hold, which is the point: it stops a 20pt title
+// and a 32pt numeral from opening craters in the column.
+constexpr int kTitleLineH = 44;    // round(1.05 * 42)
+constexpr int kDisplayLineH = 67;  // 1.00 * 67
 
 // ASCII-only uppercase, local to the theme. The design sets `text-transform:
-// uppercase` on both title runs; the strip's is small enough that mixed case
-// reads as a different element. A general Unicode case mapping is not something
+// uppercase` on the title. A general Unicode case mapping is not something
 // core/ should carry for one label, and the titles that need it (accented Latin,
 // Greek, Cyrillic) arrive with real metadata in Phase 3 -- non-ASCII bytes are
 // passed through untouched rather than mangled.
@@ -29,28 +52,31 @@ std::string upperAscii(std::string_view s) {
   return out;
 }
 
-// A dithered stand-in until Phase 3 decodes real cover images: a bordered
-// panel with the title reversed out of a filled strip along its bottom.
-void drawCoverPlaceholder(Framebuffer& fb, const FontSet& fonts, int x, int y,
-                          std::string_view title, Plane plane) {
+// Baseline of one text run, given the top of its CSS line box and that box's
+// height. This is CSS half-leading: the font's ascent+descent is centred in the
+// line box, so a box shorter than the glyphs (the board's `line-height: 1.05` on
+// the title, `1` on the numeral) pulls the baseline up rather than letting the
+// run sit flush to the top. Getting this right is what keeps the 67px numeral
+// clear of the author line above it instead of butting into it.
+int baselineIn(const Font& f, int boxTop, int boxH) {
+  const int natural = f.ascent() - f.descent();
+  return boxTop + (boxH - natural) / 2 + f.ascent();
+}
+
+// A dithered stand-in until Phase 3 decodes real cover images: a bordered panel,
+// and nothing else. The board used to reverse the title out of a filled strip
+// along the bottom; at the pt ramp's sizes that strip duplicated the title
+// already set beside the cover and ran into the stats column, so the board
+// dropped it and the cover is now a plain panel.
+void drawCoverPlaceholder(Framebuffer& fb, int x, int y) {
   // Level 1, not 2: the board's `.dither-dots` is a 4px-pitch radial-gradient
   // dot, roughly a fifth coverage. Level 2 is a 50% checkerboard, which reads as
-  // grey mesh rather than a sparse tint and swamped the strip's border.
+  // grey mesh rather than a sparse tint.
   ditherRect(fb, x, y, kCoverW, kCoverH, 1);
   fb.fillRect(x, y, kCoverW, 2, false);
   fb.fillRect(x, y + kCoverH - 2, kCoverW, 2, false);
   fb.fillRect(x, y, 2, kCoverH, false);
   fb.fillRect(x + kCoverW - 2, y, 2, kCoverH, false);
-  // The strip's title is the board's 16px/700 uppercase, so Value (14/700), not
-  // Body (17/500): the weight is what makes it read at this size, and mixed case
-  // in a bold face at cover scale competes with the real title beside it.
-  const Font& bf = fonts[Role::Value];
-  const std::string stripTitle = upperAscii(title);
-  const int stripH = bf.lineHeight() + 10;
-  const int stripY = y + kCoverH - stripH - 2;
-  fb.fillRect(x + 2, stripY, kCoverW - 4, stripH, true);
-  fb.fillRect(x + 2, stripY, kCoverW - 4, 2, false);
-  drawText(fb, bf, x + 10, stripY + stripH - 8, stripTitle, Ink::Black, 0, plane);
 }
 }  // namespace
 
@@ -60,42 +86,61 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   int y = drawHeaderBand(fb, fonts, "NOW READING", std::to_string(vm.batteryPercent) + "%", plane);
 
   // Two columns: cover on the left, the reading state stacked on the right.
-  y += 28;
-  drawCoverPlaceholder(fb, fonts, kMargin, y, vm.title, plane);
+  y += kCoverTopGap;
+  drawCoverPlaceholder(fb, kMargin, y);
 
   const int rightX = kMargin + kCoverW + kGutter;
   const Font& title = fonts[Role::Title];
   const Font& body = fonts[Role::Body];
   const Font& meta = fonts[Role::Meta];
-  int ry = y + title.ascent();
+  const Font& display = fonts[Role::Display];
+
+  // The stats column flows downward from its own top, with the board's gaps
+  // between runs. It used to hang the numeral off the cover's *bottom* edge,
+  // which worked only while the cover was the taller of the two columns: at the
+  // pt ramp the column is ~239px against a 192px cover, so that anchor drove the
+  // numeral up into the author line. Nothing here positions a run off kCoverH.
+  int ry = y + kColPadTop;
   // The board sets the title in caps (text-transform: uppercase). Casing is a
   // presentation decision, so the theme applies it rather than the view-model
   // carrying a pre-shouted string.
-  drawText(fb, title, rightX, ry, upperAscii(vm.title), Ink::Black, 0, plane);
-  ry += body.lineHeight() + 6;
-  drawText(fb, body, rightX, ry, vm.author, Ink::Black, 0, plane);
+  drawText(fb, title, rightX, baselineIn(title, ry, kTitleLineH), upperAscii(vm.title), Ink::Black,
+           0, plane);
+  ry += kTitleLineH + kTitleAuthorGap;
 
-  // The percentage is the one display-scale number on the screen: 44px against
-  // the title's 24, so it outranks the book's name instead of tying with it.
-  ry = y + kCoverH - meta.lineHeight() * 2 - 8;
-  drawText(fb, fonts[Role::Display], rightX, ry, std::to_string(vm.percent) + "%", Ink::Black, 0,
+  drawText(fb, body, rightX, baselineIn(body, ry, body.lineHeight()), vm.author, Ink::Black, 0,
            plane);
-  ry += meta.lineHeight() + 4;
-  drawText(fb, meta, rightX, ry,
+  ry += body.lineHeight() + kGroupGap;
+
+  // The percentage is the one display-scale run on the screen: 32pt against the
+  // title's 20, so it outranks the book's name instead of tying with it.
+  drawText(fb, display, rightX, baselineIn(display, ry, kDisplayLineH),
+           std::to_string(vm.percent) + "%", Ink::Black, 0, plane);
+  ry += kDisplayLineH + kMetaGap;
+
+  drawText(fb, meta, rightX, baselineIn(meta, ry, meta.lineHeight()),
            "PAGE " + std::to_string(vm.currentPage) + " / " + std::to_string(vm.pageCount),
            Ink::Black, kLabelTracking, plane);
-  ry += meta.lineHeight() + 2;
-  drawText(fb, meta, rightX, ry, vm.chapterLabel, Ink::Black, kLabelTracking, plane);
+  ry += meta.lineHeight() + kMetaGap;
 
-  y += kCoverH + 22;
+  drawText(fb, meta, rightX, baselineIn(meta, ry, meta.lineHeight()), vm.chapterLabel, Ink::Black,
+           kLabelTracking, plane);
+  ry += meta.lineHeight();
+
+  // The block is as tall as its taller column. The stats column now normally
+  // wins, but keying off whichever is taller keeps a short view model (no
+  // chapter label, a one-digit percentage) from letting the progress bar ride up
+  // over the cover's bottom edge.
+  const int coverBottom = y + kCoverH;
+  y = (ry > coverBottom ? ry : coverBottom) + kBlockGap;
 
   // Progress bar spans the usable width.
   const int barW = fb.width() - 2 * kMargin;
-  fb.fillRect(kMargin, y, barW, 8, false);
-  fb.fillRect(kMargin + 1, y + 1, barW - 2, 6, true);
+  fb.fillRect(kMargin, y, barW, kBarH, false);
+  fb.fillRect(kMargin + 1, y + 1, barW - 2, kBarH - 2, true);
   const int clamped = vm.percent < 0 ? 0 : (vm.percent > 100 ? 100 : vm.percent);
-  fb.fillRect(kMargin + 1, y + 1, (barW - 2) * clamped / 100, 6, false);
-  y += 8 + 22;
+  fb.fillRect(kMargin + 1, y + 1, (barW - 2) * clamped / 100, kBarH - 2, false);
+  y += kBarH + kBlockGap;
 
   // Continue block: focused when no menu row is.
   const bool continueFocused = (vm.focusedMenuIndex < 0);

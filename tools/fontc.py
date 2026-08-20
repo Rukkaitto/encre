@@ -2,8 +2,23 @@
 """fontc: TTF/OTF -> .rfnt bitmap font (1 or 2 bpp, with kerning).
 
 Usage: python3 tools/fontc.py FONT.ttf --size 18 --out out.rfnt
-       python3 tools/fontc.py FONT.ttf --size 16 --weight 500 --autohint --out out.rfnt
-       python3 tools/fontc.py FONT.ttf --size 13 --weight 500 --bpp 2 --out out.rfnt
+       python3 tools/fontc.py FONT.ttf --pt 11 --weight 500 --autohint --out out.rfnt
+       python3 tools/fontc.py FONT.ttf --pt 12 --weight 700 --bpp 2 --out out.rfnt
+
+Exactly one of --pt or --size sets the size, and they are not interchangeable:
+
+  --pt  points at 150 DPI, via set_char_size(pt << 6, pt << 6, 150, 150). This
+        is what CrossPoint does, character for character, and it is the unit the
+        chrome ramp is authored in (see design/Main.dc.html). ppem works out to
+        pt * 150 / 72, so 10pt is 20.83 -> FreeType's own rounding, not ours.
+  --size  a pixel size, via set_pixel_sizes. Kept for the Literata body face,
+        whose asset predates the pt ramp and must stay byte-identical.
+
+The two paths are deliberately NOT one path with a conversion in front: rounding
+a pt size to an integer ppem and calling set_pixel_sizes gives FreeType a
+different scale and a different hinting outcome than set_char_size does at the
+same nominal size, so a "converted" pt would not reproduce CrossPoint's proven
+rendering. Mirror the reference implementation instead of approximating it.
 
 The bundled faces are variable fonts, and their variable *defaults* are not the
 weights the UI asks for (Space Grotesk defaults to 300 Light). Left unset, every
@@ -80,7 +95,11 @@ def apply_variations(face, requested: dict) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("font")
-    ap.add_argument("--size", type=int, required=True, help="pixel size")
+    # Not an argparse mutually-exclusive group: that reports "one of the
+    # arguments --pt --size is required", which does not say which unit a caller
+    # should be reaching for. Check by hand and explain the choice.
+    ap.add_argument("--pt", type=int, help="size in points at 150 DPI (CrossPoint's unit)")
+    ap.add_argument("--size", type=int, help="size in pixels (Literata body face only)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--weight", type=float, help="'wght' variation axis, e.g. 500")
     ap.add_argument("--opsz", type=float, help="'opsz' variation axis, e.g. 12")
@@ -98,6 +117,23 @@ def main() -> None:
     )
     args = ap.parse_args()
 
+    if args.pt is not None and args.size is not None:
+        sys.exit(
+            "error: --pt and --size are two different size units; give exactly one.\n"
+            "  --pt N    points at 150 DPI (set_char_size) - the chrome ramp\n"
+            "  --size N  pixels (set_pixel_sizes) - the Literata body face"
+        )
+    if args.pt is None and args.size is None:
+        sys.exit(
+            "error: no size given; --pt or --size is required.\n"
+            "  --pt N    points at 150 DPI (set_char_size) - the chrome ramp\n"
+            "  --size N  pixels (set_pixel_sizes) - the Literata body face"
+        )
+    if args.pt is not None and args.pt <= 0:
+        sys.exit(f"error: --pt must be positive, got {args.pt}")
+    if args.size is not None and args.size <= 0:
+        sys.exit(f"error: --size must be positive, got {args.size}")
+
     requested = {}
     if args.weight is not None:
         requested["wght"] = args.weight
@@ -107,7 +143,15 @@ def main() -> None:
     face = freetype.Face(args.font)
     # Axes first: FT_Set_Var_Design_Coordinates can reset the active size.
     axis_summary = apply_variations(face, requested)
-    face.set_pixel_sizes(0, args.size)
+    if args.pt is not None:
+        # 26.6 fixed point, both axes, at 150x150 DPI -- byte for byte what
+        # CrossPoint's set_char_size(size << 6, size << 6, 150, 150) does.
+        face.set_char_size(args.pt << 6, args.pt << 6, 150, 150)
+    else:
+        face.set_pixel_sizes(0, args.size)
+    # Whatever FreeType actually resolved the request to, reported rather than
+    # recomputed: at --pt 10 the nominal 20.83 ppem rounds inside FreeType.
+    ppem = face.size.y_ppem
 
     # At 2bpp the mono target must be off, or FreeType hands back a 1-bit bitmap
     # and there is no anti-aliasing left to quantise.
@@ -170,8 +214,11 @@ def main() -> None:
         f.write(bytes(blob))
     # Axes and hinting go in the summary so a generated asset is traceable to
     # the exact rendering settings that produced it.
+    size_trait = (
+        f"{args.pt}pt@150dpi -> {ppem}px ppem" if args.pt is not None else f"{args.size}px"
+    )
     traits = [
-        f"{args.size}px",
+        size_trait,
         f"bpp={args.bpp}",
         axis_summary or "static",
         "autohint" if args.autohint else "hinted",

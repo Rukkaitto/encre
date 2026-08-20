@@ -13,9 +13,15 @@ class Framebuffer;
 // PPI, so a margin should be the same physical size on both. What must adapt is
 // the canvas width, which every primitive reads from the framebuffer.
 inline constexpr int kMargin = 24;
-inline constexpr int kBandH = 52;
-inline constexpr int kRowH = 56;
-inline constexpr int kHintBarH = 46;
+// Sized for the pt-at-150dpi type ramp, not the earlier px one: the chrome faces
+// roughly doubled (Label 13px -> 23px, Meta 12px -> 21px), so every box that
+// holds a line of text had to grow with them or the text would fill it edge to
+// edge. These are the board's own numbers -- the header band and the CONTINUE
+// block are 72 tall, a menu row 80, and the hint bar's 20px top padding plus a
+// 27px Meta line and 16px bottom padding come to 64.
+inline constexpr int kBandH = 72;
+inline constexpr int kRowH = 80;
+inline constexpr int kHintBarH = 64;
 inline constexpr int kLabelTracking = 2;
 // The design's `gap: 7px` between the header band's value and its battery
 // glyph, and the same breathing room between a row's value and a trailing mark.

@@ -31,12 +31,12 @@ int main(int argc, char** argv) {
   }
 
   const std::string dir = std::string(ASSETS_DIR) + "/built/";
-  auto a = slurp(dir + "spacegrotesk_500_12.rfnt");
-  auto b = slurp(dir + "spacegrotesk_500_13.rfnt");
-  auto c = slurp(dir + "spacegrotesk_700_14.rfnt");
-  auto d = slurp(dir + "spacegrotesk_500_17.rfnt");
-  auto e = slurp(dir + "spacegrotesk_700_24.rfnt");
-  auto g = slurp(dir + "spacegrotesk_700_44.rfnt");
+  auto a = slurp(dir + "spacegrotesk_500_10pt.rfnt");
+  auto b = slurp(dir + "spacegrotesk_500_11pt.rfnt");
+  auto c = slurp(dir + "spacegrotesk_700_12pt.rfnt");
+  auto d = slurp(dir + "spacegrotesk_500_14pt.rfnt");
+  auto e = slurp(dir + "spacegrotesk_700_20pt.rfnt");
+  auto g = slurp(dir + "spacegrotesk_700_32pt.rfnt");
   reader::FontSet fonts;
   fonts.load(reader::Role::Meta, a.data(), a.size());
   fonts.load(reader::Role::Label, b.data(), b.size());
