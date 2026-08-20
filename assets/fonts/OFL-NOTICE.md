@@ -11,6 +11,8 @@ binaries, so the complete licence is included alongside them as
 | `SpaceGrotesk.ttf` | (c) Florian Karsten                             | Space Grotesk      |
 
 The `.rfnt` files under `assets/built/` and the embedded
-`shell/src/font_spacegrotesk_16.h` are Modified Versions in the OFL sense:
-bitmap renderings produced from these TTFs by `tools/fontc.py`. They carry the
-same licence and, per OFL 1.1 §3, do not use the Reserved Font Names.
+`shell/src/font_spacegrotesk_500_16.h` and `shell/src/font_spacegrotesk_700_16.h`
+are Modified Versions in the OFL sense: bitmap renderings produced from these
+TTFs by `tools/fontc.py`, at a pinned instance of each font's variation axes.
+They carry the same licence and, per OFL 1.1 §3, do not use the Reserved Font
+Names.

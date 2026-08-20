@@ -19,10 +19,12 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "usage: reader_sim home OUT.png\n");
     return 2;
   }
-  auto ui = slurp(std::string(ASSETS_DIR) + "/built/spacegrotesk_16.rfnt");
+  auto labelFont = slurp(std::string(ASSETS_DIR) + "/built/spacegrotesk_500_16.rfnt");
+  auto valueFont = slurp(std::string(ASSETS_DIR) + "/built/spacegrotesk_700_16.rfnt");
   reader::QuietTheme theme;
-  if (ui.empty() || !theme.loadFonts(ui.data(), ui.size())) {
-    std::fprintf(stderr, "failed to load ui font\n");
+  if (labelFont.empty() || valueFont.empty() ||
+      !theme.loadFonts(labelFont.data(), labelFont.size(), valueFont.data(), valueFont.size())) {
+    std::fprintf(stderr, "failed to load ui fonts (run: make fonts)\n");
     return 1;
   }
   reader::HomeViewModel vm;
