@@ -67,7 +67,10 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   const Font& body = fonts[Role::Body];
   const Font& meta = fonts[Role::Meta];
   int ry = y + title.ascent();
-  drawText(fb, title, rightX, ry, vm.title);
+  // The board sets the title in caps (text-transform: uppercase). Casing is a
+  // presentation decision, so the theme applies it rather than the view-model
+  // carrying a pre-shouted string.
+  drawText(fb, title, rightX, ry, upperAscii(vm.title));
   ry += body.lineHeight() + 6;
   drawText(fb, body, rightX, ry, vm.author);
 
