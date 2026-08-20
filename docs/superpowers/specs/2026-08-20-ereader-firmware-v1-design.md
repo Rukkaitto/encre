@@ -14,9 +14,7 @@ personality — UI, typography, and features — is under our control. V1 delive
 - Crisp 1-bit typography with real customization (font family, size, margins,
   line spacing, alignment).
 - Effortless book loading: WiFi drag-and-drop in a browser, or plain SD copy.
-- Native Instapaper support: sync the unread queue, read offline, archive/like
-  from the device.
-- Formats: EPUB 2/3, plain `.txt`, and Instapaper articles.
+- Formats: EPUB 2/3 and plain `.txt`.
 
 Everything above the freeink-sdk drivers is new code. CrossPoint Reader
 (MIT, https://github.com/crosspoint-reader/crosspoint-reader) is a reference
@@ -58,8 +56,8 @@ RTC presence.
 - **Content pipeline:** EPUB container (miniz for zip, expat for OPF/XHTML) →
   a lean internal document model (block/inline tree supporting the HTML/CSS
   subset that matters for books: paragraphs, headings, emphasis, images, lists,
-  blockquotes, basic alignment). TXT and Instapaper HTML normalize into the
-  same model, so all formats get identical typography.
+  blockquotes, basic alignment). TXT normalizes into the same model, so all
+  formats get identical typography.
 - **Layout engine:** paragraph shaping (kerning, soft hyphens + hyphenation
   patterns, justified/ragged) → pages as **display lists** (positioned glyph
   runs and images). Deterministic given (document, typography settings, canvas
@@ -72,14 +70,10 @@ RTC presence.
   pairs, UTF-8 coverage). Generated offline by a desktop converter tool
   (FreeType-based, part of this repo) from TTF/OTF at a fixed size ramp.
   ~4 curated faces bundled in firmware; user fonts loaded from `/fonts` on SD.
-- **Instapaper client:** OAuth 1.0a xAuth signing (HMAC-SHA1), bookmark list
-  sync, `get_text` article download, offline action queue (archive/like
-  recorded locally, replayed on next sync). HTTP/TLS transport is injected via
-  an interface, so the whole client is testable with canned responses.
 - **State models:** global settings, per-book state (progress, bookmarks,
-  typography overrides), article read/archive state. Serialized as small JSON
-  files (sidecars under a dot-directory on SD; WiFi credentials and Instapaper
-  tokens in ESP32 NVS, not on the removable card).
+  typography overrides). Serialized as small JSON files (sidecars under a
+  dot-directory on SD; WiFi credentials in ESP32 NVS, not on the removable
+  card).
 
 ### 3.3 Device shell (thin Arduino/PlatformIO layer)
 
@@ -110,8 +104,6 @@ RTC presence.
   OFF except during transfer/sync/setup — battery first.
 - **HTTP server:** serves the single-page drag-and-drop upload UI (uploads
   stream to `/books` on SD, with progress) and the small JSON API behind it.
-- **Instapaper sync service:** wraps the core client with the transport, runs
-  sync on user demand from the Articles screen.
 - **Power manager:** idle → sleep timers; deep sleep with wake-on-button;
   paints the sleep screen before sleeping; forced clean shutdown at critical
   battery.
@@ -136,21 +128,20 @@ ground truth for the visual design pass (Claude Design handoff).
   on-screen hints.
 - **Long-press Confirm on any list item = contextual actions overlay.**
   Library items: Open / Book details / Mark as finished / Delete… (delete has
-  a confirmation step and never erases reading progress). Article items:
-  Read / Archive / Like. Saved Wi-Fi networks: hold to forget.
-- Actions that need more than a press get their own screen, not a hint:
-  Instapaper sync is a selectable row at the top of Articles, not a button
-  binding.
+  a confirmation step and never erases reading progress). Saved Wi-Fi
+  networks: hold to forget.
+- Actions that need more than a press get their own screen or list row, not a
+  hint binding.
 
 ### 4.1 Screens
 
 - **Home:** the current book front and center — cover, title, author,
   progress. Confirm resumes reading, and on Home the **Back button also
   opens the current book** ("Read") since there is nothing to go back to.
-  Below: Library, Articles (with unread count), Settings.
+  Below: Library and Settings.
   - *Empty state (first run / no books):* a welcome screen naming the two
     loading paths (SD copy, Wi-Fi send) with "Send books over Wi-Fi" as the
-    focused action; menu rows show Library — empty, Articles — set up.
+    focused action; the Library row reads "empty".
   - *Missing current book:* if the last-read file is gone (card edited
     elsewhere), Home falls back to the most recent existing book and shows a
     one-time banner saying why; with no books left it falls back to the
@@ -166,15 +157,9 @@ ground truth for the visual design pass (Claude Design handoff).
   The typography panel adjusts family / size / margins / line spacing /
   alignment with a live preview line and applies on close (background
   re-pagination from the current position).
-- **Articles:** Instapaper unread queue, newest first — title, source, length
-  estimate. "Sync now" is the first row of the list (shows last-sync time);
-  selecting it triggers the on-demand Wi-Fi connect flow. Articles read in
-  the same Reader. End-of-article screen offers Archive / Like / Next
-  article. Archive/like also available from the list via long-press.
 - **Settings:** device (sleep timers, full-refresh cadence, button remap for
-  page-turn direction), typography defaults, WiFi networks, Instapaper account
-  (xAuth login form via the web setup page — never typed on-device), sleep
-  screen mode, about/version.
+  page-turn direction), typography defaults, WiFi networks, sleep screen
+  mode, about/version.
 - **Transfer screen:** shown while the HTTP server runs — URL + QR code,
   upload progress, done/cancel.
 
@@ -183,27 +168,26 @@ ground truth for the visual design pass (Claude Design handoff).
 Reader tools: Typography panel (live preview line, applies from the current
 page), Contents (chapter list with current position), Go to page (Up/Down
 with hold-to-accelerate), Bookmarks (hold to remove), About this book.
-Flows: item-actions overlays and delete confirmation, end-of-article screen,
+Flows: item-actions overlays and delete confirmation,
 Wi-Fi settings (saved networks, join, setup hotspot) and the on-demand
-connect dialog ("Wi-Fi turns off when the sync finishes" is stated in the
-UI). Joining a network on-device: scan list (signal + lock indicators, open
+connect dialog ("Wi-Fi turns off when the transfer finishes" is stated in
+the UI). Joining a network on-device: scan list (signal + lock indicators, open
 networks join directly) → password entry on a button-driven keyboard
 (Up/Down between rows, the side page buttons move along a row, Confirm
 types, Back deletes / hold cancels; password visible while typing). The
 setup hotspot (AP + QR + credentials + web page) is the no-typing
-alternative and doubles as the Instapaper sign-in path. Join failure offers
-edit / retry / cancel and states Wi-Fi is off again; a completed sync
-shows a result banner on Articles (new-article and pushed-action counts). Error/empty: first-run Home, missing-book Home, no-SD-card screen,
+alternative for entering network details. Join failure offers edit / retry /
+cancel and states Wi-Fi is off again. Error/empty: first-run Home, missing-book Home, no-SD-card screen,
 corrupt-book dialog, low-battery banner (any button dismisses), the
 battery-empty shutdown screen (page saved; charge to wake), the boot
-splash, and the end-of-book screen (mark finished / back to library /
-read an article). The web pages the device serves are designed too
-(canvas page "Web UI"): the drag-and-drop upload page and the Setup page
-(Wi-Fi + Instapaper forms). Documented variants without their own board:
+splash, and the end-of-book screen (mark finished / back to library).
+The web pages the device serves are designed too (canvas page "Web UI"):
+the drag-and-drop upload page and the Setup page (Wi-Fi form). Documented
+variants without their own board:
 Library inside a folder (same layout, path in the header, Back exits the
 folder), Transfer before any file arrives (progress block absent), the
 sleep screen while charging (small charging glyph on the plaque), and the
-connect dialog stepping its label Joining -> Syncing. Settings displays Wi-Fi as **"on demand"** —
+connect dialog stepping its label Joining -> Ready. Settings displays Wi-Fi as **"on demand"** —
 never "connected" — matching the Wi-Fi policy in 3.3.
 
 ### 4.2 Sleep screens
@@ -212,38 +196,18 @@ Deep-sleep image: current book cover (dithered, with optional
 title/progress overlay) or user-supplied images from `/sleep` (rotating),
 per setting. Falls back to a clean typographic default when neither exists.
 
-### 4.3 Instapaper flow
-
-1. One-time connect (designed end-to-end on the canvas): Articles opens in a
-   **"not set up"** state whose single action starts setup. The device brings
-   Wi-Fi up (saved network, or the setup hotspot when none is saved), serves
-   the **web Setup page**, and shows its QR/URL with a "waiting for sign-in"
-   status. The user signs in to Instapaper **in their browser** — username
-   and password never touch the device UI; the device performs xAuth, stores
-   only the resulting token in NVS, and runs the first sync. (Prereq: an
-   Instapaper API consumer key — the only external dependency.) A
-   **connected-account screen** under Settings shows account, unread count,
-   last sync, offline quota, pending actions, and Sign out (confirmation
-   dialog; removes token + downloaded articles, never touches the account).
-2. Sync (user-initiated from Articles): fetch bookmark list diff → download
-   text for new items (bounded: newest 50 unread) → push queued archive/like
-   actions → update read state. Images in articles are downloaded and cached
-   alongside the HTML, size-capped.
-3. Reading is 100% offline; sync failures never block reading.
-
 ## 5. Data layout (SD card)
 
 ```
 /books/            user EPUBs and .txt (any folder structure)
-/articles/         synced Instapaper content (HTML + images, per-article dir)
 /fonts/            user-installed converted fonts
 /sleep/            optional user sleep-screen images
 /.reader/cache/    pagination caches (evicted LRU when space is low)
-/.reader/state/    per-book and per-article state JSON
+/.reader/state/    per-book state JSON
 /.reader/settings.json
 ```
 
-NVS (on-chip): WiFi credentials, Instapaper OAuth token, last-open pointer.
+NVS (on-chip): WiFi credentials, last-open pointer.
 
 ## 6. Error handling
 
@@ -251,8 +215,8 @@ NVS (on-chip): WiFi credentials, Instapaper OAuth token, last-open pointer.
   into a broken UI.
 - **Corrupt or unsupported book:** readable error naming the file; parser
   failures are contained (no crash, no reboot loop).
-- **Network:** WiFi/Instapaper errors surface as non-blocking notices; queued
-  actions persist across reboots; reading never depends on the network.
+- **Network:** WiFi and transfer errors surface as non-blocking notices;
+  reading never depends on the network.
 - **Power:** progress saved on page turn (debounced write); low-battery
   warning at threshold; clean shutdown (state flushed, sleep screen painted)
   at critical level.
@@ -263,19 +227,27 @@ NVS (on-chip): WiFi credentials, Instapaper OAuth token, last-open pointer.
 
 - **Core unit tests** (native, run on macOS/CI): parsers, document model,
   layout/pagination (golden-file tests: input document + settings → expected
-  page breaks and glyph positions), cache round-trip, Instapaper signing and
-  sync state machine (canned HTTP fixtures).
+  page breaks and glyph positions), cache round-trip.
 - **Visual regression:** simulator renders key screens to PNG; diffs against
   approved baselines.
 - **On-device:** small manual smoke checklist per release (boot, open book,
-  page turns, upload, sync, sleep/wake) — kept small precisely because
+  page turns, upload, sleep/wake) — kept small precisely because
   everything above the drivers is tested natively.
 
 ## 8. Out of scope for V1 (V2 shelf)
 
-OPDS browsing, Calibre wireless, dictionary lookups, reading stats, OTA
-updates, KOReader sync, Instapaper folders/highlights/two-way progress,
-RTL/bidi text, tilt page-turn (X3 IMU), audio anything. Also: the theme
+**Instapaper support** (sync the unread queue, read offline, archive/like
+from the device) — cut from V1 on 2026-08-20 to keep the first release
+achievable. Its UX is already designed end-to-end on the canvas page
+"V2 · Instapaper" (Articles list and actions, not-set-up state, browser
+sign-in flow, account screen, sync feedback), and the architecture leaves
+room for it: the client is a portable-core module with an injected HTTP
+transport, and Articles is one more view-model + theme rendering. Needs an
+Instapaper API consumer key before work starts.
+
+Also: OPDS browsing, Calibre wireless, dictionary lookups, reading stats,
+OTA updates, KOReader sync, RTL/bidi text, tilt page-turn (X3 IMU), audio
+anything. Also: the theme
 picker and user-installable themes — the theme layer itself ships in V1
 (Section 3.3) with the single built-in "Quiet" theme; alternate themes,
 including structurally different ones (the constructivist "Spine"/F
@@ -305,4 +277,3 @@ Constraints the visual design must respect:
 - Final choice of the ~4 bundled font faces (licensing must permit embedding;
   candidates: Bookerly-alikes such as Literata, Source Serif, plus a
   humanist sans and a monospace).
-- Instapaper consumer key: request early — the only external dependency.
