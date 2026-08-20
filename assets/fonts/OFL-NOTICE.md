@@ -10,8 +10,9 @@ binaries, so the complete licence is included alongside them as
 | `Literata.ttf`     | (c) The Literata Project Authors                | Literata           |
 | `SpaceGrotesk.ttf` | (c) Florian Karsten                             | Space Grotesk      |
 
-The `.rfnt` files under `assets/built/` and the embedded
-`shell/src/font_spacegrotesk_500_16.h` and `shell/src/font_spacegrotesk_700_16.h`
+The `.rfnt` files under `assets/built/` and the embedded `shell/src/font_*.h`
+headers generated from them (`font_meta.h`, `font_label.h`, `font_value.h`,
+`font_body.h`, `font_title.h`)
 are Modified Versions in the OFL sense: bitmap renderings produced from these
 TTFs by `tools/fontc.py`, at a pinned instance of each font's variation axes.
 They carry the same licence and, per OFL 1.1 §3, do not use the Reserved Font

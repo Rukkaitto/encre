@@ -83,7 +83,7 @@ int Font::kerning(char32_t l, char32_t r) const {
   return it == kerns_.end() ? 0 : it->second;
 }
 
-int Font::measure(std::string_view utf8) const {
+int Font::measure(std::string_view utf8, int tracking) const {
   int w = 0;
   char32_t prev = 0;
   for (size_t i = 0; i < utf8.size();) {
@@ -91,7 +91,7 @@ int Font::measure(std::string_view utf8) const {
     const Glyph* g = glyph(cp);
     if (!g) continue;
     if (prev) w += kerning(prev, cp);
-    w += g->advance;
+    w += g->advance + tracking;
     prev = cp;
   }
   return w;

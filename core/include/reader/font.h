@@ -20,7 +20,8 @@ class Font {
   int ascent() const { return ascent_; }
   int descent() const { return descent_; }
   int lineHeight() const { return ascent_ - descent_ + lineGap_; }
-  int measure(std::string_view utf8) const;
+  // `tracking` adds that many pixels after every glyph, matching drawText.
+  int measure(std::string_view utf8, int tracking = 0) const;
 
  private:
   std::unordered_map<char32_t, Glyph> glyphs_;
