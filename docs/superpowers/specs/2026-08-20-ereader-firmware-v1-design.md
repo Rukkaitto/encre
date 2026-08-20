@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-20
 **Status:** Approved design, pre-implementation
-**Working name:** none yet (placeholder: "the firmware")
+**Name:** Encre (French for "ink")
 **Targets:** Xteink X4 and Xteink X3 (ESP32-C3)
 
 ## 1. Purpose
@@ -302,8 +302,6 @@ Constraints the visual design must respect:
 
 ## 10. Open items
 
-- Product/project name (currently unnamed; affects boot screen, repo name,
-  web page titles).
 - Final choice of the ~4 bundled font faces (licensing must permit embedding;
   candidates: Bookerly-alikes such as Literata, Source Serif, plus a
   humanist sans and a monospace).

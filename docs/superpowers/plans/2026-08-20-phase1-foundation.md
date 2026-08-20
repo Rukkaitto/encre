@@ -47,7 +47,7 @@ platformio.local.ini
 - [ ] **Step 2: Write README.md**
 
 ```markdown
-# ereader-firmware
+# Encre
 
 From-scratch firmware for the Xteink X4/X3 e-readers (ESP32-C3, 1-bit e-ink).
 
