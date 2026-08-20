@@ -24,3 +24,8 @@ target_compile_definitions(unit_tests PRIVATE
   GOLDEN_DIR="${CMAKE_SOURCE_DIR}/test/golden"
   BUILD_DIR="${CMAKE_BINARY_DIR}")
 add_test(NAME unit COMMAND unit_tests)
+
+add_executable(reader_sim ${CMAKE_SOURCE_DIR}/sim/main.cpp)
+target_link_libraries(reader_sim PRIVATE reader_core)
+target_compile_definitions(reader_sim PRIVATE ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+add_test(NAME sim_home COMMAND reader_sim home ${CMAKE_BINARY_DIR}/sim_home.png)
