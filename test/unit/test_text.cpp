@@ -59,3 +59,24 @@ TEST_CASE("measure accounts for tracking and agrees with drawText") {
   reader::Framebuffer fb(400, 40);
   CHECK(reader::drawText(fb, font, 0, 30, "LIBRARY", reader::Ink::Black, 2) == tracked);
 }
+
+TEST_CASE("a missing glyph draws a visible box rather than nothing") {
+  auto bytes = slurpFont("spacegrotesk_500_16.rfnt");
+  reader::Font font;
+  REQUIRE(font.load(bytes.data(), bytes.size()));
+  REQUIRE(font.glyph(0x4E2D) == nullptr);   // CJK, definitely not in the subset
+
+  reader::Framebuffer fb(64, 32);
+  const int advance = reader::drawText(fb, font, 4, 24, "\xE4\xB8\xAD");  // U+4E2D
+  CHECK(advance > 0);                        // it occupies space
+
+  int inked = 0;
+  for (int y = 0; y < 32; ++y)
+    for (int x = 0; x < 64; ++x)
+      if (!fb.getPixel(x, y)) ++inked;
+  CHECK(inked > 0);                          // and it is visible
+
+  // A hollow box: its interior is untouched, so it reads as a placeholder
+  // rather than a solid blob.
+  CHECK(inked < 4 * font.ascent());
+}
