@@ -1,7 +1,8 @@
 #include <Arduino.h>
 #include <EInkDisplay.h>
 
-#include "font_spacegrotesk_16.h"
+#include "font_spacegrotesk_500_16.h"
+#include "font_spacegrotesk_700_16.h"
 #include "reader/framebuffer.h"
 #include "reader/rotate.h"
 #include "reader/theme_quiet.h"
@@ -19,7 +20,7 @@ void setup() {
   display.begin();
 
   reader::QuietTheme theme;
-  if (!theme.loadFonts(kUiFont, kUiFontSize)) {
+  if (!theme.loadFonts(kUiLabelFont, kUiLabelFontSize, kUiValueFont, kUiValueFontSize)) {
     Serial.println("font load failed");
     return;
   }

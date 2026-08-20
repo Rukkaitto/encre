@@ -7,9 +7,10 @@
 #include "reader/viewmodel.h"
 
 TEST_CASE("QuietTheme renders Home to golden") {
-  auto ui = golden::slurp(std::string(ASSETS_DIR) + "/built/spacegrotesk_16.rfnt");
+  auto labelFont = golden::slurp(std::string(ASSETS_DIR) + "/built/spacegrotesk_500_16.rfnt");
+  auto valueFont = golden::slurp(std::string(ASSETS_DIR) + "/built/spacegrotesk_700_16.rfnt");
   reader::QuietTheme theme;
-  REQUIRE(theme.loadFonts(ui.data(), ui.size()));
+  REQUIRE(theme.loadFonts(labelFont.data(), labelFont.size(), valueFont.data(), valueFont.size()));
 
   reader::HomeViewModel vm;
   vm.title = "Middlemarch";

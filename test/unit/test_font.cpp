@@ -13,7 +13,7 @@ static std::vector<uint8_t> slurp(const std::string& p) {
 }
 
 TEST_CASE("font loads and measures text") {
-  auto bytes = slurp(std::string(ASSETS_DIR) + "/built/spacegrotesk_16.rfnt");
+  auto bytes = slurp(std::string(ASSETS_DIR) + "/built/spacegrotesk_500_16.rfnt");
   reader::Font font;
   REQUIRE(font.load(bytes.data(), bytes.size()));
 
