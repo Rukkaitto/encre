@@ -171,7 +171,13 @@ ground truth for the visual design pass (Claude Design handoff).
 
 Reader tools: Typography panel (live preview line, applies from the current
 page), Contents (chapter list with current position), Go to page (Up/Down
-with hold-to-accelerate), Bookmarks (hold to remove), About this book.
+with hold-to-accelerate), Bookmarks (hold to remove), About this book. **About
+this book is a FIXED single-screen summary** — six fields, no list, nothing to
+scroll — so its hint bar carries Back and three empty slots, per §4.0's rule that
+a button with no action leaves its slot empty. Its board originally labelled Up
+and Down; that was corrected (2026-08-21) after the screen was built and the
+labels had nothing to move. If it ever needs to scroll, the answer is a scroll
+window on the screen, not re-labelling the buttons.
 Flows: item-actions overlays and delete confirmation,
 Wi-Fi settings (saved networks, join, setup hotspot) and the on-demand
 connect dialog ("Wi-Fi turns off when the transfer finishes" is stated in
