@@ -68,7 +68,15 @@ stop meaning anything.
 - **Flashing must be run by the user** — the permission classifier blocks it
   from an agent. Give them the command.
 - E-ink holds its last image with no power, so **a frozen screen does not mean
-  the firmware ran**. It has disguised a crash loop and a bootloader hang as
+  the firmware ran**.
+- **E-ink persistence is about the PANEL, not the controller.** The glass keeps
+  its image with no power; the controller's DTM1 baseline does not. A wake is a
+  chip reset, so `initController()` re-runs and `_oldPlaneValid` goes false —
+  which is what makes `displayStart()` seed DTM1 white. Telling the driver the
+  baseline is still valid (`skipInitialResync()`) skips that seed and leaves the
+  waveform diffing against garbage: on device that was a split second of noisy
+  banding on every wake. Conflating the two is easy and it looks like a panel
+  fault rather than a state bug. It has disguised a crash loop and a bootloader hang as
   "nothing happened". Read the serial log before believing the panel.
 - **The SD card shares the display's SPI bus** (X3: MISO 7, CS 12) and
   `SDCardManager` does **no locking** — there is no mutex or semaphore anywhere in

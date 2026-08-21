@@ -980,14 +980,37 @@ void setup() {
   const esp_sleep_wakeup_cause_t wake = esp_sleep_get_wakeup_cause();
   const bool fromSleep = (wake != ESP_SLEEP_WAKEUP_UNDEFINED);
   Serial.printf("[boot] wake cause=%d -> %s\n", (int)wake,
-                fromSleep ? "resumed from sleep, panel holds our frame"
+                fromSleep ? "resumed from sleep (the panel holds our frame, but the "
+                            "controller's baseline did not survive, so it is reseeded)"
                           : "cold boot, clearing the panel");
   Serial.flush();
-  if (fromSleep) {
-    display.skipInitialResync();
-  } else {
-    display.requestResync();
-  }
+  // BOTH branches let the driver seed its own baseline. On wake this used to call
+  // skipInitialResync() instead, and that was wrong in a way worth recording.
+  //
+  // The reasoning was: e-ink holds its image with no power, so on wake the panel
+  // already shows what we painted and there is nothing to clear. That is true of
+  // the PANEL and false of the CONTROLLER, which is the distinction the call
+  // actually turns on. skipInitialResync() sets Uc8279Driver::_oldPlaneValid
+  // true, asserting DTM1 still holds the displayed frame -- but a wake is a chip
+  // reset, initController() has just re-run, and DTM1's contents did not survive
+  // the power cycle. displayStart() seeds DTM1 white only `if (!_oldPlaneValid)`,
+  // so claiming validity SKIPPED that seed and left the GC waveform diffing the
+  // new frame against garbage. Wrong old values give wrong per-pixel
+  // transitions, which is what showed on the panel: a split second of noisy
+  // banding before the image settled.
+  //
+  // The cost of doing it properly is one clean flash on wake, the same as a cold
+  // boot. That is what Kindle and Kobo do on resume anyway, and a clean flash is
+  // plainly better than a fast smear of noise.
+  //
+  // skipInitialResync() is not useless -- it is right for a caller that has
+  // RESTORED the baseline first, which is what the reference firmware does on its
+  // quick resume (`begin() clears the X3 controller RAM, so restore the saved
+  // frame as the baseline`). Doing that here would give a flash-free wake: render
+  // the restored screen, rebase the controller onto it, then refresh FAST. It
+  // needs the restored screen to actually match what is on the glass, so it waits
+  // until the session restore is trustworthy enough to bet a frame on.
+  display.requestResync();
 
   Serial.printf("[info] panel %dx%d, buffer %u bytes\n", display.getDisplayWidth(),
                 display.getDisplayHeight(), (unsigned)display.getBufferSize());
