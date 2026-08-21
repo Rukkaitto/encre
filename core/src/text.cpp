@@ -78,6 +78,59 @@ int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::strin
   return f26ToPx(penF) - x;
 }
 
+std::string elideToWidth(const Font& font, std::string_view utf8, int maxW, Tracking tracking) {
+  if (font.measure(utf8, tracking) <= maxW) return std::string(utf8);
+  const int ellipsisW = font.measure(kEllipsis, tracking);
+  // Not even the mark fits. See the header: nothing, rather than something that
+  // overhangs the box this whole function exists to respect.
+  if (ellipsisW > maxW) return std::string();
+
+  // The pen is accumulated exactly as Font::measure accumulates it -- 1/64 px,
+  // kerning included, rounded once -- and after each codepoint we ask what the
+  // run WOULD measure with the ellipsis joined on. That join has to be part of
+  // the measurement rather than added afterwards: `measure(prefix) +
+  // measure(kEllipsis)` misses the kern across the join, and the kern is where a
+  // one-pixel overhang would come from.
+  constexpr char32_t kEllipsisCp = 0x2026;
+  const Glyph* eg = font.glyph(kEllipsisCp);
+  const int ellipsisAdvanceF = pxToF26(eg ? eg->advance : font.notdefAdvance());
+
+  int penF = 0;
+  char32_t prev = 0;
+  size_t fits = 0;  // byte length of the longest prefix that fits with the mark
+  size_t i = 0;
+  while (i < utf8.size()) {
+    const char32_t cp = utf8Next(utf8, i);
+    const Glyph* g = font.glyph(cp);
+    if (!g) {
+      penF += pxToF26(font.notdefAdvance()) + tracking.f26();
+      prev = 0;
+    } else {
+      if (prev) penF += pxToF26(font.kerning(prev, cp));
+      penF += pxToF26(g->advance) + tracking.f26();
+      prev = cp;
+    }
+    int joinedF = penF;
+    if (prev) joinedF += pxToF26(font.kerning(prev, kEllipsisCp));
+    joinedF += ellipsisAdvanceF + tracking.f26();
+    if (f26ToPx(joinedF) > maxW) break;
+    fits = i;
+  }
+  // `i` is already on a codepoint boundary at every iteration -- utf8Next only
+  // ever leaves it on one -- so this substr can never split a sequence.
+  std::string out(utf8.substr(0, fits));
+  out += kEllipsis;
+  return out;
+}
+
+int drawTextElided(Framebuffer& fb, const Font& font, int x, int baselineY,
+                   std::string_view utf8, int maxW, Ink ink, Tracking tracking, Plane plane) {
+  if (font.measure(utf8, tracking) <= maxW)
+    return drawText(fb, font, x, baselineY, utf8, ink, tracking, plane);
+  const std::string cut = elideToWidth(font, utf8, maxW, tracking);
+  return drawText(fb, font, x, baselineY, cut, ink, tracking, plane);
+}
+
 // descent() is negative, so `ascent - descent` is the run's full extent and
 // `(ascent + descent) / 2` is the signed distance from the baseline up to the
 // extent's midpoint.

@@ -37,6 +37,58 @@ enum class Plane { Bw, Lsb, Msb, BwDithered };
 int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::string_view utf8,
              Ink ink = Ink::Black, Tracking tracking = {}, Plane plane = Plane::Bw);
 
+// --- A run that has to fit -----------------------------------------------------
+//
+// drawText draws from a left edge with no right edge, which is right for every
+// run whose text the design chose: a board's own copy fits the box the board drew
+// it in, by construction. It is wrong for every run whose text arrives from the
+// CARD. A filename is as long as someone made it, and drawn from a left edge it
+// simply keeps going -- past its column, over the value beside it, off the panel.
+// The boards now say what happens instead (`overflow: hidden; text-overflow:
+// ellipsis; white-space: nowrap` on the title runs of Main, Library and
+// LibraryActions), and this is that declaration.
+//
+// The ellipsis is the REAL character, U+2026, not three periods. It is in every
+// face's subset (tools/fontc.py adds it alongside the quotes and dashes) and it
+// is narrower than the periods it replaces in every role -- 16px against 18 in
+// Label500, 32 against 36 in Title700 -- so the periods would be both wrong
+// typography and less room for the name.
+inline constexpr std::string_view kEllipsis = "\xE2\x80\xA6";
+
+// `utf8` if it already fits `maxW`, otherwise the longest prefix that fits with
+// the ellipsis joined on, plus the ellipsis.
+//
+// UTF-8 aware, and that is not a nicety: a prefix cut mid-sequence decodes to
+// U+FFFD, and fontc.py puts U+FFFD IN the subset precisely so malformed text is
+// visible -- so the name would come out with a replacement box on the end of it,
+// then the ellipsis, and it would read as a font bug rather than as a truncation.
+// It also measures wrong, because the box is not the width of the bytes it stands
+// for, which is how a mid-sequence cut turns into an overhang after all. The cut
+// is always on a codepoint boundary.
+//
+// Three decisions worth knowing, because each is a real filename:
+//   - A run that FITS is returned untouched, with no ellipsis. Truncation must
+//     engage only on overflow, which is what makes every existing golden hold.
+//   - When only the ellipsis fits, the ellipsis is the whole answer.
+//   - When not even the ellipsis fits -- `maxW` below its advance, including a
+//     zero or negative `maxW` -- the answer is EMPTY. Drawing a mark wider than
+//     its box is the defect this function exists to remove, so it cannot be this
+//     function's own fallback; a column that cannot hold one glyph gets nothing
+//     rather than something that overhangs.
+//
+// `tracking` must be the same value the run will be drawn with, for the reason
+// Prose carries its own: the fit is decided by a measurement, and a measurement
+// taken with different spacing is a different answer.
+std::string elideToWidth(const Font& font, std::string_view utf8, int maxW,
+                         Tracking tracking = {});
+
+// drawText of the above, and the advance it returns is the elided run's -- so a
+// caller can still place something after it. Short-circuits the measure when the
+// text fits, which is the common case and the one that must not allocate.
+int drawTextElided(Framebuffer& fb, const Font& font, int x, int baselineY,
+                   std::string_view utf8, int maxW, Ink ink = Ink::Black,
+                   Tracking tracking = {}, Plane plane = Plane::Bw);
+
 // --- Vertical placement, in one place ---------------------------------------
 //
 // Every box on every screen that holds a line of text or a mark has to answer

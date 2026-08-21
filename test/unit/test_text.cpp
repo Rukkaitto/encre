@@ -255,3 +255,175 @@ TEST_CASE("a dithered glyph reproduces the glyph's ink mass better than threshol
                                                << bwError << "), dithered " << dithered
                                                << " (err " << ditherError << ")");
 }
+
+// --- elideToWidth: the runs whose text arrives from the card -------------------
+//
+// Every case below is a real filename someone will put on a card. The property
+// that has to hold for all of them is the one the boards now declare: the run
+// occupies at most the width it was given, and it says so with an ellipsis when
+// it had to give something up.
+
+namespace {
+
+// Decodes `s` and reports whether any codepoint came back U+FFFD -- which is what
+// a cut inside a multi-byte sequence produces, and what fontc.py deliberately has
+// a glyph for, so it would render as a box on the end of a name rather than as
+// nothing.
+bool hasReplacementChar(std::string_view s) {
+  for (size_t i = 0; i < s.size();)
+    if (reader::utf8Next(s, i) == 0xFFFD) return true;
+  return false;
+}
+
+bool endsWithEllipsis(std::string_view s) {
+  return s.size() >= reader::kEllipsis.size() &&
+         s.substr(s.size() - reader::kEllipsis.size()) == reader::kEllipsis;
+}
+
+}  // namespace
+
+TEST_CASE("elideToWidth leaves a run that fits untouched, with no ellipsis") {
+  ramp::Ramp r;
+  const reader::Font& f = r.fonts[reader::Role::Body500];
+  const std::string title = "Middlemarch";
+  const int w = f.measure(title);
+  // Exactly the width it needs is still a fit: `<=`, not `<`. Every golden in the
+  // suite depends on this -- their sample titles all fit, and an off-by-one here
+  // would put an ellipsis on all fifteen of them.
+  CHECK(reader::elideToWidth(f, title, w) == title);
+  CHECK(reader::elideToWidth(f, title, w + 1) == title);
+  CHECK(reader::elideToWidth(f, title, 10000) == title);
+}
+
+TEST_CASE("elideToWidth cuts a run one pixel too wide") {
+  ramp::Ramp r;
+  const reader::Font& f = r.fonts[reader::Role::Body500];
+  const std::string title = "Middlemarch";
+  const int w = f.measure(title);
+  const std::string cut = reader::elideToWidth(f, title, w - 1);
+  CHECK(cut != title);
+  CHECK(endsWithEllipsis(cut));
+  CHECK(f.measure(cut) <= w - 1);
+  // And what survives is a prefix of the original -- nothing reordered, nothing
+  // dropped from the middle.
+  CHECK(title.compare(0, cut.size() - reader::kEllipsis.size(),
+                      cut.substr(0, cut.size() - reader::kEllipsis.size())) == 0);
+}
+
+TEST_CASE("elideToWidth cuts inside a single unbroken word") {
+  ramp::Ramp r;
+  const reader::Font& f = r.fonts[reader::Role::Body500];
+  // The shape a real filename has: no spaces at all, so there is no break
+  // opportunity anywhere and the only way to make it fit is to cut it.
+  const std::string name = "Middlemarch_George_Eliot_1871_unabridged";
+  const std::string cut = reader::elideToWidth(f, name, 200);
+  CHECK(endsWithEllipsis(cut));
+  CHECK(f.measure(cut) <= 200);
+  CHECK(cut.size() < name.size());
+}
+
+TEST_CASE("elideToWidth returns the ellipsis alone when only the ellipsis fits") {
+  ramp::Ramp r;
+  const reader::Font& f = r.fonts[reader::Role::Label500];
+  const int ellipsisW = f.measure(reader::kEllipsis);
+  CHECK(reader::elideToWidth(f, "Middlemarch", ellipsisW) == std::string(reader::kEllipsis));
+}
+
+TEST_CASE("elideToWidth returns nothing when not even the ellipsis fits") {
+  ramp::Ramp r;
+  const reader::Font& f = r.fonts[reader::Role::Label500];
+  const int ellipsisW = f.measure(reader::kEllipsis);
+  REQUIRE(ellipsisW > 1);
+  // Pinned, not undefined: a column too narrow for one glyph gets nothing. The
+  // alternative -- an ellipsis hanging out of its box -- is the defect this
+  // function exists to remove, so it cannot be the fallback.
+  CHECK(reader::elideToWidth(f, "Middlemarch", ellipsisW - 1).empty());
+  CHECK(reader::elideToWidth(f, "Middlemarch", 1).empty());
+  CHECK(reader::elideToWidth(f, "Middlemarch", 0).empty());
+  CHECK(reader::elideToWidth(f, "Middlemarch", -5).empty());
+}
+
+TEST_CASE("elideToWidth passes an empty run through at any width") {
+  ramp::Ramp r;
+  const reader::Font& f = r.fonts[reader::Role::Body500];
+  // Nothing measures 0, so it fits -- and an empty run must never acquire an
+  // ellipsis, or every Library row with no author would grow one. It is empty at a
+  // negative width too, which is the only answer that is not an overhang.
+  CHECK(reader::elideToWidth(f, "", 100).empty());
+  CHECK(reader::elideToWidth(f, "", 0).empty());
+  CHECK(reader::elideToWidth(f, "", -1).empty());
+}
+
+TEST_CASE("elideToWidth never cuts inside a multi-byte character") {
+  ramp::Ramp r;
+  const reader::Font& f = r.fonts[reader::Role::Body500];
+  // Two-byte Latin-1 (in the subset -- the Library board's own CHARLOTTE BRONTE
+  // has one) and a three-byte typographic quote, so a naive byte-wise cut lands
+  // mid-sequence at many widths rather than at one lucky one.
+  const std::string name =
+      "\xC3\x89\x6D\x69\x6C\x65 \xE2\x80\x9C\xC3\x84\xC3\x96\xC3\x9C\xE2\x80\x9D "
+      "\xC3\xA9\xC3\xA8\xC3\xAA\xC3\xAB";
+  const int full = f.measure(name);
+  REQUIRE_FALSE(hasReplacementChar(name));
+  // Sweep every width the run could be given, including past its own end. A cut
+  // that split a sequence would show up as a U+FFFD at some width, and this is the
+  // only way to find WHICH width rather than trusting one sample.
+  for (int maxW = -2; maxW <= full + 3; ++maxW) {
+    const std::string cut = reader::elideToWidth(f, name, maxW);
+    CHECK_MESSAGE(!hasReplacementChar(cut), "broken sequence at maxW " << maxW);
+    if (!cut.empty()) CHECK_MESSAGE(f.measure(cut) <= maxW, "overhang at maxW " << maxW);
+    if (maxW >= full) CHECK(cut == name);
+  }
+}
+
+TEST_CASE("elideToWidth measures with the tracking the run will be drawn with") {
+  ramp::Ramp r;
+  const reader::Font& f = r.fonts[reader::Role::Label500];
+  // 0.22em on a 23px face is 5.06px a character -- the band label's own spacing,
+  // and the case that makes a pre-rounded tracking drift. A budget wide enough for
+  // the untracked run must still cut the tracked one.
+  const reader::Tracking t = reader::Tracking::em(f.ppem(), 220);
+  const std::string name = "MIDDLEMARCH";
+  const int plain = f.measure(name);
+  REQUIRE(f.measure(name, t) > plain);
+  CHECK(reader::elideToWidth(f, name, plain, t) != name);
+  CHECK(f.measure(reader::elideToWidth(f, name, plain, t), t) <= plain);
+  // And the same budget with no tracking is a fit, so the difference really is
+  // the tracking and not the width.
+  CHECK(reader::elideToWidth(f, name, plain) == name);
+}
+
+TEST_CASE("drawTextElided draws the elided run and no ink past its budget") {
+  ramp::Ramp r;
+  const reader::Font& f = r.fonts[reader::Role::Body500];
+  const std::string name = "Middlemarch_George_Eliot_1871_unabridged";
+  const int maxW = 200;
+  const int x = 24;
+
+  reader::Framebuffer fb(480, 80);
+  fb.clear(true);
+  const int advance = reader::drawTextElided(fb, f, x, 50, name, maxW);
+  // The advance is the elided run's, so a caller can still place something after
+  // it -- and it is inside the budget, which is the whole promise.
+  CHECK(advance == f.measure(reader::elideToWidth(f, name, maxW)));
+  CHECK(advance <= maxW);
+
+  // The stronger check: no INK past the budget. An advance can be right while a
+  // glyph's bitmap overhangs it, and it is the ink the user sees.
+  int rightmost = -1;
+  for (int y = 0; y < fb.height(); ++y)
+    for (int px = 0; px < fb.width(); ++px)
+      if (!fb.getPixel(px, y) && px > rightmost) rightmost = px;
+  CHECK(rightmost >= x);
+  CHECK(rightmost < x + maxW);
+
+  // And it is byte-for-byte the same frame as drawing elideToWidth's own output.
+  reader::Framebuffer same(480, 80);
+  same.clear(true);
+  reader::drawText(same, f, x, 50, reader::elideToWidth(f, name, maxW));
+  bool identical = true;
+  for (int y = 0; y < fb.height() && identical; ++y)
+    for (int px = 0; px < fb.width(); ++px)
+      if (fb.getPixel(px, y) != same.getPixel(px, y)) { identical = false; break; }
+  CHECK(identical);
+}

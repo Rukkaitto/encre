@@ -355,8 +355,21 @@ struct Prose {
   int heightF26() const { return lineCount() * leadF26; }
 };
 
+// Whether a word wider than the column may be broken inside.
+//
+// `Normal` is the boards' default and what every paragraph wants: the copy is
+// prose, its words are words, and a break inside one would be a hyphenation
+// decision nothing here is qualified to make. `Anywhere` is the boards'
+// `overflow-wrap: anywhere`, declared on exactly two runs -- BookDetails' title
+// and DeleteConfirm's caption -- and it exists because those two runs carry a
+// FILENAME. A filename is frequently one unbreakable word ("Middlemarch_George
+// _Eliot"), and CSS offers no break opportunity at an underscore, so the choice
+// on those two runs is between breaking inside the word and hanging it out past
+// the panel. The boards chose; this is the parameter that says which.
+enum class WordBreak { Normal, Anywhere };
+
 Prose wrapProse(const Font& font, std::string_view text, int maxW, int leadEm1000,
-                Tracking tracking = {});
+                Tracking tracking = {}, WordBreak breaking = WordBreak::Normal);
 
 // The same wrap for a run whose line box the board leaves at `line-height:
 // normal` -- the face's own line height, which is not expressible as one of the
@@ -368,7 +381,35 @@ Prose wrapProse(const Font& font, std::string_view text, int maxW, int leadEm100
 // stops being a whole number, and taking it here rather than converting inside
 // keeps the ONE rounding at the paint.
 Prose wrapProseLead(const Font& font, std::string_view text, int maxW, int leadF26,
-                    Tracking tracking = {});
+                    Tracking tracking = {}, WordBreak breaking = WordBreak::Normal);
+
+// --- Bounding a wrapped run ---------------------------------------------------
+//
+// A wrap turns a width limit into a HEIGHT, and a height is the one thing two of
+// this design's screens cannot let float: Book details is a fixed single-screen
+// summary (spec 4.1b) whose field rows sit below the title, and an overlay's
+// panel is centred on the screen and has to stay on it. Left unbounded, a long
+// enough name pushes the rows off the bottom or grows the panel past the glass --
+// which is the same defect as the overflow this change is fixing, turned ninety
+// degrees.
+//
+// So a wrapped run that carries a filename is clamped: the first `maxLines` line
+// boxes are kept and everything the wrap put below them is elided into the last
+// one, which is what CSS `-webkit-line-clamp` does and what the two boards'
+// `overflow: hidden` says in the vertical direction. The ellipsis therefore
+// appears on a WRAPPING run too -- but only once the run has already been given
+// every line the screen can spare, which is the difference between this and
+// truncating a title outright.
+//
+// `maxLines` is derived by the caller from its own box model and never pinned:
+// Book details divides the room its cover, its rows and its hint bar leave by the
+// title's line box, and gets 3 on both panels today.
+//
+// `tail` is where the elided last line LIVES. A Prose holds views into the text
+// it wrapped, and the clamped last line is a new string that is not in that text,
+// so the caller owns it and it must outlive the Prose -- the same rule, and the
+// same reason, as the text itself.
+void clampProse(const Font& font, Prose& prose, int maxLines, int maxW, std::string& tail);
 
 // How a wrapped run sits in its column. The boards want both: a full-screen
 // prompt's paragraph is `text-align: center` and an overlay caption's wrapped
@@ -459,7 +500,18 @@ void drawPanel(Framebuffer& fb, int x, int y, int w, int h);
 // The line box is the FACE's own line height, not a multiple the board states:
 // the caption is `line-height: normal` where a paragraph is `1.45`. Same wrap,
 // same discipline, different source for the one number.
-Prose wrapPanelCaption(const FontSet& fonts, std::string_view label, int contentW);
+// `breaking` follows the board: LibraryActions' caption is a NAME and its board
+// truncates it on one line, so the theme elides it before it gets here and the
+// wrap has nothing to break; DeleteConfirm's is a SENTENCE with a name in it,
+// which its board keeps wrapping and gives `overflow-wrap: anywhere` so the name
+// cannot hang past the panel's border.
+Prose wrapPanelCaption(const FontSet& fonts, std::string_view label, int contentW,
+                       WordBreak breaking = WordBreak::Normal);
+// The column a caption's label wraps and truncates inside -- the panel's content
+// box less its own padding. Exposed because the theme has to elide a name against
+// it BEFORE the wrap, and a second copy of `contentW - 2 * kPanelPadX` at the
+// call site is a second answer to what the column is.
+inline int panelCaptionColumnW(int contentW) { return contentW - 2 * kPanelPadX; }
 int panelCaptionHeight(const FontSet& fonts, const Prose& label);
 int drawPanelCaption(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
                      const Prose& label, std::string_view value, Plane plane = Plane::Bw);

@@ -90,7 +90,6 @@ int drawHeaderBand(Framebuffer& fb, const FontSet& fonts, std::string_view label
   const int contentH = bandContentH(fonts, mark);
   const int labelBase = baselineIn(lf, kBandPadTop, contentH);
   const int valueBase = baselineIn(vf, kBandPadTop, contentH);
-  drawText(fb, lf, kMargin, labelBase, label, Ink::Black, trackingEm(lf, kBandLabelEm), plane);
   // The value and the battery glyph are one right-aligned group: the icon's
   // right edge, not the text's, lands on the margin. Right-aligning the value
   // alone and hanging the icon off it would push the glyph past the margin.
@@ -101,6 +100,20 @@ int drawHeaderBand(Framebuffer& fb, const FontSet& fonts, std::string_view label
   // pull both 45px left of the design.
   const int groupW = vw + (mark ? kBandGap + mark->w : 0);
   const int groupX = fb.width() - kMargin - groupW;
+  // The label truncates, because on ONE board it is data: the Library's band
+  // reads a subfolder's own name, and a folder on a real card is called whatever
+  // someone called it. Every other band's label is a literal that fits, so this
+  // never engages there -- which is the point of putting it in the primitive
+  // rather than in the Library's own render, where the next data-driven band
+  // would have to remember to repeat it.
+  //
+  // The budget is what the value's group leaves, less the board's `gap: 7px`.
+  // Reserved whenever there IS a group, because `justify-content: space-between`
+  // with no gap lets the ellipsis touch the value the moment the label fills the
+  // line -- the Library's board declares that gap for exactly this reason.
+  const int labelMaxW = groupX - kMargin - (groupW > 0 ? kBandGap : 0);
+  drawTextElided(fb, lf, kMargin, labelBase, label, labelMaxW, Ink::Black,
+                 trackingEm(lf, kBandLabelEm), plane);
   drawText(fb, vf, groupX, valueBase, value, Ink::Black, {}, plane);
   // Centred in the band's content box, which is what the design's
   // `align-items: center` does to that flex row and its nested value+battery
@@ -260,16 +273,42 @@ int drawActionButton(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
 }
 
 Prose wrapProse(const Font& font, std::string_view text, int maxW, int leadEm1000,
-                Tracking tracking) {
+                Tracking tracking, WordBreak breaking) {
   // The board states the leading as a multiple of the font size, so it resolves
   // against the face exactly as letter-spacing does -- and lands on the same 1/64
   // px unit, for the same reason: 1.55 x 29 is 44.95, and three line boxes of a
   // pre-rounded 45 put the last line a pixel low.
-  return wrapProseLead(font, text, maxW, Tracking::em(font.ppem(), leadEm1000).f26(), tracking);
+  return wrapProseLead(font, text, maxW, Tracking::em(font.ppem(), leadEm1000).f26(), tracking,
+                       breaking);
 }
 
-Prose wrapProseLead(const Font& font, std::string_view text, int maxW, int leadF26,
+namespace {
+// The end of the longest prefix of text[from, to) that measures within maxW, on
+// a codepoint boundary and never shorter than one codepoint. "Never shorter than
+// one" is what stops a column too narrow for a single glyph from making this an
+// infinite loop -- the line then overhangs by construction, which is the honest
+// outcome and the same one wrapProse's first-word rule already has.
+size_t fitPrefixEnd(const Font& font, std::string_view text, size_t from, size_t to, int maxW,
                     Tracking tracking) {
+  size_t i = from;
+  size_t fits = from;
+  while (i < to) {
+    const size_t before = i;
+    utf8Next(text, i);
+    if (i > to) i = to;  // a sequence straddling the word's end: do not read past
+    if (font.measure(text.substr(from, i - from), tracking) > maxW) {
+      // The first codepoint alone is already too wide, so it is the answer.
+      return fits == from ? i : fits;
+    }
+    fits = i;
+    if (i == before) break;  // defensive: utf8Next always advances
+  }
+  return fits;
+}
+}  // namespace
+
+Prose wrapProseLead(const Font& font, std::string_view text, int maxW, int leadF26,
+                    Tracking tracking, WordBreak breaking) {
   Prose out;
   out.tracking = tracking;
   out.leadF26 = leadF26;
@@ -277,6 +316,23 @@ Prose wrapProseLead(const Font& font, std::string_view text, int maxW, int leadF
   size_t lineStart = 0;   // first byte of the line being built
   size_t lineEnd = 0;     // one past its last non-space byte
   size_t i = 0;
+  // Starts a fresh line with the word [wordStart, wordEnd). Under
+  // WordBreak::Anywhere a word wider than the column is split across as many
+  // full lines as it takes, and what is left -- which fits by construction --
+  // becomes the line being built. Under Normal it goes on the line whole and
+  // overhangs, which is the behaviour every paragraph on every board relies on.
+  const auto startLine = [&](size_t wordStart, size_t wordEnd) {
+    if (breaking == WordBreak::Anywhere) {
+      while (font.measure(text.substr(wordStart, wordEnd - wordStart), tracking) > maxW) {
+        const size_t cut = fitPrefixEnd(font, text, wordStart, wordEnd, maxW, tracking);
+        if (cut <= wordStart || cut >= wordEnd) break;
+        out.lines.push_back(text.substr(wordStart, cut - wordStart));
+        wordStart = cut;
+      }
+    }
+    lineStart = wordStart;
+    lineEnd = wordEnd;
+  };
   while (i < text.size()) {
     // One word, plus the run of spaces before it.
     while (i < text.size() && text[i] == ' ') ++i;
@@ -286,10 +342,9 @@ Prose wrapProseLead(const Font& font, std::string_view text, int maxW, int leadF
     const bool lineEmpty = (lineEnd == lineStart);
     if (lineEmpty) {
       // The first word of a line goes on it whatever it measures: a word wider
-      // than the column has nowhere better to be, and breaking inside it would
-      // be a hyphenation decision this function is not making.
-      lineStart = wordStart;
-      lineEnd = i;
+      // than the column has nowhere better to be, and breaking inside it is a
+      // decision only the board's `overflow-wrap` may make.
+      startLine(wordStart, i);
       continue;
     }
     // The candidate is measured from the line's start, spaces included, because
@@ -300,11 +355,30 @@ Prose wrapProseLead(const Font& font, std::string_view text, int maxW, int leadF
       continue;
     }
     out.lines.push_back(text.substr(lineStart, lineEnd - lineStart));
-    lineStart = wordStart;
-    lineEnd = i;
+    startLine(wordStart, i);
   }
   if (lineEnd > lineStart) out.lines.push_back(text.substr(lineStart, lineEnd - lineStart));
   return out;
+}
+
+void clampProse(const Font& font, Prose& prose, int maxLines, int maxW, std::string& tail) {
+  if (maxLines < 1) {
+    prose.lines.clear();
+    return;
+  }
+  if (prose.lineCount() <= maxLines) return;
+  // Every line is a view into ONE buffer, so what the clamp has to elide is the
+  // single span from the last kept line's first byte to the wrap's very last --
+  // interior spaces included, because those are the spaces that would have been
+  // drawn had the run been one long line. That is what makes the ellipsis land
+  // where CSS lands it rather than at the end of the last surviving word.
+  const std::string_view keep = prose.lines[static_cast<size_t>(maxLines) - 1];
+  const std::string_view last = prose.lines.back();
+  const std::string_view rest(keep.data(),
+                              static_cast<size_t>(last.data() + last.size() - keep.data()));
+  tail = elideToWidth(font, rest, maxW, prose.tracking);
+  prose.lines.resize(static_cast<size_t>(maxLines));
+  prose.lines.back() = tail;
 }
 
 int drawProse(Framebuffer& fb, const Font& font, const Prose& prose, int boxX, int boxW,
@@ -395,29 +469,48 @@ int drawBookRow(Framebuffer& fb, const FontSet& fonts, int y, const BookRowConte
   // text on the centre line if a future face makes the thumbnail win.
   const Font& tf = fonts[focused ? Role::Body700 : Role::Body500];
   const Font& mf = fonts[Role::Meta400];
+  const Font& vf = fonts[Role::Value700];
   const int columnH = tf.lineHeight() + kBookLineGap + mf.lineHeight();
   const int columnTop = centreIn(contentTop, contentH, columnH);
   const int textX = kMargin + kBookThumbW + kBookThumbGap;
-  drawText(fb, tf, textX, baselineIn(tf, columnTop, tf.lineHeight()), row.title, ink, {}, plane);
+  const int rightEdge = fb.width() - kMargin;
+
+  // BOTH of the column's lines truncate, and to the SAME budget, because they are
+  // two children of one `min-width: 0` column on the board and neither is copy
+  // the design chose: the title is a filename today and the meta line is an
+  // author (Phase 3) or a folder's own summary. Truncating only the title would
+  // leave the identical defect one line lower for whichever of the two grew
+  // first.
+  //
+  // What the column has is everything between the thumbnail and the row's third
+  // flex child, less the board's `gap: 16px` before it. The chevron and the value
+  // are exclusive in the design -- a folder discloses, a book states its progress
+  // -- and they are placed on the same right edge below, so the budget reserves
+  // the wider of the two rather than their sum: reserving both would narrow every
+  // row by a value's width for a trailing mark that is not there.
+  int trailingW = row.isFolder ? icons::kChevron.w : 0;
+  if (!row.value.empty()) trailingW = maxOf(trailingW, vf.measure(row.value));
+  const int textMaxW =
+      rightEdge - (trailingW > 0 ? trailingW + kBookThumbGap : 0) - textX;
+
+  drawTextElided(fb, tf, textX, baselineIn(tf, columnTop, tf.lineHeight()), row.title, textMaxW,
+                 ink, {}, plane);
   // 0.10em, the tighter of the boards' two meta trackings, and the same run
   // Home's chapter label is. No tracking on the title above it: the board sets
   // none there.
-  drawText(fb, mf, textX,
-           baselineIn(mf, columnTop + tf.lineHeight() + kBookLineGap, mf.lineHeight()), row.meta,
-           ink, trackingEm(mf, kTightMetaEm), plane);
+  drawTextElided(fb, mf, textX,
+                 baselineIn(mf, columnTop + tf.lineHeight() + kBookLineGap, mf.lineHeight()),
+                 row.meta, textMaxW, ink, trackingEm(mf, kTightMetaEm), plane);
 
   // Then either the chevron or the value, right-aligned on the margin and
   // centred in the content box.
-  const int rightEdge = fb.width() - kMargin;
   if (row.isFolder) {
     const Icon& chev = icons::kChevron;
     drawIcon(fb, chev, rightEdge - chev.w, iconTopIn(contentTop, contentH, chev.h), ink, plane);
   }
-  if (!row.value.empty()) {
-    const Font& vf = fonts[Role::Value700];
+  if (!row.value.empty())
     drawText(fb, vf, rightEdge - vf.measure(row.value), baselineIn(vf, contentTop, contentH),
              row.value, ink, {}, plane);
-  }
   return consumed;
 }
 
@@ -454,13 +547,14 @@ void drawPanel(Framebuffer& fb, int x, int y, int w, int h) {
   fb.fillRect(x + w - kPanelBorder, y, kPanelBorder, h, false);
 }
 
-Prose wrapPanelCaption(const FontSet& fonts, std::string_view label, int contentW) {
+Prose wrapPanelCaption(const FontSet& fonts, std::string_view label, int contentW,
+                       WordBreak breaking) {
   const Font& lf = fonts[Role::Label500];
   // `line-height: normal` on the caption, so the line box is the face's own --
   // and the tracking is carried in the Prose, so the wrap and the draw measure
   // the same run.
-  return wrapProseLead(lf, label, contentW - 2 * kPanelPadX, pxToF26(lf.lineHeight()),
-                       trackingEm(lf, kBandLabelEm));
+  return wrapProseLead(lf, label, panelCaptionColumnW(contentW), pxToF26(lf.lineHeight()),
+                       trackingEm(lf, kBandLabelEm), breaking);
 }
 
 int panelCaptionHeight(const FontSet& fonts, const Prose& label) {

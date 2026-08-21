@@ -134,8 +134,14 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   // The board sets the title in caps (text-transform: uppercase). Casing is a
   // presentation decision, so the theme applies it rather than the view-model
   // carrying a pre-shouted string.
-  drawText(fb, title, rightX, baselineIn(title, ry, kTitleLineH), upperAscii(vm.title), Ink::Black,
-           {}, plane);
+  //
+  // And it truncates, per the board's own `text-overflow: ellipsis`: the stats
+  // column is the row's last flex item, so what the title has is everything from
+  // the column's left edge to the screen margin. Derived from the box model and
+  // not pinned, which is what keeps it right on both panels -- 304px on the X4
+  // and 352 on the X3.
+  drawTextElided(fb, title, rightX, baselineIn(title, ry, kTitleLineH), upperAscii(vm.title),
+                 fb.width() - kMargin - rightX, Ink::Black, {}, plane);
   ry += kTitleLineH + kTitleAuthorGap;
 
   drawText(fb, body, rightX, baselineIn(body, ry, body.lineHeight()), vm.author, Ink::Black, {},
@@ -405,11 +411,25 @@ void QuietTheme::renderItemActions(Framebuffer& fb, const FontSet& fonts,
   veilRect(fb, 0, 0, fb.width(), fb.height());
 
   const int contentW = panelContentW(kActionsPanelW);
-  // The caption is wrapped before anything is placed, because the panel's height
-  // is the sum of what is in it and the caption's height is what its label wraps
-  // to. A book whose name is long enough gives the panel a taller caption, and
-  // the panel grows and stays centred rather than the label being clipped.
-  const std::string caption = upperAscii(vm.title);
+  // This caption IS the book's name, and the board truncates it on one line
+  // (`white-space: nowrap; text-overflow: ellipsis`) rather than wrapping it. The
+  // reason is the panel: it is a list of actions on one item, and a name allowed
+  // to wrap makes the panel a different height for every book -- which on this
+  // screen also means a different partial-repaint footprint for every book.
+  //
+  // So the name is elided to the caption's column FIRST, less what the status
+  // value on its right takes and the board's `gap: 7px`, and then wrapped -- to
+  // the one line it now fits on. It still goes through the wrap rather than
+  // around it because the panel's height is measured off a Prose, and two paths
+  // into that measurement is how the caption and the panel come to disagree.
+  const Font& capValueFont = fonts[Role::Meta400];
+  const int statusW =
+      vm.status.empty() ? 0
+                        : capValueFont.measure(vm.status, trackingEm(capValueFont, kHintEm)) +
+                              kBandGap;
+  const std::string caption = elideToWidth(fonts[Role::Label500], upperAscii(vm.title),
+                                           panelCaptionColumnW(contentW) - statusW,
+                                           trackingEm(fonts[Role::Label500], kBandLabelEm));
   const Prose label = wrapPanelCaption(fonts, caption, contentW);
 
   const int rows = static_cast<int>(vm.actions.size());
@@ -460,13 +480,44 @@ void QuietTheme::renderDeleteConfirm(Framebuffer& fb, const FontSet& fonts,
   const int contentW = panelContentW(kConfirmPanelW);
   const int colW = contentW - 2 * kPanelPadX;
   const Font& body = fonts[Role::Body400];
-  const Prose label = wrapPanelCaption(fonts, vm.title, contentW);
+  // This caption is the one run on any board that is a SENTENCE with a name
+  // inside it rather than a name, and it is the one that keeps wrapping: an
+  // ellipsis here would eat the closing quote and the question mark, and a
+  // confirmation that no longer reads as a question is one people dismiss without
+  // reading. Wrapping also shows the whole name, which an ellipsis cannot, and
+  // naming the file is what this prompt is for.
+  //
+  // What it gains from the board is `overflow-wrap: anywhere`: a filename is
+  // frequently one unbreakable word, and a word wider than the column would
+  // otherwise hang out past the panel's own border.
+  std::string captionTail;
+  Prose label = wrapPanelCaption(fonts, vm.title, contentW, WordBreak::Anywhere);
   // The paragraph, wrapped before anything is placed: its height is what it wraps
   // to, and everything below it -- both buttons and the panel's own bottom edge --
   // hangs off that. Wrapping it twice would be two chances to disagree.
   const Prose prose = wrapProse(body, vm.message, colW, kConfirmProseLeadEm);
 
   const int proseH = f26ToPx(prose.heightF26());
+  // The board's `max-height: 100%; overflow: hidden` on the panel, in the only
+  // form a firmware can honour it: the caption is the one part of this panel whose
+  // height is unbounded, so it is the part that yields. Everything else in the
+  // panel is fixed once the paragraph is wrapped, so subtract it and divide the
+  // rest by the caption's line box -- derived from the canvas, never pinned, and
+  // 13 lines on the X4 against 12 on the X3, which no ordinary name comes near.
+  // A caption clipped by the panel's border would be worse than an ellipsis, and
+  // a panel taller than the glass -- centred, so cut off at BOTH ends -- worse
+  // still.
+  const int panelFixedH = 2 * kPanelBorder + 2 * kPanelCaptionPadY + kPanelCaptionRuleH +
+                          (2 * kConfirmProsePadY + proseH) +
+                          (2 * kActionH + kConfirmButtonGap + kConfirmButtonPadBottom);
+  const int captionRoom = fb.height() - panelFixedH;
+  int maxCaptionLines = 1;
+  while (maxCaptionLines < label.lineCount() &&
+         f26ToPx((maxCaptionLines + 1) * label.leadF26) <= captionRoom)
+    ++maxCaptionLines;
+  clampProse(fonts[Role::Label500], label, maxCaptionLines, panelCaptionColumnW(contentW),
+             captionTail);
+
   const int panelH = 2 * kPanelBorder + panelCaptionHeight(fonts, label) +
                      (kConfirmProsePadY + proseH + kConfirmProsePadY) +
                      (2 * kActionH + kConfirmButtonGap + kConfirmButtonPadBottom);
@@ -511,7 +562,8 @@ void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
   // The label is the board's literal, as renderHome's `NOW READING` is: it names
   // the screen rather than its content, so it does not vary and the view-model
   // has no opinion about it. What varies beside it is the file's format.
-  int y = drawHeaderBand(fb, fonts, "ABOUT THIS BOOK", vm.format, nullptr, plane);
+  const int bandH = drawHeaderBand(fb, fonts, "ABOUT THIS BOOK", vm.format, nullptr, plane);
+  int y = bandH;
 
   // The cover and the title column, `align-items: flex-start` -- so the column
   // starts at the block's top rather than being centred against a cover more than
@@ -526,14 +578,62 @@ void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
   const Font& author = fonts[Role::Body400];
   const Font& subtitle = fonts[Role::Label400];
 
+  // The bar and the rows are measured before the title is laid out, because they
+  // are what decides how many lines the title may have. Building the hints here
+  // rather than at the end is that: a slot's mark follows its LABEL, so the three
+  // dead buttons get neither, and the bar's height follows its content.
+  const Icon* const marks[4] = {&icons::kBack, &icons::kDot, &icons::kUp, &icons::kDown};
+  Hint hints[4];
+  for (int i = 0; i < 4; ++i)
+    hints[i] = {vm.hints[i].empty() ? nullptr : marks[i], vm.hints[i], vm.holds[i]};
+
+  const int rows = static_cast<int>(vm.fields.size());
+  int rowsH = 0;
+  for (int i = 0; i < rows; ++i) rowsH += detailRowHeight(i != rows - 1);
+
   const int colX = kMargin + kDetailsCoverW + kDetailsGutter;
+  const int colW = fb.width() - colX - kMargin;
   int cy = y + kDetailsColPadTop;
+
+  // THE ONE SCREEN WHERE A LONG NAME WRAPS instead of truncating. This is the page
+  // about the book, so its name is the content: an ellipsis here hides the thing
+  // the reader opened the screen to read, where on a list row it hides only which
+  // of seven rows this is. The board says so -- `overflow-wrap: anywhere` on this
+  // run and on no other title -- and the break has to be allowed inside a word
+  // because a filename is usually one word.
+  //
+  // The wrap is bounded, and this is the "what gives" answer: spec 4.1b makes Book
+  // details a fixed single-screen summary, so the field rows and the hint bar do
+  // not move and the NAME yields. The bound is derived -- the room the block has
+  // is the canvas less the band, the block's own padding, the rule, the rows and
+  // the bar; the column's other two lines and its padding are fixed; what is left,
+  // divided by the title's line box, is how many lines the title may have. That is
+  // 3 on both panels today (235px of block room on the X4, 227 on the X3, against
+  // 82px of fixed column and a 46px line box), and it is 3 rather than 2 because
+  // the cover is 180px tall and absorbs the first two lines for free -- a 1- or
+  // 2-line title moves nothing on this screen at all.
+  const int blockRoom = fb.height() - (bandH + kDetailsPadTop) -
+                        (kDetailsPadBottom + kDetailsRuleH + rowsH + hintBarHeight(fonts, hints));
+  const int columnFixedH = kDetailsColPadTop + kDetailsColGap + author.lineHeight() +
+                           kDetailsColGap + subtitle.lineHeight();
+  int maxTitleLines = (blockRoom - columnFixedH) / kDetailsTitleLineH;
+  if (maxTitleLines < 1) maxTitleLines = 1;
+
   // The title's line box is the board's `line-height: 1.1`, tighter than the
   // face's own -- which is what stops a 20pt name opening a crater above the
-  // author.
-  drawText(fb, title, colX, baselineIn(title, cy, kDetailsTitleLineH), vm.title, Ink::Black, {},
-           plane);
-  cy += kDetailsTitleLineH + kDetailsColGap;
+  // author. Passed as a lead rather than an em multiple for that reason: 1.1 is
+  // the board's number and 46 is what it resolves to, and wrapProseLead is the
+  // form that takes a line box the board tightened by hand.
+  std::string titleTail;
+  Prose titleProse =
+      wrapProseLead(title, vm.title, colW, pxToF26(kDetailsTitleLineH), {}, WordBreak::Anywhere);
+  clampProse(title, titleProse, maxTitleLines, colW, titleTail);
+  // Left-aligned, and one line is bit-identical to the drawText this replaced:
+  // drawProse's first baseline is baselineInF26(font, pxToF26(cy),
+  // pxToF26(kDetailsTitleLineH)), which is baselineIn's own definition.
+  cy += f26ToPx(drawProse(fb, title, titleProse, colX, colW, pxToF26(cy), Ink::Black, plane,
+                          ProseAlign::Left));
+  cy += kDetailsColGap;
   drawText(fb, author, colX, baselineIn(author, cy, author.lineHeight()), vm.author, Ink::Black,
            {}, plane);
   cy += author.lineHeight() + kDetailsColGap;
@@ -551,7 +651,6 @@ void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
   fb.fillRect(0, y, fb.width(), kDetailsRuleH, false);
   y += kDetailsRuleH;
 
-  const int rows = static_cast<int>(vm.fields.size());
   for (int i = 0; i < rows; ++i) {
     // Nothing is focused on this screen -- there is nothing to select, which is
     // why three of its four hint slots are the boards' dead-button placeholder.
@@ -561,13 +660,8 @@ void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
   }
 
   // `margin-top: auto` above the bar on the board: the slack is whatever is left,
-  // and the bar sits on the bottom edge. A slot's mark follows its LABEL, so the
-  // three placeholders get neither -- which is what makes them the board's 36px
-  // empty slots rather than affordances for buttons that do nothing.
-  const Icon* const marks[4] = {&icons::kBack, &icons::kDot, &icons::kUp, &icons::kDown};
-  Hint hints[4];
-  for (int i = 0; i < 4; ++i)
-    hints[i] = {vm.hints[i].empty() ? nullptr : marks[i], vm.hints[i], vm.holds[i]};
+  // and the bar sits on the bottom edge. Its hints were built above, because the
+  // title's line budget is measured against the room this bar leaves.
   int slots[4] = {};
   drawHintBar(fb, fonts, hints, slots, plane);
 }

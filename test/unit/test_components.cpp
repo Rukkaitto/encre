@@ -1578,3 +1578,176 @@ TEST_CASE("a panel row is 72 plus its rule, and its weight follows the focus") {
   CHECK(firstX >= 72 + reader::kPanelPadX);
   CHECK(firstX < 72 + reader::kPanelPadX + 6);
 }
+
+// --- A title longer than its column ------------------------------------------
+//
+// The defect these pin was reported off a real card: the boards' sample titles
+// are "Middlemarch" and "Dubliners", real filenames are not, and drawText had no
+// right edge. Each case below asserts the thing the user actually sees -- where
+// the INK stops -- rather than a return value, because an advance can be right
+// while a glyph's bitmap hangs past it.
+
+namespace {
+
+// The leftmost inked column in rows [y0, y1), searching from `from`.
+int leftmostInkFrom(const reader::Framebuffer& fb, int y0, int y1, int from) {
+  for (int x = from; x < fb.width(); ++x)
+    for (int y = y0; y < y1; ++y)
+      if (!fb.getPixel(x, y)) return x;
+  return -1;
+}
+
+const char* const kLongName = "Middlemarch_George_Eliot_1871_unabridged_edition_vol_one";
+
+}  // namespace
+
+TEST_CASE("the header band's label truncates instead of running into its value") {
+  Ramp f;
+  // The Library's band is the one band on any board whose label is data: a
+  // subfolder's own name, shouted. Both panels, because the budget is derived
+  // from the canvas.
+  for (int width : {480, 528}) {
+    reader::Framebuffer fb(width, 200);
+    fb.clear(true);
+    const int h = reader::drawHeaderBand(fb, f.fonts, reader::upperAscii(kLongName), "12 BOOKS",
+                                         nullptr);
+    // Where the value starts: it keeps its width, and the label may not reach it.
+    const reader::Font& vf = f.fonts[reader::Role::Value700];
+    const int valueX = width - reader::kMargin - vf.measure("12 BOOKS");
+    const int labelRight = rightmostInk(fb, 0, h - reader::kBandRuleH);
+    CHECK(labelRight <= width - reader::kMargin);
+    // The label's own ink stops at least the board's `gap: 7px` short of the
+    // value. Scanning the strip left of the value is what isolates the label.
+    reader::Framebuffer labelOnly(width, 200);
+    labelOnly.clear(true);
+    reader::drawHeaderBand(labelOnly, f.fonts, reader::upperAscii(kLongName), "", nullptr);
+    CHECK(rightmostInk(labelOnly, 0, h - reader::kBandRuleH) <= width - reader::kMargin);
+    // And with the value present there is a gap between the two runs.
+    int gapStart = -1;
+    for (int x = valueX - 1; x >= reader::kMargin; --x) {
+      bool inked = false;
+      for (int y = 0; y < h - reader::kBandRuleH; ++y)
+        if (!fb.getPixel(x, y)) { inked = true; break; }
+      if (inked) { gapStart = x; break; }
+    }
+    CHECK(gapStart >= 0);
+    CHECK_MESSAGE(valueX - 1 - gapStart >= reader::kBandGap - 1,
+                  "label ink at " << gapStart << " against a value starting at " << valueX);
+  }
+}
+
+TEST_CASE("a short band label is drawn exactly as it was before a budget existed") {
+  Ramp f;
+  // The other 26 boards' band labels are literals that fit, and they must be
+  // untouched -- which is what makes the fifteen goldens still hold.
+  for (int width : {480, 528}) {
+    reader::Framebuffer withBudget(width, 200);
+    withBudget.clear(true);
+    reader::drawHeaderBand(withBudget, f.fonts, "NOW READING", "87%");
+
+    reader::Framebuffer plain(width, 200);
+    plain.clear(true);
+    const reader::Font& lf = f.fonts[reader::Role::Label500];
+    reader::drawText(plain, lf, reader::kMargin,
+                     reader::baselineIn(lf, reader::kBandPadTop,
+                                        reader::headerBandHeight(f.fonts) -
+                                            reader::kBandPadTop - reader::kBandPadBottom -
+                                            reader::kBandRuleH),
+                     "NOW READING", reader::Ink::Black, reader::trackingEm(lf, 220));
+    // Compare only the label's own strip, left of the value.
+    for (int y = 0; y < 60; ++y)
+      for (int x = 0; x < 240; ++x)
+        REQUIRE(withBudget.getPixel(x, y) == plain.getPixel(x, y));
+  }
+}
+
+TEST_CASE("a book row's title and meta line both truncate inside their column") {
+  Ramp f;
+  for (int width : {480, 528}) {
+    reader::Framebuffer fb(width, 200);
+    fb.clear(true);
+    // The meta line has to be a named string: BookRowContent holds views, so a
+    // temporary here is a dangling read at draw time.
+    const std::string meta = reader::upperAscii(kLongName);
+    const reader::BookRowContent row{kLongName, meta, "31%", false};
+    const int consumed = reader::drawBookRow(fb, f.fonts, 0, row, false, true);
+    const reader::Font& vf = f.fonts[reader::Role::Value700];
+    const int valueX = width - reader::kMargin - vf.measure("31%");
+    // The board's `gap: 16px` before the row's third flex child is what the text
+    // column may not cross.
+    const int limit = valueX - reader::kBookThumbGap;
+    // Scan the row without its bottom rule, which is full-bleed by design.
+    for (int y = 0; y < consumed - reader::kBookRowRuleH; ++y)
+      for (int x = limit; x < valueX; ++x)
+        REQUIRE_MESSAGE(fb.getPixel(x, y), "text column ink at (" << x << ", " << y << ")");
+    // Both lines are actually there and actually cut: ink on each of the column's
+    // two line boxes, and neither reaches the limit.
+    const int textX = reader::kMargin + reader::kBookThumbW + reader::kBookThumbGap;
+    CHECK(leftmostInkFrom(fb, 0, consumed, textX) >= textX);
+  }
+}
+
+TEST_CASE("a folder row's title truncates against its chevron, not against a value") {
+  Ramp f;
+  reader::Framebuffer fb(480, 200);
+  fb.clear(true);
+  const reader::BookRowContent row{kLongName, "FOLDER", "", true};
+  const int consumed = reader::drawBookRow(fb, f.fonts, 0, row, false, true);
+  // A folder discloses and states no value, so the budget is the chevron's own
+  // width -- reserving a value's width here would narrow every folder row for a
+  // mark that is not on it.
+  const int chevX = 480 - reader::kMargin - reader::icons::kChevron.w;
+  for (int y = 0; y < consumed - reader::kBookRowRuleH; ++y)
+    for (int x = chevX - reader::kBookThumbGap; x < chevX; ++x)
+      REQUIRE_MESSAGE(fb.getPixel(x, y), "folder title ink at (" << x << ", " << y << ")");
+}
+
+TEST_CASE("wrapProse breaks inside a word only when the board asks it to") {
+  Ramp f;
+  const reader::Font& t = f.fonts[reader::Role::Title700];
+  const int colW = 292;  // Book details' column on the X4
+  // Normal: the word has nowhere better to be, so it takes a line and overhangs.
+  // Every paragraph on every board relies on this, so it must not change.
+  const reader::Prose normal =
+      reader::wrapProseLead(t, kLongName, colW, reader::pxToF26(46));
+  CHECK(normal.lineCount() == 1);
+  CHECK(t.measure(normal.lines[0]) > colW);
+  // Anywhere: the board's `overflow-wrap: anywhere` on Book details' title, and
+  // every line but the last is within the column.
+  const reader::Prose anywhere = reader::wrapProseLead(t, kLongName, colW, reader::pxToF26(46),
+                                                       {}, reader::WordBreak::Anywhere);
+  CHECK(anywhere.lineCount() > 1);
+  for (const std::string_view line : anywhere.lines)
+    CHECK_MESSAGE(t.measure(line) <= colW, "line over the column: " << std::string(line));
+  // Nothing is lost and nothing is duplicated: the lines concatenate back.
+  std::string joined;
+  for (const std::string_view line : anywhere.lines) joined += std::string(line);
+  CHECK(joined == std::string(kLongName));
+}
+
+TEST_CASE("clampProse bounds a wrapped run and elides what is left over") {
+  Ramp f;
+  const reader::Font& t = f.fonts[reader::Role::Title700];
+  const int colW = 292;
+  const std::string name = std::string(kLongName) + "_and_then_some_more_besides";
+  reader::Prose p =
+      reader::wrapProseLead(t, name, colW, reader::pxToF26(46), {}, reader::WordBreak::Anywhere);
+  REQUIRE(p.lineCount() > 3);
+  std::string tail;
+  reader::clampProse(t, p, 3, colW, tail);
+  CHECK(p.lineCount() == 3);
+  // The last line is the elided remainder, and it fits the column like the rest.
+  CHECK(t.measure(p.lines.back()) <= colW);
+  CHECK(p.lines.back() == tail);
+  CHECK(tail.size() >= reader::kEllipsis.size());
+  CHECK(tail.substr(tail.size() - reader::kEllipsis.size()) == reader::kEllipsis);
+  // A run already inside the bound is not touched, and gains no ellipsis.
+  reader::Prose fits =
+      reader::wrapProseLead(t, "Dubliners", colW, reader::pxToF26(46), {},
+                            reader::WordBreak::Anywhere);
+  std::string noTail;
+  reader::clampProse(t, fits, 3, colW, noTail);
+  CHECK(fits.lineCount() == 1);
+  CHECK(fits.lines[0] == "Dubliners");
+  CHECK(noTail.empty());
+}
