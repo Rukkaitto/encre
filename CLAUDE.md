@@ -58,6 +58,12 @@ stop meaning anything.
 - E-ink holds its last image with no power, so **a frozen screen does not mean
   the firmware ran**. It has disguised a crash loop and a bootloader hang as
   "nothing happened". Read the serial log before believing the panel.
+- **The SD card shares the display's SPI bus** (X3: MISO 7, CS 12) and
+  `SDCardManager` does **no locking** — there is no mutex or semaphore anywhere in
+  it. Its only shared-bus handling is in `begin()`, which drives the display CS
+  high before probing because a powered, never-deselected panel breaks card
+  detection. So **the caller must keep SD traffic off the bus during a panel
+  refresh**; a transfer racing a refresh is the kind of fault that looks random.
 - `~/encre-device-backup/restore.sh` restores the device to CrossInk.
 
 ## Rendering model
@@ -193,17 +199,28 @@ what needs hardware — raw button samples, the panel calls, deep sleep.
   declare `Grayscale`, `mode=FAST` beside `fidelity=gray` in a `[paint]` line is
   not a contradiction: the grayscale sequence has no differential form, so it
   means the cadence had a fast slot the screen could not use.
-- **A screen transition does NOT force a FULL refresh.** `RefreshPolicy` takes
-  `fullOnTransition` and the shell passes it `false`, because that FULL is the
-  black flash the user sees on every navigation and the reference firmware does
-  not do it on this panel: CrossInk's `ScreenTransitionRefresh::modeFor` returns
-  FULL only for `screenChanged && !deviceIsX3()`, its list and menu screens call
-  `displayBuffer()` with no argument (whose default is `FAST_REFRESH`), and its one
-  home `FULL_REFRESH` is gated behind an `initialFullRefresh` flag that defaults to
-  false. **The FULL-every-15 cadence stays**, and CrossInk having no cadence is not
-  a reason to drop it — see the comment at the `gRefresh` construction. With the
-  transition FULL gone, the cadence is the only thing bounding a run of FAST
-  refreshes, and a transition now *counts toward* it rather than resetting it.
+- **A screen transition DOES force a FULL refresh, and there is no periodic
+  cadence.** `kFullOnTransition = true`, `kFullRefreshEvery =
+  RefreshPolicy::kNever`. This is neither the reference firmware's behaviour nor
+  the obvious one, so the reasoning matters:
+  - CrossInk skips the transition FULL on this panel
+    (`ScreenTransitionRefresh::modeFor` returns FULL only for
+    `screenChanged && !deviceIsX3()`) and **accepts the ghosting**. That ghosting
+    is observable — reported on its settings screen on this device.
+  - The distinction is not flash versus no flash. A flash on a **screen change**
+    is expected on an e-reader, as Kindle and Kobo do, because a differential
+    update there has a whole screen of stale content to ghost through. A flash on
+    a **focus move** inside one screen is a defect. Those are separate settings,
+    so we take one and not the other.
+  - A periodic cadence was tried at 1-in-15 and made things *worse*: it put the
+    flash on an arbitrary navigation, which reads as more random than the
+    transition flash it replaced. No ghosting has been observed without it, and
+    the ink accumulation this project did once see came from a missing grayscale
+    settle pass on a path chrome no longer takes.
+  - Cost, measured: a transition takes the 693 ms GC waveform against 389 ms for
+    the DU, so ~825 ms versus ~520 ms. Focus moves are untouched.
+  - Both become Settings rows in 2C; `kFullOnTransition` needs a **new** row on
+    the board first (spec §10).
 - **`core/include/reader/screens.h` is the one screen catalogue**, shared by the
   simulator and the shell. Two factories would drift, and the drift would be
   invisible because each half keeps passing its own checks.

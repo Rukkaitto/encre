@@ -75,8 +75,11 @@ reader and writer in `core/`: one object, keys to numbers, bools and strings, no
 nesting, no arrays. That covers settings completely. Per-book state with its
 bookmark array is Phase 3's, and will need arrays — note that at the parser.
 
-A settings file that is missing, unparseable, or carries values out of range is
-**replaced with defaults**, and the firmware says so on serial. Spec §6 requires
+A settings file that is missing, unparseable, or carries an unknown version is
+**replaced with defaults**, and the firmware says so on serial. An out-of-range
+*value* is different: that field is **clamped** and the rest of the file still
+loads, because clamping and carrying on beats refusing to boot over one bad
+number. Either way `loadSettings` returns false so a caller can warn. Spec §6 requires
 cache entries be "versioned + checksummed; a bad entry is discarded and rebuilt,
 never trusted" — the same principle applies to settings, and the failure mode it
 prevents is a device that will not boot because a half-written file has a
@@ -591,10 +594,23 @@ Points to get right:
 - `writeAll` creates parents (`mkdirs`) then writes with `O_WRONLY | O_CREAT |
   O_TRUNC`, and **verifies the byte count written**. A short write on a full card
   that reports success is how a settings file gets truncated.
-- The SD card shares the display's SPI bus (MISO 7, CS 12 on the X3 profile).
-  Check whether `SDCardManager` serialises that itself or whether the caller
-  must; a transfer racing a panel refresh is the kind of bug that looks random.
-  Report what you find.
+- **The caller must serialise SD traffic against panel refreshes.** This was
+  checked: `SDCardManager` contains no mutex or semaphore at all. Its only
+  shared-bus handling is in `begin()`, which drives display CS high before probing
+  because a powered, never-deselected panel breaks detection. A transfer racing a
+  refresh is the kind of fault that looks random, so keep them apart explicitly.
+
+- **Nothing will hold `SdFileSystem` to the contract unless you build the seam.**
+  `test_filesystem.cpp`'s contract cases bind only the two desktop
+  implementations; `shell/` has no test harness, so the device implementation is
+  the one place the contract is unenforced. Extract the contract body into a
+  header that reports through a callback, so the desktop tests drive it with
+  doctest and an on-device routine can drive the same assertions over serial.
+  Then the easy-to-miss clauses are actually checked on hardware: `remove`
+  returns **true** for an already-absent file; `list` **appends** rather than
+  clearing; `mkdirs` is idempotent; `writeAll` refuses a directory and creates
+  parents; paths normalise (`//`, trailing `/`); and `DirEntry.size` is
+  `uint32_t` while SdFat's `fileSize()` is 64-bit.
 
 - [ ] **Step 2: Build**
 
