@@ -291,3 +291,13 @@ Constraints the visual design must respect:
 - Final choice of the ~4 bundled font faces (licensing must permit embedding;
   candidates: Bookerly-alikes such as Literata, Source Serif, plus a
   humanist sans and a monospace).
+- **A Settings toggle for the screen-transition full refresh.** V1 hardcodes it
+  on: a screen change takes the panel's FULL (GC) waveform so the outgoing screen
+  cannot ghost through, which is what Kindle and Kobo do and what the reference
+  firmware notably does not — its settings screen ghosts visibly on this device.
+  The cost is measured: ~825 ms for a transition against ~520 ms on the fast
+  waveform, so a reader who would rather have quicker navigation than a clean
+  slate has a real reason to want it off. Belongs with the other refresh and
+  power settings (sleep timers, full-refresh cadence). **Needs a row on
+  `design/Settings.dc.html` first** — per the design-first rule, the board gets
+  the row before the implementation does.
