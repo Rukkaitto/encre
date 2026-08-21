@@ -69,6 +69,13 @@ class RefreshPolicy {
 
   void setCadence(int cadence) { cadence_ = cadence; }
   int cadence() const { return cadence_; }
+  // Both knobs are settable after construction because both are Settings fields
+  // now (core/include/reader/settings.h), and the shell builds its policy at
+  // static-init time -- long before it has mounted a card to read the file off.
+  // So the file's values arrive as setters on a live policy rather than as
+  // constructor arguments, and the compiled-in defaults are the Settings
+  // struct's own.
+  void setFullOnTransition(bool on) { fullOnTransition_ = on; }
   bool fullOnTransition() const { return fullOnTransition_; }
 
   // Ask for the next refresh's mode and account for it.

@@ -93,6 +93,21 @@ class App {
 
   void dispatch(const InputEvent& ev);
 
+  // Push a screen with no input event behind it. The one caller is the shell's
+  // wake restore: the NVS session record names a screen, and there is no press
+  // that implies it -- the alternative would be constructing the App with that
+  // screen as its ROOT, which leaves Back dead on a screen the user reached by
+  // going forward.
+  //
+  // False, with the stack untouched, when the factory cannot build `id` or the
+  // stack is full. A record written by a newer firmware can name a screen this
+  // build has no factory case for, and pushing the nullptr it returns would
+  // crash on the next render rather than falling back to Home.
+  //
+  // Dirty and transition are set on success, exactly as a Push action's are: the
+  // restored screen still has to be painted.
+  bool pushScreen(ScreenId id);
+
   // Something on screen changed and needs painting.
   bool dirty() const { return dirty_; }
   // ...and the change was a screen change rather than a change within one. What

@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <optional>
+#include <string>
 
 #include "font_body400.h"
 #include "font_body500.h"
@@ -25,13 +26,19 @@
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
 #include "reader/input.h"
+#include "reader/json.h"
 #include "reader/power.h"
 #include "reader/refresh.h"
 #include "reader/screen_home.h"
+#include "reader/screen_sd_missing.h"
 #include "reader/screens.h"
+#include "reader/settings.h"
 #include "reader/text.h"  // reader::Plane
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
+#include "sd_fs.h"
+#include "sd_selftest.h"
+#include "session.h"
 
 // Xteink display SPI pins. Shared by X3 and X4; MISO is shared with the SD card.
 constexpr int8_t EPD_SCLK = 8, EPD_MOSI = 10, EPD_CS = 21, EPD_DC = 4, EPD_RST = 5,
@@ -39,11 +46,25 @@ constexpr int8_t EPD_SCLK = 8, EPD_MOSI = 10, EPD_CS = 21, EPD_DC = 4, EPD_RST =
 
 EInkDisplay display(EPD_SCLK, EPD_MOSI, EPD_CS, EPD_DC, EPD_RST, EPD_BUSY);
 
-// Sleep after five minutes idle. Becomes a setting in Phase 2C; named here so
-// the number is not buried in a constructor call.
-constexpr uint32_t kSleepAfterMs = 5u * 60u * 1000u;
-// Periodic FULL refresh cadence for chrome: DISABLED, matching the reference
-// firmware, which schedules no periodic full refresh in its UI at all.
+// THE THREE KNOBS THAT USED TO BE COMPILED IN.
+//
+// `kSleepAfterMs`, `kFullRefreshEvery` and `kFullOnTransition` were constants
+// here through 2B. They are fields of reader::Settings now, read from
+// /.reader/settings.json at boot, and the struct's DEFAULTS are the values that
+// were compiled in -- so a device with no card, or with no settings file on the
+// card, behaves exactly as it did. There is one copy of each number, in
+// core/include/reader/settings.h, and gRefresh and gIdle below are constructed
+// from it.
+//
+// What the numbers mean, and why they are what they are, stays here: the
+// reasoning is about this panel and this driver, which is the shell's subject.
+//
+// SLEEP AFTER: five minutes idle. 0 means never sleep, which is a legitimate
+// choice and the right one while a transfer is running, so the settings loader
+// does not clamp it up to its floor.
+//
+// PERIODIC FULL REFRESH CADENCE: DISABLED, matching the reference firmware,
+// which schedules no periodic full refresh in its UI at all.
 //
 // A cadence exists to clear the residue differential refreshes leave behind, and
 // keeping one was the cautious choice -- but at 1-in-15 it put a black flash on
@@ -53,11 +74,12 @@ constexpr uint32_t kSleepAfterMs = 5u * 60u * 1000u;
 // accumulation this project actually observed was caused by a missing grayscale
 // settle pass, on a path chrome no longer takes at all -- not by FAST refreshes.
 //
-// If ghosting does appear, this number is the whole fix: set it to 15 or 20.
+// If ghosting does appear, this number is the whole fix: set it to 15 or 20 --
+// and it is a settings file away now rather than a rebuild.
 // Watch for a screen that gradually stops being readable with no obvious cause.
-constexpr int kFullRefreshEvery = reader::RefreshPolicy::kNever;
-// Whether a screen change forces a FULL refresh. TRUE, and this is a deliberate
-// divergence from the reference firmware.
+//
+// FULL ON TRANSITION: whether a screen change forces a FULL refresh. TRUE, and
+// this is a deliberate divergence from the reference firmware.
 //
 // CrossInk does not do it on this panel: ScreenTransitionRefresh::modeFor returns
 // FULL only for `screenChanged && !deviceIsX3()`, and its list/menu screens call
@@ -70,8 +92,8 @@ constexpr int kFullRefreshEvery = reader::RefreshPolicy::kNever;
 // it -- because a differential update there has a whole screen of stale content
 // to ghost through. A flash on a focus move inside one screen is a defect. Those
 // are separate settings here, so we take FULL on transitions and NO periodic
-// cadence (see kFullRefreshEvery), which is neither firmware's behaviour and is
-// better than both.
+// cadence (see above), which is neither firmware's behaviour and is better than
+// both.
 //
 // Applies to pop as well as push, deliberately: leaving Settings back to Home is
 // exactly the case where the settings list would ghost onto Home, so treating
@@ -80,8 +102,9 @@ constexpr int kFullRefreshEvery = reader::RefreshPolicy::kNever;
 // Cost, measured on the X3: a transition takes the 693 ms GC waveform instead of
 // the 389 ms DU, so ~825 ms against ~520 ms. Focus moves are untouched. That is
 // the right place to spend it -- screens change far less often than a focus does.
-constexpr bool kFullOnTransition = true;
-// Input-settle window before a repaint. ZERO, deliberately.
+
+// Input-settle window before a repaint. ZERO, deliberately. NOT a setting: there
+// is nothing here for a user to have a preference about, and no board row for it.
 //
 // It was 90 ms, added when a paint cost 1363 ms and a burst of presses cost N
 // times that. A paint is now a single FAST waveform, so the insurance is worth
@@ -122,9 +145,27 @@ static reader::QuietTheme gTheme;
 static reader::DemoScreenFactory gFactory;
 static std::unique_ptr<reader::App> gApp;
 static reader::PressRecognizer gPresses;
-static reader::RefreshPolicy gRefresh(kFullRefreshEvery, kFullOnTransition);
-static reader::IdleTimer gIdle(kSleepAfterMs);
+// The settings as they will be applied. Constant-initialised to the struct's
+// defaults -- the numbers that were compiled in through 2B -- so gRefresh and
+// gIdle below are correct before setup() runs and stay correct if there is no
+// card, no settings file, or a settings file this build refuses.
+static reader::Settings gSettings;
+// Constructed FROM gSettings, declared above it in this same translation unit, so
+// there is no second copy of the defaults to drift. Both take the loaded values
+// through setters in loadAndApplySettings(); a constructor argument could not,
+// because these are alive long before the card is mounted.
+static reader::RefreshPolicy gRefresh(gSettings.fullRefreshEvery, gSettings.fullOnTransition);
+static reader::IdleTimer gIdle(gSettings.sleepAfterMs);
 static InputManager gInput;
+// The card. One instance: SDCardManager is a singleton underneath, so a second
+// SdFileSystem would address the same volume with its own idea of whether it is
+// mounted.
+static SdFileSystem gSd;
+// Did SDCardManager::begin() ever return true this boot? It opens with
+// `if (initialized) return true;` and the SPI path exposes no end()/unmount(), so
+// after one success a later begin() reports success WITHOUT touching the
+// hardware. That is the whole reason bringUpStorage() below does not trust it.
+static bool gSdBeganOnce = false;
 
 // Bring-up instrumentation. Serial here is native USB CDC, so the port
 // re-enumerates when the app starts and anything printed in the first second is
@@ -135,6 +176,176 @@ static void mark(const char* s) {
   stage = s;
   Serial.printf("[stage] %s\n", s);
   Serial.flush();
+}
+
+// --- Storage -------------------------------------------------------------
+//
+// Mount the card and say, honestly, whether the filesystem is usable.
+//
+// `mount()` alone is not that answer. SDCardManager::begin() opens with
+// `if (initialized) return true;` and the SPI path exposes no end() or unmount(),
+// so once it has succeeded it keeps succeeding whether or not the card is still
+// in the slot. A retry that trusted it would report success, replace the
+// SD-missing screen with Home, and then fail on the first read -- and a RETRY
+// button that lies is worse than one that stays put, because the user stops
+// believing the screen.
+//
+// So a mount is only accepted once probe() has actually read the root directory
+// and mounted() agrees. probe() is not a card-detect (see sd_fs.cpp: it can be
+// satisfied from SdFat's sector cache, and there is no card-detect GPIO in the
+// board profiles at all), but it is real traffic to the card, which is strictly
+// more than begin() promises after the first call.
+//
+// `why` is "boot" or "retry", and it is in every line here on purpose: the two
+// paths differ only in what they mean, so a serial log without it is ambiguous.
+static bool bringUpStorage(const char* why) {
+  const bool begun = gSd.mount();  // logs "[sd] mount ok" / "... FAILED"
+  if (!begun) {
+    Serial.printf("[sd] %s: no usable storage\n", why);
+    Serial.flush();
+    return false;
+  }
+  const bool wasFirst = !gSdBeganOnce;
+  gSdBeganOnce = true;
+  if (gSd.probe() && gSd.mounted()) {
+    Serial.printf("[sd] %s: storage usable (mount confirmed by a root-directory read)\n", why);
+    Serial.flush();
+    return true;
+  }
+  // begin() said yes and the card would not answer. Two ways to get here, and
+  // only one of them is recoverable:
+  //   * first begin() of this boot: a card that mounts but cannot be read. Worth
+  //     retrying -- reseating it may fix it.
+  //   * a later begin(): the short-circuit above. The card mounted once and is
+  //     now gone, and there is no unmount to undo that, so nothing this firmware
+  //     can do will recover it. The screen must stay and the log must say why,
+  //     rather than the retry cycling forever on a lie.
+  if (wasFirst) {
+    Serial.printf("[sd] %s: begin() succeeded but the card would not answer a directory "
+                  "read; not treating storage as usable\n",
+                  why);
+  } else {
+    Serial.printf("[sd] %s: begin() returned true WITHOUT touching the card -- it "
+                  "short-circuits on its own `initialized` flag -- and the card is not "
+                  "answering. A card that mounted once and was then pulled cannot be "
+                  "re-mounted without a REBOOT; staying on the SD-missing screen\n",
+                  why);
+  }
+  Serial.flush();
+  return false;
+}
+
+// Why loadSettings() said no. It answers with one bool over six distinguishable
+// causes, and this log line is the only way a user ever learns their hand-edited
+// file was rejected rather than applied -- so the shell asks the same questions
+// again, in the same order, and names the first one that fails.
+//
+// `defaulted` matters as much as the reason, because the two halves of that list
+// leave the device in different states: the first four throw the file away and
+// run on defaults, while the last two KEEP the file and correct one field. Saying
+// "defaulted" for a clamped value would be a false statement about every other
+// setting in the file.
+//
+// Called ONLY on failure, so the happy path pays nothing; the cost is one more
+// small read on the shared bus when something is already wrong.
+struct SettingsVerdict {
+  const char* reason;
+  bool defaulted;
+};
+
+static SettingsVerdict settingsFailure(reader::FileSystem& fs) {
+  // First, because every question below answers "no" on an unmounted filesystem
+  // and "there is no file" would be the wrong story to tell about a missing card.
+  if (!fs.mounted()) return {"no usable storage, so there was nothing to read", true};
+  if (!fs.exists(reader::kSettingsPath))
+    return {"no file yet (first boot, or nothing has saved one)", true};
+  std::string text;
+  if (!fs.readAll(reader::kSettingsPath, text)) return {"the file exists but would not read", true};
+  reader::JsonObject o;
+  if (!o.parse(text))
+    return {"not parseable flat JSON -- hand-edited, or a write lost power part way", true};
+  int64_t version = 0;
+  if (!o.getInt("version", version)) return {"no `version` key", true};
+  if (version != reader::kSettingsVersion)
+    return {"a `version` this build does not know", true};
+  return {"a value was out of range and was clamped, or was the wrong JSON type and was "
+          "ignored; every other field in the file still applies",
+          false};
+}
+
+// Read the settings and apply them. Safe with an unmounted filesystem: every
+// FileSystem method fails when mounted() is false, so loadSettings() falls back
+// to defaults and this reports exactly that.
+static void loadAndApplySettings() {
+  const bool ok = reader::loadSettings(gSd, gSettings);
+  if (ok) {
+    Serial.printf("[boot] settings loaded from %s\n", reader::kSettingsPath);
+  } else {
+    const SettingsVerdict v = settingsFailure(gSd);
+    Serial.printf("[boot] settings %s: %s\n", v.defaulted ? "DEFAULTED" : "CORRECTED", v.reason);
+  }
+  gRefresh.setCadence(gSettings.fullRefreshEvery);
+  gRefresh.setFullOnTransition(gSettings.fullOnTransition);
+  gIdle.setTimeout(gSettings.sleepAfterMs);
+  Serial.printf("[boot] settings in force: sleepAfterMs=%lu fullRefreshEvery=%d "
+                "fullOnTransition=%d\n",
+                (unsigned long)gSettings.sleepAfterMs, gSettings.fullRefreshEvery,
+                (int)gSettings.fullOnTransition);
+  Serial.flush();
+}
+
+// --- The app, and the session record -------------------------------------
+
+// Build the app with Home as its root, replacing whatever was there.
+//
+// App has no "replace the root", and a successful retry cannot PUSH Home: the
+// SD-missing screen is the root in that state, so Home would be at depth 2 and
+// Back would pop to a screen whose message is no longer true. A fresh App is the
+// straightforward answer, and the long-press mask has to be re-synced with it --
+// the mask is PressRecognizer's, not the App's, so a new stack whose top binds
+// different holds leaves the recognizer bound to the old screen's.
+static void buildHomeApp() {
+  gApp = std::make_unique<reader::App>(
+      std::make_unique<reader::HomeScreen>(reader::demoHomeVm(), reader::demoHomeTargets()),
+      gFactory);
+  gPresses.setLongPressable(gApp->longPressable());
+}
+
+// Store where the user is, so a wake can put them back. Cheap to call after every
+// dispatch: saveSession() skips an identical rewrite, so navigating back and
+// forth does not grind the NVS partition.
+//
+// FOCUS IS ALWAYS 0, and that is deliberate rather than unfinished. reader::Screen
+// exposes id/fidelity/longPressable/onEvent/render and no focus accessor, so there
+// is no way to read the focus of the screen on top without adding virtuals to
+// every screen -- and the only multi-item screen where a restored focus would be
+// visible is Library, which does not exist until 2C-2. Adding two virtuals now to
+// carry a value nothing can produce is speculative; 2C-2 wires it when there is a
+// concrete need, and the record already has the field.
+static void saveWhereWeAre() {
+  Session s;
+  s.screen = gApp->top().id();
+  s.focus = 0;
+  saveSession(s);
+}
+
+// The SD-missing screen's RETRY, which App latched for us because mounting is not
+// core/'s to do.
+static void handleRetry() {
+  // Clear the latch FIRST, so a failed attempt cannot re-fire on every loop.
+  gApp->clearRetryRequest();
+  mark("sd-retry");
+  if (!bringUpStorage("retry")) {
+    // Nothing changes on glass: the message is still true, App::dispatch
+    // deliberately does not mark a Retry dirty, and spending a full refresh to
+    // redraw an identical screen would read as the button having done something.
+    // bringUpStorage() has already logged which failure this was -- in
+    // particular whether a reboot is now required.
+    return;
+  }
+  loadAndApplySettings();  // the settings live on the card that just appeared
+  buildHomeApp();          // and Home replaces the root; see buildHomeApp()
+  mark("sd-retry-ok");
 }
 
 // One binary drives both Xteink models, and the panel controller varies by
@@ -340,6 +551,21 @@ static void renderTop() {
   Serial.flush();
   gRenderMs = gDrawMs = gCopyMs = 0;
   const uint32_t t0 = millis();
+  // THE OTHER HALF OF THE SHARED-BUS INVARIANT. Every public method of
+  // SdFileSystem takes this same recursive guard; this is the one acquisition on
+  // the panel side, and it spans the WHOLE paint sequence rather than the SPI
+  // writes alone -- the driver keeps the display's CS asserted across its BUSY
+  // waits, so a card transfer landing in a wait is still a transfer into an
+  // asserted panel. The grayscale path holds it across all four passes and three
+  // waveforms for the same reason.
+  //
+  // Today this is free insurance: paints and card access both run on the Arduino
+  // loop task, so they are already serialised by there being one thread, and the
+  // only other task (input_task.cpp) touches ADC and GPIO only. It is here to be
+  // STRUCTURAL rather than a rule someone has to remember -- the day a background
+  // library scan or a cover decode moves off this task, the fault it prevents is
+  // intermittent, bus-level and miserable to find.
+  SpiBusGuard bus;
   switch (fidelity) {
     case reader::Fidelity::Grayscale:
       // The grayscale sequence is inherently a full repaint; the policy's FAST is
@@ -482,11 +708,95 @@ void setup() {
                 display.supportsStripGrayscale());
   Serial.flush();
 
-  // The root is Home, built from the shared catalogue. Nothing rebuilds it, so
-  // popping back to Home returns this object with its focus intact.
-  gApp = std::make_unique<reader::App>(
-      std::make_unique<reader::HomeScreen>(reader::demoHomeVm(), reader::demoHomeTargets()),
-      gFactory);
+  // MOUNT THE CARD -- after the display is up, and deliberately so.
+  //
+  // SPI.begin() ends up called TWICE on one bus: detectAndSelectBoard() calls it
+  // with the display's pins, and SDCardManager::begin() calls it again with the
+  // card's. That is the reverse of the order the SDK's comments assume, and it is
+  // the ordering to be suspicious of if the panel misbehaves after a mount. Two
+  // things say it should be benign: begin()'s mitigation is about CS lines, not
+  // about who called SPI.begin() last (it drives the display's CS high before
+  // probing, because a powered, never-deselected panel breaks card detection),
+  // and SdFat issues its own beginTransaction with its own SPISettings on every
+  // access, so the bus is reconfigured per transfer either way.
+  //
+  // Mounting before display.begin() or after it were the two options, and after
+  // wins on three counts: the SD-missing screen cannot be painted before the
+  // display is up anyway, so a failed mount has nowhere to go; the panel is
+  // powered and its CS line settled by the time begin() drives it high to probe
+  // the card, which is the condition that mitigation was written for; and the
+  // whole ordering question ends up in one identifiable place.
+  //
+  // ON HARDWARE, THE FIRST PAINT AFTER A MOUNT IS THE THING TO WATCH. A corrupt
+  // or hung first refresh with a card in the slot, and a clean one without, is
+  // this call order and nothing else.
+  mark("sd-mount");
+  const bool storage = bringUpStorage("boot");
+  // The contract self-test, which is a stub returning -1 unless the firmware was
+  // built with -DENCRE_FS_SELFTEST=1 (see sd_selftest.h). Called from here rather
+  // than left uncalled so the seam is reachable at all: shell/ has no test
+  // harness, and an on-device routine nothing invokes checks nothing.
+  const int fsFailures = runSdFsContractSelfTest(gSd);
+  if (fsFailures >= 0) {
+    Serial.printf("[sd] contract self-test: %d failed assertion(s)\n", fsFailures);
+    Serial.flush();
+  }
+
+  // Settings on either branch. With no card every FileSystem method fails, so
+  // this reports "no file" and applies the compiled-in defaults -- the settings
+  // must not depend on the card for the device to behave.
+  loadAndApplySettings();
+
+  if (storage) {
+    // The root is Home, built from the shared catalogue. Nothing rebuilds it, so
+    // popping back to Home returns this object with its focus intact.
+    buildHomeApp();
+    mark("root-home");
+  } else {
+    // A missing card is a DESIGNED SCREEN (spec 6: "device never boots into a
+    // broken UI"), not a hang and not a Home screen with no books. It is the
+    // root, not a screen pushed over Home: there is nothing behind it to go back
+    // to, which is why its Back slot is empty.
+    gApp = std::make_unique<reader::App>(std::make_unique<reader::SdMissingScreen>(), gFactory);
+    mark("root-sd-missing");
+  }
+
+  // WHERE THE USER WAS. Only across a genuine wake: a device that boots into a
+  // sub-screen after a week off is confusing, and 2B already distinguishes the
+  // two cases from esp_sleep_get_wakeup_cause().
+  if (!fromSleep) {
+    // Cold boot starts at Home and forgets the record, so the next wake cannot
+    // resume a screen from a previous run of the device.
+    clearSession();
+  } else if (storage) {
+    Session s;
+    if (loadSession(s) && s.screen != reader::ScreenId::Home) {
+      if (s.screen == reader::ScreenId::SdMissing) {
+        // The mount above already decided this, and it decided there IS a card.
+        // Restoring the no-card screen over a working card would be showing the
+        // user a message that is no longer true.
+        Serial.printf("[session] the record says SD-MISSING but the card mounted; Home\n");
+        Serial.flush();
+      } else if (gApp->pushScreen(s.screen)) {
+        // Home stays underneath, so Back works. Only ONE screen is restored, so a
+        // record naming a screen that was two deep (Settings > Input Monitor)
+        // comes back with Home under it rather than Settings -- the record holds
+        // one id, not a path. Nothing in V1 is unreachable that way; a restored
+        // path is 2C-2's if the deeper screens make it worth one.
+        mark("session-restored");
+      } else {
+        // The factory refused it: an id this build has no case for, from a newer
+        // firmware's record. Home is already the root, so there is nothing to
+        // undo.
+        Serial.printf("[session] cannot build screen=%s; staying on Home\n",
+                      reader::screenName(s.screen));
+        Serial.flush();
+      }
+    }
+  }
+  // ...and if we woke with no card, the record is left alone rather than cleared:
+  // it is still true, and the next wake with a card in the slot can honour it.
+
   // Before the first poll, not just after each dispatch: a hold started on the
   // very first frame must be recognised too.
   gPresses.setLongPressable(gApp->longPressable());
@@ -526,9 +836,12 @@ void setup() {
   // drains the battery all night.
   freeink::PowerManager::powerDownRailsForSleep();
   // Waits for release, arms the SoC-correct wake source from the board's power
-  // pin and polarity, then sleeps. Wake is a chip RESET, so this never returns
-  // and the firmware boots into Home -- restoring the last screen needs the
-  // settings store, which is Phase 2C.
+  // pin and polarity, then sleeps. Wake is a chip RESET, so this never returns:
+  // setup() runs again, sees a wake cause, and restores the screen from the NVS
+  // session record -- which is why nothing is saved here. The record is written
+  // after every dispatch, so it is already current, and Power is handled BEFORE
+  // dispatch (a power press changes no screen), so there is nothing left to
+  // store at this point.
   freeink::PowerManager::deepSleepUntilPowerButton();
 }
 
@@ -594,10 +907,17 @@ void loop() {
                   ev.kind == reader::PressKind::Long ? "LONG" : "SHORT");
     if (ev.button == reader::Button::Power) sleepNow();
     gApp->dispatch(ev);
+    // Between the dispatch and the mask refresh below, so the refresh sees
+    // whatever screen the retry left on top -- on success that is a brand new App
+    // rooted at Home, whose holds are not the SD-missing screen's.
+    if (gApp->retryRequested()) handleRetry();
     // The mask belongs to whatever screen is now on top, which a push or pop
     // just changed. Re-reading it here is what keeps a hold bound only where a
     // ring is drawn.
     gPresses.setLongPressable(gApp->longPressable());
+    // Where the user is now, for a wake to restore. An unchanged record is not
+    // rewritten, so this is nearly free on an event that did not move the stack.
+    saveWhereWeAre();
   }
 
   if (gApp->sleepRequested() || gIdle.tick(millis()) == reader::PowerAction::Sleep) sleepNow();

@@ -181,6 +181,50 @@ TEST_CASE("a factory that cannot build the screen leaves the stack intact") {
   CHECK_FALSE(app.dirty());
 }
 
+TEST_CASE("pushScreen puts a screen on the stack with no event behind it") {
+  // The shell's wake restore: the session record names a screen and there is no
+  // press that implies it. Home stays underneath, so Back still works.
+  FakeFactory f;
+  App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::none()), f);
+  app.clearDirty();
+
+  CHECK(app.pushScreen(ScreenId::Settings));
+  CHECK(app.depth() == 2);
+  CHECK(app.top().id() == ScreenId::Settings);
+  // A restored screen still has to be painted, and it is a screen change.
+  CHECK(app.dirty());
+  CHECK(app.transition());
+}
+
+TEST_CASE("pushScreen refuses what it cannot build and leaves the stack alone") {
+  // A session record written by a newer firmware can name a screen this build
+  // has no factory case for. Pushing the nullptr would crash on the next render.
+  FakeFactory f;
+  f.refuse = true;
+  App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::none()), f);
+  app.clearDirty();
+
+  CHECK_FALSE(app.pushScreen(ScreenId::Settings));
+  CHECK(app.depth() == 1);
+  CHECK(app.top().id() == ScreenId::Home);
+  CHECK_FALSE(app.dirty());
+}
+
+TEST_CASE("the stack refuses to grow past the depth it reserved for") {
+  // The constructor reserves kMaxDepth and the firmware is built
+  // -fno-exceptions, so a vector that reallocated and could not would abort()
+  // with no diagnostic. Refusing the push loses a screen; growing can lose the
+  // device. V1's deepest real path is four (Home > Library > actions > confirm).
+  FakeFactory f;
+  App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::none()), f);
+  int pushed = 1;
+  while (app.pushScreen(ScreenId::Settings)) ++pushed;
+  CHECK(pushed == 8);
+  CHECK(app.depth() == 8);
+  // ...and it is still a usable app afterwards, not a wedged one.
+  CHECK(app.top().id() == ScreenId::Settings);
+}
+
 TEST_CASE("the long-press mask follows the top of the stack") {
   FakeFactory f;
   f.holds[ScreenId::Library] = buttonBit(Button::Confirm);

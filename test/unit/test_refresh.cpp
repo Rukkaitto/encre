@@ -106,3 +106,21 @@ TEST_CASE("the default cadence is the spec's fifteen") {
   for (int i = 0; i < 14; ++i) CHECK(p.next(false) == RefreshMode::Fast);
   CHECK(p.next(false) == RefreshMode::Full);
 }
+
+TEST_CASE("both knobs are settable after construction, for a settings file") {
+  // The shell builds its policy at static-init time, long before it has mounted
+  // a card to read /.reader/settings.json off, so the file's values arrive as
+  // setters on a live policy. Both fields have to be reachable that way or half
+  // the settings would be unappliable.
+  RefreshPolicy p(RefreshPolicy::kNever, true);
+  p.setCadence(3);
+  p.setFullOnTransition(false);
+  CHECK(p.cadence() == 3);
+  CHECK_FALSE(p.fullOnTransition());
+  // A transition is now an ordinary refresh, and it counts toward the cadence.
+  CHECK(p.next(true) == RefreshMode::Fast);
+  CHECK(p.next(false) == RefreshMode::Fast);
+  CHECK(p.next(false) == RefreshMode::Full);
+  p.setFullOnTransition(true);
+  CHECK(p.next(true) == RefreshMode::Full);
+}
