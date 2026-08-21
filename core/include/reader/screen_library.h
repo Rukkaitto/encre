@@ -95,9 +95,16 @@ class LibraryScreen : public Screen {
   int visibleRows() const { return window_.visibleRows(); }
 
   // The focus as an index into the WHOLE list, which is what a session record
-  // stores -- not the index into the visible slice the view-model carries.
-  int focus() const { return window_.focus(); }
-  bool setFocus(int index);
+  // stores -- not the index into the visible slice the view-model carries. This
+  // is the screen the Screen::focus/setFocus pair exists for: the pair was
+  // deferred in 2C-1 because nothing could produce a value, and a Library scroll
+  // position is worth restoring across a wake.
+  //
+  // -1 for an empty directory, which is ScrollWindow's "nothing selected" and
+  // not an index. setFocus clamps, so a record written before some books were
+  // deleted still restores to a row that exists.
+  int focus() const override { return window_.focus(); }
+  bool setFocus(int index) override;
   int itemCount() const { return static_cast<int>(items_.size()); }
 
   // The item the focus is on, or null for an empty list. This is what the

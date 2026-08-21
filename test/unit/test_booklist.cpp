@@ -339,3 +339,67 @@ TEST_CASE("the root directory is scannable like any other") {
   CHECK(out[0].name == "books");
   CHECK(out[1].name == "loose.epub");
 }
+
+// --- countLibrary, which is Home's LIBRARY row ----------------------------
+
+TEST_CASE("countLibrary counts the books here plus the books one level down") {
+  // The board's own arithmetic: design/Library.dc.html says `12 BOOKS` over six
+  // books and a folder holding six more.
+  FakeFileSystem fs;
+  for (int i = 0; i < 6; ++i)
+    fs.writeAll("/books/loose" + std::to_string(i) + ".epub", "x");
+  for (int i = 0; i < 6; ++i)
+    fs.writeAll("/books/Classics/inside" + std::to_string(i) + ".epub", "x");
+  CHECK(BookList::countLibrary(fs, "/books") == 12);
+}
+
+TEST_CASE("countLibrary stops at one level, as the board's count does") {
+  // A book two levels down is inside a folder the user has to open a folder to
+  // reach, and the design's number does not promise to have walked there. A
+  // recursive walk of a card is also unbounded work on a screen that has to
+  // paint.
+  FakeFileSystem fs;
+  fs.writeAll("/books/top.epub", "x");
+  fs.writeAll("/books/one/mid.epub", "x");
+  fs.writeAll("/books/one/two/deep.epub", "x");
+  CHECK(BookList::countLibrary(fs, "/books") == 2);
+}
+
+TEST_CASE("countLibrary counts no books, and that is not the same as -1") {
+  FakeFileSystem fs;
+  fs.mkdirs("/books");
+  // An empty library is a valid state: 0 is a count, and the row can show it.
+  CHECK(BookList::countLibrary(fs, "/books") == 0);
+  // A directory that is not there cannot be counted, and 0 would be a claim
+  // about a card nobody read. Home draws nothing at all for this.
+  CHECK(BookList::countLibrary(fs, "/nothing-here") == -1);
+  FakeFileSystem gone;
+  gone.setMounted(false);
+  CHECK(BookList::countLibrary(gone, "/books") == -1);
+}
+
+TEST_CASE("countLibrary ignores what the listing ignores") {
+  FakeFileSystem fs;
+  fs.writeAll("/books/real.epub", "x");
+  fs.writeAll("/books/notes.pdf", "x");           // wrong extension
+  fs.writeAll("/books/._real.epub", "x");         // an AppleDouble sidecar
+  fs.writeAll("/books/.Trashes/junk.epub", "x");  // a hidden DIRECTORY
+  CHECK(BookList::countLibrary(fs, "/books") == 1);
+}
+
+TEST_CASE("countLibrary survives a folder it cannot look inside") {
+  // A folder whose listing fails must contribute nothing rather than subtracting
+  // its -1 from the total, which would make the count smaller than the books
+  // plainly visible beside it.
+  class OneBadDir : public FakeFileSystem {
+   public:
+    bool list(std::string_view path, std::vector<DirEntry>& out) override {
+      if (path == "/books/bad") return false;
+      return FakeFileSystem::list(path, out);
+    }
+  };
+  OneBadDir fs;
+  fs.writeAll("/books/good.epub", "x");
+  fs.mkdirs("/books/bad");
+  CHECK(BookList::countLibrary(fs, "/books") == 1);
+}

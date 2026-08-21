@@ -29,7 +29,12 @@ class ItemActionsScreen : public Screen {
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
 
   const ItemActionsViewModel& vm() const { return vm_; }
-  int focus() const { return vm_.focusedAction; }
+  // Which of the four action rows is selected. An override of Screen::focus()
+  // since the base declared one, and marked so. No setFocus: this panel is only
+  // ever reached by a hold on a live Library, so there is no wake that can put
+  // the user back on it -- the factory refuses to build one with no Library
+  // under it, which is the correct answer and not a gap.
+  int focus() const override { return vm_.focusedAction; }
 
  private:
   // The board's four rows, in its order. An enum rather than comparing the

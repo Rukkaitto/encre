@@ -30,7 +30,10 @@ class DeleteConfirmScreen : public Screen {
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
 
   const DeleteConfirmViewModel& vm() const { return vm_; }
-  int focus() const { return vm_.focusedAction; }
+  // Cancel or Delete. An override of Screen::focus() since the base declared
+  // one, and marked so; no setFocus, for the same reason the actions panel has
+  // none -- there is no path that restores this screen onto a fresh boot.
+  int focus() const override { return vm_.focusedAction; }
 
  private:
   enum Row { kCancel = 0, kDelete, kRowCount };

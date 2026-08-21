@@ -80,6 +80,32 @@ int BookList::countBooks(FileSystem& fs, std::string_view path) {
   return n;
 }
 
+int BookList::countLibrary(FileSystem& fs, std::string_view path) {
+  std::vector<BookEntry> rows;
+  if (!scan(fs, path, rows)) return -1;
+  int n = 0;
+  for (const BookEntry& e : rows) {
+    if (!e.isDir) {
+      ++n;
+      continue;
+    }
+    // A folder whose own listing failed contributes nothing rather than being
+    // counted as a book: `> 0` is the same guard syncVm uses, so an unreadable
+    // subdirectory (-1) cannot subtract from the total.
+    //
+    // The join tolerates an empty or root `path` because the contract says a
+    // redundant separator addresses the same thing -- "//Classics" is
+    // "/Classics" -- and reaching for path.back() on an empty view would not be
+    // a wrong path, it would be undefined behaviour.
+    std::string child(path);
+    if (child.empty() || child.back() != '/') child += '/';
+    child += e.name;
+    const int inside = countBooks(fs, child);
+    if (inside > 0) n += inside;
+  }
+  return n;
+}
+
 bool BookList::scan(FileSystem& fs, std::string_view path, std::vector<BookEntry>& out) {
   // Cleared before the read, not after a successful one: a rescan that fails --
   // the card was pulled between the delete and the refresh -- must not leave the

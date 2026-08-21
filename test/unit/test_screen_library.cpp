@@ -8,8 +8,10 @@
 #include "library_app.h"
 #include "ramp.h"
 #include "reader/app.h"
+#include "reader/booklist.h"
 #include "reader/framebuffer.h"
 #include "reader/screen_library.h"
+#include "reader/screen_sd_missing.h"
 #include "reader/screens.h"
 #include "reader/theme_quiet.h"
 
@@ -295,4 +297,93 @@ TEST_CASE("the Library matches its golden at both geometries") {
     app.app.render(fb, r.fonts, theme, reader::Plane::Bw);
     golden::checkGolden(fb, c.name);
   }
+}
+
+// --- The focus pair, and the one rule stated in two places ----------------
+
+TEST_CASE("BookList::countLibrary agrees with the band the Library draws") {
+  // Home's LIBRARY row and the Library's own header band show the same number by
+  // two different routes: countLibrary reads the card, and syncVm derives it from
+  // a listing the screen already has. Two expressions of one rule, so this is
+  // what stops them drifting -- if they disagree, the user sees one count on Home
+  // and a different one after pressing Confirm on it.
+  FakeFileSystem fs;
+  fs.writeAll("/books/Middlemarch.epub", "x");
+  fs.writeAll("/books/Walden.txt", "x");
+  fs.writeAll("/books/Classics/Dubliners.epub", "x");
+  fs.writeAll("/books/Classics/Odyssey.epub", "x");
+  fs.writeAll("/books/Classics/notes.pdf", "x");  // not a book on either route
+  fs.mkdirs("/books/Empty");
+  LibraryScreen lib(fs, "/books");
+  lib.setVisibleRows(6);
+  CHECK(lib.vm().bookCount == 4);
+  CHECK(reader::BookList::countLibrary(fs, "/books") == lib.vm().bookCount);
+}
+
+TEST_CASE("the Library reports and restores its focus through Screen") {
+  // THE POINT IS THE BASE-CLASS HANDLE. The session record is read and written by
+  // the shell, which holds a reader::Screen& and nothing more specific, so the
+  // pair has to work without knowing which screen it is holding.
+  FakeFileSystem fs;
+  for (int i = 0; i < 9; ++i) fs.writeAll("/books/b" + std::to_string(i) + ".epub", "x");
+  LibraryScreen lib(fs, "/books");
+  lib.setVisibleRows(3);
+  reader::Screen& s = lib;
+
+  CHECK(s.focus() == 0);
+  // An index into the WHOLE list, not into the three rows on glass: row 7 is off
+  // the bottom of the first window, and restoring it has to scroll there.
+  CHECK(s.setFocus(7));
+  CHECK(s.focus() == 7);
+  CHECK(lib.vm().focusedRow >= 0);
+  CHECK(lib.vm().focusedRow < 3);
+
+  // Same value twice is not a change, which is the signal a caller uses to skip
+  // a repaint or an NVS write.
+  CHECK_FALSE(s.setFocus(7));
+
+  // A record written before some books were deleted still has to land somewhere.
+  CHECK(s.setFocus(400));
+  CHECK(s.focus() == 8);
+}
+
+TEST_CASE("a screen with no focus of its own says so rather than lying") {
+  // The base-class defaults. A screen that cannot restore a focus must return
+  // false, so the shell can tell "put back on row 7" from "ignored".
+  reader::SdMissingScreen sd;
+  reader::Screen& s = sd;
+  CHECK(s.focus() == 0);
+  CHECK_FALSE(s.setFocus(7));
+  CHECK(s.focus() == 0);
+}
+
+TEST_CASE("an empty library reports no selection, which is not row 0") {
+  FakeFileSystem fs;
+  fs.mkdirs("/books");
+  LibraryScreen lib(fs, "/books");
+  lib.setVisibleRows(6);
+  reader::Screen& s = lib;
+  // -1, not 0: there is no row 0 to be on. The shell stores 0 for this, because
+  // Session::focus is unsigned -- and restoring 0 onto an empty list clamps
+  // straight back to -1, so the round trip is stable.
+  CHECK(s.focus() == -1);
+  CHECK_FALSE(s.setFocus(0));
+  CHECK(s.focus() == -1);
+}
+
+TEST_CASE("the factory can be told the Library it named is gone") {
+  // The shell's factory outlives the App it builds screens for, and replacing the
+  // App (a lost card, a successful retry) destroys the Library the factory's
+  // pointer names. forgetLibrary is what keeps that pointer from outliving it.
+  Ramp ramp;
+  reader::QuietTheme theme;
+  libapp::LibraryApp app(theme, ramp.fonts, 800);
+  REQUIRE(app.factory.library() != nullptr);
+  app.factory.forgetLibrary();
+  CHECK(app.factory.library() == nullptr);
+  // ...and with no Library to act on, an overlay is REFUSED rather than built
+  // over freed memory.
+  CHECK(app.factory.create(ScreenId::ItemActions) == nullptr);
+  CHECK(app.factory.create(ScreenId::DeleteConfirm) == nullptr);
+  CHECK(app.factory.create(ScreenId::BookDetails) == nullptr);
 }

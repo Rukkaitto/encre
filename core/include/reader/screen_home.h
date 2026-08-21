@@ -25,7 +25,18 @@ class HomeScreen : public Screen {
   Action onEvent(const InputEvent& ev) override;
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
 
-  int focus() const { return vm_.focusedMenuIndex; }
+  // -1 is the CONTINUE block, 0..n-1 the menu rows. This overrides
+  // Screen::focus() now that the base declares one, which is stated rather than
+  // left implicit: the signature already matched, so it became an override the
+  // moment the virtual was added, and a reader of this header should not have to
+  // work that out from app.h.
+  //
+  // setFocus is deliberately NOT overridden. The session record only ever
+  // restores focus onto a screen the wake PUSHED, and a record naming Home
+  // pushes nothing -- Home is already the root -- so a Home setFocus would be
+  // unreachable code. Home's focus is still reported, because a record that says
+  // where the user was is worth having in the log even where nothing acts on it.
+  int focus() const override { return vm_.focusedMenuIndex; }
   const HomeViewModel& vm() const { return vm_; }
 
  private:

@@ -100,6 +100,33 @@ class Screen {
   // see.
   virtual bool isOverlay() const { return false; }
   virtual ButtonMask longPressable() const = 0;
+
+  // WHERE THE SELECTION IS, as an index into whatever the screen considers its
+  // whole list -- not into the slice on glass. The session record stores this
+  // number and a wake hands it back, so the two have to mean the same thing on a
+  // list that scrolls: a Library scrolled to row 40 restores to row 40, and the
+  // window it lands in is ScrollWindow's business, not the record's.
+  //
+  // The pair was deliberately deferred in 2C-1 and is justified now: Library is
+  // the first screen that can produce a value, and 2C-1's session record was
+  // writing a hardcoded 0 into a field nothing could fill.
+  //
+  // DEFAULTS THAT MEAN "I HAVE NO FOCUS TO REPORT OR RESTORE": 0, and false.
+  // A screen with one thing on it (the SD-missing prompt) is not obliged to
+  // pretend otherwise, and setFocus returning false says the restore did not
+  // land -- the same contract ScrollWindow::setFocus uses, so a caller can tell
+  // "restored" from "ignored" without asking which screen it is holding.
+  //
+  // A negative focus is legitimate and means "nothing selected" (Home's Continue
+  // block, an empty Library). It is the CALLER's job to decide what to do with
+  // that before putting it in a record whose field is unsigned; see
+  // saveWhereWeAre in shell/src/main.cpp.
+  virtual int focus() const { return 0; }
+  virtual bool setFocus(int index) {
+    (void)index;
+    return false;
+  }
+
   virtual Action onEvent(const InputEvent& ev) = 0;
   virtual void render(Framebuffer& fb, const FontSet& fonts, Theme& theme,
                       Plane plane) const = 0;

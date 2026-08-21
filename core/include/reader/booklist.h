@@ -8,6 +8,14 @@ namespace reader {
 
 class FileSystem;
 
+// WHERE BOOKS LIVE, as spec 4.1 puts it. One definition, because three callers
+// need the same string and none of them may guess: the shell roots the device's
+// Library here and creates the directory when a card has none, the simulator
+// prefers it under a `--root` so a card image behaves like a card, and the sample
+// content claims it as its own path so Book details' `Location` row reads the
+// same on the desktop as on the device.
+constexpr const char* kBooksRoot = "/books";
+
 // One row of the Library: a file or folder on the card that the user might want
 // to open.
 //
@@ -51,6 +59,20 @@ class BookList {
   // "could not look" draw differently -- the row shows a bare `FOLDER` for the
   // second, which is honest, where a 0 would be a claim.
   static int countBooks(FileSystem& fs, std::string_view path);
+
+  // The number a LIBRARY BAND shows for `path`: the books in it plus the books
+  // one level down, which is what design/Library.dc.html's `12 BOOKS` measures
+  // over six books and a six-book folder. -1 when `path` could not be read.
+  //
+  // It exists because HOME's `LIBRARY` row shows the same number and Home is
+  // built before any Library screen is, so it cannot ask one. That makes this the
+  // SECOND expression of one rule -- LibraryScreen::syncVm computes it from a
+  // listing it already has, rather than reading the card again during a paint --
+  // and the duplication is deliberate but not unguarded: test_booklist.cpp
+  // asserts the two agree on the same tree, so a change to either rule that does
+  // not change both fails a test rather than showing the user two different
+  // counts for one directory.
+  static int countLibrary(FileSystem& fs, std::string_view path);
 
   // Whether a FILE belongs on the list: `.epub` or `.txt`, case-insensitively,
   // on its final extension only. FAT is case-preserving but not case-sensitive,

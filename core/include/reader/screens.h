@@ -44,9 +44,27 @@ class DemoScreenFactory : public ScreenFactory {
   // The pointer is overwritten on every Library this factory builds, so it names
   // the one on the stack: an overlay is only ever created BY a live Library
   // (through Action::push from its own onEvent), which is by construction the
-  // most recent one. It is not a general-purpose handle, and Phase 2C-2's Task 6
-  // is what replaces this with the shell's real catalogue.
+  // most recent one. It is not a general-purpose handle.
+  //
+  // WHAT BOUNDS ITS LIFETIME, now that the shell has a long-lived factory: the
+  // App owns the screen, so the pointer is valid exactly as long as the App that
+  // built it. The shell REPLACES its App in three places (a successful retry, a
+  // card lost at runtime, and the boot path itself), and each of them destroys
+  // the Library this points at -- so each of them calls forgetLibrary(). That is
+  // the whole of the relationship, and it is stated here because the pointer's
+  // safety is not local to this class.
   LibraryScreen* library() const { return library_; }
+
+  // The Library this factory last built is gone. Called by whoever destroyed the
+  // App that owned it, BEFORE anything can ask for an overlay again.
+  //
+  // Without it a dangling pointer survives an App swap, and the overlay factory
+  // cases below would hand an overlay a reference to freed memory. Today nothing
+  // could reach them in that state -- the swap roots the new App at Home or at
+  // the SD-missing screen, and an overlay is only pushed by a live Library -- but
+  // "nothing can currently reach it" is a property of two other files, and the
+  // session restore already pushes a screen with no press behind it.
+  void forgetLibrary() { library_ = nullptr; }
 
   // How many rows a Library this factory builds should show, from
   // Theme::libraryVisibleRows. Held here because the factory is what constructs

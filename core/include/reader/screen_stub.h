@@ -25,7 +25,11 @@ class StubScreen : public Screen {
   Action onEvent(const InputEvent& ev) override;
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
 
-  int focus() const { return vm_.focusedLine; }
+  // An override of Screen::focus() since the base declared one; marked so it is
+  // visible here rather than inferred from app.h. No setFocus: 2C-3 replaces
+  // this placeholder with the real Settings screen, and teaching a screen that
+  // is about to be deleted to restore a focus is work thrown away.
+  int focus() const override { return vm_.focusedLine; }
 
  private:
   Action moveFocus(int delta);
