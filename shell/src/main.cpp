@@ -5,6 +5,7 @@
 #include <PowerManager.h>
 #include <SPI.h>
 #include <esp_sleep.h>
+#include <esp_system.h>  // esp_restart(), for the RETRY-after-a-pull branch
 #include <XteinkDetect.h>
 
 #include <memory>
@@ -166,6 +167,13 @@ static SdFileSystem gSd;
 // after one success a later begin() reports success WITHOUT touching the
 // hardware. That is the whole reason bringUpStorage() below does not trust it.
 static bool gSdBeganOnce = false;
+// Whether the UI currently believes storage is usable. This is the shell's own
+// view, not gSd.mounted(): it is what decides whether the app is rooted at Home
+// or at the SD-missing screen, and it is what the presence poll in loop() watches
+// for a usable -> unusable edge. Kept separate from gSdBeganOnce because the two
+// answer different questions -- "did the hardware ever come up this boot" versus
+// "is the card usable right now" -- and the RETRY path needs both.
+static bool gStorageUsable = false;
 
 // Bring-up instrumentation. Serial here is native USB CDC, so the port
 // re-enumerates when the app starts and anything printed in the first second is
@@ -212,14 +220,20 @@ static bool bringUpStorage(const char* why) {
     Serial.flush();
     return true;
   }
-  // begin() said yes and the card would not answer. Two ways to get here, and
-  // only one of them is recoverable:
+  // begin() said yes and the card would not answer. Two ways to get here:
   //   * first begin() of this boot: a card that mounts but cannot be read. Worth
   //     retrying -- reseating it may fix it.
   //   * a later begin(): the short-circuit above. The card mounted once and is
-  //     now gone, and there is no unmount to undo that, so nothing this firmware
-  //     can do will recover it. The screen must stay and the log must say why,
-  //     rather than the retry cycling forever on a lie.
+  //     now gone, and there is no unmount to undo that, so nothing short of a
+  //     restart recovers it.
+  //
+  // The second branch is UNREACHABLE BY CONSTRUCTION now and kept anyway.
+  // handleRetry() checks gSdBeganOnce itself and restarts rather than calling
+  // this, so both live callers (setup(), and retry before the first successful
+  // mount) arrive with wasFirst true. It stays because it is the only thing that
+  // would name the failure if a third caller were added that did not check --
+  // a silent "storage unusable" on a lying begin() is the hard version of this
+  // bug to find, and one printf is cheap insurance against reintroducing it.
   if (wasFirst) {
     Serial.printf("[sd] %s: begin() succeeded but the card would not answer a directory "
                   "read; not treating storage as usable\n",
@@ -228,7 +242,8 @@ static bool bringUpStorage(const char* why) {
     Serial.printf("[sd] %s: begin() returned true WITHOUT touching the card -- it "
                   "short-circuits on its own `initialized` flag -- and the card is not "
                   "answering. A card that mounted once and was then pulled cannot be "
-                  "re-mounted without a REBOOT; staying on the SD-missing screen\n",
+                  "re-mounted without a REBOOT; staying on the SD-missing screen (and this "
+                  "caller should have restarted instead -- see handleRetry)\n",
                   why);
   }
   Serial.flush();
@@ -365,23 +380,157 @@ static void saveWhereWeAre() {
   gLoggedScreen = true;
 }
 
+// Rebuild the app rooted at the SD-missing screen, replacing whatever was there.
+//
+// The counterpart to buildHomeApp(), and a fresh App for the same reason: there
+// is no "replace the root", and the no-card prompt must be the ROOT rather than a
+// screen pushed over the user's last one -- its Back slot is empty because there
+// is nothing behind it, and leaving Home underneath would let Back walk into a
+// library that cannot be read. A new App also starts dirty and in transition, so
+// the swap paints itself as a screen change (a FULL refresh) rather than needing
+// the caller to remember to mark it.
+//
+// The session record is deliberately LEFT ALONE. It names where the user was, and
+// that is still the best answer for the next wake: if the card is back by then the
+// restore honours it, and if it is not, the boot path roots at this screen anyway.
+// Overwriting it with SD-MISSING would throw away the only useful thing it holds.
+static void buildSdMissingApp() {
+  gApp = std::make_unique<reader::App>(std::make_unique<reader::SdMissingScreen>(), gFactory);
+  gPresses.setLongPressable(gApp->longPressable());
+}
+
 // The SD-missing screen's RETRY, which App latched for us because mounting is not
 // core/'s to do.
+//
+// TWO BRANCHES, because there are two ways to be on this screen and only one of
+// them can be fixed in process. They are told apart by gSdBeganOnce -- "did
+// SDCardManager::begin() ever return true this boot" -- which is exactly the
+// condition that makes a further begin() meaningless:
+//
+//   * NEVER MOUNTED (no card in the slot at power-on, or one that would not
+//     mount). The hardware has not been initialised, so begin() will really try
+//     again. The in-place attempt is correct here, and it is also the fast answer
+//     -- a card pushed in and RETRY pressed comes up in well under a second.
+//
+//   * MOUNTED, THEN LOST (the poll in loop() saw the card stop answering). An
+//     in-process remount is IMPOSSIBLE, not merely unreliable:
+//     SDCardManager::begin() opens with `if (initialized) return true;` and the
+//     SPI path exposes no end() or unmount(), so there is no call anywhere in the
+//     SDK that puts that flag back. begin() would return true without addressing
+//     the card, and this firmware would replace the SD-missing screen with Home
+//     and then fail on the first read.
+//
+// So the second branch REBOOTS. That is the honest mechanism rather than a
+// workaround, and the distinction is worth being precise about: the operation the
+// user asked for is "re-initialise the card", the only code path that performs it
+// is the one that runs at boot, and a restart is how you get to run it. It is not
+// papering over a bug in this firmware -- it is forced by the SDK having no
+// unmount on the SPI path, and nothing here can add one without forking the
+// submodule. The cost is a few seconds of boot; the benefit is that RETRY simply
+// works from the user's side, which is what spec 6 asks of the button. The
+// alternative that shipped before this -- stay on the screen and log that a reboot
+// is needed -- is a button that correctly does nothing, which reads as broken.
+//
+// A reboot is a cold boot (no wake cause), so setup() clears the session record
+// and roots at Home. That is the right landing: the card has just been reseated,
+// and resuming a screen from before it went away is not what the user is asking
+// for when they press RETRY.
 static void handleRetry() {
   // Clear the latch FIRST, so a failed attempt cannot re-fire on every loop.
   gApp->clearRetryRequest();
   mark("sd-retry");
+  if (gSdBeganOnce) {
+    Serial.printf("[sd] retry: the card mounted earlier this boot and was then lost. "
+                  "SDCardManager::begin() short-circuits on its own `initialized` flag and "
+                  "the SPI path has no end()/unmount(), so it cannot be re-initialised in "
+                  "process -- RESTARTING, which re-runs the whole mount path\n");
+    Serial.flush();
+    mark("sd-retry-restart");
+    Serial.flush();  // the restart is immediate; nothing buffered survives it
+    esp_restart();
+  }
   if (!bringUpStorage("retry")) {
     // Nothing changes on glass: the message is still true, App::dispatch
     // deliberately does not mark a Retry dirty, and spending a full refresh to
     // redraw an identical screen would read as the button having done something.
-    // bringUpStorage() has already logged which failure this was -- in
-    // particular whether a reboot is now required.
+    // bringUpStorage() has already logged which failure this was.
     return;
   }
+  gStorageUsable = true;
   loadAndApplySettings();  // the settings live on the card that just appeared
   buildHomeApp();          // and Home replaces the root; see buildHomeApp()
   mark("sd-retry-ok");
+}
+
+// --- Card-presence poll --------------------------------------------------
+//
+// PULLING THE CARD OUT HAS TO SHOW THE SD-MISSING SCREEN, and nothing used to
+// notice. SdFileSystem::mounted() is "the card was there and nothing has since
+// told us otherwise", and what tells it otherwise is an operation failing -- but
+// V1 does almost no filesystem work after boot, so a card pulled on the Home
+// screen stayed invisible until something happened to read a directory, which
+// might be never. The screen exists for exactly this state and was unreachable
+// from it.
+//
+// So the liveness check is made ACTIVE: probe() -- a real root-directory read --
+// on a timer. Three constraints shape it, all of them from CLAUDE.md's hardware
+// notes rather than from taste:
+//
+//  1. IT IS SPI TRAFFIC ON THE PANEL'S BUS. SDCardManager does no locking of any
+//     kind, so a transfer overlapping a refresh is a bus-level fault that looks
+//     random. probe() takes the recursive SpiBusGuard internally and one is taken
+//     here as well, so probe() and the mounted() read that follows it are one
+//     atomic answer rather than two that could straddle a paint.
+//  2. IT MUST NOT RUN WITH A PAINT PENDING. The call site is placed AFTER the
+//     paint block in loop() and gated on !gApp->dirty(), so a frame that is owed
+//     to the user goes to the panel before the bus is used for anything else.
+//     Both live on the Arduino loop task today, so a paint cannot literally be
+//     in flight concurrently -- this is what keeps that true if either one ever
+//     moves off it, and it also stops the poll from delaying a repaint.
+//  3. IT COSTS BATTERY, on a device whose entire job is to sit idle showing a
+//     page. Every probe wakes the card and reads a sector, so a tight loop would
+//     be a continuous drain for information nobody asked for. 2000 ms is the
+//     starting point: fast enough that a pull is noticed while the user still has
+//     their hand on the slot, slow enough to be a rounding error next to a paint.
+//     It only runs while the device is AWAKE -- the idle timer sleeps at five
+//     minutes and sleep cuts the X3's SD rail entirely -- so the realistic worst
+//     case is 150 probes per idle period.
+//
+// THE HONEST LIMIT, and it is the same one mounted() carries: probe() is not a
+// card-detect. There is no card-detect GPIO in the board profiles at all, and
+// probe() can be satisfied from SdFat's one-sector cache, so a pull may be
+// noticed a poll or two late, or -- if nothing ever needs a sector outside the
+// cache -- not by this mechanism at all. It is strictly more than the nothing
+// that was here before, and it is the strongest claim this SDK supports.
+constexpr uint32_t kSdPollMs = 2000;
+static uint32_t gLastSdPollMs = 0;
+
+static void pollCardPresence(uint32_t now) {
+  // Nothing to detect once the answer is already "no card": the SD-missing screen
+  // is up, and there is no in-process remount for the poll to discover anyway
+  // (that is RETRY's restart branch). Skipping is also the battery-cheap default
+  // for a device sitting on this screen.
+  if (!gStorageUsable) return;
+  if (static_cast<uint32_t>(now - gLastSdPollMs) < kSdPollMs) return;
+  gLastSdPollMs = now;
+
+  bool usable;
+  {
+    // See constraint 1 above. Recursive, so probe()'s own acquisition nests.
+    SpiBusGuard bus;
+    usable = gSd.probe() && gSd.mounted();
+  }
+  if (usable) return;
+
+  // A usable -> unusable edge. probe()/noteCardGone() have already said what
+  // stopped answering; this says what the UI is doing about it.
+  gStorageUsable = false;
+  Serial.printf("[sd] the card is no longer answering a root-directory read -- pulled, or "
+                "failed. Routing to the SD-missing screen; RETRY will restart the device, "
+                "because a card lost after a mount cannot be re-mounted in process\n");
+  Serial.flush();
+  buildSdMissingApp();
+  mark("sd-lost");
 }
 
 // One binary drives both Xteink models, and the panel controller varies by
@@ -783,6 +932,9 @@ void setup() {
   // must not depend on the card for the device to behave.
   loadAndApplySettings();
 
+  // The shell's own view of storage, which is what roots the app and what the
+  // presence poll in loop() watches for a usable -> unusable edge.
+  gStorageUsable = storage;
   if (storage) {
     // The root is Home, built from the shared catalogue. Nothing rebuilds it, so
     // popping back to Home returns this object with its focus intact.
@@ -792,8 +944,9 @@ void setup() {
     // A missing card is a DESIGNED SCREEN (spec 6: "device never boots into a
     // broken UI"), not a hang and not a Home screen with no books. It is the
     // root, not a screen pushed over Home: there is nothing behind it to go back
-    // to, which is why its Back slot is empty.
-    gApp = std::make_unique<reader::App>(std::make_unique<reader::SdMissingScreen>(), gFactory);
+    // to, which is why its Back slot is empty. Same helper the runtime pull path
+    // uses, so the two cannot build a different stack for the same state.
+    buildSdMissingApp();
     mark("root-sd-missing");
   }
 
@@ -893,6 +1046,13 @@ void setup() {
   // Spend the rest of the budget here. The panel now holds a frame we just
   // wrote, which is the assertion skipInitialResync exists to make.
   display.skipInitialResync();
+
+  // Start the presence poll's clock HERE rather than at zero, so the first probe
+  // lands one full interval after boot instead of immediately. bringUpStorage()
+  // above already read the root directory to confirm the mount, and the first
+  // paint has just finished; probing again in the same breath would be traffic on
+  // the panel's bus for an answer we have.
+  gLastSdPollMs = millis();
   mark("first-paint-complete");
 }
 
@@ -1040,6 +1200,13 @@ void loop() {
     renderTop();
     gApp->clearDirty();
   }
+
+  // AFTER the paint block and only with nothing owed to the panel. The poll is
+  // SPI traffic on the display's bus (see pollCardPresence), so a frame the user
+  // is waiting for goes out first; and if the poll does find the card gone, the
+  // fresh App it builds is dirty, so the SD-missing screen paints on the next
+  // iteration ten milliseconds later.
+  if (!gApp->dirty()) pollCardPresence(millis());
 
   static uint32_t beat = 0;
   if (++beat % 200 == 0) {

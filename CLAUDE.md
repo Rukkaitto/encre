@@ -305,14 +305,25 @@ restored focus would show is Library, which lands in 2C-2.
   reboot.** `SDCardManager::begin()` opens with `if (initialized) return true;` and
   the SPI path exposes no `end()`/`unmount()`, so it reports success without
   touching the hardware. So the shell never accepts `mount()` alone: it requires
-  `probe()` (a real root-directory read) to agree, and when it cannot, the
-  SD-missing screen **stays** and the log says a reboot is needed. A RETRY that
-  reports success and then fails is worse than one that stays put.
+  `probe()` (a real root-directory read) to agree. A RETRY that reports success and
+  then fails is worse than one that stays put — so **RETRY has two branches**
+  (`handleRetry`), told apart by `gSdBeganOnce`: never mounted this boot means the
+  in-place attempt is real and is kept, while mounted-then-lost **restarts the
+  device** (`esp_restart`), because boot is the only code path that re-runs the
+  mount. The restart is forced by the SDK, not a workaround for our own bug.
 - **`mounted()` is "the card was there and nothing has since told us otherwise".**
   There is no card-detect GPIO in the board profiles and `SdCard::status()` (the
   one cheap CMD13) is private to `SDCardManager`, so liveness is maintained from
   operation feedback plus `probe()`. `probe()` can be satisfied from SdFat's sector
   cache, so it is not a card-detect either.
+- **A pull is detected proactively**, because operation feedback alone never fires:
+  V1 does almost no filesystem work after boot, so a card pulled on Home stayed
+  invisible. `pollCardPresence()` runs `probe()` every `kSdPollMs` (2000) from
+  `loop()`, **after** the paint block and gated on `!gApp->dirty()`, under the same
+  `SpiBusGuard` — it is SPI traffic on the panel's bus, and it costs battery on a
+  device built to sit idle. A usable → unusable edge rebuilds the `App` rooted at
+  `SdMissingScreen` (a fresh `App` is dirty and in transition, so it paints as a
+  screen change) and leaves the session record alone.
 
 **The shared SPI bus is handled in exactly two places.** Every public method of
 `SdFileSystem` takes a recursive `SpiBusGuard`; `renderTop()` in
