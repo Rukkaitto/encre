@@ -122,22 +122,17 @@ int main(int argc, char** argv) {
   if (!loadRamp(ramp)) return 1;
   const reader::FontSet& fonts = ramp.fonts;
 
-  // Three passes, exactly as the firmware drives the panel: a thresholded base
-  // frame plus the two bit-planes the controller combines into 4 levels. The
-  // simulator recomposes the planes into one greyscale image so the desktop
-  // sees what the panel will paint. `bw` is rendered (not skipped) so the
-  // simulator exercises the same call sequence the shell does.
-  reader::Framebuffer bw(w, h), lsb(w, h), msb(w, h);
   reader::QuietTheme theme;
 
   if (isHome) {
     // From the shared catalogue, not from a copy here: the simulator's PNGs are
     // only evidence about the device if the device shows the same content.
+    //
+    // Home is Fidelity::Dithered, like every screen: one pass, one 1-bit image.
     const reader::HomeViewModel vm = reader::demoHomeVm();
-    theme.renderHome(bw, fonts, vm, reader::Plane::Bw);
-    theme.renderHome(lsb, fonts, vm, reader::Plane::Lsb);
-    theme.renderHome(msb, fonts, vm, reader::Plane::Msb);
-    if (!reader::writeGrayPng(lsb, msb, argv[2])) return 1;
+    reader::Framebuffer fb(w, h);
+    theme.renderHome(fb, fonts, vm, reader::Plane::BwDithered);
+    if (!reader::writePng(fb, argv[2])) return 1;
     std::printf("wrote %s (%dx%d)\n", argv[2], w, h);
     return 0;
   }
@@ -153,11 +148,27 @@ int main(int argc, char** argv) {
       factory);
   for (const reader::InputEvent& ev : events) app.dispatch(ev);
 
+  // Whichever path the screen on top declares, so a design comparison is
+  // measuring what the firmware will actually paint. Getting this wrong is worse
+  // than untidy: `tools/compare-design.py` drives this binary, so a simulator
+  // rendering a path the shell no longer takes turns every comparison into a
+  // check against dead code.
   const reader::Screen& top = app.top();
-  top.render(bw, fonts, theme, reader::Plane::Bw);
-  top.render(lsb, fonts, theme, reader::Plane::Lsb);
-  top.render(msb, fonts, theme, reader::Plane::Msb);
-  if (!reader::writeGrayPng(lsb, msb, argv[2])) return 1;
+  if (top.fidelity() == reader::Fidelity::Grayscale) {
+    // The three-pass path: a thresholded base frame plus the two bit-planes the
+    // controller combines into 4 levels, recomposed here into one greyscale
+    // image so the desktop sees what the panel will paint. `bw` is rendered (not
+    // skipped) so the simulator drives the same call sequence the shell does.
+    reader::Framebuffer bw(w, h), lsb(w, h), msb(w, h);
+    top.render(bw, fonts, theme, reader::Plane::Bw);
+    top.render(lsb, fonts, theme, reader::Plane::Lsb);
+    top.render(msb, fonts, theme, reader::Plane::Msb);
+    if (!reader::writeGrayPng(lsb, msb, argv[2])) return 1;
+  } else {
+    reader::Framebuffer fb(w, h);
+    top.render(fb, fonts, theme, reader::Plane::BwDithered);
+    if (!reader::writePng(fb, argv[2])) return 1;
+  }
   std::printf("wrote %s (%dx%d) screen=%d depth=%d\n", argv[2], w, h,
               static_cast<int>(app.top().id()), app.depth());
   return 0;
