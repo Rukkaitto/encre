@@ -766,8 +766,12 @@ void setup() {
   // two cases from esp_sleep_get_wakeup_cause().
   if (!fromSleep) {
     // Cold boot starts at Home and forgets the record, so the next wake cannot
-    // resume a screen from a previous run of the device.
+    // resume a screen from a previous run of the device. Logged because otherwise
+    // "it started at Home" is indistinguishable from a restore that silently
+    // failed, and that is exactly what a bring-up check needs to tell apart.
     clearSession();
+    Serial.printf("[session] cold boot: record cleared, starting at Home\n");
+    Serial.flush();
   } else if (storage) {
     Session s;
     if (loadSession(s) && s.screen != reader::ScreenId::Home) {
@@ -793,9 +797,12 @@ void setup() {
         Serial.flush();
       }
     }
+  } else {
+    // Woke with no card. The record is left ALONE rather than cleared: it is
+    // still true, and the next wake with a card in the slot can honour it.
+    Serial.printf("[session] woke with no usable storage; the record is kept for next time\n");
+    Serial.flush();
   }
-  // ...and if we woke with no card, the record is left alone rather than cleared:
-  // it is still true, and the next wake with a card in the slot can honour it.
 
   // Before the first poll, not just after each dispatch: a hold started on the
   // very first frame must be recognised too.
