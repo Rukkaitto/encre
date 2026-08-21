@@ -14,15 +14,21 @@ class Framebuffer;
 class FontSet;
 class Theme;
 
-enum class ScreenId : uint8_t { Home, Library, Settings, InputMonitor };
+enum class ScreenId : uint8_t { Home, Library, Settings, InputMonitor, SdMissing };
 
 // A screen's name, for logs. Same reasoning as buttonName: a numeric ScreenId in
 // a serial log is one more thing to decode while diagnosing a device.
 const char* screenName(ScreenId id);
 
 // What a screen asks the app to do after handling an event.
+//
+// `Retry` is the odd one out and is deliberately shaped like `Sleep`: both name
+// something only the shell can do. Storage is not core/'s -- the SD-missing
+// screen cannot mount a card, and spec 6 requires its button actually re-attempt
+// the mount rather than repaint the same message -- so the screen asks, App
+// latches the request, and the shell answers it. See App::retryRequested().
 struct Action {
-  enum class Kind : uint8_t { None, Redraw, Push, Pop, Sleep };
+  enum class Kind : uint8_t { None, Redraw, Push, Pop, Sleep, Retry };
   Kind kind = Kind::None;
   ScreenId target = ScreenId::Home;  // meaningful for Push only
 
@@ -31,6 +37,7 @@ struct Action {
   static Action push(ScreenId t) { return {Kind::Push, t}; }
   static Action pop() { return {Kind::Pop, ScreenId::Home}; }
   static Action sleep() { return {Kind::Sleep, ScreenId::Home}; }
+  static Action retry() { return {Kind::Retry, ScreenId::Home}; }
 };
 
 // The four hint slots are the four front buttons in hardware order (spec 4.0).
@@ -98,6 +105,23 @@ class App {
   bool sleepRequested() const { return sleep_; }
   void clearSleepRequest() { sleep_ = false; }
 
+  // A screen asked for storage to be re-attempted (today: the SD-missing
+  // screen's RETRY). Latched exactly like a sleep request, and for the same
+  // reason -- core/ has no filesystem and no card -- so the shell's loop is what
+  // acts on it.
+  //
+  // WHAT THE SHELL MUST DO (Task 8 of the 2C-1 plan owns this):
+  //   1. clearRetryRequest(), so a failed attempt does not re-fire forever;
+  //   2. re-run the SdFileSystem mount, keeping SD traffic off the display bus
+  //      -- the card shares the panel's SPI with no locking anywhere in
+  //      SDCardManager, so this must not race a refresh;
+  //   3. on success, load the settings, replace the root screen with Home and
+  //      repaint; on failure, repaint this screen -- the message is still true.
+  // Nothing here repaints on its own: a retry that failed changes nothing on
+  // glass, and a screen change is the shell's to make.
+  bool retryRequested() const { return retry_; }
+  void clearRetryRequest() { retry_ = false; }
+
   ButtonMask longPressable() const { return top().longPressable(); }
 
  private:
@@ -109,6 +133,7 @@ class App {
   bool dirty_ = true;  // the first frame always needs painting
   bool transition_ = true;
   bool sleep_ = false;
+  bool retry_ = false;
 };
 
 }  // namespace reader

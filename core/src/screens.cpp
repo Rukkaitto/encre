@@ -1,6 +1,7 @@
 #include "reader/screens.h"
 
 #include "reader/screen_input_monitor.h"
+#include "reader/screen_sd_missing.h"
 #include "reader/screen_stub.h"
 
 namespace reader {
@@ -41,6 +42,11 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
           std::vector<Row>{{"INPUT MONITOR", ScreenId::InputMonitor}, {"ABOUT", std::nullopt}});
     case ScreenId::InputMonitor:
       return std::make_unique<InputMonitorScreen>();
+    case ScreenId::SdMissing:
+      // Buildable through the factory, not only as a root, so the shell can
+      // replace the stack with it if the card goes away later and the simulator
+      // can render it. It takes no arguments: a missing card is a missing card.
+      return std::make_unique<SdMissingScreen>();
     case ScreenId::Home:
       // The root is never rebuilt: popping to Home returns the original object,
       // with its focus intact.

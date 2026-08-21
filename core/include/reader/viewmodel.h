@@ -34,6 +34,23 @@ struct HomeViewModel {
   std::array<bool, 4> holds{};
 };
 
+// The no-card prompt (spec 6): design/SdMissing.dc.html. Content only -- the
+// board's own copy, which the screen supplies and the theme lays out.
+//
+// There is no `retrying` or `failed` flag here, and that is deliberate: a retry
+// takes a mount attempt and a repaint, and the screen cannot know the outcome
+// because it is not the thing that mounts (see Action::Kind::Retry). Either the
+// card is there, in which case the shell replaces this screen, or it is not, in
+// which case the honest UI is the same prompt again. A "checking..." state that
+// no code could ever clear would be a lie drawn on glass.
+struct SdMissingViewModel {
+  std::string title;    // "NO SD CARD"
+  std::string message;  // the paragraph under it, wrapped by the theme
+  std::string action;   // the button's label
+  std::array<std::string, 4> hints{};  // Back, Confirm, Up, Down
+  std::array<bool, 4> holds{};
+};
+
 // A provisional titled-list surface: Phase 2B's Library and Settings
 // placeholders and its Input Monitor. It exists so the interaction runtime can
 // be navigated and verified before the real screens are built, and Phase 2C

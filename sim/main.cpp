@@ -9,6 +9,7 @@
 #include "reader/framebuffer.h"
 #include "reader/png.h"
 #include "reader/screen_home.h"
+#include "reader/screen_sd_missing.h"
 #include "reader/screens.h"
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
@@ -134,7 +135,8 @@ static bool renderToPng(const reader::Screen& top, const reader::FontSet& fonts,
 
 int main(int argc, char** argv) {
   if (argc < 3) {
-    std::fprintf(stderr, "usage: reader_sim home|app OUT.png [--canvas WxH] [--keys SPEC]\n");
+    std::fprintf(stderr,
+                 "usage: reader_sim home|sd_missing|app OUT.png [--canvas WxH] [--keys SPEC]\n");
     return 2;
   }
   int w = 480, h = 800;
@@ -144,10 +146,15 @@ int main(int argc, char** argv) {
     else if (std::strcmp(argv[i], "--keys") == 0) keys = argv[i + 1];
   }
 
+  // The screen ids here are tools/compare-design.py's: whatever it lists for a
+  // board is what it passes as argv[1], so a screen that renders but is not
+  // named here is a screen the design comparison reports as "not implemented".
   const bool isHome = std::strcmp(argv[1], "home") == 0;
+  const bool isSdMissing = std::strcmp(argv[1], "sd_missing") == 0;
   const bool isApp = std::strcmp(argv[1], "app") == 0;
-  if (!isHome && !isApp) {
-    std::fprintf(stderr, "unknown screen '%s' (expected 'home' or 'app')\n", argv[1]);
+  if (!isHome && !isSdMissing && !isApp) {
+    std::fprintf(stderr, "unknown screen '%s' (expected 'home', 'sd_missing' or 'app')\n",
+                 argv[1]);
     return 3;
   }
 
@@ -165,6 +172,15 @@ int main(int argc, char** argv) {
     // the default, Fidelity::Mono, one pass and one 1-bit image.
     const reader::HomeScreen home(reader::demoHomeVm(), reader::demoHomeTargets());
     if (!renderToPng(home, fonts, theme, w, h, argv[2])) return 1;
+    std::printf("wrote %s (%dx%d)\n", argv[2], w, h);
+    return 0;
+  }
+
+  if (isSdMissing) {
+    // Through the real screen, like `home`: the fidelity rendered is the one the
+    // screen declares, and the copy on the PNG is the copy the device will show.
+    const reader::SdMissingScreen sd;
+    if (!renderToPng(sd, fonts, theme, w, h, argv[2])) return 1;
     std::printf("wrote %s (%dx%d)\n", argv[2], w, h);
     return 0;
   }

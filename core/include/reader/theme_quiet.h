@@ -12,6 +12,8 @@ class QuietTheme : public Theme {
  public:
   void renderHome(Framebuffer& fb, const FontSet& fonts, const HomeViewModel& vm,
                   Plane plane = Plane::Bw) override;
+  void renderSdMissing(Framebuffer& fb, const FontSet& fonts, const SdMissingViewModel& vm,
+                       Plane plane = Plane::Bw) override;
   void renderStub(Framebuffer& fb, const FontSet& fonts, const StubViewModel& vm,
                   Plane plane = Plane::Bw) override;
 };

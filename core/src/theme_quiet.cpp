@@ -43,6 +43,15 @@ constexpr int kMetaGap = 4;
 constexpr int kTitleLineH = 44;    // round(1.05 * 42)
 constexpr int kDisplayLineH = 67;  // 1.00 * 67
 
+// --- design/SdMissing.dc.html ----------------------------------------------
+//
+// The board's full-screen prompt is one `justify-content: center` column above
+// the hint bar, with a single `gap: 22px` between all four of its items and its
+// own 260px-wide button. Nothing here is a height: the column's height is the
+// sum of what is in it, and where it starts falls out of that.
+constexpr int kPromptGap = 22;
+constexpr int kPromptActionW = 260;
+
 // ASCII-only uppercase, local to the theme. The design sets `text-transform:
 // uppercase` on the title. A general Unicode case mapping is not something
 // core/ should carry for one label, and the titles that need it (accented Latin,
@@ -204,6 +213,67 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
             static_cast<int>(i) == vm.focusedMenuIndex, discloses ? &icons::kChevron : nullptr,
             plane);
   }
+
+  int slots[4] = {};
+  drawHintBar(fb, fonts, hints, slots, plane);
+}
+
+void QuietTheme::renderSdMissing(Framebuffer& fb, const FontSet& fonts,
+                                 const SdMissingViewModel& vm, Plane plane) {
+  fb.clear(true);
+
+  // A slot's mark follows its label, because on the board only the button that
+  // does something carries one: three of the four slots are the empty 36px
+  // placeholder. A mark over a slot with no label would be an affordance for an
+  // action that is not there, and it would measure 32px where the board measures
+  // 36 and shift every other slot along.
+  const Icon* const marks[4] = {&icons::kBack, &icons::kDot, &icons::kUp, &icons::kDown};
+  Hint hints[4];
+  for (int i = 0; i < 4; ++i)
+    hints[i] = {vm.hints[i].empty() ? nullptr : marks[i], vm.hints[i], vm.holds[i]};
+
+  // `flex-grow: 1` on the column: it takes everything the hint bar leaves. Asking
+  // the bar rather than assuming a height is what makes this correct on both
+  // panels and on a bar whose content changes.
+  const int areaH = fb.height() - hintBarHeight(fonts, hints);
+  const int usableW = fb.width() - 2 * kMargin;
+
+  const Icon& mark = icons::kSdCard;
+  const Font& title = fonts[Role::Title700];
+  // Body400, not Body500: the board's paragraph is `font-size: var(--t-body)`
+  // with no font-weight, so it is CSS default 400 -- the same distinction that
+  // had Home's author line rendering 19% over the board's ink.
+  const Font& body = fonts[Role::Body400];
+  const Tracking titleTracking = trackingEm(title, kPromptTitleEm);
+
+  // The paragraph is wrapped before anything is placed, because its height is
+  // what it wraps to and the whole column is centred on that total. `max-width`
+  // is a maximum: on a narrower panel the screen margins win.
+  const int colW = usableW < kProseMaxW ? usableW : kProseMaxW;
+  const int colX = centreIn(kMargin, usableW, colW);
+  const Prose prose = wrapProse(body, vm.message, colW, kProseLeadEm);
+
+  // The column's own height, and then its top: three gaps, the mark, one line of
+  // title, the paragraph, the button. In 1/64 px because the paragraph's height
+  // is a fraction -- 1.55 x 29px is 44.95 -- and rounding it before halving the
+  // free space would put the whole column half a pixel off centre for no reason.
+  const int stackF26 =
+      pxToF26(mark.h + title.lineHeight() + kActionH + 3 * kPromptGap) + prose.heightF26();
+  int yF26 = (pxToF26(areaH) - stackF26) / 2;
+
+  drawIcon(fb, mark, centreIn(kMargin, usableW, mark.w), f26ToPx(yF26), Ink::Black, plane);
+  yF26 += pxToF26(mark.h + kPromptGap);
+
+  drawText(fb, title, centreIn(kMargin, usableW, title.measure(vm.title, titleTracking)),
+           baselineInF26(title, yF26, pxToF26(title.lineHeight())), vm.title, Ink::Black,
+           titleTracking, plane);
+  yF26 += pxToF26(title.lineHeight() + kPromptGap);
+
+  yF26 += drawProse(fb, body, prose, colX, colW, yF26, Ink::Black, plane);
+  yF26 += pxToF26(kPromptGap);
+
+  drawActionButton(fb, fonts, centreIn(kMargin, usableW, kPromptActionW), f26ToPx(yF26),
+                   kPromptActionW, vm.action, plane);
 
   int slots[4] = {};
   drawHintBar(fb, fonts, hints, slots, plane);

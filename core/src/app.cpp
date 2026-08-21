@@ -8,6 +8,7 @@ const char* screenName(ScreenId id) {
     case ScreenId::Library: return "LIBRARY";
     case ScreenId::Settings: return "SETTINGS";
     case ScreenId::InputMonitor: return "INPUT-MONITOR";
+    case ScreenId::SdMissing: return "SD-MISSING";
   }
   return "?";
 }
@@ -59,6 +60,13 @@ void App::dispatch(const InputEvent& ev) {
       break;
     case Action::Kind::Sleep:
       sleep_ = true;
+      break;
+    case Action::Kind::Retry:
+      // Latched, not acted on: the mount is the shell's, and so is the decision
+      // to swap this screen for Home when it succeeds. Nothing is marked dirty
+      // -- a retry that fails changes nothing on the panel, and repainting an
+      // identical screen would spend a full refresh saying so.
+      retry_ = true;
       break;
   }
 }
