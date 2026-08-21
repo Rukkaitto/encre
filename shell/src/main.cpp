@@ -162,19 +162,22 @@ static void paintGray() {
   display.displayGrayscaleBase(EInkDisplay::HALF_REFRESH);
   mark("gray-base-displayed");
 
-  // 2. The settle pass that leaves the particles receptive to the weak
-  //    grayscale nudge waveform used to be an explicit preconditionGrayscale()
-  //    here, and it was DOING THE WORK TWICE: on this controller
-  //    displayGrayscaleBase's own differential path already loads the same
-  //    XtfPreBwMid bank with the same CDI/CCSET/TSSET and triggers the same
-  //    refresh, so the second call was an identical settle. A device log showed
-  //    both, back to back, at 366 ms each -- 27% of a 1363 ms paint spent
-  //    settling an already-settled frame.
+  // 2. The settle pass, which leaves the particles receptive to the weak
+  //    grayscale nudge waveform. Must run BEFORE the planes are written: the
+  //    driver skips it once grayscale planes have overwritten DTM1/DTM2.
   //
-  //    The SDK's header asks callers to precondition between the base frame and
-  //    the planes, and that is right for panels whose displayGrayscaleBase does
-  //    not settle. UC8279's does. If a future panel needs it, put it back behind
-  //    a capability check rather than paying for it unconditionally.
+  //    DO NOT remove this as a duplicate of the settle inside
+  //    displayGrayscaleBase. It was tried: the two issue the same commands --
+  //    same XtfPreBwMid bank, same CDI/CCSET/TSSET, same trigger -- so on
+  //    inspection it looks like the identical operation done twice, and dropping
+  //    it saves 366 ms of a 1363 ms paint. On device the panel then accumulated
+  //    ink, everything growing perceptibly thicker with every refresh. The
+  //    difference is the controller's state, not the commands: the base's settle
+  //    runs having just written the new frame into DTM2, this one runs against
+  //    the synced planes, and the particles need both passes before the AA nudge
+  //    is safe. Identical command sequences are not identical operations.
+  display.preconditionGrayscale();
+  mark("gray-preconditioned");
 
   // 3. The two bit-planes. Both copies go straight out over SPI into controller
   //    RAM and retain no pointer, so one landscape buffer serves both — and the
