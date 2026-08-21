@@ -1,4 +1,4 @@
-.PHONY: test sim firmware fonts icons compare
+.PHONY: test sim firmware fonts icons compare epubs
 # PlatformIO installs outside PATH by default; allow an override: make firmware PIO=/path/to/pio
 #
 # Invoked through its MODULE entry point rather than the `pio` launcher script.
@@ -98,5 +98,13 @@ icons:
 # COMPARE_ARGS=--geometry x3 narrows to one device panel (x4 480x800, x3
 # 528x792); default renders and pairs both. --only screen_id,... filters
 # screens.
+# Test EPUBs for the device and, later, for Phase 3's parser. A generator rather
+# than checked-in binaries for the same reason fonts and icons are generated: a
+# binary fixture is opaque, so when the parser disagrees with it you cannot see
+# which of the two is wrong. Writes to build/epubs by default; EPUB_OUT=DIR to
+# put them somewhere you can copy to a card.
+EPUB_OUT ?= build/epubs
+epubs:
+	$(PYTHON) tools/mkepub.py --out $(EPUB_OUT)
 compare: sim
 	$(PYTHON) tools/compare-design.py $(COMPARE_ARGS)
