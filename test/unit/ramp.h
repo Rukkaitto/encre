@@ -31,6 +31,7 @@ struct Ramp {
   std::vector<uint8_t> value700 = slurpAsset("spacegrotesk_700_12pt.rfnt");
   std::vector<uint8_t> body400 = slurpAsset("spacegrotesk_400_14pt.rfnt");
   std::vector<uint8_t> body500 = slurpAsset("spacegrotesk_500_14pt.rfnt");
+  std::vector<uint8_t> body700 = slurpAsset("spacegrotesk_700_14pt.rfnt");
   std::vector<uint8_t> title700 = slurpAsset("spacegrotesk_700_20pt.rfnt");
   std::vector<uint8_t> display700 = slurpAsset("spacegrotesk_700_32pt.rfnt");
   reader::FontSet fonts;
@@ -52,6 +53,7 @@ struct Ramp {
            set.load(reader::Role::Value700, value700.data(), value700.size()) &&
            set.load(reader::Role::Body400, body400.data(), body400.size()) &&
            set.load(reader::Role::Body500, body500.data(), body500.size()) &&
+           set.load(reader::Role::Body700, body700.data(), body700.size()) &&
            set.load(reader::Role::Title700, title700.data(), title700.size()) &&
            set.load(reader::Role::Display700, display700.data(), display700.size());
   }

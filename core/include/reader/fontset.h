@@ -33,8 +33,14 @@ namespace reader {
 // role carried. Home's author line is `--t-body` with no weight declared -- 400
 // -- and was drawn in the 500 face, measuring 19% over the board's ink.
 //
-// So Body is two roles, because the design genuinely sets 29px at two weights.
-// The sizes whose second weight no implemented screen reaches yet (Value at
+// So Body is THREE roles, because the design genuinely sets 29px at three
+// weights. 400 and 500 shipped with Home; 700 arrives with the Library, whose
+// focused row sets its title `font-size: var(--t-body); font-weight: 700` -- and
+// that run, plus BookError's copy of the same row, is the whole of the 4 the
+// count above found. This is the process the Makefile's `fonts` target
+// describes: an unused face is 15-20 KB of flash, so a weight is added when the
+// screen that draws it lands, not in advance.
+//
 // Every (size, weight) pair the boards actually use is now shipped, so a screen
 // can always ask for the face its board declares. FontSet::load refuses to bind
 // a role to an asset built at a different size or weight, so what must never
@@ -48,6 +54,7 @@ enum class Role : uint8_t {
   Value700,
   Body400,
   Body500,
+  Body700,
   Title700,
   Display700,
   Count_
@@ -73,6 +80,7 @@ constexpr RoleSpec roleSpec(Role r) {
     case Role::Value700:   return {25, 700, 12};
     case Role::Body400:    return {29, 400, 14};
     case Role::Body500:    return {29, 500, 14};
+    case Role::Body700:    return {29, 700, 14};
     case Role::Title700:   return {42, 700, 20};
     case Role::Display700: return {67, 700, 32};
     case Role::Count_:     break;

@@ -47,7 +47,7 @@ firmware:
 #   --t-meta     21px   188 at 400,  17 at 500,   4 at 700   -> shipping 400
 #   --t-label    23px    49 at 500,   8 at 400,   2 at 700   -> shipping 500
 #   --t-value    25px   122 at 700,  61 at 500,   8 at 400   -> shipping 700
-#   --t-body     29px    24 at 500,  11 at 400,   4 at 700   -> shipping 400+500
+#   --t-body     29px    24 at 500,  11 at 400,   4 at 700   -> shipping 400+500+700
 #   --t-title    42px     6 at 700                           -> shipping 700
 #   --t-display  67px     2 at 700                           -> shipping 700
 # The second weights not listed as shipping belong to screens that do not exist
@@ -66,6 +66,7 @@ fonts:
 	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 12 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_12pt.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 14 --weight 400 --autohint --bpp 2 --out assets/built/spacegrotesk_400_14pt.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 14 --weight 500 --autohint --bpp 2 --out assets/built/spacegrotesk_500_14pt.rfnt
+	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 14 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_14pt.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 20 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_20pt.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 32 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_32pt.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/Literata.ttf --size 18 --weight 400 --opsz 12 --out assets/built/literata_18.rfnt
@@ -77,6 +78,7 @@ fonts:
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_12pt.rfnt --out shell/src/font_value700.h --symbol kFontValue700
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_400_14pt.rfnt --out shell/src/font_body400.h --symbol kFontBody400
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_14pt.rfnt --out shell/src/font_body500.h --symbol kFontBody500
+	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_14pt.rfnt --out shell/src/font_body700.h --symbol kFontBody700
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_20pt.rfnt --out shell/src/font_title700.h --symbol kFontTitle700
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_32pt.rfnt --out shell/src/font_display700.h --symbol kFontDisplay700
 # Rebuilds the UI icon bitmaps from the design boards' own inline SVG, the same

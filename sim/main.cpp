@@ -31,7 +31,7 @@ static std::vector<uint8_t> slurp(const std::string& p) {
 // impossible, and it is the same shape `test/unit/ramp.h` uses.
 struct SimRamp {
   std::vector<uint8_t> meta400, meta500, label400, label500, value500, value700;
-  std::vector<uint8_t> body400, body500, title700, display700;
+  std::vector<uint8_t> body400, body500, body700, title700, display700;
   reader::FontSet fonts;
 };
 
@@ -49,6 +49,7 @@ static bool loadRamp(SimRamp& r) {
   r.value700 = slurp(dir + "spacegrotesk_700_12pt.rfnt");
   r.body400 = slurp(dir + "spacegrotesk_400_14pt.rfnt");
   r.body500 = slurp(dir + "spacegrotesk_500_14pt.rfnt");
+  r.body700 = slurp(dir + "spacegrotesk_700_14pt.rfnt");
   r.title700 = slurp(dir + "spacegrotesk_700_20pt.rfnt");
   r.display700 = slurp(dir + "spacegrotesk_700_32pt.rfnt");
   r.fonts.load(reader::Role::Meta400, r.meta400.data(), r.meta400.size());
@@ -59,6 +60,7 @@ static bool loadRamp(SimRamp& r) {
   r.fonts.load(reader::Role::Value700, r.value700.data(), r.value700.size());
   r.fonts.load(reader::Role::Body400, r.body400.data(), r.body400.size());
   r.fonts.load(reader::Role::Body500, r.body500.data(), r.body500.size());
+  r.fonts.load(reader::Role::Body700, r.body700.data(), r.body700.size());
   r.fonts.load(reader::Role::Title700, r.title700.data(), r.title700.size());
   r.fonts.load(reader::Role::Display700, r.display700.data(), r.display700.size());
   if (!r.fonts.ready()) {

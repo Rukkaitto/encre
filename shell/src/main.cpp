@@ -14,6 +14,7 @@
 
 #include "font_body400.h"
 #include "font_body500.h"
+#include "font_body700.h"
 #include "font_display700.h"
 #include "font_label400.h"
 #include "font_label500.h"
@@ -1031,6 +1032,7 @@ void setup() {
       fonts.load(reader::Role::Value700, kFontValue700, kFontValue700Size) &&
       fonts.load(reader::Role::Body400, kFontBody400, kFontBody400Size) &&
       fonts.load(reader::Role::Body500, kFontBody500, kFontBody500Size) &&
+      fonts.load(reader::Role::Body700, kFontBody700, kFontBody700Size) &&
       fonts.load(reader::Role::Title700, kFontTitle700, kFontTitle700Size) &&
       fonts.load(reader::Role::Display700, kFontDisplay700, kFontDisplay700Size);
   if (!fontsOk || !fonts.ready()) {
