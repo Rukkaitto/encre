@@ -322,11 +322,47 @@ static void buildHomeApp() {
 // visible is Library, which does not exist until 2C-2. Adding two virtuals now to
 // carry a value nothing can produce is speculative; 2C-2 wires it when there is a
 // concrete need, and the record already has the field.
+//
+// IT SAYS WHAT IT DID, and that is not decoration. The wake path and this are the
+// two halves of one mechanism, and a wake that comes back to Home is ambiguous
+// between them: either nothing was ever stored, or a record was stored and the
+// restore would not honour it. So this logs a CHANGED record when it goes in --
+// once per screen change, not once per focus move, because the unchanged case is
+// the common one and a line per keypress would bury the interesting ones -- and
+// logs distinctly when the store refuses. saveSession() prints the NVS-level
+// reason (namespace would not open, or a put came back short); the line here is
+// the consequence, which is the part a reader of the log actually cares about.
+//
+// `gLoggedScreen` tracks what was last announced rather than what is in NVS.
+// saveSession() has its own skip-an-identical-rewrite cache and returns true
+// without touching flash, so asking it "did you write?" is not possible from
+// here; mirroring the comparison is. The two can only disagree by this printing
+// one extra line after a failure, which is the harmless direction.
+static bool gLoggedScreen = false;
+static reader::ScreenId gLastLoggedScreen = reader::ScreenId::Home;
+
 static void saveWhereWeAre() {
   Session s;
   s.screen = gApp->top().id();
   s.focus = 0;
-  saveSession(s);
+  const bool changed = !gLoggedScreen || gLastLoggedScreen != s.screen;
+  if (!saveSession(s)) {
+    // The other half of defect "wake came back to Home": a save that fails here
+    // leaves a record that either does not exist or names an older screen, and
+    // the wake then looks like the restore failed when it was the write.
+    Serial.printf("[session] NOT stored: screen=%s will not be restored by the next wake\n",
+                  reader::screenName(s.screen));
+    Serial.flush();
+    gLoggedScreen = false;
+    return;
+  }
+  if (changed) {
+    Serial.printf("[session] stored screen=%s focus=%u; a wake will come back here\n",
+                  reader::screenName(s.screen), s.focus);
+    Serial.flush();
+  }
+  gLastLoggedScreen = s.screen;
+  gLoggedScreen = true;
 }
 
 // The SD-missing screen's RETRY, which App latched for us because mounting is not
@@ -775,29 +811,56 @@ void setup() {
     Serial.printf("[session] cold boot: record cleared, nothing to restore\n");
     Serial.flush();
   } else if (storage) {
+    // EVERY OUTCOME BELOW IS LOGGED, and it was not always so. This used to read
+    // `if (loadSession(s) && s.screen != ScreenId::Home) { ... }` with no else at
+    // all, which made the two most interesting outcomes print nothing: a
+    // loadSession() that returned false, and a record that named Home. Both leave
+    // the device on Home, which is also what a restore that silently failed looks
+    // like, so "Settings, sleep, wake, back on Home" was indistinguishable from
+    // working-as-designed in a serial log. Distinguishing them is the point of
+    // this whole ladder -- read it against saveWhereWeAre()'s lines from the
+    // previous run to place the fault on the write side or the read side.
     Session s;
-    if (loadSession(s) && s.screen != reader::ScreenId::Home) {
-      if (s.screen == reader::ScreenId::SdMissing) {
-        // The mount above already decided this, and it decided there IS a card.
-        // Restoring the no-card screen over a working card would be showing the
-        // user a message that is no longer true.
-        Serial.printf("[session] the record says SD-MISSING but the card mounted; Home\n");
-        Serial.flush();
-      } else if (gApp->pushScreen(s.screen)) {
-        // Home stays underneath, so Back works. Only ONE screen is restored, so a
-        // record naming a screen that was two deep (Settings > Input Monitor)
-        // comes back with Home under it rather than Settings -- the record holds
-        // one id, not a path. Nothing in V1 is unreachable that way; a restored
-        // path is 2C-2's if the deeper screens make it worth one.
-        mark("session-restored");
-      } else {
-        // The factory refused it: an id this build has no case for, from a newer
-        // firmware's record. Home is already the root, so there is nothing to
-        // undo.
-        Serial.printf("[session] cannot build screen=%s; staying on Home\n",
-                      reader::screenName(s.screen));
-        Serial.flush();
-      }
+    const bool found = loadSession(s);
+    if (!found) {
+      // loadSession() has already said WHICH no-record this is: no namespace, a
+      // version this build does not know, or a screen id it cannot decode. This
+      // line is what that means from here.
+      Serial.printf("[session] no usable record, so nothing to restore; staying on %s. If a "
+                    "'[session] stored screen=...' line appeared before the last sleep, the "
+                    "WRITE is what failed, not the restore\n",
+                    reader::screenName(gApp->top().id()));
+      Serial.flush();
+    } else if (s.screen == reader::ScreenId::Home) {
+      // Skipped in silence by the old `!= Home` guard. It is a legitimate state --
+      // the user was on Home when they slept -- but it has to be said out loud,
+      // because it is the one case where landing on Home is CORRECT and every
+      // other way of landing on Home is a fault.
+      Serial.printf("[session] the record names HOME, which is already the root; nothing to "
+                    "push (this is a correct wake onto Home)\n");
+      Serial.flush();
+    } else if (s.screen == reader::ScreenId::SdMissing) {
+      // The mount above already decided this, and it decided there IS a card.
+      // Restoring the no-card screen over a working card would be showing the
+      // user a message that is no longer true.
+      Serial.printf("[session] the record says SD-MISSING but the card mounted; Home\n");
+      Serial.flush();
+    } else if (gApp->pushScreen(s.screen)) {
+      // Home stays underneath, so Back works. Only ONE screen is restored, so a
+      // record naming a screen that was two deep (Settings > Input Monitor)
+      // comes back with Home under it rather than Settings -- the record holds
+      // one id, not a path. Nothing in V1 is unreachable that way; a restored
+      // path is 2C-2's if the deeper screens make it worth one.
+      Serial.printf("[session] restored screen=%s over Home\n", reader::screenName(s.screen));
+      Serial.flush();
+      mark("session-restored");
+    } else {
+      // The factory refused it: an id this build has no case for, from a newer
+      // firmware's record. Home is already the root, so there is nothing to
+      // undo.
+      Serial.printf("[session] cannot build screen=%s; staying on Home\n",
+                    reader::screenName(s.screen));
+      Serial.flush();
     }
   } else {
     // Woke with no card. The record is left ALONE rather than cleared: it is
@@ -837,7 +900,21 @@ void setup() {
   // The Sleep screen is boarded and belongs to Phase 2C. Painting nothing is
   // not a gap in the picture: e-ink holds its last image with no power, so the
   // device keeps showing whatever you were looking at.
-  Serial.printf("[power] sleeping; wake with the power button\n");
+  //
+  // THE SCREEN IS NAMED HERE ON PURPOSE, and it is the third leg of the tripod
+  // that locates a bad wake. Nothing is written at this point -- the record was
+  // stored when the user navigated -- so this line is the last chance to say what
+  // the record OUGHT to contain. Read against the next boot:
+  //   * this says SETTINGS and the wake says no usable record -> the WRITE is the
+  //     problem (look for saveWhereWeAre's "NOT stored", or its absence entirely);
+  //   * this says SETTINGS and the wake restores SETTINGS -> the session path is
+  //     fine and the symptom is elsewhere;
+  //   * this line never appears at all -> the sleep path is the problem: the
+  //     Power press is not arriving as an event, or something slept without
+  //     coming through here.
+  Serial.printf("[power] sleeping from screen=%s; the record should name it on wake. Wake with "
+                "the power button\n",
+                reader::screenName(gApp->top().id()));
   Serial.flush();
   display.deepSleep();
   // Cuts the X3's SD rail (GPIO13) and any other gated rail, latched so the
@@ -914,6 +991,22 @@ void loop() {
   while (gPresses.pop(ev)) {
     Serial.printf("[input] %s %s\n", reader::buttonName(ev.button),
                   ev.kind == reader::PressKind::Long ? "LONG" : "SHORT");
+    // POWER IS HANDLED BEFORE dispatch() AND BEFORE saveWhereWeAre(), and that
+    // ordering is correct rather than an oversight -- worth stating, because it
+    // reads like a bug the first time and re-deriving it costs an hour.
+    //
+    // sleepNow() is [[noreturn]] (wake is a chip reset), so a Power press means
+    // this iteration never reaches either call below it. Neither one has anything
+    // to do:
+    //   * dispatch: no screen binds Power. It changes no screen and pushes and
+    //     pops nothing, so there is no state for a dispatch to produce.
+    //   * saveWhereWeAre: the record was already written by the dispatch that put
+    //     the user on this screen, one iteration of this same loop ago. It is
+    //     current before Power is pressed, which is exactly why sleepNow() does
+    //     not save.
+    // The consequence for defect diagnosis: if the record is wrong at wake, the
+    // write that was supposed to fix it happened at NAVIGATION time, not at sleep
+    // time -- so look for saveWhereWeAre's line on the navigation, not here.
     if (ev.button == reader::Button::Power) sleepNow();
     gApp->dispatch(ev);
     // Between the dispatch and the mask refresh below, so the refresh sees

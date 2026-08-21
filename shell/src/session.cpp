@@ -54,9 +54,23 @@ Session gCached{};
 
 bool loadSession(Session& out) {
   Preferences prefs;
-  // readOnly = true fails when the namespace has never been written, which is the
-  // ordinary first-boot case and not an error worth logging loudly.
-  if (!prefs.begin(kNamespace, true)) return false;
+  // readOnly = true fails when the namespace has never been written.
+  //
+  // That used to return false in silence, on the reasoning that it is the
+  // ordinary first-boot case. It is not only that case, and the silence cost a
+  // diagnosis: "the namespace does not exist" and "a save was attempted and did
+  // not stick" are the same observation from up here, and both of them look
+  // exactly like a wake that came back to Home for no reason. So it says which
+  // one it is now -- if this line appears on a wake AFTER a "[session] stored
+  // screen=..." line from the previous run, the write is the thing that is
+  // broken, not the read.
+  if (!prefs.begin(kNamespace, true)) {
+    Serial.printf("[session] NVS namespace %s does not exist: nothing has ever been "
+                  "stored in it, or it was cleared and not written since\n",
+                  kNamespace);
+    Serial.flush();
+    return false;
+  }
 
   const uint8_t version = prefs.getUChar(kKeyVersion, 0);
   const uint8_t rawScreen = prefs.getUChar(kKeyScreen, 0xFF);
