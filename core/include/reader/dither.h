@@ -56,6 +56,14 @@ void ditherRect(Framebuffer& fb, int x, int y, int w, int h, int level,
 // veil above and below its panel is one continuous grid instead of two with a
 // seam between them. Sets white only, so it is idempotent and stacked overlays
 // do not bleach each other's veils away.
+//
+// Written eight columns at a time straight into the framebuffer's physical
+// store, which is why this is the one drawing routine in core/ that knows the
+// rotation exists: an overlay veils the WHOLE frame, so it was the most
+// expensive thing on an overlay repaint by a wide margin. See dither.cpp for the
+// measurement and for what the rotated case has to do differently. It is pure
+// optimisation -- test_dither.cpp keeps the per-pixel form as its reference and
+// asserts byte-identity under both rotations.
 void veilRect(Framebuffer& fb, int x, int y, int w, int h);
 
 // Dispersed (true Bayer 4x4) threshold for the pixel at panel coordinates

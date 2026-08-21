@@ -275,6 +275,149 @@ TEST_CASE("a degenerate veil rect draws nothing and does not walk off the buffer
     for (int x = 0; x < 4; ++x) CHECK(fb.getPixel(x, y) == ref.getPixel(x, y));
 }
 
+// --- the veil's byte-wise fast path -----------------------------------------
+//
+// veilRect used to be a per-pixel loop over setPixel with the cell index
+// computed as ((v % 3) + 3) % 3 on both axes -- four integer divisions per pixel
+// -- and it now writes the pattern eight columns at a time straight into the
+// physical store. That is PURE OPTIMISATION: every case above, and the two
+// overlay goldens, pin the output it must keep producing.
+//
+// The reference below is that per-pixel loop, kept here for the same reason
+// test_rotate.cpp keeps rotate90CCW_reference: it IS the specification, because
+// it is the code whose output the goldens were blessed against. Any disagreement
+// means the fast path is wrong, never the reference.
+//
+// The comparison is over data() rather than over pixels, because the fast path
+// writes bytes: a mapping that is right per pixel but lays the bytes out
+// differently is still a wrong frame from the panel driver's point of view. And
+// it runs under Rotation::Ccw as well as Rotation::None, because CCW is how the
+// device paints -- a byte-wise path that assumed a logical row is a physical row
+// would pass every desktop test and every golden and smear the veil diagonally
+// on glass.
+
+namespace {
+
+constexpr bool kVeilDotRef[3][3] = {
+    {false, true, false},
+    {true, true, true},
+    {false, true, false},
+};
+constexpr int cell3Ref(int v) { return ((v % 3) + 3) % 3; }
+
+void veilRectReference(reader::Framebuffer& fb, int x, int y, int w, int h) {
+  for (int yy = y; yy < y + h; ++yy)
+    for (int xx = x; xx < x + w; ++xx)
+      if (kVeilDotRef[cell3Ref(yy)][cell3Ref(xx)]) fb.setPixel(xx, yy, true);
+}
+
+// A deterministic ground with no byte-level symmetry, so a fast path that is off
+// by a bit, a byte or a row cannot coincidentally match. A plain white or plain
+// black ground would hide any mask that is too WIDE, since the veil only sets
+// white: over paper an over-wide mask changes nothing at all.
+void fillPseudoRandom(reader::Framebuffer& fb, uint32_t seed) {
+  uint32_t s = seed | 1u;
+  for (int y = 0; y < fb.height(); ++y)
+    for (int x = 0; x < fb.width(); ++x) {
+      s ^= s << 13; s ^= s >> 17; s ^= s << 5;  // xorshift32
+      fb.setPixel(x, y, (s & 0x10u) != 0);
+    }
+}
+
+struct VeilCase {
+  int fw, fh, x, y, w, h;
+  const char* what;
+};
+
+void checkVeilMatchesReference(const VeilCase& c, reader::Rotation rot) {
+  reader::Framebuffer fast(c.fw, c.fh, rot), ref(c.fw, c.fh, rot);
+  const uint32_t seed = static_cast<uint32_t>(c.fw * 7919 + c.fh * 104729 + c.x * 31 + c.w);
+  fillPseudoRandom(fast, seed);
+  fillPseudoRandom(ref, seed);
+  reader::veilRect(fast, c.x, c.y, c.w, c.h);
+  veilRectReference(ref, c.x, c.y, c.w, c.h);
+
+  REQUIRE(fast.sizeBytes() == ref.sizeBytes());
+  int diffs = 0, first = -1;
+  for (int i = 0; i < ref.sizeBytes(); ++i)
+    if (fast.data()[i] != ref.data()[i]) {
+      if (diffs == 0) first = i;
+      ++diffs;
+    }
+  const char* rn = rot == reader::Rotation::Ccw ? "Ccw" : "None";
+  CHECK_MESSAGE(diffs == 0, c.what << " rot=" << rn << ": " << diffs << " of " << ref.sizeBytes()
+                                   << " bytes differ, first at offset " << first);
+}
+
+}  // namespace
+
+TEST_CASE("the byte-wise veil is byte-identical to the per-pixel one") {
+  const VeilCase cases[] = {
+      // The two panels, full frame: what an overlay actually asks for.
+      {528, 792, 0, 0, 528, 792, "X3 full frame"},
+      {480, 800, 0, 0, 480, 800, "X4 full frame"},
+      // Origins and widths that are not multiples of 8, which is where a
+      // byte-wise path's edge masks are the whole of the correctness. Both panel
+      // widths are multiples of 8, so nothing on the device exercises this.
+      {528, 792, 1, 0, 526, 792, "X3 inset by one pixel"},
+      {528, 792, 7, 3, 513, 785, "X3 ragged origin and width"},
+      {528, 792, 3, 0, 5, 792, "a five-pixel column inside one byte"},
+      {528, 792, 6, 0, 4, 10, "a run straddling one byte boundary"},
+      {64, 64, 0, 0, 64, 64, "aligned 64x64"},
+      {64, 64, 5, 5, 54, 54, "inset 64x64"},
+      // Every phase of the 3px grid, so none of the three byte masks is missed.
+      {48, 48, 0, 0, 48, 48, "phase 0"},
+      {48, 48, 1, 1, 46, 46, "phase 1"},
+      {48, 48, 2, 2, 44, 44, "phase 2"},
+      // Negative origins: the pattern is keyed on absolute coordinates, so
+      // clipping must not re-phase it.
+      {36, 36, -4, -4, 8, 8, "negative origin"},
+      {36, 36, -7, -5, 20, 20, "negative origin, odd offsets"},
+      // Off the far edge, so the clip has to shorten the run rather than write
+      // past the row.
+      {36, 36, 30, 30, 20, 20, "overhanging the far edge"},
+      // Degenerate: nothing drawn, nothing walked off.
+      {36, 36, 4, 4, 0, 8, "zero width"},
+      {36, 36, 4, 4, 8, 0, "zero height"},
+      {36, 36, 4, 4, -5, -5, "negative extent"},
+      {36, 36, 100, 100, 8, 8, "wholly off-screen"},
+      // Frames whose own dimensions are not multiples of 8, in both axes, which
+      // under rotation is where the stride comes from the other one.
+      {13, 21, 0, 0, 13, 21, "ragged frame 13x21"},
+      {21, 13, 0, 0, 21, 13, "ragged frame 21x13"},
+      {1, 1, 0, 0, 1, 1, "single pixel"},
+      {1, 800, 0, 0, 1, 800, "single column"},
+      {800, 1, 0, 0, 800, 1, "single row"},
+  };
+  for (const VeilCase& c : cases) {
+    checkVeilMatchesReference(c, reader::Rotation::None);
+    checkVeilMatchesReference(c, reader::Rotation::Ccw);
+  }
+}
+
+TEST_CASE("the byte-wise veil writes nothing outside the rect it was given") {
+  // The fast path indexes raw bytes, so an off-by-one in an edge mask corrupts a
+  // neighbour rather than failing a pattern check. Veil a rect inset by one pixel
+  // on every side of an all-ink frame and require the border ring is untouched --
+  // one pixel is inside the first and last byte of every row, so the masks are
+  // doing the work rather than the byte arithmetic.
+  for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw}) {
+    reader::Framebuffer fb(64, 48, rot);
+    fb.clear(false);
+    reader::veilRect(fb, 1, 1, 62, 46);
+    for (int x = 0; x < 64; ++x) {
+      CHECK_FALSE(fb.getPixel(x, 0));
+      CHECK_FALSE(fb.getPixel(x, 47));
+    }
+    for (int y = 0; y < 48; ++y) {
+      CHECK_FALSE(fb.getPixel(0, y));
+      CHECK_FALSE(fb.getPixel(63, y));
+    }
+    // ...and it did draw something, so the check above is not passing on a no-op.
+    CHECK(inkCount(fb, 1, 1, 62, 46) < 62 * 46);
+  }
+}
+
 TEST_CASE("a white-inked tint is the same cells as a black one, in paper") {
   // The boards declare the cover placeholder twice, `.dither-dots` and
   // `.dither-dots-inv`: the same 1.1px circle on the same 4px grid, colours

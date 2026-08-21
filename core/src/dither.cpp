@@ -92,12 +92,68 @@ constexpr bool kVeilDot[3][3] = {
     {false, true, false},
 };
 
-// Cell index for an absolute coordinate. ditherRect can use `& 3` because its
-// grid is a power of two; a 3px grid cannot, and `%` alone yields a negative
-// result for a negative coordinate -- which would index outside kVeilDot rather
-// than wrapping. Overlay geometry is derived by subtraction from a centred
-// panel, so a negative origin is a real possibility on the narrow geometry.
-constexpr int cell3(int v) { return ((v % 3) + 3) % 3; }
+// THE SHAPE THE FAST PATH BELOW ENCODES: a whole row of the tile at cy == 1, and
+// a single column of it at cx == 1. Everything from here to veilRect is derived
+// from that, so it is asserted rather than commented -- a change to kVeilDot that
+// left the derivation alone would otherwise draw a different veil in silence,
+// and the symptom (a veil of the wrong density) reads as a design regression
+// rather than as a broken optimisation.
+//
+// Note also that the shape is symmetric under transposition, kVeilDot[a][b] ==
+// kVeilDot[b][a], which is what lets the rotated branch of veilRect swap the
+// axes and keep the same two cases.
+constexpr bool veilIsRowPlusColumn() {
+  for (int cy = 0; cy < 3; ++cy)
+    for (int cx = 0; cx < 3; ++cx)
+      if (kVeilDot[cy][cx] != (cy == 1 || cx == 1)) return false;
+  return true;
+}
+static_assert(veilIsRowPlusColumn(),
+              "veilRect's byte masks assume a full row at cy==1 and one column at cx==1");
+
+// One byte of the stripe -- the tile's cx == 1 column -- for each phase a byte
+// can start on. A byte covers eight consecutive columns, so which of its bits
+// are on the stripe depends on the first column's cell index, and 8 % 3 == 2
+// means that index advances by two per byte and repeats every three.
+//
+// Derived from kVeilDot rather than written out, so the masks cannot drift from
+// the pattern they are meant to be.
+constexpr uint8_t stripeByte(int phase) {
+  uint8_t m = 0;
+  for (int k = 0; k < 8; ++k)
+    if (kVeilDot[0][(phase + k) % 3]) m = static_cast<uint8_t>(m | (0x80u >> k));
+  return m;
+}
+constexpr uint8_t kStripeByte[3] = {stripeByte(0), stripeByte(1), stripeByte(2)};
+// Three columns of every eight-column byte, except where the phase puts only two
+// in it: 3 + 3 + 2 == 8 bits across 24 columns, which is the 1-in-3 the stripe
+// is. Spelled out so the derivation above has something to be checked against.
+static_assert(kStripeByte[0] == 0x49 && kStripeByte[1] == 0x92 && kStripeByte[2] == 0x24,
+              "the stripe's byte masks are not 1-in-3");
+
+// Whiten one PHYSICAL row's columns [pxLo, pxHi), eight at a time.
+//
+// `full` is the tile's cy == 1 case, where every column of the run goes white;
+// otherwise only the columns on the stripe do. Both are a mask OR, because the
+// veil only ever SETS white -- which is what makes it idempotent, and what lets
+// this touch a byte once instead of eight times.
+//
+// The two edge bytes are masked down to the run rather than special-cased, so a
+// run whose origin or width is not a multiple of eight writes no pixel outside
+// itself. That is the case a byte-wise path gets wrong, and the panel geometries
+// are both multiples of 8, so nothing on the device would have caught it.
+void veilPhysRun(uint8_t* row, int pxLo, int pxHi, bool full) {
+  const int b0 = pxLo >> 3, b1 = (pxHi - 1) >> 3;
+  int phase = (2 * b0) % 3;  // (8 * b) % 3, and b0 is never negative
+  for (int b = b0; b <= b1; ++b) {
+    uint8_t m = full ? 0xFFu : kStripeByte[phase];
+    if (b == b0) m = static_cast<uint8_t>(m & (0xFFu >> (pxLo & 7)));
+    if (b == b1 && (pxHi & 7) != 0) m = static_cast<uint8_t>(m & ~(0xFFu >> (pxHi & 7)));
+    row[b] = static_cast<uint8_t>(row[b] | m);
+    phase += 2;
+    if (phase >= 3) phase -= 3;
+  }
+}
 }  // namespace
 
 int bayer4(int x, int y) { return kBayer[y & 3][x & 3]; }
@@ -124,12 +180,60 @@ void veilRect(Framebuffer& fb, int x, int y, int w, int h) {
   // Keyed on absolute framebuffer coordinates, exactly as ditherRect is: an
   // overlay veils the band above its panel and the band below it, and a pattern
   // phased on each band's own origin would show a seam where the two meet.
-  for (int yy = y; yy < y + h; ++yy)
-    for (int xx = x; xx < x + w; ++xx)
-      // Setting white only, never black. The parent has already been drawn, so
-      // this subtracts from its ink -- and it means a second overlay's veil over
-      // a first one's changes nothing further rather than bleaching it away.
-      if (kVeilDot[cell3(yy)][cell3(xx)]) fb.setPixel(xx, yy, true);
+  //
+  // WHAT THIS USED TO BE, and why it is worth the bytes below: a per-pixel loop
+  // calling setPixel, with the cell index computed as ((v % 3) + 3) % 3 for BOTH
+  // axes on EVERY pixel -- four integer divisions and a bit-addressed
+  // read-modify-write per pixel. Measured on the desktop at 528x792 it cost
+  // 2.33 ms against ditherRect's 1.12 ms for the same shape of work, and this
+  // project's desktop-to-device ratio is about 65x, so it was on the order of
+  // 150 ms of every overlay repaint. It also ran on all 418k pixels of the frame
+  // whichever pixel had changed, which is the same shape of waste the full-frame
+  // rotate90CCW was.
+  //
+  // Nothing about the OUTPUT changes here; test_dither.cpp keeps the per-pixel
+  // form as its reference and asserts this produces the identical framebuffer at
+  // both geometries, under both rotations, and for runs that start and end
+  // mid-byte.
+  if (w <= 0 || h <= 0) return;
+  const int fw = fb.width(), fh = fb.height();
+  if (fw <= 0 || fh <= 0) return;
+  // CLIP FIRST, which is what setPixel's own bounds check used to do one pixel at
+  // a time, and it is also what retires the old cell3(): a clipped coordinate is
+  // never negative, so `% 3` wraps correctly without the extra division that was
+  // there to rescue a negative one. The PHASE is still the absolute coordinate's,
+  // so clipping cannot move the pattern -- a rect with a negative origin (overlay
+  // geometry is derived by subtraction from a centred panel, so it happens on the
+  // narrow geometry) keeps the grid it would have had.
+  const int xLo = x > 0 ? x : 0, xHi = (x + w) < fw ? (x + w) : fw;
+  const int yLo = y > 0 ? y : 0, yHi = (y + h) < fh ? (y + h) : fh;
+  if (xLo >= xHi || yLo >= yHi) return;
+
+  uint8_t* const base = fb.data();
+  const int stride = fb.physRowBytes();
+  if (fb.rotation() == Rotation::Ccw) {
+    // UNDER ROTATION A LOGICAL ROW IS A PHYSICAL COLUMN, so walking a logical row
+    // byte-wise would smear the pattern diagonally across the frame -- and the
+    // device is the rotated case, so that mistake would look right on the desktop
+    // and on every golden and wrong only on glass.
+    //
+    // A logical COLUMN is a physical row: physX = logY, physY = width - 1 - logX
+    // (framebuffer.cpp's byteIndex, and rotate90CCW before it). So the outer loop
+    // is the logical x, each value of which is one physical row whose columns are
+    // the logical y range. The tile is symmetric under transposition, so the two
+    // cases are the same ones with the axes swapped: a logical x on the tile's
+    // centre column fills its whole physical row, and every other one gets the
+    // stripe -- which now runs in logical y, and lands on exactly the pixels the
+    // per-pixel form's kVeilDot[cell3(yy)][cell3(xx)] chose.
+    for (int lx = xLo; lx < xHi; ++lx)
+      veilPhysRun(base + static_cast<size_t>(fw - 1 - lx) * static_cast<size_t>(stride), yLo, yHi,
+                  lx % 3 == 1);
+  } else {
+    // Unrotated: a logical row IS a physical row, so this is the plain case.
+    for (int ly = yLo; ly < yHi; ++ly)
+      veilPhysRun(base + static_cast<size_t>(ly) * static_cast<size_t>(stride), xLo, xHi,
+                  ly % 3 == 1);
+  }
 }
 
 }  // namespace reader
