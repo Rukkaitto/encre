@@ -273,6 +273,14 @@ thing:
   `read(buf, n)`) is **Phase 3's**, and its absence is a decision, not an
   oversight: EPUBs are megabytes against ~230 KB of heap.
 
+**The settings file is CREATED at boot when the card has none** — defaults
+written to `/.reader/settings.json`, logged. Three things want that: the user gets
+a hand-editable file rather than an invisible one, 2C-3's Settings screen updates
+a file instead of creating one, and the card-presence probe gets a guaranteed
+target to read (see below). Only when **absent** — a corrupt or wrong-version file
+is left exactly as the user typed it, because `loadAndApplySettings` already
+logged `DEFAULTED` and overwriting it would destroy the only copy of their edit.
+
 **Settings are flat JSON at `/.reader/settings.json`** (spec §5), read by a
 minimal one-object parser in `core/` (`json.h` — no nesting, no arrays; Phase 3's
 bookmark array will outgrow it). Nothing is vendored and there is no network to
@@ -305,7 +313,7 @@ restored focus would show is Library, which lands in 2C-2.
   reboot.** `SDCardManager::begin()` opens with `if (initialized) return true;` and
   the SPI path exposes no `end()`/`unmount()`, so it reports success without
   touching the hardware. So the shell never accepts `mount()` alone: it requires
-  `probe()` (a real root-directory read) to agree. A RETRY that reports success and
+  `probe()` to agree. A RETRY that reports success and
   then fails is worse than one that stays put — so **RETRY has two branches**
   (`handleRetry`), told apart by `gSdBeganOnce`: never mounted this boot means the
   in-place attempt is real and is kept, while mounted-then-lost **restarts the
@@ -314,16 +322,45 @@ restored focus would show is Library, which lands in 2C-2.
 - **`mounted()` is "the card was there and nothing has since told us otherwise".**
   There is no card-detect GPIO in the board profiles and `SdCard::status()` (the
   one cheap CMD13) is private to `SDCardManager`, so liveness is maintained from
-  operation feedback plus `probe()`. `probe()` can be satisfied from SdFat's sector
-  cache, so it is not a card-detect either.
+  operation feedback plus the two probes below. Neither is a card-detect: a pull is
+  noticed by a read *failing*, not by the slot reporting empty.
 - **A pull is detected proactively**, because operation feedback alone never fires:
   V1 does almost no filesystem work after boot, so a card pulled on Home stayed
-  invisible. `pollCardPresence()` runs `probe()` every `kSdPollMs` (2000) from
-  `loop()`, **after** the paint block and gated on `!gApp->dirty()`, under the same
-  `SpiBusGuard` — it is SPI traffic on the panel's bus, and it costs battery on a
-  device built to sit idle. A usable → unusable edge rebuilds the `App` rooted at
-  `SdMissingScreen` (a fresh `App` is dirty and in transition, so it paints as a
-  screen change) and leaves the session record alone.
+  invisible. `pollCardPresence()` runs from `loop()` **after** the paint block and
+  gated on `!gApp->dirty()`, under the same `SpiBusGuard` — SPI traffic on the
+  panel's bus, and battery on a device built to sit idle. A usable → unusable edge
+  rebuilds the `App` rooted at `SdMissingScreen` (a fresh `App` is dirty and in
+  transition, so it paints as a screen change) and leaves the session record alone.
+- **What the probe READS is the load-bearing part, and getting it wrong shipped
+  once.** The first version of the poll called `probe()`, which opened `"/"`. The
+  root directory's sector is the one sector guaranteed to be in SdFat's cache after
+  boot, so the poll was answered out of RAM and kept succeeding with the card in
+  the user's hand: no log line, and the SD-missing screen was never reached.
+  Hardware confirmed it. Two layers replace it:
+  - **The fast probe, 2 s.** `probe()` reads a **byte out of `/.reader/settings.json`**,
+    which walks the root directory, then `/.reader`, then a data sector. SdFat here
+    has exactly **one 512-byte cache slot** — `FsCache` holds a single
+    `m_buffer[512]`, and `USE_SEPARATE_FAT_CACHE` is gated on `__arm__` so it is
+    **off** on the RISC-V C3 — so three sectors cannot all be served from RAM, and
+    the slot ends up holding the *last* of the three, so the next probe misses on
+    its first access. `useFileProbeTarget()` adopts the path only if it opens and
+    yields a byte *now*; otherwise the target stays the root-directory read and the
+    boot log says **DEGRADED**, because a probe that quietly falls back is the same
+    defect again.
+  - **The backstop, 25 s.** The above is an *argument* about cache geometry, and an
+    argument is what was wrong last time. `deepProbe()` calls
+    `SDCardManager::sdUsedBytes()` → `freeClusterCount()`, a whole-FAT scan of
+    thousands of sectors that no 512-byte cache can serve. **25 s is a floor, not a
+    taste**: the SDK caches that value for 20 s, so anything sooner returns the
+    cached number without touching the card. It bounds worst-case detection at
+    ~25 s and costs a real FAT scan (hundreds of ms to over a second on a big
+    card), so it is rare by design and `armCardProbes` logs the measured scan time.
+    `sdUsedBytes()` reports its own failure as **0**, so it is armed only if the
+    baseline scan returns non-zero — otherwise it says it is not armed.
+  - At most **one** of the two runs per call, and **the backstop wins when both are
+    due**: its entire value is not depending on the fast probe being right.
+  - The card-lost line **names which mechanism noticed**. If the backstop is doing
+    the detecting, the fast probe is being served from cache and this is back.
 
 **The shared SPI bus is handled in exactly two places.** Every public method of
 `SdFileSystem` takes a recursive `SpiBusGuard`; `renderTop()` in

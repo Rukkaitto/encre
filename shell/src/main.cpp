@@ -198,11 +198,14 @@ static void mark(const char* s) {
 // button that lies is worse than one that stays put, because the user stops
 // believing the screen.
 //
-// So a mount is only accepted once probe() has actually read the root directory
-// and mounted() agrees. probe() is not a card-detect (see sd_fs.cpp: it can be
-// satisfied from SdFat's sector cache, and there is no card-detect GPIO in the
-// board profiles at all), but it is real traffic to the card, which is strictly
-// more than begin() promises after the first call.
+// So a mount is only accepted once probe() has actually read the card and
+// mounted() agrees. Here, and ONLY here, that is still the root-directory read:
+// this runs before armCardProbes() has a mounted volume to look for a target file
+// on, so probe() is on its RootDir fallback. That is fine at this one call site
+// and nowhere else -- SDCardManager::begin() has just run, so nothing has been in
+// the sector cache long enough for a stale hit, and the alternative would be
+// looking for a settings file before knowing there is a card. The cached-read
+// hazard is a POLLING hazard; see ProbeTarget in sd_fs.h.
 //
 // `why` is "boot" or "retry", and it is in every line here on purpose: the two
 // paths differ only in what they mean, so a serial log without it is ambiguous.
@@ -307,6 +310,116 @@ static void loadAndApplySettings() {
                 (unsigned long)gSettings.sleepAfterMs, gSettings.fullRefreshEvery,
                 (int)gSettings.fullOnTransition);
   Serial.flush();
+}
+
+// --- The card-liveness probes --------------------------------------------
+//
+// The two cadences. What each probe does and why there are two of them is on
+// pollCardPresence() below; these are up here because armCardProbes() names both
+// numbers in its boot log, and handleRetry() has to be able to call it.
+//
+// 2000 ms for the fast probe: fast enough that a pull is noticed while the user
+// still has their hand on the slot, cheap enough (three sector reads) to be a
+// rounding error next to a paint.
+//
+// 25000 ms for the backstop, and the number has two halves. The floor is 20000 --
+// SDCardManager caches sdUsedBytes() for exactly that long, so calling it any
+// sooner returns the cached answer without touching the card and the whole
+// mechanism becomes a no-op. 25000 is that floor plus margin against millis()
+// jitter and a loop that skipped the slot. It is also the ceiling on how long a
+// pull can go unnoticed even if the fast probe were somehow still being served
+// from cache, which is the guarantee this layer is here to provide.
+//
+// It is NOT cheaper than that: freeClusterCount() reads the whole FAT one sector
+// at a time, which on a large card is hundreds of milliseconds to over a second
+// of SPI, and this is a battery device whose entire job is to sit idle. Hence the
+// layering -- the fast probe carries the responsiveness so this one can be rare,
+// and armCardProbes() logs the measured scan time so the real cost on the card in
+// the slot is in the log rather than estimated in a comment. Both only run while
+// AWAKE; the idle timer sleeps at five minutes and sleep cuts the X3's SD rail.
+constexpr uint32_t kSdPollMs = 2000;
+constexpr uint32_t kSdDeepPollMs = 25000;
+static uint32_t gLastSdPollMs = 0;
+static uint32_t gLastSdDeepPollMs = 0;
+
+// Called once after every confirmed mount (boot, and a successful RETRY). Two
+// jobs, and the first one is worth doing on its own merits.
+//
+// 1. GUARANTEE THE SETTINGS FILE EXISTS. On a fresh card there is none, because
+//    nothing has ever saved one -- loadSettings() reports "no file yet" and the
+//    device runs on the struct's defaults. Writing the defaults out at boot gives
+//    the user a plain, hand-editable /.reader/settings.json (spec 5 already fixes
+//    the path), gives 2C-3's Settings screen a file to UPDATE rather than create,
+//    and gives the probe below a target it can count on.
+//
+//    Only when ABSENT. A file that exists but is corrupt or carries an unknown
+//    version is left exactly as the user left it: loadAndApplySettings() has
+//    already logged DEFAULTED and named the reason, and silently overwriting a
+//    hand-edited file to "fix" it would destroy the only copy of what they typed.
+//    A corrupt file is still a perfectly good probe target -- the probe reads one
+//    byte and does not care what it says.
+//
+// 2. POINT THE PROBES AT IT. The fast probe reads that file; the backstop scans
+//    the FAT. See ProbeTarget and deepProbe() in sd_fs.h for why each one is what
+//    it is, and pollCardPresence() below for the cadences.
+//
+// EVERY OUTCOME IS LOGGED, including the ones where nothing went wrong, because
+// this is the boot line that says which mechanism is in force. A probe that
+// degrades quietly is the defect this whole block exists to fix, so "degraded"
+// has to be visible from a serial log without knowing to look for it.
+static void armCardProbes(const char* why) {
+  if (!gSd.exists(reader::kSettingsPath)) {
+    if (reader::saveSettings(gSd, gSettings)) {
+      Serial.printf("[sd] %s: no settings file on the card, so this build's defaults were "
+                    "written to %s -- hand-editable from here on\n",
+                    why, reader::kSettingsPath);
+    } else {
+      Serial.printf("[sd] %s: there is no settings file and %s could NOT be written (card "
+                    "full, write-protected, or failing). Running on defaults\n",
+                    why, reader::kSettingsPath);
+    }
+    Serial.flush();
+  }
+
+  if (gSd.useFileProbeTarget(reader::kSettingsPath)) {
+    Serial.printf("[sd] %s: fast probe reads %s every %lu ms. Opening it walks the root "
+                  "directory, then /.reader, then a data sector -- three sectors against "
+                  "SdFat's one 512-byte cache, so it cannot be answered from RAM\n",
+                  why, gSd.probeTargetPath(), (unsigned long)kSdPollMs);
+  } else {
+    // The one state that must never be quiet. Reaching here means the settings
+    // file is absent or unreadable after the attempt above, so probe() is back to
+    // the root-directory read that could not see a pulled card at all.
+    Serial.printf("[sd] %s: fast probe DEGRADED to a root-directory read -- %s is missing or "
+                  "would not open, so there is no file to read. That read can be served from "
+                  "SdFat's sector cache, which is exactly the defect this target exists to "
+                  "avoid; the %lu ms FAT-scan backstop is what will catch a pull now\n",
+                  why, reader::kSettingsPath, (unsigned long)kSdDeepPollMs);
+  }
+  Serial.flush();
+
+  // The backstop's baseline, and the one place its real cost on THIS card is
+  // measured. A big card means a big FAT, so print the number rather than
+  // guessing at it in a comment.
+  const uint32_t t0 = millis();
+  const bool armed = gSd.armDeepProbe();
+  const uint32_t scanMs = millis() - t0;
+  if (armed) {
+    Serial.printf("[sd] %s: FAT-scan backstop armed (%llu bytes used, scan took %lu ms) and "
+                  "re-runs every %lu ms -- it is the check that cannot be served from cache\n",
+                  why, (unsigned long long)gSd.deepProbeBaselineBytes(), (unsigned long)scanMs,
+                  (unsigned long)kSdDeepPollMs);
+  } else {
+    Serial.printf("[sd] %s: FAT-scan backstop NOT armed -- the scan reported 0 bytes used, "
+                  "which is also how it reports its own failure, so it could never tell a "
+                  "dead card from this volume. The fast probe is the only card check\n",
+                  why);
+  }
+  Serial.flush();
+  // Both clocks restart here, so the first poll of each kind lands one full
+  // interval after this -- the reads above have just answered both questions.
+  gLastSdPollMs = millis();
+  gLastSdDeepPollMs = gLastSdPollMs;
 }
 
 // --- The app, and the session record -------------------------------------
@@ -458,7 +571,12 @@ static void handleRetry() {
   }
   gStorageUsable = true;
   loadAndApplySettings();  // the settings live on the card that just appeared
-  buildHomeApp();          // and Home replaces the root; see buildHomeApp()
+  // A brand-new card is the fresh-card case: it may have no settings file, and
+  // both probes have to be re-pointed at whatever this card turns out to hold.
+  // Skipping this is how the poll would go back to the cached root read on
+  // exactly the card the user just inserted.
+  armCardProbes("retry");
+  buildHomeApp();  // and Home replaces the root; see buildHomeApp()
   mark("sd-retry-ok");
 }
 
@@ -472,9 +590,36 @@ static void handleRetry() {
 // might be never. The screen exists for exactly this state and was unreachable
 // from it.
 //
-// So the liveness check is made ACTIVE: probe() -- a real root-directory read --
-// on a timer. Three constraints shape it, all of them from CLAUDE.md's hardware
-// notes rather than from taste:
+// So the liveness check is made ACTIVE: a real read on a timer. TWO of them, in
+// layers, and the reason there are two is a defect this file shipped once.
+//
+// THE FIRST ATTEMPT DID NOT WORK ON HARDWARE. It polled probe(), and probe()
+// opened "/" -- the root directory, whose sector is the one sector guaranteed to
+// be in SdFat's cache after boot. SdFat here has exactly ONE 512-byte cache slot
+// (USE_SEPARATE_FAT_CACHE is gated on __arm__ and the C3 is RISC-V), so the poll
+// was answered out of RAM and kept succeeding with the card in the user's hand:
+// no log line, and the SD-missing screen was never reached. The risk was written
+// down when the poll was added; the device then confirmed it.
+//
+//   * THE FAST PROBE, every kSdPollMs. probe() now reads a byte out of a real
+//     file, which walks the root directory, then /.reader, then a data sector --
+//     three sectors against one cache slot, and the slot ends up holding the last
+//     of the three, so the next probe misses on its first access. See ProbeTarget
+//     in sd_fs.h. This carries the responsiveness.
+//   * THE BACKSTOP, every kSdDeepPollMs. The above is still an ARGUMENT about
+//     cache geometry, and an argument is what was wrong last time. deepProbe()
+//     scans the whole FAT (sdUsedBytes -> freeClusterCount), which is thousands
+//     of sectors and cannot be served from a 512-byte cache under any reading of
+//     the code. It is slow, so it is rare; it bounds worst-case detection at
+//     ~25 s even if every assumption above is wrong.
+//
+// At most ONE of the two runs per call, and the backstop wins when both are due:
+// its whole value is that it does not depend on the fast probe being right, so it
+// must not be crowded out by it. Skipping one fast probe every ~25 s costs
+// nothing.
+//
+// Three constraints shape both, all of them from CLAUDE.md's hardware notes
+// rather than from taste:
 //
 //  1. IT IS SPI TRAFFIC ON THE PANEL'S BUS. SDCardManager does no locking of any
 //     kind, so a transfer overlapping a refresh is a bus-level fault that looks
@@ -488,22 +633,29 @@ static void handleRetry() {
 //     in flight concurrently -- this is what keeps that true if either one ever
 //     moves off it, and it also stops the poll from delaying a repaint.
 //  3. IT COSTS BATTERY, on a device whose entire job is to sit idle showing a
-//     page. Every probe wakes the card and reads a sector, so a tight loop would
-//     be a continuous drain for information nobody asked for. 2000 ms is the
-//     starting point: fast enough that a pull is noticed while the user still has
-//     their hand on the slot, slow enough to be a rounding error next to a paint.
-//     It only runs while the device is AWAKE -- the idle timer sleeps at five
-//     minutes and sleep cuts the X3's SD rail entirely -- so the realistic worst
-//     case is 150 probes per idle period.
+//     page. Every probe wakes the card and reads sectors, so a tight loop would
+//     be a continuous drain for information nobody asked for. Both cadences are
+//     declared and justified up at kSdPollMs / kSdDeepPollMs, and only run while
+//     the device is AWAKE -- the idle timer sleeps at five minutes and sleep cuts
+//     the X3's SD rail entirely.
 //
-// THE HONEST LIMIT, and it is the same one mounted() carries: probe() is not a
-// card-detect. There is no card-detect GPIO in the board profiles at all, and
-// probe() can be satisfied from SdFat's one-sector cache, so a pull may be
-// noticed a poll or two late, or -- if nothing ever needs a sector outside the
-// cache -- not by this mechanism at all. It is strictly more than the nothing
-// that was here before, and it is the strongest claim this SDK supports.
-constexpr uint32_t kSdPollMs = 2000;
-static uint32_t gLastSdPollMs = 0;
+// THE HONEST LIMIT, and it is the same one mounted() carries: neither probe is a
+// card-detect. There is no card-detect GPIO in the board profiles at all and
+// CMD13 is private to SDCardManager, so a pull is noticed by a read FAILING, not
+// by the slot reporting empty -- which means it can be a poll or two late. The
+// backstop is what puts a bound on "late". It is far more than the nothing that
+// was here before, and it is the strongest claim this SDK supports.
+
+// Which mechanism noticed, for the edge log. Not a bool, because "the card is
+// gone" is worth much less in a log than "the card is gone and THIS is what saw
+// it": if the backstop is doing all the detecting, the fast probe is still being
+// served from cache and this file has the same bug in a new place.
+static const char* fastProbeName() {
+  return gSd.probeTarget() == SdFileSystem::ProbeTarget::File
+             ? "the 2 s FAST PROBE (a byte read from a real file)"
+             : "the 2 s FAST PROBE (a root-directory read -- the DEGRADED fallback, which "
+               "should not have been able to see this)";
+}
 
 static void pollCardPresence(uint32_t now) {
   // Nothing to detect once the answer is already "no card": the SD-missing screen
@@ -511,23 +663,31 @@ static void pollCardPresence(uint32_t now) {
   // (that is RETRY's restart branch). Skipping is also the battery-cheap default
   // for a device sitting on this screen.
   if (!gStorageUsable) return;
-  if (static_cast<uint32_t>(now - gLastSdPollMs) < kSdPollMs) return;
-  gLastSdPollMs = now;
 
-  bool usable;
-  {
-    // See constraint 1 above. Recursive, so probe()'s own acquisition nests.
+  const char* by = nullptr;
+  const bool deepDue = gSd.deepProbeArmed() &&
+                       static_cast<uint32_t>(now - gLastSdDeepPollMs) >= kSdDeepPollMs;
+  if (deepDue) {
+    gLastSdDeepPollMs = now;
+    // See constraint 1 above. Recursive, so deepProbe()'s own acquisition nests.
     SpiBusGuard bus;
-    usable = gSd.probe() && gSd.mounted();
+    if (!(gSd.deepProbe() && gSd.mounted()))
+      by = "the 25 s FAT-SCAN BACKSTOP, which the fast probe had not noticed -- so the fast "
+           "probe was being answered from SdFat's sector cache";
+  } else if (static_cast<uint32_t>(now - gLastSdPollMs) >= kSdPollMs) {
+    gLastSdPollMs = now;
+    SpiBusGuard bus;
+    if (!(gSd.probe() && gSd.mounted())) by = fastProbeName();
   }
-  if (usable) return;
+  if (!by) return;  // nothing due, or the card answered
 
-  // A usable -> unusable edge. probe()/noteCardGone() have already said what
-  // stopped answering; this says what the UI is doing about it.
+  // A usable -> unusable edge. noteCardGone() has already said what stopped
+  // answering; this says which mechanism asked, and what the UI is doing about it.
   gStorageUsable = false;
-  Serial.printf("[sd] the card is no longer answering a root-directory read -- pulled, or "
-                "failed. Routing to the SD-missing screen; RETRY will restart the device, "
-                "because a card lost after a mount cannot be re-mounted in process\n");
+  Serial.printf("[sd] THE CARD IS NO LONGER ANSWERING -- pulled, or failed. Detected by %s. "
+                "Routing to the SD-missing screen; RETRY will restart the device, because a "
+                "card lost after a mount cannot be re-mounted in process\n",
+                by);
   Serial.flush();
   buildSdMissingApp();
   mark("sd-lost");
@@ -932,6 +1092,12 @@ void setup() {
   // must not depend on the card for the device to behave.
   loadAndApplySettings();
 
+  // Write the settings file if the card has none, then point both card-liveness
+  // probes at it. After loadAndApplySettings() on purpose: gSettings holds what
+  // will actually be in force by now, so a fresh card gets a file that matches
+  // the running device rather than one written before the load had a say.
+  if (storage) armCardProbes("boot");
+
   // The shell's own view of storage, which is what roots the app and what the
   // presence poll in loop() watches for a usable -> unusable edge.
   gStorageUsable = storage;
@@ -1047,12 +1213,16 @@ void setup() {
   // wrote, which is the assertion skipInitialResync exists to make.
   display.skipInitialResync();
 
-  // Start the presence poll's clock HERE rather than at zero, so the first probe
-  // lands one full interval after boot instead of immediately. bringUpStorage()
-  // above already read the root directory to confirm the mount, and the first
-  // paint has just finished; probing again in the same breath would be traffic on
-  // the panel's bus for an answer we have.
+  // Restart both presence clocks HERE rather than leaving them where
+  // armCardProbes() set them, so the first probe of each kind lands one full
+  // interval after the FIRST PAINT instead of one interval after the mount --
+  // which, with a ~825 ms boot paint in between, would otherwise be almost
+  // immediately. Everything either probe would ask has just been answered:
+  // bringUpStorage() read the root directory, armCardProbes() read the settings
+  // file and scanned the FAT. Probing again in the same breath would be traffic on
+  // the panel's bus for answers we have.
   gLastSdPollMs = millis();
+  gLastSdDeepPollMs = gLastSdPollMs;
   mark("first-paint-complete");
 }
 
