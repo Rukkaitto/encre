@@ -7,10 +7,12 @@
 #include "reader/app.h"
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
+#include "reader/host_fs.h"
 #include "reader/png.h"
 #include "reader/screen_home.h"
 #include "reader/screen_sd_missing.h"
 #include "reader/screens.h"
+#include "reader/settings.h"
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
 
@@ -133,18 +135,50 @@ static bool renderToPng(const reader::Screen& top, const reader::FontSet& fonts,
   return reader::writePng(fb, out);
 }
 
+// What --root does with the directory it is given: mount a HostFileSystem on it
+// and run the shell's own boot-time storage sequence against it, so the storage
+// path is exercised on the desktop and not only on the device.
+//
+// It changes no pixels today -- no screen reads a file yet -- and that is why it
+// prints instead. 2C-2's Library is what will render from it; until then this is
+// the desktop's only cheap check that HostFileSystem, loadSettings and the flat
+// JSON reader agree with each other outside the unit tests.
+static void reportStorage(const char* root) {
+  reader::HostFileSystem fs(root);
+  reader::Settings settings;
+  const bool ok = reader::loadSettings(fs, settings);
+  std::printf("root %s: mounted=%d settings=%s sleepAfterMs=%u fullRefreshEvery=%d "
+              "fullOnTransition=%d\n",
+              fs.root().c_str(), (int)fs.mounted(), ok ? "loaded" : "defaulted-or-corrected",
+              (unsigned)settings.sleepAfterMs, settings.fullRefreshEvery,
+              (int)settings.fullOnTransition);
+}
+
 int main(int argc, char** argv) {
   if (argc < 3) {
-    std::fprintf(stderr,
-                 "usage: reader_sim home|sd_missing|app OUT.png [--canvas WxH] [--keys SPEC]\n");
+    std::fprintf(stderr, "usage: reader_sim home|sd_missing|app OUT.png [--canvas WxH] "
+                         "[--keys SPEC] [--root DIR]\n");
     return 2;
   }
   int w = 480, h = 800;
   const char* keys = nullptr;
+  const char* root = nullptr;
+  // Every option here takes a value, which is what makes `i + 1 < argc` the right
+  // bound -- and also what makes a trailing bare flag invisible to this loop. So
+  // it is rejected below rather than silently ignored: a `--root` whose directory
+  // the caller forgot would otherwise look like it had been honoured.
   for (int i = 3; i + 1 < argc; ++i) {
     if (std::strcmp(argv[i], "--canvas") == 0) std::sscanf(argv[i + 1], "%dx%d", &w, &h);
     else if (std::strcmp(argv[i], "--keys") == 0) keys = argv[i + 1];
+    else if (std::strcmp(argv[i], "--root") == 0) root = argv[i + 1];
   }
+  if (argc > 3 && std::strncmp(argv[argc - 1], "--", 2) == 0) {
+    std::fprintf(stderr, "%s needs a value\n", argv[argc - 1]);
+    return 2;
+  }
+  // Before the fonts, because a bad --root is worth reporting even on a run that
+  // then fails to find its type ramp.
+  if (root != nullptr) reportStorage(root);
 
   // The screen ids here are tools/compare-design.py's: whatever it lists for a
   // board is what it passes as argv[1], so a screen that renders but is not

@@ -50,3 +50,10 @@ add_test(NAME sim_home COMMAND reader_sim home ${CMAKE_BINARY_DIR}/sim_home.png)
 # without needing a golden.
 add_test(NAME sim_app COMMAND reader_sim app ${CMAKE_BINARY_DIR}/sim_app.png
          --keys DOWN,DOWN,CONFIRM,CONFIRM,CONFIRM+)
+# The SD-missing screen renders with NO --root, which is the state it exists for.
+add_test(NAME sim_sd_missing COMMAND reader_sim sd_missing ${CMAKE_BINARY_DIR}/sim_sd_missing.png)
+# ...and the storage path runs on the desktop: a HostFileSystem mounted on the
+# build directory, which has no /.reader/settings.json, so this is the
+# "defaults, and say so" case the device takes on a fresh card.
+add_test(NAME sim_storage COMMAND reader_sim sd_missing ${CMAKE_BINARY_DIR}/sim_storage.png
+         --root ${CMAKE_BINARY_DIR})

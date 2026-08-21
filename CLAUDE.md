@@ -64,6 +64,7 @@ stop meaning anything.
   high before probing because a powered, never-deselected panel breaks card
   detection. So **the caller must keep SD traffic off the bus during a panel
   refresh**; a transfer racing a refresh is the kind of fault that looks random.
+  That is `SpiBusGuard` — see **Storage** for the two places that take it.
 - `~/encre-device-backup/restore.sh` restores the device to CrossInk.
 
 ## Rendering model
@@ -224,13 +225,110 @@ what needs hardware — raw button samples, the panel calls, deep sleep.
 - **`core/include/reader/screens.h` is the one screen catalogue**, shared by the
   simulator and the shell. Two factories would drift, and the drift would be
   invisible because each half keeps passing its own checks.
-- **Deep sleep is a chip reset**, so RAM state is lost and the firmware boots
-  into Home. Wake is the **power button only**: the six front buttons are
+- **Deep sleep is a chip reset**, so RAM state is lost — the last screen comes
+  back from the NVS session record instead (see **Storage**), and only across a
+  genuine wake; a cold boot starts at Home. Wake is the **power button only**: the six front buttons are
   ADC-ladder bands on GPIO 1/2 and produce no GPIO edge, while power is a real
   GPIO (3, active-LOW). Sleep order is `display.deepSleep()` →
   `PowerManager::powerDownRailsForSleep()` → `deepSleepUntilPowerButton()`. That
   middle call does cut the X3's SD rail (the profile declares
   `sd.powerEnable = 13`), despite the SDK header calling it a no-op on X3/X4.
+
+## Storage
+
+**`core/` sees one interface — `reader::FileSystem`** (`filesystem.h`) — and never
+learns what backs it: `exists`, `list`, `readAll`, `writeAll`, `mkdirs`, `remove`,
+plus `mounted()`. Three implementations, and the contract is what keeps them one
+thing:
+
+| Implementation | Lives in | In which build |
+|---|---|---|
+| `FakeFileSystem` | `test/unit/fake_fs.h` | Unit tests. In-memory, injectable failures. |
+| `HostFileSystem` | `core/src/host_fs.cpp` | **Desktop only** — the simulator and desktop tests. |
+| `SdFileSystem` | `shell/src/sd_fs.cpp` | The device, over `SDCardManager` (SdFat). |
+
+- **`host_fs.cpp` is excluded from the firmware exactly as `png.cpp` is**, via
+  `core/library.json`'s `srcFilter`, because `<filesystem>` is a host-OS
+  dependency. Belt and braces: the body is also guarded by `READER_DESKTOP`, so a
+  filter that silently stopped matching yields an empty object file rather than a
+  `<filesystem>` include reaching the ESP32 toolchain.
+- **The contract is written once** (`core/include/reader/fs_contract.h`) and
+  reported through a callback, so `test/unit/test_filesystem.cpp` drives it with
+  doctest on the desktop and `shell/src/sd_selftest.cpp` drives the same clauses
+  against a real card over serial. `shell/` has no test harness, so without that
+  seam `SdFileSystem` would be the one implementation nothing checks. Build it in
+  with `PLATFORMIO_BUILD_FLAGS="-DENCRE_FS_SELFTEST=1" make firmware` (that
+  variable **appends** to `platformio.ini`'s flags; `--project-option` would
+  *replace* them and silently build for the wrong board). It costs ~16.8 KB and is
+  a stub returning **-1** — not 0 — otherwise, so a build without it cannot be
+  mistaken for a build that passed.
+- **The path normaliser exists in three copies**, one per implementation, and
+  nothing but the contract's "a redundant or trailing separator addresses the same
+  thing" clause holds them together. They live in three build worlds (Arduino,
+  desktop-only TU, test header), so the duplication is deliberate — but a fourth
+  implementation should extract it rather than copy it again.
+- **`readAll` is not the EPUB path.** It is for the small JSON files V1 stores and
+  `SdFileSystem` caps it at 64 KB, because `-fno-exceptions` makes a `resize` that
+  cannot allocate an `abort()` with no diagnostic. Streaming (a handle with
+  `read(buf, n)`) is **Phase 3's**, and its absence is a decision, not an
+  oversight: EPUBs are megabytes against ~230 KB of heap.
+
+**Settings are flat JSON at `/.reader/settings.json`** (spec §5), read by a
+minimal one-object parser in `core/` (`json.h` — no nesting, no arrays; Phase 3's
+bookmark array will outgrow it). Nothing is vendored and there is no network to
+fetch a parser with.
+
+- **A bad file is replaced, not trusted**: missing, unreadable, unparseable or an
+  unknown `version` all mean defaults. An out-of-range *value* is different — that
+  field is **clamped** and the rest of the file still loads, because refusing to
+  boot over one bad number is worse. `loadSettings` returns false either way.
+- **The boot log distinguishes those two**, `DEFAULTED` from `CORRECTED`, and names
+  the reason. That line is the only way a user ever learns their hand-edited file
+  was rejected rather than applied.
+- **The `Settings` struct's defaults are the constants the shell used to compile
+  in** (`kSleepAfterMs`, `kFullRefreshEvery`, `kFullOnTransition` through 2B), so a
+  device with no card behaves exactly as it did. `shell/src/main.cpp` holds the
+  *reasoning* for each number; `settings.h` holds the number.
+
+**The wake pointer is in NVS, not on the card**, because a wake must work with no
+card in the slot — which is the entire state the SD-missing screen exists for.
+`Preferences` namespace `encre_sess`, keys `ver` / `scr` / `focus` (NVS caps a key
+at 15 chars). The version key is written **last**, like a commit record, so a write
+that dies half way reads back as "no session". Restore happens **only on a genuine
+wake**; a cold boot starts at Home and clears the record. **The stored focus is
+always 0** — `reader::Screen` has no focus accessor, and the only screen where a
+restored focus would show is Library, which lands in 2C-2.
+
+**Two limitations to know before trusting the card:**
+
+- **A card pulled after a successful mount cannot be re-mounted without a
+  reboot.** `SDCardManager::begin()` opens with `if (initialized) return true;` and
+  the SPI path exposes no `end()`/`unmount()`, so it reports success without
+  touching the hardware. So the shell never accepts `mount()` alone: it requires
+  `probe()` (a real root-directory read) to agree, and when it cannot, the
+  SD-missing screen **stays** and the log says a reboot is needed. A RETRY that
+  reports success and then fails is worse than one that stays put.
+- **`mounted()` is "the card was there and nothing has since told us otherwise".**
+  There is no card-detect GPIO in the board profiles and `SdCard::status()` (the
+  one cheap CMD13) is private to `SDCardManager`, so liveness is maintained from
+  operation feedback plus `probe()`. `probe()` can be satisfied from SdFat's sector
+  cache, so it is not a card-detect either.
+
+**The shared SPI bus is handled in exactly two places.** Every public method of
+`SdFileSystem` takes a recursive `SpiBusGuard`; `renderTop()` in
+`shell/src/main.cpp` takes the same guard around the **whole** paint, BUSY waits
+included, because the driver keeps the display's CS asserted across them. Today
+both run on the Arduino loop task, so this is free insurance — it is there to be
+structural rather than a rule someone remembers when a background library scan
+moves off that task.
+
+**`SPI.begin()` ends up called twice on one bus** — `detectAndSelectBoard()` with
+the display's pins, then `SDCardManager::begin()` with the card's, which is the
+reverse of the order the SDK's comments assume. It should be benign (the CS-high
+mitigation still applies, and SdFat sets per-transaction `SPISettings`), and the
+card is mounted **after** the display is up. **The first paint after a mount is the
+thing to watch on hardware**: a bad refresh with a card in and a clean one without
+is this call order and nothing else.
 
 ## Type
 
@@ -272,6 +370,33 @@ silently wrong screen. `core/` never picks its own fonts — the caller supplies
   tried and rejected: a bar whose height varies by screen moves every list
   stacked above it, and "· HOLD" does not fit four slots at 10pt on the 480-wide
   X4.
+- **An empty hint slot is 36px wide, not zero** (`kHintEmptySlotW`). Eight boards
+  author a dead button as `<div style="width: 36px;"></div>` and
+  `space-between` divides the leftover around it. Measuring it as 0 is not
+  "drawing nothing", it is drawing the *other* slots in the wrong places: on
+  SdMissing it moves RETRY 36px left and widens each gap by 12px.
+- **Three shared primitives landed with the SD-missing screen** (2C-1), and the
+  next screen that needs them should find them rather than reinvent them, both in
+  `components.h`:
+  - `drawActionButton` — the boards' **primary action slab** on a full-screen
+    prompt: 68px tall (`kActionH`), no border, one centred Value700 label at
+    `letter-spacing: 0.18em`. Five V1 boards draw it and all five state the same
+    box; **the width is not shared** (SdMissing pins 260, the overlays take their
+    column). It is *not* Home's CONTINUE block, which is 72 tall, left-aligns and
+    carries an arrow. The outlined secondary variant belongs in this function when
+    DeleteConfirm or BookError lands, not before.
+  - `wrapProse` / `drawProse` — the **first paragraph in the firmware**. A
+    paragraph's height is a *result* (face × copy × column), not a number the
+    board states, so the wrap is a value computed once and then both measured and
+    drawn; two calls that each re-wrapped would be two chances to disagree, and
+    the disagreement would read as a paragraph drifted off centre. Greedy on
+    ASCII spaces, no hyphenation, no CJK breaking — Phase 3's EPUB text is a
+    different problem with a different budget.
+  - And the reason SdMissing's board says `max-width: 420px` where it used to say
+    400: **the wrap follows the firmware's own metrics, not Chrome's.** The
+    autohinted `.rfnt` faces have whole-pixel advances and measure ~3% wider, so
+    the board's three lines came out as four. 420 is three lines in both engines
+    and moves nothing in Chrome. The number was wrong, not the design.
 
 ## Goldens
 
