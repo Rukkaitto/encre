@@ -56,14 +56,31 @@ constexpr uint32_t kSleepAfterMs = 5u * 60u * 1000u;
 // If ghosting does appear, this number is the whole fix: set it to 15 or 20.
 // Watch for a screen that gradually stops being readable with no obvious cause.
 constexpr int kFullRefreshEvery = reader::RefreshPolicy::kNever;
-// Whether a screen change forces a FULL refresh. False: it is the black flash
-// the user sees on every navigation, and the reference firmware does not do it on
-// this panel -- CrossInk's ScreenTransitionRefresh::modeFor returns FULL only for
-// `screenChanged && !deviceIsX3()`, and its list/menu screens call
-// displayBuffer() with no argument, whose default is FAST_REFRESH. Its one
-// FULL_REFRESH on home is gated behind an `initialFullRefresh` flag that defaults
-// to false.
-constexpr bool kFullOnTransition = false;
+// Whether a screen change forces a FULL refresh. TRUE, and this is a deliberate
+// divergence from the reference firmware.
+//
+// CrossInk does not do it on this panel: ScreenTransitionRefresh::modeFor returns
+// FULL only for `screenChanged && !deviceIsX3()`, and its list/menu screens call
+// displayBuffer() with no argument, whose default is FAST_REFRESH. So it avoids
+// the flash and accepts the ghosting -- and the ghosting is observable, reported
+// on its settings screen on this device.
+//
+// The distinction that matters is not "flash" versus "no flash". A flash on a
+// SCREEN CHANGE is expected behaviour on an e-reader -- Kindle and Kobo both do
+// it -- because a differential update there has a whole screen of stale content
+// to ghost through. A flash on a focus move inside one screen is a defect. Those
+// are separate settings here, so we take FULL on transitions and NO periodic
+// cadence (see kFullRefreshEvery), which is neither firmware's behaviour and is
+// better than both.
+//
+// Applies to pop as well as push, deliberately: leaving Settings back to Home is
+// exactly the case where the settings list would ghost onto Home, so treating
+// only the outbound direction as a transition would fix half the problem.
+//
+// Cost, measured on the X3: a transition takes the 693 ms GC waveform instead of
+// the 389 ms DU, so ~825 ms against ~520 ms. Focus moves are untouched. That is
+// the right place to spend it -- screens change far less often than a focus does.
+constexpr bool kFullOnTransition = true;
 // Input-settle window before a repaint. ZERO, deliberately.
 //
 // It was 90 ms, added when a paint cost 1363 ms and a burst of presses cost N
@@ -203,7 +220,7 @@ static void paintPlane(reader::Plane plane) {
 
 // The 4-level path: base frame, settle pass, two bit-planes, combine, rebase.
 // Every comment below was earned by breaking the panel -- LSB before MSB, the
-// settle pass before the planes, the Bw re-render instead of a third frame.
+// settle pass before the planes, the Bw re-render instead of an extra frame.
 //
 // No screen declares Fidelity::Grayscale today, so nothing calls this: chrome
 // moved to the one-pass paths, which are ~5x cheaper and legible. It is
@@ -237,8 +254,8 @@ static void paintGray() {
   mark("gray-preconditioned");
 
   // 3. The two bit-planes. Both copies go straight out over SPI into controller
-  //    RAM and retain no pointer, so one landscape buffer serves both — and the
-  //    base frame above, which the driver has already memcpy'd. LSB must go
+  //    RAM and retain no pointer, so the single frame serves both — and served
+  //    the base frame above, which the driver has already memcpy'd. LSB must go
   //    first: the MSB copy is dropped unless the driver has seen a valid LSB.
   paintPlane(reader::Plane::Lsb);
   display.copyGrayscaleLsbBuffers(gFrame->data());
@@ -251,7 +268,12 @@ static void paintGray() {
   //    B/W baseline so the next ordinary refresh is differentially sane.
   display.displayGrayBuffer();
   mark("gray-displayed");
-  // Re-render the B/W pass rather than having kept a third frame alive for it.
+  // Re-render the B/W pass rather than keeping a second frame alive for it. The
+  //    original reason was that a third frame would not allocate at all (largest
+  //    contiguous block ~115 KB against 52 KB frames); drawing straight into
+  //    panel orientation has since cut us to one frame, so the headroom is real
+  //    now -- but re-rendering is still cheaper than the RAM, and Phase 3's
+  //    pagination cache wants that headroom more than this path does.
   paintPlane(reader::Plane::Bw);
   display.cleanupGrayscaleBuffers(gFrame->data());
   mark("refresh-complete");
