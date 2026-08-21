@@ -21,19 +21,32 @@
 //   namespace: "encre_sess"   (session only -- settings get their own, so
 //                              clearSession() can clear the whole namespace
 //                              without collateral damage)
-//   keys:      "ver"    uint8   record version, currently 1
-//              "scr"    uint8   reader::ScreenId of the top of the stack
+//   keys:      "ver"    uint8   record version, currently 2
+//              "scr"    str     the top screen's WIRE NAME: "home", "library",
+//                               "settings", ... -- see kWireNames in session.cpp
 //              "focus"  uint16  that screen's focus index
 //
-// e.g. from an esp-idf console: `nvs_get encre_sess scr u8`
+// e.g. from an esp-idf console: `nvs_get encre_sess scr str`
+//
+// THE SCREEN IS A NAME, NOT A NUMBER, and version 1 is why. It stored the raw
+// reader::ScreenId ordinal, which made the enum's declaration order part of a
+// persisted format -- and 2C-2 then inserted three screens after Library, moving
+// Settings from 2 to 3. A version-1 record therefore says "Settings" by writing a
+// 2 that this build would read as ItemActions. The version bump discards those
+// records; the name is what stops the next inserted screen from doing it again.
+// session.cpp holds the full argument.
 struct Session {
   reader::ScreenId screen = reader::ScreenId::Home;
+  // An index into the screen's WHOLE list (Screen::focus()), not into the slice
+  // on glass. Unsigned, so a caller with a "nothing selected" -1 must decide what
+  // that means before it gets here -- shell/src/main.cpp stores 0.
   uint16_t focus = 0;
 };
 
 // True when a usable record was found. False means "no session" -- no namespace
-// yet, a version this firmware does not know, or a ScreenId it cannot build --
-// and `out` is left alone. Callers start at Home on false.
+// yet, a version this firmware does not know, or a screen NAME it does not
+// recognise -- and `out` is left alone. Callers start at Home on false. There is
+// no path that casts an unrecognised wire value into a ScreenId.
 bool loadSession(Session& out);
 
 // True when the record is stored, or was already exactly this. Cheap to call on
