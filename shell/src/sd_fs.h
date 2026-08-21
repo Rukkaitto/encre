@@ -65,10 +65,76 @@ class SdFileSystem : public reader::FileSystem {
   // not, and pretending otherwise in the UI would be a lie.
   bool mount();
 
-  // Re-checks the card and updates mounted(). Costs one directory read on the
-  // shared bus, so it is deliberately NOT called from mounted(): see the comment
-  // on mounted() below for what it can and cannot detect.
+  // Re-checks the card and updates mounted(). Real traffic on the shared bus, so
+  // it is deliberately NOT called from mounted(); see the comment on mounted()
+  // in the .cpp for what it can and cannot detect.
+  //
+  // WHAT IT READS IS THE WHOLE POINT, and getting it wrong is a defect this
+  // project has already shipped once. See ProbeTarget.
   bool probe();
+
+  // What probe() reads to reach the card, and the difference between a probe
+  // that works and one that only looks like it does.
+  //
+  // THE DEFECT, confirmed on hardware: probe() used to open "/" -- the ROOT
+  // DIRECTORY -- and the root directory's sector is the one sector guaranteed to
+  // be sitting in SdFat's cache after boot. SdFat on this build has exactly ONE
+  // 512-byte sector cache (FsCache in common/FsCache.h holds a single
+  // `m_buffer[512]`, and USE_SEPARATE_FAT_CACHE is compiled OFF here because it
+  // is gated on __arm__ and the ESP32-C3 is RISC-V), so a repeated root read is
+  // answered out of RAM and keeps succeeding with the card physically out of the
+  // slot. Pulling the card produced no log line and never reached the SD-missing
+  // screen.
+  //
+  //   * File -- open a real file and read a byte off it. That walks the ROOT
+  //     DIRECTORY sector, then the SUBDIRECTORY's sector, then the file's DATA
+  //     sector: three distinct sectors, one 512-byte cache, so at most one of
+  //     them can be served from RAM. Better still, the sector the cache holds
+  //     when a probe ENDS (the file's data) is not the one the next probe needs
+  //     FIRST (the root directory), so in the steady state every one of the
+  //     three is a real card read.
+  //   * RootDir -- the old behaviour, kept only as a fallback for when no target
+  //     file can be established. It is NOT a card-detect and must be announced
+  //     as degraded wherever it is in force, because a probe that silently falls
+  //     back to it is this same bug again.
+  enum class ProbeTarget { RootDir, File };
+
+  // Point probe() at `path`, and say whether it took.
+  //
+  // Adopted ONLY if the file can be opened and a byte read off it right now. A
+  // target that is absent, is a directory, or is empty would make every probe
+  // fail, which is strictly worse than the cached root read -- it would report a
+  // card that is sitting right there as gone, and route the UI to the SD-missing
+  // screen for a missing FILE. On refusal the target stays RootDir.
+  bool useFileProbeTarget(const char* path);
+  ProbeTarget probeTarget() const { return probeTarget_; }
+  // The adopted path, or "" while the target is RootDir.
+  const char* probeTargetPath() const { return probeTargetPath_.c_str(); }
+
+  // THE BACKSTOP, because the fast probe above is still inference: it argues
+  // from SdFat's cache geometry that the sectors cannot all be in RAM. This
+  // argues from nothing.
+  //
+  // SDCardManager::sdUsedBytes() calls FsVolume::freeClusterCount(), which scans
+  // the ENTIRE FAT one sector at a time (FatPartition::freeClusterCount, and
+  // MAINTAIN_FREE_CLUSTER_COUNT is 0 in this build so there is no shortcut
+  // return). Thousands of sectors against one 512-byte cache: if the card is
+  // gone it cannot answer, and there is no cache geometry to reason about.
+  //
+  // It is expensive -- that is the same reason the SDK caches it for 20 s -- so
+  // it is the slow layer under the fast probe, not a replacement for it.
+  //
+  // armDeepProbe() records the baseline and must be called once after a mount is
+  // confirmed. It returns false if the scan cannot produce a non-zero byte
+  // count, in which case deepProbe() has no opinion and the caller must say so:
+  // sdUsedBytes() reports a FAILED scan as 0, so a volume that legitimately read
+  // 0 would be indistinguishable from a dead card forever.
+  bool armDeepProbe();
+  bool deepProbeArmed() const { return deepBaseline_ != 0; }
+  uint64_t deepProbeBaselineBytes() const { return deepBaseline_; }
+  // Runs the FAT scan and updates mounted(). Meaningless unless
+  // deepProbeArmed(); returns true (no opinion) in that case.
+  bool deepProbe();
 
   // Entries list() dropped because their name did not fit kNameBufBytes. Non-zero
   // means the user has a file this build cannot address; see list().
@@ -108,7 +174,14 @@ class SdFileSystem : public reader::FileSystem {
   // Clears mounted() so the next caller is told the truth rather than being let
   // through to fail again.
   void noteCardGone(const char* where);
+  // The two halves of probe(). Neither takes the bus guard -- probe() holds it.
+  bool readProbeTargetFile();
+  bool readRootDirectory();
 
   bool live_ = false;
   size_t skippedNames_ = 0;
+  ProbeTarget probeTarget_ = ProbeTarget::RootDir;
+  std::string probeTargetPath_;
+  // Bytes the FAT scan reported at arm time. 0 means "not armed".
+  uint64_t deepBaseline_ = 0;
 };

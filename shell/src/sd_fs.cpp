@@ -85,12 +85,14 @@ bool SdFileSystem::mount() {
 //
 // What is NOT available to do better: SdFat's SdCard::status() -- one CMD13, the
 // one call that would answer "is the card still there" cheaply -- sits behind
-// SDCardManager's private `sd` member. Of the public surface, sdUsedBytes()
-// rescans the FAT (seconds), and exists()/open() on an absent path fails
-// identically whether the path is missing or the card is.
+// SDCardManager's private `sd` member, and freeink-sdk/ is a submodule this
+// project does not edit. Of the public surface, exists()/open() on an absent path
+// fails identically whether the path is missing or the card is, and sdUsedBytes()
+// rescans the FAT -- expensive, but unambiguously real, which is why deepProbe()
+// uses it as the slow backstop.
 //
 // So mounted() is ready() AND a liveness flag, and the flag is maintained from
-// two directions:
+// three directions:
 //
 //   * FEEDBACK. Every operation below that gets a failure only a dead card
 //     explains -- the root directory failing to open, a directory read setting
@@ -98,29 +100,34 @@ bool SdFileSystem::mount() {
 //     that does not take -- calls noteCardGone() and clears it. So a card pulled
 //     at runtime is reported the moment anything actually needs it, which is when
 //     it matters, rather than never.
-//   * probe(), which reads the root directory on demand. Deliberately not called
-//     from here: mounted() is checked at the top of every method (writeAll checks
-//     it three times through mkdirs), and a probe is real traffic on the bus the
-//     panel shares.
+//   * probe(), the fast on-demand check -- a byte read from a real file, chosen
+//     so the access cannot be served out of SdFat's single 512-byte sector cache
+//     (see ProbeTarget in sd_fs.h). Deliberately not called from here: mounted()
+//     is checked at the top of every method (writeAll checks it three times
+//     through mkdirs), and a probe is real traffic on the bus the panel shares.
+//   * deepProbe(), the slow backstop -- a whole-FAT scan, which no cache can
+//     serve. It exists because the fast probe's guarantee is an argument about
+//     cache geometry and this one is not an argument at all.
 //
-// The honest limit: probe() can be satisfied from SdFat's one-sector cache, so it
-// is not a card-detect. There is no card-detect GPIO in the Xteink profiles
-// either (BoardConfig's SdPins has no detect field at all). "The card was there
-// and nothing has since told us otherwise" is the strongest claim this SDK
-// supports, and it is the claim this makes.
+// The honest limit: mounted() is still not a card-detect -- there is no
+// card-detect GPIO in the Xteink profiles at all (BoardConfig's SdPins has no
+// detect field), and CMD13 is private to SDCardManager. "The card was there and
+// nothing has since told us otherwise" is the strongest claim this SDK supports,
+// and it is the claim this makes. What changed is how hard probe() tries: see
+// ProbeTarget in sd_fs.h and deepProbe() below.
 bool SdFileSystem::mounted() const { return live_ && SdMan.ready(); }
 
-bool SdFileSystem::probe() {
-  SpiBusGuard bus;
-  if (!SdMan.ready()) {
-    live_ = false;
-    return false;
-  }
+// The root-directory walk. This is the DEGRADED probe -- it is what the confirmed
+// defect was, kept only for when no target file can be established, and every
+// caller that ends up on it has to say so out loud.
+//
+// Why it is degraded: the root directory's sector is the single most likely
+// sector to already be in SdFat's one 512-byte cache, so this can return true
+// forever with the card out of the slot. Reading it repeatedly is the ONE access
+// pattern guaranteed to be served from RAM.
+bool SdFileSystem::readRootDirectory() {
   FsFile root = SdMan.open("/", O_RDONLY);
-  if (!root) {
-    noteCardGone("probe");
-    return false;
-  }
+  if (!root) return false;
   root.rewind();
   FsFile first = root.openNextFile();
   bool ok;
@@ -134,8 +141,114 @@ bool SdFileSystem::probe() {
     ok = (root.getError() == 0);
   }
   root.close();
-  if (!ok) {
-    noteCardGone("probe");
+  return ok;
+}
+
+// The real probe: open the target file and read a byte off it.
+//
+// THREE SECTORS, ONE CACHE. Opening "/.reader/settings.json" makes SdFat scan the
+// root directory for ".reader" (a data-cache read of the root's sector), then scan
+// /.reader for "settings.json" (a data-cache read of that directory's cluster,
+// which EVICTS the root sector), then the 1-byte read at offset 0 takes
+// FatFile::readPrivate's partial-read branch into dataCachePrepare() for the
+// file's own first data sector (evicting the directory sector). One 512-byte
+// cache cannot hold three sectors, and the one it is left holding is the last of
+// the three -- so the next probe's FIRST access is already a miss.
+//
+// A byte is read rather than just opened deliberately. An open() that resolved
+// entirely out of a directory sector still in cache would prove less; touching
+// file data reaches a sector in the data area, which is a different region of the
+// card entirely.
+bool SdFileSystem::readProbeTargetFile() {
+  FsFile f = SdMan.open(probeTargetPath_.c_str(), O_RDONLY);
+  if (!f) return false;
+  uint8_t byte = 0;
+  const int n = f.read(&byte, 1);
+  // Read the error bits BEFORE closing; there is no handle to ask afterwards.
+  const bool err = f.getError() != 0;
+  f.close();
+  // n != 1 covers both a read error and a file that has become empty. An empty
+  // target was refused at adoption time, so a zero here means the card.
+  return n == 1 && !err;
+}
+
+bool SdFileSystem::probe() {
+  SpiBusGuard bus;
+  if (!SdMan.ready()) {
+    live_ = false;
+    return false;
+  }
+  if (probeTarget_ == ProbeTarget::File) {
+    if (!readProbeTargetFile()) {
+      noteCardGone("the fast probe (a byte read from its target file)");
+      return false;
+    }
+  } else if (!readRootDirectory()) {
+    noteCardGone("the fast probe (a root-directory read -- the DEGRADED fallback)");
+    return false;
+  }
+  live_ = true;
+  return true;
+}
+
+bool SdFileSystem::useFileProbeTarget(const char* path) {
+  SpiBusGuard bus;
+  // Fall back FIRST, so every early return below leaves a coherent state rather
+  // than a File target pointing at a path that would not open.
+  probeTarget_ = ProbeTarget::RootDir;
+  probeTargetPath_.clear();
+  if (!path || !*path) return false;
+  if (!mounted()) return false;
+
+  const std::string p = normalise(path);
+  FsFile f = SdMan.open(p.c_str(), O_RDONLY);
+  if (!f) return false;
+  if (f.isDirectory()) {
+    // A directory would be a probe barely better than "/": its entries can sit in
+    // the same one cache slot, and no data-area sector is ever touched.
+    f.close();
+    return false;
+  }
+  uint8_t byte = 0;
+  const int n = f.read(&byte, 1);
+  f.close();
+  if (n != 1) return false;  // empty, or unreadable right now
+
+  probeTargetPath_ = p;
+  probeTarget_ = ProbeTarget::File;
+  return true;
+}
+
+bool SdFileSystem::armDeepProbe() {
+  SpiBusGuard bus;
+  deepBaseline_ = 0;
+  if (!mounted()) return false;
+  const uint64_t used = SdMan.sdUsedBytes();
+  // 0 is how sdUsedBytes() reports a FAILED scan (freeClusterCount() < 0 sets its
+  // cache to zero), so a volume whose honest answer were 0 could never be told
+  // apart from a dead card. Refuse to arm rather than arm a mechanism that would
+  // declare the card gone on its first run. In practice this does not happen: a
+  // FAT32 volume's root directory occupies a cluster and an exFAT volume's
+  // allocation bitmap and upcase table occupy several, so a formatted card
+  // always reports some bytes used.
+  if (used == 0) return false;
+  deepBaseline_ = used;
+  return true;
+}
+
+bool SdFileSystem::deepProbe() {
+  SpiBusGuard bus;
+  // Unarmed: this mechanism has no opinion, and saying "gone" would be a lie.
+  // Callers gate on deepProbeArmed() and log when it is not armed.
+  if (deepBaseline_ == 0) return true;
+  if (!SdMan.ready()) {
+    live_ = false;
+    return false;
+  }
+  // The FAT scan. Only ZERO means failure -- a different non-zero number just
+  // means files were written since the baseline, which is not our business.
+  if (SdMan.sdUsedBytes() == 0) {
+    noteCardGone("the FAT-scan backstop (sdUsedBytes/freeClusterCount)");
     return false;
   }
   live_ = true;
