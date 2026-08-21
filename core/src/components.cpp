@@ -34,6 +34,26 @@ int hintSlotH(const Font& mf, const Hint& hint) {
   return h;
 }
 
+// A slot with nothing in it is the board's 36px placeholder; everything else is
+// the flex row's own content. Kept beside hintSlotH because the two answer the
+// same question on the two axes and a slot that is empty on one is empty on the
+// other.
+bool hintSlotEmpty(const Hint& hint) {
+  return hint.icon == nullptr && hint.label.empty() && !hint.hasHold;
+}
+
+int hintSlotW(const Font& mf, const Hint& hint, Tracking tracking) {
+  if (hintSlotEmpty(hint)) return kHintEmptySlotW;
+  const int iconW = hint.icon ? hint.icon->w + kHintIconGap : 0;
+  const int textW = mf.measure(hint.label, tracking);
+  // The hold ring is part of the slot's flex row, so it is part of the slot's
+  // measured width -- gap included. Leaving it out would not make the ring
+  // vanish, it would make every space-between gap this bar computes too wide
+  // by 32px and let the ring lap the next slot's mark.
+  const int holdW = hint.hasHold ? kHintIconGap + icons::kHold.w : 0;
+  return iconW + textW + holdW;
+}
+
 int hintContentH(const FontSet& fonts, const Hint hints[4]) {
   const Font& mf = fonts[Role::Meta400];
   int h = 0;
@@ -133,14 +153,7 @@ int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], int 
   int widths[4] = {};
   int total = 0;
   for (int i = 0; i < 4; ++i) {
-    const int iconW = hints[i].icon ? hints[i].icon->w + kHintIconGap : 0;
-    const int textW = mf.measure(hints[i].label, hintTracking);
-    // The hold ring is part of the slot's flex row, so it is part of the slot's
-    // measured width -- gap included. Leaving it out would not make the ring
-    // vanish, it would make every space-between gap this bar computes too wide
-    // by 32px and let the ring lap the next slot's mark.
-    const int holdW = hints[i].hasHold ? kHintIconGap + icons::kHold.w : 0;
-    widths[i] = iconW + textW + holdW;
+    widths[i] = hintSlotW(mf, hints[i], hintTracking);
     total += widths[i];
   }
   const int usable = fb.width() - 2 * kMargin;
@@ -200,6 +213,79 @@ int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], int 
     prefix += widths[i];
   }
   return barH;
+}
+
+int drawActionButton(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
+                     std::string_view label, Plane plane) {
+  const Font& lf = fonts[Role::Value700];
+  fb.fillRect(x, y, w, kActionH, false);
+  // Reversed out of the slab, which is what Ink::White is for: no scratch
+  // buffer, no second pass. The label is centred on both axes because the
+  // board's block is `align-items: center; justify-content: center` -- the same
+  // two helpers, one per axis, that every other centred box on every screen
+  // resolves against.
+  const Tracking tracking = trackingEm(lf, kActionEm);
+  const int labelW = lf.measure(label, tracking);
+  drawText(fb, lf, centreIn(x, w, labelW), baselineIn(lf, y, kActionH), label, Ink::White,
+           tracking, plane);
+  return kActionH;
+}
+
+Prose wrapProse(const Font& font, std::string_view text, int maxW, int leadEm1000,
+                Tracking tracking) {
+  Prose out;
+  out.tracking = tracking;
+  // The board states the leading as a multiple of the font size, so it resolves
+  // against the face exactly as letter-spacing does -- and lands on the same 1/64
+  // px unit, for the same reason: 1.55 x 29 is 44.95, and three line boxes of a
+  // pre-rounded 45 put the last line a pixel low.
+  out.leadF26 = Tracking::em(font.ppem(), leadEm1000).f26();
+
+  size_t lineStart = 0;   // first byte of the line being built
+  size_t lineEnd = 0;     // one past its last non-space byte
+  size_t i = 0;
+  while (i < text.size()) {
+    // One word, plus the run of spaces before it.
+    while (i < text.size() && text[i] == ' ') ++i;
+    const size_t wordStart = i;
+    while (i < text.size() && text[i] != ' ') ++i;
+    if (wordStart == i) break;  // trailing spaces only
+    const bool lineEmpty = (lineEnd == lineStart);
+    if (lineEmpty) {
+      // The first word of a line goes on it whatever it measures: a word wider
+      // than the column has nowhere better to be, and breaking inside it would
+      // be a hyphenation decision this function is not making.
+      lineStart = wordStart;
+      lineEnd = i;
+      continue;
+    }
+    // The candidate is measured from the line's start, spaces included, because
+    // that is the run that will be drawn -- measuring the word alone and adding
+    // a space's advance would lose every kern across the join.
+    if (font.measure(text.substr(lineStart, i - lineStart), tracking) <= maxW) {
+      lineEnd = i;
+      continue;
+    }
+    out.lines.push_back(text.substr(lineStart, lineEnd - lineStart));
+    lineStart = wordStart;
+    lineEnd = i;
+  }
+  if (lineEnd > lineStart) out.lines.push_back(text.substr(lineStart, lineEnd - lineStart));
+  return out;
+}
+
+int drawProse(Framebuffer& fb, const Font& font, const Prose& prose, int boxX, int boxW,
+              int topF26, Ink ink, Plane plane) {
+  for (int i = 0; i < prose.lineCount(); ++i) {
+    const std::string_view line = prose.lines[static_cast<size_t>(i)];
+    // Each line is centred in the column, on its own measured width -- which is
+    // what `text-align: center` does. Not on the widest line's, and not on the
+    // column's centre with a half-width offset: that spends a second division.
+    const int x = centreIn(boxX, boxW, font.measure(line, prose.tracking));
+    const int baseline = baselineInF26(font, topF26 + i * prose.leadF26, prose.leadF26);
+    drawText(fb, font, x, baseline, line, ink, prose.tracking, plane);
+  }
+  return prose.heightF26();
 }
 
 }  // namespace reader

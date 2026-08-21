@@ -63,6 +63,19 @@ int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::strin
 // crater in a column.
 int baselineIn(const Font& font, int boxTop, int boxH);
 
+// The same identity, for a box whose top and height are carried in 1/64 px.
+//
+// Needed because not every box the boards compute lands on a whole pixel. A
+// wrapped paragraph's line box is `line-height: 1.55` on a 29px face -- 44.95px,
+// which Chrome holds as 44.9375 in its own 1/64 unit and never rounds until it
+// paints -- so the third line's box top is 89.875px below the first's. Rounding
+// each line box to a whole pixel first and centring inside that re-introduces
+// exactly the accumulating error `Tracking` exists to avoid, one line at a time
+// instead of one glyph at a time. So the box arrives as a fraction, the
+// half-leading is taken in the same unit, and the ONE rounding is the returned
+// baseline.
+int baselineInF26(const Font& font, int boxTopF26, int boxHF26);
+
 // Top row for an item `itemH` tall centred across the box [boxTop, boxTop+boxH)
 // -- CSS `align-items: center` on a flex line, which is what every box on every
 // board that pairs an icon with a line of text declares. The item's own
@@ -84,4 +97,14 @@ int baselineIn(const Font& font, int boxTop, int boxH);
 // half-pixel layout offset: the board's 21px battery in a 32px band lands on
 // row 24, not 23, and the measurement of the rendered board agrees.
 int iconTopIn(int boxTop, int boxH, int itemH);
+
+// The axis-agnostic form of the same answer, and what iconTopIn is implemented
+// as. It exists because the boards centre on the cross axis and on the main axis
+// with the same arithmetic -- `align-items: center` on a flex row is
+// `justify-content: center` on a flex column -- and a full-screen prompt centres
+// its icon, its title, every line of its paragraph and its button box
+// horizontally. Those five call sites wanting `iconTopIn` for an x would have
+// been five chances to write `(boxW - itemW) / 2` instead and round the other
+// way on a half.
+int centreIn(int boxStart, int boxSize, int itemSize);
 }  // namespace reader

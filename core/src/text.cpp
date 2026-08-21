@@ -87,14 +87,25 @@ int baselineIn(const Font& font, int boxTop, int boxH) {
   return boxTop + (boxH - extent) / 2 + font.ascent();
 }
 
+int baselineInF26(const Font& font, int boxTopF26, int boxHF26) {
+  const int extentF26 = pxToF26(font.ascent() - font.descent());
+  // Arithmetic shift rather than / 2, so a box shorter than the run it holds
+  // (the boards do tighten line boxes below their content) halves the same way
+  // on either side of zero instead of truncating toward it.
+  const int halfLeading = (boxHF26 - extentF26) >> 1;
+  return f26ToPx(boxTopF26 + halfLeading + pxToF26(font.ascent()));
+}
+
 // One division, at the end, halves up -- and a floor that behaves the same
 // either side of zero, so an item taller than its box (the boards do tighten
 // line boxes below their content) overhangs symmetrically instead of being
 // pulled back toward the origin by integer truncation.
-int iconTopIn(int boxTop, int boxH, int itemH) {
-  const int slack = boxH - itemH;
+int centreIn(int boxStart, int boxSize, int itemSize) {
+  const int slack = boxSize - itemSize;
   const int half = slack >= 0 ? (slack + 1) / 2 : -((-slack) / 2);
-  return boxTop + half;
+  return boxStart + half;
 }
+
+int iconTopIn(int boxTop, int boxH, int itemH) { return centreIn(boxTop, boxH, itemH); }
 
 }  // namespace reader

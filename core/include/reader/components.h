@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "reader/fontset.h"
 #include "reader/icons.h"
@@ -88,6 +89,8 @@ inline constexpr int kBlockLabelEm = 200;  // 0.20em, action block label
 inline constexpr int kHintEm = 120;        // 0.12em, hint bar label
 inline constexpr int kMetaEm = 160;        // 0.16em, the page-count meta line
 inline constexpr int kTightMetaEm = 100;   // 0.10em, the chapter meta line
+inline constexpr int kActionEm = 180;      // 0.18em, a prompt button's label
+inline constexpr int kPromptTitleEm = 60;  // 0.06em, a full-screen prompt's title
 
 // The design's em value, resolved against the face that will draw it.
 inline Tracking trackingEm(const Font& font, int em1000) {
@@ -103,6 +106,22 @@ inline Tracking trackingEm(const Font& font, int em1000) {
 inline constexpr int kBandGap = 7;
 inline constexpr int kRowGap = 7;
 inline constexpr int kHintIconGap = 7;
+
+// A hint slot for a button with no action is not zero-wide: eight boards -- every
+// one with a button that does nothing on that screen (SdMissing, HomeEmpty,
+// BookDetails, WifiConnect, Transfer, SetupHotspot, ArticlesSetup,
+// InstapaperConnect) -- author it as `<div style="width: 36px;"></div>`, and
+// `justify-content: space-between` divides the leftover around it. Measuring an
+// empty slot as 0 is not "drawing nothing", it is drawing the other slots in the
+// wrong places: on SdMissing it moves the RETRY hint 36px left of the board's and
+// widens each of the three gaps by 12px.
+//
+// It is a *width* only. The board's placeholder is 0 tall, and it makes no
+// difference to the bar's height either way -- the height is the tallest of the
+// four slots, and a bar has to have something in it to be worth drawing -- so an
+// empty slot keeps the one line box every other slot has. That is what holds the
+// invariant that the bar is exactly one line tall whatever its slots carry.
+inline constexpr int kHintEmptySlotW = 36;
 
 // One hint-bar slot: a leading mark, a label, and whether that button also has a
 // long-press action.
@@ -167,5 +186,90 @@ int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label
 // callers can assert the distribution.
 int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], int slotXOut[4],
                 Plane plane = Plane::Bw);
+
+// --- A prompt button -------------------------------------------------------
+//
+// The boards' primary action on a full-screen prompt: a filled slab with one
+// centred label. Five V1 boards draw it (SdMissing, DeleteConfirm, BookError,
+// WifiError, ArticleEnd) and all five state the same box -- `height: 68px`, no
+// border, label `--t-value` at weight 700 and `letter-spacing: 0.18em`, the
+// block an `align-items: center; justify-content: center` flex row. The width is
+// NOT shared: SdMissing pins its own 260, the overlays take their column's.
+//
+// This is not Home's CONTINUE block, which is 72 tall, left-aligns its label
+// against `padding: 0 20px` and carries a trailing arrow. Same idea, different
+// box, and drawing one with the other's numbers is the pinned-height mistake
+// again.
+//
+// Only the filled form is here, because only the filled form has a screen. The
+// four boards above pair it with a `border: 2px solid; box-sizing: border-box`
+// outlined sibling at the same 68px for their secondary action; that variant
+// belongs in this function when DeleteConfirm or BookError lands, not before.
+inline constexpr int kActionH = 68;
+
+int drawActionButton(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
+                     std::string_view label, Plane plane = Plane::Bw);
+
+// --- Wrapped prose ---------------------------------------------------------
+//
+// The first paragraph in the firmware: SdMissing's explanation is body copy that
+// wraps inside a `max-width: 400px` column, centred, at `line-height: 1.55`.
+// Everything above this line is a single line of text in a box whose size the
+// board states; a paragraph's height is instead a *result* -- of the face, the
+// copy and the column -- and the screen cannot place anything below it without
+// wrapping it first.
+//
+// So the wrap is a value, computed once and then both measured and drawn. Two
+// calls that each re-wrapped would be two chances to disagree about the line
+// count, and a disagreement would not look like a bug in the wrap: it would look
+// like a paragraph that had drifted off centre.
+//
+// Line breaking is greedy on ASCII spaces, which is what the boards' copy needs
+// and no more: no hyphenation, no break inside a word (a word wider than the
+// column gets its own line and overhangs, visibly, rather than being silently
+// cut), and no bidi or CJK line breaking. Phase 3's EPUB text is a different
+// problem with a different budget.
+//
+// Note that this wraps against the FIRMWARE's own metrics, which are not
+// Chrome's: the .rfnt faces are autohinted, so their advances are whole pixels
+// and a long run measures ~3% wider here than the same string in the browser.
+// The line count following the face is the honest behaviour -- the alternative is
+// a paragraph laid out for a font the device does not have -- and it is why
+// SdMissing's board now says `max-width: 420px` where it used to say 400. Its
+// copy's second line is 401px in this face against 389.97 in Chrome's, so the
+// board's own three lines came out as four here, with "retry." alone on the last.
+// 420 is the same three lines in both engines, and Chrome renders the board
+// pixel-for-pixel identically either way -- the wider box moves no break, no line
+// and not the paragraph's height, because nothing in the copy can rise into the
+// extra 20px. The number was wrong, not the design.
+inline constexpr int kProseMaxW = 420;     // SdMissing's `max-width: 420px`
+inline constexpr int kProseLeadEm = 1550;  // its `line-height: 1.55`
+
+struct Prose {
+  // Views into the text passed to wrapProse -- which must outlive the Prose.
+  std::vector<std::string_view> lines;
+  // One line box, in 1/64 px: the board's line-height resolved against the face.
+  // Fractional on purpose (1.55 x 29px is 44.95), so the lines below the first
+  // do not accumulate a rounding error each.
+  int leadF26 = 0;
+  // Carried with the lines rather than passed again at draw time: the wrap and
+  // the centring have to measure identically, and a second Tracking argument at
+  // the draw call is a way for them not to.
+  Tracking tracking{};
+
+  int lineCount() const { return static_cast<int>(lines.size()); }
+  // The paragraph's own height, the way the board computes it: line boxes, times
+  // the line-height. In 1/64 px, because that is what it is.
+  int heightF26() const { return lineCount() * leadF26; }
+};
+
+Prose wrapProse(const Font& font, std::string_view text, int maxW, int leadEm1000,
+                Tracking tracking = {});
+
+// Draws every line centred in the column [boxX, boxX + boxW), the first line box
+// starting at `topF26`. Returns the height consumed, in 1/64 px, so a caller
+// stacking below it does not have to recompute what it just drew.
+int drawProse(Framebuffer& fb, const Font& font, const Prose& prose, int boxX, int boxW,
+              int topF26, Ink ink = Ink::Black, Plane plane = Plane::Bw);
 
 }  // namespace reader

@@ -961,3 +961,319 @@ TEST_CASE("the theme draws a hold ring exactly on the slots the view model marks
   CHECK(std::memcmp(with.data(), without.data(),
                     static_cast<size_t>(with.sizeBytes())) != 0);
 }
+
+// --- The empty hint slot ---------------------------------------------------
+//
+// Eight boards give a button with no action a `width: 36px` placeholder rather
+// than nothing, and `space-between` divides the leftover around it. A slot
+// measured as zero-wide does not draw less, it draws the OTHER slots in the wrong
+// places, so this is asserted through the distribution the bar reports.
+
+TEST_CASE("an empty hint slot is the board's 36px placeholder, not zero-wide") {
+  Ramp f;
+  const reader::Font& mf = f.fonts[reader::Role::Meta400];
+  const reader::Tracking tr = reader::trackingEm(mf, reader::kHintEm);
+  // design/SdMissing.dc.html's bar: one hint, three placeholders.
+  const reader::Hint hints[4] = {{nullptr, "", false},
+                                 {&reader::icons::kDot, "RETRY", false},
+                                 {nullptr, "", false},
+                                 {nullptr, "", false}};
+  for (int width : {480, 528}) {
+    CAPTURE(width);
+    reader::Framebuffer fb(width, 120);
+    int slotX[4] = {};
+    reader::drawHintBar(fb, f.fonts, hints, slotX);
+
+    const int hintW = reader::icons::kDot.w + reader::kHintIconGap + mf.measure("RETRY", tr);
+    const int usable = width - 2 * reader::kMargin;
+    const int leftover = usable - (3 * reader::kHintEmptySlotW + hintW);
+    // Slot 0 is on the margin, and the three gaps are equal: exactly the board's
+    // measured 24 / 132.06 / 311.94 / 420 at 480 wide, to the pixel the browser's
+    // fractional gap costs.
+    CHECK(slotX[0] == reader::kMargin);
+    CHECK(slotX[1] == reader::kMargin + reader::kHintEmptySlotW + (leftover + 1) / 3);
+    CHECK(slotX[2] == reader::kMargin + reader::kHintEmptySlotW + hintW + (2 * leftover + 1) / 3);
+    CHECK(slotX[3] == reader::kMargin + 2 * reader::kHintEmptySlotW + hintW + (3 * leftover + 1) / 3);
+    // The last slot's placeholder ends on the far margin, which is what
+    // space-between means and what a zero-width empty slot would break.
+    CHECK(slotX[3] + reader::kHintEmptySlotW == width - reader::kMargin);
+    // Nothing is drawn in an empty slot: only the one hint has ink, and it starts
+    // where slot 1 does rather than on the margin.
+    const int barTop = fb.height() - reader::hintBarHeight(f.fonts, hints);
+    int firstInk = width;
+    for (int y = barTop + reader::kHintRuleH; y < fb.height(); ++y)
+      for (int x = 0; x < width; ++x)
+        if (!fb.getPixel(x, y) && x < firstInk) firstInk = x;
+    CHECK(firstInk >= slotX[1]);
+    CHECK(firstInk < slotX[1] + reader::icons::kDot.w);
+  }
+}
+
+TEST_CASE("a bar of empty slots is still one line tall") {
+  Ramp f;
+  // The height is the tallest slot, and an empty slot keeps its label's line box,
+  // so the invariant that the bar is exactly one line tall does not depend on
+  // which buttons a screen happens to bind.
+  const reader::Hint none[4] = {
+      {nullptr, "", false}, {nullptr, "", false}, {nullptr, "", false}, {nullptr, "", false}};
+  const reader::Hint full[4] = {{&reader::icons::kBack, "BACK", false},
+                                {&reader::icons::kDot, "OPEN", false},
+                                {&reader::icons::kUp, "UP", false},
+                                {&reader::icons::kDown, "DOWN", false}};
+  CHECK(reader::hintBarHeight(f.fonts, none) == reader::hintBarHeight(f.fonts, full));
+}
+
+// --- The prompt button ----------------------------------------------------
+
+TEST_CASE("a prompt button is the board's slab with its label knocked out") {
+  Ramp f;
+  reader::Framebuffer fb(480, 200);
+  const int x = 110, y = 40, w = 260;  // design/SdMissing.dc.html's own box
+  const int h = reader::drawActionButton(fb, f.fonts, x, y, w, "RETRY");
+  CHECK(h == reader::kActionH);
+  CHECK(h == 68);
+
+  // Solid to its edges, and nothing outside them. Counted rather than checked
+  // per pixel: a CHECK inside a 480x68 loop is 32000 assertions saying one thing.
+  int paperInside = 0, inkOutside = 0;
+  for (const int row : {y, y + h - 1})
+    for (int col = x; col < x + w; ++col)
+      if (fb.getPixel(col, row)) ++paperInside;
+  for (int col = 0; col < 480; ++col) {
+    if (!fb.getPixel(col, y - 1)) ++inkOutside;
+    if (!fb.getPixel(col, y + h)) ++inkOutside;
+  }
+  for (int row = y; row < y + h; ++row) {
+    if (!fb.getPixel(x - 1, row)) ++inkOutside;
+    if (!fb.getPixel(x + w, row)) ++inkOutside;
+  }
+  CHECK(paperInside == 0);
+  CHECK(inkOutside == 0);
+
+  // The label is white ink inside the slab, centred on both axes: the same
+  // number of paper columns to its left as to its right, and optically centred
+  // vertically -- caps sit a shade above the middle because baselineIn centres
+  // the face's whole extent, descender included, which is what CSS does.
+  int x0 = 480, x1 = -1, y0 = 200, y1 = -1;
+  for (int row = y; row < y + h; ++row)
+    for (int col = x; col < x + w; ++col)
+      if (fb.getPixel(col, row)) {
+        if (col < x0) x0 = col;
+        if (col > x1) x1 = col;
+        if (row < y0) y0 = row;
+        if (row > y1) y1 = row;
+      }
+  REQUIRE(x1 > 0);
+  const int leftGap = x0 - x, rightGap = (x + w - 1) - x1;
+  // The board's letter-spacing is added after the LAST letter too (which is what
+  // CSS does and what the flex box measures), so the ink sits half a tracking
+  // step left of centre -- 0.18em at 25px is 4.5px.
+  CHECK(leftGap < rightGap);
+  CHECK(rightGap - leftGap <= 8);
+  const int above = y0 - y, below = (y + h - 1) - y1;
+  CHECK(above <= below + 3);
+  CHECK(below <= above + 3);
+}
+
+// --- Wrapped prose --------------------------------------------------------
+
+TEST_CASE("prose wraps greedily on spaces, and its height follows the board") {
+  Ramp f;
+  const reader::Font& body = f.fonts[reader::Role::Body400];
+  const std::string text =
+      "Books, articles, fonts, and reading progress live on the card. Insert one, then retry.";
+
+  // design/SdMissing.dc.html's paragraph: three lines in a 420px column, the
+  // same three the board's browser lays out.
+  const reader::Prose p = reader::wrapProse(body, text, reader::kProseMaxW, reader::kProseLeadEm);
+  CHECK(p.lineCount() == 3);
+  for (const std::string_view line : p.lines) {
+    CAPTURE(line);
+    CHECK(body.measure(line, p.tracking) <= reader::kProseMaxW);
+    // No line carries a space at either end: a trailing space would push a
+    // centred line off centre by half its advance.
+    CHECK(line.front() != ' ');
+    CHECK(line.back() != ' ');
+  }
+  // Every word survives, in order, with exactly one space between them.
+  std::string rejoined;
+  for (const std::string_view line : p.lines) {
+    if (!rejoined.empty()) rejoined += ' ';
+    rejoined += std::string(line);
+  }
+  CHECK(rejoined == text);
+
+  // `line-height: 1.55` on a 29px face is 44.95px, held in 1/64 px rather than
+  // rounded: three lines are 134.86px, not 3 x 45 = 135.
+  CHECK(p.leadF26 == reader::Tracking::em(body.ppem(), reader::kProseLeadEm).f26());
+  CHECK(p.leadF26 == 2877);
+  CHECK(p.heightF26() == 3 * 2877);
+
+  // A narrower column takes more lines, and the narrowest possible one puts every
+  // word on its own line rather than looping or breaking inside a word.
+  CHECK(reader::wrapProse(body, text, 200, reader::kProseLeadEm).lineCount() >= 5);
+  const reader::Prose perWord = reader::wrapProse(body, text, 1, reader::kProseLeadEm);
+  CHECK(perWord.lineCount() == 14);  // the copy's word count
+  CHECK(perWord.lines.front() == "Books,");
+  CHECK(perWord.lines.back() == "retry.");
+}
+
+TEST_CASE("prose tolerates the degenerate inputs a caller can hand it") {
+  Ramp f;
+  const reader::Font& body = f.fonts[reader::Role::Body400];
+  CHECK(reader::wrapProse(body, "", 400, reader::kProseLeadEm).lineCount() == 0);
+  CHECK(reader::wrapProse(body, "   ", 400, reader::kProseLeadEm).lineCount() == 0);
+  CHECK(reader::wrapProse(body, "  one  ", 400, reader::kProseLeadEm).lineCount() == 1);
+  CHECK(reader::wrapProse(body, "  one  ", 400, reader::kProseLeadEm).lines[0] == "one");
+  // Runs of spaces inside the text collapse into the break, not into a line.
+  const reader::Prose p = reader::wrapProse(body, "one     two", 1, reader::kProseLeadEm);
+  REQUIRE(p.lineCount() == 2);
+  CHECK(p.lines[0] == "one");
+  CHECK(p.lines[1] == "two");
+  // An empty paragraph draws nothing and consumes nothing.
+  reader::Framebuffer fb(480, 200);
+  const reader::Prose none = reader::wrapProse(body, "", 400, reader::kProseLeadEm);
+  CHECK(reader::drawProse(fb, body, none, 0, 480, 0) == 0);
+  int ink = 0;
+  for (int y = 0; y < 200; ++y)
+    for (int x = 0; x < 480; ++x)
+      if (!fb.getPixel(x, y)) ++ink;
+  CHECK(ink == 0);
+}
+
+TEST_CASE("prose lines are centred in their column and led by the board's line-height") {
+  Ramp f;
+  const reader::Font& body = f.fonts[reader::Role::Body400];
+  const std::string text = "one two three four five six seven eight nine ten";
+  const reader::Prose p = reader::wrapProse(body, text, 200, reader::kProseLeadEm);
+  REQUIRE(p.lineCount() >= 3);
+
+  reader::Framebuffer fb(480, 400);
+  const int boxX = 40, boxW = 200;
+  CHECK(reader::drawProse(fb, body, p, boxX, boxW, reader::pxToF26(20)) == p.heightF26());
+
+  // Each line's ink is inside the column and centred in it: the paper either
+  // side differs by no more than the side bearings of the glyphs that happen to
+  // start and end the line.
+  int prevTop = -1;
+  for (int i = 0; i < p.lineCount(); ++i) {
+    CAPTURE(i);
+    const int lineTop = reader::f26ToPx(reader::pxToF26(20) + i * p.leadF26);
+    const int lineBot = reader::f26ToPx(reader::pxToF26(20) + (i + 1) * p.leadF26);
+    int x0 = 480, x1 = -1, top = -1;
+    for (int y = lineTop; y < lineBot; ++y)
+      for (int x = 0; x < 480; ++x)
+        if (!fb.getPixel(x, y)) {
+          if (x < x0) x0 = x;
+          if (x > x1) x1 = x;
+          if (top < 0) top = y;
+        }
+    REQUIRE(x1 > 0);
+    CHECK(x0 >= boxX);
+    CHECK(x1 < boxX + boxW);
+    const int left = x0 - boxX, right = (boxX + boxW - 1) - x1;
+    CHECK(left <= right + 3);
+    CHECK(right <= left + 3);
+    (void)prevTop;
+    prevTop = top;
+  }
+}
+
+TEST_CASE("the board's fractional line-height does not drift down a long paragraph") {
+  Ramp f;
+  const reader::Font& body = f.fonts[reader::Role::Body400];
+  // Identical lines, so every line's ink top is the same distance below its own
+  // baseline and the gaps between them measure the leading itself. Thirty of
+  // them, because 1.55 x 29px is 44.953: the fraction takes twenty-odd lines to
+  // accumulate the whole pixel that makes one gap measurably shorter, and a
+  // paragraph short enough to hide that is a paragraph this test proves nothing
+  // about.
+  constexpr int kLines = 30;
+  std::string text = "one";
+  for (int i = 1; i < kLines; ++i) text += " one";
+  const reader::Prose p = reader::wrapProse(body, text, 1, reader::kProseLeadEm);
+  REQUIRE(p.lineCount() == kLines);
+
+  reader::Framebuffer fb(200, 1500);
+  reader::drawProse(fb, body, p, 0, 200, reader::pxToF26(10));
+
+  std::vector<int> tops;
+  int run = -1;
+  for (int y = 0; y < 1500; ++y) {
+    bool ink = false;
+    for (int x = 0; x < 200; ++x)
+      if (!fb.getPixel(x, y)) ink = true;
+    if (ink && run < 0) {
+      run = y;
+      tops.push_back(y);
+    }
+    if (!ink) run = -1;
+  }
+  REQUIRE(tops.size() == static_cast<size_t>(kLines));
+
+  // Every gap is 44 or 45 -- and at least one is 44, which is what proves the
+  // fraction is carried rather than rounded up per line. Thirty lines of a
+  // rounded-up 45 would sit 1.4px low by the bottom, and each line's baseline
+  // here is within half a pixel of the board's.
+  bool sawShort = false;
+  for (size_t i = 1; i < tops.size(); ++i) {
+    const int gap = tops[i] - tops[i - 1];
+    CAPTURE(i);
+    CHECK(gap >= 44);
+    CHECK(gap <= 45);
+    if (gap == 44) sawShort = true;
+  }
+  CHECK(sawShort);
+  // And the span is the board's own, not the sum of thirty roundings: within the
+  // one pixel the two end baselines' own rounding can differ by.
+  const int span = tops.back() - tops.front();
+  const int exact = reader::f26ToPx((kLines - 1) * p.leadF26);
+  CHECK(span >= exact - 1);
+  CHECK(span <= exact + 1);
+}
+
+TEST_CASE("baselineInF26 is baselineIn's identity, rounded once instead of twice") {
+  Ramp f;
+  // The two are the same formula and agree on every box whose half-leading is a
+  // whole number of pixels, which is most of the chrome.
+  //
+  // They differ by exactly 1px where it is not: a 29px face in a 53px box has
+  // 7.5px of half-leading, and baselineIn's `(boxH - extent) / 2` throws the
+  // half away before adding the ascent, where the fractional form carries it and
+  // rounds the finished baseline -- which is what the browser does, and what
+  // "round once" means. So the fractional one is the *more* correct of the two,
+  // and the difference is pinned here rather than hidden because baselineIn's
+  // answer is what four blessed Home goldens hold: the two cannot be unified
+  // without re-blessing them, which is not this screen's change to make. Every
+  // box on SdMissing is either even-slack or fractional, so nothing on it
+  // depends on which rule wins.
+  for (const reader::Role role : {reader::Role::Meta400, reader::Role::Body400,
+                                  reader::Role::Title700, reader::Role::Display700}) {
+    const reader::Font& font = f.fonts[role];
+    const int extent = font.ascent() - font.descent();
+    for (const int boxH : {21, 27, 32, 44, 53, 67, 68, 80}) {
+      for (const int top : {0, 1, 7, 100, 513}) {
+        CAPTURE(boxH);
+        CAPTURE(top);
+        const int whole = reader::baselineIn(font, top, boxH);
+        const int frac = reader::baselineInF26(font, reader::pxToF26(top), reader::pxToF26(boxH));
+        const int slack = boxH - extent;
+        if (slack % 2 == 0 || slack < 0)
+          CHECK(frac == whole);
+        else
+          CHECK(frac == whole + 1);
+      }
+    }
+  }
+}
+
+TEST_CASE("centreIn is the axis-agnostic form of iconTopIn") {
+  for (const int box : {0, 1, 25, 80, 432, 480}) {
+    for (const int item : {0, 1, 21, 25, 84, 500}) {
+      CAPTURE(box);
+      CAPTURE(item);
+      CHECK(reader::centreIn(0, box, item) == reader::iconTopIn(0, box, item));
+      CHECK(reader::centreIn(24, box, item) == reader::iconTopIn(24, box, item));
+    }
+  }
+}

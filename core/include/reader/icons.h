@@ -48,6 +48,7 @@ extern const Icon kChevron;  // right-pointing disclosure
 extern const Icon kBook;     // open book: the Read action
 extern const Icon kFolder;   // folder: a Library directory row
 extern const Icon kBattery;  // the header band's charge cell
+extern const Icon kSdCard;   // an SD card: the subject of the no-card prompt
 }  // namespace icons
 
 }  // namespace reader

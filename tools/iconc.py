@@ -146,6 +146,18 @@ ICONS = {
         "source": "design/Main.dc.html",
         "match": '<rect x="19.5"',
     },
+    # The only mark in the set that is neither a button nor a row ornament: it is
+    # the subject of a full-screen prompt, drawn at 84x105 where every other mark
+    # here is 21-46px. The match keys on the card's own outline -- the notched
+    # body -- rather than on the three contact rects, which are three
+    # indistinguishable `<rect>`s and would not identify the mark if the outline
+    # were ever retuned.
+    "sdcard": {
+        "symbol": "kSdCard",
+        "note": "an SD card, notched corner and contacts: the no-card prompt",
+        "source": "design/SdMissing.dc.html",
+        "match": "M4 1h9l6 6v16",
+    },
 }
 
 # The boards are hand-written one-element-per-line HTML with no nested <svg>, so

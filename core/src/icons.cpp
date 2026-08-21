@@ -56,6 +56,7 @@ const Icon kChevron{data::kChevronW, data::kChevronH, 2, data::kChevronBits};
 const Icon kBook{data::kBookW, data::kBookH, 2, data::kBookBits};
 const Icon kFolder{data::kFolderW, data::kFolderH, 2, data::kFolderBits};
 const Icon kBattery{data::kBatteryW, data::kBatteryH, 2, data::kBatteryBits};
+const Icon kSdCard{data::kSdCardW, data::kSdCardH, 2, data::kSdCardBits};
 }  // namespace icons
 
 }  // namespace reader
