@@ -1,4 +1,6 @@
 #pragma once
+#include "reader/text.h"  // Ink
+
 namespace reader {
 class Framebuffer;
 
@@ -8,9 +10,25 @@ class Framebuffer;
 // apparent tone comes from a stipple the eye integrates at reading distance.
 // Used for cover placeholders and sleep-screen fields.
 //
+// `ink` is which colour the dots are, and it is a real design case rather than
+// generality for its own sake: the boards declare the tint twice, once each way.
+//
+//   .dither-dots     { background-color: #ffffff; ... circle, #000000 1.1px ... }
+//   .dither-dots-inv { background-color: #000000; ... circle, #ffffff 1.1px ... }
+//
+// Same dot, same 4px grid, colours swapped -- the second is what a Library row's
+// cover placeholder becomes when the row is focused and the ground under it is
+// already filled black. Ink::White therefore SETS PAPER where Ink::Black sets
+// ink, on identical cells, so a focused and an unfocused cover are the same
+// stipple seen against opposite grounds rather than two patterns that have to be
+// kept in step.
+//
 // NOT for the veil behind an overlay, which is a different board declaration and
-// a different pattern -- see veilRect.
-void ditherRect(Framebuffer& fb, int x, int y, int w, int h, int level);
+// a different pattern -- see veilRect. (A white-inked ditherRect is not that
+// veil either: the grid is 4px against the veil's 3px, which is the whole
+// measurement the comment below turns on.)
+void ditherRect(Framebuffer& fb, int x, int y, int w, int h, int level,
+                Ink ink = Ink::Black);
 
 // Knocks an overlay's parent back with the boards' dim veil: a white dot on a
 // 3px grid, leaving 4 of every 9 pixels of the parent's ink standing.

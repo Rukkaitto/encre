@@ -126,4 +126,12 @@ int centreIn(int boxStart, int boxSize, int itemSize) {
 
 int iconTopIn(int boxTop, int boxH, int itemH) { return centreIn(boxTop, boxH, itemH); }
 
+
+std::string upperAscii(std::string_view s) {
+  std::string out(s);
+  for (char& c : out)
+    if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+  return out;
+}
+
 }  // namespace reader

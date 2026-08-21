@@ -102,17 +102,22 @@ constexpr int cell3(int v) { return ((v % 3) + 3) % 3; }
 
 int bayer4(int x, int y) { return kBayer[y & 3][x & 3]; }
 
-void ditherRect(Framebuffer& fb, int x, int y, int w, int h, int level) {
+void ditherRect(Framebuffer& fb, int x, int y, int w, int h, int level, Ink ink) {
   if (level <= 0) return;
   if (level > 4) level = 4;
   // level 1..4 -> threshold 4, 8, 12, 16 out of 16 cells inked.
   const int threshold = level * 4;
+  // The dot's colour, in the framebuffer's convention (true = paper). The CELLS
+  // chosen are the same either way: the board's inverted tint is the same dot on
+  // the same grid drawn in the other colour, so a focused row's cover and an
+  // unfocused one's cannot drift out of phase with each other.
+  const bool dot = (ink == Ink::White);
   // Keyed on absolute framebuffer coordinates, not on the rect's own origin, so
   // two adjoining dithered areas share one continuous grid instead of showing a
   // seam where their phases disagree.
   for (int yy = y; yy < y + h; ++yy)
     for (int xx = x; xx < x + w; ++xx)
-      if (kClustered[yy & 3][xx & 3] < threshold) fb.setPixel(xx, yy, false);
+      if (kClustered[yy & 3][xx & 3] < threshold) fb.setPixel(xx, yy, dot);
 }
 
 void veilRect(Framebuffer& fb, int x, int y, int w, int h) {

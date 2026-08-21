@@ -1,4 +1,5 @@
 #pragma once
+#include <string>
 #include <string_view>
 
 #include "reader/tracking.h"
@@ -130,4 +131,16 @@ int iconTopIn(int boxTop, int boxH, int itemH);
 // been five chances to write `(boxW - itemW) / 2` instead and round the other
 // way on a half.
 int centreIn(int boxStart, int boxSize, int itemSize);
+
+// ASCII-only uppercase. The boards set `text-transform: uppercase` on some runs
+// and author others as caps outright, and both cases now have callers outside
+// the theme -- the delete prompt composes a sentence with a book's title shouted
+// inside it, and a panel's caption is a caps label whose text arrives from a
+// filename. So this is one function rather than a private copy per file.
+//
+// Deliberately not a Unicode case mapping: that is a table core/ should not
+// carry, and the titles that need one (accented Latin, Greek, Cyrillic) arrive
+// with real EPUB metadata in Phase 3. Non-ASCII bytes pass through untouched
+// rather than being mangled.
+std::string upperAscii(std::string_view s);
 }  // namespace reader

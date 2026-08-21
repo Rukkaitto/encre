@@ -565,7 +565,8 @@ TEST_CASE("structural drawing is identical in every plane") {
   {
     auto render = [&](reader::Plane plane) {
       reader::Framebuffer fb(480, 200);
-      reader::drawHeaderBand(fb, f.fonts, "NOW READING", "87%", plane);
+      reader::drawHeaderBand(fb, f.fonts, "NOW READING", "87%", &reader::icons::kBattery,
+                             plane);
       return fb;
     };
     const reader::Framebuffer bw = render(reader::Plane::Bw);
@@ -1317,4 +1318,263 @@ TEST_CASE("centreIn is the axis-agnostic form of iconTopIn") {
       CHECK(reader::centreIn(24, box, item) == reader::iconTopIn(24, box, item));
     }
   }
+}
+
+// --- The 2C-2 primitives, against the measured boards -----------------------
+//
+// Every number below was read off the board in Chrome with
+// getBoundingClientRect, at the 480x800 frame the boards are authored at, and it
+// is the design's number rather than the implementation's: a test that recorded
+// what the code happens to do would pass just as happily with the code wrong.
+
+TEST_CASE("a header band with no mark right-aligns its value on the margin") {
+  Ramp f;
+  // design/Library.dc.html: `LIBRARY` / `12 BOOKS`, and no battery -- the value's
+  // own right edge lands on 456 at 480 wide (measured: x=342.50 w=113.50).
+  for (int width : {480, 528}) {
+    reader::Framebuffer fb(width, 200);
+    const int h = reader::drawHeaderBand(fb, f.fonts, "LIBRARY", "12 BOOKS", nullptr);
+    // The band's height does not depend on the mark today -- the battery is 21px
+    // against the Value face's 32px line box -- and the board agrees: both the
+    // Library's band and Home's measure 66.
+    CHECK(h == reader::headerBandHeight(f.fonts, nullptr));
+    CHECK(h == reader::headerBandHeight(f.fonts));
+    CHECK(h == 66);
+    int rightmost = -1;
+    for (int y = 0; y < h - reader::kBandRuleH; ++y)
+      for (int x = 0; x < width; ++x)
+        if (!fb.getPixel(x, y) && x > rightmost) rightmost = x;
+    // Within a glyph's side bearing of the margin, and never past it. With the
+    // battery reserved anyway this would sit ~45px further left.
+    CHECK(rightmost <= width - reader::kMargin);
+    CHECK(rightmost > width - reader::kMargin - 4);
+  }
+}
+
+TEST_CASE("a book row is the board's box, and its height is the text's not the thumbnail's") {
+  Ramp f;
+  // design/Library.dc.html: rows measure 90 tall with their border-bottom and 89
+  // without (the focused row and the last one), and the content box is 67 --
+  // which is the two-line text column (37 + 3 + 27), not the 64px thumbnail.
+  CHECK(reader::bookRowContentH(f.fonts) == 67);
+  CHECK(reader::bookRowHeight(f.fonts) == 90);
+  CHECK(reader::bookRowContentH(f.fonts) > reader::kBookThumbH);
+
+  reader::Framebuffer fb(480, 300);
+  fb.clear(true);
+  const reader::BookRowContent book{"Middlemarch", "GEORGE ELIOT", "6%", false};
+  CHECK(reader::drawBookRow(fb, f.fonts, 0, book, false, true) == 90);
+  CHECK(reader::drawBookRow(fb, f.fonts, 90, book, false, false) == 89);
+  reader::Framebuffer focusFb(480, 300);
+  focusFb.clear(true);
+  CHECK(reader::drawBookRow(focusFb, f.fonts, 0, book, true, false) == 89);
+}
+
+TEST_CASE("a book row's rule is a hairline along its BOTTOM edge, full bleed") {
+  Ramp f;
+  reader::Framebuffer fb(480, 300);
+  fb.clear(true);
+  const int h = reader::drawBookRow(fb, f.fonts, 0, {"Walden", "", "48%", false}, false, true);
+  // The board's `border-bottom: 1px solid`: the last row of the box, edge to
+  // edge, and nothing on the first.
+  CHECK_FALSE(fb.getPixel(0, h - 1));
+  CHECK_FALSE(fb.getPixel(479, h - 1));
+  CHECK(fb.getPixel(0, 0));
+  CHECK(fb.getPixel(479, 0));
+  // ...and exactly one pixel thick.
+  CHECK(fb.getPixel(0, h - 2));
+}
+
+TEST_CASE("a book row's ink is level 0 or 3 outside the glyphs and the mark") {
+  Ramp f;
+  // The cover placeholder's dither, the cover's border and the row's rule are
+  // opaque by construction, so they must be identical in every plane. Only the
+  // glyph and chevron edges may differ -- which is the property that makes a
+  // plane bug show up as fringing rather than as missing furniture.
+  reader::Framebuffer bw(480, 200), dithered(480, 200);
+  bw.clear(true);
+  dithered.clear(true);
+  const reader::BookRowContent row{"Classics", "FOLDER - 6 BOOKS", "", true};
+  reader::drawBookRow(bw, f.fonts, 0, row, false, true, reader::Plane::Bw);
+  reader::drawBookRow(dithered, f.fonts, 0, row, false, true, reader::Plane::BwDithered);
+  // The cover column is not drawn on a folder row, so scan the thumbnail box and
+  // the rule, both of which are furniture in either case.
+  for (int y = 0; y < 90; ++y)
+    CHECK(bw.getPixel(0, y) == dithered.getPixel(0, y));
+}
+
+TEST_CASE("a focused book row reverses its cover out of the fill") {
+  Ramp f;
+  reader::Framebuffer fb(480, 200);
+  fb.clear(true);
+  reader::drawBookRow(fb, f.fonts, 0, {"Dubliners", "JAMES JOYCE", "31%", false}, true, false);
+  // The board's `.dither-dots-inv` with a 2px white border: the cover's own
+  // outline is PAPER on a black row, where an unfocused row's is a 1px black
+  // outline on white.
+  const int coverY = reader::iconTopIn(reader::kBookRowPadY, reader::bookRowContentH(f.fonts),
+                                       reader::kBookThumbH);
+  CHECK(fb.getPixel(reader::kMargin, coverY));
+  CHECK(fb.getPixel(reader::kMargin + reader::kBookThumbW - 1, coverY));
+  // The fill itself is ink, immediately outside the cover's box.
+  CHECK_FALSE(fb.getPixel(reader::kMargin - 2, coverY));
+  // ...and the dots inside are paper, on the same 4px grid an unfocused cover
+  // inks. Count them rather than name one: the grid is keyed on absolute
+  // coordinates, so which cell is which depends on where the row landed.
+  int paperInside = 0;
+  for (int y = coverY + 3; y < coverY + reader::kBookThumbH - 3; ++y)
+    for (int x = reader::kMargin + 3; x < reader::kMargin + reader::kBookThumbW - 3; ++x)
+      if (fb.getPixel(x, y)) ++paperInside;
+  CHECK(paperInside > 0);
+}
+
+TEST_CASE("an outlined action button is a border and a DIFFERENT face") {
+  Ramp f;
+  // design/DeleteConfirm.dc.html: the filled CANCEL is `--t-value` at 700 and the
+  // outlined DELETE is `--t-label` at 500, both at 0.18em and both in a 68px box.
+  // So the two are not the same run with a different ground, and the widths
+  // differ: 119.00 against 104.70 for the board's own two labels.
+  reader::Framebuffer filled(480, 200), outlined(480, 200);
+  filled.clear(true);
+  outlined.clear(true);
+  CHECK(reader::drawActionButton(filled, f.fonts, 20, 10, 336, "DELETE", true) ==
+        reader::kActionH);
+  CHECK(reader::drawActionButton(outlined, f.fonts, 20, 10, 336, "DELETE", false) ==
+        reader::kActionH);
+  // Same box: `box-sizing: border-box` puts the border inside, so a focus move
+  // between the two variants cannot shift either slab.
+  CHECK_FALSE(filled.getPixel(20, 10));
+  CHECK_FALSE(outlined.getPixel(20, 10));
+  CHECK_FALSE(filled.getPixel(20, 10 + reader::kActionH - 1));
+  CHECK_FALSE(outlined.getPixel(20, 10 + reader::kActionH - 1));
+  // The outlined one's interior is paper where the filled one's is ink.
+  CHECK_FALSE(filled.getPixel(30, 10 + 4));
+  CHECK(outlined.getPixel(30, 10 + 4));
+  // Its border is 2px, not 1.
+  CHECK_FALSE(outlined.getPixel(20 + 1, 10 + 30));
+  CHECK(outlined.getPixel(20 + 2, 10 + 30));
+  // And the two labels measure differently, because they are two faces.
+  const int fw = f.fonts[reader::Role::Value700].measure(
+      "DELETE", reader::trackingEm(f.fonts[reader::Role::Value700], reader::kActionEm));
+  const int ow = f.fonts[reader::Role::Label500].measure(
+      "DELETE", reader::trackingEm(f.fonts[reader::Role::Label500], reader::kActionEm));
+  CHECK(fw != ow);
+}
+
+TEST_CASE("an overlay's panel is centred on either geometry and opaque") {
+  Ramp f;
+  // LibraryActions is `left: 70px; width: 340px` and DeleteConfirm
+  // `left: 50px; width: 380px` on the 480 canvas -- both centred, which is why
+  // the left edge is derived. Hardcoding either puts the panel 24px off centre
+  // on the 528-wide X3.
+  CHECK(reader::panelLeft(480, 340) == 70);
+  CHECK(reader::panelLeft(480, 380) == 50);
+  CHECK(reader::panelLeft(528, 340) == 94);
+  CHECK(reader::panelLeft(528, 380) == 74);
+  CHECK(reader::panelContentW(340) == 336);
+
+  reader::Framebuffer fb(480, 800);
+  fb.clear(false);  // an all-ink ground, so "opaque" is a claim with teeth
+  reader::drawPanel(fb, 70, 216, 340, 368);
+  CHECK(fb.getPixel(70 + 10, 216 + 10));       // cleared to paper inside
+  CHECK_FALSE(fb.getPixel(70, 216));           // 2px border
+  CHECK_FALSE(fb.getPixel(70 + 1, 216 + 1));
+  CHECK(fb.getPixel(70 + 2, 216 + 2));
+  CHECK_FALSE(fb.getPixel(409, 583));
+  CHECK_FALSE(fb.getPixel(69, 216));           // and nothing outside it moved
+}
+
+TEST_CASE("a panel caption's height is its wrapped label, in THIS face's line box") {
+  Ramp f;
+  // LibraryActions: `DUBLINERS` on a 336px content box is one line; DeleteConfirm's
+  // `DELETE "DUBLINERS"?` wraps to two. Chrome measures those captions 74 and
+  // 104; this measures 73 and 102, and the pixel per line is not a bug here.
+  //
+  // The caption is `line-height: normal`, which is the FACE's own line box, and
+  // the two engines round that face's metrics differently at 23px: Space Grotesk
+  // is 1.31em, so 23px is 30.13, and Chrome rounds its ascent and descent to 23
+  // and 7 where FreeType's 26.6 metrics in the .rfnt come to 23 and 6. Following
+  // the asset is the same rule the wrapped paragraph follows -- the alternative
+  // is a constant here holding Chrome's rounding of a face's metrics, which is a
+  // second source of truth for something the asset already declares.
+  //
+  // It is visible: it makes each panel 1px shorter per caption line, and a panel
+  // is vertically centred, so it also sits half that lower.
+  CHECK(f.fonts[reader::Role::Label500].lineHeight() == 29);
+  const reader::Prose one = reader::wrapPanelCaption(f.fonts, "DUBLINERS", 336);
+  CHECK(one.lineCount() == 1);
+  CHECK(reader::panelCaptionHeight(f.fonts, one) == 73);
+
+  // U+201C / U+201D, the board's own typographic quotes, spelled as UTF-8 bytes
+  // with the string broken where a hex escape would otherwise swallow the next
+  // character.
+  const reader::Prose two =
+      reader::wrapPanelCaption(f.fonts, "DELETE \xE2\x80\x9C" "DUBLINERS\xE2\x80\x9D?", 336);
+  CHECK(two.lineCount() == 2);
+  CHECK(reader::panelCaptionHeight(f.fonts, two) == 102);
+
+  reader::Framebuffer fb(480, 800);
+  fb.clear(true);
+  const int h = reader::drawPanelCaption(fb, f.fonts, 70, 216, 340, one, "31%");
+  CHECK(h == 73);
+  // The 2px bottom rule spans the panel's own width, not the screen's.
+  CHECK_FALSE(fb.getPixel(70, 216 + h - 1));
+  CHECK_FALSE(fb.getPixel(409, 216 + h - 1));
+  CHECK(fb.getPixel(69, 216 + h - 1));
+  CHECK(fb.getPixel(410, 216 + h - 1));
+}
+
+TEST_CASE("a wrapped caption is left-aligned, a paragraph is centred") {
+  Ramp f;
+  const reader::Font& body = f.fonts[reader::Role::Body400];
+  const std::string text = "one two three four five six seven eight nine ten";
+  const reader::Prose p = reader::wrapProse(body, text, 200, reader::kProseLeadEm);
+  REQUIRE(p.lineCount() >= 2);
+  reader::Framebuffer centred(300, 300), left(300, 300);
+  centred.clear(true);
+  left.clear(true);
+  reader::drawProse(centred, body, p, 0, 300, 0, reader::Ink::Black, reader::Plane::Bw,
+                    reader::ProseAlign::Centre);
+  reader::drawProse(left, body, p, 0, 300, 0, reader::Ink::Black, reader::Plane::Bw,
+                    reader::ProseAlign::Left);
+  // Every left-aligned line starts at the column's edge; a centred one does not.
+  auto firstInkX = [](const reader::Framebuffer& fb, int y0, int y1) {
+    for (int x = 0; x < fb.width(); ++x)
+      for (int y = y0; y < y1; ++y)
+        if (!fb.getPixel(x, y)) return x;
+    return -1;
+  };
+  const int lead = reader::f26ToPx(p.leadF26);
+  CHECK(firstInkX(left, 0, lead) < firstInkX(centred, 0, lead));
+}
+
+TEST_CASE("a panel row is 72 plus its rule, and its weight follows the focus") {
+  Ramp f;
+  // LibraryActions: `height: 72px; padding: 0 20px`, a 1px border-bottom on the
+  // rows that have one, Value700 on the focused row and Value500 on the rest.
+  CHECK(reader::panelRowHeight(true) == 73);
+  CHECK(reader::panelRowHeight(false) == 72);
+
+  reader::Framebuffer fb(480, 800);
+  fb.clear(true);
+  CHECK(reader::drawPanelRow(fb, f.fonts, 72, 292, 336, "Open", true, true, false) == 72);
+  // The focused row's fill is the content box, not the box plus a rule.
+  CHECK_FALSE(fb.getPixel(72, 292));
+  CHECK_FALSE(fb.getPixel(72 + 335, 292 + 71));
+  CHECK(fb.getPixel(72 + 336, 292 + 71));
+  CHECK(fb.getPixel(72, 292 + 72));
+
+  reader::Framebuffer plain(480, 800);
+  plain.clear(true);
+  CHECK(reader::drawPanelRow(plain, f.fonts, 72, 292, 336, "Book details", false, true, true) ==
+        73);
+  CHECK_FALSE(plain.getPixel(72, 292 + 72));        // the rule
+  CHECK_FALSE(plain.getPixel(72 + 335, 292 + 72));
+  CHECK(plain.getPixel(72 - 1, 292 + 72));          // ...inside the panel only
+  // The label starts at the board's 20px inset from the content box.
+  int firstX = -1;
+  for (int x = 0; x < 480 && firstX < 0; ++x)
+    for (int y = 292; y < 292 + 72; ++y)
+      if (!plain.getPixel(x, y)) { firstX = x; break; }
+  CHECK(firstX >= 72 + reader::kPanelPadX);
+  CHECK(firstX < 72 + reader::kPanelPadX + 6);
 }

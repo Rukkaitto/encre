@@ -274,3 +274,38 @@ TEST_CASE("a degenerate veil rect draws nothing and does not walk off the buffer
   for (int y = 0; y < 4; ++y)
     for (int x = 0; x < 4; ++x) CHECK(fb.getPixel(x, y) == ref.getPixel(x, y));
 }
+
+TEST_CASE("a white-inked tint is the same cells as a black one, in paper") {
+  // The boards declare the cover placeholder twice, `.dither-dots` and
+  // `.dither-dots-inv`: the same 1.1px circle on the same 4px grid, colours
+  // swapped, because a focused Library row's ground is already black. So the
+  // inverted form must ink exactly the cells the upright one does -- if it
+  // chose different cells the two covers would be out of phase with each other
+  // and a focus move would visibly re-stipple the thumbnail.
+  for (int level = 1; level <= 4; ++level) {
+    reader::Framebuffer black(48, 48), white(48, 48);
+    black.clear(true);   // paper ground, black dots
+    white.clear(false);  // ink ground, paper dots
+    reader::ditherRect(black, 0, 0, 48, 48, level, reader::Ink::Black);
+    reader::ditherRect(white, 0, 0, 48, 48, level, reader::Ink::White);
+    int cells = 0;
+    for (int y = 0; y < 48; ++y)
+      for (int x = 0; x < 48; ++x) {
+        // Exactly complementary: a pixel is a dot in one iff it is a dot in the
+        // other, so black.getPixel == white.getPixel is false everywhere.
+        CHECK(black.getPixel(x, y) != white.getPixel(x, y));
+        if (!black.getPixel(x, y)) ++cells;
+      }
+    // ...and the density is still level/4 of the field.
+    CHECK(cells == 48 * 48 * level / 4);
+  }
+}
+
+TEST_CASE("a white tint leaves an ink ground alone outside its rect") {
+  reader::Framebuffer fb(32, 32);
+  fb.clear(false);
+  reader::ditherRect(fb, 8, 8, 16, 16, 2, reader::Ink::White);
+  for (int y = 0; y < 32; ++y)
+    for (int x = 0; x < 32; ++x)
+      if (x < 8 || x >= 24 || y < 8 || y >= 24) CHECK_FALSE(fb.getPixel(x, y));
+}

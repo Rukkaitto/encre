@@ -52,18 +52,6 @@ constexpr int kDisplayLineH = 67;  // 1.00 * 67
 constexpr int kPromptGap = 22;
 constexpr int kPromptActionW = 260;
 
-// ASCII-only uppercase, local to the theme. The design sets `text-transform:
-// uppercase` on the title. A general Unicode case mapping is not something
-// core/ should carry for one label, and the titles that need it (accented Latin,
-// Greek, Cyrillic) arrive with real metadata in Phase 3 -- non-ASCII bytes are
-// passed through untouched rather than mangled.
-std::string upperAscii(std::string_view s) {
-  std::string out(s);
-  for (char& c : out)
-    if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
-  return out;
-}
-
 // NOTE: this theme used to carry its own copy of the half-leading baseline
 // formula, and it was the *correct* copy while the shared primitives in
 // components.cpp used a different, wrong one. That is the worst arrangement of
@@ -92,7 +80,8 @@ void drawCoverPlaceholder(Framebuffer& fb, int x, int y) {
 void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeViewModel& vm,
                             Plane plane) {
   fb.clear(true);
-  int y = drawHeaderBand(fb, fonts, "NOW READING", std::to_string(vm.batteryPercent) + "%", plane);
+  int y = drawHeaderBand(fb, fonts, "NOW READING", std::to_string(vm.batteryPercent) + "%",
+                             &icons::kBattery, plane);
 
   // Two columns: cover on the left, the reading state stacked on the right.
   y += kCoverTopGap;
@@ -278,8 +267,10 @@ void QuietTheme::renderSdMissing(Framebuffer& fb, const FontSet& fonts,
   yF26 += drawProse(fb, body, prose, colX, colW, yF26, Ink::Black, plane);
   yF26 += pxToF26(kPromptGap);
 
+  // Filled: SdMissing's board draws the one variant, and RETRY is the only thing
+  // on the screen a focus could be on.
   drawActionButton(fb, fonts, centreIn(kMargin, usableW, kPromptActionW), f26ToPx(yF26),
-                   kPromptActionW, vm.action, plane);
+                   kPromptActionW, vm.action, /*filled=*/true, plane);
 
   int slots[4] = {};
   drawHintBar(fb, fonts, hints, slots, plane);
@@ -291,7 +282,8 @@ void QuietTheme::renderStub(Framebuffer& fb, const FontSet& fonts, const StubVie
   // Built only from primitives already matched to boards -- header band, rows,
   // hint bar. Nothing here invents a measurement, so this surface cannot
   // introduce a fidelity defect the real screens would inherit.
-  int y = drawHeaderBand(fb, fonts, vm.title, std::to_string(vm.batteryPercent) + "%", plane);
+  int y = drawHeaderBand(fb, fonts, vm.title, std::to_string(vm.batteryPercent) + "%",
+                             &icons::kBattery, plane);
 
   const Font& meta = fonts[Role::Meta400];
   y += kMargin;

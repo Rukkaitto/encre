@@ -155,7 +155,14 @@ struct Hint {
 // roles is tallest -- which is the Value face on today's ramp (32 against the
 // Label's 29 and the battery's 21), and would be the label on a screen that set
 // its band label larger.
-int headerBandHeight(const FontSet& fonts);
+//
+// `mark` is the glyph beside the value, and it may be null. Home's band carries
+// the battery; the Library's (`LIBRARY / 12 BOOKS`) and Book details'
+// (`ABOUT THIS BOOK / EPUB`) carry nothing at all, and their value's right edge
+// lands on the margin instead. It is a parameter rather than a screen-side
+// special case because the mark is part of the band's box model: it is one of
+// the flex items the band's height is the tallest of.
+int headerBandHeight(const FontSet& fonts, const Icon* mark = &icons::kBattery);
 
 // The same, for the hint bar. A slot is exactly one line of Meta, at least as
 // tall as the marks on that line; the bar takes the tallest slot. So the bar's
@@ -175,7 +182,8 @@ int hintBarHeight(const FontSet& fonts, const Hint hints[4]);
 // on every curve and diagonal. fillRect and ditherRect still need no plane:
 // they are opaque by construction (coverage 0 or 3), identical in every plane.
 int drawHeaderBand(Framebuffer& fb, const FontSet& fonts, std::string_view label,
-                   std::string_view value, Plane plane = Plane::Bw);
+                   std::string_view value, const Icon* mark = &icons::kBattery,
+                   Plane plane = Plane::Bw);
 // `value` may be empty and `trailing` may be null; a row may carry either, both
 // or neither. A trailing mark is right-aligned on the margin and takes the row's
 // ink, so it reverses out of a focused row along with the text.
@@ -201,14 +209,98 @@ int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], int 
 // box, and drawing one with the other's numbers is the pinned-height mistake
 // again.
 //
-// Only the filled form is here, because only the filled form has a screen. The
-// four boards above pair it with a `border: 2px solid; box-sizing: border-box`
-// outlined sibling at the same 68px for their secondary action; that variant
-// belongs in this function when DeleteConfirm or BookError lands, not before.
+// Both forms are here now that DeleteConfirm has landed -- the board pairs a
+// filled CANCEL with an outlined DELETE -- and `filled` picks between them. It
+// changes the TYPE as well as the box, which is the part that is easy to miss
+// and is stated identically by all four boards that draw the pair (DeleteConfirm,
+// BookError, WifiError, and SdMissing which draws the filled one alone):
+//
+//   filled    background: #000; label --t-value  at 700, letter-spacing 0.18em
+//   outlined  border: 2px solid; label --t-label at 500, letter-spacing 0.18em
+//
+// So the outlined variant is not "the filled one with a border instead of a
+// fill": its label is a different role at a different weight, 23px/500 against
+// 25px/700. Drawing both in Value700 is the mistake Home's author line already
+// made once, and it would be invisible in review for the same reason.
+//
+// Which variant a button gets is the FOCUS, not the button's identity: the
+// boards fill exactly the slab the focus is on (DeleteConfirm's CANCEL,
+// WifiError's first of three) and outline the rest.
 inline constexpr int kActionH = 68;
+inline constexpr int kActionBorder = 2;  // the outlined variant's `border: 2px`
 
 int drawActionButton(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
-                     std::string_view label, Plane plane = Plane::Bw);
+                     std::string_view label, bool filled = true, Plane plane = Plane::Bw);
+
+// --- A list row that is a book -----------------------------------------------
+//
+// design/Library.dc.html's row, which four boards draw (Library and the three
+// that put a panel over it): a 44x64 thumbnail, then two stacked lines of text,
+// then either a right-aligned value or a disclosure chevron.
+//
+//   padding: 11px 24px; gap: 16px; border-bottom: 1px solid
+//   thumbnail  44x64      the dithered cover placeholder, or the folder mark
+//   line 1     --t-body   500, or 700 when the row is focused; no tracking
+//   line 2     --t-meta   400 at letter-spacing 0.10em
+//   value      --t-value  700, right-aligned on the margin
+//
+// This is deliberately NOT drawRow widened. drawRow is the boards' *menu* row --
+// `height: 80px`, one line of Label500 at 0.18em, a rule along its TOP -- and it
+// differs from this one in its height, its rule's edge, the number of lines, the
+// role and weight of every run on it, and whether it has a leading mark. A
+// parameter for each of those would be one function with two layouts inside it
+// and eight arguments to tell them apart, which is two primitives sharing a
+// name: the next screen would pick whichever branch its neighbour used. What the
+// two DO share is where their vertical placement comes from -- baselineIn,
+// iconTopIn, centreIn -- and that is the part a fidelity bug lives in.
+inline constexpr int kBookRowPadY = 11;    // the board's `padding: 11px 24px`
+inline constexpr int kBookRowRuleH = 1;    // its `border-bottom: 1px solid`
+inline constexpr int kBookThumbW = 44;     // `width: 44px; height: 64px`
+inline constexpr int kBookThumbH = 64;
+inline constexpr int kBookThumbGap = 16;   // the row's `gap: 16px`
+inline constexpr int kBookLineGap = 3;     // the text column's `gap: 3px`
+inline constexpr int kBookFocusBorder = 2;  // a focused cover's white border
+inline constexpr int kBookCoverBorder = 1;  // an unfocused one's black border
+
+// What one row says. A struct because there are four content fields and two
+// pieces of state, and six positional arguments at a call site is how a title
+// and a value end up transposed.
+//
+// `value` and `isFolder` are exclusive in the design rather than by construction:
+// a folder discloses (chevron, no value) and a book states its progress (value,
+// no chevron), which is the same rule renderHome applies to a menu row. Passing
+// both draws both, and the caller is what keeps the design's rule.
+struct BookRowContent {
+  std::string_view title;
+  std::string_view meta;   // the author, or "FOLDER - 6 BOOKS"; may be empty
+  std::string_view value;  // "6%", "DONE", "NEW"; empty on a folder
+  bool isFolder = false;
+};
+
+// The row's content box: the taller of the thumbnail and the two-line text
+// column. Content-independent on purpose -- an empty author line must not make a
+// row shorter than its neighbours -- so it depends on the faces and nothing else.
+int bookRowContentH(const FontSet& fonts);
+
+// The row's full height INCLUDING its bottom rule, which is the pitch a list of
+// them stacks on. `bookRowHeight` is what a caller divides a panel by to learn
+// how many rows fit; drawBookRow returns what it actually consumed, which is one
+// pixel less for a row drawn without a rule.
+//
+// Those two numbers differ because the board's rule is a `border-bottom` on a
+// content-box row, and the board omits it on the focused row and on the last
+// row of the list -- so the pitch on the board genuinely varies by a pixel, and
+// the rows below a focused one sit 1px higher than they would on an even grid.
+// That is the board's own box model and this follows it; the alternative is an
+// even grid that disagrees with the design by a pixel on five rows out of seven.
+int bookRowHeight(const FontSet& fonts);
+
+// `rule` draws the bottom border. A focused row does not have one (its fill runs
+// to the row's bottom edge and a black line on black would be invisible anyway)
+// and neither does the last row drawn, where the board leaves the list's bottom
+// edge open rather than hanging a hairline over the slack above the hint bar.
+int drawBookRow(Framebuffer& fb, const FontSet& fonts, int y, const BookRowContent& row,
+                bool focused, bool rule, Plane plane = Plane::Bw);
 
 // --- Wrapped prose ---------------------------------------------------------
 //
@@ -266,10 +358,101 @@ struct Prose {
 Prose wrapProse(const Font& font, std::string_view text, int maxW, int leadEm1000,
                 Tracking tracking = {});
 
-// Draws every line centred in the column [boxX, boxX + boxW), the first line box
+// The same wrap for a run whose line box the board leaves at `line-height:
+// normal` -- the face's own line height, which is not expressible as one of the
+// design's em multiples without inventing a ratio the board never states. A
+// wrapped LABEL (an overlay's caption) is that case; a paragraph states its
+// multiple and uses the form above, which is implemented as a call to this one.
+//
+// The lead is in 1/64 px because that is the unit a line box lives in once it
+// stops being a whole number, and taking it here rather than converting inside
+// keeps the ONE rounding at the paint.
+Prose wrapProseLead(const Font& font, std::string_view text, int maxW, int leadF26,
+                    Tracking tracking = {});
+
+// How a wrapped run sits in its column. The boards want both: a full-screen
+// prompt's paragraph is `text-align: center` and an overlay caption's wrapped
+// label is a plain left-aligned block.
+enum class ProseAlign { Centre, Left };
+
+// Draws every line in the column [boxX, boxX + boxW), the first line box
 // starting at `topF26`. Returns the height consumed, in 1/64 px, so a caller
 // stacking below it does not have to recompute what it just drew.
+//
+// `align` comes after `plane` rather than beside `boxW` where it reads better,
+// because moving `ink` or `plane` along would silently rebind every existing
+// call site that passes them positionally.
 int drawProse(Framebuffer& fb, const Font& font, const Prose& prose, int boxX, int boxW,
-              int topF26, Ink ink = Ink::Black, Plane plane = Plane::Bw);
+              int topF26, Ink ink = Ink::Black, Plane plane = Plane::Bw,
+              ProseAlign align = ProseAlign::Centre);
+
+// --- An overlay's panel ------------------------------------------------------
+//
+// The floating panel the overlay boards put over a veiled parent
+// (LibraryActions, DeleteConfirm, ReaderMenu, GoToPage, ArticleActions,
+// WifiConnect, WifiError, BookError -- eight boards, one box):
+//
+//   border: 2px solid; box-sizing: border-box; background: #ffffff
+//   top: 50%; transform: translateY(-50%)          vertically centred
+//   caption  padding: 21px 20px; border-bottom: 2px solid
+//   row      height: 72px; padding: 0 20px
+//
+// The WIDTH is each board's own and is not shared -- LibraryActions is 340 on
+// the 480 canvas and DeleteConfirm is 380, and an earlier draft of the 2C-2 plan
+// generalised from the first and would have drawn the second 40px too narrow. Nor
+// is the left edge: both boards centre their panel (70+340+70 and 50+380+50 both
+// make 480), so it is derived from the canvas, and hardcoding 70 or 50 puts the
+// panel 24px off centre on the 528-wide X3 -- which is the dev device.
+inline constexpr int kPanelBorder = 2;
+inline constexpr int kPanelPadX = 20;
+inline constexpr int kPanelCaptionPadY = 21;
+inline constexpr int kPanelCaptionRuleH = 2;
+inline constexpr int kPanelRowContentH = 72;
+inline constexpr int kPanelRowRuleH = 1;
+
+// The panel's left edge on a canvas `canvasW` wide, and the content box inside
+// its border. Trivial, and here rather than at the call sites because "centred"
+// and "inside the border" are the two things every overlay has to get right on
+// both geometries.
+inline int panelLeft(int canvasW, int panelW) { return centreIn(0, canvasW, panelW); }
+inline int panelContentW(int panelW) { return panelW - 2 * kPanelBorder; }
+
+// Clears the panel to paper and draws its 2px border. Opaque by design: the veil
+// has already knocked the parent back, and a panel the parent showed through
+// would be unreadable. Nothing inside it needs to clear again.
+void drawPanel(Framebuffer& fb, int x, int y, int w, int h);
+
+// The panel's caption: a tracked caps label, and optionally a right-aligned
+// value beside it (LibraryActions' `31%`; DeleteConfirm has none).
+//
+// The label WRAPS, which is why it arrives already wrapped. DeleteConfirm's
+// caption is a sentence with a book's title shouted inside it -- `DELETE
+// "DUBLINERS"?` -- and it is two lines on a 380px panel with the board's own
+// sample title, more with a longer one. So the caption's height is a RESULT, the
+// way a paragraph's is, and it is computed once and then both measured and drawn
+// rather than wrapped twice in two places that could disagree.
+//
+// The line box is the FACE's own line height, not a multiple the board states:
+// the caption is `line-height: normal` where a paragraph is `1.45`. Same wrap,
+// same discipline, different source for the one number.
+Prose wrapPanelCaption(const FontSet& fonts, std::string_view label, int contentW);
+int panelCaptionHeight(const FontSet& fonts, const Prose& label);
+int drawPanelCaption(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
+                     const Prose& label, std::string_view value, Plane plane = Plane::Bw);
+
+// One action row inside a panel. `x`/`w` are the panel's CONTENT box, not the
+// panel: the row's label is inset by the board's 20px from the content edge, and
+// passing the panel itself would inset it from the outside of the border and
+// draw the label 2px left of the board's.
+//
+// The label's role follows the focus -- `--t-value` at 700 on the focused row,
+// at 500 on the others -- which is the boards' own declaration and the same
+// distinction Body500-versus-Body700 makes on a Library row. `discloses` is the
+// trailing chevron: LibraryActions gives one to Open and Book details, which
+// lead somewhere, and none to Mark as finished or Delete..., which act in place.
+int panelRowHeight(bool rule);
+int drawPanelRow(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
+                 std::string_view label, bool focused, bool discloses, bool rule,
+                 Plane plane = Plane::Bw);
 
 }  // namespace reader
