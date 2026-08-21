@@ -72,6 +72,8 @@ class NullTheme : public Theme {
   void renderLibrary(Framebuffer&, const FontSet&, const LibraryViewModel&, Plane) override {}
   void renderItemActions(Framebuffer&, const FontSet&, const ItemActionsViewModel&,
                          Plane) override {}
+  void renderDeleteConfirm(Framebuffer&, const FontSet&, const DeleteConfirmViewModel&,
+                           Plane) override {}
   int libraryVisibleRows(int, const FontSet&) const override { return 0; }
   void renderStub(Framebuffer&, const FontSet&, const StubViewModel&, Plane) override {}
 };

@@ -108,6 +108,24 @@ struct ItemActionsViewModel {
   std::array<bool, 4> holds{};
 };
 
+// The delete confirmation (design/DeleteConfirm.dc.html). Two action slabs, and
+// the focused one is the FILLED one -- which is why there is no `destructive`
+// flag here: the boards fill whichever slab the focus is on and outline the
+// rest, and the focus starts on CANCEL, which is where a destructive prompt's
+// focus belongs.
+struct DeleteConfirmViewModel {
+  std::string title;    // the caption, with the book's name in it; the theme wraps it
+  std::string message;  // the paragraph under it
+  std::string cancelLabel;
+  std::string confirmLabel;
+  // 0 = cancel, 1 = delete, in the board's own top-to-bottom order. An index
+  // rather than a bool because the focus moves through a list, and because
+  // BookError's board pairs the same two slabs with a third.
+  int focusedAction = 0;
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
 // A provisional titled-list surface: Phase 2B's Library and Settings
 // placeholders and its Input Monitor. It exists so the interaction runtime can
 // be navigated and verified before the real screens are built, and Phase 2C

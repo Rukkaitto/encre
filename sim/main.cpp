@@ -231,10 +231,12 @@ int main(int argc, char** argv) {
   // overlay boards focus the sixth.
   const bool isLibrary = std::strcmp(argv[1], "library") == 0;
   const bool isLibraryActions = std::strcmp(argv[1], "library_actions") == 0;
-  if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions) {
+  const bool isDeleteConfirm = std::strcmp(argv[1], "delete_confirm") == 0;
+  if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
+      !isDeleteConfirm) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
-                 "'library_actions' or 'app')\n",
+                 "'library_actions', 'delete_confirm' or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -288,7 +290,7 @@ int main(int argc, char** argv) {
     // assignment, so the render pins the navigation too.
     for (const reader::InputEvent& ev : libraryEntry()) app.dispatch(ev);
   }
-  if (isLibraryActions) {
+  if (isLibraryActions || isDeleteConfirm) {
     // LibraryActions' own parent copy focuses the SIXTH row, Dubliners -- not the
     // second, which is what Library.dc.html focuses. The two boards disagree, so
     // the journey does too.
@@ -296,6 +298,14 @@ int main(int argc, char** argv) {
     // ...and the hold that opens the panel, which is the binding the Library's
     // hint ring advertises.
     app.dispatch({reader::Button::Confirm, reader::PressKind::Long});
+  }
+  if (isDeleteConfirm) {
+    // Down to the panel's fourth row, `Delete...`, and Confirm. The board shows
+    // the Library behind this rather than the actions panel, and it is right to:
+    // the confirm panel is wider and taller than the actions panel and both are
+    // centred, so it covers it completely.
+    for (int i = 0; i < 3; ++i) app.dispatch({reader::Button::Down, reader::PressKind::Short});
+    app.dispatch({reader::Button::Confirm, reader::PressKind::Short});
   }
   for (const reader::InputEvent& ev : events) app.dispatch(ev);
 

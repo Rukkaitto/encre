@@ -37,14 +37,27 @@ const char* screenName(ScreenId id);
 // the mount rather than repaint the same message -- so the screen asks, App
 // latches the request, and the shell answers it. See App::retryRequested().
 struct Action {
-  enum class Kind : uint8_t { None, Redraw, Push, Pop, Sleep, Retry };
+  enum class Kind : uint8_t { None, Redraw, Push, Pop, PopTo, Sleep, Retry };
   Kind kind = Kind::None;
-  ScreenId target = ScreenId::Home;  // meaningful for Push only
+  ScreenId target = ScreenId::Home;  // meaningful for Push and PopTo
 
   static Action none() { return {}; }
   static Action redraw() { return {Kind::Redraw, ScreenId::Home}; }
   static Action push(ScreenId t) { return {Kind::Push, t}; }
   static Action pop() { return {Kind::Pop, ScreenId::Home}; }
+  // Pops until `target` is on top -- "dismiss the flow I am in", which is a
+  // different thing from "go back one".
+  //
+  // The delete confirmation is what needs it: confirming a delete puts the user
+  // back on the Library with the book gone, and the actions panel it was opened
+  // from must go too. Two Pops cannot express that, because a screen returns one
+  // Action -- and a Pop that the confirm screen followed with a second Pop of its
+  // own would be the confirm screen reaching into the stack.
+  //
+  // Stops at the root if `target` is not on the stack, rather than emptying it:
+  // an id that is not there is a caller bug, and unwinding to nothing would take
+  // the device down on the next paint.
+  static Action popTo(ScreenId t) { return {Kind::PopTo, t}; }
   static Action sleep() { return {Kind::Sleep, ScreenId::Home}; }
   static Action retry() { return {Kind::Retry, ScreenId::Home}; }
 };

@@ -92,6 +92,14 @@ void App::dispatch(const InputEvent& ev) {
       dirty_ = true;
       transition_ = true;
       break;
+    case Action::Kind::PopTo:
+      // Down to `target`, or to the root if it is not on the stack -- never past
+      // it. Only one dirty/transition pair for however many screens go, because
+      // the user sees one screen change however deep the flow was.
+      while (stack_.size() > 1 && top().id() != a.target) stack_.pop_back();
+      dirty_ = true;
+      transition_ = true;
+      break;
     case Action::Kind::Sleep:
       sleep_ = true;
       break;

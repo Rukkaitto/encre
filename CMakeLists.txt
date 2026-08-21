@@ -59,6 +59,10 @@ add_test(NAME sim_library COMMAND reader_sim library ${CMAKE_BINARY_DIR}/sim_lib
 # App::render rather than the top screen alone.
 add_test(NAME sim_library_actions COMMAND reader_sim library_actions
          ${CMAKE_BINARY_DIR}/sim_library_actions.png --canvas 528x792)
+# ...and the delete confirmation over that, which is four screens deep and the
+# one place PopTo is exercised outside the unit tests.
+add_test(NAME sim_delete_confirm COMMAND reader_sim delete_confirm
+         ${CMAKE_BINARY_DIR}/sim_delete_confirm.png --canvas 480x800)
 # The SD-missing screen renders with NO --root, which is the state it exists for.
 add_test(NAME sim_sd_missing COMMAND reader_sim sd_missing ${CMAKE_BINARY_DIR}/sim_sd_missing.png)
 # ...and the storage path runs on the desktop: a HostFileSystem mounted on the

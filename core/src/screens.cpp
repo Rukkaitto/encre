@@ -1,5 +1,6 @@
 #include "reader/screens.h"
 
+#include "reader/screen_delete_confirm.h"
 #include "reader/screen_input_monitor.h"
 #include "reader/screen_item_actions.h"
 #include "reader/screen_library.h"
@@ -84,6 +85,8 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       if (library_ == nullptr) return nullptr;
       return std::make_unique<ItemActionsScreen>(*library_);
     case ScreenId::DeleteConfirm:
+      if (library_ == nullptr) return nullptr;
+      return std::make_unique<DeleteConfirmScreen>(*library_);
     case ScreenId::BookDetails:
       // Still to come in this task; a refused push until then.
       return nullptr;

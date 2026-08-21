@@ -354,6 +354,15 @@ namespace {
 // what adapts is where it sits -- panelLeft centres it on whatever the canvas
 // is.
 constexpr int kActionsPanelW = 340;
+constexpr int kConfirmPanelW = 380;
+
+// design/DeleteConfirm.dc.html's own numbers, below its caption: the paragraph's
+// `padding: 18px 20px` and `line-height: 1.45`, then the button column's
+// `gap: 12px` and its `padding: 0 20px 20px 20px`.
+constexpr int kConfirmProsePadY = 18;
+constexpr int kConfirmProseLeadEm = 1450;
+constexpr int kConfirmButtonGap = 12;
+constexpr int kConfirmButtonPadBottom = 20;
 
 // The strip at the bottom that an overlay repaints. The overlay boards draw
 // their hint bar OVER the veil with `background: #ffffff`, so the parent's bar --
@@ -407,6 +416,63 @@ void QuietTheme::renderItemActions(Framebuffer& fb, const FontSet& fonts,
     cy += drawPanelRow(fb, fonts, cx, cy, contentW, row.label, focused, row.discloses,
                        !focused && i != rows - 1, plane);
   }
+
+  const Hint hints[4] = {{&icons::kBack, vm.hints[0], vm.holds[0]},
+                         {&icons::kDot, vm.hints[1], vm.holds[1]},
+                         {&icons::kUp, vm.hints[2], vm.holds[2]},
+                         {&icons::kDown, vm.hints[3], vm.holds[3]}};
+  drawOverlayHintBar(fb, fonts, hints, plane);
+}
+
+void QuietTheme::renderDeleteConfirm(Framebuffer& fb, const FontSet& fonts,
+                                     const DeleteConfirmViewModel& vm, Plane plane) {
+  // No fb.clear(), as with the actions overlay: the parent is already painted.
+  //
+  // Worth knowing why this looks like the board even though the board draws the
+  // LIBRARY behind it while the real stack has the actions panel in between: the
+  // confirm panel is 380 wide against the actions panel's 340 and taller than it
+  // on both geometries, and both are centred -- so it covers the actions panel
+  // completely. The two renders are the same pixels, and the board is not
+  // simplifying anything.
+  veilRect(fb, 0, 0, fb.width(), fb.height());
+
+  const int contentW = panelContentW(kConfirmPanelW);
+  const int colW = contentW - 2 * kPanelPadX;
+  const Font& body = fonts[Role::Body400];
+  const Prose label = wrapPanelCaption(fonts, vm.title, contentW);
+  // The paragraph, wrapped before anything is placed: its height is what it wraps
+  // to, and everything below it -- both buttons and the panel's own bottom edge --
+  // hangs off that. Wrapping it twice would be two chances to disagree.
+  const Prose prose = wrapProse(body, vm.message, colW, kConfirmProseLeadEm);
+
+  const int proseH = f26ToPx(prose.heightF26());
+  const int panelH = 2 * kPanelBorder + panelCaptionHeight(fonts, label) +
+                     (kConfirmProsePadY + proseH + kConfirmProsePadY) +
+                     (2 * kActionH + kConfirmButtonGap + kConfirmButtonPadBottom);
+
+  const int x = panelLeft(fb.width(), kConfirmPanelW);
+  const int y = centreIn(0, fb.height(), panelH);
+  drawPanel(fb, x, y, kConfirmPanelW, panelH);
+
+  const int cx = x + kPanelBorder;
+  int cy = y + kPanelBorder;
+  cy += drawPanelCaption(fb, fonts, cx, cy, contentW, label, "", plane);
+
+  // Left-aligned: the board's paragraph declares no `text-align`, so it is a
+  // plain block -- unlike a full-screen prompt's, which is centred.
+  cy += kConfirmProsePadY;
+  cy += f26ToPx(drawProse(fb, body, prose, cx + kPanelPadX, colW, pxToF26(cy), Ink::Black, plane,
+                          ProseAlign::Left));
+  cy += kConfirmProsePadY;
+
+  // The focused slab is the filled one and the other is outlined, which is the
+  // boards' rule wherever they pair the two. The focus starts on CANCEL, so a
+  // press that arrives before the user has read anything cancels.
+  drawActionButton(fb, fonts, cx + kPanelPadX, cy, colW, vm.cancelLabel, vm.focusedAction == 0,
+                   plane);
+  cy += kActionH + kConfirmButtonGap;
+  drawActionButton(fb, fonts, cx + kPanelPadX, cy, colW, vm.confirmLabel, vm.focusedAction == 1,
+                   plane);
 
   const Hint hints[4] = {{&icons::kBack, vm.hints[0], vm.holds[0]},
                          {&icons::kDot, vm.hints[1], vm.holds[1]},
