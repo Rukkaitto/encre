@@ -62,9 +62,29 @@ stop meaning anything.
 
 ## Rendering model
 
-The panel shows **four grey levels** from two bit-planes the controller
-combines. There is **no 2 bpp framebuffer** — it would not fit. Instead the
-screen is drawn **three times** into a 1-bit buffer:
+Glyph and icon coverage is 2 bpp — 0..3 per pixel — and the framebuffer is
+1-bit. How that coverage gets onto the panel is the screen's declared `Fidelity`
+(`core/include/reader/refresh.h`), and there are two answers.
+
+**`Fidelity::Dithered` — one pass, one waveform. This is what ships.**
+`Plane::BwDithered`, in a single render, stipples partial coverage through a
+**dispersed Bayer 4×4** instead of thresholding it away: `cov*16/3 > bayer4(x,y)`
+inks 5 cells of 16 at coverage 1 and 10 at coverage 2, keyed on absolute panel
+coordinates so a mark and the label beside it share one grid. Full coverage
+stays solid and zero stays blank, so **a glyph interior is never stippled** —
+only its edge is. Chrome is therefore anti-aliased on a single 1-bit frame.
+
+**Chrome must be anti-aliased — but anti-aliased does not mean grey.** What
+Phase 2A-2 measured as illegible was 1-bit *thresholding*, which throws away
+every sub-half-coverage pixel and takes the soft edge off every stem. Stippling
+that same coverage keeps the edge, and the result was verified on X3 hardware.
+Do not read "1-bit" in the old notes as "thresholded".
+
+**`Fidelity::Grayscale` — three passes plus a rebase, three waveforms.** The
+panel shows **four grey levels** from two bit-planes the controller combines;
+there is **no 2 bpp framebuffer**, it would not fit, so the screen is drawn
+three times into the 1-bit buffer, and a fourth time to rebase the controller
+onto a valid B/W baseline afterwards:
 
 | Pass | Emits | Consumed by |
 |---|---|---|
@@ -72,20 +92,37 @@ screen is drawn **three times** into a 1-bit buffer:
 | `Plane::Lsb` | bit 0 of coverage | `copyGrayscaleLsbBuffers` |
 | `Plane::Msb` | bit 1 of coverage | `copyGrayscaleMsbBuffers` |
 
-**Rules, fills and dither** have coverage 0 or 3 and so are identical in all
-three passes; that is what makes a plane bug show up as fringing rather than
-missing furniture, and `test_components.cpp` pins it for `drawRow`'s hairline
-and the header band's rule.
+**It costs three panel waveforms: 366 + 366 + 156 ms, and 1363 ms for a focus
+move measured end to end on the X3**, against one waveform for the dithered
+path. No screen declares it today. It is kept, not deprecated, because it is the
+only way to put continuous tone on this glass — Phase 3's question about book
+covers and images — and because the sequence was expensive to get right; the
+comments in `paintGray()` were each earned by breaking the panel. **Windowed
+grayscale is not the escape hatch**: rotation is CCW, so a portrait row band
+becomes a full-height landscape column band and every gate line is driven
+anyway.
+
+**Rules, fills and dither** have coverage 0 or 3, so they are identical in all
+four passes — dithered and all three grayscale planes. That is what makes a plane
+bug show up as fringing rather than missing furniture, `test_components.cpp` pins
+it for `drawRow`'s hairline and the header band's rule, and it is why re-blessing
+Home for the dithered path moved **only** partial-coverage pixels.
 
 **Icons are not in that set.** All ten shipped marks are 2 bpp
 (`core/src/icons.cpp`) because they are generated anti-aliased from the boards,
-so they legitimately carry grey at their edges and differ between planes exactly
-as glyphs do. `Icon::bpp == 1` is the opt-in for a mark that wants hard 1-bit
-edges, and nothing uses it. So grey on an icon edge is correct; grey on a rule,
-a fill or a dither cell is a plane bug.
+so they legitimately carry partial coverage at their edges and stipple exactly as
+glyphs do. `Icon::bpp == 1` is the opt-in for a mark that wants hard 1-bit edges,
+and nothing uses it — though the small round marks (`kDot`, `kBattery`) are the
+ones a 4×4 dither serves worst, because a 1px rim at near-constant coverage has
+no tone to dither and the Bayer phase just picks which rim pixels survive.
 
-**Chrome must be anti-aliased.** 1-bit thresholding is what made small type
-illegible on the panel; it is not a size problem.
+**The two dither matrices are deliberately different, and `dither.cpp` says
+why.** `kClustered` is for *tints* — the board's cover placeholder is one round
+dot repeated on a 4px grid, and dispersing that area into isolated pixels reads
+denser and grainier than the blob it is meant to be. `kBayer` is for *edges* —
+clustering a stroke's edge coverage would pile the ink against the stroke and
+read as the stroke thickening, which is the one thing an anti-aliased edge must
+not do. Same nominal coverage, opposite arrangement, opposite jobs.
 
 ## Runtime
 
@@ -109,11 +146,13 @@ what needs hardware — raw button samples, the panel calls, deep sleep.
   view-model's `holds` array, via `hintHoldMask()`. So a screen cannot promise a
   hold it has not bound, or bind one with nothing on screen to suggest it. The
   mask follows the top of the stack, so refresh it after every dispatch.
-- **Screens declare a `Fidelity`, and chrome is always `Gray`.** A 1-bit fast
-  refresh of chrome is illegible on this glass, so `mode=FAST` in a `[paint]` log
-  line beside `fidelity=gray` is not a contradiction — it means the cadence had a
-  fast slot the screen could not use. `Mono` is the Reader's path and the input
-  monitor's.
+- **Screens declare a `Fidelity` and the default is `Dithered`**, so a screen
+  opts *in* to the expensive path rather than out of it — nothing declares
+  `Grayscale` today, and the old default is what had every chrome screen paying
+  1363 ms a paint by saying nothing. If one ever does declare it, `mode=FAST`
+  beside `fidelity=gray` in a `[paint]` line is not a contradiction: the
+  grayscale sequence has no differential form, so it means the cadence had a fast
+  slot the screen could not use.
 - **`core/include/reader/screens.h` is the one screen catalogue**, shared by the
   simulator and the shell. Two factories would drift, and the drift would be
   invisible because each half keeps passing its own checks.
@@ -176,6 +215,16 @@ intended visual change (inspect the candidate, confirm it is right, then bless)
 or a regression (find the bug). Blessing to silence a red test destroys the only
 protection the rendering has. `text_sample.png` is Literata body text: if it
 changes and you did not mean to touch body rendering, stop.
+
+Inspecting a candidate means **looking at the pixels and saying what you see**,
+including whatever looks wrong in a change you go on to bless. An icon has passed
+review twice while reading as the letters "OC". When a change is meant to move
+only some class of pixel — edges, say — the strongest check is to prove that
+nothing outside that class moved, per pixel, rather than to eyeball the totals.
+
+Home's four goldens are two-level renders of `Plane::BwDithered`, via
+`golden::checkGolden`. `golden::checkGoldenGray` composes two planes into a
+4-level image and is for a screen on the grayscale path; nothing uses it today.
 
 ## Where to look
 
