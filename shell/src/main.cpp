@@ -127,16 +127,39 @@ constexpr uint32_t kCoalesceMs = 0;
 static uint32_t gLastInputMs = 0;
 
 // Everything the render needs has to outlive setup(), so it lives here rather
-// than on setup()'s stack -- but the frame stays heap-allocated behind
-// unique_ptr on purpose. A file-scope Framebuffer would allocate during static
-// init, before the largest-block check in setup() could run, and a vector that
-// cannot allocate under -fno-exceptions is an abort() boot loop with no
-// diagnostic. This project has already lost a boot to exactly that.
+// than on setup()'s stack.
 //
-// ONE frame, not two. It is logically portrait (what the screens draw against)
-// and physically landscape (what the panel is handed), because it is built with
-// Rotation::Ccw -- see the allocation in setup().
-static std::unique_ptr<reader::Framebuffer> gFrame;
+// ONE frame, AND IT IS THE DRIVER'S. There used to be two live at once and only
+// one of them ours: FreeInkDisplay::begin() allocates its own 52,272-byte frame
+// (48,000 on the X4) whether we use it or not, and setFramebuffer() memcpy'd
+// ours into it on every paint. This is now a VIEW over display.getFrameBuffer()
+// -- no second allocation, and nothing between the render and the panel. The
+// reference firmware does the same thing, drawing straight into that buffer
+// through an orientation-aware coordinate transform.
+//
+// It is logically portrait (what the screens draw against) and physically
+// landscape (what the panel is handed), because it is bound with Rotation::Ccw
+// -- see bindFrameToDriver().
+//
+// std::optional, not unique_ptr: there is nothing left to allocate. The old
+// comment here explained that the frame had to be heap-allocated behind a
+// unique_ptr because a file-scope Framebuffer would allocate its vector during
+// static init, before setup()'s largest-block check could run, and a vector
+// that cannot allocate under -fno-exceptions is an abort() boot loop with no
+// diagnostic -- this project has already lost a boot to exactly that. A view
+// owns no vector, so the hazard is gone with the allocation. An optional keeps
+// construction deferred to after display.begin() (getFrameBuffer() is null
+// before it) at a stable address in .bss.
+static std::optional<reader::Framebuffer> gFrame;
+// The bytes gFrame currently views, so a change of them is DETECTABLE. See
+// bindFrameToDriver: the driver can take its framebuffer away and give it back.
+static const uint8_t* gFrameBytes = nullptr;
+// Whether the frame's contents are unknown to the App -- true after a bind and
+// until the next full paint. gFrame lives at a fixed address, so App's paint
+// record (which compares the Framebuffer's address) cannot tell that the bytes
+// behind it were replaced or wiped, and a partial repaint over a wiped frame is
+// an overlay panel floating on paper. This flag is what tells it.
+static bool gFrameContentsUnknown = true;
 // FontSet owns nothing: every Font it holds is a zero-copy view into a blob the
 // caller supplies. The embedded kFont* arrays have static storage, so they
 // outlive the set -- but nothing here may ever hand load() a scope-limited copy.
@@ -915,19 +938,93 @@ static uint32_t gRenderMs = 0;
 // on all 418k pixels whether one changed or every one did, on a text screen that
 // inks about 8% of them. It is gone -- the framebuffer now applies the same
 // mapping per pixel as it draws -- so the field would report zero forever.
+//
+// `copy` is now in the same position: the render draws straight into the
+// driver's own framebuffer (gFrame views it), so there is no setFramebuffer()
+// memcpy left to time and this counter is never incremented. It is kept for ONE
+// reason -- the [paint] line is the only evidence available that the copy is
+// actually gone on hardware, and this change was made without flashing. Once a
+// device log shows `copy=0`, delete the field the way `rotate` was deleted.
 static uint32_t gDrawMs = 0, gCopyMs = 0;
 
 // One render pass, straight into the panel-oriented frame.
 //
-// The rotation is the framebuffer's, declared once where gFrame is allocated;
+// The rotation is the framebuffer's, declared once in bindFrameToDriver();
 // nothing here transposes anything. CCW is the correct direction, verified on X3
 // hardware (CW renders the whole screen 180 degrees out -- the two differ by
 // exactly half a turn, so swapping them is not the fix for a mirrored image).
 // Unverified on X4: if an X4 comes out upside down, the Rotation passed to the
-// constructor in setup() is the line, not anything in here.
+// constructor in bindFrameToDriver() is the line, not anything in here.
 // Whether the last render pass repainted the top screen alone. For the log line
 // only -- the decision is App's, and it is remade per pass.
 static bool gPartialPaint = false;
+
+// Point gFrame at the driver's framebuffer, if there is one to point at.
+//
+// THE POINTER IS NOT PERMANENTLY VALID, and that is the whole reason this is a
+// function rather than a line in setup(). FreeInkDisplay::lendBuildStorage()
+// hands the framebuffer's own bytes out as scratch for a memory-hungry phase --
+// a chapter layout on a PSRAM-less part is what the SDK wrote it for -- and
+// while they are lent getFrameBuffer() returns NULL and rendering is
+// unavailable. Nothing in this firmware calls it today; Phase 3C's pagination is
+// expected to, which is exactly the kind of change that would otherwise write a
+// screen into a null pointer.
+//
+// The allocation itself never moves (that is lendBuildStorage's stated reason
+// for existing -- free/re-malloc of 48 KB fragmented the heap), so in practice a
+// return gives the same address back. This does not rely on that: it compares,
+// and rebinds if it differs.
+//
+// Either way returnBuildStorage() memsets the frame to white, so the App's
+// record of what it last painted is no longer true of these bytes -- hence
+// gFrameContentsUnknown, which forces the next paint to be a full one.
+//
+// Returns false when there is no usable frame; the caller must not paint.
+static bool bindFrameToDriver(const char* why) {
+  uint8_t* bytes = display.getFrameBuffer();
+  if (bytes == nullptr) {
+    // Lent out. Not fatal and not a bug: it is a phase that borrowed the frame
+    // and has not given it back, and the panel keeps showing its last image.
+    Serial.printf("[frame] %s: driver framebuffer is lent out; nothing to paint into\n", why);
+    Serial.flush();
+    gFrame.reset();
+    gFrameBytes = nullptr;
+    gFrameContentsUnknown = true;
+    return false;
+  }
+  if (gFrame && bytes == gFrameBytes) return true;  // the common case: no change
+  // Logical portrait, physical landscape: the dimensions are what the screens
+  // draw against (528x792 on the X3), and Rotation::Ccw maps them into the
+  // panel's own 792x528 buffer as it draws. CCW is measured on X3 hardware; see
+  // the note on reader::Rotation. Unverified on X4 -- if an X4 comes out upside
+  // down, this line is it, not anything in the paint path.
+  gFrame.emplace(bytes, display.getBufferSize(), display.getDisplayHeight(),
+                 display.getDisplayWidth(), reader::Rotation::Ccw);
+  gFrameBytes = bytes;
+  gFrameContentsUnknown = true;
+  // A view whose geometry does not fit the memory behind it is REFUSED by the
+  // Framebuffer constructor rather than clamped, and reports sizeBytes() == 0 --
+  // so this one check catches both "the driver's buffer is smaller than the
+  // panel geometry needs" (the refusal, and the case that would otherwise write
+  // past the end of the driver's allocation) and "the two disagree about the
+  // size" (a rotation applied to the coordinates but not to the store would be
+  // exactly this many bytes and still laid out wrong, so it is not the whole
+  // proof -- test_rotate.cpp's byte-identity case against rotate90CCW is).
+  if (gFrame->sizeBytes() != static_cast<int>(display.getBufferSize())) {
+    Serial.printf("[fatal] frame view %d bytes != driver buffer %u (panel %dx%d)\n",
+                  gFrame->sizeBytes(), (unsigned)display.getBufferSize(),
+                  (int)display.getDisplayWidth(), (int)display.getDisplayHeight());
+    Serial.flush();
+    mark("frame-view-REFUSED");
+    gFrame.reset();
+    gFrameBytes = nullptr;
+    return false;
+  }
+  Serial.printf("[frame] %s: viewing driver framebuffer %p, %d bytes, logical %dx%d CCW\n", why,
+                (const void*)gFrameBytes, gFrame->sizeBytes(), gFrame->width(), gFrame->height());
+  Serial.flush();
+  return true;
+}
 
 static void paintPlane(reader::Plane plane) {
   const uint32_t t0 = millis();
@@ -945,7 +1042,16 @@ static void paintPlane(reader::Plane plane) {
   // pixels -- an overlay panel floating on paper, the same wrong frame
   // App::render exists to prevent. Nothing else in this file writes gFrame;
   // showOnePass and the grayscale copies only read it.
-  gPartialPaint = gApp->renderTopOnly(*gFrame, *gFonts, gTheme, plane);
+  //
+  // gFrameContentsUnknown IS THE ONE CONDITION App CANNOT SEE. Its record
+  // compares the Framebuffer's ADDRESS, and gFrame's address never changes now
+  // that it is an optional in .bss -- so a frame whose bytes were lent out and
+  // handed back wiped white (returnBuildStorage) would still satisfy every one
+  // of App's checks. The frame is the caller's responsibility precisely because
+  // the caller is the only thing that could have clobbered it, and this is that
+  // responsibility discharged.
+  gPartialPaint =
+      !gFrameContentsUnknown && gApp->renderTopOnly(*gFrame, *gFonts, gTheme, plane);
   if (!gPartialPaint) {
     gFrame->clear(true);
     // THROUGH App::render, NOT top().render. 2C-2's overlays are panels over a
@@ -959,6 +1065,8 @@ static void paintPlane(reader::Plane plane) {
     // App's, it is refused by default, and it paints only over a frame App
     // itself last filled through this line.
     gApp->render(*gFrame, *gFonts, gTheme, plane);
+    // The frame now holds what App just put there, and App has recorded it.
+    gFrameContentsUnknown = false;
   }
   const uint32_t t1 = millis();
   gDrawMs += t1 - t0;
@@ -978,8 +1086,15 @@ static void paintGray() {
   // 1. The B/W base frame the panel paints first. displayGrayscaleBase() takes
   //    no buffer argument — it drives the driver's own frameBuffer — so
   //    setFramebuffer() (a memcpy) has to land the frame there first.
+  //
+  //    THAT MEMCPY IS GONE, because gFrame now VIEWS the driver's own
+  //    frameBuffer: the render above already landed the frame exactly where
+  //    displayGrayscaleBase reads from. Keeping the call would have been
+  //    memcpy(p, p, n) with src == dst, which is undefined behaviour rather
+  //    than a harmless no-op. The sentence above still explains why this step
+  //    needs the frame to be in the driver's buffer at all, which is the part
+  //    that was easy to get wrong.
   paintPlane(reader::Plane::Bw);
-  display.setFramebuffer(gFrame->data());
   display.displayGrayscaleBase(EInkDisplay::HALF_REFRESH);
   mark("gray-base-displayed");
 
@@ -1004,6 +1119,25 @@ static void paintGray() {
   //    RAM and retain no pointer, so the single frame serves both — and served
   //    the base frame above, which the driver has already memcpy'd. LSB must go
   //    first: the MSB copy is dropped unless the driver has seen a valid LSB.
+  //
+  //    NOW THAT THE FRAME IS THE DRIVER'S, each render here OVERWRITES the base
+  //    frame in the driver's buffer instead of leaving a private copy of it
+  //    alone. Checked against the SDK rather than assumed, because this is the
+  //    one behavioural difference the change makes on this path:
+  //      * displayGrayscaleBase (step 1) has already read and sent the base to
+  //        the controller by the time step 3 runs. It retains nothing.
+  //      * displayGrayBuffer (step 4) DOES pass the driver's frameBuffer down --
+  //        which now holds the MSB plane rather than the base. All three panel
+  //        drivers this binary can select ignore that argument on the gray path
+  //        (`(void)fb;` in Uc8279Driver, Uc8253X3Driver and Uc8279X4Driver:
+  //        the waveform comes from a built-in bank and the image from the planes
+  //        already in controller RAM), so the buffer they are handed does not
+  //        reach the glass.
+  //      * cleanupGrayscaleBuffers (step 4) already handles this exact case: it
+  //        skips its own restoring memcpy when `frameBuffer == bwBuffer`.
+  //    A fourth driver that reads `fb` on the gray path would be the thing to
+  //    re-check here, and no screen declares Grayscale today, so this path is
+  //    unexercised on hardware either way.
   paintPlane(reader::Plane::Lsb);
   display.copyGrayscaleLsbBuffers(gFrame->data());
   paintPlane(reader::Plane::Msb);
@@ -1013,6 +1147,13 @@ static void paintGray() {
   // 4. Paint the combined 4-level image (the driver reads the planes it was
   //    handed, not any framebuffer), then put the controller back on a valid
   //    B/W baseline so the next ordinary refresh is differentially sane.
+  //
+  //    A CORRECTION TO THE PARENTHESIS, found while making the frame the
+  //    driver's: displayGrayBuffer() does pass FreeInkDisplay::frameBuffer down
+  //    to the panel driver. It is the drivers that ignore it -- all three this
+  //    binary can select declare `(void)fb;` on their gray path -- so the
+  //    sentence is right about the glass and wrong about the call. It matters
+  //    now because that buffer is ours and holds the MSB plane at this point.
   display.displayGrayBuffer();
   mark("gray-displayed");
   // Re-render the B/W pass rather than keeping a second frame alive for it. The
@@ -1026,14 +1167,18 @@ static void paintGray() {
   mark("refresh-complete");
 }
 
-// Hand the one 1-bit frame in gFrame to the panel. Its bytes are already in the
-// panel's own landscape orientation, so there is nothing between the render and
-// the driver. Shared by both one-pass paths below, which differ only in the
+// Refresh the panel from the one 1-bit frame. Its bytes are already in the
+// panel's own landscape orientation AND already in the driver's own buffer --
+// gFrame views it -- so there is now literally nothing between the render and
+// the waveform. Shared by both one-pass paths below, which differ only in the
 // plane they render.
+//
+// The setFramebuffer() memcpy that used to be here is gone, which is what makes
+// `copy=` zero in the [paint] line. `displayBuffer` reads the driver's
+// frameBuffer directly in single-buffer mode (EINK_DISPLAY_SINGLE_BUFFER_MODE=1,
+// which is how this firmware is built), so the frame it sends is the one just
+// rendered.
 static void showOnePass(reader::RefreshMode mode) {
-  const uint32_t tc = millis();
-  display.setFramebuffer(gFrame->data());
-  gCopyMs += millis() - tc;
   display.displayBuffer(mode == reader::RefreshMode::Full ? EInkDisplay::FULL_REFRESH
                                                           : EInkDisplay::FAST_REFRESH);
 }
@@ -1070,6 +1215,12 @@ static void paintDithered(reader::RefreshMode mode) {
 }
 
 static void renderTop() {
+  // EVERY PAINT, not just the first. The frame is the driver's, and the driver
+  // can take it back (bindFrameToDriver says how and why). Nothing lends it
+  // today, so this is a pointer comparison that always agrees -- it is here so
+  // that the day something does, the paint is skipped and logged instead of
+  // written through a null pointer.
+  if (!bindFrameToDriver("paint")) return;
   const reader::RefreshMode mode = gRefresh.next(gApp->transition());
   const reader::Fidelity fidelity = gApp->top().fidelity();
   // `mode` is what the POLICY decided, not necessarily what the panel does: a
@@ -1219,12 +1370,20 @@ void setup() {
   const int panelW = display.getDisplayWidth();
   const int panelH = display.getDisplayHeight();
 
-  // ONE 1-bit frame. It used to be two -- a portrait one to draw into and a
-  // landscape one to rotate the finished frame into -- and the rotate is gone,
-  // so the portrait buffer is gone with it: the frame below is drawn against
-  // portrait coordinates and stored landscape. That is 52272 bytes of heap given
-  // back on the X3 (48000 on the X4), against a measured largest contiguous
-  // block of only ~115 KB.
+  // ONE 1-bit frame, AND WE NO LONGER ALLOCATE IT.
+  //
+  // It used to be two of ours -- a portrait one to draw into and a landscape one
+  // to rotate the finished frame into -- and the rotate is gone, so the portrait
+  // buffer went with it: the frame is drawn against portrait coordinates and
+  // stored landscape. That gave back 52272 bytes on the X3 (48000 on the X4).
+  //
+  // But there were still TWO frames live, because only one of them was ours.
+  // FreeInkDisplay::begin() has already allocated its own frame of exactly the
+  // same size -- unconditionally, at display bring-up, above -- and
+  // setFramebuffer() memcpy'd ours into it on every paint. So the second 52272
+  // bytes is given back here by drawing straight into that buffer instead, and
+  // the copy leaves the paint path with it. Nothing is allocated below; the
+  // frame is a VIEW (see bindFrameToDriver).
   //
   // Three frames was never possible on this hardware and is worth remembering,
   // because it is the same wall: measured free heap is ~233 KB but the largest
@@ -1233,41 +1392,23 @@ void setup() {
   // and the firmware is built -fno-exceptions, so that is an abort() and a boot
   // loop with no diagnostic. Re-rendering the B/W pass for the grayscale cleanup
   // rebase, rather than retaining a frame for it, is what avoids needing one.
+  //
+  // THE LARGEST-BLOCK CHECK IS GONE WITH THE ALLOCATION, and that is not a
+  // weakening: it existed because a vector that cannot allocate aborts with no
+  // diagnostic, and there is no vector any more. The driver's own allocation can
+  // still fail, and it reports that as a null getFrameBuffer(), which
+  // bindFrameToDriver turns into a logged refusal rather than a crash. The
+  // headroom itself is still worth logging -- Phase 3's page cache is what will
+  // want it.
   const unsigned frameBytes = display.getBufferSize();
-  const unsigned largest = ESP.getMaxAllocHeap();
-  Serial.printf("[info] frame %u bytes x1; free heap %u, largest block %u\n", frameBytes,
-                (unsigned)ESP.getFreeHeap(), largest);
+  Serial.printf("[info] frame %u bytes x1, the driver's own; free heap %u, largest block %u\n",
+                frameBytes, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
   Serial.flush();
-  // Fail loudly rather than aborting inside a constructor: a vector that cannot
-  // allocate takes the whole firmware down with no diagnostic. One frame is now
-  // all that is needed, so this asks for one -- but the check STAYS. It is the
-  // only thing standing between a fragmented heap and that silent abort, and the
-  // headroom it reports is what will matter when Phase 3 wants a page cache.
-  if (largest < frameBytes) {
-    Serial.printf("[fatal] largest block %u < one frame (%u)\n", largest, frameBytes);
-    mark("frame-alloc-WOULD-FAIL");
+  if (!bindFrameToDriver("boot")) {
+    mark("frame-bind-FAILED");
     return;
   }
-  // Logical portrait, physical landscape: the constructor's dimensions are what
-  // the screens draw against (528x792 on the X3), and Rotation::Ccw allocates
-  // the store transposed so data() is the panel's own 792x528 buffer. CCW is
-  // measured on X3 hardware; see the note on reader::Rotation.
-  gFrame = std::make_unique<reader::Framebuffer>(panelH, panelW, reader::Rotation::Ccw);
-  mark("frames-allocated");
-
-  // A short buffer would make setFramebuffer's memcpy read past the end, and a
-  // zero-length one means the panel geometry came back wrong. This is the check
-  // that the rotation is applied to the STORE and not just to the coordinates:
-  // a rotated frame whose stride came from the logical width would be exactly
-  // this many bytes and still be laid out wrong, so it is not the whole proof --
-  // test_rotate.cpp's byte-identity case against rotate90CCW is.
-  if (gFrame->sizeBytes() != (int)display.getBufferSize()) {
-    Serial.printf("[fatal] frame size %d != driver buffer %u\n", gFrame->sizeBytes(),
-                  (unsigned)display.getBufferSize());
-    mark("frame-size-MISMATCH");
-    gFrame.reset();
-    return;
-  }
+  mark("frame-bound");
 
   // Which grayscale path the selected driver actually offers. Logged because
   // the sequence below is only correct for a driver that does NOT combine the

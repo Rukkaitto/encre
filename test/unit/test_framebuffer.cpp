@@ -1,5 +1,7 @@
 #include <cstring>
+#include <memory>
 #include <utility>
+#include <vector>
 
 #include "doctest.h"
 #include "reader/framebuffer.h"
@@ -195,4 +197,172 @@ TEST_CASE("a rotated non-positive dimension is still an inert empty buffer") {
     fb.fillRect(-4, -4, 100, 100, false);
     CHECK(fb.getPixel(0, 0));
   }
+}
+
+// --- Viewing storage somebody else owns -------------------------------------
+//
+// The shell draws straight into the panel driver's own framebuffer, so this
+// constructor is on the device's paint path and nothing else is. It is also the
+// one place in this class where a wrong answer writes memory OUTSIDE the buffer
+// rather than drawing the wrong picture: every bounds check is against
+// width_/height_, which come from the caller, not from the allocation.
+
+TEST_CASE("a viewing framebuffer draws byte-identically to an owning one") {
+  // THE EQUIVALENCE THAT MATTERS. The goldens and the simulator all render into
+  // owning frames; the device renders into a viewed one. If the two ever
+  // disagree by a byte, every desktop test passes and the panel is wrong -- the
+  // same shape of defect as a rotation applied to the coordinates but not to the
+  // store.
+  for (auto rot : {reader::Rotation::None, reader::Rotation::Ccw}) {
+    for (auto [w, h] : {std::pair{16, 4}, std::pair{528, 792}, std::pair{13, 21}}) {
+      Framebuffer owned(w, h, rot);
+      std::vector<uint8_t> storage(static_cast<size_t>(owned.sizeBytes()), 0x00);
+      Framebuffer viewed(storage.data(), storage.size(), w, h, rot);
+
+      // The layout each one describes must match before a single pixel is set:
+      // this is the driver's memcpy contract, stated in these three numbers.
+      REQUIRE(viewed.sizeBytes() == owned.sizeBytes());
+      REQUIRE(viewed.physRowBytes() == owned.physRowBytes());
+      REQUIRE(viewed.physWidth() == owned.physWidth());
+      REQUIRE(viewed.physHeight() == owned.physHeight());
+      REQUIRE(viewed.width() == w);
+      REQUIRE(viewed.height() == h);
+      REQUIRE(viewed.data() == storage.data());  // no copy: it IS the caller's memory
+      REQUIRE_FALSE(viewed.ownsStorage());
+      REQUIRE(owned.ownsStorage());
+
+      // A view does not clear on construction (the bytes are someone else's),
+      // so the comparison starts from an explicit clear on both.
+      owned.clear(true);
+      viewed.clear(true);
+      REQUIRE(std::memcmp(owned.data(), viewed.data(),
+                          static_cast<size_t>(owned.sizeBytes())) == 0);
+
+      for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+          const bool white = ((x * 7 + y * 3) % 5) != 0;
+          owned.setPixel(x, y, white);
+          viewed.setPixel(x, y, white);
+        }
+      owned.fillRect(w - 3, h - 5, 100, 100, false);   // clipped on both edges
+      viewed.fillRect(w - 3, h - 5, 100, 100, false);
+      CHECK(std::memcmp(owned.data(), viewed.data(),
+                        static_cast<size_t>(owned.sizeBytes())) == 0);
+      // ...and read back through the logical transform the same way. Only on the
+      // small geometries: the byte comparison above already covers the panel
+      // sizes, and 418k assertions per case make the fast loop slow for nothing.
+      if (w * h <= 4096)
+        for (int y = 0; y < h; ++y)
+          for (int x = 0; x < w; ++x) REQUIRE(owned.getPixel(x, y) == viewed.getPixel(x, y));
+    }
+  }
+}
+
+TEST_CASE("a view over a too-small buffer is REFUSED, not clamped") {
+  // The decision, pinned. A clamped view would report the geometry it was asked
+  // for and write past the end of the memory it was given, which is the one
+  // failure in this class that corrupts something else instead of looking wrong
+  // -- and on the device that something else is the heap next to the panel
+  // driver's framebuffer. So a view that does not fit is the same inert empty
+  // buffer a non-positive dimension gives, which the shell can see (sizeBytes()
+  // == 0 for a geometry that should not be empty) and refuse to boot on.
+  //
+  // 16x4 unrotated needs 2 bytes per row x 4 rows = 8.
+  std::vector<uint8_t> storage(8, 0xFF);
+  {
+    Framebuffer exact(storage.data(), 8, 16, 4);
+    REQUIRE(exact.sizeBytes() == 8);       // exactly enough is enough
+    REQUIRE(exact.data() == storage.data());
+  }
+  {
+    Framebuffer spare(storage.data(), 64, 16, 4);
+    REQUIRE(spare.sizeBytes() == 8);       // more than enough is fine, and unused
+  }
+  // One byte short, and every way of being short. Each buffer is ALLOCATED at
+  // the short length rather than merely described as short, so ASAN has
+  // something real to catch: a clamping implementation writes eight bytes into
+  // this block and reports a heap-buffer-overflow. (Verified by temporarily
+  // clamping: with the refusal removed, ASAN reports the overflow and the
+  // untouched-bytes check below fails.) `new uint8_t[0]` is a valid, non-null,
+  // zero-length allocation, which is what keeps the bytes == 0 case a genuine
+  // pointer rather than passing the refusal for the wrong reason.
+  for (size_t bytes : {size_t{0}, size_t{1}, size_t{7}}) {
+    std::unique_ptr<uint8_t[]> sh(new uint8_t[bytes]);
+    for (size_t i = 0; i < bytes; ++i) sh[i] = 0xFF;
+    Framebuffer fb(sh.get(), bytes, 16, 4);
+    CAPTURE(bytes);
+    CHECK(fb.width() == 0);
+    CHECK(fb.height() == 0);
+    CHECK(fb.physRowBytes() == 0);
+    CHECK(fb.sizeBytes() == 0);
+    CHECK(fb.data() == nullptr);
+    CHECK_FALSE(fb.ownsStorage());  // it is still a view; it is just an empty one
+    // Inert: every operation a no-op, and NOTHING written through the pointer it
+    // was handed.
+    fb.clear(false);
+    fb.setPixel(0, 0, false);
+    fb.fillRect(-4, -4, 1000, 1000, false);
+    CHECK(fb.getPixel(0, 0));
+    for (size_t i = 0; i < bytes; ++i) CHECK(sh[i] == 0xFF);
+  }
+  for (uint8_t b : storage) CHECK(b == 0xFF);  // and the exact-fit block above is untouched
+  // A null pointer is refused the same way, however generous the length claim.
+  Framebuffer nul(nullptr, 1u << 20, 16, 4);
+  CHECK(nul.sizeBytes() == 0);
+  CHECK(nul.data() == nullptr);
+  nul.clear(false);
+  nul.setPixel(0, 0, false);
+  CHECK(nul.getPixel(0, 0));
+}
+
+TEST_CASE("a rotated view is sized by the PHYSICAL geometry, not the logical one") {
+  // The X3's real numbers, and the trap: 528x792 logical portrait needs 99 bytes
+  // per row x 528 rows. Sizing the check from the logical width (66 bytes per
+  // row) would accept a buffer two thirds the size it needs and then write off
+  // the end of it -- and the total, 66 * 792, is the SAME 52272, so a check
+  // written against the byte count alone cannot tell the two apart. This is the
+  // rotated form of the stride bug test_rotate.cpp pins for the owning frame.
+  const size_t need = 99u * 528u;
+  REQUIRE(need == 66u * 792u);  // the coincidence that makes this worth a test
+  std::vector<uint8_t> storage(need, 0xFF);
+
+  Framebuffer fb(storage.data(), need, 528, 792, reader::Rotation::Ccw);
+  REQUIRE(fb.physRowBytes() == 99);
+  REQUIRE(fb.sizeBytes() == static_cast<int>(need));
+  // Every in-bounds logical coordinate must land inside the storage. ASAN is the
+  // real assertion here; the byte check is what catches a mapping that stays in
+  // bounds but overlaps itself -- every byte of the store must have been
+  // reached, so not one of them may still be white.
+  fb.clear(true);
+  for (int y = 0; y < 792; ++y)
+    for (int x = 0; x < 528; ++x) fb.setPixel(x, y, false);
+  size_t untouched = 0;
+  for (int i = 0; i < fb.sizeBytes(); ++i)
+    if (fb.data()[i] != 0x00) ++untouched;
+  CHECK(untouched == 0);
+
+  // ...and one byte short of the rotated requirement is refused, even though it
+  // is far more than an unrotated 528-wide frame would need.
+  Framebuffer short_(storage.data(), need - 1, 528, 792, reader::Rotation::Ccw);
+  CHECK(short_.sizeBytes() == 0);
+}
+
+TEST_CASE("a view is not cleared on construction and never frees its storage") {
+  // Two facts the shell depends on. The driver memsets its framebuffer to white
+  // in begin() and the paint path clears before every full render, so a view
+  // that cleared on construction would be doing someone else's work with
+  // someone else's memory -- and on the grayscale path, between two passes, it
+  // would be destroying a plane.
+  std::vector<uint8_t> storage(8, 0xA5);
+  {
+    Framebuffer fb(storage.data(), storage.size(), 16, 4);
+    REQUIRE(fb.data()[0] == 0xA5);
+    fb.setPixel(0, 0, false);
+    CHECK(storage[0] == 0x25);  // wrote through to the caller's memory
+  }
+  // The Framebuffer is gone; the storage is not. (ASAN would report a
+  // double-free or a free of non-heap memory here if the view had taken
+  // ownership.)
+  CHECK(storage[0] == 0x25);
+  CHECK(storage[7] == 0xA5);
 }

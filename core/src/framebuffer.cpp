@@ -21,6 +21,33 @@ Framebuffer::Framebuffer(int width, int height, Rotation rot)
       rowBytes_((physWidth() + 7) / 8),
       bytes_(static_cast<size_t>(rowBytes_) * static_cast<size_t>(physHeight()), 0xFF) {}
 
+// The view. Same geometry arithmetic as above -- it has to be, or an owning and
+// a viewing frame of the same dimensions would describe different bytes and the
+// driver's memcpy contract would be stated twice, differently.
+//
+// The store is NOT cleared: these bytes belong to someone else who may already
+// have put something in them (the driver memsets its own framebuffer to white in
+// begin(), and the paint path clears before every full render anyway). An owning
+// frame starts white because it is fresh memory with nothing in it to respect.
+//
+// REFUSE, DO NOT CLAMP, when the memory cannot hold the frame. See the header
+// for why. Checked in the body rather than in the initialiser list because it
+// needs rowBytes_ and physHeight(), which are what the list is computing.
+Framebuffer::Framebuffer(uint8_t* data, size_t bytes, int width, int height, Rotation rot)
+    : width_(width > 0 && height > 0 ? width : 0),
+      height_(width > 0 && height > 0 ? height : 0),
+      rot_(rot),
+      rowBytes_((physWidth() + 7) / 8),
+      viewing_(true),
+      view_(data) {
+  const size_t need = static_cast<size_t>(rowBytes_) * static_cast<size_t>(physHeight());
+  if (data == nullptr || bytes < need) {
+    width_ = height_ = 0;
+    rowBytes_ = 0;
+    view_ = nullptr;
+  }
+}
+
 // Logical to physical, and it must match rotate90CCW exactly: that function
 // writes dst.setPixel(srcY, srcW - 1 - srcX), so physX = logY and
 // physY = logicalWidth - 1 - logX. The mirror term is not optional -- dropping
@@ -39,21 +66,24 @@ uint8_t Framebuffer::bitMask(int x, int y) const {
   return static_cast<uint8_t>(0x80u >> (physX % 8));
 }
 
+// sizeBytes() rather than bytes_.size(): an inert buffer -- a non-positive
+// geometry or a refused view -- reports zero either way, and a viewing frame has
+// no vector to ask.
 void Framebuffer::clear(bool white) {
-  if (bytes_.empty()) return;
-  std::memset(bytes_.data(), white ? 0xFF : 0x00, bytes_.size());
+  if (sizeBytes() == 0) return;
+  std::memset(data(), white ? 0xFF : 0x00, static_cast<size_t>(sizeBytes()));
 }
 
 void Framebuffer::setPixel(int x, int y, bool white) {
   if (x < 0 || y < 0 || x >= width_ || y >= height_) return;
-  uint8_t& b = bytes_[byteIndex(x, y)];
+  uint8_t& b = data()[byteIndex(x, y)];
   const uint8_t mask = bitMask(x, y);
   if (white) b |= mask; else b &= static_cast<uint8_t>(~mask);
 }
 
 bool Framebuffer::getPixel(int x, int y) const {
   if (x < 0 || y < 0 || x >= width_ || y >= height_) return true;
-  return (bytes_[byteIndex(x, y)] & bitMask(x, y)) != 0;
+  return (data()[byteIndex(x, y)] & bitMask(x, y)) != 0;
 }
 
 void Framebuffer::fillRect(int x, int y, int w, int h, bool white) {
