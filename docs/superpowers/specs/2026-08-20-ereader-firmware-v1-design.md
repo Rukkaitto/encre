@@ -51,7 +51,56 @@ variant (X4 vs X3) is detected at boot (I2C probe / BoardConfig) and exposed
 through a single `Device` interface: panel dimensions, buttons, battery source,
 RTC presence.
 
-### 3.2 Portable core (hardware-free C++20, unit-tested on desktop)
+#### 3.1b Decision: the reader engine is ours (2026-08-21)
+
+`freeink-sdk/libs/book/FreeInkBook` is a complete MIT EPUB engine — container,
+CSS, layout, pagination, hyphenation, images — inside the submodule this project
+already ships. It was evaluated properly rather than overlooked, and **rejected.**
+Recording that so nobody assumes we missed it.
+
+What the spike measured, and it all checked out: its host suite passes cold
+(~38,700 assertions, layout tested under all three memory profiles); pagination
+peaks at 114-120 KB and steady reading at 22-28 KB; a page turn is 1.00 cache
+read and ~1300 bytes, verified over 2,200 turns; ~332 KB of flash worst case and
+**100 bytes** of static RAM. Its `LayoutParams` exposes exactly the five
+typography settings §4.1 promises. On the merits it works.
+
+Rejected for two reasons, both about control of the reading surface:
+
+- **Its `PageRenderer` writes panel-native bytes and does its own rotation**, so
+  the Reader would bypass `text.cpp`, `Framebuffer`'s CCW transform and the
+  `Plane`/`Fidelity` model — and therefore the goldens and `make compare`, which
+  have caught every fidelity defect in this project so far. The one screen §4.1
+  calls "the product" would be the one screen the fidelity system does not cover.
+- **Float wrap-around is on its own known-limitations list**, and
+  `design/Reader.dc.html` opens its page with a 102px `float: left` dropcap. The
+  board is the source of truth; changing it to suit an engine inverts that.
+
+Accepted costs, stated so they are not a surprise later: this is the largest and
+hardest work in the project, the first version will be worse than the thing we
+declined, and line breaking, hyphenation, justification and cache-stable
+pagination are all now ours to get right.
+
+**Findings that apply regardless, and are worth more than the decision:**
+
+- `reader::Font`'s two `std::unordered_map`s cost **99,008 bytes of heap**
+  (measured: free heap 229,980 before the ramp loads, 130,972 after) to index
+  20-byte records whose bitmap payload is already in memory-mapped flash. A
+  zero-copy binary search over the blob's already-sorted records reclaims it.
+- **Two full framebuffers are live**: `FreeInkDisplay::begin()` allocates its own
+  52,272-byte frame, and `setFramebuffer()` memcpys ours into it every paint.
+  Rendering into `display.getFrameBuffer()` reclaims 52 KB *and* the copy.
+- `FreeInkDisplay::lendBuildStorage()` / `returnBuildStorage()` exist to lend the
+  framebuffer's bytes as scratch while rendering is unavailable — motivated in
+  the SDK by exactly this, chapter layout on a PSRAM-less part.
+- `PageCacheReader::open()`-style designs cost one small read per page of index.
+  Whatever cache we write needs a read buffer; on a shared SPI bus, ~1,300
+  unbuffered reads to open a book will hurt.
+- Book CSS asks for an unbounded set of pixel sizes (measured across fixtures:
+  16, 32, 41, 51, 64 px, differing per book). **A pre-rendered ramp cannot serve
+  that**, which forces §3.2's open question about scalable body type — see below.
+
+## 3.2 Portable core (hardware-free C++20, unit-tested on desktop)
 
 - **Content pipeline:** EPUB container (miniz for zip, expat for OPF/XHTML) →
   a lean internal document model (block/inline tree supporting the HTML/CSS
