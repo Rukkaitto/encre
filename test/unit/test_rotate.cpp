@@ -1,14 +1,22 @@
 // A single corner pixel cannot distinguish a correct rotation from one with a
 // swapped or mis-signed coordinate term, so these tests use an asymmetric
 // multi-pixel pattern with no rotational or mirror symmetry.
+#include <cstring>
 #include <utility>
 #include <vector>
 
 #include "doctest.h"
+#include "ramp.h"
+#include "reader/fontset.h"
 #include "reader/framebuffer.h"
 #include "reader/rotate.h"
+#include "reader/screen_home.h"
+#include "reader/screens.h"
+#include "reader/text.h"
+#include "reader/theme_quiet.h"
 
 using reader::Framebuffer;
+using reader::Rotation;
 
 namespace {
 
@@ -211,7 +219,7 @@ TEST_CASE("the fast rotate90CCW writes nothing outside the destination buffer") 
   reader::Framebuffer exact(h, w);
   exact.clear(true);
   reader::rotate90CCW(src, exact);
-  CHECK(exact.sizeBytes() == exact.rowBytes() * w);
+  CHECK(exact.sizeBytes() == exact.physRowBytes() * w);
   // Every byte of the destination must have been written by the rotation: with
   // both panel geometries being multiples of 8, the block loop covers the whole
   // buffer, so no byte may still hold the 0xFF the clear left.
@@ -225,4 +233,182 @@ TEST_CASE("the fast rotate90CCW writes nothing outside the destination buffer") 
   for (int i = 0; i < ref.sizeBytes(); ++i)
     if (ref.data()[i] == 0xFF) ++refUntouched;
   CHECK(untouched == refUntouched);
+}
+
+// --- Drawing straight into a rotated framebuffer -----------------------------
+//
+// This is the proof that removing the full-frame transpose from the paint path
+// is pixel-neutral. The OLD path -- draw into an unrotated portrait frame, then
+// rotate90CCW it into a landscape one -- is the code that shipped and rendered
+// correctly on X3 hardware. The NEW path draws into a Rotation::Ccw framebuffer
+// whose setPixel applies the same mapping per pixel. The two must hand the panel
+// driver the SAME BYTES, so the comparison is over data() across sizeBytes(),
+// not over pixels: a mapping that is right per pixel but lays the bytes out
+// differently would still be a wrong frame from the driver's point of view.
+//
+// Any disagreement means the new path is wrong, never the reference.
+
+namespace {
+
+// Byte-for-byte over the physical store, reporting the first offset that differs
+// so a failure says where rather than just "not equal".
+void checkSameBytes(const Framebuffer& viaRotate, const Framebuffer& direct, const char* what) {
+  REQUIRE(direct.sizeBytes() == viaRotate.sizeBytes());
+  REQUIRE(direct.physRowBytes() == viaRotate.physRowBytes());
+  int diffs = 0, first = -1;
+  for (int i = 0; i < viaRotate.sizeBytes(); ++i)
+    if (viaRotate.data()[i] != direct.data()[i]) {
+      if (diffs == 0) first = i;
+      ++diffs;
+    }
+  CHECK_MESSAGE(diffs == 0, what << ": " << diffs << " of " << viaRotate.sizeBytes()
+                                 << " bytes differ, first at offset " << first);
+}
+
+}  // namespace
+
+TEST_CASE("a Rotation::Ccw framebuffer reports logical dimensions and a physical store") {
+  Framebuffer rot(528, 792, Rotation::Ccw);
+  // Logical: what every drawing routine sees, and what the constructor was given.
+  CHECK(rot.width() == 528);
+  CHECK(rot.height() == 792);
+  // Physical: what the panel driver is handed.
+  CHECK(rot.physWidth() == 792);
+  CHECK(rot.physHeight() == 528);
+  CHECK(rot.physRowBytes() == 99);  // ceil(792 / 8), NOT ceil(528 / 8)
+  CHECK(rot.sizeBytes() == 99 * 528);
+  // Same store size as the landscape buffer the old path allocated.
+  Framebuffer landscape(792, 528);
+  CHECK(rot.sizeBytes() == landscape.sizeBytes());
+}
+
+TEST_CASE("setPixel on a Rotation::Ccw framebuffer lands where rotate90CCW would put it") {
+  // The mapping in isolation, on the asymmetric pattern the rest of this file
+  // uses: physX = logY, physY = logicalWidth - 1 - logX. Dropping the mirror
+  // term gives a plain transpose, which passes a symmetric pattern.
+  Framebuffer portrait(8, 16);
+  inkPattern(portrait);
+  Framebuffer viaRotate(16, 8);
+  reader::rotate90CCW(portrait, viaRotate);
+
+  Framebuffer direct(8, 16, Rotation::Ccw);
+  inkPattern(direct);
+  checkSameBytes(viaRotate, direct, "8x16 pattern");
+
+  // And getPixel reads back in LOGICAL coordinates, so a rotated buffer is
+  // indistinguishable from an unrotated one to anything that only draws.
+  for (int y = 0; y < portrait.height(); ++y)
+    for (int x = 0; x < portrait.width(); ++x)
+      REQUIRE(direct.getPixel(x, y) == portrait.getPixel(x, y));
+}
+
+TEST_CASE("drawing into a Rotation::Ccw framebuffer equals drawing then rotating") {
+  struct Case { int w, h; const char* what; };
+  const Case cases[] = {
+      {528, 792, "X3 528x792"},
+      {480, 800, "X4 480x800"},
+      // The stride maths is where this breaks: under rotation the stride comes
+      // from the logical HEIGHT, so a logical size that is not a multiple of 8
+      // exercises a different ragged edge than the unrotated case does.
+      {13, 21, "ragged 13x21"},
+      {21, 13, "ragged 21x13"},
+      {100, 7, "ragged 100x7"},
+      {1, 1, "degenerate 1x1"},
+  };
+  for (const Case c : cases) {
+    // Same pseudo-random pattern into both, in logical coordinates.
+    Framebuffer portrait(c.w, c.h);
+    fillPseudoRandom(portrait, static_cast<uint32_t>(c.w * 7919 + c.h));
+    Framebuffer viaRotate(c.h, c.w);
+    reader::rotate90CCW(portrait, viaRotate);
+
+    Framebuffer direct(c.w, c.h, Rotation::Ccw);
+    fillPseudoRandom(direct, static_cast<uint32_t>(c.w * 7919 + c.h));
+    checkSameBytes(viaRotate, direct, c.what);
+  }
+}
+
+TEST_CASE("a real screen renders byte-identically through both paths") {
+  // Home with the shipped view model and the real type ramp: plenty of ink, and
+  // every primitive on the screen at once -- glyphs, 2bpp icon edges, the
+  // cover's clustered dither, rules, solid fills and an inverted block. A
+  // synthetic pattern cannot catch a primitive that reads fb.width() and gets a
+  // logical answer where it wanted a physical one.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  const reader::HomeScreen home(reader::demoHomeVm(), reader::demoHomeTargets());
+  // Plane::Bw is what chrome ships; assert it so this stops matching if the
+  // screen's declared path moves, rather than pinning a path nothing paints.
+  REQUIRE(home.fidelity() == reader::Fidelity::Mono);
+
+  struct Geometry { int w, h; const char* what; };
+  for (const Geometry g : {Geometry{528, 792, "X3 528x792"}, Geometry{480, 800, "X4 480x800"}}) {
+    // (a) the old path: render portrait, transpose the finished frame.
+    Framebuffer portrait(g.w, g.h);
+    portrait.clear(true);
+    home.render(portrait, ramp.fonts, theme, reader::Plane::Bw);
+    Framebuffer viaRotate(g.h, g.w);
+    viaRotate.clear(true);
+    reader::rotate90CCW(portrait, viaRotate);
+
+    // (b) the new path: render straight into the rotated store.
+    Framebuffer direct(g.w, g.h, Rotation::Ccw);
+    direct.clear(true);
+    home.render(direct, ramp.fonts, theme, reader::Plane::Bw);
+
+    checkSameBytes(viaRotate, direct, g.what);
+    // A screen with no ink at all would pass the comparison trivially. Home inks
+    // roughly 8% of the frame; require it is not blank so the test cannot go
+    // green on an empty render.
+    int inked = 0;
+    for (int i = 0; i < direct.sizeBytes(); ++i)
+      if (direct.data()[i] != 0xFF) ++inked;
+    CHECK_MESSAGE(inked > direct.sizeBytes() / 20, g.what << ": only " << inked
+                                                          << " bytes carry ink");
+  }
+}
+
+TEST_CASE("the grayscale planes also agree through both paths") {
+  // The three-plane path renders the same screen three times plus a rebase, all
+  // into the rotated buffer now. Lsb and Msb carry partial coverage where Bw
+  // thresholds it away, so they touch bytes Bw never does.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  const reader::HomeScreen home(reader::demoHomeVm(), reader::demoHomeTargets());
+  for (const reader::Plane plane :
+       {reader::Plane::Lsb, reader::Plane::Msb, reader::Plane::BwDithered}) {
+    Framebuffer portrait(528, 792);
+    portrait.clear(true);
+    home.render(portrait, ramp.fonts, theme, plane);
+    Framebuffer viaRotate(792, 528);
+    viaRotate.clear(true);
+    reader::rotate90CCW(portrait, viaRotate);
+
+    Framebuffer direct(528, 792, Rotation::Ccw);
+    direct.clear(true);
+    home.render(direct, ramp.fonts, theme, plane);
+    checkSameBytes(viaRotate, direct, "grayscale plane");
+  }
+}
+
+TEST_CASE("rotating a Rotation::Ccw framebuffer is refused, not sheared") {
+  // rotate90CCW walks data() with physRowBytes() assuming physical == logical.
+  // A rotated argument would produce a plausible-looking sheared image, so the
+  // guard refuses instead and leaves the destination untouched.
+  Framebuffer rotated(8, 16, Rotation::Ccw);
+  inkPattern(rotated);
+  Framebuffer dst(16, 8);
+  dst.clear(true);
+  reader::rotate90CCW(rotated, dst);
+  for (int i = 0; i < dst.sizeBytes(); ++i) REQUIRE(dst.data()[i] == 0xFF);
+  reader::rotate90CW(rotated, dst);
+  for (int i = 0; i < dst.sizeBytes(); ++i) REQUIRE(dst.data()[i] == 0xFF);
+
+  // And a rotated DESTINATION is refused too.
+  Framebuffer portrait(8, 16);
+  inkPattern(portrait);
+  Framebuffer rotDst(8, 16, Rotation::Ccw);
+  rotDst.clear(true);
+  reader::rotate90CCW(portrait, rotDst);
+  for (int i = 0; i < rotDst.sizeBytes(); ++i) REQUIRE(rotDst.data()[i] == 0xFF);
 }

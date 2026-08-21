@@ -11,21 +11,29 @@ namespace {
 // cropped or offset image -- the hardest kind of bring-up bug to spot. Bail out
 // with dst untouched instead, so the symptom is a blank screen rather than a
 // plausible-looking wrong one. (No exceptions: the firmware is -fno-exceptions.)
+//
+// Both buffers must also be unrotated. Rotating a Rotation::Ccw framebuffer is
+// meaningless (it already holds a rotated frame) and, worse, the block loop
+// below walks data() with physRowBytes() assuming physical == logical, so a
+// rotated argument would produce a sheared image rather than an obvious failure.
 bool isTransposeOf(const Framebuffer& src, const Framebuffer& dst) {
   return src.width() > 0 && src.height() > 0 && dst.width() == src.height() &&
-         dst.height() == src.width();
+         dst.height() == src.width() && src.rotation() == Rotation::None &&
+         dst.rotation() == Rotation::None;
 }
 
 // Rotate one 8x8 pixel block, whole bytes in and whole bytes out.
 //
 // Why this exists: the per-pixel form below costs a bounds check, two divisions
-// and a read-modify-write per pixel, and the shell runs it FOUR times per paint
-// (one per plane, plus the grayscale cleanup rebase). Measured on the desktop at
-// the X3's geometry it was 3.86 ms against 0.57 ms for all of Home's actual
-// drawing -- 87% of a render pass spent moving bits that were already correct.
-// On device that is roughly 190 ms of every 220 ms pass. It is also
+// and a read-modify-write per pixel, and the shell used to run it FOUR times per
+// paint (one per plane, plus the grayscale cleanup rebase). Measured on the
+// desktop at the X3's geometry it was 3.86 ms against 0.57 ms for all of Home's
+// actual drawing -- 87% of a render pass spent moving bits that were already
+// correct. On device that is roughly 190 ms of every 220 ms pass. It is also
 // content-independent, which is why a focus move on Home and a push into a
-// nearly empty placeholder measured within 4% of each other.
+// nearly empty placeholder measured within 4% of each other. Making the whole
+// frame cheaper was never going to beat not transposing it at all, which is
+// what Framebuffer's Rotation::Ccw now does instead.
 //
 // The mapping, derived once so nobody has to re-derive it: rotate90CCW sends
 // src(x, y) to dst(y, w-1-x). Take an 8-aligned source block at (bx, by). Its
@@ -59,10 +67,22 @@ void rotate90CW(const Framebuffer& src, Framebuffer& dst) {
       dst.setPixel(src.height() - 1 - y, x, src.getPixel(x, y));
 }
 
+// NO LONGER ON THE PAINT PATH, and kept deliberately. The shell now draws
+// straight into a Rotation::Ccw framebuffer, which applies this same mapping one
+// pixel at a time as it draws, so nothing in the product calls this any more:
+// the full-frame transpose cost 37 ms of a 521 ms repaint whether one pixel
+// changed or all 418k did.
+//
+// Two reasons it stays. It is the REFERENCE the rotated framebuffer is tested
+// against -- "render into an unrotated frame and rotate it" is the path that was
+// verified on hardware, so test_rotate.cpp asserts the two produce identical
+// physical bytes, and any disagreement means the new path is wrong. And its
+// block-transpose tests are the specification for the CCW mapping itself. Delete
+// this and the new path has nothing to be right against.
 void rotate90CCW(const Framebuffer& src, Framebuffer& dst) {
   if (!isTransposeOf(src, dst)) return;
   const int w = src.width(), h = src.height();
-  const int srcStride = src.rowBytes(), dstStride = dst.rowBytes();
+  const int srcStride = src.physRowBytes(), dstStride = dst.physRowBytes();
   const uint8_t* sp = src.data();
   uint8_t* dp = dst.data();
 
