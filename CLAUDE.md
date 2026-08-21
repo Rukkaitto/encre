@@ -52,7 +52,19 @@ stop meaning anything.
 - The dev device is an **X3 with a UC8279** — 792×528, so a 528×792 portrait
   canvas. The X4 is 800×480 → 480×800. Both are ~220 PPI.
 - **Rotation is CCW**, measured. CW renders 180° out. Unverified on X4.
-- `pio` is not on PATH: `~/.platformio/penv/bin/pio`. The Makefile handles it.
+- `pio` is not on PATH, and the **launcher script is not the way in**: it runs a
+  dependency check before anything else that can fail with "Failed to install
+  Python dependencies into penv" while the toolchain is fine. Use the module
+  entry point, which skips the check and builds identically:
+  `~/.platformio/penv/bin/python -m platformio run -e xteink`. The Makefile does
+  this via `PIO_PY`, so `make firmware` is the reliable path.
+- **The app partition is 6.25 MB**, from the committed `partitions.csv` — the
+  board default gave 1.31 MB, which Phase 2C had already half spent. `nvs` and
+  `app0` keep the default table's offsets, so the session record survives a
+  repartition and an ordinary upload still lands correctly. There is now a
+  `coredump` partition too, so a panic can be recovered with
+  `make firmware` then `pio ... -t coredump` instead of being reconstructed from
+  the serial log.
 - **Flashing must be run by the user** — the permission classifier blocks it
   from an agent. Give them the command.
 - E-ink holds its last image with no power, so **a frozen screen does not mean

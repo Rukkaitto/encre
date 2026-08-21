@@ -1,6 +1,14 @@
 .PHONY: test sim firmware fonts icons compare
 # PlatformIO installs outside PATH by default; allow an override: make firmware PIO=/path/to/pio
-PIO ?= $(shell command -v pio 2>/dev/null || echo $(HOME)/.platformio/penv/bin/pio)
+#
+# Invoked through its MODULE entry point rather than the `pio` launcher script.
+# The launcher runs a dependency check before it does anything, and that check can
+# fail with "Failed to install Python dependencies into penv" while the toolchain
+# itself is perfectly fine -- it did, mid-Phase-2C, with no change on our side.
+# `python -m platformio` skips the check and builds identically, so a broken
+# launcher no longer blocks a build or a flash.
+PIO_PY ?= $(HOME)/.platformio/penv/bin/python
+PIO ?= $(if $(wildcard $(PIO_PY)),$(PIO_PY) -m platformio,pio)
 PYTHON ?= python3
 
 test:

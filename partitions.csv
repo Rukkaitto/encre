@@ -1,0 +1,45 @@
+# Partition table for the 16 MB Xteink X3/X4 (ESP32-C3).
+#
+# Without this file PlatformIO falls back to the board's default table, which
+# gives a 0x140000 (1.31 MB) app partition. Phase 2C already used 53% of that,
+# and the EPUB container, XHTML parser, layout engine, Wi-Fi stack and HTTP
+# server are all still to come -- so the ceiling would have been hit somewhere in
+# Phase 3, at which point repartitioning is surgery on a device in daily use.
+#
+# This is the layout the reference firmware (CrossInk) ships for this same
+# device, adopted deliberately rather than invented: it is known to work on this
+# hardware, and a home-made table would be a second thing to debug the next time
+# a boot fails. Recorded here so nobody has to re-derive it.
+#
+# Two things that make the switch safe from where we are:
+#
+#   * nvs stays at 0x9000 with 0x5000, exactly as the default table has it, so
+#     the session record written by shell/src/session.cpp SURVIVES the change.
+#     Move or resize nvs and it does not.
+#   * app0 stays at 0x10000, also as the default has it, so an ordinary
+#     `pio run -t upload` lands the app where the new table expects it.
+#
+# The spiffs region moves, so anything stored there is lost. Nothing uses it:
+# every file this firmware owns lives on the SD card (spec 5). It is kept
+# because Phase 4 serves a web UI and may want somewhere to put it.
+#
+# coredump is the one addition worth calling out. Every boot log to date carries
+#   E (154) esp_core_dump_flash: Incorrect size of core dump image: -153090797
+# which is the core-dump component finding no partition to read. With one, a
+# panic can actually be recovered afterwards with
+#   ~/.platformio/penv/bin/pio run -e xteink -t coredump
+# rather than being reconstructed from whatever the serial log happened to catch.
+# During Phase 2's boot hangs that would have been worth a lot.
+#
+# Recovery, if this ever goes wrong: ~/encre-device-backup/restore.sh writes the
+# verified 16 MB image back, partition table included. Download mode is available
+# on this device (no secure boot, no flash encryption), so it is not brickable
+# this way.
+#
+# Name,     Type, SubType,  Offset,   Size,      Flags
+nvs,        data, nvs,      0x9000,   0x5000,
+otadata,    data, ota,      0xe000,   0x2000,
+app0,       app,  ota_0,    0x10000,  0x640000,
+app1,       app,  ota_1,    0x650000, 0x640000,
+spiffs,     data, spiffs,   0xc90000, 0x360000,
+coredump,   data, coredump, 0xFF0000, 0x10000,
