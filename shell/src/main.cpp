@@ -49,24 +49,6 @@ constexpr int kFullRefreshEvery = 15;
 // costs one paint instead of one each. See the coalescing comment in loop().
 constexpr uint32_t kCoalesceMs = 90;
 
-// EXPERIMENT: force every screen onto the 1-bit path regardless of the fidelity
-// it declares.
-//
-// The grayscale path is structurally ~5x slower than 1-bit and always will be:
-// three panel waits (366 + 366 + 156 ms) and four render passes, against one
-// wait and one pass. CrossInk feels faster because it does not use it -- the
-// SDK's own UC8279 comment notes "CrossPoint paints home with FAST".
-//
-// 1-bit chrome was rejected once, in Phase 2A-2, as illegible. But that was at
-// the OLD type ramp, which was authored on a monitor and measured roughly half a
-// legible size on this glass; the pt-at-150-DPI ramp landed afterwards and 1-bit
-// has never been looked at since. Anti-aliasing was kept as a preference, not as
-// the legibility fix. So this is worth an honest look before building partial
-// updates on top of the grayscale path.
-//
-// Set false to go back to anti-aliased chrome.
-constexpr bool kForceMonoChrome = true;
-
 // millis() of the last button transition, for the coalescing window. Starts at 0
 // so the first paint in setup() is never deferred.
 static uint32_t gLastInputMs = 0;
@@ -171,6 +153,12 @@ static void paintPlane(reader::Plane plane) {
 // The 4-level path: base frame, settle pass, two bit-planes, combine, rebase.
 // Every comment below was earned by breaking the panel -- LSB before MSB, the
 // settle pass before the planes, the Bw re-render instead of a third frame.
+//
+// No screen declares Fidelity::Grayscale today, so nothing calls this: chrome
+// moved to the dithered path, which is ~5x cheaper and still anti-aliased. It is
+// kept because it is the only way to put continuous tone on this panel, which is
+// Phase 3's question about book images, and because getting the sequence right
+// cost several bricked-looking paints. Do not delete it to remove dead code.
 static void paintGray() {
   // 1. The B/W base frame the panel paints first. displayGrayscaleBase() takes
   //    no buffer argument — it drives the driver's own frameBuffer — so
@@ -218,10 +206,9 @@ static void paintGray() {
   mark("refresh-complete");
 }
 
-// The 1-bit path. Only legitimate where thresholded text is still readable --
-// the Reader's body text (Phase 3) and diagnostics. Phase 2A-2 measured
-// thresholded CHROME as illegible, so no product chrome screen may use this.
-static void paintMono(reader::RefreshMode mode) {
+// The 1-bit path, and what every screen ships on: one render pass and one panel
+// waveform against the four-and-three above.
+static void paintDithered(reader::RefreshMode mode) {
   // BwDithered, not Bw: the 1-bit path keeps its anti-aliasing by stippling
   // glyph and icon edge coverage through a dispersed Bayer threshold rather
   // than thresholding it away. One waveform and one render pass, and the
@@ -234,34 +221,35 @@ static void paintMono(reader::RefreshMode mode) {
   display.setFramebuffer(gLandscape->data());
   display.displayBuffer(mode == reader::RefreshMode::Full ? EInkDisplay::FULL_REFRESH
                                                           : EInkDisplay::FAST_REFRESH);
-  mark("mono-displayed");
+  mark("dithered-displayed");
 }
 
 static void renderTop() {
   const reader::RefreshMode mode = gRefresh.next(gApp->transition());
-  const bool gray = !kForceMonoChrome && gApp->top().fidelity() == reader::Fidelity::Gray;
+  const bool gray = gApp->top().fidelity() == reader::Fidelity::Grayscale;
   // `mode` is what the POLICY decided, not necessarily what the panel does: a
-  // Gray screen runs the full three-plane sequence regardless, because a 1-bit
-  // fast refresh of chrome is illegible on this glass. So `fidelity=gray
-  // mode=FAST` is not a contradiction -- it means the cadence had a fast slot
-  // available and this screen could not use it.
+  // Grayscale screen runs the full three-plane sequence regardless, because that
+  // sequence has no differential form. So `fidelity=gray mode=FAST` is not a
+  // contradiction -- it means the cadence had a fast slot available and this
+  // screen could not use it. Nothing declares Grayscale today, so in practice
+  // every paint takes the branch below.
   Serial.printf("[paint] screen=%s fidelity=%s mode=%s sinceFull=%d\n",
-                reader::screenName(gApp->top().id()), gray ? "gray" : "mono",
+                reader::screenName(gApp->top().id()), gray ? "gray" : "dithered",
                 mode == reader::RefreshMode::Full ? "FULL" : "FAST", gRefresh.sinceFull());
   Serial.flush();
   gRenderMs = 0;
   const uint32_t t0 = millis();
   if (gray) {
     // The grayscale sequence is inherently a full repaint; the policy's FAST is
-    // not available here, and taking it would mean thresholded chrome.
+    // not available here.
     paintGray();
   } else {
-    paintMono(mode);
+    paintDithered(mode);
   }
   const uint32_t total = millis() - t0;
   // render = drawing all passes (4 for gray: Bw, Lsb, Msb, then Bw again for the
-  // cleanup rebase; 1 for mono). panel = everything else, which is essentially
-  // BUSY waits.
+  // cleanup rebase; 1 for dithered). panel = everything else, which is
+  // essentially BUSY waits.
   Serial.printf("[paint] done total=%lums render=%lums panel=%lums\n", (unsigned long)total,
                 (unsigned long)gRenderMs, (unsigned long)(total - gRenderMs));
   Serial.flush();
