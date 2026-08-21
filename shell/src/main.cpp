@@ -40,11 +40,23 @@ constexpr int8_t EPD_SCLK = 8, EPD_MOSI = 10, EPD_CS = 21, EPD_DC = 4, EPD_RST =
 
 EInkDisplay display(EPD_SCLK, EPD_MOSI, EPD_CS, EPD_DC, EPD_RST, EPD_BUSY);
 
-// Sleep after five minutes idle, FULL refresh every fifteen. Both become
-// settings in Phase 2C; named here so the numbers are not buried in a
-// constructor call.
+// Sleep after five minutes idle. Becomes a setting in Phase 2C; named here so
+// the number is not buried in a constructor call.
 constexpr uint32_t kSleepAfterMs = 5u * 60u * 1000u;
-constexpr int kFullRefreshEvery = 15;
+// Periodic FULL refresh cadence for chrome: DISABLED, matching the reference
+// firmware, which schedules no periodic full refresh in its UI at all.
+//
+// A cadence exists to clear the residue differential refreshes leave behind, and
+// keeping one was the cautious choice -- but at 1-in-15 it put a black flash on
+// an arbitrary navigation, which reads as MORE random than the transition flash
+// it replaced, and unpredictable flashing was the complaint. Two things make the
+// risk acceptable: CrossInk ships this way on this hardware, and the ink
+// accumulation this project actually observed was caused by a missing grayscale
+// settle pass, on a path chrome no longer takes at all -- not by FAST refreshes.
+//
+// If ghosting does appear, this number is the whole fix: set it to 15 or 20.
+// Watch for a screen that gradually stops being readable with no obvious cause.
+constexpr int kFullRefreshEvery = reader::RefreshPolicy::kNever;
 // Whether a screen change forces a FULL refresh. False: it is the black flash
 // the user sees on every navigation, and the reference firmware does not do it on
 // this panel -- CrossInk's ScreenTransitionRefresh::modeFor returns FULL only for
@@ -79,20 +91,6 @@ static reader::QuietTheme gTheme;
 static reader::DemoScreenFactory gFactory;
 static std::unique_ptr<reader::App> gApp;
 static reader::PressRecognizer gPresses;
-// Chrome's refresh policy: no FULL on a screen transition, but KEEP the FULL
-// every 15.
-//
-// The reference firmware has no cadence at all, so it is tempting to delete this
-// as "not what CrossInk does". Do not do that without deciding to accept the
-// risk. A differential update leaves a little of the previous frame behind every
-// time, and on THIS panel that residue has already accumulated into visible ink
-// build-up once during this project (the paint that dropped the grayscale settle
-// pass -- everything grew perceptibly thicker with every refresh). One FULL in
-// fifteen is roughly 700 ms of flash across fifteen navigations; the failure it
-// insures against is a screen that gradually stops being readable, with no
-// obvious cause and no way to recover it but a reboot. Cheap insurance, and the
-// cadence is the only thing standing between chrome and an unbounded run of FAST
-// refreshes now that a transition no longer breaks that run.
 static reader::RefreshPolicy gRefresh(kFullRefreshEvery, kFullOnTransition);
 static reader::IdleTimer gIdle(kSleepAfterMs);
 static InputManager gInput;

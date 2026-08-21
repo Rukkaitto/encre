@@ -58,6 +58,12 @@ class RefreshPolicy {
   // spec's 15. A cadence of 1 or less means every refresh is FULL.
   // `fullOnTransition` makes a screen change force a FULL. It defaults true
   // because that is the conservative reading of spec 3.3; the shell turns it off.
+  // A cadence of this or below means NEVER schedule a periodic FULL. Distinct
+  // from 1, which means every refresh is FULL -- the two ends of the range must
+  // not collide, so 0 and negatives are the "never" end rather than folding into
+  // "always" as they used to.
+  static constexpr int kNever = 0;
+
   explicit RefreshPolicy(int cadence = 15, bool fullOnTransition = true)
       : cadence_(cadence), fullOnTransition_(fullOnTransition) {}
 

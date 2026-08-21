@@ -73,12 +73,31 @@ TEST_CASE("cadence N gives N-1 fast refreshes then a full one") {
   CHECK(p.next(false) == RefreshMode::Fast);
 }
 
-TEST_CASE("a cadence of one or less makes every refresh full") {
-  for (const int c : {1, 0, -3}) {
+TEST_CASE("a cadence of exactly one makes every refresh full") {
+  RefreshPolicy p(1);
+  CHECK(p.next(false) == RefreshMode::Full);
+  CHECK(p.next(false) == RefreshMode::Full);
+}
+
+TEST_CASE("a cadence of zero or below never schedules a periodic full") {
+  // 0 and negatives used to fold into "always FULL", which put the two ends of
+  // the range on the same value and left no way to say "never". They are now the
+  // NEVER end: kNever exists so a caller that wants no periodic flash can say so
+  // instead of picking an implausibly large number.
+  for (const int c : {RefreshPolicy::kNever, -3}) {
     RefreshPolicy p(c);
-    CHECK(p.next(false) == RefreshMode::Full);
-    CHECK(p.next(false) == RefreshMode::Full);
+    for (int i = 0; i < 50; ++i) CHECK(p.next(false) == RefreshMode::Fast);
+    // Still counting, so the log can report how long it has been.
+    CHECK(p.sinceFull() == 50);
   }
+}
+
+TEST_CASE("a disabled cadence still honours fullOnTransition") {
+  // The two settings stay independent in both directions: turning the periodic
+  // full off must not also silence a transition that asked to be FULL.
+  RefreshPolicy p(RefreshPolicy::kNever, true);
+  CHECK(p.next(true) == RefreshMode::Full);
+  CHECK(p.next(false) == RefreshMode::Fast);
 }
 
 TEST_CASE("the default cadence is the spec's fifteen") {
