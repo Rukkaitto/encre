@@ -122,6 +122,9 @@ def render_board(board_path, out_png, w, h):
     body = re.search(r"</helmet>\s*(.*?)</x-dc>", src, re.S)
     if not body:
         return None
+    panel_body, panel_notes = recentre_panels(body.group(1), w)
+    for note in panel_notes:
+        print("    [board %s @ %dx%d] %s" % (board_path.stem, w, h, note))
     frame_override = (
         '<style>[style*="width: %dpx; height: %dpx;"]'
         '{width:%dpx !important;height:%dpx !important;}</style>'
@@ -133,7 +136,7 @@ def render_board(board_path, out_png, w, h):
             + (helmet.group(1) if helmet else "")
             + "<style>html,body{margin:0;background:#fff}</style>"
             + frame_override
-            + body.group(1))
+            + panel_body)
         port = serve(tmp)
         subprocess.run(
             [CHROME, "--headless", "--disable-gpu", "--force-device-scale-factor=1",
@@ -147,6 +150,55 @@ def render_board(board_path, out_png, w, h):
             check=True, capture_output=True)
     p = pathlib.Path(out_png)
     return p if p.exists() else None
+
+
+def recentre_panels(body, w):
+    """Re-centre horizontally-centred absolute panels for a different canvas width.
+
+    The frame override below rewrites anything authored at the full frame size, so
+    the root, the content layer and the dim-veil scrim all track the new geometry.
+    An overlay PANEL does not: it is authored as `left: 70px; width: 340px`
+    (LibraryActions) or `left: 50px; width: 380px` (DeleteConfirm), neither of
+    which mentions the frame size, so it kept its authored left edge and sat 24px
+    off-centre in every X3 render. The firmware derives that edge from the canvas
+    width and centres correctly, so the DESIGN column was the wrong one -- which is
+    the worst way for this tool to be wrong, because a human reading the sheet
+    trusts the design side.
+
+    Done here rather than as a CSS rule because centring must be EARNED, not
+    assumed. A blanket `left:0;right:0;margin:auto` would also silently centre a
+    panel a board had deliberately placed off-centre, and the sheet would look
+    right while hiding a real difference. So: only rewrite `left` when the authored
+    numbers are symmetric about the authored frame, and say what was rewritten.
+
+    Vertical needs nothing -- the boards centre with `top: 50%` and a
+    `translateY(-50%)`, which is already geometry-independent (spec 4.1c).
+    """
+    if w == AUTHORED_W:
+        return body, []
+    notes = []
+
+    def fix(m):
+        style = m.group(0)
+        if not re.search(r"position:\s*absolute", style):
+            return style
+        left = re.search(r"left:\s*(\d+)px", style)
+        width = re.search(r"width:\s*(\d+)px", style)
+        if not left or not width:
+            return style
+        lv, wv = int(left.group(1)), int(width.group(1))
+        # Frame-sized layers belong to the !important override, not here.
+        if wv == AUTHORED_W:
+            return style
+        if lv * 2 + wv != AUTHORED_W:
+            notes.append("left %dpx width %dpx is NOT centred at %d; left alone"
+                         % (lv, wv, AUTHORED_W))
+            return style
+        new_left = (w - wv) // 2
+        notes.append("panel width %dpx: left %dpx -> %dpx" % (wv, lv, new_left))
+        return style.replace("left: %dpx" % lv, "left: %dpx" % new_left, 1)
+
+    return re.sub(r'style="[^"]*"', fix, body), notes
 
 
 def render_sim(screen_id, out_png, w, h):
