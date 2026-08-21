@@ -17,7 +17,11 @@ enum class Ink { Black, White };
 // Msb produce the two planes the controller combines into 4 levels. Opaque
 // drawing (rules, fills, icons) has coverage 0 or 3 and so is identical in all
 // three; only glyph edges differ.
-enum class Plane { Bw, Lsb, Msb };
+// Which pass of the panel's rendering model this draw is for. Bw/Lsb/Msb are
+// the three-pass grayscale path; BwDithered is the single-pass 1-bit path that
+// keeps anti-aliasing by stippling edge coverage instead of thresholding it
+// away, which is what lets chrome be smooth AND cost one waveform.
+enum class Plane { Bw, Lsb, Msb, BwDithered };
 
 // Draws UTF-8 text with kerning; (x, baselineY) is the pen origin.
 // `tracking` is the letter-spacing added after every glyph -- including the

@@ -1,3 +1,4 @@
+#include "reader/dither.h"
 #include "reader/icons.h"
 
 #include "icons_data.h"
@@ -30,6 +31,11 @@ void drawIcon(Framebuffer& fb, const Icon& icon, int x, int y, Ink ink, Plane pl
           break;
         case Plane::Msb:
           emit = (cov & 2) != 0;
+          break;
+        case Plane::BwDithered:
+          // Same stipple as glyph edges (see drawText), indexed by panel
+          // coordinates so a mark and the label beside it share one pattern.
+          emit = (cov * 16) / 3 > bayer4(x + col, y + row);
           break;
       }
       if (emit) fb.setPixel(x + col, y + row, white);

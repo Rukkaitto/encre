@@ -1,3 +1,4 @@
+#include "reader/dither.h"
 #include "reader/text.h"
 
 #include "reader/font.h"
@@ -54,6 +55,18 @@ int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::strin
           case Plane::Msb:
             emit = (cov & 2) != 0;
             break;
+          case Plane::BwDithered: {
+            // Stipple the edge instead of thresholding it away. Coverage is
+            // 0..3, so the nominal ink fraction is cov/3; comparing cov*16/3
+            // against the dispersed Bayer rank makes cov 1 ink 5 cells of 16,
+            // cov 2 ink 10, and cov 3 ink all 16 -- monotonic, with full
+            // coverage staying solid (a glyph's interior must never be
+            // stippled) and zero staying blank.
+            const int px = pen + g->xOff + col;
+            const int py = baselineY - g->yOff + row;
+            emit = (cov * 16) / 3 > bayer4(px, py);
+            break;
+          }
         }
         if (emit) fb.setPixel(pen + g->xOff + col, baselineY - g->yOff + row, white);
       }

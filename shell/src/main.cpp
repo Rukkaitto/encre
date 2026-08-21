@@ -222,7 +222,15 @@ static void paintGray() {
 // the Reader's body text (Phase 3) and diagnostics. Phase 2A-2 measured
 // thresholded CHROME as illegible, so no product chrome screen may use this.
 static void paintMono(reader::RefreshMode mode) {
-  paintPlane(reader::Plane::Bw);
+  // BwDithered, not Bw: the 1-bit path keeps its anti-aliasing by stippling
+  // glyph and icon edge coverage through a dispersed Bayer threshold rather
+  // than thresholding it away. One waveform and one render pass, and the
+  // curves still read as curves. This is the technique freeink-ui.md documents
+  // for exactly this ("reproduces the edge coverage on 1-bit panels through its
+  // ordered Bayer dither"), and it works because every role in our ramp is
+  // 21px or larger -- the doc's guidance is that dithered edges look best from
+  // about 16px up.
+  paintPlane(reader::Plane::BwDithered);
   display.setFramebuffer(gLandscape->data());
   display.displayBuffer(mode == reader::RefreshMode::Full ? EInkDisplay::FULL_REFRESH
                                                           : EInkDisplay::FAST_REFRESH);

@@ -37,6 +37,16 @@ namespace {
 // every 16 -- because the ranks are a permutation of 0..15, exactly as Bayer's
 // were. That is the property callers and tests rely on; the arrangement within a
 // tile is what changed.
+// The dispersed counterpart, for glyph and icon edge coverage. The classic
+// recursive Bayer 4x4: every rank is as far from its neighbours as the tile
+// allows, which is what makes a partial tone read as tone rather than texture.
+constexpr int kBayer[4][4] = {
+    {0, 8, 2, 10},
+    {12, 4, 14, 6},
+    {3, 11, 1, 9},
+    {15, 7, 13, 5},
+};
+
 constexpr int kClustered[4][4] = {
     {12, 6, 11, 13},
     {4, 0, 1, 9},
@@ -44,6 +54,8 @@ constexpr int kClustered[4][4] = {
     {14, 10, 7, 15},
 };
 }  // namespace
+
+int bayer4(int x, int y) { return kBayer[y & 3][x & 3]; }
 
 void ditherRect(Framebuffer& fb, int x, int y, int w, int h, int level) {
   if (level <= 0) return;
