@@ -72,7 +72,13 @@ TEST_CASE("icons are the sizes the design boards draw them at") {
   CHECK(reader::icons::kChevron.w == 25);
   CHECK(reader::icons::kBook.w == 25);
   CHECK(reader::icons::kBook.h == 25);
-  CHECK(reader::icons::kFolder.w == 46);
+  // 44, not 46: the Library board's folder mark used to declare `width="46"`
+  // inside a `width: 44px` thumbnail box, so Chrome shrank the <svg> to 44 on
+  // the main axis and the board's own render was 44 wide while the generator
+  // read 46 off the declaration. The mark the firmware shipped was therefore
+  // 4.5% larger than the mark the board draws. The board now declares the size
+  // it renders at; nothing about the board's pixels changed.
+  CHECK(reader::icons::kFolder.w == 44);
   CHECK(reader::icons::kFolder.h == 39);
   CHECK(reader::icons::kBattery.w == 38);
   CHECK(reader::icons::kBattery.h == 21);
