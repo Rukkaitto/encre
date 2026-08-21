@@ -4,6 +4,7 @@
 #include <InputManager.h>
 #include <PowerManager.h>
 #include <SPI.h>
+#include <esp_sleep.h>
 #include <XteinkDetect.h>
 
 #include <memory>
@@ -44,6 +45,13 @@ EInkDisplay display(EPD_SCLK, EPD_MOSI, EPD_CS, EPD_DC, EPD_RST, EPD_BUSY);
 // constructor call.
 constexpr uint32_t kSleepAfterMs = 5u * 60u * 1000u;
 constexpr int kFullRefreshEvery = 15;
+// How long input must be quiet before a repaint starts, so a burst of presses
+// costs one paint instead of one each. See the coalescing comment in loop().
+constexpr uint32_t kCoalesceMs = 90;
+
+// millis() of the last button transition, for the coalescing window. Starts at 0
+// so the first paint in setup() is never deferred.
+static uint32_t gLastInputMs = 0;
 
 // Everything the render needs has to outlive setup(), so it lives here rather
 // than on setup()'s stack -- but the two frames stay heap-allocated behind
@@ -154,11 +162,19 @@ static void paintGray() {
   display.displayGrayscaleBase(EInkDisplay::HALF_REFRESH);
   mark("gray-base-displayed");
 
-  // 2. The X3 settle pass, which leaves the particles receptive to the weak
-  //    grayscale nudge waveform. Must run BEFORE the planes are written: the
-  //    driver skips it once grayscale planes have overwritten DTM1/DTM2.
-  display.preconditionGrayscale();
-  mark("gray-preconditioned");
+  // 2. The settle pass that leaves the particles receptive to the weak
+  //    grayscale nudge waveform used to be an explicit preconditionGrayscale()
+  //    here, and it was DOING THE WORK TWICE: on this controller
+  //    displayGrayscaleBase's own differential path already loads the same
+  //    XtfPreBwMid bank with the same CDI/CCSET/TSSET and triggers the same
+  //    refresh, so the second call was an identical settle. A device log showed
+  //    both, back to back, at 366 ms each -- 27% of a 1363 ms paint spent
+  //    settling an already-settled frame.
+  //
+  //    The SDK's header asks callers to precondition between the base frame and
+  //    the planes, and that is right for panels whose displayGrayscaleBase does
+  //    not settle. UC8279's does. If a future panel needs it, put it back behind
+  //    a capability check rather than paying for it unconditionally.
 
   // 3. The two bit-planes. Both copies go straight out over SPI into controller
   //    RAM and retain no pointer, so one landscape buffer serves both — and the
@@ -233,7 +249,26 @@ void setup() {
   mark("display-begin-returned");
   // Fresh boot after a flash: force a clean full sync so the panel is not
   // differentially updated against whatever the previous firmware left on it.
-  display.requestResync();
+  // A fresh boot after a flash must not be differentially updated against
+  // whatever the previous firmware left on the panel, so the driver's two
+  // initial full clears are right -- they are what flashes the screen black.
+  //
+  // Waking from deep sleep is a chip reset that looks identical from here, but
+  // it is NOT the same situation: e-ink holds its image with no power, so the
+  // panel still shows exactly what we painted before sleeping. Clearing then is
+  // a black flash to replace a correct image with the same image. Tell the
+  // driver the panel is already valid instead.
+  const esp_sleep_wakeup_cause_t wake = esp_sleep_get_wakeup_cause();
+  const bool fromSleep = (wake != ESP_SLEEP_WAKEUP_UNDEFINED);
+  Serial.printf("[boot] wake cause=%d -> %s\n", (int)wake,
+                fromSleep ? "resumed from sleep, panel holds our frame"
+                          : "cold boot, clearing the panel");
+  Serial.flush();
+  if (fromSleep) {
+    display.skipInitialResync();
+  } else {
+    display.requestResync();
+  }
 
   Serial.printf("[info] panel %dx%d, buffer %u bytes\n", display.getDisplayWidth(),
                 display.getDisplayHeight(), (unsigned)display.getBufferSize());
@@ -325,6 +360,18 @@ void setup() {
   // first loop() iteration would repaint an identical Home and spend another
   // 1.5 s of panel time on it.
   gApp->clearDirty();
+
+  // The driver grants itself TWO full clears at init (_initialFullsRemaining),
+  // tuned for a consumer that paints a splash before its first real screen. We
+  // paint the real screen immediately, so the paint above already cleared the
+  // panel and the second clear lands on the user's FIRST BUTTON PRESS -- a
+  // black flash and an extra 693 ms DRF on an otherwise ordinary focus move,
+  // which is exactly why it read as random. Measured: 2113 ms, 2056 ms, then
+  // 1363 ms for every paint after.
+  //
+  // Spend the rest of the budget here. The panel now holds a frame we just
+  // wrote, which is the assertion skipInitialResync exists to make.
+  display.skipInitialResync();
   mark("first-paint-complete");
 }
 
@@ -397,7 +444,10 @@ void loop() {
   // Every poll, with or without a transition: a hold fires while the button is
   // still down, so without this a long press never resolves at all.
   gPresses.tick(millis());
-  if (activity) gIdle.noteActivity(millis());
+  if (activity) {
+    gIdle.noteActivity(millis());
+    gLastInputMs = millis();
+  }
 
   reader::InputEvent ev{};
   while (gPresses.pop(ev)) {
@@ -413,7 +463,19 @@ void loop() {
 
   if (gApp->sleepRequested() || gIdle.tick(millis()) == reader::PowerAction::Sleep) sleepNow();
 
-  if (gApp->dirty()) {
+  // Coalesce a burst of presses into one paint.
+  //
+  // A paint costs the panel ~1.3 s and cannot be interrupted, so holding Down
+  // through a three-item menu used to cost three of them -- 4 s to show two
+  // intermediate focus states nobody wanted to see, with every press landing
+  // further behind. Waiting for input to go quiet first means a burst paints
+  // once, at its final state.
+  //
+  // The cost is kCoalesceMs added to a single isolated press. That is a ~7%
+  // penalty on one paint against a ~3x saving on a burst, and it is below what
+  // is noticeable next to the refresh itself.
+  const bool settled = static_cast<uint32_t>(millis() - gLastInputMs) >= kCoalesceMs;
+  if (gApp->dirty() && settled) {
     renderTop();
     gApp->clearDirty();
   }
