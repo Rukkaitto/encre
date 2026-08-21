@@ -65,9 +65,20 @@ constexpr int kFullRefreshEvery = reader::RefreshPolicy::kNever;
 // FULL_REFRESH on home is gated behind an `initialFullRefresh` flag that defaults
 // to false.
 constexpr bool kFullOnTransition = false;
-// How long input must be quiet before a repaint starts, so a burst of presses
-// costs one paint instead of one each. See the coalescing comment in loop().
-constexpr uint32_t kCoalesceMs = 90;
+// Input-settle window before a repaint. ZERO, deliberately.
+//
+// It was 90 ms, added when a paint cost 1363 ms and a burst of presses cost N
+// times that. A paint is now a single FAST waveform, so the insurance is worth
+// far less and the latency costs far more: 90 ms was being added to EVERY press,
+// including isolated ones, which is pure delay against a reference firmware that
+// adds none.
+//
+// Bursts still coalesce, by the mechanism that was always doing the real work:
+// the drain loop dispatches every queued event before painting, so presses that
+// land DURING a paint are still merged into the next one. The settle window only
+// ever caught presses landing in the gap between paints, and at a human press
+// rate of ~150 ms it could not merge those without being long enough to feel.
+constexpr uint32_t kCoalesceMs = 0;
 
 // millis() of the last button transition, for the coalescing window. Starts at 0
 // so the first paint in setup() is never deferred.
@@ -158,6 +169,14 @@ static void detectAndSelectBoard() {
 // -- and guessing which would mean optimising blind.
 static uint32_t gRenderMs = 0;
 
+// Split the render pass so the log distinguishes drawing from the two
+// full-frame operations the reference firmware does not do at all: it draws
+// straight into the driver's framebuffer through an orientation-aware coordinate
+// transform, so it never rotates a frame and never memcpys one. Ours pays for
+// all 418k pixels whether one changed or every one did. If `rotate` and `copy`
+// turn out to dominate `draw`, that is the refactor worth doing.
+static uint32_t gDrawMs = 0, gRotateMs = 0, gCopyMs = 0;
+
 // One render pass: draw the plane portrait-side, then rotate into `gLandscape`.
 // CCW is the correct direction, verified on X3 hardware: CW renders the whole
 // screen 180 degrees out (the two directions differ by exactly half a turn).
@@ -166,8 +185,12 @@ static void paintPlane(reader::Plane plane) {
   const uint32_t t0 = millis();
   gPortrait->clear(true);
   gApp->top().render(*gPortrait, *gFonts, gTheme, plane);
+  const uint32_t t1 = millis();
   reader::rotate90CCW(*gPortrait, *gLandscape);
-  gRenderMs += millis() - t0;
+  const uint32_t t2 = millis();
+  gDrawMs += t1 - t0;
+  gRotateMs += t2 - t1;
+  gRenderMs += t2 - t0;
 }
 
 // The 4-level path: base frame, settle pass, two bit-planes, combine, rebase.
@@ -229,7 +252,9 @@ static void paintGray() {
 // Hand the one 1-bit frame in gLandscape to the panel. Shared by both one-pass
 // paths below, which differ only in the plane they render.
 static void showOnePass(reader::RefreshMode mode) {
+  const uint32_t tc = millis();
   display.setFramebuffer(gLandscape->data());
+  gCopyMs += millis() - tc;
   display.displayBuffer(mode == reader::RefreshMode::Full ? EInkDisplay::FULL_REFRESH
                                                           : EInkDisplay::FAST_REFRESH);
 }
@@ -281,7 +306,7 @@ static void renderTop() {
                                                          : "mono",
                 mode == reader::RefreshMode::Full ? "FULL" : "FAST", gRefresh.sinceFull());
   Serial.flush();
-  gRenderMs = 0;
+  gRenderMs = gDrawMs = gRotateMs = gCopyMs = 0;
   const uint32_t t0 = millis();
   switch (fidelity) {
     case reader::Fidelity::Grayscale:
@@ -296,8 +321,10 @@ static void renderTop() {
   // render = drawing all passes (4 for gray: Bw, Lsb, Msb, then Bw again for the
   // cleanup rebase; 1 for mono and for dithered). panel = everything else, which
   // is essentially BUSY waits.
-  Serial.printf("[paint] done total=%lums render=%lums panel=%lums\n", (unsigned long)total,
-                (unsigned long)gRenderMs, (unsigned long)(total - gRenderMs));
+  Serial.printf("[paint] done total=%lums render=%lums (draw=%lu rotate=%lu copy=%lu) panel=%lums\n",
+                (unsigned long)total, (unsigned long)gRenderMs, (unsigned long)gDrawMs,
+                (unsigned long)gRotateMs, (unsigned long)gCopyMs,
+                (unsigned long)(total - gRenderMs - gCopyMs));
   Serial.flush();
 }
 
