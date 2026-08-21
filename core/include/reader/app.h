@@ -54,7 +54,9 @@ class Screen {
  public:
   virtual ~Screen() = default;
   virtual ScreenId id() const = 0;
-  virtual Fidelity fidelity() const { return Fidelity::Gray; }
+  // Dithered by default: a screen opts IN to the ~5x more expensive grayscale
+  // path, rather than every screen having to remember to opt out of it.
+  virtual Fidelity fidelity() const { return Fidelity::Dithered; }
   virtual ButtonMask longPressable() const = 0;
   virtual Action onEvent(const InputEvent& ev) = 0;
   virtual void render(Framebuffer& fb, const FontSet& fonts, Theme& theme,

@@ -9,15 +9,16 @@ namespace reader {
 // This is what proves the phase on hardware. Short-versus-long classification
 // and the FAST refresh path are both invisible in a serial log and both visible
 // here: press Confirm and read SHORT, hold it and read LONG, at panel speed.
-// Fidelity::Mono on purpose -- a diagnostic is the one surface that can afford
-// thresholded text, and using it exercises the fast path in this phase rather
-// than leaving it untested until the Reader lands.
+//
+// It declares no fidelity: the inherited default is Fidelity::Dithered, which is
+// the fast path this screen exists to exercise. It used to override to the old
+// `Mono` because chrome was on the grayscale path and a diagnostic was the one
+// surface that could afford a cheap refresh; now every screen takes it.
 class InputMonitorScreen : public Screen {
  public:
   InputMonitorScreen();
 
   ScreenId id() const override { return ScreenId::InputMonitor; }
-  Fidelity fidelity() const override { return Fidelity::Mono; }
   ButtonMask longPressable() const override { return hintHoldMask(vm_.holds); }
   Action onEvent(const InputEvent& ev) override;
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;

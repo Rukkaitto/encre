@@ -41,9 +41,28 @@ class FakeFactory : public ScreenFactory {
   }
 };
 
+// A screen that wants true 4-level grey. Nothing in the product does yet; this
+// exists so the opt-in itself is pinned, because the retained grayscale path is
+// only reachable through it.
+class GrayscaleScreen : public FakeScreen {
+ public:
+  GrayscaleScreen() : FakeScreen(ScreenId::Home, Action::none()) {}
+  Fidelity fidelity() const override { return Fidelity::Grayscale; }
+};
+
 const InputEvent kConfirm{Button::Confirm, PressKind::Short};
 
 }  // namespace
+
+TEST_CASE("fidelity defaults to Dithered, and Grayscale is an explicit opt-in") {
+  // The default is the one-pass, one-waveform path. A screen that says nothing
+  // gets the cheap refresh; the three-waveform path costs an override. The
+  // inverse default is what made every chrome screen pay 1363 ms per paint.
+  FakeScreen quiet(ScreenId::Home, Action::none());
+  CHECK(quiet.fidelity() == Fidelity::Dithered);
+  GrayscaleScreen expensive;
+  CHECK(expensive.fidelity() == Fidelity::Grayscale);
+}
 
 TEST_CASE("hint slots map to the hardware button order") {
   // Back, Confirm, Up, Down -- NOT the enum's own order, which puts Left and

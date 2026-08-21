@@ -3,7 +3,7 @@
 //
 // No goldens here on purpose. These screens are scaffolding Phase 2C deletes,
 // and pinning provisional pixels would only create churn. What is worth pinning
-// is the behaviour -- focus, the pops and pushes, the Mono fidelity, the hold
+// is the behaviour -- focus, the pops and pushes, the declared fidelity, the hold
 // mask and the log -- plus the two things a render can get wrong regardless of
 // how it looks: drawing nothing at all, and drawing past the panel's edges.
 #include <string>
@@ -110,12 +110,14 @@ TEST_CASE("a stub binds no hold, so its mask is empty") {
   CHECK(s.longPressable() == 0);
 }
 
-TEST_CASE("the input monitor is Mono -- it is what exercises the fast refresh path") {
+TEST_CASE("every screen takes the dithered path by default -- grayscale is opt-in") {
+  // The default is the cheap path, so a screen gets the fast refresh by saying
+  // nothing. That is the whole point of the inversion: the expensive path costs
+  // three panel waveforms, and it should take a deliberate override to reach it.
   InputMonitorScreen m;
-  CHECK(m.fidelity() == Fidelity::Mono);
-  // The base class default is Gray, so this has to be an override, not luck.
+  CHECK(m.fidelity() == Fidelity::Dithered);
   StubScreen s = makeStub();
-  CHECK(s.fidelity() == Fidelity::Gray);
+  CHECK(s.fidelity() == Fidelity::Dithered);
 }
 
 TEST_CASE("the input monitor's mask is Confirm only, and comes from its hint slots") {
