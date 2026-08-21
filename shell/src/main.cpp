@@ -122,14 +122,24 @@ static void detectAndSelectBoard() {
   mark(isX3 ? "panel-profile-x3" : "panel-profile-x4");
 }
 
+// Time spent drawing, accumulated across a paint's passes so it can be reported
+// separately from time spent waiting on the panel. A focus move on Home measured
+// far slower than pushing a screen, and both take the same code path, so the
+// difference has to be either the drawing (Home draws a dither block and two
+// large faces; the placeholder draws almost nothing) or the panel's own waveform
+// -- and guessing which would mean optimising blind.
+static uint32_t gRenderMs = 0;
+
 // One render pass: draw the plane portrait-side, then rotate into `gLandscape`.
 // CCW is the correct direction, verified on X3 hardware: CW renders the whole
 // screen 180 degrees out (the two directions differ by exactly half a turn).
 // Unverified on X4 — if an X4 comes out upside down, this is the line.
 static void paintPlane(reader::Plane plane) {
+  const uint32_t t0 = millis();
   gPortrait->clear(true);
   gApp->top().render(*gPortrait, *gFonts, gTheme, plane);
   reader::rotate90CCW(*gPortrait, *gLandscape);
+  gRenderMs += millis() - t0;
 }
 
 // The 4-level path: base frame, settle pass, two bit-planes, combine, rebase.
@@ -194,6 +204,8 @@ static void renderTop() {
                 reader::screenName(gApp->top().id()), gray ? "gray" : "mono",
                 mode == reader::RefreshMode::Full ? "FULL" : "FAST", gRefresh.sinceFull());
   Serial.flush();
+  gRenderMs = 0;
+  const uint32_t t0 = millis();
   if (gray) {
     // The grayscale sequence is inherently a full repaint; the policy's FAST is
     // not available here, and taking it would mean thresholded chrome.
@@ -201,6 +213,13 @@ static void renderTop() {
   } else {
     paintMono(mode);
   }
+  const uint32_t total = millis() - t0;
+  // render = drawing all passes (4 for gray: Bw, Lsb, Msb, then Bw again for the
+  // cleanup rebase; 1 for mono). panel = everything else, which is essentially
+  // BUSY waits.
+  Serial.printf("[paint] done total=%lums render=%lums panel=%lums\n", (unsigned long)total,
+                (unsigned long)gRenderMs, (unsigned long)(total - gRenderMs));
+  Serial.flush();
 }
 
 void setup() {
@@ -349,12 +368,27 @@ void loop() {
     // order today, and a silent reinterpret would break the day either changes.
     reader::Button b;
     switch (s.button) {
+      // The SDK's names describe ITS band order, not this device's front panel,
+      // and on the Xteink they do not agree. Measured on an X3 with the input
+      // monitor, pressing each button in turn:
+      //
+      //   front row, left to right : BTN_BACK  BTN_CONFIRM  BTN_LEFT  BTN_RIGHT
+      //   the two side buttons     : BTN_UP    BTN_DOWN
+      //
+      // The design puts focus navigation on the front-right pair, under their
+      // own hint slots, and page turns on the sides with no hints (spec 4.0).
+      // So the front-right pair is Up/Down and the SIDE pair is Left/Right --
+      // the two names the SDK gives them, swapped. Mapping straight through is
+      // what put focus on the side buttons and left the front pair dead.
       case InputManager::BTN_BACK: b = reader::Button::Back; break;
       case InputManager::BTN_CONFIRM: b = reader::Button::Confirm; break;
-      case InputManager::BTN_LEFT: b = reader::Button::Left; break;
-      case InputManager::BTN_RIGHT: b = reader::Button::Right; break;
-      case InputManager::BTN_UP: b = reader::Button::Up; break;
-      case InputManager::BTN_DOWN: b = reader::Button::Down; break;
+      case InputManager::BTN_LEFT: b = reader::Button::Up; break;
+      case InputManager::BTN_RIGHT: b = reader::Button::Down; break;
+      // The sides turn pages in the Reader (Phase 3) and do nothing before it,
+      // so which one is "left" is unverified -- there is no behaviour to check
+      // it against yet. Verify when page turns land.
+      case InputManager::BTN_UP: b = reader::Button::Left; break;
+      case InputManager::BTN_DOWN: b = reader::Button::Right; break;
       case InputManager::BTN_POWER: b = reader::Button::Power; break;
       default: continue;
     }
