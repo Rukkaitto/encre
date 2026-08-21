@@ -69,6 +69,8 @@ class NullTheme : public Theme {
  public:
   void renderHome(Framebuffer&, const FontSet&, const HomeViewModel&, Plane) override {}
   void renderSdMissing(Framebuffer&, const FontSet&, const SdMissingViewModel&, Plane) override {}
+  void renderLibrary(Framebuffer&, const FontSet&, const LibraryViewModel&, Plane) override {}
+  int libraryVisibleRows(int, const FontSet&) const override { return 0; }
   void renderStub(Framebuffer&, const FontSet&, const StubViewModel&, Plane) override {}
 };
 

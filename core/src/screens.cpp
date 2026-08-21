@@ -1,6 +1,7 @@
 #include "reader/screens.h"
 
 #include "reader/screen_input_monitor.h"
+#include "reader/screen_library.h"
 #include "reader/screen_sd_missing.h"
 #include "reader/screen_stub.h"
 
@@ -26,13 +27,59 @@ HomeViewModel demoHomeVm() {
 
 std::vector<ScreenId> demoHomeTargets() { return {ScreenId::Library, ScreenId::Settings}; }
 
+std::vector<LibraryItem> demoLibraryItems() {
+  // The board's rows, in the board's order, with the board's own authors and
+  // right-hand values. The folder's `childBooks` is 6 because the board says
+  // `FOLDER - 6 BOOKS`, and it is also what makes the band read `12 BOOKS` over
+  // six books beside it -- the count is derived here exactly as it is on a card.
+  //
+  // The names carry extensions and the titles do not, because that is the
+  // relationship BookList::titleFor establishes and the sample must not be a
+  // second answer to it. Dubliners' size is what Book details formats as
+  // `0.4 MB`.
+  auto book = [](const char* name, const char* title, const char* author, const char* progress,
+                 uint32_t size) {
+    LibraryItem item;
+    item.entry = BookEntry{name, title, false, size};
+    item.author = author;
+    item.progress = progress;
+    return item;
+  };
+  LibraryItem folder;
+  folder.entry = BookEntry{"Classics", "Classics", true, 0};
+  folder.childBooks = 6;
+
+  return {folder,
+          book("Middlemarch.epub", "Middlemarch", "GEORGE ELIOT", "6%", 1268 * 1024),
+          book("Jane Eyre.epub", "Jane Eyre", "CHARLOTTE BRONT\xC3\x8B", "DONE", 902 * 1024),
+          book("Walden.epub", "Walden", "HENRY DAVID THOREAU", "48%", 511 * 1024),
+          book("Meditations.epub", "Meditations", "MARCUS AURELIUS", "NEW", 288 * 1024),
+          book("Dubliners.epub", "Dubliners", "JAMES JOYCE", "31%", 416 * 1024),
+          book("The Odyssey.epub", "The Odyssey", "HOMER \xC2\xB7 TR. BUTLER", "NEW",
+               1704 * 1024)};
+}
+
+DemoScreenFactory::DemoScreenFactory(FileSystem& fs, std::string root)
+    : fs_(&fs), root_(std::move(root)) {}
+
 std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
   using Row = StubScreen::Row;
   switch (id) {
-    case ScreenId::Library:
-      return std::make_unique<StubScreen>(
-          ScreenId::Library, "LIBRARY",
-          std::vector<Row>{{"CLASSICS", std::nullopt}, {"MIDDLEMARCH", std::nullopt}});
+    case ScreenId::Library: {
+      // Over the card when there is one, over the board's own content when there
+      // is not. Both go through the real LibraryScreen, so a desktop render is
+      // evidence about the device rather than about a second, similar screen.
+      auto lib = fs_ != nullptr ? std::make_unique<LibraryScreen>(*fs_, root_)
+                                : std::make_unique<LibraryScreen>(demoLibraryItems());
+      lib->setVisibleRows(libraryVisibleRows_);
+      library_ = lib.get();
+      return lib;
+    }
+    case ScreenId::ItemActions:
+      // Task 5's overlay. Returning null is a refused push, which leaves the
+      // stack alone -- so a long press on a row does nothing rather than pushing
+      // a hole onto the stack.
+      return nullptr;
     case ScreenId::Settings:
       // The Input Monitor is reachable ONLY from here. Nothing else lists it, and
       // without a way in, the phase loses the one place short-versus-long

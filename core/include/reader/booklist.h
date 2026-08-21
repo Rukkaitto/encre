@@ -40,6 +40,18 @@ class BookList {
   // previous card's books on screen.
   static bool scan(FileSystem& fs, std::string_view path, std::vector<BookEntry>& out);
 
+  // How many books a directory holds, or -1 when it could not be read.
+  //
+  // The board's folder row says `FOLDER - 6 BOOKS` and its band says `12 BOOKS`
+  // over six books and that folder, so the design counts one level down. This is
+  // that one level and no further: a full recursive walk of a card is unbounded
+  // work on a screen that has to paint, and V1's spec asks for neither.
+  //
+  // -1 rather than 0 for an unreadable directory, because "no books in it" and
+  // "could not look" draw differently -- the row shows a bare `FOLDER` for the
+  // second, which is honest, where a 0 would be a claim.
+  static int countBooks(FileSystem& fs, std::string_view path);
+
   // Whether a FILE belongs on the list: `.epub` or `.txt`, case-insensitively,
   // on its final extension only. FAT is case-preserving but not case-sensitive,
   // and a card written on a Mac will have a `.EPUB` on it eventually.

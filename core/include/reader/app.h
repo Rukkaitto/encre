@@ -14,7 +14,14 @@ class Framebuffer;
 class FontSet;
 class Theme;
 
-enum class ScreenId : uint8_t { Home, Library, Settings, InputMonitor, SdMissing };
+enum class ScreenId : uint8_t {
+  Home,
+  Library,
+  ItemActions,  // the overlay a long press on a Library row opens
+  Settings,
+  InputMonitor,
+  SdMissing
+};
 
 // A screen's name, for logs. Same reasoning as buttonName: a numeric ScreenId in
 // a serial log is one more thing to decode while diagnosing a device.

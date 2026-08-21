@@ -6,6 +6,7 @@ class Framebuffer;
 class FontSet;
 struct HomeViewModel;
 struct SdMissingViewModel;
+struct LibraryViewModel;
 struct StubViewModel;
 
 // Themes own the entire presentation, layout structure included (spec 3.3).
@@ -24,6 +25,27 @@ class Theme {
   // header band, no rows and no battery reading, and nothing about it is a list.
   virtual void renderSdMissing(Framebuffer& fb, const FontSet& fonts,
                                const SdMissingViewModel& vm, Plane plane = Plane::Bw) = 0;
+  // The Library (spec 4.1). Its own typed method, for the reason
+  // renderSdMissing is its own: it is its own board, and a shared "titled list"
+  // surface would have to be told which board it was drawing.
+  virtual void renderLibrary(Framebuffer& fb, const FontSet& fonts, const LibraryViewModel& vm,
+                             Plane plane = Plane::Bw) = 0;
+
+  // How many Library rows fit on a panel `panelH` tall.
+  //
+  // A query rather than a draw, and on the THEME rather than on the screen,
+  // because the answer is the board's box model -- the panel less the header band
+  // and the hint bar, over a row's height -- and the theme is what owns layout
+  // (spec 3.3). The Library needs it before it can paint anything: a scroll
+  // window cannot decide whether a focus move scrolls without knowing how many
+  // rows are on glass, and `onEvent` has no framebuffer to ask. So the caller
+  // that knows the panel size asks this and tells the screen once.
+  //
+  // Not a constant, for the reason three defects in this project were: the two
+  // geometries differ by 8px of height, the band's height depends on its type
+  // role, and a row's depends on the faces its two lines are set in.
+  virtual int libraryVisibleRows(int panelH, const FontSet& fonts) const = 0;
+
   // The provisional Phase 2B surface. A virtual on Theme rather than a screen
   // drawing its own pixels, because "screens never draw pixels directly" holds
   // for scaffolding too -- a diagnostic that bypassed the theme would be the

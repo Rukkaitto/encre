@@ -65,6 +65,28 @@ constexpr int kPromptActionW = 260;
 // along the bottom; at the pt ramp's sizes that strip duplicated the title
 // already set beside the cover and ran into the stats column, so the board
 // dropped it and the cover is now a plain panel.
+// --- design/Library.dc.html -------------------------------------------------
+//
+// The four slots' MARKS, in hardware order (Back, Confirm, Up, Down). Declared
+// once because two functions need them for two different reasons: renderLibrary
+// draws them, and libraryVisibleRows measures the bar they make. The labels come
+// from the view-model and cannot change the bar's height -- a slot is one line of
+// Meta whatever it says -- so the sizing path builds slots with no labels from
+// the same array rather than repeating the marks with a copy of the strings.
+constexpr const Icon* kLibraryMarks[4] = {&icons::kBack, &icons::kDot, &icons::kUp,
+                                          &icons::kDown};
+
+void libraryHints(const LibraryViewModel& vm, Hint out[4]) {
+  for (int i = 0; i < 4; ++i) out[i] = {kLibraryMarks[i], vm.hints[i], vm.holds[i]};
+}
+
+// "12 BOOKS", and "1 BOOK". The board only ever shows the plural, so the
+// singular is a decision rather than a transcription -- and a screen reading
+// "1 BOOKS" is a defect nobody would defend.
+std::string bookCountLabel(int n) {
+  return std::to_string(n) + (n == 1 ? " BOOK" : " BOOKS");
+}
+
 void drawCoverPlaceholder(Framebuffer& fb, int x, int y) {
   // Level 1, not 2: the board's `.dither-dots` is a 4px-pitch radial-gradient
   // dot, roughly a fifth coverage. Level 2 is a 50% checkerboard, which reads as
@@ -272,6 +294,52 @@ void QuietTheme::renderSdMissing(Framebuffer& fb, const FontSet& fonts,
   drawActionButton(fb, fonts, centreIn(kMargin, usableW, kPromptActionW), f26ToPx(yF26),
                    kPromptActionW, vm.action, /*filled=*/true, plane);
 
+  int slots[4] = {};
+  drawHintBar(fb, fonts, hints, slots, plane);
+}
+
+int QuietTheme::libraryVisibleRows(int panelH, const FontSet& fonts) const {
+  // Labelless slots: only the marks and the type role can change a bar's height,
+  // and both are the same here as in renderLibrary. An empty LABEL narrows a
+  // slot, which moves the others along the bar -- but this function is only
+  // asking how tall the bar is.
+  Hint hints[4];
+  for (int i = 0; i < 4; ++i) hints[i] = {kLibraryMarks[i], "", false};
+  // No mark on this band, so headerBandHeight is asked for the band the Library
+  // actually draws rather than for Home's.
+  const int area = panelH - headerBandHeight(fonts, nullptr) - hintBarHeight(fonts, hints);
+  const int row = bookRowHeight(fonts);
+  if (area <= 0 || row <= 0) return 0;
+  // Divided by the RULED height, which is the pitch of every row but the last:
+  // dividing by the 1px-shorter unruled one would claim room for a row that only
+  // the bottom of the list has.
+  return area / row;
+}
+
+void QuietTheme::renderLibrary(Framebuffer& fb, const FontSet& fonts, const LibraryViewModel& vm,
+                               Plane plane) {
+  fb.clear(true);
+  // No battery on this band: the board draws `LIBRARY` and a book count, and
+  // nothing else. Home's is the screen with the charge reading.
+  int y = drawHeaderBand(fb, fonts, vm.title, bookCountLabel(vm.bookCount), nullptr, plane);
+
+  const int rows = static_cast<int>(vm.rows.size());
+  for (int i = 0; i < rows; ++i) {
+    const LibraryRow& row = vm.rows[static_cast<size_t>(i)];
+    const bool focused = (i == vm.focusedRow);
+    // The board gives every row a `border-bottom` EXCEPT the focused one, whose
+    // fill runs to the next row's top edge, and the last one drawn, where it
+    // leaves the list's bottom edge open rather than hanging a hairline over the
+    // slack above the hint bar. So `y` advances by what the row actually
+    // consumed, which is 1px less without a rule -- the board's own pitch, which
+    // genuinely varies.
+    const bool rule = !focused && i != rows - 1;
+    y += drawBookRow(fb, fonts, y,
+                     {row.title, row.meta, row.value, row.isFolder}, focused, rule, plane);
+  }
+
+  Hint hints[4];
+  libraryHints(vm, hints);
   int slots[4] = {};
   drawHintBar(fb, fonts, hints, slots, plane);
 }

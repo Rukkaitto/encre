@@ -6,6 +6,7 @@ const char* screenName(ScreenId id) {
   switch (id) {
     case ScreenId::Home: return "HOME";
     case ScreenId::Library: return "LIBRARY";
+    case ScreenId::ItemActions: return "ITEM-ACTIONS";
     case ScreenId::Settings: return "SETTINGS";
     case ScreenId::InputMonitor: return "INPUT-MONITOR";
     case ScreenId::SdMissing: return "SD-MISSING";

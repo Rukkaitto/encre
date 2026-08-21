@@ -68,6 +68,18 @@ std::string BookList::titleFor(std::string_view name, bool isDir) {
   return std::string(name.substr(0, dot));
 }
 
+int BookList::countBooks(FileSystem& fs, std::string_view path) {
+  std::vector<DirEntry> raw;
+  if (!fs.list(path, raw)) return -1;
+  int n = 0;
+  // Files only, and the same isBook/isHidden rules the listing itself uses -- a
+  // count that disagreed with the rows it summarises would be worse than none.
+  // Subdirectories are not counted and not walked: see the header.
+  for (const DirEntry& e : raw)
+    if (!e.isDir && isBook(e.name)) ++n;
+  return n;
+}
+
 bool BookList::scan(FileSystem& fs, std::string_view path, std::vector<BookEntry>& out) {
   // Cleared before the read, not after a successful one: a rescan that fails --
   // the card was pulled between the delete and the refresh -- must not leave the

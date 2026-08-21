@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -10,6 +11,7 @@
 #include "reader/host_fs.h"
 #include "reader/png.h"
 #include "reader/screen_home.h"
+#include "reader/screen_library.h"
 #include "reader/screen_sd_missing.h"
 #include "reader/screens.h"
 #include "reader/settings.h"
@@ -113,28 +115,62 @@ static bool parseKeys(const char* spec, std::vector<reader::InputEvent>& out) {
 // dead code. That is why this is one function both subcommands go through rather
 // than a plane argument each of them picks for itself -- the `home` subcommand
 // used to hardcode BwDithered, which would now be exactly that dead path.
-static bool renderToPng(const reader::Screen& top, const reader::FontSet& fonts,
-                        reader::Theme& theme, int w, int h, const char* out) {
-  if (top.fidelity() == reader::Fidelity::Grayscale) {
+// The paint, as one callable per pass, so both what follows can drive the same
+// fidelity logic: a lone screen (`home`, `sd_missing`) and a whole App stack
+// (everything with an overlay in it, where painting only the top would draw a
+// panel floating on white).
+using PaintPass = std::function<void(reader::Framebuffer&, reader::Plane)>;
+
+static bool renderPassesToPng(const PaintPass& paint, reader::Fidelity fidelity, int w, int h,
+                              const char* out) {
+  if (fidelity == reader::Fidelity::Grayscale) {
     // The three-pass path: a thresholded base frame plus the two bit-planes the
     // controller combines into 4 levels, recomposed here into one greyscale
     // image so the desktop sees what the panel will paint. `bw` is rendered (not
     // skipped) so the simulator drives the same call sequence the shell does.
     reader::Framebuffer bw(w, h), lsb(w, h), msb(w, h);
-    top.render(bw, fonts, theme, reader::Plane::Bw);
-    top.render(lsb, fonts, theme, reader::Plane::Lsb);
-    top.render(msb, fonts, theme, reader::Plane::Msb);
+    paint(bw, reader::Plane::Bw);
+    paint(lsb, reader::Plane::Lsb);
+    paint(msb, reader::Plane::Msb);
     return reader::writeGrayPng(lsb, msb, out);
   }
   // Both one-pass paths write a two-level PNG; they differ only in whether
   // partial coverage is thresholded (Mono, what chrome ships) or stippled
   // (Dithered).
-  const reader::Plane plane = top.fidelity() == reader::Fidelity::Dithered
-                                  ? reader::Plane::BwDithered
-                                  : reader::Plane::Bw;
+  const reader::Plane plane = fidelity == reader::Fidelity::Dithered ? reader::Plane::BwDithered
+                                                                     : reader::Plane::Bw;
   reader::Framebuffer fb(w, h);
-  top.render(fb, fonts, theme, plane);
+  paint(fb, plane);
   return reader::writePng(fb, out);
+}
+
+static bool renderToPng(const reader::Screen& top, const reader::FontSet& fonts,
+                        reader::Theme& theme, int w, int h, const char* out) {
+  return renderPassesToPng(
+      [&](reader::Framebuffer& fb, reader::Plane p) { top.render(fb, fonts, theme, p); },
+      top.fidelity(), w, h, out);
+}
+
+// Through App::render, which paints the topmost non-overlay screen and then every
+// overlay above it. Fidelity still comes from the top of the stack alone.
+static bool renderAppToPng(const reader::App& app, const reader::FontSet& fonts,
+                           reader::Theme& theme, int w, int h, const char* out) {
+  return renderPassesToPng(
+      [&](reader::Framebuffer& fb, reader::Plane p) { app.render(fb, fonts, theme, p); },
+      app.top().fidelity(), w, h, out);
+}
+
+// The presses that reach the Library with the row its board focuses: Confirm on
+// Home's LIBRARY row (the first one, which is where Home's focus lands after one
+// Down), then one Down inside it. Shared with the overlay subcommands, which
+// need the same journey with a different row at the end of it.
+static std::vector<reader::InputEvent> libraryEntry(int downsInLibrary = 1) {
+  using reader::Button;
+  using reader::PressKind;
+  std::vector<reader::InputEvent> out{{Button::Down, PressKind::Short},
+                                      {Button::Confirm, PressKind::Short}};
+  for (int i = 0; i < downsInLibrary; ++i) out.push_back({Button::Down, PressKind::Short});
+  return out;
 }
 
 // What --root does with the directory it is given: mount a HostFileSystem on it
@@ -188,8 +224,15 @@ int main(int argc, char** argv) {
   const bool isHome = std::strcmp(argv[1], "home") == 0;
   const bool isSdMissing = std::strcmp(argv[1], "sd_missing") == 0;
   const bool isApp = std::strcmp(argv[1], "app") == 0;
-  if (!isHome && !isSdMissing && !isApp) {
-    std::fprintf(stderr, "unknown screen '%s' (expected 'home', 'sd_missing' or 'app')\n",
+  // The Library and the three boards that put something over it. Each is the
+  // same screen reached by the same presses the device would need, so a
+  // comparison sheet is a check on navigation as well as on rendering. The
+  // presses are the board's: Library.dc.html focuses its second row, and the
+  // overlay boards focus the sixth.
+  const bool isLibrary = std::strcmp(argv[1], "library") == 0;
+  if (!isHome && !isSdMissing && !isApp && !isLibrary) {
+    std::fprintf(stderr,
+                 "unknown screen '%s' (expected 'home', 'sd_missing', 'library' or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -227,12 +270,28 @@ int main(int argc, char** argv) {
   // Same root, same factory the shell builds, so a scripted desktop run walks
   // the screens the device walks rather than a second, similar-looking set.
   reader::DemoScreenFactory factory;
+  // How many Library rows fit on THIS panel. The theme owns the box model and
+  // this is the caller that knows the geometry, so it is asked once and the
+  // factory carries the answer into every Library it builds. Skipping it would
+  // leave the window inert and the list empty -- correctly, since a screen must
+  // not draw a row it was not given.
+  factory.setLibraryVisibleRows(theme.libraryVisibleRows(h, fonts));
   reader::App app(
       std::make_unique<reader::HomeScreen>(reader::demoHomeVm(), reader::demoHomeTargets()),
       factory);
+
+  if (isLibrary) {
+    // Home's first row is LIBRARY, so one Confirm opens it; then the board's own
+    // focus, which is its second row. Reached by pressing rather than by
+    // assignment, so the render pins the navigation too.
+    for (const reader::InputEvent& ev : libraryEntry()) app.dispatch(ev);
+  }
   for (const reader::InputEvent& ev : events) app.dispatch(ev);
 
-  if (!renderToPng(app.top(), fonts, theme, w, h, argv[2])) return 1;
+  // Through App::render, not top().render: with an overlay on the stack the top
+  // screen alone is a panel floating on white, and one paint path is what keeps
+  // the simulator, the goldens and the shell from disagreeing about that.
+  if (!renderAppToPng(app, fonts, theme, w, h, argv[2])) return 1;
   std::printf("wrote %s (%dx%d) screen=%d depth=%d\n", argv[2], w, h,
               static_cast<int>(app.top().id()), app.depth());
   return 0;

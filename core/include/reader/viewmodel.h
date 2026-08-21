@@ -51,6 +51,43 @@ struct SdMissingViewModel {
   std::array<bool, 4> holds{};
 };
 
+// One Library row as the theme draws it (design/Library.dc.html). Nothing here
+// addresses a file: the leaf name the card knows the thing by stays on the
+// screen's side of the wall, because the theme has no business with it and a
+// view-model that carried it would be the seam through which layout learned
+// about storage.
+//
+// `meta` is the second line, and it is composed by the screen rather than by the
+// theme because it is CONTENT: an author, or a folder's "FOLDER - 6 BOOKS"
+// summary. It is empty on the device today -- an author needs the EPUB's OPF,
+// which is Phase 3 -- and the row's height does not depend on it, so a blank
+// line leaves the list on the same grid.
+struct LibraryRow {
+  std::string title;
+  std::string meta;
+  std::string value;  // "6%", "DONE", "NEW"; empty on a folder, which discloses
+  bool isFolder = false;
+};
+
+// The Library (spec 4.1), from design/Library.dc.html.
+//
+// `rows` is EXACTLY what is on glass, never the whole directory: the scroll
+// window is the screen's business, and handing the theme a hundred books plus a
+// first-visible index would put the one rule that matters -- that the focus is
+// inside the window -- in two places. `focusedRow` therefore indexes `rows`, and
+// a screen with a focus scrolled out of view is not expressible.
+struct LibraryViewModel {
+  std::string title;  // the band's label: "LIBRARY", or a subfolder's own name
+  // The band's value, as a number: the theme formats it, because "12 BOOKS"
+  // against "1 BOOK" is a presentation decision and a pre-formatted string in
+  // here would be a screen making one.
+  int bookCount = 0;
+  std::vector<LibraryRow> rows;
+  int focusedRow = -1;
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
 // A provisional titled-list surface: Phase 2B's Library and Settings
 // placeholders and its Input Monitor. It exists so the interaction runtime can
 // be navigated and verified before the real screens are built, and Phase 2C
