@@ -54,9 +54,11 @@ class Screen {
  public:
   virtual ~Screen() = default;
   virtual ScreenId id() const = 0;
-  // Dithered by default: a screen opts IN to the ~5x more expensive grayscale
-  // path, rather than every screen having to remember to opt out of it.
-  virtual Fidelity fidelity() const { return Fidelity::Dithered; }
+  // Mono by default, which is what chrome ships on and what the reference
+  // firmware does on this panel. Both other paths cost an explicit override: the
+  // stipple because it is a deliberate aesthetic choice rather than the house
+  // style, and grayscale because it is ~5x more expensive.
+  virtual Fidelity fidelity() const { return Fidelity::Mono; }
   virtual ButtonMask longPressable() const = 0;
   virtual Action onEvent(const InputEvent& ev) = 0;
   virtual void render(Framebuffer& fb, const FontSet& fonts, Theme& theme,
@@ -86,7 +88,10 @@ class App {
 
   // Something on screen changed and needs painting.
   bool dirty() const { return dirty_; }
-  // ...and the change was a screen change, so the refresh must be FULL.
+  // ...and the change was a screen change rather than a change within one. What
+  // the refresh does with that is RefreshPolicy's business, not the app's: chrome
+  // constructs its policy with fullOnTransition false, so a transition is an
+  // ordinary FAST refresh.
   bool transition() const { return transition_; }
   void clearDirty();
 

@@ -99,6 +99,39 @@ static bool parseKeys(const char* spec, std::vector<reader::InputEvent>& out) {
   return true;
 }
 
+// Render `top` the way the shell would and write the PNG argv[2] asks for.
+//
+// Whichever path the screen on top declares, so a design comparison is measuring
+// what the firmware will actually paint. Getting this wrong is worse than
+// untidy: `tools/compare-design.py` drives this binary, so a simulator rendering
+// a path the shell no longer takes turns every comparison into a check against
+// dead code. That is why this is one function both subcommands go through rather
+// than a plane argument each of them picks for itself -- the `home` subcommand
+// used to hardcode BwDithered, which would now be exactly that dead path.
+static bool renderToPng(const reader::Screen& top, const reader::FontSet& fonts,
+                        reader::Theme& theme, int w, int h, const char* out) {
+  if (top.fidelity() == reader::Fidelity::Grayscale) {
+    // The three-pass path: a thresholded base frame plus the two bit-planes the
+    // controller combines into 4 levels, recomposed here into one greyscale
+    // image so the desktop sees what the panel will paint. `bw` is rendered (not
+    // skipped) so the simulator drives the same call sequence the shell does.
+    reader::Framebuffer bw(w, h), lsb(w, h), msb(w, h);
+    top.render(bw, fonts, theme, reader::Plane::Bw);
+    top.render(lsb, fonts, theme, reader::Plane::Lsb);
+    top.render(msb, fonts, theme, reader::Plane::Msb);
+    return reader::writeGrayPng(lsb, msb, out);
+  }
+  // Both one-pass paths write a two-level PNG; they differ only in whether
+  // partial coverage is thresholded (Mono, what chrome ships) or stippled
+  // (Dithered).
+  const reader::Plane plane = top.fidelity() == reader::Fidelity::Dithered
+                                  ? reader::Plane::BwDithered
+                                  : reader::Plane::Bw;
+  reader::Framebuffer fb(w, h);
+  top.render(fb, fonts, theme, plane);
+  return reader::writePng(fb, out);
+}
+
 int main(int argc, char** argv) {
   if (argc < 3) {
     std::fprintf(stderr, "usage: reader_sim home|app OUT.png [--canvas WxH] [--keys SPEC]\n");
@@ -126,13 +159,12 @@ int main(int argc, char** argv) {
 
   if (isHome) {
     // From the shared catalogue, not from a copy here: the simulator's PNGs are
-    // only evidence about the device if the device shows the same content.
-    //
-    // Home is Fidelity::Dithered, like every screen: one pass, one 1-bit image.
-    const reader::HomeViewModel vm = reader::demoHomeVm();
-    reader::Framebuffer fb(w, h);
-    theme.renderHome(fb, fonts, vm, reader::Plane::BwDithered);
-    if (!reader::writePng(fb, argv[2])) return 1;
+    // only evidence about the device if the device shows the same content. And
+    // through the real HomeScreen rather than calling theme.renderHome directly,
+    // so the fidelity this renders is the one the screen declares -- Home takes
+    // the default, Fidelity::Mono, one pass and one 1-bit image.
+    const reader::HomeScreen home(reader::demoHomeVm(), reader::demoHomeTargets());
+    if (!renderToPng(home, fonts, theme, w, h, argv[2])) return 1;
     std::printf("wrote %s (%dx%d)\n", argv[2], w, h);
     return 0;
   }
@@ -148,27 +180,7 @@ int main(int argc, char** argv) {
       factory);
   for (const reader::InputEvent& ev : events) app.dispatch(ev);
 
-  // Whichever path the screen on top declares, so a design comparison is
-  // measuring what the firmware will actually paint. Getting this wrong is worse
-  // than untidy: `tools/compare-design.py` drives this binary, so a simulator
-  // rendering a path the shell no longer takes turns every comparison into a
-  // check against dead code.
-  const reader::Screen& top = app.top();
-  if (top.fidelity() == reader::Fidelity::Grayscale) {
-    // The three-pass path: a thresholded base frame plus the two bit-planes the
-    // controller combines into 4 levels, recomposed here into one greyscale
-    // image so the desktop sees what the panel will paint. `bw` is rendered (not
-    // skipped) so the simulator drives the same call sequence the shell does.
-    reader::Framebuffer bw(w, h), lsb(w, h), msb(w, h);
-    top.render(bw, fonts, theme, reader::Plane::Bw);
-    top.render(lsb, fonts, theme, reader::Plane::Lsb);
-    top.render(msb, fonts, theme, reader::Plane::Msb);
-    if (!reader::writeGrayPng(lsb, msb, argv[2])) return 1;
-  } else {
-    reader::Framebuffer fb(w, h);
-    top.render(fb, fonts, theme, reader::Plane::BwDithered);
-    if (!reader::writePng(fb, argv[2])) return 1;
-  }
+  if (!renderToPng(app.top(), fonts, theme, w, h, argv[2])) return 1;
   std::printf("wrote %s (%dx%d) screen=%d depth=%d\n", argv[2], w, h,
               static_cast<int>(app.top().id()), app.depth());
   return 0;

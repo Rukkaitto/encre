@@ -110,14 +110,15 @@ TEST_CASE("a stub binds no hold, so its mask is empty") {
   CHECK(s.longPressable() == 0);
 }
 
-TEST_CASE("every screen takes the dithered path by default -- grayscale is opt-in") {
-  // The default is the cheap path, so a screen gets the fast refresh by saying
-  // nothing. That is the whole point of the inversion: the expensive path costs
-  // three panel waveforms, and it should take a deliberate override to reach it.
+TEST_CASE("every screen takes the mono path by default -- the other two are opt-in") {
+  // The default is the cheap, hard-thresholded path, so a screen gets the fast
+  // refresh by saying nothing. That is the whole point of the inversion: the
+  // grayscale path costs three panel waveforms, and it should take a deliberate
+  // override to reach it.
   InputMonitorScreen m;
-  CHECK(m.fidelity() == Fidelity::Dithered);
+  CHECK(m.fidelity() == Fidelity::Mono);
   StubScreen s = makeStub();
-  CHECK(s.fidelity() == Fidelity::Dithered);
+  CHECK(s.fidelity() == Fidelity::Mono);
 }
 
 TEST_CASE("the input monitor's mask is Confirm only, and comes from its hint slots") {

@@ -17,7 +17,7 @@ TEST_CASE("the demo catalogue can reach the input monitor from Home") {
   REQUIRE(app.top().id() == ScreenId::Settings);
   app.dispatch(confirm);  // its first row is INPUT MONITOR
   REQUIRE(app.top().id() == ScreenId::InputMonitor);
-  CHECK(app.top().fidelity() == Fidelity::Dithered);
+  CHECK(app.top().fidelity() == Fidelity::Mono);
   // Confirm carries the hold here, and the ring on that slot is the same array.
   CHECK(app.top().longPressable() == buttonBit(Button::Confirm));
 

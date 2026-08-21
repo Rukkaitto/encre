@@ -50,18 +50,33 @@ class GrayscaleScreen : public FakeScreen {
   Fidelity fidelity() const override { return Fidelity::Grayscale; }
 };
 
+// A screen that wants stippled edges rather than hard ones. Same story: nothing
+// in the product declares it now that chrome ships Mono, so this is what keeps
+// the opt-in reachable and stops the dithered path being read as dead code.
+class DitheredScreen : public FakeScreen {
+ public:
+  DitheredScreen() : FakeScreen(ScreenId::Home, Action::none()) {}
+  Fidelity fidelity() const override { return Fidelity::Dithered; }
+};
+
 const InputEvent kConfirm{Button::Confirm, PressKind::Short};
 
 }  // namespace
 
-TEST_CASE("fidelity defaults to Dithered, and Grayscale is an explicit opt-in") {
-  // The default is the one-pass, one-waveform path. A screen that says nothing
-  // gets the cheap refresh; the three-waveform path costs an override. The
+TEST_CASE("fidelity defaults to Mono, and the other two are explicit opt-ins") {
+  // The default is the hard 1-bit, one-waveform path -- what chrome ships and
+  // what the reference firmware does on this panel. A screen that says nothing
+  // gets it; the stipple and the three-waveform path each cost an override. The
   // inverse default is what made every chrome screen pay 1363 ms per paint.
   FakeScreen quiet(ScreenId::Home, Action::none());
-  CHECK(quiet.fidelity() == Fidelity::Dithered);
+  CHECK(quiet.fidelity() == Fidelity::Mono);
+  DitheredScreen stippled;
+  CHECK(stippled.fidelity() == Fidelity::Dithered);
   GrayscaleScreen expensive;
   CHECK(expensive.fidelity() == Fidelity::Grayscale);
+  // All three are distinct, so a switch over them cannot collapse two paths.
+  CHECK(quiet.fidelity() != stippled.fidelity());
+  CHECK(stippled.fidelity() != expensive.fidelity());
 }
 
 TEST_CASE("hint slots map to the hardware button order") {

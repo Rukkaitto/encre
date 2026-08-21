@@ -37,9 +37,9 @@ TEST_CASE("Home with the Library row focused matches its golden at both geometri
     reader::Framebuffer fb(c.w, c.h);
     // One pass with the plane the screen's own fidelity implies, which is the
     // sequence the shell and the simulator drive: Home declares nothing, so it
-    // takes the default Fidelity::Dithered.
-    REQUIRE(screen.fidelity() == reader::Fidelity::Dithered);
-    screen.render(fb, r.fonts, theme, reader::Plane::BwDithered);
+    // takes the default Fidelity::Mono -- hard-thresholded coverage, no stipple.
+    REQUIRE(screen.fidelity() == reader::Fidelity::Mono);
+    screen.render(fb, r.fonts, theme, reader::Plane::Bw);
     golden::checkGolden(fb, c.name);
   }
 }

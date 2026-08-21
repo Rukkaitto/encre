@@ -10,10 +10,10 @@ namespace reader {
 // and the FAST refresh path are both invisible in a serial log and both visible
 // here: press Confirm and read SHORT, hold it and read LONG, at panel speed.
 //
-// It declares no fidelity: the inherited default is Fidelity::Dithered, which is
-// the fast path this screen exists to exercise. It used to override to the old
-// `Mono` because chrome was on the grayscale path and a diagnostic was the one
-// surface that could afford a cheap refresh; now every screen takes it.
+// It declares no fidelity: the inherited default is Fidelity::Mono, which is the
+// fast path this screen exists to exercise. It used to override to `Mono`
+// explicitly, back when chrome was on the grayscale path and a diagnostic was the
+// one surface that could afford a cheap refresh; now every screen takes it.
 class InputMonitorScreen : public Screen {
  public:
   InputMonitorScreen();

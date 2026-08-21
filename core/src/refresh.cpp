@@ -3,10 +3,12 @@
 namespace reader {
 
 RefreshMode RefreshPolicy::next(bool transition) {
-  if (transition || cadence_ <= 1) {
+  if ((transition && fullOnTransition_) || cadence_ <= 1) {
     sinceFull_ = 0;
     return RefreshMode::Full;
   }
+  // Falling through here with `transition` set is deliberate: the transition is
+  // counted as the ordinary refresh it now is, rather than resetting sinceFull_.
   if (++sinceFull_ >= cadence_) {
     sinceFull_ = 0;
     return RefreshMode::Full;

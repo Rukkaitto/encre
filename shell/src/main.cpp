@@ -45,6 +45,14 @@ EInkDisplay display(EPD_SCLK, EPD_MOSI, EPD_CS, EPD_DC, EPD_RST, EPD_BUSY);
 // constructor call.
 constexpr uint32_t kSleepAfterMs = 5u * 60u * 1000u;
 constexpr int kFullRefreshEvery = 15;
+// Whether a screen change forces a FULL refresh. False: it is the black flash
+// the user sees on every navigation, and the reference firmware does not do it on
+// this panel -- CrossInk's ScreenTransitionRefresh::modeFor returns FULL only for
+// `screenChanged && !deviceIsX3()`, and its list/menu screens call
+// displayBuffer() with no argument, whose default is FAST_REFRESH. Its one
+// FULL_REFRESH on home is gated behind an `initialFullRefresh` flag that defaults
+// to false.
+constexpr bool kFullOnTransition = false;
 // How long input must be quiet before a repaint starts, so a burst of presses
 // costs one paint instead of one each. See the coalescing comment in loop().
 constexpr uint32_t kCoalesceMs = 90;
@@ -71,7 +79,21 @@ static reader::QuietTheme gTheme;
 static reader::DemoScreenFactory gFactory;
 static std::unique_ptr<reader::App> gApp;
 static reader::PressRecognizer gPresses;
-static reader::RefreshPolicy gRefresh(kFullRefreshEvery);
+// Chrome's refresh policy: no FULL on a screen transition, but KEEP the FULL
+// every 15.
+//
+// The reference firmware has no cadence at all, so it is tempting to delete this
+// as "not what CrossInk does". Do not do that without deciding to accept the
+// risk. A differential update leaves a little of the previous frame behind every
+// time, and on THIS panel that residue has already accumulated into visible ink
+// build-up once during this project (the paint that dropped the grayscale settle
+// pass -- everything grew perceptibly thicker with every refresh). One FULL in
+// fifteen is roughly 700 ms of flash across fifteen navigations; the failure it
+// insures against is a screen that gradually stops being readable, with no
+// obvious cause and no way to recover it but a reboot. Cheap insurance, and the
+// cadence is the only thing standing between chrome and an unbounded run of FAST
+// refreshes now that a transition no longer breaks that run.
+static reader::RefreshPolicy gRefresh(kFullRefreshEvery, kFullOnTransition);
 static reader::IdleTimer gIdle(kSleepAfterMs);
 static InputManager gInput;
 
@@ -155,7 +177,7 @@ static void paintPlane(reader::Plane plane) {
 // settle pass before the planes, the Bw re-render instead of a third frame.
 //
 // No screen declares Fidelity::Grayscale today, so nothing calls this: chrome
-// moved to the dithered path, which is ~5x cheaper and still anti-aliased. It is
+// moved to the one-pass paths, which are ~5x cheaper and legible. It is
 // kept because it is the only way to put continuous tone on this panel, which is
 // Phase 3's question about book images, and because getting the sequence right
 // cost several bricked-looking paints. Do not delete it to remove dead code.
@@ -206,50 +228,76 @@ static void paintGray() {
   mark("refresh-complete");
 }
 
-// The 1-bit path, and what every screen ships on: one render pass and one panel
-// waveform against the four-and-three above.
-static void paintDithered(reader::RefreshMode mode) {
-  // BwDithered, not Bw: the 1-bit path keeps its anti-aliasing by stippling
-  // glyph and icon edge coverage through a dispersed Bayer threshold rather
-  // than thresholding it away. One waveform and one render pass, and the
-  // curves still read as curves. This is the technique freeink-ui.md documents
-  // for exactly this ("reproduces the edge coverage on 1-bit panels through its
-  // ordered Bayer dither"), and it works because every role in our ramp is
-  // 21px or larger -- the doc's guidance is that dithered edges look best from
-  // about 16px up.
-  paintPlane(reader::Plane::BwDithered);
+// Hand the one 1-bit frame in gLandscape to the panel. Shared by both one-pass
+// paths below, which differ only in the plane they render.
+static void showOnePass(reader::RefreshMode mode) {
   display.setFramebuffer(gLandscape->data());
   display.displayBuffer(mode == reader::RefreshMode::Full ? EInkDisplay::FULL_REFRESH
                                                           : EInkDisplay::FAST_REFRESH);
+}
+
+// The hard 1-bit path, and what every chrome screen ships on: one render pass
+// and one panel waveform against the four-and-three above.
+static void paintMono(reader::RefreshMode mode) {
+  // Plane::Bw thresholds coverage at half: a pixel is ink or it is paper, and
+  // nothing in between survives. That is what the reference firmware does to its
+  // chrome -- CrossInk builds its UI fonts 1-bit and reads its anti-aliasing
+  // setting only in the reader activities -- and matching it on the same glass is
+  // the point. Compared side by side on an X3, the hard edge reads cleaner than a
+  // stipple at chrome sizes.
+  paintPlane(reader::Plane::Bw);
+  showOnePass(mode);
+  mark("mono-displayed");
+}
+
+// The stippled 1-bit path. Same cost as paintMono -- one render pass, one
+// waveform -- and reachable only by a screen that overrides fidelity() to
+// Fidelity::Dithered. Nothing does today; chrome ships Mono.
+static void paintDithered(reader::RefreshMode mode) {
+  // BwDithered, not Bw: this path keeps a soft edge on a two-level frame by
+  // stippling glyph and icon edge coverage through a dispersed Bayer threshold
+  // rather than thresholding it away. This is the technique freeink-ui.md
+  // documents for exactly this ("reproduces the edge coverage on 1-bit panels
+  // through its ordered Bayer dither"), and it works because every role in our
+  // ramp is 21px or larger -- the doc's guidance is that dithered edges look best
+  // from about 16px up. Kept for large display type, where a stroke is wide
+  // enough for the stipple to read as tone rather than as grain.
+  paintPlane(reader::Plane::BwDithered);
+  showOnePass(mode);
   mark("dithered-displayed");
 }
 
 static void renderTop() {
   const reader::RefreshMode mode = gRefresh.next(gApp->transition());
-  const bool gray = gApp->top().fidelity() == reader::Fidelity::Grayscale;
+  const reader::Fidelity fidelity = gApp->top().fidelity();
   // `mode` is what the POLICY decided, not necessarily what the panel does: a
   // Grayscale screen runs the full three-plane sequence regardless, because that
   // sequence has no differential form. So `fidelity=gray mode=FAST` is not a
   // contradiction -- it means the cadence had a fast slot available and this
-  // screen could not use it. Nothing declares Grayscale today, so in practice
-  // every paint takes the branch below.
+  // screen could not use it. Nothing declares Grayscale or Dithered today, so in
+  // practice every paint is `fidelity=mono`.
   Serial.printf("[paint] screen=%s fidelity=%s mode=%s sinceFull=%d\n",
-                reader::screenName(gApp->top().id()), gray ? "gray" : "dithered",
+                reader::screenName(gApp->top().id()),
+                fidelity == reader::Fidelity::Grayscale  ? "gray"
+                : fidelity == reader::Fidelity::Dithered ? "dithered"
+                                                         : "mono",
                 mode == reader::RefreshMode::Full ? "FULL" : "FAST", gRefresh.sinceFull());
   Serial.flush();
   gRenderMs = 0;
   const uint32_t t0 = millis();
-  if (gray) {
-    // The grayscale sequence is inherently a full repaint; the policy's FAST is
-    // not available here.
-    paintGray();
-  } else {
-    paintDithered(mode);
+  switch (fidelity) {
+    case reader::Fidelity::Grayscale:
+      // The grayscale sequence is inherently a full repaint; the policy's FAST is
+      // not available here.
+      paintGray();
+      break;
+    case reader::Fidelity::Dithered: paintDithered(mode); break;
+    case reader::Fidelity::Mono: paintMono(mode); break;
   }
   const uint32_t total = millis() - t0;
   // render = drawing all passes (4 for gray: Bw, Lsb, Msb, then Bw again for the
-  // cleanup rebase; 1 for dithered). panel = everything else, which is
-  // essentially BUSY waits.
+  // cleanup rebase; 1 for mono and for dithered). panel = everything else, which
+  // is essentially BUSY waits.
   Serial.printf("[paint] done total=%lums render=%lums panel=%lums\n", (unsigned long)total,
                 (unsigned long)gRenderMs, (unsigned long)(total - gRenderMs));
   Serial.flush();

@@ -10,6 +10,7 @@
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
 #include "reader/icons.h"
+#include "reader/screen_home.h"
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
 
@@ -20,15 +21,21 @@ TEST_CASE("QuietTheme renders Home to golden on both panel geometries") {
   reader::FontSet& fonts = ramp.fonts;
   reader::QuietTheme theme;
 
-  // Home is Fidelity::Dithered, so the golden is the single 1-bit frame the
-  // panel is handed -- one pass with Plane::BwDithered, exactly what
-  // paintDithered() in the shell and the simulator render. Glyph and icon edges
-  // carry their anti-aliasing as a stipple; rules, fills and the cover's dither
-  // are unchanged from the grayscale composition this golden used to hold.
+  // Home takes the default Fidelity::Mono, so the golden is the single 1-bit
+  // frame the panel is handed -- one pass with Plane::Bw, exactly what
+  // paintMono() in the shell and the simulator render. Glyph and icon edges are
+  // hard-thresholded, which is what the reference firmware does to its chrome;
+  // rules, fills and the cover's dither have coverage 0 or 3 and so are
+  // unchanged from the stippled frame this golden used to hold.
+  //
+  // The fidelity is asserted, not assumed: this test names a plane, and if the
+  // screen's declared path ever moves the golden must stop matching rather than
+  // quietly keep pinning a path nothing paints.
+  REQUIRE(reader::HomeScreen(sampleHome(), {}).fidelity() == reader::Fidelity::Mono);
   auto renderOne = [&](int w, int h, const std::string& name) {
     reader::Framebuffer fb(w, h);
     const reader::HomeViewModel vm = sampleHome();
-    theme.renderHome(fb, fonts, vm, reader::Plane::BwDithered);
+    theme.renderHome(fb, fonts, vm, reader::Plane::Bw);
     golden::checkGolden(fb, name);
   };
 
