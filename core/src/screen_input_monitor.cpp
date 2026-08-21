@@ -3,22 +3,6 @@
 #include "reader/theme.h"
 
 namespace reader {
-namespace {
-
-const char* buttonName(Button b) {
-  switch (b) {
-    case Button::Back: return "BACK";
-    case Button::Confirm: return "CONFIRM";
-    case Button::Left: return "LEFT";
-    case Button::Right: return "RIGHT";
-    case Button::Up: return "UP";
-    case Button::Down: return "DOWN";
-    case Button::Power: return "POWER";
-    default: return "?";
-  }
-}
-
-}  // namespace
 
 InputMonitorScreen::InputMonitorScreen() {
   vm_.title = "INPUT MONITOR";

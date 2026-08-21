@@ -2,6 +2,20 @@
 
 namespace reader {
 
+const char* buttonName(Button b) {
+  switch (b) {
+    case Button::Back: return "BACK";
+    case Button::Confirm: return "CONFIRM";
+    case Button::Left: return "LEFT";
+    case Button::Right: return "RIGHT";
+    case Button::Up: return "UP";
+    case Button::Down: return "DOWN";
+    case Button::Power: return "POWER";
+    case Button::Count_: break;
+  }
+  return "?";
+}
+
 void PressRecognizer::emit(Button b, PressKind kind) {
   if (count_ >= kQueueLen) {
     ++dropped_;
@@ -28,9 +42,21 @@ void PressRecognizer::sample(Button b, bool down, uint32_t ms) {
   }
   if (!s.down) return;  // release with no matching down
   s.down = false;
-  // A hold that already fired consumed the press; only an unconsumed one
-  // becomes a Short. This is what makes one physical press exactly one event.
-  if (!s.consumed) emit(b, PressKind::Short);
+  // A hold that already fired consumed the press, so the release emits nothing.
+  // That is what makes one physical press exactly one event.
+  if (!s.consumed) {
+    // tick() usually fires a hold while the button is still down, but it only
+    // runs from the main loop, and a gray refresh blocks that loop for ~1.5 s.
+    // A press made entirely inside a repaint therefore reaches here never having
+    // been ticked -- so the release classifies it, from the edge timestamps the
+    // input task captured at their true times.
+    //
+    // Getting this wrong is not a latency bug, it is a WRONG ACTION: on a list,
+    // a hold opens the item-actions overlay and a press opens the item. Firing
+    // the hold late is tolerable; silently doing the other thing is not.
+    const bool heldLongEnough = static_cast<uint32_t>(ms - s.downAt) >= kLongPressMs;
+    emit(b, heldLongEnough && maskHas(longPressable_, b) ? PressKind::Long : PressKind::Short);
+  }
   s.consumed = false;
 }
 

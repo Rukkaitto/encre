@@ -30,6 +30,11 @@ constexpr bool maskHas(ButtonMask m, Button b) { return (m & buttonBit(b)) != 0;
 // the short end of comfortable.
 inline constexpr uint32_t kLongPressMs = 500;
 
+// A button's name, for logs and diagnostics. Here rather than in each consumer
+// because there were two copies the moment a second one wanted it, and a log
+// that names the wrong button is worse than one that prints an index.
+const char* buttonName(Button b);
+
 // Turns raw level transitions into classified presses.
 //
 // Two rules govern everything here:

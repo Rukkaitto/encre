@@ -2,6 +2,16 @@
 
 namespace reader {
 
+const char* screenName(ScreenId id) {
+  switch (id) {
+    case ScreenId::Home: return "HOME";
+    case ScreenId::Library: return "LIBRARY";
+    case ScreenId::Settings: return "SETTINGS";
+    case ScreenId::InputMonitor: return "INPUT-MONITOR";
+  }
+  return "?";
+}
+
 App::App(std::unique_ptr<Screen> root, ScreenFactory& factory) : factory_(factory) {
   // Reserve up front. The firmware is built -fno-exceptions, so a vector that
   // cannot grow calls abort() and takes the whole device down with no

@@ -16,6 +16,10 @@ class Theme;
 
 enum class ScreenId : uint8_t { Home, Library, Settings, InputMonitor };
 
+// A screen's name, for logs. Same reasoning as buttonName: a numeric ScreenId in
+// a serial log is one more thing to decode while diagnosing a device.
+const char* screenName(ScreenId id);
+
 // What a screen asks the app to do after handling an event.
 struct Action {
   enum class Kind : uint8_t { None, Redraw, Push, Pop, Sleep };

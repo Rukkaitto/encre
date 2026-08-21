@@ -185,8 +185,13 @@ static void paintMono(reader::RefreshMode mode) {
 static void renderTop() {
   const reader::RefreshMode mode = gRefresh.next(gApp->transition());
   const bool gray = gApp->top().fidelity() == reader::Fidelity::Gray;
-  Serial.printf("[paint] screen=%d fidelity=%s mode=%s sinceFull=%d\n",
-                (int)gApp->top().id(), gray ? "gray" : "mono",
+  // `mode` is what the POLICY decided, not necessarily what the panel does: a
+  // Gray screen runs the full three-plane sequence regardless, because a 1-bit
+  // fast refresh of chrome is illegible on this glass. So `fidelity=gray
+  // mode=FAST` is not a contradiction -- it means the cadence had a fast slot
+  // available and this screen could not use it.
+  Serial.printf("[paint] screen=%s fidelity=%s mode=%s sinceFull=%d\n",
+                reader::screenName(gApp->top().id()), gray ? "gray" : "mono",
                 mode == reader::RefreshMode::Full ? "FULL" : "FAST", gRefresh.sinceFull());
   Serial.flush();
   if (gray) {
@@ -362,7 +367,7 @@ void loop() {
 
   reader::InputEvent ev{};
   while (gPresses.pop(ev)) {
-    Serial.printf("[input] %d %s\n", (int)ev.button,
+    Serial.printf("[input] %s %s\n", reader::buttonName(ev.button),
                   ev.kind == reader::PressKind::Long ? "LONG" : "SHORT");
     if (ev.button == reader::Button::Power) sleepNow();
     gApp->dispatch(ev);
@@ -381,9 +386,10 @@ void loop() {
 
   static uint32_t beat = 0;
   if (++beat % 200 == 0) {
-    Serial.printf("[alive] last-stage=%s heap=%u depth=%d dropped=%lu/%lu\n", stage,
-                  (unsigned)ESP.getFreeHeap(), gApp->depth(),
-                  (unsigned long)rawSamplesDropped(), (unsigned long)gPresses.dropped());
+    Serial.printf("[alive] last-stage=%s heap=%u screen=%s depth=%d dropped=%lu/%lu\n", stage,
+                  (unsigned)ESP.getFreeHeap(), reader::screenName(gApp->top().id()),
+                  gApp->depth(), (unsigned long)rawSamplesDropped(),
+                  (unsigned long)gPresses.dropped());
     Serial.flush();
   }
   delay(10);

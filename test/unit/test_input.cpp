@@ -45,6 +45,60 @@ TEST_CASE("a hold on a long-pressable button fires Long while still down, and th
   CHECK(Drain(r).n == 0);
 }
 
+TEST_CASE("a hold resolves from the release edge when tick never got to run") {
+  // The real sequence this protects: the user holds Confirm on a list item while
+  // the panel is mid-repaint. A gray refresh blocks loop() for ~1.5 s, so tick()
+  // is not called for the whole press -- but the input task sampled both edges
+  // at their true times, so the release alone is enough to classify it.
+  //
+  // Without this, the press classifies as Short and the wrong thing happens: on
+  // Library, a hold opens the item-actions overlay and a press OPENS THE BOOK.
+  // Silently doing the other action is much worse than doing it late.
+  PressRecognizer r;
+  r.setLongPressable(buttonBit(Button::Confirm));
+  r.sample(Button::Confirm, true, 1000);
+  r.sample(Button::Confirm, false, 1800);  // 800 ms, and not one tick() between
+  Drain d(r);
+  REQUIRE(d.n == 1);
+  CHECK(d.ev[0].button == Button::Confirm);
+  CHECK(d.ev[0].kind == PressKind::Long);
+}
+
+TEST_CASE("a short press with no tick in between is still Short") {
+  // The other half of the same rule: the release-edge path must classify by
+  // elapsed time, not simply assume any un-ticked press was a hold.
+  PressRecognizer r;
+  r.setLongPressable(buttonBit(Button::Confirm));
+  r.sample(Button::Confirm, true, 1000);
+  r.sample(Button::Confirm, false, 1000 + kLongPressMs - 1);
+  Drain d(r);
+  REQUIRE(d.n == 1);
+  CHECK(d.ev[0].kind == PressKind::Short);
+}
+
+TEST_CASE("the release edge never doubles a hold that tick already fired") {
+  // One physical press is still exactly one event: the release path must respect
+  // the consumed latch, or a hold spanning a tick AND a long release would emit
+  // Long twice.
+  PressRecognizer r;
+  r.setLongPressable(buttonBit(Button::Confirm));
+  r.sample(Button::Confirm, true, 1000);
+  r.tick(1600);
+  REQUIRE(Drain(r).n == 1);
+  r.sample(Button::Confirm, false, 3000);
+  CHECK(Drain(r).n == 0);
+}
+
+TEST_CASE("a long release on a button with no hold bound is still Short") {
+  PressRecognizer r;
+  r.setLongPressable(buttonBit(Button::Confirm));
+  r.sample(Button::Up, true, 1000);
+  r.sample(Button::Up, false, 9000);
+  Drain d(r);
+  REQUIRE(d.n == 1);
+  CHECK(d.ev[0].kind == PressKind::Short);
+}
+
 TEST_CASE("a hold on a button with no long action still fires Short on release") {
   PressRecognizer r;
   r.setLongPressable(buttonBit(Button::Confirm));  // Up is NOT in the mask
