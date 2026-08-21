@@ -53,8 +53,15 @@ pins them, and the field is where Phase 3 plugs in.
 ### 1. Overlays: the App renders a stack, not a screen
 
 `design/LibraryActions.dc.html` puts a centred panel over a **still-visible,
-veiled Library**. `DeleteConfirm` and `BookDetails` are the same shape. So
-rendering the top screen is no longer enough.
+veiled Library**, and `DeleteConfirm` does the same. So rendering the top screen
+is no longer enough.
+
+**`BookDetails` is NOT an overlay** — corrected after checking the boards rather
+than assuming they matched. It has no veil div, no panel, and its own header band
+and hint bar: a full screen. Its `.dim-veil` CSS rule is declared and never used,
+which is template residue (`grep -c dim-veil` gives 2 for the real overlays and 1
+for this one). So `BookDetailsScreen::isOverlay()` is **false**, and it draws its
+own hint bar like any other screen.
 
 Add `Screen::isOverlay()`, defaulting false. To paint, the App walks down from the
 top to the first non-overlay screen, renders that, then renders each overlay above
@@ -106,8 +113,17 @@ directory is a valid state, not a crash.
 
 `/books` may hold anything. A row is a book if its extension is `.epub` or `.txt`
 (case-insensitive — FAT is case-preserving but not case-sensitive, and a card
-written on a Mac will have `.EPUB` somewhere eventually). Folders are always rows.
-Everything else is skipped.
+written on a Mac will have `.EPUB` somewhere eventually). Everything else is
+skipped.
+
+**Folders are rows regardless of their extension, but NOT if they are hidden.**
+A card that has ever been mounted on a Mac carries `.Spotlight-V100`,
+`.fseventsd` and `.Trashes` as real directories, which would otherwise show as
+folders the user can descend into. The same dotfile rule also catches AppleDouble
+sidecars named `._Book.epub`, which end in `.epub` and would otherwise appear as a
+phantom duplicate of every real book on the card. A directory called
+`covers.jpg` is still a row — the rule is about the leading dot, not the
+extension.
 
 The display title is the filename with its extension removed. Do **not** attempt
 to prettify further — no underscore-to-space, no title-casing. It is a placeholder
@@ -281,12 +297,25 @@ Boards: `design/LibraryActions.dc.html`, `DeleteConfirm.dc.html`,
 `BookDetails.dc.html`. All three are centred panels over a veiled parent
 (spec §4.1c: overlays are vertically centred, not offset from the top).
 
-From the actions board, measured — do not re-derive by eye: the panel is
-`left: 70px; width: 340px` on the 480 canvas (so **centred**, and it must centre
-on 528 too), `border: 2px`, its header row is `padding: 21px 20px` with a 2px
-bottom border, and each action row is `height: 72px; padding: 0 20px`. The focused
-action is inverted, and `Open` / `Book details` carry chevrons while
-`Mark as finished` / `Delete…` do not.
+**Measure each board separately — the panels are NOT the same width.** An earlier
+draft of this plan generalised from the actions board and would have drawn the
+confirm panel 40px too narrow:
+
+| Board | Panel on the 480 canvas | Overlay? |
+|---|---|---|
+| `LibraryActions` | `left: 70px; width: 340px` | yes |
+| `DeleteConfirm` | `left: 50px; width: 380px` | yes |
+| `BookDetails` | no panel — full screen | **no** |
+
+Both panels are horizontally centred (70+340+70 and 50+380+50 both make 480), so
+**derive the left edge from the canvas width** rather than hardcoding 70 or 50, or
+they will sit 24px off-centre on the 528-wide X3.
+
+From the actions board, also measured: `border: 2px`, its header row is
+`padding: 21px 20px` with a 2px bottom border, and each action row is
+`height: 72px; padding: 0 20px`. The focused action is inverted, and
+`Open` / `Book details` carry chevrons while `Mark as finished` / `Delete…` do
+not. Read the confirm board for its own numbers; do not carry these across.
 
 - [ ] **Step 1: The actions overlay**, with its four rows. `Delete…` pushes the
   confirm overlay; `Book details` pushes details; `Open` is Phase 3's; `Mark as
