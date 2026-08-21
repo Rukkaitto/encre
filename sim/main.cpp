@@ -2,10 +2,12 @@
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "reader/app.h"
+#include "reader/booklist.h"
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
 #include "reader/host_fs.h"
@@ -177,19 +179,42 @@ static std::vector<reader::InputEvent> libraryEntry(int downsInLibrary = 1) {
 // and run the shell's own boot-time storage sequence against it, so the storage
 // path is exercised on the desktop and not only on the device.
 //
-// It changes no pixels today -- no screen reads a file yet -- and that is why it
-// prints instead. 2C-2's Library is what will render from it; until then this is
-// the desktop's only cheap check that HostFileSystem, loadSettings and the flat
-// JSON reader agree with each other outside the unit tests.
-static void reportStorage(const char* root) {
-  reader::HostFileSystem fs(root);
+// It reports rather than only rendering because the settings half of it still
+// changes no pixels; the LIBRARY half does, now that a --root Library lists real
+// files (see libraryRootIn below).
+static void reportStorage(reader::FileSystem& fs, const std::string& shown) {
   reader::Settings settings;
   const bool ok = reader::loadSettings(fs, settings);
   std::printf("root %s: mounted=%d settings=%s sleepAfterMs=%u fullRefreshEvery=%d "
               "fullOnTransition=%d\n",
-              fs.root().c_str(), (int)fs.mounted(), ok ? "loaded" : "defaulted-or-corrected",
+              shown.c_str(), (int)fs.mounted(), ok ? "loaded" : "defaulted-or-corrected",
               (unsigned)settings.sleepAfterMs, settings.fullRefreshEvery,
               (int)settings.fullOnTransition);
+}
+
+// WHERE THE LIBRARY IS ROOTED INSIDE A --root, and why it is not simply
+// kBooksRoot.
+//
+// The device's Library is rooted at /books, full stop. A --root directory is
+// asked to be two things at once: an image of a card, where /books is exactly
+// what the device would read, and a plain folder of EPUBs someone dropped
+// somewhere to see the screen render real filenames. Insisting on /books would
+// make the second one silently list nothing, which is the same
+// looks-like-a-bug-but-is-not that setLibraryVisibleRows produces.
+//
+// So: /books when it is there, the root itself when it is not, and say which.
+// A card image behaves exactly like the card; a bare folder of books just works.
+static std::string libraryRootIn(reader::FileSystem& fs) {
+  const bool hasBooks = fs.exists(reader::kBooksRoot);
+  const std::string root = hasBooks ? reader::kBooksRoot : "/";
+  // The count Home's LIBRARY row shows on the device, printed here so the
+  // desktop exercises BookList::countLibrary against a real directory tree and
+  // not only against the fake filesystem in the unit tests.
+  std::printf("library root %s (%s), %d book(s) counted\n", root.c_str(),
+              hasBooks ? "the device's own, found under --root"
+                       : "--root has no /books, so the directory itself is the library",
+              reader::BookList::countLibrary(fs, root));
+  return root;
 }
 
 int main(int argc, char** argv) {
@@ -214,9 +239,18 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "%s needs a value\n", argv[argc - 1]);
     return 2;
   }
-  // Before the fonts, because a bad --root is worth reporting even on a run that
-  // then fails to find its type ramp.
-  if (root != nullptr) reportStorage(root);
+  // The filesystem --root asks for, if any. It has to outlive the App -- the
+  // Library holds a reference to it -- so it is declared here rather than inside
+  // the reporting call it used to be a local of.
+  std::optional<reader::HostFileSystem> hostFs;
+  std::string libraryRoot;
+  if (root != nullptr) {
+    reader::HostFileSystem& fs = hostFs.emplace(root);
+    // Before the fonts, because a bad --root is worth reporting even on a run
+    // that then fails to find its type ramp.
+    reportStorage(fs, fs.root());
+    libraryRoot = libraryRootIn(fs);
+  }
 
   // The screen ids here are tools/compare-design.py's: whatever it lists for a
   // board is what it passes as argv[1], so a screen that renders but is not
@@ -272,9 +306,19 @@ int main(int argc, char** argv) {
   std::vector<reader::InputEvent> events;
   if (keys != nullptr && !parseKeys(keys, events)) return 2;
 
-  // Same root, same factory the shell builds, so a scripted desktop run walks
-  // the screens the device walks rather than a second, similar-looking set.
-  reader::DemoScreenFactory factory;
+  // Same factory the shell builds, so a scripted desktop run walks the screens
+  // the device walks rather than a second, similar-looking set.
+  //
+  // WITH A --root it is built OVER THAT FILESYSTEM, which is what exercises the
+  // storage path on the desktop: the Library scans a real directory, sorts real
+  // filenames, counts real folders, and a delete removes a real file. WITHOUT one
+  // it keeps the board's sample content, and that is not a fallback -- it is what
+  // the eight goldens and every `make compare` sheet pin, so `--root` must stay
+  // opt-in or the rendering tests would depend on whatever is in a directory.
+  std::optional<reader::DemoScreenFactory> factoryStore;
+  if (hostFs.has_value()) factoryStore.emplace(*hostFs, libraryRoot);
+  else factoryStore.emplace();
+  reader::DemoScreenFactory& factory = *factoryStore;
   // How many Library rows fit on THIS panel. The theme owns the box model and
   // this is the caller that knows the geometry, so it is asked once and the
   // factory carries the answer into every Library it builds. Skipping it would

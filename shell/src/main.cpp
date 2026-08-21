@@ -25,6 +25,7 @@
 #include "font_value700.h"
 #include "input_task.h"
 #include "reader/app.h"
+#include "reader/booklist.h"
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
 #include "reader/input.h"
@@ -141,10 +142,6 @@ static std::unique_ptr<reader::Framebuffer> gFrame;
 // outlive the set -- but nothing here may ever hand load() a scope-limited copy.
 static std::optional<reader::FontSet> gFonts;
 static reader::QuietTheme gTheme;
-// The screen catalogue is the one from core/, shared with the simulator. A
-// shell-local copy would drift from it on row lists and titles, and the drift
-// would be invisible because each half would keep passing its own checks.
-static reader::DemoScreenFactory gFactory;
 static std::unique_ptr<reader::App> gApp;
 static reader::PressRecognizer gPresses;
 // The settings as they will be applied. Constant-initialised to the struct's
@@ -163,6 +160,23 @@ static InputManager gInput;
 // SdFileSystem would address the same volume with its own idea of whether it is
 // mounted.
 static SdFileSystem gSd;
+// The screen catalogue is the one from core/, shared with the simulator. A
+// shell-local copy would drift from it on row lists and titles, and the drift
+// would be invisible because each half would keep passing its own checks.
+//
+// OVER THE REAL CARD, rooted at /books: that is what makes the Library on the
+// device list the user's files rather than the board's seven sample rows. It is
+// declared AFTER gSd on purpose -- static initialisation within a translation
+// unit runs in declaration order, and this constructor stores a reference to it.
+// (Binding a reference to an object whose constructor has not run is not
+// undefined here -- SdFileSystem's is trivial and nothing is called until
+// setup() -- but relying on that would be relying on a detail of another file.)
+//
+// It is given the card whether or not the card mounted. A Library over an
+// unmounted filesystem lists nothing, which is correct and is also unreachable:
+// with no card the app is rooted at the SD-missing screen and there is no way to
+// a Library at all.
+static reader::DemoScreenFactory gFactory(gSd, reader::kBooksRoot);
 // Did SDCardManager::begin() ever return true this boot? It opens with
 // `if (initialized) return true;` and the SPI path exposes no end()/unmount(), so
 // after one success a later begin() reports success WITHOUT touching the
@@ -313,6 +327,59 @@ static void loadAndApplySettings() {
   Serial.flush();
 }
 
+// --- /books ---------------------------------------------------------------
+//
+// A CARD WITH NO /books: CREATE IT. The plan left this open ("offer to create it,
+// or show an empty library; decide, and say which in a comment"), so here is the
+// decision and the argument for it.
+//
+// Creating it wins on discoverability, which is the only thing at stake. A
+// first-run device that shows an empty Library is indistinguishable, from the
+// user's side, from a device that cannot read the card: same screen, same absence
+// of books, no hint about what to do. Creating the directory turns that into a
+// visible instruction -- they mount the card over USB, see a `books` folder next
+// to `.reader`, and the place to put an EPUB is obvious without a manual. It also
+// makes the Library's root a real directory, so `list()` succeeds and "empty" and
+// "unreadable" stop being the same observation up in the UI.
+//
+// It is the same reasoning, and the same shape, as the settings file this file
+// already writes at boot: give the user a hand-editable artefact rather than an
+// invisible convention.
+//
+// WHAT IT COSTS: a write on first boot, on a card that may be read-only, full or
+// failing. So the failure is handled rather than assumed away:
+//
+//   * mkdirs() reports the END STATE (it is idempotent and returns true for a
+//     directory that already exists), so "already there" and "created" are told
+//     apart by the exists() check, and every outcome is logged.
+//   * A FAILED create is not fatal and not hidden. The Library still opens; it
+//     lists nothing, because there is nothing to list. What it must not do is
+//     claim the card is fine -- so the failure is logged with the three causes
+//     that produce it, and Home's LIBRARY row shows no count at all rather than a
+//     0 (see homeVmForCard). A 0 would be a lie about a card we could not read; a
+//     blank is an honest absence.
+//   * Nothing here touches the SD-missing screen. A card that mounts, reads and
+//     will not accept a mkdir is a working card with a problem, not a missing
+//     one, and routing it to the no-card prompt would be the lie in the other
+//     direction.
+//
+// Called once per confirmed mount, beside armCardProbes and for the same reason:
+// this is the point where there is definitely a volume to write to.
+static void ensureBooksDir(const char* why) {
+  if (gSd.exists(reader::kBooksRoot)) return;  // the ordinary case, and silent
+  if (gSd.mkdirs(reader::kBooksRoot)) {
+    Serial.printf("[sd] %s: no %s on the card, so it was created -- put EPUBs there and they "
+                  "appear in the Library\n",
+                  why, reader::kBooksRoot);
+  } else {
+    Serial.printf("[sd] %s: %s does not exist and could NOT be created (card write-protected, "
+                  "full, or failing). The Library will open and list nothing, and Home's "
+                  "LIBRARY row will show no count rather than a 0\n",
+                  why, reader::kBooksRoot);
+  }
+  Serial.flush();
+}
+
 // --- The card-liveness probes --------------------------------------------
 //
 // The two cadences. What each probe does and why there are two of them is on
@@ -449,6 +516,35 @@ static void armCardProbes(const char* why) {
 
 // --- The app, and the session record -------------------------------------
 
+// HOME'S `LIBRARY` ROW SHOWS THE REAL COUNT. demoHomeVm() carries the board's
+// `12`, which is right for the goldens and the design comparison and a lie on a
+// device, so the shell patches that one field from the card.
+//
+// The number is BookList::countLibrary's -- the books in /books plus the books
+// one level down -- which is the same rule the Library's own header band uses, so
+// Home and the Library cannot disagree about how many books there are. -1 means
+// the directory could not be read, and the row then shows NOTHING rather than a
+// 0: "no books" and "could not look" are different claims, and the second one is
+// not ours to make on the user's behalf.
+//
+// It is one directory listing plus one per folder, at boot and after a retry
+// only. Not on a paint, and not on a timer.
+static reader::HomeViewModel homeVmForCard() {
+  reader::HomeViewModel vm = reader::demoHomeVm();
+  const int books = gStorageUsable ? reader::BookList::countLibrary(gSd, reader::kBooksRoot) : -1;
+  // demoHomeTargets() runs parallel to this menu and its first entry is the
+  // Library, so row 0 is the row to patch. Guarded anyway: an empty menu here
+  // would be a change in the shared catalogue, and indexing into it would be a
+  // crash rather than a wrong label.
+  if (!vm.menu.empty()) vm.menu[0].value = books >= 0 ? std::to_string(books) : std::string();
+  Serial.printf("[boot] Home's LIBRARY row: %s (%s)\n",
+                books >= 0 ? vm.menu[0].value.c_str() : "blank",
+                books >= 0 ? "books in /books plus one level down"
+                           : "/books could not be read, so no count is claimed");
+  Serial.flush();
+  return vm;
+}
+
 // Build the app with Home as its root, replacing whatever was there.
 //
 // App has no "replace the root", and a successful retry cannot PUSH Home: the
@@ -458,9 +554,11 @@ static void armCardProbes(const char* why) {
 // the mask is PressRecognizer's, not the App's, so a new stack whose top binds
 // different holds leaves the recognizer bound to the old screen's.
 static void buildHomeApp() {
+  // The App about to be destroyed owns the Library the factory's pointer names,
+  // so the pointer has to go first. See DemoScreenFactory::forgetLibrary.
+  gFactory.forgetLibrary();
   gApp = std::make_unique<reader::App>(
-      std::make_unique<reader::HomeScreen>(reader::demoHomeVm(), reader::demoHomeTargets()),
-      gFactory);
+      std::make_unique<reader::HomeScreen>(homeVmForCard(), reader::demoHomeTargets()), gFactory);
   gPresses.setLongPressable(gApp->longPressable());
 }
 
@@ -468,37 +566,65 @@ static void buildHomeApp() {
 // dispatch: saveSession() skips an identical rewrite, so navigating back and
 // forth does not grind the NVS partition.
 //
-// FOCUS IS ALWAYS 0, and that is deliberate rather than unfinished. reader::Screen
-// exposes id/fidelity/longPressable/onEvent/render and no focus accessor, so there
-// is no way to read the focus of the screen on top without adding virtuals to
-// every screen -- and the only multi-item screen where a restored focus would be
-// visible is Library, which does not exist until 2C-2. Adding two virtuals now to
-// carry a value nothing can produce is speculative; 2C-2 wires it when there is a
-// concrete need, and the record already has the field.
+// THE FOCUS IS REAL NOW. Through 2B and 2C-1 this wrote a hardcoded 0, because
+// reader::Screen had no focus accessor and the only screen where a restored focus
+// would be visible was the Library. The Library exists, so Screen::focus() /
+// Screen::setFocus() exist, and this stores what the top screen actually reports.
+//
+// TWO THINGS THAT WOULD HAVE LEFT THE FIELD DECORATIVE ANYWAY:
+//
+//   * The changed-record test below compares the (SCREEN, FOCUS) PAIR. It
+//     compared the screen alone, so scrolling down the Library -- a focus move
+//     within one screen -- looked unchanged and was never announced, and after
+//     the first failure gLoggedScreen would have gone stale against a record that
+//     kept moving. saveSession() has always compared the pair, so the store was
+//     correct; it was this log, and the "did anything change" question it answers,
+//     that was half-blind.
+//   * A NEGATIVE focus is a real value and not an error: -1 means "nothing
+//     selected" -- Home's CONTINUE block, an empty /books. Session::focus is
+//     unsigned, so -1 would go in as 65535 and come back out as a wildly
+//     out-of-range row. It is stored as 0 instead, which is where a restore lands
+//     anyway (ScrollWindow::setFocus clamps, and clamps an empty list back to
+//     -1). Clamped at the top end too, for a directory with more than 65535 books:
+//     the record then restores to the last row it can name rather than wrapping to
+//     the first.
 //
 // IT SAYS WHAT IT DID, and that is not decoration. The wake path and this are the
 // two halves of one mechanism, and a wake that comes back to Home is ambiguous
 // between them: either nothing was ever stored, or a record was stored and the
 // restore would not honour it. So this logs a CHANGED record when it goes in --
-// once per screen change, not once per focus move, because the unchanged case is
-// the common one and a line per keypress would bury the interesting ones -- and
-// logs distinctly when the store refuses. saveSession() prints the NVS-level
-// reason (namespace would not open, or a put came back short); the line here is
-// the consequence, which is the part a reader of the log actually cares about.
+// once per change to the (screen, focus) pair, which since Task 6 does include a
+// focus move: a press that changes neither -- Down at the end of a list, a button
+// the screen does not bind -- still says nothing, so the log is quiet when nothing
+// happened and not merely quiet per screen. That is a line per navigation on a
+// list, which is a real cost in log volume and the right trade: the field the line
+// reports is now load-bearing, and a stored focus nobody can see going in is how
+// this ended up decorative for two phases.
 //
-// `gLoggedScreen` tracks what was last announced rather than what is in NVS.
+// It also logs distinctly when the store refuses. saveSession() prints the
+// NVS-level reason (namespace would not open, or a put came back short); the line
+// here is the consequence, which is the part a reader of the log actually cares
+// about.
+//
+// `gLoggedScreen` tracks what was last announced rather than what is in NVS, and
+// it tracks the PAIR now, for the reason above.
 // saveSession() has its own skip-an-identical-rewrite cache and returns true
 // without touching flash, so asking it "did you write?" is not possible from
 // here; mirroring the comparison is. The two can only disagree by this printing
 // one extra line after a failure, which is the harmless direction.
 static bool gLoggedScreen = false;
 static reader::ScreenId gLastLoggedScreen = reader::ScreenId::Home;
+static uint16_t gLastLoggedFocus = 0;
 
 static void saveWhereWeAre() {
   Session s;
   s.screen = gApp->top().id();
-  s.focus = 0;
-  const bool changed = !gLoggedScreen || gLastLoggedScreen != s.screen;
+  const int focus = gApp->top().focus();
+  s.focus = focus <= 0 ? 0
+            : focus >= 0xFFFF ? 0xFFFF
+                              : static_cast<uint16_t>(focus);
+  const bool changed =
+      !gLoggedScreen || gLastLoggedScreen != s.screen || gLastLoggedFocus != s.focus;
   if (!saveSession(s)) {
     // The other half of defect "wake came back to Home": a save that fails here
     // leaves a record that either does not exist or names an older screen, and
@@ -515,6 +641,7 @@ static void saveWhereWeAre() {
     Serial.flush();
   }
   gLastLoggedScreen = s.screen;
+  gLastLoggedFocus = s.focus;
   gLoggedScreen = true;
 }
 
@@ -533,6 +660,11 @@ static void saveWhereWeAre() {
 // restore honours it, and if it is not, the boot path roots at this screen anyway.
 // Overwriting it with SD-MISSING would throw away the only useful thing it holds.
 static void buildSdMissingApp() {
+  // Same reason as buildHomeApp: replacing the App destroys the Library the
+  // factory's pointer names. This is the path that made it matter -- the card
+  // going away at runtime is the one swap that can happen with a Library on the
+  // stack.
+  gFactory.forgetLibrary();
   gApp = std::make_unique<reader::App>(std::make_unique<reader::SdMissingScreen>(), gFactory);
   gPresses.setLongPressable(gApp->longPressable());
 }
@@ -596,6 +728,9 @@ static void handleRetry() {
   }
   gStorageUsable = true;
   loadAndApplySettings();  // the settings live on the card that just appeared
+  // ...and it may have no /books either. Before buildHomeApp() below, which
+  // counts what is in there for Home's LIBRARY row.
+  ensureBooksDir("retry");
   // A brand-new card is the fresh-card case: it may have no settings file, and
   // both probes have to be re-pointed at whatever this card turns out to hold.
   // Skipping this is how the poll would go back to the cached root read on
@@ -793,7 +928,13 @@ static uint32_t gDrawMs = 0, gCopyMs = 0;
 static void paintPlane(reader::Plane plane) {
   const uint32_t t0 = millis();
   gFrame->clear(true);
-  gApp->top().render(*gFrame, *gFonts, gTheme, plane);
+  // THROUGH App::render, NOT top().render. 2C-2's overlays are panels over a
+  // still-visible parent, so the top screen alone is a panel floating on white --
+  // and this line said top() until Task 6, which would have shipped exactly that
+  // to the device while the simulator (which already went through App::render)
+  // and all eight goldens kept passing. One paint path is the whole point of
+  // App::render existing.
+  gApp->render(*gFrame, *gFonts, gTheme, plane);
   const uint32_t t1 = millis();
   gDrawMs += t1 - t0;
   gRenderMs += t1 - t0;
@@ -1145,7 +1286,25 @@ void setup() {
   // probes at it. After loadAndApplySettings() on purpose: gSettings holds what
   // will actually be in force by now, so a fresh card gets a file that matches
   // the running device rather than one written before the load had a say.
-  if (storage) armCardProbes("boot");
+  if (storage) {
+    ensureBooksDir("boot");
+    armCardProbes("boot");
+  }
+
+  // HOW MANY LIBRARY ROWS FIT ON THIS PANEL, asked once and carried into every
+  // Library the factory builds. The theme owns the box model (panel height minus
+  // the header band minus the hint bar, over the row pitch) and the shell is the
+  // only side that knows the geometry, so this is the handshake between them.
+  //
+  // BEFORE THE FIRST LIBRARY IS BUILT, which means before this point can be
+  // reached by any press: skip it and the window has no height, so the list
+  // renders empty. That is the screen behaving correctly -- it must not draw a row
+  // it was not given -- and it would look exactly like an empty /books, which is
+  // the failure that is hard to spot.
+  const int libraryRows = gTheme.libraryVisibleRows(panelH, fonts);
+  gFactory.setLibraryVisibleRows(libraryRows);
+  Serial.printf("[boot] Library fits %d rows on this %dx%d panel\n", libraryRows, panelW, panelH);
+  Serial.flush();
 
   // The shell's own view of storage, which is what roots the app and what the
   // presence poll in loop() watches for a usable -> unusable edge.
@@ -1218,8 +1377,27 @@ void setup() {
       // record naming a screen that was two deep (Settings > Input Monitor)
       // comes back with Home under it rather than Settings -- the record holds
       // one id, not a path. Nothing in V1 is unreachable that way; a restored
-      // path is 2C-2's if the deeper screens make it worth one.
-      Serial.printf("[session] restored screen=%s over Home\n", reader::screenName(s.screen));
+      // path is Phase 3's if the deeper screens make it worth one.
+      //
+      // AND THE FOCUS, which is what Task 6 added.
+      //
+      // WHERE IT LANDED is what gets logged, not whether setFocus returned true.
+      // Its bool means "something changed", which is the right signal for
+      // deciding whether to store a record and the wrong one for reporting a
+      // restore: restoring focus 0 onto a screen already at 0 changes nothing and
+      // is a perfectly successful restore. Comparing the landed focus to the
+      // requested one says the thing a log reader wants -- "the record named row
+      // 12 and the screen is on row 4" is a clamp (books deleted while the device
+      // slept) or a screen that does not restore a focus at all, and either way
+      // the numbers are on the line.
+      gApp->top().setFocus(static_cast<int>(s.focus));
+      const int landed = gApp->top().focus();
+      Serial.printf("[session] restored screen=%s over Home; focus %u -> %d%s\n",
+                    reader::screenName(s.screen), s.focus, landed,
+                    landed == static_cast<int>(s.focus)
+                        ? ""
+                        : " (not the row the record named: it is no longer in the list, or this "
+                          "screen does not restore a focus)");
       Serial.flush();
       mark("session-restored");
     } else {
