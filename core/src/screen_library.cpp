@@ -38,7 +38,11 @@ LibraryScreen::LibraryScreen(FileSystem& fs, std::string root)
   rescan();
 }
 
-LibraryScreen::LibraryScreen(std::vector<LibraryItem> sample) : items_(std::move(sample)) {
+LibraryScreen::LibraryScreen(std::vector<LibraryItem> sample)
+    // The path the device's Library is rooted at, so the sample says the same
+    // thing about itself that a card would -- Book details draws it as its
+    // `Location` row, and an empty path there would read as `/`.
+    : root_("/books"), path_("/books"), items_(std::move(sample)) {
   vm_.hints = {"BACK", "OPEN", "UP", "DOWN"};
   vm_.holds = {false, true, false, false};
   window_.setCount(itemCount());

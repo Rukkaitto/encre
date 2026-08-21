@@ -1,5 +1,6 @@
 #include "reader/screens.h"
 
+#include "reader/screen_book_details.h"
 #include "reader/screen_delete_confirm.h"
 #include "reader/screen_input_monitor.h"
 #include "reader/screen_item_actions.h"
@@ -51,12 +52,25 @@ std::vector<LibraryItem> demoLibraryItems() {
   folder.entry = BookEntry{"Classics", "Classics", true, 0};
   folder.childBooks = 6;
 
+  // Book details' board describes ONE of these rows, Dubliners, so its extra
+  // fields are set on that one and left blank on the rest -- which is also what a
+  // real card looks like today, since nothing can fill them in. Its 416 KB is
+  // what the details screen formats as the board's `0.4 MB`.
+  auto dubliners = [](LibraryItem item) {
+    item.details.author = "James Joyce";
+    item.details.subtitle = "Fifteen stories \xC2\xB7 1914";
+    item.details.progress = "31% \xC2\xB7 PAGE 78 OF 252";
+    item.details.chapter = "ARABY";
+    item.details.added = "AUG 14, 2026";
+    return item;
+  };
+
   return {folder,
           book("Middlemarch.epub", "Middlemarch", "GEORGE ELIOT", "6%", 1268 * 1024),
           book("Jane Eyre.epub", "Jane Eyre", "CHARLOTTE BRONT\xC3\x8B", "DONE", 902 * 1024),
           book("Walden.epub", "Walden", "HENRY DAVID THOREAU", "48%", 511 * 1024),
           book("Meditations.epub", "Meditations", "MARCUS AURELIUS", "NEW", 288 * 1024),
-          book("Dubliners.epub", "Dubliners", "JAMES JOYCE", "31%", 416 * 1024),
+          dubliners(book("Dubliners.epub", "Dubliners", "JAMES JOYCE", "31%", 416 * 1024)),
           book("The Odyssey.epub", "The Odyssey", "HOMER \xC2\xB7 TR. BUTLER", "NEW",
                1704 * 1024)};
 }
@@ -88,8 +102,8 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       if (library_ == nullptr) return nullptr;
       return std::make_unique<DeleteConfirmScreen>(*library_);
     case ScreenId::BookDetails:
-      // Still to come in this task; a refused push until then.
-      return nullptr;
+      if (library_ == nullptr) return nullptr;
+      return std::make_unique<BookDetailsScreen>(*library_);
     case ScreenId::Settings:
       // The Input Monitor is reachable ONLY from here. Nothing else lists it, and
       // without a way in, the phase loses the one place short-versus-long

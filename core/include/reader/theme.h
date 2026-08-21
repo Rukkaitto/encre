@@ -9,6 +9,7 @@ struct SdMissingViewModel;
 struct LibraryViewModel;
 struct ItemActionsViewModel;
 struct DeleteConfirmViewModel;
+struct BookDetailsViewModel;
 struct StubViewModel;
 
 // Themes own the entire presentation, layout structure included (spec 3.3).
@@ -44,6 +45,11 @@ class Theme {
   virtual void renderDeleteConfirm(Framebuffer& fb, const FontSet& fonts,
                                    const DeleteConfirmViewModel& vm,
                                    Plane plane = Plane::Bw) = 0;
+
+  // Book details, which is a whole screen and not an overlay -- so it clears the
+  // framebuffer and draws its own hint bar like any other screen.
+  virtual void renderBookDetails(Framebuffer& fb, const FontSet& fonts,
+                                 const BookDetailsViewModel& vm, Plane plane = Plane::Bw) = 0;
 
   // How many Library rows fit on a panel `panelH` tall.
   //

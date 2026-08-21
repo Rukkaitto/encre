@@ -126,6 +126,31 @@ struct DeleteConfirmViewModel {
   std::array<bool, 4> holds{};
 };
 
+// Book details (design/BookDetails.dc.html) -- a full screen, NOT an overlay.
+//
+// Its board has no veil and no panel: it has its own header band and its own hint
+// bar. The `.dim-veil` rule in its stylesheet is declared and never used, which
+// is template residue rather than an intention (`grep -c dim-veil` gives 2 for
+// each real overlay and 1 for this one), and an earlier draft of the 2C-2 plan
+// read it as an overlay on that evidence.
+//
+// Most of these fields need EPUB metadata or per-book state and are BLANK on the
+// device until Phase 3. They are carried anyway: the board draws them, the golden
+// pins them, and the field is where Phase 3 plugs in. Dropping them until
+// something populated them would mean re-deriving this layout then.
+struct BookDetailsViewModel {
+  std::string title;     // "Dubliners"              -- from the filename today
+  std::string author;    // "James Joyce"            -- Phase 3
+  std::string subtitle;  // "Fifteen stories - 1914" -- Phase 3
+  std::string format;    // the band's value: "EPUB" / "TXT", from the extension
+  // The board's six label/value rows, in its order: Progress, Current story,
+  // Bookmarks, File size, Added, Location. A vector rather than six fields
+  // because the theme draws them as a list and Phase 3 adds to it.
+  std::vector<MenuEntry> fields;
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
 // A provisional titled-list surface: Phase 2B's Library and Settings
 // placeholders and its Input Monitor. It exists so the interaction runtime can
 // be navigated and verified before the real screens are built, and Phase 2C

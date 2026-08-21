@@ -386,6 +386,30 @@ int drawProse(Framebuffer& fb, const Font& font, const Prose& prose, int boxX, i
               int topF26, Ink ink = Ink::Black, Plane plane = Plane::Bw,
               ProseAlign align = ProseAlign::Centre);
 
+// --- A detail row ------------------------------------------------------------
+//
+// design/BookDetails.dc.html's field rows and design/Contents.dc.html's chapter
+// rows -- fourteen rows across two boards, stating one box:
+//
+//   height: 64px; padding: 0 24px; border-bottom: 1px solid
+//   label  --t-value at 500        value  --t-value at 700, right-aligned
+//
+// Full-bleed and inset on the screen margin, like drawRow and unlike
+// drawPanelRow. It is neither of them: drawRow is 80 tall with one Label500 run
+// at 0.18em and its rule along the TOP, and drawPanelRow is 72 tall, inset on a
+// panel's own 20px padding, and discloses with a chevron where this states a
+// value. Same reasoning as bookRowHeight's: three boxes that differ in height,
+// inset, rule edge and type are three primitives, not one with three modes.
+//
+// `focused` inverts it, which BookDetails never does and Contents does on the
+// chapter you are in (`background: #000000; color: #ffffff` on one of its eight).
+inline constexpr int kDetailRowContentH = 64;
+inline constexpr int kDetailRowRuleH = 1;
+
+int detailRowHeight(bool rule);
+int drawDetailRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label,
+                  std::string_view value, bool focused, bool rule, Plane plane = Plane::Bw);
+
 // --- An overlay's panel ------------------------------------------------------
 //
 // The floating panel the overlay boards put over a veiled parent

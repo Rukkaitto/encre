@@ -232,11 +232,12 @@ int main(int argc, char** argv) {
   const bool isLibrary = std::strcmp(argv[1], "library") == 0;
   const bool isLibraryActions = std::strcmp(argv[1], "library_actions") == 0;
   const bool isDeleteConfirm = std::strcmp(argv[1], "delete_confirm") == 0;
+  const bool isBookDetails = std::strcmp(argv[1], "book_details") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
-      !isDeleteConfirm) {
+      !isDeleteConfirm && !isBookDetails) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
-                 "'library_actions', 'delete_confirm' or 'app')\n",
+                 "'library_actions', 'delete_confirm', 'book_details' or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -290,7 +291,7 @@ int main(int argc, char** argv) {
     // assignment, so the render pins the navigation too.
     for (const reader::InputEvent& ev : libraryEntry()) app.dispatch(ev);
   }
-  if (isLibraryActions || isDeleteConfirm) {
+  if (isLibraryActions || isDeleteConfirm || isBookDetails) {
     // LibraryActions' own parent copy focuses the SIXTH row, Dubliners -- not the
     // second, which is what Library.dc.html focuses. The two boards disagree, so
     // the journey does too.
@@ -298,6 +299,13 @@ int main(int argc, char** argv) {
     // ...and the hold that opens the panel, which is the binding the Library's
     // hint ring advertises.
     app.dispatch({reader::Button::Confirm, reader::PressKind::Long});
+  }
+  if (isBookDetails) {
+    // Down to the panel's second row, `Book details`, and Confirm. It is a whole
+    // screen rather than an overlay, so what App::render paints is this alone --
+    // the Library and the actions panel beneath it are not drawn at all.
+    app.dispatch({reader::Button::Down, reader::PressKind::Short});
+    app.dispatch({reader::Button::Confirm, reader::PressKind::Short});
   }
   if (isDeleteConfirm) {
     // Down to the panel's fourth row, `Delete...`, and Confirm. The board shows

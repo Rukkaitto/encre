@@ -28,6 +28,35 @@ struct LibraryItem {
   BookEntry entry;
   std::string author;
   std::string progress;
+  // design/BookDetails.dc.html's fields, which need the same metadata and are
+  // therefore blank on a card today. They are held here, beside the row they
+  // describe, rather than assembled by the details screen: the details screen has
+  // no way to learn them either, and a second place for a book's facts to live is
+  // a second place for Phase 3 to have to fill in.
+  //
+  // Strings rather than numbers because the units are the design's -- `31% - PAGE
+  // 78 OF 252` is not a percentage and `AUG 14, 2026` is not a timestamp -- and
+  // the screen only ever draws them. A number here would be a promise the theme
+  // could format, and nothing can format a page count that does not exist.
+  struct Details {
+    // The author as the DETAILS board sets it -- sentence case, `James Joyce` --
+    // where the Library row's `author` above is the caps run its own board sets,
+    // `JAMES JOYCE`. Two fields for one fact, for the same reason `progress`
+    // below is two: the two boards state two different runs, and one cannot be
+    // derived from the other. Shouting the sentence-case form would need a
+    // Unicode case mapping core/ does not carry -- `Charlotte Bronte` with its
+    // diaeresis is on the board precisely to keep a non-ASCII glyph in the
+    // goldens, and ASCII folding would render it `BRONTe`.
+    std::string author;
+    std::string subtitle;  // "Fifteen stories - 1914"
+    // The Progress ROW's value, which is a superset of the Library row's `31%`:
+    // the board writes `31% - PAGE 78 OF 252`. Two strings for one fact because
+    // the two boards state two different runs, and deriving the long one from the
+    // short one is not possible in either direction.
+    std::string progress;
+    std::string chapter;  // "ARABY"
+    std::string added;    // "AUG 14, 2026" -- FileSystem carries no timestamps
+  } details;
   int childBooks = -1;
 };
 

@@ -63,6 +63,10 @@ add_test(NAME sim_library_actions COMMAND reader_sim library_actions
 # one place PopTo is exercised outside the unit tests.
 add_test(NAME sim_delete_confirm COMMAND reader_sim delete_confirm
          ${CMAKE_BINARY_DIR}/sim_delete_confirm.png --canvas 480x800)
+# Book details, which the actions overlay pushes and which is NOT an overlay: the
+# render is this screen alone, over neither of the two beneath it.
+add_test(NAME sim_book_details COMMAND reader_sim book_details
+         ${CMAKE_BINARY_DIR}/sim_book_details.png --canvas 480x800)
 # The SD-missing screen renders with NO --root, which is the state it exists for.
 add_test(NAME sim_sd_missing COMMAND reader_sim sd_missing ${CMAKE_BINARY_DIR}/sim_sd_missing.png)
 # ...and the storage path runs on the desktop: a HostFileSystem mounted on the

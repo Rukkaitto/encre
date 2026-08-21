@@ -60,11 +60,6 @@ constexpr int kPromptActionW = 260;
 // anyone reading either file alone. reader::baselineIn in core/src/text.cpp is
 // now the only copy, and this theme is one of its callers like any other.
 
-// A dithered stand-in until Phase 3 decodes real cover images: a bordered panel,
-// and nothing else. The board used to reverse the title out of a filled strip
-// along the bottom; at the pt ramp's sizes that strip duplicated the title
-// already set beside the cover and ran into the stats column, so the board
-// dropped it and the cover is now a plain panel.
 // --- design/Library.dc.html -------------------------------------------------
 //
 // The four slots' MARKS, in hardware order (Back, Confirm, Up, Down). Declared
@@ -87,15 +82,24 @@ std::string bookCountLabel(int n) {
   return std::to_string(n) + (n == 1 ? " BOOK" : " BOOKS");
 }
 
-void drawCoverPlaceholder(Framebuffer& fb, int x, int y) {
+// A dithered stand-in until Phase 3 decodes real cover images: a bordered panel,
+// and nothing else. The board used to reverse the title out of a filled strip
+// along the bottom; at the pt ramp's sizes that strip duplicated the title
+// already set beside the cover and ran into the stats column, so the board
+// dropped it and the cover is now a plain panel.
+//
+// The size is the caller's: Home draws 112x168 and Book details 120x180, both
+// with the same 2px border and the same tint, so this takes the box rather than
+// each screen growing its own copy of the border-and-dither.
+void drawCoverPlaceholder(Framebuffer& fb, int x, int y, int w, int h) {
   // Level 1, not 2: the board's `.dither-dots` is a 4px-pitch radial-gradient
   // dot, roughly a fifth coverage. Level 2 is a 50% checkerboard, which reads as
   // grey mesh rather than a sparse tint.
-  ditherRect(fb, x, y, kCoverW, kCoverH, 1);
-  fb.fillRect(x, y, kCoverW, 2, false);
-  fb.fillRect(x, y + kCoverH - 2, kCoverW, 2, false);
-  fb.fillRect(x, y, 2, kCoverH, false);
-  fb.fillRect(x + kCoverW - 2, y, 2, kCoverH, false);
+  ditherRect(fb, x, y, w, h, 1);
+  fb.fillRect(x, y, w, 2, false);
+  fb.fillRect(x, y + h - 2, w, 2, false);
+  fb.fillRect(x, y, 2, h, false);
+  fb.fillRect(x + w - 2, y, 2, h, false);
 }
 }  // namespace
 
@@ -107,7 +111,7 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
 
   // Two columns: cover on the left, the reading state stacked on the right.
   y += kCoverTopGap;
-  drawCoverPlaceholder(fb, kMargin, y);
+  drawCoverPlaceholder(fb, kMargin, y, kCoverW, kCoverH);
 
   const int rightX = kMargin + kCoverW + kGutter;
   const Font& title = fonts[Role::Title700];
@@ -364,6 +368,23 @@ constexpr int kConfirmProseLeadEm = 1450;
 constexpr int kConfirmButtonGap = 12;
 constexpr int kConfirmButtonPadBottom = 20;
 
+// --- design/BookDetails.dc.html ---------------------------------------------
+//
+// Its cover is bigger than Home's -- 120x180 against 112x168 -- because it is the
+// subject of the screen rather than a thumbnail beside a stats column. The rest
+// is the board's own box model: the block's `padding: 24px 24px 20px 24px` and
+// `gap: 20px`, the text column's `padding-top: 4px` and `gap: 6px`, the
+// `line-height: 1.1` on the title, and the `border-top: 2px` above the fields.
+constexpr int kDetailsCoverW = 120;
+constexpr int kDetailsCoverH = 180;
+constexpr int kDetailsPadTop = 24;
+constexpr int kDetailsPadBottom = 20;
+constexpr int kDetailsGutter = 20;
+constexpr int kDetailsColPadTop = 4;
+constexpr int kDetailsColGap = 6;
+constexpr int kDetailsTitleLineH = 46;  // round(1.1 * 42)
+constexpr int kDetailsRuleH = 2;
+
 // The strip at the bottom that an overlay repaints. The overlay boards draw
 // their hint bar OVER the veil with `background: #ffffff`, so the parent's bar --
 // which App::render has already painted, with the parent's own labels on it -- is
@@ -479,6 +500,76 @@ void QuietTheme::renderDeleteConfirm(Framebuffer& fb, const FontSet& fonts,
                          {&icons::kUp, vm.hints[2], vm.holds[2]},
                          {&icons::kDown, vm.hints[3], vm.holds[3]}};
   drawOverlayHintBar(fb, fonts, hints, plane);
+}
+
+void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
+                                   const BookDetailsViewModel& vm, Plane plane) {
+  // A whole screen, so it clears -- Book details is NOT an overlay, whatever the
+  // unused `.dim-veil` rule in its stylesheet suggests.
+  fb.clear(true);
+  // No mark on this band either: `ABOUT THIS BOOK` and the file's format.
+  // The label is the board's literal, as renderHome's `NOW READING` is: it names
+  // the screen rather than its content, so it does not vary and the view-model
+  // has no opinion about it. What varies beside it is the file's format.
+  int y = drawHeaderBand(fb, fonts, "ABOUT THIS BOOK", vm.format, nullptr, plane);
+
+  // The cover and the title column, `align-items: flex-start` -- so the column
+  // starts at the block's top rather than being centred against a cover more than
+  // twice its height.
+  y += kDetailsPadTop;
+  drawCoverPlaceholder(fb, kMargin, y, kDetailsCoverW, kDetailsCoverH);
+
+  const Font& title = fonts[Role::Title700];
+  // Body400 and Label400: both runs are `font-size: var(--t-...)` with no
+  // font-weight, so both are CSS default 400. This is the distinction that had
+  // Home's author line rendering 19% over the board's ink.
+  const Font& author = fonts[Role::Body400];
+  const Font& subtitle = fonts[Role::Label400];
+
+  const int colX = kMargin + kDetailsCoverW + kDetailsGutter;
+  int cy = y + kDetailsColPadTop;
+  // The title's line box is the board's `line-height: 1.1`, tighter than the
+  // face's own -- which is what stops a 20pt name opening a crater above the
+  // author.
+  drawText(fb, title, colX, baselineIn(title, cy, kDetailsTitleLineH), vm.title, Ink::Black, {},
+           plane);
+  cy += kDetailsTitleLineH + kDetailsColGap;
+  drawText(fb, author, colX, baselineIn(author, cy, author.lineHeight()), vm.author, Ink::Black,
+           {}, plane);
+  cy += author.lineHeight() + kDetailsColGap;
+  drawText(fb, subtitle, colX, baselineIn(subtitle, cy, subtitle.lineHeight()), vm.subtitle,
+           Ink::Black, {}, plane);
+  cy += subtitle.lineHeight();
+
+  // The block is as tall as its taller column plus the block's own bottom
+  // padding. Keyed on whichever is taller rather than on the cover, so a book
+  // with a long title -- or Phase 3's wrapped one -- pushes the fields down
+  // instead of running into them.
+  const int coverBottom = y + kDetailsCoverH;
+  y = (cy > coverBottom ? cy : coverBottom) + kDetailsPadBottom;
+
+  fb.fillRect(0, y, fb.width(), kDetailsRuleH, false);
+  y += kDetailsRuleH;
+
+  const int rows = static_cast<int>(vm.fields.size());
+  for (int i = 0; i < rows; ++i) {
+    // Nothing is focused on this screen -- there is nothing to select, which is
+    // why three of its four hint slots are the boards' dead-button placeholder.
+    // The last row has no rule, as the board's last row has no border-bottom.
+    y += drawDetailRow(fb, fonts, y, vm.fields[static_cast<size_t>(i)].label,
+                       vm.fields[static_cast<size_t>(i)].value, false, i != rows - 1, plane);
+  }
+
+  // `margin-top: auto` above the bar on the board: the slack is whatever is left,
+  // and the bar sits on the bottom edge. A slot's mark follows its LABEL, so the
+  // three placeholders get neither -- which is what makes them the board's 36px
+  // empty slots rather than affordances for buttons that do nothing.
+  const Icon* const marks[4] = {&icons::kBack, &icons::kDot, &icons::kUp, &icons::kDown};
+  Hint hints[4];
+  for (int i = 0; i < 4; ++i)
+    hints[i] = {vm.hints[i].empty() ? nullptr : marks[i], vm.hints[i], vm.holds[i]};
+  int slots[4] = {};
+  drawHintBar(fb, fonts, hints, slots, plane);
 }
 
 void QuietTheme::renderStub(Framebuffer& fb, const FontSet& fonts, const StubViewModel& vm,
