@@ -770,7 +770,9 @@ void setup() {
     // "it started at Home" is indistinguishable from a restore that silently
     // failed, and that is exactly what a bring-up check needs to tell apart.
     clearSession();
-    Serial.printf("[session] cold boot: record cleared, starting at Home\n");
+    // Not "starting at Home": with no card the root above is the SD-missing
+    // screen, and this line must not contradict it.
+    Serial.printf("[session] cold boot: record cleared, nothing to restore\n");
     Serial.flush();
   } else if (storage) {
     Session s;
