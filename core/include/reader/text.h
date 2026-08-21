@@ -46,7 +46,8 @@ int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::strin
 // baseline falling out of it; for anything with a plain box height, an icon or
 // a rule, it means the box centred in the box.
 //
-// These two functions are those two answers. They exist as shared functions
+// These two answers are two functions -- one for a glyph run, one for a plain
+// box -- and each is ONE function, not a family. They exist as shared functions
 // rather than as a formula each caller repeats because the formula was got wrong
 // the obvious way: `boxTop + boxH / 2 + ascent / 2` looks like centring but centres
 // the *ascent*, and ascent reserves room above the caps for accents that a
@@ -54,18 +55,16 @@ int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::strin
 // its box by half the descent, consistently, on every screen. Six more screens
 // are still to be built against these primitives; none of them should have to
 // know that.
-
-// Baseline for a single line of `font` centred in the box [boxTop, boxTop+boxH).
-// `boxH` may be smaller than the font's own extent -- the boards tighten some
-// line boxes below it (`line-height: 1.05` on a title, `1` on the big numeral)
-// -- in which case the baseline is pulled up rather than the run being flushed
-// to the top, which is what CSS does and what stops a 67px numeral opening a
-// crater in a column.
-int baselineIn(const Font& font, int boxTop, int boxH);
-
-// The same identity, for a box whose top and height are carried in 1/64 px.
 //
-// Needed because not every box the boards compute lands on a whole pixel. A
+// And they round the same way as each other: halves go UP, once, at the end,
+// which is what Chrome's pixel snapping does. The whole-pixel baseline used to
+// round twice and therefore truncate -- see baselineIn below.
+
+// Baseline for a single line of `font` centred in a box whose top and height are
+// carried in 1/64 px. This is the implementation; the whole-pixel form below is
+// a unit conversion in front of it.
+//
+// Fractional because not every box the boards compute lands on a whole pixel. A
 // wrapped paragraph's line box is `line-height: 1.55` on a 29px face -- 44.95px,
 // which Chrome holds as 44.9375 in its own 1/64 unit and never rounds until it
 // paints -- so the third line's box top is 89.875px below the first's. Rounding
@@ -74,7 +73,27 @@ int baselineIn(const Font& font, int boxTop, int boxH);
 // instead of one glyph at a time. So the box arrives as a fraction, the
 // half-leading is taken in the same unit, and the ONE rounding is the returned
 // baseline.
+//
+// `boxH` may be smaller than the font's own extent -- the boards tighten some
+// line boxes below it (`line-height: 1.05` on a title, `1` on the big numeral)
+// -- in which case the baseline is pulled up rather than the run being flushed
+// to the top, which is what CSS does and what stops a 67px numeral opening a
+// crater in a column.
 int baselineInF26(const Font& font, int boxTopF26, int boxHF26);
+
+// The same rule for a box already on the whole-pixel grid, which is most of the
+// chrome. It converts and forwards: there is no second formula here, deliberately.
+//
+// It used to have one -- `boxTop + (boxH - extent) / 2 + ascent` -- and that is
+// two roundings, the half-leading and then the baseline, where the fractional
+// form has one. The two therefore disagreed by exactly 1px on every box with odd
+// positive slack (`boxH - extent`), the whole-pixel one sitting a pixel high, and
+// the disagreement was pinned in a test instead of fixed for one commit. Two
+// helpers that mean the same thing and differ by a pixel is a trap: the next
+// screen picks whichever one its neighbour used and the defect is too small to
+// fail review. SdMissing's action block is the box that had it (68px box, 33px
+// extent, slack 35); its two goldens were re-blessed onto the fractional answer.
+int baselineIn(const Font& font, int boxTop, int boxH);
 
 // Top row for an item `itemH` tall centred across the box [boxTop, boxTop+boxH)
 // -- CSS `align-items: center` on a flex line, which is what every box on every
@@ -95,7 +114,11 @@ int baselineInF26(const Font& font, int boxTopF26, int boxHF26);
 //
 // Halves round up, which is what Chrome's pixel snapping does with a
 // half-pixel layout offset: the board's 21px battery in a 32px band lands on
-// row 24, not 23, and the measurement of the rendered board agrees.
+// row 24, not 23, and the measurement of the rendered board agrees. That is the
+// same rounding baselineInF26 applies to a baseline, so the mark and the run
+// beside it are snapped by one rule and not two -- `centreIn` is already exactly
+// `f26ToPx` of the fractional centre, proved exhaustively in test_components.cpp,
+// so it needs no fractional twin to forward to.
 int iconTopIn(int boxTop, int boxH, int itemH);
 
 // The axis-agnostic form of the same answer, and what iconTopIn is implemented

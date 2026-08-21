@@ -80,13 +80,27 @@ int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::strin
 
 // descent() is negative, so `ascent - descent` is the run's full extent and
 // `(ascent + descent) / 2` is the signed distance from the baseline up to the
-// extent's midpoint. The two spellings below are the same identity; each is
-// written the way its caller thinks about the problem.
-int baselineIn(const Font& font, int boxTop, int boxH) {
-  const int extent = font.ascent() - font.descent();
-  return boxTop + (boxH - extent) / 2 + font.ascent();
-}
-
+// extent's midpoint.
+//
+// There is ONE implementation, and it is the fractional one. The whole-pixel
+// entry point is a unit conversion in front of it, not a second rule: it used to
+// compute `boxTop + (boxH - extent) / 2 + ascent`, which rounds the half-leading
+// AND then lands on a whole baseline -- two roundings -- and so answered 1px
+// higher than this one on every box whose slack (boxH - extent) is odd and
+// positive. That is the "round once" invariant, and the two spellings disagreeing
+// by a pixel was a trap: a screen picked whichever helper its neighbour used and
+// the defect was too small to see in review.
+//
+// Exactly two boxes on the implemented screens have odd positive slack, and both
+// set Value700 (33px extent): a menu row's VALUE in the 80px row content box
+// (slack 47) and the action block's label in its 68px block (slack 35). Both
+// moved down a pixel and both now land where Chrome puts them, measured off the
+// rasterised boards -- Home's "12" on rows 606..623 against the board's 606..623,
+// and SdMissing's RETRY 25px above and 25px below inside its slab where it used
+// to be 24 and 26. Six goldens were re-blessed onto those numbers. Every other
+// box is even-slack (a row's LABEL, the header band's label, the CONTINUE block)
+// or negative-slack (the boards tighten the title, the numeral and every
+// line-height-1 box below its own extent), where the two spellings always agreed.
 int baselineInF26(const Font& font, int boxTopF26, int boxHF26) {
   const int extentF26 = pxToF26(font.ascent() - font.descent());
   // Arithmetic shift rather than / 2, so a box shorter than the run it holds
@@ -94,6 +108,10 @@ int baselineInF26(const Font& font, int boxTopF26, int boxHF26) {
   // on either side of zero instead of truncating toward it.
   const int halfLeading = (boxHF26 - extentF26) >> 1;
   return f26ToPx(boxTopF26 + halfLeading + pxToF26(font.ascent()));
+}
+
+int baselineIn(const Font& font, int boxTop, int boxH) {
+  return baselineInF26(font, pxToF26(boxTop), pxToF26(boxH));
 }
 
 // One division, at the end, halves up -- and a floor that behaves the same

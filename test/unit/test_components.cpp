@@ -1232,39 +1232,80 @@ TEST_CASE("the board's fractional line-height does not drift down a long paragra
   CHECK(span <= exact + 1);
 }
 
-TEST_CASE("baselineInF26 is baselineIn's identity, rounded once instead of twice") {
+TEST_CASE("baselineIn IS baselineInF26, so there is one centring rule and not two") {
   Ramp f;
-  // The two are the same formula and agree on every box whose half-leading is a
-  // whole number of pixels, which is most of the chrome.
+  // The whole-pixel entry point is a unit conversion in front of the fractional
+  // one, so the two agree on EVERY box -- not just on the boxes whose half-leading
+  // happens to be a whole number of pixels.
   //
-  // They differ by exactly 1px where it is not: a 29px face in a 53px box has
-  // 7.5px of half-leading, and baselineIn's `(boxH - extent) / 2` throws the
-  // half away before adding the ascent, where the fractional form carries it and
-  // rounds the finished baseline -- which is what the browser does, and what
-  // "round once" means. So the fractional one is the *more* correct of the two,
-  // and the difference is pinned here rather than hidden because baselineIn's
-  // answer is what four blessed Home goldens hold: the two cannot be unified
-  // without re-blessing them, which is not this screen's change to make. Every
-  // box on SdMissing is either even-slack or fractional, so nothing on it
-  // depends on which rule wins.
-  for (const reader::Role role : {reader::Role::Meta400, reader::Role::Body400,
+  // They used to disagree by exactly 1px wherever it is not: a 25px face in a
+  // 68px box has 17.5px of half-leading, and the old `(boxH - extent) / 2` threw
+  // the half away before adding the ascent, where the fractional form carries it
+  // and rounds the finished baseline. That is what the browser does and what
+  // "round once" means, so the fractional answer is the correct one -- and the
+  // difference was *pinned* here for a commit rather than fixed, on the belief
+  // that four Home goldens depended on the whole-pixel answer. They did not: every
+  // box Home draws has even or negative slack. The two goldens that did depend on
+  // it were SdMissing's, through drawActionButton's 68px block, and they were
+  // re-blessed with the unification.
+  for (const reader::Role role : {reader::Role::Meta400, reader::Role::Label500,
+                                  reader::Role::Value700, reader::Role::Body400,
                                   reader::Role::Title700, reader::Role::Display700}) {
     const reader::Font& font = f.fonts[role];
     const int extent = font.ascent() - font.descent();
-    for (const int boxH : {21, 27, 32, 44, 53, 67, 68, 80}) {
+    for (const int boxH : {21, 27, 32, 44, 53, 67, 68, 72, 80}) {
       for (const int top : {0, 1, 7, 100, 513}) {
         CAPTURE(boxH);
         CAPTURE(top);
         const int whole = reader::baselineIn(font, top, boxH);
         const int frac = reader::baselineInF26(font, reader::pxToF26(top), reader::pxToF26(boxH));
+        CHECK(whole == frac);
+        // The regression pin for the rule that was removed. Where the slack is
+        // odd and positive the old formula sat a pixel HIGH; asserting the
+        // direction as well as the magnitude is what stops a future "tidy-up"
+        // reintroducing it as a truncation that looks harmless.
         const int slack = boxH - extent;
-        if (slack % 2 == 0 || slack < 0)
-          CHECK(frac == whole);
+        const int twiceRounded = top + slack / 2 + font.ascent();
+        if (slack > 0 && slack % 2 != 0)
+          CHECK(whole == twiceRounded + 1);
         else
-          CHECK(frac == whole + 1);
+          CHECK(whole == twiceRounded);
       }
     }
   }
+}
+
+TEST_CASE("centreIn already rounds once, so it needs no fractional twin") {
+  // iconTopIn forwards to centreIn, and the question the unification raised is
+  // whether centreIn has baselineIn's old defect: a halving that rounds, feeding
+  // something that rounds again. It does not -- it takes the slack, halves it
+  // once, and that single division IS the rounding.
+  //
+  // Proved by construction rather than asserted: the fractional form of the same
+  // answer is `f26ToPx(boxStart*64 + ((boxSize - itemSize)*64 >> 1))`, which is
+  // the shape baselineInF26 has, and the two are equal everywhere -- including on
+  // odd slack, on negative slack (the boards tighten line boxes below their
+  // content) and on a negative origin. So converting centreIn to fixed point
+  // would change no pixel on any screen, which is why it was left alone.
+  for (const int boxStart : {-9, 0, 1, 18, 24, 241}) {
+    for (const int boxSize : {0, 1, 21, 25, 27, 32, 68, 72, 80, 481}) {
+      for (const int itemSize : {0, 1, 9, 12, 21, 25, 28, 33, 46, 500}) {
+        CAPTURE(boxStart);
+        CAPTURE(boxSize);
+        CAPTURE(itemSize);
+        const int frac = reader::f26ToPx(reader::pxToF26(boxStart) +
+                                        ((reader::pxToF26(boxSize) - reader::pxToF26(itemSize)) >> 1));
+        CHECK(reader::centreIn(boxStart, boxSize, itemSize) == frac);
+      }
+    }
+  }
+  // And halves go up, the same direction baselineInF26's f26ToPx takes them, so a
+  // mark and the run beside it in one box are snapped by one rule rather than two
+  // that part company on a half pixel.
+  CHECK(reader::centreIn(0, 32, 21) == 6);   // slack 11 -> 5.5 -> 6
+  CHECK(reader::centreIn(0, 27, 12) == 8);   // slack 15 -> 7.5 -> 8
+  CHECK(reader::centreIn(0, 27, 28) == 0);   // slack -1 -> -0.5 -> 0
+  CHECK(reader::centreIn(0, 24, 27) == -1);  // slack -3 -> -1.5 -> -1
 }
 
 TEST_CASE("centreIn is the axis-agnostic form of iconTopIn") {

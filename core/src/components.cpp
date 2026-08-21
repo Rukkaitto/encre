@@ -187,7 +187,13 @@ int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], int 
     // a taller mark makes a slot taller it is what keeps the short slots on the
     // centre line the tall one straddles.
     const int slotH = hintSlotH(mf, hints[i]);
-    const int slotTop = contentTop + (contentH - slotH) / 2;
+    // centreIn, not `contentTop + (contentH - slotH) / 2`: the two are the same
+    // number while every slot is the same height as the content box, which is
+    // every screen today, and they part company by a pixel the moment one slot
+    // carries a taller mark than its neighbours -- an open-coded halving
+    // truncates where the primitive rounds halves up, and it would put the odd
+    // slot on a different centre line from the rest of the bar.
+    const int slotTop = centreIn(contentTop, contentH, slotH);
     const int baseline = baselineIn(mf, slotTop, slotH);
     slotXOut[i] = x;
     int textX = x;

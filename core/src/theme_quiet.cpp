@@ -259,7 +259,13 @@ void QuietTheme::renderSdMissing(Framebuffer& fb, const FontSet& fonts,
   // free space would put the whole column half a pixel off centre for no reason.
   const int stackF26 =
       pxToF26(mark.h + title.lineHeight() + kActionH + 3 * kPromptGap) + prose.heightF26();
-  int yF26 = (pxToF26(areaH) - stackF26) / 2;
+  // Arithmetic shift rather than / 2, for the reason baselineInF26 uses one: the
+  // fraction is kept and the ONE rounding happens where the value is painted, and
+  // a shift halves a column taller than its area the same way it halves one that
+  // fits instead of truncating toward the origin. Identical on every positive
+  // value, so no screen moves today; it stops being identical exactly when a
+  // prompt outgrows the space above the hint bar.
+  int yF26 = (pxToF26(areaH) - stackF26) >> 1;
 
   drawIcon(fb, mark, centreIn(kMargin, usableW, mark.w), f26ToPx(yF26), Ink::Black, plane);
   yF26 += pxToF26(mark.h + kPromptGap);
