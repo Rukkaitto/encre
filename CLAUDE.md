@@ -477,12 +477,58 @@ silently wrong screen. `core/` never picks its own fonts — the caller supplies
   while the device is wrong. It has happened once.
 - **Input and fidelity come from the top screen only.** An overlay whose parent
   still received events would move a focus the user cannot see.
+- **A focus move inside an overlay repaints the OVERLAY ALONE**, over the frame
+  the previous paint left — `App::renderTopOnly`, and `paintPlane` in
+  `shell/src/main.cpp` is the one caller. Measured at 528×792 it takes an actions
+  overlay repaint from 4.75 ms to 1.58 ms, of which the veil is most (below) and
+  skipping the parent's text pass is the rest.
+  - **The precondition is about the FRAME, not the stack**, and the frame is the
+    one thing `App` cannot see — so `App` records what it painted and where, and
+    `canRenderTopOnly` refuses unless the frame, plane, top screen and depth all
+    match that record. A caller cannot be trusted with this check, because a
+    caller is the only thing that could have clobbered the frame. **The clear
+    belongs inside the full-paint branch**: clearing and then partially
+    repainting is an overlay panel floating on paper.
+  - **A push or a pop is never partial** (`transition()` is the signal) and
+    neither is the first frame after boot, on two independent conditions. The
+    push/pop rule is conservative on purpose: the pointer comparisons it would
+    otherwise rest on are an ABA, since a popped screen's address can be reused
+    by the next push.
+  - **Grayscale never is.** That path renders three planes plus a rebase, and the
+    frame between passes holds a different plane, so the precondition is false for
+    every pass but the first. `Dithered` and `Mono` both qualify.
+  - **`Screen::paintFootprint()` is the screen's own promise** that equal tokens
+    mean the same pixels covered, so the new paint replaces the old one. Zero is
+    "no promise" and is the default. `DeleteConfirm`'s is constant;
+    **`ItemActions`' is not, and the reason is one pixel**: its panel's height is
+    the sum of its rows, and the focused row loses its rule, so focusing the LAST
+    row (whose rule is already gone) makes the panel a pixel taller and, being
+    centred, a pixel higher. Moving the focus off it shrinks the panel and leaves
+    the old top border standing — 226 pixels at y=212 on the X3, and the veil only
+    takes 5 of every 9 of them out. So two of its four focus moves take the fast
+    path and two do not. `test_partial_repaint.cpp` renders **every ordered pair**
+    of both overlays' focus states through both paths and compares bytes.
 - **There are THREE dither patterns for three jobs**, each from its own board
   declaration, and `dither.cpp` explains why they cannot be shared:
   `kClustered` black on a 4px grid for tints (`.dither-dots`, and an `Ink` for
   `.dither-dots-inv`), `kBayer` dispersed for glyph and icon edges, and
   `veilRect`'s clustered **white** on a **3px** grid for the overlay veil. A 4px
   veil is half as dense and reads as a smudge.
+- **The veil was the most expensive thing on the screen, and it is now byte-wise.**
+  A veil covers the WHOLE frame, and the per-pixel form cost four integer
+  divisions and a bit-addressed read-modify-write per pixel: 2.33 ms at 528×792
+  against `ditherRect`'s 1.12 ms and a full-frame `clear`'s 0.001 ms, so ~150 ms
+  of every overlay repaint at this project's ~65× desktop-to-device ratio. It now
+  ORs eight columns at a time into the physical store — 0.17 ms, 13.6× — which
+  makes it **the one drawing routine in `core/` that knows `Rotation` exists**:
+  under CCW a logical row is a physical *column*, so it walks logical **columns**
+  instead, and the tile is symmetric under transposition, which is what lets the
+  two cases just swap axes. A byte-wise path that assumed a logical row is a
+  physical row would pass every desktop test and every golden and smear the veil
+  diagonally on glass. `test_dither.cpp` keeps the per-pixel form as its reference
+  and asserts byte-identity at both geometries, under both rotations, and for runs
+  that start and end mid-byte — the panel widths are multiples of 8, so nothing on
+  the device exercises the edge masks.
 - **`ScrollWindow` owns list movement** — focus plus first-visible, scrolling by a
   row rather than a page. `Theme::libraryVisibleRows` derives how many rows fit
   from the panel and the type; the shell must set it before the first Library
