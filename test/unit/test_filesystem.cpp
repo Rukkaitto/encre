@@ -1,18 +1,26 @@
 // The FileSystem contract, written ONCE and run against every implementation.
 //
-// The cases below take a `FileSystem&`, so the in-memory fake and the real
-// HostFileSystem are held to exactly the same promises. That is the point of the
-// file: a fake that passes tests the real one fails is worse than no fake,
-// because every test written above it then proves nothing.
-#include <algorithm>
+// The clauses themselves live in reader/fs_contract.h and take a `FileSystem&`,
+// so the in-memory fake and the real HostFileSystem are held to exactly the same
+// promises. That is the point: a fake that passes tests the real one fails is
+// worse than no fake, because every test written above it then proves nothing.
+//
+// They live in core/ rather than here because `shell/` has no test harness, and
+// SdFileSystem -- the implementation on real hardware, on the shared SPI bus --
+// would otherwise be the one nothing checks. This file is the doctest runner for
+// those clauses; shell/src/sd_selftest.cpp is the on-device one, and they run the
+// same assertions in the same order.
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "doctest.h"
 #include "fake_fs.h"
 #include "reader/filesystem.h"
+#include "reader/fs_contract.h"
 #include "reader/host_fs.h"
 
 using namespace reader;
@@ -32,246 +40,68 @@ std::string freshTempRoot(const char* name) {
   return root;
 }
 
-// list()'s order is unspecified, so every assertion about a listing goes
-// through here.
-std::vector<DirEntry> sortedByName(std::vector<DirEntry> v) {
-  std::sort(v.begin(), v.end(),
-            [](const DirEntry& a, const DirEntry& b) { return a.name < b.name; });
-  return v;
-}
+// Adapts the contract's report to doctest, one assertion each so the counts and
+// the failure behaviour are exactly what the hand-written CHECK/REQUIRE calls
+// were before the clauses moved into reader/fs_contract.h.
+class DoctestReport : public FsContractReport {
+ public:
+  void check(bool passed, const char* expr) override { CHECK_MESSAGE(passed, expr); }
+  bool require(bool passed, const char* expr) override {
+    REQUIRE_MESSAGE(passed, expr);  // throws past the clause on failure
+    return passed;
+  }
+};
 
-const DirEntry* entryNamed(const std::vector<DirEntry>& v, const std::string& name) {
-  for (const auto& e : v)
-    if (e.name == name) return &e;
-  return nullptr;
-}
-
-// `fs` must be mounted and empty. Every implementation owes all of this.
-void checkFileSystemContract(FileSystem& fs, const char* label) {
+// Every mounted clause, each against storage the factory has just made fresh.
+// The SUBCASE is what gives each clause its own filesystem: doctest re-enters the
+// body once per clause, so `make` runs seventeen independent cases and a failure
+// names which one.
+template <typename Factory>
+void runContract(const char* label, Factory makeFs) {
   INFO("implementation: " << label);
-  REQUIRE(fs.mounted());
-
-  SUBCASE("a written file exists and reads back byte-identical") {
-    REQUIRE(fs.writeAll("/hello.txt", "hello"));
-    CHECK(fs.exists("/hello.txt"));
-    std::string got;
-    REQUIRE(fs.readAll("/hello.txt", got));
-    CHECK(got == "hello");
+  size_t count = 0;
+  const FsContractClause* clauses = fsContractClauses(count);
+  for (size_t i = 0; i < count; ++i) {
+    SUBCASE(clauses[i].name) {
+      auto fs = makeFs();
+      DoctestReport report;
+      fsRunClause(clauses[i], *fs, report);
+    }
   }
-
-  SUBCASE("embedded newlines and NULs survive the round trip") {
-    const std::string body("li\nne\0with\r\nnul", 15);
-    REQUIRE(fs.writeAll("/binary.bin", body));
-    std::string got;
-    REQUIRE(fs.readAll("/binary.bin", got));
-    CHECK(got.size() == body.size());
-    CHECK(got == body);
-  }
-
-  SUBCASE("an empty file is a file, not an absence") {
-    REQUIRE(fs.writeAll("/empty.txt", ""));
-    CHECK(fs.exists("/empty.txt"));
-    std::string got = "sentinel";
-    REQUIRE(fs.readAll("/empty.txt", got));
-    CHECK(got.empty());
-    std::vector<DirEntry> out;
-    REQUIRE(fs.list("/", out));
-    const DirEntry* e = entryNamed(out, "empty.txt");
-    REQUIRE(e != nullptr);
-    CHECK(e->size == 0u);
-    CHECK_FALSE(e->isDir);
-  }
-
-  SUBCASE("writeAll truncates rather than appending") {
-    REQUIRE(fs.writeAll("/t.txt", "a long original body"));
-    REQUIRE(fs.writeAll("/t.txt", "short"));
-    std::string got;
-    REQUIRE(fs.readAll("/t.txt", got));
-    CHECK(got == "short");
-  }
-
-  SUBCASE("writeAll creates missing parents") {
-    CHECK_FALSE(fs.exists("/.reader"));
-    REQUIRE(fs.writeAll("/.reader/deep/settings.json", "{}"));
-    CHECK(fs.exists("/.reader"));
-    CHECK(fs.exists("/.reader/deep"));
-    CHECK(fs.exists("/.reader/deep/settings.json"));
-    std::string got;
-    REQUIRE(fs.readAll("/.reader/deep/settings.json", got));
-    CHECK(got == "{}");
-  }
-
-  SUBCASE("list appends rather than clearing, and reports isDir and size") {
-    REQUIRE(fs.mkdirs("/books/sub"));
-    REQUIRE(fs.writeAll("/books/a.txt", "12345"));
-
-    std::vector<DirEntry> out;
-    out.push_back(DirEntry{"pre-existing", false, 99});
-    REQUIRE(fs.list("/books", out));
-    REQUIRE(out.size() == 3);
-    CHECK(out[0].name == "pre-existing");  // appended, not cleared
-
-    const auto s = sortedByName(std::vector<DirEntry>(out.begin() + 1, out.end()));
-    CHECK(s[0].name == "a.txt");
-    CHECK_FALSE(s[0].isDir);
-    CHECK(s[0].size == 5u);
-    CHECK(s[1].name == "sub");
-    CHECK(s[1].isDir);
-    CHECK(s[1].size == 0u);  // 0 for directories
-  }
-
-  SUBCASE("list names leaves, not paths") {
-    REQUIRE(fs.writeAll("/dir/leaf.txt", "x"));
-    std::vector<DirEntry> out;
-    REQUIRE(fs.list("/dir", out));
-    REQUIRE(out.size() == 1);
-    CHECK(out[0].name == "leaf.txt");
-  }
-
-  SUBCASE("list on a file, or on a missing path, is false and leaves out alone") {
-    REQUIRE(fs.writeAll("/file.txt", "x"));
-    std::vector<DirEntry> out;
-    out.push_back(DirEntry{"pre-existing", false, 99});
-    CHECK_FALSE(fs.list("/file.txt", out));
-    CHECK(out.size() == 1);
-    CHECK_FALSE(fs.list("/nope", out));
-    CHECK(out.size() == 1);
-    CHECK_FALSE(fs.list("/nope/deeper", out));
-    CHECK(out.size() == 1);
-  }
-
-  SUBCASE("the root is a listable directory") {
-    REQUIRE(fs.writeAll("/top.txt", "x"));
-    std::vector<DirEntry> out;
-    REQUIRE(fs.list("/", out));
-    CHECK(entryNamed(out, "top.txt") != nullptr);
-  }
-
-  SUBCASE("readAll on a missing file is false and leaves out untouched") {
-    std::string got = "sentinel";
-    CHECK_FALSE(fs.readAll("/absent.txt", got));
-    CHECK(got == "sentinel");
-    // ...including when the parent directory does not exist either.
-    CHECK_FALSE(fs.readAll("/no/such/dir/absent.txt", got));
-    CHECK(got == "sentinel");
-  }
-
-  SUBCASE("readAll on a directory is false") {
-    REQUIRE(fs.mkdirs("/adir"));
-    std::string got = "sentinel";
-    CHECK_FALSE(fs.readAll("/adir", got));
-    CHECK(got == "sentinel");
-  }
-
-  SUBCASE("remove is about the end state") {
-    CHECK(fs.remove("/never-existed.txt"));  // already gone counts as removed
-    REQUIRE(fs.writeAll("/doomed.txt", "x"));
-    CHECK(fs.remove("/doomed.txt"));
-    CHECK_FALSE(fs.exists("/doomed.txt"));
-    CHECK(fs.remove("/doomed.txt"));  // and again, idempotently
-  }
-
-  SUBCASE("remove refuses a directory") {
-    REQUIRE(fs.mkdirs("/keepme"));
-    CHECK_FALSE(fs.remove("/keepme"));
-    CHECK(fs.exists("/keepme"));
-  }
-
-  SUBCASE("mkdirs is idempotent and creates the whole chain") {
-    REQUIRE(fs.mkdirs("/a/b/c"));
-    CHECK(fs.exists("/a"));
-    CHECK(fs.exists("/a/b"));
-    CHECK(fs.exists("/a/b/c"));
-    CHECK(fs.mkdirs("/a/b/c"));  // already there
-    CHECK(fs.mkdirs("/"));       // the root always exists
-  }
-
-  SUBCASE("a file cannot be a parent directory") {
-    REQUIRE(fs.writeAll("/blocker", "x"));
-    CHECK_FALSE(fs.mkdirs("/blocker/under"));
-    CHECK_FALSE(fs.writeAll("/blocker/under/f.txt", "x"));
-    CHECK_FALSE(fs.exists("/blocker/under"));
-    std::string got;
-    REQUIRE(fs.readAll("/blocker", got));
-    CHECK(got == "x");  // and the file itself is untouched
-  }
-
-  SUBCASE("writeAll refuses a path that is a directory") {
-    REQUIRE(fs.mkdirs("/adir"));
-    CHECK_FALSE(fs.writeAll("/adir", "x"));
-    CHECK(fs.exists("/adir"));
-    std::vector<DirEntry> out;
-    CHECK(fs.list("/adir", out));  // still a directory
-  }
-
-  SUBCASE("a redundant or trailing separator addresses the same thing") {
-    REQUIRE(fs.writeAll("/n/f.txt", "x"));
-    CHECK(fs.exists("/n//f.txt"));
-    CHECK(fs.exists("/n/"));
-    CHECK(fs.exists("/n/f.txt/"));  // stripped, not treated as a directory
-    std::string got;
-    REQUIRE(fs.readAll("//n//f.txt", got));
-    CHECK(got == "x");
-    std::vector<DirEntry> out;
-    CHECK(fs.list("/n/", out));
-  }
-}
-
-// `fs` must report mounted() == false. Nothing may succeed, and nothing may
-// bring the storage into existence as a side effect.
-void checkUnmountedContract(FileSystem& fs, const char* label) {
-  INFO("implementation: " << label);
-  REQUIRE_FALSE(fs.mounted());
-
-  CHECK_FALSE(fs.exists("/anything"));
-  CHECK_FALSE(fs.exists("/"));
-
-  std::vector<DirEntry> out;
-  out.push_back(DirEntry{"pre-existing", false, 99});
-  CHECK_FALSE(fs.list("/", out));
-  CHECK(out.size() == 1);
-
-  std::string got = "sentinel";
-  CHECK_FALSE(fs.readAll("/anything", got));
-  CHECK(got == "sentinel");
-
-  CHECK_FALSE(fs.writeAll("/anything", "x"));
-  CHECK_FALSE(fs.mkdirs("/anything"));
-  // remove's end-state contract does NOT apply here: with no storage we cannot
-  // know the file is gone, so claiming success would be a lie.
-  CHECK_FALSE(fs.remove("/anything"));
 }
 
 }  // namespace
 
 TEST_CASE("FakeFileSystem obeys the FileSystem contract") {
-  FakeFileSystem fs;
-  checkFileSystemContract(fs, "FakeFileSystem");
+  runContract("FakeFileSystem", [] { return std::make_unique<FakeFileSystem>(); });
 }
 
 TEST_CASE("FakeFileSystem obeys the unmounted contract") {
+  INFO("implementation: FakeFileSystem");
   FakeFileSystem fs;
   fs.setMounted(false);
-  checkUnmountedContract(fs, "FakeFileSystem");
+  DoctestReport report;
+  fsUnmountedClause().run(fs, report);
 }
 
 // The same cases, against real files. If these two diverge the fake is lying,
 // and everything tested against the fake is worthless.
 
 TEST_CASE("HostFileSystem obeys the FileSystem contract") {
-  const std::string root = freshTempRoot("contract");
-  HostFileSystem fs(root);
-  checkFileSystemContract(fs, "HostFileSystem");
+  runContract("HostFileSystem",
+              [] { return std::make_unique<HostFileSystem>(freshTempRoot("contract")); });
   std::error_code ec;
-  std::filesystem::remove_all(root, ec);
+  std::filesystem::remove_all(std::string(BUILD_DIR) + "/fs_test/contract", ec);
 }
 
 TEST_CASE("HostFileSystem obeys the unmounted contract") {
+  INFO("implementation: HostFileSystem");
   const std::string root = std::string(BUILD_DIR) + "/fs_test/no_such_root";
   std::error_code ec;
   std::filesystem::remove_all(root, ec);
   HostFileSystem fs(root);
-  checkUnmountedContract(fs, "HostFileSystem");
+  DoctestReport report;
+  fsUnmountedClause().run(fs, report);
   // A missing card must stay missing: not one of those calls may have created
   // the root on its way to failing.
   CHECK_FALSE(std::filesystem::exists(root));
