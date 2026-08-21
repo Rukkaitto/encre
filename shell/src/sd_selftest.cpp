@@ -83,6 +83,62 @@ bool wipeScratch(SdFileSystem& fs) {
   return fs.mkdirs(kScratch);
 }
 
+// Why the wipe failed, printed once. On the device every clause skipped with
+// CANNOT PREPARE, and mkdirs() collapses four separate outcomes into one false:
+// the directory already existing as a file, SdMan.mkdir refusing, mkdir
+// succeeding but isDirectory() misreading it, or the path itself being
+// unresolvable. Reading the code cannot separate those, so print all four.
+//
+// The leading-dot component is the specific suspicion: '.' is special in a FAT
+// directory, and while "/.reader/settings.json" opens for READ on this card,
+// nothing has ever created a directory under it -- /.reader was already there and
+// the settings file was loaded, not written. So the fallback probes a path with
+// no dot component, which separates "dots break mkdir" from "mkdir is broken".
+void explainWipeFailure(SdFileSystem& fs) {
+  SpiBusGuard bus;
+  Serial.printf("[fscontract] DIAGNOSING the failure to prepare %s\n", kScratch);
+
+  Serial.printf("[fscontract]   parent /.reader: exists=%d\n", (int)fs.exists("/.reader"));
+  {
+    FsFile f = SdMan.open("/.reader", O_RDONLY);
+    Serial.printf("[fscontract]   parent /.reader: open=%d isDirectory=%d\n", (int)(bool)f,
+                  f ? (int)f.isDirectory() : -1);
+    if (f) f.close();
+  }
+  Serial.printf("[fscontract]   target: exists=%d\n", (int)fs.exists(kScratch));
+
+  const bool rawMkdir = SdMan.mkdir(kScratch, true);
+  Serial.printf("[fscontract]   SdMan.mkdir(%s, pFlag=true) returned %d\n", kScratch,
+                (int)rawMkdir);
+  {
+    FsFile f = SdMan.open(kScratch, O_RDONLY);
+    Serial.printf("[fscontract]   after mkdir: open=%d isDirectory=%d\n", (int)(bool)f,
+                  f ? (int)f.isDirectory() : -1);
+    if (f) f.close();
+  }
+  Serial.printf("[fscontract]   after mkdir: fs.exists=%d fs.mkdirs=%d\n",
+                (int)fs.exists(kScratch), (int)fs.mkdirs(kScratch));
+
+  // The discriminator: same operation, no dot anywhere in the path.
+  constexpr const char* kNoDot = "/encretst";
+  const bool rawNoDot = SdMan.mkdir(kNoDot, true);
+  bool noDotIsDir = false;
+  {
+    FsFile f = SdMan.open(kNoDot, O_RDONLY);
+    noDotIsDir = f && f.isDirectory();
+    if (f) f.close();
+  }
+  Serial.printf("[fscontract]   CONTROL %s (no dot component): mkdir=%d isDirectory=%d\n", kNoDot,
+                (int)rawNoDot, (int)noDotIsDir);
+  if (noDotIsDir && !rawMkdir) {
+    Serial.printf("[fscontract]   => a dot-prefixed parent is what breaks mkdir on this card\n");
+  } else if (!noDotIsDir) {
+    Serial.printf("[fscontract]   => mkdir fails even with no dot: the write path, not the dot\n");
+  }
+  if (noDotIsDir) SdMan.removeDir(kNoDot);
+  Serial.flush();
+}
+
 }  // namespace
 
 int runSdFsContractSelfTest(SdFileSystem& fs) {
@@ -106,6 +162,11 @@ int runSdFsContractSelfTest(SdFileSystem& fs) {
   for (size_t i = 0; i < count; ++i) {
     const int before = report.failures;
     if (!wipeScratch(fs)) {
+      static bool explained = false;
+      if (!explained) {
+        explained = true;
+        explainWipeFailure(fs);
+      }
       Serial.printf("[fscontract]   CANNOT PREPARE %s -- skipping %s\n", kScratch,
                     clauses[i].name);
       Serial.flush();
