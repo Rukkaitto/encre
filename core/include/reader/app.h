@@ -66,6 +66,17 @@ class Screen {
   // stipple because it is a deliberate aesthetic choice rather than the house
   // style, and grayscale because it is ~5x more expensive.
   virtual Fidelity fidelity() const { return Fidelity::Mono; }
+  // A panel over a still-visible parent rather than a whole screen: the item
+  // actions, delete confirm and book details boards are all one centred panel
+  // over a veiled Library. An overlay draws its own veil before its panel, and
+  // App::render is what puts the parent underneath it.
+  //
+  // Default false, so being see-through costs an override. It changes ONLY what
+  // gets painted: input, fidelity and the long-press mask still come from the
+  // top of the stack alone (see App::dispatch and App::longPressable), because an
+  // overlay whose parent also received events would move a focus the user cannot
+  // see.
+  virtual bool isOverlay() const { return false; }
   virtual ButtonMask longPressable() const = 0;
   virtual Action onEvent(const InputEvent& ev) = 0;
   virtual void render(Framebuffer& fb, const FontSet& fonts, Theme& theme,
@@ -90,6 +101,20 @@ class App {
   Screen& top();
   const Screen& top() const;
   int depth() const { return static_cast<int>(stack_.size()); }
+
+  // Paints the stack: the topmost non-overlay screen, then every overlay above
+  // it in order, each drawing its own veil before its panel.
+  //
+  // Callers go through this rather than through top().render(), and the
+  // difference is only visible when an overlay is up -- which is exactly why it
+  // has to be the one entry point. Two paint paths would mean the shell and the
+  // simulator could disagree about what an overlay looks like, and the goldens
+  // would keep passing while the device drew a panel floating on white.
+  //
+  // Screens below the topmost non-overlay are NOT painted: they are entirely
+  // hidden, and a screen's worth of text rendering is not free on this chip.
+  // Clearing the framebuffer stays the caller's job, as it was.
+  void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const;
 
   void dispatch(const InputEvent& ev);
 

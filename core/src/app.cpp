@@ -49,7 +49,25 @@ void App::clearDirty() {
   transition_ = false;
 }
 
+void App::render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const {
+  // Walk down from the top to the first screen that is not an overlay -- the
+  // parent the overlays are floating over -- then paint upward from there.
+  //
+  // The loop stops at 0 as well as at a non-overlay, so an overlay at the ROOT
+  // renders only itself. That should not happen: an overlay veils a parent and
+  // the root has none. But "should not happen" is how a walk ends up reading
+  // stack_[-1], and the stack is never empty, so index 0 is always a valid
+  // thing to start from.
+  size_t base = stack_.size() - 1;
+  while (base > 0 && stack_[base]->isOverlay()) --base;
+  for (size_t i = base; i < stack_.size(); ++i) stack_[i]->render(fb, fonts, theme, plane);
+}
+
 void App::dispatch(const InputEvent& ev) {
+  // The TOP screen only, overlay or not. An overlay that let its parent see the
+  // event would move a focus that is behind a veil -- and the symptom would show
+  // up on the parent after the overlay was dismissed, which reads as a rendering
+  // bug rather than a dispatch one.
   const Action a = top().onEvent(ev);
   switch (a.kind) {
     case Action::Kind::None:
