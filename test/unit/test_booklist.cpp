@@ -1,0 +1,341 @@
+#include <string>
+#include <vector>
+
+#include "doctest.h"
+#include "fake_fs.h"
+#include "reader/booklist.h"
+
+using namespace reader;
+
+namespace {
+
+// A FileSystem that returns exactly what the fake holds, in a deliberately
+// hostile order.
+//
+// The fake's own list() walks a std::map and a std::set, so it hands back
+// directories first and each group in byte order -- which is very nearly the
+// answer BookList is supposed to produce. Testing the sort against it would
+// therefore pass on a scan that did no sorting at all. FAT gives no ordering
+// guarantee whatsoever, and "a listing whose order depends on the filesystem is
+// a listing that looks different on two cards with the same books" is the whole
+// reason the sort exists, so the test drives it through this.
+//
+// The shuffle is a fixed-seed xorshift: a test that is only sometimes hostile is
+// a test that only sometimes fails.
+class ShuffledFs : public FileSystem {
+ public:
+  explicit ShuffledFs(FakeFileSystem& inner, uint32_t seed = 0x1234567u)
+      : inner_(inner), seed_(seed) {}
+
+  bool mounted() const override { return inner_.mounted(); }
+  bool exists(std::string_view p) override { return inner_.exists(p); }
+  bool readAll(std::string_view p, std::string& o) override { return inner_.readAll(p, o); }
+  bool writeAll(std::string_view p, std::string_view d) override { return inner_.writeAll(p, d); }
+  bool mkdirs(std::string_view p) override { return inner_.mkdirs(p); }
+  bool remove(std::string_view p) override { return inner_.remove(p); }
+
+  bool list(std::string_view path, std::vector<DirEntry>& out) override {
+    std::vector<DirEntry> mine;
+    if (!inner_.list(path, mine)) return false;
+    // Fisher-Yates, walked backwards, so the fake's near-sorted order is
+    // thoroughly destroyed rather than nudged.
+    for (size_t i = mine.size(); i > 1; --i) {
+      const size_t j = next() % i;
+      std::swap(mine[i - 1], mine[j]);
+    }
+    // The contract says list APPENDS.
+    out.insert(out.end(), mine.begin(), mine.end());
+    return true;
+  }
+
+ private:
+  uint32_t next() {
+    seed_ ^= seed_ << 13;
+    seed_ ^= seed_ >> 17;
+    seed_ ^= seed_ << 5;
+    return seed_;
+  }
+  FakeFileSystem& inner_;
+  uint32_t seed_;
+};
+
+// The names in `out`, joined -- what a failure should print.
+std::string names(const std::vector<BookEntry>& out) {
+  std::string s;
+  for (const auto& e : out) {
+    if (!s.empty()) s += ", ";
+    s += e.name;
+  }
+  return s;
+}
+
+bool has(const std::vector<BookEntry>& out, std::string_view name) {
+  for (const auto& e : out)
+    if (e.name == name) return true;
+  return false;
+}
+
+const BookEntry* find(const std::vector<BookEntry>& out, std::string_view name) {
+  for (const auto& e : out)
+    if (e.name == name) return &e;
+  return nullptr;
+}
+
+}  // namespace
+
+TEST_CASE("epub and txt are books, in any case the card spells them") {
+  // FAT is case-preserving but not case-sensitive, and a card written on a Mac
+  // will have a .EPUB on it eventually.
+  FakeFileSystem fs;
+  fs.writeAll("/books/one.epub", "x");
+  fs.writeAll("/books/two.EPUB", "x");
+  fs.writeAll("/books/three.Epub", "x");
+  fs.writeAll("/books/four.txt", "x");
+  fs.writeAll("/books/five.TXT", "x");
+  fs.writeAll("/books/six.Txt", "x");
+  std::vector<BookEntry> out;
+  REQUIRE(BookList::scan(fs, "/books", out));
+  CAPTURE(names(out));
+  CHECK(out.size() == 6);
+}
+
+TEST_CASE("other extensions and extensionless files are skipped") {
+  FakeFileSystem fs;
+  fs.writeAll("/books/keep.epub", "x");
+  fs.writeAll("/books/cover.jpg", "x");
+  fs.writeAll("/books/notes.pdf", "x");
+  fs.writeAll("/books/README", "x");
+  fs.writeAll("/books/archive.epub.bak", "x");  // the FINAL extension is what counts
+  fs.writeAll("/books/trailing.", "x");
+  fs.writeAll("/books/epub", "x");  // the word, not an extension
+  std::vector<BookEntry> out;
+  REQUIRE(BookList::scan(fs, "/books", out));
+  CAPTURE(names(out));
+  CHECK(out.size() == 1);
+  CHECK(out[0].name == "keep.epub");
+}
+
+TEST_CASE("directories are rows whatever they are called") {
+  // A folder is a place to descend into, so its name says nothing about whether
+  // it belongs on the list -- including when it ends in something that looks
+  // like a rejected extension.
+  FakeFileSystem fs;
+  fs.mkdirs("/books/Sci-Fi");
+  fs.mkdirs("/books/covers.jpg");
+  fs.mkdirs("/books/no-extension-here");
+  std::vector<BookEntry> out;
+  REQUIRE(BookList::scan(fs, "/books", out));
+  CAPTURE(names(out));
+  CHECK(out.size() == 3);
+  for (const auto& e : out) CHECK(e.isDir);
+  // A folder keeps its whole name as its title: it has no extension to strip,
+  // and "covers" would be a different folder than the one on the card.
+  CHECK(find(out, "covers.jpg")->title == "covers.jpg");
+}
+
+TEST_CASE("folders sort before books, then each group alphabetically and case-blind") {
+  FakeFileSystem fs;
+  fs.mkdirs("/books/zebra");
+  fs.mkdirs("/books/Anthology");
+  fs.mkdirs("/books/middle");
+  fs.writeAll("/books/banana.epub", "x");
+  fs.writeAll("/books/Apple.epub", "x");
+  fs.writeAll("/books/cherry.txt", "x");
+  fs.writeAll("/books/Date.EPUB", "x");
+  ShuffledFs hostile(fs);
+  std::vector<BookEntry> out;
+  REQUIRE(BookList::scan(hostile, "/books", out));
+  CAPTURE(names(out));
+  REQUIRE(out.size() == 7);
+  CHECK(out[0].name == "Anthology");
+  CHECK(out[1].name == "middle");
+  CHECK(out[2].name == "zebra");
+  CHECK(out[3].name == "Apple.epub");
+  CHECK(out[4].name == "banana.epub");
+  CHECK(out[5].name == "cherry.txt");
+  CHECK(out[6].name == "Date.EPUB");
+  // Case-blind, not byte order. Byte order puts every capital ahead of every
+  // lowercase, so it would have produced "Date.EPUB" before "banana.epub" --
+  // and a list where capitals bunch at the top reads as unsorted to anyone
+  // looking at the screen.
+  CHECK(std::string("Date.EPUB") < std::string("banana.epub"));  // what bytes say
+  CHECK(out[4].name == "banana.epub");                           // what we do
+  CHECK(out[6].name == "Date.EPUB");
+}
+
+TEST_CASE("the order does not depend on which order the card lists things in") {
+  // Same books, six different filesystem orders, one answer.
+  FakeFileSystem fs;
+  fs.mkdirs("/books/Folder B");
+  fs.mkdirs("/books/folder a");
+  fs.writeAll("/books/Beta.epub", "x");
+  fs.writeAll("/books/alpha.txt", "x");
+  fs.writeAll("/books/Gamma.EPUB", "x");
+  std::string first;
+  for (uint32_t seed = 1; seed <= 6; ++seed) {
+    ShuffledFs hostile(fs, seed * 2654435761u + 1u);
+    std::vector<BookEntry> out;
+    REQUIRE(BookList::scan(hostile, "/books", out));
+    if (seed == 1) first = names(out);
+    CAPTURE(seed);
+    CHECK(names(out) == first);
+  }
+  CHECK(first == "folder a, Folder B, alpha.txt, Beta.epub, Gamma.EPUB");
+}
+
+TEST_CASE("names that differ only in case get one fixed order, not an arbitrary one") {
+  // std::sort is not stable, so a comparator that calls these two equal would
+  // let the order come out of the sort's internals. Two cards with the same
+  // books must still look the same.
+  FakeFileSystem fs;
+  fs.writeAll("/books/Novel.epub", "x");
+  fs.writeAll("/books/novel.txt", "x");
+  fs.writeAll("/books/NOVEL.epub", "x");
+  std::string first;
+  for (uint32_t seed = 1; seed <= 8; ++seed) {
+    ShuffledFs hostile(fs, seed * 40503u + 7u);
+    std::vector<BookEntry> out;
+    REQUIRE(BookList::scan(hostile, "/books", out));
+    REQUIRE(out.size() == 3);
+    if (seed == 1) first = names(out);
+    CAPTURE(seed);
+    CHECK(names(out) == first);
+  }
+}
+
+TEST_CASE("the title is the filename minus its final extension, and nothing cleverer") {
+  // A placeholder until Phase 3 reads the real title out of the EPUB. No
+  // underscore-to-space, no title-casing: a clever transform would make a wrong
+  // title look deliberate.
+  FakeFileSystem fs;
+  fs.writeAll("/books/Middlemarch.epub", "x");
+  fs.writeAll("/books/Vol.2.epub", "x");
+  fs.writeAll("/books/the_waves.txt", "x");
+  fs.writeAll("/books/a.b.c.epub", "x");
+  fs.writeAll("/books/UPPER CASE.EPUB", "x");
+  std::vector<BookEntry> out;
+  REQUIRE(BookList::scan(fs, "/books", out));
+  CAPTURE(names(out));
+  REQUIRE(out.size() == 5);
+  CHECK(find(out, "Middlemarch.epub")->title == "Middlemarch");
+  CHECK(find(out, "Vol.2.epub")->title == "Vol.2");
+  CHECK(find(out, "the_waves.txt")->title == "the_waves");
+  CHECK(find(out, "a.b.c.epub")->title == "a.b.c");
+  CHECK(find(out, "UPPER CASE.EPUB")->title == "UPPER CASE");
+}
+
+TEST_CASE("hidden entries are skipped, files and directories alike") {
+  // A dotfile is not a book. This matters more than it sounds: a card that has
+  // ever been mounted on a Mac carries AppleDouble sidecars named `._Book.epub`
+  // -- which end in .epub and would otherwise appear as a phantom duplicate of
+  // every real book -- plus `.Spotlight-V100`, `.fseventsd` and `.Trashes`
+  // DIRECTORIES, which would appear as folders to descend into.
+  FakeFileSystem fs;
+  fs.writeAll("/books/Real.epub", "x");
+  fs.writeAll("/books/._Real.epub", "x");
+  fs.writeAll("/books/.hidden.epub", "x");
+  fs.writeAll("/books/.DS_Store", "x");
+  fs.mkdirs("/books/.Spotlight-V100");
+  fs.mkdirs("/books/.fseventsd");
+  fs.mkdirs("/books/Visible");
+  std::vector<BookEntry> out;
+  REQUIRE(BookList::scan(fs, "/books", out));
+  CAPTURE(names(out));
+  CHECK(out.size() == 2);
+  CHECK(has(out, "Visible"));
+  CHECK(has(out, "Real.epub"));
+}
+
+TEST_CASE("an empty directory is an empty list and TRUE") {
+  // No books is a valid state. The caller has to be able to tell it from a read
+  // failure, because one draws an empty library and the other is a broken card.
+  FakeFileSystem fs;
+  fs.mkdirs("/books");
+  std::vector<BookEntry> out;
+  CHECK(BookList::scan(fs, "/books", out));
+  CHECK(out.empty());
+}
+
+TEST_CASE("a directory holding nothing that qualifies is also empty and TRUE") {
+  FakeFileSystem fs;
+  fs.writeAll("/books/.DS_Store", "x");
+  fs.writeAll("/books/cover.jpg", "x");
+  std::vector<BookEntry> out;
+  CHECK(BookList::scan(fs, "/books", out));
+  CHECK(out.empty());
+}
+
+TEST_CASE("a path that is not a directory is false") {
+  FakeFileSystem fs;
+  fs.writeAll("/books/one.epub", "x");
+  std::vector<BookEntry> out;
+  CHECK_FALSE(BookList::scan(fs, "/books/one.epub", out));
+  CHECK(out.empty());
+  CHECK_FALSE(BookList::scan(fs, "/nowhere", out));
+  CHECK(out.empty());
+}
+
+TEST_CASE("an unmounted filesystem is false, not empty-and-fine") {
+  // The distinction the SD-missing screen exists for: no card is not an empty
+  // library.
+  FakeFileSystem fs;
+  fs.writeAll("/books/one.epub", "x");
+  fs.setMounted(false);
+  std::vector<BookEntry> out;
+  CHECK_FALSE(BookList::scan(fs, "/books", out));
+  CHECK(out.empty());
+}
+
+TEST_CASE("scan clears its output first, so a rescan does not accumulate") {
+  FakeFileSystem fs;
+  fs.writeAll("/books/one.epub", "x");
+  fs.writeAll("/books/two.epub", "x");
+  std::vector<BookEntry> out;
+  REQUIRE(BookList::scan(fs, "/books", out));
+  REQUIRE(out.size() == 2);
+  REQUIRE(BookList::scan(fs, "/books", out));
+  CHECK(out.size() == 2);
+  // ...and a failed scan clears it too: the list is what the card says now, and
+  // leaving the previous card's books on screen is worse than showing none.
+  fs.setMounted(false);
+  CHECK_FALSE(BookList::scan(fs, "/books", out));
+  CHECK(out.empty());
+}
+
+TEST_CASE("a book carries its size and a folder does not pretend to have one") {
+  FakeFileSystem fs;
+  fs.writeAll("/books/sized.epub", std::string(4321, 'x'));
+  fs.mkdirs("/books/folder");
+  std::vector<BookEntry> out;
+  REQUIRE(BookList::scan(fs, "/books", out));
+  REQUIRE(out.size() == 2);
+  CHECK(find(out, "sized.epub")->size == 4321u);
+  CHECK_FALSE(find(out, "sized.epub")->isDir);
+  CHECK(find(out, "folder")->size == 0u);
+  CHECK(find(out, "folder")->isDir);
+}
+
+TEST_CASE("the name is the leaf, not the path it was found under") {
+  // The row's name is joined onto the directory to open the book; a name that
+  // already carried the directory would address /books/books/one.epub.
+  FakeFileSystem fs;
+  fs.writeAll("/books/nested/deep/one.epub", "x");
+  std::vector<BookEntry> out;
+  REQUIRE(BookList::scan(fs, "/books/nested/deep", out));
+  REQUIRE(out.size() == 1);
+  CHECK(out[0].name == "one.epub");
+}
+
+TEST_CASE("the root directory is scannable like any other") {
+  // A card whose books are loose at the top level, and the path shape most
+  // likely to trip a naive join.
+  FakeFileSystem fs;
+  fs.writeAll("/loose.epub", "x");
+  fs.mkdirs("/books");
+  std::vector<BookEntry> out;
+  REQUIRE(BookList::scan(fs, "/", out));
+  CAPTURE(names(out));
+  CHECK(out.size() == 2);
+  CHECK(out[0].name == "books");
+  CHECK(out[1].name == "loose.epub");
+}
