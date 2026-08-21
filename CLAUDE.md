@@ -72,10 +72,17 @@ screen is drawn **three times** into a 1-bit buffer:
 | `Plane::Lsb` | bit 0 of coverage | `copyGrayscaleLsbBuffers` |
 | `Plane::Msb` | bit 1 of coverage | `copyGrayscaleMsbBuffers` |
 
-Structural drawing (rules, fills, dither, icons) has coverage 0 or 3 and so is
-identical in all three passes; only glyph edges differ. That is what makes a
-plane bug show up as text fringing rather than missing furniture — and there is
-a test pinning it.
+**Rules, fills and dither** have coverage 0 or 3 and so are identical in all
+three passes; that is what makes a plane bug show up as fringing rather than
+missing furniture, and `test_components.cpp` pins it for `drawRow`'s hairline
+and the header band's rule.
+
+**Icons are not in that set.** All ten shipped marks are 2 bpp
+(`core/src/icons.cpp`) because they are generated anti-aliased from the boards,
+so they legitimately carry grey at their edges and differ between planes exactly
+as glyphs do. `Icon::bpp == 1` is the opt-in for a mark that wants hard 1-bit
+edges, and nothing uses it. So grey on an icon edge is correct; grey on a rule,
+a fill or a dither cell is a plane bug.
 
 **Chrome must be anti-aliased.** 1-bit thresholding is what made small type
 illegible on the panel; it is not a size problem.

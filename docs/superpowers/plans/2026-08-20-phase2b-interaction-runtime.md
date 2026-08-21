@@ -1864,9 +1864,31 @@ the `sim_home` test and `tools/compare-design.py` both call it.
 
 - [ ] **Step 1: Factor the font loading out of `main`**
 
-`sim/main.cpp` loads ten faces inline in `main`. Extract that into
-`static bool loadRamp(reader::FontSet& fonts)` returning false on failure, so both
-subcommands use one copy. Keep the existing comment about roles naming weights.
+`sim/main.cpp` loads ten faces inline in `main`. Extract it so both subcommands use
+one copy, keeping the existing comment about roles naming weights.
+
+**`FontSet` owns nothing** — every `Font` is a zero-copy view, so each blob passed
+to `load()` must outlive the set. A `static bool loadRamp(reader::FontSet&)` holding
+the ten `std::vector`s as locals is therefore a **use-after-free**: it compiles,
+links, exits 0, and prints a PNG with garbage where the largest faces should be,
+because the result depends on what the freed heap got reused for. `sim_home` checks
+the exit code, so the suite would not catch it.
+
+Extract a struct that owns the blobs beside the set — the shape `test/unit/ramp.h`
+already uses:
+
+```cpp
+// The blobs live here, next to the FontSet that views them: FontSet owns nothing,
+// so a loader that kept them in locals would leave every face dangling on return.
+struct SimRamp {
+  std::vector<uint8_t> blobs[10];
+  reader::FontSet fonts;
+  bool load(const std::string& dir);
+};
+```
+
+Verify by eye, not just by exit code: `./build/reader_sim home build/home.png` and
+confirm the PNG is byte-identical to `test/golden/home_quiet.png`.
 
 - [ ] **Step 2: Put the screen catalogue in `core/`, not in the simulator**
 
@@ -2111,15 +2133,17 @@ make test
 ./build/reader_sim app build/nav_x3.png --keys DOWN,CONFIRM --canvas 528x792
 ```
 
-Expected: `make test` green including `sim_app`; the second command prints
-`screen=0 depth=1` (Home, no keys change that); the third prints `screen=1 depth=2`
-(Library). Open `build/nav.png` with the Read tool and confirm it is the Library
+Expected: `make test` green including `sim_app`. The second and third commands run
+the **same keys** and differ only in canvas, so they print the **same stack** —
+`screen=1 depth=2` (Library) for both, since DOWN focuses LIBRARY and CONFIRM pushes
+it. A bad key name exits 2 with `unknown key '...'`. Open `build/nav.png` with the Read tool and confirm it is the Library
 placeholder with its `PLACEHOLDER — PHASE 2C` note, not a broken frame.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add sim/main.cpp CMakeLists.txt
+git add core/include/reader/screens.h core/src/screens.cpp test/unit/test_screens.cpp \
+        test/unit/home_vm.h sim/main.cpp CMakeLists.txt
 git commit -m "feat(sim): drive the app from scripted button events"
 ```
 
@@ -2202,6 +2226,11 @@ Run: `make test`
 Expected: FAIL — the goldens do not exist; the test writes
 `build/home_focus_library_candidate.png` and names both paths.
 
+`golden::checkGoldenGray` uses a **fatal** `FAIL` for a missing golden, so a loop over
+both geometries aborts after the first and only ever writes the x4 candidate. Getting
+both: inspect and bless x4, re-run to obtain the real x3 candidate, inspect that, then
+bless it. Do not shortcut by blessing x3 unseen.
+
 - [ ] **Step 3: Inspect the candidates before blessing**
 
 **Open both candidates with the Read tool** and check, item by item:
@@ -2213,7 +2242,10 @@ Expected: FAIL — the goldens do not exist; the test writes
   label and black forward arrow
 - the header band, cover placeholder, title, author, progress bar and hint bar are
   identical to `home_quiet.png` / `home_quiet_x3.png`
-- no grey on any rule, fill or icon in the composed image
+- no grey on any **rule, fill or dither cell** in the composed image. Icons are a
+  different matter: every shipped mark is 2 bpp and anti-aliased, so grey on an
+  icon's edge is correct. Compare an icon's grey pixel count against
+  `home_quiet.png` rather than expecting zero.
 
 Write down what you see, including anything that looks wrong even if you bless it.
 
