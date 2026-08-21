@@ -466,6 +466,33 @@ silently wrong screen. `core/` never picks its own fonts — the caller supplies
     the board's three lines came out as four. 420 is three lines in both engines
     and moves nothing in Chrome. The number was wrong, not the design.
 
+## Overlays and lists
+
+- **The App renders a STACK, not a screen.** `Screen::isOverlay()` marks a panel
+  that leaves the screen beneath it visible under a veil; `App::render` walks down
+  to the topmost non-overlay, renders that, then renders each overlay above it.
+  **The shell must call `App::render`, never `top().render`** — that mistake paints
+  an overlay as a panel floating on white, and *nothing on the desktop can catch
+  it*: the simulator and all the goldens go through `App::render`, so they pass
+  while the device is wrong. It has happened once.
+- **Input and fidelity come from the top screen only.** An overlay whose parent
+  still received events would move a focus the user cannot see.
+- **There are THREE dither patterns for three jobs**, each from its own board
+  declaration, and `dither.cpp` explains why they cannot be shared:
+  `kClustered` black on a 4px grid for tints (`.dither-dots`, and an `Ink` for
+  `.dither-dots-inv`), `kBayer` dispersed for glyph and icon edges, and
+  `veilRect`'s clustered **white** on a **3px** grid for the overlay veil. A 4px
+  veil is half as dense and reads as a smudge.
+- **`ScrollWindow` owns list movement** — focus plus first-visible, scrolling by a
+  row rather than a page. `Theme::libraryVisibleRows` derives how many rows fit
+  from the panel and the type; the shell must set it before the first Library
+  paint or the list correctly renders empty.
+- **The session record stores a screen NAME, not an enum ordinal.** 2C-2 inserted
+  three screens into the middle of `ScreenId` and a stored ordinal silently became
+  a different screen. Names also mean `nvs_get encre_sess scr str` is readable on
+  a device. They are deliberately not `screenName()`'s strings — that is a log
+  label, free to be reworded; this is a storage format.
+
 ## Goldens
 
 `test/golden/*.png` are human-approved, pixel-exact baselines. A golden test
