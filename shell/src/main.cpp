@@ -398,9 +398,33 @@ static void armCardProbes(const char* why) {
   }
   Serial.flush();
 
-  // The backstop's baseline, and the one place its real cost on THIS card is
-  // measured. A big card means a big FAT, so print the number rather than
-  // guessing at it in a comment.
+  // ARM THE BACKSTOP ONLY IF THE FAST PROBE IS DEGRADED.
+  //
+  // Measured on the user's card: the FAT scan takes **14108 ms**. It was armed
+  // unconditionally, which delayed the first paint by fourteen seconds and would
+  // then have blocked the loop for fourteen seconds out of every twenty-five,
+  // forever. That is not insurance, it is a device that appears to hang.
+  //
+  // It was added because the fast probe's guarantee was an ARGUMENT about
+  // SdFat's cache geometry, and an argument is what was wrong the time before.
+  // The device has since settled that argument: pulling the card produced
+  // "Detected by the 2 s FAST PROBE (a byte read from a real file)" within two
+  // seconds. So the fast probe works, and paying fourteen seconds to second-guess
+  // it is strictly worse than not paying it.
+  //
+  // It stays for the one case where the fast probe genuinely cannot tell -- no
+  // target file, so `probe()` falls back to the cache-served root read. There the
+  // scan is the only check there is, and fourteen seconds every twenty-five is
+  // better than never noticing. That path also announces itself loudly above.
+  if (gSd.probeTarget() == SdFileSystem::ProbeTarget::File) {
+    Serial.printf("[sd] %s: FAT-scan backstop NOT armed -- the fast probe reads a real file, "
+                  "which the device has confirmed detects a pull in ~2 s. The scan costs "
+                  "~14 s on this card and is only worth that when the fast probe is "
+                  "degraded\n",
+                  why);
+    Serial.flush();
+    return;
+  }
   const uint32_t t0 = millis();
   const bool armed = gSd.armDeepProbe();
   const uint32_t scanMs = millis() - t0;
