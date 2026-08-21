@@ -87,6 +87,44 @@ a fill or a dither cell is a plane bug.
 **Chrome must be anti-aliased.** 1-bit thresholding is what made small type
 illegible on the panel; it is not a size problem.
 
+## Runtime
+
+The interaction runtime is *logic*, so it lives in `core/` and is unit-tested on
+the desktop: `PressRecognizer` (input.h), `App` + `Screen` (app.h),
+`RefreshPolicy` (refresh.h), `IdleTimer` (power.h). The shell contributes only
+what needs hardware — raw button samples, the panel calls, deep sleep.
+
+- **One physical press is exactly one event.** A hold fires `Long` while the
+  button is still down; the release then emits nothing. A button *outside* the
+  long-press mask fires `Short` on release however long it was held — never
+  nothing. And because `tick()` only runs from the main loop, which a gray
+  refresh blocks for ~1.5 s, the **release edge classifies the press too**: a
+  hold made entirely inside a repaint would otherwise arrive as a `Short`, which
+  on a list means opening the item instead of its actions overlay.
+- **`InputManager::beginAsync()` cannot support a long press** — it queues press
+  edges only, no releases and no durations. `shell/src/input_task.cpp` is its own
+  poll loop over `update()`, queuing both edges with a `millis()` timestamp.
+  **Only that task may call `update()`**; it owns the edge state.
+- **The hint bar's hold ring and the long-press binding read one field** — the
+  view-model's `holds` array, via `hintHoldMask()`. So a screen cannot promise a
+  hold it has not bound, or bind one with nothing on screen to suggest it. The
+  mask follows the top of the stack, so refresh it after every dispatch.
+- **Screens declare a `Fidelity`, and chrome is always `Gray`.** A 1-bit fast
+  refresh of chrome is illegible on this glass, so `mode=FAST` in a `[paint]` log
+  line beside `fidelity=gray` is not a contradiction — it means the cadence had a
+  fast slot the screen could not use. `Mono` is the Reader's path and the input
+  monitor's.
+- **`core/include/reader/screens.h` is the one screen catalogue**, shared by the
+  simulator and the shell. Two factories would drift, and the drift would be
+  invisible because each half keeps passing its own checks.
+- **Deep sleep is a chip reset**, so RAM state is lost and the firmware boots
+  into Home. Wake is the **power button only**: the six front buttons are
+  ADC-ladder bands on GPIO 1/2 and produce no GPIO edge, while power is a real
+  GPIO (3, active-LOW). Sleep order is `display.deepSleep()` →
+  `PowerManager::powerDownRailsForSleep()` → `deepSleepUntilPowerButton()`. That
+  middle call does cut the X3's SD rail (the profile declares
+  `sd.powerEnable = 13`), despite the SDK header calling it a no-op on X3/X4.
+
 ## Type
 
 Sized in **points at 150 DPI**, CrossPoint's convention: `ppem = pt * 150 / 72`.
