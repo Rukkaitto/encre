@@ -64,21 +64,49 @@ stop meaning anything.
 
 Glyph and icon coverage is 2 bpp — 0..3 per pixel — and the framebuffer is
 1-bit. How that coverage gets onto the panel is the screen's declared `Fidelity`
-(`core/include/reader/refresh.h`), and there are two answers.
+(`core/include/reader/refresh.h`), and there are three answers.
 
-**`Fidelity::Dithered` — one pass, one waveform. This is what ships.**
-`Plane::BwDithered`, in a single render, stipples partial coverage through a
-**dispersed Bayer 4×4** instead of thresholding it away: `cov*16/3 > bayer4(x,y)`
-inks 5 cells of 16 at coverage 1 and 10 at coverage 2, keyed on absolute panel
-coordinates so a mark and the label beside it share one grid. Full coverage
-stays solid and zero stays blank, so **a glyph interior is never stippled** —
-only its edge is. Chrome is therefore anti-aliased on a single 1-bit frame.
+**`Fidelity::Mono` — one pass, one waveform, hard threshold. This is what ships,
+and it is the default.** `Plane::Bw` inks where coverage ≥ 2 and leaves paper
+where it is ≤ 1. No stipple, no grey, no anti-aliasing: chrome is
+hard-thresholded 1-bit.
 
-**Chrome must be anti-aliased — but anti-aliased does not mean grey.** What
-Phase 2A-2 measured as illegible was 1-bit *thresholding*, which throws away
-every sub-half-coverage pixel and takes the soft edge off every stem. Stippling
-that same coverage keeps the edge, and the result was verified on X3 hardware.
-Do not read "1-bit" in the old notes as "thresholded".
+**Why, when 2A-2 measured thresholded chrome as illegible: because the reference
+firmware does exactly this, on this glass.** CrossInk (a CrossPoint derivative,
+the stock firmware) builds its **UI fonts 1-bit** and only its *reader* fonts
+2-bit, and its "Text Anti-Aliasing" setting is read **only** by the EPUB/TXT
+reader activities — never by a menu, home, library or settings screen. Its chrome
+therefore has no anti-aliasing at all, and it is legible. Compared side by side
+on the X3 against our dithered chrome, the hard edge won. What 2A-2 actually
+measured was a *px-authored* type ramp that was too small for the panel; the
+pt-at-150-DPI ramp fixed that, and every role is now ≥ 21px, where a 2px stem
+fully inked is cleaner than a 2px stem inked 5/8 of the way.
+
+Two things the re-bless made concrete, and both are worth knowing before
+predicting what thresholding will do:
+
+- **It makes foreground heavier, not lighter.** Coverage 2 is more common than
+  coverage 1 on this ramp (3618 px vs 1702 on Home), so thresholding *fills* more
+  edge than it *drops*: Home gained 806 pixels of ink. The naive fear — "hard
+  1-bit thins the text out" — is backwards here.
+- **The exception is a thin diagonal.** `kChevron`'s stroke is mostly
+  coverage-1 pixels, so it comes out one notch lighter and much crisper. Diagonals
+  are where to look if a mark ever reads too faint.
+
+**`Fidelity::Dithered` — also one pass and one waveform, but stippled.**
+`Plane::BwDithered` puts partial coverage through a **dispersed Bayer 4×4**
+instead of thresholding it: `cov*16/3 > bayer4(x,y)` inks 5 cells of 16 at
+coverage 1 and 10 at coverage 2, keyed on absolute panel coordinates so a mark
+and the label beside it share one grid. Full coverage stays solid and zero stays
+blank, so **a glyph interior is never stippled** — only its edge is.
+
+It is **implemented, tested and hardware-verified**, and it is not deprecated. It
+costs exactly what `Mono` costs, and it is the right answer where a stroke is wide
+enough for a stipple to read as tone rather than as grain — Home's 67px `6%`
+numeral is the one element on the screen that measurably got worse on `Mono`, its
+curves going from smooth to a countable staircase. Chrome ships `Mono` anyway,
+because at 21px the same stipple reads as noise on the stroke rather than as a
+soft edge, and small type is most of chrome.
 
 **`Fidelity::Grayscale` — three passes plus a rebase, three waveforms.** The
 panel shows **four grey levels** from two bit-planes the controller combines;
@@ -93,7 +121,7 @@ onto a valid B/W baseline afterwards:
 | `Plane::Msb` | bit 1 of coverage | `copyGrayscaleMsbBuffers` |
 
 **It costs three panel waveforms: 366 + 366 + 156 ms, and 1363 ms for a focus
-move measured end to end on the X3**, against one waveform for the dithered
+move measured end to end on the X3**, against one waveform for either one-pass
 path. No screen declares it today. It is kept, not deprecated, because it is the
 only way to put continuous tone on this glass — Phase 3's question about book
 covers and images — and because the sequence was expensive to get right; the
@@ -102,27 +130,39 @@ grayscale is not the escape hatch**: rotation is CCW, so a portrait row band
 becomes a full-height landscape column band and every gate line is driven
 anyway.
 
-**Rules, fills and dither** have coverage 0 or 3, so they are identical in all
-four passes — dithered and all three grayscale planes. That is what makes a plane
-bug show up as fringing rather than missing furniture, `test_components.cpp` pins
-it for `drawRow`'s hairline and the header band's rule, and it is why re-blessing
-Home for the dithered path moved **only** partial-coverage pixels.
+**Rules, fills and dither** have coverage 0 or 3, so they are identical in every
+pass — `Bw`, `BwDithered` and all three grayscale planes. That is what makes a
+plane bug show up as fringing rather than missing furniture, `test_components.cpp`
+pins it for `drawRow`'s hairline and the header band's rule, and it is why each
+re-bless of Home — first onto the dithered path, then onto `Mono` — moved **only**
+partial-coverage pixels, verified per pixel against the coverage map rather than
+by eyeballing totals.
 
 **Icons are not in that set.** All ten shipped marks are 2 bpp
-(`core/src/icons.cpp`) because they are generated anti-aliased from the boards,
-so they legitimately carry partial coverage at their edges and stipple exactly as
-glyphs do. `Icon::bpp == 1` is the opt-in for a mark that wants hard 1-bit edges,
-and nothing uses it — though the small round marks (`kDot`, `kBattery`) are the
-ones a 4×4 dither serves worst, because a 1px rim at near-constant coverage has
-no tone to dither and the Bayer phase just picks which rim pixels survive.
+(`core/src/icons.cpp`) because they are generated anti-aliased from the boards, so
+they legitimately carry partial coverage at their edges and take whichever
+treatment the plane implies. `Icon::bpp == 1` is the opt-in for a mark that wants
+hard 1-bit edges, and nothing uses it — it is now redundant for chrome, because
+`Plane::Bw` gives every mark hard edges anyway.
+
+**The small round marks are what settled the chrome question.** `kDot`,
+`kBattery` and `kBook` are the marks a 4×4 dither serves worst: a 1px rim at
+near-constant coverage has no tone to dither, so the Bayer phase just picks which
+rim pixels survive, and the mark comes out visibly moth-eaten. On `Mono` the
+battery is a clean outline with a solid fill and a solid terminal nub, the book is
+an unmistakable two-page spread with a solid spine, and the bullet loses its four
+single-pixel whiskers. Thresholding **improved** all three, measurably and
+visibly. Same for `kForward`, whose dithered arrowhead was frayed.
 
 **The two dither matrices are deliberately different, and `dither.cpp` says
-why.** `kClustered` is for *tints* — the board's cover placeholder is one round
-dot repeated on a 4px grid, and dispersing that area into isolated pixels reads
-denser and grainier than the blob it is meant to be. `kBayer` is for *edges* —
-clustering a stroke's edge coverage would pile the ink against the stroke and
-read as the stroke thickening, which is the one thing an anti-aliased edge must
-not do. Same nominal coverage, opposite arrangement, opposite jobs.
+why** — and `kClustered` still ships, on the cover placeholder, whatever the
+screen's fidelity. `kClustered` is for *tints*: the board's cover placeholder is
+one round dot repeated on a 4px grid, and dispersing that area into isolated
+pixels reads denser and grainier than the blob it is meant to be. `kBayer` is for
+*edges*, and is what `Plane::BwDithered` uses — clustering a stroke's edge
+coverage would pile the ink against the stroke and read as the stroke thickening,
+which is the one thing an anti-aliased edge must not do. Same nominal coverage,
+opposite arrangement, opposite jobs.
 
 ## Runtime
 
@@ -146,13 +186,24 @@ what needs hardware — raw button samples, the panel calls, deep sleep.
   view-model's `holds` array, via `hintHoldMask()`. So a screen cannot promise a
   hold it has not bound, or bind one with nothing on screen to suggest it. The
   mask follows the top of the stack, so refresh it after every dispatch.
-- **Screens declare a `Fidelity` and the default is `Dithered`**, so a screen
-  opts *in* to the expensive path rather than out of it — nothing declares
-  `Grayscale` today, and the old default is what had every chrome screen paying
-  1363 ms a paint by saying nothing. If one ever does declare it, `mode=FAST`
-  beside `fidelity=gray` in a `[paint]` line is not a contradiction: the
-  grayscale sequence has no differential form, so it means the cadence had a fast
-  slot the screen could not use.
+- **Screens declare a `Fidelity` and the default is `Mono`**, so a screen opts
+  *in* to a more expensive or more unusual path rather than out of it — nothing
+  declares `Dithered` or `Grayscale` today, and the old `Gray` default is what had
+  every chrome screen paying 1363 ms a paint by saying nothing. If one ever does
+  declare `Grayscale`, `mode=FAST` beside `fidelity=gray` in a `[paint]` line is
+  not a contradiction: the grayscale sequence has no differential form, so it
+  means the cadence had a fast slot the screen could not use.
+- **A screen transition does NOT force a FULL refresh.** `RefreshPolicy` takes
+  `fullOnTransition` and the shell passes it `false`, because that FULL is the
+  black flash the user sees on every navigation and the reference firmware does
+  not do it on this panel: CrossInk's `ScreenTransitionRefresh::modeFor` returns
+  FULL only for `screenChanged && !deviceIsX3()`, its list and menu screens call
+  `displayBuffer()` with no argument (whose default is `FAST_REFRESH`), and its one
+  home `FULL_REFRESH` is gated behind an `initialFullRefresh` flag that defaults to
+  false. **The FULL-every-15 cadence stays**, and CrossInk having no cadence is not
+  a reason to drop it — see the comment at the `gRefresh` construction. With the
+  transition FULL gone, the cadence is the only thing bounding a run of FAST
+  refreshes, and a transition now *counts toward* it rather than resetting it.
 - **`core/include/reader/screens.h` is the one screen catalogue**, shared by the
   simulator and the shell. Two factories would drift, and the drift would be
   invisible because each half keeps passing its own checks.
@@ -222,9 +273,22 @@ review twice while reading as the letters "OC". When a change is meant to move
 only some class of pixel — edges, say — the strongest check is to prove that
 nothing outside that class moved, per pixel, rather than to eyeball the totals.
 
-Home's four goldens are two-level renders of `Plane::BwDithered`, via
-`golden::checkGolden`. `golden::checkGoldenGray` composes two planes into a
-4-level image and is for a screen on the grayscale path; nothing uses it today.
+Home's four goldens are two-level renders of `Plane::Bw`, via
+`golden::checkGolden`, because Home takes the default `Fidelity::Mono`. Both
+golden tests assert that fidelity before naming the plane, so a change to the
+shipped path fails the test rather than leaving the goldens quietly pinning a path
+nothing paints. `golden::checkGoldenGray` composes two planes into a 4-level image
+and is for a screen on the grayscale path; nothing uses it today.
+
+**The check that made the last two re-blesses trustworthy** was not a visual one:
+compose `Plane::Lsb` and `Plane::Msb` into the 4-level coverage map (that map's
+level per pixel *is* the coverage the renderer computed), then assert that **no
+pixel of coverage 0 or 3 moved**. Both re-blesses came out at exactly zero, which
+proves the header band, every rule, the cover's dither block, the progress bar,
+the inverted block and row fields and every hint-slot position are bit-identical,
+without needing to trust an eyeball on 384000 pixels. Note the level→byte mapping
+is `0..3 → white..black`, so **byte 170 is coverage 1 and byte 85 is coverage 2** —
+easy to get backwards, and it inverts the conclusion if you do.
 
 ## Where to look
 
