@@ -60,10 +60,10 @@ TEST_CASE("every role carries the weight and the size its name claims") {
   CHECK(b400.ppem() == b500.ppem());
   int ink400 = 0, ink500 = 0;
   for (const char* s = "George Eliot"; *s; ++s) {
-    const reader::Glyph* g4 = b400.glyph(static_cast<char32_t>(*s));
-    const reader::Glyph* g5 = b500.glyph(static_cast<char32_t>(*s));
-    REQUIRE(g4 != nullptr);
-    REQUIRE(g5 != nullptr);
+    const auto g4 = b400.glyph(static_cast<char32_t>(*s));
+    const auto g5 = b500.glyph(static_cast<char32_t>(*s));
+    REQUIRE(g4.has_value());
+    REQUIRE(g5.has_value());
     for (int y = 0; y < g4->bitmapH; ++y)
       for (int x = 0; x < g4->bitmapW; ++x) ink400 += b400.coverage(*g4, x, y);
     for (int y = 0; y < g5->bitmapH; ++y)

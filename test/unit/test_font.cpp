@@ -19,10 +19,10 @@ TEST_CASE("font loads and measures text") {
 
   CHECK(font.ascent() > 8);
   CHECK(font.descent() < 0);
-  CHECK(font.glyph(U'A') != nullptr);
-  CHECK(font.glyph(U'é') != nullptr);   // é (Latin-1)
-  CHECK(font.glyph(U'—') != nullptr);   // em dash
-  CHECK(font.glyph(0x1F600) == nullptr);     // no emoji
+  CHECK(font.glyph(U'A').has_value());
+  CHECK(font.glyph(U'é').has_value());   // é (Latin-1)
+  CHECK(font.glyph(U'—').has_value());   // em dash
+  CHECK_FALSE(font.glyph(0x1F600).has_value());  // no emoji
 
   const int wa = font.measure("A");
   const int wab = font.measure("AB");

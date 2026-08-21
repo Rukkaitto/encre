@@ -69,7 +69,7 @@ TEST_CASE("a missing glyph draws a visible box rather than nothing") {
   auto bytes = slurpFont("spacegrotesk_500_14pt.rfnt");
   reader::Font font;
   REQUIRE(font.load(bytes.data(), bytes.size()));
-  REQUIRE(font.glyph(0x4E2D) == nullptr);   // CJK, definitely not in the subset
+  REQUIRE_FALSE(font.glyph(0x4E2D).has_value());   // CJK, definitely not in the subset
 
   reader::Framebuffer fb(64, 32);
   const int advance = reader::drawText(fb, font, 4, 24, "\xE4\xB8\xAD");  // U+4E2D

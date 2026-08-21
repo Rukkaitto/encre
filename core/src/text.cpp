@@ -1,3 +1,5 @@
+#include <optional>
+
 #include "reader/dither.h"
 #include "reader/text.h"
 
@@ -17,7 +19,7 @@ int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::strin
   char32_t prev = 0;
   for (size_t i = 0; i < utf8.size();) {
     const char32_t cp = utf8Next(utf8, i);
-    const Glyph* g = font.glyph(cp);
+    const std::optional<Glyph> g = font.glyph(cp);
     if (!g) {
       // No glyph for this codepoint: draw a hollow box so malformed or
       // out-of-subset text is visibly wrong instead of silently invisible.
@@ -92,7 +94,7 @@ std::string elideToWidth(const Font& font, std::string_view utf8, int maxW, Trac
   // measure(kEllipsis)` misses the kern across the join, and the kern is where a
   // one-pixel overhang would come from.
   constexpr char32_t kEllipsisCp = 0x2026;
-  const Glyph* eg = font.glyph(kEllipsisCp);
+  const std::optional<Glyph> eg = font.glyph(kEllipsisCp);
   const int ellipsisAdvanceF = pxToF26(eg ? eg->advance : font.notdefAdvance());
 
   int penF = 0;
@@ -101,7 +103,7 @@ std::string elideToWidth(const Font& font, std::string_view utf8, int maxW, Trac
   size_t i = 0;
   while (i < utf8.size()) {
     const char32_t cp = utf8Next(utf8, i);
-    const Glyph* g = font.glyph(cp);
+    const std::optional<Glyph> g = font.glyph(cp);
     if (!g) {
       penF += pxToF26(font.notdefAdvance()) + tracking.f26();
       prev = 0;

@@ -47,7 +47,7 @@ TEST_CASE("Font::load accepts a well-formed synthetic font") {
   const auto bytes = minimalFont().build();
   reader::Font font;
   REQUIRE(font.load(bytes.data(), bytes.size()));
-  REQUIRE(font.glyph(U'A') != nullptr);
+  REQUIRE(font.glyph(U'A').has_value());
   CHECK(font.glyph(U'A')->bitmap[0] == 0xFF);
 }
 
@@ -85,7 +85,7 @@ TEST_CASE("Font::load reads format 2's declared size and weight, and format 1 ha
   CHECK(font.ppem() == 29);
   CHECK(font.weight() == 400);
   // The glyph table moved 4 bytes along with the header and is still read.
-  CHECK(font.glyph(U'A') != nullptr);
+  CHECK(font.glyph(U'A').has_value());
 
   // A format-1 asset declares neither and says so with 0 rather than with a
   // plausible-looking guess.
@@ -94,7 +94,7 @@ TEST_CASE("Font::load reads format 2's declared size and weight, and format 1 ha
   REQUIRE(old.load(v1.data(), v1.size()));
   CHECK(old.ppem() == 0);
   CHECK(old.weight() == 0);
-  CHECK(old.glyph(U'A') != nullptr);
+  CHECK(old.glyph(U'A').has_value());
 }
 
 TEST_CASE("Font::load rejects a short header") {
@@ -181,10 +181,10 @@ TEST_CASE("Font::load leaves no state behind after a failure") {
 
   reader::Font font;
   REQUIRE(font.load(good.data(), good.size()));
-  REQUIRE(font.glyph(U'A') != nullptr);
+  REQUIRE(font.glyph(U'A').has_value());
 
   CHECK_FALSE(font.load(badBytes.data(), badBytes.size()));
-  CHECK(font.glyph(U'A') == nullptr);  // glyphs from the previous load are gone
+  CHECK_FALSE(font.glyph(U'A').has_value());  // the previous load's table is gone
   CHECK(font.ascent() == 0);
   CHECK(font.descent() == 0);
   CHECK(font.lineHeight() == 0);
@@ -213,8 +213,8 @@ TEST_CASE("Font::load accepts a v2 2bpp font and reports its depth") {
   reader::Font f;
   REQUIRE(f.load(bytes.data(), bytes.size()));
   CHECK(f.bpp() == 2);
-  const reader::Glyph* g = f.glyph(U'A');
-  REQUIRE(g != nullptr);
+  const auto g = f.glyph(U'A');
+  REQUIRE(g.has_value());
   CHECK(g->rowBytes() == 1);  // 4 px * 2 bpp = 1 byte
   CHECK(f.coverage(*g, 0, 0) == 0);
   CHECK(f.coverage(*g, 1, 0) == 1);
@@ -227,8 +227,8 @@ TEST_CASE("a v1 font still loads and reports 1bpp with binary coverage") {
   reader::Font f;
   REQUIRE(f.load(bytes.data(), bytes.size()));
   CHECK(f.bpp() == 1);
-  const reader::Glyph* g = f.glyph(U'A');
-  REQUIRE(g != nullptr);
+  const auto g = f.glyph(U'A');
+  REQUIRE(g.has_value());
   CHECK(g->rowBytes() == 1);
   CHECK(f.coverage(*g, 0, 0) == 3);  // a set 1bpp bit is full coverage
   CHECK(f.coverage(*g, 1, 0) == 0);
@@ -242,8 +242,8 @@ TEST_CASE("a 2bpp row is one byte wider every four pixels") {
   const auto bytes = b.build();
   reader::Font f;
   REQUIRE(f.load(bytes.data(), bytes.size()));
-  const reader::Glyph* g = f.glyph(U'A');
-  REQUIRE(g != nullptr);
+  const auto g = f.glyph(U'A');
+  REQUIRE(g.has_value());
   CHECK(g->rowBytes() == 2);
   CHECK(f.coverage(*g, 3, 0) == 0);
   CHECK(f.coverage(*g, 4, 0) == 2);
