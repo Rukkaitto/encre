@@ -5,16 +5,32 @@
 // file: a fake that passes tests the real one fails is worse than no fake,
 // because every test written above it then proves nothing.
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
 #include "doctest.h"
 #include "fake_fs.h"
 #include "reader/filesystem.h"
+#include "reader/host_fs.h"
 
 using namespace reader;
 
 namespace {
+
+// A directory under BUILD_DIR, emptied first so the test does not inherit
+// anything from a previous run. doctest re-enters a TEST_CASE body once per
+// SUBCASE, so this runs before each contract case and every one of them starts
+// from an empty filesystem -- the same state a freshly constructed fake is in.
+std::string freshTempRoot(const char* name) {
+  const std::string root = std::string(BUILD_DIR) + "/fs_test/" + name;
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  std::filesystem::create_directories(root, ec);
+  REQUIRE_MESSAGE(!ec, "cannot create " << root << ": " << ec.message());
+  return root;
+}
 
 // list()'s order is unspecified, so every assertion about a listing goes
 // through here.
@@ -237,6 +253,51 @@ TEST_CASE("FakeFileSystem obeys the unmounted contract") {
   FakeFileSystem fs;
   fs.setMounted(false);
   checkUnmountedContract(fs, "FakeFileSystem");
+}
+
+// The same cases, against real files. If these two diverge the fake is lying,
+// and everything tested against the fake is worthless.
+
+TEST_CASE("HostFileSystem obeys the FileSystem contract") {
+  const std::string root = freshTempRoot("contract");
+  HostFileSystem fs(root);
+  checkFileSystemContract(fs, "HostFileSystem");
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+}
+
+TEST_CASE("HostFileSystem obeys the unmounted contract") {
+  const std::string root = std::string(BUILD_DIR) + "/fs_test/no_such_root";
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  HostFileSystem fs(root);
+  checkUnmountedContract(fs, "HostFileSystem");
+  // A missing card must stay missing: not one of those calls may have created
+  // the root on its way to failing.
+  CHECK_FALSE(std::filesystem::exists(root));
+}
+
+// HostFileSystem's own concern: the rooting.
+
+TEST_CASE("HostFileSystem confines an absolute reader path to its root") {
+  const std::string root = freshTempRoot("rooting");
+  HostFileSystem fs(root);
+
+  REQUIRE(fs.writeAll("/.reader/settings.json", "{\"version\":1}"));
+  CHECK(std::filesystem::exists(root + "/.reader/settings.json"));
+  CHECK(fs.hostPath("/.reader/settings.json") == root + "/.reader/settings.json");
+
+  // A file the host put there is visible through the interface.
+  {
+    std::ofstream out(root + "/planted.txt", std::ios::binary);
+    out << "planted";
+  }
+  std::string got;
+  REQUIRE(fs.readAll("/planted.txt", got));
+  CHECK(got == "planted");
+
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
 }
 
 // The fake's own extras -- the injectable failures the product tests need, which

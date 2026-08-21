@@ -5,6 +5,6 @@
     "srcDir": "src",
     "includeDir": "include",
     "flags": ["-std=gnu++2a"],
-    "srcFilter": ["+<*>", "-<png.cpp>"]
+    "srcFilter": ["+<*>", "-<png.cpp>", "-<host_fs.cpp>"]
   }
 }
