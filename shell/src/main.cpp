@@ -27,7 +27,6 @@
 #include "reader/input.h"
 #include "reader/power.h"
 #include "reader/refresh.h"
-#include "reader/rotate.h"
 #include "reader/screen_home.h"
 #include "reader/screens.h"
 #include "reader/text.h"  // reader::Plane
@@ -85,12 +84,16 @@ constexpr uint32_t kCoalesceMs = 0;
 static uint32_t gLastInputMs = 0;
 
 // Everything the render needs has to outlive setup(), so it lives here rather
-// than on setup()'s stack -- but the two frames stay heap-allocated behind
+// than on setup()'s stack -- but the frame stays heap-allocated behind
 // unique_ptr on purpose. A file-scope Framebuffer would allocate during static
 // init, before the largest-block check in setup() could run, and a vector that
 // cannot allocate under -fno-exceptions is an abort() boot loop with no
 // diagnostic. This project has already lost a boot to exactly that.
-static std::unique_ptr<reader::Framebuffer> gPortrait, gLandscape;
+//
+// ONE frame, not two. It is logically portrait (what the screens draw against)
+// and physically landscape (what the panel is handed), because it is built with
+// Rotation::Ccw -- see the allocation in setup().
+static std::unique_ptr<reader::Framebuffer> gFrame;
 // FontSet owns nothing: every Font it holds is a zero-copy view into a blob the
 // caller supplies. The embedded kFont* arrays have static storage, so they
 // outlive the set -- but nothing here may ever hand load() a scope-limited copy.
@@ -169,28 +172,33 @@ static void detectAndSelectBoard() {
 // -- and guessing which would mean optimising blind.
 static uint32_t gRenderMs = 0;
 
-// Split the render pass so the log distinguishes drawing from the two
-// full-frame operations the reference firmware does not do at all: it draws
-// straight into the driver's framebuffer through an orientation-aware coordinate
-// transform, so it never rotates a frame and never memcpys one. Ours pays for
-// all 418k pixels whether one changed or every one did. If `rotate` and `copy`
-// turn out to dominate `draw`, that is the refactor worth doing.
-static uint32_t gDrawMs = 0, gRotateMs = 0, gCopyMs = 0;
+// Split the render pass so the log distinguishes drawing from the full-frame
+// memcpy into the driver's own buffer, which the reference firmware does not do
+// at all -- it draws straight into that buffer through an orientation-aware
+// coordinate transform.
+//
+// There used to be a `rotate` field here too, and it is what this split was
+// added to find: a full-frame rotate90CCW cost 37 ms of a 521 ms repaint, paid
+// on all 418k pixels whether one changed or every one did, on a text screen that
+// inks about 8% of them. It is gone -- the framebuffer now applies the same
+// mapping per pixel as it draws -- so the field would report zero forever.
+static uint32_t gDrawMs = 0, gCopyMs = 0;
 
-// One render pass: draw the plane portrait-side, then rotate into `gLandscape`.
-// CCW is the correct direction, verified on X3 hardware: CW renders the whole
-// screen 180 degrees out (the two directions differ by exactly half a turn).
-// Unverified on X4 — if an X4 comes out upside down, this is the line.
+// One render pass, straight into the panel-oriented frame.
+//
+// The rotation is the framebuffer's, declared once where gFrame is allocated;
+// nothing here transposes anything. CCW is the correct direction, verified on X3
+// hardware (CW renders the whole screen 180 degrees out -- the two differ by
+// exactly half a turn, so swapping them is not the fix for a mirrored image).
+// Unverified on X4: if an X4 comes out upside down, the Rotation passed to the
+// constructor in setup() is the line, not anything in here.
 static void paintPlane(reader::Plane plane) {
   const uint32_t t0 = millis();
-  gPortrait->clear(true);
-  gApp->top().render(*gPortrait, *gFonts, gTheme, plane);
+  gFrame->clear(true);
+  gApp->top().render(*gFrame, *gFonts, gTheme, plane);
   const uint32_t t1 = millis();
-  reader::rotate90CCW(*gPortrait, *gLandscape);
-  const uint32_t t2 = millis();
   gDrawMs += t1 - t0;
-  gRotateMs += t2 - t1;
-  gRenderMs += t2 - t0;
+  gRenderMs += t1 - t0;
 }
 
 // The 4-level path: base frame, settle pass, two bit-planes, combine, rebase.
@@ -207,7 +215,7 @@ static void paintGray() {
   //    no buffer argument — it drives the driver's own frameBuffer — so
   //    setFramebuffer() (a memcpy) has to land the frame there first.
   paintPlane(reader::Plane::Bw);
-  display.setFramebuffer(gLandscape->data());
+  display.setFramebuffer(gFrame->data());
   display.displayGrayscaleBase(EInkDisplay::HALF_REFRESH);
   mark("gray-base-displayed");
 
@@ -233,9 +241,9 @@ static void paintGray() {
   //    base frame above, which the driver has already memcpy'd. LSB must go
   //    first: the MSB copy is dropped unless the driver has seen a valid LSB.
   paintPlane(reader::Plane::Lsb);
-  display.copyGrayscaleLsbBuffers(gLandscape->data());
+  display.copyGrayscaleLsbBuffers(gFrame->data());
   paintPlane(reader::Plane::Msb);
-  display.copyGrayscaleMsbBuffers(gLandscape->data());
+  display.copyGrayscaleMsbBuffers(gFrame->data());
   mark("gray-planes-written");
 
   // 4. Paint the combined 4-level image (the driver reads the planes it was
@@ -245,15 +253,17 @@ static void paintGray() {
   mark("gray-displayed");
   // Re-render the B/W pass rather than having kept a third frame alive for it.
   paintPlane(reader::Plane::Bw);
-  display.cleanupGrayscaleBuffers(gLandscape->data());
+  display.cleanupGrayscaleBuffers(gFrame->data());
   mark("refresh-complete");
 }
 
-// Hand the one 1-bit frame in gLandscape to the panel. Shared by both one-pass
-// paths below, which differ only in the plane they render.
+// Hand the one 1-bit frame in gFrame to the panel. Its bytes are already in the
+// panel's own landscape orientation, so there is nothing between the render and
+// the driver. Shared by both one-pass paths below, which differ only in the
+// plane they render.
 static void showOnePass(reader::RefreshMode mode) {
   const uint32_t tc = millis();
-  display.setFramebuffer(gLandscape->data());
+  display.setFramebuffer(gFrame->data());
   gCopyMs += millis() - tc;
   display.displayBuffer(mode == reader::RefreshMode::Full ? EInkDisplay::FULL_REFRESH
                                                           : EInkDisplay::FAST_REFRESH);
@@ -306,7 +316,7 @@ static void renderTop() {
                                                          : "mono",
                 mode == reader::RefreshMode::Full ? "FULL" : "FAST", gRefresh.sinceFull());
   Serial.flush();
-  gRenderMs = gDrawMs = gRotateMs = gCopyMs = 0;
+  gRenderMs = gDrawMs = gCopyMs = 0;
   const uint32_t t0 = millis();
   switch (fidelity) {
     case reader::Fidelity::Grayscale:
@@ -320,11 +330,13 @@ static void renderTop() {
   const uint32_t total = millis() - t0;
   // render = drawing all passes (4 for gray: Bw, Lsb, Msb, then Bw again for the
   // cleanup rebase; 1 for mono and for dithered). panel = everything else, which
-  // is essentially BUSY waits.
-  Serial.printf("[paint] done total=%lums render=%lums (draw=%lu rotate=%lu copy=%lu) panel=%lums\n",
+  // is essentially BUSY waits. `render` and `draw` are now the same number --
+  // drawing is all a render pass does since the rotate went away -- and both are
+  // kept so the field stays comparable against the logs that measured the
+  // difference. If they ever diverge again, something new got added to the pass.
+  Serial.printf("[paint] done total=%lums render=%lums (draw=%lu copy=%lu) panel=%lums\n",
                 (unsigned long)total, (unsigned long)gRenderMs, (unsigned long)gDrawMs,
-                (unsigned long)gRotateMs, (unsigned long)gCopyMs,
-                (unsigned long)(total - gRenderMs - gCopyMs));
+                (unsigned long)gCopyMs, (unsigned long)(total - gRenderMs - gCopyMs));
   Serial.flush();
 }
 
@@ -390,38 +402,53 @@ void setup() {
   const int panelW = display.getDisplayWidth();
   const int panelH = display.getDisplayHeight();
 
-  // TWO 1-bit frames, not three. Three (portrait + gray scratch + a retained
-  // B/W base for the cleanup rebase) aborts on this hardware: measured free
-  // heap is ~233 KB but the largest contiguous block is only ~115 KB, so the
-  // third 52 KB allocation finds no block big enough even though the total
-  // would cover it. std::vector then throws, and the firmware is built
-  // -fno-exceptions, so that is an abort() and a boot loop. Re-rendering the
-  // B/W pass for the cleanup rebase costs one extra render and saves a frame.
+  // ONE 1-bit frame. It used to be two -- a portrait one to draw into and a
+  // landscape one to rotate the finished frame into -- and the rotate is gone,
+  // so the portrait buffer is gone with it: the frame below is drawn against
+  // portrait coordinates and stored landscape. That is 52272 bytes of heap given
+  // back on the X3 (48000 on the X4), against a measured largest contiguous
+  // block of only ~115 KB.
+  //
+  // Three frames was never possible on this hardware and is worth remembering,
+  // because it is the same wall: measured free heap is ~233 KB but the largest
+  // contiguous block is ~115 KB, so a third 52 KB allocation found no block big
+  // enough even though the total would have covered it. std::vector then throws,
+  // and the firmware is built -fno-exceptions, so that is an abort() and a boot
+  // loop with no diagnostic. Re-rendering the B/W pass for the grayscale cleanup
+  // rebase, rather than retaining a frame for it, is what avoids needing one.
   const unsigned frameBytes = display.getBufferSize();
   const unsigned largest = ESP.getMaxAllocHeap();
-  Serial.printf("[info] frame %u bytes x2; free heap %u, largest block %u\n", frameBytes,
+  Serial.printf("[info] frame %u bytes x1; free heap %u, largest block %u\n", frameBytes,
                 (unsigned)ESP.getFreeHeap(), largest);
   Serial.flush();
   // Fail loudly rather than aborting inside a constructor: a vector that cannot
-  // allocate takes the whole firmware down with no diagnostic.
-  if (largest < frameBytes * 2) {
-    Serial.printf("[fatal] largest block %u < two frames (%u)\n", largest, frameBytes * 2);
+  // allocate takes the whole firmware down with no diagnostic. One frame is now
+  // all that is needed, so this asks for one -- but the check STAYS. It is the
+  // only thing standing between a fragmented heap and that silent abort, and the
+  // headroom it reports is what will matter when Phase 3 wants a page cache.
+  if (largest < frameBytes) {
+    Serial.printf("[fatal] largest block %u < one frame (%u)\n", largest, frameBytes);
     mark("frame-alloc-WOULD-FAIL");
     return;
   }
-  gPortrait = std::make_unique<reader::Framebuffer>(panelH, panelW);
-  gLandscape = std::make_unique<reader::Framebuffer>(panelW, panelH);
+  // Logical portrait, physical landscape: the constructor's dimensions are what
+  // the screens draw against (528x792 on the X3), and Rotation::Ccw allocates
+  // the store transposed so data() is the panel's own 792x528 buffer. CCW is
+  // measured on X3 hardware; see the note on reader::Rotation.
+  gFrame = std::make_unique<reader::Framebuffer>(panelH, panelW, reader::Rotation::Ccw);
   mark("frames-allocated");
 
   // A short buffer would make setFramebuffer's memcpy read past the end, and a
-  // zero-length one means the panel geometry came back wrong.
-  if (gLandscape->sizeBytes() != (int)display.getBufferSize() ||
-      gPortrait->sizeBytes() != (int)display.getBufferSize()) {
-    Serial.printf("[fatal] frame size %d/%d != driver buffer %u\n", gPortrait->sizeBytes(),
-                  gLandscape->sizeBytes(), (unsigned)display.getBufferSize());
+  // zero-length one means the panel geometry came back wrong. This is the check
+  // that the rotation is applied to the STORE and not just to the coordinates:
+  // a rotated frame whose stride came from the logical width would be exactly
+  // this many bytes and still be laid out wrong, so it is not the whole proof --
+  // test_rotate.cpp's byte-identity case against rotate90CCW is.
+  if (gFrame->sizeBytes() != (int)display.getBufferSize()) {
+    Serial.printf("[fatal] frame size %d != driver buffer %u\n", gFrame->sizeBytes(),
+                  (unsigned)display.getBufferSize());
     mark("frame-size-MISMATCH");
-    gPortrait.reset();
-    gLandscape.reset();
+    gFrame.reset();
     return;
   }
 
