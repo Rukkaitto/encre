@@ -191,9 +191,13 @@ bool SdFileSystem::list(std::string_view path, std::vector<reader::DirEntry>& ou
   // clearing" clause is what pins it.
   std::vector<reader::DirEntry> found;
   char name[kNameBufBytes];
-  // One level only, as the interface says. openNextFile() skips "." and ".."
-  // itself (FatFile::openNext drops any entry whose name starts with '.'), so a
-  // subdirectory lists exactly what was put in it.
+  // One level only, as the interface says. No filtering needed for "." and "..":
+  // FatFile::openNext skips any entry whose 8.3 SHORT-NAME field starts with '.',
+  // and only the dot entries ever do -- short-name generation strips a leading dot
+  // from a long name, so a dotfile like "/.reader" has an SFN of "READER~1" and IS
+  // listed. (exFAT has no dot entries at all.) So a subdirectory lists exactly
+  // what was put in it, hidden-by-convention names included, which is what the
+  // contract's "/.reader" clauses need.
   for (FsFile f = dir.openNextFile(); f; f = dir.openNextFile()) {
     // Read everything off the handle BEFORE closing it, and close it on every
     // path out of the iteration -- including the skip below. The SDK's own loop
