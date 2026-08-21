@@ -49,6 +49,24 @@ constexpr int kFullRefreshEvery = 15;
 // costs one paint instead of one each. See the coalescing comment in loop().
 constexpr uint32_t kCoalesceMs = 90;
 
+// EXPERIMENT: force every screen onto the 1-bit path regardless of the fidelity
+// it declares.
+//
+// The grayscale path is structurally ~5x slower than 1-bit and always will be:
+// three panel waits (366 + 366 + 156 ms) and four render passes, against one
+// wait and one pass. CrossInk feels faster because it does not use it -- the
+// SDK's own UC8279 comment notes "CrossPoint paints home with FAST".
+//
+// 1-bit chrome was rejected once, in Phase 2A-2, as illegible. But that was at
+// the OLD type ramp, which was authored on a monitor and measured roughly half a
+// legible size on this glass; the pt-at-150-DPI ramp landed afterwards and 1-bit
+// has never been looked at since. Anti-aliasing was kept as a preference, not as
+// the legibility fix. So this is worth an honest look before building partial
+// updates on top of the grayscale path.
+//
+// Set false to go back to anti-aliased chrome.
+constexpr bool kForceMonoChrome = true;
+
 // millis() of the last button transition, for the coalescing window. Starts at 0
 // so the first paint in setup() is never deferred.
 static uint32_t gLastInputMs = 0;
@@ -213,7 +231,7 @@ static void paintMono(reader::RefreshMode mode) {
 
 static void renderTop() {
   const reader::RefreshMode mode = gRefresh.next(gApp->transition());
-  const bool gray = gApp->top().fidelity() == reader::Fidelity::Gray;
+  const bool gray = !kForceMonoChrome && gApp->top().fidelity() == reader::Fidelity::Gray;
   // `mode` is what the POLICY decided, not necessarily what the panel does: a
   // Gray screen runs the full three-plane sequence regardless, because a 1-bit
   // fast refresh of chrome is illegible on this glass. So `fidelity=gray
