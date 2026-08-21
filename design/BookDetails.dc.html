@@ -34,10 +34,19 @@
   <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">ABOUT THIS BOOK</div>
   <div style="font-size: var(--t-value); font-weight: 700;">EPUB</div>
 </div>
-  <div style="display: flex; gap: 20px; padding: 24px 24px 20px 24px; align-items: flex-start;">
+  <!-- The one screen where a long name WRAPS instead of truncating: this is the
+       page about the book, so its name is the content and an ellipsis here hides
+       the thing the reader came to read. The column therefore takes the width the
+       cover leaves (`flex: 1; min-width: 0`) and the title breaks inside a word
+       when it has to -- a real filename is one unbreakable word.
+       `min-height: 0; overflow: hidden` on the block is the other half of that
+       decision: Book details is a fixed one-screen summary (spec 4.1b), so when a
+       name is tall enough to push the field rows off the bottom it is the NAME
+       that yields, not the rows and not the hint bar. -->
+  <div style="display: flex; gap: 20px; padding: 24px 24px 20px 24px; align-items: flex-start; min-height: 0; overflow: hidden;">
     <div class="dither-dots" style="width: 120px; height: 180px; border: 2px solid #000000; box-sizing: border-box; flex-shrink: 0;"></div>
-    <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 4px;">
-      <div style="font-size: var(--t-title); font-weight: 700; line-height: 1.1;">Dubliners</div>
+    <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 4px; flex: 1; min-width: 0;">
+      <div style="font-size: var(--t-title); font-weight: 700; line-height: 1.1; overflow-wrap: anywhere;">Dubliners</div>
       <div style="font-size: var(--t-body);">James Joyce</div>
       <div style="font-size: var(--t-label);">Fifteen stories &middot; 1914</div>
     </div>
