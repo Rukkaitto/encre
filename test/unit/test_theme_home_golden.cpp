@@ -20,20 +20,20 @@ TEST_CASE("QuietTheme renders Home to golden on both panel geometries") {
   reader::FontSet& fonts = ramp.fonts;
   reader::QuietTheme theme;
 
-  // Home goes through the grayscale path: three passes, and the golden holds
-  // the 4-level composition of the two planes. The Bw pass is rendered too, so
-  // the test drives the same sequence the shell and the simulator do.
-  auto renderThree = [&](int w, int h, const std::string& name) {
-    reader::Framebuffer bw(w, h), lsb(w, h), msb(w, h);
+  // Home is Fidelity::Dithered, so the golden is the single 1-bit frame the
+  // panel is handed -- one pass with Plane::BwDithered, exactly what
+  // paintDithered() in the shell and the simulator render. Glyph and icon edges
+  // carry their anti-aliasing as a stipple; rules, fills and the cover's dither
+  // are unchanged from the grayscale composition this golden used to hold.
+  auto renderOne = [&](int w, int h, const std::string& name) {
+    reader::Framebuffer fb(w, h);
     const reader::HomeViewModel vm = sampleHome();
-    theme.renderHome(bw, fonts, vm, reader::Plane::Bw);
-    theme.renderHome(lsb, fonts, vm, reader::Plane::Lsb);
-    theme.renderHome(msb, fonts, vm, reader::Plane::Msb);
-    golden::checkGoldenGray(lsb, msb, name);
+    theme.renderHome(fb, fonts, vm, reader::Plane::BwDithered);
+    golden::checkGolden(fb, name);
   };
 
-  SUBCASE("X4 480x800") { renderThree(480, 800, "home_quiet"); }
-  SUBCASE("X3 528x792") { renderThree(528, 792, "home_quiet_x3"); }
+  SUBCASE("X4 480x800") { renderOne(480, 800, "home_quiet"); }
+  SUBCASE("X3 528x792") { renderOne(528, 792, "home_quiet_x3"); }
 }
 
 TEST_CASE("Home's action block carries the long arrow, not the row chevron") {

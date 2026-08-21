@@ -34,12 +34,12 @@ TEST_CASE("Home with the Library row focused matches its golden at both geometri
   for (const Case c : {Case{480, 800, "home_focus_library"},
                        Case{528, 792, "home_focus_library_x3"}}) {
     reader::HomeScreen screen = focusedOnLibrary();
-    reader::Framebuffer bw(c.w, c.h), lsb(c.w, c.h), msb(c.w, c.h);
-    // All three planes rendered, so the test drives the same sequence the shell
-    // and the simulator do; the golden holds the composition of the two planes.
-    screen.render(bw, r.fonts, theme, reader::Plane::Bw);
-    screen.render(lsb, r.fonts, theme, reader::Plane::Lsb);
-    screen.render(msb, r.fonts, theme, reader::Plane::Msb);
-    golden::checkGoldenGray(lsb, msb, c.name);
+    reader::Framebuffer fb(c.w, c.h);
+    // One pass with the plane the screen's own fidelity implies, which is the
+    // sequence the shell and the simulator drive: Home declares nothing, so it
+    // takes the default Fidelity::Dithered.
+    REQUIRE(screen.fidelity() == reader::Fidelity::Dithered);
+    screen.render(fb, r.fonts, theme, reader::Plane::BwDithered);
+    golden::checkGolden(fb, c.name);
   }
 }
