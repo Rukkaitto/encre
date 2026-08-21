@@ -17,7 +17,9 @@ class Theme;
 enum class ScreenId : uint8_t {
   Home,
   Library,
-  ItemActions,  // the overlay a long press on a Library row opens
+  ItemActions,    // the overlay a long press on a Library row opens
+  DeleteConfirm,  // the overlay that overlay's Delete... opens
+  BookDetails,    // a full screen, NOT an overlay -- see its board
   Settings,
   InputMonitor,
   SdMissing

@@ -7,6 +7,7 @@ class FontSet;
 struct HomeViewModel;
 struct SdMissingViewModel;
 struct LibraryViewModel;
+struct ItemActionsViewModel;
 struct StubViewModel;
 
 // Themes own the entire presentation, layout structure included (spec 3.3).
@@ -30,6 +31,12 @@ class Theme {
   // surface would have to be told which board it was drawing.
   virtual void renderLibrary(Framebuffer& fb, const FontSet& fonts, const LibraryViewModel& vm,
                              Plane plane = Plane::Bw) = 0;
+  // The item actions overlay. It draws its own veil and then its panel, over a
+  // parent App::render has already painted -- so this method must NOT clear the
+  // framebuffer, which is the one way an overlay's render differs in kind from a
+  // whole screen's.
+  virtual void renderItemActions(Framebuffer& fb, const FontSet& fonts,
+                                 const ItemActionsViewModel& vm, Plane plane = Plane::Bw) = 0;
 
   // How many Library rows fit on a panel `panelH` tall.
   //

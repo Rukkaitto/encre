@@ -16,6 +16,8 @@ class QuietTheme : public Theme {
                        Plane plane = Plane::Bw) override;
   void renderLibrary(Framebuffer& fb, const FontSet& fonts, const LibraryViewModel& vm,
                      Plane plane = Plane::Bw) override;
+  void renderItemActions(Framebuffer& fb, const FontSet& fonts, const ItemActionsViewModel& vm,
+                         Plane plane = Plane::Bw) override;
   int libraryVisibleRows(int panelH, const FontSet& fonts) const override;
   void renderStub(Framebuffer& fb, const FontSet& fonts, const StubViewModel& vm,
                   Plane plane = Plane::Bw) override;

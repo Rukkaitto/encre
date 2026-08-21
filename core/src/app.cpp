@@ -7,6 +7,8 @@ const char* screenName(ScreenId id) {
     case ScreenId::Home: return "HOME";
     case ScreenId::Library: return "LIBRARY";
     case ScreenId::ItemActions: return "ITEM-ACTIONS";
+    case ScreenId::DeleteConfirm: return "DELETE-CONFIRM";
+    case ScreenId::BookDetails: return "BOOK-DETAILS";
     case ScreenId::Settings: return "SETTINGS";
     case ScreenId::InputMonitor: return "INPUT-MONITOR";
     case ScreenId::SdMissing: return "SD-MISSING";

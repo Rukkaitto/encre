@@ -88,6 +88,26 @@ struct LibraryViewModel {
   std::array<bool, 4> holds{};
 };
 
+// The item actions overlay (design/LibraryActions.dc.html): a panel over the
+// veiled Library, captioned with the book it acts on.
+struct ItemActionEntry {
+  std::string label;
+  // Whether the row leads somewhere, which is the board's rule for the trailing
+  // chevron: Open and Book details have one, Mark as finished and Delete... do
+  // not. A flag rather than the theme keying on the row's index, which would
+  // silently mark the wrong row the first time the list is reordered.
+  bool discloses = false;
+};
+
+struct ItemActionsViewModel {
+  std::string title;   // the book's name; the theme shouts it, as a caps label
+  std::string status;  // the caption's right-hand value: "31%", or "NEW" today
+  std::vector<ItemActionEntry> actions;
+  int focusedAction = 0;
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
 // A provisional titled-list surface: Phase 2B's Library and Settings
 // placeholders and its Input Monitor. It exists so the interaction runtime can
 // be navigated and verified before the real screens are built, and Phase 2C

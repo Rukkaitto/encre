@@ -199,7 +199,14 @@ Action LibraryScreen::onEvent(const InputEvent& ev) {
     // so anything else arriving here means the two have drifted, and ignoring it
     // keeps that visible.
     if (ev.button != Button::Confirm) return Action::none();
-    if (focusedItem() == nullptr) return Action::none();
+    const LibraryItem* item = focusedItem();
+    if (item == nullptr) return Action::none();
+    // Books only. The overlay is design/LibraryActions.dc.html, whose four rows
+    // are Open / Book details / Mark as finished / Delete... -- three of which
+    // mean nothing for a directory, and there is no board for a folder's
+    // actions. Doing nothing is the honest answer until there is one; inventing
+    // a folder overlay here would be a design decision made in a screen.
+    if (item->entry.isDir) return Action::none();
     return Action::push(ScreenId::ItemActions);
   }
 

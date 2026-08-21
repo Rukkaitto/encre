@@ -230,9 +230,11 @@ int main(int argc, char** argv) {
   // presses are the board's: Library.dc.html focuses its second row, and the
   // overlay boards focus the sixth.
   const bool isLibrary = std::strcmp(argv[1], "library") == 0;
-  if (!isHome && !isSdMissing && !isApp && !isLibrary) {
+  const bool isLibraryActions = std::strcmp(argv[1], "library_actions") == 0;
+  if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions) {
     std::fprintf(stderr,
-                 "unknown screen '%s' (expected 'home', 'sd_missing', 'library' or 'app')\n",
+                 "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
+                 "'library_actions' or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -285,6 +287,15 @@ int main(int argc, char** argv) {
     // focus, which is its second row. Reached by pressing rather than by
     // assignment, so the render pins the navigation too.
     for (const reader::InputEvent& ev : libraryEntry()) app.dispatch(ev);
+  }
+  if (isLibraryActions) {
+    // LibraryActions' own parent copy focuses the SIXTH row, Dubliners -- not the
+    // second, which is what Library.dc.html focuses. The two boards disagree, so
+    // the journey does too.
+    for (const reader::InputEvent& ev : libraryEntry(5)) app.dispatch(ev);
+    // ...and the hold that opens the panel, which is the binding the Library's
+    // hint ring advertises.
+    app.dispatch({reader::Button::Confirm, reader::PressKind::Long});
   }
   for (const reader::InputEvent& ev : events) app.dispatch(ev);
 

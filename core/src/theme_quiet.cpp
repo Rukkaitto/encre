@@ -344,6 +344,77 @@ void QuietTheme::renderLibrary(Framebuffer& fb, const FontSet& fonts, const Libr
   drawHintBar(fb, fonts, hints, slots, plane);
 }
 
+namespace {
+// --- The overlay panels' own widths ------------------------------------------
+//
+// Each board's own number, and they are NOT the same: LibraryActions is 340 on
+// the 480 canvas and DeleteConfirm is 380. Fixed in pixels rather than a
+// fraction of the canvas, for the reason kMargin is: the two panels are within
+// ~2% of the same PPI, so a panel should be the same physical size on both, and
+// what adapts is where it sits -- panelLeft centres it on whatever the canvas
+// is.
+constexpr int kActionsPanelW = 340;
+
+// The strip at the bottom that an overlay repaints. The overlay boards draw
+// their hint bar OVER the veil with `background: #ffffff`, so the parent's bar --
+// which App::render has already painted, with the parent's own labels on it -- is
+// covered rather than veiled. Anything less would leave two bars' worth of ink
+// on one line.
+void drawOverlayHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], Plane plane) {
+  const int barH = hintBarHeight(fonts, hints);
+  fb.fillRect(0, fb.height() - barH, fb.width(), barH, true);
+  int slots[4] = {};
+  drawHintBar(fb, fonts, hints, slots, plane);
+}
+}  // namespace
+
+void QuietTheme::renderItemActions(Framebuffer& fb, const FontSet& fonts,
+                                   const ItemActionsViewModel& vm, Plane plane) {
+  // NO fb.clear(): the Library underneath has already been painted by
+  // App::render, and this screen's whole job is to be in front of it.
+  veilRect(fb, 0, 0, fb.width(), fb.height());
+
+  const int contentW = panelContentW(kActionsPanelW);
+  // The caption is wrapped before anything is placed, because the panel's height
+  // is the sum of what is in it and the caption's height is what its label wraps
+  // to. A book whose name is long enough gives the panel a taller caption, and
+  // the panel grows and stays centred rather than the label being clipped.
+  const std::string caption = upperAscii(vm.title);
+  const Prose label = wrapPanelCaption(fonts, caption, contentW);
+
+  const int rows = static_cast<int>(vm.actions.size());
+  int rowsH = 0;
+  for (int i = 0; i < rows; ++i)
+    rowsH += panelRowHeight(i != vm.focusedAction && i != rows - 1);
+  const int panelH = 2 * kPanelBorder + panelCaptionHeight(fonts, label) + rowsH;
+
+  const int x = panelLeft(fb.width(), kActionsPanelW);
+  // `top: 50%; transform: translateY(-50%)` -- centred on the SCREEN, not on the
+  // area above the hint bar (spec 4.1c). The bar is drawn over the veil after
+  // this, and the panel does not reach it.
+  const int y = centreIn(0, fb.height(), panelH);
+  drawPanel(fb, x, y, kActionsPanelW, panelH);
+
+  const int cx = x + kPanelBorder;
+  int cy = y + kPanelBorder;
+  cy += drawPanelCaption(fb, fonts, cx, cy, contentW, label, vm.status, plane);
+  for (int i = 0; i < rows; ++i) {
+    const ItemActionEntry& row = vm.actions[static_cast<size_t>(i)];
+    const bool focused = (i == vm.focusedAction);
+    // The board's rule again: every row has a `border-bottom` except the focused
+    // one, whose fill runs to the next row's edge, and the last one, where the
+    // panel's own border closes the list.
+    cy += drawPanelRow(fb, fonts, cx, cy, contentW, row.label, focused, row.discloses,
+                       !focused && i != rows - 1, plane);
+  }
+
+  const Hint hints[4] = {{&icons::kBack, vm.hints[0], vm.holds[0]},
+                         {&icons::kDot, vm.hints[1], vm.holds[1]},
+                         {&icons::kUp, vm.hints[2], vm.holds[2]},
+                         {&icons::kDown, vm.hints[3], vm.holds[3]}};
+  drawOverlayHintBar(fb, fonts, hints, plane);
+}
+
 void QuietTheme::renderStub(Framebuffer& fb, const FontSet& fonts, const StubViewModel& vm,
                             Plane plane) {
   fb.clear(true);

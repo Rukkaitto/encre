@@ -147,6 +147,13 @@ TEST_CASE("a held Confirm opens the actions overlay, and the ring says so") {
   LibraryScreen lib(fs, "/books");
   lib.setVisibleRows(theme.libraryVisibleRows(800, r.fonts));
 
+  // On a FOLDER, nothing: the overlay's four rows are Open / Book details /
+  // Mark as finished / Delete..., three of which mean nothing for a directory,
+  // and there is no board for a folder's actions.
+  REQUIRE(lib.vm().rows[0].isFolder);
+  CHECK(lib.onEvent(kHold).kind == Action::Kind::None);
+
+  lib.onEvent(kDown);  // onto a book
   const Action a = lib.onEvent(kHold);
   CHECK(a.kind == Action::Kind::Push);
   CHECK(a.target == ScreenId::ItemActions);

@@ -1,6 +1,7 @@
 #include "reader/screens.h"
 
 #include "reader/screen_input_monitor.h"
+#include "reader/screen_item_actions.h"
 #include "reader/screen_library.h"
 #include "reader/screen_sd_missing.h"
 #include "reader/screen_stub.h"
@@ -76,9 +77,15 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       return lib;
     }
     case ScreenId::ItemActions:
-      // Task 5's overlay. Returning null is a refused push, which leaves the
-      // stack alone -- so a long press on a row does nothing rather than pushing
-      // a hole onto the stack.
+      // Over the Library this factory built last, which is the one on the stack:
+      // an overlay is only ever pushed BY a live Library. A null there is a
+      // refused push, which leaves the stack alone rather than putting a hole in
+      // it.
+      if (library_ == nullptr) return nullptr;
+      return std::make_unique<ItemActionsScreen>(*library_);
+    case ScreenId::DeleteConfirm:
+    case ScreenId::BookDetails:
+      // Still to come in this task; a refused push until then.
       return nullptr;
     case ScreenId::Settings:
       // The Input Monitor is reachable ONLY from here. Nothing else lists it, and

@@ -55,6 +55,10 @@ add_test(NAME sim_app COMMAND reader_sim app ${CMAKE_BINARY_DIR}/sim_app.png
 # depends on the panel it is rendered at.
 add_test(NAME sim_library COMMAND reader_sim library ${CMAKE_BINARY_DIR}/sim_library.png
          --canvas 528x792)
+# ...and the actions overlay over it, which is the one render that needs
+# App::render rather than the top screen alone.
+add_test(NAME sim_library_actions COMMAND reader_sim library_actions
+         ${CMAKE_BINARY_DIR}/sim_library_actions.png --canvas 528x792)
 # The SD-missing screen renders with NO --root, which is the state it exists for.
 add_test(NAME sim_sd_missing COMMAND reader_sim sd_missing ${CMAKE_BINARY_DIR}/sim_sd_missing.png)
 # ...and the storage path runs on the desktop: a HostFileSystem mounted on the
