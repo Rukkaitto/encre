@@ -79,7 +79,15 @@ class SerialReport : public reader::FsContractReport {
 // the wipe cannot be written against the interface.
 bool wipeScratch(SdFileSystem& fs) {
   SpiBusGuard bus;
-  if (fs.exists(kScratch) && !SdMan.removeDir(kScratch)) return false;
+  // A leftover may be a FILE, not a directory, and removeDir only removes
+  // directories -- so it could not clear one and every clause skipped forever.
+  // That is what the device showed: /.reader/fstest existed with
+  // isDirectory()==0, mkdir refused because something was already there, and
+  // mkdirs correctly refused to turn a file into a directory. Handle both kinds.
+  if (fs.exists(kScratch)) {
+    const bool gone = SdMan.removeDir(kScratch) || SdMan.remove(kScratch);
+    if (!gone || fs.exists(kScratch)) return false;
+  }
   return fs.mkdirs(kScratch);
 }
 
@@ -119,23 +127,44 @@ void explainWipeFailure(SdFileSystem& fs) {
   Serial.printf("[fscontract]   after mkdir: fs.exists=%d fs.mkdirs=%d\n",
                 (int)fs.exists(kScratch), (int)fs.mkdirs(kScratch));
 
-  // The discriminator: same operation, no dot anywhere in the path.
-  constexpr const char* kNoDot = "/encretst";
-  const bool rawNoDot = SdMan.mkdir(kNoDot, true);
-  bool noDotIsDir = false;
-  {
-    FsFile f = SdMan.open(kNoDot, O_RDONLY);
-    noDotIsDir = f && f.isDirectory();
-    if (f) f.close();
+  // Separate the TWO variables the first attempt confounded: whether the parent
+  // is dot-prefixed, and whether the target is nested at all. /encretst was flat
+  // AND undotted, so it could not tell them apart -- and the earlier conclusion
+  // drawn from it ("a dot-prefixed parent breaks mkdir") was wrong, because the
+  // real reason mkdir returned 0 was that a FILE already sat at the target.
+  //
+  // This matters beyond the harness: spec 5 puts /.reader/cache and
+  // /.reader/state under a dot-prefixed parent, and Phase 3 has to CREATE those.
+  struct Probe {
+    const char* path;
+    const char* what;
+  };
+  const Probe probes[] = {
+      {"/encre_a", "flat, undotted"},
+      {"/encre_b/sub", "nested under an undotted parent"},
+      {"/.encre_c/sub", "nested under a DOT-prefixed parent"},
+      {"/.reader/encre_d", "nested under /.reader itself"},
+  };
+  for (const Probe& pr : probes) {
+    SdMan.removeDir(pr.path);
+    SdMan.remove(pr.path);
+    const bool made = SdMan.mkdir(pr.path, true);
+    bool isDir = false, opened = false;
+    {
+      FsFile f = SdMan.open(pr.path, O_RDONLY);
+      opened = (bool)f;
+      isDir = f && f.isDirectory();
+      if (f) f.close();
+    }
+    Serial.printf("[fscontract]   PROBE %-22s mkdir=%d open=%d isDirectory=%d  (%s)\n", pr.path,
+                  (int)made, (int)opened, (int)isDir, pr.what);
+    Serial.flush();
+    SdMan.removeDir(pr.path);
+    SdMan.remove(pr.path);
   }
-  Serial.printf("[fscontract]   CONTROL %s (no dot component): mkdir=%d isDirectory=%d\n", kNoDot,
-                (int)rawNoDot, (int)noDotIsDir);
-  if (noDotIsDir && !rawMkdir) {
-    Serial.printf("[fscontract]   => a dot-prefixed parent is what breaks mkdir on this card\n");
-  } else if (!noDotIsDir) {
-    Serial.printf("[fscontract]   => mkdir fails even with no dot: the write path, not the dot\n");
-  }
-  if (noDotIsDir) SdMan.removeDir(kNoDot);
+  Serial.printf("[fscontract]   read the four PROBE lines: the first that fails names the "
+                "variable that breaks mkdir. All four passing means the only fault was the "
+                "stale file, now removable.\n");
   Serial.flush();
 }
 
