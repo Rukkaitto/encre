@@ -925,16 +925,41 @@ static uint32_t gDrawMs = 0, gCopyMs = 0;
 // exactly half a turn, so swapping them is not the fix for a mirrored image).
 // Unverified on X4: if an X4 comes out upside down, the Rotation passed to the
 // constructor in setup() is the line, not anything in here.
+// Whether the last render pass repainted the top screen alone. For the log line
+// only -- the decision is App's, and it is remade per pass.
+static bool gPartialPaint = false;
+
 static void paintPlane(reader::Plane plane) {
   const uint32_t t0 = millis();
-  gFrame->clear(true);
-  // THROUGH App::render, NOT top().render. 2C-2's overlays are panels over a
-  // still-visible parent, so the top screen alone is a panel floating on white --
-  // and this line said top() until Task 6, which would have shipped exactly that
-  // to the device while the simulator (which already went through App::render)
-  // and all eight goldens kept passing. One paint path is the whole point of
-  // App::render existing.
-  gApp->render(*gFrame, *gFonts, gTheme, plane);
+  // THE PARTIAL REPAINT, and this is the ONLY place it is taken.
+  //
+  // App refuses unless the frame in gFrame is the one IT last painted, in this
+  // plane, with this screen on top, at this depth, on a change that was not a
+  // transition, and with the top screen an overlay whose own footprint has not
+  // moved (App::canRenderTopOnly lists every condition and the failure each one
+  // is for). So the question "is the frame still what I think it is" is answered
+  // by the code that painted it, not by this function remembering to ask.
+  //
+  // NOTE WHERE THE CLEAR IS: inside the else, and it has to be. A partial repaint
+  // over a cleared frame is the stale-pixel bug with white instead of stale
+  // pixels -- an overlay panel floating on paper, the same wrong frame
+  // App::render exists to prevent. Nothing else in this file writes gFrame;
+  // showOnePass and the grayscale copies only read it.
+  gPartialPaint = gApp->renderTopOnly(*gFrame, *gFonts, gTheme, plane);
+  if (!gPartialPaint) {
+    gFrame->clear(true);
+    // THROUGH App::render, NOT top().render. 2C-2's overlays are panels over a
+    // still-visible parent, so the top screen alone is a panel floating on white
+    // -- and this line said top() until Task 6, which would have shipped exactly
+    // that to the device while the simulator (which already went through
+    // App::render) and all eight goldens kept passing. One paint path is the
+    // whole point of App::render existing.
+    //
+    // renderTopOnly above is not a second paint path in that sense: it is
+    // App's, it is refused by default, and it paints only over a frame App
+    // itself last filled through this line.
+    gApp->render(*gFrame, *gFonts, gTheme, plane);
+  }
   const uint32_t t1 = millis();
   gDrawMs += t1 - t0;
   gRenderMs += t1 - t0;
@@ -1061,6 +1086,7 @@ static void renderTop() {
                 mode == reader::RefreshMode::Full ? "FULL" : "FAST", gRefresh.sinceFull());
   Serial.flush();
   gRenderMs = gDrawMs = gCopyMs = 0;
+  gPartialPaint = false;
   const uint32_t t0 = millis();
   // THE OTHER HALF OF THE SHARED-BUS INVARIANT. Every public method of
   // SdFileSystem takes this same recursive guard; this is the one acquisition on
@@ -1093,9 +1119,17 @@ static void renderTop() {
   // drawing is all a render pass does since the rotate went away -- and both are
   // kept so the field stays comparable against the logs that measured the
   // difference. If they ever diverge again, something new got added to the pass.
-  Serial.printf("[paint] done total=%lums render=%lums (draw=%lu copy=%lu) panel=%lums\n",
+  //
+  // `scope` is which of the two paint paths the LAST pass took: `stack` is the
+  // whole walk over a cleared frame, `top` is the top overlay alone over the
+  // frame the previous paint left. It is per-pass rather than per-paint because
+  // the grayscale sequence has four, and it is in the log because a stale-pixel
+  // report needs to say which path drew the frame that showed it -- guessing from
+  // the screen name is exactly the wrong way round.
+  Serial.printf("[paint] done total=%lums render=%lums (draw=%lu copy=%lu) panel=%lums scope=%s\n",
                 (unsigned long)total, (unsigned long)gRenderMs, (unsigned long)gDrawMs,
-                (unsigned long)gCopyMs, (unsigned long)(total - gRenderMs - gCopyMs));
+                (unsigned long)gCopyMs, (unsigned long)(total - gRenderMs - gCopyMs),
+                gPartialPaint ? "top" : "stack");
   Serial.flush();
 }
 

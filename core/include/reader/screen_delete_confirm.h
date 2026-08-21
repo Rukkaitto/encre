@@ -35,6 +35,15 @@ class DeleteConfirmScreen : public Screen {
   // none -- there is no path that restores this screen onto a fresh boot.
   int focus() const override { return vm_.focusedAction; }
 
+  // CONSTANT, so every focus move here is a partial repaint. Unlike the actions
+  // panel, nothing this screen draws changes shape with the focus:
+  // QuietTheme::renderDeleteConfirm sizes its panel from the caption's wrap and
+  // the paragraph's, both of which are fixed once the screen exists, plus two
+  // action slabs of kActionH that are both always drawn -- focus only decides
+  // which one is filled and which is outlined, in the same box. Pinned by
+  // test_partial_repaint.cpp rather than asserted here.
+  uint32_t paintFootprint() const override { return 1; }
+
  private:
   enum Row { kCancel = 0, kDelete, kRowCount };
 

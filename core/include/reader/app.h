@@ -127,6 +127,30 @@ class Screen {
     return false;
   }
 
+  // WHICH PIXELS THIS SCREEN'S PAINT COVERS, as a token rather than a rectangle.
+  //
+  // The promise: two paints of this screen whose tokens are EQUAL write exactly
+  // the same set of pixels opaquely, so the later one completely replaces the
+  // earlier one. That is the whole precondition App::renderTopOnly needs -- it
+  // repaints this screen over the frame this screen's own last paint left behind,
+  // so anything the previous paint inked and this one does not reach survives as
+  // a stale pixel.
+  //
+  // ZERO MEANS "NO PROMISE", and it is the default, so a screen is ineligible for
+  // a partial repaint until it says otherwise. A token is a token: the numbers
+  // mean nothing except equal-or-not, and they are compared only against another
+  // token from the same screen.
+  //
+  // WHAT A SCREEN HAS TO KNOW TO ANSWER: whatever in its own view-model changes
+  // the box its theme draws. That is layout knowledge, which normally belongs in
+  // the theme -- so the two screens that answer name the theme's rule they
+  // mirror, and test_partial_repaint.cpp renders EVERY pair of their reachable
+  // states both ways and asserts the bytes agree whenever the tokens do. Getting
+  // this wrong in the safe direction (a token that changes more often than the
+  // box) costs a repaint; getting it wrong the other way ships stale pixels, so
+  // the test enumerates rather than samples.
+  virtual uint32_t paintFootprint() const { return 0; }
+
   virtual Action onEvent(const InputEvent& ev) = 0;
   virtual void render(Framebuffer& fb, const FontSet& fonts, Theme& theme,
                       Plane plane) const = 0;
@@ -164,6 +188,59 @@ class App {
   // hidden, and a screen's worth of text rendering is not free on this chip.
   // Clearing the framebuffer stays the caller's job, as it was.
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const;
+
+  // REPAINTS ONLY THE TOP SCREEN, over the frame `fb` already holds.
+  //
+  // A focus move inside an overlay changes nothing below it: the parent received
+  // no event, and the veil over it is already drawn. Re-rendering the stack for
+  // that costs the parent's whole text pass plus a veil over every pixel of the
+  // frame -- measured at 4.6 ms on the desktop for the actions overlay against
+  // 0.9 ms for the top screen alone once the veil was made byte-wise, and this
+  // project's desktop-to-device ratio is about 65x.
+  //
+  // Returns FALSE and paints NOTHING when the precondition does not hold, so the
+  // caller falls back to render(). It is deliberately not an assert: every
+  // refusal is a correct full repaint, and the cost of being wrong the other way
+  // is stale pixels from a previous frame -- which reads as a rendering bug
+  // rather than as a caching one, and is the hardest kind of defect to trace back
+  // to here.
+  //
+  // THE CALLER STILL MUST NOT CLEAR THE FRAME FIRST. Clearing and then partially
+  // repainting is exactly the stale-pixel bug with white in place of the stale
+  // pixels: an overlay panel floating on paper, which is the same wrong frame
+  // App::render exists to prevent.
+  bool renderTopOnly(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const;
+
+  // Whether renderTopOnly would paint. Exposed so the shell can log the decision
+  // and so each condition is testable on its own; renderTopOnly calls it rather
+  // than trusting a caller to have called it.
+  //
+  // EVERY CONDITION, and the failure each one is there for:
+  //
+  //   1. dirty() -- nothing to paint at all otherwise.
+  //   2. !transition() -- A PUSH OR A POP IS NEVER PARTIAL. The stack changed, so
+  //      everything below the top may be different. This is also what makes the
+  //      first frame after boot full: a fresh App is dirty AND in transition.
+  //   3. the frame is the one this App last painted, in the same plane, with the
+  //      same screen on top, at the same depth. THE FRAME'S CONTENTS ARE THE
+  //      PRECONDITION, and this is the part a caller cannot be trusted to check,
+  //      because the caller is the thing that would have clobbered it. A fresh
+  //      App has painted nothing, so this refuses the first frame too --
+  //      independently of (2), because "there is nothing in the frame yet" and
+  //      "the stack just changed" are different reasons.
+  //   4. the top screen is an OVERLAY. A non-overlay fills the frame, so there is
+  //      nothing underneath to preserve and no saving to make -- and it would be
+  //      actively wrong, because a full paint clears the frame first and a partial
+  //      one must not, so every pixel the screen does not draw would be stale.
+  //   5. it is not on the GRAYSCALE path. That path renders the screen three
+  //      times plus a rebase, and the frame between passes holds a DIFFERENT
+  //      plane, so "the frame holds the previous paint of this plane" is false for
+  //      every pass but the first. Condition (3)'s plane check already refuses it;
+  //      this says so on purpose rather than by accident, because a future two-
+  //      frame grayscale path would silently satisfy the plane check.
+  //   6. the top screen's paintFootprint() is non-zero and unchanged since that
+  //      paint -- the screen's own promise that this paint covers that one.
+  bool canRenderTopOnly(const Framebuffer& fb, Plane plane) const;
 
   void dispatch(const InputEvent& ev);
 
@@ -217,12 +294,38 @@ class App {
   // V1's deepest path is Home > Library > item actions > delete confirm.
   static constexpr size_t kMaxDepth = 8;
 
+  // WHAT THE LAST FULL PAINT PUT WHERE, so canRenderTopOnly can check its own
+  // precondition instead of trusting the caller with it.
+  //
+  // `frame` being null is "nothing has been painted yet", which is the state a
+  // fresh App is in -- including the one the shell builds when a card is pulled
+  // at runtime, or after a successful RETRY. Those replace the App, so the record
+  // goes with it and the next paint is full, which is what a new stack needs
+  // anyway.
+  //
+  // The pointer is compared, never dereferenced, so a stale one is only ever
+  // wrong in the safe direction: a different framebuffer at the same address
+  // would have to be the same size and rotation to be handed to the same App, and
+  // the shell allocates exactly one for the life of the process.
+  struct PaintRecord {
+    const Framebuffer* frame = nullptr;
+    const Screen* top = nullptr;
+    Plane plane = Plane::Bw;
+    int depth = 0;
+    uint32_t footprint = 0;
+  };
+
   std::vector<std::unique_ptr<Screen>> stack_;
   ScreenFactory& factory_;
   bool dirty_ = true;  // the first frame always needs painting
   bool transition_ = true;
   bool sleep_ = false;
   bool retry_ = false;
+  // Mutable because render() is const: painting does not change the app, but it
+  // does change what is on glass, and this is what remembers that. The
+  // alternative -- a non-const render() -- would make every const App& in the
+  // tests and the simulator unable to paint, for no gain.
+  mutable PaintRecord painted_;
 };
 
 }  // namespace reader

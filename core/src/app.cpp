@@ -64,6 +64,37 @@ void App::render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plan
   size_t base = stack_.size() - 1;
   while (base > 0 && stack_[base]->isOverlay()) --base;
   for (size_t i = base; i < stack_.size(); ++i) stack_[i]->render(fb, fonts, theme, plane);
+
+  // Record what the frame now holds. This is the only place the record is
+  // written, and it is written AFTER the paint so a render that somehow did not
+  // complete cannot leave a claim behind it.
+  painted_ = {&fb, stack_.back().get(), plane, depth(), stack_.back()->paintFootprint()};
+}
+
+bool App::canRenderTopOnly(const Framebuffer& fb, Plane plane) const {
+  // Each clause is one of the ways a partial repaint goes wrong; app.h names the
+  // failure beside each. The order is cheapest-first, and the two that matter
+  // most -- the transition and the frame identity -- are the two at the top.
+  if (!dirty_ || transition_) return false;
+  if (painted_.frame != &fb || painted_.plane != plane) return false;
+  if (painted_.top != stack_.back().get() || painted_.depth != depth()) return false;
+  const Screen& t = *stack_.back();
+  if (!t.isOverlay()) return false;
+  if (t.fidelity() == Fidelity::Grayscale) return false;
+  const uint32_t footprint = t.paintFootprint();
+  return footprint != 0 && footprint == painted_.footprint;
+}
+
+bool App::renderTopOnly(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const {
+  if (!canRenderTopOnly(fb, plane)) return false;
+  // The top screen alone, over what is already there. NOT App::render's walk:
+  // the parent and the veil over it are exactly what this is skipping, and they
+  // are still in the frame.
+  stack_.back()->render(fb, fonts, theme, plane);
+  // The record does not change: same frame, same screen, same plane, same depth,
+  // and the footprint is equal by the check above. Nothing to rewrite, so two
+  // partial repaints in a row are both allowed.
+  return true;
 }
 
 void App::dispatch(const InputEvent& ev) {

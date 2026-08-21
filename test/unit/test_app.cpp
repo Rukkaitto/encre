@@ -22,6 +22,10 @@ class FakeScreen : public Screen {
   ScreenId id() const override { return id_; }
   ButtonMask longPressable() const override { return holds_; }
   bool isOverlay() const override { return overlay_; }
+  // Default 0 -- "no promise" -- exactly as Screen's is, so the partial-repaint
+  // tests below have to opt each screen in the way a real one does.
+  uint32_t paintFootprint() const override { return footprint; }
+  uint32_t footprint = 0;
   Action onEvent(const InputEvent&) override {
     ++events;
     return next_;
@@ -52,13 +56,18 @@ class FakeFactory : public ScreenFactory {
   // land in a later task, so the overlay tests mark existing ids instead --
   // isOverlay is a property of the screen, not of its id.
   std::set<ScreenId> overlays;
+  // What paintFootprint() should answer for each id. Absent means 0, which is
+  // Screen's "no promise" and forbids a partial repaint.
+  std::map<ScreenId, uint32_t> footprints;
   std::vector<ScreenId>* renderLog = nullptr;
   bool refuse = false;
   std::unique_ptr<Screen> create(ScreenId id) override {
     if (refuse) return nullptr;
-    return std::make_unique<FakeScreen>(id, actions.count(id) ? actions[id] : Action::none(),
-                                        holds.count(id) ? holds[id] : 0, overlays.count(id) != 0,
-                                        renderLog);
+    auto s = std::make_unique<FakeScreen>(id, actions.count(id) ? actions[id] : Action::none(),
+                                          holds.count(id) ? holds[id] : 0, overlays.count(id) != 0,
+                                          renderLog);
+    if (footprints.count(id)) s->footprint = footprints[id];
+    return s;
   }
 };
 
@@ -80,12 +89,51 @@ class NullTheme : public Theme {
   void renderStub(Framebuffer&, const FontSet&, const StubViewModel&, Plane) override {}
 };
 
+const InputEvent kConfirm{Button::Confirm, PressKind::Short};
+
 // Everything App::render needs, none of it load-bearing here.
 struct RenderTarget {
   Framebuffer fb{8, 8};
   FontSet fonts;
   NullTheme theme;
   void paint(const App& app) { app.render(fb, fonts, theme, Plane::Bw); }
+  void paint(const App& app, Plane plane) { app.render(fb, fonts, theme, plane); }
+  bool paintTop(const App& app) { return app.renderTopOnly(fb, fonts, theme, Plane::Bw); }
+  bool paintTop(const App& app, Plane plane) {
+    return app.renderTopOnly(fb, fonts, theme, plane);
+  }
+};
+
+// THE ONE STATE A PARTIAL REPAINT IS ALLOWED IN: an App whose top screen is an
+// overlay, whose frame this App has already painted in full, and which is now
+// dirty from a plain Redraw -- which is exactly what a focus move inside an
+// overlay leaves behind. Every test below starts here and breaks one condition.
+struct PartialFixture {
+  std::vector<ScreenId> log;
+  FakeFactory f;
+  App app;
+  RenderTarget t;
+
+  explicit PartialFixture(uint32_t footprint = 7)
+      : app(std::make_unique<FakeScreen>(ScreenId::Home, Action::push(ScreenId::Settings), 0, false,
+                                        &log),
+            f) {
+    f.renderLog = &log;
+    f.overlays.insert(ScreenId::Settings);
+    f.footprints[ScreenId::Settings] = footprint;
+    f.actions[ScreenId::Settings] = Action::redraw();
+    app.dispatch(kConfirm);  // Home pushes the overlay -- a transition
+    REQUIRE(app.depth() == 2);
+    REQUIRE(app.top().isOverlay());
+    t.paint(app);  // ...and the whole stack is painted, which is what a push needs
+    app.clearDirty();
+    app.dispatch(kConfirm);  // the overlay redraws itself -- NOT a transition
+    REQUIRE(app.dirty());
+    REQUIRE_FALSE(app.transition());
+    log.clear();
+  }
+
+  FakeScreen& overlay() { return static_cast<FakeScreen&>(app.top()); }
 };
 
 // A screen that wants true 4-level grey. Nothing in the product does yet; this
@@ -105,8 +153,6 @@ class DitheredScreen : public FakeScreen {
   DitheredScreen() : FakeScreen(ScreenId::Home, Action::none()) {}
   Fidelity fidelity() const override { return Fidelity::Dithered; }
 };
-
-const InputEvent kConfirm{Button::Confirm, PressKind::Short};
 
 }  // namespace
 
@@ -448,6 +494,285 @@ TEST_CASE("popping an overlay goes back to painting the parent alone") {
   RenderTarget t;
   t.paint(app);
   CHECK(log == std::vector<ScreenId>{ScreenId::Home});
+}
+
+// --- the partial repaint ----------------------------------------------------
+//
+// A focus move inside an overlay changes nothing below it, so re-rendering the
+// parent and re-veiling every pixel of the frame is work with no result. What
+// makes skipping it safe is a precondition about the FRAME, not about the stack,
+// and the frame is the one thing App cannot see -- so the conditions live here
+// and the shell asks rather than deciding. Every refusal below is a correct full
+// repaint; the cost of a wrong ACCEPT is stale pixels from a previous frame,
+// which reads as a rendering bug and is the hardest kind to trace back to a
+// caching decision.
+
+TEST_CASE("a screen promises nothing about its footprint unless it says so") {
+  // Zero is "no promise", and it is the default: a partial repaint of a screen
+  // that has not opted in would repaint it over its own previous paint with no
+  // guarantee the new paint covers the old one.
+  FakeScreen plain(ScreenId::Home, Action::none());
+  CHECK(plain.paintFootprint() == 0);
+}
+
+TEST_CASE("a focus move inside an overlay repaints the overlay alone") {
+  PartialFixture fx;
+  CHECK(fx.app.canRenderTopOnly(fx.t.fb, Plane::Bw));
+  CHECK(fx.t.paintTop(fx.app));
+  // The overlay, and NOT the parent underneath it. That is the whole saving: the
+  // parent's text pass and a veil over every pixel of the frame.
+  CHECK(fx.log == std::vector<ScreenId>{ScreenId::Settings});
+}
+
+TEST_CASE("two partial repaints in a row are both allowed") {
+  // The record must survive a partial repaint: the frame, the screen, the plane,
+  // the depth and the footprint are all still what they were. A record that only
+  // a full paint could refresh would make every other focus move expensive for no
+  // reason.
+  PartialFixture fx;
+  REQUIRE(fx.t.paintTop(fx.app));
+  fx.app.clearDirty();
+  fx.app.dispatch(kConfirm);
+  REQUIRE(fx.app.dirty());
+  CHECK(fx.t.paintTop(fx.app));
+  CHECK(fx.log == std::vector<ScreenId>{ScreenId::Settings, ScreenId::Settings});
+}
+
+TEST_CASE("the first paint after boot is never partial") {
+  // There is nothing in the frame yet. TWO independent conditions refuse it -- a
+  // fresh App is in transition, and it has painted nothing -- so this holds even
+  // for a caller that has somehow cleared the transition flag without painting.
+  FakeFactory f;
+  f.overlays.insert(ScreenId::Home);
+  f.footprints[ScreenId::Home] = 7;
+  auto root = std::make_unique<FakeScreen>(ScreenId::Home, Action::none(), 0, true);
+  root->footprint = 7;
+  App app(std::move(root), f);
+  RenderTarget t;
+  REQUIRE(app.dirty());
+  REQUIRE(app.transition());
+  CHECK_FALSE(app.canRenderTopOnly(t.fb, Plane::Bw));
+  CHECK_FALSE(t.paintTop(app));
+
+  app.clearDirty();
+  // Still refused with the transition flag gone, because the frame holds nothing.
+  CHECK_FALSE(app.canRenderTopOnly(t.fb, Plane::Bw));
+}
+
+TEST_CASE("a push is never partial, and neither is a pop") {
+  // The stack changed, so everything below the top may be different. This is the
+  // condition transition() already expresses, which is why it is the signal.
+  PartialFixture fx;
+  fx.f.overlays.insert(ScreenId::InputMonitor);
+  fx.f.footprints[ScreenId::InputMonitor] = 7;
+  REQUIRE(fx.t.paintTop(fx.app));
+  fx.app.clearDirty();
+
+  fx.overlay().setNext(Action::push(ScreenId::InputMonitor));
+  fx.app.dispatch(kConfirm);
+  REQUIRE(fx.app.depth() == 3);
+  REQUIRE(fx.app.transition());
+  CHECK_FALSE(fx.app.canRenderTopOnly(fx.t.fb, Plane::Bw));
+  CHECK_FALSE(fx.t.paintTop(fx.app));
+  // ...and the full paint that follows re-establishes the record.
+  fx.t.paint(fx.app);
+  fx.app.clearDirty();
+
+  static_cast<FakeScreen&>(fx.app.top()).setNext(Action::pop());
+  fx.app.dispatch(kConfirm);
+  REQUIRE(fx.app.depth() == 2);
+  REQUIRE(fx.app.transition());
+  CHECK_FALSE(fx.t.paintTop(fx.app));
+}
+
+TEST_CASE("a transition is refused even when the stack came back to where it was") {
+  // A PUSH OR A POP IS NEVER PARTIAL, and this is the case where that rule is
+  // doing the work on its own rather than being backed up by the frame/top/depth
+  // checks: push an overlay and pop it again with no paint in between, and the top
+  // screen and the depth are the ones the frame was painted at.
+  //
+  // The rule is deliberately conservative here -- the frame IS still valid, so a
+  // partial repaint would happen to be correct. It is refused anyway, because the
+  // pointer comparison it would otherwise rest on is an ABA: a popped screen's
+  // memory is freed and the next push allocates a screen of similar size, so
+  // `painted_.top == stack_.back().get()` can be true of a DIFFERENT screen at the
+  // same address. transition() is the only condition that does not depend on an
+  // address staying unique, so it is the one that has to hold the line, and one
+  // wasted repaint per push-pop pair is the right price.
+  PartialFixture fx;
+  fx.f.overlays.insert(ScreenId::InputMonitor);
+  fx.f.footprints[ScreenId::InputMonitor] = 7;
+  REQUIRE(fx.t.paintTop(fx.app));
+  fx.app.clearDirty();
+  const Screen* paintedTop = &fx.app.top();
+  const int paintedDepth = fx.app.depth();
+
+  fx.overlay().setNext(Action::push(ScreenId::InputMonitor));
+  fx.app.dispatch(kConfirm);
+  REQUIRE(fx.app.depth() == paintedDepth + 1);
+  static_cast<FakeScreen&>(fx.app.top()).setNext(Action::pop());
+  fx.app.dispatch(kConfirm);
+  // Back to exactly the screen and depth the frame was painted at...
+  REQUIRE(&fx.app.top() == paintedTop);
+  REQUIRE(fx.app.depth() == paintedDepth);
+  REQUIRE(fx.app.transition());
+  // ...and refused all the same.
+  CHECK_FALSE(fx.app.canRenderTopOnly(fx.t.fb, Plane::Bw));
+  CHECK_FALSE(fx.t.paintTop(fx.app));
+}
+
+TEST_CASE("a push not yet painted stays a transition through a later redraw") {
+  // Presses coalesce into one paint, so a push and a redraw can both land before
+  // anything is drawn. Redraw must not clear the transition the push set, or the
+  // paint that finally happens would be partial over a frame holding the screen
+  // BELOW the one that was pushed.
+  PartialFixture fx;
+  fx.f.overlays.insert(ScreenId::InputMonitor);
+  fx.f.footprints[ScreenId::InputMonitor] = 7;
+  REQUIRE(fx.t.paintTop(fx.app));
+  fx.app.clearDirty();
+  fx.overlay().setNext(Action::push(ScreenId::InputMonitor));
+  fx.app.dispatch(kConfirm);  // push, not painted
+  static_cast<FakeScreen&>(fx.app.top()).setNext(Action::redraw());
+  fx.app.dispatch(kConfirm);  // ...then a redraw on the new top
+  CHECK(fx.app.transition());
+  CHECK_FALSE(fx.t.paintTop(fx.app));
+}
+
+TEST_CASE("only an overlay can be partially repainted") {
+  // A non-overlay fills the frame, so there is nothing beneath it to preserve --
+  // and it would be actively wrong, because a full paint clears the frame first
+  // and a partial one must not, leaving every pixel the screen does not draw
+  // stale.
+  FakeFactory f;
+  f.footprints[ScreenId::Settings] = 7;  // opted in, but NOT an overlay
+  f.actions[ScreenId::Settings] = Action::redraw();
+  App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::push(ScreenId::Settings)), f);
+  RenderTarget t;
+  app.dispatch(kConfirm);
+  REQUIRE(app.depth() == 2);
+  REQUIRE_FALSE(app.top().isOverlay());
+  t.paint(app);
+  app.clearDirty();
+  app.dispatch(kConfirm);
+  REQUIRE(app.dirty());
+  REQUIRE_FALSE(app.transition());
+  CHECK_FALSE(app.canRenderTopOnly(t.fb, Plane::Bw));
+  CHECK_FALSE(t.paintTop(app));
+}
+
+TEST_CASE("a screen with no footprint promise is never partially repainted") {
+  PartialFixture fx(0);
+  CHECK(fx.overlay().paintFootprint() == 0);
+  CHECK_FALSE(fx.app.canRenderTopOnly(fx.t.fb, Plane::Bw));
+  CHECK_FALSE(fx.t.paintTop(fx.app));
+  // Refused, and it painted NOTHING -- the caller falls back to render(), and a
+  // renderTopOnly that half-painted before refusing would have already ruined the
+  // frame it was checking.
+  CHECK(fx.log.empty());
+}
+
+TEST_CASE("a footprint that moved is never partially repainted") {
+  // The screen's own promise is "equal tokens cover the same pixels". A changed
+  // token means the box may have moved, and the pixels the old paint reached and
+  // the new one does not would survive as stale ink.
+  PartialFixture fx(7);
+  REQUIRE(fx.t.paintTop(fx.app));
+  fx.app.clearDirty();
+  fx.overlay().footprint = 8;
+  fx.app.dispatch(kConfirm);
+  REQUIRE(fx.app.dirty());
+  REQUIRE_FALSE(fx.app.transition());
+  CHECK_FALSE(fx.app.canRenderTopOnly(fx.t.fb, Plane::Bw));
+  // ...and going back to the footprint the frame was painted at is allowed again.
+  fx.overlay().footprint = 7;
+  CHECK(fx.app.canRenderTopOnly(fx.t.fb, Plane::Bw));
+}
+
+TEST_CASE("a different framebuffer is never partially repainted") {
+  // The precondition is about the frame's CONTENTS, and a second framebuffer does
+  // not hold them. This is the check a caller cannot be trusted with, because the
+  // caller is the thing that would have clobbered the frame.
+  PartialFixture fx;
+  RenderTarget other;
+  CHECK_FALSE(fx.app.canRenderTopOnly(other.fb, Plane::Bw));
+  CHECK_FALSE(other.paintTop(fx.app));
+  CHECK(fx.app.canRenderTopOnly(fx.t.fb, Plane::Bw));
+}
+
+TEST_CASE("a different plane is never partially repainted") {
+  // The frame holds one plane's render. Repainting the top screen in another
+  // plane over it would mix two planes in one frame, which on the panel is
+  // fringing rather than an obviously wrong screen.
+  PartialFixture fx;
+  CHECK_FALSE(fx.app.canRenderTopOnly(fx.t.fb, Plane::BwDithered));
+  CHECK_FALSE(fx.app.canRenderTopOnly(fx.t.fb, Plane::Lsb));
+  CHECK_FALSE(fx.app.canRenderTopOnly(fx.t.fb, Plane::Msb));
+  CHECK(fx.app.canRenderTopOnly(fx.t.fb, Plane::Bw));
+}
+
+TEST_CASE("the dithered path can be partially repainted, in its own plane") {
+  // Nothing declares Fidelity::Dithered today, so this is what keeps the other
+  // one-pass path eligible rather than leaving it accidentally excluded.
+  PartialFixture fx;
+  fx.t.paint(fx.app, Plane::BwDithered);
+  fx.app.clearDirty();
+  fx.app.dispatch(kConfirm);
+  CHECK(fx.app.canRenderTopOnly(fx.t.fb, Plane::BwDithered));
+  CHECK_FALSE(fx.app.canRenderTopOnly(fx.t.fb, Plane::Bw));
+}
+
+TEST_CASE("the grayscale path is never partially repainted") {
+  // It renders the screen three times plus a rebase, and the frame between passes
+  // holds a DIFFERENT plane -- so "the frame holds the previous paint of this
+  // plane" is false for every pass but the first. The plane check alone would
+  // refuse it; the fidelity check says so on purpose, so a future two-frame
+  // grayscale path cannot satisfy the plane check and quietly become eligible.
+  class GrayOverlay : public FakeScreen {
+   public:
+    GrayOverlay() : FakeScreen(ScreenId::Settings, Action::redraw(), 0, true) { footprint = 7; }
+    Fidelity fidelity() const override { return Fidelity::Grayscale; }
+  };
+  FakeFactory f;
+  App app(std::make_unique<GrayOverlay>(), f);
+  RenderTarget t;
+  t.paint(app);
+  app.clearDirty();
+  app.dispatch(kConfirm);
+  REQUIRE(app.dirty());
+  REQUIRE_FALSE(app.transition());
+  REQUIRE(app.top().isOverlay());
+  REQUIRE(app.top().paintFootprint() != 0);
+  CHECK_FALSE(app.canRenderTopOnly(t.fb, Plane::Bw));
+}
+
+TEST_CASE("a clean app is not partially repainted either") {
+  PartialFixture fx;
+  fx.app.clearDirty();
+  CHECK_FALSE(fx.app.dirty());
+  CHECK_FALSE(fx.app.canRenderTopOnly(fx.t.fb, Plane::Bw));
+  CHECK_FALSE(fx.t.paintTop(fx.app));
+}
+
+TEST_CASE("a fresh App carries no repaint permission from the one it replaced") {
+  // The shell replaces its App in three places -- a successful RETRY, a card lost
+  // at runtime, and boot. A new stack over the old frame is precisely the
+  // stale-pixel case, and the record lives in the App, so it goes with it.
+  PartialFixture fx;
+  REQUIRE(fx.app.canRenderTopOnly(fx.t.fb, Plane::Bw));
+  FakeFactory f2;
+  f2.overlays.insert(ScreenId::SdMissing);
+  f2.footprints[ScreenId::SdMissing] = 7;
+  auto root = std::make_unique<FakeScreen>(ScreenId::SdMissing, Action::redraw(), 0, true);
+  root->footprint = 7;
+  App fresh(std::move(root), f2);
+  fresh.clearDirty();
+  fresh.dispatch(kConfirm);
+  REQUIRE(fresh.dirty());
+  REQUIRE_FALSE(fresh.transition());
+  // Same framebuffer, same plane, an overlay with a footprint -- and refused,
+  // because THIS App has painted nothing into it.
+  CHECK_FALSE(fresh.canRenderTopOnly(fx.t.fb, Plane::Bw));
 }
 
 TEST_CASE("a sleep action is latched until the shell clears it") {
