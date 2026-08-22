@@ -1,4 +1,6 @@
 #pragma once
+#include "reader/focus.h"
+
 namespace reader {
 
 // A focus plus a first-visible index: everything a list longer than the screen
@@ -31,13 +33,13 @@ class ScrollWindow {
   ScrollWindow() = default;
   ScrollWindow(int count, int visibleRows);
 
-  int count() const { return count_; }
+  int count() const { return focus_.count(); }
   int visibleRows() const { return visible_; }
 
   // The selected row, or -1 when there is nothing to select. An empty /books is
   // a valid state rather than an error, and -1 is what lets a screen tell it
   // apart from a list whose first row happens to be focused.
-  int focus() const { return focus_; }
+  int focus() const { return focus_.index(); }
 
   // The first row on glass. Always 0 for a list that fits.
   int firstVisible() const { return first_; }
@@ -48,9 +50,11 @@ class ScrollWindow {
   // short list cannot read past the end of its own vector.
   int visibleCount() const;
 
-  // Moves the focus by `delta`, clamping at both ends -- no wrapping, the rule
-  // HomeScreen::moveFocus already states -- and scrolls the window by however
-  // much it takes to keep the new focus visible.
+  // Moves the focus by `delta` -- WRAPPING off each end onto the other unless
+  // setWrapping(false) has been used, which is Focus's rule and not a second copy
+  // of it -- and scrolls the window by however much it takes to keep the new
+  // focus visible. Wrapping to the far end scrolls the window with it, which is
+  // the half of the behaviour that belongs to this class.
   //
   // Returns whether anything changed, so a screen can answer Action::none() at
   // the end of a list instead of paying a refresh that repaints an identical
@@ -72,16 +76,22 @@ class ScrollWindow {
 
   void setVisibleRows(int n);
 
- private:
-  // Re-establishes both invariants after any change to any of the four fields.
-  // One function rather than one per mutator: the invariants are joint, and a
-  // setter that maintained only its own half is how a window ends up scrolled
-  // past the end of a list it just shrank.
-  void clamp();
+  // Whether the list rolls off each end onto the other. ON by default, like every
+  // list in the firmware; a pass-through to Focus so a list screen that wants to
+  // opt out says so once. See Focus::setWrapping, which records what enabling it
+  // reversed and where it is sharpest (a held button on a long list).
+  void setWrapping(bool on) { focus_.setWrapping(on); }
+  bool wraps() const { return focus_.wraps(); }
 
-  int count_ = 0;
+ private:
+  // Re-establishes the WINDOW's invariants after any change. The focus's own
+  // invariants belong to Focus, which is the whole reason this is no longer one
+  // function doing both -- the clamp it used to hold was the fifth copy of a rule
+  // four screens also had.
+  void clampWindow();
+
+  Focus focus_;
   int visible_ = 0;
-  int focus_ = -1;
   int first_ = 0;
 };
 

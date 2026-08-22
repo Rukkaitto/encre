@@ -86,7 +86,7 @@ TEST_CASE("the Library lists a card's books and counts them the way the board do
   CHECK(lib.vm().rows[0].value.empty());
 }
 
-TEST_CASE("the Library's focus starts on the first row and clamps at both ends") {
+TEST_CASE("the Library's focus starts on the first row and wraps at both ends") {
   Ramp r;
   reader::QuietTheme theme;
   FakeFileSystem fs = cardWithBooks();
@@ -95,13 +95,13 @@ TEST_CASE("the Library's focus starts on the first row and clamps at both ends")
 
   CHECK(lib.focus() == 0);
   CHECK(lib.vm().focusedRow == 0);
-  // At the top already, so nothing moves and nothing repaints: on this panel a
-  // refresh that changes nothing is half a second of a button that feels stuck.
-  CHECK(lib.onEvent(kUp).kind == Action::Kind::None);
+  // Up from the first row goes to the last.
+  CHECK(lib.onEvent(kUp).kind == Action::Kind::Redraw);
+  CHECK(lib.focus() == 2);
   CHECK(lib.onEvent(kDown).kind == Action::Kind::Redraw);
-  CHECK(lib.focus() == 1);
+  CHECK(lib.focus() == 0);
   CHECK(lib.onEvent(kDown).kind == Action::Kind::Redraw);
-  CHECK(lib.onEvent(kDown).kind == Action::Kind::None);  // the end of the list
+  CHECK(lib.onEvent(kDown).kind == Action::Kind::Redraw);
   CHECK(lib.focus() == 2);
 }
 
@@ -365,9 +365,10 @@ TEST_CASE("an empty library reports no selection, which is not row 0") {
   LibraryScreen lib(fs, "/books");
   lib.setVisibleRows(6);
   reader::Screen& s = lib;
-  // -1, not 0: there is no row 0 to be on. The shell stores 0 for this, because
-  // Session::focus is unsigned -- and restoring 0 onto an empty list clamps
-  // straight back to -1, so the round trip is stable.
+  // -1, not 0: there is no row 0 to be on. The shell stores the -1 as itself
+  // now that Session::focus is signed -- and restoring either -1 or the 0 an
+  // older record holds clamps back to -1 here, so the round trip is stable
+  // whichever it reads.
   CHECK(s.focus() == -1);
   CHECK_FALSE(s.setFocus(0));
   CHECK(s.focus() == -1);

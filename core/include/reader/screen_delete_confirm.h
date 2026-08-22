@@ -1,5 +1,6 @@
 #pragma once
 #include "reader/app.h"
+#include "reader/focus.h"
 #include "reader/viewmodel.h"
 
 namespace reader {
@@ -30,10 +31,12 @@ class DeleteConfirmScreen : public Screen {
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
 
   const DeleteConfirmViewModel& vm() const { return vm_; }
-  // Cancel or Delete. An override of Screen::focus() since the base declared
-  // one, and marked so; no setFocus, for the same reason the actions panel has
-  // none -- there is no path that restores this screen onto a fresh boot.
+  // Cancel or Delete, both ways round -- for the same reason the actions panel
+  // accepts a focus back: the rule is that a screen which reports one takes one,
+  // and "no wake can reach this screen" is a fact about the shell that this
+  // header should not be encoding.
   int focus() const override { return vm_.focusedAction; }
+  bool setFocus(int index) override;
 
   // CONSTANT, so every focus move here is a partial repaint. Unlike the actions
   // panel, nothing this screen draws changes shape with the focus:
@@ -48,9 +51,11 @@ class DeleteConfirmScreen : public Screen {
   enum Row { kCancel = 0, kDelete, kRowCount };
 
   Action moveFocus(int delta);
+  bool syncFocus(bool moved);
 
   LibraryScreen& library_;
   DeleteConfirmViewModel vm_;
+  Focus focus_;
 };
 
 }  // namespace reader

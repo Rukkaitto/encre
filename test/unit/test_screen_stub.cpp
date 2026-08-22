@@ -55,19 +55,19 @@ bool rowIsWhite(const Framebuffer& fb, int y) {
 
 }  // namespace
 
-TEST_CASE("stub focus clamps at both ends rather than wrapping") {
+TEST_CASE("stub focus wraps at both ends") {
   StubScreen s = makeStub();
   CHECK(s.focus() == 0);
-  // Already at the top: no move, and no redraw to pay a panel refresh for.
-  CHECK(s.onEvent(kUp).kind == Action::Kind::None);
+  // Off the top and round to the bottom.
+  CHECK(s.onEvent(kUp).kind == Action::Kind::Redraw);
+  CHECK(s.focus() == 2);
+  CHECK(s.onEvent(kDown).kind == Action::Kind::Redraw);
   CHECK(s.focus() == 0);
   CHECK(s.onEvent(kDown).kind == Action::Kind::Redraw);
   CHECK(s.onEvent(kDown).kind == Action::Kind::Redraw);
   CHECK(s.focus() == 2);
-  CHECK(s.onEvent(kDown).kind == Action::Kind::None);
-  CHECK(s.focus() == 2);
-  CHECK(s.onEvent(kUp).kind == Action::Kind::Redraw);
-  CHECK(s.focus() == 1);
+  CHECK(s.onEvent(kDown).kind == Action::Kind::Redraw);
+  CHECK(s.focus() == 0);
 }
 
 TEST_CASE("an empty stub has nothing to focus and moving does nothing") {

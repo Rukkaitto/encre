@@ -1,5 +1,6 @@
 #pragma once
 #include "reader/app.h"
+#include "reader/focus.h"
 #include "reader/viewmodel.h"
 
 namespace reader {
@@ -29,12 +30,18 @@ class ItemActionsScreen : public Screen {
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
 
   const ItemActionsViewModel& vm() const { return vm_; }
-  // Which of the four action rows is selected. An override of Screen::focus()
-  // since the base declared one, and marked so. No setFocus: this panel is only
-  // ever reached by a hold on a live Library, so there is no wake that can put
-  // the user back on it -- the factory refuses to build one with no Library
-  // under it, which is the correct answer and not a gap.
+  // Which of the four action rows is selected, both ways round.
+  //
+  // setFocus was left off on the grounds that no wake can land here -- this panel
+  // is only reached by a hold on a live Library, and the factory refuses to build
+  // one with no Library under it, which is still true and still correct. It is
+  // here anyway, because "which screens can a wake reach" is a fact about the
+  // shell's restore ladder and the factory, and pinning a core/ screen's
+  // behaviour to it means every change over there is a chance to leave a screen
+  // silently reporting a focus it cannot accept. The rule is local and has no
+  // exceptions: a screen that reports a focus takes one back.
   int focus() const override { return vm_.focusedAction; }
+  bool setFocus(int index) override;
 
   // THE ONE THING THAT MOVES THIS PANEL'S BOX IS HOW MANY OF ITS ROWS HAVE A
   // RULE, so that count is the token. QuietTheme::renderItemActions sums
@@ -67,8 +74,10 @@ class ItemActionsScreen : public Screen {
   enum Row { kOpen = 0, kDetails, kFinished, kDelete, kRowCount };
 
   Action moveFocus(int delta);
+  bool syncFocus(bool moved);
 
   ItemActionsViewModel vm_;
+  Focus focus_;
 };
 
 }  // namespace reader

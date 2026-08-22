@@ -19,6 +19,8 @@ ItemActionsScreen::ItemActionsScreen(const LibraryScreen& library) {
   vm_.actions = {{"Open", true}, {"Book details", true}, {"Mark as finished", false},
                  {"Delete\xE2\x80\xA6", false}};
   vm_.focusedAction = kOpen;
+  focus_ = Focus(kRowCount);
+  focus_.set(vm_.focusedAction);
   // The board's own labels. CLOSE rather than BACK, because what Back does here
   // is dismiss a panel rather than leave a screen -- and no holds, so no slot
   // shows a ring.
@@ -26,14 +28,15 @@ ItemActionsScreen::ItemActionsScreen(const LibraryScreen& library) {
   vm_.holds = {false, false, false, false};
 }
 
+bool ItemActionsScreen::syncFocus(bool moved) {
+  if (moved) vm_.focusedAction = focus_.index();
+  return moved;
+}
+
+bool ItemActionsScreen::setFocus(int index) { return syncFocus(focus_.set(index)); }
+
 Action ItemActionsScreen::moveFocus(int delta) {
-  int next = vm_.focusedAction + delta;
-  // Clamped, not wrapped: one rule for every list in this firmware.
-  if (next < 0) next = 0;
-  if (next > kRowCount - 1) next = kRowCount - 1;
-  if (next == vm_.focusedAction) return Action::none();
-  vm_.focusedAction = next;
-  return Action::redraw();
+  return syncFocus(focus_.move(delta)) ? Action::redraw() : Action::none();
 }
 
 Action ItemActionsScreen::onEvent(const InputEvent& ev) {

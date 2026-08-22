@@ -120,6 +120,12 @@ class Screen {
   // the first screen that can produce a value, and 2C-1's session record was
   // writing a hardcoded 0 into a field nothing could fill.
   //
+  // OVERRIDE THEM IN PAIRS. A screen that reports a focus and does not accept one
+  // back is not a screen with a limitation, it is a screen that loses the user's
+  // place on every wake without saying so -- three of them shipped that way, each
+  // with a header comment explaining why its own case was the exception. There is
+  // no exception; test_focus_restore.cpp walks the whole catalogue.
+  //
   // DEFAULTS THAT MEAN "I HAVE NO FOCUS TO REPORT OR RESTORE": 0, and false.
   // A screen with one thing on it (the SD-missing prompt) is not obliged to
   // pretend otherwise, and setFocus returning false says the restore did not
@@ -127,8 +133,10 @@ class Screen {
   // "restored" from "ignored" without asking which screen it is holding.
   //
   // A negative focus is legitimate and means "nothing selected" (Home's Continue
-  // block, an empty Library). It is the CALLER's job to decide what to do with
-  // that before putting it in a record whose field is unsigned; see
+  // block, an empty Library), and a screen that reports one must accept it back:
+  // on Home, -1 (Continue) and 0 (the first menu row) are two different places
+  // the user can be, so a round trip that cannot tell them apart is a wake onto
+  // the wrong one. The session record's field is signed for that reason; see
   // saveWhereWeAre in shell/src/main.cpp.
   virtual int focus() const { return 0; }
   virtual bool setFocus(int index) {
@@ -176,8 +184,32 @@ class ScreenFactory {
   virtual std::unique_ptr<Screen> create(ScreenId id) = 0;
 };
 
+// ONE SCREEN'S PLACE ON THE STACK: which screen, and where its focus was. A
+// snapshot is a vector of these, ROOT FIRST, and it is everything a wake needs to
+// put the user back exactly where they were.
+//
+// Deliberately not a Screen* or an index into anything: it survives a chip reset,
+// which is what deep sleep is, so it can only hold values.
+struct StackEntry {
+  ScreenId screen = ScreenId::Home;
+  // Screen::focus()'s number, and negative is a position (Home's CONTINUE block,
+  // an empty Library), not an error. See Screen::focus.
+  int focus = 0;
+
+  friend bool operator==(const StackEntry& a, const StackEntry& b) {
+    return a.screen == b.screen && a.focus == b.focus;
+  }
+  friend bool operator!=(const StackEntry& a, const StackEntry& b) { return !(a == b); }
+};
+
 class App {
  public:
+  // V1's deepest path is Home > Library > item actions > delete confirm. Public
+  // because the record format has to refuse a stack this cannot hold -- a longer
+  // one could only ever be half-restored, and "the record was usable" has to stay
+  // a single yes-or-no.
+  static constexpr size_t kMaxDepth = 8;
+
   App(std::unique_ptr<Screen> root, ScreenFactory& factory);
 
   Screen& top();
@@ -253,6 +285,44 @@ class App {
 
   void dispatch(const InputEvent& ev);
 
+  // WHERE THE USER IS, root first, for the wake record to store.
+  //
+  // Every screen answers through Screen::focus(), so nothing here knows what any
+  // of them are -- which is the point. The mechanic used to be a ladder in the
+  // shell with Home and the SD-missing screen written into it by name, and every
+  // screen that was not in the ladder silently lost the user's place.
+  std::vector<StackEntry> snapshot() const;
+
+  // WHAT A RESTORE DID, so the caller can log it without asking which screens
+  // were involved. `restored` counts the entries now standing, the root included,
+  // so restored == requested is a complete restore and anything less names how
+  // far it got.
+  struct RestoreReport {
+    int requested = 0;
+    int restored = 0;
+    // The record's root is this App's root. False means nothing was restored at
+    // all: an empty record, a stack that is already deep, or a root that
+    // disagrees -- the card went away while the device slept, so the boot path
+    // rooted this App at the no-card screen and a record naming Home must not be
+    // layered over it. One rule, no screen named.
+    bool rootMatched = false;
+  };
+
+  // PUT A SNAPSHOT BACK. Only meaningful on a fresh App, which is the only thing
+  // that ever calls it -- the boot path, right after building the root.
+  //
+  // IN ORDER, AND EACH ENTRY'S FOCUS BEFORE THE NEXT PUSH. That ordering is not
+  // tidiness: an overlay reads the focused row of the screen underneath it AT
+  // CONSTRUCTION, so the parent has to be both present and already focused before
+  // the overlay is built. It is also what makes an overlay restorable at all --
+  // the old one-screen record could never satisfy the factory, which correctly
+  // refuses to build an overlay with no live Library under it.
+  //
+  // A push the factory refuses STOPS the restore and keeps what already stands: a
+  // record from a newer firmware naming a screen this build cannot make should
+  // not cost the user the Library they really were in.
+  RestoreReport restore(const std::vector<StackEntry>& stack);
+
   // Push a screen with no input event behind it. The one caller is the shell's
   // wake restore: the NVS session record names a screen, and there is no press
   // that implies it -- the alternative would be constructing the App with that
@@ -303,9 +373,6 @@ class App {
   ButtonMask autoRepeat() const { return top().autoRepeat(); }
 
  private:
-  // V1's deepest path is Home > Library > item actions > delete confirm.
-  static constexpr size_t kMaxDepth = 8;
-
   // WHAT THE LAST FULL PAINT PUT WHERE, so canRenderTopOnly can check its own
   // precondition instead of trusting the caller with it.
   //

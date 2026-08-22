@@ -462,10 +462,94 @@ at 15 chars). The version key is written **last**, like a commit record, so a wr
 that dies half way reads back as "no session". Restore happens **only on a genuine
 wake**; a cold boot starts at Home and clears the record. **The stored focus is real**, and this
 paragraph claimed it was always 0 until a review checked it: `Screen::focus()`
-and `setFocus()` exist (`app.h`), the shell stores the live focus clamped to
-`uint16` and restores it on wake, and Library is the screen it shows on. The
-"always 0" was true when 2C-1 wrote it and 2C-2 made it false without updating
-this line.
+and `setFocus()` exist (`app.h`), the shell stores the live focus and restores it
+on wake. The "always 0" was true when 2C-1 wrote it and 2C-2 made it false without
+updating this line.
+
+**`Focus` (`core/include/reader/focus.h`) IS WHERE MOVING A SELECTION LIVES**, and
+until it existed there were five copies of it: `HomeScreen`, `StubScreen`, both
+overlay panels and `ScrollWindow` each carried the same eight lines — add a
+delta, clamp to a range, report whether anything moved — with the range spelled
+slightly differently in each. That is why "clamp, do not wrap" had to be written
+into four separate comments to stay one rule. A screen now declares its **range**
+(`Focus::WithNone` when -1 is a position below the first item, as Home's CONTINUE
+block is) and mirrors `focus_.index()` into its view-model; it holds no clamp at
+all. `ScrollWindow` owns a `Focus` plus the window around it, so the two concerns
+are separable.
+
+- **`set()` CLAMPS and `move()` WRAPS**, deliberately: `set` is the restore path,
+  where a record naming row 400 of a three-row list means "as far down as you can
+  go", and wrapping that to row 1 would land the user somewhere unrelated to where
+  they were.
+- **EVERY LIST WRAPS, and that reversed a decision this project had written down
+  four times** — "clamp, do not wrap: a list that jumps silently from the last
+  item to the first is indistinguishable from a stuck button". Half that argument
+  still stands and it is worth knowing which half. A wrap is now the only thing a
+  press at the end can do, so it can never read as a *dead* button — the screen
+  always changes. What it costs is the opposite reading, a Down that appears to
+  jump a long way, which is unambiguous on a four-row overlay and is the case to
+  watch on a several-hundred-book Library. `setWrapping(false)` is the opt-out, on
+  `Focus` and passed through by `ScrollWindow`; nothing uses it.
+- **AUTO-REPEAT IS WHERE WRAPPING IS SHARPEST, and it is not solved.** A held Up
+  or Down delivers a *distance* (`InputEvent::steps`), which `move()` takes
+  correctly — several laps land where one lap would — so a held button on the
+  Library now cycles for as long as it is down instead of resting at the end. On a
+  ten-row list a single accumulated step of +100 lands on row 0. If that is the
+  wrong feel on glass, the fix is one `setWrapping` call, not a rewrite.
+
+**THE RULE IS: A SCREEN THAT REPORTS A FOCUS ACCEPTS ONE BACK.** It was
+implemented one screen at a time instead, and each screen that had not been done
+yet failed the same silent way — `Screen::focus()` overridden, `setFocus()` left
+on the base class's no-op, so the wake stored a real number, handed it back, and
+the screen dropped it. No log line, no failing test, just the user waking on the
+first row. Library got it in 2C-2, Home after "why does the Library come back
+where I left it and Home does not", Settings after the same question again, and
+each of the three headers carried a paragraph arguing that *its* screen was the
+exception (Home cannot be pushed; the Stub is about to be deleted; no wake can
+reach an overlay). Every one of those premises was true and every conclusion was
+wrong: the reachability of a screen is a fact about the shell's restore ladder,
+and encoding it in a `core/` header is how a change over there leaves a screen
+silently one-way. `test/unit/test_focus_restore.cpp` walks **every** `ScreenId`
+and asserts the round trip, `static_assert`s its own catalogue against the enum
+so an added screen cannot slip past, and **counts** the screens whose focus can
+move (five) so it cannot quietly end up testing nothing.
+
+**THE RECORD IS THE WHOLE STACK, AND `App` PUTS IT BACK** — `snapshot()` /
+`restore()`, root first. It held one screen id through version 3, so
+Home > Library > actions came back as **Home**: the restore pushed the overlay
+onto a fresh app, the factory refused it (correctly — an overlay reads the focused
+row of the Library under it, and there was none), and the user lost both. Three
+things about the fix are worth keeping:
+
+- **Order is load-bearing.** Each entry's focus is set BEFORE the next push,
+  because an overlay reads its parent's focused row *at construction*. That is
+  also what makes an overlay restorable at all.
+- **It deleted the special cases.** The shell's restore was a ladder naming Home
+  ("already the root, nothing to push") and SD-missing ("the card mounted, so the
+  message is no longer true"), and every screen not in the ladder was handled by
+  accident — three of them wrongly. Both branches are now one question,
+  *does the record's root match this app's root*, and `App::restore` names no
+  screen at all. **A restore that stops early keeps what already stands**: a
+  record from a newer firmware should not cost the user the Library they were in.
+- **The wire format is in `core/`** (`reader/session_record.h`), as
+  `home:-1;library:7;item-actions:1`, because `shell/` has no test harness and
+  that is the only part of the resume path that is pure logic. One payload key
+  also makes the version key a real commit record — with `scr` and `focus` as two
+  keys, a cut between them left a valid-looking mixed record.
+
+**`focus` is SIGNED (`int16`), and that is what let Home restore its focus too.**
+Restoring onto Home is not a push — Home is already the root — so the ladder
+skipped it entirely and every wake from Home landed on CONTINUE whatever row the
+user had left selected. Two things had to change together, and the second is the
+one worth remembering: the ladder's Home branch sets the focus on the **root**
+instead of on a screen it just pushed, and the record had to be able to hold
+**-1**. On Library, -1 ("nothing selected", an empty `/books`) survived being
+flattened to 0 because 0 clamps straight back to -1 there; on Home, -1 is the
+CONTINUE block and 0 is the first menu row, so flattening woke the user somewhere
+they were never sitting. **A field that cannot hold the value is not a place to
+store it**, and a round trip that is stable on one screen for an accidental reason
+is not a round trip. The record went version 2 → 3 with the type, so the first
+wake after this firmware lands reads as "no session" and starts at Home.
 
 **Two limitations to know before trusting the card:**
 
@@ -729,9 +813,9 @@ top of this spike.
   and asserts byte-identity at both geometries, under both rotations, and for runs
   that start and end mid-byte — the panel widths are multiples of 8, so nothing on
   the device exercises the edge masks.
-- **`ScrollWindow` owns list movement** — focus plus first-visible, scrolling by a
-  row rather than a page, and it CLAMPS, which is what lets a held button's
-  40-row step land on the last row instead of past it. `Theme::libraryVisibleRows` derives how many rows fit
+- **`ScrollWindow` owns list movement** — a `Focus` (see Storage) plus
+  first-visible, scrolling by a row rather than a page, and it CLAMPS, which is
+  what lets a held button's 40-row step land on the last row instead of past it. `Theme::libraryVisibleRows` derives how many rows fit
   from the panel and the type; the shell must set it before the first Library
   paint or the list correctly renders empty.
 - **A scrollable list shows its position as a RAIL** in a 14px gutter

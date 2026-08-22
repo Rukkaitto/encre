@@ -29,17 +29,21 @@ DeleteConfirmScreen::DeleteConfirmScreen(LibraryScreen& library) : library_(libr
   // focus starts on the destructive action is a prompt that deletes a book on a
   // press the user made before reading it.
   vm_.focusedAction = kCancel;
+  focus_ = Focus(kRowCount);
+  focus_.set(vm_.focusedAction);
   vm_.hints = {"CANCEL", "SELECT", "UP", "DOWN"};
   vm_.holds = {false, false, false, false};
 }
 
+bool DeleteConfirmScreen::syncFocus(bool moved) {
+  if (moved) vm_.focusedAction = focus_.index();
+  return moved;
+}
+
+bool DeleteConfirmScreen::setFocus(int index) { return syncFocus(focus_.set(index)); }
+
 Action DeleteConfirmScreen::moveFocus(int delta) {
-  int next = vm_.focusedAction + delta;
-  if (next < 0) next = 0;
-  if (next > kRowCount - 1) next = kRowCount - 1;
-  if (next == vm_.focusedAction) return Action::none();
-  vm_.focusedAction = next;
-  return Action::redraw();
+  return syncFocus(focus_.move(delta)) ? Action::redraw() : Action::none();
 }
 
 Action DeleteConfirmScreen::onEvent(const InputEvent& ev) {

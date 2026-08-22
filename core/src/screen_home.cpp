@@ -5,20 +5,30 @@
 namespace reader {
 
 HomeScreen::HomeScreen(HomeViewModel vm, std::vector<ScreenId> targets)
-    : vm_(std::move(vm)), targets_(std::move(targets)) {}
+    : vm_(std::move(vm)),
+      targets_(std::move(targets)),
+      // WithNone: -1 is the CONTINUE block, a place the user can be, not the
+      // absence of a selection. The view-model may arrive with a focus already
+      // set -- the goldens author one -- so it is adopted rather than reset.
+      focus_(static_cast<int>(vm_.menu.size()), Focus::WithNone) {
+  focus_.set(vm_.focusedMenuIndex);
+  vm_.focusedMenuIndex = focus_.index();
+}
 
+bool HomeScreen::syncFocus(bool moved) {
+  // The view-model is what the theme draws, so the focus has to be mirrored into
+  // it. That mirror is the whole of what this screen now does about focus: the
+  // range, the clamp and the "did anything move" answer are all Focus's.
+  if (moved) vm_.focusedMenuIndex = focus_.index();
+  return moved;
+}
+
+bool HomeScreen::setFocus(int index) { return syncFocus(focus_.set(index)); }
+
+// Redraw only when the focus actually moved: at the end of the list a press must
+// not cost a 1.5 s panel refresh that changes nothing.
 Action HomeScreen::moveFocus(int delta) {
-  const int last = static_cast<int>(vm_.menu.size()) - 1;
-  int next = vm_.focusedMenuIndex + delta;
-  // Clamp rather than wrap. Home's menu is short enough that wrapping would be
-  // pleasant, but Library will hold hundreds of books and a list that jumps
-  // silently from the last item to the first is indistinguishable from a stuck
-  // button. One rule for every list.
-  if (next < -1) next = -1;
-  if (next > last) next = last;
-  if (next == vm_.focusedMenuIndex) return Action::none();
-  vm_.focusedMenuIndex = next;
-  return Action::redraw();
+  return syncFocus(focus_.move(delta)) ? Action::redraw() : Action::none();
 }
 
 Action HomeScreen::onEvent(const InputEvent& ev) {

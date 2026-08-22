@@ -1,0 +1,120 @@
+// THE FOCUS ROUND TRIP, FOR EVERY SCREEN THERE IS.
+//
+// A wake stores Screen::focus() and hands it back through Screen::setFocus(), so
+// the two have to be inverse on every screen or the user wakes somewhere they
+// never were. That is one rule, and it kept being implemented one screen at a
+// time: Library got it in 2C-2, Home only after "why does the Library come back
+// where I left it and Home does not", and Settings only after the same question
+// again. Each time, the screens that had not been done reported a focus, dropped
+// the restored one on the base class's no-op, and said nothing about it -- a
+// silent wrong-place-on-wake rather than a failure.
+//
+// So this walks the CATALOGUE rather than a screen. A new screen is covered the
+// day it is added, and one that reports a focus it cannot accept back fails here
+// instead of on someone's device.
+#include <memory>
+#include <vector>
+
+#include "doctest.h"
+#include "home_vm.h"
+#include "reader/app.h"
+#include "reader/screen_home.h"
+#include "reader/screens.h"
+
+using namespace reader;
+
+namespace {
+
+// EVERY ScreenId, and the size assertion below is what keeps it every. An added
+// screen changes the count and fails here, which is the prompt to add its row --
+// there is no -Wswitch to lean on over an array.
+constexpr ScreenId kAllScreens[] = {
+    ScreenId::Home,     ScreenId::Library,      ScreenId::ItemActions, ScreenId::DeleteConfirm,
+    ScreenId::BookDetails, ScreenId::Settings,  ScreenId::InputMonitor, ScreenId::SdMissing,
+};
+static_assert(sizeof(kAllScreens) / sizeof(kAllScreens[0]) ==
+                  static_cast<size_t>(ScreenId::SdMissing) + 1,
+              "a ScreenId was added or removed; give it a row in kAllScreens");
+
+// One screen, plus whatever has to outlive it. The three screens built over a
+// Library hold a REFERENCE to it, so the Library cannot be a temporary -- and it
+// must be a different Library per fixture, or two fixtures would share a focus
+// and the round trip would pass by accident.
+struct Standalone {
+  DemoScreenFactory factory;
+  std::unique_ptr<Screen> parent;
+  std::unique_ptr<Screen> screen;
+
+  Screen& get() const { return *screen; }
+};
+
+std::unique_ptr<Standalone> build(ScreenId id) {
+  auto b = std::make_unique<Standalone>();
+  // Any non-zero row count will do here; this is not a layout test. Zero would
+  // give the Library an empty window and hide the very thing being checked.
+  b->factory.setLibraryVisibleRows(7);
+  if (id == ScreenId::Home) {
+    // The factory refuses Home on purpose -- the root is never rebuilt -- so the
+    // one screen the shell constructs by hand is constructed by hand here too.
+    b->screen = std::make_unique<HomeScreen>(demoHomeVm(), demoHomeTargets());
+    return b;
+  }
+  if (id == ScreenId::ItemActions || id == ScreenId::DeleteConfirm ||
+      id == ScreenId::BookDetails) {
+    b->parent = b->factory.create(ScreenId::Library);
+  }
+  b->screen = b->factory.create(id);
+  return b;
+}
+
+const InputEvent kDown{Button::Down, PressKind::Short};
+
+}  // namespace
+
+TEST_CASE("every screen accepts back the focus it reports") {
+  // Counted, not assumed. A refactor that made every screen report a fixed focus
+  // would leave the loop below passing on nothing at all, which is the failure
+  // mode this project keeps hitting -- a check that reports on less than it
+  // claims. Five screens can move their focus today: Home, Library, the two
+  // overlays and Settings. BookDetails, the Input Monitor and the SD-missing
+  // prompt have one thing on them and legitimately report 0.
+  int movable = 0;
+
+  for (const ScreenId id : kAllScreens) {
+    CAPTURE(screenName(id));
+    auto live = build(id);
+    REQUIRE(live->screen != nullptr);
+
+    const int fresh = live->get().focus();
+    live->get().onEvent(kDown);
+    const int moved = live->get().focus();
+    if (moved == fresh) continue;  // nothing to preserve on this screen
+    ++movable;
+
+    // A SECOND instance, as a wake gets: the shell builds the screen from
+    // scratch and then restores. Asking the screen that already moved would
+    // prove nothing, since it is already sitting on the answer.
+    auto restored = build(id);
+    REQUIRE(restored->screen != nullptr);
+    REQUIRE(restored->get().focus() == fresh);
+    CHECK(restored->get().setFocus(moved));
+    CHECK(restored->get().focus() == moved);
+  }
+
+  CHECK(movable == 5);
+}
+
+TEST_CASE("restoring the focus a screen is already on is a no-op, not a failure") {
+  // The bool means "something moved", not "the restore was accepted" -- the shell
+  // reads it to decide whether a repaint or an NVS write is owed, and a screen
+  // that returned true for an unchanged focus would cost a panel refresh on every
+  // wake. Same contract on every screen, so it is checked on every screen.
+  for (const ScreenId id : kAllScreens) {
+    CAPTURE(screenName(id));
+    auto s = build(id);
+    REQUIRE(s->screen != nullptr);
+    const int where = s->get().focus();
+    CHECK_FALSE(s->get().setFocus(where));
+    CHECK(s->get().focus() == where);
+  }
+}

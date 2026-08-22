@@ -1,0 +1,101 @@
+// THE WAKE RECORD'S WIRE FORMAT, which is a string and lives in core/ so that it
+// can be tested at all -- shell/ has no test harness, and this is the one piece
+// of the resume path that is pure logic.
+//
+// `home:-1;library:7;item-actions:1`, root first. Two things it inherits from the
+// single-screen format it replaces: the screen is a NAME rather than an enum
+// ordinal (2C-2 inserted three screens into the middle of ScreenId and silently
+// renamed every stored record), and an unrecognised name is "no session" rather
+// than a best-effort decode -- nothing here casts an integer into a ScreenId.
+#include <string>
+#include <vector>
+
+#include "doctest.h"
+#include "reader/session_record.h"
+
+using namespace reader;
+
+TEST_CASE("a stack round-trips through the wire format") {
+  const std::vector<StackEntry> in{
+      {ScreenId::Home, -1}, {ScreenId::Library, 7}, {ScreenId::ItemActions, 1}};
+  const std::string wire = encodeSessionStack(in);
+  CHECK(wire == "home:-1;library:7;item-actions:1");
+
+  std::vector<StackEntry> out;
+  REQUIRE(decodeSessionStack(wire.c_str(), out));
+  CHECK(out == in);
+}
+
+TEST_CASE("a one-screen stack needs no separator") {
+  CHECK(encodeSessionStack({{ScreenId::Home, 0}}) == "home:0");
+  std::vector<StackEntry> out;
+  REQUIRE(decodeSessionStack("home:0", out));
+  REQUIRE(out.size() == 1);
+  CHECK(out[0].screen == ScreenId::Home);
+  CHECK(out[0].focus == 0);
+}
+
+TEST_CASE("-1 survives, because it is a position and not an error") {
+  // Home's CONTINUE block and an empty /books both report -1. The record this
+  // replaces stored the focus in an unsigned NVS key and flattened it to 0, which
+  // woke the user on the first menu row instead of on CONTINUE.
+  std::vector<StackEntry> out;
+  REQUIRE(decodeSessionStack("home:-1", out));
+  CHECK(out[0].focus == -1);
+}
+
+TEST_CASE("an unknown screen name rejects the WHOLE record, not just its entry") {
+  // A name this build does not know comes from a firmware that does, so the
+  // entries around it may not mean what they say either. Home is the answer.
+  std::vector<StackEntry> out{{ScreenId::Library, 3}};
+  CHECK_FALSE(decodeSessionStack("home:0;reader:12", out));
+  CHECK(out.empty());
+}
+
+TEST_CASE("malformed input is refused rather than half-read") {
+  std::vector<StackEntry> out;
+  CHECK_FALSE(decodeSessionStack("", out));
+  CHECK_FALSE(decodeSessionStack(nullptr, out));
+  CHECK_FALSE(decodeSessionStack("home", out));         // no focus
+  CHECK_FALSE(decodeSessionStack("home:", out));        // no digits
+  CHECK_FALSE(decodeSessionStack("home:x", out));       // not a number
+  CHECK_FALSE(decodeSessionStack("home:0;", out));      // trailing separator
+  CHECK_FALSE(decodeSessionStack(":0", out));           // no name
+  CHECK_FALSE(decodeSessionStack("home:0;;library:1", out));
+  CHECK_FALSE(decodeSessionStack("home:1-2", out));
+}
+
+TEST_CASE("a record deeper than the app's stack is refused") {
+  // App::kMaxDepth is 8 and a push past it fails, so a longer record could only
+  // ever be half-restored. Refusing it whole keeps "the record was usable" a
+  // single yes-or-no.
+  std::string wire = "home:0";
+  for (int i = 0; i < 8; ++i) wire += ";library:1";
+  std::vector<StackEntry> out;
+  CHECK_FALSE(decodeSessionStack(wire.c_str(), out));
+}
+
+TEST_CASE("the focus is clamped on the way out, so the string has a bound") {
+  // The clamp used to be in the shell, where it existed because the NVS key was a
+  // uint16. The key is a string now and the reason changed with it: a focus is a
+  // row index, and an unbounded one would make the record's length unbounded too.
+  CHECK(encodeSessionStack({{ScreenId::Home, 999999}}) == "home:32767");
+  CHECK(encodeSessionStack({{ScreenId::Home, -999999}}) == "home:-1");
+}
+
+TEST_CASE("every screen in the catalogue has a wire name, and they are all distinct") {
+  // A screen with no name cannot be stored, which is a defined outcome -- but it
+  // must be a deliberate one. This is the check that makes forgetting a row show
+  // up here rather than as a screen that quietly never restores.
+  std::vector<std::string> names;
+  for (int i = 0; i <= static_cast<int>(ScreenId::SdMissing); ++i) {
+    const ScreenId id = static_cast<ScreenId>(i);
+    const char* n = sessionWireName(id);
+    REQUIRE(n != nullptr);
+    CHECK(std::string(n).find(':') == std::string::npos);
+    CHECK(std::string(n).find(';') == std::string::npos);
+    names.push_back(n);
+  }
+  for (size_t a = 0; a < names.size(); ++a)
+    for (size_t b = a + 1; b < names.size(); ++b) CHECK(names[a] != names[b]);
+}

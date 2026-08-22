@@ -12,11 +12,40 @@ TEST_CASE("focus starts at the first item and the window at the top") {
   CHECK(w.visibleCount() == 7);
 }
 
-TEST_CASE("focus clamps at both ends and reports no change there") {
+TEST_CASE("the focus wraps off each end onto the other") {
+  ScrollWindow w(3, 3);
+  CHECK(w.moveFocus(-1));
+  CHECK(w.focus() == 2);
+  CHECK(w.moveFocus(+1));
+  CHECK(w.focus() == 0);
+  CHECK(w.moveFocus(+2));
+  CHECK(w.focus() == 2);
+  CHECK(w.moveFocus(+1));
+  CHECK(w.focus() == 0);
+}
+
+TEST_CASE("wrapping to the far end scrolls the window with it") {
+  // The half a wrap that is this class's own: the focus jumping from the last row
+  // to the first has to bring the WINDOW back to the top, or the list shows a
+  // slice with no focused row in it.
+  ScrollWindow w(20, 5);
+  REQUIRE(w.setFocus(19));
+  REQUIRE(w.firstVisible() == 15);
+  CHECK(w.moveFocus(+1));
+  CHECK(w.focus() == 0);
+  CHECK(w.firstVisible() == 0);
+  // ...and back the other way, which scrolls to the bottom.
+  CHECK(w.moveFocus(-1));
+  CHECK(w.focus() == 19);
+  CHECK(w.firstVisible() == 15);
+}
+
+TEST_CASE("a list that does not wrap clamps at both ends and reports no change there") {
   // A press that changes nothing must not report a change: on this panel a
   // repaint is 520 ms minimum, and spending it to redraw an identical screen is
   // what makes the end of a list feel like a stuck button.
   ScrollWindow w(3, 3);
+  w.setWrapping(false);
   CHECK_FALSE(w.moveFocus(-1));
   CHECK(w.focus() == 0);
   CHECK(w.moveFocus(+1));
@@ -24,10 +53,6 @@ TEST_CASE("focus clamps at both ends and reports no change there") {
   CHECK(w.focus() == 2);
   CHECK_FALSE(w.moveFocus(+1));
   CHECK(w.focus() == 2);
-  // ...and no wrapping, at either end. One rule for every list, as
-  // HomeScreen::moveFocus already says: a list that jumps silently from the last
-  // item to the first is indistinguishable from a stuck button.
-  CHECK(w.focus() != 0);
 }
 
 TEST_CASE("moving past the bottom scrolls by exactly one row, not by a page") {
@@ -81,8 +106,14 @@ TEST_CASE("the focus is always inside the window, whatever the movement") {
 }
 
 TEST_CASE("the window never shows past the last item") {
+  // setFocus rather than a big moveFocus, which is how this reached the end
+  // before lists wrapped: a move of +100 over ten rows is now ten laps and lands
+  // back on row 0. That is wrapping working, not this invariant breaking -- but
+  // it is worth knowing that a HELD button delivers exactly that kind of delta
+  // (InputEvent::steps), so a long hold on a short list now cycles rather than
+  // resting at the end.
   ScrollWindow w(10, 4);
-  w.moveFocus(+100);
+  w.setFocus(9);
   CHECK(w.focus() == 9);
   CHECK(w.firstVisible() == 6);  // 10 - 4, not 9
   CHECK(w.visibleCount() == 4);

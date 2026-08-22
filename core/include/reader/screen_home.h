@@ -2,6 +2,7 @@
 #include <vector>
 
 #include "reader/app.h"
+#include "reader/focus.h"
 #include "reader/viewmodel.h"
 
 namespace reader {
@@ -31,21 +32,32 @@ class HomeScreen : public Screen {
   // moment the virtual was added, and a reader of this header should not have to
   // work that out from app.h.
   //
-  // setFocus is deliberately NOT overridden. The session record only ever
-  // restores focus onto a screen the wake PUSHED, and a record naming Home
-  // pushes nothing -- Home is already the root -- so a Home setFocus would be
-  // unreachable code. Home's focus is still reported, because a record that says
-  // where the user was is worth having in the log even where nothing acts on it.
+  // setFocus IS overridden, and this comment used to argue at length that it
+  // must not be: the session record only restores onto a screen the wake pushed,
+  // a record naming Home pushes nothing, so a Home setFocus would be unreachable.
+  // The premise was true and the conclusion was the wrong way round -- the
+  // restore ladder skipped Home BECAUSE nothing here could accept a focus, so
+  // Home stored where the user was on every sleep and woke on CONTINUE every
+  // time. It is the root that gets its focus set instead of a pushed screen (see
+  // the Home branch of the restore ladder in shell/src/main.cpp), which is one
+  // extra branch there rather than a reason to drop the value on the floor.
+  //
+  // The bool is ScrollWindow's contract: "something moved", not "the restore was
+  // accepted". Restoring CONTINUE onto a Home that is already on CONTINUE is a
+  // perfectly good restore and returns false.
   int focus() const override { return vm_.focusedMenuIndex; }
+  bool setFocus(int index) override;
   const HomeViewModel& vm() const { return vm_; }
 
  private:
-  // Returns Redraw only when the focus actually moved: at the end of the list a
-  // press must not cost a 1.5 s panel refresh that changes nothing.
   Action moveFocus(int delta);
+  // Mirrors focus_ into the view-model the theme draws, and passes the "did
+  // anything move" answer through. See screen_home.cpp.
+  bool syncFocus(bool moved);
 
   HomeViewModel vm_;
   std::vector<ScreenId> targets_;
+  Focus focus_;
 };
 
 }  // namespace reader

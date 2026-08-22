@@ -12,6 +12,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "font_body400.h"
 #include "font_body500.h"
@@ -38,6 +39,7 @@
 #include "reader/screen_sd_missing.h"
 #include "reader/scalablefont.h"
 #include "reader/screens.h"
+#include "reader/session_record.h"
 #include "reader/settings.h"
 #include "reader/text.h"  // reader::Plane
 #include "reader/theme_quiet.h"
@@ -797,83 +799,62 @@ static void buildHomeApp() {
 // dispatch: saveSession() skips an identical rewrite, so navigating back and
 // forth does not grind the NVS partition.
 //
-// THE FOCUS IS REAL NOW. Through 2B and 2C-1 this wrote a hardcoded 0, because
-// reader::Screen had no focus accessor and the only screen where a restored focus
-// would be visible was the Library. The Library exists, so Screen::focus() /
-// Screen::setFocus() exist, and this stores what the top screen actually reports.
-//
-// TWO THINGS THAT WOULD HAVE LEFT THE FIELD DECORATIVE ANYWAY:
-//
-//   * The changed-record test below compares the (SCREEN, FOCUS) PAIR. It
-//     compared the screen alone, so scrolling down the Library -- a focus move
-//     within one screen -- looked unchanged and was never announced, and after
-//     the first failure gLoggedScreen would have gone stale against a record that
-//     kept moving. saveSession() has always compared the pair, so the store was
-//     correct; it was this log, and the "did anything change" question it answers,
-//     that was half-blind.
-//   * A NEGATIVE focus is a real value and not an error: -1 means "nothing
-//     selected" -- Home's CONTINUE block, an empty /books. Session::focus is
-//     unsigned, so -1 would go in as 65535 and come back out as a wildly
-//     out-of-range row. It is stored as 0 instead, which is where a restore lands
-//     anyway (ScrollWindow::setFocus clamps, and clamps an empty list back to
-//     -1). Clamped at the top end too, for a directory with more than 65535 books:
-//     the record then restores to the last row it can name rather than wrapping to
-//     the first.
+// THE WHOLE STACK, and there is nothing screen-specific left in here to get
+// wrong. App::snapshot() asks every screen on the stack where its focus is
+// through one virtual, so a screen added in Phase 3 is stored the day it exists
+// and needs no line here, in session.cpp or in the restore. That is the third
+// attempt at this: 2C-1 stored a hardcoded 0, 2C-2 stored the top screen's focus,
+// and both left screens that reported a focus nobody read back -- because each
+// version knew the names of the screens it handled.
 //
 // IT SAYS WHAT IT DID, and that is not decoration. The wake path and this are the
 // two halves of one mechanism, and a wake that comes back to Home is ambiguous
 // between them: either nothing was ever stored, or a record was stored and the
-// restore would not honour it. So this logs a CHANGED record when it goes in --
-// once per change to the (screen, focus) pair, which since Task 6 does include a
-// focus move: a press that changes neither -- Down at the end of a list, a button
-// the screen does not bind -- still says nothing, so the log is quiet when nothing
-// happened and not merely quiet per screen. That is a line per navigation on a
-// list, which is a real cost in log volume and the right trade: the field the line
-// reports is now load-bearing, and a stored focus nobody can see going in is how
-// this ended up decorative for two phases.
+// restore would not honour it. So this logs a CHANGED record when it goes in,
+// once per change to the encoded stack -- which includes a focus move, so it is a
+// line per navigation on a list. That is a real cost in log volume and the right
+// trade: what the line reports is load-bearing, and a stored value nobody could
+// see going in is how the focus field stayed decorative for two phases.
 //
 // It also logs distinctly when the store refuses. saveSession() prints the
 // NVS-level reason (namespace would not open, or a put came back short); the line
 // here is the consequence, which is the part a reader of the log actually cares
 // about.
 //
-// `gLoggedScreen` tracks what was last announced rather than what is in NVS, and
-// it tracks the PAIR now, for the reason above.
+// `gLastLogged` tracks what was last ANNOUNCED rather than what is in NVS.
 // saveSession() has its own skip-an-identical-rewrite cache and returns true
 // without touching flash, so asking it "did you write?" is not possible from
 // here; mirroring the comparison is. The two can only disagree by this printing
 // one extra line after a failure, which is the harmless direction.
-static bool gLoggedScreen = false;
-static reader::ScreenId gLastLoggedScreen = reader::ScreenId::Home;
-static uint16_t gLastLoggedFocus = 0;
+//
+// COMPARED AS A SNAPSHOT, NOT AS THE ENCODED STRING, which is the difference
+// between building one string per keypress and building none. This runs after
+// every dispatch and the overwhelmingly common outcome is "nothing changed"; the
+// wire form is only wanted for a log line, so it is built only when there is a
+// line to print.
+static bool gLogged = false;
+static std::vector<reader::StackEntry> gLastLogged;
 
 static void saveWhereWeAre() {
-  Session s;
-  s.screen = gApp->top().id();
-  const int focus = gApp->top().focus();
-  s.focus = focus <= 0 ? 0
-            : focus >= 0xFFFF ? 0xFFFF
-                              : static_cast<uint16_t>(focus);
-  const bool changed =
-      !gLoggedScreen || gLastLoggedScreen != s.screen || gLastLoggedFocus != s.focus;
-  if (!saveSession(s)) {
+  const std::vector<reader::StackEntry> stack = gApp->snapshot();
+  const bool changed = !gLogged || gLastLogged != stack;
+  if (!saveSession(stack)) {
     // The other half of defect "wake came back to Home": a save that fails here
-    // leaves a record that either does not exist or names an older screen, and
+    // leaves a record that either does not exist or describes an older stack, and
     // the wake then looks like the restore failed when it was the write.
-    Serial.printf("[session] NOT stored: screen=%s will not be restored by the next wake\n",
-                  reader::screenName(s.screen));
+    Serial.printf("[session] NOT stored: %s will not be restored by the next wake\n",
+                  reader::encodeSessionStack(stack).c_str());
     Serial.flush();
-    gLoggedScreen = false;
+    gLogged = false;
     return;
   }
   if (changed) {
-    Serial.printf("[session] stored screen=%s focus=%u; a wake will come back here\n",
-                  reader::screenName(s.screen), s.focus);
+    Serial.printf("[session] stored %s; a wake will come back here\n",
+                  reader::encodeSessionStack(stack).c_str());
     Serial.flush();
   }
-  gLastLoggedScreen = s.screen;
-  gLastLoggedFocus = s.focus;
-  gLoggedScreen = true;
+  gLastLogged = stack;
+  gLogged = true;
 }
 
 // Rebuild the app rooted at the SD-missing screen, replacing whatever was there.
@@ -2009,69 +1990,58 @@ void setup() {
     // loadSession() that returned false, and a record that named Home. Both leave
     // the device on Home, which is also what a restore that silently failed looks
     // like, so "Settings, sleep, wake, back on Home" was indistinguishable from
-    // working-as-designed in a serial log. Distinguishing them is the point of
-    // this whole ladder -- read it against saveWhereWeAre()'s lines from the
-    // previous run to place the fault on the write side or the read side.
-    Session s;
-    const bool found = loadSession(s);
-    if (!found) {
+    // working-as-designed in a serial log. Read these against saveWhereWeAre()'s
+    // lines from the previous run to place a fault on the write side or the read
+    // side.
+    //
+    // WHAT USED TO BE HERE was a ladder of screen names -- a branch for a record
+    // naming Home (already the root, so nothing to push), a branch for one naming
+    // the SD-missing screen (the card mounted, so the message is no longer true),
+    // then the push. Every screen not in that ladder was handled by accident, and
+    // three of them turned out to be handled wrongly. App::restore() is the same
+    // decisions with no screen named: the two special cases are both "does the
+    // record's root match this app's root", which it asks once.
+    std::vector<reader::StackEntry> stack;
+    if (!loadSession(stack)) {
       // loadSession() has already said WHICH no-record this is: no namespace, a
-      // version this build does not know, or a screen id it cannot decode. This
-      // line is what that means from here.
+      // version this build does not know, or a stack it cannot decode. This line
+      // is what that means from here.
       Serial.printf("[session] no usable record, so nothing to restore; staying on %s. If a "
-                    "'[session] stored screen=...' line appeared before the last sleep, the "
-                    "WRITE is what failed, not the restore\n",
+                    "'[session] stored ...' line appeared before the last sleep, the WRITE "
+                    "is what failed, not the restore\n",
                     reader::screenName(gApp->top().id()));
       Serial.flush();
-    } else if (s.screen == reader::ScreenId::Home) {
-      // Skipped in silence by the old `!= Home` guard. It is a legitimate state --
-      // the user was on Home when they slept -- but it has to be said out loud,
-      // because it is the one case where landing on Home is CORRECT and every
-      // other way of landing on Home is a fault.
-      Serial.printf("[session] the record names HOME, which is already the root; nothing to "
-                    "push (this is a correct wake onto Home)\n");
-      Serial.flush();
-    } else if (s.screen == reader::ScreenId::SdMissing) {
-      // The mount above already decided this, and it decided there IS a card.
-      // Restoring the no-card screen over a working card would be showing the
-      // user a message that is no longer true.
-      Serial.printf("[session] the record says SD-MISSING but the card mounted; Home\n");
-      Serial.flush();
-    } else if (gApp->pushScreen(s.screen)) {
-      // Home stays underneath, so Back works. Only ONE screen is restored, so a
-      // record naming a screen that was two deep (Settings > Input Monitor)
-      // comes back with Home under it rather than Settings -- the record holds
-      // one id, not a path. Nothing in V1 is unreachable that way; a restored
-      // path is Phase 3's if the deeper screens make it worth one.
-      //
-      // AND THE FOCUS, which is what Task 6 added.
-      //
-      // WHERE IT LANDED is what gets logged, not whether setFocus returned true.
-      // Its bool means "something changed", which is the right signal for
-      // deciding whether to store a record and the wrong one for reporting a
-      // restore: restoring focus 0 onto a screen already at 0 changes nothing and
-      // is a perfectly successful restore. Comparing the landed focus to the
-      // requested one says the thing a log reader wants -- "the record named row
-      // 12 and the screen is on row 4" is a clamp (books deleted while the device
-      // slept) or a screen that does not restore a focus at all, and either way
-      // the numbers are on the line.
-      gApp->top().setFocus(static_cast<int>(s.focus));
-      const int landed = gApp->top().focus();
-      Serial.printf("[session] restored screen=%s over Home; focus %u -> %d%s\n",
-                    reader::screenName(s.screen), s.focus, landed,
-                    landed == static_cast<int>(s.focus)
-                        ? ""
-                        : " (not the row the record named: it is no longer in the list, or this "
-                          "screen does not restore a focus)");
-      Serial.flush();
-      mark("session-restored");
     } else {
-      // The factory refused it: an id this build has no case for, from a newer
-      // firmware's record. Home is already the root, so there is nothing to
-      // undo.
-      Serial.printf("[session] cannot build screen=%s; staying on Home\n",
-                    reader::screenName(s.screen));
-      Serial.flush();
+      const reader::App::RestoreReport r = gApp->restore(stack);
+      if (!r.rootMatched) {
+        // The record describes a different world from the one that booted -- in
+        // practice a record from a session with a card, woken with none, or the
+        // reverse. Restoring the no-card prompt over a working card would be
+        // showing the user a message that is no longer true, and layering Home
+        // over the no-card prompt would let Back walk into a library that cannot
+        // be read.
+        Serial.printf("[session] the record is rooted at %s and this boot is rooted at %s; "
+                      "nothing restored\n",
+                      reader::screenName(stack.front().screen),
+                      reader::screenName(gApp->top().id()));
+        Serial.flush();
+      } else {
+        // WHERE IT LANDED is what gets logged, not what was asked for. A restore
+        // that lands short is a real outcome and a common one: books deleted
+        // while the device slept clamp a focus, and a screen whose parent is gone
+        // stops the push. The whole stack goes on the line, so the answer to "did
+        // it come back where I left it" is a string comparison rather than an
+        // inference.
+        const std::string landed = reader::encodeSessionStack(gApp->snapshot());
+        Serial.printf("[session] restored %d of %d screen(s): %s%s\n", r.restored, r.requested,
+                      landed.c_str(),
+                      landed == reader::encodeSessionStack(stack)
+                          ? ""
+                          : " (not what the record named: a screen it wants no longer builds, "
+                            "or a focused row is no longer in its list)");
+        Serial.flush();
+        mark("session-restored");
+      }
     }
   } else {
     // Woke with no card. The record is left ALONE rather than cleared: it is

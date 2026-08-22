@@ -30,6 +30,47 @@ App::App(std::unique_ptr<Screen> root, ScreenFactory& factory) : factory_(factor
 Screen& App::top() { return *stack_.back(); }
 const Screen& App::top() const { return *stack_.back(); }
 
+std::vector<StackEntry> App::snapshot() const {
+  std::vector<StackEntry> out;
+  out.reserve(stack_.size());
+  for (const auto& screen : stack_) out.push_back({screen->id(), screen->focus()});
+  return out;
+}
+
+App::RestoreReport App::restore(const std::vector<StackEntry>& stack) {
+  RestoreReport r;
+  r.requested = static_cast<int>(stack.size());
+  // Nothing to put back, or this App is not the fresh one a boot builds, or the
+  // record describes a different world from the one that booted. All three are
+  // "leave the stack exactly as it is", and none of them names a screen.
+  if (stack.empty() || stack_.size() != 1 || stack.front().screen != stack_.front()->id())
+    return r;
+  r.rootMatched = true;
+
+  // The root is never rebuilt -- the factory refuses Home on purpose, since
+  // popping back to it must return the same object with its own state -- so it
+  // gets its focus set rather than being pushed. That is the ONLY difference
+  // between the root and everything above it, and it is a difference about the
+  // root, not about Home.
+  stack_.front()->setFocus(stack.front().focus);
+  r.restored = 1;
+
+  for (size_t i = 1; i < stack.size(); ++i) {
+    if (!pushScreen(stack[i].screen)) break;
+    // Before the next push, because an overlay reads the focused row of the
+    // screen under it at construction time.
+    top().setFocus(stack[i].focus);
+    ++r.restored;
+  }
+
+  // A restored stack has never been painted, whatever the root's focus did or did
+  // not change. pushScreen sets these for every entry above the root; a record
+  // that only moved the root's focus would otherwise come back unpainted.
+  dirty_ = true;
+  transition_ = true;
+  return r;
+}
+
 bool App::pushScreen(ScreenId id) {
   // The reserve() in the constructor is what keeps a push from allocating the
   // vector again, and -fno-exceptions makes a failed reallocation an abort()

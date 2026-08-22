@@ -9,20 +9,21 @@ StubScreen::StubScreen(ScreenId id, std::string title, std::vector<Row> rows)
   vm_.title = std::move(title);
   vm_.note = "PLACEHOLDER \xE2\x80\x94 PHASE 2C";
   for (const Row& r : rows_) vm_.lines.push_back(r.label);
-  vm_.focusedLine = rows_.empty() ? -1 : 0;
+  focus_ = Focus(static_cast<int>(rows_.size()));
+  vm_.focusedLine = focus_.index();  // -1 for an empty list, 0 otherwise
   vm_.batteryPercent = 87;
   vm_.hints = {"BACK", "OPEN", "UP", "DOWN"};
 }
 
+bool StubScreen::syncFocus(bool moved) {
+  if (moved) vm_.focusedLine = focus_.index();
+  return moved;
+}
+
+bool StubScreen::setFocus(int index) { return syncFocus(focus_.set(index)); }
+
 Action StubScreen::moveFocus(int delta) {
-  if (rows_.empty()) return Action::none();
-  const int last = static_cast<int>(rows_.size()) - 1;
-  int next = vm_.focusedLine + delta;
-  if (next < 0) next = 0;
-  if (next > last) next = last;
-  if (next == vm_.focusedLine) return Action::none();
-  vm_.focusedLine = next;
-  return Action::redraw();
+  return syncFocus(focus_.move(delta)) ? Action::redraw() : Action::none();
 }
 
 Action StubScreen::onEvent(const InputEvent& ev) {

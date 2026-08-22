@@ -95,15 +95,18 @@ TEST_CASE("cancelling leaves the actions panel up; confirming returns to the Lib
   }
 }
 
-TEST_CASE("the confirmation's focus is two rows, clamped, and it binds no hold") {
+TEST_CASE("the confirmation's focus is two rows, wrapping, and it binds no hold") {
   Ramp r;
   reader::QuietTheme theme;
   libapp::LibraryApp app = confirmOver(theme, r.fonts, 800);
   auto& confirm = static_cast<reader::DeleteConfirmScreen&>(app.app.top());
-  CHECK(confirm.onEvent(kUp).kind == Action::Kind::None);  // already at the top
+  // Two slabs, so Up and Down both simply alternate between them.
+  CHECK(confirm.onEvent(kUp).kind == Action::Kind::Redraw);
+  CHECK(confirm.focus() == 1);
+  CHECK(confirm.onEvent(kDown).kind == Action::Kind::Redraw);
+  CHECK(confirm.focus() == 0);
   CHECK(confirm.onEvent(kDown).kind == Action::Kind::Redraw);
   CHECK(confirm.focus() == 1);
-  CHECK(confirm.onEvent(kDown).kind == Action::Kind::None);  // only two slabs
   CHECK(confirm.vm().holds == std::array<bool, 4>{false, false, false, false});
   CHECK(confirm.longPressable() == 0);
   CHECK(confirm.onEvent(kHold).kind == Action::Kind::None);

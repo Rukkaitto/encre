@@ -114,12 +114,13 @@ TEST_CASE("the actions overlay's four rows do what the plan says, including noth
   CHECK(del.kind == Action::Kind::Push);
   CHECK(del.target == ScreenId::DeleteConfirm);
 
-  // The end of a four-row list, so nothing moves and nothing repaints.
-  CHECK(actions.onEvent(kDown).kind == Action::Kind::None);
+  // The end of a four-row list, which wraps round to the first.
+  CHECK(actions.onEvent(kDown).kind == Action::Kind::Redraw);
+  CHECK(actions.focus() == 0);
+  // ...and off the top, back to the last.
+  CHECK(actions.onEvent(kUp).kind == Action::Kind::Redraw);
   CHECK(actions.focus() == 3);
-  // ...and back up to the top, clamping there.
   for (int i = 0; i < 3; ++i) CHECK(actions.onEvent(kUp).kind == Action::Kind::Redraw);
-  CHECK(actions.onEvent(kUp).kind == Action::Kind::None);
   CHECK(actions.focus() == 0);
 
   // Back dismisses the panel.
