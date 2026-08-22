@@ -225,7 +225,31 @@ the desktop: `PressRecognizer` (input.h), `App` + `Screen` (app.h),
 `RefreshPolicy` (refresh.h), `IdleTimer` (power.h). The shell contributes only
 what needs hardware — raw button samples, the panel calls, deep sleep.
 
-- **One physical press is exactly one event.** A hold fires `Long` while the
+- **A HELD Up or Down on a list repeats, accelerating, and the step is derived
+  from ELAPSED TIME rather than from a count of events.** That is forced by the
+  panel: `tick()` only runs from the main loop and a paint blocks it for
+  520-825 ms, so a conventional "one row per interval" scheme moves about two rows
+  a second whatever interval it asks for — 256 books in over a minute. So
+  `InputEvent::steps` carries the distance and one event stands for all the time
+  the panel was busy. 6 rows/s ramping to 30 over 1.8 s after a 400 ms delay; the
+  delay is what keeps a deliberate hold distinct from a slow tap, and the leftover
+  fraction of a row is kept between ticks rather than truncated away.
+  - **`autoRepeat` and `longPressable` are mutually exclusive, and `setAutoRepeat`
+    ENFORCES it** by clearing the overlap rather than documenting it. A button in
+    both has its press consumed by whichever fired first, so the behaviour would
+    depend on how long the user held it and on when the loop happened to tick.
+  - **It is deliberately NOT derived from the hint bar**, which is where
+    `longPressable()` comes from. A hold ring promises a *different* action;
+    auto-repeat is more of the *same* one, so it has nothing to announce.
+  - A press that repeated emits **nothing** on release, exactly as a `Long` does:
+    the repeats were the press, and a trailing `Short` would move the list one
+    further row after the user let go. `forgetPresses()` also stops a repeat dead,
+    which is what keeps a dropped release from leaving the list scrolling by
+    itself.
+  - One event's step is **capped**, so a pathological stall cannot cash in five
+    seconds of held button as a 150-row jump. The surplus is dropped, not banked.
+- **One physical press is exactly one event** — with `Repeat` the one exception
+  above, which is why it is a distinct `PressKind` rather than a repeated `Short`. A hold fires `Long` while the
   button is still down; the release then emits nothing. A button *outside* the
   long-press mask fires `Short` on release however long it was held — never
   nothing. And because `tick()` only runs from the main loop, which a gray
@@ -645,25 +669,38 @@ top of this spike.
   that start and end mid-byte — the panel widths are multiples of 8, so nothing on
   the device exercises the edge masks.
 - **`ScrollWindow` owns list movement** — focus plus first-visible, scrolling by a
-  row rather than a page. `Theme::libraryVisibleRows` derives how many rows fit
+  row rather than a page, and it CLAMPS, which is what lets a held button's
+  40-row step land on the last row instead of past it. `Theme::libraryVisibleRows` derives how many rows fit
   from the panel and the type; the shell must set it before the first Library
   paint or the list correctly renders empty.
-- **A scrollable list shows its position as a RANGE IN THE HEADER BAND** —
-  `1–7 OF 12` at `--t-value` 700 — and only when the list overflows; when it
-  fits, the band keeps its plain count, because `1–7 OF 7` is noise dressed as
-  information. It **replaces** the count rather than joining it: the range already
-  carries the total, and this is the width-constrained band on the 480px X4 where
-  the label is data and truncates.
-  - **Not a scrollbar rail, deliberately.** A rail thin enough not to steal width
-    from every row is exactly the thin-1-bit-stroke case `kChevron`'s diagonal
-    already documents, and type is the crispest thing this chrome has.
-  - **This governs every scrollable list, not just Library** — Contents,
-    Bookmarks, WifiPicker and Settings all have lists and none of those screens
-    exists yet. The pattern is recorded here so the screen that lands next
-    inherits it instead of inventing a second answer; put it on that board when
-    the screen is built.
-  - The widest string a 256-book cap admits is `250–256 OF 256`, which is what
-    the label's remaining width has to survive.
+- **A scrollable list shows its position as a RAIL** in a 14px gutter
+  (`kListGutterW`), not as a number in the header band: the band's right slot
+  already means "books, counting one level down" and a position means "rows", so
+  putting both there produced `1–7 OF 12` — two units in one expression. A rail
+  says *where* without claiming a count. `drawScrollRail`, outlined track with a
+  solid proportional thumb.
+  - **The gutter exists only when the rail does.** Reserving it on every list was
+    tried, to spare a library crossing the visible-row count one reflow of its
+    right-aligned values — and it left a white strip beside the FULL-BLEED focused
+    row on every list that fits, which reads as a rendering fault. A defect you
+    see every time beats a reflow you see once. One condition drives both, and
+    `drawScrollRail` refuses the same case independently so they cannot disagree.
+  - **A rail cannot live in the outer margin**, which was the first attempt: the
+    focused row is full-bleed inverted, so a black thumb crossing it is black on
+    black and vanishes, and each row's 1px rule runs straight through the track.
+    It needs a column the rows do not enter — that is the real cost of a
+    scrollbar here, 14px off every row.
+  - **A vertical rail is the BEST case on this glass, not the worst.** It is
+    axis-aligned and coverage 0-or-3, so track and thumb are identical in every
+    plane and pass. The thin-stroke warning this project records is about
+    DIAGONALS (`kChevron`); it was wrongly cited against a rail once.
+  - **This governs every scrollable list** — Contents, Bookmarks, WifiPicker and
+    Settings all have lists and none of those screens exists yet. Put it on that
+    board when the screen is built.
+  - **Nothing but the unit tests exercises it.** Library's golden shows seven rows
+    of seven, so it does not overflow and the rail never draws in it;
+    `design/LibraryScrolled.dc.html` is the state's board and the simulator has no
+    subcommand for it yet, so `make compare` reports it unimplemented.
 - **The session record stores a screen NAME, not an enum ordinal.** 2C-2 inserted
   three screens into the middle of `ScreenId` and a stored ordinal silently became
   a different screen. Names also mean `nvs_get encre_sess scr str` is readable on

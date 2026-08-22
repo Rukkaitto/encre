@@ -101,6 +101,15 @@ class Screen {
   virtual bool isOverlay() const { return false; }
   virtual ButtonMask longPressable() const = 0;
 
+  // Buttons this screen wants to auto-repeat while held, accelerating. Zero for
+  // everything but a list long enough to need it: on a four-row overlay a held
+  // button that ran away would be a defect, not a convenience.
+  //
+  // Deliberately NOT derived from the hint bar, which is where longPressable()
+  // comes from. A hold ring promises a DIFFERENT action; auto-repeat is more of
+  // the same one, so it has nothing to announce and no slot to announce it in.
+  virtual ButtonMask autoRepeat() const { return 0; }
+
   // WHERE THE SELECTION IS, as an index into whatever the screen considers its
   // whole list -- not into the slice on glass. The session record stores this
   // number and a wake hands it back, so the two have to mean the same thing on a
@@ -291,6 +300,7 @@ class App {
   void clearRetryRequest() { retry_ = false; }
 
   ButtonMask longPressable() const { return top().longPressable(); }
+  ButtonMask autoRepeat() const { return top().autoRepeat(); }
 
  private:
   // V1's deepest path is Home > Library > item actions > delete confirm.

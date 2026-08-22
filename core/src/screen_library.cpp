@@ -219,11 +219,16 @@ Action LibraryScreen::onEvent(const InputEvent& ev) {
     return Action::push(ScreenId::ItemActions);
   }
 
+  // A held Up or Down carries how far to go: see InputEvent::steps. The panel is
+  // why it is a distance rather than a count of events -- a paint blocks the loop
+  // that ticks the recognizer, so one event has to stand for all the time that
+  // passed while the panel was busy.
+  const int step = ev.kind == PressKind::Repeat ? ev.steps : 1;
   switch (ev.button) {
     case Button::Down:
-      return moveFocus(+1);
+      return moveFocus(+step);
     case Button::Up:
-      return moveFocus(-1);
+      return moveFocus(-step);
     case Button::Confirm: {
       const LibraryItem* item = focusedItem();
       if (item == nullptr) return Action::none();

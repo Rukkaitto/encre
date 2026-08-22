@@ -674,6 +674,7 @@ static void buildHomeApp() {
   gApp = std::make_unique<reader::App>(
       std::make_unique<reader::HomeScreen>(homeVmForCard(), reader::demoHomeTargets()), gFactory);
   gPresses.setLongPressable(gApp->longPressable());
+  gPresses.setAutoRepeat(gApp->autoRepeat());
 }
 
 // Store where the user is, so a wake can put them back. Cheap to call after every
@@ -781,6 +782,7 @@ static void buildSdMissingApp() {
   gFactory.forgetLibrary();
   gApp = std::make_unique<reader::App>(std::make_unique<reader::SdMissingScreen>(), gFactory);
   gPresses.setLongPressable(gApp->longPressable());
+  gPresses.setAutoRepeat(gApp->autoRepeat());
 }
 
 // The SD-missing screen's RETRY, which App latched for us because mounting is not
@@ -1837,6 +1839,7 @@ void setup() {
   // Before the first poll, not just after each dispatch: a hold started on the
   // very first frame must be recognised too.
   gPresses.setLongPressable(gApp->longPressable());
+  gPresses.setAutoRepeat(gApp->autoRepeat());
   gInput.begin();
   startInputTask(gInput);
   mark("input-started");
@@ -2014,6 +2017,7 @@ void loop() {
     // just changed. Re-reading it here is what keeps a hold bound only where a
     // ring is drawn.
     gPresses.setLongPressable(gApp->longPressable());
+  gPresses.setAutoRepeat(gApp->autoRepeat());
     // Where the user is now, for a wake to restore. An unchanged record is not
     // rewritten, so this is nearly free on an event that did not move the stack.
     saveWhereWeAre();

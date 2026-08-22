@@ -9,11 +9,26 @@ namespace reader {
 enum class Button : uint8_t { Back, Confirm, Left, Right, Up, Down, Power, Count_ };
 inline constexpr int kButtonCount = static_cast<int>(Button::Count_);
 
-enum class PressKind : uint8_t { Short, Long };
+// `Repeat` is a held button ASKING FOR MORE OF THE SAME, not a distinct action:
+// it is what holding Up or Down on a long list emits, over and over, while
+// `Short` and `Long` are one per press. It carries a step count -- see
+// InputEvent::steps and kRepeat* below for why it must.
+enum class PressKind : uint8_t { Short, Long, Repeat };
 
 struct InputEvent {
   Button button;
   PressKind kind;
+  // How many units of the action this event is worth. Always 1 for Short and
+  // Long; for Repeat it is how far the list should move, which is derived from
+  // ELAPSED TIME rather than from a count of events.
+  //
+  // That is forced by the panel, not a preference. tick() only runs from the main
+  // loop and a paint blocks that loop for 520-825 ms, so a conventional "one
+  // repeat per interval" scheme fires about twice a second whatever interval it
+  // asks for -- 256 books would take over two minutes. Carrying the step lets one
+  // event represent all the time that passed while the panel was busy, so held
+  // scrolling runs at a real rate instead of the repaint rate.
+  int steps = 1;
 };
 
 // A set of buttons. Bit (1 << index).
@@ -29,6 +44,24 @@ constexpr bool maskHas(ButtonMask m, Button b) { return (m & buttonBit(b)) != 0;
 // it, and a hold the user has to discover from a small ring mark wants to be at
 // the short end of comfortable.
 inline constexpr uint32_t kLongPressMs = 500;
+
+// --- Held-scroll acceleration ------------------------------------------------
+//
+// Rows per second, ramped, because a long library needs both ends: a slow start
+// so a held button can still land on the row you meant, and a fast end so 256
+// books do not take a minute. Time-based, so a paint that blocks the loop for
+// 825 ms costs nothing -- the next tick simply owes more rows.
+//
+// The delay is what keeps a deliberate hold distinct from a slow tap; below it a
+// press is still exactly one Short.
+constexpr uint32_t kRepeatDelayMs = 400;
+constexpr int kRepeatSlowRowsPerSec = 6;
+constexpr int kRepeatFastRowsPerSec = 30;
+constexpr uint32_t kRepeatRampMs = 1800;
+// A ceiling on ONE event's step, so a pathological stall -- a grayscale screen, a
+// card probe's FAT scan -- cannot cash in five seconds of held button as a
+// 150-row jump. The time over the cap is dropped rather than banked.
+constexpr int kRepeatMaxSteps = 40;
 
 // A button's name, for logs and diagnostics. Here rather than in each consumer
 // because there were two copies the moment a second one wanted it, and a log
@@ -51,6 +84,18 @@ class PressRecognizer {
   // -- including in the middle of a hold, which is why a fired press is latched
   // as consumed rather than re-derived at release time.
   void setLongPressable(ButtonMask mask) { longPressable_ = mask; }
+
+  // Buttons that emit `Repeat` while held, accelerating. For list movement.
+  //
+  // MUTUALLY EXCLUSIVE WITH setLongPressable, and enforced rather than
+  // documented: a button in both masks would have its press consumed by whichever
+  // of the two fired first, so the behaviour would depend on how long the user
+  // held it and on when the loop happened to tick. autoRepeat wins and the
+  // long-press bit is dropped, because a hint bar's hold ring is a promise about
+  // a DIFFERENT action while auto-repeat is more of the same one -- a screen that
+  // asked for both has a bug in its hint bar, not in its scrolling.
+  void setAutoRepeat(ButtonMask mask);
+  ButtonMask autoRepeat() const { return autoRepeat_; }
 
   // Forget which buttons are held, WITHOUT emitting anything for them.
   //
@@ -87,11 +132,17 @@ class PressRecognizer {
  private:
   static constexpr int kQueueLen = 16;
 
-  void emit(Button b, PressKind kind);
+  void emit(Button b, PressKind kind, int steps = 1);
 
   struct State {
     bool down = false;
     bool consumed = false;  // Long already fired for this press
+    // When the last Repeat was accounted for, and whether any fired. A press that
+    // repeated emits nothing on release, exactly as a Long does: the repeats WERE
+    // the press, and a trailing Short would move the list one further row after
+    // the user let go.
+    uint32_t lastRepeatAt = 0;
+    bool repeated = false;
     uint32_t downAt = 0;
   };
 
@@ -99,6 +150,7 @@ class PressRecognizer {
   InputEvent queue_[kQueueLen];
   int head_ = 0, count_ = 0;
   ButtonMask longPressable_ = 0;
+  ButtonMask autoRepeat_ = 0;
   uint32_t dropped_ = 0;
 };
 

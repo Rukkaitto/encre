@@ -266,3 +266,172 @@ TEST_CASE("a real release arriving after a forget is ignored, not misread") {
   reader::InputEvent e{};
   CHECK_FALSE(r.pop(e));
 }
+
+// --- Held-scroll acceleration -----------------------------------------------
+//
+// A held Up or Down asks for MORE OF THE SAME, which is a third kind of press
+// alongside Short and Long. What makes it unusual is that the step comes from
+// ELAPSED TIME rather than from a count of events: tick() only runs from the main
+// loop and a paint blocks that loop for 520-825 ms, so a scheme that moved one row
+// per repeat would move about two rows a second whatever interval it asked for --
+// 256 books in over a minute. These tests pin the time-based behaviour, because
+// the tick-based version passes any test that ticks in a tight loop.
+
+namespace {
+reader::PressRecognizer scroller() {
+  reader::PressRecognizer r;
+  r.setAutoRepeat(reader::buttonBit(reader::Button::Down));
+  return r;
+}
+// Total rows a run of ticks asks for.
+int drainSteps(reader::PressRecognizer& r) {
+  int total = 0;
+  reader::InputEvent e{};
+  while (r.pop(e))
+    if (e.kind == reader::PressKind::Repeat) total += e.steps;
+  return total;
+}
+}  // namespace
+
+TEST_CASE("a tap shorter than the delay is still exactly one Short") {
+  reader::PressRecognizer r = scroller();
+  r.sample(reader::Button::Down, true, 1000);
+  r.tick(1000 + reader::kRepeatDelayMs - 50);
+  reader::InputEvent e{};
+  CHECK_FALSE(r.pop(e));  // nothing yet: the delay is what separates hold from tap
+  r.sample(reader::Button::Down, false, 1000 + reader::kRepeatDelayMs - 40);
+  REQUIRE(r.pop(e));
+  CHECK(e.kind == reader::PressKind::Short);
+  CHECK(e.steps == 1);
+  CHECK_FALSE(r.pop(e));
+}
+
+TEST_CASE("a hold past the delay repeats, and the release adds nothing") {
+  reader::PressRecognizer r = scroller();
+  r.sample(reader::Button::Down, true, 1000);
+  r.tick(1000 + reader::kRepeatDelayMs + 500);
+  const int moved = drainSteps(r);
+  CHECK(moved >= 1);
+
+  // The repeats WERE the press. A trailing Short here would move the list one
+  // further row after the user let go.
+  r.sample(reader::Button::Down, false, 1000 + reader::kRepeatDelayMs + 520);
+  reader::InputEvent e{};
+  CHECK_FALSE(r.pop(e));
+}
+
+TEST_CASE("holding longer scrolls faster") {
+  // The same elapsed slice, early in the hold and late in it. Late must ask for
+  // more rows, or the ramp does not exist.
+  const uint32_t slice = 300;
+  int early = 0, late = 0;
+  {
+    reader::PressRecognizer r = scroller();
+    r.sample(reader::Button::Down, true, 0);
+    r.tick(reader::kRepeatDelayMs);
+    drainSteps(r);
+    r.tick(reader::kRepeatDelayMs + slice);
+    early = drainSteps(r);
+  }
+  {
+    reader::PressRecognizer r = scroller();
+    r.sample(reader::Button::Down, true, 0);
+    r.tick(reader::kRepeatDelayMs + reader::kRepeatRampMs);
+    drainSteps(r);
+    r.tick(reader::kRepeatDelayMs + reader::kRepeatRampMs + slice);
+    late = drainSteps(r);
+  }
+  CHECK(late > early);
+  // And the fast end is roughly the declared rate.
+  CHECK(late >= (reader::kRepeatFastRowsPerSec * static_cast<int>(slice)) / 1000 - 1);
+}
+
+TEST_CASE("ONE tick after a long paint owes all the rows the paint cost") {
+  // The whole reason the step is time-based. A single tick arriving 825 ms late --
+  // one FULL refresh -- must account for that time, not for one interval.
+  reader::PressRecognizer r = scroller();
+  r.sample(reader::Button::Down, true, 0);
+  r.tick(reader::kRepeatDelayMs);      // repeats begin
+  drainSteps(r);
+  r.tick(reader::kRepeatDelayMs + 825);  // the next tick the loop could manage
+  const int owed = drainSteps(r);
+  CHECK(owed >= 4);  // a tick-per-row scheme would have said 1
+}
+
+TEST_CASE("no single event can cash in an unbounded stall") {
+  // A five-second block -- a grayscale screen, a FAT scan -- must not arrive as a
+  // 150-row jump.
+  reader::PressRecognizer r = scroller();
+  r.sample(reader::Button::Down, true, 0);
+  r.tick(reader::kRepeatDelayMs);
+  drainSteps(r);
+  r.tick(reader::kRepeatDelayMs + 5000);
+  reader::InputEvent e{};
+  while (r.pop(e)) CHECK(e.steps <= reader::kRepeatMaxSteps);
+}
+
+TEST_CASE("a button outside the mask never repeats, however long it is held") {
+  reader::PressRecognizer r = scroller();  // Down repeats, Up does not
+  r.sample(reader::Button::Up, true, 0);
+  r.tick(10000);
+  reader::InputEvent e{};
+  CHECK_FALSE(r.pop(e));
+  r.sample(reader::Button::Up, false, 10010);
+  REQUIRE(r.pop(e));
+  CHECK(e.kind == reader::PressKind::Short);
+}
+
+TEST_CASE("auto-repeat and long-press are mutually exclusive, and enforced") {
+  // A button in both masks would behave according to whichever fired first --
+  // which depends on how long it was held and when the loop happened to tick.
+  reader::PressRecognizer r;
+  r.setLongPressable(static_cast<reader::ButtonMask>(
+      reader::buttonBit(reader::Button::Down) | reader::buttonBit(reader::Button::Confirm)));
+  r.setAutoRepeat(reader::buttonBit(reader::Button::Down));
+
+  CHECK(reader::maskHas(r.autoRepeat(), reader::Button::Down));
+  // Down lost its long-press bit...
+  CHECK_FALSE(reader::maskHas(r.longPressable(), reader::Button::Down));
+  // ...and Confirm kept its.
+  CHECK(reader::maskHas(r.longPressable(), reader::Button::Confirm));
+
+  // Behaviourally: holding Down repeats and never emits Long.
+  r.sample(reader::Button::Down, true, 0);
+  r.tick(reader::kLongPressMs + 1000);
+  reader::InputEvent e{};
+  bool sawLong = false, sawRepeat = false;
+  while (r.pop(e)) {
+    if (e.kind == reader::PressKind::Long) sawLong = true;
+    if (e.kind == reader::PressKind::Repeat) sawRepeat = true;
+  }
+  CHECK(sawRepeat);
+  CHECK_FALSE(sawLong);
+}
+
+TEST_CASE("a fraction of a row is kept rather than rounded away every tick") {
+  // At the slow end a 100ms tick is well under one row. Ten of them must still
+  // produce movement -- a scheme that truncated each tick to zero would never
+  // move at all, which is the bug this accumulation exists to prevent.
+  reader::PressRecognizer r = scroller();
+  r.sample(reader::Button::Down, true, 0);
+  int total = 0;
+  for (int i = 1; i <= 10; ++i) {
+    r.tick(reader::kRepeatDelayMs + static_cast<uint32_t>(i) * 100u);
+    total += drainSteps(r);
+  }
+  CHECK(total >= (reader::kRepeatSlowRowsPerSec * 1000) / 1000 - 1);
+  CHECK(total > 0);
+}
+
+TEST_CASE("forgetPresses stops a repeat dead") {
+  // A dropped release during held scrolling would otherwise leave the list
+  // scrolling on its own.
+  reader::PressRecognizer r = scroller();
+  r.sample(reader::Button::Down, true, 0);
+  r.tick(reader::kRepeatDelayMs + 500);
+  drainSteps(r);
+  r.forgetPresses();
+  r.tick(reader::kRepeatDelayMs + 2000);
+  reader::InputEvent e{};
+  CHECK_FALSE(r.pop(e));
+}
