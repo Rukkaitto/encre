@@ -225,11 +225,11 @@ Action LibraryScreen::onGesture(const GestureEvent& g) {
       const LibraryItem* item = focusedItem();
       if (item == nullptr) return Action::none();
       if (item->entry.isDir) return descend() ? Action::redraw() : Action::none();
-      // Opening a book is the Reader, which is Phase 3. Nothing happens yet, on
-      // purpose: pushing a placeholder screen would be a screen to delete, and
-      // core/ has no logger to say so through -- the shell is what logs, and it
-      // sees only the Action. So this returns none and the comment is the record.
-      return Action::none();
+      // ASKS, rather than pushes. A Reader needs a Document, and a Document needs
+      // this file inflated, unzipped and parsed -- none of which a screen can do,
+      // because storage is not core/'s. So the request is latched and the shell
+      // answers it; see Action::open() and App::openRequested().
+      return Action::open();
     }
     case Gesture::Back:
       // Out of a folder, or off the Library entirely. Ascending is a content

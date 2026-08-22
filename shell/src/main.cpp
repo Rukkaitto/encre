@@ -39,6 +39,9 @@
 #include "reader/refresh.h"
 #include "reader/screen_home.h"
 #include "reader/screen_sd_missing.h"
+#include "reader/book.h"
+#include "reader/screen_reader.h"
+#include "reader/layout.h"
 #include "reader/scalablefont.h"
 #include "reader/screens.h"
 #include "reader/session_record.h"
@@ -207,6 +210,19 @@ static SdFileSystem gSd;
 // with no card the app is rooted at the SD-missing screen and there is no way to
 // a Library at all.
 static reader::DemoScreenFactory gFactory(gSd, reader::kBooksRoot);
+
+// THE BODY FACE, and it is resident now rather than a boot-time local. It used to
+// be scoped to the check below and released before setup() returned, because
+// nothing drew body text; the Reader does. Resident costs its glyph cache --
+// 16 KB, sized in reader/scalablefont.h against the measured working set at
+// ppem 32 -- for as long as the device is on, which is the right trade against
+// re-parsing a 236 KB TTF and re-rasterising every glyph on each page turn.
+//
+// A file-scope object rather than one owned by the Reader screen: a screen is
+// built and destroyed on every push and pop, and a cache that died with the screen
+// would make leaving a book and coming back cost a cold rasterisation of the whole
+// page. It also has to outlive every ReaderScreen that borrows it.
+static reader::ScalableFont gBody;
 // Did SDCardManager::begin() ever return true this boot? It opens with
 // `if (initialized) return true;` and the SPI path exposes no end()/unmount(), so
 // after one success a later begin() reports success WITHOUT touching the
@@ -994,6 +1010,75 @@ static void buildSdMissingApp() {
 // and roots at Home. That is the right landing: the card has just been reseated,
 // and resuming a screen from before it went away is not what the user is asking
 // for when they press RETRY.
+// The Open latch, answered exactly as handleRetry answers Retry: the card is the
+// shell's, so the screen asks and this does the work.
+//
+// EVERY FAILURE IS LOGGED AND LEAVES THE LIBRARY STANDING. A book that will not
+// open is a book on somebody's card, and the only honest outcomes are "the Reader
+// appears" or "the log says why". Repainting the Library would cost a full refresh
+// to show an unchanged screen; a Push of an error screen is design/BookError.dc.html
+// and is not built.
+static void handleOpen() {
+  gApp->clearOpenRequest();  // first, so a book that refuses does not re-fire
+
+  reader::LibraryScreen* lib = gFactory.library();
+  if (lib == nullptr) {
+    Serial.println("[open] no Library to ask");
+    return;
+  }
+  const reader::LibraryItem* item = lib->focusedItem();
+  if (item == nullptr || item->entry.isDir) {
+    Serial.println("[open] nothing selected, or a folder");
+    return;
+  }
+  // BookEntry::name is a leaf name and never a path (booklist.h), so the path is
+  // the Library's current directory joined with it -- which is also why this
+  // cannot live in core/: only the Library knows where it has descended to.
+  std::string path = lib->path();
+  if (path.empty() || path.back() != '/') path += '/';
+  path += item->entry.name;
+
+  const uint32_t t0 = millis();
+  const uint32_t heapBefore = ESP.getFreeHeap();
+  reader::OpenedChapter opened;
+  const char* why = "";
+  if (!reader::openChapter(gSd, path, 0, opened, &why)) {
+    Serial.printf("[open] %s REFUSED: %s\n", path.c_str(), why);
+    Serial.flush();
+    return;
+  }
+  const uint32_t t1 = millis();
+
+  // The chapter label the header shows. Composed here rather than in the screen
+  // because it is a presentation of a spine index, and the screen is handed the
+  // string -- ReaderViewModel's rule: the theme does no arithmetic.
+  char chapter[16];
+  std::snprintf(chapter, sizeof(chapter), "CH. %02d", 1);
+  // Counted BEFORE the move: `opened.doc` is moved into the factory and what is
+  // left of it says nothing about the chapter.
+  const size_t blocks = opened.doc.blocks.size();
+  gFactory.setReaderChapter(std::move(opened.doc), opened.bookTitle, chapter);
+  const bool pushed = gApp->pushScreen(reader::ScreenId::Reader);
+
+  // The page count is the ONE number here that is not free: it is the pagination
+  // walk, one wrap per page, and it happened inside the push. Reported because
+  // "how long does opening a book take" is a question only the device answers, and
+  // this line is the whole of the answer -- parse, paginate and heap.
+  int pages = -1;
+  if (pushed) {
+    const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
+    pages = rd->pageCount();
+  }
+  Serial.printf("[open] %s -> \"%s\" ch=1/%d: parse=%lums total=%lums blocks=%u pages=%d "
+                "heap %u -> %u (cost %ld) min=%u pushed=%d\n",
+                path.c_str(), opened.bookTitle.c_str(), opened.chapterCount,
+                (unsigned long)(t1 - t0), (unsigned long)(millis() - t0), (unsigned)blocks,
+                pages, (unsigned)heapBefore, (unsigned)ESP.getFreeHeap(),
+                (long)heapBefore - (long)ESP.getFreeHeap(),
+                (unsigned)ESP.getMinFreeHeap(), pushed ? 1 : 0);
+  Serial.flush();
+}
+
 static void handleRetry() {
   // Clear the latch FIRST, so a failed attempt cannot re-fire on every loop.
   gApp->clearRetryRequest();
@@ -1755,16 +1840,22 @@ void setup() {
   // And it is the only thing on the desktop's side of this task that the DEVICE
   // can answer: a runtime rasteriser on a part with no FPU is the assumption 3B
   // is about to build on, and the numbers below are how it is falsified early
-  // rather than late. The face is a local -- its 8 KB glyph cache is transient,
-  // released before setup() returns -- so the check costs no resident heap.
+  // rather than late.
+  //
+  // IT IS ALSO THE REAL INITIALISATION NOW, not just a check. gBody is what every
+  // Reader draws from, at reader::kBodyPpem -- design/Reader.dc.html's `font-size:
+  // 32px` -- where this used to hard-code 29 and throw the face away. A failure
+  // here therefore means no book can be opened, which is why the log line below is
+  // the one that says so.
   {
-    reader::ScalableFont body;
+    reader::ScalableFont& body = gBody;
     const uint32_t t0 = micros();
-    const bool bodyOk = body.init(kFontBodySerif, kFontBodySerifSize, 29);
+    const bool bodyOk = body.init(kFontBodySerif, kFontBodySerifSize, reader::kBodyPpem);
     const uint32_t t1 = micros();
     if (!bodyOk) {
-      // Not fatal: no screen reads this face yet, so a failure here must be
-      // loud without taking a working reader down with it.
+      // Not fatal, still: the chrome screens do not read this face, so a card
+      // full of books the device cannot open is better than a device that does
+      // not boot. openChapter's caller logs the refusal per book.
       mark("body-face-FAILED");
     } else {
       // One glyph, rasterised, so the timing is a rasterisation and not a parse.
@@ -2035,6 +2126,17 @@ void setup() {
   gFactory.setSettings(gSettings);
   Serial.printf("[boot] Settings list %dpx: rows %dpx, section headers %dpx\n", settingsListH,
                 settingsRowH, settingsHeaderH);
+
+  // Reader, the third screen whose box model the theme owns. The LOGICAL geometry,
+  // for the reason spelled out above: libraryVisibleRows was handed the native
+  // landscape height once and showed four rows instead of seven.
+  reader::PageMetrics readerMetrics;
+  gTheme.readerMetrics(logicalW, logicalH, fonts, gBody, readerMetrics);
+  gFactory.setReaderMetrics(readerMetrics);
+  gFactory.setReaderBody(&gBody);
+  Serial.printf("[boot] Reader column %dx%d at (%d,%d), body ppem %d\n", readerMetrics.columnW,
+                readerMetrics.columnH, readerMetrics.columnLeft, readerMetrics.columnTop,
+                gBody.ppem());
   Serial.flush();
 
   // The shell's own view of storage, which is what roots the app and what the
@@ -2323,6 +2425,9 @@ void loop() {
     // whatever screen the retry left on top -- on success that is a brand new App
     // rooted at Home, whose holds are not the SD-missing screen's.
     if (gApp->retryRequested()) handleRetry();
+    // Same placement and the same reason: the mask refresh below must see whatever
+    // screen the open left on top.
+    if (gApp->openRequested()) handleOpen();
     // The mask belongs to whatever screen is now on top, which a push or pop
     // just changed. Re-reading it here is what keeps a hold bound only where a
     // ring is drawn.

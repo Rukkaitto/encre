@@ -130,7 +130,7 @@ TEST_CASE("Confirm descends into a folder and Back climbs back out") {
   CHECK(lib.path() == "/books");
 }
 
-TEST_CASE("Confirm on a book does nothing yet, because the Reader is Phase 3") {
+TEST_CASE("CONFIRM ON A BOOK ASKS THE SHELL TO OPEN IT, AND DOES NOT PUSH") {
   Ramp r;
   reader::QuietTheme theme;
   FakeFileSystem fs = cardWithBooks();
@@ -138,10 +138,38 @@ TEST_CASE("Confirm on a book does nothing yet, because the Reader is Phase 3") {
   lib.setVisibleRows(theme.libraryVisibleRows(800, r.fonts));
   lib.onEvent(kDown);  // onto Middlemarch
   REQUIRE_FALSE(lib.vm().rows[1].isFolder);
-  // Not a Push: there is no Reader to push, and a placeholder screen would be a
-  // screen to delete in Phase 3.
-  CHECK(lib.onEvent(kConfirm).kind == Action::Kind::None);
+  // NOT a Push, and that distinction is the design: a Reader needs a Document,
+  // and building one means inflating and parsing this file -- storage, which is
+  // not core/'s. So the screen ASKS and the shell answers. See Action::open().
+  //
+  // This test used to assert None, with a comment saying the Reader was Phase 3.
+  // It is here now.
+  CHECK(lib.onEvent(kConfirm).kind == Action::Kind::Open);
+  // And the Library stays where it is: the shell decides whether the book opened,
+  // so the screen must not have moved in anticipation.
   CHECK(lib.path() == "/books");
+}
+
+TEST_CASE("an Open request is LATCHED by the app, not acted on") {
+  // Mirrors the Retry latch, and for the same reason: the mount and the card are
+  // the shell's. Asserted on App because a screen returning the right Action is
+  // only half of it -- the app must not try to push a Reader itself.
+  Ramp r;
+  reader::QuietTheme theme;
+  FakeFileSystem fs = cardWithBooks();
+  reader::DemoScreenFactory factory(fs, "/books");
+  auto lib = std::make_unique<LibraryScreen>(fs, "/books");
+  lib->setVisibleRows(theme.libraryVisibleRows(800, r.fonts));
+  reader::App app(std::move(lib), factory);
+  CHECK_FALSE(app.openRequested());
+  app.dispatch(kDown);
+  app.dispatch(kConfirm);
+  CHECK(app.openRequested());
+  // The stack is untouched: no Reader was pushed behind the shell's back.
+  CHECK(app.depth() == 1);
+  CHECK(app.top().id() == reader::ScreenId::Library);
+  app.clearOpenRequest();
+  CHECK_FALSE(app.openRequested());
 }
 
 TEST_CASE("a held Confirm opens the actions overlay, and the ring says so") {

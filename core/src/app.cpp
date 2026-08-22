@@ -187,6 +187,11 @@ void App::dispatch(const InputEvent& ev) {
       // identical screen would spend a full refresh saying so.
       retry_ = true;
       break;
+    case Action::Kind::Open:
+      // Latched for the same reason Retry is: the card is the shell's. See
+      // Action::open().
+      open_ = true;
+      break;
   }
 }
 

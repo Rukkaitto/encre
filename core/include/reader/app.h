@@ -44,7 +44,7 @@ const char* screenName(ScreenId id);
 // the mount rather than repaint the same message -- so the screen asks, App
 // latches the request, and the shell answers it. See App::retryRequested().
 struct Action {
-  enum class Kind : uint8_t { None, Redraw, Push, Pop, PopTo, Sleep, Retry };
+  enum class Kind : uint8_t { None, Redraw, Push, Pop, PopTo, Sleep, Retry, Open };
   Kind kind = Kind::None;
   ScreenId target = ScreenId::Home;  // meaningful for Push and PopTo
 
@@ -67,6 +67,17 @@ struct Action {
   static Action popTo(ScreenId t) { return {Kind::PopTo, t}; }
   static Action sleep() { return {Kind::Sleep, ScreenId::Home}; }
   static Action retry() { return {Kind::Retry, ScreenId::Home}; }
+  // "Open the book I have selected." Shaped like Retry and for the same reason:
+  // opening a book is READING A FILE OFF THE CARD, and storage is not core/'s. The
+  // screen cannot push a Reader itself because a Reader needs a Document, and a
+  // Document needs a zip, an inflate and an XHTML parse over a FileHandle the
+  // screen has no way to get.
+  //
+  // It carries no path, deliberately. Adding one would put a std::string in every
+  // Action -- returned by value from every gesture on every screen -- to serve one
+  // Action kind. The shell already holds the LibraryScreen, so it can ask which
+  // book is selected; see App::openRequested().
+  static Action open() { return {Kind::Open, ScreenId::Reader}; }
 };
 
 // The four hint slots are the four front buttons in hardware order (spec 4.0).
@@ -433,6 +444,20 @@ class App {
   bool retryRequested() const { return retry_; }
   void clearRetryRequest() { retry_ = false; }
 
+  // The user pressed select on a book. The shell's job, in this order:
+  //
+  //   1. clearOpenRequest(), so a book that fails to open does not re-fire;
+  //   2. ask the LibraryScreen which item is focused and openChapter() it --
+  //      keeping SD traffic off the display bus, exactly as the retry does;
+  //   3. on success, setReaderChapter() on the factory and pushScreen(Reader);
+  //      on failure, log the reason and leave the Library standing.
+  //
+  // Nothing here repaints on its own, for the reason Retry gives: a book that
+  // failed to open has not changed what is on glass, and a screen change is the
+  // shell's to make.
+  bool openRequested() const { return open_; }
+  void clearOpenRequest() { open_ = false; }
+
   ButtonMask longPressable() const { return top().longPressable(); }
   ButtonMask autoRepeat() const { return top().autoRepeat(); }
 
@@ -464,6 +489,7 @@ class App {
   bool transition_ = true;
   bool sleep_ = false;
   bool retry_ = false;
+  bool open_ = false;
   // Mutable because render() is const: painting does not change the app, but it
   // does change what is on glass, and this is what remembers that. The
   // alternative -- a non-const render() -- would make every const App& in the
