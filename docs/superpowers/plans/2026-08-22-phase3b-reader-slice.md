@@ -65,8 +65,21 @@ ctest --test-dir build --output-on-failure
 ~/.platformio/penv/bin/python -m platformio run -e xteink
 ```
 
-Expect flash to grow by a few KB. If it grows by tens, an image decoder is still
-compiled in and a `STBI_NO_*` is missing.
+**FLASH CANNOT ANSWER THIS YET, and expecting it to was wrong.** Nothing in the
+firmware calls `inflateRaw` until Task 3, so the linker drops the whole TU and the
+size report is byte-identical — the same effect 3A recorded for the body font,
+where an unreferenced array read as free right up until the first caller.
+
+Measure the object instead, which works with no caller:
+
+```bash
+OBJ=.pio/build/xteink/libfce/core/inflate.cpp.o
+nm "$OBJ" | grep -ciE "stbi__(png|jpeg|bmp|tga|gif|hdr|psd|pnm)"   # must be 0
+~/.platformio/packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-size -A "$OBJ"   | awk '/^\.(text|rodata|data|bss)/ {s+=$2} END {print s, "bytes"}'
+```
+
+Measured: **3,001 bytes**, zero image-decoder symbols. Do not read the object's
+FILE size — 176 KB of it is unstripped debug info.
 
 - [ ] **Step 5: commit**
 
