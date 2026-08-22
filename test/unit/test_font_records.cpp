@@ -98,10 +98,15 @@ TEST_CASE("every committed .rfnt has a strictly ascending glyph table") {
       if (i > 0) REQUIRE_MESSAGE(cp > prev, name);
       prev = cp;
     }
-    // The kern table is empty in every committed asset (FreeType exposes no
-    // kerning these faces carry through get_kerning), so this loop asserts
-    // nothing today. It is here because the day one of them is non-empty is the
-    // day the kern search starts bisecting, and nothing else would notice.
+    // The kern table, and this loop used to assert nothing: every committed
+    // asset had zero pairs, because FreeType's get_kerning reads only the legacy
+    // `kern` table and neither face has one (their kerning is GPOS -- see
+    // tools/gposkern.py). tools/fontc.py reads GPOS directly now, so the table
+    // is non-empty in all twelve and the kern search finally bisects real
+    // records. **Non-empty is asserted, not assumed**: a generator that silently
+    // stopped finding pairs would put the project back where it was and the only
+    // symptom would be text a couple of pixels wide of the boards.
+    REQUIRE_MESSAGE(t.kernCount > 0, name);
     uint64_t prevKey = 0;
     for (uint16_t i = 0; i < t.kernCount; ++i) {
       const size_t at = t.kernsAt + i * 12u;
@@ -109,7 +114,39 @@ TEST_CASE("every committed .rfnt has a strictly ascending glyph table") {
           (static_cast<uint64_t>(rd<uint32_t>(d, at)) << 32) | rd<uint32_t>(d, at + 4);
       if (i > 0) REQUIRE_MESSAGE(key > prevKey, name);
       prevKey = key;
+      // A kern of zero is a record that costs 12 bytes and changes nothing --
+      // Font::kerning already answers 0 for a pair it has no record for -- and
+      // fontc.py drops those, so one here means the filter stopped working.
+      REQUIRE_MESSAGE(rd<int32_t>(d, at + 8) != 0, name);
     }
+  }
+}
+
+TEST_CASE("every record in every committed .rfnt kern table is reachable") {
+  // The other half of the glyph-table test, on the table that had no coverage
+  // from any real asset until now: Phase 3A gave Font::kerning's bisection
+  // synthetic coverage only, so a bisection bug would have shown up as text
+  // drifting a pixel or two on some screens and nothing else. These are real
+  // pairs -- 1297 to 2923 per face -- so the search is exercised at depth ~11.
+  for (const char* name : kAssets) {
+    const auto d = slurp(name);
+    const Tables t = tablesOf(d);
+    reader::Font font;
+    REQUIRE(font.load(d.data(), d.size()));
+    CAPTURE(name);
+    for (uint16_t i = 0; i < t.kernCount; ++i) {
+      const size_t at = t.kernsAt + i * 12u;
+      const auto left = static_cast<char32_t>(rd<uint32_t>(d, at));
+      const auto right = static_cast<char32_t>(rd<uint32_t>(d, at + 4));
+      REQUIRE(font.kerning(left, right) == rd<int32_t>(d, at + 8));
+      // Every kerned pair is a pair of glyphs the face actually has, or the
+      // adjustment is applied to a notdef box and the subsets have diverged.
+      REQUIRE(font.glyph(left).has_value());
+      REQUIRE(font.glyph(right).has_value());
+    }
+    // And a pair that is not in the table is zero, not the neighbour's value:
+    // U+0020 against itself, which no face kerns.
+    CHECK(font.kerning(U' ', U' ') == 0);
   }
 }
 
@@ -175,28 +212,36 @@ TEST_CASE("an absent codepoint is absent, on every side of the table") {
 }
 
 TEST_CASE("the whole ramp measures the same as it did with a hash index") {
-  // A regression guard with real numbers rather than a tautology: these widths
-  // were recorded from the unordered_map implementation, so if the search
+  // A regression guard with real numbers rather than a tautology: if the search
   // resolves even one glyph differently on any face of the ramp, a measurement
   // moves and right-aligned text drifts against the margin it is aligned to.
   // (The goldens are the pixel-level proof; this is the one that says WHICH
   // face went wrong.)
+  //
+  // The widths came from the unordered_map implementation and every one of them
+  // moved when the ramp gained kerning -- by 2 to 5 px, always NARROWER, which
+  // is the only direction a kern can move a run in either face here. So the
+  // constant alone is no longer self-evidently right, and `kern` is what makes
+  // it auditable: the assertion below is that `expected` is the sum of the
+  // face's own advances plus exactly that much kerning, which is a statement
+  // about the asset rather than a number someone copied out of a failure.
   const struct {
     reader::Role role;
     const char* asset;
     int expected;
+    int kern;
   } cases[] = {
-      {reader::Role::Meta400, "spacegrotesk_400_10pt.rfnt", 263},
-      {reader::Role::Meta500, "spacegrotesk_500_10pt.rfnt", 272},
-      {reader::Role::Label400, "spacegrotesk_400_11pt.rfnt", 289},
-      {reader::Role::Label500, "spacegrotesk_500_11pt.rfnt", 295},
-      {reader::Role::Value500, "spacegrotesk_500_12pt.rfnt", 314},
-      {reader::Role::Value700, "spacegrotesk_700_12pt.rfnt", 318},
-      {reader::Role::Body400, "spacegrotesk_400_14pt.rfnt", 379},
-      {reader::Role::Body500, "spacegrotesk_500_14pt.rfnt", 376},
-      {reader::Role::Body700, "spacegrotesk_700_14pt.rfnt", 371},
-      {reader::Role::Title700, "spacegrotesk_700_20pt.rfnt", 540},
-      {reader::Role::Display700, "spacegrotesk_700_32pt.rfnt", 855},
+      {reader::Role::Meta400, "spacegrotesk_400_10pt.rfnt", 261, -2},
+      {reader::Role::Meta500, "spacegrotesk_500_10pt.rfnt", 270, -2},
+      {reader::Role::Label400, "spacegrotesk_400_11pt.rfnt", 287, -2},
+      {reader::Role::Label500, "spacegrotesk_500_11pt.rfnt", 293, -2},
+      {reader::Role::Value500, "spacegrotesk_500_12pt.rfnt", 312, -2},
+      {reader::Role::Value700, "spacegrotesk_700_12pt.rfnt", 316, -2},
+      {reader::Role::Body400, "spacegrotesk_400_14pt.rfnt", 376, -3},
+      {reader::Role::Body500, "spacegrotesk_500_14pt.rfnt", 373, -3},
+      {reader::Role::Body700, "spacegrotesk_700_14pt.rfnt", 368, -3},
+      {reader::Role::Title700, "spacegrotesk_700_20pt.rfnt", 537, -3},
+      {reader::Role::Display700, "spacegrotesk_700_32pt.rfnt", 850, -5},
   };
   // Mixed case, digits, punctuation, a Latin-1 accent and an em dash: one
   // string that touches all four blocks the subset covers.
@@ -207,6 +252,20 @@ TEST_CASE("the whole ramp measures the same as it did with a hash index") {
     REQUIRE(font.load(d.data(), d.size()));
     CAPTURE(c.asset);
     CHECK(font.measure(s) == c.expected);
+    // The same run with the kerning taken back out, glyph by glyph. measure()
+    // is advances plus kerns and nothing else on this face, so the difference
+    // is the kerning -- and it must be negative, because a face that kerned a
+    // run WIDER would be a sign error in the generator that every golden would
+    // pass through as "text moved a bit".
+    int unkerned = 0;
+    size_t i = 0;
+    while (i < s.size()) {
+      const char32_t cp = reader::utf8Next(s, i);
+      const std::optional<int> adv = font.advance(cp);
+      unkerned += adv ? *adv : font.notdefAdvance();
+    }
+    CHECK(c.expected - unkerned == c.kern);
+    CHECK(c.kern < 0);
   }
 }
 

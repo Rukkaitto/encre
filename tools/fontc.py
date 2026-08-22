@@ -59,12 +59,40 @@ was not the culprit; it is mass-neutral to within 0.2%. The missing curve was.
 
 This is a coverage correction, not a weight change: --weight still says exactly
 what the design says, and the outline is the one the design asked for.
+
+--- Where the kerning comes from, and why not from FreeType -------------------
+
+FreeType's FT_Get_Kerning reads ONLY the legacy `kern` table. Space Grotesk has
+none -- its kerning is GPOS, LookupType 2 with ValueFormat1 68 (XAdvance |
+XAdvDevice) -- and neither does Literata, whose kern feature is GPOS LookupType
+9, Extension Positioning. So `face.has_kerning` was false on both faces and
+**every committed .rfnt carried zero kern pairs**, for the whole of Phases 1
+and 2. It was invisible at 21px and is not at 42 or 67.
+
+The pairs are therefore read out of GPOS directly by tools/gposkern.py, which is
+also what tools/ttfprep.py uses for the body face, so chrome and body text kern
+from one reading of one font. FreeType remains the fallback for a face that does
+have a legacy `kern` table, and the summary line says which source was used --
+a generator that quietly found nothing is how this gap lasted two phases.
+
+**The adjustments are whole pixels**, because that is what an .rfnt kern record
+holds and what Font::kerning returns. A pair whose adjustment is under half a
+pixel at this ppem is dropped rather than stored as 0: Font::kerning already
+answers 0 for a pair it has no record for, so a zero record is 12 bytes for
+nothing. At 21px that drops about two thirds of the face's pairs; at 67px it
+drops a sixth. The consequence to know is that firmware kerning is quantised
+where the design boards' (Chrome's) is subpixel, so a kerned run can land a
+pixel either side of the board's.
 """
 import argparse
 import struct
 import sys
 
 import freetype
+from fontTools.ttLib import TTFont
+from fontTools.varLib import instancer
+
+import gposkern
 
 # ASCII + Latin-1 + typographic set used by the UI and books, plus U+FFFD
 # REPLACEMENT CHARACTER so malformed UTF-8 (which the decoder turns into
@@ -95,13 +123,19 @@ def coverage_lut(gamma: float) -> list:
     return [min(3, int((v / 255.0) ** (1.0 / gamma) * 3 + 0.5)) for v in range(256)]
 
 
-def apply_variations(face, requested: dict) -> str:
+def apply_variations(face, requested: dict):
     """Pin the face's variation axes to `requested` {tag: value}.
 
     Axis order is the face's own (Literata is opsz,wght; Space Grotesk is wght
     only), so it is queried rather than assumed. Axes the caller did not ask for
-    keep their current design coordinate. Returns a human-readable summary of
-    the resolved coordinates, or "" for a static face.
+    keep their current design coordinate.
+
+    Returns (summary, resolved) -- a human-readable summary of the resolved
+    coordinates, and the {tag: value} dict of what was actually set. The dict is
+    what the GPOS read below pins fontTools to, so the two libraries cannot end
+    up looking at different instances of the same face: FreeType's coordinates
+    are the ones the bitmaps came from, and they are the ones the kerning must
+    come from too.
     """
     if not face.has_multiple_masters:
         if requested:
@@ -109,7 +143,7 @@ def apply_variations(face, requested: dict) -> str:
             name = name.decode() if isinstance(name, bytes) else name
             tags = ", ".join(sorted(requested))
             sys.exit(f"error: {name} is not a variable font; cannot set {tags}")
-        return ""
+        return "", {}
 
     info = [(a.tag, a.minimum, a.maximum) for a in face.get_variation_info().axes]
     axes = [tag for tag, _, _ in info]
@@ -131,7 +165,89 @@ def apply_variations(face, requested: dict) -> str:
         for tag, current in zip(axes, face.get_var_design_coords())
     ]
     face.set_var_design_coords(coords)
-    return " ".join(f"{tag}={value:g}" for tag, value in zip(axes, coords))
+    return (" ".join(f"{tag}={value:g}" for tag, value in zip(axes, coords)),
+            dict(zip(axes, coords)))
+
+
+def mul_fix(units: int, scale: int) -> int:
+    """FT_MulFix: font units x a 16.16 scale -> 26.6 pixels, halves up.
+
+    Spelled out rather than reached for through freetype-py because the point is
+    that the kern is scaled by the SAME number the advances were: `size.x_scale`
+    is what FreeType resolved --pt 10 at 150 DPI to, which is 20.83 ppem and not
+    the 21 that `size.y_ppem` reports. Scaling by the rounded ppem instead would
+    put the kerning on a different scale from the glyph it adjusts.
+    """
+    sign = 1
+    if units < 0:
+        units, sign = -units, -sign
+    if scale < 0:
+        scale, sign = -scale, -sign
+    return sign * ((units * scale + 0x8000) >> 16)
+
+
+def round_px(f26: int) -> int:
+    """26.6 -> whole pixels, halves away from zero.
+
+    The same rule ScalableFont::kerning applies to the body face (roundPx in
+    core/src/scalablefont.cpp), so a pair does not tuck by different amounts
+    depending on which face is drawing it.
+    """
+    return (f26 + 32) // 64 if f26 >= 0 else -((-f26 + 32) // 64)
+
+
+def kern_pairs(path: str, face, coords: dict, present: list):
+    """[(leftCp, rightCp, px)] for the face's kerning, ascending by (left, right).
+
+    Ascending is a requirement, not a nicety: Font::kerning bisects the kern
+    table on the packed (left << 32) | right key and load() falls back to a
+    linear scan only if the table does not ascend (see core/include/reader/
+    font.h). `present` is already ascending -- it is CODEPOINTS filtered -- so
+    the nested walk below produces the key order the search wants.
+
+    Returns (pairs, source) where source names where the numbers came from, so a
+    generator that found nothing says so out loud.
+    """
+    # A second open of the same file, by a second library, and both are needed:
+    # FreeType rasterises and fontTools is the only one of the two that can read
+    # a GPOS Extension lookup. Pinned to the coordinates FreeType is using.
+    font = TTFont(path)
+    if coords:
+        instancer.instantiateVariableFont(font, coords, inplace=True,
+                                         updateFontNames=False)
+    cmap = font.getBestCmap()
+    units = gposkern.pair_adjustments(font, {cmap[cp] for cp in present if cp in cmap})
+    source = "GPOS"
+    if not units:
+        # A face with a real legacy `kern` table: FreeType can read that, and it
+        # is the one case where asking it is not pointless. Neither bundled face
+        # takes this path.
+        if not face.has_kerning:
+            return [], "none (no GPOS pairs, no `kern` table)"
+        source = "FreeType `kern` table"
+        out = []
+        for left in present:
+            for right in present:
+                k = face.get_kerning(chr(left), chr(right)).x // 64
+                if k:
+                    out.append((left, right, k))
+        return out, source
+
+    # Glyph names, not codepoints, are what GPOS is keyed by -- and the map is
+    # not one to one (U+00A0 is the same glyph as U+0020 in both faces), so one
+    # GPOS pair can be several codepoint pairs. Every one of them needs a record
+    # or the kerning would depend on which spelling of a character the text used.
+    names = {cp: cmap.get(cp) for cp in present}
+    out = []
+    for left in present:
+        for right in present:
+            value = units.get((names[left], names[right]))
+            if value is None:
+                continue
+            px = round_px(mul_fix(value, face.size.x_scale))
+            if px:  # a sub-half-pixel kern is dropped; see the module docstring
+                out.append((left, right, px))
+    return out, source
 
 
 def main() -> None:
@@ -200,7 +316,7 @@ def main() -> None:
 
     face = freetype.Face(args.font)
     # Axes first: FT_Set_Var_Design_Coordinates can reset the active size.
-    axis_summary = apply_variations(face, requested)
+    axis_summary, coords = apply_variations(face, requested)
     if args.pt is not None:
         # 26.6 fixed point, both axes, at 150x150 DPI -- byte for byte what
         # CrossPoint's set_char_size(size << 6, size << 6, 150, 150) does.
@@ -258,14 +374,7 @@ def main() -> None:
         )
         blob += packed
 
-    kerns = []
-    if face.has_kerning:
-        present = [g[0] for g in glyphs]
-        for left in present:
-            for right in present:
-                k = face.get_kerning(chr(left), chr(right)).x // 64
-                if k:
-                    kerns.append((left, right, k))
+    kerns, kern_source = kern_pairs(args.font, face, coords, [g[0] for g in glyphs])
 
     ascent = face.size.ascender // 64
     descent = face.size.descender // 64  # negative
@@ -315,7 +424,8 @@ def main() -> None:
     if args.bpp == 2:
         traits.append(f"gamma={gamma:g}")
     print(
-        f"{args.out}: {len(glyphs)} glyphs, {len(kerns)} kern pairs, "
+        f"{args.out}: {len(glyphs)} glyphs, {len(kerns)} kern pairs "
+        f"from {kern_source} ({12 * len(kerns)} bytes), "
         f"blob {len(blob)} bytes, {', '.join(t for t in traits if t)}"
     )
     if args.bpp == 2:

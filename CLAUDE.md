@@ -441,6 +441,35 @@ different ppem or weight, so a mis-binding is a boot failure rather than a
 silently wrong screen. `core/` never picks its own fonts — the caller supplies a
 `FontSet`, which is how device knowledge stays out of the portable layer.
 
+**Kerning came late, and the reason it was missing is worth not rediscovering.**
+Both bundled faces keep their kerning in **GPOS**, and neither has a legacy
+`kern` table. FreeType's `FT_Get_Kerning` reads only the legacy table, so
+`fontc.py` found nothing and all twelve `.rfnt` assets shipped with **zero kern
+pairs** through Phases 1 and 2. `stb_truetype` does read GPOS pair positioning,
+but only LookupType 2 with `ValueFormat1 == 4`, and Literata's kern feature is
+LookupType 9 (Extension) with `ValueFormat1 == 68` before instancing — so the
+body face had none either. `tools/gposkern.py` now reads the pairs properly for
+both generators (extension lookups resolved, PairPos formats 1 **and** 2, first
+applicable subtable wins); `fontc.py` writes them as `.rfnt` kern records and
+`ttfprep.py` writes them as a synthesised format-0 `kern` table, which is the
+one form stb reads. Its numbers were checked pair for pair against Chrome's own
+GPOS shaping and agree exactly.
+
+Three consequences to know:
+
+- **It costs flash.** 12 bytes a record across the eleven embedded chrome faces
+  is ~225 KB, plus 36 KB for the body TTF's 6 bytes a pair: firmware flash went
+  898,768 → 1,159,720. A 6-byte `.rfnt` record (the keys fit `uint16`) would
+  halve the chrome half if that ever matters.
+- **Firmware kerning is quantised to whole pixels** and the boards' is subpixel,
+  so a kerned chrome run can land a pixel either side of the board's. A pair
+  under half a pixel at its ppem is dropped rather than stored as zero, which at
+  21px is about two thirds of the face's pairs.
+- **It moved the firmware measurably toward the boards**: design-vs-firmware
+  mismatched pixels fell 27.6% across the six implemented screens at both
+  geometries, every panel improving. Most of that is prose — chrome's own
+  uppercase, tracked labels barely kern at all in Space Grotesk.
+
 ## Invariants worth not relearning
 
 - **Derive from the board's box model; never pin a number the board computes.**
@@ -489,9 +518,14 @@ silently wrong screen. `core/` never picks its own fonts — the caller supplies
     different problem with a different budget.
   - And the reason SdMissing's board says `max-width: 420px` where it used to say
     400: **the wrap follows the firmware's own metrics, not Chrome's.** The
-    autohinted `.rfnt` faces have whole-pixel advances and measure ~3% wider, so
+    autohinted `.rfnt` faces have whole-pixel advances and measured ~3% wider, so
     the board's three lines came out as four. 420 is three lines in both engines
-    and moves nothing in Chrome. The number was wrong, not the design.
+    and moves nothing in Chrome. The number was wrong, not the design. **Kerning
+    has since closed part of that gap** (see **Type**) — DeleteConfirm's
+    paragraph went from five firmware lines to the board's four, at the board's
+    own break positions — but not all of it: whole-pixel advances still measure
+    wide, so a board's `max-width` is still a number to check in both engines
+    rather than to trust from Chrome.
 
 ## Overlays and lists
 

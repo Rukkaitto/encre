@@ -174,7 +174,14 @@ def main() -> None:
         tag, value = spec.split("=", 1)
         axes[tag.strip()] = float(value)
 
-    font = TTFont(args.ttf)
+    # recalcTimestamp=False, and it is not a detail: fontTools defaults to
+    # stamping `head.modified` with the current time on save, so two runs of
+    # `make fonts` over an unchanged source produced files differing in seven
+    # bytes -- the timestamp and the two checksums derived from it. A committed
+    # generated asset that churns for no reason makes "regenerate and diff" --
+    # the only cheap check that an asset matches its generator -- useless. With
+    # this, the .ttf is as reproducible as the .rfnt files already are.
+    font = TTFont(args.ttf, recalcTimestamp=False)
     before = os.path.getsize(args.ttf)
 
     if axes:

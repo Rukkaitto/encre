@@ -30,7 +30,10 @@ namespace reader {
 // generated as a nested walk over that list, so they ascend by (left, right)
 // which is the packed key), verified against the bytes of all twelve committed
 // assets and pinned by test_font_records.cpp. A search is therefore a binary
-// search: ~8 comparisons on 200 records.
+// search: ~8 comparisons on 200 glyph records, ~11 on the 1297-2923 kern
+// records each face now carries -- and it carries them because fontc.py reads
+// GPOS itself; asking FreeType for kerning found nothing, since FreeType reads
+// only the legacy `kern` table and neither bundled face has one.
 //
 // **A table that does NOT ascend is still searched correctly**, by a linear
 // scan, decided once at load() and remembered. That is not defensive

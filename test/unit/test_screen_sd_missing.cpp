@@ -211,12 +211,23 @@ TEST_CASE("the prompt is laid out from the board's box model at both geometries"
     // The button is the bottom of the column: a solid slab of the board's own
     // 260x68 with its label knocked out of it.
     const int slabX = centreIn(kMargin, usableW, 260);
+    // A row is the slab's top edge when the WHOLE 260px span is inked, not
+    // merely its two ends. Testing the ends alone is a heuristic and it was
+    // wrong: any prose row with a glyph at both x=slabX and x=slabX+259 answers
+    // it, and once the chrome ramp gained kerning one of them did -- this
+    // reported the slab at y=420, in the middle of the paragraph, and four
+    // assertions below then failed on a screen that was drawn correctly. The
+    // BOARD's own render trips the two-end version too, at y=378, so the
+    // heuristic never held; the unkerned firmware just happened not to break
+    // it. The slab is a solid rectangle 68px tall with a 33px label centred in
+    // it, so its first 25 rows are fully inked and no line of type can be.
     int slabTop = -1;
-    for (int y = 0; y < barTop; ++y)
-      if (!fb.getPixel(slabX, y) && !fb.getPixel(slabX + 259, y)) {
-        slabTop = y;
-        break;
-      }
+    for (int y = 0; y < barTop && slabTop < 0; ++y) {
+      bool solid = true;
+      for (int x = slabX; solid && x < slabX + 260; ++x)
+        if (fb.getPixel(x, y)) solid = false;
+      if (solid) slabTop = y;
+    }
     REQUIRE(slabTop > 0);
     CHECK(slabTop + kActionH - 1 == column.y1);
     int slabPaperEdges = 0;

@@ -29,9 +29,16 @@ uint64_t kernKey(const uint8_t* rec) {
 
 // Bisect `count` fixed-size records for `key`, or scan them when the table is
 // not in order. One template so the glyph and kern tables cannot drift into two
-// slightly different searches -- the kern table is the one with no coverage in
-// any shipped asset (every committed .rfnt has zero kern pairs), so it is
-// exactly the one that would rot.
+// slightly different searches.
+//
+// The kern table used to be the one with no coverage from any shipped asset --
+// every committed .rfnt had zero pairs, because tools/fontc.py asked FreeType
+// for kerning and FreeType reads only the legacy `kern` table, which neither
+// face has. It reads GPOS directly now (tools/gposkern.py) and every asset
+// carries 1297 to 2923 pairs, so this bisection is finally exercised at depth
+// ~11 by real records rather than by synthetic ones. test_font_records.cpp
+// asserts the table is non-empty as well as ordered: an empty one is how this
+// went unnoticed for two phases.
 template <typename Key, size_t RecordBytes, Key (*KeyOf)(const uint8_t*)>
 const uint8_t* findRecord(const uint8_t* records, size_t count, bool ascends, Key key) {
   if (records == nullptr) return nullptr;
