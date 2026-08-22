@@ -46,6 +46,9 @@ extern const Icon kUp;       // stem with a chevron head, pointing up
 extern const Icon kDown;     // the same, pointing down
 extern const Icon kChevron;  // right-pointing disclosure
 extern const Icon kBook;     // open book: the Read action
+// The SAME drawing at 112px, and a separate asset because these are pre-rendered
+// bitmaps -- there is no scaling a 25px mark up. HomeEmpty's mark.
+extern const Icon kBookLarge;
 extern const Icon kFolder;   // folder: a Library directory row
 extern const Icon kBattery;  // the header band's charge cell
 extern const Icon kSdCard;   // an SD card: the subject of the no-card prompt

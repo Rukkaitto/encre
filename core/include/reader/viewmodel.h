@@ -23,6 +23,19 @@ struct HomeViewModel {
   // a dithered placeholder carrying the title. This flag says whether a real
   // cover exists, so the placeholder can be replaced without a view-model change.
   bool hasCover = false;
+  // NOTHING TO CONTINUE: /books holds no readable book, so the whole reading
+  // column -- cover, title, progress, CONTINUE -- is replaced by the empty-library
+  // block. design/HomeEmpty.dc.html.
+  //
+  // A flag rather than inferring it from an empty `title`, because those are
+  // different facts: a book whose metadata gave no title is still a book to
+  // continue, and it would be a mistake to draw "NO BOOKS YET" over one.
+  bool libraryEmpty = false;
+  // What the empty block says. Copy lives in the view model for the same reason
+  // SdMissing's does -- it is the board's words, and a theme that held them would
+  // be a theme deciding what the device tells the user.
+  std::string emptyTitle;
+  std::string emptyBody;
   std::vector<MenuEntry> menu;
   int focusedMenuIndex = -1;                 // -1 = Continue block focused
   std::array<std::string, 4> hints{};        // Back, Confirm, Up, Down slots

@@ -28,6 +28,26 @@ HomeViewModel demoHomeVm() {
   return vm;
 }
 
+// design/HomeEmpty.dc.html. The same screen with nothing to continue, so the
+// reading column is replaced -- see HomeViewModel::libraryEmpty.
+HomeViewModel demoHomeEmptyVm() {
+  HomeViewModel vm;
+  vm.batteryPercent = 87;
+  vm.libraryEmpty = true;
+  vm.emptyTitle = "NO BOOKS YET";
+  vm.emptyBody = "Put the SD card in your computer and copy EPUB files into its /books folder.";
+  // LIBRARY says EMPTY where Home says a count -- the value is what the state
+  // changes, and the row is otherwise Home's row.
+  vm.menu = {{"LIBRARY", "EMPTY"}, {"SETTINGS", ""}};
+  vm.focusedMenuIndex = 0;
+  // NO READ HINT: slot 0 is empty, because there is nothing to read. The bar keeps
+  // its four slots and the empty one keeps its 36px -- measuring it as nothing
+  // would move every other slot along.
+  vm.hints = {"", "SELECT", "UP", "DOWN"};
+  vm.holds = {false, false, false, false};
+  return vm;
+}
+
 std::vector<ScreenId> demoHomeTargets() { return {ScreenId::Library, ScreenId::Settings}; }
 
 // The board's `&middot;`, spaces included. A third copy of this two-byte string

@@ -10,7 +10,15 @@ HomeScreen::HomeScreen(HomeViewModel vm, std::vector<ScreenId> targets)
       // WithNone: -1 is the CONTINUE block, a place the user can be, not the
       // absence of a selection. The view-model may arrive with a focus already
       // set -- the goldens author one -- so it is adopted rather than reset.
-      focus_(static_cast<int>(vm_.menu.size()), Focus::WithNone) {
+      //
+      // EXCEPT ON THE EMPTY VARIANT, which draws no CONTINUE block: its first
+      // hint slot is empty because there is nothing to read, so a focus on -1
+      // would be a selection on an invisible row with a blank action. Building the
+      // ring Noneless is the model being right, and it closes both ways in at
+      // once -- Up from LIBRARY, which was reachable before lists wrapped, and
+      // Down off the last menu row, which wrapping added.
+      focus_(static_cast<int>(vm_.menu.size()),
+             vm_.libraryEmpty ? Focus::Noneless : Focus::WithNone) {
   focus_.set(vm_.focusedMenuIndex);
   vm_.focusedMenuIndex = focus_.index();
 }

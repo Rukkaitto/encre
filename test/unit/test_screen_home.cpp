@@ -1,4 +1,5 @@
 #include "doctest.h"
+#include "reader/screens.h"
 #include "reader/screen_home.h"
 
 using namespace reader;
@@ -163,5 +164,88 @@ TEST_CASE("restoring a row onto an empty menu lands on CONTINUE") {
   HomeScreen h(vm, {});
   reader::Screen& s = h;
   CHECK_FALSE(s.setFocus(0));
+  CHECK(s.focus() == -1);
+}
+
+// --- The empty state --------------------------------------------------------
+//
+// design/HomeEmpty.dc.html: /books holds no readable book, so the reading column
+// is replaced. A VARIANT of Home rather than a screen of its own, which is why it
+// shares HomeViewModel and ScreenId::Home -- the menu and the hint bar are Home's
+// and must not move between the two.
+
+TEST_CASE("the empty variant keeps Home's identity and menu") {
+  const reader::HomeViewModel vm = reader::demoHomeEmptyVm();
+  reader::HomeScreen screen(vm, reader::demoHomeTargets());
+  CHECK(screen.id() == reader::ScreenId::Home);
+  CHECK(vm.libraryEmpty);
+  // Same two rows, in the same order, so navigation is unchanged.
+  REQUIRE(vm.menu.size() == 2);
+  CHECK(vm.menu[0].label == "LIBRARY");
+  CHECK(vm.menu[1].label == "SETTINGS");
+  // LIBRARY says EMPTY where Home says a count.
+  CHECK(vm.menu[0].value == "EMPTY");
+}
+
+TEST_CASE("the empty variant focuses LIBRARY, because there is no CONTINUE block") {
+  const reader::HomeViewModel vm = reader::demoHomeEmptyVm();
+  // -1 means "the CONTINUE block", and this state has none -- leaving it there
+  // would give the hint bar a SELECT with nothing selected.
+  CHECK(vm.focusedMenuIndex == 0);
+}
+
+TEST_CASE("the empty variant offers no READ hint") {
+  const reader::HomeViewModel vm = reader::demoHomeEmptyVm();
+  CHECK(vm.hints[0].empty());  // nothing to read
+  CHECK(vm.hints[1] == "SELECT");
+  CHECK(vm.hints[2] == "UP");
+  CHECK(vm.hints[3] == "DOWN");
+  // And no ring anywhere: an empty Home binds no hold.
+  for (bool h : vm.holds) CHECK_FALSE(h);
+}
+
+TEST_CASE("the empty variant carries the board's copy, not the theme's") {
+  // The words are the design's, so they live in the view model -- a theme holding
+  // them would be a theme deciding what the device tells the user.
+  const reader::HomeViewModel vm = reader::demoHomeEmptyVm();
+  CHECK(vm.emptyTitle == "NO BOOKS YET");
+  CHECK(vm.emptyBody.find("/books") != std::string::npos);
+  CHECK(vm.emptyBody.find("Wi-Fi") == std::string::npos);  // V1 is card-only
+}
+
+TEST_CASE("an ordinary Home is not the empty variant") {
+  const reader::HomeViewModel vm = reader::demoHomeVm();
+  CHECK_FALSE(vm.libraryEmpty);
+  CHECK(vm.focusedMenuIndex == -1);  // the CONTINUE block
+  CHECK(vm.hints[0] == "READ");
+}
+
+TEST_CASE("the empty variant has no CONTINUE slot to focus, in either direction") {
+  // -1 is Home's CONTINUE block, and this variant does not draw one -- its first
+  // hint slot is empty because there is nothing to read. Letting the focus reach
+  // -1 anyway would put the selection on an invisible row with a blank action.
+  //
+  // It was reachable before lists wrapped, by pressing Up from LIBRARY, and
+  // wrapping added a second way in (Down off the last menu row). The ring is
+  // built Noneless for this variant instead, which is the model being right
+  // rather than the ends being special-cased.
+  reader::HomeScreen h(reader::demoHomeEmptyVm(), reader::demoHomeTargets());
+  reader::Screen& s = h;
+  REQUIRE(s.focus() == 0);
+  h.onEvent({reader::Button::Up, reader::PressKind::Short});
+  CHECK(s.focus() == 1);  // wrapped to SETTINGS, not down to a CONTINUE block
+  h.onEvent({reader::Button::Down, reader::PressKind::Short});
+  CHECK(s.focus() == 0);
+  // ...and a record naming the CONTINUE block cannot put one here either.
+  s.setFocus(-1);
+  CHECK(s.focus() == 0);
+}
+
+TEST_CASE("an ordinary Home still has its CONTINUE slot") {
+  reader::HomeScreen h(reader::demoHomeVm(), reader::demoHomeTargets());
+  reader::Screen& s = h;
+  CHECK(s.focus() == -1);
+  CHECK(s.setFocus(0));
+  CHECK(s.setFocus(-1));
   CHECK(s.focus() == -1);
 }
