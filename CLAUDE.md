@@ -95,7 +95,14 @@ card probe that was answered from cache and kept reporting success.
   submodule nor the fix. `git submodule update --init` first. `make test` is
   unaffected, so a worktree can look healthy and still not build the firmware.
 - E-ink holds its last image with no power, so **a frozen screen does not mean
-  the firmware ran**.
+  the firmware ran**. And **nothing clears the glass at boot** — the cold-boot
+  branch calls `display.requestResync()`, which reseeds the CONTROLLER's DTM1
+  baseline and never touches the panel, so the previous session's screen stays
+  visible until the first paint. That is deliberate (a clear would be an extra
+  full flash to show white) but it did once log itself as "clearing the panel",
+  which is a claim about the wrong one of the two. The first paint is the earliest
+  anything can appear, and it cannot happen before `display.begin()` returns —
+  ~2.7 s in, of which ~2.5 s is `XteinkDetect`'s I2C passes.
 - **E-ink persistence is about the PANEL, not the controller.** The glass keeps
   its image with no power; the controller's DTM1 baseline does not. A wake is a
   chip reset, so `initController()` re-runs and `_oldPlaneValid` goes false —

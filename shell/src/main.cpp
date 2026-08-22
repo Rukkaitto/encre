@@ -1418,7 +1418,8 @@ void setup() {
   Serial.printf("[boot] wake cause=%d -> %s\n", (int)wake,
                 fromSleep ? "resumed from sleep (the panel holds our frame, but the "
                             "controller's baseline did not survive, so it is reseeded)"
-                          : "cold boot, clearing the panel");
+                          : "cold boot, reseeding the controller's baseline (the "
+                            "panel keeps its last image until the first paint)");
   Serial.flush();
   // BOTH branches let the driver seed its own baseline. On wake this used to call
   // skipInitialResync() instead, and that was wrong in a way worth recording.
@@ -2032,7 +2033,7 @@ void loop() {
     // just changed. Re-reading it here is what keeps a hold bound only where a
     // ring is drawn.
     gPresses.setLongPressable(gApp->longPressable());
-  gPresses.setAutoRepeat(gApp->autoRepeat());
+    gPresses.setAutoRepeat(gApp->autoRepeat());
     // Where the user is now, for a wake to restore. An unchanged record is not
     // rewritten, so this is nearly free on an event that did not move the stack.
     saveWhereWeAre();
