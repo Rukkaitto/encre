@@ -26,8 +26,7 @@ class SleepScreen : public Screen {
   explicit SleepScreen(SleepViewModel vm);
 
   ScreenId id() const override { return ScreenId::Sleep; }
-  ButtonMask longPressable() const override { return 0; }
-  Action onEvent(const InputEvent& ev) override;
+  Action onGesture(const GestureEvent& g) override;
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
 
   const SleepViewModel& vm() const { return vm_; }

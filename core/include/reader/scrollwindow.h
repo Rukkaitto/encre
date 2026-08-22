@@ -60,7 +60,9 @@ class ScrollWindow {
   // the end of a list instead of paying a refresh that repaints an identical
   // screen. On this panel that is at least 520 ms, and spending it to change
   // nothing is what makes the end of a list feel like a stuck button.
-  bool moveFocus(int delta);
+  // `held` is passed straight through to Focus::move, which is where clamp-versus-
+  // wrap is decided. A window has no opinion about it; it only has to follow.
+  bool moveFocus(int delta, bool held = false);
 
   // Selects a row outright, clamping into range. For the wake restore, where the
   // session record names a row and no press implies it; a record written before

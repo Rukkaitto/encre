@@ -57,7 +57,18 @@ class Focus {
   // `delta` may be far larger than the list: a held Up or Down delivers a
   // DISTANCE rather than a press (InputEvent::steps), so a wrapping list has to
   // take a delta of several laps and land where one lap would.
-  bool move(int delta);
+  //
+  // `held` IS WHY THIS TAKES A SECOND ARGUMENT, and it settles an interaction
+  // neither wrapping nor held-scroll owned alone. A wrap is right for a PRESS:
+  // the screen always changes, so it can never read as a dead button. It is wrong
+  // for a HOLD: a held button that wraps has no end and cycles for as long as it
+  // is down, which is not scrolling, it is a carousel. So a held move CLAMPS even
+  // on a wrapping focus.
+  //
+  // Here rather than in a screen because it is one rule and there were two
+  // screens about to each get their own copy of it -- the same shape as the five
+  // copies of the clamp this class was extracted to remove.
+  bool move(int delta, bool held = false);
 
   // The list changed length -- a rescan after a delete, a menu built at boot. The
   // index is pulled back into range, because one left past the end indexes one

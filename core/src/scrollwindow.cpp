@@ -46,10 +46,11 @@ int ScrollWindow::visibleCount() const {
 // scrolls because the focus left it -- but reporting "changed" from the pair is
 // what keeps that an implementation detail rather than something a caller relies
 // on.
-bool ScrollWindow::moveFocus(int delta) {
+bool ScrollWindow::moveFocus(int delta, bool held) {
   if (focus_.count() == 0 || visible_ == 0) return false;
   const int wasFirst = first_;
-  const bool moved = focus_.move(delta);
+  // Straight through: Focus owns clamp-versus-wrap and a window only follows.
+  const bool moved = focus_.move(delta, held);
   clampWindow();
   return moved || first_ != wasFirst;
 }

@@ -22,8 +22,7 @@ class HomeScreen : public Screen {
   HomeScreen(HomeViewModel vm, std::vector<ScreenId> targets);
 
   ScreenId id() const override { return ScreenId::Home; }
-  ButtonMask longPressable() const override { return hintHoldMask(vm_.holds); }
-  Action onEvent(const InputEvent& ev) override;
+  Action onGesture(const GestureEvent& g) override;
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
 
   // -1 is the CONTINUE block, 0..n-1 the menu rows. This overrides

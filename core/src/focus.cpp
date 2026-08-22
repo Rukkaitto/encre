@@ -32,9 +32,10 @@ bool Focus::set(int index) {
   return index_ != was;
 }
 
-bool Focus::move(int delta) {
+bool Focus::move(int delta, bool held) {
   if (count_ <= 0) return false;
-  if (!wrap_) return set(index_ + delta);
+  // A HELD move clamps even where a pressed one wraps -- see the header.
+  if (!wrap_ || held) return set(index_ + delta);
 
   // The ring runs from lowest() to count-1 inclusive, so a WithNone focus wraps
   // through its none slot rather than past it.

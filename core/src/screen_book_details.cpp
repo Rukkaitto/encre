@@ -61,14 +61,14 @@ BookDetailsScreen::BookDetailsScreen(const LibraryScreen& library) {
   // button the screen does not use is worse than one promising nothing.
   vm_.hints = {"BACK", "", "", ""};
   vm_.holds = {false, false, false, false};
+  declareHints(vm_.holds);
 }
 
-Action BookDetailsScreen::onEvent(const InputEvent& ev) {
-  if (ev.kind != PressKind::Short) return Action::none();
+Action BookDetailsScreen::onGesture(const GestureEvent& g) {
   // Back, and only Back. Confirm, Up and Down have no hint and do nothing, which
   // is the same rule SdMissing states: a button that acts without the bar saying
   // so is worse than one that does nothing.
-  if (ev.button == Button::Back) return Action::pop();
+  if (g.what == Gesture::Back) return Action::pop();
   return Action::none();
 }
 

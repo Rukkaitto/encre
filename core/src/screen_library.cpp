@@ -35,6 +35,12 @@ LibraryScreen::LibraryScreen(FileSystem& fs, std::string root)
   // cannot promise a hold it has not bound or bind one nothing advertises.
   vm_.hints = {"BACK", "OPEN", "UP", "DOWN"};
   vm_.holds = {false, true, false, false};
+  declareHints(vm_.holds);
+  // The one screen with a list long enough to need held scrolling -- 256 rows at
+  // the cap, and a row per press is a minute of pressing. Declared beside the
+  // holds because both are one statement about what the four buttons do, and
+  // gestureFor reads them together.
+  declareRepeat(static_cast<ButtonMask>(buttonBit(Button::Up) | buttonBit(Button::Down)));
   rescan();
 }
 
@@ -45,6 +51,12 @@ LibraryScreen::LibraryScreen(std::vector<LibraryItem> sample)
     : root_(kBooksRoot), path_(kBooksRoot), items_(std::move(sample)) {
   vm_.hints = {"BACK", "OPEN", "UP", "DOWN"};
   vm_.holds = {false, true, false, false};
+  declareHints(vm_.holds);
+  // The one screen with a list long enough to need held scrolling -- 256 rows at
+  // the cap, and a row per press is a minute of pressing. Declared beside the
+  // holds because both are one statement about what the four buttons do, and
+  // gestureFor reads them together.
+  declareRepeat(static_cast<ButtonMask>(buttonBit(Button::Up) | buttonBit(Button::Down)));
   window_.setCount(itemCount());
   syncVm();
 }
@@ -156,11 +168,14 @@ void LibraryScreen::syncVm() {
   vm_.focusedRow = (focus >= first && focus < first + count) ? focus - first : -1;
 }
 
-Action LibraryScreen::moveFocus(int delta) {
+Action LibraryScreen::moveFocus(int delta, bool held) {
   // ScrollWindow reports whether anything moved, so the end of a list costs no
   // refresh: on this panel a repaint that changes nothing is ~520 ms of the user
   // wondering whether the button works.
-  if (!window_.moveFocus(delta)) return Action::none();
+  //
+  // `held` is forwarded and not interpreted. This screen has no opinion about
+  // clamp-versus-wrap and must not acquire one -- Focus decides, once.
+  if (!window_.moveFocus(delta, held)) return Action::none();
   syncVm();
   return Action::redraw();
 }
@@ -201,13 +216,11 @@ bool LibraryScreen::deleteFocused() {
   return gone;
 }
 
-Action LibraryScreen::onEvent(const InputEvent& ev) {
-  if (ev.kind == PressKind::Long) {
-    // The only hold this screen binds, and the one its bar advertises. A hold on
-    // any other button is not reachable -- the mask comes from the same array --
-    // so anything else arriving here means the two have drifted, and ignoring it
-    // keeps that visible.
-    if (ev.button != Button::Confirm) return Action::none();
+Action LibraryScreen::onGesture(const GestureEvent& g) {
+  if (g.what == Gesture::Secondary) {
+    // The actions overlay. Which BUTTON produced this is no longer this screen's
+    // business -- gestureFor already refused a hold the hint bar does not
+    // advertise, so a Secondary arriving here is one the bar drew a ring for.
     const LibraryItem* item = focusedItem();
     if (item == nullptr) return Action::none();
     // Books only. The overlay is design/LibraryActions.dc.html, whose four rows
@@ -219,17 +232,16 @@ Action LibraryScreen::onEvent(const InputEvent& ev) {
     return Action::push(ScreenId::ItemActions);
   }
 
-  // A held Up or Down carries how far to go: see InputEvent::steps. The panel is
-  // why it is a distance rather than a count of events -- a paint blocks the loop
-  // that ticks the recognizer, so one event has to stand for all the time that
-  // passed while the panel was busy.
-  const int step = ev.kind == PressKind::Repeat ? ev.steps : 1;
-  switch (ev.button) {
-    case Button::Down:
-      return moveFocus(+step);
-    case Button::Up:
-      return moveFocus(-step);
-    case Button::Confirm: {
+  // The distance comes off the gesture, and so does whether it was HELD -- which
+  // is the whole reason this screen no longer decides. A held Next must clamp at
+  // the end of the list where a pressed Next wraps, and `held` is what lets
+  // ScrollWindow apply that without any screen choosing.
+  switch (g.what) {
+    case Gesture::Next:
+      return moveFocus(+g.steps, g.held);
+    case Gesture::Prev:
+      return moveFocus(-g.steps, g.held);
+    case Gesture::Activate: {
       const LibraryItem* item = focusedItem();
       if (item == nullptr) return Action::none();
       if (item->entry.isDir) return descend() ? Action::redraw() : Action::none();
@@ -239,7 +251,7 @@ Action LibraryScreen::onEvent(const InputEvent& ev) {
       // sees only the Action. So this returns none and the comment is the record.
       return Action::none();
     }
-    case Button::Back:
+    case Gesture::Back:
       // Out of a folder, or off the Library entirely. Ascending is a content
       // change within one screen, so it is a Redraw; leaving is a Pop, and the
       // App's transition flag makes that the screen change it is.
