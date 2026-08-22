@@ -1476,9 +1476,23 @@ void setup() {
   // renders empty. That is the screen behaving correctly -- it must not draw a row
   // it was not given -- and it would look exactly like an empty /books, which is
   // the failure that is hard to spot.
-  const int libraryRows = gTheme.libraryVisibleRows(panelH, fonts);
+  // ASK THE FRAME, not the driver. display.getDisplayWidth()/Height() are the
+  // panel's NATIVE LANDSCAPE 792x528; the logical canvas every screen draws
+  // against is portrait 528x792, which is why gFrame is constructed with the two
+  // swapped. Passing panelH here handed libraryVisibleRows 528 as the height and
+  // it returned 4 rows where the canvas fits 7 -- three books a screen, silently,
+  // and a number nothing else in the firmware could contradict.
+  //
+  // gFrame->height() cannot drift from what is actually drawn into, which is the
+  // whole point: this value decides scrolling, and a screen that scrolls against
+  // a height it does not have is a defect no golden can see (the goldens render
+  // at an explicit geometry and never consult the driver).
+  const int logicalW = gFrame->width(), logicalH = gFrame->height();
+  const int libraryRows = gTheme.libraryVisibleRows(logicalH, fonts);
   gFactory.setLibraryVisibleRows(libraryRows);
-  Serial.printf("[boot] Library fits %d rows on this %dx%d panel\n", libraryRows, panelW, panelH);
+  Serial.printf("[boot] Library fits %d rows on this %dx%d logical canvas "
+                "(panel is %dx%d native)\n",
+                libraryRows, logicalW, logicalH, panelW, panelH);
   Serial.flush();
 
   // The shell's own view of storage, which is what roots the app and what the
