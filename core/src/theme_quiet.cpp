@@ -653,12 +653,10 @@ void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
 
   // The bar and the rows are measured before the title is laid out, because they
   // are what decides how many lines the title may have. Building the hints here
-  // rather than at the end is that: a slot's mark follows its LABEL, so the three
-  // dead buttons get neither, and the bar's height follows its content.
-  const Icon* const marks[4] = {&icons::kBack, &icons::kDot, &icons::kUp, &icons::kDown};
+  // rather than at the end is that: buildHints leaves the three dead buttons
+  // markless, and the bar's height follows its content.
   Hint hints[4];
-  for (int i = 0; i < 4; ++i)
-    hints[i] = {vm.hints[i].empty() ? nullptr : marks[i], vm.hints[i], vm.holds[i]};
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
 
   const int rows = static_cast<int>(vm.fields.size());
   int rowsH = 0;
