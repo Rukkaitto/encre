@@ -408,11 +408,24 @@ FakeFileSystem cardWithManyBooks(int n) {
   }
   return fs;
 }
+// Ink in the rail's column that is NOT one of the full-width rules crossing it.
+//
+// The header band's 2px rule and the hint bar's 1px rule both span the panel, so
+// counting the whole column reports ink for a screen that has no rail at all --
+// which a first version of this helper did, and it failed the no-rail case while
+// the rail itself was working. The rail stops kRailRightGap short of the edge by
+// construction, so a row inked all the way to the edge is a rule, not the rail.
 int railInkIn(const reader::Framebuffer& fb) {
+  const int x0 = fb.width() - reader::kRailRightGap - reader::kRailW;
   int n = 0;
-  for (int x = fb.width() - reader::kRailRightGap - reader::kRailW; x < fb.width(); ++x)
-    for (int y = 0; y < fb.height(); ++y)
+  for (int y = 0; y < fb.height(); ++y) {
+    bool spansToEdge = true;
+    for (int x = fb.width() - reader::kRailRightGap; x < fb.width(); ++x)
+      if (fb.getPixel(x, y)) spansToEdge = false;
+    if (spansToEdge) continue;
+    for (int x = x0; x < fb.width() - reader::kRailRightGap; ++x)
       if (!fb.getPixel(x, y)) ++n;
+  }
   return n;
 }
 }  // namespace
