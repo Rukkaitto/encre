@@ -613,19 +613,30 @@ static reader::HomeViewModel homeVmForCard() {
         (unsigned long)(rowN ? listHeld / rowN : 0), (unsigned long)(t3 - t2),
         (unsigned long)(rawHeld + listHeld), (unsigned)sizeof(reader::DirEntry),
         (unsigned)sizeof(reader::BookEntry));
-    // What a large library would cost at the measured rate -- the cap question in
-    // the one form that answers it. Extrapolated from however few books are on
-    // the card, so it is only as good as the per-row figure above; the fixed part
-    // (the sizeofs) is exact and the variable part is one name string per row.
+    // Extrapolated, with both distortions named, because a number this drives a
+    // decision from has to carry its own error bars.
+    //
+    //  * `peak` is an UPPER BOUND, not a measurement. It adds the two retained
+    //    figures, and the names are MOVED from one to the other rather than
+    //    copied -- so every byte of every book's name is counted twice in it.
+    //  * `retained/row` is INFLATED whenever rows < entries, because scan()
+    //    reserves for the whole listing (`out.reserve(raw.size())`) and a folder
+    //    with non-book files pays for slots it never fills. Reserving is still
+    //    right -- reallocating mid-scan is worse -- but it means a card whose
+    //    /books holds covers or metadata files reads high here.
+    //
+    // Both distortions shrink toward nothing on a real library, where entries
+    // and rows converge. THE FIX FOR A BAD FIGURE HERE IS MORE BOOKS ON THE
+    // CARD, not more arithmetic: `make epubs-bulk N=200`.
     if (rowN) {
       const uint32_t perRow = listHeld / rowN;
-      const uint32_t perRowPeak = (rawHeld + listHeld) / rowN;
-      Serial.printf("[library] extrapolated: 1024 rows = %lu KB retained / %lu KB peak;"
-                    " 4096 rows = %lu KB / %lu KB\n",
+      Serial.printf("[library] extrapolated retained: 256 rows = %lu KB, "
+                    "1024 rows = %lu KB, 4096 rows = %lu KB "
+                    "(inflated %ux by rows<entries)\n",
+                    (unsigned long)(perRow * 256u / 1024u),
                     (unsigned long)(perRow * 1024u / 1024u),
-                    (unsigned long)(perRowPeak * 1024u / 1024u),
                     (unsigned long)(perRow * 4096u / 1024u),
-                    (unsigned long)(perRowPeak * 4096u / 1024u));
+                    (unsigned)(rowN ? (rawN + rowN - 1) / rowN : 1));
     }
     Serial.flush();
   }

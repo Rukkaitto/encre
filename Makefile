@@ -1,4 +1,4 @@
-.PHONY: test sim firmware fonts icons compare epubs
+.PHONY: test sim firmware fonts icons compare epubs epubs-bulk
 # PlatformIO installs outside PATH by default; allow an override: make firmware PIO=/path/to/pio
 #
 # Invoked through its MODULE entry point rather than the `pio` launcher script.
@@ -125,5 +125,12 @@ icons:
 EPUB_OUT ?= build/epubs
 epubs:
 	$(PYTHON) tools/mkepub.py --out $(EPUB_OUT)
+# N small books with VARIED name lengths, for measuring what a book costs in RAM
+# on the device -- the [library] boot line's per-row figure is dominated by the
+# name string, and a three-book sample says nothing about the distribution.
+# Copy the result into /books on the card and read the boot log.
+BULK_N ?= 200
+epubs-bulk:
+	$(PYTHON) tools/mkepub.py --out $(EPUB_OUT) --bulk $(BULK_N)
 compare: sim
 	$(PYTHON) tools/compare-design.py $(COMPARE_ARGS)

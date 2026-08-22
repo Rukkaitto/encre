@@ -216,15 +216,56 @@ def build(out_dir, title, author, blurb, index):
     return path
 
 
+
+def build_bulk(out_dir, n):
+    """Write `n` small books with realistic, varied names.
+
+    Sizing a library cap needs a per-book memory figure, and that figure cannot
+    be had from three books: the name string dominates it and a three-name
+    sample says nothing about the distribution. These are deliberately NOT
+    uniform -- a real card's names run from "Emma.epub" to
+    "The Strange Case of Dr Jekyll and Mr Hyde - Robert Louis Stevenson.epub",
+    and the short ones fit in std::string's 15-char inline buffer while the long
+    ones each cost a heap allocation. A uniform name length would measure one
+    point on that curve and call it the answer.
+    """
+    firsts = ["Emma", "Villette", "Middlemarch", "Persuasion", "The Waves",
+              "Mansfield Park", "Wuthering Heights", "North and South",
+              "The Mill on the Floss", "Daniel Deronda", "Shirley", "Agnes Grey",
+              "The Tenant of Wildfell Hall", "Sense and Sensibility",
+              "A Portrait of the Artist as a Young Man", "Jude the Obscure"]
+    authors = ["Austen", "C Bronte", "Eliot", "Woolf", "Gaskell", "E Bronte",
+               "A Bronte", "Hardy", "Joyce", "Richardson"]
+    paths = []
+    for i in range(n):
+        title = firsts[i % len(firsts)]
+        author = authors[(i // len(firsts)) % len(authors)]
+        # The volume suffix keeps names unique without making them all the same
+        # length, which is the point.
+        name = "%s - %s" % (title, author) if i < len(firsts) * len(authors) \
+            else "%s v%d - %s" % (title, i, author)
+        paths.append(build(out_dir, name, author, "Bulk fixture for sizing.", 1000 + i))
+    return paths
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True, help="directory to write the .epub files into")
     ap.add_argument("--one", help='a single book as "Title|Author"')
+    ap.add_argument("--bulk", type=int, metavar="N",
+                    help="write N small books with varied name lengths, for "
+                         "measuring per-book memory cost on the device")
     args = ap.parse_args()
 
     out = pathlib.Path(args.out).expanduser()
     out.mkdir(parents=True, exist_ok=True)
+
+    if args.bulk:
+        made = build_bulk(out, args.bulk)
+        total = sum(p.stat().st_size for p in made)
+        print("%d books in %s, %d bytes total" % (len(made), out, total))
+        return
 
     books = BOOKS
     if args.one:
