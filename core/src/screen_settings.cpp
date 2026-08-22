@@ -154,16 +154,17 @@ void SettingsScreen::syncVm() {
   vm_.title = "SETTINGS";
   vm_.version = std::string("V ") + kVersion;
 
-  vm_.firstRow = window().firstVisible();
+  const ScrollWindow::Slice s = window().slice();
+  vm_.firstRow = s.first;
   vm_.totalRows = window().count();
+  // Slice's own rule: the focus as an index into what is drawn, or -1, so this
+  // cannot name a row that is not on glass.
+  vm_.focusedRow = s.focused;
 
   vm_.rows.clear();
-  const int first = window().firstVisible();
-  const int count = window().visibleCount();
-  vm_.rows.reserve(static_cast<size_t>(count));
-  vm_.focusedRow = -1;
-  for (int i = 0; i < count; ++i) {
-    const int at = first + i;
+  vm_.rows.reserve(static_cast<size_t>(s.count));
+  for (int i = 0; i < s.count; ++i) {
+    const int at = s.first + i;
     const Item& it = kItems[static_cast<size_t>(at)];
     SettingsRow row;
     row.label = it.label;
@@ -177,7 +178,6 @@ void SettingsScreen::syncVm() {
         case Field::None: row.value = it.placeholder; break;
       }
     }
-    if (at == window().focus()) vm_.focusedRow = i;
     vm_.rows.push_back(std::move(row));
   }
 

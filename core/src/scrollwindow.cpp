@@ -36,6 +36,15 @@ void ScrollWindow::clampWindow() {
   if (first_ < 0) first_ = 0;
 }
 
+ScrollWindow::Slice ScrollWindow::slice() const {
+  Slice s;
+  s.first = first_;
+  s.count = visibleCount();
+  const int f = focus_.index();
+  s.focused = (f >= s.first && f < s.first + s.count) ? f - s.first : -1;
+  return s;
+}
+
 int ScrollWindow::visibleCount() const {
   const int rest = focus_.count() - first_;
   if (rest <= 0) return 0;

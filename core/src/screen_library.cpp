@@ -131,15 +131,14 @@ void LibraryScreen::syncVm() {
 
   // The rail's two numbers. The theme cannot derive them: vm_.rows holds only
   // what is on screen, so "how far down a longer list is this" has to be said.
-  vm_.firstRow = window().firstVisible();
+  const ScrollWindow::Slice s = window().slice();
+  vm_.firstRow = s.first;
   vm_.totalRows = window().count();
 
   vm_.rows.clear();
-  const int first = window().firstVisible();
-  const int count = window().visibleCount();
-  vm_.rows.reserve(static_cast<size_t>(count));
-  for (int i = 0; i < count; ++i) {
-    const LibraryItem& item = items_[static_cast<size_t>(first + i)];
+  vm_.rows.reserve(static_cast<size_t>(s.count));
+  for (int i = 0; i < s.count; ++i) {
+    const LibraryItem& item = items_[static_cast<size_t>(s.first + i)];
     LibraryRow row;
     row.title = std::string(item.entry.title());
     row.isFolder = item.entry.isDir;
@@ -156,10 +155,9 @@ void LibraryScreen::syncVm() {
     vm_.rows.push_back(std::move(row));
   }
   // The focus as an index into the SLICE, or -1 when there is nothing selected
-  // or the window has no height. `visibleCount` is 0 in that case, so this
-  // cannot name a row that was not drawn.
-  const int focus = window().focus();
-  vm_.focusedRow = (focus >= first && focus < first + count) ? focus - first : -1;
+  // or the window has no height -- Slice's own rule, so this cannot name a row
+  // that was not drawn.
+  vm_.focusedRow = s.focused;
 }
 
 bool LibraryScreen::descend() {

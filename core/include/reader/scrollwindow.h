@@ -47,6 +47,19 @@ class ScrollWindow {
   // The first row on glass. Always 0 for a list that fits.
   int firstVisible() const { return first_; }
 
+  // THE WINDOW AS A VIEW-MODEL CONSUMES IT: which rows are on glass, and where
+  // the focus sits AMONG THEM. `focused` indexes the slice, not the list, and is
+  // -1 when the focus is not on glass -- an empty list, a heightless window --
+  // so a view-model built from a slice can never name a row that was not drawn.
+  // Library and Settings each derived these three numbers by hand, and the -1
+  // subtlety was documented on one copy and re-derived inside the other's loop.
+  struct Slice {
+    int first = 0;     // index into the whole list of the first row on glass
+    int count = 0;     // rows on glass -- visibleCount()
+    int focused = -1;  // the focus as an index into the slice, or -1
+  };
+  Slice slice() const;
+
   // How many rows a renderer may actually draw: visibleRows() in the middle of a
   // long list, fewer at the end of a short one, 0 for an empty list or a window
   // with no height. Callers loop over this rather than over visibleRows(), so a

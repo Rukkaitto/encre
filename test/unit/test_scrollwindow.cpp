@@ -317,3 +317,53 @@ TEST_CASE("a window built WithNone starts on the none slot and keeps it as a pos
   w.setCount(5);           // growing the list must not drag -1 onto row 0
   CHECK(w.focus() == -1);
 }
+
+// --- slice(): the window as the view-model consumes it ------------------------
+
+TEST_CASE("slice reports the visible rows and the focus as a slice index") {
+  // Library's and Settings' syncVm both derived these three numbers by hand, and
+  // the subtlety -- a focus that is not on glass must be -1, so a view-model can
+  // never name a row that was not drawn -- was documented on one copy and
+  // re-derived in the other.
+  ScrollWindow w(10, 3);
+  w.setFocus(5);
+  const ScrollWindow::Slice s = w.slice();
+  CHECK(s.first == w.firstVisible());
+  CHECK(s.count == 3);
+  CHECK(s.focused == 5 - w.firstVisible());
+  CHECK(s.focused >= 0);
+  CHECK(s.focused < s.count);
+}
+
+TEST_CASE("slice of an empty list names no row") {
+  ScrollWindow w(0, 3);
+  const ScrollWindow::Slice s = w.slice();
+  CHECK(s.first == 0);
+  CHECK(s.count == 0);
+  CHECK(s.focused == -1);
+}
+
+TEST_CASE("slice of a heightless window names no row, whatever the focus") {
+  // A screen asked before it has been told its metrics: the focus survives (it
+  // is simply not on glass) and the slice must say so rather than name a row
+  // nothing drew.
+  ScrollWindow w(10, 0);
+  w.setFocus(4);
+  const ScrollWindow::Slice s = w.slice();
+  CHECK(s.count == 0);
+  CHECK(s.focused == -1);
+}
+
+TEST_CASE("slice at the end of a short list reports fewer rows than the window holds") {
+  ScrollWindow w(5, 3);
+  w.setFocus(4);
+  const ScrollWindow::Slice s = w.slice();
+  CHECK(s.first == 2);
+  CHECK(s.count == 3);
+  CHECK(s.focused == 2);
+  w.setCount(2);  // the list shrank under the window
+  const ScrollWindow::Slice t = w.slice();
+  CHECK(t.first == 0);
+  CHECK(t.count == 2);
+  CHECK(t.focused == 1);  // the focus was pulled back into range and is on glass
+}
