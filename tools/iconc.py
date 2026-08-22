@@ -134,6 +134,16 @@ ICONS = {
         "source": "design/Main.dc.html",
         "match": "M8 3.2C6.6 2",
     },
+    # The SAME path at a different size, which is why it is a second entry rather
+    # than a second use of kBook: these are pre-rendered bitmaps, so a 112px mark
+    # and a 25px one are two assets. The matcher keys on path data, and both boards
+    # carry this path -- so `source` is what disambiguates them, and it has to.
+    "book_large": {
+        "symbol": "kBookLarge",
+        "note": "the empty-library mark, 112px on HomeEmpty",
+        "source": "design/HomeEmpty.dc.html",
+        "match": "M8 3.2C6.6 2",
+    },
     "folder": {
         "symbol": "kFolder",
         "note": "folder: a Library directory row",

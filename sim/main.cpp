@@ -269,12 +269,13 @@ int main(int argc, char** argv) {
   const bool isBookDetails = std::strcmp(argv[1], "book_details") == 0;
   const bool isSettings = std::strcmp(argv[1], "settings") == 0;
   const bool isSleep = std::strcmp(argv[1], "sleep") == 0;
+  const bool isHomeEmpty = std::strcmp(argv[1], "home_empty") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
-      !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep) {
+      !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
-                 "'sleep' or 'app')\n",
+                 "'sleep', 'home_empty' or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -346,8 +347,13 @@ int main(int argc, char** argv) {
     shown.fullOnTransition = true;
     factory.setSettings(shown);
   }
+  // The empty variant is a different ROOT, not a different navigation: it is Home
+  // with nothing to continue, so there is no journey that reaches it -- the card
+  // is what decides, and on the desktop that is a choice of view model.
   reader::App app(
-      std::make_unique<reader::HomeScreen>(reader::demoHomeVm(), reader::demoHomeTargets()),
+      std::make_unique<reader::HomeScreen>(
+          isHomeEmpty ? reader::demoHomeEmptyVm() : reader::demoHomeVm(),
+          reader::demoHomeTargets()),
       factory);
 
   if (isLibrary) {

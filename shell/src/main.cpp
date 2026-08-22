@@ -707,8 +707,25 @@ static void armCardProbes(const char* why) {
 // It is one directory listing plus one per folder, at boot and after a retry
 // only. Not on a paint, and not on a timer.
 static reader::HomeViewModel homeVmForCard() {
-  reader::HomeViewModel vm = reader::demoHomeVm();
   const int books = gStorageUsable ? reader::BookList::countLibrary(gSd, reader::kBooksRoot) : -1;
+
+  // NO BOOKS ON THE CARD is its own state, not Home with a blank count: there is
+  // nothing to continue, so the whole reading column goes and the board's
+  // explanation takes its place. design/HomeEmpty.dc.html.
+  //
+  // EXACTLY zero, and only when the card was readable. `books < 0` means /books
+  // could not be read at all -- a card that is present but unreadable, or absent
+  // -- and telling that user "no books yet, copy some onto the card" would be
+  // advice about a card the device cannot see. They keep the ordinary Home, whose
+  // LIBRARY row shows a blank count, and the SD-missing screen handles the case
+  // where the card really has gone.
+  reader::HomeViewModel vm =
+      books == 0 ? reader::demoHomeEmptyVm() : reader::demoHomeVm();
+  if (books == 0) {
+    Serial.printf("[boot] /books holds no readable book: Home shows the empty state\n");
+    Serial.flush();
+    return vm;
+  }
 
   // WHAT A BOOK COSTS IN RAM -- OFF BY DEFAULT, because it is not free.
   //

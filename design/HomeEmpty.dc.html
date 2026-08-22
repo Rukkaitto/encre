@@ -34,11 +34,28 @@
   </div>
   <div style="display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 44px 24px 0 24px; flex-shrink: 1; min-height: 0; overflow: hidden; text-align: center;">
     <svg width="112" height="112" viewBox="0 0 16 16" fill="none"><path d="M8 3.2C6.6 2 4.3 1.7 2 2v11c2.3-.3 4.6 0 6 1.2 1.4-1.2 3.7-1.5 6-1.2V2c-2.3-.3-4.6 0-6 1.2z" stroke="#000000" stroke-width="0.9"></path><path d="M8 3.2v11" stroke="#000000" stroke-width="0.9"></path></svg>
-    <div style="font-size: 39px; font-weight: 700; letter-spacing: 0.06em;">NO BOOKS YET</div>
-    <div style="font-size: var(--t-body); line-height: 1.55; max-width: 400px;">Copy EPUB files onto the SD card, or send them from your computer&rsquo;s browser over Wi-Fi.</div>
-    <div style="width: 420px;"><div style="background: #000000; color: #ffffff; height: 72px; display: flex; align-items: center; justify-content: center;">
-  <div style="font-size: var(--t-value); letter-spacing: 0.18em; font-weight: 700;">SEND BOOKS OVER WI-FI</div>
-</div></div>
+    <!-- ON THE RAMP, at `--t-title`. This said 39px, which is in no role -- the
+         same call the Sleep screen's title needed, and 42px is the nearest thing
+         that exists. The 0.06em goes with it: Title700 is drawn untracked
+         everywhere else it appears. -->
+    <div style="font-size: var(--t-title); font-weight: 700;">NO BOOKS YET</div>
+    <!-- CARD ONLY. This read "Copy EPUB files onto the SD card, or send them from
+         your computer's browser over Wi-Fi", above a 72px black slab reading SEND
+         BOOKS OVER WI-FI -- and Wi-Fi is out of V1 as too big, so the slab was a
+         primary action that could not work.
+         
+         There is NO action slab now, and that is the right shape rather than a
+         compromise: the only way to get a book onto this device is to put the card
+         in a computer, which is not something a button on the device can do. A
+         screen whose whole job is to explain a state should explain it, not offer
+         a control that leads nowhere. The Wi-Fi slab returns with Wi-Fi.
+
+         `/books` rather than a bolded "books", which is what this said. Prose in
+         this firmware is ONE face -- drawProse takes a single Font -- so a bold
+         word inside a sentence is a capability nothing has and one screen is a
+         thin reason to build it. A path is also the less ambiguous way to name a
+         folder. -->
+    <div style="font-size: var(--t-body); line-height: 1.55; max-width: 400px;">Put the SD card in your computer and copy EPUB files into its /books folder.</div>
   </div>
   <!-- THE MENU IS MAIN'S MENU, and this board's copy had drifted from it: it used
        `--t-value` sentence-case labels with a `border-bottom`, where Main.dc.html
@@ -49,7 +66,17 @@
        Only the VALUE differs, and it is the whole point of this board: `EMPTY`
        where Home shows a count. -->
   <div style="display: flex; flex-direction: column; margin-top: auto;">
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000;">
+    <!-- FOCUSED. This board inked neither row, which cannot be right on a screen
+         whose hint bar says SELECT -- there has to be something selected for it to
+         select. Home puts its focus on the CONTINUE block and there is no CONTINUE
+         block here, so it falls to the first row that does anything.
+
+         IT KEEPS ITS `border-top`, which is invisible against the fill and is the
+         point: an unfocused row is 80px plus a 1px rule and dropping the rule made
+         the focused one 80px, so the menu's total height depended on whether a row
+         was focused -- and the whole block would step a pixel the moment focus
+         entered it. Black on black costs nothing and holds the pitch at 81. -->
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000; background: #000000; color: #ffffff;">
       <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">LIBRARY</div>
       <div style="font-size: var(--t-value); font-weight: 700;">EMPTY</div>
     </div>

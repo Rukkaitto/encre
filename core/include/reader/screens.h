@@ -17,6 +17,9 @@ namespace reader {
 HomeViewModel demoHomeVm();
 
 // Home's menu rows, in order, and the screen each one opens.
+// design/HomeEmpty.dc.html -- Home with nothing to continue.
+HomeViewModel demoHomeEmptyVm();
+
 std::vector<ScreenId> demoHomeTargets();
 
 // design/Sleep.dc.html's own values -- see the definition.

@@ -71,6 +71,22 @@ constexpr int kPromptActionW = 260;
 constexpr const Icon* kLibraryMarks[4] = {&icons::kBack, &icons::kDot, &icons::kUp,
                                           &icons::kDown};
 
+// design/HomeEmpty.dc.html's own numbers: a 44px top pad, the 20px flex `gap`
+// between the mark, the title and the copy, and the copy's `max-width`.
+// The board's `padding: 18px 24px 0` on the battery strip.
+constexpr int kEmptyStripTop = 18;
+constexpr int kEmptyTopPad = 44;
+constexpr int kEmptyGap = 20;
+constexpr int kEmptyProseMaxW = 400;
+
+// Home's hint marks. Slot 0 is the BOOK, because Home's first hint is READ -- and
+// on the empty variant that slot has no label at all, which by the hint bar's own
+// rule means no mark: a mark over an empty slot is an affordance for an action
+// that is not there, and it measures 32px where the board measures 36 and shifts
+// every other slot along.
+constexpr const Icon* kHomeMarks[4] = {&icons::kBook, &icons::kDot, &icons::kUp,
+                                       &icons::kDown};
+
 void libraryHints(const LibraryViewModel& vm, Hint out[4]) {
   for (int i = 0; i < 4; ++i) out[i] = {kLibraryMarks[i], vm.hints[i], vm.holds[i]};
 }
@@ -106,6 +122,74 @@ void drawCoverPlaceholder(Framebuffer& fb, int x, int y, int w, int h) {
 void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeViewModel& vm,
                             Plane plane) {
   fb.clear(true);
+
+  Hint homeHints[4];
+  for (int i = 0; i < 4; ++i)
+    homeHints[i] = {vm.hints[static_cast<size_t>(i)].empty() ? nullptr : kHomeMarks[i],
+                    vm.hints[static_cast<size_t>(i)], vm.holds[static_cast<size_t>(i)]};
+
+  if (vm.libraryEmpty) {
+    // NOT A HEADER BAND, and drawHeaderBand is the wrong primitive for it. This
+    // board's top strip is a bare right-aligned battery -- `padding: 18px 24px 0`,
+    // no label and NO `border-bottom` -- where the band has a label and a 2px
+    // rule. Reaching for the band with an empty label drew that rule, which is a
+    // line the board does not have.
+    //
+    // Inline rather than a `drawHeaderBandNoRule`: the board makes this a
+    // different element, not a variant of one, and there is exactly one of it.
+    // `NOW READING` is also absent for a reason -- it would be a claim about a
+    // book that does not exist.
+    const Font& pct = fonts[Role::Value700];
+    const std::string charge = std::to_string(vm.batteryPercent) + "%";
+    const int chargeW = pct.measure(charge);
+    const int stripRight = fb.width() - kMargin;
+    const int battX = stripRight - icons::kBattery.w;
+    const int textX = battX - kBandGap - chargeW;
+    int ey = kEmptyStripTop;
+    drawIcon(fb, icons::kBattery, battX, iconTopIn(ey, pct.lineHeight(), icons::kBattery.h),
+             Ink::Black, plane);
+    drawText(fb, pct, textX, baselineIn(pct, ey, pct.lineHeight()), charge, Ink::Black, {},
+             plane);
+    ey += pct.lineHeight();
+    const Font& big = fonts[Role::Title700];
+    const Font& copy = fonts[Role::Body400];
+    const int colW = fb.width() - 2 * kMargin;
+
+    // 1/64 px through the column, for the reason renderSdMissing gives: the
+    // paragraph's height is a fraction (1.55 x 29px is 44.95) and rounding it
+    // before the next element would move everything below it.
+    const int proseW = colW < kEmptyProseMaxW ? colW : kEmptyProseMaxW;
+    const Prose lines = wrapProse(copy, vm.emptyBody, proseW, kProseLeadEm);
+
+    int eyF26 = pxToF26(ey + kEmptyTopPad);
+    drawIcon(fb, icons::kBookLarge, centreIn(kMargin, colW, icons::kBookLarge.w),
+             f26ToPx(eyF26), Ink::Black, plane);
+    eyF26 += pxToF26(icons::kBookLarge.h + kEmptyGap);
+
+    drawText(fb, big, centreIn(kMargin, colW, big.measure(vm.emptyTitle)),
+             baselineInF26(big, eyF26, pxToF26(big.lineHeight())), vm.emptyTitle, Ink::Black, {},
+             plane);
+    eyF26 += pxToF26(big.lineHeight() + kEmptyGap);
+
+    drawProse(fb, copy, lines, centreIn(kMargin, colW, proseW), proseW, eyF26, Ink::Black, plane);
+
+    // The menu and the bar sit exactly where Home's do: this is a VARIANT of one
+    // screen, and a menu that moved between the two would read as a different
+    // screen rather than a different state. Same call, same rule for the trailing
+    // mark -- a row states a quantity or discloses a screen, never both.
+    const int menuTop = fb.height() - hintBarHeight(fonts, homeHints) -
+                        static_cast<int>(vm.menu.size()) * kRowH;
+    for (size_t i = 0; i < vm.menu.size(); ++i) {
+      const bool discloses = vm.menu[i].value.empty();
+      drawRow(fb, fonts, menuTop + static_cast<int>(i) * kRowH, vm.menu[i].label,
+              vm.menu[i].value, static_cast<int>(i) == vm.focusedMenuIndex,
+              discloses ? &icons::kChevron : nullptr, plane);
+    }
+    int slots[4] = {};
+    drawHintBar(fb, fonts, homeHints, slots, plane);
+    return;
+  }
+
   int y = drawHeaderBand(fb, fonts, "NOW READING", std::to_string(vm.batteryPercent) + "%",
                              &icons::kBattery, plane);
 
