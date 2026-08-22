@@ -24,7 +24,7 @@ make sim        # render Home to build/home.png
 make firmware   # build for the ESP32-C3
 make fonts      # regenerate the .rfnt type ramp and embedded headers
 make icons      # regenerate icon bitmaps from the design boards' SVG
-make compare    # design-vs-firmware contact sheet for every screen
+make compare    # design-vs-firmware contact sheet, all 28 boards (~2.5 min)
 ```
 
 `make compare COMPARE_ARGS="--only home --export build/overlay"` writes bare
@@ -40,6 +40,15 @@ only in code, and not the other way round — including when the design itself i
 what is wrong (fix the board, then follow it). `make compare` is what keeps them
 honest; changing only the implementation silently invalidates it and the goldens
 stop meaning anything.
+
+**And it has to actually cover the screen.** Until a cold-read review found it,
+`make compare` defaulted to the seven V1 boards, so it compared Home and Library
+and skipped four of the six implemented screens — while CLAUDE.md called it the
+check that keeps the design honest. `--only <flow screen>` matched nothing at all,
+silently. The default is now every board, and `--only` errors on an id it does not
+recognise rather than reporting `0/0`. **A check that reports on less than it
+claims is worse than no check, because it is trusted** — the same shape as the
+card probe that was answered from cache and kept reporting success.
 
 ## Hardware facts
 

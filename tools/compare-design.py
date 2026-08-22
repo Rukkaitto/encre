@@ -279,8 +279,11 @@ def compose(rows, out, geom_keys, pairs_per_row=2):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--all", action="store_true", help="include flows and states")
-    ap.add_argument("--only", help="comma-separated screen ids")
+    ap.add_argument("--all", action="store_true",
+                    help="accepted and ignored; every screen is the default now. "
+                         "Kept so existing invocations and docs do not break.")
+    ap.add_argument("--only", help="comma-separated screen ids; errors on an "
+                                   "id that matches nothing")
     ap.add_argument("--geometry", choices=["x4", "x3", "both"], default="both",
                      help="device panel geometry to render: x4 (480x800), "
                           "x3 (528x792), or both (default)")
@@ -294,10 +297,25 @@ def main():
                          "placeholder, which would be useless to overlay.")
     args = ap.parse_args()
 
-    screens = V1_SCREENS + (FLOW_SCREENS if args.all else [])
+    # EVERY board, by default. This used to be `V1_SCREENS + (FLOW_SCREENS if
+    # args.all else [])`, which meant the documented `make compare` compared Home
+    # and Library and nothing else -- because four of the six screens the firmware
+    # actually implements (ItemActions, DeleteConfirm, BookDetails, SdMissing) live
+    # in FLOW_SCREENS. The fidelity check that CLAUDE.md calls "what keeps them
+    # honest" was running on a third of what it claimed, and `--only sd_missing`
+    # silently matched NOTHING because the filter ran over the already-narrowed
+    # list. Same quiet-degradation shape as the card probe that read from cache and
+    # kept reporting success (CLAUDE.md, Storage) -- a check that reports on less
+    # than it says is worse than no check, because it is trusted.
+    screens = V1_SCREENS + FLOW_SCREENS
     if args.only:
         want = {s.strip() for s in args.only.split(",")}
         screens = [s for s in screens if s[0] in want]
+        missing = want - {s[0] for s in screens}
+        if missing:
+            # A typo used to render zero screens and report "0/0 implemented",
+            # which reads like a pass.
+            raise SystemExit(f"--only names no such screen: {', '.join(sorted(missing))}")
     if not pathlib.Path(CHROME).exists():
         raise SystemExit(f"Chrome not found at {CHROME}")
 

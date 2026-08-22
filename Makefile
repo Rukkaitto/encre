@@ -110,11 +110,13 @@ fonts:
 # passed review twice while the book icon read as the letters "OC".
 icons:
 	$(PYTHON) tools/iconc.py --out core/src/icons_data.h --sheet build/icons_sheet.png
-# Design-vs-firmware contact sheet for every screen (needs Chrome + Pillow).
-# COMPARE_ARGS=--all includes the flows and states.
+# Design-vs-firmware contact sheet for EVERY screen (needs Chrome + Pillow).
+# All 28 boards, both geometries, ~2.5 minutes. It used to default to the seven
+# V1 screens, which meant it compared Home and Library and skipped four of the
+# six screens the firmware implements -- see the comment in compare-design.py.
 # COMPARE_ARGS=--geometry x3 narrows to one device panel (x4 480x800, x3
-# 528x792); default renders and pairs both. --only screen_id,... filters
-# screens.
+# 528x792); default renders and pairs both. --only screen_id,... filters screens
+# and now errors on an id that matches nothing.
 # Test EPUBs for the device and, later, for Phase 3's parser. A generator rather
 # than checked-in binaries for the same reason fonts and icons are generated: a
 # binary fixture is opaque, so when the parser disagrees with it you cannot see
