@@ -228,6 +228,32 @@ int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4],
 // then hollows): an outline deliberately leaves the middle alone.
 void outlineRect(Framebuffer& fb, int x, int y, int w, int h, int t, bool white = false);
 
+// --- A proportional bar --------------------------------------------------------
+//
+// A 1px outline with a fill INSIDE it, proportional to `percent`. Three boards
+// declare exactly this and declare it identically -- Main's reading progress,
+// Sleep's, and Reader's footer -- each as
+//
+//   width: Wpx; height: Hpx; border: 1px solid #000; box-sizing: border-box
+//
+// wrapping a child at `width: P%; height: 100%`. `box-sizing: border-box` is the
+// load-bearing word: the child's 100% is the CONTENT box, so the fill is `W - 2t`
+// by `H - 2t` inset by `t`, and P% is a fraction of `W - 2t`, not of `W`.
+//
+// This exists because the three call sites had two different answers. Main insets
+// the fill as the board says; Sleep painted it at full height over its own border
+// and took its percentage of the outer width, so its 8px bar was 2px too tall and
+// its fill up to 1px too wide -- on a bar 8 pixels tall, both are visible. Neither
+// was wrong on purpose; the four lines are just short enough to retype and get
+// subtly different, which is what a shared primitive is for.
+//
+// ROUNDED, not truncated, and once: Chrome resolves the child's width as a
+// fraction and snaps at the paint, so 6% of 208 is 12.48 and paints 12 -- while
+// 49% of 208 is 101.92 and paints 102, which truncation would put a pixel short.
+// `percent` is clamped to 0..100 rather than trusted, because a reading position
+// divided by a page count is arithmetic done elsewhere.
+void drawProgressBar(Framebuffer& fb, int x, int y, int w, int h, int percent, int t = 1);
+
 // One centred run in a box: measured, centred, drawn. The measure and the draw
 // take the SAME tracking, or the centring is off by the tracking's total -- the
 // hazard this exists to remove, since a caller centring by hand has to remember

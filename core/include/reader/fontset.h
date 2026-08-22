@@ -48,6 +48,7 @@ namespace reader {
 enum class Role : uint8_t {
   Meta400,
   Meta500,
+  Meta700,
   Label400,
   Label500,
   Value500,
@@ -74,6 +75,7 @@ constexpr RoleSpec roleSpec(Role r) {
   switch (r) {
     case Role::Meta400:    return {21, 400, 10};
     case Role::Meta500:    return {21, 500, 10};
+    case Role::Meta700:    return {21, 700, 10};
     case Role::Label400:   return {23, 400, 11};
     case Role::Label500:   return {23, 500, 11};
     case Role::Value500:   return {25, 500, 12};

@@ -44,15 +44,23 @@ firmware:
 # per size cannot do better than that, whichever weight it picks.
 #
 # Counted across all 46 boards (a run with no font-weight is CSS default 400):
-#   --t-meta     21px   188 at 400,  17 at 500,   4 at 700   -> shipping 400
+#   --t-meta     21px   188 at 400,  17 at 500,   4 at 700   -> shipping 400+500+700
 #   --t-label    23px    49 at 500,   8 at 400,   2 at 700   -> shipping 500
 #   --t-value    25px   122 at 700,  61 at 500,   8 at 400   -> shipping 700
 #   --t-body     29px    24 at 500,  11 at 400,   4 at 700   -> shipping 400+500+700
 #   --t-title    42px     6 at 700                           -> shipping 700
 #   --t-display  67px     2 at 700                           -> shipping 700
 # The second weights not listed as shipping belong to screens that do not exist
-# yet, and an unused face is 15-20KB of flash. Add one when its screen lands: a
-# line here, an entry in Role, a line in each loader. FontSet::load checks the
+# yet, and an unused face is 15-20KB of flash (10pt measures 27KB, so read that
+# range as a floor). Add one when its screen lands: a line here, an entry in
+# Role, a line in each loader.
+#
+# Meta700 is the first one added that way. Reader's footer sets its reading
+# percentage at 21px/700 against the page counter's 400, and the weight IS the
+# distinction -- it is what makes the percentage the primary reading of progress
+# rather than one of two equal numbers. Bookmarks wants it twice and LowBattery
+# once, so three screens were waiting on it. 27KB against a 6.5MB app partition
+# running at ~11% is not a reason to redraw a board. FontSet::load checks the
 # asset's declared ppem and weight against the role's, so a wrong binding is a
 # load failure at boot rather than a screen that is quietly the wrong weight.
 #
@@ -60,6 +68,7 @@ firmware:
 fonts:
 	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 10 --weight 400 --autohint --bpp 2 --out assets/built/spacegrotesk_400_10pt.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 10 --weight 500 --autohint --bpp 2 --out assets/built/spacegrotesk_500_10pt.rfnt
+	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 10 --weight 700 --autohint --bpp 2 --out assets/built/spacegrotesk_700_10pt.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 11 --weight 400 --autohint --bpp 2 --out assets/built/spacegrotesk_400_11pt.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 11 --weight 500 --autohint --bpp 2 --out assets/built/spacegrotesk_500_11pt.rfnt
 	$(PYTHON) tools/fontc.py assets/fonts/SpaceGrotesk.ttf --pt 12 --weight 500 --autohint --bpp 2 --out assets/built/spacegrotesk_500_12pt.rfnt
@@ -88,6 +97,7 @@ fonts:
 	$(PYTHON) tools/ttfprep.py assets/fonts/Literata.ttf --axis wght=400 --axis opsz=12 --out assets/built/literata_body.ttf
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_400_10pt.rfnt --out shell/src/font_meta400.h --symbol kFontMeta400
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_10pt.rfnt --out shell/src/font_meta500.h --symbol kFontMeta500
+	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_10pt.rfnt --out shell/src/font_meta700.h --symbol kFontMeta700
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_400_11pt.rfnt --out shell/src/font_label400.h --symbol kFontLabel400
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_11pt.rfnt --out shell/src/font_label500.h --symbol kFontLabel500
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_12pt.rfnt --out shell/src/font_value500.h --symbol kFontValue500

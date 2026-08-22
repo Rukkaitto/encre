@@ -181,6 +181,16 @@ void outlineRect(Framebuffer& fb, int x, int y, int w, int h, int t, bool white)
   fb.fillRect(x + w - t, y, t, h, white);
 }
 
+void drawProgressBar(Framebuffer& fb, int x, int y, int w, int h, int percent, int t) {
+  outlineRect(fb, x, y, w, h, t);
+  const int innerW = w - 2 * t;
+  const int innerH = h - 2 * t;
+  if (innerW <= 0 || innerH <= 0) return;
+  const int pct = percent < 0 ? 0 : (percent > 100 ? 100 : percent);
+  const int fill = (innerW * pct + 50) / 100;
+  if (fill > 0) fb.fillRect(x + t, y + t, fill, innerH, false);
+}
+
 void drawCentredText(Framebuffer& fb, const Font& font, int boxX, int boxW, int baseline,
                      std::string_view text, Ink ink, Tracking tracking, Plane plane) {
   const int w = font.measure(text, tracking);

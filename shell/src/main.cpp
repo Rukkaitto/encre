@@ -23,6 +23,7 @@
 #include "font_label500.h"
 #include "font_meta400.h"
 #include "font_meta500.h"
+#include "font_meta700.h"
 #include "font_title700.h"
 #include "font_value500.h"
 #include "font_value700.h"

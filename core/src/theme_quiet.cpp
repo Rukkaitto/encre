@@ -252,10 +252,7 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
 
   // Progress bar spans the usable width.
   const int barW = fb.width() - 2 * kMargin;
-  fb.fillRect(kMargin, y, barW, kBarH, false);
-  fb.fillRect(kMargin + 1, y + 1, barW - 2, kBarH - 2, true);
-  const int clamped = vm.percent < 0 ? 0 : (vm.percent > 100 ? 100 : vm.percent);
-  fb.fillRect(kMargin + 1, y + 1, (barW - 2) * clamped / 100, kBarH - 2, false);
+  drawProgressBar(fb, kMargin, y, barW, kBarH, vm.percent);
   y += kBarH + kBlockGap;
 
   // Continue block: focused when no menu row is.
@@ -824,10 +821,7 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   // and the same reason -- an outline plus a solid fill is what reads on this glass
   // hard-thresholded.
   const int barX = cx + centreIn(0, contentW, kSleepBarW);
-  outlineRect(fb, barX, y, kSleepBarW, kSleepBarH, 1);
-  const int pct = vm.progressPercent < 0 ? 0 : (vm.progressPercent > 100 ? 100 : vm.progressPercent);
-  const int fill = (kSleepBarW * pct + 50) / 100;  // rounded once
-  if (fill > 0) fb.fillRect(barX, y, fill, kSleepBarH, false);
+  drawProgressBar(fb, barX, y, kSleepBarW, kSleepBarH, vm.progressPercent);
   y += kSleepBarH + kSleepGap;
 
   drawCentredText(fb, progress, cx, contentW, baselineIn(progress, y, progress.lineHeight()),
