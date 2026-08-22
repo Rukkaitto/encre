@@ -295,7 +295,7 @@ TEST_CASE("a chapter streamed from a card reads the same as one from memory") {
   const char* why = "";
   REQUIRE_MESSAGE(reader::openBook(fs, "/books/b.epub", 0, ob, &why), std::string(why));
 
-  reader::ReaderScreen fromCard(fs, ob.chapter, "T", "CH. 01", &body.face);
+  reader::ReaderScreen fromCard(fs, "/books/b.epub", "T", ob.chapterCount, 0, &body.face);
   fromCard.setMetrics(m);
 
   // The same chapter's bytes, read out whole and streamed from memory instead.
@@ -313,4 +313,132 @@ TEST_CASE("a chapter streamed from a card reads the same as one from memory") {
   REQUIRE(fromCard.pageCount() == fromMemory.pageCount());
   CHECK(fromCard.pageCount() > 0);
   CHECK(pageText(fromCard.page()) == pageText(fromMemory.page()));
+}
+
+
+TEST_CASE("PAGING OFF THE END OF A CHAPTER OPENS THE NEXT ONE") {
+  // What makes this a reader rather than a chapter viewer -- and the defect the
+  // device found: spine entry 0 of a real EPUB is a cover, one <img> and no text, so
+  // it paginates to nothing. Skipping to the first chapter with text would only have
+  // moved the dead end to the bottom of that chapter.
+  //
+  // The fixture is a two-chapter EPUB, so reaching the second one can only happen
+  // by paging into it.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+
+  FakeFileSystem fs;
+  REQUIRE(fs.writeAll("/books/b.epub",
+                      std::string_view(reinterpret_cast<const char*>(epubfix::kEpubGood),
+                                       epubfix::kEpubGoodLen)));
+  reader::OpenedBook ob;
+  const char* why = "";
+  REQUIRE_MESSAGE(reader::openBook(fs, "/books/b.epub", 0, ob, &why), std::string(why));
+
+  reader::ReaderScreen scr(fs, "/books/b.epub", ob.title, ob.chapterCount, 0, &body.face);
+  scr.setMetrics(m);
+  REQUIRE(scr.pageCount() > 0);
+  const int firstChapter = scr.chapterIndex();
+  const std::string firstPage = pageText(scr.page());
+
+  const reader::InputEvent down{reader::Button::Down, reader::PressKind::Short};
+  const reader::InputEvent up{reader::Button::Up, reader::PressKind::Short};
+
+  // Page to the end of this chapter.
+  int guard = 0;
+  while (scr.chapterIndex() == firstChapter && guard++ < 200) {
+    if (scr.onEvent(down).kind != reader::Action::Kind::Redraw) break;
+  }
+  if (ob.chapterCount > 1) {
+    // It moved on rather than stopping.
+    CHECK(scr.chapterIndex() > firstChapter);
+    CHECK(scr.pageCount() > 0);
+    CHECK(scr.vm().page == 1);  // landed on the new chapter's FIRST page
+    // The label follows the spine position.
+    CHECK(scr.vm().chapter != "CH. 01");
+
+    // And back off the top lands on the PREVIOUS chapter's LAST page, not its first.
+    REQUIRE(scr.onEvent(up).kind == reader::Action::Kind::Redraw);
+    CHECK(scr.chapterIndex() == firstChapter);
+    CHECK(scr.vm().page == scr.pageCount());
+    // Paging back to the very start gives the page we began on.
+    int g2 = 0;
+    while (scr.vm().page > 1 && g2++ < 200) scr.onEvent(up);
+    CHECK(pageText(scr.page()) == firstPage);
+  }
+  // Off the very front of the book: refused, and nothing moves.
+  CHECK(scr.onEvent(up).kind == reader::Action::Kind::None);
+  CHECK(scr.chapterIndex() == firstChapter);
+}
+
+TEST_CASE("A CHAPTER THAT PAGINATES TO NOTHING IS SKIPPED, not shown blank") {
+  // The device's exact symptom: a blank page reading 0/0. Three of the 92 spine
+  // entries in one real book are an <img> and nothing document.h models.
+  //
+  // Built here rather than mocked: a two-entry EPUB whose FIRST entry has no text.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+
+  // The in-memory constructor is the one place a textless chapter can be handed
+  // over directly, and it must not pretend to have a page.
+  reader::ReaderScreen empty("<html><body><img src=\"cover.png\"/></body></html>", "T",
+                             "CH. 01", &body.face);
+  empty.setMetrics(m);
+  CHECK(empty.pageCount() == 0);
+  CHECK(empty.vm().pageTotal == 0);
+  CHECK(empty.page().lines.empty());
+  // And it does not claim a page it does not have.
+  CHECK(empty.vm().page == 0);
+  CHECK(empty.vm().progressPercent == 0);
+}
+
+TEST_CASE("A REFUSED CHAPTER TURN LEAVES THE SCREEN WHERE IT WAS") {
+  // Running off either end of the book used to corrupt the screen: the walk opens
+  // each candidate before it can know whether that candidate has pages, so the last
+  // one tried was left in `chapterAt_` with an empty index -- the device reported
+  // "spine 0, page 1/7" for a spine entry with no pages at all, with a stale page
+  // still on the panel.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+
+  FakeFileSystem fs;
+  REQUIRE(fs.writeAll("/books/b.epub",
+                      std::string_view(reinterpret_cast<const char*>(epubfix::kEpubGood),
+                                       epubfix::kEpubGoodLen)));
+  reader::OpenedBook ob;
+  const char* why = "";
+  REQUIRE(reader::openBook(fs, "/books/b.epub", 0, ob, &why));
+
+  reader::ReaderScreen scr(fs, "/books/b.epub", ob.title, ob.chapterCount, 0, &body.face);
+  scr.setMetrics(m);
+  REQUIRE(scr.pageCount() > 0);
+
+  const reader::InputEvent up{reader::Button::Up, reader::PressKind::Short};
+  // Page back to the very front of the book.
+  int guard = 0;
+  while (scr.onEvent(up).kind == reader::Action::Kind::Redraw && guard++ < 2000) {
+  }
+  // Whatever it landed on, it is a REAL position: a page count, a page inside it,
+  // and lines on the screen.
+  CHECK(scr.pageCount() > 0);
+  CHECK(scr.vm().pageTotal == scr.pageCount());
+  CHECK(scr.vm().page >= 1);
+  CHECK(scr.vm().page <= scr.pageCount());
+  CHECK_FALSE(scr.page().lines.empty());
+  // And a further refusal changes nothing.
+  const int wasChapter = scr.chapterIndex();
+  const int wasPage = scr.vm().page;
+  CHECK(scr.onEvent(up).kind == reader::Action::Kind::None);
+  CHECK(scr.chapterIndex() == wasChapter);
+  CHECK(scr.vm().page == wasPage);
+  CHECK_FALSE(scr.page().lines.empty());
 }

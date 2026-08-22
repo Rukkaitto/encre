@@ -222,14 +222,14 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // caller can act on a refused push.
       if (readerBody_ == nullptr) return nullptr;
       const std::string title = readerBookTitle_.empty() ? "Middlemarch" : readerBookTitle_;
-      const std::string chapter = readerChapter_.empty() ? "CH. 01" : readerChapter_;
       std::unique_ptr<ReaderScreen> scr;
-      if (readerWhere_.bookPath.empty() || fs_ == nullptr) {
+      if (readerPath_.empty() || fs_ == nullptr) {
         // The demo content, streamed from memory. Also the fallback when there is
         // no filesystem at all, which is the simulator and every golden.
-        scr = std::make_unique<ReaderScreen>(demoReaderXhtml(), title, chapter, readerBody_);
+        scr = std::make_unique<ReaderScreen>(demoReaderXhtml(), title, "CH. 01", readerBody_);
       } else {
-        scr = std::make_unique<ReaderScreen>(*fs_, readerWhere_, title, chapter, readerBody_);
+        scr = std::make_unique<ReaderScreen>(*fs_, readerPath_, title, readerChapterCount_,
+                                            readerStartChapter_, readerBody_);
       }
       // The expensive call: one decode of the chapter to build the page index.
       scr->setMetrics(readerMetrics_);

@@ -293,3 +293,23 @@ TEST_CASE("the caps still fire in the streaming form") {
   CHECK_FALSE(r2.ok());
   CHECK(count == static_cast<int>(reader::kMaxBlocks));  // it stopped AT the cap
 }
+
+TEST_CASE("A PARAGRAPH OF NOTHING BUT NBSP IS DROPPED") {
+  // `<p>&nbsp;</p>` is how an ebook makes vertical space and it is everywhere: the
+  // first text chapter of a real EPUB opens with THREE of them, and the device
+  // showed a page whose first line was a blank space because each survived as a
+  // two-byte block and took a line.
+  //
+  // U+00A0 is whitespace for THIS question only -- inside text it is kept, because
+  // there it is deliberate.
+  CHECK(flatten("<body><p>\xC2\xA0</p><p>real</p></body>") == "P[real]");
+  CHECK(flatten("<body><p>\xC2\xA0</p><p>\xC2\xA0</p><p>\xC2\xA0</p><p>x</p></body>") == "P[x]");
+  CHECK(flatten("<body><p> \xC2\xA0 \n</p><p>x</p></body>") == "P[x]");
+  // Kept where it is part of the sentence: French sets one before a colon, and
+  // collapsing it would let the line break in the wrong place.
+  // SPLIT LITERALS, because `\x` eats unbounded hex digits: "\xA0b" is 0xA0B and
+  // does not fit a char, so the compiler rejects it. The lines above happen to be
+  // followed by ':' or '<', which are not hex.
+  CHECK(flatten("<p>Note\xC2\xA0" ": ceci</p>") == "P[Note\xC2\xA0" ": ceci]");
+  CHECK(flatten("<p>a\xC2\xA0" "b</p>") == "P[a\xC2\xA0" "b]");
+}

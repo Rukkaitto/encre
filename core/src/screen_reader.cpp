@@ -1,7 +1,9 @@
 #include "reader/screen_reader.h"
 
+#include <cstdio>
 #include <new>
 
+#include "reader/book.h"
 #include "reader/glyphsource.h"
 #include "reader/theme.h"
 
@@ -16,16 +18,18 @@ constexpr int kMaxPages = 4096;
 
 }  // namespace
 
-ReaderScreen::ReaderScreen(FileSystem& fs, const ChapterLocation& where,
-                           std::string bookTitle, std::string chapter,
-                           const GlyphSource* body)
+ReaderScreen::ReaderScreen(FileSystem& fs, std::string bookPath, std::string bookTitle,
+                           int chapterCount, int startChapter, const GlyphSource* body)
     : body_(body),
       bookTitle_(std::move(bookTitle)),
-      chapter_label_(std::move(chapter)) {
-  // The stream is opened here so a book that cannot be read says so before the
-  // screen is pushed; the pagination waits for setMetrics, which is the first
-  // moment a column height exists.
-  chapter_.begin(fs, where);
+      fs_(&fs),
+      bookPath_(std::move(bookPath)),
+      chapterCount_(chapterCount),
+      chapterAt_(startChapter) {
+  // Nothing is opened here: a chapter cannot be paginated without a column height,
+  // and setMetrics is the first moment one exists. So the constructor is cheap and
+  // the work is in one place rather than half in each.
+  updateChapterLabel();
   syncVm();
 }
 
@@ -42,10 +46,79 @@ ReaderScreen::~ReaderScreen() = default;
 
 void ReaderScreen::setMetrics(const PageMetrics& m) {
   metrics_ = m;
+  if (fs_ != nullptr && !bookPath_.empty()) {
+    // The expensive call: locating the chapter and decoding it once to index its
+    // pages, plus however many empty spine entries have to be skipped to reach
+    // text.
+    openChapterAt(chapterAt_, false);
+    return;
+  }
+  // The in-memory chapter: already begun by the constructor.
   buildIndex();
   at_ = 0;
   seekTo(0);
   syncVm();
+}
+
+void ReaderScreen::updateChapterLabel() {
+  // The SPINE POSITION, not a chapter number, and the distinction is real: spine
+  // entry 0 of a real book is its cover. Without a table of contents -- which is
+  // design/Contents.dc.html and is not built -- the position is the only thing
+  // honestly known, so that is what is shown.
+  char buf[16];
+  std::snprintf(buf, sizeof(buf), "CH. %02d", chapterAt_ + 1);
+  chapter_label_.assign(buf);
+}
+
+bool ReaderScreen::openChapterAt(int c, bool atEnd) {
+  // A FAILED TURN MUST LEAVE THE SCREEN WHERE IT WAS. The walk below opens each
+  // candidate before it can know whether that candidate has any pages, so running
+  // off either end of the book left `chapterAt_` on the last thing tried and
+  // `starts_` empty -- the device reported "spine 0, page 1/7" for a spine entry
+  // with no pages at all, with a stale page still on the panel.
+  const int wasAt = chapterAt_;
+  const int wasPage = at_;
+  if (walkToChapter(c, atEnd)) return true;
+  if (!starts_.empty() && chapterAt_ == wasAt) return false;  // nothing was disturbed
+  // Put back exactly what was showing. One extra chapter decode, once, at the
+  // book's edge.
+  if (walkToChapter(wasAt, false) && wasPage < static_cast<int>(starts_.size())) {
+    at_ = wasPage;
+    seekTo(at_);
+    updateChapterLabel();
+    syncVm();
+  }
+  return false;
+}
+
+bool ReaderScreen::walkToChapter(int c, bool atEnd) {
+  if (fs_ == nullptr || bookPath_.empty() || body_ == nullptr) return false;
+  const int dir = atEnd ? -1 : +1;
+
+  // Bounded by the spine's own length: every step moves one entry, so this cannot
+  // loop even if every chapter were empty.
+  for (int guard = 0; guard <= chapterCount_; ++guard) {
+    if (c < 0 || c >= chapterCount_) return false;
+
+    OpenedBook ob;
+    const char* why = "";
+    if (!openBook(*fs_, bookPath_, c, ob, &why)) return false;
+    if (!chapter_.begin(*fs_, ob.chapter)) return false;
+
+    chapterAt_ = c;
+    buildIndex();
+    if (!starts_.empty()) {
+      at_ = atEnd ? static_cast<int>(starts_.size()) - 1 : 0;
+      seekTo(at_);
+      updateChapterLabel();
+      syncVm();
+      return true;
+    }
+    // Nothing on this one -- a cover, a title page. Keep going the way we were
+    // heading rather than stopping on a blank page.
+    c += dir;
+  }
+  return false;
 }
 
 void ReaderScreen::buildIndex() {
@@ -153,7 +226,13 @@ Action ReaderScreen::onGesture(const GestureEvent& g) {
       // what accelerates a Library scroll; on a panel that costs ~520 ms a repaint
       // and a page that has to be decoded, a repeat that skipped four pages would
       // be four pages the reader never saw.
-      if (at_ + 1 >= static_cast<int>(starts_.size())) return Action::none();
+      if (at_ + 1 >= static_cast<int>(starts_.size())) {
+        // OFF THE END OF THE CHAPTER IS THE NEXT CHAPTER, which is what makes this a
+        // reader rather than a chapter viewer. Locating one costs a reopen and a
+        // directory parse -- ~76 ms on device -- against a ~520 ms refresh.
+        if (!openChapterAt(chapterAt_ + 1, false)) return Action::none();
+        return Action::redraw();
+      }
       // THE FAST PATH: continue the live stream rather than decoding the chapter
       // again. Falls back to a seek if the stream is not positioned -- after the
       // last page, or after a backward turn that spent the builder.
@@ -165,7 +244,13 @@ Action ReaderScreen::onGesture(const GestureEvent& g) {
       // Where the page index earns itself: the stream only goes forward, so an
       // earlier page means rewinding and decoding to its recorded cursor. Without
       // the index there would be no cursor to decode TO.
-      if (at_ <= 0) return Action::none();
+      if (at_ <= 0) {
+        // And back off the top is the PREVIOUS chapter's LAST page, so paging
+        // backwards through a book is continuous rather than stopping at each
+        // chapter's start.
+        if (!openChapterAt(chapterAt_ - 1, true)) return Action::none();
+        return Action::redraw();
+      }
       if (!seekTo(at_ - 1)) return Action::none();
       syncVm();
       return Action::redraw();

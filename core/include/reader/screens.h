@@ -124,10 +124,16 @@ class DemoScreenFactory : public ScreenFactory {
   // means the demo content: design/Reader.dc.html's own two paragraphs, streamed
   // from memory, which is what the simulator and the goldens render, on the same
   // reasoning as demoSleepVm().
-  void setReaderChapter(ChapterLocation where, std::string bookTitle, std::string chapter) {
-    readerWhere_ = std::move(where);
+  // THE BOOK, not one chapter: a path, its title, how many spine entries it has and
+  // which to open. An empty path means the demo content -- design/Reader.dc.html's
+  // own two paragraphs, streamed from memory, which is what the simulator and the
+  // goldens render, on the same reasoning as demoSleepVm().
+  void setReaderBook(std::string bookPath, std::string bookTitle, int chapterCount,
+                     int startChapter) {
+    readerPath_ = std::move(bookPath);
     readerBookTitle_ = std::move(bookTitle);
-    readerChapter_ = std::move(chapter);
+    readerChapterCount_ = chapterCount;
+    readerStartChapter_ = startChapter;
   }
 
  private:
@@ -143,7 +149,9 @@ class DemoScreenFactory : public ScreenFactory {
   int settingsHeaderH_ = 0;
   const GlyphSource* readerBody_ = nullptr;
   PageMetrics readerMetrics_{};
-  ChapterLocation readerWhere_{};
+  std::string readerPath_;
+  int readerChapterCount_ = 0;
+  int readerStartChapter_ = 0;
   std::string readerBookTitle_;
   std::string readerChapter_;
 };

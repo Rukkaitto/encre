@@ -1082,15 +1082,15 @@ static void handleOpen() {
   }
   const uint32_t t1 = millis();
 
-  // The chapter label the header shows. Composed here rather than in the screen
-  // because it is a presentation of a spine index, and the screen is handed the
-  // string -- ReaderViewModel's rule: the theme does no arithmetic.
-  char chapter[16];
-  std::snprintf(chapter, sizeof(chapter), "CH. %02d", 1);
+  // The chapter label is the SCREEN's now: it changes when the reader pages into
+  // another spine entry, so the shell cannot be the one composing it.
   // A LOCATION, not a chapter: openBook released the archive before returning, and
   // the ReaderScreen streams from these three numbers -- so nothing here holds the
   // chapter, which is the whole of 3C.
-  gFactory.setReaderChapter(opened.chapter, opened.title, chapter);
+  // THE BOOK, not one chapter: the reader pages between spine entries itself, which
+  // is what it needs to be a reader -- entry 0 of a real EPUB is a cover with no
+  // text at all, and it showed as a blank page reading 0/0.
+  gFactory.setReaderBook(path, opened.title, opened.chapterCount, 0);
   const bool pushed = gApp->pushScreen(reader::ScreenId::Reader);
 
   // The page count is the expensive part, and it happened inside the push: one

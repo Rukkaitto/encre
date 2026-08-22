@@ -1087,7 +1087,7 @@ and 228,849 of blocks, and holding both at once was a **546 KB peak** against ~1
 free. Only 62 of its 92 chapters could be opened. Measured after 3C, over the same
 book: **69,884 bytes peak for any chapter, largest single allocation 36,956** — the
 inflate window and its tables, which is the only sizeable one left. All 92 chapters
-open; the whole book is 8,137 pages.
+open; the whole book is 8,114 pages.
 
 `inflate.h` (the one-shot form over stb) is still there and still used for the small
 things — an OPF, a `container.xml`. It is not the reader's path.
@@ -1127,6 +1127,44 @@ over `Le Fléau` (every deflated entry, at 2048-byte grain **and one byte at a t
 and 3,600 over the 200 generated EPUBs, zero disagreements, 8.3 MB decompressed.
 **Grain 1 is the load-bearing case** — a source that satisfies every read hides every
 resumption bug there is.
+
+### The two things a real book taught the reader
+
+Both were found by flashing, and both looked like the same symptom — a blank page
+reading `0 / 0`.
+
+**SPINE ENTRY 0 IS THE COVER.** `Cover.html` in a real EPUB is one `<img>` and no
+body text, and `document.h` drops images, so it paginates to NOTHING. Three of
+`Le Fléau`'s 92 entries do. Skipping to the first entry with text would only have
+moved the dead end to the bottom of that chapter, so `ReaderScreen` owns the BOOK:
+paging off the end of a chapter opens the next, off the top opens the previous one's
+LAST page, and an entry with no pages is skipped in whichever direction the reader
+was already going. Locating a chapter costs a reopen and a directory parse, ~76 ms
+on device, against a ~520 ms refresh.
+
+The label is the SPINE POSITION, not a chapter number — spine 2 shows `CH. 03`.
+Without a table of contents (`Contents.dc.html`, not built) the position is the only
+thing honestly known.
+
+**`<p>&nbsp;</p>` IS HOW AN EBOOK MAKES VERTICAL SPACE**, and it is everywhere: the
+first text chapter of `Le Fléau` opens with three of them. Trimming only ASCII space
+left each as a two-byte block that took a line of the page and drew blank. A block of
+nothing but whitespace is dropped, and **U+00A0 counts for that question only** — it
+is kept inside text, because there it is deliberate (French sets one before a colon,
+and collapsing it would let the line break in the wrong place).
+
+**A REFUSED CHAPTER TURN MUST LEAVE THE SCREEN WHERE IT WAS.** The walk has to open
+each candidate before it can know whether that candidate has pages, so running off
+either end of the book left `chapterAt_` on the last thing tried with an empty index
+— the device reported "spine 0, page 1/7" for an entry with no pages, with a stale
+page still on the panel. `openChapterAt` restores the previous chapter on failure, at
+the cost of one extra decode, once, at the book's edge.
+
+And a note on how the first of these was missed: the desktop probe checked
+`pagesRead != starts.size()` and `0 == 0` satisfied it, so a chapter that paginated
+to nothing passed silently. **A check that reports on less than it claims** — the
+same shape as the card probe answered from cache, and the `make compare` default that
+skipped four screens.
 
 ### Paging: forward is free, backward re-decodes
 

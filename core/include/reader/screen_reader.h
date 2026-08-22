@@ -41,18 +41,25 @@ class GlyphSource;
 // to 300 ms on device against a ~520 ms panel refresh.
 class ReaderScreen : public Screen {
  public:
-  // `fs` and `body` must outlive the screen. `where` is what openBook returned.
+  // A BOOK, not a chapter. `fs` and `body` must outlive the screen.
+  //
+  // It took a single ChapterLocation and could therefore only ever show one chapter
+  // of a book -- which the device found immediately: spine entry 0 of a real EPUB is
+  // `Cover.html`, one `<img>` and no body text, so it paginated to NOTHING and the
+  // panel showed a blank page reading 0/0. Skipping to the first chapter with text
+  // would only have moved the dead end to the bottom of that chapter.
   //
   // The screen is not renderable until setMetrics has been called, exactly as
   // Library is not until setVisibleRows: a page count depends on a column height
   // and onGesture has no framebuffer to ask. Before it, the page is empty and the
   // counter reads 0 -- a readable screen rather than an abort.
-  ReaderScreen(FileSystem& fs, const ChapterLocation& where, std::string bookTitle,
-               std::string chapter, const GlyphSource* body);
+  ReaderScreen(FileSystem& fs, std::string bookPath, std::string bookTitle,
+               int chapterCount, int startChapter, const GlyphSource* body);
 
-  // A chapter already in memory, through the same layers minus the inflate. What
-  // the simulator and the goldens render, having no card -- and the reason
-  // ChapterReader has a buffer entry point at all.
+  // A single chapter already in memory, through the same layers minus the inflate.
+  // What the simulator and the goldens render, having no card -- and the reason
+  // ChapterReader has a buffer entry point at all. There is no book behind it, so
+  // paging past either end simply stops.
   ReaderScreen(std::string_view xhtml, std::string bookTitle, std::string chapter,
                const GlyphSource* body);
   ~ReaderScreen() override;
@@ -75,6 +82,9 @@ class ReaderScreen : public Screen {
   const Page& page() const { return page_; }
   int pageCount() const { return static_cast<int>(starts_.size()); }
   int pageIndex() const { return at_; }
+  // Which spine entry is open, and how many there are.
+  int chapterIndex() const { return chapterAt_; }
+  int chapterCount() const { return chapterCount_; }
 
   // Why the chapter stopped being readable, or empty. A card pulled mid-book, or a
   // stream that turned out to be corrupt partway through.
@@ -82,6 +92,16 @@ class ReaderScreen : public Screen {
 
  private:
   void buildIndex();
+  // Opens spine entry `c` and lands on its first page, or its last when `atEnd`.
+  //
+  // SKIPS CHAPTERS THAT PAGINATE TO NOTHING, continuing in whichever direction it
+  // was already going. Three of the 92 spine entries in one real book do -- a cover
+  // and two title pages, each an `<img>` and nothing document.h models. A reader
+  // that stopped on one would show a blank page and no way off it.
+  bool openChapterAt(int c, bool atEnd);
+  // The walk itself. Separate so openChapterAt can undo it on failure.
+  bool walkToChapter(int c, bool atEnd);
+  void updateChapterLabel();
   // Renders page `p` by rewinding and decoding forward to it. The general path.
   bool seekTo(int p);
   // Renders the page after the current one by continuing the live stream. The
@@ -105,6 +125,13 @@ class ReaderScreen : public Screen {
   Page page_{};
   ReaderViewModel vm_{};
   std::string bookTitle_, chapter_label_;
+
+  // The book, for reaching another chapter. Empty bookPath_ means the in-memory
+  // constructor was used and there is no book to page into.
+  FileSystem* fs_ = nullptr;
+  std::string bookPath_;
+  int chapterCount_ = 0;
+  int chapterAt_ = 0;
 };
 
 }  // namespace reader

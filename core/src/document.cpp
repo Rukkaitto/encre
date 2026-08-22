@@ -76,6 +76,33 @@ struct TagName {
   uint16_t full = 0;
 };
 
+// Whether a block holds nothing but whitespace, WITH U+00A0 COUNTING AS
+// WHITESPACE.
+//
+// `<p>&nbsp;</p>` is how an ebook makes vertical space, and it is everywhere: the
+// first text chapter of a real EPUB opens with THREE of them. Trimming only ASCII
+// space left each one as a two-byte block, which took a line of the page and drew
+// blank -- the device showed a page whose first line was a space.
+//
+// NBSP is only whitespace for THIS question. It is kept inside text, because there
+// it is deliberate: French sets a non-breaking space before a colon, and collapsing
+// that to an ordinary one would let the line break in the wrong place.
+bool onlyWhitespace(const std::string& s) {
+  for (size_t i = 0; i < s.size();) {
+    const unsigned char c = static_cast<unsigned char>(s[i]);
+    if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+      ++i;
+      continue;
+    }
+    if (c == 0xC2 && i + 1 < s.size() && static_cast<unsigned char>(s[i + 1]) == 0xA0) {
+      i += 2;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
 // The kind a block gets, read from the WHOLE STACK rather than from the tag that
 // started it -- outermost wins. `<blockquote><p>x</p></blockquote>` is a quoted
 // paragraph, not a paragraph that happens to sit inside a quote, and the same for
@@ -150,7 +177,7 @@ bool BlockReader::next(Block& out) {
     have = false;
     if (st.open) {
       while (!st.cur.text.empty() && st.cur.text.back() == ' ') st.cur.text.pop_back();
-      if (!st.cur.text.empty()) {
+      if (!onlyWhitespace(st.cur.text)) {
         if (emitted_ >= static_cast<int>(kMaxBlocks)) {
           error_ = "too many blocks";
           return false;
