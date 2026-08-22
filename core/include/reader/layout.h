@@ -235,6 +235,12 @@ class PageBuilder {
 // unbreakable would leave pages a third empty. `next.line` is how the following
 // page resumes mid-wrap.
 //
+// NOT FOR A LOOP. It feeds a PageBuilder from the Document's first block every
+// call, because there is one set of layout rules and the builder holds them -- so
+// walking a chapter with this is quadratic in the page count. The reader drives a
+// PageBuilder directly and pays one page per turn; this is for a caller that has a
+// whole Document and wants one page of it.
+//
 // No widow or orphan control. It is the obvious next refinement and it is not in
 // V1: the rules trade blank space at the foot of a page for a tidier break, and on
 // a 20-line page that trade is expensive enough to want measuring before it is

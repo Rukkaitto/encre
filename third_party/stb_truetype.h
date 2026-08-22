@@ -2799,7 +2799,22 @@ static void *stbtt__hheap_alloc(stbtt__hheap *hh, size_t size, void *userdata)
       return p;
    } else {
       if (hh->num_remaining_in_head_chunk == 0) {
-         int count = (size < 32 ? 2000 : size < 128 ? 800 : 100);
+         // ENCRE PATCH -- 2000 -> 128 for the small-struct case. See CLAUDE.md.
+         //
+         // stbtt__active_edge is 28 bytes here, so the upstream 2000 is a single
+         // 56,004-byte malloc for the FIRST edge of every glyph -- a glyph needing
+         // twenty. On this device the reader has ~87 KB free while a page is on
+         // glass, and that spike took minimum free heap to 18,952 bytes: the whole
+         // margin, on a part where a failed allocation is abort() with no
+         // diagnostic.
+         //
+         // stbtt__hheap_alloc CHAINS another chunk when one runs out, so this
+         // trades memory for allocation count and nothing else -- no glyph is
+         // rasterised differently, which the goldens confirm byte for byte.
+         //
+         // This breaks the file's "vendored, unmodified" claim, and that claim was
+         // the recorded reason not to do it while 54 KB was affordable. It is not.
+         int count = (size < 32 ? 128 : size < 128 ? 800 : 100);
          stbtt__hheap_chunk *c = (stbtt__hheap_chunk *) STBTT_malloc(sizeof(stbtt__hheap_chunk) + size * count, userdata);
          if (c == NULL)
             return NULL;

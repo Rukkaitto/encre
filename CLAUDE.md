@@ -723,15 +723,33 @@ it, and `mark()` carries the heap so the existing stage trail is a heap TRACE: t
 stage where `min` falls is the stage that spent it. That is how this was found,
 after two wrong guesses about bring-up.
 
-It is `third_party/stb_truetype.h:2802` — `count = (size < 32 ? 2000 : ...)` — and
-the v2 `stbtt__active_edge` is 28 bytes, so stb pre-allocates 2000 slots (56,004
+It was `third_party/stb_truetype.h:2802` — `count = (size < 32 ? 2000 : ...)` — and
+the v2 `stbtt__active_edge` is 28 bytes, so stb pre-allocated 2000 slots (56,008
 bytes) for the first edge of every glyph, for a text glyph needing ~20.
-`stbtt__hheap_alloc` chains another chunk when one runs out, so lowering the count
-trades memory for allocation count and nothing else. **Not patched**: the file's
-header makes a sha256-backed "vendored, unmodified" claim, which is worth more
-than 54 KB while 54 KB is affordable. Recorded as a lever, in the roadmap, with
-the caveat that the reader's cache, zip directory and page structures all stack on
-top of this spike.
+
+**THAT LEVER HAS BEEN TAKEN: the count is 128, and the spike is 3,592 bytes.** This
+paragraph used to say it was not worth breaking the file's sha256-backed "vendored,
+unmodified" claim *while 54 KB is affordable*. It stopped being affordable the moment
+the reader shipped: with a page on glass the device has ~87 KB free, and the spike
+took **minimum free heap to 18,952 bytes** — the whole margin, on a part where a
+failed allocation is `abort()` with no diagnostic.
+
+Three things about the change:
+
+- **`stbtt__hheap_alloc` chains another chunk when one runs out**, so this trades
+  memory for allocation count and nothing else. No glyph rasterises differently —
+  all 686 tests pass, `text_sample.png` (Literata body text, the golden this file
+  says to stop on) included, byte for byte.
+- **It is also FASTER.** Three runs each on the desktop: cold page draw 572/530/500 µs
+  against 1008/732/645, warm 372/366/314 against 634/473/414. A 56 KB malloc plus
+  touching 56 KB of cold memory costs more than a 3.6 KB one. Note that the first run
+  of any freshly built binary is the slowest by a wide margin — a single
+  before/after pair here says nothing, and nearly had me report a 1.7× regression
+  that did not exist.
+- **The claim in the file's header is now false**, and the patch says so at the site.
+
+Recorded here rather than only in the roadmap, because the next person to want heap
+will come looking for this lever and needs to find it already spent.
 
 ## Invariants worth not relearning
 
