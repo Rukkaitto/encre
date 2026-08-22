@@ -8,8 +8,14 @@
 
 namespace reader {
 
-int drawText(Framebuffer& fb, const GlyphSource& font, int x, int baselineY, std::string_view utf8,
-             Ink ink, Tracking tracking, Plane plane) {
+// THE ONE PEN LOOP. drawText and drawTextJustified are both this, differing by
+// `extraPerGapF26` alone -- a second loop for justified text would be a second
+// place for the fractional pen, the kern-before-glyph order, the notdef box and
+// every fidelity fix this file has accumulated to be got subtly differently. The
+// header says one text path; this is where that is true or not.
+static int drawRun(Framebuffer& fb, const GlyphSource& font, int x, int baselineY,
+                   std::string_view utf8, Ink ink, Tracking tracking, Plane plane,
+                   int extraPerGapF26) {
   const bool white = (ink == Ink::White);
   // The pen is 26.6 fixed point; `pen` below is only ever the *paint* position,
   // rounded off it. With integer tracking penF stays a multiple of 64 and every
@@ -86,11 +92,27 @@ int drawText(Framebuffer& fb, const GlyphSource& font, int x, int baselineY, std
         if (emit) fb.setPixel(pen + g->xOff + col, baselineY - g->yOff + row, white);
       }
     penF += pxToF26(g->advance) + tracking.f26();
+    // The word gap stretch, applied to ASCII space and nothing else. The set has
+    // to match layout.cpp's gap COUNT exactly -- it divides the line's slack by
+    // that count -- so both name the same single codepoint rather than each
+    // deciding what a gap is.
+    if (cp == U' ') penF += extraPerGapF26;
     prev = cp;
   }
   // f26ToPx is exact-linear in x (x is a whole pixel, so it factors out of the
   // rounding), which is why this equals Font::measure of the same run.
   return f26ToPx(penF) - x;
+}
+
+int drawText(Framebuffer& fb, const GlyphSource& font, int x, int baselineY, std::string_view utf8,
+             Ink ink, Tracking tracking, Plane plane) {
+  return drawRun(fb, font, x, baselineY, utf8, ink, tracking, plane, 0);
+}
+
+int drawTextJustified(Framebuffer& fb, const GlyphSource& font, int x, int baselineY,
+                      std::string_view utf8, int extraPerGapF26, Ink ink, Tracking tracking,
+                      Plane plane) {
+  return drawRun(fb, font, x, baselineY, utf8, ink, tracking, plane, extraPerGapF26);
 }
 
 std::string elideToWidth(const GlyphSource& font, std::string_view utf8, int maxW, Tracking tracking) {

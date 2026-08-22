@@ -335,10 +335,18 @@ size_t fitPrefixEnd(const GlyphSource& font, std::string_view text, size_t from,
 }  // namespace
 
 Prose wrapProseLead(const GlyphSource& font, std::string_view text, int maxW, int leadF26,
-                    Tracking tracking, WordBreak breaking) {
+                    Tracking tracking, WordBreak breaking, int firstIndentF26) {
   Prose out;
   out.tracking = tracking;
   out.leadF26 = leadF26;
+  out.firstIndentF26 = firstIndentF26;
+
+  // The width available to the line CURRENTLY being built. `out.lines.size()` is
+  // that line's index, so the indent applies while nothing has been emitted yet
+  // -- which is CSS's rule, and it has to be asked per candidate rather than
+  // computed once, because a line is emitted in the middle of the loop below.
+  const int indentPx = f26ToPx(firstIndentF26);
+  const auto limit = [&]() { return out.lines.empty() ? maxW - indentPx : maxW; };
 
   size_t lineStart = 0;   // first byte of the line being built
   size_t lineEnd = 0;     // one past its last non-space byte
@@ -350,8 +358,8 @@ Prose wrapProseLead(const GlyphSource& font, std::string_view text, int maxW, in
   // overhangs, which is the behaviour every paragraph on every board relies on.
   const auto startLine = [&](size_t wordStart, size_t wordEnd) {
     if (breaking == WordBreak::Anywhere) {
-      while (font.measure(text.substr(wordStart, wordEnd - wordStart), tracking) > maxW) {
-        const size_t cut = fitPrefixEnd(font, text, wordStart, wordEnd, maxW, tracking);
+      while (font.measure(text.substr(wordStart, wordEnd - wordStart), tracking) > limit()) {
+        const size_t cut = fitPrefixEnd(font, text, wordStart, wordEnd, limit(), tracking);
         if (cut <= wordStart || cut >= wordEnd) break;
         out.lines.push_back(text.substr(wordStart, cut - wordStart));
         wordStart = cut;
@@ -377,7 +385,7 @@ Prose wrapProseLead(const GlyphSource& font, std::string_view text, int maxW, in
     // The candidate is measured from the line's start, spaces included, because
     // that is the run that will be drawn -- measuring the word alone and adding
     // a space's advance would lose every kern across the join.
-    if (font.measure(text.substr(lineStart, i - lineStart), tracking) <= maxW) {
+    if (font.measure(text.substr(lineStart, i - lineStart), tracking) <= limit()) {
       lineEnd = i;
       continue;
     }

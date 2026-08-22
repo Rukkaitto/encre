@@ -53,7 +53,26 @@
 
          Justification stays, because that is not ornament -- it is what the
          paragraph looks like. -->
+    <!-- PARAGRAPHS ARE SEPARATED BY AN INDENT, NOT A GAP, and the second paragraph
+         is here because a board with one paragraph does not state that. `margin: 0`
+         alone says "no gap"; it does not say what marks the boundary, and with
+         neither a gap nor an indent two consecutive paragraphs read as one.
+
+         An indent rather than a blank line, on two grounds. It is what a printed
+         book does, which is the reference this whole screen is drawn against. And
+         a gap costs a line box of a 20-line page -- 5% of the text on screen for
+         every paragraph break -- where an indent costs nothing vertical, which on
+         a panel that repaints in ~520ms is the difference between a page turn and
+         two.
+
+         1.5em at 32px is 48px, the conventional book indent (1 to 2 ems).
+
+         THE FIRST PARAGRAPH AFTER A BREAK IS FLUSH. That is the other half of the
+         convention and the reason mkepub.py marks its openers `class="first"`:
+         an indent says "this continues what you were reading", so a paragraph
+         with nothing above it has nothing to distinguish itself from. -->
     <p style="margin: 0;">Miss Brooke had that kind of beauty which seems to be thrown into relief by poor dress. Her hand and wrist were so finely formed that she could wear sleeves not less bare of style than those in which the Blessed Virgin appeared to Italian painters.</p>
+    <p style="margin: 0; text-indent: 1.5em;">Her sister Celia wore a necklace, and the two of them had that air of being dressed alike which is never quite an accident. It was the kind of morning that makes a plain room look deliberate.</p>
   </div>
 
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0 16px 0; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">

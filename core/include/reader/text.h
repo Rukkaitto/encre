@@ -42,6 +42,32 @@ enum class Plane { Bw, Lsb, Msb, BwDithered };
 int drawText(Framebuffer& fb, const GlyphSource& font, int x, int baselineY, std::string_view utf8,
              Ink ink = Ink::Black, Tracking tracking = {}, Plane plane = Plane::Bw);
 
+// --- Justified text -----------------------------------------------------------
+//
+// drawText with a stretch added after every ASCII space. That is the whole of
+// justification at the drawing layer; deciding HOW MUCH is layout's job (see
+// reader/layout.h), because the slack is a property of the line's column and
+// only the thing that wrapped the line knows that.
+//
+// `extraPerGapF26` is in 1/64 px for the same reason Tracking is: a 444px column
+// distributing 11px of slack across 7 gaps wants 1.571px per gap, and seven
+// roundings of that land the line's right edge up to 3px short of the margin --
+// visibly ragged on exactly the lines justification exists to straighten. The pen
+// accumulates the fraction and rounds once per glyph, as it already does for
+// letter-spacing.
+//
+// A GAP IS U+0020 AND NOTHING ELSE -- not a tab, not a non-breaking space (which
+// is a space the author asked NOT to be stretched, and stretching it would pull
+// apart the very pair it was inserted to hold together). layout.cpp counts gaps
+// by the same rule; the count and the stretch must agree or the line overshoots
+// its column by the difference.
+//
+// Returns the advance consumed, INCLUDING the stretch -- so the return is the
+// justified line's real width and a caller can check it against the column.
+int drawTextJustified(Framebuffer& fb, const GlyphSource& font, int x, int baselineY,
+                      std::string_view utf8, int extraPerGapF26, Ink ink = Ink::Black,
+                      Tracking tracking = {}, Plane plane = Plane::Bw);
+
 // --- A run that has to fit -----------------------------------------------------
 //
 // drawText draws from a left edge with no right edge, which is right for every

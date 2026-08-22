@@ -453,6 +453,13 @@ struct Prose {
   // the draw call is a way for them not to.
   Tracking tracking{};
 
+  // How far the FIRST line is pushed in, in 1/64 px -- CSS `text-indent`, which
+  // the reader's continuing paragraphs declare (design/Reader.dc.html). Carried
+  // here rather than passed separately to the draw because the wrap MEASURED with
+  // it: a caller that drew the first line flush would have a line laid out for a
+  // narrower column than it was drawn in, which overflows by exactly the indent.
+  int firstIndentF26 = 0;
+
   int lineCount() const { return static_cast<int>(lines.size()); }
   // The paragraph's own height, the way the board computes it: line boxes, times
   // the line-height. In 1/64 px, because that is what it is.
@@ -484,8 +491,14 @@ Prose wrapProse(const GlyphSource& font, std::string_view text, int maxW, int le
 // The lead is in 1/64 px because that is the unit a line box lives in once it
 // stops being a whole number, and taking it here rather than converting inside
 // keeps the ONE rounding at the paint.
+//
+// `firstIndentF26` shortens the FIRST line only, which is what `text-indent` does:
+// a book's continuing paragraph starts an em and a half in and its remaining lines
+// run full width. Zero for every chrome caller, so nothing on any existing board
+// moves.
 Prose wrapProseLead(const GlyphSource& font, std::string_view text, int maxW, int leadF26,
-                    Tracking tracking = {}, WordBreak breaking = WordBreak::Normal);
+                    Tracking tracking = {}, WordBreak breaking = WordBreak::Normal,
+                    int firstIndentF26 = 0);
 
 // --- Bounding a wrapped run ---------------------------------------------------
 //
