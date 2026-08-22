@@ -249,3 +249,49 @@ check and logged, matching the documented approximation);
 rescans; `RefreshPolicy::next` including the `cadence == 1` and `kNever`
 edges; `Framebuffer` view refusal and clipping; `settings.cpp` clamping
 (sound, given a parse that does not abort — finding 1 sits below it).
+
+---
+
+## Disposition — 2026-08-22
+
+Every claim spot-checked in code before acting; all of them held.
+
+| # | What | Status |
+|---|---|---|
+| 1 | JSON parser unbounded → `abort()` boot loop | **FIXED** — `kJsonMaxPairs` 64, `kJsonMaxStringBytes` 256, both malformed past the limit. 6 tests. |
+| 2 | Directory listing unbounded + triple-buffered | **HALF FIXED** — the copy at `sd_fs.cpp:368` is now a move. The entry cap is **open**, below. |
+| 3 | `make compare` covered 2 of 6 implemented screens | **FIXED** — default is all 28 boards (6/28 implemented, ~2.5 min); `--only` errors on an unknown id instead of reporting `0/0`. |
+| 4 | Dropped release edge latches the recognizer | **FIXED** — `PressRecognizer::forgetPresses()`, called from the loop when the drop counter advances. 4 tests. |
+| 5 | `drawText` violates the `Glyph::bitmap` borrow contract | **FIXED** — kerning hoisted above `glyph()`, applied on the glyph path only so the notdef case still matches `measure()`. Every golden unchanged, which is the proof. |
+| 6 | Ranking of the three known-unbounded | **ACCEPTED** — see below. |
+| 7 | SPI / input-task / borrow / partial-repaint verdicts | **NOTHING TO DO** — all four held. Recorded so the next review does not re-derive them. |
+| 8 | Session "version last" is a commit record only for the first write | **COMMENT FIXED**, code deliberately unchanged: one stale field, and a bad focus clamps on restore. |
+| 9 | `homeVmForCard`'s log line indexes past its own guard | **FIXED** — one line. |
+| 10 | Eight false documented claims | **FIXED** — all eight, plus the empty-`freeink-sdk` worktree trap added to CLAUDE.md. |
+
+**One correction to the review**, since it will otherwise be re-attempted: finding
+1's suggested `std::move(v.s)` at `json.cpp:209` cannot help — `setString` takes a
+`std::string_view`, so it copies whatever it is given. The diagnosis was right and
+the string cap addresses it better: the transient copies are bounded at 256 bytes
+each instead of at the file's size.
+
+### Still open
+
+- **Finding 2's entry cap is a PRODUCT decision, not a cleanup**: how many books
+  must V1 hold? A Calibre card with a few thousand files costs ~300–500 KB
+  transient across `sd_fs` → `booklist` → `screen_library`, against a ~155 KB
+  floor. Capping means a library that silently stops listing at N, which is a UX
+  answer before it is a memory one. Do not pick the number in code without
+  deciding the behaviour.
+- **Finding 6's three, in the review's own order.** `drawDetailRow`'s value is
+  first and reachable this week by nesting folders — but it needs its board pass
+  first, per the rule that governs UI work. `countLibrary` at boot belongs to
+  Phase 3's background scan, which is already its named home. `elideToWidth`'s
+  grapheme clusters become real with EPUB metadata, not before.
+- **Finding 5's two adjacent facts**, neither a defect today, both worth closing
+  with 3B: the arena gives no guarantee the last-returned glyph survives the next
+  `glyph()` call (a wrap overwrites it), and a cache **hit** on a null-arena source
+  returns `bitmap == nullptr` for a cached zero-ink glyph, contradicting the miss
+  path's "valid pointer rather than null" comment. Never dereferenced (`bitmapH ==
+  0` guards every caller) — it would trip the first caller that null-checks
+  instead.
