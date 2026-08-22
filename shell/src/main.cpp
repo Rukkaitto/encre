@@ -1410,6 +1410,85 @@ void setup() {
           (unsigned)(t3 - t2), (unsigned)cs.usedBytes, (unsigned)cs.capacityBytes,
           (unsigned)cs.overheadBytes);
       Serial.flush();
+
+      // THE ONE SAMPLE ABOVE IS NOT THE NUMBER 3B NEEDS, and reporting it as
+      // though it were is how a plan gets built on a cold-path artifact. The
+      // first rasterisation in the process pays for things that happen exactly
+      // once -- the first faults into a 132 KB `.rodata` font over SPI flash,
+      // the first malloc of stb's scratch bitmap, the first pass through code
+      // that is not yet in the instruction cache -- and none of those recur.
+      // Whether a runtime rasteriser is viable here depends on the STEADY cost,
+      // which needs a population, so the sweep below rasterises one.
+      //
+      // Three separate questions, three measurements, because they have
+      // different answers and 3B's design turns on which one dominates:
+      //
+      //   COLD  -- every distinct glyph of a page, each rasterised once. This is
+      //            what the first page of a chapter actually costs, and the set
+      //            is small: printable ASCII is 95 glyphs and an English page
+      //            draws thousands of glyph INSTANCES but far fewer distinct
+      //            ones. If this number is tolerable, on-demand rasterisation
+      //            is viable and 3B needs no pre-render pass.
+      //   WARM  -- the same set again, now that the cache has seen it. This is
+      //            what page two costs, and the gap between it and COLD is the
+      //            entire value of the cache. It is also where an undersized
+      //            cache shows up: if the set does not fit, WARM comes back
+      //            near COLD with evictions to prove why, and the fix is a
+      //            bigger budget rather than a different architecture.
+      //   MEAS  -- a line of text measured, not drawn. Pagination measures whole
+      //            CHAPTERS to find page breaks, so if measuring rasterised, the
+      //            cost would be the book's glyph count rather than a page's and
+      //            nothing else in 3B would matter. advance() is documented as
+      //            never rasterising; `rast=` here is that documentation checked
+      //            against the device, and it must print 0.
+      const char32_t kFirst = 0x20, kLast = 0x7E;
+
+      body.resetCacheStats();
+      int found = 0;
+      const uint32_t c0 = micros();
+      for (char32_t cp = kFirst; cp <= kLast; ++cp)
+        if (body.glyph(cp)) ++found;
+      const uint32_t c1 = micros();
+      const reader::ScalableFont::CacheStats cold = body.cacheStats();
+
+      body.resetCacheStats();
+      const uint32_t w0 = micros();
+      for (char32_t cp = kFirst; cp <= kLast; ++cp) (void)body.glyph(cp);
+      const uint32_t w1 = micros();
+      const reader::ScalableFont::CacheStats warm = body.cacheStats();
+
+      // A real sentence rather than a synthetic run: measure() walks pairs for
+      // kerning, so a string of one repeated character would measure a path the
+      // reader never takes.
+      static const char kLine[] =
+          "Miss Brooke had that kind of beauty which seems to be thrown into "
+          "relief by poor dress.";
+      body.resetCacheStats();
+      const uint32_t m0 = micros();
+      const int lineW = body.measure(kLine);
+      const uint32_t m1 = micros();
+      const reader::ScalableFont::CacheStats meas = body.cacheStats();
+
+      const uint32_t coldUs = c1 - c0, warmUs = w1 - w0;
+      Serial.printf(
+          "[body] sweep glyphs=%d cold=%luus (%luus/glyph) warm=%luus "
+          "(%luus/glyph) speedup=%lux\n",
+          found, (unsigned long)coldUs,
+          (unsigned long)(found ? coldUs / (uint32_t)found : 0),
+          (unsigned long)warmUs,
+          (unsigned long)(found ? warmUs / (uint32_t)found : 0),
+          (unsigned long)(warmUs ? coldUs / warmUs : 0));
+      Serial.printf(
+          "[body] cache after sweep: %u/%u bytes, %d/%d entries, "
+          "cold hit/miss=%lu/%lu warm hit/miss=%lu/%lu evict=%lu wrap=%lu "
+          "bypass=%lu\n",
+          (unsigned)warm.usedBytes, (unsigned)warm.capacityBytes, warm.entries,
+          warm.capacityEntries, cold.hits, cold.misses, warm.hits, warm.misses,
+          warm.evictions, warm.wraps, warm.bypasses);
+      Serial.printf("[body] measure %u chars = %dpx in %luus, rast=%lu (MUST be 0)\n",
+                    (unsigned)(sizeof(kLine) - 1), lineW, (unsigned long)(m1 - m0),
+                    meas.rasterisations);
+      Serial.flush();
       mark("body-face-ok");
     }
   }
