@@ -1,8 +1,7 @@
 #pragma once
 #include <vector>
 
-#include "reader/app.h"
-#include "reader/focus.h"
+#include "reader/focus_screen.h"
 #include "reader/viewmodel.h"
 
 namespace reader {
@@ -13,7 +12,7 @@ namespace reader {
 // The hint LABELS are fixed, not focus-dependent: Home's board says
 // READ / SELECT / UP / DOWN, and making Confirm read "OPEN" over the Library row
 // would be a design change, which belongs in the board first.
-class HomeScreen : public Screen {
+class HomeScreen : public FocusScreen {
  public:
   // `targets` runs parallel to `vm.menu`: the screen each row opens. A row with
   // no screen yet (or one Phase 3 owns) gets no entry, and Confirm on it does
@@ -26,38 +25,20 @@ class HomeScreen : public Screen {
   Action onEvent(const InputEvent& ev) override;
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
 
-  // -1 is the CONTINUE block, 0..n-1 the menu rows. This overrides
-  // Screen::focus() now that the base declares one, which is stated rather than
-  // left implicit: the signature already matched, so it became an override the
-  // moment the virtual was added, and a reader of this header should not have to
-  // work that out from app.h.
-  //
-  // setFocus IS overridden, and this comment used to argue at length that it
-  // must not be: the session record only restores onto a screen the wake pushed,
-  // a record naming Home pushes nothing, so a Home setFocus would be unreachable.
-  // The premise was true and the conclusion was the wrong way round -- the
-  // restore ladder skipped Home BECAUSE nothing here could accept a focus, so
-  // Home stored where the user was on every sleep and woke on CONTINUE every
-  // time. It is the root that gets its focus set instead of a pushed screen (see
-  // the Home branch of the restore ladder in shell/src/main.cpp), which is one
-  // extra branch there rather than a reason to drop the value on the floor.
-  //
-  // The bool is ScrollWindow's contract: "something moved", not "the restore was
-  // accepted". Restoring CONTINUE onto a Home that is already on CONTINUE is a
-  // perfectly good restore and returns false.
-  int focus() const override { return vm_.focusedMenuIndex; }
-  bool setFocus(int index) override;
+  // focus()/setFocus() are FocusScreen's -- final, one mechanism. -1 is the
+  // CONTINUE block, 0..n-1 the menu rows; the constructor picks the range (a
+  // WithNone window, Noneless on the empty variant, which draws no CONTINUE).
+  // This header once argued that setFocus was unreachable on Home because a
+  // record naming the root pushes nothing -- true, and exactly why every wake
+  // from Home landed on CONTINUE: the shell restores the ROOT's focus too, and
+  // the base class is what keeps that reachable.
   const HomeViewModel& vm() const { return vm_; }
 
  private:
-  Action moveFocus(int delta);
-  // Mirrors focus_ into the view-model the theme draws, and passes the "did
-  // anything move" answer through. See screen_home.cpp.
-  bool syncFocus(bool moved);
+  void syncVm() override;
 
   HomeViewModel vm_;
   std::vector<ScreenId> targets_;
-  Focus focus_;
 };
 
 }  // namespace reader

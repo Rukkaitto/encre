@@ -4,40 +4,31 @@
 
 namespace reader {
 
+// WithNone: -1 is the CONTINUE block, a place the user can be, not the absence
+// of a selection.
+//
+// EXCEPT ON THE EMPTY VARIANT, which draws no CONTINUE block: its first hint
+// slot is empty because there is nothing to read, so a focus on -1 would be a
+// selection on an invisible row with a blank action. Building the ring Noneless
+// is the model being right, and it closes both ways in at once -- Up from
+// LIBRARY, which was reachable before lists wrapped, and Down off the last menu
+// row, which wrapping added.
 HomeScreen::HomeScreen(HomeViewModel vm, std::vector<ScreenId> targets)
-    : vm_(std::move(vm)),
-      targets_(std::move(targets)),
-      // WithNone: -1 is the CONTINUE block, a place the user can be, not the
-      // absence of a selection. The view-model may arrive with a focus already
-      // set -- the goldens author one -- so it is adopted rather than reset.
-      //
-      // EXCEPT ON THE EMPTY VARIANT, which draws no CONTINUE block: its first
-      // hint slot is empty because there is nothing to read, so a focus on -1
-      // would be a selection on an invisible row with a blank action. Building the
-      // ring Noneless is the model being right, and it closes both ways in at
-      // once -- Up from LIBRARY, which was reachable before lists wrapped, and
-      // Down off the last menu row, which wrapping added.
-      focus_(static_cast<int>(vm_.menu.size()),
-             vm_.libraryEmpty ? Focus::Noneless : Focus::WithNone) {
-  focus_.set(vm_.focusedMenuIndex);
-  vm_.focusedMenuIndex = focus_.index();
+    : FocusScreen(static_cast<int>(vm.menu.size()), static_cast<int>(vm.menu.size()),
+                  vm.libraryEmpty ? Focus::Noneless : Focus::WithNone),
+      vm_(std::move(vm)),
+      targets_(std::move(targets)) {
+  // The view-model may arrive with a focus already set -- the goldens author one
+  // -- so it is adopted rather than reset; the mirror is then re-asserted
+  // unconditionally, because setFocus reports "moved" and an unmoved adoption
+  // still has to leave the vm and the window agreeing.
+  setFocus(vm_.focusedMenuIndex);
+  syncVm();
 }
 
-bool HomeScreen::syncFocus(bool moved) {
-  // The view-model is what the theme draws, so the focus has to be mirrored into
-  // it. That mirror is the whole of what this screen now does about focus: the
-  // range, the clamp and the "did anything move" answer are all Focus's.
-  if (moved) vm_.focusedMenuIndex = focus_.index();
-  return moved;
-}
-
-bool HomeScreen::setFocus(int index) { return syncFocus(focus_.set(index)); }
-
-// Redraw only when the focus actually moved: at the end of the list a press must
-// not cost a 1.5 s panel refresh that changes nothing.
-Action HomeScreen::moveFocus(int delta) {
-  return syncFocus(focus_.move(delta)) ? Action::redraw() : Action::none();
-}
+// The mirror is the whole of what this screen still does about focus: the range,
+// the clamp and the "did anything move" answer are all FocusScreen's.
+void HomeScreen::syncVm() { vm_.focusedMenuIndex = focus(); }
 
 Action HomeScreen::onEvent(const InputEvent& ev) {
   // Home binds no holds, so a Long here means the mask and the view model
