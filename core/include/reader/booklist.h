@@ -19,16 +19,33 @@ constexpr const char* kBooksRoot = "/books";
 // One row of the Library: a file or folder on the card that the user might want
 // to open.
 //
-// `title` is what the screen draws and `name` is what the filesystem knows the
-// thing by; they are separate because Phase 3 will fill `title` from the EPUB's
-// own metadata while `name` still has to address the file. Until then the title
-// is derived from the filename, which is the placeholder the plan's Scope
-// section says it is.
+// `title()` is what the screen draws and `name` is what the filesystem knows the
+// thing by; they are separate because Phase 3 will fill the title from the EPUB's
+// own metadata while `name` still has to address the file.
+//
+// THE TITLE IS STORED ONLY WHEN IT DIFFERS FROM THE DERIVED ONE. Today it never
+// does -- the rule is "the name minus its final extension", which is always a
+// PREFIX of the name -- so `titleOverride` is empty on every entry and `title()`
+// hands back a view into `name` with nothing allocated. That is worth a little
+// awkwardness because it is per BOOK: the old second `std::string` heap-allocated
+// on every entry whose name exceeds the 15-char small-string buffer, which is
+// essentially all of them ("Middlemarch - George Eliot.epub" is 31), and a
+// library is the one structure here whose size the user controls.
+//
+// Phase 3 fills `titleOverride` for the books whose metadata says something else,
+// and pays for exactly those. The design the old comment described is intact; it
+// just stopped charging for it in advance.
 struct BookEntry {
-  std::string name;   // leaf name as the card spells it, never a path
-  std::string title;  // what the row shows: the name minus its final extension
+  std::string name;  // leaf name as the card spells it, never a path
+  // Empty means "derive from `name`". Set only when the real title differs.
+  std::string titleOverride;
   bool isDir = false;
   uint32_t size = 0;  // 0 for a directory
+
+  // What the row shows. A VIEW, into either `name` or `titleOverride` -- so it
+  // lives exactly as long as this entry does and dies if `name` is reassigned.
+  // Copy it into a std::string if it needs to outlive the entry.
+  std::string_view title() const;
 };
 
 // Turns a directory listing into Library rows: what counts as a book, what a row
@@ -73,6 +90,11 @@ class BookList {
   // not change both fails a test rather than showing the user two different
   // counts for one directory.
   static int countLibrary(FileSystem& fs, std::string_view path);
+
+  // The title rule as a VIEW -- always a prefix of `name`, so it never
+  // allocates. `titleFor` is this plus a copy, and both exist so there is one
+  // rule rather than two that can drift.
+  static std::string_view titleView(std::string_view name, bool isDir);
 
   // Whether a FILE belongs on the list: `.epub` or `.txt`, case-insensitively,
   // on its final extension only. FAT is case-preserving but not case-sensitive,

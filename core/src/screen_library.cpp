@@ -130,7 +130,7 @@ void LibraryScreen::syncVm() {
   for (int i = 0; i < count; ++i) {
     const LibraryItem& item = items_[static_cast<size_t>(first + i)];
     LibraryRow row;
-    row.title = item.entry.title;
+    row.title = std::string(item.entry.title());
     row.isFolder = item.entry.isDir;
     if (item.entry.isDir) {
       row.meta = "FOLDER";

@@ -34,7 +34,7 @@ std::string megabytes(uint32_t bytes) {
 BookDetailsScreen::BookDetailsScreen(const LibraryScreen& library) {
   const LibraryItem* item = library.focusedItem();
   if (item != nullptr) {
-    vm_.title = item->entry.title;
+    vm_.title = std::string(item->entry.title());
     vm_.author = item->details.author;
     vm_.subtitle = item->details.subtitle;
     vm_.format = formatOf(item->entry.name);

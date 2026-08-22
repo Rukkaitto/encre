@@ -567,6 +567,68 @@ static void armCardProbes(const char* why) {
 static reader::HomeViewModel homeVmForCard() {
   reader::HomeViewModel vm = reader::demoHomeVm();
   const int books = gStorageUsable ? reader::BookList::countLibrary(gSd, reader::kBooksRoot) : -1;
+
+  // WHAT A BOOK COSTS IN RAM, measured, because the library is the one structure
+  // here whose size the user controls and the cap on it has to come from a number
+  // rather than from sizeof-arithmetic. (Two memory questions have now been
+  // guessed at wrongly in this project; both were settled by a boot line.)
+  //
+  // The two allocations are measured SEPARATELY rather than as one peak, because
+  // getMinFreeHeap() is monotonic over the boot and the body probe has already
+  // driven it below anything a library scan will reach -- so a peak measured that
+  // way would read as zero and mean nothing.
+  //
+  //   raw  -- what FileSystem::list() retains: one DirEntry per directory entry,
+  //           books and non-books alike, so it is charged on the whole folder.
+  //   list -- what BookList::scan() retains: one BookEntry per ROW, names moved
+  //           out of `raw` rather than copied, no title string built.
+  //
+  // Peak is the two together, which is what a rescan holds while it runs.
+  if (gStorageUsable) {
+    std::vector<reader::DirEntry> raw;
+    const uint32_t h0 = ESP.getFreeHeap();
+    const uint32_t t0 = micros();
+    const bool rawOk = gSd.list(reader::kBooksRoot, raw);
+    const uint32_t t1 = micros();
+    const uint32_t rawHeld = h0 - ESP.getFreeHeap();
+    const size_t rawN = raw.size();
+    raw.clear();
+    raw.shrink_to_fit();
+
+    std::vector<reader::BookEntry> rows;
+    const uint32_t h1 = ESP.getFreeHeap();
+    const uint32_t t2 = micros();
+    const bool listOk = reader::BookList::scan(gSd, reader::kBooksRoot, rows);
+    const uint32_t t3 = micros();
+    const uint32_t listHeld = h1 - ESP.getFreeHeap();
+    const size_t rowN = rows.size();
+
+    Serial.printf(
+        "[library] %s entries=%u rows=%u | raw %lu B (%lu/entry, %luus) | "
+        "list %lu B (%lu/row, %luus) | peak %lu B | sizeof DirEntry=%u "
+        "BookEntry=%u\n",
+        (rawOk && listOk) ? "ok" : "READ FAILED", (unsigned)rawN, (unsigned)rowN,
+        (unsigned long)rawHeld, (unsigned long)(rawN ? rawHeld / rawN : 0),
+        (unsigned long)(t1 - t0), (unsigned long)listHeld,
+        (unsigned long)(rowN ? listHeld / rowN : 0), (unsigned long)(t3 - t2),
+        (unsigned long)(rawHeld + listHeld), (unsigned)sizeof(reader::DirEntry),
+        (unsigned)sizeof(reader::BookEntry));
+    // What a large library would cost at the measured rate -- the cap question in
+    // the one form that answers it. Extrapolated from however few books are on
+    // the card, so it is only as good as the per-row figure above; the fixed part
+    // (the sizeofs) is exact and the variable part is one name string per row.
+    if (rowN) {
+      const uint32_t perRow = listHeld / rowN;
+      const uint32_t perRowPeak = (rawHeld + listHeld) / rowN;
+      Serial.printf("[library] extrapolated: 1024 rows = %lu KB retained / %lu KB peak;"
+                    " 4096 rows = %lu KB / %lu KB\n",
+                    (unsigned long)(perRow * 1024u / 1024u),
+                    (unsigned long)(perRowPeak * 1024u / 1024u),
+                    (unsigned long)(perRow * 4096u / 1024u),
+                    (unsigned long)(perRowPeak * 4096u / 1024u));
+    }
+    Serial.flush();
+  }
   // demoHomeTargets() runs parallel to this menu and its first entry is the
   // Library, so row 0 is the row to patch. Guarded anyway: an empty menu here
   // would be a change in the shared catalogue, and indexing into it would be a

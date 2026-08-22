@@ -61,11 +61,21 @@ bool BookList::isBook(std::string_view name) {
   return false;
 }
 
-std::string BookList::titleFor(std::string_view name, bool isDir) {
-  if (isDir) return std::string(name);
+std::string_view BookList::titleView(std::string_view name, bool isDir) {
+  // Always a PREFIX of `name`, which is what lets BookEntry::title() be a view.
+  // A folder keeps its whole name; a file loses its final extension.
+  if (isDir) return name;
   const size_t dot = extDot(name);
-  if (dot == std::string_view::npos) return std::string(name);
-  return std::string(name.substr(0, dot));
+  return dot == std::string_view::npos ? name : name.substr(0, dot);
+}
+
+std::string BookList::titleFor(std::string_view name, bool isDir) {
+  return std::string(titleView(name, isDir));
+}
+
+std::string_view BookEntry::title() const {
+  return titleOverride.empty() ? BookList::titleView(name, isDir)
+                               : std::string_view(titleOverride);
 }
 
 int BookList::countBooks(FileSystem& fs, std::string_view path) {
@@ -81,12 +91,20 @@ int BookList::countBooks(FileSystem& fs, std::string_view path) {
 }
 
 int BookList::countLibrary(FileSystem& fs, std::string_view path) {
-  std::vector<BookEntry> rows;
-  if (!scan(fs, path, rows)) return -1;
+  // Works off the RAW listing, not scan(). It used to call scan(), which builds a
+  // BookEntry per row and then SORTS them -- to produce one integer, on the boot
+  // path, before the first paint. A count does not care what order it counts in.
+  //
+  // The rules still have to be scan()'s rules, or the band would disagree with
+  // the rows it summarises, so isHidden/isBook are applied here exactly as the
+  // listing applies them and test_booklist.cpp pins the two against each other.
+  std::vector<DirEntry> raw;
+  if (!fs.list(path, raw)) return -1;
   int n = 0;
-  for (const BookEntry& e : rows) {
+  for (const DirEntry& e : raw) {
+    if (isHidden(e.name)) continue;
     if (!e.isDir) {
-      ++n;
+      if (isBook(e.name)) ++n;
       continue;
     }
     // A folder whose own listing failed contributes nothing rather than being
@@ -117,13 +135,22 @@ bool BookList::scan(FileSystem& fs, std::string_view path, std::vector<BookEntry
   if (!fs.list(path, raw)) return false;
 
   out.reserve(raw.size());
-  for (const DirEntry& e : raw) {
+  for (DirEntry& e : raw) {
     if (isHidden(e.name)) continue;
     // A folder is a place to descend into, so its name says nothing about
     // whether it belongs on the list -- including when it ends in something
     // that looks like a rejected extension.
     if (!e.isDir && !isBook(e.name)) continue;
-    out.push_back(BookEntry{e.name, titleFor(e.name, e.isDir), e.isDir, e.isDir ? 0u : e.size});
+    // `e.name` is MOVED, not copied. `raw` is a local that dies at the closing
+    // brace, so copying meant every name existed twice at the peak -- and the
+    // peak is the number that matters, because it is what -fno-exceptions turns
+    // into an abort() with no diagnostic. `raw` is left holding emptied strings,
+    // which is fine: nothing reads it again.
+    //
+    // No title is built either. It is derived from the name by BookEntry::title()
+    // now, so this loop allocates once per book instead of three times.
+    out.push_back(BookEntry{std::move(e.name), std::string(), e.isDir,
+                            e.isDir ? 0u : e.size});
   }
 
   // FAT gives no ordering guarantee at all, so the order is ours to impose: a
@@ -138,8 +165,8 @@ bool BookList::scan(FileSystem& fs, std::string_view path, std::vector<BookEntry
   // order would come out of the sort's internals.
   std::sort(out.begin(), out.end(), [](const BookEntry& a, const BookEntry& b) {
     if (a.isDir != b.isDir) return a.isDir;
-    if (lessNoCase(a.title, b.title)) return true;
-    if (lessNoCase(b.title, a.title)) return false;
+    if (lessNoCase(a.title(), b.title())) return true;
+    if (lessNoCase(b.title(), a.title())) return false;
     return a.name < b.name;
   });
   return true;

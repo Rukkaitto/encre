@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -134,7 +135,7 @@ TEST_CASE("directories are rows whatever they are called") {
   for (const auto& e : out) CHECK(e.isDir);
   // A folder keeps its whole name as its title: it has no extension to strip,
   // and "covers" would be a different folder than the one on the card.
-  CHECK(find(out, "covers.jpg")->title == "covers.jpg");
+  CHECK(find(out, "covers.jpg")->title() == "covers.jpg");
 }
 
 TEST_CASE("folders sort before books, then each group alphabetically and case-blind") {
@@ -221,11 +222,11 @@ TEST_CASE("the title is the filename minus its final extension, and nothing clev
   REQUIRE(BookList::scan(fs, "/books", out));
   CAPTURE(names(out));
   REQUIRE(out.size() == 5);
-  CHECK(find(out, "Middlemarch.epub")->title == "Middlemarch");
-  CHECK(find(out, "Vol.2.epub")->title == "Vol.2");
-  CHECK(find(out, "the_waves.txt")->title == "the_waves");
-  CHECK(find(out, "a.b.c.epub")->title == "a.b.c");
-  CHECK(find(out, "UPPER CASE.EPUB")->title == "UPPER CASE");
+  CHECK(find(out, "Middlemarch.epub")->title() == "Middlemarch");
+  CHECK(find(out, "Vol.2.epub")->title() == "Vol.2");
+  CHECK(find(out, "the_waves.txt")->title() == "the_waves");
+  CHECK(find(out, "a.b.c.epub")->title() == "a.b.c");
+  CHECK(find(out, "UPPER CASE.EPUB")->title() == "UPPER CASE");
 }
 
 TEST_CASE("hidden entries are skipped, files and directories alike") {
@@ -406,4 +407,77 @@ TEST_CASE("countLibrary survives a folder it cannot look inside") {
   fs.writeAll("/books/good.epub", "x");
   fs.mkdirs("/books/bad");
   CHECK(BookList::countLibrary(fs, "/books") == 1);
+}
+
+// --- The title is a view, and the override is the Phase 3 seam ---------------
+//
+// BookEntry used to carry a second std::string per book, heap-allocated on every
+// name past the 15-char small-string buffer -- which is essentially all of them.
+// The derived title is always a PREFIX of the name, so it costs nothing to hand
+// back a view instead. These pin both halves: that the common case allocates
+// nothing, and that the override still works, so Phase 3 can fill titles from
+// EPUB metadata without rediscovering how.
+
+TEST_CASE("the derived title is a view INTO the name, not a copy") {
+  reader::BookEntry e{"Middlemarch.epub", std::string(), false, 1234};
+  const std::string_view t = e.title();
+  CHECK(t == "Middlemarch");
+  // The whole point: same storage. If this ever fails, every book on the card is
+  // paying for a second allocation again.
+  CHECK(t.data() == e.name.data());
+}
+
+TEST_CASE("a folder's title is the whole name, still a view") {
+  reader::BookEntry e{"Classics", std::string(), true, 0};
+  CHECK(e.title() == "Classics");
+  CHECK(e.title().data() == e.name.data());
+}
+
+TEST_CASE("titleOverride wins when set -- the Phase 3 path") {
+  // An EPUB whose metadata title has nothing to do with its filename, which is
+  // the normal case for a Calibre-managed card.
+  reader::BookEntry e{"middlemarch_1871.epub", "Middlemarch", false, 99};
+  CHECK(e.title() == "Middlemarch");
+  CHECK(e.title().data() == e.titleOverride.data());
+}
+
+TEST_CASE("an override is sorted on, not the filename") {
+  // The comparator reads title(), so an override has to change the order or the
+  // list would sort by something the screen does not show.
+  std::vector<reader::BookEntry> rows{
+      {"zzz.epub", "Aardvark", false, 1},
+      {"aaa.epub", std::string(), false, 1},  // derives to "aaa"
+  };
+  std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
+    return a.title() < b.title();
+  });
+  CHECK(rows[0].title() == "Aardvark");
+  CHECK(rows[1].title() == "aaa");
+}
+
+TEST_CASE("countLibrary counts what scan lists, without building or sorting it") {
+  // countLibrary works off the raw listing now; scan() builds BookEntries and
+  // sorts them. The two must still agree exactly, because one is a band's number
+  // and the other is the rows underneath it -- and a band that disagreed with
+  // its own rows is worse than no band.
+  FakeFileSystem fs;
+  fs.writeAll("/books/Middlemarch.epub", "x");
+  fs.writeAll("/books/Walden.epub", "x");
+  fs.writeAll("/books/.hidden.epub", "x");   // excluded by both
+  fs.writeAll("/books/notes.txt", "x");      // .txt IS a book here
+  fs.writeAll("/books/cover.jpg", "x");      // excluded by both
+  fs.writeAll("/books/Classics/Emma.epub", "x");
+  fs.writeAll("/books/Classics/Persuasion.epub", "x");
+
+  std::vector<reader::BookEntry> rows;
+  REQUIRE(reader::BookList::scan(fs, "/books", rows));
+  int viaScan = 0;
+  for (const auto& e : rows) {
+    if (!e.isDir) { ++viaScan; continue; }
+    const int inside = reader::BookList::countBooks(fs, "/books/" + e.name);
+    if (inside > 0) viaScan += inside;
+  }
+
+  CHECK(reader::BookList::countLibrary(fs, "/books") == viaScan);
+  CHECK(viaScan == 5);  // 3 beside the folder + 2 inside it
 }

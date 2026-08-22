@@ -11,7 +11,7 @@ ItemActionsScreen::ItemActionsScreen(const LibraryScreen& library) {
   // empty list -- but an overlay captioned with a blank name is a better failure
   // than one that dereferences nothing.
   if (item != nullptr) {
-    vm_.title = item->entry.title;
+    vm_.title = std::string(item->entry.title());
     vm_.status = item->progress;
   }
   // The board's four rows, in the board's order, and its chevrons: Open and Book

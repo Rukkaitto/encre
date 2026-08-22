@@ -17,7 +17,7 @@ DeleteConfirmScreen::DeleteConfirmScreen(LibraryScreen& library) : library_(libr
   // A confirmation that does not NAME the thing is one people learn to dismiss
   // without reading, so this is load-bearing rather than decorative.
   const LibraryItem* item = library.focusedItem();
-  const std::string name = item != nullptr ? upperAscii(item->entry.title) : std::string();
+  const std::string name = item != nullptr ? upperAscii(item->entry.title()) : std::string();
   vm_.title = "DELETE \xE2\x80\x9C" + name + "\xE2\x80\x9D?";
   // The board's own paragraph, verbatim -- and it is a promise the code keeps:
   // nothing here goes near /.reader/state/.
