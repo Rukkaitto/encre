@@ -26,6 +26,9 @@ enum class ScreenId : uint8_t {
   // rather than a special case in the shell, so the simulator and the goldens can
   // render it like everything else.
   Sleep,
+  // The reading page -- see screen_reader.h. Last of the V1 screens to arrive and
+  // the only one whose content is the book's rather than the app's.
+  Reader,
   SdMissing
 };
 

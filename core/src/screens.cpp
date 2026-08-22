@@ -70,6 +70,31 @@ SleepViewModel demoSleepVm() {
   return vm;
 }
 
+// design/Reader.dc.html's own two paragraphs, verbatim, on the same reasoning as
+// demoSleepVm: a screen the simulator and the goldens must render needs a source
+// for its content, and the board's copy is the one source that makes the
+// comparison sheet meaningful.
+//
+// Built as blocks directly rather than parsed from XHTML: the board is HTML the
+// document builder has never seen and never will -- it carries the board's own
+// commentary and inline styles -- so parsing it would be testing the parser on the
+// wrong input while pretending to fix the content.
+Document demoReaderDoc() {
+  Document d;
+  d.blocks.push_back(
+      {BlockKind::Paragraph,
+       "Miss Brooke had that kind of beauty which seems to be thrown into relief by "
+       "poor dress. Her hand and wrist were so finely formed that she could wear "
+       "sleeves not less bare of style than those in which the Blessed Virgin "
+       "appeared to Italian painters."});
+  d.blocks.push_back(
+      {BlockKind::Paragraph,
+       "Her sister Celia wore a necklace, and the two of them had that air of being "
+       "dressed alike which is never quite an accident. It was the kind of morning "
+       "that makes a plain room look deliberate."});
+  return d;
+}
+
 std::vector<LibraryItem> demoLibraryItems() {
   // The board's rows, in the board's order, with the board's own authors and
   // right-hand values. The folder's `childBooks` is 6 because the board says
@@ -193,6 +218,19 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // the demo catalogue, and a screen nothing can navigate TO needs a source
       // for its values either way.
       return std::make_unique<SleepScreen>(demoSleepVm());
+    case ScreenId::Reader: {
+      // REFUSED without a body face, rather than built empty. A Reader that
+      // rendered nothing looks exactly like a book that failed to open, and the
+      // caller can act on a refused push.
+      if (readerBody_ == nullptr) return nullptr;
+      Document doc = readerDoc_.blocks.empty() ? demoReaderDoc() : readerDoc_;
+      auto scr = std::make_unique<ReaderScreen>(
+          std::move(doc),
+          readerBookTitle_.empty() ? "Middlemarch" : readerBookTitle_,
+          readerChapter_.empty() ? "CH. 01" : readerChapter_, readerBody_);
+      scr->setMetrics(readerMetrics_);
+      return scr;
+    }
     case ScreenId::SdMissing:
       // Buildable through the factory, not only as a root, so the shell can
       // replace the stack with it if the card goes away later and the simulator

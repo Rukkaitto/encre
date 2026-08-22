@@ -237,7 +237,7 @@ TEST_CASE("a line with no gaps is never stretched") {
 }
 
 TEST_CASE("A LINE IS SET RAGGED RATHER THAN OPENING A CORRIDOR") {
-  // kMaxGapStretch's reason, on the actual string from tools/mkepub.py: the line
+  // kMinJustifyFillPercent's reason, on the actual string from tools/mkepub.py: the line
   // before an unbreakably long word holds few words and most of the column as
   // slack, and justifying it puts two words at opposite margins.
   Body b;
@@ -250,6 +250,38 @@ TEST_CASE("A LINE IS SET RAGGED RATHER THAN OPENING A CORRIDOR") {
   REQUIRE(p.lines.size() >= 2);
   // The first line is "Two words" -- one gap, ~330px of slack. Ragged.
   CHECK(p.lines[0].extraPerGapF26 == 0);
+}
+
+TEST_CASE("AN ORDINARY LINE IS JUSTIFIED EVEN WHEN ITS SLACK FALLS ACROSS FEW GAPS") {
+  // The regression a per-gap stretch cap caused, on design/Reader.dc.html's own
+  // copy. "necklace, and the two of" is 367px of text in a 444px column -- 83%
+  // full, unremarkable prose -- but its 77px of slack falls across only four gaps,
+  // so a cap of three space-widths refused it by one pixel and set it ragged
+  // directly beneath a line it had justified. Justification is a property of the
+  // LINE's fill, not of the gap count; this is that pinned.
+  Body b;
+  Document d = docOf({"Short opening.",
+                      "Her sister Celia wore a necklace, and the two of them had that air of "
+                      "being dressed alike which is never quite an accident."});
+  const Page p = reader::layoutPage(d, b.face, boardMetrics(2400), Cursor{});
+  REQUIRE(p.lastPage);
+  int raggedMidParagraph = 0;
+  for (size_t i = 0; i < p.lines.size(); ++i) {
+    const std::string_view t = p.lines[i].text;
+    const bool blockEnds = (i + 1 == p.lines.size()) ||
+                           (p.lines[i + 1].text.data() > t.data() + t.size() + 1);
+    if (blockEnds || gapsIn(t) == 0) continue;
+    const int avail = 444 - (p.lines[i].x - 18);
+    const int nat = b.face.measure(t);
+    if (nat * 100 >= avail * reader::kMinJustifyFillPercent &&
+        p.lines[i].extraPerGapF26 == 0) {
+      ++raggedMidParagraph;
+      CAPTURE(std::string(t));
+      CAPTURE(nat);
+      CAPTURE(avail);
+    }
+  }
+  CHECK(raggedMidParagraph == 0);
 }
 
 // --- The indent --------------------------------------------------------------

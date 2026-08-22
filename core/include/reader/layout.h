@@ -36,33 +36,43 @@ inline constexpr int kBodyPpem = 32;         // `font-size: 32px`
 inline constexpr int kBodyLeadEm = 1700;     // `line-height: 1.7`
 inline constexpr int kBodyIndentEm = 1500;   // `text-indent: 1.5em` on a continuing paragraph
 
-// The most a single gap may be STRETCHED BY, as a multiple of the face's own space
-// advance -- so 3 means a gap may grow to four times its natural width before the
-// line is set ragged instead.
+// How full a line must be, as a percentage of its column, before it is justified
+// at all. Below this it is set ragged.
 //
-// Justification's failure case is a real string in our own fixtures:
-// "pneumonoultramicroscopicsilicovolcanoconiosis" is wider than the 444px column,
-// so the greedy wrap puts it alone on a line and leaves the line BEFORE it holding
-// two or three words and most of the column as slack. Divided across two gaps that
-// is 100px a gap -- two words at opposite margins with a corridor between them,
-// which reads as a rendering fault rather than as typography.
+// THE TEST IS THE LINE, NOT THE GAP, and getting that round the wrong way is
+// instructive. This started as a cap on how far one gap could stretch -- three
+// times the space's own width -- on the reasoning that justification's failure
+// case is a corridor of white between two words. The failure case is real: our
+// own fixtures contain "pneumonoultramicroscopicsilicovolcanoconiosis", which is
+// wider than the 444px column, so the greedy wrap puts it alone on a line and
+// leaves the line before it holding two words and 330px of slack.
 //
-// WHY SO LOOSE, when a printed book stretches a space by half its width and a
-// typesetter would call four times grotesque: those books HYPHENATE. TeX's limit
-// is tight because when a line will not fit it breaks a word instead; this wrap
-// has no hyphenation dictionary, so its only other move is to give up on the line.
-// A ragged line in the middle of a justified paragraph is more conspicuous than a
-// wide gap -- it looks like the feature failing rather than like a loose line -- so
-// the threshold is set where "ragged" stays rare and reserved for the case above.
+// But a per-gap cap cannot tell that line from ordinary prose, because the number
+// of gaps is what converts slack into stretch. Measured on
+// design/Reader.dc.html's own two paragraphs, the cap refused "necklace, and the
+// two of" -- 367px of text in a 444px column, a perfectly ordinary line -- because
+// its 77px of slack fell across only four gaps, 19.25px each against an 18px cap.
+// It refused it BY ONE PIXEL, and set it ragged directly beneath a line it had
+// justified at 15.25px. A ragged line sitting between two justified ones is
+// exactly what the cap existed to avoid, arrived at from the other direction.
 //
-// THE THRESHOLD IS NOT TUNED AGAINST REAL PROSE, and that is worth knowing before
-// anyone trusts the number. Measured over 6,800 pages of tools/mkepub.py output:
-// 71% of lines justified, 29% ragged, of which the stretch cap accounts for 18
-// points. That 18 is NOT a property of prose -- mkepub.py's second chapter is the
-// same paragraph 24 times, so one line position in it recurs ~4,800 times and
-// carries the whole spike. The corpus can say the mechanism works (worst overshoot
-// past the right margin: 0px) and cannot say whether 3 is the right number.
-inline constexpr int kMaxGapStretch = 3;
+// A line that is 83% full is prose. A line that is 23% full is the corridor. So
+// the question is how much of the line is TEXT, which is the thing actually
+// visible, and it needs no reference to the gap count at all.
+//
+// 60% is where "more text than space" stops being true. Measured over the same
+// 6,800 pages of tools/mkepub.py output: the per-gap cap set 18% of all lines
+// ragged and the fill test sets 3.4%, taking justified lines from 71% to 86%. The
+// lines that remain ragged are almost all paragraph-final, which is where ragged
+// belongs.
+//
+// The price is admitted rather than hidden: a line at the threshold has 40% of its
+// column as slack, and across four gaps that is a gap five or six times the space's
+// own width -- a visible river. That is the trade a wrap with no hyphenation
+// dictionary has to make, and it is made in this direction because an occasional
+// wide gap reads as loose typesetting while a ragged line mid-paragraph reads as
+// the feature being broken.
+inline constexpr int kMinJustifyFillPercent = 60;
 
 struct PageMetrics {
   // The column in FRAMEBUFFER coordinates, so a LaidLine's x and baselineY are
@@ -97,7 +107,7 @@ struct LaidLine {
   int baselineY = 0;  // px
   // What drawTextJustified should add after each ASCII space, or 0 for a line set
   // ragged -- which is every last line of a paragraph, every line with no gaps,
-  // and every line whose slack exceeds kMaxGapStretch.
+  // and every line too empty to justify (see kMinJustifyFillPercent).
   int extraPerGapF26 = 0;
   BlockKind kind = BlockKind::Paragraph;
 };

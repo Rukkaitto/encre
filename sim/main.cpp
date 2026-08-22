@@ -16,6 +16,8 @@
 #include "reader/screen_home.h"
 #include "reader/screen_library.h"
 #include "reader/screen_sd_missing.h"
+#include "reader/scalablefont.h"
+#include "reader/screen_reader.h"
 #include "reader/screens.h"
 #include "reader/settings.h"
 #include "reader/theme_quiet.h"
@@ -259,12 +261,14 @@ int main(int argc, char** argv) {
   const bool isSleep = std::strcmp(argv[1], "sleep") == 0;
   const bool isHomeEmpty = std::strcmp(argv[1], "home_empty") == 0;
   const bool isLibraryScrolled = std::strcmp(argv[1], "library_scrolled") == 0;
+  const bool isReader = std::strcmp(argv[1], "reader") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
-      !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty && !isLibraryScrolled) {
+      !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
+      !isLibraryScrolled && !isReader) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
-                 "'sleep', 'home_empty', 'library_scrolled' or 'app')\n",
+                 "'sleep', 'home_empty', 'library_scrolled', 'reader' or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -274,6 +278,44 @@ int main(int argc, char** argv) {
   const reader::FontSet& fonts = ramp.fonts;
 
   reader::QuietTheme theme;
+
+  // The body face, for `reader` only. Its BYTES live here beside it for the same
+  // reason SimRamp keeps the ramp's: ScalableFont borrows the buffer it was
+  // initialised from and never copies it, so a vector that went out of scope
+  // would leave it rasterising from freed heap.
+  std::vector<uint8_t> bodyTtf;
+  reader::ScalableFont body;
+  if (isReader) {
+    bodyTtf = slurp(std::string(ASSETS_DIR) + "/built/literata_body.ttf");
+    if (!body.init(bodyTtf.data(), bodyTtf.size(), reader::kBodyPpem)) {
+      std::fprintf(stderr, "body face failed to load\n");
+      return 1;
+    }
+  }
+
+  if (isReader) {
+    // Through the real ReaderScreen, and the metrics through the real
+    // Theme::readerMetrics -- so the PNG is laid out by exactly the arithmetic the
+    // device runs, rather than by a column this file picked. Reader declares
+    // Fidelity::Grayscale, so renderToPng renders three planes and composes them:
+    // this is the first screen in the project whose golden is not a 1-bit frame.
+    reader::PageMetrics m;
+    theme.readerMetrics(w, h, fonts, body, m);
+    reader::DemoScreenFactory factory;
+    factory.setReaderBody(&body);
+    factory.setReaderMetrics(m);
+    std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Reader);
+    if (scr == nullptr) {
+      std::fprintf(stderr, "the factory refused ScreenId::Reader\n");
+      return 1;
+    }
+    if (!renderToPng(*scr, fonts, theme, w, h, argv[2])) return 1;
+    const auto& rd = static_cast<const reader::ReaderScreen&>(*scr);
+    std::printf("wrote %s (%dx%d) page %d/%d, %zu lines, column %dx%d\n", argv[2], w, h,
+                rd.vm().page, rd.vm().pageTotal, rd.page().lines.size(), m.columnW,
+                m.columnH);
+    return 0;
+  }
 
   if (isHome) {
     // From the shared catalogue, not from a copy here: the simulator's PNGs are

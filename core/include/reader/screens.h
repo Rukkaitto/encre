@@ -5,6 +5,7 @@
 #include "reader/app.h"
 #include "reader/screen_settings.h"
 #include "reader/screen_library.h"
+#include "reader/screen_reader.h"
 #include "reader/viewmodel.h"
 
 namespace reader {
@@ -108,6 +109,25 @@ class DemoScreenFactory : public ScreenFactory {
     settingsHeaderH_ = headerH;
   }
 
+  // What a Reader this factory builds shows, and what it draws body text with.
+  // Held here for the reason the Library's row count and Settings' sink are: the
+  // factory constructs the screen, and neither the chapter nor a rasterised face
+  // is something `core/` can go and find.
+  //
+  // With no body face set the factory REFUSES to build a Reader, rather than
+  // building one that renders nothing: a screen with no text is
+  // indistinguishable from a book that failed to open.
+  void setReaderBody(const GlyphSource* body) { readerBody_ = body; }
+  void setReaderMetrics(const PageMetrics& m) { readerMetrics_ = m; }
+  // The chapter to open. Empty means demoReaderDoc() -- design/Reader.dc.html's
+  // own two paragraphs, which is what the simulator and the goldens render, on
+  // the same reasoning as demoSleepVm().
+  void setReaderChapter(Document doc, std::string bookTitle, std::string chapter) {
+    readerDoc_ = std::move(doc);
+    readerBookTitle_ = std::move(bookTitle);
+    readerChapter_ = std::move(chapter);
+  }
+
  private:
   FileSystem* fs_ = nullptr;
   std::string root_;
@@ -119,6 +139,11 @@ class DemoScreenFactory : public ScreenFactory {
   int settingsListH_ = 0;
   int settingsRowH_ = 0;
   int settingsHeaderH_ = 0;
+  const GlyphSource* readerBody_ = nullptr;
+  PageMetrics readerMetrics_{};
+  Document readerDoc_{};
+  std::string readerBookTitle_;
+  std::string readerChapter_;
 };
 
 }  // namespace reader

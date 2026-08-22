@@ -193,6 +193,24 @@ struct SleepViewModel {
   std::string note;       // "ASLEEP - PRESS POWER TO WAKE"
 };
 
+// design/Reader.dc.html's CHROME -- the header band and the footer. The page's
+// text is NOT here: a laid-out page is geometry (reader/layout.h's LaidLine
+// carries an x and a baseline), and this file's rule is semantic content plus
+// interaction state, no geometry and no styling. So renderReader takes the Page
+// as its own argument beside this, and the split says which half is which.
+struct ReaderViewModel {
+  std::string bookTitle;  // "Middlemarch" -- the board shouts it, the theme does that
+  std::string chapter;    // "CH. 01", already composed: the theme does not do arithmetic
+  int progressPercent = 0;
+  // The footer's "53 / 890". CHAPTER-RELATIVE in this slice, not book-wide, and
+  // the board's copy is book-wide -- a book-wide page number needs an index of
+  // every chapter's page count, which is a pass over the whole EPUB and does not
+  // exist yet. Carried as two plain numbers so that pass can fill them in later
+  // without this struct or the theme changing.
+  int page = 0;
+  int pageTotal = 0;
+};
+
 struct SettingsRow {
   std::string label;
   std::string value;      // empty on a section header

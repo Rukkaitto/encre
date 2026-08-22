@@ -33,8 +33,8 @@ bool indented(const Document& doc, int at) {
 // Paragraphs and quotes are body text and the board says `text-align: justify`.
 // Headings and list items are NOT: a heading is a display line whose slack is
 // meant to be visible, and a list item is usually short enough that justifying it
-// opens the corridor kMaxGapStretch exists to prevent -- on every line rather than
-// occasionally.
+// opens the corridor kMinJustifyFillPercent exists to prevent -- on every line
+// rather than occasionally.
 bool justifiable(BlockKind k) {
   return k == BlockKind::Paragraph || k == BlockKind::Blockquote;
 }
@@ -54,14 +54,13 @@ int stretchFor(const GlyphSource& font, std::string_view line, int availW, Track
   // let overhang. Pulling the gaps tighter to compensate would compress a line
   // that is already wrong, in a way that looks like a different bug.
   if (naturalW >= availW) return 0;
-  const int perGapF26 = pxToF26(availW - naturalW) / gaps;
 
-  // The ragged fallback. See kMaxGapStretch: the alternative on the line before
-  // an unbreakably long word is two words at opposite margins.
-  const std::optional<int> spaceAdv = font.advance(U' ');
-  const int spaceF26 = pxToF26(spaceAdv.value_or(font.ppem() / 4));
-  if (spaceF26 > 0 && perGapF26 > kMaxGapStretch * spaceF26) return 0;
-  return perGapF26;
+  // The ragged fallback, tested on how full the LINE is rather than on how far a
+  // gap would stretch -- see kMinJustifyFillPercent for why that distinction is
+  // the whole of it. Multiplied out rather than divided, so a narrow column needs
+  // no rounding rule of its own.
+  if (naturalW * 100 < availW * kMinJustifyFillPercent) return 0;
+  return pxToF26(availW - naturalW) / gaps;
 }
 
 }  // namespace

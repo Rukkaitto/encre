@@ -885,6 +885,106 @@ void QuietTheme::settingsMetrics(int panelH, const FontSet& fonts, int& listH, i
   headerH = settingsHeaderHeight(fonts);
 }
 
+namespace {
+
+// design/Reader.dc.html's box model. The frame is `padding: 20px 18px 0 18px`, so
+// the side margin is 18 rather than the 24 every chrome screen uses -- a reading
+// column wants the width, and this is the one screen whose content is the book's
+// rather than the app's.
+constexpr int kReadPadTop = 20;
+constexpr int kReadPadX = 18;
+constexpr int kReadHeaderPadBottom = 22;  // the header row's `padding-bottom`
+constexpr int kReadFooterPadTop = 12;     // the footer's `padding: 12px 0 16px 0`
+constexpr int kReadFooterPadBottom = 16;
+constexpr int kReadBarW = 210;
+constexpr int kReadBarH = 5;
+constexpr int kReadTitleEm = 180;  // MIDDLEMARCH, 0.18em
+constexpr int kReadMetaEm = 120;   // the chapter, the percent and the counter, 0.12em
+
+}  // namespace
+
+void QuietTheme::readerMetrics(int panelW, int panelH, const FontSet& fonts,
+                               const GlyphSource& body, PageMetrics& out) const {
+  // Both bands are one line of --t-meta plus their padding. The header's two runs
+  // are `align-items: baseline` and the same size, so the row is one line high;
+  // the footer's tallest child is its text, not the 5px bar.
+  const Font& meta = fonts[Role::Meta400];
+  const int headerH = meta.lineHeight() + kReadHeaderPadBottom;
+  const int footerH = kReadFooterPadTop + meta.lineHeight() + kReadFooterPadBottom;
+
+  out.columnLeft = kReadPadX;
+  out.columnTop = kReadPadTop + headerH;
+  out.columnW = panelW - 2 * kReadPadX;
+  out.columnH = panelH - kReadPadTop - headerH - footerH;
+  out.leadEm1000 = kBodyLeadEm;
+  out.indentEm1000 = kBodyIndentEm;
+  // The body face's own tracking is the face's: the board sets no letter-spacing
+  // on the reading column, and a book's text is the one run on this device that
+  // must not be tracked -- the chrome's wide spacing is a chrome mannerism.
+  out.tracking = {};
+  (void)body;
+}
+
+void QuietTheme::renderReader(Framebuffer& fb, const FontSet& fonts, const GlyphSource& body,
+                              const ReaderViewModel& vm, const Page& page, Plane plane) {
+  const Font& meta = fonts[Role::Meta400];
+  const Font& metaTitle = fonts[Role::Meta500];  // the header's book title, 21px/500
+  const Font& metaPct = fonts[Role::Meta700];    // the footer's percentage, 21px/700
+
+  // --- The header: the book, and the chapter, on one baseline ---
+  //
+  // `align-items: baseline` and both runs at --t-meta, so ONE baseline serves
+  // both -- taken from the taller of the two faces so neither is clipped. Placing
+  // each in its own box would centre two different line heights separately and
+  // part the baselines by a pixel, which on two runs that the board explicitly
+  // puts on a shared baseline is the whole point.
+  const int bandH = metaTitle.lineHeight() > meta.lineHeight() ? metaTitle.lineHeight()
+                                                              : meta.lineHeight();
+  const int headBase = baselineIn(metaTitle, kReadPadTop, bandH);
+  const Tracking titleTrack = trackingEm(metaTitle, kReadTitleEm);
+  const int right = fb.width() - kReadPadX;
+
+  // The chapter is drawn FIRST and its width reserved, because it is the run that
+  // must not be truncated: "CH. 01" is `white-space: nowrap` on the board and the
+  // book title is the run with `space-between` slack to give up. A long title on
+  // the narrower panel is the case this orders for.
+  const Tracking metaTrack = trackingEm(meta, kReadMetaEm);
+  const int chapterW = meta.measure(vm.chapter, metaTrack);
+  drawText(fb, meta, right - chapterW, headBase, vm.chapter, Ink::Black, metaTrack, plane);
+  drawTextElided(fb, metaTitle, kReadPadX, headBase, upperAscii(vm.bookTitle),
+                 fb.width() - 2 * kReadPadX - chapterW - kReadPadX, Ink::Black, titleTrack,
+                 plane);
+
+  // --- The page ---
+  //
+  // Already positioned by reader/layout.h, in these coordinates. All this does is
+  // draw each line with the stretch layout computed, which is what keeps
+  // justification a property of the measurement rather than of the paint.
+  for (const LaidLine& ln : page.lines)
+    drawTextJustified(fb, body, ln.x, ln.baselineY, ln.text, ln.extraPerGapF26, Ink::Black,
+                      {}, plane);
+
+  // --- The footer: percent, bar, counter ---
+  const int footerTop = fb.height() - kReadFooterPadBottom - meta.lineHeight();
+  const int base = baselineIn(metaPct, footerTop, meta.lineHeight());
+
+  const std::string pct = std::to_string(vm.progressPercent) + "%";
+  const Tracking pctTrack = trackingEm(metaPct, kReadMetaEm);
+  drawText(fb, metaPct, kReadPadX, base, pct, Ink::Black, pctTrack, plane);
+
+  const std::string counter = std::to_string(vm.page) + " / " + std::to_string(vm.pageTotal);
+  const int counterW = meta.measure(counter, metaTrack);
+  drawText(fb, meta, right - counterW, base, counter, Ink::Black, metaTrack, plane);
+
+  // The bar is `justify-content: space-between`'s middle child, so it is centred
+  // across the WHOLE row rather than in the space left over -- which is what the
+  // board's three equal-weight children resolve to and is why it is placed off
+  // fb.width() and not off the two measured runs.
+  const int barX = centreIn(kReadPadX, fb.width() - 2 * kReadPadX, kReadBarW);
+  const int barY = iconTopIn(footerTop, meta.lineHeight(), kReadBarH);
+  drawProgressBar(fb, barX, barY, kReadBarW, kReadBarH, vm.progressPercent);
+}
+
 void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
                                 const SettingsViewModel& vm, Plane plane) {
   fb.clear(true);

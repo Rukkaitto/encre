@@ -47,8 +47,13 @@ TEST_CASE("-1 survives, because it is a position and not an error") {
 TEST_CASE("an unknown screen name rejects the WHOLE record, not just its entry") {
   // A name this build does not know comes from a firmware that does, so the
   // entries around it may not mean what they say either. Home is the answer.
+  //
+  // The example used to be "reader", which stopped being unknown the moment the
+  // Reader screen landed -- and the test then asserted that a valid record was
+  // refused, passing for the wrong reason right up until it failed. A name that
+  // cannot become a screen is the only safe stand-in.
   std::vector<StackEntry> out{{ScreenId::Library, 3}};
-  CHECK_FALSE(decodeSessionStack("home:0;reader:12", out));
+  CHECK_FALSE(decodeSessionStack("home:0;not-a-screen:12", out));
   CHECK(out.empty());
 }
 

@@ -10,6 +10,12 @@ const char* screenName(ScreenId id) {
     case ScreenId::DeleteConfirm: return "DELETE-CONFIRM";
     case ScreenId::BookDetails: return "BOOK-DETAILS";
     case ScreenId::Settings: return "SETTINGS";
+    // Sleep was missing from this switch and fell through to "?", so every log
+    // line naming it named nothing. Not caught by -Wswitch because the function
+    // has a return after the switch -- which it needs, for an id cast from a
+    // stored byte.
+    case ScreenId::Sleep: return "SLEEP";
+    case ScreenId::Reader: return "READER";
     case ScreenId::SdMissing: return "SD-MISSING";
   }
   return "?";

@@ -15,9 +15,13 @@ namespace {
 // local and checked -- test_session_record.cpp asks every id for its name and
 // asserts they are all distinct -- and it is not the coupling version 1 got wrong,
 // which was putting the ordinal ON THE WIRE.
+// IN ENUM ORDER, because decodeName maps an index straight back to ScreenId(i).
+// Appending a name rather than inserting it at its enum position silently maps
+// every id after the insertion point to the wrong name -- which encodes a
+// Reader as "sd-missing" and restores an SdMissing as a Reader.
 constexpr const char* kNames[] = {
     "home", "library", "item-actions", "delete-confirm",
-    "book-details", "settings", "sleep", "sd-missing",
+    "book-details", "settings", "sleep", "reader", "sd-missing",
 };
 
 // Clamped so the encoded length is bounded. -1 is the floor rather than 0 because
@@ -68,7 +72,14 @@ const char* sessionWireName(ScreenId id) {
     // ever does, note that a restored SleepScreen takes no input: waking into it
     // would be a screen with no way out. Make it unstorable before pushing it.
     case ScreenId::Sleep: return kNames[6];
-    case ScreenId::SdMissing: return kNames[7];
+    // Reader is NAMEABLE but not restorable, and the two are separate facts. It
+    // needs a name so this switch is exhaustive; it is not restorable because a
+    // reading position is a block and a line, which `focus` cannot carry -- so a
+    // restored Reader would reopen the chapter at page 1 and lose exactly what the
+    // session record exists to keep. ScreenFactory refuses to build one, which is
+    // what makes the refusal happen at the push rather than silently.
+    case ScreenId::Reader: return kNames[7];
+    case ScreenId::SdMissing: return kNames[8];
   }
   return kNames[0];
 }

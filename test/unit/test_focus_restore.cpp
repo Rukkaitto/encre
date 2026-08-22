@@ -20,6 +20,9 @@
 #include "home_vm.h"
 #include "reader/app.h"
 #include "reader/screen_home.h"
+#include "golden.h"
+#include "reader/layout.h"
+#include "reader/scalablefont.h"
 #include "reader/screens.h"
 
 using namespace reader;
@@ -31,7 +34,8 @@ namespace {
 // there is no -Wswitch to lean on over an array.
 constexpr ScreenId kAllScreens[] = {
     ScreenId::Home,     ScreenId::Library,      ScreenId::ItemActions, ScreenId::DeleteConfirm,
-    ScreenId::BookDetails, ScreenId::Settings,  ScreenId::Sleep,       ScreenId::SdMissing,
+    ScreenId::BookDetails, ScreenId::Settings,  ScreenId::Sleep,       ScreenId::Reader,
+    ScreenId::SdMissing,
 };
 static_assert(sizeof(kAllScreens) / sizeof(kAllScreens[0]) ==
                   static_cast<size_t>(ScreenId::SdMissing) + 1,
@@ -45,6 +49,11 @@ struct Standalone {
   DemoScreenFactory factory;
   std::unique_ptr<Screen> parent;
   std::unique_ptr<Screen> screen;
+  // Reader is the one screen the factory refuses without a body face, and a face
+  // is a TTF plus a rasteriser rather than a value -- so it is held here, beside
+  // the Library the overlays hold a reference to, for the same lifetime reason.
+  std::vector<uint8_t> ttf;
+  ScalableFont body;
 
   Screen& get() const { return *screen; }
 };
@@ -59,6 +68,21 @@ std::unique_ptr<Standalone> build(ScreenId id) {
   // is refused (ScrollWindow's rule, which Settings now shares instead of
   // hand-rolling around it).
   b->factory.setSettingsMetrics(700, 55, 45);
+  if (id == ScreenId::Reader) {
+    // GIVEN a body face rather than skipped. Excluding Reader from the loop would
+    // have been a screen this file claims to cover and does not -- and Reader is a
+    // Screen with no movable focus, which is exactly the case the `movable` count
+    // below exists to keep honest.
+    b->ttf = golden::slurp(std::string(ASSETS_DIR) + "/built/literata_body.ttf");
+    REQUIRE(b->body.init(b->ttf.data(), b->ttf.size(), reader::kBodyPpem));
+    b->factory.setReaderBody(&b->body);
+    PageMetrics m;
+    m.columnLeft = 18;
+    m.columnTop = 100;
+    m.columnW = 444;
+    m.columnH = 600;
+    b->factory.setReaderMetrics(m);
+  }
   if (id == ScreenId::Home) {
     // The factory refuses Home on purpose -- the root is never rebuilt -- so the
     // one screen the shell constructs by hand is constructed by hand here too.

@@ -1,4 +1,5 @@
 #pragma once
+#include "reader/layout.h"
 #include "reader/text.h"
 
 namespace reader {
@@ -12,6 +13,7 @@ struct DeleteConfirmViewModel;
 struct BookDetailsViewModel;
 struct SettingsViewModel;
 struct SleepViewModel;
+struct ReaderViewModel;
 
 // Themes own the entire presentation, layout structure included (spec 3.3).
 // The FontSet is supplied by the caller so device knowledge — which asset backs
@@ -90,6 +92,28 @@ class Theme {
   // headers, with the same rail Library uses -- see SettingsViewModel.
   virtual void renderSettings(Framebuffer& fb, const FontSet& fonts,
                               const SettingsViewModel& vm, Plane plane) = 0;
+
+  // Reader's COLUMN, the same split as settingsMetrics: the theme owns the box
+  // model, the screen owns what goes in it. The theme knows the header band's and
+  // the footer's heights because it draws them; only the screen can paginate,
+  // because only it holds the chapter.
+  //
+  // Takes the body face as well as the ramp: the column's height is a whole
+  // number of the BODY face's line boxes, and the body face is a ScalableFont
+  // rasterised at a runtime size, not one of FontSet's eleven fixed roles.
+  virtual void readerMetrics(int panelW, int panelH, const FontSet& fonts,
+                             const GlyphSource& body, PageMetrics& out) const = 0;
+
+  // design/Reader.dc.html.
+  //
+  // The ONE theme method that takes two content arguments, and the extra one is
+  // not a convenience: `page` is already positioned, in framebuffer coordinates,
+  // by reader/layout.h -- which is where justification and pagination live and
+  // where the assertion that measuring does not rasterise is made. A theme that
+  // took only a view model would have to lay the page out itself, and then the
+  // screen could not know how many pages there are or which one it is on.
+  virtual void renderReader(Framebuffer& fb, const FontSet& fonts, const GlyphSource& body,
+                            const ReaderViewModel& vm, const Page& page, Plane plane) = 0;
 
 };
 }  // namespace reader
