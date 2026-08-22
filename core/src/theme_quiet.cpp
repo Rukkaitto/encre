@@ -60,16 +60,16 @@ constexpr int kPromptActionW = 260;
 // anyone reading either file alone. reader::baselineIn in core/src/text.cpp is
 // now the only copy, and this theme is one of its callers like any other.
 
-// --- design/Library.dc.html -------------------------------------------------
-//
-// The four slots' MARKS, in hardware order (Back, Confirm, Up, Down). Declared
-// once because two functions need them for two different reasons: renderLibrary
-// draws them, and libraryVisibleRows measures the bar they make. The labels come
-// from the view-model and cannot change the bar's height -- a slot is one line of
-// Meta whatever it says -- so the sizing path builds slots with no labels from
-// the same array rather than repeating the marks with a copy of the strings.
-constexpr const Icon* kLibraryMarks[4] = {&icons::kBack, &icons::kDot, &icons::kUp,
-                                          &icons::kDown};
+// The MEASURING slots: kHintSlotMarks with no labels, for the two functions that
+// ask how tall the bar is before anything is drawn (libraryVisibleRows,
+// settingsMetrics). Labels cannot change a bar's height -- a slot is one line of
+// Meta whatever it says -- and these deliberately KEEP their marks where
+// buildHints would drop a markless slot's, because only the marks and the type
+// role set the height. Measuring is a different job from drawing, so it does not
+// pretend to be the same call.
+void measuringHints(Hint out[4]) {
+  for (int i = 0; i < 4; ++i) out[i] = {kHintSlotMarks[i], "", false};
+}
 
 // design/HomeEmpty.dc.html's own numbers: a 44px top pad, the 20px flex `gap`
 // between the mark, the title and the copy, and the copy's `max-width`.
@@ -86,10 +86,6 @@ constexpr int kEmptyProseMaxW = 400;
 // every other slot along.
 constexpr const Icon* kHomeMarks[4] = {&icons::kBook, &icons::kDot, &icons::kUp,
                                        &icons::kDown};
-
-void libraryHints(const LibraryViewModel& vm, Hint out[4]) {
-  for (int i = 0; i < 4; ++i) out[i] = {kLibraryMarks[i], vm.hints[i], vm.holds[i]};
-}
 
 // "12 BOOKS", and "1 BOOK". The board only ever shows the plural, so the
 // singular is a decision rather than a transcription -- and a screen reading
@@ -112,10 +108,7 @@ void drawCoverPlaceholder(Framebuffer& fb, int x, int y, int w, int h) {
   // dot, roughly a fifth coverage. Level 2 is a 50% checkerboard, which reads as
   // grey mesh rather than a sparse tint.
   ditherRect(fb, x, y, w, h, 1);
-  fb.fillRect(x, y, w, 2, false);
-  fb.fillRect(x, y + h - 2, w, 2, false);
-  fb.fillRect(x, y, 2, h, false);
-  fb.fillRect(x + w - 2, y, 2, h, false);
+  outlineRect(fb, x, y, w, h, 2);
 }
 }  // namespace
 
@@ -124,9 +117,7 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   fb.clear(true);
 
   Hint homeHints[4];
-  for (int i = 0; i < 4; ++i)
-    homeHints[i] = {vm.hints[static_cast<size_t>(i)].empty() ? nullptr : kHomeMarks[i],
-                    vm.hints[static_cast<size_t>(i)], vm.holds[static_cast<size_t>(i)]};
+  buildHints(kHomeMarks, vm.hints, vm.holds, homeHints);
 
   if (vm.libraryEmpty) {
     // NOT A HEADER BAND, and drawHeaderBand is the wrong primitive for it. This
@@ -166,9 +157,9 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
              f26ToPx(eyF26), Ink::Black, plane);
     eyF26 += pxToF26(icons::kBookLarge.h + kEmptyGap);
 
-    drawText(fb, big, centreIn(kMargin, colW, big.measure(vm.emptyTitle)),
-             baselineInF26(big, eyF26, pxToF26(big.lineHeight())), vm.emptyTitle, Ink::Black, {},
-             plane);
+    drawCentredText(fb, big, kMargin, colW,
+                    baselineInF26(big, eyF26, pxToF26(big.lineHeight())), vm.emptyTitle,
+                    Ink::Black, {}, plane);
     eyF26 += pxToF26(big.lineHeight() + kEmptyGap);
 
     drawProse(fb, copy, lines, centreIn(kMargin, colW, proseW), proseW, eyF26, Ink::Black, plane);
@@ -185,8 +176,7 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
               vm.menu[i].value, static_cast<int>(i) == vm.focusedMenuIndex,
               discloses ? &icons::kChevron : nullptr, plane);
     }
-    int slots[4] = {};
-    drawHintBar(fb, fonts, homeHints, slots, plane);
+    drawHintBar(fb, fonts, homeHints, plane);
     return;
   }
 
@@ -274,10 +264,7 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   if (continueFocused) {
     fb.fillRect(kMargin, y, barW, kBlockH, false);
   } else {
-    fb.fillRect(kMargin, y, barW, 2, false);
-    fb.fillRect(kMargin, y + kBlockH - 2, barW, 2, false);
-    fb.fillRect(kMargin, y, 2, kBlockH, false);
-    fb.fillRect(kMargin + barW - 2, y, 2, kBlockH, false);
+    outlineRect(fb, kMargin, y, barW, kBlockH, 2);
   }
   const Ink cink = continueFocused ? Ink::White : Ink::Black;
   // The block is an `align-items: center` flex row on the board, so its label
@@ -296,10 +283,8 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
 
   // The ring comes from the view model, not from this function: a slot shows a
   // hold mark if and only if the screen bound a long-press to that button.
-  const Hint hints[4] = {{&icons::kBook, vm.hints[0], vm.holds[0]},
-                         {&icons::kDot, vm.hints[1], vm.holds[1]},
-                         {&icons::kUp, vm.hints[2], vm.holds[2]},
-                         {&icons::kDown, vm.hints[3], vm.holds[3]}};
+  Hint hints[4];
+  buildHints(kHomeMarks, vm.hints, vm.holds, hints);
 
   // Menu rows sit above the hint bar, so the bar's height decides where they
   // start. That height is the bar's to compute -- from its own padding and its
@@ -319,23 +304,17 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
             plane);
   }
 
-  int slots[4] = {};
-  drawHintBar(fb, fonts, hints, slots, plane);
+  drawHintBar(fb, fonts, hints, plane);
 }
 
 void QuietTheme::renderSdMissing(Framebuffer& fb, const FontSet& fonts,
                                  const SdMissingViewModel& vm, Plane plane) {
   fb.clear(true);
 
-  // A slot's mark follows its label, because on the board only the button that
-  // does something carries one: three of the four slots are the empty 36px
-  // placeholder. A mark over a slot with no label would be an affordance for an
-  // action that is not there, and it would measure 32px where the board measures
-  // 36 and shift every other slot along.
-  const Icon* const marks[4] = {&icons::kBack, &icons::kDot, &icons::kUp, &icons::kDown};
+  // Three of the four slots are the boards' empty 36px placeholder, and
+  // buildHints is what keeps them markless -- see its header comment.
   Hint hints[4];
-  for (int i = 0; i < 4; ++i)
-    hints[i] = {vm.hints[i].empty() ? nullptr : marks[i], vm.hints[i], vm.holds[i]};
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
 
   // `flex-grow: 1` on the column: it takes everything the hint bar leaves. Asking
   // the bar rather than assuming a height is what makes this correct on both
@@ -375,9 +354,9 @@ void QuietTheme::renderSdMissing(Framebuffer& fb, const FontSet& fonts,
   drawIcon(fb, mark, centreIn(kMargin, usableW, mark.w), f26ToPx(yF26), Ink::Black, plane);
   yF26 += pxToF26(mark.h + kPromptGap);
 
-  drawText(fb, title, centreIn(kMargin, usableW, title.measure(vm.title, titleTracking)),
-           baselineInF26(title, yF26, pxToF26(title.lineHeight())), vm.title, Ink::Black,
-           titleTracking, plane);
+  drawCentredText(fb, title, kMargin, usableW,
+                  baselineInF26(title, yF26, pxToF26(title.lineHeight())), vm.title, Ink::Black,
+                  titleTracking, plane);
   yF26 += pxToF26(title.lineHeight() + kPromptGap);
 
   yF26 += drawProse(fb, body, prose, colX, colW, yF26, Ink::Black, plane);
@@ -388,8 +367,7 @@ void QuietTheme::renderSdMissing(Framebuffer& fb, const FontSet& fonts,
   drawActionButton(fb, fonts, centreIn(kMargin, usableW, kPromptActionW), f26ToPx(yF26),
                    kPromptActionW, vm.action, /*filled=*/true, plane);
 
-  int slots[4] = {};
-  drawHintBar(fb, fonts, hints, slots, plane);
+  drawHintBar(fb, fonts, hints, plane);
 }
 
 int QuietTheme::libraryVisibleRows(int panelH, const FontSet& fonts) const {
@@ -398,7 +376,7 @@ int QuietTheme::libraryVisibleRows(int panelH, const FontSet& fonts) const {
   // slot, which moves the others along the bar -- but this function is only
   // asking how tall the bar is.
   Hint hints[4];
-  for (int i = 0; i < 4; ++i) hints[i] = {kLibraryMarks[i], "", false};
+  measuringHints(hints);
   // No mark on this band, so headerBandHeight is asked for the band the Library
   // actually draws rather than for Home's.
   const int area = panelH - headerBandHeight(fonts, nullptr) - hintBarHeight(fonts, hints);
@@ -433,7 +411,7 @@ void QuietTheme::renderLibrary(Framebuffer& fb, const FontSet& fonts, const Libr
     // slack above the hint bar. So `y` advances by what the row actually
     // consumed, which is 1px less without a rule -- the board's own pitch, which
     // genuinely varies.
-    const bool rule = !focused && i != rows - 1;
+    const bool rule = rowRuleFor(i, rows, focused);
     // The gutter exists only when the rail does, so a list that fits runs its
     // rows to the panel edge -- focused fill included. See kListGutterW.
     y += drawBookRow(fb, fonts, y, {row.title, row.meta, row.value, row.isFolder}, focused,
@@ -441,7 +419,7 @@ void QuietTheme::renderLibrary(Framebuffer& fb, const FontSet& fonts, const Libr
   }
 
   Hint hints[4];
-  libraryHints(vm, hints);
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
 
   // The rail spans the LIST, not the panel: a track running the full height would
   // claim the header band and the hint bar scroll, which they do not. `listTop` is
@@ -451,8 +429,7 @@ void QuietTheme::renderLibrary(Framebuffer& fb, const FontSet& fonts, const Libr
   drawScrollRail(fb, listTop, fb.height() - hintBarHeight(fonts, hints), vm.firstRow, rows,
                  vm.totalRows, plane);
 
-  int slots[4] = {};
-  drawHintBar(fb, fonts, hints, slots, plane);
+  drawHintBar(fb, fonts, hints, plane);
 }
 
 namespace {
@@ -500,8 +477,7 @@ constexpr int kDetailsRuleH = 2;
 void drawOverlayHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], Plane plane) {
   const int barH = hintBarHeight(fonts, hints);
   fb.fillRect(0, fb.height() - barH, fb.width(), barH, true);
-  int slots[4] = {};
-  drawHintBar(fb, fonts, hints, slots, plane);
+  drawHintBar(fb, fonts, hints, plane);
 }
 }  // namespace
 
@@ -556,13 +532,11 @@ void QuietTheme::renderItemActions(Framebuffer& fb, const FontSet& fonts,
     // one, whose fill runs to the next row's edge, and the last one, where the
     // panel's own border closes the list.
     cy += drawPanelRow(fb, fonts, cx, cy, contentW, row.label, focused, row.discloses,
-                       !focused && i != rows - 1, plane);
+                       rowRuleFor(i, rows, focused), plane);
   }
 
-  const Hint hints[4] = {{&icons::kBack, vm.hints[0], vm.holds[0]},
-                         {&icons::kDot, vm.hints[1], vm.holds[1]},
-                         {&icons::kUp, vm.hints[2], vm.holds[2]},
-                         {&icons::kDown, vm.hints[3], vm.holds[3]}};
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
   drawOverlayHintBar(fb, fonts, hints, plane);
 }
 
@@ -647,10 +621,8 @@ void QuietTheme::renderDeleteConfirm(Framebuffer& fb, const FontSet& fonts,
   drawActionButton(fb, fonts, cx + kPanelPadX, cy, colW, vm.confirmLabel, vm.focusedAction == 1,
                    plane);
 
-  const Hint hints[4] = {{&icons::kBack, vm.hints[0], vm.holds[0]},
-                         {&icons::kDot, vm.hints[1], vm.holds[1]},
-                         {&icons::kUp, vm.hints[2], vm.holds[2]},
-                         {&icons::kDown, vm.hints[3], vm.holds[3]}};
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
   drawOverlayHintBar(fb, fonts, hints, plane);
 }
 
@@ -763,8 +735,7 @@ void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
   // `margin-top: auto` above the bar on the board: the slack is whatever is left,
   // and the bar sits on the bottom edge. Its hints were built above, because the
   // title's line budget is measured against the room this bar leaves.
-  int slots[4] = {};
-  drawHintBar(fb, fonts, hints, slots, plane);
+  drawHintBar(fb, fonts, hints, plane);
 }
 
 // --- Sleep -------------------------------------------------------------------
@@ -791,25 +762,6 @@ constexpr int kSleepLabelEm = 260;   // NOW READING, 0.26em
 constexpr int kSleepAuthorEm = 220;  // 0.22em
 constexpr int kSleepProgressEm = 140;
 constexpr int kSleepNoteEm = 200;
-
-// A 1px-or-more outline as four fills. Written here rather than in components.h
-// because two callers is not a shared primitive yet -- the scroll rail's track is
-// the other, and it needs its interior for a thumb rather than a fill.
-void outline(Framebuffer& fb, int x, int y, int w, int h, int t) {
-  if (w <= 0 || h <= 0 || t <= 0) return;
-  fb.fillRect(x, y, w, t, false);
-  fb.fillRect(x, y + h - t, w, t, false);
-  fb.fillRect(x, y, t, h, false);
-  fb.fillRect(x + w - t, y, t, h, false);
-}
-
-// Centred in a box, which every child of this card is. The measure and the draw
-// take the SAME tracking, or the centring is off by the tracking's total.
-void centredText(Framebuffer& fb, const Font& font, int boxX, int boxW, int baseline,
-                 std::string_view text, Tracking tracking, Plane plane) {
-  const int w = font.measure(text, tracking);
-  drawText(fb, font, boxX + centreIn(0, boxW, w), baseline, text, Ink::Black, tracking, plane);
-}
 
 }  // namespace
 
@@ -850,38 +802,38 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   // Paper under the card, then its border: the card is opaque white ON the field,
   // so the dither has to be cleared rather than drawn around.
   fb.fillRect(cardX, cardY, cardW, cardH, true);
-  outline(fb, cardX, cardY, cardW, cardH, kSleepCardBorder);
+  outlineRect(fb, cardX, cardY, cardW, cardH, kSleepCardBorder);
 
   int y = cardY + kSleepCardBorder + kSleepCardPadY;
   const int cx = cardX + kSleepCardBorder + kSleepCardPadX;
 
-  centredText(fb, label, cx, contentW, baselineIn(label, y, label.lineHeight()), vm.label,
-              trackingEm(label, kSleepLabelEm), plane);
+  drawCentredText(fb, label, cx, contentW, baselineIn(label, y, label.lineHeight()), vm.label,
+                  Ink::Black, trackingEm(label, kSleepLabelEm), plane);
   y += label.lineHeight() + kSleepGap;
 
   fb.fillRect(cx + centreIn(0, contentW, kSleepRuleW), y, kSleepRuleW, kSleepRuleH, false);
   y += kSleepRuleH + kSleepGap;
 
-  centredText(fb, title, cx, contentW, baselineIn(title, y, title.lineHeight()), shownTitle, {},
-              plane);
+  drawCentredText(fb, title, cx, contentW, baselineIn(title, y, title.lineHeight()), shownTitle,
+                  Ink::Black, {}, plane);
   y += title.lineHeight() + kSleepGap;
 
-  centredText(fb, author, cx, contentW, baselineIn(author, y, author.lineHeight()),
-              upperAscii(vm.author), trackingEm(author, kSleepAuthorEm), plane);
+  drawCentredText(fb, author, cx, contentW, baselineIn(author, y, author.lineHeight()),
+                  upperAscii(vm.author), Ink::Black, trackingEm(author, kSleepAuthorEm), plane);
   y += author.lineHeight() + kSleepGap + kSleepBarTopGap;
 
   // The bar: a 1px outline with a proportional fill, the treatment kBattery uses
   // and the same reason -- an outline plus a solid fill is what reads on this glass
   // hard-thresholded.
   const int barX = cx + centreIn(0, contentW, kSleepBarW);
-  outline(fb, barX, y, kSleepBarW, kSleepBarH, 1);
+  outlineRect(fb, barX, y, kSleepBarW, kSleepBarH, 1);
   const int pct = vm.progressPercent < 0 ? 0 : (vm.progressPercent > 100 ? 100 : vm.progressPercent);
   const int fill = (kSleepBarW * pct + 50) / 100;  // rounded once
   if (fill > 0) fb.fillRect(barX, y, fill, kSleepBarH, false);
   y += kSleepBarH + kSleepGap;
 
-  centredText(fb, progress, cx, contentW, baselineIn(progress, y, progress.lineHeight()),
-              vm.progress, trackingEm(progress, kSleepProgressEm), plane);
+  drawCentredText(fb, progress, cx, contentW, baselineIn(progress, y, progress.lineHeight()),
+                  vm.progress, Ink::Black, trackingEm(progress, kSleepProgressEm), plane);
 
   // The badge, measured from the BOTTOM as the board positions it.
   const int noteW = note.measure(vm.note, trackingEm(note, kSleepNoteEm));
@@ -890,7 +842,7 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   const int badgeX = centreIn(0, fb.width(), badgeW);
   const int badgeY = fb.height() - kSleepBadgeBottom - badgeH;
   fb.fillRect(badgeX, badgeY, badgeW, badgeH, true);
-  outline(fb, badgeX, badgeY, badgeW, badgeH, kSleepBadgeBorder);
+  outlineRect(fb, badgeX, badgeY, badgeW, badgeH, kSleepBadgeBorder);
   drawText(fb, note, badgeX + kSleepBadgeBorder + kSleepBadgePadX,
            baselineIn(note, badgeY + kSleepBadgeBorder + kSleepBadgePadY, note.lineHeight()),
            vm.note, Ink::Black, trackingEm(note, kSleepNoteEm), plane);
@@ -931,7 +883,7 @@ int settingsRowPitch() { return kSettingsRowH + kSettingsRuleH; }
 void QuietTheme::settingsMetrics(int panelH, const FontSet& fonts, int& listH, int& rowH,
                                  int& headerH) const {
   Hint hints[4];
-  for (int i = 0; i < 4; ++i) hints[i] = {kLibraryMarks[i], "", false};
+  measuringHints(hints);
   const int area = panelH - headerBandHeight(fonts, nullptr) - hintBarHeight(fonts, hints);
   listH = area > 0 ? area : 0;
   // The RULED pitch, as libraryVisibleRows uses: the 1px-shorter unruled height
@@ -1023,20 +975,17 @@ void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
     // rule under `Sleep screen` that the board does not draw.
     const bool nextIsHeader =
         (i + 1 < rows) && vm.rows[static_cast<size_t>(i + 1)].isHeader;
-    const bool isLastDrawn = (i == rows - 1);
-    if (!focused && !nextIsHeader && !isLastDrawn) {
+    if (rowRuleFor(i, rows, focused) && !nextIsHeader) {
       fb.fillRect(0, y, fb.width() - inset, kSettingsRuleH, false);
       y += kSettingsRuleH;
     }
   }
 
   Hint hints[4];
-  for (int i = 0; i < 4; ++i) hints[i] = {kLibraryMarks[i], vm.hints[static_cast<size_t>(i)],
-                                          vm.holds[static_cast<size_t>(i)]};
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
   drawScrollRail(fb, listTop, fb.height() - hintBarHeight(fonts, hints), vm.firstRow, rows,
                  vm.totalRows, plane);
-  int slots[4] = {};
-  drawHintBar(fb, fonts, hints, slots, plane);
+  drawHintBar(fb, fonts, hints, plane);
 }
 
 

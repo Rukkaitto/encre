@@ -77,9 +77,7 @@ int firstInkRow(const Icon& icon) {
 // The screen's hint bar, rebuilt from the view model the way the theme does, so
 // the expected geometry below is derived rather than transcribed.
 void hintsOf(const SdMissingViewModel& vm, Hint out[4]) {
-  const Icon* const marks[4] = {&icons::kBack, &icons::kDot, &icons::kUp, &icons::kDown};
-  for (int i = 0; i < 4; ++i)
-    out[i] = {vm.hints[i].empty() ? nullptr : marks[i], vm.hints[i], vm.holds[i]};
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, out);
 }
 
 const InputEvent kConfirm{Button::Confirm, PressKind::Short};

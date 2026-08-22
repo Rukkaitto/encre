@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -140,6 +141,23 @@ struct Hint {
   bool hasHold;
 };
 
+// The standard slot MARKS, in hardware order (Back, Confirm, Up, Down). Every
+// screen but Home draws these four; Home's first slot is the one exception
+// (kBook, because its first hint is READ), and it keeps its own array.
+inline constexpr const Icon* kHintSlotMarks[4] = {&icons::kBack, &icons::kDot, &icons::kUp,
+                                                  &icons::kDown};
+
+// One view-model's hint arrays as the four Hint slots the bar draws. A slot's
+// mark FOLLOWS its label: the boards author a dead button as an empty 36px slot
+// (kHintEmptySlotW), and a mark over one would be an affordance for an action
+// that is not there -- and it measures 32px where the board measures 36, which
+// shifts every other slot along. This rule was applied at some call sites and
+// not others (whose labels happened never to be empty), which is exactly the
+// drift one helper exists to remove; the hold flag passes through untouched,
+// because the ring rides with its binding whatever the label says.
+void buildHints(const Icon* const marks[4], const std::array<std::string, 4>& labels,
+                const std::array<bool, 4>& holds, Hint out[4]);
+
 // --- Derived heights -------------------------------------------------------
 //
 // The two bars' heights, computed the way the boards compute them: the padding
@@ -195,6 +213,40 @@ int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label
 // callers can assert the distribution.
 int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], int slotXOut[4],
                 Plane plane = Plane::Bw);
+// Without the slot report: what every production caller wants -- all seven were
+// passing a dummy `int slots[4]` they never read. The out-parameter form stays
+// for the tests that assert the distribution.
+int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4],
+                Plane plane = Plane::Bw);
+
+// A rectangular outline of thickness `t`, as four fills, interior untouched --
+// the treatment every bordered box on the boards shares: the sleep card and its
+// badge, the cover placeholder, an unfocused action block, the outlined prompt
+// button, the scroll rail's track, a book thumb's border, an overlay panel's
+// border. `white` is the focused book thumb's case, a paper border on an inked
+// row. NOT for a box whose interior must be painted (Home's progress bar fills
+// then hollows): an outline deliberately leaves the middle alone.
+void outlineRect(Framebuffer& fb, int x, int y, int w, int h, int t, bool white = false);
+
+// One centred run in a box: measured, centred, drawn. The measure and the draw
+// take the SAME tracking, or the centring is off by the tracking's total -- the
+// hazard this exists to remove, since a caller centring by hand has to remember
+// the tracking twice. `boxX`/`boxW` are the box the run centres in; the baseline
+// is the caller's, because what varies between callers is the line box it came
+// from, not the centring.
+void drawCentredText(Framebuffer& fb, const Font& font, int boxX, int boxW, int baseline,
+                     std::string_view text, Ink ink, Tracking tracking = {},
+                     Plane plane = Plane::Bw);
+
+// THE BOARDS' RULE FOR A LIST ROW'S BOTTOM RULE, positional rather than by
+// identity: every row carries a `border-bottom` EXCEPT the focused one, whose
+// fill runs to the next row's top edge, and the last one drawn, which leaves the
+// list's bottom edge open rather than hanging a hairline over the slack above
+// the hint bar. Stated once because it was restated at three call sites, and one
+// restatement once also advanced `y` -- the compounding kind of defect, every
+// row below it a pixel low. Screens with extra reasons to drop a rule (Settings'
+// section boundaries) AND this together.
+constexpr bool rowRuleFor(int i, int rows, bool focused) { return !focused && i != rows - 1; }
 
 // --- A prompt button -------------------------------------------------------
 //

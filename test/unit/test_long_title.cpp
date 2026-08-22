@@ -141,10 +141,7 @@ TEST_CASE("Book details keeps every field row above the hint bar, however long t
       theme.renderBookDetails(fb, r.fonts, vm, reader::Plane::Bw);
 
       reader::Hint hints[4];
-      const reader::Icon* const marks[4] = {&reader::icons::kBack, &reader::icons::kDot,
-                                            &reader::icons::kUp, &reader::icons::kDown};
-      for (int i = 0; i < 4; ++i)
-        hints[i] = {vm.hints[i].empty() ? nullptr : marks[i], vm.hints[i], vm.holds[i]};
+      reader::buildHints(reader::kHintSlotMarks, vm.hints, vm.holds, hints);
       const int barTop = c.h - reader::hintBarHeight(r.fonts, hints);
 
       // The bar's own top rule is the first ink at or below barTop. Anything
@@ -239,10 +236,8 @@ TEST_CASE("the delete panel stays on the glass for a pathologically long name") 
       // The hint bar is drawn over the veil last, so the bottom rows are the bar's
       // -- what matters is that the panel did not reach past the bar's top.
       reader::Hint hints[4];
-      const reader::Icon* const marks[4] = {&reader::icons::kBack, &reader::icons::kDot,
-                                            &reader::icons::kUp, &reader::icons::kDown};
       const reader::DeleteConfirmViewModel vm = longDeleteConfirm(name);
-      for (int i = 0; i < 4; ++i) hints[i] = {marks[i], vm.hints[i], vm.holds[i]};
+      reader::buildHints(reader::kHintSlotMarks, vm.hints, vm.holds, hints);
       const int barTop = height - reader::hintBarHeight(r.fonts, hints);
       CHECK_MESSAGE(longestRun(barTop - 1) < panelW,
                     "panel border under the bar, repeats " << repeats);

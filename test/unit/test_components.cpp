@@ -1895,3 +1895,74 @@ TEST_CASE("a rail with no room draws nothing rather than inverting") {
   reader::drawScrollRail(fb, 400, 380, 3, 7, 24);
   CHECK(railInk(fb) == 0);
 }
+
+// --- outlineRect ---------------------------------------------------------------
+
+TEST_CASE("outlineRect inks a border of the stated thickness and leaves the interior alone") {
+  reader::Framebuffer fb(32, 32);
+  fb.clear(true);
+  reader::outlineRect(fb, 4, 6, 20, 12, 2);
+  // The four bands are ink.
+  CHECK_FALSE(fb.getPixel(4, 6));        // top-left corner
+  CHECK_FALSE(fb.getPixel(23, 17));      // bottom-right corner
+  CHECK_FALSE(fb.getPixel(14, 7));       // inside the 2px top band
+  CHECK_FALSE(fb.getPixel(5, 12));       // inside the 2px left band
+  CHECK_FALSE(fb.getPixel(22, 12));      // inside the 2px right band
+  CHECK_FALSE(fb.getPixel(14, 16));      // inside the 2px bottom band
+  // The interior is untouched -- an outline deliberately does not paint it.
+  CHECK(fb.getPixel(14, 12));
+  CHECK(fb.getPixel(6, 8));
+  // ...and nothing outside the box moved.
+  CHECK(fb.getPixel(3, 6));
+  CHECK(fb.getPixel(24, 17));
+}
+
+TEST_CASE("outlineRect's white variant is the focused book thumb's border") {
+  reader::Framebuffer fb(16, 16);
+  fb.clear(false);  // an inked field, as a focused row's fill is
+  reader::outlineRect(fb, 2, 2, 10, 10, 1, /*white=*/true);
+  CHECK(fb.getPixel(2, 2));
+  CHECK(fb.getPixel(11, 11));
+  CHECK_FALSE(fb.getPixel(5, 5));  // interior stays inked
+}
+
+TEST_CASE("outlineRect refuses a degenerate box rather than smearing") {
+  reader::Framebuffer fb(16, 16);
+  fb.clear(true);
+  reader::outlineRect(fb, 4, 4, 0, 8, 2);
+  reader::outlineRect(fb, 4, 4, 8, 0, 2);
+  reader::outlineRect(fb, 4, 4, 8, 8, 0);
+  for (int y = 0; y < 16; ++y)
+    for (int x = 0; x < 16; ++x) CHECK(fb.getPixel(x, y));
+}
+
+// --- rowRuleFor ------------------------------------------------------------------
+
+TEST_CASE("rowRuleFor states the boards' positional rule") {
+  // Every row carries a bottom rule EXCEPT the focused one (its fill runs to the
+  // next row's top edge) and the last one drawn (the list's bottom edge is open).
+  CHECK(reader::rowRuleFor(0, 3, false));
+  CHECK(reader::rowRuleFor(1, 3, false));
+  CHECK_FALSE(reader::rowRuleFor(1, 3, true));   // focused
+  CHECK_FALSE(reader::rowRuleFor(2, 3, false));  // last drawn
+  CHECK_FALSE(reader::rowRuleFor(2, 3, true));   // both at once
+  CHECK_FALSE(reader::rowRuleFor(0, 1, false));  // a one-row list has no rule at all
+}
+
+// --- buildHints ------------------------------------------------------------------
+
+TEST_CASE("buildHints gives a mark only to a slot with a label") {
+  // The boards author a dead button as an empty 36px slot; a mark over one would
+  // be an affordance for an action that is not there, and it measures 32px where
+  // the board measures 36, shifting every other slot along.
+  const std::array<std::string, 4> labels{"BACK", "", "UP", ""};
+  const std::array<bool, 4> holds{false, true, false, false};
+  reader::Hint out[4];
+  reader::buildHints(reader::kHintSlotMarks, labels, holds, out);
+  CHECK(out[0].icon == reader::kHintSlotMarks[0]);
+  CHECK(out[0].label == "BACK");
+  CHECK(out[1].icon == nullptr);  // no label, no mark
+  CHECK(out[1].hasHold);          // ...but the hold flag passes through untouched
+  CHECK(out[2].icon == reader::kHintSlotMarks[2]);
+  CHECK(out[3].icon == nullptr);
+}

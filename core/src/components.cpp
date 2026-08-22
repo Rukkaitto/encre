@@ -162,6 +162,36 @@ int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label
   return kRowH;
 }
 
+void buildHints(const Icon* const marks[4], const std::array<std::string, 4>& labels,
+                const std::array<bool, 4>& holds, Hint out[4]) {
+  // The mark follows the label -- see the header for why an empty slot must not
+  // carry one. The hold passes through whatever the label says: the ring rides
+  // with its binding, and gestureFor drops a hold on a slot nothing advertises.
+  for (int i = 0; i < 4; ++i) {
+    const size_t s = static_cast<size_t>(i);
+    out[i] = {labels[s].empty() ? nullptr : marks[i], labels[s], holds[s]};
+  }
+}
+
+void outlineRect(Framebuffer& fb, int x, int y, int w, int h, int t, bool white) {
+  if (w <= 0 || h <= 0 || t <= 0) return;
+  fb.fillRect(x, y, w, t, white);
+  fb.fillRect(x, y + h - t, w, t, white);
+  fb.fillRect(x, y, t, h, white);
+  fb.fillRect(x + w - t, y, t, h, white);
+}
+
+void drawCentredText(Framebuffer& fb, const Font& font, int boxX, int boxW, int baseline,
+                     std::string_view text, Ink ink, Tracking tracking, Plane plane) {
+  const int w = font.measure(text, tracking);
+  drawText(fb, font, boxX + centreIn(0, boxW, w), baseline, text, ink, tracking, plane);
+}
+
+int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], Plane plane) {
+  int slots[4] = {};
+  return drawHintBar(fb, fonts, hints, slots, plane);
+}
+
 int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], int slotXOut[4],
                 Plane plane) {
   const Font& mf = fonts[Role::Meta400];
@@ -255,10 +285,7 @@ int drawActionButton(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
     // `border: 2px solid; box-sizing: border-box` -- the border is inside the
     // box, so an outlined slab and a filled one occupy exactly the same rect and
     // a focus move between them cannot shift either.
-    fb.fillRect(x, y, w, kActionBorder, false);
-    fb.fillRect(x, y + kActionH - kActionBorder, w, kActionBorder, false);
-    fb.fillRect(x, y, kActionBorder, kActionH, false);
-    fb.fillRect(x + w - kActionBorder, y, kActionBorder, kActionH, false);
+    outlineRect(fb, x, y, w, kActionH, kActionBorder);
   }
   // Reversed out of the slab, which is what Ink::White is for: no scratch
   // buffer, no second pass. The label is centred on both axes because the
@@ -432,10 +459,7 @@ void drawScrollRail(Framebuffer& fb, int listTop, int listBottom, int first, int
   if (h <= 2 * kRailBorder) return;  // no room to draw a track, let alone a thumb
 
   // The outlined track: four 1px edges, the treatment kBattery uses.
-  fb.fillRect(x, top, kRailW, kRailBorder, false);
-  fb.fillRect(x, bottom - kRailBorder, kRailW, kRailBorder, false);
-  fb.fillRect(x, top, kRailBorder, h, false);
-  fb.fillRect(x + kRailW - kRailBorder, top, kRailBorder, h, false);
+  outlineRect(fb, x, top, kRailW, h, kRailBorder);
 
   // The thumb, inside the border. ROUNDED ONCE: both proportions are taken
   // against the inner height in one division each, rather than accumulating a
@@ -508,11 +532,7 @@ int drawBookRow(Framebuffer& fb, const FontSet& fonts, int y, const BookRowConte
     // (`border: 2px solid #ffffff` against `border: 1px solid #000000`): a white
     // hairline on black needs the extra pixel to read at all on this glass.
     const int b = focused ? kBookFocusBorder : kBookCoverBorder;
-    const bool paper = focused;
-    fb.fillRect(kMargin, coverY, kBookThumbW, b, paper);
-    fb.fillRect(kMargin, coverY + kBookThumbH - b, kBookThumbW, b, paper);
-    fb.fillRect(kMargin, coverY, b, kBookThumbH, paper);
-    fb.fillRect(kMargin + kBookThumbW - b, coverY, b, kBookThumbH, paper);
+    outlineRect(fb, kMargin, coverY, kBookThumbW, kBookThumbH, b, /*white=*/focused);
   }
 
   // The text column, centred in the content box as its own flex item -- which is
@@ -592,10 +612,7 @@ int drawDetailRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view
 
 void drawPanel(Framebuffer& fb, int x, int y, int w, int h) {
   fb.fillRect(x, y, w, h, true);
-  fb.fillRect(x, y, w, kPanelBorder, false);
-  fb.fillRect(x, y + h - kPanelBorder, w, kPanelBorder, false);
-  fb.fillRect(x, y, kPanelBorder, h, false);
-  fb.fillRect(x + w - kPanelBorder, y, kPanelBorder, h, false);
+  outlineRect(fb, x, y, w, h, kPanelBorder);
 }
 
 Prose wrapPanelCaption(const FontSet& fonts, std::string_view label, int contentW,
