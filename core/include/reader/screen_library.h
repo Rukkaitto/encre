@@ -2,9 +2,8 @@
 #include <string>
 #include <vector>
 
-#include "reader/app.h"
 #include "reader/booklist.h"
-#include "reader/scrollwindow.h"
+#include "reader/focus_screen.h"
 #include "reader/viewmodel.h"
 
 namespace reader {
@@ -75,7 +74,7 @@ struct LibraryItem {
 //   over sample items -- the design comparison and the goldens. There is no
 //     filesystem, so a rescan keeps what it was given and a delete refuses. The
 //     board's own content is what makes a golden a test of the rendering.
-class LibraryScreen : public Screen {
+class LibraryScreen : public FocusScreen {
  public:
   LibraryScreen(FileSystem& fs, std::string root);
   explicit LibraryScreen(std::vector<LibraryItem> sample);
@@ -97,19 +96,13 @@ class LibraryScreen : public Screen {
   // event arrives -- see Theme::libraryVisibleRows. Zero is legitimate (a panel
   // with no room for a row): the window goes inert and nothing is drawn.
   void setVisibleRows(int n);
-  int visibleRows() const { return window_.visibleRows(); }
+  int visibleRows() const { return window().visibleRows(); }
 
-  // The focus as an index into the WHOLE list, which is what a session record
-  // stores -- not the index into the visible slice the view-model carries. This
-  // is the screen the Screen::focus/setFocus pair exists for: the pair was
-  // deferred in 2C-1 because nothing could produce a value, and a Library scroll
-  // position is worth restoring across a wake.
-  //
-  // -1 for an empty directory, which is ScrollWindow's "nothing selected" and
-  // not an index. setFocus clamps, so a record written before some books were
+  // focus()/setFocus() are FocusScreen's -- final, one mechanism. The focus is
+  // an index into the WHOLE list, which is what a session record stores -- not
+  // the index into the visible slice the view-model carries. -1 is an empty
+  // directory; setFocus clamps, so a record written before some books were
   // deleted still restores to a row that exists.
-  int focus() const override { return window_.focus(); }
-  bool setFocus(int index) override;
   int itemCount() const { return static_cast<int>(items_.size()); }
 
   // The item the focus is on, or null for an empty list. This is what the
@@ -137,21 +130,19 @@ class LibraryScreen : public Screen {
   bool deleteFocused();
 
  private:
-  Action moveFocus(int delta);
   bool descend();
   bool ascend();
   // Rebuilds the view-model from `items_` and the window. One place, called
   // after every change to either, rather than building it inside render(): a
   // const render would need mutable state to do it, and the vm would then be
   // rebuilt once per paint for a list that had not changed.
-  void syncVm();
+  void syncVm() override;
   std::string join(std::string_view leaf) const;
 
   FileSystem* fs_ = nullptr;  // null = sample content
   std::string root_;          // where the Library starts; Back at this level pops
   std::string path_;          // what is being listed now
   std::vector<LibraryItem> items_;
-  ScrollWindow window_;
   LibraryViewModel vm_;
 };
 

@@ -27,7 +27,7 @@ std::string_view leafOf(std::string_view path) {
 }  // namespace
 
 LibraryScreen::LibraryScreen(FileSystem& fs, std::string root)
-    : fs_(&fs), root_(std::move(root)), path_(root_) {
+    : FocusScreen(0, 0), fs_(&fs), root_(std::move(root)), path_(root_) {
   // The hint labels are the board's: BACK / OPEN / UP / DOWN, with the hold ring
   // on Confirm because a long press opens the actions overlay. `holds` is the
   // ONE declaration of that -- the theme draws the ring from it and
@@ -42,10 +42,10 @@ LibraryScreen::LibraryScreen(std::vector<LibraryItem> sample)
     // The path the device's Library is rooted at, so the sample says the same
     // thing about itself that a card would -- Book details draws it as its
     // `Location` row, and an empty path there would read as `/`.
-    : root_(kBooksRoot), path_(kBooksRoot), items_(std::move(sample)) {
+    : FocusScreen(0, 0), root_(kBooksRoot), path_(kBooksRoot), items_(std::move(sample)) {
   vm_.hints = {"BACK", "OPEN", "UP", "DOWN"};
   vm_.holds = {false, true, false, false};
-  window_.setCount(itemCount());
+  window().setCount(itemCount());
   syncVm();
 }
 
@@ -59,7 +59,7 @@ std::string LibraryScreen::join(std::string_view leaf) const {
 }
 
 bool LibraryScreen::rescan() {
-  const int wasFocus = window_.focus();
+  const int wasFocus = window().focus();
   items_.clear();
   bool ok = false;
   if (fs_ != nullptr) {
@@ -84,25 +84,19 @@ bool LibraryScreen::rescan() {
   // setCount pulls the focus back into range and the window follows it, which is
   // what makes deleting the last book land the focus on the new last one instead
   // of one past the end.
-  window_.setCount(itemCount());
-  if (wasFocus < 0) window_.setFocus(0);
+  window().setCount(itemCount());
+  if (wasFocus < 0) window().setFocus(0);
   syncVm();
   return ok;
 }
 
 void LibraryScreen::setVisibleRows(int n) {
-  window_.setVisibleRows(n);
+  window().setVisibleRows(n);
   syncVm();
 }
 
-bool LibraryScreen::setFocus(int index) {
-  const bool moved = window_.setFocus(index);
-  if (moved) syncVm();
-  return moved;
-}
-
 const LibraryItem* LibraryScreen::focusedItem() const {
-  const int i = window_.focus();
+  const int i = window().focus();
   if (i < 0 || i >= itemCount()) return nullptr;
   return &items_[static_cast<size_t>(i)];
 }
@@ -125,12 +119,12 @@ void LibraryScreen::syncVm() {
 
   // The rail's two numbers. The theme cannot derive them: vm_.rows holds only
   // what is on screen, so "how far down a longer list is this" has to be said.
-  vm_.firstRow = window_.firstVisible();
-  vm_.totalRows = window_.count();
+  vm_.firstRow = window().firstVisible();
+  vm_.totalRows = window().count();
 
   vm_.rows.clear();
-  const int first = window_.firstVisible();
-  const int count = window_.visibleCount();
+  const int first = window().firstVisible();
+  const int count = window().visibleCount();
   vm_.rows.reserve(static_cast<size_t>(count));
   for (int i = 0; i < count; ++i) {
     const LibraryItem& item = items_[static_cast<size_t>(first + i)];
@@ -152,17 +146,8 @@ void LibraryScreen::syncVm() {
   // The focus as an index into the SLICE, or -1 when there is nothing selected
   // or the window has no height. `visibleCount` is 0 in that case, so this
   // cannot name a row that was not drawn.
-  const int focus = window_.focus();
+  const int focus = window().focus();
   vm_.focusedRow = (focus >= first && focus < first + count) ? focus - first : -1;
-}
-
-Action LibraryScreen::moveFocus(int delta) {
-  // ScrollWindow reports whether anything moved, so the end of a list costs no
-  // refresh: on this panel a repaint that changes nothing is ~520 ms of the user
-  // wondering whether the button works.
-  if (!window_.moveFocus(delta)) return Action::none();
-  syncVm();
-  return Action::redraw();
 }
 
 bool LibraryScreen::descend() {
@@ -171,7 +156,7 @@ bool LibraryScreen::descend() {
   path_ = join(item->entry.name);
   // A fresh directory starts at its first row rather than inheriting the parent's
   // scroll position, which would open a folder half way down.
-  window_.setCount(0);
+  window().setCount(0);
   rescan();
   return true;
 }
@@ -182,7 +167,7 @@ bool LibraryScreen::ascend() {
   // Never above the root the Library was given: `root_` is a prefix of `path_`
   // by construction, so this cannot walk off the top of the card.
   path_ = (slash == std::string::npos || slash < root_.size()) ? root_ : path_.substr(0, slash);
-  window_.setCount(0);
+  window().setCount(0);
   rescan();
   return true;
 }
