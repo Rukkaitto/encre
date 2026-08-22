@@ -220,9 +220,19 @@ static bool gStorageUsable = false;
 // lost to the host. Every stage is announced and the last one reached is
 // repeated from loop(), so a hang can be located by attaching at any time.
 static const char* stage = "boot";
+// Every bring-up stage already prints, so carrying the heap on that line turns
+// the existing stage trail into a heap TRACE for nothing -- and the trace is what
+// a single figure cannot give.
+//
+// The first run of `minHeap` reported a 72 KB transient dip during boot: larger
+// than the framebuffer, unaccounted for, and invisible to `free` because it
+// happens BETWEEN two lines. It matters because 3B's buffers get sized against
+// what looks free, while the real ceiling is that much lower. `min` here falls at
+// exactly the stage that spent it, which is the whole bisect in one boot.
 static void mark(const char* s) {
   stage = s;
-  Serial.printf("[stage] %s\n", s);
+  Serial.printf("[stage] %s heap=%u min=%u\n", s, (unsigned)ESP.getFreeHeap(),
+                (unsigned)ESP.getMinFreeHeap());
   Serial.flush();
 }
 
