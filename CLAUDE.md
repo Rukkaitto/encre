@@ -960,7 +960,7 @@ worth knowing before changing it:
 | Item actions, Delete confirm | their own boards | Overlays; a focus move repaints the overlay alone. |
 | Book details | `BookDetails.dc.html` | Not an overlay, despite covering the Library. Its title **wraps**; everywhere else elides. |
 | Settings | `Settings.dc.html` | Draws nine rows and only three respond. |
-| Sleep | `Sleep.dc.html` | Takes no input and draws no hint bar. |
+| Sleep | `Sleep.dc.html` | **NOT REACHED ON THE DEVICE** — implemented, never painted. |
 | SD missing | `SdMissing.dc.html` | RETRY restarts the device when the card was lost after a mount. |
 
 **SETTINGS DRAWS EVERY BOARD ROW AND ONLY THE DEVICE ONES RESPOND.** TYPOGRAPHY
@@ -1011,7 +1011,25 @@ focused one 80px — and the menu's total height then depends on whether a row i
 focused, stepping the whole block a pixel the moment focus enters it. Black on
 black costs nothing and holds the pitch at `kRowH`.
 
-**THE SLEEP SCREEN TAKES NO INPUT AND DRAWS NO HINT BAR**, and neither is an
+**THE SLEEP SCREEN IS IMPLEMENTED AND THE DEVICE NEVER PAINTS IT.** Deliberate,
+and deferred to Phase 3 rather than left as an oversight. The shell's sleep path
+logs, calls `display.deepSleep()`, powers down the rails and sleeps — it never
+renders `SleepScreen`, so the panel keeps whatever screen the user was on. It is a
+board, a screen, a theme method, a simulator subcommand and a set of tests, and it
+has never been on glass.
+
+Why it waits: **the board's content does not exist yet.** It shows
+`NOW READING / MIDDLEMARCH / GEORGE ELIOT / 6% · CH. 01`, and there is no Reader,
+so the device would paint either demo fiction or a card with the reading block
+empty. The same reasoning that keeps typography out of Settings.
+
+And a trap for whoever wires it: **it must be painted WITHOUT being pushed.** The
+session record names the top screen, so pushing `SleepScreen` would make the wake
+restore *into* the sleep screen. It wants a direct render after the record is
+saved, not a navigation. It also costs a full refresh (~825 ms) on every sleep,
+which is not free either.
+
+**IT TAKES NO INPUT AND DRAWS NO HINT BAR**, and neither is an
 omission: the shell paints it and then calls deep sleep, so there is nobody left to
 press anything, and the bar is a contract about four buttons that do nothing.
 `onEvent` answers `none()` even for Back. It exists because e-ink holds its last
