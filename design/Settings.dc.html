@@ -32,11 +32,35 @@
     <div style="font-size: var(--t-value); font-weight: 700;">V 0.1.0</div>
   </div>
 
-  <div style="display: flex; flex-direction: column; flex-grow: 1;">
+  <!-- SETTINGS SCROLLS, and it does so because it no longer fits. The
+       `Refresh on screen change` row DEVICE needs took the content past 800px and
+       clipped the hint bar -- and the list only grows from here, since Phase 3
+       adds typography settings and Phase 4 adds Wi-Fi rows. So this is a
+       scrollable list like Library's, with the same rail in the same 14px gutter
+       (see LibraryScrolled for why it cannot live in the outer margin).
+
+       Unlike Library, this list ALWAYS overflows, so the gutter is always taken
+       and the rail is always drawn. That makes the "reserve the gutter only when
+       the rail is drawn" rule a no-op here rather than a case to think about.
+
+       The window below is the TOP of the list; CONNECTIONS and its Wi-Fi row are
+       below the fold, which is what the thumb's height is saying. They are not
+       deleted -- they are the two elements the rail's 11-of-13 proportion counts.
+  -->
+  <div style="position: relative; display: flex; flex-direction: column; flex-grow: 1;">
+    <div style="display: flex; flex-direction: column; flex-grow: 1; margin-right: 14px;">
 
     <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">TYPOGRAPHY</div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; background: #000000; color: #ffffff; padding: 0 24px;">
-      <div style="font-size: var(--t-value); font-weight: 700;">Font</div>
+    <!-- NOT the focused row, and that is the decision showing. Focus SKIPS rows
+         with nothing behind them, so TYPOGRAPHY cannot hold it until Phase 3's
+         reader gives these settings something to change. This board focused Font
+         before that was settled; leaving it there would have documented behaviour
+         the firmware deliberately does not have, and mismatched `make compare`
+         forever on which row is inverted. An inert row is drawn exactly like an
+         unfocused focusable one -- there is no dimming, because a visual
+         difference nobody designed is worse than no difference. -->
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
+      <div style="font-size: var(--t-value); font-weight: 500;">Font</div>
       <div style="font-size: var(--t-value); font-weight: 700;">LITERATA</div>
     </div>
     <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
@@ -57,23 +81,48 @@
     </div>
 
     <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px; border-top: 2px solid #000000;">DEVICE</div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
-      <div style="font-size: var(--t-value); font-weight: 500;">Sleep after</div>
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; background: #000000; color: #ffffff; padding: 0 24px;">
+      <div style="font-size: var(--t-value); font-weight: 700;">Sleep after</div>
       <div style="font-size: var(--t-value); font-weight: 700;">10 MIN</div>
     </div>
     <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
       <div style="font-size: var(--t-value); font-weight: 500;">Full refresh</div>
       <div style="font-size: var(--t-value); font-weight: 700;">EVERY 15 PAGES</div>
     </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px;">
+    <!-- THE SECOND REFRESH SETTING, and it is a separate one from the row above.
+         `Full refresh` is a periodic CADENCE (every Nth paint, 0 = never); this is
+         whether a SCREEN CHANGE takes the full waveform so the outgoing screen
+         cannot ghost through. The firmware ships the cadence off and the
+         transition on, which is neither the reference firmware's behaviour nor the
+         obvious one, so it needs to be a row the user can see and reverse -- see
+         the roadmap for the measurement (~825 ms against ~520 ms) and the argument.
+
+         Next to the cadence rather than at the end of DEVICE, because a reader
+         hunting for "why does my screen flash" should find both answers together
+         rather than one here and one three rows down.
+
+         The longest label in this column by some way. At --t-value 500 it measures
+         ~300px of the X4's 480, leaving the value's ~30px and the 48px of padding
+         comfortably -- the pair to beat is `Full refresh` + `EVERY 15 PAGES`, which
+         is wider overall. -->
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
+      <div style="font-size: var(--t-value); font-weight: 500;">Refresh on screen change</div>
+      <div style="font-size: var(--t-value); font-weight: 700;">ON</div>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
       <div style="font-size: var(--t-value); font-weight: 500;">Sleep screen</div>
       <div style="font-size: var(--t-value); font-weight: 700;">BOOK COVER</div>
     </div>
 
-    <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px; border-top: 2px solid #000000;">CONNECTIONS</div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px;">
-      <div style="font-size: var(--t-value); font-weight: 500;">Wi-Fi</div>
-      <div style="font-size: var(--t-value); font-weight: 700;">ON DEMAND</div>
+    </div>
+
+    <!-- The rail. 11 of the list's 13 elements are visible (3 section headers and
+         10 rows; CONNECTIONS and Wi-Fi are below), so the thumb is 84.6% at the
+         top. A large thumb is the honest answer for a list that only just
+         overflows -- see LibraryScrolled for why a mockup's proportion has to be
+         one the rule could produce. -->
+    <div style="position: absolute; top: 6px; bottom: 6px; right: 4px; width: 6px; border: 1px solid #000000; box-sizing: border-box;">
+      <div style="position: absolute; left: 0; right: 0; top: 0; height: 84.6%; background: #000000;"></div>
     </div>
 
   </div>
