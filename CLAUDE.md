@@ -101,8 +101,22 @@ card probe that was answered from cache and kept reporting success.
   visible until the first paint. That is deliberate (a clear would be an extra
   full flash to show white) but it did once log itself as "clearing the panel",
   which is a claim about the wrong one of the two. The first paint is the earliest
-  anything can appear, and it cannot happen before `display.begin()` returns —
-  ~2.7 s in, of which ~2.5 s is `XteinkDetect`'s I2C passes.
+  anything can appear, and it cannot happen before `display.begin()` returns.
+- **`setup()` waits for the USB HOST, and it used to wait 2.5 s unconditionally.**
+  A `delay(2500)` let USB CDC enumerate before the first print — about 60% of the
+  time before the panel could show anything, spent so a serial log nobody was
+  reading would be complete, on a device that spends its life unplugged. It now
+  leaves as soon as `Serial` reports a host has the port open, and gives up after a
+  400 ms grace when `HWCDC::isPlugged()` says nothing is there
+  (`ARDUINO_USB_CDC_ON_BOOT=1`, so `Serial` is the USB Serial/JTAG CDC). The
+  2500 ms cap is unchanged, so the worst case is the old behaviour, and
+  **`[boot] waited Nms for USB CDC` is on the boot line** — a slow boot with a big
+  number there is a USB question, not a firmware one.
+  - **This line first said the 2.5 s was `XteinkDetect`'s I2C passes.** It was not:
+    that figure was read off the first timestamped SDK log line without noticing
+    that nothing before it was timestamped at all, and the delay was sitting in
+    `setup()` two lines above. The detect passes cost ~66 ms by the SDK's own
+    comment. **A log's first timestamp is not the same as time zero.**
 - **E-ink persistence is about the PANEL, not the controller.** The glass keeps
   its image with no power; the controller's DTM1 baseline does not. A wake is a
   chip reset, so `initController()` re-runs and `_oldPlaneValid` goes false —
