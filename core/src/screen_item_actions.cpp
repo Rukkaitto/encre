@@ -5,7 +5,8 @@
 
 namespace reader {
 
-ItemActionsScreen::ItemActionsScreen(const LibraryScreen& library) {
+ItemActionsScreen::ItemActionsScreen(const LibraryScreen& library)
+    : FocusScreen(kRowCount, kRowCount) {
   const LibraryItem* item = library.focusedItem();
   // A null focus should not be reachable -- the Library refuses the hold on an
   // empty list -- but an overlay captioned with a blank name is a better failure
@@ -18,26 +19,17 @@ ItemActionsScreen::ItemActionsScreen(const LibraryScreen& library) {
   // details lead somewhere, Mark as finished and Delete... act in place.
   vm_.actions = {{"Open", true}, {"Book details", true}, {"Mark as finished", false},
                  {"Delete\xE2\x80\xA6", false}};
-  vm_.focusedAction = kOpen;
-  focus_ = Focus(kRowCount);
-  focus_.set(vm_.focusedAction);
   // The board's own labels. CLOSE rather than BACK, because what Back does here
   // is dismiss a panel rather than leave a screen -- and no holds, so no slot
   // shows a ring.
   vm_.hints = {"CLOSE", "SELECT", "UP", "DOWN"};
   vm_.holds = {false, false, false, false};
+  // The base's focus starts on the first row, which is kOpen -- the board's own
+  // starting selection. The mirror below is all the focus state there is.
+  syncVm();
 }
 
-bool ItemActionsScreen::syncFocus(bool moved) {
-  if (moved) vm_.focusedAction = focus_.index();
-  return moved;
-}
-
-bool ItemActionsScreen::setFocus(int index) { return syncFocus(focus_.set(index)); }
-
-Action ItemActionsScreen::moveFocus(int delta) {
-  return syncFocus(focus_.move(delta)) ? Action::redraw() : Action::none();
-}
+void ItemActionsScreen::syncVm() { vm_.focusedAction = focus(); }
 
 Action ItemActionsScreen::onEvent(const InputEvent& ev) {
   // No holds are bound and no slot shows a ring, so a Long here means the mask

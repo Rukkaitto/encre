@@ -1,6 +1,5 @@
 #pragma once
-#include "reader/app.h"
-#include "reader/focus.h"
+#include "reader/focus_screen.h"
 #include "reader/viewmodel.h"
 
 namespace reader {
@@ -19,7 +18,7 @@ class LibraryScreen;
 // displays. The focus underneath cannot move while this is up (the parent
 // receives no events), so a copy cannot go stale -- and the one thing that does
 // change the list, a delete, pops this screen as part of doing it.
-class ItemActionsScreen : public Screen {
+class ItemActionsScreen : public FocusScreen {
  public:
   explicit ItemActionsScreen(const LibraryScreen& library);
 
@@ -30,18 +29,11 @@ class ItemActionsScreen : public Screen {
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
 
   const ItemActionsViewModel& vm() const { return vm_; }
-  // Which of the four action rows is selected, both ways round.
-  //
-  // setFocus was left off on the grounds that no wake can land here -- this panel
-  // is only reached by a hold on a live Library, and the factory refuses to build
-  // one with no Library under it, which is still true and still correct. It is
-  // here anyway, because "which screens can a wake reach" is a fact about the
-  // shell's restore ladder and the factory, and pinning a core/ screen's
-  // behaviour to it means every change over there is a chance to leave a screen
-  // silently reporting a focus it cannot accept. The rule is local and has no
-  // exceptions: a screen that reports a focus takes one back.
-  int focus() const override { return vm_.focusedAction; }
-  bool setFocus(int index) override;
+  // focus()/setFocus() are FocusScreen's -- final, one mechanism. This header
+  // used to argue that setFocus could be left off because no wake can land here;
+  // the premise was a fact about the shell's restore ladder, and encoding it in
+  // a core/ screen is how a change over there leaves a screen silently one-way.
+  // The base class makes that argument unwritable.
 
   // THE ONE THING THAT MOVES THIS PANEL'S BOX IS HOW MANY OF ITS ROWS HAVE A
   // RULE, so that count is the token. QuietTheme::renderItemActions sums
@@ -73,11 +65,9 @@ class ItemActionsScreen : public Screen {
   // label, because a label is content and Confirm's behaviour is not.
   enum Row { kOpen = 0, kDetails, kFinished, kDelete, kRowCount };
 
-  Action moveFocus(int delta);
-  bool syncFocus(bool moved);
+  void syncVm() override;
 
   ItemActionsViewModel vm_;
-  Focus focus_;
 };
 
 }  // namespace reader

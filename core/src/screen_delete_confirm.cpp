@@ -6,7 +6,8 @@
 
 namespace reader {
 
-DeleteConfirmScreen::DeleteConfirmScreen(LibraryScreen& library) : library_(library) {
+DeleteConfirmScreen::DeleteConfirmScreen(LibraryScreen& library)
+    : FocusScreen(kRowCount, kRowCount), library_(library) {
   // The board's caption, with the book's name in it: `DELETE "DUBLINERS"?`, in
   // U+201C/U+201D as the board spells them (&ldquo; / &rdquo;).
   //
@@ -25,26 +26,15 @@ DeleteConfirmScreen::DeleteConfirmScreen(LibraryScreen& library) : library_(libr
       "The file leaves the SD card. Your progress and bookmarks are kept in case it comes back.";
   vm_.cancelLabel = "CANCEL";
   vm_.confirmLabel = "DELETE";
-  // On CANCEL, which is the board's filled slab. A destructive prompt whose
-  // focus starts on the destructive action is a prompt that deletes a book on a
-  // press the user made before reading it.
-  vm_.focusedAction = kCancel;
-  focus_ = Focus(kRowCount);
-  focus_.set(vm_.focusedAction);
   vm_.hints = {"CANCEL", "SELECT", "UP", "DOWN"};
   vm_.holds = {false, false, false, false};
+  // The base's focus starts on the first row, which is kCancel -- the board's
+  // filled slab, and where a destructive prompt's focus belongs: a press made
+  // before the user has read anything cancels.
+  syncVm();
 }
 
-bool DeleteConfirmScreen::syncFocus(bool moved) {
-  if (moved) vm_.focusedAction = focus_.index();
-  return moved;
-}
-
-bool DeleteConfirmScreen::setFocus(int index) { return syncFocus(focus_.set(index)); }
-
-Action DeleteConfirmScreen::moveFocus(int delta) {
-  return syncFocus(focus_.move(delta)) ? Action::redraw() : Action::none();
-}
+void DeleteConfirmScreen::syncVm() { vm_.focusedAction = focus(); }
 
 Action DeleteConfirmScreen::onEvent(const InputEvent& ev) {
   if (ev.kind != PressKind::Short) return Action::none();
