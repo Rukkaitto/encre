@@ -1056,6 +1056,8 @@ static uint32_t gRenderMs = 0;
 // way `rotate` was: rendering goes straight into the driver's framebuffer and
 // there is no copy left to time.
 static uint32_t gDrawMs = 0;
+// How long setup() waited for USB CDC. See the wait loop for why it varies.
+static uint32_t gSerialWaitMs = 0;
 
 // One render pass, straight into the panel-oriented frame.
 //
@@ -1395,8 +1397,48 @@ static void renderTop() {
 
 void setup() {
   Serial.begin(115200);
-  delay(2500);  // let USB CDC enumerate before the first print
+  // WAIT FOR THE HOST, NOT FOR A CONSTANT. This was `delay(2500)` -- an
+  // unconditional 2.5 seconds on every boot so USB CDC could enumerate before the
+  // first print, which is about 60% of the time before the panel is able to show
+  // anything at all. On a device that spends its life unplugged that is 2.5
+  // seconds of nothing, paid so that a serial log nobody is reading is complete.
+  //
+  // ARDUINO_USB_CDC_ON_BOOT=1 (platformio.ini), so `Serial` is the USB
+  // Serial/JTAG CDC and it has two things worth asking:
+  //
+  //   Serial (operator bool)   -- the CDC is up and a host has opened it
+  //   isPlugged()              -- the peripheral sees a host at all. IDF's
+  //                               timer-based check, not the SOF ISR, which the
+  //                               core's own comment says breaks esptool uploads.
+  //
+  // So: leave the moment the host is actually there, and give up early when
+  // nothing is. Unplugged costs the grace window instead of the full cap; plugged
+  // costs however long enumeration really takes. The cap is unchanged, so the
+  // worst case is exactly the old behaviour.
+  //
+  // What this trades away: the first few lines, on a host that is plugged in but
+  // slower to report than the grace window. `mark()` flushes every stage line, so
+  // the loss would be bounded and visible as a missing early stage rather than as
+  // silence -- and the whole log is reproducible by resetting with the port
+  // already open.
+  {
+    constexpr uint32_t kSerialCapMs = 2500;    // the old constant, as a ceiling
+    constexpr uint32_t kSerialGraceMs = 400;   // long enough for the peripheral to notice a host
+    const uint32_t t0 = millis();
+    while (millis() - t0 < kSerialCapMs) {
+      if (Serial) break;  // a host has the port open; nothing left to wait for
+      if (millis() - t0 >= kSerialGraceMs && !HWCDC::isPlugged()) break;  // nobody there
+      delay(10);
+    }
+    gSerialWaitMs = millis() - t0;
+  }
   mark("serial-up");
+  // Reported because it is the one boot cost that varies with something outside
+  // the firmware, and a slow boot with a big number here is a USB question rather
+  // than a firmware one.
+  Serial.printf("[boot] waited %lums for USB CDC (cap 2500, plugged=%d, open=%d)\n",
+                (unsigned long)gSerialWaitMs, (int)HWCDC::isPlugged(), Serial ? 1 : 0);
+  Serial.flush();
 
   detectAndSelectBoard();
 
