@@ -1,4 +1,4 @@
-.PHONY: test sim firmware fonts icons compare epubs epubs-bulk
+.PHONY: test sim firmware fonts icons compare epubs epubs-bulk card-add card-remove
 # PlatformIO installs outside PATH by default; allow an override: make firmware PIO=/path/to/pio
 #
 # Invoked through its MODULE entry point rather than the `pio` launcher script.
@@ -132,5 +132,15 @@ epubs:
 BULK_N ?= 200
 epubs-bulk:
 	$(PYTHON) tools/mkepub.py --out $(EPUB_OUT) --bulk $(BULK_N)
+# ...and PUT THEM ON THE CARD, which generating them does not do. The card lives
+# in the device, so it has to come out and go into a reader first; the script
+# finds it by the firmware's own .reader/settings.json rather than by volume name,
+# and refuses rather than guessing if that matches zero or several volumes.
+# card-add is additive; card-remove takes off exactly the names in EPUB_OUT, so
+# real books on the card are never touched.
+card-add:
+	sh tools/cardsync.sh add $(EPUB_OUT)
+card-remove:
+	sh tools/cardsync.sh remove $(EPUB_OUT)
 compare: sim
 	$(PYTHON) tools/compare-design.py $(COMPARE_ARGS)
