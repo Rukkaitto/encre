@@ -33,6 +33,24 @@ panel-size PNGs for overlaying in a design tool.
 CMake uses `file(GLOB ...)`: **re-run `cmake -S . -B build` after adding or
 removing a source file**, or it is silently ignored.
 
+## What V1 is, and is not
+
+**V1 IS CARD TRANSFER ONLY. Wi-Fi is cut.** It was too big, and cutting it took
+nine boards out of the comparison sheet with it — Transfer, the five Wi-Fi flows
+and SetupHotspot. They are **parked, not deleted**: `V2_SCREENS` in
+`tools/compare-design.py` keeps them reachable by `--only` so a V2 design can still
+be rendered, without counting them as V1 work nobody is doing. Instapaper was cut
+the same way earlier (canvas page "V2 · Instapaper").
+
+Two consequences that are easy to trip over:
+
+- **Settings has no CONNECTIONS section**, which is what brought its list back
+  inside the panel — see the scroll rail under **Overlays and lists**.
+- **HomeEmpty has no action slab.** Its board's call-to-action was
+  `SEND BOOKS OVER WI-FI`, and a primary action that cannot work is worse than
+  none, so the copy carries it: *"Put the SD card in your computer and copy EPUB
+  files into its /books folder."* The slab returns with Wi-Fi.
+
 ## The rule that governs UI work
 
 **A UI change goes into the design HTML first, then the implementation.** Never
@@ -457,17 +475,25 @@ fetch a parser with.
 
 **The wake pointer is in NVS, not on the card**, because a wake must work with no
 card in the slot — which is the entire state the SD-missing screen exists for.
-`Preferences` namespace `encre_sess`, keys `ver` / `scr` / `focus` (NVS caps a key
-at 15 chars). The version key is written **last**, like a commit record, so a write
-that dies half way reads back as "no session". Restore happens **only on a genuine
-wake**; a cold boot starts at Home and clears the record. **The stored focus is real**, and this
-paragraph claimed it was always 0 until a review checked it: `Screen::focus()`
-and `setFocus()` exist (`app.h`), the shell stores the live focus and restores it
-on wake. The "always 0" was true when 2C-1 wrote it and 2C-2 made it false without
-updating this line.
+`Preferences` namespace `encre_sess`, keys `ver` / `stack` / `slept` (NVS caps a
+key at 15 chars). **The payload is ONE key**, and that is what makes the version
+key a real commit record: with `scr` and `focus` as two keys, a cut between them
+left a valid-looking mixed record — a review found that the "written last" claim
+held only for a namespace's FIRST write, since an update's previous version key is
+already valid. One payload plus a version written after it has no such gap.
+
+The wire format is `core/include/reader/session_record.h` —
+`home:-1;library:7;item-actions:1`, root first — and it lives in `core/` because
+`shell/` has no test harness and this is the only pure logic on the resume path.
+Record version is **4**.
+
+**The stored focus is real**, and this paragraph twice said otherwise: it claimed
+"always 0" after 2C-2 made that false, and the roadmap said the same. An
+inherited-work note is a claim with an expiry date.
 
 **`Focus` (`core/include/reader/focus.h`) IS WHERE MOVING A SELECTION LIVES**, and
-until it existed there were five copies of it: `HomeScreen`, `StubScreen`, both
+until it existed there were five copies of it: `HomeScreen`, `StubScreen` (which
+2C-3 has since deleted — it was Settings until the real screen landed), both
 overlay panels and `ScrollWindow` each carried the same eight lines — add a
 delta, clamp to a range, report whether anything moved — with the range spelled
 slightly differently in each. That is why "clamp, do not wrap" had to be written
@@ -839,9 +865,13 @@ top of this spike.
     axis-aligned and coverage 0-or-3, so track and thumb are identical in every
     plane and pass. The thin-stroke warning this project records is about
     DIAGONALS (`kChevron`); it was wrongly cited against a rail once.
-  - **This governs every scrollable list** — Contents, Bookmarks, WifiPicker and
-    Settings all have lists and none of those screens exists yet. Put it on that
-    board when the screen is built.
+  - **This governs every scrollable list**, and today that is Library alone.
+    Settings scrolled for about an hour: adding its `Refresh on screen change` row
+    pushed it past the panel, and then Wi-Fi was cut from V1 and CONNECTIONS went
+    with it — eleven items where twelve fit. Phase 3's typography settings will
+    push it over again and it will start scrolling **without any code change**,
+    because `renderSettings` reads `totalRows > rows` rather than assuming. Contents
+    and Bookmarks are Phase 3's and will want it too.
   - **Nothing but the unit tests exercises it.** Library's golden shows seven rows
     of seven, so it does not overflow and the rail never draws in it;
     `design/LibraryScrolled.dc.html` is the state's board and the simulator has no
@@ -851,6 +881,97 @@ top of this spike.
   a different screen. Names also mean `nvs_get encre_sess scr str` is readable on
   a device. They are deliberately not `screenName()`'s strings — that is a log
   label, free to be reworded; this is a storage format.
+
+## The chrome screens
+
+V1's chrome is complete as of 2C-3. What each screen is, and the one thing about it
+worth knowing before changing it:
+
+| Screen | Board | The thing |
+|---|---|---|
+| Home | `Main.dc.html` | Focus starts on the CONTINUE block (`-1`), not the menu. |
+| Home / empty | `HomeEmpty.dc.html` | A **variant**, not a screen: same `ScreenId`, same view model, same menu. |
+| Library | `Library.dc.html` | The only list that scrolls today, and the only screen with a rail. |
+| Library / scrolled | `LibraryScrolled.dc.html` | **The simulator cannot render this state**, so `make compare` never checks the rail. |
+| Item actions, Delete confirm | their own boards | Overlays; a focus move repaints the overlay alone. |
+| Book details | `BookDetails.dc.html` | Not an overlay, despite covering the Library. Its title **wraps**; everywhere else elides. |
+| Settings | `Settings.dc.html` | Draws nine rows and only three respond. |
+| Sleep | `Sleep.dc.html` | Takes no input and draws no hint bar. |
+| SD missing | `SdMissing.dc.html` | RETRY restarts the device when the card was lost after a mount. |
+
+**SETTINGS DRAWS EVERY BOARD ROW AND ONLY THE DEVICE ONES RESPOND.** TYPOGRAPHY
+belongs to Phase 3's reader; its five rows carry the board's own placeholder values
+so the screen matches the board before the settings behind them exist.
+
+- **Focus SKIPS them.** A row that cannot be reached cannot mislead, where a row
+  that focuses and then ignores CHANGE is the silent no-op this project has been
+  bitten by twice. The cost is real and worth watching on glass: focus starts six
+  rows down with five unreachable rows above it, and UP there does nothing.
+- **An inert row is drawn EXACTLY as an unfocused focusable one.** No dimming —
+  `SettingsRow::focusable` is about input, and a visual difference nobody designed
+  is worse than none. `renderSettings` deliberately never reads that flag.
+- **The theme reports Settings' BOX MODEL, not its row count.** Library's items are
+  one height so a theme can answer "how many fit"; Settings interleaves 54px rows
+  with taller section headers, so the answer depends on which items are headers —
+  and the item table belongs to the screen. `settingsMetrics` hands over three
+  heights and the screen counts, so neither side holds a copy of the other's data.
+- **`SettingsSink::commit` applies AND persists**, in that order. The user has
+  pressed a button and expects the device to behave differently; a card gone
+  read-only must not also cost them the change until the next boot. **A refused
+  write still shows the new value** — the change has taken effect in RAM, and
+  reverting the display would make a read-only card look like a screen that ignores
+  its buttons. The shell logs the failure; `core/` never learns why.
+- **The factory holds a COPY of the settings**, because it is what constructs the
+  screen. It has to be told when the struct changes, or closing Settings and
+  reopening it shows the values from before the change — struct right, policy
+  right, screen wrong.
+
+**THREE RULES THE SETTINGS BOARD DRAWS AND A NAIVE RENDERER DOES NOT**, all three
+found by diffing pixels rather than by looking:
+
+1. The **first** section header has no rule — the header band's own 2px border is
+   already there, and a second doubles it into a 4px slab. Positional, not by
+   identity: at the top of the window the band is the separation, whichever section
+   is scrolled there.
+2. The **last row of a section** has none either; the next section's `border-top`
+   is the line between them.
+3. The **last drawn row** has none, which is `renderLibrary`'s rule verbatim.
+
+Rule 2 was the expensive one: it also advanced `y`, so every row below the DEVICE
+header sat a pixel low. **The symptom reported was a line at the top, and the line
+at the top was the smaller of the two defects.**
+
+**A FOCUSED MENU ROW KEEPS ITS `border-top`.** Invisible against the fill, and the
+point: an unfocused row is 80px plus a 1px rule, so dropping the rule makes the
+focused one 80px — and the menu's total height then depends on whether a row is
+focused, stepping the whole block a pixel the moment focus enters it. Black on
+black costs nothing and holds the pitch at `kRowH`.
+
+**THE SLEEP SCREEN TAKES NO INPUT AND DRAWS NO HINT BAR**, and neither is an
+omission: the shell paints it and then calls deep sleep, so there is nobody left to
+press anything, and the bar is a contract about four buttons that do nothing.
+`onEvent` answers `none()` even for Back. It exists because e-ink holds its last
+image with no power — leaving the previous screen there shows a Library or a
+half-read page and gives no clue the device is asleep rather than frozen.
+
+**TWO BOARDS ASKED FOR TYPE THAT IS NOT IN THE RAMP** — Sleep's title at 53px and
+HomeEmpty's at 39px — and both now use `--t-title` (42px). A role is a pre-rendered
+asset per size AND weight, 15–20 KB of flash each, and these were the only boards
+that wanted those sizes. Sleep's soft hyphen went with it: MIDDLEMARCH at 53px had
+to break, and at 42px it fits. **If either reads too quiet on glass the fix is a new
+role plus a wrap that honours a soft hyphen** — real work, and not worth it until
+the panel says so.
+
+**`kBookLarge` is a second asset for the same drawing**, at 112px against `kBook`'s
+25px, because these are pre-rendered bitmaps and there is no scaling one up. 3,136
+bytes. `iconc.py` disambiguates them by `source` board, since both boards carry the
+identical path data.
+
+**THE INPUT MONITOR IS GONE**, deleted with `StubScreen` in 2C-3. It was reachable
+only from the stub's first row and no board ever listed it. **What was given up: press
+classification is now verified only by `test_input.cpp` on the desktop**, and
+`shell/` is where four bugs have hidden. If held-scroll or press classification
+needs eyes on glass again, it comes back as a board row, not a hidden gesture.
 
 ## Goldens
 
