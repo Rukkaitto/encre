@@ -215,11 +215,22 @@ bool saveSession(const Session& s) {
     Serial.flush();
     return false;
   }
-  // THE VERSION KEY GOES LAST, and that ordering is the whole integrity story
-  // for this record: it is the only key loadSession() validates, so writing it
-  // after the payload means a write that dies half way leaves a record that reads
-  // as "no session" rather than as a valid pointer to a stale screen. Same shape
-  // as a commit record, for the same reason.
+  // THE VERSION KEY GOES LAST, because it is the only key loadSession()
+  // validates, so writing it after the payload means a half-finished write reads
+  // as "no session" rather than as a valid pointer to a stale screen.
+  //
+  // BUT IT IS A COMMIT RECORD ONLY FOR THE FIRST WRITE, and the comment here
+  // claimed otherwise until a review pointed it out. On an UPDATE the previous
+  // record's version key is already present and valid, so it cannot gate
+  // anything: a power cut after putString(scr) and before putUShort(focus)
+  // leaves version + NEW screen + OLD focus, which reads back as a perfectly
+  // valid mixed record. The failure branch below only covers a put that
+  // *returns* an error, not a cut between two of them.
+  //
+  // Left as-is deliberately. Each nvs_set is individually atomic, so the blast
+  // radius is one stale field; the field is a focus index, and a wrong one is
+  // clamped by setFocus on restore. A real fix is one blob instead of three
+  // keys, which is a storage-format change for a cosmetic symptom.
   bool ok = prefs.putString(kKeyScreen, wire) == std::strlen(wire) &&
             prefs.putUShort(kKeyFocus, s.focus) == sizeof(uint16_t) &&
             prefs.putUChar(kKeyVersion, kVersion) == sizeof(uint8_t);

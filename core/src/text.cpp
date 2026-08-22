@@ -19,6 +19,19 @@ int drawText(Framebuffer& fb, const GlyphSource& font, int x, int baselineY, std
   char32_t prev = 0;
   for (size_t i = 0; i < utf8.size();) {
     const char32_t cp = utf8Next(utf8, i);
+    // KERNING IS LOOKED UP BEFORE THE GLYPH, and the order is the contract
+    // rather than a preference. `Glyph::bitmap` is borrowed and valid only until
+    // the next call into this same GlyphSource -- and `kerning()` is such a
+    // call. Asking for it after the glyph was safe only because neither shipped
+    // implementation's kerning() touches the cache; the day one does (kerning
+    // synthesised from outlines is the obvious future), every kerned pair in
+    // body text would blit from an evicted arena slot, and it would pass every
+    // test in which the arena never happens to wrap mid-pair.
+    //
+    // It is applied below rather than here, so the notdef path still resets
+    // `prev` and kerns across nothing -- which is what measure() does too, and
+    // the two must not part company.
+    const int kernF = prev ? pxToF26(font.kerning(prev, cp)) : 0;
     const std::optional<Glyph> g = font.glyph(cp);
     if (!g) {
       // No glyph for this codepoint: draw a hollow box so malformed or
@@ -41,7 +54,7 @@ int drawText(Framebuffer& fb, const GlyphSource& font, int x, int baselineY, std
       prev = 0;
       continue;
     }
-    if (prev) penF += pxToF26(font.kerning(prev, cp));
+    penF += kernF;
     const int pen = f26ToPx(penF);
     for (int row = 0; row < g->bitmapH; ++row)
       for (int col = 0; col < g->bitmapW; ++col) {

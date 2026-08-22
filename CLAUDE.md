@@ -76,6 +76,10 @@ card probe that was answered from cache and kept reporting success.
   the serial log.
 - **Flashing must be run by the user** — the permission classifier blocks it
   from an agent. Give them the command.
+- **A fresh git worktree has an EMPTY `freeink-sdk/`**, and `make firmware` then
+  fails with `PackageException: not a directory`, which names neither the
+  submodule nor the fix. `git submodule update --init` first. `make test` is
+  unaffected, so a worktree can look healthy and still not build the firmware.
 - E-ink holds its last image with no power, so **a frozen screen does not mean
   the firmware ran**.
 - **E-ink persistence is about the PANEL, not the controller.** The glass keeps
@@ -156,7 +160,7 @@ onto a valid B/W baseline afterwards:
 | `Plane::Lsb` | bit 0 of coverage | `copyGrayscaleLsbBuffers` |
 | `Plane::Msb` | bit 1 of coverage | `copyGrayscaleMsbBuffers` |
 
-**It costs three panel waveforms: 366 + 366 + 156 ms, and 1363 ms for a focus
+**It costs three panel waveforms: 367 + 366 + 156 ms, and 1363 ms for a focus
 move measured end to end on the X3**, against one waveform for either one-pass
 path. No screen declares it today. It is kept, not deprecated, because it is the
 only way to put continuous tone on this glass — Phase 3's question about book
@@ -174,7 +178,7 @@ re-bless of Home — first onto the dithered path, then onto `Mono` — moved **
 partial-coverage pixels, verified per pixel against the coverage map rather than
 by eyeballing totals.
 
-**Icons are not in that set.** All ten shipped marks are 2 bpp
+**Icons are not in that set.** All eleven shipped marks are 2 bpp
 (`core/src/icons.cpp`) because they are generated anti-aliased from the boards, so
 they legitimately carry partial coverage at their edges and take whichever
 treatment the plane implies. `Icon::bpp == 1` is the opt-in for a mark that wants
@@ -357,9 +361,12 @@ card in the slot — which is the entire state the SD-missing screen exists for.
 `Preferences` namespace `encre_sess`, keys `ver` / `scr` / `focus` (NVS caps a key
 at 15 chars). The version key is written **last**, like a commit record, so a write
 that dies half way reads back as "no session". Restore happens **only on a genuine
-wake**; a cold boot starts at Home and clears the record. **The stored focus is
-always 0** — `reader::Screen` has no focus accessor, and the only screen where a
-restored focus would show is Library, which lands in 2C-2.
+wake**; a cold boot starts at Home and clears the record. **The stored focus is real**, and this
+paragraph claimed it was always 0 until a review checked it: `Screen::focus()`
+and `setFocus()` exist (`app.h`), the shell stores the live focus clamped to
+`uint16` and restores it on wake, and Library is the screen it shows on. The
+"always 0" was true when 2C-1 wrote it and 2C-2 made it false without updating
+this line.
 
 **Two limitations to know before trusting the card:**
 
@@ -440,7 +447,7 @@ Sized in **points at 150 DPI**, CrossPoint's convention: `ppem = pt * 150 / 72`.
 
 | Role | pt | px | Role | pt | px |
 |---|---|---|---|---|---|
-| Meta400 / Meta500 | 10 | 21 | Body400 / Body500 | 14 | 29 |
+| Meta400 / Meta500 | 10 | 21 | Body400 / Body500 / Body700 | 14 | 29 |
 | Label400 / Label500 | 11 | 23 | Title700 | 20 | 42 |
 | Value500 / Value700 | 12 | 25 | Display700 | 32 | 67 |
 
@@ -468,7 +475,7 @@ Three consequences to know:
 
 - **It costs flash.** 12 bytes a record across the eleven embedded chrome faces
   is ~225 KB, plus 36 KB for the body TTF's 6 bytes a pair: firmware flash went
-  898,768 → 1,159,720. A 6-byte `.rfnt` record (the keys fit `uint16`) would
+  898,768 → 1,160,752. A 6-byte `.rfnt` record (the keys fit `uint16`) would
   halve the chrome half if that ever matters.
 - **Firmware kerning is quantised to whole pixels** and the boards' is subpixel,
   so a kerned chrome run can land a pixel either side of the board's. A pair
@@ -537,8 +544,11 @@ top of this spike.
     `letter-spacing: 0.18em`. Five V1 boards draw it and all five state the same
     box; **the width is not shared** (SdMissing pins 260, the overlays take their
     column). It is *not* Home's CONTINUE block, which is 72 tall, left-aligns and
-    carries an arrow. The outlined secondary variant belongs in this function when
-    DeleteConfirm or BookError lands, not before.
+    carries an arrow. **The outlined secondary variant now lives here too** — the
+    `filled` flag picks the role, because the boards do: a filled slab's label is
+    Value700 and an outlined one's is Label500, same box and same tracking. (This
+    said the variant "belongs in this function when DeleteConfirm lands, not
+    before"; DeleteConfirm landed and brought it.)
   - `wrapProse` / `drawProse` — the **first paragraph in the firmware**. A
     paragraph's height is a *result* (face × copy × column), not a number the
     board states, so the wrap is a value computed once and then both measured and

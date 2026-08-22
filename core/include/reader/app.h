@@ -263,8 +263,10 @@ class App {
   bool dirty() const { return dirty_; }
   // ...and the change was a screen change rather than a change within one. What
   // the refresh does with that is RefreshPolicy's business, not the app's: chrome
-  // constructs its policy with fullOnTransition false, so a transition is an
-  // ordinary FAST refresh.
+  // ships fullOnTransition TRUE, so a transition forces a FULL refresh and a
+  // focus move inside one screen does not. (This comment said the opposite until
+  // a review caught it -- it predates the 2B decision that flipped the default,
+  // and it contradicted the reasoning recorded in CLAUDE.md under Runtime.)
   bool transition() const { return transition_; }
   void clearDirty();
 

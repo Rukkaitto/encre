@@ -571,9 +571,15 @@ static reader::HomeViewModel homeVmForCard() {
   // Library, so row 0 is the row to patch. Guarded anyway: an empty menu here
   // would be a change in the shared catalogue, and indexing into it would be a
   // crash rather than a wrong label.
+  const bool patched = !vm.menu.empty() && books >= 0;
   if (!vm.menu.empty()) vm.menu[0].value = books >= 0 ? std::to_string(books) : std::string();
+  // `patched`, not `books >= 0`: the guard above exists because an empty menu
+  // would be a crash rather than a wrong label, and reading vm.menu[0] here on
+  // the strength of `books` alone undid it two lines later. Unreachable today
+  // (demoHomeVm always fills two rows) and exactly the kind of latent hole a
+  // shared catalogue change opens.
   Serial.printf("[boot] Home's LIBRARY row: %s (%s)\n",
-                books >= 0 ? vm.menu[0].value.c_str() : "blank",
+                patched ? vm.menu[0].value.c_str() : "blank",
                 books >= 0 ? "books in /books plus one level down"
                            : "/books could not be read, so no count is claimed");
   Serial.flush();
