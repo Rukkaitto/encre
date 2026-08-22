@@ -123,11 +123,14 @@ class Screen {
   // the first screen that can produce a value, and 2C-1's session record was
   // writing a hardcoded 0 into a field nothing could fill.
   //
-  // OVERRIDE THEM IN PAIRS. A screen that reports a focus and does not accept one
-  // back is not a screen with a limitation, it is a screen that loses the user's
-  // place on every wake without saying so -- three of them shipped that way, each
-  // with a header comment explaining why its own case was the exception. There is
-  // no exception; test_focus_restore.cpp walks the whole catalogue.
+  // OVERRIDE THEM IN PAIRS -- and the way to do that is to derive from
+  // FocusScreen (focus_screen.h), where the pair is final and cannot be
+  // half-taken. A screen that reports a focus and does not accept one back is
+  // not a screen with a limitation, it is a screen that loses the user's place
+  // on every wake without saying so -- three of them shipped that way, each with
+  // a header comment explaining why its own case was the exception. There is no
+  // exception; test_focus_restore.cpp walks the whole catalogue, and every
+  // focused screen now inherits both halves from one mechanism.
   //
   // THE BOOL MEANS "SOMETHING MOVED", NOT "THE RESTORE LANDED", and this comment
   // used to claim both in one sentence -- "setFocus returning false says the

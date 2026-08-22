@@ -499,9 +499,23 @@ delta, clamp to a range, report whether anything moved — with the range spelle
 slightly differently in each. That is why "clamp, do not wrap" had to be written
 into four separate comments to stay one rule. A screen now declares its **range**
 (`Focus::WithNone` when -1 is a position below the first item, as Home's CONTINUE
-block is) and mirrors `focus_.index()` into its view-model; it holds no clamp at
+block is) and mirrors the focus into its view-model; it holds no clamp at
 all. `ScrollWindow` owns a `Focus` plus the window around it, so the two concerns
 are separable.
+
+**The mirror around Focus is now `FocusScreen`'s**
+(`core/include/reader/focus_screen.h`): the base class owns a `ScrollWindow` (a
+window with `visibleRows == count` never scrolls and behaves as a bare `Focus`),
+and a screen supplies `syncVm()` — mirror the focus and, for a windowed list, the
+visible slice into the view-model — plus `focusable(int)` where some rows refuse a
+landing. The triad every screen used to hand-write (`syncFocus`/`setFocus`/
+`moveFocus`, three byte-identical copies plus two `ScrollWindow` variants) is one
+mechanism now. **Landing rules live in `Focus` too**: `Focus::Gate` is consulted
+per landing by the gated `move`/`set` overloads, which is where Settings'
+skip-past-headers stepping went — the hand-rolled walk had silently stopped
+wrapping while every other list rolled over. The gated walk is pinned to the
+ungated arithmetic by an equivalence property in `test_focus.cpp`, so it cannot
+drift into a second copy of wrap/clamp/none.
 
 - **`set()` CLAMPS and `move()` WRAPS**, deliberately: `set` is the restore path,
   where a record naming row 400 of a three-row list means "as far down as you can
@@ -538,7 +552,11 @@ and encoding it in a `core/` header is how a change over there leaves a screen
 silently one-way. `test/unit/test_focus_restore.cpp` walks **every** `ScreenId`
 and asserts the round trip, `static_assert`s its own catalogue against the enum
 so an added screen cannot slip past, and **counts** the screens whose focus can
-move (five) so it cannot quietly end up testing nothing.
+move (five) so it cannot quietly end up testing nothing. **The rule is structural
+now**: `focus()` and `setFocus()` are `final` on `FocusScreen`, so a derived
+screen cannot take one half without the other — the test checks a property the
+type system also enforces, and a sixth focused screen gets the whole contract by
+choosing its base class.
 
 **THE RECORD IS THE WHOLE STACK, AND `App` PUTS IT BACK** — `snapshot()` /
 `restore()`, root first. It held one screen id through version 3, so
