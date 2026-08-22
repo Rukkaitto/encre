@@ -1488,6 +1488,21 @@ void setup() {
   // a height it does not have is a defect no golden can see (the goldens render
   // at an explicit geometry and never consult the driver).
   const int logicalW = gFrame->width(), logicalH = gFrame->height();
+  // The logical canvas and the panel's native geometry MUST be a transpose of
+  // each other, because the rotation is exactly what relates them. Asserted
+  // rather than trusted: the bug this replaced (4 library rows instead of 7) was
+  // a silent swap that every one of 391 unit tests and every golden passed
+  // through, because the goldens render at an explicit geometry and never ask the
+  // driver. A log line was the only artefact in the system that knew, and reading
+  // it was luck. This fails loudly instead.
+  if (logicalW != panelH || logicalH != panelW) {
+    Serial.printf("[fatal] logical canvas %dx%d is not the transpose of the panel's "
+                  "native %dx%d -- the rotation and the geometry disagree\n",
+                  logicalW, logicalH, panelW, panelH);
+    Serial.flush();
+    mark("frame-geometry-MISMATCH");
+    return;
+  }
   const int libraryRows = gTheme.libraryVisibleRows(logicalH, fonts);
   gFactory.setLibraryVisibleRows(libraryRows);
   Serial.printf("[boot] Library fits %d rows on this %dx%d logical canvas "
