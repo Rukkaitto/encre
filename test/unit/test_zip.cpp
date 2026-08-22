@@ -188,3 +188,86 @@ TEST_CASE("every truncation of a good archive is survivable") {
     }
   }
 }
+
+// --- THE BACKWARD EOCD SCAN, ACROSS ITS CHUNK BOUNDARIES ---------------------
+//
+// The scan used to allocate the whole 64 KB window in one std::string. On a real
+// book that was the largest single allocation in the reader and it aborted the
+// device: 142 KB free, no contiguous block that size, because 203 library entries
+// had fragmented the heap. It reads in 2 KB chunks on the stack now.
+//
+// EVERY FIXTURE IN THIS FILE IS SMALLER THAN ONE CHUNK, so none of them exercised
+// the loop -- they all passed before the rewrite and after it. The comment field is
+// what pushes the record away from the end, so these build zips with comments
+// sized either side of every boundary the loop can trip on.
+namespace {
+
+// `kGood` with an N-byte comment appended and its comment-length field set. The
+// EOCD is a fixed 22 bytes at the end of kGood, and the length lives at offset 20
+// within it -- so this is a legal zip whose record sits exactly N bytes from the
+// end of the file.
+std::string withComment(size_t n) {
+  std::string z(reinterpret_cast<const char*>(zipfix::kGood), zipfix::kGoodLen);
+  const size_t lenAt = z.size() - 2;  // the comment-length field is the last field
+  z[lenAt] = static_cast<char>(n & 0xFF);
+  z[lenAt + 1] = static_cast<char>((n >> 8) & 0xFF);
+  // A comment of readable filler. Deliberately NOT containing "PK\x05\x06": a
+  // signature inside a comment is LATER in the file than the real record and would
+  // legitimately win under zip's own last-record-wins rule, which is a different
+  // question from the one this test asks.
+  z.append(n, '.');
+  return z;
+}
+
+bool opens(const std::string& bytes, std::string* firstEntry = nullptr) {
+  Archive a(reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size());
+  if (!a.open()) return false;
+  if (firstEntry != nullptr && !a.zip.entries().empty())
+    *firstEntry = a.zip.entries()[0].name;
+  return true;
+}
+
+}  // namespace
+
+TEST_CASE("the EOCD is found at every distance a chunked backward scan can trip on") {
+  // 2048 is the chunk. The +-1s are the off-by-one the loop's `hi` bound and its
+  // 3-byte read overlap can each get wrong, and 65535 is the largest comment the
+  // format allows -- 32 chunks back, which no fixture had ever reached.
+  for (const size_t n : {size_t{0}, size_t{1}, size_t{21}, size_t{22},
+                         size_t{2045}, size_t{2046}, size_t{2047}, size_t{2048}, size_t{2049},
+                         size_t{4095}, size_t{4096}, size_t{4097},
+                         size_t{8192}, size_t{32768}, size_t{65535}}) {
+    std::string name;
+    CAPTURE(n);
+    REQUIRE(opens(withComment(n), &name));
+    // Not just "it opened" -- the directory behind the record has to have been read
+    // through, which is what a wrong offset would break silently.
+    CHECK(name == "mimetype");
+  }
+}
+
+TEST_CASE("a comment longer than the scan window is refused, not searched forever") {
+  // kMaxEocdSearch is 64 KB + 22. A record pushed past it cannot be found, and the
+  // scan must stop at the window rather than walking the whole file.
+  std::string z = withComment(65535);
+  z.append(2048, '.');  // now further from the end than the field can even claim
+  CHECK_FALSE(opens(z));
+}
+
+TEST_CASE("A CHAPTER TOO LARGE FOR THE HEAP IS A REASON, NOT AN abort()") {
+  // The second failure the device found, after the scan: `new` aborts under
+  // -fno-exceptions with no diagnostic, so an entry the heap cannot serve took the
+  // firmware down. Every large allocation in Zip is nothrow-checked now.
+  //
+  // Asserted through the CAP rather than by exhausting the host's heap: the desktop
+  // has gigabytes, so the only reachable form of "too big" here is a claim above
+  // kMaxEntryBytes. What this pins is that the refusal path SETS A REASON -- the
+  // device is where the allocation actually fails, and a bare false there is
+  // indistinguishable from a corrupt file.
+  ARCHIVE(kUsizeAbsurd);
+  if (a.open() && !a.zip.entries().empty()) {
+    std::string out;
+    CHECK_FALSE(a.zip.read(*a.handle, a.zip.entries()[0], out));
+    CHECK(out.empty());
+  }
+}

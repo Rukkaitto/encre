@@ -1,6 +1,7 @@
 #include "reader/book.h"
 
 #include <memory>
+#include <new>
 
 #include "reader/epub.h"
 #include "reader/zip.h"
@@ -55,6 +56,30 @@ bool openChapter(FileSystem& fs, std::string_view path, int chapter, OpenedChapt
     *reason = zip.reason();
     return false;
   }
+
+  // A PRE-FLIGHT ON THE HEAP, because buildDocument cannot fail politely.
+  //
+  // Zip's own allocations are nothrow-checked now, but a Document is std::strings
+  // and a std::vector growing as the parse runs, and every one of those aborts
+  // under -fno-exceptions. The peak is the XHTML *and* the blocks live at once --
+  // buildDocument reads from the one while filling the other -- and the blocks are
+  // bounded above by the XHTML's own size, since they hold a subset of its bytes.
+  //
+  // So: can the heap serve a second copy? If not, refuse here, where there is a
+  // reason to hand back. This is a bound and not a guarantee -- std::string's
+  // doubling can briefly want 1.5x what it ends up holding -- and the honest
+  // remaining risk is that a chapter close to the limit still aborts. It converts
+  // the common case, which is a chapter that is simply too big for this device.
+  {
+    char* probe = new (std::nothrow) char[xhtml.size() + 1];
+    const bool room = probe != nullptr;
+    delete[] probe;
+    if (!room) {
+      *reason = "not enough memory to lay out this chapter";
+      return false;
+    }
+  }
+
   // The XHTML is a local and dies here. Only the blocks survive -- which for a
   // real chapter is ~2.5 KB of text out of a ~10 KB inflate, and the difference
   // matters on a 300 KB heap.

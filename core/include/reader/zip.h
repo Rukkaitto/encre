@@ -74,7 +74,11 @@ class Zip {
   bool fail(const char* why);
 
   std::vector<Entry> entries_;
-  const char* reason_ = "";
+  // MUTABLE so that read() -- which is const, because reading an entry does not
+  // change the archive -- can still say WHY it refused. A bare false from a read
+  // that ran out of memory is indistinguishable from a corrupt file, and those two
+  // want different words on a screen.
+  mutable const char* reason_ = "";
 };
 
 }  // namespace reader

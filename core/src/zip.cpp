@@ -1,5 +1,7 @@
 #include "reader/zip.h"
 
+#include <new>
+
 #include <cstring>
 
 #include "reader/inflate.h"
@@ -42,6 +44,52 @@ constexpr uint16_t kFlagEncrypted = 0x0001;
 constexpr uint16_t kMethodStored = 0;
 constexpr uint16_t kMethodDeflated = 8;
 
+// A HEAP BUFFER THAT CAN FAIL WITHOUT ABORTING.
+//
+// `new` and every std::string/vector growth abort() under -fno-exceptions, with no
+// message and no stack -- and this file allocates sizes a FILE states. The device
+// found that the honest way: opening a full-length novel called abort() from
+// `std::string tail(...)` below, rebooted, and came back on Home, which reads as a
+// navigation bug rather than as out of memory.
+//
+// std::nothrow returns nullptr instead. "This book needs more memory than this
+// device has" is then a refusal with a reason, which is a thing a screen can say.
+class Buf {
+ public:
+  explicit Buf(size_t n) : p_(new (std::nothrow) char[n]), n_(p_ != nullptr ? n : 0) {}
+  ~Buf() { delete[] p_; }
+  Buf(const Buf&) = delete;
+  Buf& operator=(const Buf&) = delete;
+  bool ok() const { return p_ != nullptr; }
+  char* data() { return p_; }
+  const char* data() const { return p_; }
+  size_t size() const { return n_; }
+
+ private:
+  char* p_;
+  size_t n_;
+};
+
+// Whether the heap could serve `n` bytes right now, without keeping them.
+//
+// For the one buffer this file does not own: Zip::read fills a caller's
+// std::string, whose assign() would abort. Probing with the same size and freeing
+// it immediately is reliable on this device because it is single-threaded and the
+// assign follows at once -- the allocator hands back the block it just released.
+// It is a poor substitute for an interface that could report failure, and it is
+// here rather than in a comment on a crash report.
+bool canAllocate(size_t n) {
+  char* p = new (std::nothrow) char[n];
+  const bool ok = p != nullptr;
+  delete[] p;
+  return ok;
+}
+
+// The backward EOCD scan's window, on the STACK. Sized at four SdFat sectors: the
+// scan walks backwards, so every read is a real card read, and a 64 KB window at
+// 512 bytes a step would be 128 of them.
+constexpr size_t kScanChunk = 2048;
+
 }  // namespace
 
 bool Zip::fail(const char* why) {
@@ -62,24 +110,50 @@ bool Zip::open(FileHandle& file) {
   // than by the file. A legal comment pushes the record up to 64 KB from the end,
   // so a reader that only checks the last 22 bytes misses it -- and scanning the
   // whole file would make a large non-zip cost a full read before being refused.
+  //
+  // IN CHUNKS, ON THE STACK, and that is the whole point of the shape below. This
+  // used to allocate the window in one std::string -- up to 65,558 bytes -- which
+  // is the largest single allocation in the reader and the first thing to fail on a
+  // real book: the device had 142 KB free and no contiguous block that size, because
+  // 203 library entries had fragmented it. A backward scan needs a sliding view, not
+  // the whole window at once.
   const uint64_t window = size < kMaxEocdSearch ? size : kMaxEocdSearch;
-  std::string tail(static_cast<size_t>(window), '\0');
-  if (!readAt(file, size - window, tail.data(), tail.size()))
-    return fail("could not read the end of the file");
+  const uint64_t windowStart = size - window;
+  unsigned char buf[kScanChunk + 3];  // +3 so a signature at a chunk's top edge reads whole
 
-  const unsigned char* t = reinterpret_cast<const unsigned char*>(tail.data());
   int64_t eocd = -1;
-  // From the end: the LAST record wins, which matters because an archive can
-  // contain another archive's bytes and the outer one's EOCD is the later.
-  for (int64_t i = static_cast<int64_t>(tail.size()) - 22; i >= 0; --i) {
-    if (le32(t + i) == kEocdSig) {
-      eocd = i;
-      break;
+  // `hi` is exclusive: a signature must START below it. Each pass drops it by a
+  // chunk, so this terminates at windowStart.
+  uint64_t hi = size;
+  while (eocd < 0 && hi > windowStart) {
+    const uint64_t lo = (hi - windowStart > kScanChunk) ? (hi - kScanChunk) : windowStart;
+    const uint64_t readEnd = (lo + kScanChunk + 3 < size) ? (lo + kScanChunk + 3) : size;
+    const size_t n = static_cast<size_t>(readEnd - lo);
+    if (!readAt(file, lo, buf, n)) return fail("could not read the end of the file");
+    // Backwards within the chunk, and the chunks run backwards, so the FIRST hit is
+    // the LAST record in the file -- which matters because an archive can contain
+    // another archive's bytes and the outer one's EOCD is the later.
+    //
+    // The full 22 bytes must fit inside the file, exactly as the one-buffer version
+    // required: accepting a 4-byte signature in the last 21 bytes would let a stray
+    // signature there shadow the real record and turn a readable zip into a refusal.
+    for (int64_t i = static_cast<int64_t>(hi - lo) - 1; i >= 0; --i) {
+      if (static_cast<size_t>(i) + 4 > n) continue;
+      if (lo + static_cast<uint64_t>(i) + 22 > size) continue;
+      if (le32(buf + i) == kEocdSig) {
+        eocd = static_cast<int64_t>(lo + static_cast<uint64_t>(i));
+        break;
+      }
     }
+    hi = lo;
   }
   if (eocd < 0) return fail("no end-of-central-directory record found");
 
-  const unsigned char* e = t + eocd;
+  // The record itself, read on its own now that the window is not resident.
+  unsigned char record[22];
+  if (!readAt(file, static_cast<uint64_t>(eocd), record, sizeof(record)))
+    return fail("could not read the end-of-central-directory record");
+  const unsigned char* e = record;
   const uint16_t claimed = le16(e + 10);   // entries on this disk
   const uint32_t cdSize = le32(e + 12);
   const uint32_t cdOffset = le32(e + 16);
@@ -88,7 +162,8 @@ bool Zip::open(FileHandle& file) {
   if (cdOffset > size || cdSize > size || cdOffset + static_cast<uint64_t>(cdSize) > size)
     return fail("the central directory is not inside the file");
 
-  std::string cd(cdSize, '\0');
+  Buf cd(cdSize);
+  if (!cd.ok()) return fail("not enough memory to read the central directory");
   if (cdSize > 0 && !readAt(file, cdOffset, cd.data(), cd.size()))
     return fail("could not read the central directory");
 
@@ -161,20 +236,37 @@ bool Zip::read(FileHandle& file, const Entry& entry, std::string& out) const {
   const uint64_t dataAt =
       static_cast<uint64_t>(entry.localHeaderOffset) + 30u + nameLen + extraLen;
 
-  std::string raw(entry.compressedSize, '\0');
+  Buf raw(entry.compressedSize);
+  if (!raw.ok()) {
+    reason_ = "not enough memory to read this chapter";
+    return false;
+  }
   if (!readAt(file, dataAt, raw.data(), raw.size())) return false;
 
   if (!entry.deflated) {
     // Stored: the two sizes must agree, and a file that says otherwise is
     // describing something this cannot represent.
     if (entry.compressedSize != entry.uncompressedSize) return false;
-    out = std::move(raw);
+    if (!canAllocate(entry.uncompressedSize + 1)) {
+      reason_ = "not enough memory to read this chapter";
+      return false;
+    }
+    out.assign(raw.data(), raw.size());
     return true;
   }
 
+  // PROBED WHILE `raw` IS STILL HELD, deliberately: both buffers are live during
+  // the inflate, so the question is whether the heap can serve the second one on
+  // top of the first. Probing before allocating raw would answer a question nobody
+  // asked.
+  if (!canAllocate(static_cast<size_t>(entry.uncompressedSize) + 1)) {
+    reason_ = "not enough memory to inflate this chapter";
+    return false;
+  }
   out.assign(entry.uncompressedSize, '\0');
-  if (!inflateRaw(raw, out)) {
+  if (!inflateRaw(std::string_view(raw.data(), raw.size()), out)) {
     out.clear();
+    reason_ = "the chapter's compressed data is malformed";
     return false;
   }
   return true;

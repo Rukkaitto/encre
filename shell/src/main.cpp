@@ -1069,7 +1069,14 @@ static void handleOpen() {
   reader::OpenedChapter opened;
   const char* why = "";
   if (!reader::openChapter(gSd, path, 0, opened, &why)) {
-    Serial.printf("[open] %s REFUSED: %s\n", path.c_str(), why);
+    // THE HEAP GOES IN THE REFUSAL LINE, because "not enough memory" is only
+    // actionable next to how much there was and how fragmented it is. The largest
+    // free BLOCK is the number that actually decides: the reader's allocations are
+    // single contiguous buffers, and a heap with 140 KB free in 40 KB pieces cannot
+    // serve a 60 KB chapter.
+    Serial.printf("[open] %s REFUSED: %s (heap %u free, largest block %u)\n", path.c_str(),
+                  why, (unsigned)ESP.getFreeHeap(),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     Serial.flush();
     return;
   }

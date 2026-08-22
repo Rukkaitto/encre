@@ -1176,6 +1176,39 @@ Three things worth keeping:
 The `[stack]` serial line reports `uxTaskGetStackHighWaterMark` after an open — the
 worst case since boot, inflate included.
 
+### Memory, which is what a real book runs into
+
+**`new` ABORTS under `-fno-exceptions`, with no message and no stack.** The reboot
+looks like a navigation bug — twice now it has been reported as "opening a book goes
+back to Home". `MCAUSE 0x2` plus `abort() was called` plus `addr2line` on the stack
+words is how you get from that to `operator new` → `std::bad_alloc` → `__terminate`.
+
+So every sizeable allocation in the EPUB path is **`std::nothrow`-checked** and
+answers with a reason: `Zip`'s central directory and both of its read buffers, and a
+pre-flight probe in `book.cpp` before `buildDocument` (whose `std::string`/`std::vector`
+growth cannot fail politely — that one is a bound, not a guarantee).
+
+**THE EOCD SCAN NO LONGER ALLOCATES.** It used to take the whole 64 KB comment
+window in one `std::string`, which was the largest single allocation in the reader
+and the first thing a full-length novel broke: 142 KB free and no contiguous block
+that size. It reads 2 KB chunks on the stack, backwards, with a 3-byte overlap so a
+signature at a chunk edge still reads whole. **Every zip fixture in the repo is
+smaller than one chunk**, so the loop is covered by tests that append comments sized
+either side of 2048, 4096 and 65535 — without those the rewrite was untested.
+
+Two things about the numbers:
+
+- **A cap is not a memory check.** `kMaxEntryBytes` is 512 KB, which protects against
+  a file that lies about its size and does nothing about a file that is honestly too
+  big for a 140 KB heap. Those are different failures and need different code.
+- **The largest free BLOCK decides, not the free total.** Every reader buffer is one
+  contiguous allocation. The `[open]` refusal line reports both.
+
+**The Library is resident while you read.** It sits below the Reader on the stack, so
+its entries stay allocated: 203 books cost ~59 KB (heap 201,576 → 142,560 in the
+boot log), taken out of the heap exactly when a chapter needs it. That is the
+obvious next lever if real novels do not fit, and it is a design change, not a tune.
+
 ### What the desktop measures, and what only the panel can answer
 
 Desktop, 12-line page, 444px column, ppem 32: paginate 349 µs/page, lay out one page
