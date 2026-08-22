@@ -229,8 +229,66 @@ static const char* stage = "boot";
 // happens BETWEEN two lines. It matters because 3B's buffers get sized against
 // what looks free, while the real ceiling is that much lower. `min` here falls at
 // exactly the stage that spent it, which is the whole bisect in one boot.
+// --- Breadcrumbs across a sleep ---------------------------------------------
+//
+// Some faults happen ONLY on a wake, and a wake cannot be watched: deep sleep
+// powers down USB, and a host attaching afterwards can reset the chip -- three
+// attempts to capture a resume came back as cold boots (see CLAUDE.md). So the
+// device records what happened to it and the NEXT boot prints the record.
+//
+// RTC memory survives deep sleep and does not survive a power cycle, which is
+// exactly the lifetime wanted: the record describes the sleep/wake cycle just
+// ended and never a stale one from days ago. The magic guards against reading
+// uninitialised RTC bytes as a record.
+//
+// Deliberately small and fixed-size. No allocation, no pointers -- RTC memory
+// outlives the heap it would point into, so a pointer stored here is a dangling
+// pointer by construction.
+struct WakeCrumbs {
+  uint32_t magic;
+  uint8_t resetReason;
+  uint8_t wakeCause;
+  uint8_t mountOk;        // did bringUpStorage() find usable storage
+  uint8_t probeFirstDone; // has the first card probe run at all
+  uint8_t probeFirstOk;   // ...and did it pass
+  uint32_t probeFirstMs;
+  uint32_t cardLostMs;    // 0 = the card never stopped answering
+  uint32_t firstPaintMs;
+  char lastStage[28];
+  char lostBy[56];
+};
+RTC_DATA_ATTR static WakeCrumbs gCrumbs;
+static constexpr uint32_t kCrumbMagic = 0x454E4352u;  // "ENCR"
+
+// Print the previous cycle's record, then start a fresh one.
+static void reportAndResetCrumbs(esp_reset_reason_t rst, esp_sleep_wakeup_cause_t wake) {
+  if (gCrumbs.magic == kCrumbMagic) {
+    Serial.printf("[prev] the boot before this one: reset=%u wake=%u mount=%s "
+                  "firstProbe=%s@%lums firstPaint=%lums lastStage=%s\n",
+                  (unsigned)gCrumbs.resetReason, (unsigned)gCrumbs.wakeCause,
+                  gCrumbs.mountOk ? "ok" : "FAILED",
+                  !gCrumbs.probeFirstDone ? "never-ran"
+                                          : (gCrumbs.probeFirstOk ? "ok" : "FAILED"),
+                  (unsigned long)gCrumbs.probeFirstMs, (unsigned long)gCrumbs.firstPaintMs,
+                  gCrumbs.lastStage[0] ? gCrumbs.lastStage : "(none)");
+    if (gCrumbs.cardLostMs != 0)
+      Serial.printf("[prev] ...and the card stopped answering at %lums, detected by: %s\n",
+                    (unsigned long)gCrumbs.cardLostMs, gCrumbs.lostBy);
+    else
+      Serial.printf("[prev] ...and the card answered for the whole of it\n");
+    Serial.flush();
+  }
+  gCrumbs = WakeCrumbs{};
+  gCrumbs.magic = kCrumbMagic;
+  gCrumbs.resetReason = static_cast<uint8_t>(rst);
+  gCrumbs.wakeCause = static_cast<uint8_t>(wake);
+}
+
 static void mark(const char* s) {
   stage = s;
+  // The last stage reached, kept across a sleep: on a wake that goes wrong this
+  // is the only thing that says how far setup() got.
+  snprintf(gCrumbs.lastStage, sizeof(gCrumbs.lastStage), "%s", s);
   // millis() FIRST, because a stage line without one is how a boot cost gets
   // attributed to the wrong thing. These lines carried heap and no time, so the
   // only timestamps in a boot log came from the SDK -- and the first of those was
@@ -976,11 +1034,23 @@ static void pollCardPresence(uint32_t now) {
     SpiBusGuard bus;
     if (!(gSd.probe() && gSd.mounted())) by = fastProbeName();
   }
+  if (!gCrumbs.probeFirstDone && (deepDue || static_cast<uint32_t>(now - gLastSdPollMs) == 0)) {
+    // The FIRST probe of this boot, recorded whether it passed or not. On the
+    // reported wake fault the card was present, boot mounted it and read
+    // settings.json off it, and then the SD-missing screen appeared about a
+    // second later -- so which of those two the first probe agrees with is the
+    // whole question.
+    gCrumbs.probeFirstDone = 1;
+    gCrumbs.probeFirstOk = by == nullptr ? 1 : 0;
+    gCrumbs.probeFirstMs = now;
+  }
   if (!by) return;  // nothing due, or the card answered
 
   // A usable -> unusable edge. noteCardGone() has already said what stopped
   // answering; this says which mechanism asked, and what the UI is doing about it.
   gStorageUsable = false;
+  gCrumbs.cardLostMs = now == 0 ? 1u : now;  // 0 is the "never" sentinel
+  snprintf(gCrumbs.lostBy, sizeof(gCrumbs.lostBy), "%s", by);
   Serial.printf("[sd] THE CARD IS NO LONGER ANSWERING -- pulled, or failed. Detected by %s. "
                 "Routing to the SD-missing screen; RETRY will restart the device, because a "
                 "card lost after a mount cannot be re-mounted in process\n",
@@ -1507,6 +1577,10 @@ void setup() {
   Serial.printf("[boot] reset reason=%d %s; sleep wake cause=%d\n", (int)rst, rstName,
                 (int)wake);
   Serial.flush();
+  // Before anything overwrites it: this prints the PREVIOUS cycle and starts a
+  // new record, so a fault that only happens unplugged is readable next time the
+  // device is plugged in.
+  reportAndResetCrumbs(rst, wake);
   Serial.printf("[boot] wake cause=%d -> %s\n", (int)wake,
                 fromSleep ? "resumed from sleep (the panel holds our frame, but the "
                             "controller's baseline did not survive, so it is reseeded)"
@@ -1851,6 +1925,10 @@ void setup() {
   // The shell's own view of storage, which is what roots the app and what the
   // presence poll in loop() watches for a usable -> unusable edge.
   gStorageUsable = storage;
+  // Kept across a sleep: on the wake fault the mount SUCCEEDED and the poll then
+  // said the card was gone, so the record has to carry both answers or it cannot
+  // tell "never mounted" from "mounted, then lost".
+  gCrumbs.mountOk = storage ? 1 : 0;
   if (storage) {
     // The root is Home, built from the shared catalogue. Nothing rebuilds it, so
     // popping back to Home returns this object with its focus intact.
@@ -1993,6 +2071,7 @@ void setup() {
   // the panel's bus for answers we have.
   gLastSdPollMs = millis();
   gLastSdDeepPollMs = gLastSdPollMs;
+  gCrumbs.firstPaintMs = millis();
   mark("first-paint-complete");
 }
 
