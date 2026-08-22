@@ -104,8 +104,16 @@ card probe that was answered from cache and kept reporting success.
     slept. Read that line before believing anything about a wake.
   - The decisive test needs no logger: sleep, press power, and see whether the
     screen you left comes back. If it does, the wake works and the logger was the
-    problem. To get NUMBERS off an unobservable path, keep them in
-    `RTC_DATA_ATTR` across the sleep and print them on a later boot.
+    problem.
+  - **To get facts off that path, the record must be in NVS, not RTC memory.**
+    `RTC_DATA_ATTR` looks right — free to write, survives deep sleep — and does
+    not work here: ESP-IDF re-initialises `.rtc.data` on every reset that is not a
+    deep-sleep wake, and the reset to survive is precisely the `ESP_RST_USB` the
+    host causes by attaching. So plugging in to read the record is what erases it,
+    and the log comes back with no `[prev]` line rather than with an error. The
+    record lives in the `encre_diag` NVS namespace, written at a few decisive
+    points (reason known, mount decided, first probe, card lost, first paint)
+    rather than per stage.
 - **A fresh git worktree has an EMPTY `freeink-sdk/`**, and `make firmware` then
   fails with `PackageException: not a directory`, which names neither the
   submodule nor the fix. `git submodule update --init` first. `make test` is

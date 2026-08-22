@@ -5,7 +5,8 @@
 #include <PowerManager.h>
 #include <SPI.h>
 #include <esp_sleep.h>
-#include <esp_system.h>  // esp_restart(), for the RETRY-after-a-pull branch
+#include <esp_system.h>
+#include <Preferences.h>  // esp_restart(), for the RETRY-after-a-pull branch
 #include <XteinkDetect.h>
 
 #include <memory>
@@ -257,11 +258,45 @@ struct WakeCrumbs {
   char lastStage[28];
   char lostBy[56];
 };
-RTC_DATA_ATTR static WakeCrumbs gCrumbs;
+static WakeCrumbs gCrumbs;
 static constexpr uint32_t kCrumbMagic = 0x454E4352u;  // "ENCR"
+
+// IN NVS, NOT RTC MEMORY, and the first version got this wrong in a way that
+// wasted a reproduction.
+//
+// RTC_DATA_ATTR looked ideal: free to write, survives deep sleep, gone on a power
+// cycle. But ESP-IDF's startup RE-INITIALISES `.rtc.data` on every reset that is
+// not a deep-sleep wake -- and the reset we have to survive is exactly the one a
+// host causes by attaching (reset reason 11, ESP_RST_USB). So the act of plugging
+// in to read the record was what destroyed it: the fault was reproduced, the
+// cable went in, and the log came back with no [prev] line at all.
+//
+// Flash survives everything. The cost is NVS writes, which is why this is written
+// at a few decisive points rather than continuously, and why the payload is a
+// fixed 100-odd bytes: `encre_diag` is wear-levelled by NVS and a handful of
+// writes per boot is the same order as the session record already does.
+static constexpr const char* kCrumbNs = "encre_diag";
+static constexpr const char* kCrumbKey = "prev";
+
+static void saveCrumbs() {
+  Preferences p;
+  if (!p.begin(kCrumbNs, false)) return;  // diagnostics must never break a boot
+  p.putBytes(kCrumbKey, &gCrumbs, sizeof(gCrumbs));
+  p.end();
+}
 
 // Print the previous cycle's record, then start a fresh one.
 static void reportAndResetCrumbs(esp_reset_reason_t rst, esp_sleep_wakeup_cause_t wake) {
+  {
+    Preferences p;
+    if (p.begin(kCrumbNs, true)) {
+      WakeCrumbs prev{};
+      if (p.getBytesLength(kCrumbKey) == sizeof(prev) &&
+          p.getBytes(kCrumbKey, &prev, sizeof(prev)) == sizeof(prev))
+        gCrumbs = prev;
+      p.end();
+    }
+  }
   if (gCrumbs.magic == kCrumbMagic) {
     Serial.printf("[prev] the boot before this one: reset=%u wake=%u mount=%s "
                   "firstProbe=%s@%lums firstPaint=%lums lastStage=%s\n",
@@ -282,12 +317,14 @@ static void reportAndResetCrumbs(esp_reset_reason_t rst, esp_sleep_wakeup_cause_
   gCrumbs.magic = kCrumbMagic;
   gCrumbs.resetReason = static_cast<uint8_t>(rst);
   gCrumbs.wakeCause = static_cast<uint8_t>(wake);
+  saveCrumbs();  // so a boot that dies before the next save still leaves the reason
 }
 
 static void mark(const char* s) {
   stage = s;
-  // The last stage reached, kept across a sleep: on a wake that goes wrong this
-  // is the only thing that says how far setup() got.
+  // The last stage reached. RAM only -- an NVS write per stage would be a dozen
+  // flash writes a boot for a field that only matters at the decisive points
+  // below, where it is flushed with the rest of the record.
   snprintf(gCrumbs.lastStage, sizeof(gCrumbs.lastStage), "%s", s);
   // millis() FIRST, because a stage line without one is how a boot cost gets
   // attributed to the wrong thing. These lines carried heap and no time, so the
@@ -1043,6 +1080,7 @@ static void pollCardPresence(uint32_t now) {
     gCrumbs.probeFirstDone = 1;
     gCrumbs.probeFirstOk = by == nullptr ? 1 : 0;
     gCrumbs.probeFirstMs = now;
+    saveCrumbs();
   }
   if (!by) return;  // nothing due, or the card answered
 
@@ -1051,6 +1089,7 @@ static void pollCardPresence(uint32_t now) {
   gStorageUsable = false;
   gCrumbs.cardLostMs = now == 0 ? 1u : now;  // 0 is the "never" sentinel
   snprintf(gCrumbs.lostBy, sizeof(gCrumbs.lostBy), "%s", by);
+  saveCrumbs();  // the event this whole record exists for
   Serial.printf("[sd] THE CARD IS NO LONGER ANSWERING -- pulled, or failed. Detected by %s. "
                 "Routing to the SD-missing screen; RETRY will restart the device, because a "
                 "card lost after a mount cannot be re-mounted in process\n",
@@ -1929,6 +1968,7 @@ void setup() {
   // said the card was gone, so the record has to carry both answers or it cannot
   // tell "never mounted" from "mounted, then lost".
   gCrumbs.mountOk = storage ? 1 : 0;
+  saveCrumbs();
   if (storage) {
     // The root is Home, built from the shared catalogue. Nothing rebuilds it, so
     // popping back to Home returns this object with its focus intact.
@@ -2073,6 +2113,7 @@ void setup() {
   gLastSdDeepPollMs = gLastSdPollMs;
   gCrumbs.firstPaintMs = millis();
   mark("first-paint-complete");
+  saveCrumbs();
 }
 
 [[noreturn]] static void sleepNow() {
