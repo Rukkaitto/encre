@@ -751,13 +751,25 @@ void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
   for (int i = 0; i < rows; ++i) {
     const SettingsRow& row = vm.rows[static_cast<size_t>(i)];
     if (row.isHeader) {
-      // The section's 2px rule, then tracked caps. The rule spans the ROW box, not
-      // the panel, so it stops at the rail's gutter like everything else.
-      fb.fillRect(0, y, fb.width() - inset, kSettingsHeaderRuleH, false);
-      const int textTop = y + kSettingsHeaderRuleH + kSettingsHeaderPadTop;
+      // A section's 2px rule, EXCEPT on the first item in the window -- the board
+      // gives DEVICE and CONNECTIONS a `border-top` and gives TYPOGRAPHY none,
+      // because the first section sits directly under the header band's own 2px
+      // border and a second rule doubles it into a 4px slab. Drawing it
+      // unconditionally is exactly what this did, and it read as a stray separator
+      // against the top bar.
+      //
+      // POSITIONAL, not by identity: the rule separates a section from the content
+      // above it, and at the top of the window the band is that separation
+      // whichever section happens to be scrolled there. Same shape as
+      // drawBookRow's last-row rule, which is also about where a row is rather
+      // than which row it is.
+      const bool underTheBand = (i == 0);
+      if (!underTheBand) fb.fillRect(0, y, fb.width() - inset, kSettingsHeaderRuleH, false);
+      const int ruleH = underTheBand ? 0 : kSettingsHeaderRuleH;
+      const int textTop = y + ruleH + kSettingsHeaderPadTop;
       drawText(fb, header, kMargin, baselineIn(header, textTop, header.lineHeight()), row.label,
                Ink::Black, trackingEm(header, kSettingsHeaderEm), plane);
-      y += settingsHeaderHeight(fonts);
+      y += settingsHeaderHeight(fonts) - (kSettingsHeaderRuleH - ruleH);
       continue;
     }
 
@@ -781,9 +793,20 @@ void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
                {}, plane);
 
     y += kSettingsRowH;
-    // The focused row's fill runs to the next row's top edge, so it draws no rule
-    // -- the same asymmetry drawBookRow implements, from the same board rule.
-    if (!focused) {
+    // TWO reasons a row draws no rule, and both are the board's.
+    //
+    // The focused row's fill runs to the next row's top edge -- the same asymmetry
+    // drawBookRow implements.
+    //
+    // And the LAST ROW OF A SECTION has none, because the next section's 2px
+    // `border-top` is the line between them: `Alignment` on the board carries no
+    // `border-bottom` for exactly that reason. Drawing one anyway made a 3px slab
+    // where the board draws 2, and -- because it also advanced `y` -- pushed every
+    // row below the DEVICE header down by a pixel. That is the compounding kind:
+    // one wrong rule, and the whole bottom half of the screen is off by one.
+    const bool nextIsHeader =
+        (i + 1 < rows) && vm.rows[static_cast<size_t>(i + 1)].isHeader;
+    if (!focused && !nextIsHeader) {
       fb.fillRect(0, y, fb.width() - inset, kSettingsRuleH, false);
       y += kSettingsRuleH;
     }
