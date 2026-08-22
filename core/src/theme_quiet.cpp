@@ -683,6 +683,135 @@ void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
   drawHintBar(fb, fonts, hints, slots, plane);
 }
 
+// --- Sleep -------------------------------------------------------------------
+//
+// design/Sleep.dc.html: a dithered field with a bordered white card centred on it,
+// and a smaller badge near the bottom. Every measurement below is the board's.
+namespace {
+
+constexpr int kSleepCardMaxW = 400;
+constexpr int kSleepCardPadX = 42;
+constexpr int kSleepCardPadY = 38;
+constexpr int kSleepCardBorder = 2;
+constexpr int kSleepGap = 14;      // the card's flex `gap`
+constexpr int kSleepRuleW = 44;    // the little rule under NOW READING
+constexpr int kSleepRuleH = 2;
+constexpr int kSleepBarW = 170;
+constexpr int kSleepBarH = 8;
+constexpr int kSleepBarTopGap = 8;  // the bar's own `margin-top`, on top of the gap
+constexpr int kSleepBadgeBottom = 34;
+constexpr int kSleepBadgePadX = 18;
+constexpr int kSleepBadgePadY = 8;
+constexpr int kSleepBadgeBorder = 1;
+constexpr int kSleepLabelEm = 260;   // NOW READING, 0.26em
+constexpr int kSleepAuthorEm = 220;  // 0.22em
+constexpr int kSleepProgressEm = 140;
+constexpr int kSleepNoteEm = 200;
+
+// A 1px-or-more outline as four fills. Written here rather than in components.h
+// because two callers is not a shared primitive yet -- the scroll rail's track is
+// the other, and it needs its interior for a thumb rather than a fill.
+void outline(Framebuffer& fb, int x, int y, int w, int h, int t) {
+  if (w <= 0 || h <= 0 || t <= 0) return;
+  fb.fillRect(x, y, w, t, false);
+  fb.fillRect(x, y + h - t, w, t, false);
+  fb.fillRect(x, y, t, h, false);
+  fb.fillRect(x + w - t, y, t, h, false);
+}
+
+// Centred in a box, which every child of this card is. The measure and the draw
+// take the SAME tracking, or the centring is off by the tracking's total.
+void centredText(Framebuffer& fb, const Font& font, int boxX, int boxW, int baseline,
+                 std::string_view text, Tracking tracking, Plane plane) {
+  const int w = font.measure(text, tracking);
+  drawText(fb, font, boxX + centreIn(0, boxW, w), baseline, text, Ink::Black, tracking, plane);
+}
+
+}  // namespace
+
+void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepViewModel& vm,
+                             Plane plane) {
+  // The FIELD first: the board's `.dither-field` is the same 4px-pitch dot as
+  // `.dither-dots`, so this is kClustered at level 1 over the whole panel -- the
+  // one dither this screen wants, and the reason it is clustered rather than
+  // dispersed is in dither.cpp: a tint reads as a blob, not as grain.
+  fb.clear(true);
+  ditherRect(fb, 0, 0, fb.width(), fb.height(), 1, Ink::Black);
+
+  const Font& label = fonts[Role::Meta500];
+  const Font& title = fonts[Role::Title700];
+  const Font& author = fonts[Role::Label400];
+  const Font& progress = fonts[Role::Label500];
+  const Font& note = fonts[Role::Meta400];
+
+  // The card's width is the board's max, or the panel less a margin on the
+  // narrower X4 -- `max-width` is a ceiling, not a pin.
+  const int roomy = fb.width() - 2 * kMargin;
+  const int cardW = roomy < kSleepCardMaxW ? roomy : kSleepCardMaxW;
+  const int contentW = cardW - 2 * (kSleepCardBorder + kSleepCardPadX);
+
+  // HEIGHT IS A RESULT, not a number the board states: it is the sum of six
+  // children and five gaps, and pinning it would be the mistake the header band
+  // and the menu rows both taught. The title is measured elided, so a long book
+  // cannot make the card taller than it was laid out to be.
+  const std::string shownTitle = elideToWidth(title, upperAscii(vm.title), contentW);
+  const int contentH = label.lineHeight() + kSleepGap + kSleepRuleH + kSleepGap +
+                       title.lineHeight() + kSleepGap + author.lineHeight() + kSleepGap +
+                       kSleepBarTopGap + kSleepBarH + kSleepGap + progress.lineHeight();
+  const int cardH = contentH + 2 * (kSleepCardBorder + kSleepCardPadY);
+
+  const int cardX = centreIn(0, fb.width(), cardW);
+  const int cardY = centreIn(0, fb.height(), cardH);
+
+  // Paper under the card, then its border: the card is opaque white ON the field,
+  // so the dither has to be cleared rather than drawn around.
+  fb.fillRect(cardX, cardY, cardW, cardH, true);
+  outline(fb, cardX, cardY, cardW, cardH, kSleepCardBorder);
+
+  int y = cardY + kSleepCardBorder + kSleepCardPadY;
+  const int cx = cardX + kSleepCardBorder + kSleepCardPadX;
+
+  centredText(fb, label, cx, contentW, baselineIn(label, y, label.lineHeight()), vm.label,
+              trackingEm(label, kSleepLabelEm), plane);
+  y += label.lineHeight() + kSleepGap;
+
+  fb.fillRect(cx + centreIn(0, contentW, kSleepRuleW), y, kSleepRuleW, kSleepRuleH, false);
+  y += kSleepRuleH + kSleepGap;
+
+  centredText(fb, title, cx, contentW, baselineIn(title, y, title.lineHeight()), shownTitle, {},
+              plane);
+  y += title.lineHeight() + kSleepGap;
+
+  centredText(fb, author, cx, contentW, baselineIn(author, y, author.lineHeight()),
+              upperAscii(vm.author), trackingEm(author, kSleepAuthorEm), plane);
+  y += author.lineHeight() + kSleepGap + kSleepBarTopGap;
+
+  // The bar: a 1px outline with a proportional fill, the treatment kBattery uses
+  // and the same reason -- an outline plus a solid fill is what reads on this glass
+  // hard-thresholded.
+  const int barX = cx + centreIn(0, contentW, kSleepBarW);
+  outline(fb, barX, y, kSleepBarW, kSleepBarH, 1);
+  const int pct = vm.progressPercent < 0 ? 0 : (vm.progressPercent > 100 ? 100 : vm.progressPercent);
+  const int fill = (kSleepBarW * pct + 50) / 100;  // rounded once
+  if (fill > 0) fb.fillRect(barX, y, fill, kSleepBarH, false);
+  y += kSleepBarH + kSleepGap;
+
+  centredText(fb, progress, cx, contentW, baselineIn(progress, y, progress.lineHeight()),
+              vm.progress, trackingEm(progress, kSleepProgressEm), plane);
+
+  // The badge, measured from the BOTTOM as the board positions it.
+  const int noteW = note.measure(vm.note, trackingEm(note, kSleepNoteEm));
+  const int badgeW = noteW + 2 * (kSleepBadgeBorder + kSleepBadgePadX);
+  const int badgeH = note.lineHeight() + 2 * (kSleepBadgeBorder + kSleepBadgePadY);
+  const int badgeX = centreIn(0, fb.width(), badgeW);
+  const int badgeY = fb.height() - kSleepBadgeBottom - badgeH;
+  fb.fillRect(badgeX, badgeY, badgeW, badgeH, true);
+  outline(fb, badgeX, badgeY, badgeW, badgeH, kSleepBadgeBorder);
+  drawText(fb, note, badgeX + kSleepBadgeBorder + kSleepBadgePadX,
+           baselineIn(note, badgeY + kSleepBadgeBorder + kSleepBadgePadY, note.lineHeight()),
+           vm.note, Ink::Black, trackingEm(note, kSleepNoteEm), plane);
+}
+
 // --- Settings ----------------------------------------------------------------
 //
 // The board's boxes: a 54px row with a `border-bottom`, and a section header that

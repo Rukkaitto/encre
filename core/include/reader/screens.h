@@ -19,6 +19,9 @@ HomeViewModel demoHomeVm();
 // Home's menu rows, in order, and the screen each one opens.
 std::vector<ScreenId> demoHomeTargets();
 
+// design/Sleep.dc.html's own values -- see the definition.
+SleepViewModel demoSleepVm();
+
 // design/Library.dc.html's own seven rows, with the authors and percentages the
 // board draws. The device fills the same fields from the card -- filenames, blank
 // authors, NEW -- so this is what keeps `make compare` and the goldens testing

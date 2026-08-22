@@ -168,6 +168,18 @@ struct BookDetailsViewModel {
 // design.
 // design/Settings.dc.html. One flat list of ITEMS, because that is what scrolls:
 // a section header and a setting row move together and the rail counts both.
+// design/Sleep.dc.html: what is on the glass while the device is asleep. No hints
+// and no focus -- the shell paints this and then sleeps, so there is nobody to
+// press anything. The only way out is the power button, which the badge says.
+struct SleepViewModel {
+  std::string label;      // "NOW READING"
+  std::string title;      // the book, shouted by the theme
+  std::string author;
+  int progressPercent = 0;
+  std::string progress;   // "6% - CH. 01", the line under the bar
+  std::string note;       // "ASLEEP - PRESS POWER TO WAKE"
+};
+
 struct SettingsRow {
   std::string label;
   std::string value;      // empty on a section header

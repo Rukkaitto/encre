@@ -21,6 +21,10 @@ enum class ScreenId : uint8_t {
   DeleteConfirm,  // the overlay that overlay's Delete... opens
   BookDetails,    // a full screen, NOT an overlay -- see its board
   Settings,
+  // What the panel holds while the device sleeps -- see screen_sleep.h. A screen
+  // rather than a special case in the shell, so the simulator and the goldens can
+  // render it like everything else.
+  Sleep,
   SdMissing
 };
 

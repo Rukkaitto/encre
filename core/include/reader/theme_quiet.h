@@ -25,6 +25,9 @@ class QuietTheme : public Theme {
   int libraryVisibleRows(int panelH, const FontSet& fonts) const override;
   void settingsMetrics(int panelH, const FontSet& fonts, int& listH, int& rowH,
                        int& headerH) const override;
+  void renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepViewModel& vm,
+                   Plane plane) override;
+
   void renderSettings(Framebuffer& fb, const FontSet& fonts, const SettingsViewModel& vm,
                       Plane plane) override;
 

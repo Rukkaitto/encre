@@ -268,12 +268,13 @@ int main(int argc, char** argv) {
   const bool isDeleteConfirm = std::strcmp(argv[1], "delete_confirm") == 0;
   const bool isBookDetails = std::strcmp(argv[1], "book_details") == 0;
   const bool isSettings = std::strcmp(argv[1], "settings") == 0;
+  const bool isSleep = std::strcmp(argv[1], "sleep") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
-      !isDeleteConfirm && !isBookDetails && !isSettings) {
+      !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
-                 "'library_actions', 'delete_confirm', 'book_details', 'settings' "
-                 "or 'app')\n",
+                 "'library_actions', 'delete_confirm', 'book_details', 'settings', "
+                 "'sleep' or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -389,6 +390,16 @@ int main(int argc, char** argv) {
     app.dispatch({reader::Button::Down, reader::PressKind::Short});
     app.dispatch({reader::Button::Down, reader::PressKind::Short});
     app.dispatch({reader::Button::Confirm, reader::PressKind::Short});
+  }
+  if (isSleep) {
+    // NOT reached by pressing: nothing navigates to the sleep screen, the idle
+    // timer or the power button puts the device there. So it is pushed directly,
+    // which is the honest model -- and it is why this screen has no journey to
+    // pin the way Library's and Settings' renders do.
+    if (!app.pushScreen(reader::ScreenId::Sleep)) {
+      std::fprintf(stderr, "the factory refused ScreenId::Sleep\n");
+      return 1;
+    }
   }
   for (const reader::InputEvent& ev : events) app.dispatch(ev);
 

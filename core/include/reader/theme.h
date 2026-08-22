@@ -11,6 +11,7 @@ struct ItemActionsViewModel;
 struct DeleteConfirmViewModel;
 struct BookDetailsViewModel;
 struct SettingsViewModel;
+struct SleepViewModel;
 
 // Themes own the entire presentation, layout structure included (spec 3.3).
 // The FontSet is supplied by the caller so device knowledge — which asset backs
@@ -74,6 +75,10 @@ class Theme {
   // to SettingsScreen, not here. So the theme reports the three heights it owns
   // and the screen, which knows where its headers are, does the counting. Neither
   // side ends up holding a copy of the other's data.
+  // design/Sleep.dc.html. No hint bar and no focus -- the device is asleep.
+  virtual void renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepViewModel& vm,
+                           Plane plane) = 0;
+
   virtual void settingsMetrics(int panelH, const FontSet& fonts, int& listH, int& rowH,
                                int& headerH) const = 0;
 

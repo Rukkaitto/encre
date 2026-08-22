@@ -87,6 +87,7 @@ class NullTheme : public Theme {
                          Plane) override {}
   int libraryVisibleRows(int, const FontSet&) const override { return 0; }
   void renderSettings(Framebuffer&, const FontSet&, const SettingsViewModel&, Plane) override {}
+  void renderSleep(Framebuffer&, const FontSet&, const SleepViewModel&, Plane) override {}
   void settingsMetrics(int, const FontSet&, int& listH, int& rowH, int& headerH) const override {
     listH = 0;
     rowH = 1;
