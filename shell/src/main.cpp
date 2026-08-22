@@ -156,10 +156,19 @@ static uint32_t gLastInputMs = 0;
 // cheap settle instead. That is the whole reason this is worth doing rather than
 // just painting twice.
 //
-// The worst case is a press landing DURING a refinement: panel waits do not
-// interrupt, so that turn pays the refinement plus a fresh fast paint -- about
-// what the full sequence costs today. Never worse, usually half.
-constexpr uint32_t kRefineQuietMs = 600;
+// THE QUIET WINDOW HAS TO MEAN "STOPPED", NOT "BETWEEN TURNS", and 600 ms did
+// not. A paint blocks the loop for ~520 ms, so the earliest a second press can be
+// DISPATCHED is ~520 ms after the first -- which means someone turning pages
+// steadily produces gaps clustered just above that. A 600 ms window therefore
+// fired about 80 ms after each paint finished: precisely into the window where the
+// next press lands. The refinement then blocked it for its own ~550 ms, and turning
+// several pages in a row felt far worse than before the refinement existed.
+//
+// 2500 ms is ~5 paints: comfortably past anyone flipping, and still well inside the
+// time spent reading a page of twelve lines. A press RESETS it, so the only
+// remaining race is a press arriving after 2.5 s of quiet and inside the ~550 ms
+// refinement -- and rawSamplesPending() below closes most of even that.
+constexpr uint32_t kRefineQuietMs = 2500;
 static bool gRefineOwed = false;
 
 // Everything the render needs has to outlive setup(), so it lives here rather
@@ -2571,7 +2580,11 @@ void loop() {
   //
   // `!gApp->dirty()` as well as the quiet window: a screen change already queued
   // supersedes the refinement, and renderTop clears the flag anyway.
-  if (gRefineOwed && !gApp->dirty() &&
+  // `rawSamplesPending()` as well as the clock: a transition already queued means
+  // the user is still going, and starting something the panel cannot interrupt in
+  // front of it is the whole defect this window exists to avoid. The queue is
+  // drained at the top of the loop, so anything here arrived during the paint.
+  if (gRefineOwed && !gApp->dirty() && rawSamplesPending() == 0 &&
       static_cast<uint32_t>(millis() - gLastInputMs) >= kRefineQuietMs) {
     refineNow();
   }

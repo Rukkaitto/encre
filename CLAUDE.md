@@ -1195,9 +1195,18 @@ Three things that make it work, and one that does not:
 - **It refines from `loop()`, never from a dispatch.** A paint cannot be
   interrupted, so refining between two page turns would put its full cost in front
   of the second one.
-- **The worst case is a press landing during a refinement**: that turn pays the
-  refinement plus a fresh fast paint, about what the full sequence costs today.
-  Never worse, usually half.
+- **THE QUIET WINDOW HAS TO MEAN "STOPPED", NOT "BETWEEN TURNS".** 600 ms did not,
+  and it made rapid page turning *worse* than no refinement at all. A paint blocks
+  the loop for ~520 ms, so the earliest a second press can be dispatched is ~520 ms
+  after the first — steady turning therefore produces gaps clustered just above
+  that, and a 600 ms window fired ~80 ms after each paint finished, exactly where
+  the next press lands. It then blocked that press for its own ~550 ms.
+  `kRefineQuietMs` is **2500 ms**, about five paints: past anyone flipping, still
+  well inside the time spent reading twelve lines.
+- **It also refuses to start with input already queued** (`rawSamplesPending()`).
+  The clock alone cannot see a press that arrived during the paint, and starting
+  something the panel cannot interrupt in front of one is the defect the window
+  exists to avoid.
 
 `[paint] … refine-owed` and a separate `[refine] done total=…` keep the two costs
 distinguishable in the log — a page turn is the fast paint, and the refinement is

@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 
 class InputManager;
@@ -29,3 +30,7 @@ bool popRawSample(RawSample& out);
 
 // Transitions dropped because the queue was full.
 uint32_t rawSamplesDropped();
+
+// How many transitions are waiting. For deciding whether to start something the
+// panel cannot interrupt: a press already queued means the user is still going.
+size_t rawSamplesPending();

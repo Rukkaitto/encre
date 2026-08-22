@@ -61,3 +61,8 @@ bool popRawSample(RawSample& out) {
 }
 
 uint32_t rawSamplesDropped() { return gDropped; }
+
+size_t rawSamplesPending() {
+  if (!gQueue) return 0;
+  return static_cast<size_t>(uxQueueMessagesWaiting(gQueue));
+}
