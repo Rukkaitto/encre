@@ -47,10 +47,22 @@ def main():
         # The port node can appear a moment before it will accept an open, so a
         # first open often fails with EBUSY or ENOENT. Retrying briefly is the
         # difference between catching the boot and reporting a spurious error.
+        #
+        # AND THE PROBE MUST NOT ASSERT DTR/RTS. `serial.Serial(port)` opens
+        # immediately with both lines asserted, which resets the chip -- so the
+        # first version of this reset the device it was waiting for, and the log
+        # came back reading `rst:0x15 (USB_UART_CHIP_RESET)` and `wake cause=0`:
+        # a cold boot, in a capture whose whole purpose was a wake. Construct
+        # unopened, clear the lines, then open, exactly as the real listener below
+        # does.
         if port:
             for _ in range(40):
                 try:
-                    probe = serial.Serial(port)
+                    probe = serial.Serial()
+                    probe.port = port
+                    probe.dtr = False
+                    probe.rts = False
+                    probe.open()
                     probe.close()
                     break
                 except Exception:
