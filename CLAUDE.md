@@ -968,11 +968,14 @@ worth knowing before changing it:
 | Book details | `BookDetails.dc.html` | Not an overlay, despite covering the Library. Its title **wraps**; everywhere else elides. |
 | Settings | `Settings.dc.html` | Draws nine rows and only three respond. |
 | Sleep | `Sleep.dc.html` | **NOT REACHED ON THE DEVICE** — implemented, never painted. |
+| Reader | `Reader.dc.html` | The only screen whose content is the BOOK's. `Fidelity::Grayscale`, the only one. |
 | SD missing | `SdMissing.dc.html` | RETRY restarts the device when the card was lost after a mount. |
 
 **SETTINGS DRAWS EVERY BOARD ROW AND ONLY THE DEVICE ONES RESPOND.** TYPOGRAPHY
 belongs to Phase 3's reader; its five rows carry the board's own placeholder values
-so the screen matches the board before the settings behind them exist.
+so the screen matches the board before the settings behind them exist. The `Size`
+row is the one that will cost something to wire: see the glyph-cache table below,
+because at 41px the shipped cache budget thrashes.
 
 - **Focus SKIPS them.** A row that cannot be reached cannot mislead, where a row
   that focuses and then ignores CHANGE is the silent no-op this project has been
@@ -1061,6 +1064,94 @@ only from the stub's first row and no board ever listed it. **What was given up:
 classification is now verified only by `test_input.cpp` on the desktop**, and
 `shell/` is where four bugs have hidden. If held-scroll or press classification
 needs eyes on glass again, it comes back as a board row, not a hidden gesture.
+
+## The reader
+
+Six layers, each one ignorant of the next. The boundary is the point: every one of
+them refuses bad input with a reason rather than aborting, because all of it is
+bytes off somebody's card.
+
+| Layer | Holds | Does NOT know about |
+|---|---|---|
+| `inflate.h` | raw DEFLATE, into a pre-sized buffer | zip, files |
+| `zip.h` | the central directory, entry reads | XML, EPUB |
+| `xml.h` | a pull tokenizer, entities | nesting, EPUB, documents |
+| `epub.h` | container, OPF, spine order | XHTML content |
+| `document.h` | blocks: paragraph, heading, quote, list item | pixels, fonts, columns |
+| `layout.h` | pages, justification, the indent | `Framebuffer`, themes, drawing |
+
+`book.h` is the seam that joins them to the filesystem, and it lives in `core/`
+**because `shell/` has no test harness** — five bugs have hidden there. "It needs a
+filesystem" is not a reason to be untestable: `FileSystem` is an interface and
+`fake_fs.h` serves real EPUB bytes through it.
+
+**`xml.h` DOES NOT VALIDATE NESTING, ON PURPOSE.** `<p>unclosed` tokenizes without
+complaint. The document builder keeps a stack to know which block it is in, so it
+notices an unclosed tag at `Eof` for free; a second stack in the parser would be a
+second depth cap and a second allocation for a check the layer above cannot skip.
+
+**EVERYTHING THE XHTML SAYS THAT `document.h` DOES NOT MODEL IS DROPPED, NOT
+APPROXIMATED.** A `<table>` becomes its cells in reading order or nothing, never a
+guess at a layout. `<style>` and `<script>` text never reaches a page. **Inline
+emphasis is not modelled** — `<em>` contributes its text and no marker — because
+there is no italic face to render it with, and a field layout must ignore is worse
+than an honest gap.
+
+**LAYOUT ASKS `advance()`, NEVER `glyph()`.** That is design decision 3 of 3A and
+`layout.h` is the layer it was made for: a scalable face rasterises inside `glyph()`
+at ~3,794 µs a glyph, and a page holds ~600 of them, so a measuring pass that
+rasterised would cost seconds to decide where to break a line it has not drawn.
+Asserted on the cache's own counter, not on discipline — **0 rasterisations across
+6,800 pages** of real EPUBs.
+
+**LINE BREAKING IS NOT IN `layout.h`.** It is `wrapProseLead` in `components.h`,
+which already breaks greedily on ASCII spaces against these exact metrics; body text
+got `firstIndentF26` added to it rather than a second wrap that would inherit none of
+its fixes. Same for drawing: `drawText` and `drawTextJustified` are ONE pen loop
+differing by one argument.
+
+**JUSTIFICATION REFUSES ON HOW FULL THE LINE IS, NOT ON HOW FAR A GAP STRETCHES.**
+A per-gap cap cannot tell a corridor from prose, because the gap count is what turns
+slack into stretch: on `Reader.dc.html`'s own copy a three-space-width cap refused
+"necklace, and the two of" — 367px of text in a 444px column — because its 77px of
+slack fell across four gaps, and set it ragged directly under a line it had
+justified. `kMinJustifyFillPercent` asks the question that is actually visible.
+Ragged lines went 18% → 3.4% and what remains is almost all paragraph-final.
+
+**A PAGE BOUNDARY MAY LAND INSIDE A PARAGRAPH, AND MUST.** A 12-line page and a
+7-line paragraph means most pages end mid-paragraph. `layoutPage` walks FORWARD only;
+`ReaderScreen` paginates the chapter once into a list of page-start cursors, which is
+what makes the page counter and the previous page possible at all.
+
+**PARAGRAPHS ARE SEPARATED BY AN INDENT, NOT A GAP** (`Reader.dc.html`), and a
+paragraph is indented only if the one before it was also a paragraph — a heading or a
+quote is itself the break the indent would announce. A gap would cost a line box of a
+12-line page.
+
+### The glyph cache
+
+Sized against the UNION across pages, not against a page. A page is small — the worst
+of 5,000 real pages used 36 distinct glyphs and 3,272 bytes — but the arena is a RING,
+so a page that introduces a capital the last one did not advances the write pointer,
+and on wrap it overwrites whatever is oldest, `e` included. Printable ASCII plus the
+32 accents and marks every `fontc.py` subset carries, on the shipped face:
+
+| ppem | 29 | 32 | 36 | 41 | 48 |
+|---|---|---|---|---|---|
+| bytes | 10,378 | **12,292** | 15,359 | 19,284 | 25,854 |
+
+Bytes go as ppem², so the old 8 KB held the set at **no** reading size. 16 KB holds
+ppem 32 with 25% spare. **A body-size setting must revisit this** — the budget is a
+constructor argument precisely so the caller can size it from the chosen ppem.
+
+### What the desktop measures, and what only the panel can answer
+
+Desktop, 12-line page, 444px column, ppem 32: paginate 349 µs/page, lay out one page
+168 µs, draw a page 580 µs cold (29 rasterisations) and 363 µs warm. The device is a
+160 MHz RISC-V with no FPU and rasterises at ~3,794 µs a glyph, so a cold page is
+~110–140 ms there and the pagination walk is the part with no desktop analogue worth
+trusting. The `[open]` serial line reports parse, total, blocks, pages and the heap
+cost of an open for exactly this reason.
 
 ## Goldens
 

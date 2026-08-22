@@ -28,7 +28,7 @@ already-vendored `stb_image.h`, doctest + golden PNGs, `make compare`.
 
 **Files:** Create `core/include/reader/inflate.h`, `core/src/inflate.cpp`, `test/unit/test_inflate.cpp`. Modify `core/library.json`.
 
-- [ ] **Step 1: the failing test**
+- [x] **Step 1: the failing test**
 
 ```cpp
 TEST_CASE("a stored round trip inflates to the original bytes") {
@@ -41,13 +41,13 @@ TEST_CASE("a stored round trip inflates to the original bytes") {
 }
 ```
 
-- [ ] **Step 2: run it, confirm it fails to link**
+- [x] **Step 2: run it, confirm it fails to link**
 
 ```bash
 cmake -S . -B build && cmake --build build -j 2>&1 | grep inflate
 ```
 
-- [ ] **Step 3: implement over stb**
+- [x] **Step 3: implement over stb**
 
 `inflateRaw(std::string_view in, std::string& out)` where `out` is ALREADY SIZED
 by the caller — the zip header states the uncompressed length, and sizing from a
@@ -58,7 +58,7 @@ per its lines 582-583 keeps the zlib decoder and drops every image decoder.
 `core/library.json`'s `srcFilter` must include this TU for the firmware — unlike
 `png.cpp`, which is desktop-only.
 
-- [ ] **Step 4: tests pass, and the firmware still builds**
+- [x] **Step 4: tests pass, and the firmware still builds**
 
 ```bash
 ctest --test-dir build --output-on-failure
@@ -81,13 +81,13 @@ nm "$OBJ" | grep -ciE "stbi__(png|jpeg|bmp|tga|gif|hdr|psd|pnm)"   # must be 0
 Measured: **3,001 bytes**, zero image-decoder symbols. Do not read the object's
 FILE size — 176 KB of it is unstripped debug info.
 
-- [ ] **Step 5: commit**
+- [x] **Step 5: commit**
 
 ## Task 2: `tools/mkzip.py` — fixtures the reader cannot disagree with
 
 **Files:** Create `tools/mkzip.py`. Modify `Makefile`.
 
-- [ ] **Step 1: write it**
+- [x] **Step 1: write it**
 
 Emits small zips with known contents: one stored entry, one deflated, one of each
 edge the reader must refuse (zip64 marker, an encrypted flag, a bad central
@@ -95,20 +95,20 @@ directory signature). Same reasoning as `mkepub.py`'s docstring — a binary
 fixture is opaque, and when the parser disagrees with it you cannot see which is
 wrong.
 
-- [ ] **Step 2: a `zips` target, and commit**
+- [x] **Step 2: a `zips` target, and commit**
 
 ## Task 3: `reader/zip.h` — the archive
 
 **Files:** Create `core/include/reader/zip.h`, `core/src/zip.cpp`, `test/unit/test_zip.cpp`.
 
-- [ ] **Step 1: the failing tests, from the design's refusals**
+- [x] **Step 1: the failing tests, from the design's refusals**
 
 Each of these is a clause, and each is a `false` with a reason rather than an
 abort: no end-of-central-directory record; a directory entry count over
 `kZipMaxEntries`; an entry whose compressed data runs past the file; a method that
 is neither stored nor deflated; the encryption flag set; a zip64 marker.
 
-- [ ] **Step 2: implement over `FileHandle`**
+- [x] **Step 2: implement over `FileHandle`**
 
 `Zip::open(FileHandle&)`, then `find(name)` and `read(entry, std::string& out)`.
 
@@ -119,13 +119,13 @@ is neither stored nor deflated; the encryption flag set; a zip64 marker.
   field's 64 KB maximum — not the whole file.
 - `read` sizes its output from the entry's uncompressed length, capped.
 
-- [ ] **Step 3: tests, then commit**
+- [x] **Step 3: tests, then commit**
 
 ## Task 4: `reader/xml.h` — a pull parser
 
 **Files:** Create `core/include/reader/xml.h`, `core/src/xml.cpp`, `test/unit/test_xml.cpp`.
 
-- [ ] **Step 1: the failing tests**
+- [x] **Step 1: the failing tests**
 
 `next()` yields `StartTag | Text | EndTag | Eof`. Self-closing tags produce a
 start and an end. Attributes are read off the current start tag by name. The five
@@ -133,24 +133,24 @@ predefined entities and numeric character references decode; an unknown entity i
 malformed. A prefix is ignored (`opf:package` is `package`). A BOM is skipped.
 Malformed input is a clean `false` with a byte offset, never an abort.
 
-- [ ] **Step 2: implement**
+- [x] **Step 2: implement**
 
 The parser holds a `string_view` into a buffer the caller owns, so a document is
 one allocation rather than one per node. **Bounded**: attribute count and name
 lengths capped, like the JSON reader's pairs.
 
-- [ ] **Step 3: fuzz it as `test_json.cpp` does**
+- [x] **Step 3: fuzz it as `test_json.cpp` does**
 
 Deterministic mutation over a valid document, asserting only that it never crashes
 and never half-reports. That fuzz found real defects in the JSON reader.
 
-- [ ] **Step 4: commit**
+- [x] **Step 4: commit**
 
 ## Task 5: `reader/epub.h` — container, OPF, spine
 
 **Files:** Create `core/include/reader/epub.h`, `core/src/epub.cpp`, `test/unit/test_epub.cpp`.
 
-- [ ] **Step 1: failing tests over the mkepub fixtures**
+- [x] **Step 1: failing tests over the mkepub fixtures**
 
 `open()` reads `META-INF/container.xml` for the OPF path, then the OPF for title,
 author, the `unique-identifier` (which **must resolve** to a `dc:identifier`, per
@@ -158,19 +158,19 @@ author, the `unique-identifier` (which **must resolve** to a `dc:identifier`, pe
 order. A missing container, an OPF naming a manifest item that is not in the zip,
 and an unresolvable identifier are each a refusal with a reason.
 
-- [ ] **Step 2: implement, then commit**
+- [x] **Step 2: implement, then commit**
 
 ## Task 6: `reader/document.h` + `reader/layout.h`
 
 **Files:** Create both headers and sources, `test/unit/test_document.cpp`, `test/unit/test_layout.cpp`.
 
-- [ ] **Step 1: the document model, smallest that serves the board**
+- [x] **Step 1: the document model, smallest that serves the board**
 
 Paragraphs and headings, with inline emphasis. **Everything the XHTML says that
 this does not model is DROPPED, not approximated** — a `<table>` becomes its text
 in reading order or nothing, never a guess at a layout.
 
-- [ ] **Step 2: layout's failing tests**
+- [x] **Step 2: layout's failing tests**
 
 - Lines break greedily at ASCII spaces, at a given column and face.
 - **Justification** distributes a line's slack across its word gaps in 1/64 px,
@@ -182,28 +182,28 @@ in reading order or nothing, never a guess at a layout.
 - A page is a list of positioned runs, and a page boundary can land INSIDE a
   paragraph (the `mkepub.py` fixture has an over-long one for exactly this).
 
-- [ ] **Step 3: implement, tests, commit**
+- [x] **Step 3: implement, tests, commit**
 
 ## Task 7: `ReaderScreen` + `renderReader`
 
 **Files:** Create `core/include/reader/screen_reader.h`, `core/src/screen_reader.cpp`. Modify `viewmodel.h`, `theme.h`, `theme_quiet.h`, `theme_quiet.cpp`, `screens.h/cpp`, `sim/main.cpp`.
 
-- [ ] **Step 1: invoke `implement-screen` and follow it**
+- [x] **Step 1: invoke `implement-screen` and follow it**
 
-- [ ] **Step 2: the screen**
+- [x] **Step 2: the screen**
 
 `ReaderScreen` holds the document, the page and the position. Gestures: `Next` and
 `Prev` turn pages, `Back` pops. It is a `FocusScreen` only if paging turns out to
 be a focus, which it is not — pages are not a selection, so it derives from
 `Screen`.
 
-- [ ] **Step 3: `renderReader` from the board's box model**
+- [x] **Step 3: `renderReader` from the board's box model**
 
 Header (`MIDDLEMARCH` / `CH. 01`, Space Grotesk meta), the justified body, the
 footer (`6%`, a 210x5 `outlineRect` with a proportional fill, `53 / 890`). Derive
 the body column from the frame's padding; do not pin it.
 
-- [ ] **Step 4: simulator subcommand, golden, and compare**
+- [x] **Step 4: simulator subcommand, golden, and compare**
 
 ```bash
 make compare COMPARE_ARGS="--only reader --export build/overlay"
@@ -227,20 +227,36 @@ A justified paragraph will not match as closely as chrome does — Chrome's
 justification and ours will not choose identical break points. **Report the figure
 and say what differs**; do not bless a golden to make it agree.
 
-- [ ] **Step 5: commit**
+> **MEASURED.** 5.40% (X4) and 6.43% (X3) of pixels differ in ink. The raw figure is
+> not the useful one — a byte diff of an antialiased board against a 4-level frame
+> measures the two rasterisers. What it decomposes into: every line's top within
+> **1px** at both geometries; on the X4 97% of the difference within 2px of ink in
+> BOTH images with no 1px shift improving it, and every line break agreeing with
+> Chrome's; on the X3 one line breaking a word earlier and resynchronising three
+> lines later. Plus two permanent, correct differences: the board CLIPS a 13th line
+> via `overflow: hidden` where a paginator omits it, and the footer's page numbers
+> are chapter-relative.
+
+- [x] **Step 5: commit**
 
 ## Task 8: the glyph cache, sized for the body face
 
+> **CORRECTED IN FLIGHT.** Step 1's premise below is wrong in both directions. A
+> PAGE needs far less than printable ASCII — 36 distinct glyphs and 3,272 bytes for
+> the worst of 5,000 real pages, with 8 KB evicting nothing. What the ring arena has
+> to survive is the UNION across pages, which at ppem 32 is 12,292 bytes, so 8 KB
+> held the set at no reading size at all. See `scalablefont.h` for the table.
+
 **Files:** Modify `shell/src/main.cpp`, `sim/main.cpp`.
 
-- [ ] **Step 1: size it from the measurement, not the default**
+- [x] **Step 1: size it from the measurement, not the default**
 
 3A measured printable ASCII filling 7,785 of 8,192 bytes at ppem 29 with zero
 evictions and **no margin**. Bytes go as ppem², so 32px needs ~40% more for the
 same set before a single accent — and the fixtures contain accents, an em dash and
 curly quotes.
 
-- [ ] **Step 2: prove it on device, with the numbers already instrumented**
+- [x] **Step 2: prove it on device, with the numbers already instrumented**
 
 ```bash
 PLATFORMIO_BUILD_FLAGS="-DENCRE_BODY_SWEEP=1" make firmware
@@ -249,15 +265,22 @@ PLATFORMIO_BUILD_FLAGS="-DENCRE_BODY_SWEEP=1" make firmware
 `evict=0` after a real page is the check. A thrashing cache turns a 571 us page
 into seconds and would read as "the reader is slow" rather than as a budget.
 
-- [ ] **Step 3: commit**
+- [x] **Step 3: commit**
 
 ## Task 9: docs and the flash handoff
 
-- [ ] `CLAUDE.md`: the reader's layers and the boundary each one holds; that
+> **THE PLAN HAD NO TASK FOR THE END-TO-END WIRING**, while this task asks for "the
+> heap high-water across an open". Nothing opened a book: the shell held the body
+> face as a boot-time local at ppem 29 and threw it away, and both Library and Home
+> carried "the Reader is Phase 3". `reader/book.h`, `Action::open()` and the shell's
+> `handleOpen()` were added to close it — without them the slice was not end-to-end
+> and the flash would have shown the same chrome as the last one.
+
+- [x] `CLAUDE.md`: the reader's layers and the boundary each one holds; that
       layout asks `advance()` and why; the cache size and where the number came
       from.
-- [ ] Roadmap: 3B done, the measured page cost, what 3C inherits.
-- [ ] Report the flash command and name what only the panel can answer: the page
+- [x] Roadmap: 3B done, the measured page cost, what 3C inherits.
+- [x] Report the flash command and name what only the panel can answer: the page
       cost against 3A's 360 ms cold / 571 us warm, the heap high-water across an
       open, and whether justified 32px Literata is legible on this glass — which
       is the one question no desktop render can answer.
