@@ -747,6 +747,36 @@ top of this spike.
   found on one screen and belonged in `components.cpp` / `text.cpp` /
   `dither.cpp` / a generator. Special-casing a screen means the next screen
   inherits the bug.
+- **THE SECOND COPY IS THE EXTRACTION POINT, NOT THE FIFTH** — a rule this
+  project retrofitted across two whole passes (`FocusScreen` and the
+  shared-primitives sweep) instead of following from the start, and the cost of
+  retrofitting is why it is a rule now. Every mechanism extracted late had the
+  same biography: written in one screen, copied because it was only six lines,
+  and the copies then did what copies do — no test caught any of it, because
+  each copy passed its own. The clamp existed five times before `Focus`; the
+  focus/setFocus pair shipped one-way on three screens, each behind a comment
+  arguing its own case was the exception; Settings' hand-rolled skip walk
+  silently stopped wrapping while every other list rolled over; eight `Hint[4]`
+  loops drifted into two behaviours for an empty slot; the ramp's role↔asset
+  binding was three lists in three build worlds. Four signatures, each acted on
+  the moment it appears rather than when it hurts:
+  - a rule restated in COMMENTS at more than one site is a primitive not yet
+    extracted ("clamp, do not wrap" had to be written down four times to stay
+    one rule);
+  - a contract whose halves can be adopted separately is a mechanism not yet
+    made structural (`FocusScreen` made the pair `final`, and the failure mode
+    stopped being writable);
+  - an ordering or a caller list maintained in PROSE is a function not yet
+    written (`replaceApp` replaced a comment enumerating who remembered to call
+    `forgetLibrary`);
+  - one table spelled in more than one build world is a manifest
+    (`font_manifest.h`).
+  When building screen N+1, the question is not "what does this screen need"
+  but "which parts of screen N were mechanism": extract, migrate BOTH, and give
+  the primitive its own test, so a screen's tests are about its content.
+  Deliberate duplication stays legal — the path normaliser's three copies are a
+  documented decision — but it has to be a decision with its reason written
+  down, not a default arrived at six lines at a time.
 - **Assets are generated from the design, not transcribed.** `iconc.py` reads
   each icon's SVG and size from its named board at generation time. It once held
   copies and silently swallowed a design fix.
