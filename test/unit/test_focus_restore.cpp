@@ -13,6 +13,7 @@
 // day it is added, and one that reports a focus it cannot accept back fails here
 // instead of on someone's device.
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "doctest.h"
@@ -30,7 +31,7 @@ namespace {
 // there is no -Wswitch to lean on over an array.
 constexpr ScreenId kAllScreens[] = {
     ScreenId::Home,     ScreenId::Library,      ScreenId::ItemActions, ScreenId::DeleteConfirm,
-    ScreenId::BookDetails, ScreenId::Settings,  ScreenId::InputMonitor, ScreenId::SdMissing,
+    ScreenId::BookDetails, ScreenId::Settings,  ScreenId::Sleep,       ScreenId::SdMissing,
 };
 static_assert(sizeof(kAllScreens) / sizeof(kAllScreens[0]) ==
                   static_cast<size_t>(ScreenId::SdMissing) + 1,
@@ -81,7 +82,7 @@ TEST_CASE("every screen accepts back the focus it reports") {
   int movable = 0;
 
   for (const ScreenId id : kAllScreens) {
-    CAPTURE(screenName(id));
+    CAPTURE(std::string(screenName(id)));
     auto live = build(id);
     REQUIRE(live->screen != nullptr);
 
@@ -104,13 +105,44 @@ TEST_CASE("every screen accepts back the focus it reports") {
   CHECK(movable == 5);
 }
 
+TEST_CASE("every screen with a movable focus wraps off the end") {
+  // THE CATALOGUE CHECK THAT WOULD HAVE CAUGHT SETTINGS. Wrapping is Focus's
+  // default, so a screen gets it by using the primitive -- and a screen that
+  // hand-rolls its own stepping (Settings has to, to skip section headers) can
+  // silently keep clamping. It did. Nothing else would have noticed: the firmware
+  // would simply have had one list that stopped at the end while every other list
+  // rolled over.
+  int wrapping = 0;
+  for (const ScreenId id : kAllScreens) {
+    CAPTURE(std::string(screenName(id)));
+    auto s = build(id);
+    REQUIRE(s->screen != nullptr);
+    const int start = s->get().focus();
+    s->get().onEvent(kDown);
+    if (s->get().focus() == start) continue;  // no movable focus on this screen
+
+    // Walk down until the focus goes BACKWARDS, which only a wrap can do. The cap
+    // is a runaway guard, not an expected bound -- no list in V1 is near it.
+    bool wrapped = false;
+    int prev = s->get().focus();
+    for (int i = 0; i < 512 && !wrapped; ++i) {
+      s->get().onEvent(kDown);
+      if (s->get().focus() < prev) wrapped = true;
+      prev = s->get().focus();
+    }
+    CHECK(wrapped);
+    ++wrapping;
+  }
+  CHECK(wrapping == 5);
+}
+
 TEST_CASE("restoring the focus a screen is already on is a no-op, not a failure") {
   // The bool means "something moved", not "the restore was accepted" -- the shell
   // reads it to decide whether a repaint or an NVS write is owed, and a screen
   // that returned true for an unchanged focus would cost a panel refresh on every
   // wake. Same contract on every screen, so it is checked on every screen.
   for (const ScreenId id : kAllScreens) {
-    CAPTURE(screenName(id));
+    CAPTURE(std::string(screenName(id)));
     auto s = build(id);
     REQUIRE(s->screen != nullptr);
     const int where = s->get().focus();

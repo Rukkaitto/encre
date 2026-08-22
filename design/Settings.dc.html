@@ -32,23 +32,20 @@
     <div style="font-size: var(--t-value); font-weight: 700;">V 0.1.0</div>
   </div>
 
-  <!-- SETTINGS SCROLLS, and it does so because it no longer fits. The
-       `Refresh on screen change` row DEVICE needs took the content past 800px and
-       clipped the hint bar -- and the list only grows from here, since Phase 3
-       adds typography settings and Phase 4 adds Wi-Fi rows. So this is a
-       scrollable list like Library's, with the same rail in the same 14px gutter
-       (see LibraryScrolled for why it cannot live in the outer margin).
+  <!-- SETTINGS FITS AGAIN, and the history is worth keeping because it may not
+       stay that way.
 
-       Unlike Library, this list ALWAYS overflows, so the gutter is always taken
-       and the rail is always drawn. That makes the "reserve the gutter only when
-       the rail is drawn" rule a no-op here rather than a case to think about.
+       Adding the `Refresh on screen change` row DEVICE needed took the content
+       past 800px and clipped the hint bar, so this board became a scrolling list
+       with Library's rail in a 14px gutter. Then Wi-Fi was cut from V1 -- card
+       transfer only -- and CONNECTIONS went with it: eleven items where twelve fit.
+       So the rail and its gutter came back off, and the rows run to the panel edge.
 
-       The window below is the TOP of the list; CONNECTIONS and its Wi-Fi row are
-       below the fold, which is what the thumb's height is saying. They are not
-       deleted -- they are the two elements the rail's 11-of-13 proportion counts.
-  -->
-  <div style="position: relative; display: flex; flex-direction: column; flex-grow: 1;">
-    <div style="display: flex; flex-direction: column; flex-grow: 1; margin-right: 14px;">
+       Phase 3's typography settings will push it over again. When they do, the rail
+       returns and `renderSettings` already asks rather than assumes -- it reads
+       `totalRows > rows` and takes the gutter only if the rail is drawn, which is
+       why nothing but this board had to change. -->
+  <div style="display: flex; flex-direction: column; flex-grow: 1;">
 
     <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">TYPOGRAPHY</div>
     <!-- NOT the focused row, and that is the decision showing. Focus SKIPS rows
@@ -109,20 +106,13 @@
       <div style="font-size: var(--t-value); font-weight: 500;">Refresh on screen change</div>
       <div style="font-size: var(--t-value); font-weight: 700;">ON</div>
     </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
+    <!-- No `border-bottom`: this is the last row of DEVICE and CONNECTIONS' own
+         `border-top` is the line between them. Giving it one made a 3px slab where
+         the board elsewhere draws 2 -- `Alignment`, the last row of TYPOGRAPHY,
+         has none for the same reason. -->
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px;">
       <div style="font-size: var(--t-value); font-weight: 500;">Sleep screen</div>
       <div style="font-size: var(--t-value); font-weight: 700;">BOOK COVER</div>
-    </div>
-
-    </div>
-
-    <!-- The rail. 11 of the list's 13 elements are visible (3 section headers and
-         10 rows; CONNECTIONS and Wi-Fi are below), so the thumb is 84.6% at the
-         top. A large thumb is the honest answer for a list that only just
-         overflows -- see LibraryScrolled for why a mockup's proportion has to be
-         one the rule could produce. -->
-    <div style="position: absolute; top: 6px; bottom: 6px; right: 4px; width: 6px; border: 1px solid #000000; box-sizing: border-box;">
-      <div style="position: absolute; left: 0; right: 0; top: 0; height: 84.6%; background: #000000;"></div>
     </div>
 
   </div>

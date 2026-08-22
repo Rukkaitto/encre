@@ -23,8 +23,14 @@ class QuietTheme : public Theme {
   void renderBookDetails(Framebuffer& fb, const FontSet& fonts, const BookDetailsViewModel& vm,
                          Plane plane = Plane::Bw) override;
   int libraryVisibleRows(int panelH, const FontSet& fonts) const override;
-  void renderStub(Framebuffer& fb, const FontSet& fonts, const StubViewModel& vm,
-                  Plane plane = Plane::Bw) override;
+  void settingsMetrics(int panelH, const FontSet& fonts, int& listH, int& rowH,
+                       int& headerH) const override;
+  void renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepViewModel& vm,
+                   Plane plane) override;
+
+  void renderSettings(Framebuffer& fb, const FontSet& fonts, const SettingsViewModel& vm,
+                      Plane plane) override;
+
 };
 
 }  // namespace reader

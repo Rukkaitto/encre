@@ -5,7 +5,7 @@ namespace reader {
 // live.
 //
 // Five screens each carried their own copy of this: add a delta, clamp to a
-// range, report whether anything moved. HomeScreen, StubScreen, the two overlay
+// range, report whether anything moved. HomeScreen, the Settings list, the two overlay
 // panels and ScrollWindow, with the range spelled slightly differently in each.
 // The duplication is not hypothetical harm -- it is why "clamp, do not wrap" had
 // to be written into four separate comments to stay one rule, and why three of

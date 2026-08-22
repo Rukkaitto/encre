@@ -31,7 +31,23 @@
   <div style="background: #ffffff; border: 2px solid #000000; padding: 38px 42px; display: flex; flex-direction: column; align-items: center; gap: 14px; max-width: 400px;">
     <div style="font-size: var(--t-meta); letter-spacing: 0.26em; font-weight: 500;">NOW READING</div>
     <div style="width: 44px; border-top: 2px solid #000000;"></div>
-    <div style="font-size: 53px; font-weight: 700; text-align: center; line-height: 1.1; text-transform: uppercase;">Middle&shy;march</div>
+    <!-- ON THE RAMP, at `--t-title`. This said `font-size: 53px`, which is in no
+         role: the ramp is 21/23/25/29/42/67 at 150 DPI and 53px is 25.4pt, not a
+         value anything else asks for. A role costs a pre-rendered asset per size
+         AND weight -- 15-20 KB of flash -- and this is the only board that wanted
+         it.
+         
+         The soft hyphen went with it. It was there because MIDDLEMARCH at 53px is
+         ~390px against this card's 316px of content, so the title had to break;
+         at 42px it measures ~308px and fits on one line. A longer title elides,
+         which is the rule for every screen but Book details.
+         
+         The cost, stated rather than hidden: the hero of this screen is smaller
+         than it was drawn. If it reads as too quiet on glass, the fix is a new
+         role and a wrap that honours a soft hyphen -- both real work, and neither
+         worth it for a screen shown while the device is asleep until the panel
+         says so. -->
+    <div style="font-size: var(--t-title); font-weight: 700; text-align: center; line-height: 1.1; text-transform: uppercase;">Middlemarch</div>
     <div style="font-size: var(--t-label); letter-spacing: 0.22em;">GEORGE ELIOT</div>
     <div style="width: 170px; height: 8px; border: 1px solid #000000; box-sizing: border-box; margin-top: 8px;">
       <div style="width: 6%; height: 100%; background: #000000;"></div>

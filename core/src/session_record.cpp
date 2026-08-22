@@ -11,9 +11,13 @@ namespace {
 // the new screen a name. Forgetting is the one way a screen silently never
 // restores, and test_session_record.cpp asks for every id's name so a forgotten
 // one fails on the desktop rather than on a device.
+// IN ENUM ORDER: decodeName indexes this by ScreenId's ordinal. That coupling is
+// local and checked -- test_session_record.cpp asks every id for its name and
+// asserts they are all distinct -- and it is not the coupling version 1 got wrong,
+// which was putting the ordinal ON THE WIRE.
 constexpr const char* kNames[] = {
-    "home", "library", "item-actions", "delete-confirm", "book-details",
-    "settings", "input-monitor", "sd-missing",
+    "home", "library", "item-actions", "delete-confirm",
+    "book-details", "settings", "sleep", "sd-missing",
 };
 
 // Clamped so the encoded length is bounded. -1 is the floor rather than 0 because
@@ -59,7 +63,11 @@ const char* sessionWireName(ScreenId id) {
     case ScreenId::DeleteConfirm: return kNames[3];
     case ScreenId::BookDetails: return kNames[4];
     case ScreenId::Settings: return kNames[5];
-    case ScreenId::InputMonitor: return kNames[6];
+    // The shell does not push the Sleep screen today -- sleepNow() paints
+    // nothing, because e-ink holds the frame -- so no record can name it. If one
+    // ever does, note that a restored SleepScreen takes no input: waking into it
+    // would be a screen with no way out. Make it unstorable before pushing it.
+    case ScreenId::Sleep: return kNames[6];
     case ScreenId::SdMissing: return kNames[7];
   }
   return kNames[0];

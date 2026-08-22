@@ -1,12 +1,12 @@
 #include "reader/screens.h"
 
+#include "reader/screen_sleep.h"
+
 #include "reader/screen_book_details.h"
 #include "reader/screen_delete_confirm.h"
-#include "reader/screen_input_monitor.h"
 #include "reader/screen_item_actions.h"
 #include "reader/screen_library.h"
 #include "reader/screen_sd_missing.h"
-#include "reader/screen_stub.h"
 
 namespace reader {
 
@@ -29,6 +29,26 @@ HomeViewModel demoHomeVm() {
 }
 
 std::vector<ScreenId> demoHomeTargets() { return {ScreenId::Library, ScreenId::Settings}; }
+
+// The board's `&middot;`, spaces included. A third copy of this two-byte string
+// (screen_library.cpp and components.cpp have the others) and deliberately not
+// shared: it is a punctuation choice each board makes, not a constant, and the day
+// one board wants an en dash a shared one would have to be un-shared.
+const char* const kDot = " \xC2\xB7 ";
+
+// design/Sleep.dc.html's own values. A demo view model rather than a real one for
+// the same reason demoHomeVm is: `core/` has no book to read, and a board is a
+// statement about layout that a render has to be able to reproduce exactly.
+SleepViewModel demoSleepVm() {
+  SleepViewModel vm;
+  vm.label = "NOW READING";
+  vm.title = "Middlemarch";
+  vm.author = "George Eliot";
+  vm.progressPercent = 6;
+  vm.progress = std::string("6%") + kDot + "CH. 01";
+  vm.note = std::string("ASLEEP") + kDot + "PRESS POWER TO WAKE";
+  return vm;
+}
 
 std::vector<LibraryItem> demoLibraryItems() {
   // The board's rows, in the board's order, with the board's own authors and
@@ -79,7 +99,6 @@ DemoScreenFactory::DemoScreenFactory(FileSystem& fs, std::string root)
     : fs_(&fs), root_(std::move(root)) {}
 
 std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
-  using Row = StubScreen::Row;
   switch (id) {
     case ScreenId::Library: {
       // Over the card when there is one, over the board's own content when there
@@ -104,15 +123,17 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
     case ScreenId::BookDetails:
       if (library_ == nullptr) return nullptr;
       return std::make_unique<BookDetailsScreen>(*library_);
-    case ScreenId::Settings:
-      // The Input Monitor is reachable ONLY from here. Nothing else lists it, and
-      // without a way in, the phase loses the one place short-versus-long
-      // classification and the FAST refresh path are visible on the panel.
-      return std::make_unique<StubScreen>(
-          ScreenId::Settings, "SETTINGS",
-          std::vector<Row>{{"INPUT MONITOR", ScreenId::InputMonitor}, {"ABOUT", std::nullopt}});
-    case ScreenId::InputMonitor:
-      return std::make_unique<InputMonitorScreen>();
+    case ScreenId::Settings: {
+      auto scr = std::make_unique<SettingsScreen>(settings_, settingsSink_);
+      scr->setMetrics(settingsListH_, settingsRowH_, settingsHeaderH_);
+      return scr;
+    }
+    case ScreenId::Sleep:
+      // The board's own copy, which is what the simulator and the goldens render.
+      // The shell builds its own from the book it was actually reading -- this is
+      // the demo catalogue, and a screen nothing can navigate TO needs a source
+      // for its values either way.
+      return std::make_unique<SleepScreen>(demoSleepVm());
     case ScreenId::SdMissing:
       // Buildable through the factory, not only as a root, so the shell can
       // replace the stack with it if the card goes away later and the simulator

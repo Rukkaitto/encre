@@ -60,8 +60,25 @@ V1_SCREENS = [
     ("reader",       "Reader.dc.html",     "Reader"),
     ("reader_menu",  "ReaderMenu.dc.html", "Reader menu"),
     ("settings",     "Settings.dc.html",   "Settings"),
-    ("transfer",     "Transfer.dc.html",   "Transfer"),
     ("sleep",        "Sleep.dc.html",      "Sleep"),
+]
+
+# PARKED, NOT DELETED. V1 is card-transfer only -- Wi-Fi was cut as too big --
+# so these boards describe a V2 and comparing them would report a permanent
+# "not implemented" for work nobody is doing. The files stay in design/ because
+# they are real design work and V2 will want them; what changes is that the
+# fidelity check stops counting them.
+#
+# Same treatment Instapaper already got (see the canvas page "V2 - Instapaper").
+# If Wi-Fi returns, move these rows back into FLOW_SCREENS.
+V2_SCREENS = [
+    ("transfer",        "Transfer.dc.html",       "Send books (V2)"),
+    ("wifi_picker",     "WifiPicker.dc.html",     "Join network (V2)"),
+    ("wifi_password",   "WifiPassword.dc.html",   "Password entry (V2)"),
+    ("wifi_error",      "WifiError.dc.html",      "Join failed (V2)"),
+    ("wifi_connect",    "WifiConnect.dc.html",    "Wi-Fi connect (V2)"),
+    ("wifi_settings",   "WifiSettings.dc.html",   "Wi-Fi settings (V2)"),
+    ("setup_hotspot",   "SetupHotspot.dc.html",   "Setup hotspot (V2)"),
 ]
 
 FLOW_SCREENS = [
@@ -77,12 +94,6 @@ FLOW_SCREENS = [
     ("goto_page",       "GoToPage.dc.html",       "Go to page"),
     ("bookmarks",       "Bookmarks.dc.html",      "Bookmarks"),
     ("book_end",        "BookEnd.dc.html",        "Book finished"),
-    ("wifi_picker",     "WifiPicker.dc.html",     "Join network"),
-    ("wifi_password",   "WifiPassword.dc.html",   "Password entry"),
-    ("wifi_error",      "WifiError.dc.html",      "Join failed"),
-    ("wifi_connect",    "WifiConnect.dc.html",    "Wi-Fi connect"),
-    ("wifi_settings",   "WifiSettings.dc.html",   "Wi-Fi settings"),
-    ("setup_hotspot",   "SetupHotspot.dc.html",   "Setup hotspot"),
     ("sd_missing",      "SdMissing.dc.html",      "No SD card"),
     ("low_battery",     "LowBattery.dc.html",     "Low battery"),
     ("battery_empty",   "BatteryEmpty.dc.html",   "Battery empty"),
@@ -309,6 +320,11 @@ def main():
     # kept reporting success (CLAUDE.md, Storage) -- a check that reports on less
     # than it says is worse than no check, because it is trusted.
     screens = V1_SCREENS + FLOW_SCREENS
+    # A PARKED board is reachable by name but never by default -- see V2_SCREENS.
+    # `--only transfer` still renders it, so a V2 design can be looked at without
+    # putting it back in the count that measures V1.
+    if args.only:
+        screens = screens + V2_SCREENS
     if args.only:
         want = {s.strip() for s in args.only.split(",")}
         screens = [s for s in screens if s[0] in want]

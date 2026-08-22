@@ -683,38 +683,277 @@ void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
   drawHintBar(fb, fonts, hints, slots, plane);
 }
 
-void QuietTheme::renderStub(Framebuffer& fb, const FontSet& fonts, const StubViewModel& vm,
-                            Plane plane) {
+// --- Sleep -------------------------------------------------------------------
+//
+// design/Sleep.dc.html: a dithered field with a bordered white card centred on it,
+// and a smaller badge near the bottom. Every measurement below is the board's.
+namespace {
+
+constexpr int kSleepCardMaxW = 400;
+constexpr int kSleepCardPadX = 42;
+constexpr int kSleepCardPadY = 38;
+constexpr int kSleepCardBorder = 2;
+constexpr int kSleepGap = 14;      // the card's flex `gap`
+constexpr int kSleepRuleW = 44;    // the little rule under NOW READING
+constexpr int kSleepRuleH = 2;
+constexpr int kSleepBarW = 170;
+constexpr int kSleepBarH = 8;
+constexpr int kSleepBarTopGap = 8;  // the bar's own `margin-top`, on top of the gap
+constexpr int kSleepBadgeBottom = 34;
+constexpr int kSleepBadgePadX = 18;
+constexpr int kSleepBadgePadY = 8;
+constexpr int kSleepBadgeBorder = 1;
+constexpr int kSleepLabelEm = 260;   // NOW READING, 0.26em
+constexpr int kSleepAuthorEm = 220;  // 0.22em
+constexpr int kSleepProgressEm = 140;
+constexpr int kSleepNoteEm = 200;
+
+// A 1px-or-more outline as four fills. Written here rather than in components.h
+// because two callers is not a shared primitive yet -- the scroll rail's track is
+// the other, and it needs its interior for a thumb rather than a fill.
+void outline(Framebuffer& fb, int x, int y, int w, int h, int t) {
+  if (w <= 0 || h <= 0 || t <= 0) return;
+  fb.fillRect(x, y, w, t, false);
+  fb.fillRect(x, y + h - t, w, t, false);
+  fb.fillRect(x, y, t, h, false);
+  fb.fillRect(x + w - t, y, t, h, false);
+}
+
+// Centred in a box, which every child of this card is. The measure and the draw
+// take the SAME tracking, or the centring is off by the tracking's total.
+void centredText(Framebuffer& fb, const Font& font, int boxX, int boxW, int baseline,
+                 std::string_view text, Tracking tracking, Plane plane) {
+  const int w = font.measure(text, tracking);
+  drawText(fb, font, boxX + centreIn(0, boxW, w), baseline, text, Ink::Black, tracking, plane);
+}
+
+}  // namespace
+
+void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepViewModel& vm,
+                             Plane plane) {
+  // The FIELD first: the board's `.dither-field` is the same 4px-pitch dot as
+  // `.dither-dots`, so this is kClustered at level 1 over the whole panel -- the
+  // one dither this screen wants, and the reason it is clustered rather than
+  // dispersed is in dither.cpp: a tint reads as a blob, not as grain.
   fb.clear(true);
-  // Built only from primitives already matched to boards -- header band, rows,
-  // hint bar. Nothing here invents a measurement, so this surface cannot
-  // introduce a fidelity defect the real screens would inherit.
-  int y = drawHeaderBand(fb, fonts, vm.title, std::to_string(vm.batteryPercent) + "%",
-                             &icons::kBattery, plane);
+  ditherRect(fb, 0, 0, fb.width(), fb.height(), 1, Ink::Black);
 
-  const Font& meta = fonts[Role::Meta400];
-  y += kMargin;
-  drawText(fb, meta, kMargin, baselineIn(meta, y, meta.lineHeight()), vm.note, Ink::Black,
-           trackingEm(meta, kBandLabelEm), plane);
-  y += meta.lineHeight() + kMargin;
+  const Font& label = fonts[Role::Meta500];
+  const Font& title = fonts[Role::Title700];
+  const Font& author = fonts[Role::Label400];
+  const Font& progress = fonts[Role::Label500];
+  const Font& note = fonts[Role::Meta400];
 
-  const Hint hints[4] = {{&icons::kBack, vm.hints[0], vm.holds[0]},
-                         {&icons::kDot, vm.hints[1], vm.holds[1]},
-                         {&icons::kUp, vm.hints[2], vm.holds[2]},
-                         {&icons::kDown, vm.hints[3], vm.holds[3]}};
-  const int barTop = fb.height() - hintBarHeight(fonts, hints);
+  // The card's width is the board's max, or the panel less a margin on the
+  // narrower X4 -- `max-width` is a ceiling, not a pin.
+  const int roomy = fb.width() - 2 * kMargin;
+  const int cardW = roomy < kSleepCardMaxW ? roomy : kSleepCardMaxW;
+  const int contentW = cardW - 2 * (kSleepCardBorder + kSleepCardPadX);
 
-  for (size_t i = 0; i < vm.lines.size(); ++i) {
-    const int rowY = y + static_cast<int>(i) * kRowH;
-    // Clip against the hint bar rather than drawing under it. The real screens
-    // scroll; this one just stops, which is honest for a placeholder.
-    if (rowY + kRowH > barTop) break;
-    drawRow(fb, fonts, rowY, vm.lines[i], "", static_cast<int>(i) == vm.focusedLine, nullptr,
-            plane);
+  // HEIGHT IS A RESULT, not a number the board states: it is the sum of six
+  // children and five gaps, and pinning it would be the mistake the header band
+  // and the menu rows both taught. The title is measured elided, so a long book
+  // cannot make the card taller than it was laid out to be.
+  const std::string shownTitle = elideToWidth(title, upperAscii(vm.title), contentW);
+  const int contentH = label.lineHeight() + kSleepGap + kSleepRuleH + kSleepGap +
+                       title.lineHeight() + kSleepGap + author.lineHeight() + kSleepGap +
+                       kSleepBarTopGap + kSleepBarH + kSleepGap + progress.lineHeight();
+  const int cardH = contentH + 2 * (kSleepCardBorder + kSleepCardPadY);
+
+  const int cardX = centreIn(0, fb.width(), cardW);
+  const int cardY = centreIn(0, fb.height(), cardH);
+
+  // Paper under the card, then its border: the card is opaque white ON the field,
+  // so the dither has to be cleared rather than drawn around.
+  fb.fillRect(cardX, cardY, cardW, cardH, true);
+  outline(fb, cardX, cardY, cardW, cardH, kSleepCardBorder);
+
+  int y = cardY + kSleepCardBorder + kSleepCardPadY;
+  const int cx = cardX + kSleepCardBorder + kSleepCardPadX;
+
+  centredText(fb, label, cx, contentW, baselineIn(label, y, label.lineHeight()), vm.label,
+              trackingEm(label, kSleepLabelEm), plane);
+  y += label.lineHeight() + kSleepGap;
+
+  fb.fillRect(cx + centreIn(0, contentW, kSleepRuleW), y, kSleepRuleW, kSleepRuleH, false);
+  y += kSleepRuleH + kSleepGap;
+
+  centredText(fb, title, cx, contentW, baselineIn(title, y, title.lineHeight()), shownTitle, {},
+              plane);
+  y += title.lineHeight() + kSleepGap;
+
+  centredText(fb, author, cx, contentW, baselineIn(author, y, author.lineHeight()),
+              upperAscii(vm.author), trackingEm(author, kSleepAuthorEm), plane);
+  y += author.lineHeight() + kSleepGap + kSleepBarTopGap;
+
+  // The bar: a 1px outline with a proportional fill, the treatment kBattery uses
+  // and the same reason -- an outline plus a solid fill is what reads on this glass
+  // hard-thresholded.
+  const int barX = cx + centreIn(0, contentW, kSleepBarW);
+  outline(fb, barX, y, kSleepBarW, kSleepBarH, 1);
+  const int pct = vm.progressPercent < 0 ? 0 : (vm.progressPercent > 100 ? 100 : vm.progressPercent);
+  const int fill = (kSleepBarW * pct + 50) / 100;  // rounded once
+  if (fill > 0) fb.fillRect(barX, y, fill, kSleepBarH, false);
+  y += kSleepBarH + kSleepGap;
+
+  centredText(fb, progress, cx, contentW, baselineIn(progress, y, progress.lineHeight()),
+              vm.progress, trackingEm(progress, kSleepProgressEm), plane);
+
+  // The badge, measured from the BOTTOM as the board positions it.
+  const int noteW = note.measure(vm.note, trackingEm(note, kSleepNoteEm));
+  const int badgeW = noteW + 2 * (kSleepBadgeBorder + kSleepBadgePadX);
+  const int badgeH = note.lineHeight() + 2 * (kSleepBadgeBorder + kSleepBadgePadY);
+  const int badgeX = centreIn(0, fb.width(), badgeW);
+  const int badgeY = fb.height() - kSleepBadgeBottom - badgeH;
+  fb.fillRect(badgeX, badgeY, badgeW, badgeH, true);
+  outline(fb, badgeX, badgeY, badgeW, badgeH, kSleepBadgeBorder);
+  drawText(fb, note, badgeX + kSleepBadgeBorder + kSleepBadgePadX,
+           baselineIn(note, badgeY + kSleepBadgeBorder + kSleepBadgePadY, note.lineHeight()),
+           vm.note, Ink::Black, trackingEm(note, kSleepNoteEm), plane);
+}
+
+// --- Settings ----------------------------------------------------------------
+//
+// The board's boxes: a 54px row with a `border-bottom`, and a section header that
+// is `--t-meta` tracked caps in an 18/6 padding box under a 2px rule. Both are
+// DERIVED from the type rather than pinned -- the 54 is the board's number at the
+// board's face, and a role change would move it.
+namespace {
+
+// The board's `letter-spacing: 0.2em` on a section header, in thousandths as
+// trackingEm takes it.
+constexpr int kSettingsHeaderEm = 200;
+
+constexpr int kSettingsRowH = 54;
+constexpr int kSettingsRuleH = 1;
+constexpr int kSettingsHeaderRuleH = 2;
+constexpr int kSettingsHeaderPadTop = 18;
+constexpr int kSettingsHeaderPadBottom = 6;
+// Between a truncating label and its value -- the same 7px the Library band
+// uses, and for the same reason: without it the ellipsis touches the value the
+// moment the label fills the line.
+constexpr int kSettingsLabelGap = 7;
+
+int settingsHeaderHeight(const FontSet& fonts) {
+  return kSettingsHeaderRuleH + kSettingsHeaderPadTop + fonts[Role::Meta500].lineHeight() +
+         kSettingsHeaderPadBottom;
+}
+
+// One row's pitch INCLUDING its rule, which is what a list's arithmetic wants.
+int settingsRowPitch() { return kSettingsRowH + kSettingsRuleH; }
+
+}  // namespace
+
+void QuietTheme::settingsMetrics(int panelH, const FontSet& fonts, int& listH, int& rowH,
+                                 int& headerH) const {
+  Hint hints[4];
+  for (int i = 0; i < 4; ++i) hints[i] = {kLibraryMarks[i], "", false};
+  const int area = panelH - headerBandHeight(fonts, nullptr) - hintBarHeight(fonts, hints);
+  listH = area > 0 ? area : 0;
+  // The RULED pitch, as libraryVisibleRows uses: the 1px-shorter unruled height
+  // belongs only to the bottom of a list, and claiming it for every row would
+  // promise room for one more row than there is.
+  rowH = settingsRowPitch();
+  headerH = settingsHeaderHeight(fonts);
+}
+
+void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
+                                const SettingsViewModel& vm, Plane plane) {
+  fb.clear(true);
+  // The band carries the version, not a battery: the board's right slot is
+  // `V 0.1.0`. Same band as Library's otherwise.
+  const int listTop = drawHeaderBand(fb, fonts, vm.title, vm.version, nullptr, plane);
+  int y = listTop;
+
+  const int rows = static_cast<int>(vm.rows.size());
+  // ALWAYS overflowing in practice -- the list is 13 items and about 11 fit -- but
+  // asked rather than assumed, so a future build that trims the list does not draw
+  // a rail beside a list that fits.
+  const bool overflowing = vm.totalRows > rows;
+  const int inset = overflowing ? kListGutterW : 0;
+
+  const Font& label = fonts[Role::Value500];
+  const Font& labelFocused = fonts[Role::Value700];
+  const Font& value = fonts[Role::Value700];
+  const Font& header = fonts[Role::Meta500];
+
+  for (int i = 0; i < rows; ++i) {
+    const SettingsRow& row = vm.rows[static_cast<size_t>(i)];
+    if (row.isHeader) {
+      // A section's 2px rule, EXCEPT on the first item in the window -- the board
+      // gives DEVICE and CONNECTIONS a `border-top` and gives TYPOGRAPHY none,
+      // because the first section sits directly under the header band's own 2px
+      // border and a second rule doubles it into a 4px slab. Drawing it
+      // unconditionally is exactly what this did, and it read as a stray separator
+      // against the top bar.
+      //
+      // POSITIONAL, not by identity: the rule separates a section from the content
+      // above it, and at the top of the window the band is that separation
+      // whichever section happens to be scrolled there. Same shape as
+      // drawBookRow's last-row rule, which is also about where a row is rather
+      // than which row it is.
+      const bool underTheBand = (i == 0);
+      if (!underTheBand) fb.fillRect(0, y, fb.width() - inset, kSettingsHeaderRuleH, false);
+      const int ruleH = underTheBand ? 0 : kSettingsHeaderRuleH;
+      const int textTop = y + ruleH + kSettingsHeaderPadTop;
+      drawText(fb, header, kMargin, baselineIn(header, textTop, header.lineHeight()), row.label,
+               Ink::Black, trackingEm(header, kSettingsHeaderEm), plane);
+      y += settingsHeaderHeight(fonts) - (kSettingsHeaderRuleH - ruleH);
+      continue;
+    }
+
+    const bool focused = (i == vm.focusedRow);
+    // An INERT row is drawn exactly as an unfocused focusable one. `row.focusable`
+    // is deliberately not read here -- see SettingsViewModel: the flag is about
+    // input, and a theme that dimmed on it would be inventing a design decision.
+    if (focused) fb.fillRect(0, y, fb.width() - inset, kSettingsRowH, false);
+    const Ink ink = focused ? Ink::White : Ink::Black;
+    const Font& lf = focused ? labelFocused : label;
+
+    const int rightEdge = fb.width() - inset - kMargin;
+    const int valueW = row.value.empty() ? 0 : value.measure(row.value);
+    // The label truncates and the value keeps its width, the same rule the
+    // Library band states: the value is the state and the label is what it names.
+    const int labelMaxW = rightEdge - kMargin - (valueW > 0 ? valueW + kSettingsLabelGap : 0);
+    drawTextElided(fb, lf, kMargin, baselineIn(lf, y, kSettingsRowH), row.label, labelMaxW, ink,
+                   {}, plane);
+    if (valueW > 0)
+      drawText(fb, value, rightEdge - valueW, baselineIn(value, y, kSettingsRowH), row.value, ink,
+               {}, plane);
+
+    y += kSettingsRowH;
+    // TWO reasons a row draws no rule, and both are the board's.
+    //
+    // The focused row's fill runs to the next row's top edge -- the same asymmetry
+    // drawBookRow implements.
+    //
+    // And the LAST ROW OF A SECTION has none, because the next section's 2px
+    // `border-top` is the line between them: `Alignment` on the board carries no
+    // `border-bottom` for exactly that reason. Drawing one anyway made a 3px slab
+    // where the board draws 2, and -- because it also advanced `y` -- pushed every
+    // row below the DEVICE header down by a pixel. That is the compounding kind:
+    // one wrong rule, and the whole bottom half of the screen is off by one.
+    // ...and the LAST DRAWN row has none either, which is renderLibrary's rule
+    // verbatim (`i != rows - 1`): it leaves the list's bottom edge open rather
+    // than hanging a hairline over the slack above the hint bar. Missing it left a
+    // rule under `Sleep screen` that the board does not draw.
+    const bool nextIsHeader =
+        (i + 1 < rows) && vm.rows[static_cast<size_t>(i + 1)].isHeader;
+    const bool isLastDrawn = (i == rows - 1);
+    if (!focused && !nextIsHeader && !isLastDrawn) {
+      fb.fillRect(0, y, fb.width() - inset, kSettingsRuleH, false);
+      y += kSettingsRuleH;
+    }
   }
 
+  Hint hints[4];
+  for (int i = 0; i < 4; ++i) hints[i] = {kLibraryMarks[i], vm.hints[static_cast<size_t>(i)],
+                                          vm.holds[static_cast<size_t>(i)]};
+  drawScrollRail(fb, listTop, fb.height() - hintBarHeight(fonts, hints), vm.firstRow, rows,
+                 vm.totalRows, plane);
   int slots[4] = {};
   drawHintBar(fb, fonts, hints, slots, plane);
 }
+
 
 }  // namespace reader

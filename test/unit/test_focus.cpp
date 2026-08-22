@@ -1,6 +1,6 @@
 // THE FOCUS PRIMITIVE, which five screens were each implementing by hand.
 //
-// HomeScreen, StubScreen, ItemActionsScreen, DeleteConfirmScreen and ScrollWindow
+// HomeScreen, the Settings list, ItemActionsScreen, DeleteConfirmScreen and ScrollWindow
 // all carried the same eight lines -- add a delta, clamp to a range, return
 // whether it moved -- with the range spelled slightly differently in each. That
 // duplication is what let three of them ship a focus() with no setFocus() and

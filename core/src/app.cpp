@@ -10,7 +10,6 @@ const char* screenName(ScreenId id) {
     case ScreenId::DeleteConfirm: return "DELETE-CONFIRM";
     case ScreenId::BookDetails: return "BOOK-DETAILS";
     case ScreenId::Settings: return "SETTINGS";
-    case ScreenId::InputMonitor: return "INPUT-MONITOR";
     case ScreenId::SdMissing: return "SD-MISSING";
   }
   return "?";

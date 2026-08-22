@@ -267,11 +267,14 @@ int main(int argc, char** argv) {
   const bool isLibraryActions = std::strcmp(argv[1], "library_actions") == 0;
   const bool isDeleteConfirm = std::strcmp(argv[1], "delete_confirm") == 0;
   const bool isBookDetails = std::strcmp(argv[1], "book_details") == 0;
+  const bool isSettings = std::strcmp(argv[1], "settings") == 0;
+  const bool isSleep = std::strcmp(argv[1], "sleep") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
-      !isDeleteConfirm && !isBookDetails) {
+      !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
-                 "'library_actions', 'delete_confirm', 'book_details' or 'app')\n",
+                 "'library_actions', 'delete_confirm', 'book_details', 'settings', "
+                 "'sleep' or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -325,6 +328,24 @@ int main(int argc, char** argv) {
   // leave the window inert and the list empty -- correctly, since a screen must
   // not draw a row it was not given.
   factory.setLibraryVisibleRows(theme.libraryVisibleRows(h, fonts));
+  // The same relationship for Settings, in three numbers rather than one: its
+  // items are not all the same height, so the theme reports the box model and the
+  // screen counts. No sink -- there is nowhere on a desktop to persist to, and a
+  // render must not need one.
+  {
+    int listH = 0, rowH = 0, headerH = 0;
+    theme.settingsMetrics(h, fonts, listH, rowH, headerH);
+    factory.setSettingsMetrics(listH, rowH, headerH);
+    // The BOARD's values, not the defaults: design/Settings.dc.html states
+    // `10 MIN` and `EVERY 15 PAGES`, which are a plausible configured state rather
+    // than a fresh device's. Rendering the defaults here would report a mismatch
+    // against the board on every run and it would be the board that was right.
+    reader::Settings shown;
+    shown.sleepAfterMs = 10u * 60u * 1000u;
+    shown.fullRefreshEvery = 15;
+    shown.fullOnTransition = true;
+    factory.setSettings(shown);
+  }
   reader::App app(
       std::make_unique<reader::HomeScreen>(reader::demoHomeVm(), reader::demoHomeTargets()),
       factory);
@@ -358,6 +379,27 @@ int main(int argc, char** argv) {
     // centred, so it covers it completely.
     for (int i = 0; i < 3; ++i) app.dispatch({reader::Button::Down, reader::PressKind::Short});
     app.dispatch({reader::Button::Confirm, reader::PressKind::Short});
+  }
+  if (isSettings) {
+    // TWO Downs, then Confirm. Home's focus starts BEFORE its menu -- on the
+    // CONTINUE block -- so the first Down reaches LIBRARY and the second reaches
+    // SETTINGS; libraryEntry() above needs only one for the same reason. Reached
+    // by pressing rather than by assignment, so the render pins the navigation
+    // too, and getting it wrong showed up immediately as a Library in the
+    // comparison sheet rather than as a subtly wrong Settings.
+    app.dispatch({reader::Button::Down, reader::PressKind::Short});
+    app.dispatch({reader::Button::Down, reader::PressKind::Short});
+    app.dispatch({reader::Button::Confirm, reader::PressKind::Short});
+  }
+  if (isSleep) {
+    // NOT reached by pressing: nothing navigates to the sleep screen, the idle
+    // timer or the power button puts the device there. So it is pushed directly,
+    // which is the honest model -- and it is why this screen has no journey to
+    // pin the way Library's and Settings' renders do.
+    if (!app.pushScreen(reader::ScreenId::Sleep)) {
+      std::fprintf(stderr, "the factory refused ScreenId::Sleep\n");
+      return 1;
+    }
   }
   for (const reader::InputEvent& ev : events) app.dispatch(ev);
 

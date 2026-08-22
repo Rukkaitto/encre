@@ -166,13 +166,40 @@ struct BookDetailsViewModel {
 // be navigated and verified before the real screens are built, and Phase 2C
 // deletes it. Deliberately plain, and it carries `note` so nobody reads it as a
 // design.
-struct StubViewModel {
-  std::string title;
-  std::string note;                    // e.g. "PLACEHOLDER - PHASE 2C"
-  std::vector<std::string> lines;
-  int focusedLine = -1;                // -1 = nothing focused
-  int batteryPercent = 0;
-  std::array<std::string, 4> hints{};  // Back, Confirm, Up, Down
+// design/Settings.dc.html. One flat list of ITEMS, because that is what scrolls:
+// a section header and a setting row move together and the rail counts both.
+// design/Sleep.dc.html: what is on the glass while the device is asleep. No hints
+// and no focus -- the shell paints this and then sleeps, so there is nobody to
+// press anything. The only way out is the power button, which the badge says.
+struct SleepViewModel {
+  std::string label;      // "NOW READING"
+  std::string title;      // the book, shouted by the theme
+  std::string author;
+  int progressPercent = 0;
+  std::string progress;   // "6% - CH. 01", the line under the bar
+  std::string note;       // "ASLEEP - PRESS POWER TO WAKE"
+};
+
+struct SettingsRow {
+  std::string label;
+  std::string value;      // empty on a section header
+  bool isHeader = false;  // tracked caps, its own rule, never focusable
+  // Whether this row responds to CHANGE. An unfocusable row is drawn EXACTLY as
+  // an unfocused focusable one -- the flag is about input, not about appearance,
+  // and the theme must not be tempted to dim it.
+  bool focusable = false;
+};
+
+struct SettingsViewModel {
+  std::string title;    // "SETTINGS"
+  std::string version;  // the band's right slot: "V 0.1.0"
+  std::vector<SettingsRow> rows;  // the VISIBLE window, not the whole list
+  int focusedRow = -1;            // an index into `rows`, not into the whole list
+  // The rail's two numbers, over the WHOLE list including headers. Not derivable
+  // from `rows`, which holds only what is on screen.
+  int firstRow = 0;
+  int totalRows = 0;
+  std::array<std::string, 4> hints{};
   std::array<bool, 4> holds{};
 };
 

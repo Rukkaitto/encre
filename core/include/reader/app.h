@@ -21,7 +21,10 @@ enum class ScreenId : uint8_t {
   DeleteConfirm,  // the overlay that overlay's Delete... opens
   BookDetails,    // a full screen, NOT an overlay -- see its board
   Settings,
-  InputMonitor,
+  // What the panel holds while the device sleeps -- see screen_sleep.h. A screen
+  // rather than a special case in the shell, so the simulator and the goldens can
+  // render it like everything else.
+  Sleep,
   SdMissing
 };
 
@@ -126,11 +129,30 @@ class Screen {
   // with a header comment explaining why its own case was the exception. There is
   // no exception; test_focus_restore.cpp walks the whole catalogue.
   //
-  // DEFAULTS THAT MEAN "I HAVE NO FOCUS TO REPORT OR RESTORE": 0, and false.
-  // A screen with one thing on it (the SD-missing prompt) is not obliged to
-  // pretend otherwise, and setFocus returning false says the restore did not
-  // land -- the same contract ScrollWindow::setFocus uses, so a caller can tell
-  // "restored" from "ignored" without asking which screen it is holding.
+  // THE BOOL MEANS "SOMETHING MOVED", NOT "THE RESTORE LANDED", and this comment
+  // used to claim both in one sentence -- "setFocus returning false says the
+  // restore did not land -- the same contract ScrollWindow::setFocus uses". Those
+  // are different questions and ScrollWindow answers the first, so the two halves
+  // contradicted each other, and the two screens written since each followed a
+  // different half. SettingsScreen returned "landed" on the reasoning that
+  // restoring onto the row a screen is already on is a successful restore, which
+  // is TRUE and is not what this bool is for.
+  //
+  // "Moved" wins for three reasons. It is what ScrollWindow, Focus and every
+  // other screen already answer. It is what moveFocus needs, to return None
+  // instead of paying a 520 ms refresh that repaints an identical screen. And the
+  // base-class default below is false for a screen with no focus -- which is the
+  // right answer to "did anything move" and the wrong answer to "did it land",
+  // since asking a focusless screen for 0 lands perfectly well.
+  //
+  // "DID IT LAND" IS STILL ANSWERABLE, and by the caller that wants it: compare
+  // focus() to what you asked for. App::restore's logging does exactly that,
+  // because a bool cannot say "the record named row 12 and the screen is on row
+  // 4" and that is the sentence a log reader needs.
+  //
+  // DEFAULTS THAT MEAN "I HAVE NO FOCUS TO REPORT OR RESTORE": 0, and false. A
+  // screen with one thing on it (the SD-missing prompt) is not obliged to pretend
+  // otherwise.
   //
   // A negative focus is legitimate and means "nothing selected" (Home's Continue
   // block, an empty Library), and a screen that reports one must accept it back:
