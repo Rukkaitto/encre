@@ -86,6 +86,12 @@ class NullTheme : public Theme {
   void renderBookDetails(Framebuffer&, const FontSet&, const BookDetailsViewModel&,
                          Plane) override {}
   int libraryVisibleRows(int, const FontSet&) const override { return 0; }
+  void renderSettings(Framebuffer&, const FontSet&, const SettingsViewModel&, Plane) override {}
+  void settingsMetrics(int, const FontSet&, int& listH, int& rowH, int& headerH) const override {
+    listH = 0;
+    rowH = 1;
+    headerH = 1;
+  }
   void renderStub(Framebuffer&, const FontSet&, const StubViewModel&, Plane) override {}
 };
 

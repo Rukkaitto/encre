@@ -683,6 +683,121 @@ void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
   drawHintBar(fb, fonts, hints, slots, plane);
 }
 
+// --- Settings ----------------------------------------------------------------
+//
+// The board's boxes: a 54px row with a `border-bottom`, and a section header that
+// is `--t-meta` tracked caps in an 18/6 padding box under a 2px rule. Both are
+// DERIVED from the type rather than pinned -- the 54 is the board's number at the
+// board's face, and a role change would move it.
+namespace {
+
+// The board's `letter-spacing: 0.2em` on a section header, in thousandths as
+// trackingEm takes it.
+constexpr int kSettingsHeaderEm = 200;
+
+constexpr int kSettingsRowH = 54;
+constexpr int kSettingsRuleH = 1;
+constexpr int kSettingsHeaderRuleH = 2;
+constexpr int kSettingsHeaderPadTop = 18;
+constexpr int kSettingsHeaderPadBottom = 6;
+// Between a truncating label and its value -- the same 7px the Library band
+// uses, and for the same reason: without it the ellipsis touches the value the
+// moment the label fills the line.
+constexpr int kSettingsLabelGap = 7;
+
+int settingsHeaderHeight(const FontSet& fonts) {
+  return kSettingsHeaderRuleH + kSettingsHeaderPadTop + fonts[Role::Meta500].lineHeight() +
+         kSettingsHeaderPadBottom;
+}
+
+// One row's pitch INCLUDING its rule, which is what a list's arithmetic wants.
+int settingsRowPitch() { return kSettingsRowH + kSettingsRuleH; }
+
+}  // namespace
+
+void QuietTheme::settingsMetrics(int panelH, const FontSet& fonts, int& listH, int& rowH,
+                                 int& headerH) const {
+  Hint hints[4];
+  for (int i = 0; i < 4; ++i) hints[i] = {kLibraryMarks[i], "", false};
+  const int area = panelH - headerBandHeight(fonts, nullptr) - hintBarHeight(fonts, hints);
+  listH = area > 0 ? area : 0;
+  // The RULED pitch, as libraryVisibleRows uses: the 1px-shorter unruled height
+  // belongs only to the bottom of a list, and claiming it for every row would
+  // promise room for one more row than there is.
+  rowH = settingsRowPitch();
+  headerH = settingsHeaderHeight(fonts);
+}
+
+void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
+                                const SettingsViewModel& vm, Plane plane) {
+  fb.clear(true);
+  // The band carries the version, not a battery: the board's right slot is
+  // `V 0.1.0`. Same band as Library's otherwise.
+  const int listTop = drawHeaderBand(fb, fonts, vm.title, vm.version, nullptr, plane);
+  int y = listTop;
+
+  const int rows = static_cast<int>(vm.rows.size());
+  // ALWAYS overflowing in practice -- the list is 13 items and about 11 fit -- but
+  // asked rather than assumed, so a future build that trims the list does not draw
+  // a rail beside a list that fits.
+  const bool overflowing = vm.totalRows > rows;
+  const int inset = overflowing ? kListGutterW : 0;
+
+  const Font& label = fonts[Role::Value500];
+  const Font& labelFocused = fonts[Role::Value700];
+  const Font& value = fonts[Role::Value700];
+  const Font& header = fonts[Role::Meta500];
+
+  for (int i = 0; i < rows; ++i) {
+    const SettingsRow& row = vm.rows[static_cast<size_t>(i)];
+    if (row.isHeader) {
+      // The section's 2px rule, then tracked caps. The rule spans the ROW box, not
+      // the panel, so it stops at the rail's gutter like everything else.
+      fb.fillRect(0, y, fb.width() - inset, kSettingsHeaderRuleH, false);
+      const int textTop = y + kSettingsHeaderRuleH + kSettingsHeaderPadTop;
+      drawText(fb, header, kMargin, baselineIn(header, textTop, header.lineHeight()), row.label,
+               Ink::Black, trackingEm(header, kSettingsHeaderEm), plane);
+      y += settingsHeaderHeight(fonts);
+      continue;
+    }
+
+    const bool focused = (i == vm.focusedRow);
+    // An INERT row is drawn exactly as an unfocused focusable one. `row.focusable`
+    // is deliberately not read here -- see SettingsViewModel: the flag is about
+    // input, and a theme that dimmed on it would be inventing a design decision.
+    if (focused) fb.fillRect(0, y, fb.width() - inset, kSettingsRowH, false);
+    const Ink ink = focused ? Ink::White : Ink::Black;
+    const Font& lf = focused ? labelFocused : label;
+
+    const int rightEdge = fb.width() - inset - kMargin;
+    const int valueW = row.value.empty() ? 0 : value.measure(row.value);
+    // The label truncates and the value keeps its width, the same rule the
+    // Library band states: the value is the state and the label is what it names.
+    const int labelMaxW = rightEdge - kMargin - (valueW > 0 ? valueW + kSettingsLabelGap : 0);
+    drawTextElided(fb, lf, kMargin, baselineIn(lf, y, kSettingsRowH), row.label, labelMaxW, ink,
+                   {}, plane);
+    if (valueW > 0)
+      drawText(fb, value, rightEdge - valueW, baselineIn(value, y, kSettingsRowH), row.value, ink,
+               {}, plane);
+
+    y += kSettingsRowH;
+    // The focused row's fill runs to the next row's top edge, so it draws no rule
+    // -- the same asymmetry drawBookRow implements, from the same board rule.
+    if (!focused) {
+      fb.fillRect(0, y, fb.width() - inset, kSettingsRuleH, false);
+      y += kSettingsRuleH;
+    }
+  }
+
+  Hint hints[4];
+  for (int i = 0; i < 4; ++i) hints[i] = {kLibraryMarks[i], vm.hints[static_cast<size_t>(i)],
+                                          vm.holds[static_cast<size_t>(i)]};
+  drawScrollRail(fb, listTop, fb.height() - hintBarHeight(fonts, hints), vm.firstRow, rows,
+                 vm.totalRows, plane);
+  int slots[4] = {};
+  drawHintBar(fb, fonts, hints, slots, plane);
+}
+
 void QuietTheme::renderStub(Framebuffer& fb, const FontSet& fonts, const StubViewModel& vm,
                             Plane plane) {
   fb.clear(true);

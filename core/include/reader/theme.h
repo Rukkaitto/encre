@@ -10,6 +10,7 @@ struct LibraryViewModel;
 struct ItemActionsViewModel;
 struct DeleteConfirmViewModel;
 struct BookDetailsViewModel;
+struct SettingsViewModel;
 struct StubViewModel;
 
 // Themes own the entire presentation, layout structure included (spec 3.3).
@@ -66,10 +67,26 @@ class Theme {
   // role, and a row's depends on the faces its two lines are set in.
   virtual int libraryVisibleRows(int panelH, const FontSet& fonts) const = 0;
 
+  // Settings' BOX MODEL, not its row count, and the split is deliberate.
+  //
+  // Library's items are all one height, so a theme can answer "how many fit"
+  // outright. Settings interleaves 54px rows with taller section headers, so the
+  // answer depends on WHICH items are in the window -- and the item table belongs
+  // to SettingsScreen, not here. So the theme reports the three heights it owns
+  // and the screen, which knows where its headers are, does the counting. Neither
+  // side ends up holding a copy of the other's data.
+  virtual void settingsMetrics(int panelH, const FontSet& fonts, int& listH, int& rowH,
+                               int& headerH) const = 0;
+
   // The provisional Phase 2B surface. A virtual on Theme rather than a screen
   // drawing its own pixels, because "screens never draw pixels directly" holds
   // for scaffolding too -- a diagnostic that bypassed the theme would be the
   // precedent that erodes the rule.
+  // design/Settings.dc.html. A scrolling list whose items include section
+  // headers, with the same rail Library uses -- see SettingsViewModel.
+  virtual void renderSettings(Framebuffer& fb, const FontSet& fonts,
+                              const SettingsViewModel& vm, Plane plane) = 0;
+
   virtual void renderStub(Framebuffer& fb, const FontSet& fonts, const StubViewModel& vm,
                           Plane plane = Plane::Bw) = 0;
 };
