@@ -9,7 +9,7 @@ twice, teach the filesystem to stream, and give body text a face that can be any
 size — so 3B and 3C can be about EPUBs and typesetting rather than plumbing.
 
 **Architecture:** Four independent foundations, in dependency order. Nothing here
-renders a new screen; the fifteen goldens must not move. The one architectural
+renders a new screen; the seventeen goldens must not move. The one architectural
 change is that `drawText` starts taking an interface rather than a concrete
 `Font`, so chrome's pre-rendered ramp and the reader's scalable face share one
 text path.
@@ -32,12 +32,16 @@ decision — they are worth paying off whatever the reader turns out to be:
 - **Two full framebuffers are live.** `FreeInkDisplay::begin()` allocates its own
   52,272-byte frame, and `setFramebuffer()` memcpys ours into it every paint.
 - **`FileSystem` cannot stream.** 2C-1 left that gap deliberately and named Phase
-  3 as its owner: an EPUB is megabytes against ~71 KB of free heap, so `readAll`
-  is not the EPUB path.
+  3 as its owner: an EPUB is megabytes and `readAll` is not the EPUB path.
 
 The fourth is the decision this phase exists to make real: **book CSS asks for an
 unbounded set of type sizes** (measured: 16, 32, 41, 51, 64 px, differing per
 book), so a pre-rendered ramp cannot serve body text.
+
+> **On heap figures in this document.** Numbers quoted below were measured
+> *before* Task 1 and Task 2 reclaimed 152,792 bytes (confirmed on device:
+> `heap=223892`, up from `71100`). Treat any specific figure here as historical
+> and take the current one from a device `[alive]` line, not from this plan.
 
 ## Design decisions this plan locks in
 
@@ -47,7 +51,7 @@ A pre-rendered `.rfnt` per size × weight × style is unbounded, and snapping a
 publisher's heading to the nearest built size draws it at the wrong size inside a
 line box reserved for the right one. So body text comes from a TTF rasterised on
 demand, and **chrome keeps the pre-rendered ramp**, where the boards are
-pixel-exact and the fifteen goldens live.
+pixel-exact and the seventeen goldens live.
 
 `stb_truetype` — public domain / MIT dual, single header, already vendored inside
 `freeink-sdk/libs/book/FreeInkBook/third_party/stb/`. **Copy it into our
@@ -108,7 +112,7 @@ asserted it from reading `fontc.py`, which is not the same as checking the bytes
 If they are not sorted, sort them in the generator and regenerate, which is a
 change to eleven committed assets and needs its own careful pass.
 
-The fifteen goldens are the proof. If one moves, the lookup is wrong.
+The seventeen goldens are the proof. If one moves, the lookup is wrong.
 
 ## File structure
 
@@ -146,7 +150,7 @@ The fifteen goldens are the proof. If one moves, the lookup is wrong.
 - [ ] **Step 3: Replace both maps with a binary search** over the blob. Zero
   copies, zero nodes: the `Glyph` returned points into the blob exactly as it does
   now. `FontSet::load`'s validation must be unchanged.
-- [ ] **Step 4: Prove it.** `make test` green, **all fifteen goldens byte-identical**,
+- [ ] **Step 4: Prove it.** `make test` green, **all seventeen goldens byte-identical**,
   `make firmware` builds. Then benchmark `measure()` on a realistic string: a
   binary search over ~200 records is ~8 comparisons against a hash lookup, so a
   small regression is expected and acceptable — **report the number.** If it is
@@ -253,7 +257,7 @@ EPUB is megabytes against ~71 KB of heap, so `readAll` is not the EPUB path.
 ## Task 5: Verify, measure on device, document
 
 - [ ] `make test`, `make sim`, `make firmware`, `make compare COMPARE_ARGS="--all"`
-  — 6/28 implemented, all matching, fifteen goldens unchanged.
+  — 6/28 implemented, all matching, seventeen goldens unchanged.
 - [ ] **Add `ESP.getMinFreeHeap()` to the `[alive]` line.** There is no high-water
   instrumentation in the firmware today, and every memory claim in this plan and
   the next two wants it.
