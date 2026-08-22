@@ -137,12 +137,15 @@ Action SettingsScreen::cycleFocused() {
   return Action::redraw();
 }
 
-Action SettingsScreen::onEvent(const InputEvent& ev) {
-  switch (ev.button) {
-    case Button::Down: return moveFocus(+1);
-    case Button::Up: return moveFocus(-1);
-    case Button::Confirm: return cycleFocused();
-    case Button::Back: return Action::pop();
+Action SettingsScreen::onGesture(const GestureEvent& g) {
+  switch (g.what) {
+    // One at a time whatever the distance: this screen declares no repeat, so a
+    // gesture never carries more than one step, and stepping past unfocusable rows
+    // is what moveFocus is for.
+    case Gesture::Next: return moveFocus(+1);
+    case Gesture::Prev: return moveFocus(-1);
+    case Gesture::Activate: return cycleFocused();
+    case Gesture::Back: return Action::pop();
     default: return Action::none();
   }
 }
@@ -183,6 +186,7 @@ void SettingsScreen::syncVm() {
   // confirm button's label is not about navigation.
   vm_.hints = {"BACK", "CHANGE", "UP", "DOWN"};
   vm_.holds = {false, false, false, false};
+  declareHints(vm_.holds);
 }
 
 void SettingsScreen::render(Framebuffer& fb, const FontSet& fonts, Theme& theme,

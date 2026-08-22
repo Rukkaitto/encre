@@ -80,13 +80,9 @@ class LibraryScreen : public FocusScreen {
   explicit LibraryScreen(std::vector<LibraryItem> sample);
 
   ScreenId id() const override { return ScreenId::Library; }
-  ButtonMask longPressable() const override { return hintHoldMask(vm_.holds); }
   // The one screen with a list long enough to need it -- 256 rows at the cap, and
   // a row per press is a minute of pressing.
-  ButtonMask autoRepeat() const override {
-    return static_cast<ButtonMask>(buttonBit(Button::Up) | buttonBit(Button::Down));
-  }
-  Action onEvent(const InputEvent& ev) override;
+  Action onGesture(const GestureEvent& g) override;
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
 
   const LibraryViewModel& vm() const { return vm_; }

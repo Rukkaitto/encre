@@ -24,24 +24,25 @@ HomeScreen::HomeScreen(HomeViewModel vm, std::vector<ScreenId> targets)
   // still has to leave the vm and the window agreeing.
   setFocus(vm_.focusedMenuIndex);
   syncVm();
+  // From whatever view model arrived, because Home's hints are built outside the
+  // screen (demoHomeVm, homeVmForCard). Home binds no hold today and the empty
+  // variant binds none either, so this is zero -- but it is DERIVED from the bar
+  // rather than assumed, which is the point: the day a Home hint grows a ring, the
+  // binding follows it without anyone remembering to add one.
+  declareHints(vm_.holds);
 }
 
 // The mirror is the whole of what this screen still does about focus: the range,
 // the clamp and the "did anything move" answer are all FocusScreen's.
 void HomeScreen::syncVm() { vm_.focusedMenuIndex = focus(); }
 
-Action HomeScreen::onEvent(const InputEvent& ev) {
-  // Home binds no holds, so a Long here means the mask and the view model
-  // disagree. Ignoring it keeps that visible as a dead button rather than
-  // papering over it by treating the hold as a press.
-  if (ev.kind != PressKind::Short) return Action::none();
-
-  switch (ev.button) {
-    case Button::Down:
+Action HomeScreen::onGesture(const GestureEvent& g) {
+  switch (g.what) {
+    case Gesture::Next:
       return moveFocus(+1);
-    case Button::Up:
+    case Gesture::Prev:
       return moveFocus(-1);
-    case Button::Confirm: {
+    case Gesture::Activate: {
       const int i = vm_.focusedMenuIndex;
       // Continue: the Reader is Phase 3.
       if (i < 0) return Action::none();
@@ -50,7 +51,7 @@ Action HomeScreen::onEvent(const InputEvent& ev) {
     }
     // Home's board binds Back to "Read" (spec 4.1: there is nothing to go back
     // to), which opens the Reader -- Phase 3.
-    case Button::Back:
+    case Gesture::Back:
     default:
       return Action::none();
   }

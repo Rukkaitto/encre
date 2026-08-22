@@ -49,9 +49,11 @@ class FocusScreen : public Screen, private Focus::Gate {
       : window_(count, visibleRows, none) {}
 
   // Redraw only when the focus actually moved: at the end of a clamping list a
-  // press must not cost a ~520 ms panel refresh that changes nothing.
-  Action moveFocus(int delta) {
-    if (!window_.moveFocus(delta, this)) return Action::none();
+  // press must not cost a ~520 ms panel refresh that changes nothing. `held` is
+  // GestureEvent's flag, passed straight through to Focus, which is where a held
+  // move clamping on a wrapping list is decided -- no screen has an opinion.
+  Action moveFocus(int delta, bool held = false) {
+    if (!window_.moveFocus(delta, held, this)) return Action::none();
     syncVm();
     return Action::redraw();
   }

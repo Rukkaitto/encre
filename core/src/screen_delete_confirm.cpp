@@ -28,6 +28,7 @@ DeleteConfirmScreen::DeleteConfirmScreen(LibraryScreen& library)
   vm_.confirmLabel = "DELETE";
   vm_.hints = {"CANCEL", "SELECT", "UP", "DOWN"};
   vm_.holds = {false, false, false, false};
+  declareHints(vm_.holds);
   // The base's focus starts on the first row, which is kCancel -- the board's
   // filled slab, and where a destructive prompt's focus belongs: a press made
   // before the user has read anything cancels.
@@ -36,18 +37,16 @@ DeleteConfirmScreen::DeleteConfirmScreen(LibraryScreen& library)
 
 void DeleteConfirmScreen::syncVm() { vm_.focusedAction = focus(); }
 
-Action DeleteConfirmScreen::onEvent(const InputEvent& ev) {
-  if (ev.kind != PressKind::Short) return Action::none();
-
-  switch (ev.button) {
-    case Button::Down:
+Action DeleteConfirmScreen::onGesture(const GestureEvent& g) {
+  switch (g.what) {
+    case Gesture::Next:
       return moveFocus(+1);
-    case Button::Up:
+    case Gesture::Prev:
       return moveFocus(-1);
-    case Button::Back:
+    case Gesture::Back:
       // Back IS cancel here, which is what the board's first hint slot says.
       return Action::pop();
-    case Button::Confirm:
+    case Gesture::Activate:
       if (vm_.focusedAction == kCancel) return Action::pop();
       // The delete itself, and the rescan that follows it, are the Library's:
       // it owns the path and the list. This screen owns the confirmation.

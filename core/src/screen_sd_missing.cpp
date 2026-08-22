@@ -20,17 +20,14 @@ SdMissingScreen::SdMissingScreen() {
   // mark follows its label.
   vm_.hints = {"", "RETRY", "", ""};
   vm_.holds = {false, false, false, false};
+  declareHints(vm_.holds);
 }
 
-Action SdMissingScreen::onEvent(const InputEvent& ev) {
-  // No holds are bound, so no slot draws a ring and a Long that arrives anyway
-  // means the mask and the view model have drifted. Ignore it rather than
-  // treating it as a press, which would hide the drift.
-  if (ev.kind != PressKind::Short) return Action::none();
+Action SdMissingScreen::onGesture(const GestureEvent& g) {
   // Confirm is the retry, and the ONLY thing this screen does. Up, Down and Back
   // are dead here on purpose: they have no hint, and a button that does something
   // the bar does not advertise is worse than one that does nothing.
-  if (ev.button == Button::Confirm) return Action::retry();
+  if (g.what == Gesture::Activate) return Action::retry();
   return Action::none();
 }
 

@@ -289,9 +289,9 @@ TEST_CASE("the window follows a gated skip in one move") {
   ScrollWindow w(11, 3);
   w.setFocus(7);
   REQUIRE(w.focus() == 7);
-  CHECK(w.moveFocus(+1, &gate));
+  CHECK(w.moveFocus(+1, false, &gate));
   CHECK(w.focus() == 8);
-  CHECK(w.moveFocus(+2, &gate));  // 9, then the wrap-skip to 7
+  CHECK(w.moveFocus(+2, false, &gate));  // 9, then the wrap-skip to 7
   CHECK(w.focus() == 7);
   CHECK(w.firstVisible() <= 7);
   CHECK(w.firstVisible() + 3 > 7);  // the focus is inside the window

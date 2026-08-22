@@ -64,9 +64,13 @@ class ScrollWindow {
   // screen. On this panel that is at least 520 ms, and spending it to change
   // nothing is what makes the end of a list feel like a stuck button.
   //
-  // A `gate` is passed through to Focus, whose landing rules these are; the
-  // window only follows the focus it ends up with.
-  bool moveFocus(int delta, const Focus::Gate* gate = nullptr);
+  // `held` and `gate` are passed straight through to Focus::move, which is where
+  // clamp-versus-wrap and the landing rules are decided. A window has no opinion
+  // about either; it only has to follow the focus it ends up with.
+  bool moveFocus(int delta, bool held = false, const Focus::Gate* gate = nullptr);
+  // Same guard as Focus::move's: a gate passed second would silently become
+  // `held == true`.
+  bool moveFocus(int delta, const Focus::Gate*) = delete;
 
   // Selects a row outright, clamping into range. For the wake restore, where the
   // session record names a row and no press implies it; a record written before

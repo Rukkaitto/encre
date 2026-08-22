@@ -26,11 +26,9 @@ struct MiniScreen : FocusScreen {
   using FocusScreen::window;
 
   ScreenId id() const override { return ScreenId::Home; }
-  ButtonMask longPressable() const override { return 0; }
-  Action onEvent(const InputEvent& ev) override {
-    if (ev.kind != PressKind::Short) return Action::none();
-    if (ev.button == Button::Down) return moveFocus(+1);
-    if (ev.button == Button::Up) return moveFocus(-1);
+  Action onGesture(const GestureEvent& g) override {
+    if (g.what == Gesture::Next) return moveFocus(+g.steps, g.held);
+    if (g.what == Gesture::Prev) return moveFocus(-g.steps, g.held);
     return Action::none();
   }
   void render(Framebuffer&, const FontSet&, Theme&, Plane) const override {}

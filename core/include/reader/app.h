@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 
+#include "reader/gesture.h"
 #include "reader/input.h"
 #include "reader/refresh.h"
 #include "reader/text.h"  // Plane
@@ -85,6 +86,12 @@ constexpr ButtonMask hintHoldMask(const std::array<bool, 4>& holds) {
 class Screen {
  public:
   virtual ~Screen() = default;
+
+ private:
+  ButtonMask holds_ = 0;
+  ButtonMask repeats_ = 0;
+
+ public:
   virtual ScreenId id() const = 0;
   // Mono by default, which is what chrome ships on and what the reference
   // firmware does on this panel. Both other paths cost an explicit override: the
@@ -102,7 +109,14 @@ class Screen {
   // overlay whose parent also received events would move a focus the user cannot
   // see.
   virtual bool isOverlay() const { return false; }
-  virtual ButtonMask longPressable() const = 0;
+  // WHAT THE FOUR FRONT BUTTONS DO, and no longer a virtual each screen answers.
+  //
+  // Nine screens overrode this with the identical `hintHoldMask(vm_.holds)`, which
+  // is the same fact the hint bar already states -- and two spellings of one fact
+  // is how a ring ends up promising a hold nothing bound. A screen now DECLARES it
+  // once, where it builds its view model, and these read the declaration.
+  ButtonMask longPressable() const { return holds_; }
+  ButtonMask autoRepeat() const { return repeats_; }
 
   // Buttons this screen wants to auto-repeat while held, accelerating. Zero for
   // everything but a list long enough to need it: on a four-row overlay a held
@@ -111,7 +125,6 @@ class Screen {
   // Deliberately NOT derived from the hint bar, which is where longPressable()
   // comes from. A hold ring promises a DIFFERENT action; auto-repeat is more of
   // the same one, so it has nothing to announce and no slot to announce it in.
-  virtual ButtonMask autoRepeat() const { return 0; }
 
   // WHERE THE SELECTION IS, as an index into whatever the screen considers its
   // whole list -- not into the slice on glass. The session record stores this
@@ -193,7 +206,30 @@ class Screen {
   // the test enumerates rather than samples.
   virtual uint32_t paintFootprint() const { return 0; }
 
-  virtual Action onEvent(const InputEvent& ev) = 0;
+  // A RAW PRESS ARRIVES HERE AND A GESTURE LEAVES. Not virtual: the translation is
+  // one mapping and it was previously done nine times, six of them as a guard a
+  // screen had to remember (`if (ev.kind != Short) return none()`) whose omission
+  // silently made a hold do a press's job.
+  Action onEvent(const InputEvent& ev) {
+    const GestureEvent g = gestureFor(ev, holds_, repeats_);
+    if (g.what == Gesture::None) return Action::none();
+    return onGesture(g);
+  }
+
+  // What a screen implements instead. It sees intent and distance, never a
+  // PressKind -- see gesture.h.
+  virtual Action onGesture(const GestureEvent& g) = 0;
+
+ protected:
+  // Declared where the screen builds its hint bar, so the ring and the binding
+  // cannot drift: a ring always means a hold is bound, and a bound hold always
+  // shows a ring.
+  void declareHints(const std::array<bool, 4>& holds) { holds_ = hintHoldMask(holds); }
+  // Which buttons scroll while held. Only a list long enough to need it -- on a
+  // four-row overlay a held button that ran away would be a defect.
+  void declareRepeat(ButtonMask mask) { repeats_ = mask; }
+
+ public:
   virtual void render(Framebuffer& fb, const FontSet& fonts, Theme& theme,
                       Plane plane) const = 0;
 };

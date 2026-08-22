@@ -24,6 +24,7 @@ ItemActionsScreen::ItemActionsScreen(const LibraryScreen& library)
   // shows a ring.
   vm_.hints = {"CLOSE", "SELECT", "UP", "DOWN"};
   vm_.holds = {false, false, false, false};
+  declareHints(vm_.holds);
   // The base's focus starts on the first row, which is kOpen -- the board's own
   // starting selection. The mirror below is all the focus state there is.
   syncVm();
@@ -31,19 +32,15 @@ ItemActionsScreen::ItemActionsScreen(const LibraryScreen& library)
 
 void ItemActionsScreen::syncVm() { vm_.focusedAction = focus(); }
 
-Action ItemActionsScreen::onEvent(const InputEvent& ev) {
-  // No holds are bound and no slot shows a ring, so a Long here means the mask
-  // and the view-model have drifted. Ignoring it keeps that visible.
-  if (ev.kind != PressKind::Short) return Action::none();
-
-  switch (ev.button) {
-    case Button::Down:
+Action ItemActionsScreen::onGesture(const GestureEvent& g) {
+  switch (g.what) {
+    case Gesture::Next:
       return moveFocus(+1);
-    case Button::Up:
+    case Gesture::Prev:
       return moveFocus(-1);
-    case Button::Back:
+    case Gesture::Back:
       return Action::pop();
-    case Button::Confirm:
+    case Gesture::Activate:
       switch (vm_.focusedAction) {
         case kOpen:
           // The Reader is Phase 3, exactly as Confirm on a Library row is.

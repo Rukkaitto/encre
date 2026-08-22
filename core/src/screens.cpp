@@ -115,6 +115,43 @@ std::vector<LibraryItem> demoLibraryItems() {
                1704 * 1024)};
 }
 
+// design/LibraryScrolled.dc.html: 24 books, windowed at rows 8-14. The board's
+// seven visible rows are real entries in a list long enough to scroll, because the
+// whole point of the state is the rail -- and a rail's proportions come from the
+// list's LENGTH, so a seven-item list could not produce them.
+//
+// The titles either side are filler and are named as such: what matters is that
+// exactly seven sort between `Hard Times` and `North and South`, so the board's
+// window is the window BookList's own ordering produces rather than one this
+// function asserts.
+std::vector<LibraryItem> demoLibraryScrolledItems() {
+  auto book = [](const char* title, const char* author, const char* progress) {
+    LibraryItem item;
+    item.entry = BookEntry{std::string(title) + ".epub", title, false, 512 * 1024};
+    item.author = author;
+    item.progress = progress;
+    return item;
+  };
+  auto filler = [&book](const char* title) { return book(title, "", "NEW"); };
+
+  return {
+      // Seven before the window.
+      filler("Anna Karenina"), filler("Bleak House"), filler("Cranford"), filler("Dracula"),
+      filler("Emma"), filler("Frankenstein"), filler("Hard Times"),
+      // The board's seven, with the board's authors and values.
+      book("Jane Eyre", "CHARLOTTE BRONT\xC3\x8B", "DONE"),
+      book("Kidnapped", "R. L. STEVENSON", "NEW"),
+      book("Little Dorrit", "CHARLES DICKENS", "12%"),
+      book("Mansfield Park", "JANE AUSTEN", "NEW"),
+      book("Meditations", "MARCUS AURELIUS", "NEW"),
+      book("Middlemarch", "GEORGE ELIOT", "6%"),
+      book("Moby-Dick", "HERMAN MELVILLE", "48%"),
+      // Ten after it, so the rail's thumb has somewhere below to point at.
+      filler("North and South"), filler("Oliver Twist"), filler("Persuasion"),
+      filler("Rob Roy"), filler("Silas Marner"), filler("The Odyssey"), filler("Ulysses"),
+      filler("Villette"), filler("Walden"), filler("Wuthering Heights")};
+}
+
 DemoScreenFactory::DemoScreenFactory(FileSystem& fs, std::string root)
     : fs_(&fs), root_(std::move(root)) {}
 
@@ -125,7 +162,9 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // is not. Both go through the real LibraryScreen, so a desktop render is
       // evidence about the device rather than about a second, similar screen.
       auto lib = fs_ != nullptr ? std::make_unique<LibraryScreen>(*fs_, root_)
-                                : std::make_unique<LibraryScreen>(demoLibraryItems());
+                                : std::make_unique<LibraryScreen>(
+                                      libraryItems_.empty() ? demoLibraryItems()
+                                                            : libraryItems_);
       lib->setVisibleRows(libraryVisibleRows_);
       library_ = lib.get();
       return lib;

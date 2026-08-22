@@ -530,12 +530,11 @@ drift into a second copy of wrap/clamp/none.
   jump a long way, which is unambiguous on a four-row overlay and is the case to
   watch on a several-hundred-book Library. `setWrapping(false)` is the opt-out, on
   `Focus` and passed through by `ScrollWindow`; nothing uses it.
-- **AUTO-REPEAT IS WHERE WRAPPING IS SHARPEST, and it is not solved.** A held Up
-  or Down delivers a *distance* (`InputEvent::steps`), which `move()` takes
-  correctly — several laps land where one lap would — so a held button on the
-  Library now cycles for as long as it is down instead of resting at the end. On a
-  ten-row list a single accumulated step of +100 lands on row 0. If that is the
-  wrong feel on glass, the fix is one `setWrapping` call, not a rewrite.
+- **AUTO-REPEAT WAS WHERE WRAPPING WAS SHARPEST, AND IT IS NOW SOLVED.**
+  `Focus::move(delta, held)` clamps when the flag is set, so a wrap belongs to a
+  press and a hold rests at the end. It needed the gesture layer above to exist
+  first: before that, nothing on the path knew whether a movement had come from
+  holding, which is why the defect belonged to neither half that created it.
 
 **THE RULE IS: A SCREEN THAT REPORTS A FOCUS ACCEPTS ONE BACK.** It was
 implemented one screen at a time instead, and each screen that had not been done

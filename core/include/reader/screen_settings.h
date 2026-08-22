@@ -53,8 +53,7 @@ class SettingsScreen : public FocusScreen {
   SettingsScreen(const Settings& initial, SettingsSink* sink);
 
   ScreenId id() const override { return ScreenId::Settings; }
-  ButtonMask longPressable() const override { return hintHoldMask(vm_.holds); }
-  Action onEvent(const InputEvent& ev) override;
+  Action onGesture(const GestureEvent& g) override;
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
 
   // focus()/setFocus() are FocusScreen's -- final, one mechanism. setFocus still

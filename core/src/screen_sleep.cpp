@@ -8,9 +8,10 @@ namespace reader {
 
 SleepScreen::SleepScreen(SleepViewModel vm) : vm_(std::move(vm)) {}
 
-Action SleepScreen::onEvent(const InputEvent&) {
+Action SleepScreen::onGesture(const GestureEvent&) {
   // Everything, including Back. See the header: the device is asleep, and a screen
-  // that answered a button would be claiming otherwise.
+  // that answered a gesture would be claiming otherwise. It never even declares a
+  // hint, so Screen::onEvent drops most presses before they reach here.
   return Action::none();
 }
 

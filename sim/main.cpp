@@ -270,12 +270,13 @@ int main(int argc, char** argv) {
   const bool isSettings = std::strcmp(argv[1], "settings") == 0;
   const bool isSleep = std::strcmp(argv[1], "sleep") == 0;
   const bool isHomeEmpty = std::strcmp(argv[1], "home_empty") == 0;
+  const bool isLibraryScrolled = std::strcmp(argv[1], "library_scrolled") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
-      !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty) {
+      !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty && !isLibraryScrolled) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
-                 "'sleep', 'home_empty' or 'app')\n",
+                 "'sleep', 'home_empty', 'library_scrolled' or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -329,6 +330,12 @@ int main(int argc, char** argv) {
   // leave the window inert and the list empty -- correctly, since a screen must
   // not draw a row it was not given.
   factory.setLibraryVisibleRows(theme.libraryVisibleRows(h, fonts));
+  // THE SCROLLED LIBRARY NEEDS A LONGER LIST, not a different screen: the rail's
+  // thumb is visible/total and its position is first/total, so a seven-item list
+  // -- which fits -- cannot produce a rail at all. This is the ONLY state in which
+  // the rail is compared against its board, and until it existed the rail was
+  // checked by unit tests and by nothing that looked at a pixel.
+  if (isLibraryScrolled) factory.setLibraryItems(reader::demoLibraryScrolledItems());
   // The same relationship for Settings, in three numbers rather than one: its
   // items are not all the same height, so the theme reports the box model and the
   // screen counts. No sink -- there is nowhere on a desktop to persist to, and a
@@ -356,6 +363,23 @@ int main(int argc, char** argv) {
           reader::demoHomeTargets()),
       factory);
 
+  if (isLibraryScrolled) {
+    // Into the Library, DOWN PAST the board's focused row, then back up one.
+    //
+    // Not 12 Downs, which is the obvious thing and gives the wrong window:
+    // ScrollWindow scrolls only as far as it must to keep the focus visible, so
+    // arriving at row 12 from above lands it on the window's BOTTOM edge -- rows
+    // 6..12, focus last. The board draws rows 7..13 with the focus sixth of seven,
+    // which is the state after going one further and coming back: the window has
+    // already moved and the focus steps back inside it.
+    //
+    // Worth the extra press rather than editing the board, because both states are
+    // real and the board's is the more useful illustration of a rail -- a thumb
+    // with list on both sides of it. And doing it by pressing is what proves the
+    // window the board draws is one ScrollWindow actually produces.
+    for (const reader::InputEvent& ev : libraryEntry(13)) app.dispatch(ev);
+    app.dispatch({reader::Button::Up, reader::PressKind::Short});
+  }
   if (isLibrary) {
     // Home's first row is LIBRARY, so one Confirm opens it; then the board's own
     // focus, which is its second row. Reached by pressing rather than by

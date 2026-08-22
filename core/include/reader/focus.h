@@ -80,10 +80,24 @@ class Focus {
   // DISTANCE rather than a press (InputEvent::steps), so a wrapping list has to
   // take a delta of several laps and land where one lap would.
   //
+  // `held` settles an interaction neither wrapping nor held-scroll owned alone.
+  // A wrap is right for a PRESS: the screen always changes, so it can never read
+  // as a dead button. It is wrong for a HOLD: a held button that wraps has no
+  // end and cycles for as long as it is down, which is not scrolling, it is a
+  // carousel. So a held move CLAMPS even on a wrapping focus. Here rather than
+  // in a screen because it is one rule and there were two screens about to each
+  // get their own copy of it -- the same shape as the five copies of the clamp
+  // this class was extracted to remove.
+  //
   // With a `gate`, a refused position is stepped over without consuming any of
-  // the distance, wrapping through refused ends -- the walk Settings used to
-  // hand-roll, in the one place movement rules live.
-  bool move(int delta, const Gate* gate = nullptr);
+  // the distance, wrapping through refused ends (clamping at them when `held`)
+  // -- the walk Settings used to hand-roll, in the one place movement rules
+  // live.
+  bool move(int delta, bool held = false, const Gate* gate = nullptr);
+  // The gate is the THIRD argument. Without this deletion, `move(d, &gate)`
+  // would compile -- the pointer silently converting to `held == true` -- and
+  // clamp a list someone meant to gate.
+  bool move(int delta, const Gate*) = delete;
 
   // The list changed length -- a rescan after a delete, a menu built at boot. The
   // index is pulled back into range, because one left past the end indexes one
@@ -105,11 +119,11 @@ class Focus {
   // a four-row overlay or a three-row menu that is unambiguous, while on a
   // several-hundred-book Library it is the case to watch.
   //
-  // AUTO-REPEAT IS WHERE THIS IS SHARPEST, and it is not solved here: a HELD Down
-  // on the Library ramps to 30 rows/s and now cycles for as long as the button is
-  // down instead of resting at the end. See LibraryScreen if that turns out to be
-  // the wrong feel on glass -- setWrapping(false) for the repeat, or for the
-  // screen, is a line.
+  // AUTO-REPEAT WAS WHERE THIS WAS SHARPEST, and move()'s `held` flag is what
+  // solved it: a HELD Down clamps at the end where a pressed one wraps, so the
+  // Library no longer cycles for as long as the button is down. (This note said
+  // "not solved here" until the flag existed -- an inherited-work note is a
+  // claim with an expiry date.)
   //
   // The opt-out exists because a screen where running off the end is a mistake
   // rather than a convenience should say so.
@@ -121,11 +135,12 @@ class Focus {
   // from every mutator, for the same reason ScrollWindow::clamp is one function.
   void clampIndex();
 
-  // One position in `dir` from `from`, honouring this focus's own wrap, clamp
-  // and none-slot rules -- the arithmetic move(+/-1) performs, extracted so the
+  // One position in `dir` from `from`, honouring the clamp and none-slot rules
+  // and wrapping only when `wrapping` says so (a held move clamps even on a
+  // wrapping focus) -- the arithmetic move(+/-1) performs, extracted so the
   // gated walk cannot become a second copy of it. Returns `from` itself at a
   // clamping end.
-  int stepOnce(int from, int dir) const;
+  int stepOnce(int from, int dir, bool wrapping) const;
 
   int count_ = 0;
   int index_ = -1;

@@ -18,15 +18,21 @@ class FakeScreen : public Screen {
  public:
   FakeScreen(ScreenId id, Action next, ButtonMask holds = 0, bool overlay = false,
              std::vector<ScreenId>* renderLog = nullptr)
-      : id_(id), next_(next), holds_(holds), overlay_(overlay), log_(renderLog) {}
+      : id_(id), next_(next), overlay_(overlay), log_(renderLog) {
+    // DECLARED, not overridden: longPressable is no longer a virtual, because nine
+    // screens answered it with the same expression. A fake declares what a real
+    // screen declares.
+    const std::array<bool, 4> ring{maskHas(holds, Button::Back), maskHas(holds, Button::Confirm),
+                                   maskHas(holds, Button::Up), maskHas(holds, Button::Down)};
+    declareHints(ring);
+  }
   ScreenId id() const override { return id_; }
-  ButtonMask longPressable() const override { return holds_; }
   bool isOverlay() const override { return overlay_; }
   // Default 0 -- "no promise" -- exactly as Screen's is, so the partial-repaint
   // tests below have to opt each screen in the way a real one does.
   uint32_t paintFootprint() const override { return footprint; }
   uint32_t footprint = 0;
-  Action onEvent(const InputEvent&) override {
+  Action onGesture(const GestureEvent&) override {
     ++events;
     return next_;
   }
@@ -43,7 +49,6 @@ class FakeScreen : public Screen {
  private:
   ScreenId id_;
   Action next_;
-  ButtonMask holds_;
   bool overlay_;
   std::vector<ScreenId>* log_;
 };

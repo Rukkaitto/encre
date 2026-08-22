@@ -17,6 +17,9 @@ namespace reader {
 HomeViewModel demoHomeVm();
 
 // Home's menu rows, in order, and the screen each one opens.
+// design/LibraryScrolled.dc.html -- 24 books, so the rail has proportions.
+std::vector<LibraryItem> demoLibraryScrolledItems();
+
 // design/HomeEmpty.dc.html -- Home with nothing to continue.
 HomeViewModel demoHomeEmptyVm();
 
@@ -79,6 +82,15 @@ class DemoScreenFactory : public ScreenFactory {
   // "not told", and the Library then shows nothing rather than guessing.
   void setLibraryVisibleRows(int n) { libraryVisibleRows_ = n; }
 
+  // Which demo books a card-less Library shows. Empty means demoLibraryItems() --
+  // the board's own seven. Set it to render a state the default list cannot
+  // produce, which today is the SCROLLED library: a rail's proportions come from
+  // the list's length, so a seven-item list cannot show one.
+  //
+  // Ignored when the factory has a real filesystem; a card's contents are the
+  // card's.
+  void setLibraryItems(std::vector<LibraryItem> items) { libraryItems_ = std::move(items); }
+
   // What a Settings screen this factory builds starts from, and where its changes
   // go. Held here for the same reason the Library's row count is: the factory is
   // what constructs the screen, and neither the current settings nor a place to
@@ -101,6 +113,7 @@ class DemoScreenFactory : public ScreenFactory {
   std::string root_;
   LibraryScreen* library_ = nullptr;
   int libraryVisibleRows_ = 0;
+  std::vector<LibraryItem> libraryItems_;
   Settings settings_{};
   SettingsSink* settingsSink_ = nullptr;
   int settingsListH_ = 0;

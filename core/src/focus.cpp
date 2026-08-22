@@ -40,9 +40,9 @@ bool Focus::set(int index, const Gate* gate) {
   return index_ != was;
 }
 
-int Focus::stepOnce(int from, int dir) const {
+int Focus::stepOnce(int from, int dir, bool wrapping) const {
   if (count_ <= 0) return from;
-  if (!wrap_) {
+  if (!wrapping) {
     int next = from + dir;
     if (next < lowest()) next = lowest();
     if (next > count_ - 1) next = count_ - 1;
@@ -55,12 +55,16 @@ int Focus::stepOnce(int from, int dir) const {
   return lowest() + offset;
 }
 
-bool Focus::move(int delta, const Gate* gate) {
+bool Focus::move(int delta, bool held, const Gate* gate) {
   if (count_ <= 0) return false;
+  // A HELD move clamps even where a pressed one wraps -- see the header. One
+  // effective flag, so the gated walk and the arithmetic cannot disagree about
+  // what "held" means.
+  const bool wrapping = wrap_ && !held;
   if (gate == nullptr) {
     // The ungated path keeps its O(1) arithmetic, bit-for-bit: every existing
     // caller lands exactly where it always did, multi-lap wraps included.
-    if (!wrap_) return set(index_ + delta);
+    if (!wrapping) return set(index_ + delta);
 
     // The ring runs from lowest() to count-1 inclusive, so a WithNone focus
     // wraps through its none slot rather than past it.
@@ -82,15 +86,15 @@ bool Focus::move(int delta, const Gate* gate) {
   // nothing instead of spinning -- the full-circle check SettingsScreen used to
   // hand-roll, now in the one place movement rules live. The test suite pins
   // this walk to the arithmetic above with an everything-focusable gate over
-  // every configuration.
+  // every configuration, held and pressed both.
   const int start = index_;
   const int dir = delta < 0 ? -1 : 1;
   int steps = delta < 0 ? -delta : delta;
   int i = index_;
   while (steps-- > 0) {
-    int j = stepOnce(i, dir);
+    int j = stepOnce(i, dir, wrapping);
     int guard = count_ - lowest();
-    while (j != i && !gate->focusable(j) && guard-- > 0) j = stepOnce(j, dir);
+    while (j != i && !gate->focusable(j) && guard-- > 0) j = stepOnce(j, dir, wrapping);
     if (j == i || !gate->focusable(j)) break;  // a clamping end, or nothing to land on
     i = j;
   }

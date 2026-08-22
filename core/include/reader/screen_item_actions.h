@@ -24,8 +24,7 @@ class ItemActionsScreen : public FocusScreen {
 
   ScreenId id() const override { return ScreenId::ItemActions; }
   bool isOverlay() const override { return true; }
-  ButtonMask longPressable() const override { return hintHoldMask(vm_.holds); }
-  Action onEvent(const InputEvent& ev) override;
+  Action onGesture(const GestureEvent& g) override;
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
 
   const ItemActionsViewModel& vm() const { return vm_; }
