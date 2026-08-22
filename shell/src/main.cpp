@@ -222,6 +222,32 @@ static reader::DemoScreenFactory gFactory(gSd, reader::kBooksRoot);
 // built and destroyed on every push and pop, and a cache that died with the screen
 // would make leaving a book and coming back cost a cold rasterisation of the whole
 // page. It also has to outlive every ReaderScreen that borrows it.
+// THE LOOP TASK'S STACK, AND WHY IT IS NOT THE DEFAULT 8 KB.
+//
+// stb_image's inflate wants 6,608 bytes in ONE FRAME. Read off the panic that
+// found it: `add sp,sp,t0` at the faulting address with T0 = 0xffffe630, which is
+// -6608, inside stbi_zlib_decode_noheader_buffer. The compiler inlines
+// stbi__parse_zlib, stbi__compute_huffman_codes and stbi__zbuild_huffman into that
+// one function, so all three stbi__zhuffman tables -- fast[512] plus size[288] plus
+// value[288] each -- live in a single frame. Arduino's default loopTask stack is
+// 8,184 usable bytes, and the chain above the inflate (loop -> handleOpen ->
+// openChapter -> Zip::read -> inflateRaw) already spends ~1.5 KB of it. Opening any
+// book was a stack-protection fault, every time.
+//
+// 16 KB rather than 12: the inflate peak is ~8.2 KB, buildDocument's own peak is a
+// 1 KB tag stack plus an Xml with its 16 attribute slots, and pagination sits on
+// top of neither. Doubling leaves ~7.8 KB spare, which is headroom a future caller
+// can spend without this needing to be rediscovered by another panic.
+//
+// SET_LOOP_TASK_STACK_SIZE, not a build flag. `-DCONFIG_ARDUINO_LOOP_STACK_SIZE`
+// looks like the obvious fix and does NOTHING: arduino-esp32 ships PRECOMPILED, so
+// our -D never reaches its main.cpp. The weak-symbol override in Arduino.h is the
+// supported mechanism and the only one that takes effect.
+//
+// It costs 8 KB, taken from the heap when the task is created -- against ~200 KB
+// free at boot. The [stack] line below is what keeps that a measurement.
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+
 static reader::ScalableFont gBody;
 // Did SDCardManager::begin() ever return true this boot? It opens with
 // `if (initialized) return true;` and the SPI path exposes no end()/unmount(), so
@@ -1069,6 +1095,15 @@ static void handleOpen() {
     const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
     pages = rd->pageCount();
   }
+  // THE STACK HIGH-WATER MARK, because a stack is the one budget this firmware had
+  // no instrument for -- and the first thing to exhaust it did so on the very first
+  // book. uxTaskGetStackHighWaterMark reports the SMALLEST free space the task has
+  // ever had, so this is the worst case across everything the device has done since
+  // boot, the inflate included. If it approaches zero, the next layer added to the
+  // reader panics like the first one did.
+  Serial.printf("[stack] loopTask free at worst: %u bytes of %u\n",
+                (unsigned)(uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t)),
+                (unsigned)getArduinoLoopTaskStackSize());
   Serial.printf("[open] %s -> \"%s\" ch=1/%d: parse=%lums total=%lums blocks=%u pages=%d "
                 "heap %u -> %u (cost %ld) min=%u pushed=%d\n",
                 path.c_str(), opened.bookTitle.c_str(), opened.chapterCount,

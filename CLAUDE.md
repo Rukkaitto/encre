@@ -1144,6 +1144,38 @@ Bytes go as ppem², so the old 8 KB held the set at **no** reading size. 16 KB h
 ppem 32 with 25% spare. **A body-size setting must revisit this** — the budget is a
 constructor argument precisely so the caller can size it from the chosen ppem.
 
+### The stack, which is the budget nothing was watching
+
+**stb_image's inflate wants 6,608 bytes in ONE FRAME.** The compiler inlines
+`stbi__parse_zlib`, `stbi__compute_huffman_codes` and `stbi__zbuild_huffman` into
+`stbi_zlib_decode_noheader_buffer`, so all three `stbi__zhuffman` tables — `fast[512]`
+plus `size[288]` plus `value[288]` each — share one frame. Arduino's default
+`loopTask` stack is 8,184 usable bytes and the chain above the call spends ~1.5 KB of
+it, so **opening any book was a stack-protection fault, every time**, and the reboot
+landed back on Home looking like a navigation bug.
+
+`shell/src/main.cpp` therefore carries `SET_LOOP_TASK_STACK_SIZE(16 * 1024)`.
+
+Three things worth keeping:
+
+- **`-DCONFIG_ARDUINO_LOOP_STACK_SIZE` DOES NOTHING.** arduino-esp32 ships
+  precompiled, so a `-D` in `build_flags` never reaches its `main.cpp`. The
+  weak-symbol override (`SET_LOOP_TASK_STACK_SIZE`, declared in `Arduino.h`) is the
+  supported mechanism and the only one that takes effect.
+- **Read the frame size off the panic.** `add sp,sp,t0` at the faulting address with
+  `T0 = 0xffffe630` is a −6,608-byte allocation; `addr2line` on `MEPC` names the
+  function. That is faster and more certain than reasoning about `sizeof`.
+- **A stack budget cannot be moved into `core/` to be faked.** The answer to
+  "`shell/` has no test harness" has been to move logic where a fake can reach it;
+  a stack is not movable, so it is MEASURED instead. `test_inflate.cpp` runs the
+  inflate on a pthread with a stack it owns, fills it with a pattern and counts what
+  survives — FreeRTOS's own high-water technique. It reports **7,348 bytes** and
+  asserts a 10 KB ceiling, so a vendored-library bump that grows the appetite fails
+  on the desktop rather than panicking the device.
+
+The `[stack]` serial line reports `uxTaskGetStackHighWaterMark` after an open — the
+worst case since boot, inflate included.
+
 ### What the desktop measures, and what only the panel can answer
 
 Desktop, 12-line page, 444px column, ppem 32: paginate 349 µs/page, lay out one page

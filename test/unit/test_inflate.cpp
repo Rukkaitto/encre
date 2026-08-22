@@ -1,5 +1,9 @@
+#include <pthread.h>
+
+#include <algorithm>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "doctest.h"
 #include "reader/inflate.h"
@@ -109,4 +113,85 @@ TEST_CASE("deterministic fuzz: every truncation and byte flip is survivable") {
     const bool ok = reader::inflateRaw(mutated, out);
     if (ok) CHECK(out.size() == std::strlen(kSentenceText));
   }
+}
+
+
+// --- How much STACK the inflate wants -----------------------------------------
+//
+// This test exists because the device found it first, and nothing on the desktop
+// could have. Opening any book was a stack-protection fault in loopTask:
+// stb_image's inflate wants 6,608 bytes in ONE FRAME -- the compiler inlines
+// stbi__parse_zlib, stbi__compute_huffman_codes and stbi__zbuild_huffman together,
+// so all three stbi__zhuffman tables share a frame -- against Arduino's default
+// 8,184-byte loop stack with ~1.5 KB already spent above the call.
+//
+// A desktop main thread has 8 MB, so every test above passed. The project's answer
+// to "shell/ has no test harness" has been to move logic into core/ where a fake
+// can reach it; a stack budget cannot be moved, so it has to be MEASURED instead.
+//
+// The technique is FreeRTOS's own: give the thread a stack we own, fill it with a
+// pattern, and see how much of the pattern survives. Conservative in the safe
+// direction -- if the inflate happens to write the pattern's own bytes, this
+// under-reports usage, so the assertion has room rather than being tight.
+namespace {
+
+constexpr size_t kProbeStack = 512 * 1024;  // generous; the point is to measure
+constexpr unsigned char kFill = 0xA5;
+
+struct Probe {
+  bool ok = false;
+  std::string out;
+};
+
+void* runInflate(void* arg) {
+  Probe* p = static_cast<Probe*>(arg);
+  p->out.assign(std::strlen(kSentenceText), '\0');
+  p->ok = reader::inflateRaw(bytes(kSentence, sizeof(kSentence)), p->out);
+  return nullptr;
+}
+
+}  // namespace
+
+TEST_CASE("INFLATE FITS THE DEVICE'S STACK, measured rather than assumed") {
+  std::vector<unsigned char> stack(kProbeStack, kFill);
+
+  pthread_attr_t attr;
+  REQUIRE(pthread_attr_init(&attr) == 0);
+  // Page-align the base: pthread_attr_setstack requires it on both hosts, and a
+  // misaligned base is an EINVAL that would look like the API not working.
+  const size_t page = 16u * 1024u;
+  unsigned char* base = stack.data();
+  const size_t shift = (page - (reinterpret_cast<uintptr_t>(base) % page)) % page;
+  base += shift;
+  const size_t usable = (kProbeStack - shift) & ~(page - 1);
+  REQUIRE(pthread_attr_setstack(&attr, base, usable) == 0);
+
+  Probe probe;
+  pthread_t tid{};
+  REQUIRE(pthread_create(&tid, &attr, runInflate, &probe) == 0);
+  REQUIRE(pthread_join(tid, nullptr) == 0);
+  pthread_attr_destroy(&attr);
+
+  REQUIRE(probe.ok);
+  // std::string on both sides: doctest stringifies a const char* as a POINTER
+  // (CLAUDE.md records this for fs_contract.h), so a failure here would print an
+  // address instead of the text that differed.
+  CHECK(probe.out == std::string(kSentenceText));
+
+  // The stack grew DOWN from the top, so what is still the fill pattern at the
+  // bottom is what was never touched.
+  size_t untouched = 0;
+  while (untouched < usable && base[untouched] == kFill) ++untouched;
+  const size_t used = usable - untouched;
+  CAPTURE(used);
+
+  // The frame the panic reported is 6,608 bytes, plus the chain into it. Asserted
+  // as a CEILING, so this fails if a vendored-library bump or a compiler change
+  // grows the appetite -- which is the thing that would panic the device again.
+  //
+  // The device's loopTask is 16 KB (SET_LOOP_TASK_STACK_SIZE in shell/src/main.cpp)
+  // and spends ~1.5 KB above this call, so 10 KB is the budget this may not exceed
+  // while leaving room for the layers above it.
+  CHECK(used > 4096);   // the measurement is real, not a pattern-scan artifact
+  CHECK(used <= 10240);
 }
