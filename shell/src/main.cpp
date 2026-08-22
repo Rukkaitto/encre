@@ -1848,6 +1848,27 @@ void loop() {
     return;
   }
 
+  // A DROPPED RAW EDGE INVALIDATES WHAT WE THINK IS HELD, so say so before
+  // feeding the recognizer anything else. The input task drops transitions when
+  // its 32-deep queue fills, and a FULL paint blocks this loop for ~825 ms --
+  // long enough at a fast mash. A dropped PRESS costs nothing; a dropped RELEASE
+  // leaves the button latched down in the recognizer, which then either invents a
+  // Long for a button nobody is touching or hands the next press a stale
+  // timestamp so it classifies as Long. On a list that is the actions overlay
+  // instead of the item: a wrong action, from an input the user never made.
+  //
+  // The counter was already on the [alive] line, but a counter diagnoses after
+  // the wrong action; this acts on it. Compared against the last value rather
+  // than a flag because the task increments it whenever it likes.
+  static uint32_t lastDropped = 0;
+  const uint32_t droppedNow = rawSamplesDropped();
+  if (droppedNow != lastDropped) {
+    Serial.printf("[input] %lu raw edge(s) dropped -- forgetting held buttons\n",
+                  (unsigned long)(droppedNow - lastDropped));
+    lastDropped = droppedNow;
+    gPresses.forgetPresses();
+  }
+
   bool activity = false;
   RawSample s{};
   while (popRawSample(s)) {

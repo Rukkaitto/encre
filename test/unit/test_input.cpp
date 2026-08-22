@@ -191,3 +191,78 @@ TEST_CASE("a full queue drops the newest and counts it") {
   CHECK(n == 16);
   CHECK(r.dropped() == 4);
 }
+
+// --- Recovering from a dropped raw edge -------------------------------------
+//
+// Review finding 4. `shell/src/input_task.cpp` drops raw edges when its 32-deep
+// queue fills, which a paint makes possible because the loop that drains it is
+// blocked for the paint's whole duration (~825 ms on a FULL refresh, and longer
+// for anything Phase 3 puts in front of it).
+//
+// A dropped PRESS is harmless -- nothing happened, and nothing is claimed. A
+// dropped RELEASE is not: it leaves the recognizer's state latched `down`, and
+// from there two separate wrong things follow. `forgetPresses()` is the seam that
+// lets the shell say "I no longer know what is held", which is the truth after a
+// drop, and losing a press is strictly better than inventing one the user never
+// made.
+
+TEST_CASE("a dropped release would otherwise fire a Long the user never made") {
+  reader::PressRecognizer r;
+  r.setLongPressable(reader::buttonBit(reader::Button::Confirm));
+
+  r.sample(reader::Button::Confirm, true, 1000);
+  // The release at 1050 is DROPPED -- the shell never calls sample() for it.
+  // Without the forget, tick() past the long-press threshold invents a Long.
+  r.forgetPresses();
+  r.tick(1000 + reader::kLongPressMs + 50);
+
+  reader::InputEvent e{};
+  CHECK_FALSE(r.pop(e));
+}
+
+TEST_CASE("a dropped release does not make the NEXT short press a Long") {
+  reader::PressRecognizer r;
+  r.setLongPressable(reader::buttonBit(reader::Button::Confirm));
+
+  r.sample(reader::Button::Confirm, true, 1000);  // release dropped
+  r.forgetPresses();
+
+  // A genuine short press much later. Without the forget, the stale downAt of
+  // 1000 makes this release classify as Long -- on a list, that is "open the
+  // actions overlay" instead of "open the item".
+  r.sample(reader::Button::Confirm, true, 9000);
+  r.sample(reader::Button::Confirm, false, 9040);
+
+  reader::InputEvent e{};
+  REQUIRE(r.pop(e));
+  CHECK(e.button == reader::Button::Confirm);
+  CHECK(e.kind == reader::PressKind::Short);
+  CHECK_FALSE(r.pop(e));
+}
+
+TEST_CASE("forgetPresses keeps events already recognised") {
+  // The drop invalidates what is HELD, not what already happened. An event that
+  // was recognised before the queue overflowed is a press the user really made.
+  reader::PressRecognizer r;
+  r.sample(reader::Button::Down, true, 100);
+  r.sample(reader::Button::Down, false, 140);
+  r.forgetPresses();
+
+  reader::InputEvent e{};
+  REQUIRE(r.pop(e));
+  CHECK(e.button == reader::Button::Down);
+  CHECK(e.kind == reader::PressKind::Short);
+}
+
+TEST_CASE("a real release arriving after a forget is ignored, not misread") {
+  // The other order: we forgot, but the button was genuinely still down and its
+  // release does arrive. A release with no matching press must emit nothing --
+  // the same rule that makes a wake-button release on a fresh boot silent.
+  reader::PressRecognizer r;
+  r.sample(reader::Button::Back, true, 100);
+  r.forgetPresses();
+  r.sample(reader::Button::Back, false, 200);
+
+  reader::InputEvent e{};
+  CHECK_FALSE(r.pop(e));
+}

@@ -51,9 +51,27 @@ class PressRecognizer {
   // -- including in the middle of a hold, which is why a fired press is latched
   // as consumed rather than re-derived at release time.
   void setLongPressable(ButtonMask mask) { longPressable_ = mask; }
+
+  // Forget which buttons are held, WITHOUT emitting anything for them.
+  //
+  // For the one case where the caller knows it has lost raw edges: the shell's
+  // input task drops transitions when its queue fills, which a long paint makes
+  // possible. A dropped PRESS costs nothing. A dropped RELEASE leaves a button
+  // latched down here, and then either tick() fires a Long for a button the user
+  // is no longer touching, or the next press inherits the stale timestamp and
+  // classifies as Long -- which on a list means opening the actions overlay
+  // instead of the item.
+  //
+  // After a drop the honest state is "unknown", and this is how to say it. Any
+  // event already recognised is kept: the drop invalidates what is HELD, not what
+  // already happened. If a button really was down, its eventual release arrives
+  // with no matching press and sample() ignores it, so the cost is one lost press
+  // -- strictly better than one invented.
   ButtonMask longPressable() const { return longPressable_; }
 
   // One raw transition. `ms` is a millisecond clock and is allowed to wrap.
+  void forgetPresses();
+
   void sample(Button b, bool down, uint32_t ms);
 
   // Current time with no transition, so a hold can fire while still held. Call

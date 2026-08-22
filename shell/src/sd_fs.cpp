@@ -6,6 +6,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
+#include <iterator>
 #include <memory>
 #include <new>
 #include <utility>
@@ -365,7 +366,14 @@ bool SdFileSystem::list(std::string_view path, std::vector<reader::DirEntry>& ou
     return false;
   }
 
-  out.insert(out.end(), found.begin(), found.end());
+  // MOVED, not copied. `found` is built to the side so a read that fails part
+  // way appends nothing (the check above), and it dies at the closing brace --
+  // so copying meant every entry's name string existed twice, transiently, for
+  // no reason. On a folder with a few thousand files that second set is real
+  // memory on a part with a ~155 KB floor, and `-fno-exceptions` makes the
+  // allocation that fails an abort() with no diagnostic rather than a false.
+  out.insert(out.end(), std::make_move_iterator(found.begin()),
+             std::make_move_iterator(found.end()));
   return true;
 }
 

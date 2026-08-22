@@ -25,6 +25,11 @@ void PressRecognizer::emit(Button b, PressKind kind) {
   ++count_;
 }
 
+void PressRecognizer::forgetPresses() {
+  // Only the down-state, and deliberately not the event queue -- see the header.
+  for (State& s : state_) s = State{};
+}
+
 void PressRecognizer::sample(Button b, bool down, uint32_t ms) {
   const int i = static_cast<int>(b);
   if (i < 0 || i >= kButtonCount) return;
