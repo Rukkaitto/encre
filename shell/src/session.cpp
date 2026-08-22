@@ -12,6 +12,8 @@ namespace {
 // names are also what a future `nvs_get` invocation needs, which is why they live
 // in one place rather than inline at each call.
 constexpr const char* kNamespace = "encre_sess";
+// Short, because NVS caps a key at 15 characters.
+constexpr const char* kKeySlept = "slept";
 constexpr const char* kKeyVersion = "ver";
 constexpr const char* kKeyScreen = "scr";
 constexpr const char* kKeyFocus = "focus";
@@ -249,6 +251,35 @@ bool saveSession(const Session& s) {
   gCached = s;
   gCachedValid = true;
   return true;
+}
+
+bool markSleeping() {
+  Preferences prefs;
+  if (!prefs.begin(kNamespace, false)) {
+    Serial.printf("[session] could not open %s to record the sleep; the next boot will look "
+                  "like a cold start and land on Home\n",
+                  kNamespace);
+    Serial.flush();
+    return false;
+  }
+  const bool ok = prefs.putUChar(kKeySlept, 1) == sizeof(uint8_t);
+  prefs.end();
+  if (!ok) {
+    Serial.printf("[session] the sleep flag did not store; the next boot will land on Home\n");
+    Serial.flush();
+  }
+  return ok;
+}
+
+bool takeSleptFlag() {
+  Preferences prefs;
+  // Read-write, because taking the flag clears it -- see the header. A read-only
+  // open here would report a resume on every boot after the first.
+  if (!prefs.begin(kNamespace, false)) return false;
+  const uint8_t slept = prefs.getUChar(kKeySlept, 0);
+  if (slept) prefs.remove(kKeySlept);
+  prefs.end();
+  return slept != 0;
 }
 
 bool clearSession() {

@@ -58,3 +58,26 @@ bool saveSession(const Session& s);
 // Settings sub-screen after a week off is confusing, so the record is only for a
 // genuine wake.
 bool clearSession();
+
+// --- "Was that a resume, or a cold start?" -----------------------------------
+//
+// THE RESET REASON CANNOT ANSWER THAT ON THIS DEVICE, which is what these two
+// exist for. Measured: with USB attached the chip deep-sleeps and comes back as
+// ESP_RST_DEEPSLEEP, and on battery the same sleep leaves it fully powered down,
+// so pressing power produces ESP_RST_POWERON -- indistinguishable from a first-ever
+// boot. The restore is gated on "did we wake", so on battery it correctly declined
+// every time and then cleared a perfectly good record. The user saw "it always
+// comes back to Home", which is the symptom of the gate being right and the
+// question being unanswerable.
+//
+// So the intent is recorded before sleeping rather than inferred afterwards. A
+// deliberate sleep sets the flag; the next boot takes it (reading CLEARS it) and
+// treats itself as a resume regardless of what the reset reason says.
+//
+// TAKING IT CLEARS IT, deliberately: a boot that sets out to resume and then
+// panics must not resume again on the next boot, and again after that. One flag
+// buys exactly one resume.
+//
+//   key: "slept"  uint8  1 = the last shutdown was a deliberate sleep
+bool markSleeping();
+bool takeSleptFlag();

@@ -1587,7 +1587,11 @@ void setup() {
   // a black flash to replace a correct image with the same image. Tell the
   // driver the panel is already valid instead.
   const esp_sleep_wakeup_cause_t wake = esp_sleep_get_wakeup_cause();
-  const bool fromSleep = (wake != ESP_SLEEP_WAKEUP_UNDEFINED);
+  // TAKEN HERE, EARLY, AND ONCE: reading it clears it, so this is the only place
+  // that may ask. On battery the sleep powers the chip down, so `wake` is
+  // UNDEFINED on a resume and this flag is the only thing that knows otherwise.
+  const bool sleptDeliberately = takeSleptFlag();
+  const bool fromSleep = (wake != ESP_SLEEP_WAKEUP_UNDEFINED) || sleptDeliberately;
   // THE RESET REASON, not just the sleep cause, because `wake cause=0` has two
   // completely different meanings and this is what tells them apart:
   //
@@ -1613,8 +1617,9 @@ void setup() {
                         : rst == ESP_RST_BROWNOUT ? "BROWNOUT"
                         : rst == ESP_RST_EXT     ? "EXT (reset pin)"
                                                  : "other";
-  Serial.printf("[boot] reset reason=%d %s; sleep wake cause=%d\n", (int)rst, rstName,
-                (int)wake);
+  Serial.printf("[boot] reset reason=%d %s; sleep wake cause=%d; slept-flag=%d -> %s\n",
+                (int)rst, rstName, (int)wake, sleptDeliberately ? 1 : 0,
+                fromSleep ? "RESUME" : "cold start");
   Serial.flush();
   // Before anything overwrites it: this prints the PREVIOUS cycle and starts a
   // new record, so a fault that only happens unplugged is readable next time the
@@ -2148,6 +2153,11 @@ void setup() {
   // after every dispatch, so it is already current, and Power is handled BEFORE
   // dispatch (a power press changes no screen), so there is nothing left to
   // store at this point.
+  // LAST THING BEFORE THE LIGHTS GO OUT. On battery this call does not return and
+  // the chip loses power entirely, so the next boot's reset reason is POWERON and
+  // indistinguishable from a first-ever start. The flag is what makes the next
+  // boot know it was a resume; see session.h.
+  markSleeping();
   freeink::PowerManager::deepSleepUntilPowerButton();
 }
 
