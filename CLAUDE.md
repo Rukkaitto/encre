@@ -936,10 +936,17 @@ top of this spike.
     push it over again and it will start scrolling **without any code change**,
     because `renderSettings` reads `totalRows > rows` rather than assuming. Contents
     and Bookmarks are Phase 3's and will want it too.
-  - **Nothing but the unit tests exercises it.** Library's golden shows seven rows
-    of seven, so it does not overflow and the rail never draws in it;
-    `design/LibraryScrolled.dc.html` is the state's board and the simulator has no
-    subcommand for it yet, so `make compare` reports it unimplemented.
+  - **It is compared against its board now**, and for a while it was not: Library's
+    golden shows seven rows of seven, so it does not overflow and no rail draws in
+    it, and Settings stopped scrolling when Wi-Fi was cut. So the rail shipped with
+    unit tests and nothing that looked at a pixel. The `library_scrolled` state
+    needs a LONG list — a rail's proportions come from the list's length — so the
+    factory takes demo items and the state uses 24 books.
+    - **Reaching the board's window takes one press past it and one back.** Twelve
+      Downs is the obvious route and gives the wrong window: `ScrollWindow` scrolls
+      only as far as it must, so arriving from above lands the focus on the
+      window's BOTTOM edge. Both states are real; the board's has list on both
+      sides of the thumb, which is the better illustration.
 - **The session record stores a screen NAME, not an enum ordinal.** 2C-2 inserted
   three screens into the middle of `ScreenId` and a stored ordinal silently became
   a different screen. Names also mean `nvs_get encre_sess scr str` is readable on
@@ -956,7 +963,7 @@ worth knowing before changing it:
 | Home | `Main.dc.html` | Focus starts on the CONTINUE block (`-1`), not the menu. |
 | Home / empty | `HomeEmpty.dc.html` | A **variant**, not a screen: same `ScreenId`, same view model, same menu. |
 | Library | `Library.dc.html` | The only list that scrolls today, and the only screen with a rail. |
-| Library / scrolled | `LibraryScrolled.dc.html` | **The simulator cannot render this state**, so `make compare` never checks the rail. |
+| Library / scrolled | `LibraryScrolled.dc.html` | Reached by pressing PAST the focused row and back — arriving from above windows it differently. |
 | Item actions, Delete confirm | their own boards | Overlays; a focus move repaints the overlay alone. |
 | Book details | `BookDetails.dc.html` | Not an overlay, despite covering the Library. Its title **wraps**; everywhere else elides. |
 | Settings | `Settings.dc.html` | Draws nine rows and only three respond. |

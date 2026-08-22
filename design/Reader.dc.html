@@ -33,7 +33,27 @@
   </div>
 
   <div style="flex-grow: 1; overflow: hidden; font-size: 32px; line-height: 1.7; text-align: justify;">
-    <p style="margin: 0;"><span style="float: left; font-size: 102px; line-height: 0.86; font-weight: 600; padding: 6px 8px 0 0;">M</span>iss Brooke had that kind of beauty which seems to be thrown into relief by poor dress. Her hand and wrist were so finely formed that she could wear sleeves not less bare of style than those in which the Blessed Virgin appeared to Italian painters.</p>
+    <!-- NO DROP CAP. This opened with a 102px floated `M`, and it is dropped from
+         V1 rather than deferred -- the mechanism note is kept because it is the
+         interesting part and whoever brings it back will need it:
+
+           * A drop cap is a BOUNDED set -- 26 letters and a few quote marks --
+             where body text's size set is unbounded, which is exactly why the
+             reader rasterises at runtime. So it wants a PRE-RENDERED asset, like
+             the chrome ramp: the opposite mechanism from the one the body face
+             uses, on the same screen.
+           * At 102px it does not fit the glyph cache. 2bpp is ceil(102/4)*102 =
+             2,652 bytes for ONE glyph, against an 8 KB arena that printable ASCII
+             at ppem 29 already fills to 7,785. Rasterising it would evict a third
+             of the page and re-rasterise those glyphs at ~3,794us each.
+           * `float: left` is a layout feature nothing else on this device needs:
+             the first N lines indent by the cap's width, N depending on its height
+             and the line height. One ornament is a thin reason to put a float in
+             the layout engine.
+
+         Justification stays, because that is not ornament -- it is what the
+         paragraph looks like. -->
+    <p style="margin: 0;">Miss Brooke had that kind of beauty which seems to be thrown into relief by poor dress. Her hand and wrist were so finely formed that she could wear sleeves not less bare of style than those in which the Blessed Virgin appeared to Italian painters.</p>
   </div>
 
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0 16px 0; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">

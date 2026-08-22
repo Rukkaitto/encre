@@ -26,7 +26,7 @@ behaviour in front of us while the design can still move.
 |---|---|---|
 | Body face | Literata, **32px**, `line-height: 1.7` | `ScalableFont` does any size — 3A |
 | Alignment | **`text-align: justify`** | No. `drawText` has a fractional pen and `Tracking`; justification is space distribution on top |
-| Drop cap | **102px**, `float: left`, weight 600 | No, and it wants its own answer — below |
+| Drop cap | ~~102px floated~~ | **DROPPED from V1** — see below and the board |
 | Header | `MIDDLEMARCH` / `CH. 01`, Space Grotesk meta | Yes |
 | Footer | `6%`, a 210x5 bar, `53 / 890` | The bar is `outlineRect` plus a fill |
 
@@ -37,9 +37,10 @@ board — and this project's pixel diff is worth more than the week it would sav
 `drawText` already accumulates the pen in 1/64 px and rounds once, so the work is
 distributing a line's slack across its word gaps rather than a new text path.
 
-### The drop cap is OUT of 3B, and it wants a different mechanism
+### The drop cap is DROPPED from V1, not deferred
 
-Deferred, with the reasoning recorded because it is not "we ran out of time":
+The board no longer draws one, so `make compare` has no gap to explain. The
+reasoning is kept because whoever brings it back will need it:
 
 - **A drop cap is a BOUNDED set.** It is the first letter of a chapter, so at most
   26 glyphs plus a handful of quote marks — unlike body text, whose size set is
@@ -54,8 +55,8 @@ Deferred, with the reasoning recorded because it is not "we ran out of time":
   One screen is a thin reason to put a float in the layout engine, and 3C can add
   it once with the other block features.
 
-So 3B renders the chapter's first paragraph without a drop cap, `make compare`
-shows the difference, and it is a KNOWN gap rather than a surprise.
+Justification stays, because that is not ornament -- it is what the paragraph
+looks like.
 
 ## The layers, and what each one may not do
 
@@ -140,7 +141,7 @@ every other screen, so `implement-screen`'s checks apply unchanged.
 
 - No pagination cache, and **no whole-book pagination**: 3A measured 17.3 us/char,
   so a 1.8M-character novel is ~31 s before a first page. Per-chapter, lazily.
-- No chapter navigation, no TXT, no images, no typography settings, no drop cap.
+- No chapter navigation, no TXT, no images, no typography settings.
 - **The glyph cache must be sized for ppem 32, not left at 8 KB.** 3A measured
   printable ASCII filling 7,785 of 8,192 at ppem 29 with zero evictions and no
   margin; bytes go as ppem^2, so 32px needs ~40% more for the same set before a
