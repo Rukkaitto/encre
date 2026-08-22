@@ -75,13 +75,16 @@ fonts:
 # it is rasterised at runtime from a TTF in flash -- see
 # core/include/reader/scalablefont.h. What ships is therefore a font FILE, and
 # ttfprep.py resolves its variation axes and strips the tables stb_truetype
-# cannot read: 955,132 bytes of variable Literata become 132,724 of static
-# Literata with every one of its 1789 glyphs intact. The 822,408 bytes that go
+# cannot read: 955,132 bytes of variable Literata become 169,144 of static
+# Literata with every one of its 1789 glyphs intact. The 785,988 bytes that go
 # are variation deltas and layout tables the device could never have turned into
-# a pixel -- including 104 KB of GPOS, and that one is worth reading ttfprep.py's
-# docstring about before assuming it was a mistake. Axes are pinned explicitly
-# here for the same reason fontc.py's are, and to the same values
-# literata_18.rfnt uses.
+# a pixel -- including 104 KB of GPOS. GPOS still goes, but its KERNING no
+# longer goes with it: ttfprep.py resolves the Extension lookups stb cannot
+# follow and re-emits the pairs as a legacy `kern` table, 6064 pairs over
+# fontc.py's subset for 36,402 bytes. Read ttfprep.py's docstring before
+# assuming either half of that was a mistake. Axes are pinned explicitly here
+# for the same reason fontc.py's are, and to the same values literata_18.rfnt
+# uses.
 	$(PYTHON) tools/ttfprep.py assets/fonts/Literata.ttf --axis wght=400 --axis opsz=12 --out assets/built/literata_body.ttf
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_400_10pt.rfnt --out shell/src/font_meta400.h --symbol kFontMeta400
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_10pt.rfnt --out shell/src/font_meta500.h --symbol kFontMeta500

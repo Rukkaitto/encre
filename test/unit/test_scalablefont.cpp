@@ -343,32 +343,50 @@ TEST_CASE("ScalableFont refuses what it cannot draw with, rather than trying") {
   CHECK(face.glyph(U'a').has_value());
 }
 
-// --- Kerning: a known gap, pinned rather than assumed ------------------------
+// --- Kerning: stb must actually consume the table ttfprep synthesises --------
 //
-// This test asserts ZERO, which is not what it was written to assert. The
-// finding is worth stating precisely because it is easy to assume the opposite:
+// This test used to assert ZERO, and the zero was real. The finding, and why the
+// inversion needs pinning rather than trusting:
 //
-//   - Literata has no legacy `kern` table. Its kerning is in GPOS.
-//   - stb_truetype DOES read pair kerning out of GPOS -- but only LookupType 2,
-//     PairPos, formats 1 and 2.
-//   - Literata's `kern` feature is **LookupType 9, Extension Positioning**,
-//     which stb does not implement. So stbtt_GetGlyphKernAdvance finds nothing.
+//   - Literata has no legacy `kern` table of its own. Its kerning is in GPOS.
+//   - stb_truetype DOES read pair positioning out of GPOS -- but only
+//     LookupType 2, and only where ValueFormat1 is exactly 4.
+//   - Literata's `kern` feature is **LookupType 9, Extension Positioning**, and
+//     before instancing its ValueFormat1 is 68 (XAdvance | XAdvDevice). stb
+//     fails it twice over, so stbtt_GetGlyphKernAdvance returned 0 for every
+//     pair in the face and this project had no kerning anywhere.
 //
-// Verified against the bytes for ten pairs, out of the ORIGINAL variable file as
-// well as the prepared one -- so tools/ttfprep.py dropping GPOS is not what lost
-// this, and keeping the table would have been 104 KB of flash for nothing.
+// tools/ttfprep.py now resolves the extension lookups, expands both PairPos
+// formats over fontc.py's subset, and writes the result back as a **legacy
+// `kern` table, format 0** -- the one form stb reads. 6064 pairs, 36402 bytes.
 //
-// The chrome ramp is in the same position for a different reason: FreeType's
-// get_kerning reads only the legacy `kern` table, Space Grotesk has none, and
-// all eleven committed .rfnt assets therefore carry zero kern pairs (see
-// core/src/font.cpp). Body text is not a regression against chrome; it is the
-// same gap, and it now has two implementations rather than one.
+// THE ASSERTION THAT MATTERS is that stb consumes it, asked of stb directly
+// rather than through our wrapper: `stbtt_GetKerningTableLength` and
+// `stbtt_GetCodepointKernAdvance` on the shipped bytes, in this file's own
+// differently-configured copy of stb. A future face whose kern feature moved,
+// or a future stb whose legacy reader changed, would put the zero back
+// silently -- the glyphs would still draw and every golden but one would still
+// pass -- and this is what says so.
 //
-// The fix, when typesetting is the task: synthesise a legacy `kern` table in
-// ttfprep.py from the GPOS pairs. stb reads that format happily and it would
-// cost a fraction of 104 KB. When it lands, this test inverts.
-TEST_CASE("kerning is zero on this face, and it is stb's Extension gap not ours") {
-  Body b(64);  // large, so a real kern would be well clear of a rounding
+// Two conditions are load-bearing and neither is obvious:
+//   - The table must be ASCENDING by (leftGID << 16) | rightGID, because stb
+//     bisects on that key. Unsorted misses pairs rather than failing.
+//   - The face must have NO GPOS, because stb is `if (gpos) ... else if (kern)`
+//     -- a face that keeps GPOS never reaches the legacy table at all. That is
+//     why ttfprep refuses --keep-gpos alongside the synthesis.
+TEST_CASE("the shipped face kerns, and stb is what reads it") {
+  std::vector<uint8_t> bytes = bodyTtf();
+  stbtt_fontinfo info;
+  REQUIRE(stbtt_InitFont(&info, bytes.data(), stbtt_GetFontOffsetForIndex(bytes.data(), 0)));
+
+  // stb found a horizontal format-0 subtable and will bisect it. Zero here is
+  // the whole regression: no table, or one stb rejected.
+  const int tableLength = stbtt_GetKerningTableLength(&info);
+  CHECK(tableLength > 0);
+  CHECK(tableLength == 6064);
+
+  // Design units, straight out of stb. Negative because a kern TUCKS -- a sign
+  // flip would widen every one of these pairs and still be "non-zero".
   for (auto pair : {std::pair<char32_t, char32_t>{U'A', U'V'},
                     {U'T', U'o'},
                     {U'W', U'a'},
@@ -377,16 +395,46 @@ TEST_CASE("kerning is zero on this face, and it is stb's Extension gap not ours"
                     {U'y', U','},
                     {U'T', U'a'},
                     {U'L', U'T'},
-                    {U'o', U'v'},
-                    {U'f', U'i'}}) {
-    CHECK(b.face.kerning(pair.first, pair.second) == 0);
+                    {U'o', U'v'}}) {
+    CAPTURE(static_cast<uint32_t>(pair.first));
+    CAPTURE(static_cast<uint32_t>(pair.second));
+    const int units = stbtt_GetCodepointKernAdvance(&info, static_cast<int>(pair.first),
+                                                    static_cast<int>(pair.second));
+    CHECK(units < 0);
   }
-  // What must hold regardless of whether the face kerns: measure() applies
-  // exactly the adjustment kerning() reports, so the day a kern appears, the
-  // pen picks it up in both the wrap and the draw rather than in one of them.
+  // `fi` is a deliberate exception and worth naming so it is not read as a
+  // miss: Literata kerns that pair at 0 and handles it with a GSUB ligature
+  // instead, which ttfprep drops because stb does not do substitution either.
+  CHECK(stbtt_GetCodepointKernAdvance(&info, 'f', 'i') == 0);
+
+  // And ScalableFont reports exactly stb's number, scaled by its one rounding
+  // rule. At 64px every pair above clears a whole pixel; at a small size some
+  // legitimately round to zero, which is the .rfnt path's problem too and is
+  // stated in tools/fontc.py.
+  Body b(64);
+  const float scale = stbtt_ScaleForMappingEmToPixels(&info, 64.0f);
+  for (auto pair : {std::pair<char32_t, char32_t>{U'A', U'V'},
+                    {U'T', U'o'},
+                    {U'W', U'a'},
+                    {U'L', U'T'}}) {
+    const int units = stbtt_GetCodepointKernAdvance(&info, static_cast<int>(pair.first),
+                                                    static_cast<int>(pair.second));
+    const float exact = units * scale;
+    const int expect = exact >= 0.0f ? static_cast<int>(exact + 0.5f)
+                                     : -static_cast<int>(-exact + 0.5f);
+    CAPTURE(static_cast<uint32_t>(pair.first));
+    CHECK(b.face.kerning(pair.first, pair.second) == expect);
+    CHECK(b.face.kerning(pair.first, pair.second) < 0);
+  }
+
+  // What must hold whether or not the face kerns: measure() applies exactly the
+  // adjustment kerning() reports, so the wrap and the draw pick up the same pen.
+  // Now that the adjustment is non-zero this is a real equation rather than
+  // 0 == 0 -- "AV" is strictly narrower than "A" plus "V".
   const int sum = b.face.measure("A") + b.face.measure("V");
   const int pair = b.face.measure("AV");
   CHECK(pair == sum + b.face.kerning(U'A', U'V'));
+  CHECK(pair < sum);
 }
 
 TEST_CASE("the prepared TTF renders identically to the variable font it came from") {
@@ -422,11 +470,16 @@ TEST_CASE("the prepared TTF renders identically to the variable font it came fro
         REQUIRE(a.coverage(*ga, col, row) == b.coverage(*gb, col, row));
   }
   CHECK(compared > 200);
-  // And kerning agrees too -- at zero for both, which is the point: dropping
-  // GPOS took nothing away, because stb could not read Literata's Extension
-  // lookups out of it either way. See the kerning test above.
-  CHECK(a.kerning(U'A', U'V') == b.kerning(U'A', U'V'));
-  CHECK(a.kerning(U'T', U'o') == b.kerning(U'T', U'o'));
+  // Kerning is the ONE thing that deliberately does not agree, and the
+  // disagreement is the tool's whole point. The original file's kerning is in
+  // GPOS behind an Extension lookup that stb cannot follow, so it reports zero;
+  // the prepared file carries the same pairs as a legacy `kern` table, which
+  // stb reads. Dropping GPOS therefore took nothing away and the synthesis put
+  // something real back. See the kerning test above.
+  CHECK(b.kerning(U'A', U'V') == 0);
+  CHECK(b.kerning(U'T', U'o') == 0);
+  CHECK(a.kerning(U'A', U'V') < 0);
+  CHECK(a.kerning(U'T', U'o') < 0);
 }
 
 TEST_CASE("chrome's ramp and the body face are one text path") {

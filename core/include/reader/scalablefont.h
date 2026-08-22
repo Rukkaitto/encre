@@ -98,9 +98,19 @@ class ScalableFont : public GlyphSource {
   // test_scalablefont.cpp asserts it on cacheStats() rather than trusting it.
   std::optional<int> advance(char32_t cp) const override;
 
-  // GPOS pair kerning, which is where Literata keeps its (it has no `kern`
-  // table). Scaled and rounded the same way an advance is, so measure() and
-  // drawText() accumulate identical pens.
+  // Pair kerning out of the shipped face's legacy `kern` table. Literata has no
+  // such table of its own -- its kerning is in GPOS, behind LookupType 9
+  // Extension lookups that stb_truetype does not implement, so asking stb for
+  // GPOS kerning here returned 0 for every pair in the face. tools/ttfprep.py
+  // resolves those lookups and writes the pairs back as a format-0 `kern`
+  // table, which is the form stb does read; it also drops GPOS, which is what
+  // lets stb reach the legacy table at all (stbtt_GetGlyphKernAdvance is
+  // `if (gpos) ... else if (kern)`).
+  //
+  // Scaled and rounded the same way an advance is, so measure() and drawText()
+  // accumulate identical pens. Whole pixels, so a pair whose adjustment is
+  // under half a pixel at the current size reports 0 -- that is the format's
+  // resolution, not a missing pair.
   int kerning(char32_t left, char32_t right) const override;
 
   // --- What the cache is doing ----------------------------------------------
