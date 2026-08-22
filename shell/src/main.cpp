@@ -1428,8 +1428,23 @@ void setup() {
   // silence -- and the whole log is reproducible by resetting with the port
   // already open.
   {
-    constexpr uint32_t kSerialCapMs = 2500;    // the old constant, as a ceiling
-    constexpr uint32_t kSerialGraceMs = 400;   // long enough for the peripheral to notice a host
+    // THE CAP IS SHORT ON PURPOSE, and the first version of this got it wrong.
+    //
+    // Keeping the old 2500 as the ceiling looked conservative and was not:
+    // `Serial` is only true once a host has OPENED the port, so a device plugged
+    // into a charger -- or into a computer with no terminal running -- has
+    // isPlugged() true and Serial false, and waited the entire 2500 ms. That is
+    // the overnight-charging case and the wake-with-cable case, which is to say
+    // most of them. It was no better than the constant it replaced and it made a
+    // wake feel slow.
+    //
+    // So the wait is now bounded by what it is actually for: letting CDC come up
+    // when somebody is already watching. A terminal already open answers in ~0 ms
+    // (the common dev case, since you reset while watching). Anything else pays
+    // the cap once and gets on with booting. A terminal that attaches LATER loses
+    // the first few lines, which is recoverable by resetting with the port open.
+    constexpr uint32_t kSerialCapMs = 400;
+    constexpr uint32_t kSerialGraceMs = 150;  // for the peripheral to notice a host at all
     const uint32_t t0 = millis();
     while (millis() - t0 < kSerialCapMs) {
       if (Serial) break;  // a host has the port open; nothing left to wait for
@@ -1442,8 +1457,9 @@ void setup() {
   // Reported because it is the one boot cost that varies with something outside
   // the firmware, and a slow boot with a big number here is a USB question rather
   // than a firmware one.
-  Serial.printf("[boot] waited %lums for USB CDC (cap 2500, plugged=%d, open=%d)\n",
-                (unsigned long)gSerialWaitMs, (int)HWCDC::isPlugged(), Serial ? 1 : 0);
+  Serial.printf("[boot] waited %lums for USB CDC (cap %lu, plugged=%d, open=%d)\n",
+                (unsigned long)gSerialWaitMs, 400ul, (int)HWCDC::isPlugged(),
+                Serial ? 1 : 0);
   Serial.flush();
 
   detectAndSelectBoard();

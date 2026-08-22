@@ -21,11 +21,43 @@ def main():
     ap.add_argument("--seconds", type=float, default=10.0)
     ap.add_argument("--no-reset", action="store_true",
                     help="just listen; do not pulse the reset line")
+    ap.add_argument("--wait-for-port", type=float, default=0.0, metavar="SECONDS",
+                    help="poll for the port to appear, for up to SECONDS, before "
+                         "listening. This is how a WAKE is captured: deep sleep "
+                         "powers down USB, so the port disappears while the device "
+                         "sleeps and re-enumerates when it wakes. Start this first, "
+                         "then press power -- attaching after the wake misses "
+                         "setup() entirely, which is the half you want.")
     args = ap.parse_args()
 
-    port = args.port or next(iter(sorted(glob.glob("/dev/cu.usbmodem*"))), None)
+    def find_port():
+        return args.port if args.port else next(
+            iter(sorted(glob.glob("/dev/cu.usbmodem*"))), None)
+
+    port = find_port()
+    if port is None and args.wait_for_port > 0:
+        print(f"# waiting up to {args.wait_for_port:g}s for a port to appear "
+              f"— press the power button now", flush=True)
+        deadline = time.monotonic() + args.wait_for_port
+        while time.monotonic() < deadline:
+            port = find_port()
+            if port:
+                break
+            time.sleep(0.05)
+        # The port node can appear a moment before it will accept an open, so a
+        # first open often fails with EBUSY or ENOENT. Retrying briefly is the
+        # difference between catching the boot and reporting a spurious error.
+        if port:
+            for _ in range(40):
+                try:
+                    probe = serial.Serial(port)
+                    probe.close()
+                    break
+                except Exception:
+                    time.sleep(0.05)
     if not port:
-        sys.exit("no /dev/cu.usbmodem* found — wake the device or replug USB")
+        sys.exit("no /dev/cu.usbmodem* found — wake the device or replug USB "
+                 "(or pass --wait-for-port 30 and press power)")
     print(f"# port {port}, listening {args.seconds:g}s", flush=True)
 
     s = serial.Serial()
