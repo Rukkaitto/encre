@@ -442,6 +442,49 @@ static SettingsVerdict settingsFailure(reader::FileSystem& fs) {
           false};
 }
 
+// Push `gSettings` into the two objects that act on it. Factored out of
+// loadAndApplySettings because the Settings SCREEN needs exactly this and nothing
+// else: it has already changed the struct, and re-reading the file would undo the
+// change it is trying to make.
+static void applySettings() {
+  gRefresh.setCadence(gSettings.fullRefreshEvery);
+  gRefresh.setFullOnTransition(gSettings.fullOnTransition);
+  gIdle.setTimeout(gSettings.sleepAfterMs);
+}
+
+// Where the Settings screen's changes go. See reader::SettingsSink: this is the
+// one place that both APPLIES a change and persists it, which is why the interface
+// has a single method rather than two.
+//
+// Applied FIRST and persisted second, deliberately. The user has pressed a button
+// and expects the device to behave differently; a card that has gone read-only
+// must not also cost them the change until the next boot. So the refresh policy
+// and the idle timer are updated whatever the file does, and a failed write is
+// reported as a failed WRITE rather than as a setting that did not take.
+class ShellSettingsSink : public reader::SettingsSink {
+ public:
+  bool commit(const reader::Settings& s) override {
+    gSettings = s;
+    applySettings();
+    // The factory holds a COPY, because it is what constructs the screen and the
+    // screen is handed its starting values. Without this, closing Settings and
+    // reopening it would show the values from before the change -- the struct
+    // would be right, the refresh policy would be right, and the screen would be
+    // the one thing still lying.
+    gFactory.setSettings(gSettings);
+    const bool wrote = reader::saveSettings(gSd, gSettings);
+    Serial.printf("[settings] sleepAfterMs=%lu fullRefreshEvery=%d fullOnTransition=%d -> %s\n",
+                  (unsigned long)gSettings.sleepAfterMs, gSettings.fullRefreshEvery,
+                  (int)gSettings.fullOnTransition,
+                  wrote ? "applied and saved"
+                        : "APPLIED BUT NOT SAVED (the change is live; it will not survive a "
+                          "reboot)");
+    Serial.flush();
+    return wrote;
+  }
+};
+static ShellSettingsSink gSettingsSink;
+
 // Read the settings and apply them. Safe with an unmounted filesystem: every
 // FileSystem method fails when mounted() is false, so loadSettings() falls back
 // to defaults and this reports exactly that.
@@ -453,9 +496,7 @@ static void loadAndApplySettings() {
     const SettingsVerdict v = settingsFailure(gSd);
     Serial.printf("[boot] settings %s: %s\n", v.defaulted ? "DEFAULTED" : "CORRECTED", v.reason);
   }
-  gRefresh.setCadence(gSettings.fullRefreshEvery);
-  gRefresh.setFullOnTransition(gSettings.fullOnTransition);
-  gIdle.setTimeout(gSettings.sleepAfterMs);
+  applySettings();
   Serial.printf("[boot] settings in force: sleepAfterMs=%lu fullRefreshEvery=%d "
                 "fullOnTransition=%d\n",
                 (unsigned long)gSettings.sleepAfterMs, gSettings.fullRefreshEvery,
@@ -960,6 +1001,7 @@ static void handleRetry() {
   }
   gStorageUsable = true;
   loadAndApplySettings();  // the settings live on the card that just appeared
+  gFactory.setSettings(gSettings);  // ...and the factory's copy is now stale
   // ...and it may have no /books either. Before buildHomeApp() below, which
   // counts what is in there for Home's LIBRARY row.
   ensureBooksDir("retry");
@@ -1964,6 +2006,24 @@ void setup() {
   Serial.printf("[boot] Library fits %d rows on this %dx%d logical canvas "
                 "(panel is %dx%d native)\n",
                 libraryRows, logicalW, logicalH, panelW, panelH);
+
+  // Settings, and it takes THREE numbers rather than one because its items are not
+  // all the same height -- the theme owns the box model, the screen owns the item
+  // table and does the counting. Same failure mode as the Library's if it is
+  // skipped: the screen correctly renders nothing, because a screen must not draw
+  // a row it was not given room for.
+  //
+  // The LOGICAL height, not the panel's. libraryVisibleRows was handed the native
+  // landscape height once and the Library showed four rows instead of seven; the
+  // assertion above now makes that impossible to repeat silently, but the same
+  // variable is the right one here for the same reason.
+  int settingsListH = 0, settingsRowH = 0, settingsHeaderH = 0;
+  gTheme.settingsMetrics(logicalH, fonts, settingsListH, settingsRowH, settingsHeaderH);
+  gFactory.setSettingsMetrics(settingsListH, settingsRowH, settingsHeaderH);
+  gFactory.setSettingsSink(&gSettingsSink);
+  gFactory.setSettings(gSettings);
+  Serial.printf("[boot] Settings list %dpx: rows %dpx, section headers %dpx\n", settingsListH,
+                settingsRowH, settingsHeaderH);
   Serial.flush();
 
   // The shell's own view of storage, which is what roots the app and what the
