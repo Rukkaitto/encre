@@ -78,6 +78,10 @@ std::string_view BookEntry::title() const {
                                : std::string_view(titleOverride);
 }
 
+// Set by scan(), read by lastScanDropped(). A single-threaded screen calls one
+// then the other; nothing here is reentrant and nothing else writes it.
+size_t gLastScanDropped = 0;
+
 int BookList::countBooks(FileSystem& fs, std::string_view path) {
   std::vector<DirEntry> raw;
   if (!fs.list(path, raw)) return -1;
@@ -89,6 +93,8 @@ int BookList::countBooks(FileSystem& fs, std::string_view path) {
     if (!e.isDir && isBook(e.name)) ++n;
   return n;
 }
+
+size_t BookList::lastScanDropped() { return gLastScanDropped; }
 
 int BookList::countLibrary(FileSystem& fs, std::string_view path) {
   // Works off the RAW listing, not scan(). It used to call scan(), which builds a
@@ -134,7 +140,17 @@ bool BookList::scan(FileSystem& fs, std::string_view path, std::vector<BookEntry
   std::vector<DirEntry> raw;
   if (!fs.list(path, raw)) return false;
 
-  out.reserve(raw.size());
+  // Reserve from the count of rows we will actually KEEP, not from the listing.
+  // A macOS-copied card carries a `._name` AppleDouble beside every book, so
+  // reserving raw.size() over-allocated by 2x on a real 203-book card -- 22 KB of
+  // slots for 11 KB of rows. Counting first is one pass over a vector already in
+  // RAM, against an allocation charged per book.
+  size_t keep = 0;
+  for (const DirEntry& e : raw)
+    if (!isHidden(e.name) && (e.isDir || isBook(e.name))) ++keep;
+  gLastScanDropped = keep > kMaxLibraryRows ? keep - kMaxLibraryRows : 0;
+  out.reserve(keep < kMaxLibraryRows ? keep : kMaxLibraryRows);
+
   for (DirEntry& e : raw) {
     if (isHidden(e.name)) continue;
     // A folder is a place to descend into, so its name says nothing about
@@ -149,6 +165,7 @@ bool BookList::scan(FileSystem& fs, std::string_view path, std::vector<BookEntry
     //
     // No title is built either. It is derived from the name by BookEntry::title()
     // now, so this loop allocates once per book instead of three times.
+    if (out.size() >= kMaxLibraryRows) break;
     out.push_back(BookEntry{std::move(e.name), std::string(), e.isDir,
                             e.isDir ? 0u : e.size});
   }

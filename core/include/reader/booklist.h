@@ -16,6 +16,28 @@ class FileSystem;
 // same on the desktop as on the device.
 constexpr const char* kBooksRoot = "/books";
 
+// HOW MANY BOOKS ONE FOLDER MAY LIST, and the number is measured rather than
+// chosen. At 203 books on real hardware a row costs 167 bytes retained and a
+// directory listing costs 2.7 ms PER ENTRY -- so 256 rows is ~41 KB against a
+// ~155 KB heap floor, and ~1.4 s per listing. Both are affordable; 1024 is
+// neither (~167 KB, and ~5.5 s per listing, which `rescan()` pays after every
+// delete).
+//
+// TIME BINDS BEFORE MEMORY HERE, which is the opposite of what the arithmetic
+// suggested, and it is why the cap is this low. It is a V1 limit and not a
+// considered maximum: what lifts it is a persisted sorted index, because the
+// reason the whole list must be in RAM is SORTING -- seven rows need seven
+// entries, sorted order needs every key.
+constexpr size_t kMaxLibraryRows = 256;
+
+// And a separate, higher ceiling on the raw listing, because the two resources
+// are not the same. Time and the DirEntry vector are charged per ENTRY, books or
+// not -- a folder of 5000 cover images pays for 5000 -- and macOS makes that
+// routine rather than pathological: copying to a FAT card writes a `._name`
+// AppleDouble beside every file, so a real 203-book card measured 406 entries.
+// Hence 2x the row cap plus room, not the same number.
+constexpr size_t kMaxDirEntries = 1024;
+
 // One row of the Library: a file or folder on the card that the user might want
 // to open.
 //
@@ -64,6 +86,14 @@ class BookList {
   // gone. `out` is cleared either way, so a failed rescan cannot leave the
   // previous card's books on screen.
   static bool scan(FileSystem& fs, std::string_view path, std::vector<BookEntry>& out);
+
+  // How many rows the last scan() DROPPED for exceeding kMaxLibraryRows, or 0.
+  //
+  // Non-zero means the user has books this screen is not showing, which they are
+  // entitled to know -- surfacing it needs a board, so for now it is a log line
+  // and this accessor. Silent truncation is the failure mode this project has
+  // already shipped once, in a card probe that kept reporting success.
+  static size_t lastScanDropped();
 
   // How many books a directory holds, or -1 when it could not be read.
   //

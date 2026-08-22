@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <vector>
@@ -480,4 +481,74 @@ TEST_CASE("countLibrary counts what scan lists, without building or sorting it")
 
   CHECK(reader::BookList::countLibrary(fs, "/books") == viaScan);
   CHECK(viaScan == 5);  // 3 beside the folder + 2 inside it
+}
+
+// --- The library cap --------------------------------------------------------
+//
+// 256 rows, from measurement rather than taste: at 203 books on real hardware a
+// row costs 167 B retained and a listing costs 2.7 ms PER ENTRY, so 256 is ~41 KB
+// and ~1.4 s while 1024 is ~167 KB and ~5.5 s -- and rescan() pays that after
+// every delete. Time binds before memory, which is the opposite of what the
+// arithmetic predicted.
+
+TEST_CASE("scan stops at the row cap and says how many it dropped") {
+  FakeFileSystem fs;
+  const size_t extra = 40;
+  for (size_t i = 0; i < reader::kMaxLibraryRows + extra; ++i) {
+    char name[64];
+    std::snprintf(name, sizeof(name), "/books/book_%04zu.epub", i);
+    fs.writeAll(name, "x");
+  }
+
+  std::vector<reader::BookEntry> rows;
+  REQUIRE(reader::BookList::scan(fs, "/books", rows));
+  CHECK(rows.size() == reader::kMaxLibraryRows);
+  CHECK(reader::BookList::lastScanDropped() == extra);
+}
+
+TEST_CASE("a library under the cap drops nothing") {
+  FakeFileSystem fs;
+  fs.writeAll("/books/one.epub", "x");
+  fs.writeAll("/books/two.epub", "x");
+
+  std::vector<reader::BookEntry> rows;
+  REQUIRE(reader::BookList::scan(fs, "/books", rows));
+  CHECK(rows.size() == 2);
+  CHECK(reader::BookList::lastScanDropped() == 0);
+}
+
+TEST_CASE("non-books do not consume the cap") {
+  // The cap is on ROWS, and the count that drives the reserve is of rows too --
+  // otherwise a macOS-copied card, which carries a `._name` beside every book,
+  // would report half its library dropped when nothing was.
+  FakeFileSystem fs;
+  for (size_t i = 0; i < reader::kMaxLibraryRows; ++i) {
+    char name[64], sidecar[80];
+    std::snprintf(name, sizeof(name), "/books/book_%04zu.epub", i);
+    std::snprintf(sidecar, sizeof(sidecar), "/books/._book_%04zu.epub", i);
+    fs.writeAll(name, "x");
+    fs.writeAll(sidecar, "x");  // AppleDouble: hidden, never a row
+  }
+
+  std::vector<reader::BookEntry> rows;
+  REQUIRE(reader::BookList::scan(fs, "/books", rows));
+  CHECK(rows.size() == reader::kMaxLibraryRows);
+  CHECK(reader::BookList::lastScanDropped() == 0);
+}
+
+TEST_CASE("the dropped count is reset by the next scan, not accumulated") {
+  FakeFileSystem fs;
+  for (size_t i = 0; i < reader::kMaxLibraryRows + 5; ++i) {
+    char name[64];
+    std::snprintf(name, sizeof(name), "/books/b%04zu.epub", i);
+    fs.writeAll(name, "x");
+  }
+  std::vector<reader::BookEntry> rows;
+  REQUIRE(reader::BookList::scan(fs, "/books", rows));
+  REQUIRE(reader::BookList::lastScanDropped() == 5);
+
+  FakeFileSystem small;
+  small.writeAll("/books/only.epub", "x");
+  REQUIRE(reader::BookList::scan(small, "/books", rows));
+  CHECK(reader::BookList::lastScanDropped() == 0);
 }
