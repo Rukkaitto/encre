@@ -84,20 +84,20 @@ TEST_CASE("FontSet refuses an asset that is not the role's face") {
   // that says 400. This is the mis-binding that used to be undetectable -- and
   // it is one line in the shell -- so it has to be a load failure, not a screen
   // that is quietly 19% too heavy.
-  CHECK_FALSE(fonts.load(reader::Role::Body400, r.body500.data(), r.body500.size()));
-  CHECK(fonts.load(reader::Role::Body400, r.body400.data(), r.body400.size()));
-  CHECK_FALSE(fonts.load(reader::Role::Body500, r.body400.data(), r.body400.size()));
+  CHECK_FALSE(fonts.load(reader::Role::Body400, r.blob_Body500.data(), r.blob_Body500.size()));
+  CHECK(fonts.load(reader::Role::Body400, r.blob_Body400.data(), r.blob_Body400.size()));
+  CHECK_FALSE(fonts.load(reader::Role::Body500, r.blob_Body400.data(), r.blob_Body400.size()));
 
   // The same for a size mismatch, in both directions.
-  CHECK_FALSE(fonts.load(reader::Role::Label500, r.body500.data(), r.body500.size()));
-  CHECK_FALSE(fonts.load(reader::Role::Title700, r.display700.data(), r.display700.size()));
-  CHECK_FALSE(fonts.load(reader::Role::Display700, r.title700.data(), r.title700.size()));
+  CHECK_FALSE(fonts.load(reader::Role::Label500, r.blob_Body500.data(), r.blob_Body500.size()));
+  CHECK_FALSE(fonts.load(reader::Role::Title700, r.blob_Display700.data(), r.blob_Display700.size()));
+  CHECK_FALSE(fonts.load(reader::Role::Display700, r.blob_Title700.data(), r.blob_Title700.size()));
 
   // A refused load leaves the role unloaded rather than half-bound: the set
   // cannot become ready by way of a rejection.
   reader::FontSet partial;
   REQUIRE(r.load(partial));
   REQUIRE(partial.ready());
-  CHECK_FALSE(partial.load(reader::Role::Body400, r.body500.data(), r.body500.size()));
+  CHECK_FALSE(partial.load(reader::Role::Body400, r.blob_Body500.data(), r.blob_Body500.size()));
   CHECK_FALSE(partial.ready());
 }

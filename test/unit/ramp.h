@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "doctest.h"
+#include "reader/font_manifest.h"
 #include "reader/fontset.h"
 
 namespace ramp {
@@ -22,18 +23,16 @@ inline std::vector<uint8_t> slurpAsset(const std::string& name) {
   return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)), {});
 }
 
+// Which asset backs which role is the manifest's (reader/font_manifest.h): one
+// list, expanded here over file loads exactly as the simulator does, and in the
+// shell over the embedded arrays. The blob members are named blob_<Role>, so a
+// test that deliberately mis-binds one (there is one, and it must keep failing
+// to load) reads as obviously deliberate.
 struct Ramp {
-  std::vector<uint8_t> meta400 = slurpAsset("spacegrotesk_400_10pt.rfnt");
-  std::vector<uint8_t> meta500 = slurpAsset("spacegrotesk_500_10pt.rfnt");
-  std::vector<uint8_t> label400 = slurpAsset("spacegrotesk_400_11pt.rfnt");
-  std::vector<uint8_t> label500 = slurpAsset("spacegrotesk_500_11pt.rfnt");
-  std::vector<uint8_t> value500 = slurpAsset("spacegrotesk_500_12pt.rfnt");
-  std::vector<uint8_t> value700 = slurpAsset("spacegrotesk_700_12pt.rfnt");
-  std::vector<uint8_t> body400 = slurpAsset("spacegrotesk_400_14pt.rfnt");
-  std::vector<uint8_t> body500 = slurpAsset("spacegrotesk_500_14pt.rfnt");
-  std::vector<uint8_t> body700 = slurpAsset("spacegrotesk_700_14pt.rfnt");
-  std::vector<uint8_t> title700 = slurpAsset("spacegrotesk_700_20pt.rfnt");
-  std::vector<uint8_t> display700 = slurpAsset("spacegrotesk_700_32pt.rfnt");
+#define ENCRE_ROLE_BLOB(role, stem) \
+  std::vector<uint8_t> blob_##role = slurpAsset(#stem ".rfnt");
+  READER_FONT_RAMP(ENCRE_ROLE_BLOB)
+#undef ENCRE_ROLE_BLOB
   reader::FontSet fonts;
 
   Ramp() {
@@ -45,17 +44,12 @@ struct Ramp {
   // deliberately different set (a band whose label role is a bigger face, say)
   // without repeating the list.
   bool load(reader::FontSet& set) const {
-    return set.load(reader::Role::Meta400, meta400.data(), meta400.size()) &&
-           set.load(reader::Role::Meta500, meta500.data(), meta500.size()) &&
-           set.load(reader::Role::Label400, label400.data(), label400.size()) &&
-           set.load(reader::Role::Label500, label500.data(), label500.size()) &&
-           set.load(reader::Role::Value500, value500.data(), value500.size()) &&
-           set.load(reader::Role::Value700, value700.data(), value700.size()) &&
-           set.load(reader::Role::Body400, body400.data(), body400.size()) &&
-           set.load(reader::Role::Body500, body500.data(), body500.size()) &&
-           set.load(reader::Role::Body700, body700.data(), body700.size()) &&
-           set.load(reader::Role::Title700, title700.data(), title700.size()) &&
-           set.load(reader::Role::Display700, display700.data(), display700.size());
+    return true
+#define ENCRE_LOAD_ROLE(role, stem) \
+  && set.load(reader::Role::role, blob_##role.data(), blob_##role.size())
+        READER_FONT_RAMP(ENCRE_LOAD_ROLE)
+#undef ENCRE_LOAD_ROLE
+        ;
   }
 };
 

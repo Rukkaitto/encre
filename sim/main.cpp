@@ -8,6 +8,7 @@
 
 #include "reader/app.h"
 #include "reader/booklist.h"
+#include "reader/font_manifest.h"
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
 #include "reader/host_fs.h"
@@ -33,40 +34,27 @@ static std::vector<uint8_t> slurp(const std::string& p) {
 // drew garbage in place of MIDDLEMARCH and 6%: whichever faces the freed heap
 // got reused for. Keeping the bytes next to the set is what makes that
 // impossible, and it is the same shape `test/unit/ramp.h` uses.
+//
+// WHICH asset backs WHICH role is the manifest's (reader/font_manifest.h): one
+// list, expanded here over file loads and in the shell over embedded arrays.
 struct SimRamp {
-  std::vector<uint8_t> meta400, meta500, label400, label500, value500, value700;
-  std::vector<uint8_t> body400, body500, body700, title700, display700;
+#define ENCRE_ROLE_BLOB(role, stem) std::vector<uint8_t> blob_##role;
+  READER_FONT_RAMP(ENCRE_ROLE_BLOB)
+#undef ENCRE_ROLE_BLOB
   reader::FontSet fonts;
 };
 
 // One asset per role, and the role names the weight it wants: FontSet::load
-// refuses a blob whose declared size or weight is not the role's, so a
-// transposed pair here fails at startup instead of drawing a screen in the
+// refuses a blob whose declared size or weight is not the role's, so a wrong
+// stem in the manifest fails at startup instead of drawing a screen in the
 // wrong weight.
 static bool loadRamp(SimRamp& r) {
   const std::string dir = std::string(ASSETS_DIR) + "/built/";
-  r.meta400 = slurp(dir + "spacegrotesk_400_10pt.rfnt");
-  r.meta500 = slurp(dir + "spacegrotesk_500_10pt.rfnt");
-  r.label400 = slurp(dir + "spacegrotesk_400_11pt.rfnt");
-  r.label500 = slurp(dir + "spacegrotesk_500_11pt.rfnt");
-  r.value500 = slurp(dir + "spacegrotesk_500_12pt.rfnt");
-  r.value700 = slurp(dir + "spacegrotesk_700_12pt.rfnt");
-  r.body400 = slurp(dir + "spacegrotesk_400_14pt.rfnt");
-  r.body500 = slurp(dir + "spacegrotesk_500_14pt.rfnt");
-  r.body700 = slurp(dir + "spacegrotesk_700_14pt.rfnt");
-  r.title700 = slurp(dir + "spacegrotesk_700_20pt.rfnt");
-  r.display700 = slurp(dir + "spacegrotesk_700_32pt.rfnt");
-  r.fonts.load(reader::Role::Meta400, r.meta400.data(), r.meta400.size());
-  r.fonts.load(reader::Role::Meta500, r.meta500.data(), r.meta500.size());
-  r.fonts.load(reader::Role::Label400, r.label400.data(), r.label400.size());
-  r.fonts.load(reader::Role::Label500, r.label500.data(), r.label500.size());
-  r.fonts.load(reader::Role::Value500, r.value500.data(), r.value500.size());
-  r.fonts.load(reader::Role::Value700, r.value700.data(), r.value700.size());
-  r.fonts.load(reader::Role::Body400, r.body400.data(), r.body400.size());
-  r.fonts.load(reader::Role::Body500, r.body500.data(), r.body500.size());
-  r.fonts.load(reader::Role::Body700, r.body700.data(), r.body700.size());
-  r.fonts.load(reader::Role::Title700, r.title700.data(), r.title700.size());
-  r.fonts.load(reader::Role::Display700, r.display700.data(), r.display700.size());
+#define ENCRE_LOAD_ROLE(role, stem)                                       \
+  r.blob_##role = slurp(dir + #stem ".rfnt");                             \
+  r.fonts.load(reader::Role::role, r.blob_##role.data(), r.blob_##role.size());
+  READER_FONT_RAMP(ENCRE_LOAD_ROLE)
+#undef ENCRE_LOAD_ROLE
   if (!r.fonts.ready()) {
     std::fprintf(stderr, "font ramp failed to load from %s\n", dir.c_str());
     return false;

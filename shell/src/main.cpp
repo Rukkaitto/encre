@@ -29,6 +29,7 @@
 #include "input_task.h"
 #include "reader/app.h"
 #include "reader/booklist.h"
+#include "reader/font_manifest.h"
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
 #include "reader/input.h"
@@ -1722,21 +1723,16 @@ void setup() {
   Serial.flush();
 
   reader::FontSet& fonts = gFonts.emplace();
-  // Each role names its weight and FontSet::load checks the asset against it,
-  // so a mis-wired pair here is a loud "font-load-FAILED" at boot rather than a
-  // screen drawn in the wrong weight for the rest of the project.
-  const bool fontsOk =
-      fonts.load(reader::Role::Meta400, kFontMeta400, kFontMeta400Size) &&
-      fonts.load(reader::Role::Meta500, kFontMeta500, kFontMeta500Size) &&
-      fonts.load(reader::Role::Label400, kFontLabel400, kFontLabel400Size) &&
-      fonts.load(reader::Role::Label500, kFontLabel500, kFontLabel500Size) &&
-      fonts.load(reader::Role::Value500, kFontValue500, kFontValue500Size) &&
-      fonts.load(reader::Role::Value700, kFontValue700, kFontValue700Size) &&
-      fonts.load(reader::Role::Body400, kFontBody400, kFontBody400Size) &&
-      fonts.load(reader::Role::Body500, kFontBody500, kFontBody500Size) &&
-      fonts.load(reader::Role::Body700, kFontBody700, kFontBody700Size) &&
-      fonts.load(reader::Role::Title700, kFontTitle700, kFontTitle700Size) &&
-      fonts.load(reader::Role::Display700, kFontDisplay700, kFontDisplay700Size);
+  // The ramp is the manifest's (reader/font_manifest.h) -- one list, three
+  // loaders. Each role names its weight and FontSet::load checks the asset
+  // against it, so a mis-wired entry there is a loud "font-load-FAILED" at boot
+  // rather than a screen drawn in the wrong weight for the rest of the project.
+  // The embedded array names match the Role names by the generator's convention,
+  // which is what lets the manifest expand over them.
+#define ENCRE_LOAD_ROLE(role, stem) \
+  && fonts.load(reader::Role::role, kFont##role, kFont##role##Size)
+  const bool fontsOk = true READER_FONT_RAMP(ENCRE_LOAD_ROLE);
+#undef ENCRE_LOAD_ROLE
   if (!fontsOk || !fonts.ready()) {
     mark("font-load-FAILED");
     return;
