@@ -60,13 +60,38 @@ class ScalableFont : public GlyphSource {
   // here is a way for body text and chrome to end up different weights.
   static constexpr float kCoverageGamma = 2.0f;
 
-  // A default that is deliberately small (decision 4 says "a few KB"), sized so
-  // one line of body text at a reading size fits and a page does not: at 29px a
-  // lowercase glyph is ~14x20 at 2bpp, about 80 bytes, so 8 KB is ~100 glyphs --
-  // more than the distinct characters of an English page, which is what a cache
-  // for a *drawing* pass actually has to hold (see GlyphSource::advance: a
-  // measuring pass populates nothing).
-  static constexpr size_t kDefaultCacheBytes = 8 * 1024;
+  // Sized to hold the WHOLE working set of the reading face, measured rather than
+  // scaled -- because both of the obvious estimates are wrong, in opposite
+  // directions.
+  //
+  // What a DRAWING pass actually needs per page is small: over 5,000 pages of real
+  // EPUBs at ppem 32, the worst single page used 36 distinct glyphs and 3,272
+  // bytes of bitmap, and an 8 KB cache evicted nothing at all. A measuring pass
+  // needs none of it (see GlyphSource::advance). So "a page of English prose" is
+  // not the number to size against -- it fits twice over.
+  //
+  // What the cache has to survive is the UNION across pages, because the arena is
+  // a ring: a page that introduces a capital or an accent the last one did not
+  // advances the write pointer, and when it wraps it overwrites whatever is oldest,
+  // which includes glyphs as hot as 'e'. Measured on assets/built/literata_body.ttf,
+  // printable ASCII plus the 32 accented and punctuation codepoints fontc.py puts
+  // in every subset:
+  //
+  //     ppem 29: 10,378 B      ppem 36: 15,359 B      ppem 48: 25,854 B
+  //     ppem 32: 12,292 B      ppem 41: 19,284 B
+  //
+  // Bytes go as ppem squared, so 8 KB does not hold the set at ANY reading size --
+  // not even the 29px it was chosen at. 16 KB holds ppem 32 with 25% spare, which
+  // is what the reader ships at, and it costs 8 KB of a 320 KB heap the firmware
+  // currently uses 5.8% of. The alternative is re-rasterising at ~3,794us a glyph
+  // on the pages that thrash, which is the one cost the whole advance()/glyph()
+  // split exists to avoid.
+  //
+  // A BODY SIZE SETTING MUST REVISIT THIS. design/Settings.dc.html has a `Size`
+  // row; at 41px the set is 19,284 B and this budget thrashes. The table above is
+  // the data for that decision, and the budget is a constructor argument precisely
+  // so the caller can size it from the chosen ppem rather than from this default.
+  static constexpr size_t kDefaultCacheBytes = 16 * 1024;
 
   explicit ScalableFont(size_t cacheBudgetBytes = kDefaultCacheBytes);
   ~ScalableFont() override;

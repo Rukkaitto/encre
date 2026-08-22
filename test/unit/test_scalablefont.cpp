@@ -16,6 +16,7 @@
 #include "reader/components.h"
 #include "reader/font.h"
 #include "reader/framebuffer.h"
+#include "reader/layout.h"
 #include "reader/scalablefont.h"
 #include "reader/text.h"
 
@@ -61,6 +62,42 @@ constexpr const char* kSpecimen =
     "caf\xC3\xA9, na\xC3\xAFve, 0123456789.";
 
 }  // namespace
+
+TEST_CASE("THE DEFAULT CACHE HOLDS THE WHOLE WORKING SET AT THE READING SIZE") {
+  // The assertion that keeps kDefaultCacheBytes honest. The budget was 8 KB, chosen
+  // against "the distinct characters of an English page" -- which is 36 glyphs and
+  // fits twice over, and is not the number that matters. The arena is a ring, so
+  // what has to fit is the UNION across pages: printable ASCII plus the accents and
+  // punctuation every subset carries. At ppem 32 that is 12,292 bytes, which 8 KB
+  // never held at any reading size.
+  //
+  // Measured here rather than trusted, so a face swap or a gamma change that grows
+  // the bitmaps fails this instead of quietly thrashing on the pages that use a
+  // capital the previous page did not.
+  Body b(reader::kBodyPpem, 1u << 20);  // a big cache, to measure with
+  size_t bytes = 0;
+  int glyphs = 0;
+  const char32_t kExtended[] = {
+      0xE0, 0xE1, 0xE2, 0xE4, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB, 0xEE, 0xEF, 0xF1, 0xF4, 0xF6,
+      0xF9, 0xFB, 0xFC, 0xC0, 0xC7, 0xC9, 0xD6, 0xDC, 0x2018, 0x2019, 0x201C, 0x201D,
+      0x2013, 0x2014, 0x2026, 0xA0, 0xAB, 0xBB, 0xFFFD};
+  const auto add = [&](char32_t cp) {
+    const std::optional<reader::Glyph> g = b.face.glyph(cp);
+    if (!g) return;
+    bytes += static_cast<size_t>(g->stride) * g->bitmapH;
+    ++glyphs;
+  };
+  for (char32_t cp = 0x20; cp < 0x7F; ++cp) add(cp);
+  for (const char32_t cp : kExtended) add(cp);
+
+  CAPTURE(glyphs);
+  CAPTURE(bytes);
+  CHECK(glyphs > 100);  // the set is really being walked
+  CHECK(bytes <= ScalableFont::kDefaultCacheBytes);
+  // And with margin, so one more accented codepoint in a subset does not put it
+  // over: the point is a budget that cannot thrash, not one that just fits.
+  CHECK(bytes * 100 <= ScalableFont::kDefaultCacheBytes * 85);
+}
 
 TEST_CASE("ScalableFont metrics match stb_truetype's own for a known face and size") {
   std::vector<uint8_t> bytes = bodyTtf();
