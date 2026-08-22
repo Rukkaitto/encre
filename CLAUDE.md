@@ -341,9 +341,25 @@ what needs hardware — raw button samples, the panel calls, deep sleep.
 - **`core/include/reader/screens.h` is the one screen catalogue**, shared by the
   simulator and the shell. Two factories would drift, and the drift would be
   invisible because each half keeps passing its own checks.
+- **A RESUME ON BATTERY IS A POWER-ON RESET, and the reset reason cannot tell you
+  it was a resume.** Measured on an X3: with USB attached the chip really
+  deep-sleeps and returns `ESP_RST_DEEPSLEEP`; on battery the same sleep leaves it
+  fully powered down, so pressing power gives `ESP_RST_POWERON` — indistinguishable
+  from a first-ever boot. The restore is gated on "did we wake", so on battery it
+  correctly declined every time and then cleared a perfectly good record. The
+  symptom was "it always comes back to Home", and it was the gate being right
+  about a question that had no answer — which is why reading the restore code
+  found nothing wrong with it.
+  - So the INTENT is recorded, not inferred. `markSleeping()` writes a `slept`
+    flag immediately before the sleep call that does not return; `takeSleptFlag()`
+    at boot reads **and clears** it. Clearing on read is deliberate: a boot that
+    sets out to resume and then panics must not resume again on every boot after
+    it. One flag buys exactly one resume.
+  - **`[boot] reset reason=… slept-flag=… -> RESUME|cold start` prints the whole
+    decision.** Read that line before believing anything about a wake.
 - **Deep sleep is a chip reset**, so RAM state is lost — the last screen comes
   back from the NVS session record instead (see **Storage**), and only across a
-  genuine wake; a cold boot starts at Home. Wake is the **power button only**: the six front buttons are
+  genuine wake or a recorded sleep; an unrecorded cold boot starts at Home. Wake is the **power button only**: the six front buttons are
   ADC-ladder bands on GPIO 1/2 and produce no GPIO edge, while power is a real
   GPIO (3, active-LOW). Sleep order is `display.deepSleep()` →
   `PowerManager::powerDownRailsForSleep()` → `deepSleepUntilPowerButton()`. That
