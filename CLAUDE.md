@@ -740,6 +740,14 @@ Three things about the change:
   memory for allocation count and nothing else. No glyph rasterises differently —
   all 686 tests pass, `text_sample.png` (Literata body text, the golden this file
   says to stop on) included, byte for byte.
+- **IT DID NOT RAISE THE OBSERVED MINIMUM, so the attribution was wrong.** `min` was
+  18,952 before the patch and 18,948 after — four bytes apart across two builds,
+  which is not what a removed 52 KB transient looks like. Something else sets that
+  floor. The patch is still right (a 15.6× smaller spike, and faster), but the
+  reader's real low-water mark is unexplained, and `mark("open-located")` /
+  `mark("open-paginated")` / `mark("refine-complete")` exist to localise it: the
+  stage where `min` falls is the stage that spent it. **Do not guess at this a
+  second time.**
 - **It is also FASTER.** Three runs each on the desktop: cold page draw 572/530/500 µs
   against 1008/732/645, warm 372/366/314 against 634/473/414. A 56 KB malloc plus
   touching 56 KB of cold memory costs more than a 3.6 KB one. Note that the first run
@@ -1219,8 +1227,15 @@ Three things that make it work, and one that does not:
   after the first — steady turning therefore produces gaps clustered just above
   that, and a 600 ms window fired ~80 ms after each paint finished, exactly where
   the next press lands. It then blocked that press for its own ~550 ms.
-  `kRefineQuietMs` is **2500 ms**, about five paints: past anyone flipping, still
-  well inside the time spent reading twelve lines.
+  `kRefineQuietMs` is **5000 ms**, and the number comes from the asymmetry rather
+  than from taste. Measured across twelve consecutive page turns on the device: the
+  gap between the panel going free and the next press being painted was a median of
+  **72 ms**, with two of the twelve at **898 ms and 1360 ms** — pauses taken while
+  still turning. A refinement measured **1408 ms** and cannot be interrupted. So
+  firing early costs 1408 ms of dead buttons; firing late costs a page that stays
+  dithered a little longer. 5000 ms is ~3.5× both the longest observed pause and the
+  cost of being wrong, and still a fifth of the ~23 s a reader spends on twelve
+  lines.
 - **It also refuses to start with input already queued** (`rawSamplesPending()`).
   The clock alone cannot see a press that arrived during the paint, and starting
   something the panel cannot interrupt in front of one is the defect the window
@@ -1229,6 +1244,17 @@ Three things that make it work, and one that does not:
 `[paint] … refine-owed` and a separate `[refine] done total=…` keep the two costs
 distinguishable in the log — a page turn is the fast paint, and the refinement is
 what the page settles into.
+
+**THE REFINEMENT COSTS MORE THAN THE SINGLE GRAYSCALE PAINT IT REPLACED**, and that
+is the honest accounting: 1408 ms (1041 panel + 367 render, four render passes)
+against ~1056 ms. It is still the right trade because what the reader waits for is
+TEXT, and text arrives at ~570 ms instead of ~1056 — but the extra ~900 ms of panel
+work is real, and it is battery and panel wear rather than latency. A reader turning
+pages steadily never pays it at all.
+
+Its base pass does take the cheap settle path as intended — 366 ms of `gray_DRF`
+with no visible flash — which is what makes the upgrade look like a refinement
+rather than a second paint.
 
 ### Nothing may leave the column
 

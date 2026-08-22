@@ -164,11 +164,23 @@ static uint32_t gLastInputMs = 0;
 // next press lands. The refinement then blocked it for its own ~550 ms, and turning
 // several pages in a row felt far worse than before the refinement existed.
 //
-// 2500 ms is ~5 paints: comfortably past anyone flipping, and still well inside the
-// time spent reading a page of twelve lines. A press RESETS it, so the only
-// remaining race is a press arriving after 2.5 s of quiet and inside the ~550 ms
-// refinement -- and rawSamplesPending() below closes most of even that.
-constexpr uint32_t kRefineQuietMs = 2500;
+// THE WINDOW IS SET BY THE ASYMMETRY, not by taste. Measured from the device's own
+// log across twelve consecutive page turns: the gap between the panel going free
+// and the next press being painted was a median of 72 ms, but two of the twelve
+// were 898 ms and 1360 ms -- pauses taken WHILE STILL TURNING. Meanwhile a
+// refinement measured `[refine] done total=1408ms`, and it cannot be interrupted.
+//
+// So firing early costs 1408 ms of dead buttons and firing late costs a page that
+// stays dithered a little longer. 5000 ms is ~3.5x the longest observed
+// mid-turning pause and ~3.5x the cost of getting it wrong, and it is still a
+// fifth of the ~23 s an average reader spends on twelve lines. A press RESETS it,
+// so the remaining race is a press arriving after five seconds of quiet and inside
+// the refinement -- and rawSamplesPending() below closes most of even that.
+//
+// 600 ms was the first guess and it was actively worse than no refinement: it fired
+// ~80 ms after each paint finished, which is exactly where the median 72 ms gap
+// puts the next press.
+constexpr uint32_t kRefineQuietMs = 5000;
 static bool gRefineOwed = false;
 
 // Everything the render needs has to outlive setup(), so it lives here rather
@@ -1116,6 +1128,12 @@ static void handleOpen() {
     return;
   }
   const uint32_t t1 = millis();
+  // mark() carries heap AND min, so these two make the open's phases visible in the
+  // stage trail -- which is how a heap dip gets ATTRIBUTED rather than guessed at.
+  // It was guessed at once: stb's 56 KB per-glyph edge buffer was blamed for
+  // min=18,952, the buffer was cut to 3.6 KB, and min came back 18,948. Whatever
+  // spends it is somewhere in here.
+  mark("open-located");
 
   // The chapter label is the SCREEN's now: it changes when the reader pages into
   // another spine entry, so the shell cannot be the one composing it.
@@ -1127,6 +1145,9 @@ static void handleOpen() {
   // text at all, and it showed as a blank page reading 0/0.
   gFactory.setReaderBook(path, opened.title, opened.chapterCount, 0);
   const bool pushed = gApp->pushScreen(reader::ScreenId::Reader);
+  // The push builds the screen, which locates the chapter, decodes it once to index
+  // its pages, and lays out the first -- the whole expensive part.
+  mark("open-paginated");
 
   // The page count is the expensive part, and it happened inside the push: one
   // decode of the chapter to index its pages. Reported because "how long does
@@ -1761,6 +1782,7 @@ static void refineNow() {
   SpiBusGuard bus;  // the same whole-sequence guard renderTop takes, same reason
   paintGray();
   const uint32_t total = millis() - t0;
+  mark("refine-complete");
   // Reported separately from [paint] so the two costs stay distinguishable: a page
   // turn is the fast paint, and this is what the page settles into afterwards.
   Serial.printf("[refine] done total=%lums render=%lums panel=%lums\n",
