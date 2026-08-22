@@ -231,8 +231,14 @@ static const char* stage = "boot";
 // exactly the stage that spent it, which is the whole bisect in one boot.
 static void mark(const char* s) {
   stage = s;
-  Serial.printf("[stage] %s heap=%u min=%u\n", s, (unsigned)ESP.getFreeHeap(),
-                (unsigned)ESP.getMinFreeHeap());
+  // millis() FIRST, because a stage line without one is how a boot cost gets
+  // attributed to the wrong thing. These lines carried heap and no time, so the
+  // only timestamps in a boot log came from the SDK -- and the first of those was
+  // read as time zero, which put a 2.5 s delay in setup() down as the panel
+  // detection's cost. Everything before the first timestamp is invisible, so
+  // every stage gets one.
+  Serial.printf("[stage] %lums %s heap=%u min=%u\n", (unsigned long)millis(), s,
+                (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
   Serial.flush();
 }
 
@@ -1560,6 +1566,18 @@ void setup() {
           (unsigned)cs.overheadBytes);
       Serial.flush();
 
+      // THE SWEEP BELOW IS OFF BY DEFAULT: it rasterises 95 glyphs twice at
+      // ~3.79 ms each, which is ~362 ms of EVERY boot for a measurement that has
+      // been taken and is in the roadmap. Same mistake as the [library] probe,
+      // caught the same way -- by reading a boot log and asking what each line
+      // cost.
+      //
+      //   PLATFORMIO_BUILD_FLAGS="-DENCRE_BODY_SWEEP=1" make firmware
+      //
+      // The single cold glyph above stays unconditional: it is ~8 ms, it is what
+      // proves the rasteriser works on this part at all, and a boot that silently
+      // stopped being able to raster body text is worth 8 ms to notice.
+#if defined(ENCRE_BODY_SWEEP) && ENCRE_BODY_SWEEP
       // THE ONE SAMPLE ABOVE IS NOT THE NUMBER 3B NEEDS, and reporting it as
       // though it were is how a plan gets built on a cold-path artifact. The
       // first rasterisation in the process pays for things that happen exactly
@@ -1638,6 +1656,7 @@ void setup() {
                     (unsigned)(sizeof(kLine) - 1), lineW, (unsigned long)(m1 - m0),
                     meas.rasterisations);
       Serial.flush();
+#endif  // ENCRE_BODY_SWEEP
       mark("body-face-ok");
     }
   }
