@@ -40,15 +40,23 @@
   <div style="font-size: var(--t-value); letter-spacing: 0.18em; font-weight: 700;">SEND BOOKS OVER WI-FI</div>
 </div></div>
   </div>
-  <div style="margin-top: auto; display: flex; flex-direction: column;">
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-bottom: 1px solid #000000;">
-  <div style="font-size: var(--t-value); font-weight: 500;">Library</div>
-  <div style="font-size: var(--t-value); font-weight: 700;">EMPTY</div>
-</div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px;">
-  <div style="font-size: var(--t-value); font-weight: 500;">Settings</div>
-  <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
-</div>
+  <!-- THE MENU IS MAIN'S MENU, and this board's copy had drifted from it: it used
+       `--t-value` sentence-case labels with a `border-bottom`, where Main.dc.html
+       uses `--t-label` caps at 0.18em with a `border-top`. That is Home's menu in
+       an older revision, kept alive by a board nothing rendered -- implementing it
+       faithfully would have reintroduced a style Home stopped using.
+       
+       Only the VALUE differs, and it is the whole point of this board: `EMPTY`
+       where Home shows a count. -->
+  <div style="display: flex; flex-direction: column; margin-top: auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000;">
+      <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">LIBRARY</div>
+      <div style="font-size: var(--t-value); font-weight: 700;">EMPTY</div>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000;">
+      <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">SETTINGS</div>
+      <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
+    </div>
   </div>
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
   <div style="width: 36px;"></div>
