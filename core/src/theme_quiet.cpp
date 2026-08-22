@@ -331,9 +331,15 @@ void QuietTheme::renderLibrary(Framebuffer& fb, const FontSet& fonts, const Libr
   fb.clear(true);
   // No battery on this band: the board draws `LIBRARY` and a book count, and
   // nothing else. Home's is the screen with the charge reading.
-  int y = drawHeaderBand(fb, fonts, vm.title, bookCountLabel(vm.bookCount), nullptr, plane);
+  const int listTop = drawHeaderBand(fb, fonts, vm.title, bookCountLabel(vm.bookCount), nullptr, plane);
+  int y = listTop;
 
   const int rows = static_cast<int>(vm.rows.size());
+  // ONE condition for the rail and the gutter, read from one place: a gutter
+  // without a rail is a white strip, and a rail without a gutter is a thumb the
+  // focused row swallows. drawScrollRail refuses the same case independently, so
+  // the two cannot disagree even if a caller gets this wrong.
+  const bool overflowing = vm.totalRows > rows;
   for (int i = 0; i < rows; ++i) {
     const LibraryRow& row = vm.rows[static_cast<size_t>(i)];
     const bool focused = (i == vm.focusedRow);
@@ -344,12 +350,23 @@ void QuietTheme::renderLibrary(Framebuffer& fb, const FontSet& fonts, const Libr
     // consumed, which is 1px less without a rule -- the board's own pitch, which
     // genuinely varies.
     const bool rule = !focused && i != rows - 1;
-    y += drawBookRow(fb, fonts, y,
-                     {row.title, row.meta, row.value, row.isFolder}, focused, rule, plane);
+    // The gutter exists only when the rail does, so a list that fits runs its
+    // rows to the panel edge -- focused fill included. See kListGutterW.
+    y += drawBookRow(fb, fonts, y, {row.title, row.meta, row.value, row.isFolder}, focused,
+                     rule, plane, overflowing ? kListGutterW : 0);
   }
 
   Hint hints[4];
   libraryHints(vm, hints);
+
+  // The rail spans the LIST, not the panel: a track running the full height would
+  // claim the header band and the hint bar scroll, which they do not. `listTop` is
+  // the band's bottom edge drawHeaderBand already returned, and the bottom is
+  // DERIVED from the bar rather than pinned -- hintBarHeight needs the hints, so
+  // they are built before the rail rather than after it.
+  drawScrollRail(fb, listTop, fb.height() - hintBarHeight(fonts, hints), vm.firstRow, rows,
+                 vm.totalRows, plane);
+
   int slots[4] = {};
   drawHintBar(fb, fonts, hints, slots, plane);
 }

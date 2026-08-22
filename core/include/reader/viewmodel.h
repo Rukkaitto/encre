@@ -84,6 +84,16 @@ struct LibraryViewModel {
   int bookCount = 0;
   std::vector<LibraryRow> rows;
   int focusedRow = -1;
+  // Where the visible rows sit in the whole list, for the scroll rail
+  // (design/LibraryScrolled.dc.html). NOT derivable from `rows`, which holds
+  // only what is on screen -- so the screen has to say, and these are the two
+  // numbers the rail's proportions come from: thumb height is rows/total and
+  // thumb top is firstRow/total.
+  //
+  // totalRows == rows.size() means the list does not overflow, and the rail is
+  // not drawn: a full-height thumb says nothing.
+  int firstRow = 0;
+  int totalRows = 0;
   std::array<std::string, 4> hints{};
   std::array<bool, 4> holds{};
 };

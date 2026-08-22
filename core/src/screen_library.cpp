@@ -123,6 +123,11 @@ void LibraryScreen::syncVm() {
   }
   vm_.bookCount = books;
 
+  // The rail's two numbers. The theme cannot derive them: vm_.rows holds only
+  // what is on screen, so "how far down a longer list is this" has to be said.
+  vm_.firstRow = window_.firstVisible();
+  vm_.totalRows = window_.count();
+
   vm_.rows.clear();
   const int first = window_.firstVisible();
   const int count = window_.visibleCount();

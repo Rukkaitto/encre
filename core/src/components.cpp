@@ -417,8 +417,59 @@ int bookRowHeight(const FontSet& fonts) {
   return kBookRowPadY + bookRowContentH(fonts) + kBookRowPadY + kBookRowRuleH;
 }
 
+void drawScrollRail(Framebuffer& fb, int listTop, int listBottom, int first, int visible,
+                    int total, Plane plane) {
+  (void)plane;  // every pixel here is coverage 0 or 3, so the plane cannot change it
+  if (total <= 0 || visible >= total) return;  // a list that fits has nothing to say
+
+  // The board's numbers: 6px wide, right edge 4px off the panel, inset 6px from
+  // the list's own top and bottom so the track does not touch the header band's
+  // rule or the hint bar's.
+  const int x = fb.width() - kRailRightGap - kRailW;
+  const int top = listTop + kRailEndInset;
+  const int bottom = listBottom - kRailEndInset;
+  const int h = bottom - top;
+  if (h <= 2 * kRailBorder) return;  // no room to draw a track, let alone a thumb
+
+  // The outlined track: four 1px edges, the treatment kBattery uses.
+  fb.fillRect(x, top, kRailW, kRailBorder, false);
+  fb.fillRect(x, bottom - kRailBorder, kRailW, kRailBorder, false);
+  fb.fillRect(x, top, kRailBorder, h, false);
+  fb.fillRect(x + kRailW - kRailBorder, top, kRailBorder, h, false);
+
+  // The thumb, inside the border. ROUNDED ONCE: both proportions are taken
+  // against the inner height in one division each, rather than accumulating a
+  // per-row pitch that would drift down a 256-row list.
+  const int innerX = x + kRailBorder;
+  const int innerY = top + kRailBorder;
+  const int innerW = kRailW - 2 * kRailBorder;
+  const int innerH = h - 2 * kRailBorder;
+
+  int thumbH = (innerH * visible + total / 2) / total;
+  // A floor, because at the 256-row cap a proportional thumb can round to a
+  // couple of pixels and a thumb too small to see is worse than none: it reads as
+  // dirt on the track rather than as a position.
+  if (thumbH < kRailThumbMinH) thumbH = kRailThumbMinH;
+  if (thumbH > innerH) thumbH = innerH;
+
+  int thumbY = innerY + (innerH * first + total / 2) / total;
+  // Clamped so the floor above cannot push the thumb past the track's end -- at
+  // the bottom of a long list the proportional top plus a floored height would
+  // otherwise overhang the border it sits inside.
+  if (thumbY + thumbH > innerY + innerH) thumbY = innerY + innerH - thumbH;
+  if (thumbY < innerY) thumbY = innerY;
+
+  fb.fillRect(innerX, thumbY, innerW, thumbH, false);
+}
+
 int drawBookRow(Framebuffer& fb, const FontSet& fonts, int y, const BookRowContent& row,
-                bool focused, bool rule, Plane plane) {
+                bool focused, bool rule, Plane plane, int rightInset) {
+  // The row's box, narrowed by the rail's gutter. Everything that spans the row
+  // reads this rather than fb.width(): the focused fill, the rule and the right
+  // edge the value and chevron sit on. A fill that kept the full width would run
+  // under the rail and swallow the thumb, which is exactly what the board's first
+  // draft did.
+  const int rowW = fb.width() - rightInset;
   const int contentH = bookRowContentH(fonts);
   const int boxH = kBookRowPadY + contentH + kBookRowPadY;
   const int consumed = boxH + (rule ? kBookRowRuleH : 0);
@@ -427,9 +478,9 @@ int drawBookRow(Framebuffer& fb, const FontSet& fonts, int y, const BookRowConte
     // The whole box, which on the board is the row without its border: the
     // focused row is the one row the design gives no `border-bottom`, so its
     // fill runs to the next row's top edge.
-    fb.fillRect(0, y, fb.width(), boxH, false);
+    fb.fillRect(0, y, rowW, boxH, false);
   } else if (rule) {
-    fb.fillRect(0, y + boxH, fb.width(), kBookRowRuleH, false);
+    fb.fillRect(0, y + boxH, rowW, kBookRowRuleH, false);
   }
 
   const int contentTop = y + kBookRowPadY;
@@ -473,7 +524,7 @@ int drawBookRow(Framebuffer& fb, const FontSet& fonts, int y, const BookRowConte
   const int columnH = tf.lineHeight() + kBookLineGap + mf.lineHeight();
   const int columnTop = centreIn(contentTop, contentH, columnH);
   const int textX = kMargin + kBookThumbW + kBookThumbGap;
-  const int rightEdge = fb.width() - kMargin;
+  const int rightEdge = rowW - kMargin;
 
   // BOTH of the column's lines truncate, and to the SAME budget, because they are
   // two children of one `min-width: 0` column on the board and neither is copy

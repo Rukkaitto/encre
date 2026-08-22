@@ -37,12 +37,17 @@
        the label fills the line. Every other band's label is a literal
        (NOW READING, ABOUT THIS BOOK), which is why they state neither.
 
-       THE RAIL'S GUTTER IS RESERVED HERE TOO, and that is the point of it being a
-       gutter: the rows stop 14px short of the panel whether or not a rail is
-       drawn. Reserving it only when the list overflows would reflow every row the
-       user already had the moment an eighth book arrived -- every right-aligned
-       value stepping 14px left because a book was added. See LibraryScrolled for
-       the rail itself and why it cannot live in the outer margin.
+       NO GUTTER ON THIS BOARD, because there is no rail on it. The rows run to
+       the panel edge and the focused row's fill touches the border.
+
+       Reserving the gutter here was tried and is wrong. The argument for it was
+       that a list crossing seven books would otherwise reflow -- every
+       right-aligned value stepping 14px left the moment an eighth arrived. True,
+       but it happens ONCE, at the same moment the rail appears, which explains
+       the shift rather than looking broken. The reserved-but-empty gutter is
+       visible always, and a white strip beside a full-bleed black row reads as a
+       rendering fault. A defect you see every time beats a reflow you see once.
+       See LibraryScrolled for the rail and why it needs a column at all.
 
        THE RIGHT SLOT STAYS THE BOOK COUNT ON THIS BOARD, because this list does
        NOT overflow: one folder plus six books is exactly the seven rows that fit.
@@ -61,8 +66,7 @@
     <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">12 BOOKS</div>
   </div>
 
-  <div style="position: relative; display: flex; flex-direction: column; flex-grow: 1;">
-    <div style="display: flex; flex-direction: column; flex-grow: 1; margin-right: 14px;">
+  <div style="display: flex; flex-direction: column; flex-grow: 1;">
 
     <div style="display: flex; align-items: center; gap: 16px; padding: 11px 24px; border-bottom: 1px solid #000000;">
       <div style="width: 44px; height: 64px; display: flex; align-items: center; justify-content: center;">
@@ -129,7 +133,6 @@
       <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">NEW</div>
     </div>
 
-    </div>
   </div>
 
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">

@@ -1751,3 +1751,147 @@ TEST_CASE("clampProse bounds a wrapped run and elides what is left over") {
   CHECK(fits.lines[0] == "Dubliners");
   CHECK(noTail.empty());
 }
+
+// --- The scroll rail --------------------------------------------------------
+//
+// Untested until now for a reason worth naming: Library's own golden shows seven
+// rows of seven, so it does NOT overflow and the rail never draws in it. The one
+// place the rail appears is a state no golden held, which is the shape of gap
+// that has hidden four bugs in this project.
+
+namespace {
+// Ink anywhere in the rail's column, which is the whole question: did it draw.
+// getPixel reports WHITE -- the framebuffer's bool is "is paper", which is why
+// every fillRect that inks passes false -- so ink is its negation.
+int railInk(const reader::Framebuffer& fb) {
+  int n = 0;
+  for (int x = fb.width() - reader::kRailRightGap - reader::kRailW; x < fb.width(); ++x)
+    for (int y = 0; y < fb.height(); ++y)
+      if (!fb.getPixel(x, y)) ++n;
+  return n;
+}
+// The vertical extent of the SOLID thumb.
+//
+// Scanned strictly INSIDE the track, because the track's own end caps span the
+// full rail width and would otherwise read as thumb: measured over the whole
+// panel this reported the track's height for every list length, which made a
+// proportional thumb and a constant one indistinguishable -- the exact confusion
+// the design board's first draft also invited.
+void thumbExtent(const reader::Framebuffer& fb, int listTop, int listBottom, int& top,
+                 int& bottom) {
+  const int x = fb.width() - reader::kRailRightGap - reader::kRailW + reader::kRailBorder;
+  const int yFrom = listTop + reader::kRailEndInset + reader::kRailBorder;
+  const int yTo = listBottom - reader::kRailEndInset - reader::kRailBorder;
+  top = -1;
+  bottom = -1;
+  for (int y = yFrom; y < yTo; ++y) {
+    bool solid = true;
+    for (int i = 0; i < reader::kRailW - 2 * reader::kRailBorder; ++i)
+      if (fb.getPixel(x + i, y)) solid = false;  // any paper means not the thumb
+    if (!solid) continue;
+    if (top < 0) top = y;
+    bottom = y;
+  }
+}
+}  // namespace
+
+TEST_CASE("a list that fits draws no rail at all") {
+  reader::Framebuffer fb(480, 800);
+  fb.clear(true);
+  reader::drawScrollRail(fb, 100, 700, 0, 7, 7);
+  CHECK(railInk(fb) == 0);
+
+  // And a shorter list than the window, which ScrollWindow permits.
+  reader::drawScrollRail(fb, 100, 700, 0, 7, 3);
+  CHECK(railInk(fb) == 0);
+  // Nothing at all to position.
+  reader::drawScrollRail(fb, 100, 700, 0, 7, 0);
+  CHECK(railInk(fb) == 0);
+}
+
+TEST_CASE("the thumb is proportional to the visible fraction") {
+  reader::Framebuffer fb(480, 800);
+  fb.clear(true);
+  // The board's fiction: 24 rows, 7 visible, scrolled to row 8.
+  reader::drawScrollRail(fb, 100, 700, 7, 7, 24);
+  int top = 0, bottom = 0;
+  thumbExtent(fb, 100, 700, top, bottom);
+  REQUIRE(top > 0);
+
+  const int innerTop = 100 + reader::kRailEndInset + reader::kRailBorder;
+  const int innerH = (700 - reader::kRailEndInset) - (100 + reader::kRailEndInset) -
+                     2 * reader::kRailBorder;
+  const int h = bottom - top + 1;
+  // 7 of 24 of the track, within a pixel of the rounding.
+  CHECK(h >= innerH * 7 / 24 - 1);
+  CHECK(h <= innerH * 7 / 24 + 1);
+  // ...starting 7 of 24 down it.
+  CHECK(top >= innerTop + innerH * 7 / 24 - 1);
+  CHECK(top <= innerTop + innerH * 7 / 24 + 1);
+}
+
+TEST_CASE("a longer list gives a shorter thumb") {
+  // The property that a fixed-size thumb would fail, and the one the design
+  // board's first draft could not have caught: at 7 of 9 the thumb is 78% of the
+  // track, which looks the same as a constant.
+  int hs[3] = {};
+  const int totals[3] = {9, 24, 256};
+  for (int i = 0; i < 3; ++i) {
+    reader::Framebuffer fb(480, 800);
+    fb.clear(true);
+    reader::drawScrollRail(fb, 100, 700, 0, 7, totals[i]);
+    int top = 0, bottom = 0;
+    thumbExtent(fb, 100, 700, top, bottom);
+    hs[i] = bottom - top + 1;
+  }
+  CHECK(hs[0] > hs[1]);
+  CHECK(hs[1] > hs[2]);
+  // Never invisible, however long the list: at the 256-row cap the true
+  // proportion rounds to a couple of pixels, which reads as dirt on the track.
+  CHECK(hs[2] >= reader::kRailThumbMinH);
+}
+
+TEST_CASE("the thumb never overhangs the track, at either end") {
+  reader::Framebuffer fb(480, 800);
+  const int innerTop = 100 + reader::kRailEndInset + reader::kRailBorder;
+  const int innerBottom = (700 - reader::kRailEndInset) - reader::kRailBorder - 1;
+
+  // The very bottom of the longest list, where the minimum-height floor and the
+  // proportional top would otherwise push the thumb through the end cap.
+  fb.clear(true);
+  reader::drawScrollRail(fb, 100, 700, 256 - 7, 7, 256);
+  int top = 0, bottom = 0;
+  thumbExtent(fb, 100, 700, top, bottom);
+  CHECK(top >= innerTop);
+  CHECK(bottom <= innerBottom);
+
+  // And the very top.
+  fb.clear(true);
+  reader::drawScrollRail(fb, 100, 700, 0, 7, 256);
+  thumbExtent(fb, 100, 700, top, bottom);
+  CHECK(top >= innerTop);
+  CHECK(bottom <= innerBottom);
+}
+
+TEST_CASE("the rail stays inside the gutter it was given") {
+  // It must not reach the panel edge (that gap is the board's 4px) and must not
+  // reach into the rows' column, or it would collide with the focused fill.
+  reader::Framebuffer fb(480, 800);
+  fb.clear(true);
+  reader::drawScrollRail(fb, 100, 700, 3, 7, 24);
+  for (int y = 0; y < 800; ++y) {
+    for (int x = 480 - reader::kRailRightGap; x < 480; ++x) CHECK(fb.getPixel(x, y));
+    CHECK(fb.getPixel(480 - reader::kListGutterW - 1, y));
+  }
+}
+
+TEST_CASE("a rail with no room draws nothing rather than inverting") {
+  // listBottom above listTop, which a very short panel or a very tall hint bar
+  // could produce. A negative height must not become a full-frame fill.
+  reader::Framebuffer fb(480, 800);
+  fb.clear(true);
+  reader::drawScrollRail(fb, 400, 402, 3, 7, 24);
+  CHECK(railInk(fb) == 0);
+  reader::drawScrollRail(fb, 400, 380, 3, 7, 24);
+  CHECK(railInk(fb) == 0);
+}

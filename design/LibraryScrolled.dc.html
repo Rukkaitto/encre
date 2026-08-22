@@ -142,9 +142,12 @@
          identical and no reader would catch it. A mockup of a proportional
          element has to pick a proportion that could only come from the rule.
 
-         Drawn only when the list overflows -- a full-height thumb says nothing --
-         and the gutter is RESERVED either way, so a library growing past seven
-         books does not reflow every row it already had. -->
+         THE GUTTER EXISTS ONLY WHEN THE RAIL DOES. Library.dc.html has no gutter
+         and its rows run to the panel edge, focused fill included. Reserving it
+         on both was tried, to spare a list crossing seven books one reflow, and
+         it left a white strip beside the full-bleed focused row on every
+         non-overflowing library -- which reads as a rendering fault. A defect
+         you see every time beats a reflow you see once. -->
     <div style="position: absolute; top: 6px; bottom: 6px; right: 4px; width: 6px; border: 1px solid #000000; box-sizing: border-box;">
       <div style="position: absolute; left: 0; right: 0; top: 29.2%; height: 29.2%; background: #000000;"></div>
     </div>

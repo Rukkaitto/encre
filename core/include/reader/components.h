@@ -300,8 +300,59 @@ int bookRowHeight(const FontSet& fonts);
 // to the row's bottom edge and a black line on black would be invisible anyway)
 // and neither does the last row drawn, where the board leaves the list's bottom
 // edge open rather than hanging a hairline over the slack above the hint bar.
+// The column the scroll rail owns, which no row may enter.
+//
+// TAKEN ONLY WHEN A RAIL IS DRAWN. A list that fits gives up nothing: its rows
+// run to the panel edge and the focused row's fill touches the border.
+//
+// Reserving it unconditionally was tried first, to spare a library crossing the
+// visible-row count one reflow of its right-aligned values. That reflow is real
+// but it happens ONCE, at the same moment the rail appears, which explains the
+// shift. The reserved-but-empty gutter is there always, and a white strip beside
+// a full-bleed black row reads as a rendering fault rather than as space. A
+// defect you see every time beats a reflow you see once.
+//
+// It has to be a real column and not the outer margin: the focused row is
+// FULL-BLEED INVERTED, so a black thumb crossing it would be black on black and
+// vanish, and each row's 1px rule would run straight through the track. That was
+// tried on the board and rendered exactly that way.
+constexpr int kListGutterW = 14;
+
+// The rail's own box, all from design/LibraryScrolled.dc.html: 6px wide with a
+// 1px outline, its right edge 4px off the panel, and inset 6px from the list's
+// top and bottom so the track clears the header band's rule and the hint bar's.
+// 6 + 4 = 10 of the gutter's 14, leaving 4px of clear space to the rows.
+constexpr int kRailW = 6;
+constexpr int kRailRightGap = 4;
+constexpr int kRailEndInset = 6;
+constexpr int kRailBorder = 1;
+// A thumb this short is dirt on the track rather than a position, so the
+// proportion is floored here -- at the 256-row cap it would otherwise round to
+// two or three pixels.
+constexpr int kRailThumbMinH = 8;
+
+// `rightInset` narrows the row's box -- kListGutterW for a list that has a rail's
+// column, 0 for one that does not. It shifts the row's right-aligned value; the
+// rule, the fill and the cover strip all follow the same narrowed box.
 int drawBookRow(Framebuffer& fb, const FontSet& fonts, int y, const BookRowContent& row,
-                bool focused, bool rule, Plane plane = Plane::Bw);
+                bool focused, bool rule, Plane plane = Plane::Bw, int rightInset = 0);
+
+// The scroll rail: an outlined track with a solid proportional thumb, drawn in
+// the gutter beside a list that overflows.
+//
+// `first`, `visible` and `total` are rows. Draws nothing when the list fits
+// (`visible >= total`), because a full-height thumb communicates nothing, and
+// nothing when `total <= 0`.
+//
+// Axis-aligned and coverage 0-or-3 throughout, which is the BEST case on this
+// glass rather than the worst: a vertical edge needs no anti-aliasing, so track
+// and thumb are identical in every plane and every pass. (The thin-stroke warning
+// this project records is about DIAGONALS -- kChevron -- not vertical bars.) An
+// outlined track with a solid fill is the treatment kBattery already proves reads
+// well hard-thresholded; a dithered track would get one and a half dots across a
+// 4px grid, which is the moth-eaten failure the small round marks documented.
+void drawScrollRail(Framebuffer& fb, int listTop, int listBottom, int first, int visible,
+                    int total, Plane plane = Plane::Bw);
 
 // --- Wrapped prose ---------------------------------------------------------
 //
