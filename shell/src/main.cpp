@@ -835,22 +835,42 @@ static reader::HomeViewModel homeVmForCard() {
   return vm;
 }
 
-// Build the app with Home as its root, replacing whatever was there.
-//
-// App has no "replace the root", and a successful retry cannot PUSH Home: the
-// SD-missing screen is the root in that state, so Home would be at depth 2 and
-// Back would pop to a screen whose message is no longer true. A fresh App is the
-// straightforward answer, and the long-press mask has to be re-synced with it --
-// the mask is PressRecognizer's, not the App's, so a new stack whose top binds
-// different holds leaves the recognizer bound to the old screen's.
-static void buildHomeApp() {
-  // The App about to be destroyed owns the Library the factory's pointer names,
-  // so the pointer has to go first. See DemoScreenFactory::forgetLibrary.
-  gFactory.forgetLibrary();
-  gApp = std::make_unique<reader::App>(
-      std::make_unique<reader::HomeScreen>(homeVmForCard(), reader::demoHomeTargets()), gFactory);
+// Re-teach the recognizer what the TOP SCREEN binds. The masks are
+// PressRecognizer's, not the App's, so anything that changes what is on top --
+// a dispatch that pushed or popped, a replaced App -- has to re-sync them or
+// the recognizer stays bound to the previous screen's holds. One function, so
+// forgetting HALF of the pair (a mask synced, a repeat left stale) is not
+// writable.
+static void syncRecognizer() {
   gPresses.setLongPressable(gApp->longPressable());
   gPresses.setAutoRepeat(gApp->autoRepeat());
+}
+
+// REPLACE THE APP with one rooted at `root`. App has no "replace the root", and
+// the reasons a fresh App is right are the callers' (see buildHomeApp and
+// buildSdMissingApp); what this function owns is the ORDER:
+//
+//   1. forgetLibrary() FIRST -- the App about to be destroyed owns the Library
+//      the factory's pointer names, and DemoScreenFactory::forgetLibrary's
+//      header says the pointer's safety is not local to that class. It used to
+//      be a rule each swap site remembered, and a prose list of the sites that
+//      remembered it; now it is structural.
+//   2. the new App, which starts dirty and in transition, so the swap paints
+//      itself as the screen change it is.
+//   3. the recognizer re-sync, because the top screen just changed.
+static void replaceApp(std::unique_ptr<reader::Screen> root) {
+  gFactory.forgetLibrary();
+  gApp = std::make_unique<reader::App>(std::move(root), gFactory);
+  syncRecognizer();
+}
+
+// Build the app with Home as its root, replacing whatever was there.
+//
+// A successful retry cannot PUSH Home: the SD-missing screen is the root in
+// that state, so Home would be at depth 2 and Back would pop to a screen whose
+// message is no longer true. Replacing the App is the straightforward answer.
+static void buildHomeApp() {
+  replaceApp(std::make_unique<reader::HomeScreen>(homeVmForCard(), reader::demoHomeTargets()));
 }
 
 // Store where the user is, so a wake can put them back. Cheap to call after every
@@ -930,14 +950,10 @@ static void saveWhereWeAre() {
 // restore honours it, and if it is not, the boot path roots at this screen anyway.
 // Overwriting it with SD-MISSING would throw away the only useful thing it holds.
 static void buildSdMissingApp() {
-  // Same reason as buildHomeApp: replacing the App destroys the Library the
-  // factory's pointer names. This is the path that made it matter -- the card
-  // going away at runtime is the one swap that can happen with a Library on the
-  // stack.
-  gFactory.forgetLibrary();
-  gApp = std::make_unique<reader::App>(std::make_unique<reader::SdMissingScreen>(), gFactory);
-  gPresses.setLongPressable(gApp->longPressable());
-  gPresses.setAutoRepeat(gApp->autoRepeat());
+  // The card going away at runtime is the one swap that can happen with a
+  // Library on the stack -- replaceApp's forgetLibrary ordering is what this
+  // path made matter.
+  replaceApp(std::make_unique<reader::SdMissingScreen>());
 }
 
 // The SD-missing screen's RETRY, which App latched for us because mounting is not
@@ -2129,8 +2145,7 @@ void setup() {
 
   // Before the first poll, not just after each dispatch: a hold started on the
   // very first frame must be recognised too.
-  gPresses.setLongPressable(gApp->longPressable());
-  gPresses.setAutoRepeat(gApp->autoRepeat());
+  syncRecognizer();
   gInput.begin();
   startInputTask(gInput);
   mark("input-started");
@@ -2314,8 +2329,7 @@ void loop() {
     // The mask belongs to whatever screen is now on top, which a push or pop
     // just changed. Re-reading it here is what keeps a hold bound only where a
     // ring is drawn.
-    gPresses.setLongPressable(gApp->longPressable());
-    gPresses.setAutoRepeat(gApp->autoRepeat());
+    syncRecognizer();
     // Where the user is now, for a wake to restore. An unchanged record is not
     // rewritten, so this is nearly free on an event that did not move the stack.
     saveWhereWeAre();
