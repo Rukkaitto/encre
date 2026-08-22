@@ -1,4 +1,4 @@
-.PHONY: test sim firmware fonts icons compare epubs epubs-bulk card-add card-remove
+.PHONY: test sim firmware fonts icons compare epubs epubs-bulk card-add card-remove zips
 # PlatformIO installs outside PATH by default; allow an override: make firmware PIO=/path/to/pio
 #
 # Invoked through its MODULE entry point rather than the `pio` launcher script.
@@ -130,6 +130,12 @@ epubs:
 # name string, and a three-book sample says nothing about the distribution.
 # Copy the result into /books on the card and read the boot log.
 BULK_N ?= 200
+# Zip fixtures for the reader's archive layer, as a committed C++ header -- the
+# same relationship iconc.py has with icons_data.h. Half of them are deliberately
+# malformed, so no tool could have produced them; mkzip.py states what each is.
+zips:
+	$(PYTHON) tools/mkzip.py --out test/unit/zip_fixtures.h
+
 epubs-bulk:
 	$(PYTHON) tools/mkepub.py --out $(EPUB_OUT) --bulk $(BULK_N)
 # ...and PUT THEM ON THE CARD, which generating them does not do. The card lives
