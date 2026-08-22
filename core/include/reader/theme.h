@@ -11,7 +11,6 @@ struct ItemActionsViewModel;
 struct DeleteConfirmViewModel;
 struct BookDetailsViewModel;
 struct SettingsViewModel;
-struct StubViewModel;
 
 // Themes own the entire presentation, layout structure included (spec 3.3).
 // The FontSet is supplied by the caller so device knowledge — which asset backs
@@ -87,7 +86,5 @@ class Theme {
   virtual void renderSettings(Framebuffer& fb, const FontSet& fonts,
                               const SettingsViewModel& vm, Plane plane) = 0;
 
-  virtual void renderStub(Framebuffer& fb, const FontSet& fonts, const StubViewModel& vm,
-                          Plane plane = Plane::Bw) = 0;
 };
 }  // namespace reader

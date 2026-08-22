@@ -191,14 +191,4 @@ struct SettingsViewModel {
   std::array<bool, 4> holds{};
 };
 
-struct StubViewModel {
-  std::string title;
-  std::string note;                    // e.g. "PLACEHOLDER - PHASE 2C"
-  std::vector<std::string> lines;
-  int focusedLine = -1;                // -1 = nothing focused
-  int batteryPercent = 0;
-  std::array<std::string, 4> hints{};  // Back, Confirm, Up, Down
-  std::array<bool, 4> holds{};
-};
-
 }  // namespace reader

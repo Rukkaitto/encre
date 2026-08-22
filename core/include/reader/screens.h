@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "reader/app.h"
+#include "reader/screen_settings.h"
 #include "reader/screen_library.h"
 #include "reader/viewmodel.h"
 
@@ -72,11 +73,33 @@ class DemoScreenFactory : public ScreenFactory {
   // "not told", and the Library then shows nothing rather than guessing.
   void setLibraryVisibleRows(int n) { libraryVisibleRows_ = n; }
 
+  // What a Settings screen this factory builds starts from, and where its changes
+  // go. Held here for the same reason the Library's row count is: the factory is
+  // what constructs the screen, and neither the current settings nor a place to
+  // write them is something `core/` can go and find.
+  //
+  // A null sink is the simulator and the golden tests -- see SettingsSink. The
+  // metrics are Theme::settingsMetrics's three numbers; zero means "not told", and
+  // the screen then shows nothing rather than guessing, exactly as the Library
+  // does.
+  void setSettings(const Settings& s) { settings_ = s; }
+  void setSettingsSink(SettingsSink* sink) { settingsSink_ = sink; }
+  void setSettingsMetrics(int listH, int rowH, int headerH) {
+    settingsListH_ = listH;
+    settingsRowH_ = rowH;
+    settingsHeaderH_ = headerH;
+  }
+
  private:
   FileSystem* fs_ = nullptr;
   std::string root_;
   LibraryScreen* library_ = nullptr;
   int libraryVisibleRows_ = 0;
+  Settings settings_{};
+  SettingsSink* settingsSink_ = nullptr;
+  int settingsListH_ = 0;
+  int settingsRowH_ = 0;
+  int settingsHeaderH_ = 0;
 };
 
 }  // namespace reader

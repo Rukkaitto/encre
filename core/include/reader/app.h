@@ -21,7 +21,6 @@ enum class ScreenId : uint8_t {
   DeleteConfirm,  // the overlay that overlay's Delete... opens
   BookDetails,    // a full screen, NOT an overlay -- see its board
   Settings,
-  InputMonitor,
   SdMissing
 };
 

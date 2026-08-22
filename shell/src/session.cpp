@@ -32,7 +32,6 @@ constexpr uint8_t kVersion = 2;
 // Version 1 stored `static_cast<uint8_t>(s.screen)`, so the enum's DECLARATION
 // ORDER was part of a persisted format. 2C-2 then inserted ItemActions,
 // DeleteConfirm and BookDetails after Library, which moved Settings 2 -> 3,
-// InputMonitor 3 -> 4 and SdMissing 4 -> 5. A record written by the firmware
 // currently on a device says "Settings" by writing 2, and this build would have
 // read that 2 as ItemActions: the user sleeps on Settings and wakes into an
 // actions overlay for a book they never chose. It happens to fail safely today
@@ -76,7 +75,6 @@ constexpr WireName kWireNames[] = {
     {reader::ScreenId::DeleteConfirm, "delete-confirm"},
     {reader::ScreenId::BookDetails, "book-details"},
     {reader::ScreenId::Settings, "settings"},
-    {reader::ScreenId::InputMonitor, "input-monitor"},
     {reader::ScreenId::SdMissing, "sd-missing"},
 };
 
@@ -100,7 +98,6 @@ const char* wireNameOf(reader::ScreenId id) {
     case reader::ScreenId::DeleteConfirm: return kWireNames[3].name;
     case reader::ScreenId::BookDetails: return kWireNames[4].name;
     case reader::ScreenId::Settings: return kWireNames[5].name;
-    case reader::ScreenId::InputMonitor: return kWireNames[6].name;
     case reader::ScreenId::SdMissing: return kWireNames[7].name;
   }
   return nullptr;

@@ -114,15 +114,22 @@
       <div style="font-size: var(--t-value); font-weight: 700;">BOOK COVER</div>
     </div>
 
+    <!-- CONNECTIONS' header IS on screen; its Wi-Fi row is not. This board first
+         stopped after `Sleep screen` on an estimate of eleven visible items, and
+         the firmware -- which derives the count from the real font metrics -- fits
+         twelve. The board was the wrong one: how many items fit is a number the
+         box model COMPUTES, so authoring it by guess is the thing this project's
+         first invariant warns against. -->
+    <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px; border-top: 2px solid #000000;">CONNECTIONS</div>
+
     </div>
 
-    <!-- The rail. 11 of the list's 13 elements are visible (3 section headers and
-         10 rows; CONNECTIONS and Wi-Fi are below), so the thumb is 84.6% at the
-         top. A large thumb is the honest answer for a list that only just
-         overflows -- see LibraryScrolled for why a mockup's proportion has to be
-         one the rule could produce. -->
+    <!-- The rail. 12 of the list's 13 items are visible, so the thumb is 92.3% at
+         the top -- only Wi-Fi is below the fold. A large thumb is the honest answer
+         for a list that only just overflows; see LibraryScrolled for why a
+         mockup's proportion has to be one the rule could produce. -->
     <div style="position: absolute; top: 6px; bottom: 6px; right: 4px; width: 6px; border: 1px solid #000000; box-sizing: border-box;">
-      <div style="position: absolute; left: 0; right: 0; top: 0; height: 84.6%; background: #000000;"></div>
+      <div style="position: absolute; left: 0; right: 0; top: 0; height: 92.3%; background: #000000;"></div>
     </div>
 
   </div>

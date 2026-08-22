@@ -798,38 +798,5 @@ void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
   drawHintBar(fb, fonts, hints, slots, plane);
 }
 
-void QuietTheme::renderStub(Framebuffer& fb, const FontSet& fonts, const StubViewModel& vm,
-                            Plane plane) {
-  fb.clear(true);
-  // Built only from primitives already matched to boards -- header band, rows,
-  // hint bar. Nothing here invents a measurement, so this surface cannot
-  // introduce a fidelity defect the real screens would inherit.
-  int y = drawHeaderBand(fb, fonts, vm.title, std::to_string(vm.batteryPercent) + "%",
-                             &icons::kBattery, plane);
-
-  const Font& meta = fonts[Role::Meta400];
-  y += kMargin;
-  drawText(fb, meta, kMargin, baselineIn(meta, y, meta.lineHeight()), vm.note, Ink::Black,
-           trackingEm(meta, kBandLabelEm), plane);
-  y += meta.lineHeight() + kMargin;
-
-  const Hint hints[4] = {{&icons::kBack, vm.hints[0], vm.holds[0]},
-                         {&icons::kDot, vm.hints[1], vm.holds[1]},
-                         {&icons::kUp, vm.hints[2], vm.holds[2]},
-                         {&icons::kDown, vm.hints[3], vm.holds[3]}};
-  const int barTop = fb.height() - hintBarHeight(fonts, hints);
-
-  for (size_t i = 0; i < vm.lines.size(); ++i) {
-    const int rowY = y + static_cast<int>(i) * kRowH;
-    // Clip against the hint bar rather than drawing under it. The real screens
-    // scroll; this one just stops, which is honest for a placeholder.
-    if (rowY + kRowH > barTop) break;
-    drawRow(fb, fonts, rowY, vm.lines[i], "", static_cast<int>(i) == vm.focusedLine, nullptr,
-            plane);
-  }
-
-  int slots[4] = {};
-  drawHintBar(fb, fonts, hints, slots, plane);
-}
 
 }  // namespace reader

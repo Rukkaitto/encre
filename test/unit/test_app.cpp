@@ -92,7 +92,6 @@ class NullTheme : public Theme {
     rowH = 1;
     headerH = 1;
   }
-  void renderStub(Framebuffer&, const FontSet&, const StubViewModel&, Plane) override {}
 };
 
 const InputEvent kConfirm{Button::Confirm, PressKind::Short};
@@ -388,8 +387,8 @@ TEST_CASE("two stacked overlays render three screens, bottom-up") {
   FakeFactory f;
   f.renderLog = &log;
   f.overlays.insert(ScreenId::Settings);
-  f.overlays.insert(ScreenId::InputMonitor);
-  f.actions[ScreenId::Settings] = Action::push(ScreenId::InputMonitor);
+  f.overlays.insert(ScreenId::SdMissing);
+  f.actions[ScreenId::Settings] = Action::push(ScreenId::SdMissing);
   App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::push(ScreenId::Settings), 0, false,
                                        &log),
           f);
@@ -400,7 +399,7 @@ TEST_CASE("two stacked overlays render three screens, bottom-up") {
   RenderTarget t;
   t.paint(app);
   CHECK(log ==
-        std::vector<ScreenId>{ScreenId::Home, ScreenId::Settings, ScreenId::InputMonitor});
+        std::vector<ScreenId>{ScreenId::Home, ScreenId::Settings, ScreenId::SdMissing});
 }
 
 TEST_CASE("the walk stops at the first non-overlay, not at the root") {
@@ -569,12 +568,12 @@ TEST_CASE("a push is never partial, and neither is a pop") {
   // The stack changed, so everything below the top may be different. This is the
   // condition transition() already expresses, which is why it is the signal.
   PartialFixture fx;
-  fx.f.overlays.insert(ScreenId::InputMonitor);
-  fx.f.footprints[ScreenId::InputMonitor] = 7;
+  fx.f.overlays.insert(ScreenId::SdMissing);
+  fx.f.footprints[ScreenId::SdMissing] = 7;
   REQUIRE(fx.t.paintTop(fx.app));
   fx.app.clearDirty();
 
-  fx.overlay().setNext(Action::push(ScreenId::InputMonitor));
+  fx.overlay().setNext(Action::push(ScreenId::SdMissing));
   fx.app.dispatch(kConfirm);
   REQUIRE(fx.app.depth() == 3);
   REQUIRE(fx.app.transition());
@@ -606,14 +605,14 @@ TEST_CASE("a transition is refused even when the stack came back to where it was
   // address staying unique, so it is the one that has to hold the line, and one
   // wasted repaint per push-pop pair is the right price.
   PartialFixture fx;
-  fx.f.overlays.insert(ScreenId::InputMonitor);
-  fx.f.footprints[ScreenId::InputMonitor] = 7;
+  fx.f.overlays.insert(ScreenId::SdMissing);
+  fx.f.footprints[ScreenId::SdMissing] = 7;
   REQUIRE(fx.t.paintTop(fx.app));
   fx.app.clearDirty();
   const Screen* paintedTop = &fx.app.top();
   const int paintedDepth = fx.app.depth();
 
-  fx.overlay().setNext(Action::push(ScreenId::InputMonitor));
+  fx.overlay().setNext(Action::push(ScreenId::SdMissing));
   fx.app.dispatch(kConfirm);
   REQUIRE(fx.app.depth() == paintedDepth + 1);
   static_cast<FakeScreen&>(fx.app.top()).setNext(Action::pop());
@@ -633,11 +632,11 @@ TEST_CASE("a push not yet painted stays a transition through a later redraw") {
   // paint that finally happens would be partial over a frame holding the screen
   // BELOW the one that was pushed.
   PartialFixture fx;
-  fx.f.overlays.insert(ScreenId::InputMonitor);
-  fx.f.footprints[ScreenId::InputMonitor] = 7;
+  fx.f.overlays.insert(ScreenId::SdMissing);
+  fx.f.footprints[ScreenId::SdMissing] = 7;
   REQUIRE(fx.t.paintTop(fx.app));
   fx.app.clearDirty();
-  fx.overlay().setNext(Action::push(ScreenId::InputMonitor));
+  fx.overlay().setNext(Action::push(ScreenId::SdMissing));
   fx.app.dispatch(kConfirm);  // push, not painted
   static_cast<FakeScreen&>(fx.app.top()).setNext(Action::redraw());
   fx.app.dispatch(kConfirm);  // ...then a redraw on the new top

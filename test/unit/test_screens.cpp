@@ -4,25 +4,26 @@
 
 using namespace reader;
 
-TEST_CASE("the demo catalogue can reach the input monitor from Home") {
+TEST_CASE("the demo catalogue reaches Settings from Home, and Back unwinds") {
+  // This used to walk on into the Input Monitor, which 2C-3 deleted with
+  // StubScreen -- it was reachable only from the stub's first row and no board
+  // ever listed it. What is left is the navigation that survives: Home's SETTINGS
+  // row opens the real screen, and Back unwinds to a root that cannot be popped.
   DemoScreenFactory f;
   App app(std::make_unique<HomeScreen>(demoHomeVm(), demoHomeTargets()), f);
   const InputEvent down{Button::Down, PressKind::Short};
   const InputEvent confirm{Button::Confirm, PressKind::Short};
   const InputEvent back{Button::Back, PressKind::Short};
 
-  app.dispatch(down);     // focus LIBRARY
+  app.dispatch(down);     // focus LIBRARY -- Home's focus starts before its menu
   app.dispatch(down);     // focus SETTINGS
   app.dispatch(confirm);  // push Settings
   REQUIRE(app.top().id() == ScreenId::Settings);
-  app.dispatch(confirm);  // its first row is INPUT MONITOR
-  REQUIRE(app.top().id() == ScreenId::InputMonitor);
   CHECK(app.top().fidelity() == Fidelity::Mono);
-  // Confirm carries the hold here, and the ring on that slot is the same array.
-  CHECK(app.top().longPressable() == buttonBit(Button::Confirm));
+  // Nothing here promises a hold: every focusable row edits in place, so the hint
+  // bar has no ring and longPressable must agree with it.
+  CHECK(app.top().longPressable() == 0);
 
-  app.dispatch(back);
-  CHECK(app.top().id() == ScreenId::Settings);
   app.dispatch(back);
   CHECK(app.top().id() == ScreenId::Home);
   CHECK(app.depth() == 1);
