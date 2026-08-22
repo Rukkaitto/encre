@@ -6,6 +6,7 @@
 #include <SDCardManager.h>
 
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -35,6 +36,9 @@ class RootedFileSystem : public reader::FileSystem {
     return inner_.list(at(p), out);
   }
   bool readAll(std::string_view p, std::string& out) override { return inner_.readAll(at(p), out); }
+  std::unique_ptr<reader::FileHandle> openRead(std::string_view p) override {
+    return inner_.openRead(at(p));
+  }
   bool writeAll(std::string_view p, std::string_view d) override {
     return inner_.writeAll(at(p), d);
   }

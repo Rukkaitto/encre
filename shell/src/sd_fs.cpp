@@ -6,6 +6,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
+#include <memory>
+#include <new>
 #include <utility>
 
 namespace {
@@ -408,6 +410,124 @@ bool SdFileSystem::readAll(std::string_view path, std::string& out) {
   f.close();
   out = std::move(body);
   return true;
+}
+
+// The read handle. Deliberately NOT in an anonymous namespace: sd_fs.h has to be
+// able to name it to befriend it, so it lives at file scope with an external
+// name and is defined only here.
+//
+// THE FsFile's LIFETIME IS THE HANDLE'S, AND NOTHING ELSE'S.
+//
+// SdFat is compiled with DESTRUCTOR_CLOSES_FILE == 0 in this build (checked in
+// SdFatConfig.h -- it is the default and nothing overrides it), so ~FsFile does
+// NOT close the file. An FsFile that goes out of scope unclosed keeps its
+// directory entry pinned, and a firmware that leaks them stops being able to open
+// anything at all -- the failure arrives long after the leak, on an unrelated
+// screen, which is why the SDK's own loops close on every path and so does
+// list() above.
+//
+// Three things make it unambiguous here:
+//   * the handle owns exactly ONE FsFile, opened in openAt() and closed in the
+//     destructor. There is no other close() and no other open().
+//   * openRead() hands back a std::unique_ptr<reader::FileHandle> with a virtual
+//     destructor, so the close happens at scope exit on every path out --
+//     including an early return the caller did not think about. reader::FileHandle
+//     deletes copy and move for this reason: two owners would close it twice or
+//     not at all.
+//   * a failed openAt() closes before returning false, and the destructor's
+//     `if (file_)` makes the second close a no-op rather than a double close.
+class SdFileHandle : public reader::FileHandle {
+ public:
+  explicit SdFileHandle(SdFileSystem& fs) : fs_(fs) {}
+
+  ~SdFileHandle() override {
+    SpiBusGuard bus;
+    if (file_) file_.close();
+  }
+
+  // The guard is the caller's (openRead holds it), so this must not take it --
+  // recursively it would be harmless, but it would also be a lie about who owns
+  // the bus here.
+  bool openAt(const char* path) {
+    file_ = SdMan.open(path, O_RDONLY);
+    if (!file_) return false;
+    if (file_.isDirectory()) {
+      file_.close();
+      return false;  // a directory opens perfectly well; only this refuses it
+    }
+    const uint64_t bytes = file_.fileSize();
+    // size() is uint32_t. Saturating would make seek(size()) land in the middle
+    // of the file and every offset past 4 GiB unreachable but not reported, so
+    // refuse the open instead of handing back a handle that lies about its shape.
+    // Only exFAT can hold such a file; nothing in V1 should meet one.
+    if (bytes > UINT32_MAX) {
+      file_.close();
+      Serial.printf("[sd] %s is %llu bytes; openRead cannot address past %u\n", path,
+                    (unsigned long long)bytes, (unsigned)UINT32_MAX);
+      Serial.flush();
+      return false;
+    }
+    size_ = static_cast<uint32_t>(bytes);
+    pos_ = 0;
+    return true;
+  }
+
+  // No guard: answered from RAM, so this never reaches the bus. See the note in
+  // sd_fs.h about why the guard is per-operation.
+  uint32_t size() const override { return size_; }
+  uint32_t position() const override { return pos_; }
+
+  size_t read(void* dst, size_t bytes) override {
+    if (bytes == 0) return 0;  // a no-op, and `dst` is never dereferenced
+    SpiBusGuard bus;
+    if (!file_ || !fs_.mounted()) return 0;
+    const int n = file_.read(dst, bytes);
+    if (n <= 0) {
+      // n == 0 at the end of the file is ordinary and NOT a card failure --
+      // FatFile::read clamps the count to what is left, so a request at EOF
+      // returns 0 without touching the card. Below size() it is the same evidence
+      // readAll acts on: the file told us its length and would not produce it.
+      if (pos_ < size_) fs_.noteCardGone("a handle read");
+      return 0;
+    }
+    pos_ += static_cast<uint32_t>(n);
+    return static_cast<size_t>(n);
+  }
+
+  bool seek(uint32_t offset) override {
+    // Refused past the end, position unchanged -- which is also exactly what
+    // FatFile::seekSet does (pos > m_fileSize fails and restores m_curCluster),
+    // so this is the primitive rather than something emulated on top of it. See
+    // reader::FileHandle for why refused and not clamped.
+    if (offset > size_) return false;
+    SpiBusGuard bus;
+    if (!file_ || !fs_.mounted()) return false;
+    if (!file_.seekSet(offset)) return false;
+    pos_ = offset;
+    return true;
+  }
+
+ private:
+  SdFileSystem& fs_;
+  FsFile file_;
+  uint32_t size_ = 0;
+  uint32_t pos_ = 0;
+};
+
+std::unique_ptr<reader::FileHandle> SdFileSystem::openRead(std::string_view path) {
+  SpiBusGuard bus;
+  if (!mounted()) return nullptr;
+  const std::string p = normalise(path);
+  if (p == "/") return nullptr;  // the root is a directory
+
+  // nothrow, and this is not decoration: the firmware is -fno-exceptions, so the
+  // ordinary operator new calls std::terminate on failure, which is an abort()
+  // with no diagnostic. A failed open must be a null handle -- including when
+  // what failed was the allocation.
+  std::unique_ptr<SdFileHandle> h(new (std::nothrow) SdFileHandle(*this));
+  if (!h) return nullptr;
+  if (!h->openAt(p.c_str())) return nullptr;
+  return h;
 }
 
 bool SdFileSystem::writeAll(std::string_view path, std::string_view data) {

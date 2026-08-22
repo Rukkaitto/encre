@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -44,6 +45,35 @@ class SpiBusGuard {
   SpiBusGuard& operator=(const SpiBusGuard&) = delete;
 };
 
+// The read handle, defined in sd_fs.cpp. Declared here only so SdFileSystem can
+// befriend it: it needs noteCardGone(), because a read that stops short of the
+// file's own declared size is the same "the card stopped answering" evidence
+// readAll acts on, and a handle that swallowed it would leave mounted() lying.
+class SdFileHandle;
+
+// THE BUS GUARD AND A LONG-LIVED HANDLE: per-operation, never per-handle.
+//
+// A handle is a new shape for this class. Every other method here is one bounded
+// burst of card traffic, so wrapping the whole method in a SpiBusGuard is both
+// correct and free. A handle is different: an EPUB reader holds one open for as
+// long as the book is open -- minutes, and across many paints.
+//
+// So the guard is taken per OPERATION (open, each read, each seek, close) and
+// never held for the handle's lifetime. Holding it across the lifetime would not
+// deadlock today -- the mutex is recursive and both users are on the Arduino loop
+// task, so renderTop() taking it again would simply succeed -- but that is the
+// accident that makes it look safe. The moment a handle is held by anything OTHER
+// than the paint task (a background library scan is the obvious Phase 3
+// candidate, and it is exactly why this guard exists at all) renderTop() would
+// block behind it for the whole time a book is open: not a deadlock, a panel that
+// never repaints. Which is worse, because it looks like a display fault.
+//
+// What makes per-operation sufficient is that SdFat holds no bus state between
+// calls. An open FsFile is RAM only -- a cluster number, an offset, some flags --
+// so nothing is asserted on the bus while nobody is inside a call. size() and
+// position() do not touch the card at all: both are answered from members this
+// class caches, which is why neither takes the guard.
+//
 // reader::FileSystem over the SD card, via SDCardManager (which is a singleton,
 // so this class holds no volume of its own and two instances would address the
 // same card).
@@ -150,22 +180,29 @@ class SdFileSystem : public reader::FileSystem {
   static constexpr size_t kNameBufBytes = 256;
 
   // readAll's ceiling. The interface is explicit that readAll is for the small
-  // JSON files V1 stores and that EPUBs will need a streaming handle instead, and
-  // this is where that stops being advice: the firmware is built
-  // -fno-exceptions, so a std::string::resize that cannot allocate calls abort()
-  // and takes the device down with no diagnostic. A 64 KB cap turns "someone put
-  // a 300 MB file where a settings file goes" into a clean false.
+  // JSON files V1 stores and that EPUBs need openRead instead, and this is where
+  // that stops being advice: the firmware is built -fno-exceptions, so a
+  // std::string::resize that cannot allocate calls abort() and takes the device
+  // down with no diagnostic. A 64 KB cap turns "someone put a 300 MB file where a
+  // settings file goes" into a clean false.
+  //
+  // openRead has NO equivalent cap and needs none: the handle allocates a fixed
+  // few dozen bytes whatever the file's size, and the buffer is the caller's.
+  // That is the whole difference between the two.
   static constexpr uint32_t kMaxReadBytes = 64u * 1024u;
 
   bool mounted() const override;
   bool exists(std::string_view path) override;
   bool list(std::string_view path, std::vector<reader::DirEntry>& out) override;
   bool readAll(std::string_view path, std::string& out) override;
+  std::unique_ptr<reader::FileHandle> openRead(std::string_view path) override;
   bool writeAll(std::string_view path, std::string_view data) override;
   bool mkdirs(std::string_view path) override;
   bool remove(std::string_view path) override;
 
  private:
+  friend class SdFileHandle;
+
   // True when `p` names an existing directory. Opens and closes a handle.
   bool isDirectory(const std::string& p);
   // True when `p` exists and is NOT a directory.

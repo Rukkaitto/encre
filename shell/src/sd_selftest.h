@@ -32,11 +32,12 @@ class SdFileSystem;
 // `--project-option="build_flags=..."` instead: that REPLACES the list, so the
 // device defines vanish and the binary silently builds for the wrong board.
 //
-// Without the flag this is a stub and the firmware pays nothing for it: measured
-// at 651328 bytes of flash either way, because the clauses carry a string per
-// assertion and ~16.8 KB of that is not worth shipping. With it wired up and
-// enabled the self-test costs ~16.8 KB on top of the ~28.5 KB that mounting a
-// card costs at all.
+// Without the flag this is a stub and the firmware pays nothing for it. With it
+// enabled the self-test costs ~29.7 KB of flash (measured at Phase 3A task 3:
+// 742648 bytes without, 773028 with) and 8 bytes of RAM, because the clauses
+// carry a string per assertion. That figure roughly doubled when the ten
+// openRead/FileHandle clauses landed, which is the cost of the one thing that
+// checks the handle against real hardware -- and worth it for exactly that.
 //
 // Returns the number of FAILED assertions (0 = the device obeys the contract), or
 // -1 when the self-test was not compiled in. -1 rather than 0 on purpose: a build

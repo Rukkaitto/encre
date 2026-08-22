@@ -1,3 +1,4 @@
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,9 @@ class ShuffledFs : public FileSystem {
   bool writeAll(std::string_view p, std::string_view d) override { return inner_.writeAll(p, d); }
   bool mkdirs(std::string_view p) override { return inner_.mkdirs(p); }
   bool remove(std::string_view p) override { return inner_.remove(p); }
+  std::unique_ptr<FileHandle> openRead(std::string_view p) override {
+    return inner_.openRead(p);
+  }
 
   bool list(std::string_view path, std::vector<DirEntry>& out) override {
     std::vector<DirEntry> mine;

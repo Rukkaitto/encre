@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -36,6 +37,10 @@ class HostFileSystem : public FileSystem {
   bool exists(std::string_view path) override;
   bool list(std::string_view path, std::vector<DirEntry>& out) override;
   bool readAll(std::string_view path, std::string& out) override;
+  // The handle class itself stays inside host_fs.cpp: it holds an std::ifstream,
+  // and putting <fstream> in a core/include header would put a host-OS
+  // dependency somewhere the firmware can reach it by including this file.
+  std::unique_ptr<FileHandle> openRead(std::string_view path) override;
   bool writeAll(std::string_view path, std::string_view data) override;
   bool mkdirs(std::string_view path) override;
   bool remove(std::string_view path) override;

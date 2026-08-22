@@ -6,9 +6,13 @@
 // into the ESP32 toolchain. Same arrangement as png.cpp.
 #ifdef READER_DESKTOP
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <ios>
+#include <memory>
+#include <new>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -40,6 +44,70 @@ std::string parentOf(const std::string& normalised) {
   const size_t slash = normalised.rfind('/');
   return slash == 0 ? "/" : normalised.substr(0, slash);
 }
+
+// A read handle over an std::ifstream.
+//
+// The stream's own error flags are the thing to be careful with here: istream's
+// read() sets BOTH eofbit and failbit when it delivers fewer bytes than asked
+// for, and leaves them set, so a naive second read on the same handle returns
+// nothing forever. That would make "a short read at the end of the file" a
+// permanent failure rather than the ordinary event FileHandle says it is -- and
+// on the desktop it would silently diverge from SdFat, which just returns the
+// bytes it had. So every operation clears eof/fail afterwards and only
+// badbit -- a real stream failure -- is treated as one.
+class HostFileHandle : public FileHandle {
+ public:
+  HostFileHandle(std::ifstream in, uint32_t size) : in_(std::move(in)), size_(size) {}
+
+  uint32_t size() const override { return size_; }
+  uint32_t position() const override { return pos_; }
+
+  size_t read(void* dst, size_t bytes) override {
+    if (bytes == 0) return 0;  // a no-op, and `dst` is not touched
+    // Clamp to the length recorded at open, so position() can never pass size().
+    // The clamp is not paranoia: size_ was read once and the file on disk can
+    // grow behind us (the simulator writes into the same tree it reads), and
+    // without this a handle would quietly hand back bytes past the size it is
+    // still reporting. SdFat clamps internally for the same reason, so clamping
+    // here is also what keeps the two implementations answering alike.
+    if (pos_ >= size_) return 0;
+    const size_t left = size_ - pos_;
+    if (bytes > left) bytes = left;
+
+    in_.read(static_cast<char*>(dst), static_cast<std::streamsize>(bytes));
+    const std::streamsize got = in_.gcount();
+    if (in_.bad()) {
+      // A real stream failure, as opposed to the end of the file. gcount() no
+      // longer describes where the stream is, so report nothing delivered and
+      // put it back where pos_ says it is: position() stays authoritative and
+      // the handle stays usable.
+      in_.clear();
+      in_.seekg(static_cast<std::streamoff>(pos_), std::ios::beg);
+      return 0;
+    }
+    in_.clear();  // a short read is the end of the file, not an error
+    pos_ += static_cast<uint32_t>(got);
+    return static_cast<size_t>(got);
+  }
+
+  bool seek(uint32_t offset) override {
+    if (offset > size_) return false;  // refused, not clamped -- see FileHandle
+    in_.clear();
+    in_.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+    if (!in_) {
+      in_.clear();
+      in_.seekg(static_cast<std::streamoff>(pos_), std::ios::beg);
+      return false;
+    }
+    pos_ = offset;
+    return true;
+  }
+
+ private:
+  std::ifstream in_;
+  uint32_t size_ = 0;
+  uint32_t pos_ = 0;
+};
 
 }  // namespace
 
@@ -102,6 +170,25 @@ bool HostFileSystem::readAll(std::string_view path, std::string& out) {
   if (in.bad()) return false;  // `out` is still untouched on every failure path
   out = std::move(body);
   return true;
+}
+
+std::unique_ptr<FileHandle> HostFileSystem::openRead(std::string_view path) {
+  if (!mounted()) return nullptr;
+  const std::string p = hostPath(path);
+  std::error_code ec;
+  // is_regular_file is what refuses a directory AND a missing path in one call,
+  // and it is checked before the open so a directory never reaches ifstream --
+  // which on some platforms opens one happily and then reads nothing.
+  if (!fsys::is_regular_file(p, ec)) return nullptr;
+  const std::uintmax_t bytes = fsys::file_size(p, ec);
+  if (ec) return nullptr;
+  // size() is uint32_t. A saturated length would make seek(size()) land in the
+  // middle of the file, so refuse rather than lie about it.
+  if (bytes > UINT32_MAX) return nullptr;
+  std::ifstream in(p, std::ios::binary);
+  if (!in) return nullptr;
+  return std::unique_ptr<FileHandle>(
+      new (std::nothrow) HostFileHandle(std::move(in), static_cast<uint32_t>(bytes)));
 }
 
 bool HostFileSystem::writeAll(std::string_view path, std::string_view data) {

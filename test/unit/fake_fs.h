@@ -9,13 +9,54 @@
 // fake that is more forgiving than the real thing makes every test above it
 // meaningless.
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <map>
+#include <memory>
+#include <new>
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "reader/filesystem.h"
+
+// A read handle over a COPY of the body.
+//
+// The copy is deliberate. A pointer into the map would dangle the moment a test
+// wrote to the file or dropped the filesystem while a handle was open, and a fake
+// whose failure mode is undefined behaviour is worse than no fake at all. It does
+// mean the fake's handle is immune to a concurrent writeAll where a real one is
+// not -- that is a divergence, and it is why the contract says nothing about
+// writing to a file that is open for reading. Do not start relying on it.
+class FakeFileHandle : public reader::FileHandle {
+ public:
+  explicit FakeFileHandle(std::string body) : body_(std::move(body)) {}
+
+  uint32_t size() const override { return static_cast<uint32_t>(body_.size()); }
+  uint32_t position() const override { return pos_; }
+
+  size_t read(void* dst, size_t bytes) override {
+    if (bytes == 0) return 0;  // a no-op, and `dst` is not touched
+    const size_t left = body_.size() - pos_;
+    const size_t n = bytes < left ? bytes : left;
+    if (n != 0) std::memcpy(dst, body_.data() + pos_, n);
+    pos_ += static_cast<uint32_t>(n);
+    return n;
+  }
+
+  bool seek(uint32_t offset) override {
+    // Refused, not clamped, and pos_ is left alone -- see FileHandle.
+    if (offset > body_.size()) return false;
+    pos_ = offset;
+    return true;
+  }
+
+ private:
+  std::string body_;
+  uint32_t pos_ = 0;
+};
 
 class FakeFileSystem : public reader::FileSystem {
  public:
@@ -69,6 +110,20 @@ class FakeFileSystem : public reader::FileSystem {
     if (it == files_.end()) return false;
     out = it->second;
     return true;
+  }
+
+  std::unique_ptr<reader::FileHandle> openRead(std::string_view path) override {
+    if (!mounted_) return nullptr;
+    const std::string p = normalise(path);
+    if (dirs_.count(p) != 0) return nullptr;  // a directory is not readable
+    auto it = files_.find(p);
+    if (it == files_.end()) return nullptr;
+    // size() is uint32_t, so a longer file has no honest length to report and a
+    // saturated one would break seek arithmetic. Refuse, as the real ones do.
+    if (it->second.size() > UINT32_MAX) return nullptr;
+    // nothrow for the same reason the device does it: a failed open is a null
+    // handle, never an abort. See FileHandle.
+    return std::unique_ptr<reader::FileHandle>(new (std::nothrow) FakeFileHandle(it->second));
   }
 
   bool writeAll(std::string_view path, std::string_view data) override {

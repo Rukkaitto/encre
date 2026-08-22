@@ -54,7 +54,7 @@ class DoctestReport : public FsContractReport {
 
 // Every mounted clause, each against storage the factory has just made fresh.
 // The SUBCASE is what gives each clause its own filesystem: doctest re-enters the
-// body once per clause, so `make` runs seventeen independent cases and a failure
+// body once per clause, so `make` runs twenty-seven independent cases and a failure
 // names which one.
 template <typename Factory>
 void runContract(const char* label, Factory makeFs) {
@@ -125,6 +125,46 @@ TEST_CASE("HostFileSystem confines an absolute reader path to its root") {
   std::string got;
   REQUIRE(fs.readAll("/planted.txt", got));
   CHECK(got == "planted");
+
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+}
+
+// HostFileSystem's other own concern: a handle reports the length it read at
+// open, and the host filesystem is the one place something else can change the
+// file underneath it -- the simulator writes into the same tree it reads from.
+// This cannot be a contract clause: the fake's handle holds a copy, and asking
+// the device runner to grow a file mid-clause would be testing SdFat rather than
+// us. So it is pinned here, against the implementation that has the hazard.
+TEST_CASE("a host handle does not read past the size it reported, if the file grows") {
+  const std::string root = freshTempRoot("grow");
+  HostFileSystem fs(root);
+  REQUIRE(fs.writeAll("/f.bin", "12345"));
+
+  std::unique_ptr<FileHandle> h = fs.openRead("/f.bin");
+  REQUIRE(h != nullptr);
+  REQUIRE(h->size() == 5u);
+
+  // Append behind the handle's back.
+  {
+    std::ofstream out(root + "/f.bin", std::ios::binary | std::ios::app);
+    out << "6789";
+  }
+
+  char buf[16] = {0};
+  CHECK(h->read(buf, sizeof(buf)) == 5u);  // the length it promised, not what is there now
+  CHECK(std::string(buf, 5) == "12345");
+  CHECK(h->position() == 5u);
+  CHECK(h->position() <= h->size());  // the invariant the clamp exists for
+  CHECK(h->read(buf, sizeof(buf)) == 0u);
+  // ...and seek is still bounded by the size it reported, not the new one.
+  CHECK_FALSE(h->seek(7));
+  CHECK(h->position() == 5u);
+
+  // A handle opened NOW sees the longer file: size() is per-handle, read at open.
+  std::unique_ptr<FileHandle> fresh = fs.openRead("/f.bin");
+  REQUIRE(fresh != nullptr);
+  CHECK(fresh->size() == 9u);
 
   std::error_code ec;
   std::filesystem::remove_all(root, ec);

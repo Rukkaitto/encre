@@ -258,8 +258,8 @@ what needs hardware — raw button samples, the panel calls, deep sleep.
 
 **`core/` sees one interface — `reader::FileSystem`** (`filesystem.h`) — and never
 learns what backs it: `exists`, `list`, `readAll`, `writeAll`, `mkdirs`, `remove`,
-plus `mounted()`. Three implementations, and the contract is what keeps them one
-thing:
+`openRead`, plus `mounted()`. Three implementations, and the contract is what
+keeps them one thing:
 
 | Implementation | Lives in | In which build |
 |---|---|---|
@@ -279,9 +279,9 @@ thing:
   seam `SdFileSystem` would be the one implementation nothing checks. Build it in
   with `PLATFORMIO_BUILD_FLAGS="-DENCRE_FS_SELFTEST=1" make firmware` (that
   variable **appends** to `platformio.ini`'s flags; `--project-option` would
-  *replace* them and silently build for the wrong board). It costs ~16.8 KB and is
+  *replace* them and silently build for the wrong board). It costs ~29.7 KB and is
   a stub returning **-1** — not 0 — otherwise, so a build without it cannot be
-  mistaken for a build that passed.
+  mistaken for a build that passed. **27 clauses**, ten of them `openRead`'s.
 - **The path normaliser exists in three copies**, one per implementation, and
   nothing but the contract's "a redundant or trailing separator addresses the same
   thing" clause holds them together. They live in three build worlds (Arduino,
@@ -289,9 +289,34 @@ thing:
   implementation should extract it rather than copy it again.
 - **`readAll` is not the EPUB path.** It is for the small JSON files V1 stores and
   `SdFileSystem` caps it at 64 KB, because `-fno-exceptions` makes a `resize` that
-  cannot allocate an `abort()` with no diagnostic. Streaming (a handle with
-  `read(buf, n)`) is **Phase 3's**, and its absence is a decision, not an
-  oversight: EPUBs are megabytes against ~230 KB of heap.
+  cannot allocate an `abort()` with no diagnostic. `openRead` is the EPUB path
+  (3A-3), and the difference is who owns the buffer: a handle is one fixed ~100-byte
+  allocation whatever the file's size, so it has no cap and needs none.
+- **The handle is RANDOM ACCESS, not just streaming**, and that is the requirement
+  rather than a nicety: a zip's central directory is at the **end** of the file, so
+  a forward-only stream cannot read an EPUB at all. `openRead(path)` returns
+  `std::unique_ptr<FileHandle>` — null on failure, never an `abort()`, and every
+  implementation allocates with `new (std::nothrow)` so even OOM is a null.
+  `read(dst, n)` / `seek(offset)` / `size()` / `position()`, and **`seek` past the
+  end is REFUSED with `position()` unchanged, not clamped** — that is SdFat's own
+  `seekSet` semantics, so the device is the primitive rather than an emulation, and
+  it keeps "that offset does not exist" distinct from "I am at the end", which is a
+  distinction the end-of-central-directory scan needs.
+- **The handle's `SpiBusGuard` is per OPERATION, never per handle lifetime.** A
+  reader holds a book open for minutes. Holding the guard across that would not
+  deadlock today — the mutex is recursive and both users are on the loop task — but
+  the day a handle is held off that task, `renderTop()` would block behind it for
+  as long as the book is open: a panel that never repaints, which reads as a
+  display fault. Per-operation is sufficient because SdFat holds no bus state
+  between calls; an open `FsFile` is a cluster number and an offset in RAM.
+  `size()` and `position()` are answered from cached members and touch neither the
+  bus nor the guard.
+- **`DESTRUCTOR_CLOSES_FILE` is 0 in this SdFat build**, so `~FsFile` does *not*
+  close and a leaked handle eventually stops the firmware opening anything at all —
+  arriving as a failure on an unrelated screen, long after the leak. So the handle
+  owns exactly one `FsFile`, closes it in its own destructor, and is reached only
+  through a `unique_ptr`; `FileHandle` deletes copy and move so there can never be
+  two owners.
 
 **The settings file is CREATED at boot when the card has none** — defaults
 written to `/.reader/settings.json`, logged. Three things want that: the user gets
@@ -383,7 +408,9 @@ restored focus would show is Library, which lands in 2C-2.
     the detecting, the fast probe is being served from cache and this is back.
 
 **The shared SPI bus is handled in exactly two places.** Every public method of
-`SdFileSystem` takes a recursive `SpiBusGuard`; `renderTop()` in
+`SdFileSystem` takes a recursive `SpiBusGuard` — and so does each *operation* on a
+`FileHandle` it handed out, open and close included, which is the same rule and
+not a third place; `renderTop()` in
 `shell/src/main.cpp` takes the same guard around the **whole** paint, BUSY waits
 included, because the driver keeps the display's CS asserted across them. Today
 both run on the Arduino loop task, so this is free insurance — it is there to be
