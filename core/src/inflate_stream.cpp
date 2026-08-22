@@ -37,11 +37,16 @@ bool Inflater::fail(const char* why) {
 }
 
 bool Inflater::begin(ByteSource& src) {
-  delete s_;
-  s_ = new (std::nothrow) Scratch;
+  // REUSED, not reallocated. begin() is called again on every backward page turn
+  // -- the stream cannot be seeked, so reaching an earlier page means decoding from
+  // the chapter's start again -- and churning 32 KB each time is how a heap with
+  // ~142 KB free gets fragmented into one that cannot serve the next chapter.
   if (s_ == nullptr) {
-    error_ = "not enough memory for the inflate window";
-    return false;
+    s_ = new (std::nothrow) Scratch;
+    if (s_ == nullptr) {
+      error_ = "not enough memory for the inflate window";
+      return false;
+    }
   }
   src_ = &src;
   wpos_ = 0;

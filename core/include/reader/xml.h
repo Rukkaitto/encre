@@ -15,6 +15,13 @@ class BufferSource : public ByteSource {
   explicit BufferSource(std::string_view bytes) : b_(bytes) {}
   size_t read(void* dst, size_t bytes) override;
 
+  // Point at different bytes, or back at the start of the same ones. What a rewind
+  // is for an in-memory chapter.
+  void reset(std::string_view bytes) {
+    b_ = bytes;
+    at_ = 0;
+  }
+
  private:
   std::string_view b_;
   size_t at_ = 0;
@@ -117,6 +124,12 @@ class Xml {
 
   Xml(const Xml&) = delete;
   Xml& operator=(const Xml&) = delete;
+
+  // Points the parser at a new source and forgets everything about the old one.
+  // For re-reading a chapter from its beginning, which is what a backward page turn
+  // costs on a stream that cannot be seeked -- and it reuses the buffers rather
+  // than constructing a second parser.
+  void restart(ByteSource& src);
 
   // Advances. Every call returns exactly one node; a self-closing element yields
   // a StartTag and then an EndTag, so a caller's stack balances without it having

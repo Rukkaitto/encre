@@ -1066,9 +1066,9 @@ static void handleOpen() {
 
   const uint32_t t0 = millis();
   const uint32_t heapBefore = ESP.getFreeHeap();
-  reader::OpenedChapter opened;
+  reader::OpenedBook opened;
   const char* why = "";
-  if (!reader::openChapter(gSd, path, 0, opened, &why)) {
+  if (!reader::openBook(gSd, path, 0, opened, &why)) {
     // THE HEAP GOES IN THE REFUSAL LINE, because "not enough memory" is only
     // actionable next to how much there was and how fragmented it is. The largest
     // free BLOCK is the number that actually decides: the reader's allocations are
@@ -1087,20 +1087,22 @@ static void handleOpen() {
   // string -- ReaderViewModel's rule: the theme does no arithmetic.
   char chapter[16];
   std::snprintf(chapter, sizeof(chapter), "CH. %02d", 1);
-  // Counted BEFORE the move: `opened.doc` is moved into the factory and what is
-  // left of it says nothing about the chapter.
-  const size_t blocks = opened.doc.blocks.size();
-  gFactory.setReaderChapter(std::move(opened.doc), opened.bookTitle, chapter);
+  // A LOCATION, not a chapter: openBook released the archive before returning, and
+  // the ReaderScreen streams from these three numbers -- so nothing here holds the
+  // chapter, which is the whole of 3C.
+  gFactory.setReaderChapter(opened.chapter, opened.title, chapter);
   const bool pushed = gApp->pushScreen(reader::ScreenId::Reader);
 
-  // The page count is the ONE number here that is not free: it is the pagination
-  // walk, one wrap per page, and it happened inside the push. Reported because
-  // "how long does opening a book take" is a question only the device answers, and
-  // this line is the whole of the answer -- parse, paginate and heap.
+  // The page count is the expensive part, and it happened inside the push: one
+  // decode of the chapter to index its pages. Reported because "how long does
+  // opening a book take" is a question only the device answers, and this line is
+  // the whole of the answer -- locate, paginate and heap.
   int pages = -1;
+  const char* readerWhy = "";
   if (pushed) {
     const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
     pages = rd->pageCount();
+    readerWhy = rd->error();
   }
   // THE STACK HIGH-WATER MARK, because a stack is the one budget this firmware had
   // no instrument for -- and the first thing to exhaust it did so on the very first
@@ -1111,13 +1113,15 @@ static void handleOpen() {
   Serial.printf("[stack] loopTask free at worst: %u bytes of %u\n",
                 (unsigned)(uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t)),
                 (unsigned)getArduinoLoopTaskStackSize());
-  Serial.printf("[open] %s -> \"%s\" ch=1/%d: parse=%lums total=%lums blocks=%u pages=%d "
-                "heap %u -> %u (cost %ld) min=%u pushed=%d\n",
-                path.c_str(), opened.bookTitle.c_str(), opened.chapterCount,
-                (unsigned long)(t1 - t0), (unsigned long)(millis() - t0), (unsigned)blocks,
-                pages, (unsigned)heapBefore, (unsigned)ESP.getFreeHeap(),
+  Serial.printf("[open] %s -> \"%s\" ch=1/%d: locate=%lums total=%lums pages=%d "
+                "entry=%uB heap %u -> %u (cost %ld) min=%u pushed=%d%s%s\n",
+                path.c_str(), opened.title.c_str(), opened.chapterCount,
+                (unsigned long)(t1 - t0), (unsigned long)(millis() - t0), pages,
+                (unsigned)opened.chapter.compressedSize, (unsigned)heapBefore,
+                (unsigned)ESP.getFreeHeap(),
                 (long)heapBefore - (long)ESP.getFreeHeap(),
-                (unsigned)ESP.getMinFreeHeap(), pushed ? 1 : 0);
+                (unsigned)ESP.getMinFreeHeap(), pushed ? 1 : 0,
+                readerWhy[0] != '\0' ? " reader-refused: " : "", readerWhy);
   Serial.flush();
 }
 

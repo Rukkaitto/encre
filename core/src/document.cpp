@@ -120,6 +120,18 @@ BlockReader::BlockReader(ByteSource& src) : st_(new (std::nothrow) State(src)) {
 
 BlockReader::~BlockReader() { delete st_; }
 
+void BlockReader::restart(ByteSource& src) {
+  if (st_ == nullptr) return;
+  st_->xml.restart(src);
+  st_->depth = 0;
+  st_->suppressAt = 0;
+  st_->cur = Block{};
+  st_->open = false;
+  st_->finished = false;
+  emitted_ = 0;
+  error_ = "";
+}
+
 bool BlockReader::next(Block& out) {
   if (st_ == nullptr || !ok() || st_->finished) return false;
   State& st = *st_;

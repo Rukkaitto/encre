@@ -75,24 +75,22 @@ SleepViewModel demoSleepVm() {
 // for its content, and the board's copy is the one source that makes the
 // comparison sheet meaningful.
 //
-// Built as blocks directly rather than parsed from XHTML: the board is HTML the
-// document builder has never seen and never will -- it carries the board's own
-// commentary and inline styles -- so parsing it would be testing the parser on the
-// wrong input while pretending to fix the content.
-Document demoReaderDoc() {
-  Document d;
-  d.blocks.push_back(
-      {BlockKind::Paragraph,
-       "Miss Brooke had that kind of beauty which seems to be thrown into relief by "
-       "poor dress. Her hand and wrist were so finely formed that she could wear "
-       "sleeves not less bare of style than those in which the Blessed Virgin "
-       "appeared to Italian painters."});
-  d.blocks.push_back(
-      {BlockKind::Paragraph,
-       "Her sister Celia wore a necklace, and the two of them had that air of being "
-       "dressed alike which is never quite an accident. It was the kind of morning "
-       "that makes a plain room look deliberate."});
-  return d;
+// AS XHTML, not as blocks. It used to build Blocks directly, which skipped the
+// document builder entirely -- so the demo exercised the renderer and nothing
+// below it. A few hundred bytes of markup runs the same tokenizer and the same
+// block builder a real chapter does, which is what makes the golden mean
+// something about the reader rather than only about the theme.
+std::string_view demoReaderXhtml() {
+  return
+      "<html><body>"
+      "<p>Miss Brooke had that kind of beauty which seems to be thrown into relief by "
+      "poor dress. Her hand and wrist were so finely formed that she could wear "
+      "sleeves not less bare of style than those in which the Blessed Virgin "
+      "appeared to Italian painters.</p>"
+      "<p>Her sister Celia wore a necklace, and the two of them had that air of being "
+      "dressed alike which is never quite an accident. It was the kind of morning "
+      "that makes a plain room look deliberate.</p>"
+      "</body></html>";
 }
 
 std::vector<LibraryItem> demoLibraryItems() {
@@ -223,11 +221,17 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // rendered nothing looks exactly like a book that failed to open, and the
       // caller can act on a refused push.
       if (readerBody_ == nullptr) return nullptr;
-      Document doc = readerDoc_.blocks.empty() ? demoReaderDoc() : readerDoc_;
-      auto scr = std::make_unique<ReaderScreen>(
-          std::move(doc),
-          readerBookTitle_.empty() ? "Middlemarch" : readerBookTitle_,
-          readerChapter_.empty() ? "CH. 01" : readerChapter_, readerBody_);
+      const std::string title = readerBookTitle_.empty() ? "Middlemarch" : readerBookTitle_;
+      const std::string chapter = readerChapter_.empty() ? "CH. 01" : readerChapter_;
+      std::unique_ptr<ReaderScreen> scr;
+      if (readerWhere_.bookPath.empty() || fs_ == nullptr) {
+        // The demo content, streamed from memory. Also the fallback when there is
+        // no filesystem at all, which is the simulator and every golden.
+        scr = std::make_unique<ReaderScreen>(demoReaderXhtml(), title, chapter, readerBody_);
+      } else {
+        scr = std::make_unique<ReaderScreen>(*fs_, readerWhere_, title, chapter, readerBody_);
+      }
+      // The expensive call: one decode of the chapter to build the page index.
       scr->setMetrics(readerMetrics_);
       return scr;
     }

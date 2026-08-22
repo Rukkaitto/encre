@@ -74,6 +74,12 @@ class BlockReader {
   // chapter ended (`error()` empty) or it was refused (`error()` says why) --
   // `ok()` tells them apart without a second call.
   bool next(Block& out);
+
+  // Re-reads from the beginning of a new source, reusing the buffers. A backward
+  // page turn on a stream that cannot be seeked means decoding the chapter again,
+  // and constructing a second reader would mean a second 4.3 KB allocation.
+  void restart(ByteSource& src);
+
   bool ok() const { return error_[0] == '\0'; }
   const char* error() const { return error_; }
 

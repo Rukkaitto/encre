@@ -57,6 +57,18 @@ Xml::Xml(ByteSource& src) : src_(&src), own_(std::string_view{}) {}
 
 Xml::Xml(std::string_view doc) : src_(nullptr), own_(doc) { src_ = &own_; }
 
+void Xml::restart(ByteSource& src) {
+  src_ = &src;
+  inLen_ = inAt_ = 0;
+  consumed_ = 0;
+  sourceEnded_ = false;
+  nameLen_ = textLen_ = 0;
+  pendingEndLen_ = 0;
+  endPending_ = false;
+  attrUsed_ = attrCount_ = 0;
+  error_ = "";
+}
+
 Xml::Node Xml::fail(const char* why) {
   error_ = why;
   return Node::Error;

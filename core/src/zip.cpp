@@ -272,4 +272,44 @@ bool Zip::read(FileHandle& file, const Entry& entry, std::string& out) const {
   return true;
 }
 
+bool Zip::locate(FileHandle& file, const Entry& entry, uint32_t& dataOffset) const {
+  // The local header restates the sizes and may disagree with the directory; only
+  // its LENGTHS are read, to find where the data begins. The directory is the
+  // authority on everything else.
+  unsigned char header[30];
+  if (!readAt(file, entry.localHeaderOffset, header, sizeof(header))) {
+    reason_ = "could not read a local header";
+    return false;
+  }
+  if (le32(header) != kLocalSig) {
+    reason_ = "an entry has no local header signature";
+    return false;
+  }
+  const uint16_t nameLen = le16(header + 26);
+  const uint16_t extraLen = le16(header + 28);
+  const uint64_t at = static_cast<uint64_t>(entry.localHeaderOffset) + 30u + nameLen + extraLen;
+  if (at + entry.compressedSize > file.size()) {
+    reason_ = "an entry's data runs past the end of the file";
+    return false;
+  }
+  dataOffset = static_cast<uint32_t>(at);
+  return true;
+}
+
+void EntrySource::reset(FileHandle& file, uint32_t dataOffset, uint32_t compressedSize) {
+  file_ = &file;
+  at_ = dataOffset;
+  left_ = compressedSize;
+}
+
+size_t EntrySource::read(void* dst, size_t bytes) {
+  if (file_ == nullptr || left_ == 0) return 0;
+  const size_t want = bytes < left_ ? bytes : left_;
+  if (!file_->seek(at_)) return 0;
+  const size_t got = file_->read(dst, want);
+  at_ += static_cast<uint32_t>(got);
+  left_ -= static_cast<uint32_t>(got);
+  return got;
+}
+
 }  // namespace reader

@@ -119,11 +119,13 @@ class DemoScreenFactory : public ScreenFactory {
   // indistinguishable from a book that failed to open.
   void setReaderBody(const GlyphSource* body) { readerBody_ = body; }
   void setReaderMetrics(const PageMetrics& m) { readerMetrics_ = m; }
-  // The chapter to open. Empty means demoReaderDoc() -- design/Reader.dc.html's
-  // own two paragraphs, which is what the simulator and the goldens render, on
-  // the same reasoning as demoSleepVm().
-  void setReaderChapter(Document doc, std::string bookTitle, std::string chapter) {
-    readerDoc_ = std::move(doc);
+  // WHERE the chapter is, not the chapter itself -- a path and three numbers, which
+  // is what openBook hands back and all a ChapterReader needs. An empty bookPath
+  // means the demo content: design/Reader.dc.html's own two paragraphs, streamed
+  // from memory, which is what the simulator and the goldens render, on the same
+  // reasoning as demoSleepVm().
+  void setReaderChapter(ChapterLocation where, std::string bookTitle, std::string chapter) {
+    readerWhere_ = std::move(where);
     readerBookTitle_ = std::move(bookTitle);
     readerChapter_ = std::move(chapter);
   }
@@ -141,7 +143,7 @@ class DemoScreenFactory : public ScreenFactory {
   int settingsHeaderH_ = 0;
   const GlyphSource* readerBody_ = nullptr;
   PageMetrics readerMetrics_{};
-  Document readerDoc_{};
+  ChapterLocation readerWhere_{};
   std::string readerBookTitle_;
   std::string readerChapter_;
 };

@@ -187,6 +187,13 @@ class InflateSource : public ByteSource {
   explicit InflateSource(Inflater& inf) : inf_(&inf) {}
   size_t read(void* dst, size_t bytes) override;
 
+  // Forget the chunk in hand, for when the Inflater has been begun again on a new
+  // stream. Without it a re-stream would hand back the tail of the old one.
+  void reset() {
+    chunk_ = {};
+    at_ = 0;
+  }
+
   // Why the stream stopped, for a caller that got a short read and needs to tell
   // "the chapter ended" from "the chapter is corrupt".
   bool done() const { return inf_->done(); }

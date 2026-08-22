@@ -1,0 +1,134 @@
+#include "reader/chapter.h"
+
+#include <new>
+
+namespace reader {
+
+bool ChapterReader::begin(FileSystem& fs, const ChapterLocation& where) {
+  fs_ = &fs;
+  where_ = where;
+  position_ = 0;
+  error_ = "";
+  file_ = fs.openRead(where_.bookPath);
+  if (file_ == nullptr) {
+    error_ = "cannot open the book file";
+    return false;
+  }
+  return startStream();
+}
+
+bool ChapterReader::beginBuffer(std::string_view xhtml) {
+  fs_ = nullptr;
+  file_.reset();
+  fromBuffer_ = true;
+  buffer_.assign(xhtml);
+  where_ = ChapterLocation{};
+  position_ = 0;
+  error_ = "";
+  return startStream();
+}
+
+bool ChapterReader::rewind() {
+  if (fromBuffer_) {
+    position_ = 0;
+    error_ = "";
+    return startStream();
+  }
+  if (fs_ == nullptr) {
+    error_ = "nothing to rewind";
+    return false;
+  }
+  position_ = 0;
+  error_ = "";
+  // The HANDLE is kept: seeking it back is what a rewind is, and reopening would
+  // cost a directory walk on the card for no gain. `startStream` seeks through
+  // EntrySource, which addresses the entry absolutely.
+  if (file_ == nullptr) {
+    file_ = fs_->openRead(where_.bookPath);
+    if (file_ == nullptr) {
+      error_ = "cannot reopen the book file";
+      return false;
+    }
+  }
+  return startStream();
+}
+
+bool ChapterReader::startStream() {
+  ByteSource* bytes = nullptr;
+
+  if (fromBuffer_) {
+    if (bufSrc_ == nullptr) {
+      bufSrc_.reset(new (std::nothrow) BufferSource(buffer_));
+      if (bufSrc_ == nullptr) {
+        error_ = "not enough memory to read this chapter";
+        return false;
+      }
+    } else {
+      bufSrc_->reset(buffer_);
+    }
+    bytes = bufSrc_.get();
+    if (blocks_ == nullptr) {
+      blocks_.reset(new (std::nothrow) BlockReader(*bytes));
+      if (blocks_ == nullptr || !blocks_->ok()) {
+        error_ = "not enough memory to read this chapter";
+        return false;
+      }
+    } else {
+      blocks_->restart(*bytes);
+    }
+    return true;
+  }
+
+  entry_.reset(*file_, where_.dataOffset, where_.compressedSize);
+
+  if (where_.deflated) {
+    // begin() reuses the window if one is already allocated, which is what keeps a
+    // rewind from churning 32 KB on a heap that has ~142 KB free.
+    if (!inflater_.begin(entry_)) {
+      error_ = inflater_.error();
+      return false;
+    }
+    if (inflated_ == nullptr) {
+      inflated_.reset(new (std::nothrow) InflateSource(inflater_));
+      if (inflated_ == nullptr) {
+        error_ = "not enough memory to read this chapter";
+        return false;
+      }
+    } else {
+      // Forget the chunk in hand: it belongs to the stream just abandoned.
+      inflated_->reset();
+    }
+    bytes = inflated_.get();
+  } else {
+    // A stored entry: the bytes ARE the text, so the inflater is skipped entirely.
+    // Rare in an EPUB's content but legal, and cheaper than pretending.
+    bytes = &entry_;
+  }
+
+  if (blocks_ == nullptr) {
+    blocks_.reset(new (std::nothrow) BlockReader(*bytes));
+    if (blocks_ == nullptr || !blocks_->ok()) {
+      error_ = "not enough memory to read this chapter";
+      return false;
+    }
+  } else {
+    blocks_->restart(*bytes);
+  }
+  return true;
+}
+
+bool ChapterReader::next(Block& out) {
+  if (blocks_ == nullptr || !ok()) return false;
+  if (!blocks_->next(out)) {
+    // A refusal from any layer surfaces here with the layer's own words: the
+    // tokenizer's for malformed markup, the inflater's for a corrupt stream.
+    if (!blocks_->ok()) error_ = blocks_->error();
+    else if (where_.deflated && !inflater_.done() && inflater_.error()[0] != '\0')
+      error_ = inflater_.error();
+    return false;
+  }
+  ++position_;
+  return true;
+}
+
+}  // namespace reader

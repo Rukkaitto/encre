@@ -11,6 +11,12 @@
 #include "doctest.h"
 #include "golden.h"
 #include "ramp.h"
+#include "epub_fixtures.h"
+#include "fake_fs.h"
+#include "reader/book.h"
+#include "reader/epub.h"
+#include "reader/xml.h"
+#include "reader/zip.h"
 #include "reader/framebuffer.h"
 #include "reader/layout.h"
 #include "reader/scalablefont.h"
@@ -135,4 +141,176 @@ TEST_CASE("every page's lines are inside the column the theme reported") {
       rd.onEvent({reader::Button::Down, reader::PressKind::Short});
     }
   }
+}
+
+// --- The streaming reader ----------------------------------------------------
+//
+// The golden above renders the demo chapter, which is two paragraphs. What these
+// exercise is the paging: an index built by one decode, forward turns that continue
+// the stream, and backward turns that rewind and decode to a recorded cursor.
+
+namespace {
+
+// A chapter big enough to have real pagination, as XHTML so it goes through the
+// same tokenizer and block builder a card would feed.
+std::string longChapter(int paragraphs) {
+  std::string d = "<html><body><h1>Chapter One</h1>";
+  for (int i = 0; i < paragraphs; ++i) {
+    d += "<p>Paragraph " + std::to_string(i) +
+         " of a chapter long enough that its pages have to be found rather than "
+         "assumed, carrying an accent (caf&#233;) and an em dash &#8212; so the "
+         "decoder is exercised alongside the layout.</p>";
+  }
+  d += "</body></html>";
+  return d;
+}
+
+struct Reading {
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  reader::PageMetrics m;
+  std::unique_ptr<reader::ReaderScreen> scr;
+
+  explicit Reading(const std::string& xhtml, int w = 480, int h = 800) {
+    theme.readerMetrics(w, h, ramp.fonts, body.face, m);
+    scr = std::make_unique<reader::ReaderScreen>(xhtml, "Middlemarch", "CH. 01", &body.face);
+    scr->setMetrics(m);
+  }
+};
+
+std::string pageText(const reader::Page& p) {
+  std::string s;
+  for (const reader::LaidLine& ln : p.lines) s += ln.text + "|";
+  return s;
+}
+
+}  // namespace
+
+TEST_CASE("A LONG CHAPTER PAGINATES AND EVERY PAGE IS REACHABLE FORWARD") {
+  Reading r(longChapter(60));
+  REQUIRE(r.scr->pageCount() > 8);
+  const reader::InputEvent down{reader::Button::Down, reader::PressKind::Short};
+
+  std::vector<std::string> pages;
+  pages.push_back(pageText(r.scr->page()));
+  for (int i = 1; i < r.scr->pageCount(); ++i) {
+    REQUIRE(r.scr->onEvent(down).kind == reader::Action::Kind::Redraw);
+    CHECK(r.scr->vm().page == i + 1);
+    pages.push_back(pageText(r.scr->page()));
+    CHECK_FALSE(pages.back().empty());
+  }
+  // Off the end: refused, and the page does not move.
+  CHECK(r.scr->onEvent(down).kind == reader::Action::Kind::None);
+  CHECK(r.scr->pageIndex() == r.scr->pageCount() - 1);
+
+  // No page repeated, which is what an off-by-one in the index would produce.
+  for (size_t i = 1; i < pages.size(); ++i) CHECK(pages[i] != pages[i - 1]);
+}
+
+TEST_CASE("READING BACKWARD GIVES EXACTLY THE PAGES READING FORWARD GAVE") {
+  // The strongest test in this file. A backward turn rewinds the stream and decodes
+  // to a cursor recorded during the index pass -- so it exercises the rewind, the
+  // buffer reuse, startAt's discard path and the index all at once, and any of them
+  // being off by a line shows up as a page that differs from its forward self.
+  Reading r(longChapter(40));
+  const int n = r.scr->pageCount();
+  REQUIRE(n > 6);
+  const reader::InputEvent down{reader::Button::Down, reader::PressKind::Short};
+  const reader::InputEvent up{reader::Button::Up, reader::PressKind::Short};
+
+  std::vector<std::string> forward;
+  forward.push_back(pageText(r.scr->page()));
+  for (int i = 1; i < n; ++i) {
+    REQUIRE(r.scr->onEvent(down).kind == reader::Action::Kind::Redraw);
+    forward.push_back(pageText(r.scr->page()));
+  }
+
+  for (int i = n - 2; i >= 0; --i) {
+    REQUIRE(r.scr->onEvent(up).kind == reader::Action::Kind::Redraw);
+    CAPTURE(i);
+    CHECK(r.scr->vm().page == i + 1);
+    CHECK(pageText(r.scr->page()) == forward[static_cast<size_t>(i)]);
+  }
+  // And the first page does not wrap to the last.
+  CHECK(r.scr->onEvent(up).kind == reader::Action::Kind::None);
+  CHECK(r.scr->pageIndex() == 0);
+}
+
+TEST_CASE("a forward turn after a backward one still continues correctly") {
+  // A backward turn spends the builder, so the next forward turn takes the seek
+  // path rather than the fast one. Both must land on the same page.
+  Reading r(longChapter(30));
+  REQUIRE(r.scr->pageCount() > 4);
+  const reader::InputEvent down{reader::Button::Down, reader::PressKind::Short};
+  const reader::InputEvent up{reader::Button::Up, reader::PressKind::Short};
+
+  r.scr->onEvent(down);
+  r.scr->onEvent(down);
+  const std::string atThree = pageText(r.scr->page());
+  REQUIRE(r.scr->vm().page == 3);
+
+  r.scr->onEvent(up);
+  REQUIRE(r.scr->vm().page == 2);
+  r.scr->onEvent(down);
+  CHECK(r.scr->vm().page == 3);
+  CHECK(pageText(r.scr->page()) == atThree);
+}
+
+TEST_CASE("THE PAGE INDEX IS THE ONLY THING THAT GROWS WITH THE CHAPTER") {
+  // 10x the chapter must not mean 10x the reader. The index is one cursor a page --
+  // 8 bytes -- and everything else is fixed: the inflate window, the tokenizer's
+  // buffers, one block, one page.
+  Reading small(longChapter(10));
+  Reading large(longChapter(200));
+  REQUIRE(small.scr->pageCount() > 1);
+  REQUIRE(large.scr->pageCount() > 10 * small.scr->pageCount() / 2);
+
+  // The fixed parts, named so a buffer growing shows up here.
+  CAPTURE(sizeof(reader::Xml));
+  CAPTURE(reader::Inflater::kHeapBytes);
+  CHECK(sizeof(reader::Xml) <= 3072);
+  CHECK(reader::Inflater::kHeapBytes <= 40u * 1024u);
+  // And the index's own cost, for the largest chapter this book has.
+  const size_t indexBytes = static_cast<size_t>(large.scr->pageCount()) * sizeof(reader::Cursor);
+  CAPTURE(indexBytes);
+  CHECK(indexBytes < 8192);
+}
+
+TEST_CASE("a chapter streamed from a card reads the same as one from memory") {
+  // The two entry points through ChapterReader -- an inflating stream off a
+  // FileHandle, and a BufferSource over bytes already held -- must produce the same
+  // pages. Everything above uses the second because the goldens have no card.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+
+  FakeFileSystem fs;
+  REQUIRE(fs.writeAll("/books/b.epub",
+                      std::string_view(reinterpret_cast<const char*>(epubfix::kEpubGood),
+                                       epubfix::kEpubGoodLen)));
+  reader::OpenedBook ob;
+  const char* why = "";
+  REQUIRE_MESSAGE(reader::openBook(fs, "/books/b.epub", 0, ob, &why), std::string(why));
+
+  reader::ReaderScreen fromCard(fs, ob.chapter, "T", "CH. 01", &body.face);
+  fromCard.setMetrics(m);
+
+  // The same chapter's bytes, read out whole and streamed from memory instead.
+  std::unique_ptr<reader::FileHandle> f = fs.openRead("/books/b.epub");
+  REQUIRE(f != nullptr);
+  reader::Zip zip;
+  REQUIRE(zip.open(*f));
+  reader::Epub ep;
+  REQUIRE(ep.open(*f, zip));
+  std::string xhtml;
+  REQUIRE(zip.read(*f, *zip.find(ep.chapters()[0].path), xhtml));
+  reader::ReaderScreen fromMemory(xhtml, "T", "CH. 01", &body.face);
+  fromMemory.setMetrics(m);
+
+  REQUIRE(fromCard.pageCount() == fromMemory.pageCount());
+  CHECK(fromCard.pageCount() > 0);
+  CHECK(pageText(fromCard.page()) == pageText(fromMemory.page()));
 }

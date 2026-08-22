@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 
+#include "reader/chapter.h"
 #include "reader/document.h"
 #include "reader/filesystem.h"
 
@@ -22,25 +23,29 @@ namespace reader {
 // outlive every page laid out from it -- three lifetimes with one correct nesting,
 // which is exactly the sort of thing each caller would get subtly differently.
 //
-// WHAT IT DOES NOT DO: keep the book open. It reads ONE chapter and closes the
-// file, because a Document is self-contained and the alternative is a card handle
-// held for as long as someone is reading -- across a sleep, across a card removal.
-// Turning to the next chapter reopens. That costs a zip central-directory parse
-// per chapter, which is measured in the roadmap and is not what a page turn pays.
-struct OpenedChapter {
-  Document doc;
-  std::string bookTitle;  // from the OPF, as authored
+// WHAT IT HANDS BACK IS A LOCATION, NOT A DOCUMENT. It used to return the whole
+// chapter's blocks, which is exactly what could not be afforded: Le Fléau's longest
+// chapter is 228,849 bytes of them. So it opens the archive, reads the metadata,
+// finds where the chapter's compressed bytes begin, and closes -- and a
+// ChapterReader streams from that location afterwards.
+//
+// The archive is therefore parsed once per chapter OPENED, not per page turned: a
+// ChapterLocation is a path and three numbers, so re-reading the chapter for a
+// backward page turn needs no central directory at all.
+struct OpenedBook {
+  std::string title;   // from the OPF, as authored
   std::string author;
   int chapterCount = 0;
+  ChapterLocation chapter;  // where the requested chapter's bytes are
 };
 
 // `path` is the EPUB, absolute on `fs`. `chapter` indexes Epub::chapters().
 //
 // False with `*reason` set for every failure -- a missing file, a zip that is not
-// one, an OPF that does not parse, a chapter index past the spine, XHTML the
-// document builder refuses. NEVER an abort: this is bytes off a user's card, and
-// the caller has a screen it can put the reason on.
-bool openChapter(FileSystem& fs, std::string_view path, int chapter, OpenedChapter& out,
-                 const char** reason);
+// one, an OPF that does not parse, a chapter index past the spine, an entry the
+// spine names but the archive does not contain. NEVER an abort: this is bytes off a
+// user's card, and the caller has a screen it can put the reason on.
+bool openBook(FileSystem& fs, std::string_view path, int chapter, OpenedBook& out,
+              const char** reason);
 
 }  // namespace reader

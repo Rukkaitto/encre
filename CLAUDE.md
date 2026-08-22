@@ -1073,17 +1073,101 @@ bytes off somebody's card.
 
 | Layer | Holds | Does NOT know about |
 |---|---|---|
-| `inflate.h` | raw DEFLATE, into a pre-sized buffer | zip, files |
-| `zip.h` | the central directory, entry reads | XML, EPUB |
-| `xml.h` | a pull tokenizer, entities | nesting, EPUB, documents |
+| `inflate_stream.h` | raw DEFLATE in bounded chunks, a 32 KB window | zip, files |
+| `zip.h` | the central directory, entry reads, `EntrySource` | XML, EPUB |
+| `xml.h` | a pull tokenizer over a `ByteSource`, entities | nesting, EPUB, documents |
 | `epub.h` | container, OPF, spine order | XHTML content |
-| `document.h` | blocks: paragraph, heading, quote, list item | pixels, fonts, columns |
-| `layout.h` | pages, justification, the indent | `Framebuffer`, themes, drawing |
+| `document.h` | blocks, one at a time (`BlockReader`) | pixels, fonts, columns |
+| `layout.h` | pages from a block stream (`PageBuilder`), justification | `Framebuffer`, themes |
+| `chapter.h` | the whole chain, positioned (`ChapterReader`) | screens, pages |
+
+**EVERY LAYER IS A STREAM, and that is what made a real book openable.** Under 3B
+each held its whole input: `Le Fléau`'s longest chapter is 315,852 bytes of XHTML
+and 228,849 of blocks, and holding both at once was a **546 KB peak** against ~142 KB
+free. Only 62 of its 92 chapters could be opened. Measured after 3C, over the same
+book: **69,884 bytes peak for any chapter, largest single allocation 36,956** — the
+inflate window and its tables, which is the only sizeable one left. All 92 chapters
+open; the whole book is 8,137 pages.
+
+`inflate.h` (the one-shot form over stb) is still there and still used for the small
+things — an OPF, a `container.xml`. It is not the reader's path.
 
 `book.h` is the seam that joins them to the filesystem, and it lives in `core/`
 **because `shell/` has no test harness** — five bugs have hidden there. "It needs a
 filesystem" is not a reason to be untestable: `FileSystem` is an interface and
-`fake_fs.h` serves real EPUB bytes through it.
+`fake_fs.h` serves real EPUB bytes through it. **It hands back a LOCATION, not a
+chapter** — a path and three numbers — so the archive, its central directory and the
+OPF's parse are all released before a block is read, and re-reading the chapter for
+a backward page turn needs no central directory at all.
+
+### Why the decoder is ours
+
+stb_image's zlib is one-shot: whole input in, whole output out. There is no way to
+get chunks from it, and **every** route to bounded memory needs them — including
+inflating to a temp file, which needs incremental output to write incrementally. So
+the choice was ours-versus-miniz, and ours won on the grounds 3B's parsers did, plus
+one: it removes stb's **6,608-byte single stack frame**, which is 41% of the loop
+task's stack and had already panicked the device.
+
+Three things about it worth keeping:
+
+- **The 32 KB window is the format, not a choice.** A DEFLATE match reaches 32,768
+  bytes back, so a decoder that does not hold its whole output must retain that much
+  of it. That sets the floor for the whole design.
+- **Everything big is in ONE heap block**, and that was measured rather than assumed.
+  With the window on the heap but the input buffer and Huffman tables as members, an
+  `Inflater` declared as a local cost **6,336 bytes of stack** — barely better than
+  the thing it replaced, for exactly the same reason. One `Scratch` brings it to
+  3,072. A `static_assert` ties the documented `kHeapBytes` to `sizeof(Scratch)`.
+- **Canonical counts-and-symbols tables** (zlib's `puff.c` form), ~600 bytes each
+  against stb's ~2 KB. That is the whole frame difference.
+
+Validated byte-for-byte against the one-shot decoder that shipped: 216 entry-passes
+over `Le Fléau` (every deflated entry, at 2048-byte grain **and one byte at a time**)
+and 3,600 over the 200 generated EPUBs, zero disagreements, 8.3 MB decompressed.
+**Grain 1 is the load-bearing case** — a source that satisfies every read hides every
+resumption bug there is.
+
+### Paging: forward is free, backward re-decodes
+
+A DEFLATE stream cannot be seeked and checkpointing one costs 32 KB a checkpoint. So:
+
+- **Opening a chapter costs one decode**, which builds the page index: one start
+  Cursor per page, ~8 bytes each, 3,072 bytes for the longest chapter in the book.
+  That index is what lets the footer say `3 / 12` at all, and what a backward turn
+  decodes *to*.
+- **A forward turn continues the live stream** — the reading position keeps its
+  `ChapterReader` and its `PageBuilder`. Measured 1.16 ms on the desktop for the
+  worst page in the book.
+- **A backward turn rewinds and decodes forward** to the recorded cursor. 33.9 ms
+  desktop for the worst case, against a ~520 ms panel refresh. Buffers are reused, so
+  it allocates nothing — churning 32 KB per turn is how a heap with 142 KB free
+  becomes one that cannot serve the next chapter.
+
+The strongest test of all this is `READING BACKWARD GIVES EXACTLY THE PAGES READING
+FORWARD GAVE`: it exercises the rewind, the buffer reuse, `startAt`'s discard path
+and the index together, and any of them off by a line shows up as a page that differs
+from its forward self.
+
+### The lifetime rules that changed, and how they broke things
+
+Both of these are worth knowing because neither failure looks like a lifetime bug.
+
+**`Xml::name()` is a view into a reused buffer now**, where it used to view the
+caller's whole document and outlive the parse. `document.cpp`'s tag stack held those
+views, and the result was that `<blockquote><p>x</p></blockquote>` came out a plain
+paragraph — the stack's `"blockquote"` had become `"p"` — and `<a><b></a></b>` was
+**accepted**, because the mismatch check compared two views into the same buffer and
+those are always equal. A dangling view here does not crash; it silently agrees with
+itself. The stack holds 24-byte truncated copies plus the full length.
+
+**`LaidLine::text` is OWNED**, not a view. A view meant whichever blocks a page
+spanned had to outlive the Page, which is a rule the reader would have to enforce
+across a page turn while blocks are being dropped behind it. A page is ~12 lines of
+~45 bytes, so copying costs ~1 KB against a ~520 ms refresh — and it means a block is
+released the moment its last line is laid, so **nothing needs a block window**. Two
+tests had recovered a block boundary by comparing `text.data()` pointers; `LaidLine`
+carries `block` and `lastOfBlock` now, which the page index needs anyway.
 
 **`xml.h` DOES NOT VALIDATE NESTING, ON PURPOSE.** `<p>unclosed` tokenizes without
 complaint. The document builder keeps a stack to know which block it is in, so it
@@ -1206,8 +1290,9 @@ Two things about the numbers:
 
 **The Library is resident while you read.** It sits below the Reader on the stack, so
 its entries stay allocated: 203 books cost ~59 KB (heap 201,576 → 142,560 in the
-boot log), taken out of the heap exactly when a chapter needs it. That is the
-obvious next lever if real novels do not fit, and it is a design change, not a tune.
+boot log), taken out of the heap exactly when a chapter needs it. **3C made this stop
+mattering** — a chapter now peaks at ~70 KB whatever its length — so it is a saving
+available if something later needs it, not a blocker.
 
 ### What the desktop measures, and what only the panel can answer
 

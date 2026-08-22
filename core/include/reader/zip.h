@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "reader/filesystem.h"
+#include "reader/inflate_stream.h"  // ByteSource
 
 namespace reader {
 
@@ -67,6 +68,13 @@ class Zip {
   // above exists and is checked before the allocation.
   bool read(FileHandle& file, const Entry& entry, std::string& out) const;
 
+  // WHERE an entry's compressed bytes begin, by reading its local header. The
+  // three numbers a streaming read needs, and the only ones -- so a chapter can be
+  // re-read later without the archive being parsed again, which is what makes a
+  // backward page turn cost an inflate rather than an inflate plus a
+  // central-directory scan.
+  bool locate(FileHandle& file, const Entry& entry, uint32_t& dataOffset) const;
+
   // Why the last open() or read() failed. A sentence, for a log line.
   const char* reason() const { return reason_; }
 
@@ -79,6 +87,25 @@ class Zip {
   // that ran out of memory is indistinguishable from a corrupt file, and those two
   // want different words on a screen.
   mutable const char* reason_ = "";
+};
+
+// One zip entry's COMPRESSED bytes as a ByteSource, straight off the file with no
+// buffer of the whole entry. The input side of the streaming chain: this feeds an
+// Inflater, which feeds an InflateSource, which feeds Xml.
+//
+// It seeks before every read, because the FileHandle it shares may have been moved
+// by anything else holding it -- and on this device the same handle is the only way
+// to reach the card.
+class EntrySource : public ByteSource {
+ public:
+  EntrySource() = default;
+  void reset(FileHandle& file, uint32_t dataOffset, uint32_t compressedSize);
+  size_t read(void* dst, size_t bytes) override;
+
+ private:
+  FileHandle* file_ = nullptr;
+  uint32_t at_ = 0;
+  uint32_t left_ = 0;
 };
 
 }  // namespace reader
