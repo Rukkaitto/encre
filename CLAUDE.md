@@ -1166,6 +1166,43 @@ to nothing passed silently. **A check that reports on less than it claims** — 
 same shape as the card probe answered from cache, and the `make compare` default that
 skipped four screens.
 
+### A grayscale screen is painted twice: fast, then four levels
+
+`renderTop` paints a `Fidelity::Grayscale` screen with ONE waveform and `loop()`
+upgrades it to four levels once the buttons have been quiet for `kRefineQuietMs`
+(600 ms). The reference firmware does this and it is the right shape for a reader:
+the page wants to be there NOW and the grey edges can arrive a moment later.
+
+From this device's own logs: the grayscale sequence is three waveforms and
+**~1056 ms**; one waveform is **~520 ms**. So a page turn shows text in half the
+time and the refinement costs what the full sequence would have cost anyway.
+Flipping through pages costs 520 ms a turn instead of 1056.
+
+Three things that make it work, and one that does not:
+
+- **IT SHOULD NOT COST A SECOND FLASH.** `Uc8279Driver::displayGrayscaleBase` takes
+  its visible "clean base" path only when
+  `!_oldPlaneValid || _lsbValid || _forceFullSyncNext || _initialFullsRemaining > 0`.
+  After an ordinary one-waveform paint the old plane IS valid and no grayscale
+  planes have been written, so the base pass is the cheap settle. That is the whole
+  reason this beats simply painting twice.
+- **The fast pass is `Dithered`, not `Mono`.** The reader declares Grayscale
+  precisely because hard-thresholding a serif face at 32px was judged worse, so the
+  transient frame keeps what anti-aliasing one waveform can carry. Same cost, closer
+  to the final image, smaller visible upgrade. Its known artifact is the em dash
+  combing against the 4×4 grid at body size; `paintMono(mode)` is the one-line
+  alternative.
+- **It refines from `loop()`, never from a dispatch.** A paint cannot be
+  interrupted, so refining between two page turns would put its full cost in front
+  of the second one.
+- **The worst case is a press landing during a refinement**: that turn pays the
+  refinement plus a fresh fast paint, about what the full sequence costs today.
+  Never worse, usually half.
+
+`[paint] … refine-owed` and a separate `[refine] done total=…` keep the two costs
+distinguishable in the log — a page turn is the fast paint, and the refinement is
+what the page settles into.
+
 ### Nothing may leave the column
 
 Body text wraps with **`WordBreak::Anywhere`**, and it is the one place that is right

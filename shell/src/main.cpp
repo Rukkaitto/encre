@@ -136,6 +136,32 @@ constexpr uint32_t kCoalesceMs = 0;
 // so the first paint in setup() is never deferred.
 static uint32_t gLastInputMs = 0;
 
+// --- PROGRESSIVE REFINEMENT ------------------------------------------------
+//
+// A grayscale screen is painted FAST FIRST and upgraded to four levels once the
+// buttons go quiet. The reference firmware does this and it is the right shape:
+// the reader wants the page NOW and the grey edges a moment later.
+//
+// The arithmetic, from this device's own logs: the grayscale sequence is three
+// waveforms and ~1056 ms, a one-waveform paint is ~520 ms. So a page turn shows
+// text in half the time, and the refinement that follows costs what the full
+// sequence would have cost anyway. Someone flipping through pages pays 520 ms a
+// turn instead of 1056; someone who stops reading gets the four-level page.
+//
+// IT SHOULD NOT COST A SECOND FLASH, and the reason is in the driver:
+// Uc8279Driver::displayGrayscaleBase takes a "clean base" path -- a full visible
+// B/W display -- only when `!_oldPlaneValid || _lsbValid || _forceFullSyncNext ||
+// _initialFullsRemaining > 0`. After an ordinary one-waveform paint the old plane
+// IS valid and no grayscale planes have been written, so the base pass is the
+// cheap settle instead. That is the whole reason this is worth doing rather than
+// just painting twice.
+//
+// The worst case is a press landing DURING a refinement: panel waits do not
+// interrupt, so that turn pays the refinement plus a fresh fast paint -- about
+// what the full sequence costs today. Never worse, usually half.
+constexpr uint32_t kRefineQuietMs = 600;
+static bool gRefineOwed = false;
+
 // Everything the render needs has to outlive setup(), so it lives here rather
 // than on setup()'s stack.
 //
@@ -1654,6 +1680,8 @@ static void renderTop() {
   Serial.flush();
   gRenderMs = gDrawMs = 0;
   gPartialPaint = false;
+  // Any new paint supersedes a refinement that was owed for the old frame.
+  gRefineOwed = false;
   const uint32_t t0 = millis();
   // THE OTHER HALF OF THE SHARED-BUS INVARIANT. Every public method of
   // SdFileSystem takes this same recursive guard; this is the one acquisition on
@@ -1672,9 +1700,20 @@ static void renderTop() {
   SpiBusGuard bus;
   switch (fidelity) {
     case reader::Fidelity::Grayscale:
-      // The grayscale sequence is inherently a full repaint; the policy's FAST is
-      // not available here.
-      paintGray();
+      // THE FAST PASS, and the four-level one follows once the buttons go quiet --
+      // see kRefineQuietMs. DITHERED rather than Mono for the intermediate: the
+      // whole reason the reader declares Grayscale is that hard-thresholding a
+      // serif face at 32px was judged worse, so the transient frame should keep
+      // what anti-aliasing one waveform can carry rather than be the thing that
+      // was rejected. Same cost, closer to the final image, so the upgrade is a
+      // smaller visible change.
+      //
+      // Its one known artifact is the em dash, which combs against the 4x4 grid at
+      // body size (recorded in the roadmap). On a frame that lasts ~600 ms that is
+      // a fair trade; swapping this line for paintMono(mode) is the alternative if
+      // it reads badly on glass.
+      paintDithered(mode);
+      gRefineOwed = true;
       break;
     case reader::Fidelity::Dithered: paintDithered(mode); break;
     case reader::Fidelity::Mono: paintMono(mode); break;
@@ -1693,9 +1732,31 @@ static void renderTop() {
   // the grayscale sequence has four, and it is in the log because a stale-pixel
   // report needs to say which path drew the frame that showed it -- guessing from
   // the screen name is exactly the wrong way round.
-  Serial.printf("[paint] done total=%lums render=%lums (draw=%lu) panel=%lums scope=%s\n",
+  Serial.printf("[paint] done total=%lums render=%lums (draw=%lu) panel=%lums scope=%s%s\n",
                 (unsigned long)total, (unsigned long)gRenderMs, (unsigned long)gDrawMs,
-                (unsigned long)(total - gRenderMs), gPartialPaint ? "top" : "stack");
+                (unsigned long)(total - gRenderMs), gPartialPaint ? "top" : "stack",
+                gRefineOwed ? " refine-owed" : "");
+  Serial.flush();
+}
+
+// The four-level upgrade of a frame already on glass. Runs from loop() once the
+// buttons have been quiet, never from a dispatch -- see kRefineQuietMs.
+static void refineNow() {
+  if (!bindFrameToDriver("refine")) return;
+  gRefineOwed = false;
+  Serial.printf("[refine] screen=%s -> four levels\n", reader::screenName(gApp->top().id()));
+  Serial.flush();
+  gRenderMs = gDrawMs = 0;
+  gPartialPaint = false;
+  const uint32_t t0 = millis();
+  SpiBusGuard bus;  // the same whole-sequence guard renderTop takes, same reason
+  paintGray();
+  const uint32_t total = millis() - t0;
+  // Reported separately from [paint] so the two costs stay distinguishable: a page
+  // turn is the fast paint, and this is what the page settles into afterwards.
+  Serial.printf("[refine] done total=%lums render=%lums panel=%lums\n",
+                (unsigned long)total, (unsigned long)gRenderMs,
+                (unsigned long)(total - gRenderMs));
   Serial.flush();
 }
 
@@ -2500,6 +2561,19 @@ void loop() {
   if (gApp->dirty() && settled) {
     renderTop();
     gApp->clearDirty();
+  }
+
+  // THE FOUR-LEVEL UPGRADE, once the buttons have been quiet and nothing is owed
+  // to the panel. Placed here rather than after a dispatch because the whole point
+  // is that it must NOT happen while the reader is still turning pages: a paint
+  // cannot be interrupted, so refining between two turns would put its full cost
+  // in front of the second one.
+  //
+  // `!gApp->dirty()` as well as the quiet window: a screen change already queued
+  // supersedes the refinement, and renderTop clears the flag anyway.
+  if (gRefineOwed && !gApp->dirty() &&
+      static_cast<uint32_t>(millis() - gLastInputMs) >= kRefineQuietMs) {
+    refineNow();
   }
 
   // AFTER the paint block and only with nothing owed to the panel. The poll is
