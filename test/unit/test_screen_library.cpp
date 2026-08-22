@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -9,6 +10,7 @@
 #include "ramp.h"
 #include "reader/app.h"
 #include "reader/booklist.h"
+#include "reader/components.h"
 #include "reader/framebuffer.h"
 #include "reader/screen_library.h"
 #include "reader/screen_sd_missing.h"
@@ -386,4 +388,90 @@ TEST_CASE("the factory can be told the Library it named is gone") {
   CHECK(app.factory.create(ScreenId::ItemActions) == nullptr);
   CHECK(app.factory.create(ScreenId::DeleteConfirm) == nullptr);
   CHECK(app.factory.create(ScreenId::BookDetails) == nullptr);
+}
+
+// --- The rail, through renderLibrary ----------------------------------------
+//
+// The rail's own geometry is pinned in test_components.cpp, but NOTHING covered
+// the wiring: whether a Library with more books than rows actually reaches
+// drawScrollRail with the right numbers. Library's golden shows seven rows of
+// seven, so it never overflows and the rail never draws in it -- and the rail
+// failed to appear on a 200-book card while every test passed.
+
+namespace {
+FakeFileSystem cardWithManyBooks(int n) {
+  FakeFileSystem fs;
+  for (int i = 0; i < n; ++i) {
+    char name[64];
+    std::snprintf(name, sizeof(name), "/books/book_%04d.epub", i);
+    fs.writeAll(name, "x");
+  }
+  return fs;
+}
+int railInkIn(const reader::Framebuffer& fb) {
+  int n = 0;
+  for (int x = fb.width() - reader::kRailRightGap - reader::kRailW; x < fb.width(); ++x)
+    for (int y = 0; y < fb.height(); ++y)
+      if (!fb.getPixel(x, y)) ++n;
+  return n;
+}
+}  // namespace
+
+TEST_CASE("a Library with more books than rows reports the numbers the rail needs") {
+  Ramp r;
+  reader::QuietTheme theme;
+  FakeFileSystem fs = cardWithManyBooks(200);
+  LibraryScreen lib(fs, "/books");
+  const int visible = theme.libraryVisibleRows(800, r.fonts);
+  lib.setVisibleRows(visible);
+
+  REQUIRE(lib.itemCount() == 200);
+  CHECK(lib.vm().rows.size() == static_cast<size_t>(visible));
+  // The two the theme cannot derive from `rows`.
+  CHECK(lib.vm().totalRows == 200);
+  CHECK(lib.vm().firstRow == 0);
+}
+
+TEST_CASE("...and renderLibrary actually draws the rail") {
+  Ramp r;
+  reader::QuietTheme theme;
+  FakeFileSystem fs = cardWithManyBooks(200);
+  LibraryScreen lib(fs, "/books");
+  lib.setVisibleRows(theme.libraryVisibleRows(800, r.fonts));
+
+  reader::Framebuffer fb(480, 800);
+  theme.renderLibrary(fb, r.fonts, lib.vm(), reader::Plane::Bw);
+  CHECK(railInkIn(fb) > 0);
+}
+
+TEST_CASE("a Library that fits draws no rail and gives up no width") {
+  Ramp r;
+  reader::QuietTheme theme;
+  FakeFileSystem fs = cardWithBooks();  // three rows
+  LibraryScreen lib(fs, "/books");
+  lib.setVisibleRows(theme.libraryVisibleRows(800, r.fonts));
+  lib.onEvent(kDown);  // focus a row so there is a full-bleed fill to check
+
+  reader::Framebuffer fb(480, 800);
+  theme.renderLibrary(fb, r.fonts, lib.vm(), reader::Plane::Bw);
+  CHECK(railInkIn(fb) == 0);
+  // And the focused row's fill reaches the panel edge -- no reserved-but-empty
+  // gutter, which is what a white strip beside black looks like on the device.
+  bool touchesEdge = false;
+  for (int y = 0; y < 800; ++y)
+    if (!fb.getPixel(479, y)) touchesEdge = true;
+  CHECK(touchesEdge);
+}
+
+TEST_CASE("scrolling down moves the thumb, because firstRow follows the window") {
+  Ramp r;
+  reader::QuietTheme theme;
+  FakeFileSystem fs = cardWithManyBooks(200);
+  LibraryScreen lib(fs, "/books");
+  const int visible = theme.libraryVisibleRows(800, r.fonts);
+  lib.setVisibleRows(visible);
+
+  for (int i = 0; i < visible + 20; ++i) lib.onEvent(kDown);
+  CHECK(lib.vm().firstRow > 0);
+  CHECK(lib.vm().totalRows == 200);
 }

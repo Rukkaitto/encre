@@ -57,6 +57,31 @@ case "$action" in
     echo "card:  $card"
     echo "adding $count .epub from $dir -> $books/"
     for f in "$dir"/*.epub; do cp "$f" "$books/"; done
+    # AND STRIP THE APPLEDOUBLE SIDECARS, which is not tidiness -- it is half the
+    # firmware's library read.
+    #
+    # Copying to a FAT volume from macOS writes a `._name` file beside every file,
+    # to carry metadata FAT cannot hold. The firmware filters them out of the
+    # library (they are hidden by convention), but it still PAYS for them: a
+    # directory listing costs ~2.7 ms per entry on this card, and 203 books
+    # measured 406 entries. So half of every library read -- at boot, and again
+    # each time the Library screen opens -- is spent walking files that can never
+    # be shown.
+    #
+    # dot_clean merges them back and deletes them. They return on the next copy
+    # from a Mac, which is exactly why this runs here rather than being a thing to
+    # remember.
+    if command -v dot_clean >/dev/null 2>&1; then
+      before=$(find "$books" -name '._*' | wc -l | tr -d ' ')
+      dot_clean -m "$books" 2>/dev/null || dot_clean "$books" 2>/dev/null || true
+      after=$(find "$books" -name '._*' | wc -l | tr -d ' ')
+      echo "stripped $((before - after)) AppleDouble sidecar(s); $after left"
+      echo "  (each one costs the firmware ~2.7 ms on every library read)"
+    else
+      echo "NOTE: dot_clean not found. The ._ sidecars macOS wrote will each cost"
+      echo "      the firmware ~2.7 ms on every library read; remove them with"
+      echo "      find \"$books\" -name '._*' -delete"
+    fi
     ;;
   remove)
     echo "card:  $card"
@@ -65,6 +90,9 @@ case "$action" in
     for f in "$dir"/*.epub; do
       target="$books/$(basename "$f")"
       if [ -f "$target" ]; then rm "$target"; gone=$((gone + 1)); fi
+      # ...and its sidecar, if the card has been near a Mac since.
+      sidecar="$books/._$(basename "$f")"
+      [ -f "$sidecar" ] && rm "$sidecar"
     done
     echo "removed $gone"
     ;;

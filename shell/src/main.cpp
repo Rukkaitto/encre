@@ -568,7 +568,21 @@ static reader::HomeViewModel homeVmForCard() {
   reader::HomeViewModel vm = reader::demoHomeVm();
   const int books = gStorageUsable ? reader::BookList::countLibrary(gSd, reader::kBooksRoot) : -1;
 
-  // WHAT A BOOK COSTS IN RAM, measured, because the library is the one structure
+  // WHAT A BOOK COSTS IN RAM -- OFF BY DEFAULT, because it is not free.
+  //
+  // It lists /books TWICE, and a listing costs 2.7 ms per ENTRY on this card. On a
+  // 203-book library that is 406 entries -- macOS writes a `._name` beside every
+  // file -- so the probe adds ~2.1 seconds to every boot, for a measurement that
+  // has been taken and is recorded in the roadmap. It stays because those numbers
+  // are how the 256-row cap was chosen, and the next change to BookEntry or
+  // DirEntry will want them again.
+  //
+  //   PLATFORMIO_BUILD_FLAGS="-DENCRE_LIBRARY_PROBE=1" make firmware
+  //
+  // Same shape as the filesystem self-test, for the same reason: a diagnostic
+  // that costs seconds of boot has to be opt-in, or it quietly becomes the
+  // product's behaviour.
+#if defined(ENCRE_LIBRARY_PROBE) && ENCRE_LIBRARY_PROBE
   // here whose size the user controls and the cap on it has to come from a number
   // rather than from sizeof-arithmetic. (Two memory questions have now been
   // guessed at wrongly in this project; both were settled by a boot line.)
@@ -640,6 +654,7 @@ static reader::HomeViewModel homeVmForCard() {
     }
     Serial.flush();
   }
+#endif  // ENCRE_LIBRARY_PROBE
   // demoHomeTargets() runs parallel to this menu and its first entry is the
   // Library, so row 0 is the row to patch. Guarded anyway: an empty menu here
   // would be a change in the shared catalogue, and indexing into it would be a
