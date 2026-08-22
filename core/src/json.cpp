@@ -44,6 +44,11 @@ class Parser {
       skipWs();
       Parsed v;
       if (!parseValue(v)) return false;
+      // Bounded here rather than at the caller because this is the line that
+      // allocates. Counting PAIRS and not distinct keys is deliberate: last-wins
+      // means a file of one repeated key has size() == 1 while having allocated
+      // every one of them.
+      if (out.size() >= kJsonMaxPairs) return false;
       out.emplace_back(std::move(key), std::move(v));
       skipWs();
       if (take(',')) {
@@ -93,10 +98,16 @@ class Parser {
         // A raw control byte is accepted, which strict JSON forbids: dump()
         // emits them raw for everything outside the five shorthands, so
         // refusing them here would break the round trip.
+        if (out.size() >= kJsonMaxStringBytes) return false;
         out.push_back(c);
         continue;
       }
       if (eof()) return false;  // a trailing backslash
+      // The escaped path allocates too, and each case below appends exactly one
+      // byte. Checking here rather than only on the literal path is what makes
+      // the cap DECODED bytes: "\n\n\n..." is two input bytes per output byte,
+      // so a cap enforced on input would admit twice the limit.
+      if (out.size() >= kJsonMaxStringBytes) return false;
       switch (t_[i_++]) {
         case '"': out.push_back('"'); break;
         case '\\': out.push_back('\\'); break;

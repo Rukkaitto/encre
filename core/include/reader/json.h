@@ -39,10 +39,38 @@ namespace reader {
 //  - dump() passes control bytes other than those five through raw, which strict
 //    JSON forbids and parse() therefore accepts, so an arbitrary byte string
 //    still round-trips.
+// RESOURCE BOUNDS, and they are part of the grammar rather than a safety net.
+//
+// "Parsing is total" above was true for every MALFORMED input and false for a
+// well-formed one that is merely large: nothing bounded the pair count or a
+// string's length, so a valid file could ask for more memory than the device
+// has. Under -fno-exceptions that is not a failed parse, it is `abort()` with no
+// diagnostic -- and it happens DURING the parse, before validity is decided, so
+// the DEFAULTED path that exists to replace a bad file never runs and the file
+// is still there at the next boot. A persistent boot loop, cleared only by
+// pulling the card. The trigger is a user pasting something large into the file
+// the boot log advertises as hand-editable; no hostility required.
+//
+// So exceeding either limit is MALFORMED, which routes it into the refusal path
+// the design already has, with the log line that already explains itself.
+//
+// The numbers: settings needs about four short pairs, and Phase 3's per-book
+// state is a different file with a different format (see the note above). The
+// headroom is for a hand-editor, not for growth -- extend the format rather than
+// these. `kJsonMaxStringBytes` counts DECODED bytes and is checked as the string
+// grows, so an escape-heavy input cannot smuggle twice the limit past it.
+// 256 rather than 512 because the test that states the composed worst case
+// caught 512 as too generous: 64 pairs of two 512-byte strings is 67 KB, and a
+// bound this file cannot afford is not a bound. A path or a title fits in 256
+// with room, which is the longest string anything here plausibly stores.
+inline constexpr std::size_t kJsonMaxPairs = 64;
+inline constexpr std::size_t kJsonMaxStringBytes = 256;
+
 class JsonObject {
  public:
   // Replaces the contents. True only if `text` is a complete, well-formed
-  // object in the subset above; on false the object is empty.
+  // object in the subset above AND within the bounds above; on false the object
+  // is empty.
   bool parse(std::string_view text);
 
   bool getInt(std::string_view key, int64_t& out) const;

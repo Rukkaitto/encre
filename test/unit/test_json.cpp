@@ -430,3 +430,107 @@ TEST_CASE("deterministic fuzz: mutating a valid file one byte at a time") {
   // so this is where the ACCEPTING path gets its fuzz coverage.
   CHECK(parsedOk > 20);
 }
+
+// --- Resource bounds --------------------------------------------------------
+//
+// A cold-read review (docs/superpowers/2026-08-22-review-findings.md, finding 1)
+// found that "parsing is total" held for every malformed input and not for a
+// WELL-FORMED one that is merely large. The integer path was already bounded
+// against overflow; the allocation paths were not bounded at all.
+//
+// Why that was a crash and not a slow parse: the firmware builds with
+// -fno-exceptions, so a std::vector or std::string that cannot allocate calls
+// abort() with no diagnostic. And it aborts DURING parse, before validity is
+// decided -- so loadSettings never returns false, the DEFAULTED path that exists
+// precisely to replace a bad file is unreachable, and the file is still on the
+// card at the next boot. A persistent boot loop, cleared only by pulling the
+// card.
+//
+// These tests are the reason the caps cannot be quietly raised past what the
+// heap allows: they pin the refusal, not the number.
+
+TEST_CASE("a well-formed object with too many pairs is refused, not allocated") {
+  std::string text = "{";
+  for (size_t i = 0; i <= reader::kJsonMaxPairs; ++i) {
+    if (i) text += ",";
+    text += "\"k" + std::to_string(i) + "\":0";
+  }
+  text += "}";
+
+  reader::JsonObject o;
+  CHECK_FALSE(o.parse(text));
+  CHECK(o.size() == 0);  // and empty, per the header's promise
+}
+
+TEST_CASE("exactly the pair limit still parses") {
+  std::string text = "{";
+  for (size_t i = 0; i < reader::kJsonMaxPairs; ++i) {
+    if (i) text += ",";
+    text += "\"k" + std::to_string(i) + "\":1";
+  }
+  text += "}";
+
+  reader::JsonObject o;
+  REQUIRE(o.parse(text));
+  CHECK(o.size() == reader::kJsonMaxPairs);
+}
+
+TEST_CASE("duplicate keys count toward the pair limit") {
+  // Last-wins means size() stays 1, so counting DISTINCT keys would let a
+  // 64 KB file of one repeated key allocate without bound while looking tiny.
+  // The cap is on pairs parsed, which is what actually gets allocated.
+  std::string text = "{";
+  for (size_t i = 0; i <= reader::kJsonMaxPairs; ++i) {
+    if (i) text += ",";
+    text += "\"same\":0";
+  }
+  text += "}";
+
+  reader::JsonObject o;
+  CHECK_FALSE(o.parse(text));
+}
+
+TEST_CASE("an over-long string is refused, in a key or a value") {
+  const std::string big(reader::kJsonMaxStringBytes + 1, 'x');
+
+  reader::JsonObject value;
+  CHECK_FALSE(value.parse("{\"a\":\"" + big + "\"}"));
+  CHECK(value.size() == 0);
+
+  reader::JsonObject key;
+  CHECK_FALSE(key.parse("{\"" + big + "\":0}"));
+  CHECK(key.size() == 0);
+}
+
+TEST_CASE("exactly the string limit still parses, escapes counted as bytes OUT") {
+  const std::string ok(reader::kJsonMaxStringBytes, 'x');
+  reader::JsonObject o;
+  REQUIRE(o.parse("{\"a\":\"" + ok + "\"}"));
+  std::string got;
+  REQUIRE(o.getString("a", got));
+  CHECK(got.size() == reader::kJsonMaxStringBytes);
+
+  // A cap counted on INPUT bytes would let "\\n" (2 bytes in, 1 out) through at
+  // twice the limit, and one counted on output has to be checked as it grows
+  // rather than after. This is the escaped form of a string that is exactly at
+  // the limit once decoded, so it must parse.
+  const std::string escaped(reader::kJsonMaxStringBytes, 'n');
+  std::string src = "{\"a\":\"";
+  for (char c : escaped) { src += '\\'; src += c; }
+  src += "\"}";
+  reader::JsonObject esc;
+  REQUIRE(esc.parse(src));
+  std::string decoded;
+  REQUIRE(esc.getString("a", decoded));
+  CHECK(decoded.size() == reader::kJsonMaxStringBytes);
+}
+
+TEST_CASE("the bounds compose to a total allocation the device can afford") {
+  // The point of the caps is a NUMBER, so state it. Two strings per pair at the
+  // string cap, plus the pair vector itself. If this figure ever approaches the
+  // ~155 KB measured heap floor (CLAUDE.md, Memory), the caps are wrong.
+  const size_t worst = reader::kJsonMaxPairs *
+                       (2 * reader::kJsonMaxStringBytes +
+                        sizeof(std::pair<std::string, int64_t>));
+  CHECK(worst < 64u * 1024u);
+}
