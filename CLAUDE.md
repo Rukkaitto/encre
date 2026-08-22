@@ -470,6 +470,27 @@ Three consequences to know:
   geometries, every panel improving. Most of that is prose — chrome's own
   uppercase, tracked labels barely kern at all in Space Grotesk.
 
+## Memory
+
+**`getFreeHeap()` cannot see the largest allocation this firmware makes.**
+Rasterising ONE glyph transiently costs ~74 KB, ~56 KB of it a single malloc, and
+it is freed before the next line prints — so every `free heap` figure in the boot
+log is measured either side of it and reads 229,900 while the real floor is
+155,712. `ESP.getMinFreeHeap()` on the `[alive]` line is the only thing that sees
+it, and `mark()` carries the heap so the existing stage trail is a heap TRACE: the
+stage where `min` falls is the stage that spent it. That is how this was found,
+after two wrong guesses about bring-up.
+
+It is `third_party/stb_truetype.h:2802` — `count = (size < 32 ? 2000 : ...)` — and
+the v2 `stbtt__active_edge` is 28 bytes, so stb pre-allocates 2000 slots (56,004
+bytes) for the first edge of every glyph, for a text glyph needing ~20.
+`stbtt__hheap_alloc` chains another chunk when one runs out, so lowering the count
+trades memory for allocation count and nothing else. **Not patched**: the file's
+header makes a sha256-backed "vendored, unmodified" claim, which is worth more
+than 54 KB while 54 KB is affordable. Recorded as a lever, in the roadmap, with
+the caveat that the reader's cache, zip directory and page structures all stack on
+top of this spike.
+
 ## Invariants worth not relearning
 
 - **Derive from the board's box model; never pin a number the board computes.**
