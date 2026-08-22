@@ -15,6 +15,7 @@
 #include "font_body400.h"
 #include "font_body500.h"
 #include "font_body700.h"
+#include "font_body_serif.h"
 #include "font_display700.h"
 #include "font_label400.h"
 #include "font_label500.h"
@@ -34,6 +35,7 @@
 #include "reader/refresh.h"
 #include "reader/screen_home.h"
 #include "reader/screen_sd_missing.h"
+#include "reader/scalablefont.h"
 #include "reader/screens.h"
 #include "reader/settings.h"
 #include "reader/text.h"  // reader::Plane
@@ -1366,6 +1368,50 @@ void setup() {
     return;
   }
   mark("fonts-ok");
+
+  // --- The body face, checked once at boot -----------------------------------
+  //
+  // Chrome's eleven faces are pre-rendered; body text is not, because book CSS
+  // asks for an unbounded set of sizes (see reader/scalablefont.h). Nothing
+  // DRAWS body text yet -- that is 3B and 3C -- so this is a parse-and-rasterise
+  // check and nothing more, and it is here rather than deferred for two reasons.
+  //
+  // It is what pays the flash. kFontBodySerif is 236,652 bytes of `.rodata` and
+  // an array nothing references is an array the linker never emits, so without a
+  // caller the cost of the body face would read as zero in every size report
+  // right up until 3B added the first draw call and it appeared all at once.
+  //
+  // And it is the only thing on the desktop's side of this task that the DEVICE
+  // can answer: a runtime rasteriser on a part with no FPU is the assumption 3B
+  // is about to build on, and the numbers below are how it is falsified early
+  // rather than late. The face is a local -- its 8 KB glyph cache is transient,
+  // released before setup() returns -- so the check costs no resident heap.
+  {
+    reader::ScalableFont body;
+    const uint32_t t0 = micros();
+    const bool bodyOk = body.init(kFontBodySerif, kFontBodySerifSize, 29);
+    const uint32_t t1 = micros();
+    if (!bodyOk) {
+      // Not fatal: no screen reads this face yet, so a failure here must be
+      // loud without taking a working reader down with it.
+      mark("body-face-FAILED");
+    } else {
+      // One glyph, rasterised, so the timing is a rasterisation and not a parse.
+      const uint32_t t2 = micros();
+      const std::optional<reader::Glyph> g = body.glyph('a');
+      const uint32_t t3 = micros();
+      const reader::ScalableFont::CacheStats cs = body.cacheStats();
+      Serial.printf(
+          "[body] ppem=%d weight=%d ascent=%d descent=%d line=%d init=%uus "
+          "glyph_a=%dx%d raster=%uus cache=%u/%u+%u\n",
+          body.ppem(), body.weight(), body.ascent(), body.descent(), body.lineHeight(),
+          (unsigned)(t1 - t0), g ? g->bitmapW : -1, g ? g->bitmapH : -1,
+          (unsigned)(t3 - t2), (unsigned)cs.usedBytes, (unsigned)cs.capacityBytes,
+          (unsigned)cs.overheadBytes);
+      Serial.flush();
+      mark("body-face-ok");
+    }
+  }
 
   const int panelW = display.getDisplayWidth();
   const int panelH = display.getDisplayHeight();
