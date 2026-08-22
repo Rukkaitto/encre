@@ -946,8 +946,10 @@ static uint32_t gRenderMs = 0;
 // memcpy left to time and this counter is never incremented. It is kept for ONE
 // reason -- the [paint] line is the only evidence available that the copy is
 // actually gone on hardware, and this change was made without flashing. Once a
-// device log shows `copy=0`, delete the field the way `rotate` was deleted.
-static uint32_t gDrawMs = 0, gCopyMs = 0;
+// A device log has now shown `copy=0` (2026-08-22), so the field is retired the
+// way `rotate` was: rendering goes straight into the driver's framebuffer and
+// there is no copy left to time.
+static uint32_t gDrawMs = 0;
 
 // One render pass, straight into the panel-oriented frame.
 //
@@ -1238,7 +1240,7 @@ static void renderTop() {
                                                          : "mono",
                 mode == reader::RefreshMode::Full ? "FULL" : "FAST", gRefresh.sinceFull());
   Serial.flush();
-  gRenderMs = gDrawMs = gCopyMs = 0;
+  gRenderMs = gDrawMs = 0;
   gPartialPaint = false;
   const uint32_t t0 = millis();
   // THE OTHER HALF OF THE SHARED-BUS INVARIANT. Every public method of
@@ -1279,10 +1281,9 @@ static void renderTop() {
   // the grayscale sequence has four, and it is in the log because a stale-pixel
   // report needs to say which path drew the frame that showed it -- guessing from
   // the screen name is exactly the wrong way round.
-  Serial.printf("[paint] done total=%lums render=%lums (draw=%lu copy=%lu) panel=%lums scope=%s\n",
+  Serial.printf("[paint] done total=%lums render=%lums (draw=%lu) panel=%lums scope=%s\n",
                 (unsigned long)total, (unsigned long)gRenderMs, (unsigned long)gDrawMs,
-                (unsigned long)gCopyMs, (unsigned long)(total - gRenderMs - gCopyMs),
-                gPartialPaint ? "top" : "stack");
+                (unsigned long)(total - gRenderMs), gPartialPaint ? "top" : "stack");
   Serial.flush();
 }
 
@@ -1857,10 +1858,15 @@ void loop() {
 
   static uint32_t beat = 0;
   if (++beat % 200 == 0) {
-    Serial.printf("[alive] last-stage=%s heap=%u screen=%s depth=%d dropped=%lu/%lu\n", stage,
-                  (unsigned)ESP.getFreeHeap(), reader::screenName(gApp->top().id()),
-                  gApp->depth(), (unsigned long)rawSamplesDropped(),
-                  (unsigned long)gPresses.dropped());
+    // minHeap is the HIGH-WATER mark, and it is the number Phase 3 actually needs:
+    // `heap` is whatever is free at this instant, while a pagination peak happens
+    // BETWEEN two [alive] lines and would otherwise never be seen. 3A's entire
+    // memory case rested on a figure nothing was measuring.
+    Serial.printf("[alive] last-stage=%s heap=%u minHeap=%u screen=%s depth=%d "
+                  "dropped=%lu/%lu\n",
+                  stage, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+                  reader::screenName(gApp->top().id()), gApp->depth(),
+                  (unsigned long)rawSamplesDropped(), (unsigned long)gPresses.dropped());
     Serial.flush();
   }
   delay(10);
