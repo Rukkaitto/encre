@@ -35,10 +35,38 @@
        its width, and the `gap: 7px` is the minimum separation between them --
        without it `space-between` lets the ellipsis touch the count the moment
        the label fills the line. Every other band's label is a literal
-       (NOW READING, ABOUT THIS BOOK), which is why they state neither. -->
+       (NOW READING, ABOUT THIS BOOK), which is why they state neither.
+
+       THE RIGHT SLOT IS THE SCROLL POSITION WHEN THE LIST OVERFLOWS, and the
+       plain count when it does not. A 200-book library in a seven-row window
+       with no position indicator gives the user nothing to navigate by, and this
+       is the answer that suits the panel: a rail thin enough not to steal a row's
+       width is exactly the thin-1-bit-stroke case the chevron already warns
+       about, while type at --t-value 700 is the crispest thing this chrome has.
+
+       It REPLACES the count rather than joining it, on two grounds. `1-7 OF 12`
+       already contains the total, so a band carrying both would state the
+       same number twice -- and this band is the width-constrained one on the
+       480px X4, where the label is data and already truncates. When the list
+       FITS, the range is `1-7 OF 7`, which is noise dressed as information, so
+       the count stands instead.
+
+       The widest string the cap admits is `250-256 OF 256` (14 chars at
+       --t-value 700), which is what the label's remaining width has to survive.
+       That is the shape of the number, so it is recorded here rather than
+       measured off the shortest case.
+
+       THE RANGE HAS TO AGREE WITH THE ROWS BELOW IT. This board shows the TOP of
+       the list -- `Classics` is a folder and folders sort first, so it can only
+       be row 1 -- which makes the range `1-7`. And the total is the board's own
+       12: six books beside a folder the row itself labels `6 BOOKS`, which is
+       what the band said before this slot became the position. A mocked-up `203`
+       would read more impressively and contradict every other number on the
+       board. Seven rows of twelve still overflows, which is the state this slot
+       exists for. -->
   <div style="display: flex; justify-content: space-between; align-items: center; gap: 7px; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
     <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">LIBRARY</div>
-    <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">12 BOOKS</div>
+    <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">1&ndash;7 OF 12</div>
   </div>
 
   <div style="display: flex; flex-direction: column; flex-grow: 1;">

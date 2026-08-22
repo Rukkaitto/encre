@@ -648,6 +648,22 @@ top of this spike.
   row rather than a page. `Theme::libraryVisibleRows` derives how many rows fit
   from the panel and the type; the shell must set it before the first Library
   paint or the list correctly renders empty.
+- **A scrollable list shows its position as a RANGE IN THE HEADER BAND** —
+  `1–7 OF 12` at `--t-value` 700 — and only when the list overflows; when it
+  fits, the band keeps its plain count, because `1–7 OF 7` is noise dressed as
+  information. It **replaces** the count rather than joining it: the range already
+  carries the total, and this is the width-constrained band on the 480px X4 where
+  the label is data and truncates.
+  - **Not a scrollbar rail, deliberately.** A rail thin enough not to steal width
+    from every row is exactly the thin-1-bit-stroke case `kChevron`'s diagonal
+    already documents, and type is the crispest thing this chrome has.
+  - **This governs every scrollable list, not just Library** — Contents,
+    Bookmarks, WifiPicker and Settings all have lists and none of those screens
+    exists yet. The pattern is recorded here so the screen that lands next
+    inherits it instead of inventing a second answer; put it on that board when
+    the screen is built.
+  - The widest string a 256-book cap admits is `250–256 OF 256`, which is what
+    the label's remaining width has to survive.
 - **The session record stores a screen NAME, not an enum ordinal.** 2C-2 inserted
   three screens into the middle of `ScreenId` and a stored ordinal silently became
   a different screen. Names also mean `nvs_get encre_sess scr str` is readable on
