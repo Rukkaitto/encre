@@ -135,7 +135,7 @@ TEST_CASE("an unknown version is a bad file: defaults, and false") {
                            "{\"version\":-1,\"sleepAfterMs\":60000}",
                            "{\"sleepAfterMs\":60000}",          // no version at all
                            "{\"version\":\"1\",\"sleepAfterMs\":60000}"}) {
-    INFO("file: " << text);
+    INFO("file: " << std::string(text));  // a bare const char* prints as a pointer
     plant(fs, text);
     Settings s;
     CHECK_FALSE(loadSettings(fs, s));
@@ -152,7 +152,7 @@ TEST_CASE("a malformed file yields complete defaults, never a half-populated out
                            "{\"version\":1,\"sleepAfterMs\":600.0}",
                            "not json at all",
                            "{\"version\":1,\"nested\":{\"a\":1}}"}) {
-    INFO("file: " << text);
+    INFO("file: " << std::string(text));  // a bare const char* prints as a pointer
     plant(fs, text);
     Settings s;
     CHECK_FALSE(loadSettings(fs, s));

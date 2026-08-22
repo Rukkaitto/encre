@@ -43,11 +43,22 @@ std::string freshTempRoot(const char* name) {
 // Adapts the contract's report to doctest, one assertion each so the counts and
 // the failure behaviour are exactly what the hand-written CHECK/REQUIRE calls
 // were before the clauses moved into reader/fs_contract.h.
+//
+// `expr` IS WRAPPED IN std::string, and that is not a style choice. doctest
+// resolves a bare `const char*` to its `const void*` stringification overload and
+// prints the POINTER, so every failure here used to read
+//   ERROR: CHECK( passed ) is NOT correct!  logged: 0x10088d367
+// -- a hex address where the clause's own source text should be. fs_contract.h
+// spells FSC_CHECK as `r.check(cond, #cond)` precisely so that a failure quotes
+// the condition that failed; without this cast that whole mechanism was silently
+// producing addresses on the desktop, while the device runner (a Serial.printf
+// with %s) printed the text correctly all along. So the ONE runner that runs on
+// every `make test` was the one that could not say what broke.
 class DoctestReport : public FsContractReport {
  public:
-  void check(bool passed, const char* expr) override { CHECK_MESSAGE(passed, expr); }
+  void check(bool passed, const char* expr) override { CHECK_MESSAGE(passed, std::string(expr)); }
   bool require(bool passed, const char* expr) override {
-    REQUIRE_MESSAGE(passed, expr);  // throws past the clause on failure
+    REQUIRE_MESSAGE(passed, std::string(expr));  // throws past the clause on failure
     return passed;
   }
 };
@@ -58,7 +69,12 @@ class DoctestReport : public FsContractReport {
 // names which one.
 template <typename Factory>
 void runContract(const char* label, Factory makeFs) {
-  INFO("implementation: " << label);
+  // std::string, not the bare const char*: doctest resolves a const char* to its
+  // const void* overload and prints the POINTER, so this message used to read
+  // "implementation: 0x1029c54ab" -- on the one runner whose whole job is to say
+  // WHICH implementation broke the contract. test_json.cpp wraps it for the same
+  // reason.
+  INFO("implementation: " << std::string(label));
   size_t count = 0;
   const FsContractClause* clauses = fsContractClauses(count);
   for (size_t i = 0; i < count; ++i) {
