@@ -3,6 +3,8 @@
 #include <string_view>
 #include <vector>
 
+#include "reader/inflate_stream.h"  // ByteSource
+
 namespace reader {
 
 // A book's chapter, as a list of blocks. Deliberately the smallest model that
@@ -39,9 +41,56 @@ struct Document {
   std::vector<Block> blocks;
 };
 
-// A chapter's XHTML into blocks. False on malformed markup or a document past the
-// caps below, with `*reason` naming which -- never an abort, because this parses
-// bytes off a user's card.
+// A CHAPTER'S BLOCKS, ONE AT A TIME.
+//
+// The resumable form, and the one the reader uses. `buildDocument` below is this
+// drained into a vector, kept because a whole-chapter Document is still the right
+// thing for a test and for anything small.
+//
+// It exists because a Document is the OTHER half of why a real book could not be
+// opened: Le Fléau's longest chapter is 315,852 bytes of XHTML and 228,849 bytes of
+// blocks, and holding all of the second while producing it from all of the first is
+// how a 546 KB peak happened. Nothing needs every block at once -- a page spans a
+// handful -- so this hands them over as they finish and forgets them.
+//
+// Its whole memory is the Xml it drives (2,560 bytes), a tag stack of 64 truncated
+// names, and ONE block. Measured over a real book, the largest single block is
+// 4,406 bytes, so the peak is bounded by a paragraph rather than by a chapter.
+//
+// UNBALANCED TAGS ARE CAUGHT HERE, which is the boundary xml.h documents: this is
+// the layer that keeps a stack to know which block it is in, so an unclosed tag is
+// free to notice at Eof and the parser is spared a second copy of that stack. The
+// stack holds truncated COPIES, not views -- see document.cpp, where relying on
+// views silently made `<blockquote><p>` a plain paragraph and made a mis-nested
+// document parse clean.
+class BlockReader {
+ public:
+  explicit BlockReader(ByteSource& src);
+  BlockReader(const BlockReader&) = delete;
+  BlockReader& operator=(const BlockReader&) = delete;
+  ~BlockReader();
+
+  // Fills `out` with the next block and returns true. False means either the
+  // chapter ended (`error()` empty) or it was refused (`error()` says why) --
+  // `ok()` tells them apart without a second call.
+  bool next(Block& out);
+  bool ok() const { return error_[0] == '\0'; }
+  const char* error() const { return error_; }
+
+  // How many blocks have been handed over. The global index of the NEXT one, which
+  // is what a page cursor names.
+  int emitted() const { return emitted_; }
+
+ private:
+  struct State;
+  State* st_;  // one heap allocation, for the reason Inflater's Scratch gives
+  int emitted_ = 0;
+  const char* error_ = "";
+};
+
+// A chapter's XHTML into blocks, all of them. False on malformed markup or a
+// document past the caps below, with `*reason` naming which -- never an abort,
+// because this parses bytes off a user's card.
 //
 // UNBALANCED TAGS ARE CAUGHT HERE, which is the boundary xml.h documents: this is
 // the layer that keeps a stack to know which block it is in, so an unclosed tag is

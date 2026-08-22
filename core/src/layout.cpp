@@ -21,11 +21,9 @@ namespace {
 // interrupted one, and nothing in the markup distinguishes those. Flush is chosen
 // because it is the answer that is never obtrusive -- a missing indent reads as
 // continuation, an unwanted one reads as a paragraph that is not there.
-bool indented(const Document& doc, int at) {
-  if (at <= 0) return false;
-  const size_t i = static_cast<size_t>(at);
-  return doc.blocks[i].kind == BlockKind::Paragraph &&
-         doc.blocks[i - 1].kind == BlockKind::Paragraph;
+bool indentedAfter(BlockKind prev, BlockKind here, bool isFirst) {
+  if (isFirst) return false;
+  return here == BlockKind::Paragraph && prev == BlockKind::Paragraph;
 }
 
 // Whether this kind's lines are justified at all.
@@ -65,64 +63,159 @@ int stretchFor(const GlyphSource& font, std::string_view line, int availW, Track
 
 }  // namespace
 
-Page layoutPage(const Document& doc, const GlyphSource& font, const PageMetrics& m, Cursor from) {
-  Page page;
-  page.next = from;
+PageBuilder::PageBuilder(const GlyphSource& font, const PageMetrics& m)
+    : font_(&font), m_(m) {
+  leadF26_ = Tracking::em(font.ppem(), m.leadEm1000).f26();
+  indentF26_ = Tracking::em(font.ppem(), m.indentEm1000).f26();
+  // A column that cannot hold one line box yields no pages at all, rather than
+  // dividing by zero -- layout.h says a caller must not loop on that.
+  rows_ = (leadF26_ > 0 && m.columnW > 0) ? pxToF26(m.columnH) / leadF26_ : 0;
+  beginPage();
+}
 
-  const int leadF26 = Tracking::em(font.ppem(), m.leadEm1000).f26();
-  const int indentF26 = Tracking::em(font.ppem(), m.indentEm1000).f26();
+void PageBuilder::beginPage() {
+  page_ = Page{};
+  row_ = 0;
+  pageStart_ = Cursor{blockIndex_, line_};
+}
+
+void PageBuilder::startAt(Cursor at) {
+  skipping_ = true;
+  skipTo_ = at;
+}
+
+void PageBuilder::add(const Block& b, int index) {
+  // The text is COPIED, because the wrap below produces views into it and the
+  // caller is free to drop its block the moment this returns.
+  held_ = b.text;
+  kind_ = b.kind;
+  blockIndex_ = index;
+  line_ = 0;
+  haveBlock_ = true;
+
+  // DECIDED HERE, NOT IN drain(), because `prevKind_` is about to become this
+  // block's own kind -- and drain() runs after that. Reading it there made every
+  // paragraph its own predecessor, so a paragraph after a heading indented when the
+  // whole rule is that it must not.
+  indentThis_ = indentedAfter(prevKind_, b.kind, index == 0);
+  const int myIndentF26 = indentThis_ ? indentF26_ : 0;
+  prose_ = wrapProseLead(*font_, held_, m_.columnW, leadF26_, m_.tracking, WordBreak::Normal,
+                         myIndentF26);
+  prevKind_ = b.kind;
+  if (!skipping_ && row_ == 0) pageStart_ = Cursor{blockIndex_, 0};
+  drain();
+}
+
+void PageBuilder::drain() {
+  if (!haveBlock_ || rows_ <= 0) return;
+  const int count = prose_.lineCount();
+  const int myIndentF26 = indentThis_ ? indentF26_ : 0;
+
+  while (line_ < count && row_ < rows_) {
+    // Everything before the requested start is measured and thrown away -- the
+    // lines still have to be produced, because a page boundary depends on how many
+    // came before it.
+    if (skipping_) {
+      if (blockIndex_ < skipTo_.block || (blockIndex_ == skipTo_.block && line_ < skipTo_.line)) {
+        ++line_;
+        continue;
+      }
+      skipping_ = false;
+      row_ = 0;
+      page_ = Page{};
+      pageStart_ = Cursor{blockIndex_, line_};
+    }
+
+    const std::string_view text = prose_.lines[static_cast<size_t>(line_)];
+    // Only line 0 carries the indent, and only when the page did not resume
+    // mid-paragraph: a page that begins at line 3 begins at the left margin.
+    const int xIndentF26 = (line_ == 0) ? myIndentF26 : 0;
+    LaidLine ln;
+    ln.kind = kind_;
+    ln.block = blockIndex_;
+    ln.lastOfBlock = (line_ == count - 1);
+    ln.x = m_.columnLeft + f26ToPx(xIndentF26);
+    // One line box per row, its top accumulated in 1/64 px so the twentieth line
+    // does not sit a pixel high off twenty roundings, and the baseline centred in
+    // it by the same rule every other box on every screen uses.
+    ln.baselineY = baselineInF26(*font_, pxToF26(m_.columnTop) + row_ * leadF26_, leadF26_);
+    // THE LAST LINE OF A PARAGRAPH IS RAGGED. It is short by however much the
+    // paragraph happened to end short, and stretching it to the margin is the
+    // single most recognisable way justified text can be wrong.
+    if (!ln.lastOfBlock && justifiable(kind_))
+      ln.extraPerGapF26 =
+          stretchFor(*font_, text, m_.columnW - f26ToPx(xIndentF26), m_.tracking);
+    ln.text.assign(text);
+    page_.lines.push_back(std::move(ln));
+
+    ++line_;
+    ++row_;
+  }
+
+  if (line_ >= count) {
+    // The block is spent; its text can go, and with it the views into it.
+    haveBlock_ = false;
+    held_.clear();
+    prose_.lines.clear();
+  }
+}
+
+bool PageBuilder::ready() const { return rows_ > 0 && row_ >= rows_; }
+
+Page PageBuilder::take() {
+  Page out = std::move(page_);
+  // `next` names where the following page begins: still inside this block if lines
+  // remain, otherwise the start of the next block.
+  out.next = haveBlock_ ? Cursor{blockIndex_, line_} : Cursor{blockIndex_ + 1, 0};
+  out.lastPage = false;
+  beginPage();
+  drain();
+  return out;
+}
+
+Page PageBuilder::finish() {
+  Page out = std::move(page_);
+  out.next = haveBlock_ ? Cursor{blockIndex_, line_} : Cursor{blockIndex_ + 1, 0};
+  out.lastPage = true;
+  page_ = Page{};
+  row_ = 0;
+  return out;
+}
+
+Page layoutPage(const Document& doc, const GlyphSource& font, const PageMetrics& m, Cursor from) {
+  // ONE SET OF LAYOUT RULES. This used to be its own loop over the Document, which
+  // would now be a second copy of every decision PageBuilder makes -- the indent,
+  // the ragged last line, the fractional line box. So it feeds the builder instead
+  // and takes the page that begins where it was asked to.
   const int blocks = static_cast<int>(doc.blocks.size());
   if (from.block >= blocks) {
-    page.lastPage = true;
-    return page;
+    Page p;
+    p.next = from;
+    p.lastPage = true;
+    return p;
   }
-  // A column that cannot hold one line box yields an EMPTY page whose `next`
-  // equals `from`. The caller must not loop on that -- see layout.h.
-  if (leadF26 <= 0 || m.columnW <= 0) return page;
-  const int rows = pxToF26(m.columnH) / leadF26;
-  if (rows <= 0) return page;
 
-  int row = 0;
-  for (int b = from.block; b < blocks && row < rows; ++b) {
-    const Block& blk = doc.blocks[static_cast<size_t>(b)];
-    const int myIndentF26 = indented(doc, b) ? indentF26 : 0;
-    // RE-WRAPPING, not caching. This is the paragraph the previous page ended in
-    // the middle of, and wrapping it again to reach line `from.line` costs
-    // advances only -- which is what makes one-page-at-a-time affordable. See
-    // layout.h.
-    const Prose wrapped = wrapProseLead(font, blk.text, m.columnW, leadF26, m.tracking,
-                                        WordBreak::Normal, myIndentF26);
-
-    const int first = (b == from.block) ? from.line : 0;
-    const int count = wrapped.lineCount();
-    for (int l = first; l < count && row < rows; ++l, ++row) {
-      const std::string_view text = wrapped.lines[static_cast<size_t>(l)];
-      // Only line 0 carries the indent, and only when the page did not resume
-      // mid-paragraph: a page that begins at line 3 begins at the left margin.
-      const int xIndentF26 = (l == 0) ? myIndentF26 : 0;
-      LaidLine ln;
-      ln.kind = blk.kind;
-      ln.x = m.columnLeft + f26ToPx(xIndentF26);
-      // One line box per row, its top accumulated in 1/64 px so the twentieth
-      // line does not sit a pixel high off twenty roundings, and the baseline
-      // centred in it by the same rule every other box on every screen uses.
-      ln.baselineY = baselineInF26(font, pxToF26(m.columnTop) + row * leadF26, leadF26);
-      // THE LAST LINE OF A PARAGRAPH IS RAGGED. It is short by however much the
-      // paragraph happened to end short, and stretching it to the margin is the
-      // single most recognisable way justified text can be wrong.
-      const bool last = (l == count - 1);
-      if (!last && justifiable(blk.kind))
-        ln.extraPerGapF26 =
-            stretchFor(font, text, m.columnW - f26ToPx(xIndentF26), m.tracking);
-      ln.text = text;
-      page.lines.push_back(ln);
-
-      page.next = (l + 1 < count) ? Cursor{b, l + 1} : Cursor{b + 1, 0};
+  PageBuilder pb(font, m);
+  // A column too short for one line box: an EMPTY page whose `next` equals `from`,
+  // and NOT a last page. layout.h states that contract and a caller must not loop
+  // on it; reporting lastPage here would tell a caller the chapter had ended.
+  if (!pb.viable()) {
+    Page p;
+    p.next = from;
+    return p;
+  }
+  pb.startAt(from);
+  for (int b = 0; b < blocks; ++b) {
+    pb.add(doc.blocks[static_cast<size_t>(b)], b);
+    if (pb.ready()) {
+      Page p = pb.take();
+      // `lastPage` is the builder's only unknowable: it fills a page without
+      // knowing whether another block follows. Here the Document says.
+      p.lastPage = p.next.block >= blocks;
+      return p;
     }
   }
-
-  page.lastPage = page.next.block >= blocks;
-  return page;
+  return pb.finish();
 }
 
 }  // namespace reader

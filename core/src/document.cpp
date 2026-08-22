@@ -1,5 +1,7 @@
 #include "reader/document.h"
 
+#include <new>
+
 #include "reader/xml.h"
 
 namespace reader {
@@ -93,136 +95,183 @@ BlockKind kindFromStack(const TagName* stack, size_t depth) {
 
 }  // namespace
 
-bool buildDocument(std::string_view xhtml, Document& out, const char** reason) {
-  out.blocks.clear();
-
+// All of the builder's state, in one heap allocation -- the reason Inflater's
+// Scratch gives: an Xml is 2,560 bytes and a 64-deep tag stack is another 1,792, so
+// a BlockReader as a local would put 4.3 KB in a frame, and this project has
+// already had one stack-protection panic from arrays in the wrong place.
+struct BlockReader::State {
+  Xml xml;
   TagName stack[kMaxNestDepth];
   size_t depth = 0;
-
   // The depth at which suppression began, 0 for "not suppressing". Nested
   // suppression (a `<style>` inside a `<head>`) needs no counter: the outer one is
   // already in force and the inner close is not at the recorded depth.
   size_t suppressAt = 0;
-
   Block cur;
   bool open = false;
+  bool finished = false;
+
+  explicit State(ByteSource& src) : xml(src) {}
+};
+
+BlockReader::BlockReader(ByteSource& src) : st_(new (std::nothrow) State(src)) {
+  if (st_ == nullptr) error_ = "not enough memory to read this chapter";
+}
+
+BlockReader::~BlockReader() { delete st_; }
+
+bool BlockReader::next(Block& out) {
+  if (st_ == nullptr || !ok() || st_->finished) return false;
+  State& st = *st_;
 
   // Whitespace collapses on the way IN rather than in a pass afterwards, because
   // the alternative is holding a chapter's raw text with every source newline in it
-  // and then rewriting it -- two copies of the largest string in the program, on a
-  // device with 300 KB of heap.
+  // and then rewriting it.
   const auto appendSpace = [&]() {
-    if (!cur.text.empty() && cur.text.back() != ' ') cur.text.push_back(' ');
+    if (!st.cur.text.empty() && st.cur.text.back() != ' ') st.cur.text.push_back(' ');
   };
 
-  const auto flush = [&]() -> bool {
-    if (open) {
-      while (!cur.text.empty() && cur.text.back() == ' ') cur.text.pop_back();
-      // An empty block is DROPPED, not emitted blank: `<p></p>` between chapters is
-      // a generator's artifact and a blank block would cost a line of the page.
-      if (!cur.text.empty()) {
-        if (out.blocks.size() >= kMaxBlocks) {
-          *reason = "too many blocks";
+  // Moves the block being built into `out`, if it has anything in it. An empty
+  // block is DROPPED, not emitted blank: `<p></p>` between chapters is a
+  // generator's artifact and a blank block would take a line of the page.
+  const auto take = [&](bool& have) -> bool {
+    have = false;
+    if (st.open) {
+      while (!st.cur.text.empty() && st.cur.text.back() == ' ') st.cur.text.pop_back();
+      if (!st.cur.text.empty()) {
+        if (emitted_ >= static_cast<int>(kMaxBlocks)) {
+          error_ = "too many blocks";
           return false;
         }
-        out.blocks.push_back(std::move(cur));
+        out = std::move(st.cur);
+        ++emitted_;
+        have = true;
       }
     }
-    cur = Block{};
-    open = false;
+    st.cur = Block{};
+    st.open = false;
     return true;
   };
 
-  const auto begin = [&]() -> bool {
-    if (!flush()) return false;
-    cur.kind = kindFromStack(stack, depth);
-    open = true;
-    return true;
+  const auto beginBlock = [&]() {
+    st.cur.kind = kindFromStack(st.stack, st.depth);
+    st.open = true;
   };
 
-  Xml xml(xhtml);
   for (;;) {
-    const Xml::Node n = xml.next();
+    const Xml::Node n = st.xml.next();
 
     if (n == Xml::Node::Error) {
-      *reason = xml.error();
+      error_ = st.xml.error();
       return false;
     }
 
     if (n == Xml::Node::Eof) {
       // UNCLOSED TAGS SURFACE HERE, for free, off the stack this layer needs
       // anyway -- which is why xml.h deliberately keeps no stack of its own.
-      if (depth != 0) {
-        *reason = "unclosed tag at end of document";
+      if (st.depth != 0) {
+        error_ = "unclosed tag at end of document";
         return false;
       }
-      return flush();
+      st.finished = true;
+      bool have = false;
+      if (!take(have)) return false;
+      return have;
     }
 
     if (n == Xml::Node::StartTag) {
-      if (depth >= kMaxNestDepth) {
-        *reason = "nesting too deep";
+      if (st.depth >= kMaxNestDepth) {
+        error_ = "nesting too deep";
         return false;
       }
-      stack[depth++].set(xml.name());
+      st.stack[st.depth++].set(st.xml.name());
 
-      if (suppressAt != 0) continue;
-      if (isSuppressed(xml.name())) {
-        suppressAt = depth;
+      if (st.suppressAt != 0) continue;
+      if (isSuppressed(st.xml.name())) {
+        st.suppressAt = st.depth;
         // Whatever block was being built ends at the boundary rather than
         // absorbing the text after the suppressed element.
-        if (!flush()) return false;
+        bool have = false;
+        if (!take(have)) return false;
+        if (have) return true;
         continue;
       }
-      if (startsBlock(xml.name())) {
-        if (!begin()) return false;
-      } else if (separatesWords(xml.name())) {
-        if (!open && !begin()) return false;
+      if (startsBlock(st.xml.name())) {
+        // The PREVIOUS block is what goes out; the new one opens against the stack
+        // as it stands now, which is why beginBlock runs before the return.
+        bool have = false;
+        if (!take(have)) return false;
+        beginBlock();
+        if (have) return true;
+        continue;
+      }
+      if (separatesWords(st.xml.name())) {
+        if (!st.open) beginBlock();
         appendSpace();
       }
       continue;
     }
 
     if (n == Xml::Node::EndTag) {
-      if (depth == 0) {
-        *reason = "end tag with no start tag";
+      if (st.depth == 0) {
+        error_ = "end tag with no start tag";
         return false;
       }
-      if (!(stack[depth - 1] == xml.name())) {
-        *reason = "mismatched end tag";
+      if (!(st.stack[st.depth - 1] == st.xml.name())) {
+        error_ = "mismatched end tag";
         return false;
       }
-      --depth;
+      --st.depth;
 
-      if (suppressAt != 0) {
-        if (depth + 1 == suppressAt) suppressAt = 0;
+      if (st.suppressAt != 0) {
+        if (st.depth + 1 == st.suppressAt) st.suppressAt = 0;
         continue;
       }
-      if (startsBlock(xml.name())) {
-        if (!flush()) return false;
-      } else if (separatesWords(xml.name())) {
-        appendSpace();
+      if (startsBlock(st.xml.name())) {
+        bool have = false;
+        if (!take(have)) return false;
+        if (have) return true;
+        continue;
       }
+      if (separatesWords(st.xml.name())) appendSpace();
       continue;
     }
 
     // Text.
-    if (suppressAt != 0) continue;
+    if (st.suppressAt != 0) continue;
     // A bare text node with no block around it is still the book's words, so it
     // opens one rather than being lost.
-    if (!open && !begin()) return false;
-    for (const char c : xml.text()) {
+    if (!st.open) beginBlock();
+    for (const char c : st.xml.text()) {
       if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
         appendSpace();
         continue;
       }
-      if (cur.text.size() >= kMaxBlockBytes) {
-        *reason = "block too long";
+      if (st.cur.text.size() >= kMaxBlockBytes) {
+        error_ = "block too long";
         return false;
       }
-      cur.text.push_back(c);
+      st.cur.text.push_back(c);
     }
   }
+}
+
+bool buildDocument(std::string_view xhtml, Document& out, const char** reason) {
+  out.blocks.clear();
+  BufferSource src(xhtml);
+  BlockReader r(src);
+  if (!r.ok()) {
+    *reason = r.error();
+    return false;
+  }
+  Block b;
+  while (r.next(b)) out.blocks.push_back(std::move(b));
+  if (!r.ok()) {
+    *reason = r.error();
+    out.blocks.clear();
+    return false;
+  }
+  return true;
 }
 
 }  // namespace reader

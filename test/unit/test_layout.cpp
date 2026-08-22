@@ -145,9 +145,14 @@ TEST_CASE("A PAGE BOUNDARY MAY LAND INSIDE A PARAGRAPH") {
   const Page second = reader::layoutPage(d, b.face, m, first.next);
   REQUIRE(!second.lines.empty());
   // The second page resumes exactly where the first stopped -- no line repeated
-  // and none skipped, which is the off-by-one this case exists to find.
-  CHECK(second.lines.front().text.data() ==
-        first.lines.back().text.data() + first.lines.back().text.size() + 1);
+  // and none skipped, which is the off-by-one this case exists to find. Asserted on
+  // the block index and the text, not on where the bytes live: the lines own their
+  // text now, so a pointer comparison would be comparing two separate allocations.
+  CHECK(second.lines.front().block == first.lines.back().block);
+  CHECK_FALSE(first.lines.back().lastOfBlock);
+  // And rejoining them reproduces the paragraph across the boundary.
+  const std::string across = first.lines.back().text + " " + second.lines.front().text;
+  CHECK(d.blocks[0].text.find(across) != std::string::npos);
 }
 
 TEST_CASE("every line of the chapter appears exactly once across the pages") {
@@ -214,14 +219,16 @@ TEST_CASE("the last line of EVERY paragraph is ragged, not just the page's") {
                       longPara("Second paragraph.", 4).c_str()});
   const Page p = reader::layoutPage(d, b.face, boardMetrics(2400), Cursor{});
   REQUIRE(p.lastPage);
-  // Find each block's final line by watching the text pointer leave the block.
-  for (size_t i = 0; i < p.lines.size(); ++i) {
-    const std::string_view t = p.lines[i].text;
-    const bool blockEnds =
-        (i + 1 == p.lines.size()) ||
-        (p.lines[i + 1].text.data() > t.data() + t.size() + 1);
-    if (blockEnds) CHECK(p.lines[i].extraPerGapF26 == 0);
+  // `lastOfBlock` says which lines those are, rather than the pointer arithmetic
+  // this used to infer it with.
+  int checked = 0;
+  for (const LaidLine& ln : p.lines) {
+    if (!ln.lastOfBlock) continue;
+    ++checked;
+    CAPTURE(ln.text);
+    CHECK(ln.extraPerGapF26 == 0);
   }
+  CHECK(checked == 2);  // two paragraphs, so two final lines -- not zero
 }
 
 TEST_CASE("a line with no gaps is never stretched") {
@@ -267,10 +274,8 @@ TEST_CASE("AN ORDINARY LINE IS JUSTIFIED EVEN WHEN ITS SLACK FALLS ACROSS FEW GA
   REQUIRE(p.lastPage);
   int raggedMidParagraph = 0;
   for (size_t i = 0; i < p.lines.size(); ++i) {
-    const std::string_view t = p.lines[i].text;
-    const bool blockEnds = (i + 1 == p.lines.size()) ||
-                           (p.lines[i + 1].text.data() > t.data() + t.size() + 1);
-    if (blockEnds || gapsIn(t) == 0) continue;
+    const std::string& t = p.lines[i].text;
+    if (p.lines[i].lastOfBlock || gapsIn(t) == 0) continue;
     const int avail = 444 - (p.lines[i].x - 18);
     const int nat = b.face.measure(t);
     if (nat * 100 >= avail * reader::kMinJustifyFillPercent &&
@@ -396,4 +401,137 @@ TEST_CASE("a real chapter paginates, and the page count is what a 32px face give
   CAPTURE(lines);
   CHECK(pages >= 2);
   CHECK(lines > 10);
+}
+
+// --- PageBuilder, the streaming engine --------------------------------------
+
+TEST_CASE("STREAMED PAGES MATCH THE ONES layoutPage GIVES, page for page") {
+  // layoutPage is implemented over PageBuilder, so this is not quite a comparison
+  // of two engines -- it is a check that feeding blocks one at a time and dropping
+  // them behind you produces the same pagination as having the whole Document. That
+  // is the property the reader depends on and the one a resumption bug breaks.
+  Body b;
+  Document d = docOf({longPara("First.", 6).c_str(), longPara("Second.", 6).c_str(),
+                      longPara("Third.", 6).c_str()});
+  const PageMetrics m = boardMetrics(400);
+
+  // The reference: walk it with layoutPage.
+  std::vector<std::vector<std::string>> viaLayout;
+  Cursor at{};
+  for (int guard = 0; guard < 100; ++guard) {
+    const Page p = reader::layoutPage(d, b.face, m, at);
+    std::vector<std::string> lines;
+    for (const LaidLine& ln : p.lines) lines.push_back(ln.text);
+    viaLayout.push_back(lines);
+    if (p.lastPage) break;
+    at = p.next;
+  }
+
+  // The same thing, streamed: each block fed once and then dropped.
+  std::vector<std::vector<std::string>> viaStream;
+  reader::PageBuilder pb(b.face, m);
+  REQUIRE(pb.viable());
+  const auto keep = [&](const Page& p) {
+    std::vector<std::string> lines;
+    for (const LaidLine& ln : p.lines) lines.push_back(ln.text);
+    viaStream.push_back(lines);
+  };
+  for (int i = 0; i < static_cast<int>(d.blocks.size()); ++i) {
+    reader::Block copy = d.blocks[static_cast<size_t>(i)];
+    pb.add(copy, i);
+    copy = reader::Block{};  // dropped, as a BlockReader's caller drops it
+    while (pb.ready()) keep(pb.take());
+  }
+  keep(pb.finish());
+
+  REQUIRE(viaStream.size() == viaLayout.size());
+  CHECK(viaStream.size() > 3);  // really paginated
+  for (size_t i = 0; i < viaStream.size(); ++i) {
+    CAPTURE(i);
+    CHECK(viaStream[i] == viaLayout[i]);
+  }
+}
+
+TEST_CASE("A PAGE INDEX OF CURSORS IS WHAT PAGINATION LEAVES BEHIND") {
+  // The reader needs three things a single page cannot give: how many pages there
+  // are, which one it is on, and how to reach an earlier one. All three come from
+  // recording the start cursor of each page during one pass -- ~8 bytes a page --
+  // and discarding the lines.
+  Body b;
+  Document d = docOf({longPara("A paragraph.", 20).c_str(), "Short one.",
+                      longPara("Another.", 20).c_str()});
+  const PageMetrics m = boardMetrics(400);
+
+  std::vector<Cursor> index;
+  reader::PageBuilder pb(b.face, m);
+  size_t linesSeen = 0;
+  for (int i = 0; i < static_cast<int>(d.blocks.size()); ++i) {
+    index.push_back(pb.pageStart());  // provisional; corrected below
+    index.pop_back();
+    reader::Block copy = d.blocks[static_cast<size_t>(i)];
+    pb.add(copy, i);
+    while (pb.ready()) {
+      index.push_back(pb.pageStart());
+      const Page p = pb.take();
+      linesSeen += p.lines.size();
+    }
+  }
+  index.push_back(pb.pageStart());
+  const Page last = pb.finish();
+  linesSeen += last.lines.size();
+
+  REQUIRE(index.size() > 2);
+  // The index is monotonic and starts at the chapter's beginning.
+  CHECK(index.front() == Cursor{0, 0});
+  for (size_t i = 1; i < index.size(); ++i) {
+    CAPTURE(i);
+    const bool forward = index[i].block > index[i - 1].block ||
+                         (index[i].block == index[i - 1].block && index[i].line > index[i - 1].line);
+    CHECK(forward);
+  }
+  // Every cursor in it is a page layoutPage can actually produce, which is what
+  // makes the index usable for going backwards.
+  for (const Cursor& c : index) {
+    const Page p = reader::layoutPage(d, b.face, m, c);
+    CAPTURE(c.block);
+    CAPTURE(c.line);
+    CHECK_FALSE(p.lines.empty());
+    CHECK(p.lines.front().block == c.block);
+  }
+  // And no line was lost or duplicated across the whole walk.
+  size_t totalLines = 0;
+  Cursor at{};
+  for (int guard = 0; guard < 200; ++guard) {
+    const Page p = reader::layoutPage(d, b.face, m, at);
+    totalLines += p.lines.size();
+    if (p.lastPage) break;
+    at = p.next;
+  }
+  CHECK(linesSeen == totalLines);
+}
+
+// No comma in the name on purpose: doctest treats one as a pattern separator in
+// -tc, so a filtered run skips the test silently -- which is how this one first
+// appeared to pass.
+TEST_CASE("the builder holds ONE BLOCK and releases it once its lines are laid") {
+  // The lines own their text (see LaidLine), which is what lets the block go. A
+  // builder that kept blocks would grow with the chapter and the whole streaming
+  // design would buy nothing.
+  Body b;
+  const std::string big = longPara("An enormous paragraph.", 200);
+  reader::Block blk{BlockKind::Paragraph, big};
+  reader::PageBuilder pb(b.face, boardMetrics(400));
+  pb.add(blk, 0);
+  int pages = 0;
+  while (pb.ready()) {
+    const Page p = pb.take();
+    CHECK_FALSE(p.lines.empty());
+    // Each line's text is its own: independent of the block, which the caller is
+    // free to have destroyed.
+    for (const LaidLine& ln : p.lines) CHECK(big.find(ln.text) != std::string::npos);
+    ++pages;
+    REQUIRE(pages < 400);  // a guard, not an expectation: this block is ~110 pages
+  }
+  pb.finish();
+  CHECK(pages > 50);  // one block spanning a hundred pages is the case being tested
 }

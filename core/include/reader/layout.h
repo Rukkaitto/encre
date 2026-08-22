@@ -1,7 +1,9 @@
 #pragma once
+#include <string>
 #include <string_view>
 #include <vector>
 
+#include "reader/components.h"  // Prose
 #include "reader/document.h"
 #include "reader/tracking.h"
 
@@ -101,8 +103,17 @@ struct Cursor {
 };
 
 struct LaidLine {
-  // A view into the Document's own text, so the Document must outlive the Page.
-  std::string_view text;
+  // OWNED, not a view, and that decision is what makes a streaming reader
+  // tractable. A view meant the Document -- or, once chapters stream, whichever
+  // blocks the page happened to span -- had to be kept alive for exactly as long as
+  // the Page was, which is a lifetime rule the reader would have to enforce across
+  // a page turn while blocks are being discarded behind it.
+  //
+  // A page is ~12 lines of ~45 bytes. Copying them costs about 1 KB and a dozen
+  // small allocations per page turn, against a ~520 ms panel refresh -- and it
+  // makes a Page self-contained, so a block can be dropped the moment its lines
+  // have been taken. That is the whole reason nothing here needs a block window.
+  std::string text;
   int x = 0;          // px, left edge; carries the indent
   int baselineY = 0;  // px
   // What drawTextJustified should add after each ASCII space, or 0 for a line set
@@ -110,6 +121,16 @@ struct LaidLine {
   // and every line too empty to justify (see kMinJustifyFillPercent).
   int extraPerGapF26 = 0;
   BlockKind kind = BlockKind::Paragraph;
+
+  // WHICH BLOCK THIS LINE CAME FROM, and whether it is that block's last line.
+  //
+  // Carried rather than inferred. Two tests used to recover it by comparing
+  // `text.data()` pointers, which worked only while every line was a view into one
+  // contiguous buffer -- so making a Page own its text broke them, and the break
+  // was in the tests' technique rather than in the layout. It is also exactly what
+  // a page index keys on: a Cursor is a block and a line within it.
+  int block = 0;
+  bool lastOfBlock = false;
 };
 
 struct Page {
@@ -120,6 +141,91 @@ struct Page {
   // Nothing follows. The caller needs this to know a page turn is an end-of-book
   // rather than a blank screen.
   bool lastPage = false;
+};
+
+// PAGES FROM A STREAM OF BLOCKS, which is the engine everything else here is
+// built on -- `layoutPage` below is this fed from an in-memory Document.
+//
+// It exists because pagination cannot ask for block N: blocks arrive from a
+// BlockReader in order, once, and are dropped behind it. So the caller pushes and
+// this pulls pages out:
+//
+//     PageBuilder pb(font, metrics);
+//     Block b;
+//     while (reader.next(b)) {
+//       pb.add(b, index++);
+//       while (pb.ready()) consume(pb.take());
+//     }
+//     consume(pb.finish());
+//
+// `add` may only be called when `ready()` is false -- that is the signal that the
+// block just fed has been fully laid out. A block longer than a page fills several,
+// which is why `ready()` is a loop and not an if.
+//
+// ITS MEMORY IS ONE BLOCK PLUS ONE PAGE. The block's text is copied in, because
+// the wrap produces views into it and they must outlive the block the caller is
+// about to drop; a page's lines then own their own text (see LaidLine), so the
+// block is released the moment its last line is laid. Measured over a real book:
+// the largest block is 4,406 bytes and a page is ~1 KB of line text.
+class PageBuilder {
+ public:
+  // `font` and `m` must outlive the builder.
+  PageBuilder(const GlyphSource& font, const PageMetrics& m);
+
+  // Feed the next block. `index` is its global position in the chapter, which is
+  // what a Cursor names. Blocks must arrive in order with none skipped: the indent
+  // rule reads the previous block's kind, and a page cursor is meaningless if the
+  // count has a hole in it.
+  void add(const Block& b, int index);
+
+  // A page has filled. Take it and keep going; whatever is left of the block that
+  // overflowed carries onto the next page.
+  bool ready() const;
+  Page take();
+
+  // The blocks have run out. The partial page, marked as the last.
+  Page finish();
+
+  // False when the column cannot hold even one line box. A caller must check it
+  // rather than loop on an empty page -- see layoutPage.
+  bool viable() const { return rows_ > 0; }
+
+  // Where the page currently being built began. This is what a page index records.
+  Cursor pageStart() const { return pageStart_; }
+
+  // Discards everything before `at`, then begins a page there. For `layoutPage`'s
+  // "a page starting exactly HERE" semantics, which is not necessarily a boundary
+  // the natural pagination would have chosen.
+  void startAt(Cursor at);
+
+ private:
+  void beginPage();
+  void drain();
+
+  const GlyphSource* font_;
+  PageMetrics m_;
+  int leadF26_ = 0;
+  int indentF26_ = 0;
+  int rows_ = 0;
+
+  // The block being laid out, owned -- see the class comment.
+  std::string held_;
+  Prose prose_{};
+  BlockKind kind_ = BlockKind::Paragraph;
+  BlockKind prevKind_ = BlockKind::Heading;  // a break precedes the first block
+  int blockIndex_ = 0;
+  int line_ = 0;
+  bool haveBlock_ = false;
+  bool indentThis_ = false;
+
+  Page page_{};
+  int row_ = 0;
+  Cursor pageStart_{};
+
+  // While set, output is discarded until this cursor is reached. startAt's whole
+  // mechanism.
+  bool skipping_ = false;
+  Cursor skipTo_{};
 };
 
 // One page of `doc`, starting at `from`.

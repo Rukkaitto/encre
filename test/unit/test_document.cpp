@@ -153,3 +153,143 @@ TEST_CASE("a real chapter builds, with the shape mkepub.py wrote") {
   CHECK(d.blocks[4].kind == reader::BlockKind::ListItem);
   CHECK(d.blocks[5].kind == reader::BlockKind::ListItem);
 }
+
+// --- BlockReader, the resumable form ----------------------------------------
+//
+// Everything above drives buildDocument, which drains this into a vector -- so it
+// covers the PARSING and says nothing about the streaming. What matters here is
+// that blocks arrive one at a time and that nothing accumulates behind them.
+
+namespace {
+
+class Grained : public reader::ByteSource {
+ public:
+  Grained(std::string_view b, size_t grain) : b_(b), grain_(grain) {}
+  size_t read(void* dst, size_t bytes) override {
+    const size_t want = bytes < grain_ ? bytes : grain_;
+    const size_t got = b_.size() - at_ < want ? b_.size() - at_ : want;
+    for (size_t i = 0; i < got; ++i) static_cast<char*>(dst)[i] = b_[at_ + i];
+    at_ += got;
+    return got;
+  }
+
+ private:
+  std::string_view b_;
+  size_t grain_;
+  size_t at_ = 0;
+};
+
+// A chapter with the shape a real one has: a heading, many paragraphs, a quote and
+// a list. Long enough that holding all of it would be visible.
+std::string chapterOf(int paragraphs) {
+  std::string d = "<html><body><h1>Chapter One</h1>";
+  for (int i = 0; i < paragraphs; ++i) {
+    d += "<p>Paragraph " + std::to_string(i) +
+         ", which exists to give the reader something to hand over and forget. "
+         "It carries an accent, caf&#233;, and an em dash &#8212; so the decoder "
+         "is exercised too.</p>";
+  }
+  d += "<blockquote>A quotation.</blockquote><ul><li>One</li><li>Two</li></ul>"
+       "</body></html>";
+  return d;
+}
+
+}  // namespace
+
+TEST_CASE("BLOCKS ARRIVE ONE AT A TIME, in the same order buildDocument gives") {
+  const std::string doc = chapterOf(40);
+
+  reader::Document whole;
+  const char* why = "";
+  REQUIRE_MESSAGE(reader::buildDocument(doc, whole, &why), std::string(why));
+
+  Grained src(doc, 64);
+  reader::BlockReader r(src);
+  std::vector<reader::Block> streamed;
+  reader::Block b;
+  while (r.next(b)) streamed.push_back(std::move(b));
+  REQUIRE(r.ok());
+
+  REQUIRE(streamed.size() == whole.blocks.size());
+  CHECK(streamed.size() == 44);  // heading + 40 paragraphs + quote + 2 items
+  for (size_t i = 0; i < streamed.size(); ++i) {
+    CAPTURE(i);
+    CHECK(streamed[i].kind == whole.blocks[i].kind);
+    CHECK(streamed[i].text == whole.blocks[i].text);
+  }
+  CHECK(r.emitted() == static_cast<int>(streamed.size()));
+}
+
+TEST_CASE("EVERY GRAIN SIZE GIVES THE SAME BLOCKS") {
+  const std::string doc = chapterOf(12);
+  std::string reference;
+  for (const size_t grain : {size_t{1}, size_t{3}, size_t{97}, size_t{4096}}) {
+    Grained src(doc, grain);
+    reader::BlockReader r(src);
+    std::string flat;
+    reader::Block b;
+    while (r.next(b)) flat += "[" + b.text + "]";
+    REQUIRE(r.ok());
+    CAPTURE(grain);
+    if (reference.empty()) reference = flat;
+    else CHECK(flat == reference);
+  }
+  CHECK_FALSE(reference.empty());
+}
+
+TEST_CASE("THE READER HOLDS ONE BLOCK, NOT THE CHAPTER") {
+  // The whole point of the resumable form. Asserted by taking blocks and dropping
+  // them: if the reader accumulated, its own footprint would grow with the
+  // chapter, and a 400-paragraph chapter would show it.
+  //
+  // Measured against the DOCUMENT the same chapter would build, which is what this
+  // replaces -- the ratio is the saving.
+  const std::string doc = chapterOf(400);
+  reader::Document whole;
+  const char* why = "";
+  REQUIRE(reader::buildDocument(doc, whole, &why));
+  size_t documentBytes = 0;
+  for (const reader::Block& b : whole.blocks) documentBytes += b.text.size();
+
+  Grained src(doc, 512);
+  reader::BlockReader r(src);
+  reader::Block b;
+  size_t largest = 0, total = 0;
+  int n = 0;
+  while (r.next(b)) {
+    if (b.text.size() > largest) largest = b.text.size();
+    total += b.text.size();
+    ++n;
+    b = reader::Block{};  // dropped, as the reader's caller will drop it
+  }
+  REQUIRE(r.ok());
+  CHECK(n == 404);
+  CHECK(total == documentBytes);
+  CAPTURE(largest);
+  CAPTURE(documentBytes);
+  // One block against the whole chapter's blocks: the resident cost is the former.
+  CHECK(largest < documentBytes / 100);
+}
+
+TEST_CASE("the caps still fire in the streaming form") {
+  // Same refusals as buildDocument's, reached through the incremental path -- where
+  // the block cap in particular is now a running count rather than a vector's size.
+  std::string deep;
+  for (size_t i = 0; i <= reader::kMaxNestDepth; ++i) deep += "<div>";
+  deep += "x";
+  Grained d1(deep, 8);
+  reader::BlockReader r1(d1);
+  reader::Block b;
+  while (r1.next(b)) {}
+  CHECK_FALSE(r1.ok());
+
+  std::string many = "<body>";
+  for (size_t i = 0; i <= reader::kMaxBlocks; ++i) many += "<p>x</p>";
+  many += "</body>";
+  Grained d2(many, 4096);
+  reader::BlockReader r2(d2);
+  int count = 0;
+  while (r2.next(b)) ++count;
+  CHECK_FALSE(r2.ok());
+  CHECK(count == static_cast<int>(reader::kMaxBlocks));  // it stopped AT the cap
+}
