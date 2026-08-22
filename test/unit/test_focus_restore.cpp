@@ -54,6 +54,11 @@ std::unique_ptr<Standalone> build(ScreenId id) {
   // Any non-zero row count will do here; this is not a layout test. Zero would
   // give the Library an empty window and hide the very thing being checked.
   b->factory.setLibraryVisibleRows(7);
+  // Any workable geometry, for the same reason: a Settings whose metrics were
+  // never told has a zero-height window, and movement on a window with no height
+  // is refused (ScrollWindow's rule, which Settings now shares instead of
+  // hand-rolling around it).
+  b->factory.setSettingsMetrics(700, 55, 45);
   if (id == ScreenId::Home) {
     // The factory refuses Home on purpose -- the root is never rebuilt -- so the
     // one screen the shell constructs by hand is constructed by hand here too.

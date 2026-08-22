@@ -59,16 +59,23 @@ std::string refreshLabel(int every) {
 }  // namespace
 
 SettingsScreen::SettingsScreen(const Settings& initial, SettingsSink* sink)
-    : settings_(initial), sink_(sink) {
-  window_ = ScrollWindow(static_cast<int>(kItems.size()), 0);
-  // The first focusable row, not row 0: row 0 is the TYPOGRAPHY header.
-  window_.setFocus(firstFocusable());
+    : FocusScreen(static_cast<int>(kItems.size()), 0), settings_(initial), sink_(sink) {
+  // The first focusable row, not row 0: row 0 is the TYPOGRAPHY header. syncVm
+  // runs unconditionally after, because a table edited down to nothing focusable
+  // leaves the setFocus refused and the screen must still render readably.
+  setFocus(firstFocusable());
   syncVm();
+}
+
+bool SettingsScreen::focusable(int index) const {
+  if (index < 0 || index >= static_cast<int>(kItems.size())) return false;
+  const Item& it = kItems[static_cast<size_t>(index)];
+  return !it.isHeader && it.field != Field::None;
 }
 
 int SettingsScreen::firstFocusable() const {
   for (size_t i = 0; i < kItems.size(); ++i)
-    if (!kItems[i].isHeader && kItems[i].field != Field::None) return static_cast<int>(i);
+    if (focusable(static_cast<int>(i))) return static_cast<int>(i);
   // Unreachable with the table above, and not an assert: a table edited down to
   // nothing focusable should render a readable screen rather than abort a boot.
   return 0;
@@ -87,67 +94,12 @@ void SettingsScreen::setMetrics(int listH, int rowH, int headerH) {
     used += h;
     ++n;
   }
-  window_.setVisibleRows(n);
+  window().setVisibleRows(n);
   syncVm();
-}
-
-bool SettingsScreen::setFocus(int index) {
-  // REFUSED rather than clamped when the index is not focusable. A restored focus
-  // that landed on a section header could not be moved off it in one press -- the
-  // move would step to the next focusable row and look like it skipped one -- and
-  // "the restore did not land" is a thing the shell already knows how to report.
-  if (index < 0 || index >= static_cast<int>(kItems.size())) return false;
-  const Item& it = kItems[static_cast<size_t>(index)];
-  if (it.isHeader || it.field == Field::None) return false;
-
-  // "SOMETHING CHANGED", which is the contract every other screen answers and
-  // which Screen::setFocus now states without contradicting itself.
-  //
-  // This returned "the restore LANDED" instead -- window_.focus() == index -- on
-  // the reasoning that restoring onto the row a screen is already on is a
-  // perfectly successful restore. That reasoning is correct and it is not what
-  // this bool is for; app.h has the argument, including why the base class's own
-  // default is wrong under the other reading. The question it was answering is
-  // still answered, by the caller that actually wants it: App::restore compares
-  // focus() to what the record asked for, which says "the record named row 12 and
-  // the screen is on row 4" where a bool could only say "no".
-  const bool moved = window_.setFocus(index);
-  syncVm();
-  return moved;
-}
-
-Action SettingsScreen::moveFocus(int dir) {
-  // Step ONE AT A TIME past anything unfocusable, rather than moving by `dir` and
-  // then correcting: correcting could land back where it started, which reads as
-  // a dead button. `dir` is only ever +1 or -1 -- this screen does not declare
-  // auto-repeat, because thirteen items do not need it.
-  //
-  // AND IT WRAPS, like every other list. This is the one screen that cannot get
-  // wrapping from Focus by using it, because the scan past section headers is its
-  // own: it stepped to the end of kItems and returned none(), so Settings quietly
-  // stopped at the last row while Home, the Library and both overlays rolled over.
-  // test_focus_restore.cpp's wrap case is what catches that for the next screen
-  // that hand-rolls its stepping.
-  const int n = static_cast<int>(kItems.size());
-  const int from = window_.focus();
-  int i = from;
-  for (;;) {
-    i += dir;
-    if (i < 0) i = n - 1;
-    if (i >= n) i = 0;
-    // All the way round without finding anywhere to land: a table edited down to
-    // nothing focusable renders a readable screen rather than spinning here.
-    if (i == from) return Action::none();
-    const Item& it = kItems[static_cast<size_t>(i)];
-    if (!it.isHeader && it.field != Field::None) break;
-  }
-  if (!window_.setFocus(i)) return Action::none();
-  syncVm();
-  return Action::redraw();
 }
 
 Action SettingsScreen::cycleFocused() {
-  const int f = window_.focus();
+  const int f = focus();
   if (f < 0 || f >= static_cast<int>(kItems.size())) return Action::none();
   const Field field = kItems[static_cast<size_t>(f)].field;
   if (field == Field::None) return Action::none();  // cannot be focused, so cannot happen
@@ -199,12 +151,12 @@ void SettingsScreen::syncVm() {
   vm_.title = "SETTINGS";
   vm_.version = std::string("V ") + kVersion;
 
-  vm_.firstRow = window_.firstVisible();
-  vm_.totalRows = window_.count();
+  vm_.firstRow = window().firstVisible();
+  vm_.totalRows = window().count();
 
   vm_.rows.clear();
-  const int first = window_.firstVisible();
-  const int count = window_.visibleCount();
+  const int first = window().firstVisible();
+  const int count = window().visibleCount();
   vm_.rows.reserve(static_cast<size_t>(count));
   vm_.focusedRow = -1;
   for (int i = 0; i < count; ++i) {
@@ -222,7 +174,7 @@ void SettingsScreen::syncVm() {
         case Field::None: row.value = it.placeholder; break;
       }
     }
-    if (at == window_.focus()) vm_.focusedRow = i;
+    if (at == window().focus()) vm_.focusedRow = i;
     vm_.rows.push_back(std::move(row));
   }
 

@@ -2,8 +2,7 @@
 #include <string>
 #include <vector>
 
-#include "reader/app.h"
-#include "reader/scrollwindow.h"
+#include "reader/focus_screen.h"
 #include "reader/settings.h"
 #include "reader/viewmodel.h"
 
@@ -46,7 +45,7 @@ class SettingsSink {
 // Section headers are items in that list: they scroll with the rows, they are
 // never focusable, and they count toward the rail's proportion. Treating them as
 // anything else would make the rail lie about how much list there is.
-class SettingsScreen : public Screen {
+class SettingsScreen : public FocusScreen {
  public:
   // `sink` may be null -- the simulator and the golden tests have nowhere to
   // persist to, and a screen that could not be rendered without a filesystem
@@ -58,11 +57,13 @@ class SettingsScreen : public Screen {
   Action onEvent(const InputEvent& ev) override;
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
 
-  // Restorable across a wake, so both halves are real. setFocus refuses an index
-  // that is not focusable rather than silently landing on a section header: a
-  // restored focus that cannot be moved off would be worse than no restore.
-  int focus() const override { return window_.focus(); }
-  bool setFocus(int index) override;
+  // focus()/setFocus() are FocusScreen's -- final, one mechanism. setFocus still
+  // refuses an index that is not focusable rather than silently landing on a
+  // section header (a restored focus that cannot be moved off would be worse
+  // than no restore) -- that rule now comes from focusable() below, through
+  // Focus::Gate, along with the skip-past-headers stepping this screen used to
+  // hand-roll. The hand-rolled walk silently stopped wrapping once; the gate
+  // cannot, because it is the same code every other list exercises.
 
   // How much room the list has, and what each kind of item costs -- from
   // Theme::settingsMetrics. The COUNTING happens here because the item table is
@@ -94,14 +95,16 @@ class SettingsScreen : public Screen {
   };
 
  private:
-  Action moveFocus(int dir);
   Action cycleFocused();
-  void syncVm();
+  // Which rows a focus may land on: not a header, and not a placeholder row
+  // whose setting does not exist yet. Consumed by FocusScreen through
+  // Focus::Gate.
+  bool focusable(int index) const override;
+  void syncVm() override;
   int firstFocusable() const;
 
   Settings settings_;
   SettingsSink* sink_;
-  ScrollWindow window_;
   SettingsViewModel vm_;
 };
 
