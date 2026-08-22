@@ -1166,6 +1166,40 @@ to nothing passed silently. **A check that reports on less than it claims** — 
 same shape as the card probe answered from cache, and the `make compare` default that
 skipped four screens.
 
+### Nothing may leave the column
+
+Body text wraps with **`WordBreak::Anywhere`**, and it is the one place that is right
+— for a reason the boards never had: a board's copy is text the design chose, so
+`Normal`'s "a segment wider than the column sits on its own line and overhangs" is
+fine there and is not fine for a book.
+
+Measured over `Le Fléau`: **8 lines of 96,823 ran past the column**, the worst by
+683px on a 492px column — off the panel entirely. Two fixes, in order of how much
+they were worth:
+
+- **A break after a hyphen** (UAX #14 allows one; Chrome does it), which took 8 to 2
+  and moved no golden. Six of the eight were chanted hyphen chains like
+  `Jeff-Marty-Helen-Harriett-…`. The hyphen stays at the end of the line, which is
+  what makes the break read as typography rather than damage.
+- **`Anywhere` as the last resort**, for the two survivors. Both separate their words
+  with **U+00A0** — non-breaking by definition, so a browser would overflow rather
+  than break, which a panel cannot do. `Anywhere` engages only when a segment cannot
+  fit a line at all, which is CSS's `overflow-wrap: break-word`.
+
+**0 of 96,658 lines overhang now.**
+
+### A factory that substitutes content is worse than one that refuses
+
+`ScreenId::Reader` needs a book, and the shell only sets one from a button press — so
+a **session restore has nothing set**. The factory used to fall through to the demo
+chapter there, and the device woke from sleep showing Middlemarch: fiction from a book
+the user was not reading.
+
+The demo now has to be asked for (`setReaderDemo()`, which the simulator and the
+goldens call) and a Reader with neither a book nor a demo is **refused**. A refused
+push leaves the Library standing — wrong in a way the user can see through, rather
+than wrong in a way they cannot.
+
 ### Paging: forward is free, backward re-decodes
 
 A DEFLATE stream cannot be seeked and checkpointing one costs 32 KB a checkpoint. So:

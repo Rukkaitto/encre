@@ -99,7 +99,18 @@ void PageBuilder::add(const Block& b, int index) {
   // whole rule is that it must not.
   indentThis_ = indentedAfter(prevKind_, b.kind, index == 0);
   const int myIndentF26 = indentThis_ ? indentF26_ : 0;
-  prose_ = wrapProseLead(*font_, held_, m_.columnW, leadF26_, m_.tracking, WordBreak::Normal,
+  // WordBreak::Anywhere, and body text is the one place it is right for a reason
+  // the boards never had: NOTHING MAY LEAVE THE COLUMN. `Normal` lets a segment
+  // wider than the column sit on its own line and overhang, which is fine on a
+  // board whose copy the design chose and is not fine for a book -- `Le Fléau` has
+  // a chanted phrase that ran 683px past a 492px column and off the panel.
+  //
+  // Breaking after a hyphen (see wrapProseLead) took that from eight lines in 96,823
+  // to two, and both survivors separate their words with U+00A0: non-breaking by
+  // definition, so a browser would overflow rather than break, which a panel cannot
+  // do. `Anywhere` engages ONLY when a segment cannot fit a line at all -- which is
+  // CSS's `overflow-wrap: break-word`, not a licence to break ordinary words.
+  prose_ = wrapProseLead(*font_, held_, m_.columnW, leadF26_, m_.tracking, WordBreak::Anywhere,
                          myIndentF26);
   prevKind_ = b.kind;
   if (!skipping_ && row_ == 0) pageStart_ = Cursor{blockIndex_, 0};

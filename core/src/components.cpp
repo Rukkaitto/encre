@@ -382,7 +382,23 @@ Prose wrapProseLead(const GlyphSource& font, std::string_view text, int maxW, in
     // One word, plus the run of spaces before it.
     while (i < text.size() && text[i] == ' ') ++i;
     const size_t wordStart = i;
-    while (i < text.size() && text[i] != ' ') ++i;
+    // A SEGMENT ENDS AT A SPACE **OR JUST AFTER A HYPHEN**, which is a real line
+    // breaking rule (UAX #14 allows a break after a hyphen) and what Chrome does --
+    // so honouring it moves the firmware toward the boards rather than away.
+    //
+    // It is here because a real book needed it. `Le Fléau` writes chanted phrases as
+    // hyphen chains, and the worst of them --
+    // "Jeff-Marty-Helen-Harriett-Bill-George-Robert-Stanley-Richard-Danny-Frank" --
+    // was ONE unbreakable word, so it ran 683px past a 492px column and off the
+    // panel. Eight lines in 96,823 did that; six were hyphen chains.
+    //
+    // The hyphen stays at the END of the line, which is what makes the break read as
+    // typography rather than as damage. Not applied to a leading hyphen ("-5" is not
+    // two segments), nor when a space follows anyway.
+    while (i < text.size() && text[i] != ' ') {
+      ++i;
+      if (text[i - 1] == '-' && i > wordStart + 1 && i < text.size() && text[i] != ' ') break;
+    }
     if (wordStart == i) break;  // trailing spaces only
     const bool lineEmpty = (lineEnd == lineStart);
     if (lineEmpty) {

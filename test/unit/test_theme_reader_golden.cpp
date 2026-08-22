@@ -53,6 +53,7 @@ TEST_CASE("QuietTheme renders Reader to golden on both panel geometries") {
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body.face);
     factory.setReaderMetrics(m);
+    factory.setReaderDemo();
     std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Reader);
     REQUIRE(scr != nullptr);
     REQUIRE(scr->fidelity() == reader::Fidelity::Grayscale);
@@ -89,6 +90,7 @@ TEST_CASE("A PAGE TURN MOVES THE PAGE, AND THE ENDS DO NOT WRAP") {
   reader::DemoScreenFactory factory;
   factory.setReaderBody(&body.face);
   factory.setReaderMetrics(m);
+    factory.setReaderDemo();
   std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Reader);
   REQUIRE(scr != nullptr);
   auto& rd = static_cast<reader::ReaderScreen&>(*scr);
@@ -123,6 +125,7 @@ TEST_CASE("every page's lines are inside the column the theme reported") {
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body.face);
     factory.setReaderMetrics(m);
+    factory.setReaderDemo();
     std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Reader);
     REQUIRE(scr != nullptr);
     auto& rd = static_cast<reader::ReaderScreen&>(*scr);
@@ -441,4 +444,32 @@ TEST_CASE("A REFUSED CHAPTER TURN LEAVES THE SCREEN WHERE IT WAS") {
   CHECK(scr.chapterIndex() == wasChapter);
   CHECK(scr.vm().page == wasPage);
   CHECK_FALSE(scr.page().lines.empty());
+}
+
+TEST_CASE("THE FACTORY REFUSES A READER IT HAS NO BOOK FOR") {
+  // It used to fall through to the demo chapter, so a session restore -- where
+  // nothing has called setReaderBook, because the shell only calls it from a button
+  // press -- silently built a Reader full of Middlemarch. The device woke from sleep
+  // showing fiction from a book the user was not reading.
+  //
+  // A factory that substitutes content is worse than one that refuses: a refused
+  // push leaves the Library standing, which is wrong in a way the user can see
+  // through.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+
+  reader::DemoScreenFactory bare;
+  bare.setReaderBody(&body.face);
+  bare.setReaderMetrics(m);
+  // A body face and metrics but no book and no demo asked for.
+  CHECK(bare.create(reader::ScreenId::Reader) == nullptr);
+
+  // The demo has to be ASKED for, and then it builds.
+  bare.setReaderDemo();
+  std::unique_ptr<reader::Screen> demo = bare.create(reader::ScreenId::Reader);
+  REQUIRE(demo != nullptr);
+  CHECK(static_cast<reader::ReaderScreen*>(demo.get())->pageCount() > 0);
 }

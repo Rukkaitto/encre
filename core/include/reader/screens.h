@@ -124,10 +124,20 @@ class DemoScreenFactory : public ScreenFactory {
   // means the demo content: design/Reader.dc.html's own two paragraphs, streamed
   // from memory, which is what the simulator and the goldens render, on the same
   // reasoning as demoSleepVm().
+  // THE DEMO CHAPTER, EXPLICITLY. design/Reader.dc.html's own two paragraphs,
+  // streamed from memory -- what the simulator and the goldens render, on the same
+  // reasoning as demoSleepVm().
+  //
+  // It has to be ASKED FOR, and that is the whole point of it being its own setter.
+  // It used to be the fallback for "no book set", which meant a session restore --
+  // where nothing has called setReaderBook, because the shell only calls it from a
+  // button press -- silently built a Reader full of Middlemarch. The device woke
+  // from sleep showing fiction from a book the user was not reading. A factory that
+  // substitutes content is worse than one that refuses.
+  void setReaderDemo() { readerDemo_ = true; }
+
   // THE BOOK, not one chapter: a path, its title, how many spine entries it has and
-  // which to open. An empty path means the demo content -- design/Reader.dc.html's
-  // own two paragraphs, streamed from memory, which is what the simulator and the
-  // goldens render, on the same reasoning as demoSleepVm().
+  // which to open.
   void setReaderBook(std::string bookPath, std::string bookTitle, int chapterCount,
                      int startChapter) {
     readerPath_ = std::move(bookPath);
@@ -150,6 +160,7 @@ class DemoScreenFactory : public ScreenFactory {
   const GlyphSource* readerBody_ = nullptr;
   PageMetrics readerMetrics_{};
   std::string readerPath_;
+  bool readerDemo_ = false;
   int readerChapterCount_ = 0;
   int readerStartChapter_ = 0;
   std::string readerBookTitle_;

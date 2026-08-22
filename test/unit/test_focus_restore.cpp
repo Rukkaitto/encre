@@ -82,6 +82,7 @@ std::unique_ptr<Standalone> build(ScreenId id) {
     m.columnW = 444;
     m.columnH = 600;
     b->factory.setReaderMetrics(m);
+    b->factory.setReaderDemo();
   }
   if (id == ScreenId::Home) {
     // The factory refuses Home on purpose -- the root is never rebuilt -- so the

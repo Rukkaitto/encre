@@ -304,6 +304,7 @@ int main(int argc, char** argv) {
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body);
     factory.setReaderMetrics(m);
+    factory.setReaderDemo();
     std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Reader);
     if (scr == nullptr) {
       std::fprintf(stderr, "the factory refused ScreenId::Reader\n");

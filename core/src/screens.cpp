@@ -223,13 +223,18 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       if (readerBody_ == nullptr) return nullptr;
       const std::string title = readerBookTitle_.empty() ? "Middlemarch" : readerBookTitle_;
       std::unique_ptr<ReaderScreen> scr;
-      if (readerPath_.empty() || fs_ == nullptr) {
-        // The demo content, streamed from memory. Also the fallback when there is
-        // no filesystem at all, which is the simulator and every golden.
-        scr = std::make_unique<ReaderScreen>(demoReaderXhtml(), title, "CH. 01", readerBody_);
-      } else {
+      if (!readerPath_.empty() && fs_ != nullptr) {
         scr = std::make_unique<ReaderScreen>(*fs_, readerPath_, title, readerChapterCount_,
                                             readerStartChapter_, readerBody_);
+      } else if (readerDemo_) {
+        scr = std::make_unique<ReaderScreen>(demoReaderXhtml(), title, "CH. 01", readerBody_);
+      } else {
+        // NO BOOK AND NO DEMO ASKED FOR: refused. This is the session-restore path --
+        // the shell sets the book from a button press, so a wake has nothing set --
+        // and it used to fall through to the demo, waking the device into
+        // Middlemarch. A refused push leaves the Library standing, which is wrong in
+        // a way the user can see through, rather than wrong in a way they cannot.
+        return nullptr;
       }
       // The expensive call: one decode of the chapter to build the page index.
       scr->setMetrics(readerMetrics_);
