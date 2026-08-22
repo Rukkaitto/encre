@@ -1,0 +1,169 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+    .dither-dots { background-color: #ffffff; background-image: radial-gradient(circle, #000000 1.1px, transparent 1.3px); background-size: 4px 4px; }
+    .dither-dots-inv { background-color: #000000; background-image: radial-gradient(circle, #ffffff 1.1px, transparent 1.3px); background-size: 4px 4px; }
+  </style>
+</helmet>
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
+
+  <!-- The one header band on any board whose LABEL is data: it reads LIBRARY at
+       the root and a subfolder's own name below it, and a folder on a real card
+       is named whatever it is named. So the label truncates and the count keeps
+       its width, and the `gap: 7px` is the minimum separation between them --
+       without it `space-between` lets the ellipsis touch the count the moment
+       the label fills the line. Every other band's label is a literal
+       (NOW READING, ABOUT THIS BOOK), which is why they state neither.
+
+       THE BOOK COUNT KEEPS THIS SLOT, and the scroll position is a RAIL rather
+       than a second number. That is what keeps the units apart: `24 BOOKS` counts
+       books, while a position is about ROWS. Expressing both as numbers in one
+       slot produced `1-7 OF 12` -- two units in one expression, and simply wrong.
+       A rail says "where" without claiming a count at all.
+
+       This board is the OVERFLOW state: 24 rows, seven fit, scrolled to row 8.
+       Its own board rather than an annotation on Library, the same way Home's
+       empty and missing-book states are their own boards. -->
+  <div style="display: flex; justify-content: space-between; align-items: center; gap: 7px; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
+    <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">LIBRARY</div>
+    <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">24 BOOKS</div>
+  </div>
+
+  <!-- position: relative so the rail is placed against the LIST's own box. A rail
+       spanning the panel's full height would claim the header band and the hint
+       bar scroll, which they do not. -->
+  <div style="position: relative; display: flex; flex-direction: column; flex-grow: 1;">
+    <div style="display: flex; flex-direction: column; flex-grow: 1; margin-right: 14px;">
+      <div style="display: flex; align-items: center; gap: 16px; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div class="dither-dots" style="width: 44px; height: 64px; border: 1px solid #000000; box-sizing: border-box;"></div>
+        <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
+          <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Jane Eyre</div>
+          <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">CHARLOTTE BRONT&Euml;</div>
+        </div>
+        <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">DONE</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 16px; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div class="dither-dots" style="width: 44px; height: 64px; border: 1px solid #000000; box-sizing: border-box;"></div>
+        <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
+          <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Kidnapped</div>
+          <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">R. L. STEVENSON</div>
+        </div>
+        <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">NEW</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 16px; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div class="dither-dots" style="width: 44px; height: 64px; border: 1px solid #000000; box-sizing: border-box;"></div>
+        <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
+          <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Little Dorrit</div>
+          <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">CHARLES DICKENS</div>
+        </div>
+        <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">12%</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 16px; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div class="dither-dots" style="width: 44px; height: 64px; border: 1px solid #000000; box-sizing: border-box;"></div>
+        <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
+          <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Mansfield Park</div>
+          <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">JANE AUSTEN</div>
+        </div>
+        <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">NEW</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 16px; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div class="dither-dots" style="width: 44px; height: 64px; border: 1px solid #000000; box-sizing: border-box;"></div>
+        <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
+          <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Meditations</div>
+          <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">MARCUS AURELIUS</div>
+        </div>
+        <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">NEW</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 16px; padding: 11px 24px; background: #000000; color: #ffffff;">
+        <div class="dither-dots-inv" style="width: 44px; height: 64px; border: 2px solid #ffffff; box-sizing: border-box;"></div>
+        <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
+          <div style="font-size: var(--t-body); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Middlemarch</div>
+          <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">GEORGE ELIOT</div>
+        </div>
+        <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">6%</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 16px; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div class="dither-dots" style="width: 44px; height: 64px; border: 1px solid #000000; box-sizing: border-box;"></div>
+        <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
+          <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Moby-Dick</div>
+          <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">HERMAN MELVILLE</div>
+        </div>
+        <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">48%</div>
+      </div>
+    </div>
+
+    <!-- THE SCROLL RAIL, in a gutter of its own.
+
+         The first attempt put it in the outer margin so no row lost any width,
+         and rendering it showed why that cannot work: THE FOCUSED ROW IS
+         FULL-BLEED INVERTED, so a black thumb crossing it is black on black and
+         disappears -- and every row's 1px separator ran straight through the
+         track, turning it into a ladder. A rail on this list needs a column the
+         rows do not enter. That is the true cost of a scrollbar here: 14px off
+         every row, not a stroke-weight problem.
+
+         Axis-aligned and coverage 0-or-3, which IS the best case on this glass: a
+         vertical edge needs no anti-aliasing, so track and thumb are identical in
+         every plane and every pass. (The thin-stroke warning this project records
+         is about DIAGONALS -- kChevron -- and does not apply to a vertical bar.)
+
+         An OUTLINED track with a SOLID thumb, the treatment the battery mark
+         already proves reads well hard-thresholded. Not a dithered track: at 6px
+         a 4px dither grid gets one and a half dots across it, which is the
+         moth-eaten failure the small round marks documented.
+
+         Height is visible/total and top is first/total -- BOTH proportions, in
+         percent so they survive the reflow to the X3's 528x792. The fiction is 24
+         rows shown from row 8, so 29.2% and 29.2%. The first draft of this board
+         showed 7 of 9, which put the thumb at 78% of the track: correct, and
+         useless as a specification, because a FIXED-SIZE thumb would look
+         identical and no reader would catch it. A mockup of a proportional
+         element has to pick a proportion that could only come from the rule.
+
+         Drawn only when the list overflows -- a full-height thumb says nothing --
+         and the gutter is RESERVED either way, so a library growing past seven
+         books does not reflow every row it already had. -->
+    <div style="position: absolute; top: 6px; bottom: 6px; right: 4px; width: 6px; border: 1px solid #000000; box-sizing: border-box;">
+      <div style="position: absolute; left: 0; right: 0; top: 29.2%; height: 29.2%; background: #000000;"></div>
+    </div>
+
+  </div>
+
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">BACK</div></div>
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">OPEN</div><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="none" stroke="#000000" stroke-width="1"></circle></svg></div>
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">UP</div></div>
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M4 9l4 4 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">DOWN</div></div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
