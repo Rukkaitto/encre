@@ -173,4 +173,29 @@ class Inflater {
   const char* error_ = "";
 };
 
+
+// An Inflater's output AS a ByteSource, which is what puts the decoder and the XML
+// tokenizer together: one produces bounded chunks, the other wants bytes and does
+// its own small-buffer bookkeeping.
+//
+// The chunk view is only borrowed until the next `next()`, and this never calls
+// `next()` while bytes of the current chunk are unread -- which is the whole of the
+// bookkeeping. It copies, and the copy is the price of the two layers not having to
+// know each other's buffer strategy: one pass over the stream, no allocation.
+class InflateSource : public ByteSource {
+ public:
+  explicit InflateSource(Inflater& inf) : inf_(&inf) {}
+  size_t read(void* dst, size_t bytes) override;
+
+  // Why the stream stopped, for a caller that got a short read and needs to tell
+  // "the chapter ended" from "the chapter is corrupt".
+  bool done() const { return inf_->done(); }
+  const char* error() const { return inf_->error(); }
+
+ private:
+  Inflater* inf_;
+  std::string_view chunk_;
+  size_t at_ = 0;
+};
+
 }  // namespace reader

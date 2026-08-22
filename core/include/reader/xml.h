@@ -1,9 +1,24 @@
 #pragma once
 #include <cstddef>
-#include <string>
+#include <cstdint>
 #include <string_view>
 
+#include "reader/inflate_stream.h"  // ByteSource
+
 namespace reader {
+
+// A ByteSource over a buffer already in memory. For the documents that are small
+// by nature -- `container.xml` is a few hundred bytes and the largest OPF measured
+// in a real book is 8,472 -- where streaming would be machinery for nothing.
+class BufferSource : public ByteSource {
+ public:
+  explicit BufferSource(std::string_view bytes) : b_(bytes) {}
+  size_t read(void* dst, size_t bytes) override;
+
+ private:
+  std::string_view b_;
+  size_t at_ = 0;
+};
 
 // A PULL PARSER for the XML an EPUB contains, and only that.
 //
@@ -19,10 +34,29 @@ namespace reader {
 // `next()` lets the caller's own loop be the state. expat was the alternative and
 // its streaming callbacks fit exactly this awkwardly.
 //
-// ONE ALLOCATION, NOT ONE PER NODE. The parser borrows the caller's buffer and
-// returns views into it, except where a value has to be entity-decoded -- those
-// land in two internal buffers that are reused for every token. So a chapter is
-// the caller's one string plus a few hundred bytes, whatever its node count.
+// --- IT READS A STREAM, NOT A BUFFER -----------------------------------------
+//
+// It used to take a `std::string_view` of the whole document and index into it.
+// That is why a real book could not be opened: `Le Fléau`'s longest chapter is
+// 315,852 bytes of XHTML, and holding it while the blocks were built from it was
+// half of a 546 KB peak against a heap with ~142 KB free.
+//
+// So it reads from a `ByteSource` -- an Inflater's output, or a `BufferSource` over
+// a document small enough not to care. Its whole memory is the buffers below,
+// about 2.3 KB, WHATEVER THE DOCUMENT'S LENGTH.
+//
+// THE CONSEQUENCE FOR CALLERS IS A LIFETIME RULE: `name()`, `text()` and `attr()`
+// return views into those internal buffers, valid only until the next `next()`.
+// `text()` always worked that way; `name()` did not -- it used to be a view into
+// the caller's own document and lived as long as it did. **A caller that keeps a
+// name across a `next()` must copy it.** The document builder's tag stack is
+// exactly that caller, and it holds truncated inline copies.
+//
+// A TEXT RUN LONGER THAN THE BUFFER ARRIVES AS SEVERAL `Text` NODES, and that is
+// not an error or a limit -- `kTextBytes` is a chunking granularity. Measured over
+// a real book: 45,217 text runs, median 46 bytes, longest 812. Any caller that
+// accumulates text already handles several nodes in a row, because
+// `a <em>b</em> c` is three of them.
 //
 // WHAT IT SKIPS, silently and by design: the XML declaration, DOCTYPE, comments,
 // and processing instructions. None carries content a book needs, and a reader
@@ -58,19 +92,42 @@ class Xml {
   static constexpr size_t kMaxAttrs = 16;
   static constexpr size_t kMaxNameBytes = 128;
 
+  // How much text one `Text` node carries at most. NOT a limit on a run's length
+  // -- a longer run is split across nodes. 1 KB against a longest-observed run of
+  // 812 bytes, so in practice a run arrives whole.
+  static constexpr size_t kTextBytes = 1024;
+
+  // All of one tag's attribute names and decoded values, together. Refused above
+  // this, because unlike a text run it cannot be split: `attr()` answers about the
+  // current tag as a whole. Measured over a real book's 143,119 attributes: the
+  // longest single value is 49 bytes and the fattest tag carries 160, so this is
+  // 3x the observed worst case.
+  static constexpr size_t kMaxAttrBytes = 512;
+
+  // How much of the source is held at once. Only ever a few bytes are examined --
+  // `<![CDATA[` is the longest thing needing lookahead -- so this is about how
+  // often the source is asked, not about what the parser can see.
+  static constexpr size_t kInputBytes = 512;
+
+  explicit Xml(ByteSource& src);
+
+  // A whole document already in memory. Holds a BufferSource internally, so the
+  // bytes must outlive the parser.
   explicit Xml(std::string_view doc);
+
+  Xml(const Xml&) = delete;
+  Xml& operator=(const Xml&) = delete;
 
   // Advances. Every call returns exactly one node; a self-closing element yields
   // a StartTag and then an EndTag, so a caller's stack balances without it having
   // to know the tag was self-closing.
   Node next();
 
-  // Valid after StartTag and EndTag. Prefix already stripped.
-  std::string_view name() const { return name_; }
+  // Valid after StartTag and EndTag, until the next `next()`. Prefix stripped.
+  std::string_view name() const { return {nameBuf_, nameLen_}; }
 
-  // Valid after Text, entity-decoded. A view into the parser's own buffer, so it
-  // lives only until the next `next()`.
-  std::string_view text() const { return text_; }
+  // Valid after Text, entity-decoded, until the next `next()`.
+  std::string_view text() const { return {textBuf_, textLen_}; }
 
   // The attribute's value on the current StartTag, or an empty view if absent --
   // and `hasAttr` tells an absent attribute from an empty one, which matters for
@@ -79,36 +136,60 @@ class Xml {
   bool hasAttr(std::string_view attrName) const;
   size_t attrCount() const { return attrCount_; }
 
-  // Where parsing stopped, and why. A byte offset rather than a line: this reads
-  // machine-written XML, and an offset is what a hex dump needs.
-  size_t offset() const { return at_; }
+  // How many bytes of the source have been consumed, and why parsing stopped. A
+  // byte offset rather than a line: this reads machine-written XML, and an offset
+  // is what a hex dump needs. Against a stream it is the offset in the
+  // DECOMPRESSED document, which is also what a page index would key on.
+  size_t offset() const { return consumed_ - avail(); }
   const char* error() const { return error_; }
 
  private:
   Node fail(const char* why);
-  bool decodeInto(std::string_view raw, std::string& out);
-  bool parseName(std::string_view& out);
+
+  // --- The character reader ---------------------------------------------------
+  // `ensure(n)` makes up to n bytes visible, compacting and refilling as needed,
+  // and returns how many there really are -- fewer than asked only at the end of
+  // the source. `at(i)` reads one of them; `bump(n)` consumes.
+  size_t ensure(size_t n);
+  size_t avail() const { return inLen_ - inAt_; }
+  char at(size_t i) const { return in_[inAt_ + i]; }
+  void bump(size_t n) { inAt_ += n; }
+  bool matches(const char* lit, size_t n);
+
   void skipSpace();
+  bool parseName(char* out, size_t& outLen);
+  bool skipUntil(const char* lit, size_t n);
+  // Reads one entity reference, already positioned on '&', into `out`.
+  bool decodeEntity(char* out, size_t cap, size_t& outLen);
 
-  std::string_view doc_;
-  size_t at_ = 0;
+  ByteSource* src_;
+  BufferSource own_;  // backs the string_view constructor; unused otherwise
 
-  std::string_view name_;
-  std::string_view text_;
-  std::string textBuf_;  // reused: entity-decoded text
-  std::string attrBuf_;  // reused: entity-decoded attribute values
+  char in_[kInputBytes];
+  size_t inLen_ = 0, inAt_ = 0;
+  size_t consumed_ = 0;  // bytes taken FROM the source, including those still held
+  bool sourceEnded_ = false;
 
+  char nameBuf_[kMaxNameBytes];
+  size_t nameLen_ = 0;
+  char textBuf_[kTextBytes];
+  size_t textLen_ = 0;
+
+  // A self-closing tag owes an EndTag, which the next call pays. A COPY, not a
+  // view: the name buffer is reused by whatever the next call parses.
+  char pendingEnd_[kMaxNameBytes];
+  size_t pendingEndLen_ = 0;
+  bool endPending_ = false;
+
+  // One tag's attributes, names and values packed into a single buffer and
+  // addressed by offset, so a tag costs no allocation per attribute.
+  char attrBuf_[kMaxAttrBytes];
+  size_t attrUsed_ = 0;
   struct Attr {
-    std::string_view name;
-    size_t valueAt = 0;  // into attrBuf_
-    size_t valueLen = 0;
+    uint16_t nameAt, nameLen, valueAt, valueLen;
   };
   Attr attrs_[kMaxAttrs];
   size_t attrCount_ = 0;
-
-  // A self-closing tag owes an EndTag, which the next call pays.
-  std::string_view pendingEnd_;
-  bool endPending_ = false;
 
   const char* error_ = "";
 };

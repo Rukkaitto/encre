@@ -349,4 +349,20 @@ std::string_view Inflater::next() {
   return std::string_view(reinterpret_cast<const char*>(s_->window + start), produced);
 }
 
+size_t InflateSource::read(void* dst, size_t bytes) {
+  size_t wrote = 0;
+  while (wrote < bytes) {
+    if (at_ >= chunk_.size()) {
+      chunk_ = inf_->next();
+      at_ = 0;
+      if (chunk_.empty()) break;  // done, or failed -- ask the Inflater which
+    }
+    const size_t take = chunk_.size() - at_ < bytes - wrote ? chunk_.size() - at_ : bytes - wrote;
+    std::memcpy(static_cast<char*>(dst) + wrote, chunk_.data() + at_, take);
+    at_ += take;
+    wrote += take;
+  }
+  return wrote;
+}
+
 }  // namespace reader

@@ -201,3 +201,200 @@ TEST_CASE("deterministic fuzz: every truncation and byte flip is survivable") {
     CHECK(guard < 10000);
   }
 }
+
+// --- The streaming path ------------------------------------------------------
+//
+// Everything above uses the `std::string_view` constructor, whose BufferSource
+// satisfies every read in full. That exercises the tokenizer but NOT the reader
+// underneath it: no lookahead ever straddles a refill, so the compaction path, a
+// tag name split across two reads, an entity split mid-reference and a BOM
+// arriving one byte at a time are all untested by it.
+//
+// A source that hands out one byte per call makes every one of those happen on
+// every token of every document.
+
+namespace {
+
+class Grained : public reader::ByteSource {
+ public:
+  Grained(std::string_view bytes, size_t grain) : b_(bytes), grain_(grain) {}
+  size_t read(void* dst, size_t bytes) override {
+    const size_t want = bytes < grain_ ? bytes : grain_;
+    const size_t got = b_.size() - at_ < want ? b_.size() - at_ : want;
+    for (size_t i = 0; i < got; ++i) static_cast<char*>(dst)[i] = b_[at_ + i];
+    at_ += got;
+    return got;
+  }
+
+ private:
+  std::string_view b_;
+  size_t grain_;
+  size_t at_ = 0;
+};
+
+std::string flattenGrained(std::string_view doc, size_t grain) {
+  Grained src(doc, grain);
+  Xml x(src);
+  std::string out;
+  for (;;) {
+    switch (x.next()) {
+      case Node::StartTag: out += "(" + std::string(x.name()); break;
+      case Node::EndTag: out += ")" + std::string(x.name()); break;
+      case Node::Text: out += "'" + std::string(x.text()); break;
+      case Node::Eof: return out;
+      case Node::Error: return out + "!" + x.error();
+    }
+  }
+}
+
+// The documents worth running at every grain: each one puts a different construct
+// across a potential read boundary.
+const char* const kCorpus[] = {
+    "<html><body><p>Miss Brooke had that kind of beauty.</p></body></html>",
+    "\xEF\xBB\xBF<p>a BOM, which is three bytes and can be split by any of them</p>",
+    "<p>entities: &amp; &lt; &gt; &quot; &apos; &#233; &#x2014; &#8212;</p>",
+    "<!-- a comment whose terminator --> <p>follows it</p>",
+    "<![CDATA[a CDATA section holding <not-a-tag> and ]] and ]>]]><p>after</p>",
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE html [ <!ENTITY x \"y\"> ]><p>x</p>",
+    "<item id=\"ch1\" href=\"OEBPS/ch1.xhtml\" media-type=\"application/xhtml+xml\"/>",
+    "<a><b/><c></c><d attr='single quoted'/></a>",
+    "<dc:title xmlns:dc=\"http://purl.org/dc/elements/1.1/\">A Prefixed Name</dc:title>",
+    "<p>text with a <em>nested</em> run and trailing space </p>",
+};
+
+}  // namespace
+
+TEST_CASE("EVERY GRAIN SIZE YIELDS THE SAME TOKENS, one byte at a time included") {
+  for (const char* doc : kCorpus) {
+    const std::string whole = flatten(doc);
+    CAPTURE(std::string(doc));
+    for (const size_t grain : {size_t{1}, size_t{2}, size_t{3}, size_t{7}, size_t{64},
+                               size_t{512}, size_t{4096}}) {
+      CAPTURE(grain);
+      CHECK(flattenGrained(doc, grain) == whole);
+    }
+  }
+}
+
+TEST_CASE("a BOM split across reads is still skipped") {
+  // Three bytes, so grains 1 and 2 both split it. Without the compaction in
+  // ensure() the first tag would not match and the BOM would arrive as text.
+  const std::string_view doc = "\xEF\xBB\xBF<p>x</p>";
+  CHECK(flattenGrained(doc, 1) == "(p'x)p");
+  CHECK(flattenGrained(doc, 2) == "(p'x)p");
+  CHECK(flattenGrained(doc, 3) == "(p'x)p");
+}
+
+TEST_CASE("A LONG TEXT RUN ARRIVES AS SEVERAL NODES, not as a refusal") {
+  // kTextBytes is a chunking granularity, not a limit -- the header says so, and
+  // this is what makes that true. A caller that accumulates text already handles
+  // several nodes in a row, because `a <em>b</em> c` is three of them.
+  const size_t n = Xml::kTextBytes * 3 + 17;
+  std::string doc = "<p>";
+  doc.append(n, 'x');
+  doc += "</p>";
+
+  Grained src(doc, 512);
+  Xml x(src);
+  REQUIRE(x.next() == Node::StartTag);
+  size_t got = 0;
+  int nodes = 0;
+  for (;;) {
+    const Node t = x.next();
+    if (t == Node::Text) {
+      got += x.text().size();
+      CHECK(x.text().size() <= Xml::kTextBytes);
+      ++nodes;
+      continue;
+    }
+    REQUIRE(t == Node::EndTag);
+    break;
+  }
+  CHECK(got == n);
+  CHECK(nodes >= 4);  // really split, not delivered whole
+}
+
+TEST_CASE("an entity is never split across two Text nodes") {
+  // The buffer stops with room for the longest decoded character, so a reference
+  // cannot straddle a node boundary -- otherwise a caller joining two nodes would
+  // see a half-decoded character, or the parser would refuse a valid document
+  // depending only on where the run happened to land.
+  //
+  // Built so an entity sits exactly at the boundary, then walked one byte either
+  // side of it, so the case is hit rather than hoped for.
+  for (int slack = -6; slack <= 6; ++slack) {
+    const int fill = static_cast<int>(Xml::kTextBytes) - 4 + slack;
+    if (fill < 1) continue;
+    std::string doc = "<p>";
+    doc.append(static_cast<size_t>(fill), 'x');
+    doc += "&#233;y</p>";
+    Grained src(doc, 64);
+    Xml x(src);
+    REQUIRE(x.next() == Node::StartTag);
+    std::string joined;
+    for (;;) {
+      const Node t = x.next();
+      if (t == Node::Text) {
+        joined += x.text();
+        continue;
+      }
+      CAPTURE(slack);
+      REQUIRE(t == Node::EndTag);
+      break;
+    }
+    CAPTURE(slack);
+    CHECK(joined == std::string(static_cast<size_t>(fill), 'x') + "\xC3\xA9y");
+  }
+}
+
+TEST_CASE("a tag with more attribute bytes than the buffer holds is refused") {
+  // Unlike a text run this CANNOT be split: attr() answers about the whole tag.
+  // So it is a refusal, and the cap is 3x the fattest tag measured in a real book
+  // (160 bytes across 143,119 attributes).
+  std::string doc = "<item";
+  for (int i = 0; i < 12; ++i) doc += " attribute" + std::to_string(i) + "=\"" +
+                                     std::string(60, 'v') + "\"";
+  doc += "/>";
+  CHECK_FALSE(parses(doc));
+  // And a realistic tag is nowhere near it.
+  CHECK(parses("<item id=\"ch1\" href=\"OEBPS/ch1.xhtml\" "
+               "media-type=\"application/xhtml+xml\" properties=\"nav\"/>"));
+}
+
+TEST_CASE("a name at the cap parses and one past it is refused") {
+  const std::string ok(Xml::kMaxNameBytes, 'n');
+  const std::string over(Xml::kMaxNameBytes + 1, 'n');
+  CHECK(parses("<" + ok + "/>"));
+  CHECK_FALSE(parses("<" + over + "/>"));
+}
+
+TEST_CASE("offset() counts bytes of the DECOMPRESSED document, not of the buffer") {
+  // It is what a page index would key on, so it has to mean the same thing whether
+  // the source is a buffer or an inflater -- and in particular it must not report
+  // the read-ahead the reader is holding.
+  const std::string_view doc = "<p>abc</p>";
+  Grained src(doc, 3);
+  Xml x(src);
+  REQUIRE(x.next() == Node::StartTag);
+  CHECK(x.offset() == 3);  // just past "<p>"
+  REQUIRE(x.next() == Node::Text);
+  CHECK(x.offset() == 6);
+  REQUIRE(x.next() == Node::EndTag);
+  CHECK(x.offset() == doc.size());
+}
+
+TEST_CASE("THE PARSER'S SIZE IS FIXED, and small enough to be a local") {
+  // Its whole memory is its buffers, whatever the document's length -- that is the
+  // point of the rewrite. Pinned because the failure mode of a buffer growing is
+  // silent: it costs stack at every call site, and this project has already had one
+  // stack-protection panic from arrays living in the wrong place.
+  //
+  // Measured over a real book, the peak for the WHOLE chain (this, an Inflater's
+  // 32 KB window and its tables) is 36,956 bytes for any chapter, against 546,000
+  // for the same book when the tokenizer took a buffer.
+  CAPTURE(sizeof(Xml));
+  CHECK(sizeof(Xml) <= 3072);
+  // And the buffers really are the bulk of it, so the number above is not measuring
+  // something else that happens to fit.
+  CHECK(sizeof(Xml) >= Xml::kTextBytes + Xml::kMaxAttrBytes);
+}

@@ -1,6 +1,7 @@
 #include "reader/xml.h"
 
 #include <cstdint>
+#include <cstring>
 
 namespace reader {
 namespace {
@@ -17,107 +18,192 @@ bool isNameChar(char c) {
 
 // One code point as UTF-8. Numeric character references are the only place this
 // parser creates bytes rather than copying them.
-void appendUtf8(uint32_t cp, std::string& out) {
+size_t appendUtf8(uint32_t cp, char* out) {
   if (cp < 0x80) {
-    out.push_back(static_cast<char>(cp));
-  } else if (cp < 0x800) {
-    out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
-    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-  } else if (cp < 0x10000) {
-    out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
-    out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-  } else {
-    out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
-    out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
-    out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    out[0] = static_cast<char>(cp);
+    return 1;
   }
+  if (cp < 0x800) {
+    out[0] = static_cast<char>(0xC0 | (cp >> 6));
+    out[1] = static_cast<char>(0x80 | (cp & 0x3F));
+    return 2;
+  }
+  if (cp < 0x10000) {
+    out[0] = static_cast<char>(0xE0 | (cp >> 12));
+    out[1] = static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+    out[2] = static_cast<char>(0x80 | (cp & 0x3F));
+    return 3;
+  }
+  out[0] = static_cast<char>(0xF0 | (cp >> 18));
+  out[1] = static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+  out[2] = static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+  out[3] = static_cast<char>(0x80 | (cp & 0x3F));
+  return 4;
 }
+
+// The longest entity this parser accepts, plus room: "&#x10FFFF;" is 10.
+constexpr size_t kMaxEntityBytes = 16;
 
 }  // namespace
 
-Xml::Xml(std::string_view doc) : doc_(doc) {
-  // A BOM is not content. Skipping it here rather than in every caller is the
-  // difference between one line and a class of "the first tag did not match" bug.
-  constexpr std::string_view kBom = "\xEF\xBB\xBF";
-  if (doc_.size() >= kBom.size() && doc_.substr(0, kBom.size()) == kBom) at_ = kBom.size();
+size_t BufferSource::read(void* dst, size_t bytes) {
+  const size_t got = b_.size() - at_ < bytes ? b_.size() - at_ : bytes;
+  std::memcpy(dst, b_.data() + at_, got);
+  at_ += got;
+  return got;
 }
+
+Xml::Xml(ByteSource& src) : src_(&src), own_(std::string_view{}) {}
+
+Xml::Xml(std::string_view doc) : src_(nullptr), own_(doc) { src_ = &own_; }
 
 Xml::Node Xml::fail(const char* why) {
   error_ = why;
   return Node::Error;
 }
 
-void Xml::skipSpace() {
-  while (at_ < doc_.size() && isSpace(doc_[at_])) ++at_;
+size_t Xml::ensure(size_t n) {
+  if (n > kInputBytes) n = kInputBytes;
+  if (avail() >= n) return avail();
+  // COMPACT, then refill. The unread bytes move to the front so a lookahead that
+  // straddles the buffer's end can still be satisfied -- which is the whole reason
+  // the tokenizer can ask for nine bytes of `<![CDATA[` without caring where the
+  // source's reads happened to land.
+  if (inAt_ > 0) {
+    std::memmove(in_, in_ + inAt_, avail());
+    inLen_ = avail();
+    inAt_ = 0;
+  }
+  while (inLen_ < n && !sourceEnded_) {
+    const size_t got = src_->read(in_ + inLen_, kInputBytes - inLen_);
+    if (got == 0) {
+      sourceEnded_ = true;
+      break;
+    }
+    inLen_ += got;
+    consumed_ += got;
+  }
+  return avail();
 }
 
-bool Xml::parseName(std::string_view& out) {
-  const size_t start = at_;
-  while (at_ < doc_.size() && isNameChar(doc_[at_])) ++at_;
-  if (at_ == start) return false;
-  if (at_ - start > kMaxNameBytes) return false;
-  std::string_view name = doc_.substr(start, at_ - start);
-  // THE PREFIX IS DROPPED, not resolved -- see the header. `dc:title` is `title`.
-  const size_t colon = name.rfind(':');
-  if (colon != std::string_view::npos) name = name.substr(colon + 1);
-  if (name.empty()) return false;  // a bare ":" is not a name
-  out = name;
+bool Xml::matches(const char* lit, size_t n) {
+  if (ensure(n) < n) return false;
+  for (size_t i = 0; i < n; ++i)
+    if (at(i) != lit[i]) return false;
   return true;
 }
 
-bool Xml::decodeInto(std::string_view raw, std::string& out) {
-  out.clear();
-  for (size_t i = 0; i < raw.size();) {
-    if (raw[i] != '&') {
-      out.push_back(raw[i++]);
-      continue;
-    }
-    const size_t semi = raw.find(';', i + 1);
-    // AN UNTERMINATED OR UNKNOWN ENTITY IS MALFORMED, not passed through. A
-    // literal "&nbsp;" surviving into a paragraph reads as a rendering bug and is
-    // really a parsing one, and the file is well-formed XML by specification --
-    // so an entity we do not know means we are wrong about the file, not that the
-    // file is being casual.
-    if (semi == std::string_view::npos) return false;
-    const std::string_view ref = raw.substr(i + 1, semi - i - 1);
-    if (ref.empty()) return false;
+void Xml::skipSpace() {
+  while (ensure(1) >= 1 && isSpace(at(0))) bump(1);
+}
 
-    if (ref == "amp") {
-      out.push_back('&');
-    } else if (ref == "lt") {
-      out.push_back('<');
-    } else if (ref == "gt") {
-      out.push_back('>');
-    } else if (ref == "quot") {
-      out.push_back('"');
-    } else if (ref == "apos") {
-      out.push_back('\'');
-    } else if (ref[0] == '#') {
-      const bool hex = ref.size() > 1 && (ref[1] == 'x' || ref[1] == 'X');
-      const std::string_view digits = ref.substr(hex ? 2 : 1);
-      if (digits.empty()) return false;
-      uint32_t cp = 0;
-      for (char c : digits) {
-        int v;
-        if (c >= '0' && c <= '9') v = c - '0';
-        else if (hex && c >= 'a' && c <= 'f') v = c - 'a' + 10;
-        else if (hex && c >= 'A' && c <= 'F') v = c - 'A' + 10;
-        else return false;
-        cp = cp * static_cast<uint32_t>(hex ? 16 : 10) + static_cast<uint32_t>(v);
-        if (cp > 0x10FFFF) return false;  // past the last code point there is
-      }
-      // Surrogates are not characters, and a file naming one is describing
-      // something that cannot be encoded as UTF-8.
-      if (cp >= 0xD800 && cp <= 0xDFFF) return false;
-      if (cp == 0) return false;
-      appendUtf8(cp, out);
-    } else {
-      return false;
+// Scans forward until `lit` is consumed. Used for the constructs this parser skips
+// wholesale -- comments, processing instructions, CDATA's terminator -- where the
+// content between is not wanted. One byte at a time on purpose: a terminator can
+// straddle any refill, and `ensure` is what makes that invisible.
+bool Xml::skipUntil(const char* lit, size_t n) {
+  for (;;) {
+    if (ensure(n) < n) return false;
+    if (matches(lit, n)) {
+      bump(n);
+      return true;
     }
-    i = semi + 1;
+    bump(1);
   }
+}
+
+bool Xml::parseName(char* out, size_t& outLen) {
+  size_t len = 0;
+  while (ensure(1) >= 1 && isNameChar(at(0))) {
+    if (len >= kMaxNameBytes) return false;
+    out[len++] = at(0);
+    bump(1);
+  }
+  if (len == 0) return false;
+  // THE PREFIX IS DROPPED, not resolved -- see the header. `dc:title` is `title`.
+  size_t start = 0;
+  for (size_t i = len; i > 0; --i) {
+    if (out[i - 1] == ':') {
+      start = i;
+      break;
+    }
+  }
+  if (start > 0) {
+    const size_t kept = len - start;
+    if (kept == 0) return false;  // a name ending in ':' is not a name
+    std::memmove(out, out + start, kept);
+    len = kept;
+  }
+  outLen = len;
+  return true;
+}
+
+// Positioned on '&'. Decodes one reference into `out`, or fails.
+//
+// AN UNTERMINATED OR UNKNOWN ENTITY IS MALFORMED, not passed through. A literal
+// "&nbsp;" surviving into a paragraph reads as a rendering bug and is really a
+// parsing one, and the file is well-formed XML by specification -- so an entity we
+// do not know means we are wrong about the file, not that the file is being casual.
+bool Xml::decodeEntity(char* out, size_t cap, size_t& outLen) {
+  char ref[kMaxEntityBytes];
+  size_t refLen = 0;
+  bump(1);  // '&'
+  for (;;) {
+    if (ensure(1) < 1) return false;  // the source ended inside a reference
+    const char c = at(0);
+    bump(1);
+    if (c == ';') break;
+    if (refLen >= sizeof(ref)) return false;  // longer than any entity we accept
+    ref[refLen++] = c;
+  }
+  if (refLen == 0 || cap < 4) return false;
+
+  const std::string_view r(ref, refLen);
+  if (r == "amp") {
+    out[0] = '&';
+    outLen = 1;
+    return true;
+  }
+  if (r == "lt") {
+    out[0] = '<';
+    outLen = 1;
+    return true;
+  }
+  if (r == "gt") {
+    out[0] = '>';
+    outLen = 1;
+    return true;
+  }
+  if (r == "quot") {
+    out[0] = '"';
+    outLen = 1;
+    return true;
+  }
+  if (r == "apos") {
+    out[0] = '\'';
+    outLen = 1;
+    return true;
+  }
+  if (r[0] != '#') return false;
+
+  const bool hex = refLen > 1 && (r[1] == 'x' || r[1] == 'X');
+  const std::string_view digits = r.substr(hex ? 2 : 1);
+  if (digits.empty()) return false;
+  uint32_t cp = 0;
+  for (const char c : digits) {
+    int v;
+    if (c >= '0' && c <= '9') v = c - '0';
+    else if (hex && c >= 'a' && c <= 'f') v = c - 'a' + 10;
+    else if (hex && c >= 'A' && c <= 'F') v = c - 'A' + 10;
+    else return false;
+    cp = cp * static_cast<uint32_t>(hex ? 16 : 10) + static_cast<uint32_t>(v);
+    if (cp > 0x10FFFF) return false;  // past the last code point there is
+  }
+  // Surrogates are not characters, and a file naming one is describing something
+  // that cannot be encoded as UTF-8.
+  if (cp >= 0xD800 && cp <= 0xDFFF) return false;
+  if (cp == 0) return false;
+  outLen = appendUtf8(cp, out);
   return true;
 }
 
@@ -125,121 +211,172 @@ Xml::Node Xml::next() {
   // A self-closing tag owed an EndTag; pay it before reading anything more.
   if (endPending_) {
     endPending_ = false;
-    name_ = pendingEnd_;
+    std::memcpy(nameBuf_, pendingEnd_, pendingEndLen_);
+    nameLen_ = pendingEndLen_;
     return Node::EndTag;
   }
 
-  for (;;) {
-    if (at_ >= doc_.size()) return Node::Eof;
+  // A BOM is not content. Skipped on the first call rather than in every caller,
+  // which is the difference between one line and a class of "the first tag did not
+  // match" bug. It can only appear at offset 0, so this is checked once.
+  if (consumed_ == 0 && offset() == 0 && matches("\xEF\xBB\xBF", 3)) bump(3);
 
-    if (doc_[at_] != '<') {
-      // TEXT, up to the next '<'. Whitespace between elements is text and is kept:
-      // `<em>a</em> <em>b</em>` has a space that is part of the sentence, and a
-      // parser that dropped it would join words.
-      const size_t start = at_;
-      while (at_ < doc_.size() && doc_[at_] != '<') ++at_;
-      if (!decodeInto(doc_.substr(start, at_ - start), textBuf_))
-        return fail("a text run contains an entity we do not know");
-      text_ = textBuf_;
+  for (;;) {
+    if (ensure(1) < 1) return Node::Eof;
+
+    if (at(0) != '<') {
+      // TEXT, up to the next '<' or the buffer's capacity. Whitespace between
+      // elements is text and is kept: `<em>a</em> <em>b</em>` has a space that is
+      // part of the sentence, and a parser that dropped it would join words.
+      textLen_ = 0;
+      while (ensure(1) >= 1 && at(0) != '<') {
+        // Stop with room for the longest single decoded character, so a reference
+        // is never split across two nodes.
+        if (textLen_ + 4 > kTextBytes) break;
+        if (at(0) == '&') {
+          size_t n = 0;
+          if (!decodeEntity(textBuf_ + textLen_, kTextBytes - textLen_, n))
+            return fail("a text run contains an entity we do not know");
+          textLen_ += n;
+          continue;
+        }
+        textBuf_[textLen_++] = at(0);
+        bump(1);
+      }
+      // A run of nothing cannot happen: the loop above is entered only with a
+      // non-'<' byte available, and every branch consumes at least one.
       return Node::Text;
     }
 
     // Everything that begins '<!' or '<?' carries no content a book needs.
-    if (doc_.compare(at_, 4, "<!--") == 0) {
-      const size_t end = doc_.find("-->", at_ + 4);
-      if (end == std::string_view::npos) return fail("an unterminated comment");
-      at_ = end + 3;
+    if (matches("<!--", 4)) {
+      bump(4);
+      if (!skipUntil("-->", 3)) return fail("an unterminated comment");
       continue;
     }
-    if (doc_.compare(at_, 9, "<![CDATA[") == 0) {
-      const size_t end = doc_.find("]]>", at_ + 9);
-      if (end == std::string_view::npos) return fail("an unterminated CDATA section");
+    if (matches("<![CDATA[", 9)) {
+      bump(9);
       // UNDECODED, which is its whole purpose: it holds characters that would
-      // otherwise be markup.
-      textBuf_.assign(doc_.substr(at_ + 9, end - (at_ + 9)));
-      text_ = textBuf_;
-      at_ = end + 3;
+      // otherwise be markup. Chunked like ordinary text, so a long section is
+      // several nodes rather than a refusal.
+      textLen_ = 0;
+      for (;;) {
+        if (ensure(3) < 1) return fail("an unterminated CDATA section");
+        if (matches("]]>", 3)) {
+          bump(3);
+          break;
+        }
+        if (textLen_ + 1 > kTextBytes) break;
+        textBuf_[textLen_++] = at(0);
+        bump(1);
+      }
       return Node::Text;
     }
-    if (doc_.compare(at_, 2, "<?") == 0) {
-      const size_t end = doc_.find("?>", at_ + 2);
-      if (end == std::string_view::npos) return fail("an unterminated processing instruction");
-      at_ = end + 2;
+    if (matches("<?", 2)) {
+      bump(2);
+      if (!skipUntil("?>", 2)) return fail("an unterminated processing instruction");
       continue;
     }
-    if (doc_.compare(at_, 2, "<!") == 0) {
-      // A DOCTYPE, which may carry a bracketed internal subset. Refusing one
-      // would refuse most real EPUBs.
+    if (matches("<!", 2)) {
+      // A DOCTYPE, which may carry a bracketed internal subset. Refusing one would
+      // refuse most real EPUBs.
+      bump(2);
       size_t depth = 0;
-      size_t i = at_ + 2;
-      for (; i < doc_.size(); ++i) {
-        if (doc_[i] == '[') ++depth;
-        else if (doc_[i] == ']') { if (depth > 0) --depth; }
-        else if (doc_[i] == '>' && depth == 0) break;
+      for (;;) {
+        if (ensure(1) < 1) return fail("an unterminated declaration");
+        const char c = at(0);
+        bump(1);
+        if (c == '[') {
+          ++depth;
+        } else if (c == ']') {
+          if (depth > 0) --depth;
+        } else if (c == '>' && depth == 0) {
+          break;
+        }
       }
-      if (i >= doc_.size()) return fail("an unterminated declaration");
-      at_ = i + 1;
       continue;
     }
 
     // A closing tag.
-    if (doc_.compare(at_, 2, "</") == 0) {
-      at_ += 2;
-      if (!parseName(name_)) return fail("a closing tag with no name");
+    if (matches("</", 2)) {
+      bump(2);
+      if (!parseName(nameBuf_, nameLen_)) return fail("a closing tag with no name");
       skipSpace();
-      if (at_ >= doc_.size() || doc_[at_] != '>') return fail("a closing tag that never closes");
-      ++at_;
+      if (ensure(1) < 1 || at(0) != '>') return fail("a closing tag that never closes");
+      bump(1);
       return Node::EndTag;
     }
 
     // An opening tag.
-    ++at_;
-    if (!parseName(name_)) return fail("an opening tag with no name");
+    bump(1);
+    if (!parseName(nameBuf_, nameLen_)) return fail("an opening tag with no name");
     attrCount_ = 0;
-    attrBuf_.clear();
+    attrUsed_ = 0;
 
     for (;;) {
       skipSpace();
-      if (at_ >= doc_.size()) return fail("a tag that never closes");
-      if (doc_[at_] == '>') {
-        ++at_;
+      if (ensure(2) < 1) return fail("a tag that never closes");
+      if (at(0) == '>') {
+        bump(1);
         return Node::StartTag;
       }
-      if (doc_.compare(at_, 2, "/>") == 0) {
-        at_ += 2;
+      if (matches("/>", 2)) {
+        bump(2);
         // Owe an EndTag, so the caller's stack balances -- see the header.
-        pendingEnd_ = name_;
+        std::memcpy(pendingEnd_, nameBuf_, nameLen_);
+        pendingEndLen_ = nameLen_;
         endPending_ = true;
         return Node::StartTag;
       }
 
-      std::string_view attrName;
-      if (!parseName(attrName)) return fail("a tag attribute with no name");
+      if (attrCount_ >= kMaxAttrs) return fail("more attributes on one tag than we will read");
+
+      // The name goes straight into the shared buffer; the value follows it.
+      char scratch[kMaxNameBytes];
+      size_t scratchLen = 0;
+      if (!parseName(scratch, scratchLen)) return fail("a tag attribute with no name");
+      if (attrUsed_ + scratchLen > kMaxAttrBytes)
+        return fail("an element carries more attribute bytes than we will hold");
+      Attr& a = attrs_[attrCount_];
+      a.nameAt = static_cast<uint16_t>(attrUsed_);
+      a.nameLen = static_cast<uint16_t>(scratchLen);
+      std::memcpy(attrBuf_ + attrUsed_, scratch, scratchLen);
+      attrUsed_ += scratchLen;
+
       skipSpace();
       // NO BARE ATTRIBUTES. HTML permits `<input disabled>`; XML does not, and
       // accepting it here would be guessing at a value.
-      if (at_ >= doc_.size() || doc_[at_] != '=') return fail("an attribute with no value");
-      ++at_;
+      if (ensure(1) < 1 || at(0) != '=') return fail("an attribute with no value");
+      bump(1);
       skipSpace();
-      if (at_ >= doc_.size() || (doc_[at_] != '"' && doc_[at_] != '\''))
+      if (ensure(1) < 1 || (at(0) != '"' && at(0) != '\''))
         return fail("an attribute value that is not quoted");
-      const char quote = doc_[at_++];
-      const size_t vs = at_;
-      while (at_ < doc_.size() && doc_[at_] != quote) ++at_;
-      if (at_ >= doc_.size()) return fail("an unterminated attribute value");
-      const std::string_view rawValue = doc_.substr(vs, at_ - vs);
-      ++at_;  // the closing quote
+      const char quote = at(0);
+      bump(1);
 
-      if (attrCount_ >= kMaxAttrs) return fail("more attributes on one tag than we will read");
-      std::string decoded;
-      if (!decodeInto(rawValue, decoded))
-        return fail("an attribute value contains an entity we do not know");
-      // Appended to one reused buffer and addressed by offset, so a tag's
-      // attributes cost no allocation per attribute.
-      attrs_[attrCount_].name = attrName;
-      attrs_[attrCount_].valueAt = attrBuf_.size();
-      attrs_[attrCount_].valueLen = decoded.size();
-      attrBuf_ += decoded;
+      a.valueAt = static_cast<uint16_t>(attrUsed_);
+      size_t valueLen = 0;
+      for (;;) {
+        if (ensure(1) < 1) return fail("an unterminated attribute value");
+        if (at(0) == quote) {
+          bump(1);
+          break;
+        }
+        if (attrUsed_ + 4 > kMaxAttrBytes)
+          return fail("an element carries more attribute bytes than we will hold");
+        if (at(0) == '&') {
+          size_t n = 0;
+          if (!decodeEntity(attrBuf_ + attrUsed_, kMaxAttrBytes - attrUsed_, n))
+            return fail("an attribute value contains an entity we do not know");
+          attrUsed_ += n;
+          valueLen += n;
+          continue;
+        }
+        attrBuf_[attrUsed_++] = at(0);
+        ++valueLen;
+        bump(1);
+      }
+      a.valueLen = static_cast<uint16_t>(valueLen);
       ++attrCount_;
     }
   }
@@ -247,14 +384,14 @@ Xml::Node Xml::next() {
 
 bool Xml::hasAttr(std::string_view attrName) const {
   for (size_t i = 0; i < attrCount_; ++i)
-    if (attrs_[i].name == attrName) return true;
+    if (std::string_view(attrBuf_ + attrs_[i].nameAt, attrs_[i].nameLen) == attrName) return true;
   return false;
 }
 
 std::string_view Xml::attr(std::string_view attrName) const {
   for (size_t i = 0; i < attrCount_; ++i)
-    if (attrs_[i].name == attrName)
-      return std::string_view(attrBuf_).substr(attrs_[i].valueAt, attrs_[i].valueLen);
+    if (std::string_view(attrBuf_ + attrs_[i].nameAt, attrs_[i].nameLen) == attrName)
+      return std::string_view(attrBuf_ + attrs_[i].valueAt, attrs_[i].valueLen);
   return {};
 }
 

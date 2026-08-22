@@ -32,15 +32,57 @@ bool isSuppressed(std::string_view t) {
   return t == "head" || t == "style" || t == "script";
 }
 
+// ONE TAG NAME, HELD BY VALUE.
+//
+// The stack used to hold `std::string_view`s of the names, which worked only while
+// Xml handed out views into the caller's whole document. It reads a stream now, so
+// a name lives in a buffer the next token overwrites -- and the two tests that
+// caught it are worth naming, because neither looks like a lifetime bug:
+// `<blockquote><p>x</p></blockquote>` came out as a plain paragraph (the stack's
+// "blockquote" had become "p"), and `<a><b></a></b>` was ACCEPTED, because the
+// mismatch check was comparing two views into the same buffer and they are always
+// equal. A dangling view does not crash here; it silently agrees with itself.
+//
+// TRUNCATED AT 24 BYTES, which is longer than every element name that exists in
+// the vocabularies an EPUB can contain: `blockquote` and `figcaption` are 10,
+// MathML's `annotation-xml` is 14, and the longest name measured in a real book is
+// 14. SVG's `feComponentTransfer` is 19. So two names collide only if they share
+// their first 24 bytes AND their length, which no real pair does -- and the cost of
+// getting that wrong is one accepted mis-nesting, not a corrupt page.
+constexpr size_t kTagNameBytes = 24;
+
+struct TagName {
+  char bytes[kTagNameBytes];
+  uint8_t len = 0;
+
+  void set(std::string_view s) {
+    len = static_cast<uint8_t>(s.size() < kTagNameBytes ? s.size() : kTagNameBytes);
+    for (size_t i = 0; i < len; ++i) bytes[i] = s[i];
+    // The FULL length is what makes truncation safe: two names sharing a prefix
+    // but differing in length still compare unequal.
+    full = static_cast<uint16_t>(s.size());
+  }
+  bool operator==(std::string_view s) const {
+    if (s.size() != full) return false;
+    const size_t n = s.size() < kTagNameBytes ? s.size() : kTagNameBytes;
+    for (size_t i = 0; i < n; ++i)
+      if (bytes[i] != s[i]) return false;
+    return true;
+  }
+  std::string_view view() const { return {bytes, len}; }
+
+  uint16_t full = 0;
+};
+
 // The kind a block gets, read from the WHOLE STACK rather than from the tag that
 // started it -- outermost wins. `<blockquote><p>x</p></blockquote>` is a quoted
 // paragraph, not a paragraph that happens to sit inside a quote, and the same for
 // `<li><p>`: what the reader should see is decided by the outer element. Reading
 // only the innermost tag makes every `<blockquote><p>` a plain paragraph, which is
 // how the quote styling silently disappears from a book.
-BlockKind kindFromStack(const std::string_view* stack, size_t depth) {
+BlockKind kindFromStack(const TagName* stack, size_t depth) {
   for (size_t i = 0; i < depth; ++i) {
-    const std::string_view t = stack[i];
+    const std::string_view t = stack[i].view();
     if (t == "blockquote") return BlockKind::Blockquote;
     if (t == "li") return BlockKind::ListItem;
     if (t == "h1" || t == "h2" || t == "h3" || t == "h4" || t == "h5" || t == "h6")
@@ -54,7 +96,7 @@ BlockKind kindFromStack(const std::string_view* stack, size_t depth) {
 bool buildDocument(std::string_view xhtml, Document& out, const char** reason) {
   out.blocks.clear();
 
-  std::string_view stack[kMaxNestDepth];
+  TagName stack[kMaxNestDepth];
   size_t depth = 0;
 
   // The depth at which suppression began, 0 for "not suppressing". Nested
@@ -122,7 +164,7 @@ bool buildDocument(std::string_view xhtml, Document& out, const char** reason) {
         *reason = "nesting too deep";
         return false;
       }
-      stack[depth++] = xml.name();
+      stack[depth++].set(xml.name());
 
       if (suppressAt != 0) continue;
       if (isSuppressed(xml.name())) {
@@ -146,7 +188,7 @@ bool buildDocument(std::string_view xhtml, Document& out, const char** reason) {
         *reason = "end tag with no start tag";
         return false;
       }
-      if (stack[depth - 1] != xml.name()) {
+      if (!(stack[depth - 1] == xml.name())) {
         *reason = "mismatched end tag";
         return false;
       }
