@@ -61,12 +61,26 @@ card probe that was answered from cache and kept reporting success.
 - The dev device is an **X3 with a UC8279** — 792×528, so a 528×792 portrait
   canvas. The X4 is 800×480 → 480×800. Both are ~220 PPI.
 - **Rotation is CCW**, measured. CW renders 180° out. Unverified on X4.
-- `pio` is not on PATH, and the **launcher script is not the way in**: it runs a
-  dependency check before anything else that can fail with "Failed to install
-  Python dependencies into penv" while the toolchain is fine. Use the module
-  entry point, which skips the check and builds identically:
-  `~/.platformio/penv/bin/python -m platformio run -e xteink`. The Makefile does
-  this via `PIO_PY`, so `make firmware` is the reliable path.
+- `pio` is not on PATH; use `~/.platformio/penv/bin/python -m platformio run -e
+  xteink`, which is what `make firmware` does via `PIO_PY`.
+- **"Failed to install Python dependencies into penv" is TRANSIENT — retry it.**
+  This note used to say the module entry point *skips* that check. It does not,
+  and no entry point can: the check is in the **platform's** builder script,
+  `~/.platformio/platforms/espressif32/builder/penv_setup.py`, not in the `pio`
+  launcher. Three things it actually does, all worth knowing:
+  - It is gated on `has_internet_connection()`. With no network it skips the
+    check and says so; with a network it runs `uv pip install --upgrade` for the
+    platform's Python deps. So the failure means "the network was there and the
+    install failed" — a PyPI hiccup, or two builds sharing the `uv` cache at
+    once. **Do not run two builds concurrently.**
+  - On failure it is `sys.exit(1)`, so a broken build cannot be mistaken for a
+    good one and `make firmware` fails honestly. (Observed once as exit 0 —
+    that was `$?` reading a piped `tail`, not PlatformIO.)
+  - It runs `--upgrade` on **every** build that has a network. So the toolchain's
+    Python side can move under the project at any time without a change on our
+    part: a build that worked yesterday can pull a new esptool today. That is the
+    real hazard here, not the transient failure, and it is unpinnable from our
+    side.
 - **The app partition is 6.25 MB**, from the committed `partitions.csv` — the
   board default gave 1.31 MB, which Phase 2C had already half spent. `nvs` and
   `app0` keep the default table's offsets, so the session record survives a
