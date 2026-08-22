@@ -1479,6 +1479,34 @@ void setup() {
   // driver the panel is already valid instead.
   const esp_sleep_wakeup_cause_t wake = esp_sleep_get_wakeup_cause();
   const bool fromSleep = (wake != ESP_SLEEP_WAKEUP_UNDEFINED);
+  // THE RESET REASON, not just the sleep cause, because `wake cause=0` has two
+  // completely different meanings and this is what tells them apart:
+  //
+  //   ESP_RST_DEEPSLEEP  -- a real resume. If wake cause is still 0 here, the
+  //                         sleep API and the reset disagree, which is a bug.
+  //   ESP_RST_USB        -- the USB Serial/JTAG peripheral reset the chip. A host
+  //                         attaching does this, and after deep sleep the port has
+  //                         to be re-enumerated and reopened -- so CAPTURING a
+  //                         wake over USB CDC can destroy the wake. Three
+  //                         consecutive attempts to log a resume came back as this.
+  //   ESP_RST_POWERON /
+  //   ESP_RST_SW etc.    -- the device never slept, or something restarted it.
+  //
+  // Without this line the three are indistinguishable, and "the session restore
+  // stopped working" and "the logger reset the device" look identical from the
+  // serial output.
+  const esp_reset_reason_t rst = esp_reset_reason();
+  const char* rstName = rst == ESP_RST_DEEPSLEEP ? "DEEPSLEEP (a real resume)"
+                        : rst == ESP_RST_USB     ? "USB (a host attaching reset the chip)"
+                        : rst == ESP_RST_POWERON ? "POWERON"
+                        : rst == ESP_RST_SW      ? "SW (esp_restart)"
+                        : rst == ESP_RST_PANIC   ? "PANIC"
+                        : rst == ESP_RST_BROWNOUT ? "BROWNOUT"
+                        : rst == ESP_RST_EXT     ? "EXT (reset pin)"
+                                                 : "other";
+  Serial.printf("[boot] reset reason=%d %s; sleep wake cause=%d\n", (int)rst, rstName,
+                (int)wake);
+  Serial.flush();
   Serial.printf("[boot] wake cause=%d -> %s\n", (int)wake,
                 fromSleep ? "resumed from sleep (the panel holds our frame, but the "
                             "controller's baseline did not survive, so it is reseeded)"

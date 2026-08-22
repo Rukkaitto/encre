@@ -90,6 +90,22 @@ card probe that was answered from cache and kept reporting success.
   the serial log.
 - **Flashing must be run by the user** — the permission classifier blocks it
   from an agent. Give them the command.
+- **ATTACHING A SERIAL LOGGER CAN TURN A WAKE INTO A COLD BOOT.** Deep sleep
+  powers down USB, so a resume has to re-enumerate and the host has to reopen the
+  port — and on the C3 the USB Serial/JTAG peripheral can reset the chip when that
+  happens. Three consecutive attempts to capture a resume came back
+  `rst:0x15 (USB_UART_CHIP_RESET)` with `wake cause=0`: cold boots, in captures
+  whose whole purpose was a wake. So **a wake may be unobservable by the usual
+  route**, and worse, it looks exactly like a bug — a session restore that
+  "stopped working" while a logger was attached is the restore correctly declining
+  to run, because from the firmware's side it really was a cold boot.
+  - `[boot] reset reason=…` distinguishes the cases: `DEEPSLEEP` is a real
+    resume, `USB` is the host having reset the chip, `POWERON`/`SW` means it never
+    slept. Read that line before believing anything about a wake.
+  - The decisive test needs no logger: sleep, press power, and see whether the
+    screen you left comes back. If it does, the wake works and the logger was the
+    problem. To get NUMBERS off an unobservable path, keep them in
+    `RTC_DATA_ATTR` across the sleep and print them on a later boot.
 - **A fresh git worktree has an EMPTY `freeink-sdk/`**, and `make firmware` then
   fails with `PackageException: not a directory`, which names neither the
   submodule nor the fix. `git submodule update --init` first. `make test` is
