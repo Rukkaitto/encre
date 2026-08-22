@@ -3,12 +3,12 @@
 #include "reader/dither.h"
 #include "reader/text.h"
 
-#include "reader/font.h"
 #include "reader/framebuffer.h"
+#include "reader/glyphsource.h"
 
 namespace reader {
 
-int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::string_view utf8,
+int drawText(Framebuffer& fb, const GlyphSource& font, int x, int baselineY, std::string_view utf8,
              Ink ink, Tracking tracking, Plane plane) {
   const bool white = (ink == Ink::White);
   // The pen is 26.6 fixed point; `pen` below is only ever the *paint* position,
@@ -80,7 +80,7 @@ int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::strin
   return f26ToPx(penF) - x;
 }
 
-std::string elideToWidth(const Font& font, std::string_view utf8, int maxW, Tracking tracking) {
+std::string elideToWidth(const GlyphSource& font, std::string_view utf8, int maxW, Tracking tracking) {
   if (font.measure(utf8, tracking) <= maxW) return std::string(utf8);
   const int ellipsisW = font.measure(kEllipsis, tracking);
   // Not even the mark fits. See the header: nothing, rather than something that
@@ -93,9 +93,13 @@ std::string elideToWidth(const Font& font, std::string_view utf8, int maxW, Trac
   // the measurement rather than added afterwards: `measure(prefix) +
   // measure(kEllipsis)` misses the kern across the join, and the kern is where a
   // one-pixel overhang would come from.
+  // advance(), not glyph(): an elide is a MEASUREMENT, and on a scalable face
+  // reaching for glyph() here would rasterise every codepoint of a run in order
+  // to decide how much of it to draw -- and rasterise the ones it then discards.
+  // The whole of this function is design decision 3's second caller.
   constexpr char32_t kEllipsisCp = 0x2026;
-  const std::optional<Glyph> eg = font.glyph(kEllipsisCp);
-  const int ellipsisAdvanceF = pxToF26(eg ? eg->advance : font.notdefAdvance());
+  const std::optional<int> ea = font.advance(kEllipsisCp);
+  const int ellipsisAdvanceF = pxToF26(ea ? *ea : font.notdefAdvance());
 
   int penF = 0;
   char32_t prev = 0;
@@ -103,13 +107,13 @@ std::string elideToWidth(const Font& font, std::string_view utf8, int maxW, Trac
   size_t i = 0;
   while (i < utf8.size()) {
     const char32_t cp = utf8Next(utf8, i);
-    const std::optional<Glyph> g = font.glyph(cp);
-    if (!g) {
+    const std::optional<int> adv = font.advance(cp);
+    if (!adv) {
       penF += pxToF26(font.notdefAdvance()) + tracking.f26();
       prev = 0;
     } else {
       if (prev) penF += pxToF26(font.kerning(prev, cp));
-      penF += pxToF26(g->advance) + tracking.f26();
+      penF += pxToF26(*adv) + tracking.f26();
       prev = cp;
     }
     int joinedF = penF;
@@ -125,7 +129,7 @@ std::string elideToWidth(const Font& font, std::string_view utf8, int maxW, Trac
   return out;
 }
 
-int drawTextElided(Framebuffer& fb, const Font& font, int x, int baselineY,
+int drawTextElided(Framebuffer& fb, const GlyphSource& font, int x, int baselineY,
                    std::string_view utf8, int maxW, Ink ink, Tracking tracking, Plane plane) {
   if (font.measure(utf8, tracking) <= maxW)
     return drawText(fb, font, x, baselineY, utf8, ink, tracking, plane);
@@ -156,7 +160,7 @@ int drawTextElided(Framebuffer& fb, const Font& font, int x, int baselineY,
 // box is even-slack (a row's LABEL, the header band's label, the CONTINUE block)
 // or negative-slack (the boards tighten the title, the numeral and every
 // line-height-1 box below its own extent), where the two spellings always agreed.
-int baselineInF26(const Font& font, int boxTopF26, int boxHF26) {
+int baselineInF26(const GlyphSource& font, int boxTopF26, int boxHF26) {
   const int extentF26 = pxToF26(font.ascent() - font.descent());
   // Arithmetic shift rather than / 2, so a box shorter than the run it holds
   // (the boards do tighten line boxes below their content) halves the same way
@@ -165,7 +169,7 @@ int baselineInF26(const Font& font, int boxTopF26, int boxHF26) {
   return f26ToPx(boxTopF26 + halfLeading + pxToF26(font.ascent()));
 }
 
-int baselineIn(const Font& font, int boxTop, int boxH) {
+int baselineIn(const GlyphSource& font, int boxTop, int boxH) {
   return baselineInF26(font, pxToF26(boxTop), pxToF26(boxH));
 }
 

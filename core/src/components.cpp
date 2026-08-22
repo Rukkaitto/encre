@@ -29,7 +29,7 @@ int bandContentH(const FontSet& fonts, const Icon* mark) {
 // The height is still *derived* from the content rather than pinned, which is
 // what keeps it correct for a screen that sets its hints in a larger role or
 // pairs them with a taller mark.
-int hintSlotH(const Font& mf, const Hint& hint) {
+int hintSlotH(const GlyphSource& mf, const Hint& hint) {
   int h = mf.lineHeight();
   if (hint.icon) h = maxOf(h, hint.icon->h);
   // The ring is 25px against Meta's 27px line box today, so this max is a no-op
@@ -47,7 +47,7 @@ bool hintSlotEmpty(const Hint& hint) {
   return hint.icon == nullptr && hint.label.empty() && !hint.hasHold;
 }
 
-int hintSlotW(const Font& mf, const Hint& hint, Tracking tracking) {
+int hintSlotW(const GlyphSource& mf, const Hint& hint, Tracking tracking) {
   if (hintSlotEmpty(hint)) return kHintEmptySlotW;
   const int iconW = hint.icon ? hint.icon->w + kHintIconGap : 0;
   const int textW = mf.measure(hint.label, tracking);
@@ -272,7 +272,7 @@ int drawActionButton(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
   return kActionH;
 }
 
-Prose wrapProse(const Font& font, std::string_view text, int maxW, int leadEm1000,
+Prose wrapProse(const GlyphSource& font, std::string_view text, int maxW, int leadEm1000,
                 Tracking tracking, WordBreak breaking) {
   // The board states the leading as a multiple of the font size, so it resolves
   // against the face exactly as letter-spacing does -- and lands on the same 1/64
@@ -288,7 +288,7 @@ namespace {
 // one" is what stops a column too narrow for a single glyph from making this an
 // infinite loop -- the line then overhangs by construction, which is the honest
 // outcome and the same one wrapProse's first-word rule already has.
-size_t fitPrefixEnd(const Font& font, std::string_view text, size_t from, size_t to, int maxW,
+size_t fitPrefixEnd(const GlyphSource& font, std::string_view text, size_t from, size_t to, int maxW,
                     Tracking tracking) {
   size_t i = from;
   size_t fits = from;
@@ -307,7 +307,7 @@ size_t fitPrefixEnd(const Font& font, std::string_view text, size_t from, size_t
 }
 }  // namespace
 
-Prose wrapProseLead(const Font& font, std::string_view text, int maxW, int leadF26,
+Prose wrapProseLead(const GlyphSource& font, std::string_view text, int maxW, int leadF26,
                     Tracking tracking, WordBreak breaking) {
   Prose out;
   out.tracking = tracking;
@@ -361,7 +361,7 @@ Prose wrapProseLead(const Font& font, std::string_view text, int maxW, int leadF
   return out;
 }
 
-void clampProse(const Font& font, Prose& prose, int maxLines, int maxW, std::string& tail) {
+void clampProse(const GlyphSource& font, Prose& prose, int maxLines, int maxW, std::string& tail) {
   if (maxLines < 1) {
     prose.lines.clear();
     return;
@@ -381,7 +381,7 @@ void clampProse(const Font& font, Prose& prose, int maxLines, int maxW, std::str
   prose.lines.back() = tail;
 }
 
-int drawProse(Framebuffer& fb, const Font& font, const Prose& prose, int boxX, int boxW,
+int drawProse(Framebuffer& fb, const GlyphSource& font, const Prose& prose, int boxX, int boxW,
               int topF26, Ink ink, Plane plane, ProseAlign align) {
   for (int i = 0; i < prose.lineCount(); ++i) {
     const std::string_view line = prose.lines[static_cast<size_t>(i)];

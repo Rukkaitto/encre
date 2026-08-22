@@ -6,7 +6,12 @@
 
 namespace reader {
 class Framebuffer;
-class Font;
+// Chrome's pre-rendered ramp and the reader's scalable face both satisfy this,
+// and everything below takes it rather than a concrete Font -- one text path,
+// so kerning, tracking, the notdef box and the Plane handling cannot drift
+// between chrome and body text. See reader/glyphsource.h for why, and for the
+// interface's shape.
+class GlyphSource;
 
 // Which colour glyph coverage paints. White exists so inverted text (a focused
 // row, a filled action block) needs no scratch buffer: fill the rect black,
@@ -34,7 +39,7 @@ enum class Plane { Bw, Lsb, Msb, BwDithered };
 // Returns the advance width consumed, which is exactly Font::measure of the
 // same string and tracking. That equality is load-bearing: right-aligned runs
 // are placed at `edge - measure(s)`.
-int drawText(Framebuffer& fb, const Font& font, int x, int baselineY, std::string_view utf8,
+int drawText(Framebuffer& fb, const GlyphSource& font, int x, int baselineY, std::string_view utf8,
              Ink ink = Ink::Black, Tracking tracking = {}, Plane plane = Plane::Bw);
 
 // --- A run that has to fit -----------------------------------------------------
@@ -79,13 +84,13 @@ inline constexpr std::string_view kEllipsis = "\xE2\x80\xA6";
 // `tracking` must be the same value the run will be drawn with, for the reason
 // Prose carries its own: the fit is decided by a measurement, and a measurement
 // taken with different spacing is a different answer.
-std::string elideToWidth(const Font& font, std::string_view utf8, int maxW,
+std::string elideToWidth(const GlyphSource& font, std::string_view utf8, int maxW,
                          Tracking tracking = {});
 
 // drawText of the above, and the advance it returns is the elided run's -- so a
 // caller can still place something after it. Short-circuits the measure when the
 // text fits, which is the common case and the one that must not allocate.
-int drawTextElided(Framebuffer& fb, const Font& font, int x, int baselineY,
+int drawTextElided(Framebuffer& fb, const GlyphSource& font, int x, int baselineY,
                    std::string_view utf8, int maxW, Ink ink = Ink::Black,
                    Tracking tracking = {}, Plane plane = Plane::Bw);
 
@@ -132,7 +137,7 @@ int drawTextElided(Framebuffer& fb, const Font& font, int x, int baselineY,
 // -- in which case the baseline is pulled up rather than the run being flushed
 // to the top, which is what CSS does and what stops a 67px numeral opening a
 // crater in a column.
-int baselineInF26(const Font& font, int boxTopF26, int boxHF26);
+int baselineInF26(const GlyphSource& font, int boxTopF26, int boxHF26);
 
 // The same rule for a box already on the whole-pixel grid, which is most of the
 // chrome. It converts and forwards: there is no second formula here, deliberately.
@@ -146,7 +151,7 @@ int baselineInF26(const Font& font, int boxTopF26, int boxHF26);
 // screen picks whichever one its neighbour used and the defect is too small to
 // fail review. SdMissing's action block is the box that had it (68px box, 33px
 // extent, slack 35); its two goldens were re-blessed onto the fractional answer.
-int baselineIn(const Font& font, int boxTop, int boxH);
+int baselineIn(const GlyphSource& font, int boxTop, int boxH);
 
 // Top row for an item `itemH` tall centred across the box [boxTop, boxTop+boxH)
 // -- CSS `align-items: center` on a flex line, which is what every box on every

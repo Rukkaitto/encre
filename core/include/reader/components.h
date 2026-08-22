@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "reader/fontset.h"
+#include "reader/glyphsource.h"
 #include "reader/icons.h"
 #include "reader/text.h"
 
@@ -93,7 +94,7 @@ inline constexpr int kActionEm = 180;      // 0.18em, a prompt button's label
 inline constexpr int kPromptTitleEm = 60;  // 0.06em, a full-screen prompt's title
 
 // The design's em value, resolved against the face that will draw it.
-inline Tracking trackingEm(const Font& font, int em1000) {
+inline Tracking trackingEm(const GlyphSource& font, int em1000) {
   return Tracking::em(font.ppem(), em1000);
 }
 
@@ -368,7 +369,7 @@ struct Prose {
 // the panel. The boards chose; this is the parameter that says which.
 enum class WordBreak { Normal, Anywhere };
 
-Prose wrapProse(const Font& font, std::string_view text, int maxW, int leadEm1000,
+Prose wrapProse(const GlyphSource& font, std::string_view text, int maxW, int leadEm1000,
                 Tracking tracking = {}, WordBreak breaking = WordBreak::Normal);
 
 // The same wrap for a run whose line box the board leaves at `line-height:
@@ -380,7 +381,7 @@ Prose wrapProse(const Font& font, std::string_view text, int maxW, int leadEm100
 // The lead is in 1/64 px because that is the unit a line box lives in once it
 // stops being a whole number, and taking it here rather than converting inside
 // keeps the ONE rounding at the paint.
-Prose wrapProseLead(const Font& font, std::string_view text, int maxW, int leadF26,
+Prose wrapProseLead(const GlyphSource& font, std::string_view text, int maxW, int leadF26,
                     Tracking tracking = {}, WordBreak breaking = WordBreak::Normal);
 
 // --- Bounding a wrapped run ---------------------------------------------------
@@ -409,7 +410,7 @@ Prose wrapProseLead(const Font& font, std::string_view text, int maxW, int leadF
 // it wrapped, and the clamped last line is a new string that is not in that text,
 // so the caller owns it and it must outlive the Prose -- the same rule, and the
 // same reason, as the text itself.
-void clampProse(const Font& font, Prose& prose, int maxLines, int maxW, std::string& tail);
+void clampProse(const GlyphSource& font, Prose& prose, int maxLines, int maxW, std::string& tail);
 
 // How a wrapped run sits in its column. The boards want both: a full-screen
 // prompt's paragraph is `text-align: center` and an overlay caption's wrapped
@@ -423,7 +424,7 @@ enum class ProseAlign { Centre, Left };
 // `align` comes after `plane` rather than beside `boxW` where it reads better,
 // because moving `ink` or `plane` along would silently rebind every existing
 // call site that passes them positionally.
-int drawProse(Framebuffer& fb, const Font& font, const Prose& prose, int boxX, int boxW,
+int drawProse(Framebuffer& fb, const GlyphSource& font, const Prose& prose, int boxX, int boxW,
               int topF26, Ink ink = Ink::Black, Plane plane = Plane::Bw,
               ProseAlign align = ProseAlign::Centre);
 
