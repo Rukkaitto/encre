@@ -9,14 +9,20 @@ namespace reader {
 namespace {
 
 // THE BOARD'S ROWS, IN THE BOARD'S ORDER, and the order is the only thing that
-// makes this table checkable against design/Settings.dc.html by eye. Thirteen
-// items: three section headers and ten rows, which is the 11-of-13 the board's
-// rail proportion states.
+// makes this table checkable against design/Settings.dc.html by eye. Eleven items:
+// two section headers and nine rows, which FITS the panel -- so Settings draws no
+// rail today.
+//
+// It did have a CONNECTIONS section with a Wi-Fi row, and losing them is what
+// brought the list back inside the panel: V1 is card-transfer only, Wi-Fi having
+// been cut as too big. Phase 3's typography settings will push it over again, and
+// nothing here has to change when they do -- renderSettings reads
+// `totalRows > rows` and draws the rail and takes its gutter only then.
 //
 // The placeholder strings are the BOARD'S values for rows whose settings do not
 // exist yet, kept verbatim so the screen matches the board before Phase 3's reader
 // and Phase 4's Wi-Fi arrive. They are not defaults and nothing reads them back.
-constexpr std::array<SettingsScreen::Item, 13> kItems{{
+constexpr std::array<SettingsScreen::Item, 11> kItems{{
     {"TYPOGRAPHY", SettingsScreen::Field::None, true, ""},
     {"Font", SettingsScreen::Field::None, false, "LITERATA"},
     {"Size", SettingsScreen::Field::None, false, "18 PT"},
@@ -28,8 +34,6 @@ constexpr std::array<SettingsScreen::Item, 13> kItems{{
     {"Full refresh", SettingsScreen::Field::FullRefresh, false, ""},
     {"Refresh on screen change", SettingsScreen::Field::OnTransition, false, ""},
     {"Sleep screen", SettingsScreen::Field::None, false, "BOOK COVER"},
-    {"CONNECTIONS", SettingsScreen::Field::None, true, ""},
-    {"Wi-Fi", SettingsScreen::Field::None, false, "ON DEMAND"},
 }};
 
 // The values CHANGE cycles through, and they wrap: this is one button, so there is

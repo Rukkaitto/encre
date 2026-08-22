@@ -76,8 +76,8 @@ TEST_CASE("focus skips headers and inert rows in both directions") {
   CHECK(focusedLabel(scr) == "Full refresh");
   scr.onEvent(kDown);
   CHECK(focusedLabel(scr) == "Refresh on screen change");
-  // Sleep screen, CONNECTIONS and Wi-Fi all follow and none is focusable, so DOWN
-  // from here must do nothing rather than land on one of them.
+  // `Sleep screen` follows and is not focusable, so DOWN from here must do nothing
+  // rather than land on it.
   scr.onEvent(kDown);
   CHECK(focusedLabel(scr) == "Refresh on screen change");
 
@@ -206,14 +206,16 @@ TEST_CASE("setFocus refuses a header or an inert row") {
   CHECK(focusedLabel(scr) == "Sleep after");
 }
 
-TEST_CASE("the list overflows the panel, which is why it scrolls at all") {
-  // The board's own claim: 13 items, about 11 visible. If this ever stops being
-  // true the rail should stop being drawn, and renderSettings asks rather than
-  // assumes -- but the arithmetic that made Settings a scrolling list is here.
+TEST_CASE("the list FITS the panel, so no rail is drawn") {
+  // Eleven items, all visible. It briefly did not fit -- adding the transition row
+  // pushed it over and made it a scrolling list -- and then Wi-Fi was cut from V1
+  // and CONNECTIONS went with it. Phase 3's typography settings will push it over
+  // again, and this assertion is what will notice: renderSettings draws the rail
+  // and takes its gutter off `totalRows > rows`, so the day this flips, the screen
+  // starts scrolling without anything else changing.
   SettingsScreen scr = sized(Settings{}, nullptr);
-  CHECK(scr.vm().totalRows == 13);
-  CHECK(static_cast<int>(scr.vm().rows.size()) < scr.vm().totalRows);
-  CHECK(scr.vm().rows.size() >= 9);  // and not so few that the screen looks broken
+  CHECK(scr.vm().totalRows == 11);
+  CHECK(static_cast<int>(scr.vm().rows.size()) == scr.vm().totalRows);
 }
 
 TEST_CASE("section headers are rows in the list, not decoration around it") {
@@ -225,7 +227,7 @@ TEST_CASE("section headers are rows in the list, not decoration around it") {
       CHECK(row.value.empty());
       CHECK_FALSE(row.focusable);
     }
-  CHECK(headers >= 2);  // TYPOGRAPHY and DEVICE are both in the top window
+  CHECK(headers == 2);  // TYPOGRAPHY and DEVICE, and no CONNECTIONS any more
 }
 
 TEST_CASE("an inert row is marked unfocusable but is otherwise an ordinary row") {

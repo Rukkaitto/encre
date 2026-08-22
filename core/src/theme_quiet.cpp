@@ -933,9 +933,14 @@ void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
     // where the board draws 2, and -- because it also advanced `y` -- pushed every
     // row below the DEVICE header down by a pixel. That is the compounding kind:
     // one wrong rule, and the whole bottom half of the screen is off by one.
+    // ...and the LAST DRAWN row has none either, which is renderLibrary's rule
+    // verbatim (`i != rows - 1`): it leaves the list's bottom edge open rather
+    // than hanging a hairline over the slack above the hint bar. Missing it left a
+    // rule under `Sleep screen` that the board does not draw.
     const bool nextIsHeader =
         (i + 1 < rows) && vm.rows[static_cast<size_t>(i + 1)].isHeader;
-    if (!focused && !nextIsHeader) {
+    const bool isLastDrawn = (i == rows - 1);
+    if (!focused && !nextIsHeader && !isLastDrawn) {
       fb.fillRect(0, y, fb.width() - inset, kSettingsRuleH, false);
       y += kSettingsRuleH;
     }
