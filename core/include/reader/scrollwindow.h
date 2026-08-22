@@ -31,7 +31,10 @@ namespace reader {
 class ScrollWindow {
  public:
   ScrollWindow() = default;
-  ScrollWindow(int count, int visibleRows);
+  // `none` is passed to the Focus this window owns: a WithNone window's -1 is a
+  // position below the first row (Home's CONTINUE block), with every none-slot
+  // rule -- setCount keeping -1 where -1 is a place -- already Focus's.
+  ScrollWindow(int count, int visibleRows, Focus::None none = Focus::Noneless);
 
   int count() const { return focus_.count(); }
   int visibleRows() const { return visible_; }
@@ -60,13 +63,17 @@ class ScrollWindow {
   // the end of a list instead of paying a refresh that repaints an identical
   // screen. On this panel that is at least 520 ms, and spending it to change
   // nothing is what makes the end of a list feel like a stuck button.
-  bool moveFocus(int delta);
+  //
+  // A `gate` is passed through to Focus, whose landing rules these are; the
+  // window only follows the focus it ends up with.
+  bool moveFocus(int delta, const Focus::Gate* gate = nullptr);
 
   // Selects a row outright, clamping into range. For the wake restore, where the
   // session record names a row and no press implies it; a record written before
   // some books were deleted must still restore to something. Same return
-  // contract as moveFocus.
-  bool setFocus(int index);
+  // contract as moveFocus, and the same gate pass-through: a refused landing
+  // leaves focus and window both where they were.
+  bool setFocus(int index, const Focus::Gate* gate = nullptr);
 
   // The list changed length -- a rescan after a delete, say. The focus is pulled
   // back into range and the window follows it, because a focus left past the end

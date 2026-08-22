@@ -267,3 +267,53 @@ TEST_CASE("visibleCount is what a renderer may draw, and never overruns the list
     }
   }
 }
+
+// --- Landing rules pass through to the Focus this window owns -----------------
+
+#include <vector>
+
+namespace {
+struct WindowTableGate : Focus::Gate {
+  std::vector<bool> ok;
+  explicit WindowTableGate(std::vector<bool> t) : ok(std::move(t)) {}
+  bool focusable(int index) const override {
+    return index >= 0 && index < static_cast<int>(ok.size()) && ok[static_cast<size_t>(index)];
+  }
+};
+}  // namespace
+
+TEST_CASE("the window follows a gated skip in one move") {
+  // 11 items, 3 on glass, only 7..9 focusable: the wrap off 9 skips 10 and the
+  // headers and lands back on 7, with the window following the whole way.
+  WindowTableGate gate({false, false, false, false, false, false, false, true, true, true, false});
+  ScrollWindow w(11, 3);
+  w.setFocus(7);
+  REQUIRE(w.focus() == 7);
+  CHECK(w.moveFocus(+1, &gate));
+  CHECK(w.focus() == 8);
+  CHECK(w.moveFocus(+2, &gate));  // 9, then the wrap-skip to 7
+  CHECK(w.focus() == 7);
+  CHECK(w.firstVisible() <= 7);
+  CHECK(w.firstVisible() + 3 > 7);  // the focus is inside the window
+}
+
+TEST_CASE("a gated setFocus that is refused leaves the window alone") {
+  WindowTableGate gate({false, true, true});
+  ScrollWindow w(3, 2);
+  w.setFocus(1);
+  const int first = w.firstVisible();
+  CHECK_FALSE(w.setFocus(0, &gate));
+  CHECK(w.focus() == 1);
+  CHECK(w.firstVisible() == first);
+}
+
+TEST_CASE("a window built WithNone starts on the none slot and keeps it as a position") {
+  ScrollWindow w(3, 3, Focus::WithNone);
+  CHECK(w.focus() == -1);
+  CHECK(w.moveFocus(-1));  // wraps through the none slot to the last row
+  CHECK(w.focus() == 2);
+  CHECK(w.moveFocus(+1));  // ...and back onto it
+  CHECK(w.focus() == -1);
+  w.setCount(5);           // growing the list must not drag -1 onto row 0
+  CHECK(w.focus() == -1);
+}
