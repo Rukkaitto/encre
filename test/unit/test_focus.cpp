@@ -157,3 +157,106 @@ TEST_CASE("a negative count is a count of zero, not an error") {
   CHECK(f.count() == 0);
   CHECK(f.index() == -1);
 }
+
+// --- Landing rules: Focus::Gate ----------------------------------------------
+//
+// Settings was the fifth-and-a-half copy: its skip-past-headers walk was the one
+// movement rule still living in a screen, and it silently stopped wrapping while
+// every other list rolled over. The gate moves that rule in here, where wrap and
+// clamp already live, so a screen with unfocusable rows declares WHICH rows and
+// gets the walk from the same code every other screen exercises.
+
+#include <vector>
+
+namespace {
+// A gate over a fixed table, the shape SettingsScreen needs: headers and
+// placeholder rows refuse, device rows accept.
+struct TableGate : reader::Focus::Gate {
+  std::vector<bool> ok;
+  explicit TableGate(std::vector<bool> t) : ok(std::move(t)) {}
+  bool focusable(int index) const override {
+    return index >= 0 && index < static_cast<int>(ok.size()) && ok[static_cast<size_t>(index)];
+  }
+};
+struct AllGate : reader::Focus::Gate {
+  bool focusable(int) const override { return true; }
+};
+}  // namespace
+
+TEST_CASE("a gate that refuses nothing changes nothing -- move and set are the ungated calls") {
+  // The gated walk is a second implementation of wrap/clamp/none, so this pins it
+  // to the modular arithmetic across every configuration, multi-lap included.
+  AllGate all;
+  for (const Focus::None none : {Focus::Noneless, Focus::WithNone}) {
+    for (const bool wrap : {true, false}) {
+      for (int count = 0; count <= 5; ++count) {
+        for (int start = -1; start < (count == 0 ? 0 : count); ++start) {
+          for (int delta = -12; delta <= 12; ++delta) {
+            CAPTURE(wrap); CAPTURE(count); CAPTURE(start); CAPTURE(delta);
+            Focus a(count, none); a.setWrapping(wrap); a.set(start);
+            Focus b(count, none); b.setWrapping(wrap); b.set(start);
+            CHECK(a.move(delta) == b.move(delta, &all));
+            CHECK(a.index() == b.index());
+          }
+          for (int target = -3; target <= count + 3; ++target) {
+            CAPTURE(wrap); CAPTURE(count); CAPTURE(start); CAPTURE(target);
+            Focus a(count, none); a.setWrapping(wrap); a.set(start);
+            Focus b(count, none); b.setWrapping(wrap); b.set(start);
+            CHECK(a.set(target) == b.set(target, &all));
+            CHECK(a.index() == b.index());
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("a gated move skips refused landings, wrapping through them without consuming a step") {
+  // The Settings shape: 11 items, only 7..9 focusable.
+  TableGate gate({false, false, false, false, false, false, false, true, true, true, false});
+  Focus f(11);
+  f.set(7);  // seat the focus ungated, as a screen's ctor does
+  CHECK(f.move(+1, &gate)); CHECK(f.index() == 8);
+  CHECK(f.move(+1, &gate)); CHECK(f.index() == 9);
+  // Off the focusable end: wraps through 10, 0..6 and lands on 7.
+  CHECK(f.move(+1, &gate)); CHECK(f.index() == 7);
+  // ...and back the other way.
+  CHECK(f.move(-1, &gate)); CHECK(f.index() == 9);
+  // A distance counts focusable landings, not raw positions.
+  CHECK(f.move(+2, &gate)); CHECK(f.index() == 8);
+}
+
+TEST_CASE("a gated move on a non-wrapping focus stops at the last focusable position") {
+  TableGate gate({false, true, true, false});
+  Focus f(4);
+  f.setWrapping(false);
+  f.set(1);
+  CHECK(f.move(+5, &gate)); CHECK(f.index() == 2);  // 3 refuses, the clamp ends the walk
+  CHECK_FALSE(f.move(+1, &gate)); CHECK(f.index() == 2);
+}
+
+TEST_CASE("a gate that refuses everything moves nothing, so a bare table cannot spin") {
+  TableGate none({false, false, false});
+  Focus f(3);
+  CHECK_FALSE(f.move(+1, &none)); CHECK(f.index() == 0);
+  CHECK_FALSE(f.move(-1, &none)); CHECK(f.index() == 0);
+}
+
+TEST_CASE("a gate whose only focusable position is the current one moves nothing") {
+  TableGate gate({false, false, true, false});
+  Focus f(4);
+  f.set(2);
+  CHECK_FALSE(f.move(+1, &gate)); CHECK(f.index() == 2);
+  CHECK_FALSE(f.move(-1, &gate)); CHECK(f.index() == 2);
+}
+
+TEST_CASE("a gated set clamps first and refuses an unlandable landing, index unchanged") {
+  TableGate gate({false, false, false, false, false, false, false, true, true, true, false});
+  Focus f(11);
+  f.set(7);
+  CHECK_FALSE(f.set(0, &gate));   CHECK(f.index() == 7);  // a header refuses
+  CHECK_FALSE(f.set(400, &gate)); CHECK(f.index() == 7);  // clamps to 10, which refuses
+  CHECK_FALSE(f.set(-2, &gate));  CHECK(f.index() == 7);  // clamps to 0, which refuses
+  CHECK(f.set(8, &gate));         CHECK(f.index() == 8);
+  CHECK_FALSE(f.set(8, &gate));   CHECK(f.index() == 8);  // unchanged is false, not a failure
+}

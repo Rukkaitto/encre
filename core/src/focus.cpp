@@ -25,28 +25,77 @@ void Focus::clampIndex() {
   if (index_ > count_ - 1) index_ = count_ - 1;
 }
 
-bool Focus::set(int index) {
+bool Focus::set(int index, const Gate* gate) {
   const int was = index_;
   index_ = index;
   clampIndex();
+  // Clamp FIRST, then let the gate refuse the landing: a record naming row 400
+  // clamps to the last row, and if that row cannot be landed on the restore is
+  // refused with the index unchanged. An empty list is never asked: -1 is its
+  // only state and there is nothing to refuse into.
+  if (gate != nullptr && count_ > 0 && !gate->focusable(index_)) {
+    index_ = was;
+    return false;
+  }
   return index_ != was;
 }
 
-bool Focus::move(int delta) {
-  if (count_ <= 0) return false;
-  if (!wrap_) return set(index_ + delta);
-
-  // The ring runs from lowest() to count-1 inclusive, so a WithNone focus wraps
-  // through its none slot rather than past it.
+int Focus::stepOnce(int from, int dir) const {
+  if (count_ <= 0) return from;
+  if (!wrap_) {
+    int next = from + dir;
+    if (next < lowest()) next = lowest();
+    if (next > count_ - 1) next = count_ - 1;
+    return next;
+  }
   const int span = count_ - lowest();
-  if (span <= 1) return false;  // one position: nowhere to wrap to
-  // Positive modulo: delta may be several laps in either direction, because a
-  // held button delivers a distance rather than a press.
-  int offset = (index_ - lowest() + delta) % span;
+  if (span <= 1) return from;  // one position: nowhere to step to
+  int offset = (from - lowest() + dir) % span;
   if (offset < 0) offset += span;
-  const int next = lowest() + offset;
-  if (next == index_) return false;
-  index_ = next;
+  return lowest() + offset;
+}
+
+bool Focus::move(int delta, const Gate* gate) {
+  if (count_ <= 0) return false;
+  if (gate == nullptr) {
+    // The ungated path keeps its O(1) arithmetic, bit-for-bit: every existing
+    // caller lands exactly where it always did, multi-lap wraps included.
+    if (!wrap_) return set(index_ + delta);
+
+    // The ring runs from lowest() to count-1 inclusive, so a WithNone focus
+    // wraps through its none slot rather than past it.
+    const int span = count_ - lowest();
+    if (span <= 1) return false;  // one position: nowhere to wrap to
+    // Positive modulo: delta may be several laps in either direction, because a
+    // held button delivers a distance rather than a press.
+    int offset = (index_ - lowest() + delta) % span;
+    if (offset < 0) offset += span;
+    const int next = lowest() + offset;
+    if (next == index_) return false;
+    index_ = next;
+    return true;
+  }
+
+  // The gated walk: one position at a time, so each LANDING can be judged. A
+  // refused position is stepped over without consuming any distance; the guard
+  // bounds the skip at one full lap, so a list with nothing focusable moves
+  // nothing instead of spinning -- the full-circle check SettingsScreen used to
+  // hand-roll, now in the one place movement rules live. The test suite pins
+  // this walk to the arithmetic above with an everything-focusable gate over
+  // every configuration.
+  const int start = index_;
+  const int dir = delta < 0 ? -1 : 1;
+  int steps = delta < 0 ? -delta : delta;
+  int i = index_;
+  while (steps-- > 0) {
+    int j = stepOnce(i, dir);
+    int guard = count_ - lowest();
+    while (j != i && !gate->focusable(j) && guard-- > 0) j = stepOnce(j, dir);
+    if (j == i || !gate->focusable(j)) break;  // a clamping end, or nothing to land on
+    i = j;
+  }
+  if (i == start) return false;
+  index_ = i;
   return true;
 }
 

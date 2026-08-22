@@ -28,6 +28,23 @@ class Focus {
   // the call site: `Focus(menu.size(), true)` says nothing about what is true.
   enum None { Noneless, WithNone };
 
+  // WHETHER A POSITION MAY BE LANDED ON. Consulted by the gated overloads below:
+  // move() steps over a refused position without consuming any of its distance,
+  // and set() refuses a landing outright. The CURRENT position is never asked --
+  // a focus can find itself somewhere it could not land (a screen before its
+  // first setFocus), and moving OFF such a place must work.
+  //
+  // An interface rather than a callable for the reason ScreenFactory is one
+  // (app.h): no <functional>, no allocation, and the one implementer is a
+  // long-lived screen that can simply be pointed at.
+  class Gate {
+   public:
+    virtual bool focusable(int index) const = 0;
+
+   protected:
+    ~Gate() = default;  // never owned, never deleted through this interface
+  };
+
   Focus() = default;
   explicit Focus(int count, None none = Noneless);
 
@@ -46,7 +63,12 @@ class Focus {
   // A record naming row 400 of a list that now has three rows means "as far down
   // as you can go"; wrapping it round to row 1 would put the user somewhere with
   // no relation to where they were.
-  bool set(int index);
+  //
+  // With a `gate`, the clamp happens FIRST and the landing is then judged: a
+  // landing the gate refuses restores the previous index and returns false,
+  // which is what "refused rather than clamped" has to mean on a list whose
+  // ends are unfocusable.
+  bool set(int index, const Gate* gate = nullptr);
 
   // Moves by `delta`, wrapping if this focus wraps and clamping if it does not.
   // Returns whether anything moved, so a screen can answer Action::none() at the
@@ -57,7 +79,11 @@ class Focus {
   // `delta` may be far larger than the list: a held Up or Down delivers a
   // DISTANCE rather than a press (InputEvent::steps), so a wrapping list has to
   // take a delta of several laps and land where one lap would.
-  bool move(int delta);
+  //
+  // With a `gate`, a refused position is stepped over without consuming any of
+  // the distance, wrapping through refused ends -- the walk Settings used to
+  // hand-roll, in the one place movement rules live.
+  bool move(int delta, const Gate* gate = nullptr);
 
   // The list changed length -- a rescan after a delete, a menu built at boot. The
   // index is pulled back into range, because one left past the end indexes one
@@ -94,6 +120,12 @@ class Focus {
   // Puts `index_` in range without touching anything else. One function, called
   // from every mutator, for the same reason ScrollWindow::clamp is one function.
   void clampIndex();
+
+  // One position in `dir` from `from`, honouring this focus's own wrap, clamp
+  // and none-slot rules -- the arithmetic move(+/-1) performs, extracted so the
+  // gated walk cannot become a second copy of it. Returns `from` itself at a
+  // clamping end.
+  int stepOnce(int from, int dir) const;
 
   int count_ = 0;
   int index_ = -1;
