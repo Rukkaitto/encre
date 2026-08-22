@@ -762,6 +762,23 @@ top of this spike.
   `space-between` divides the leftover around it. Measuring it as 0 is not
   "drawing nothing", it is drawing the *other* slots in the wrong places: on
   SdMissing it moves RETRY 36px left and widens each gap by 12px.
+- **The shared-primitives pass swept the remaining drawing repeats into
+  `components.h`**, and the next screen should find them rather than reinvent
+  them: `outlineRect` (the four-fill border every bordered box shares — NOT for a
+  box whose interior must be painted, like Home's progress bar), `buildHints` +
+  `kHintSlotMarks` (a view-model's hint arrays as the bar's four slots, with the
+  boards' empty-36px-dead-slot rule applied uniformly — eight hand-rolled copies
+  had drifted into two behaviours; the theme's `measuringHints` is the different
+  job of labelless height-measuring, which deliberately keeps its marks),
+  `rowRuleFor` (the positional bottom-rule rule below), `drawCentredText` (the
+  measure-and-draw-same-tracking hazard, once), and a `drawHintBar` overload
+  without the slot out-param nothing but tests read.
+  `ScrollWindow::slice()` is the same pass on the state side: first/count/
+  focused-in-slice-or-−1, so a view-model can never name a row that was not
+  drawn — Contents and Bookmarks are Phase 3's callers. The type ramp's
+  role↔asset binding is `reader/font_manifest.h`, one list expanded by all three
+  loaders (shell's embedded arrays, the simulator's files, the tests' ramp.h);
+  adding a Phase 3 role is one manifest line plus the generated asset.
 - **Three shared primitives landed with the SD-missing screen** (2C-1), and the
   next screen that needs them should find them rather than reinvent them, both in
   `components.h`:
