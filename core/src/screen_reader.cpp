@@ -16,6 +16,14 @@ namespace {
 // on the builder advancing, and a guard is cheaper than trusting that from here.
 constexpr int kMaxPages = 4096;
 
+// IS `a` STRICTLY BEFORE `b` in the document. Local rather than an operator< on
+// Cursor, because ordering two cursors is only meaningful WITHIN one chapter at one
+// layout -- a comparison operator on the type would invite comparing cursors from
+// two chapters, which is a question with no answer.
+bool earlier(const Cursor& a, const Cursor& b) {
+  return a.block != b.block ? a.block < b.block : a.line < b.line;
+}
+
 }  // namespace
 
 ReaderScreen::ReaderScreen(FileSystem& fs, OpenedBook book, int startChapter,
@@ -56,6 +64,14 @@ void ReaderScreen::setMetrics(const PageMetrics& m) {
   // the card path takes. Two paths that paginate differently would mean the goldens
   // and the simulator testing something the device does not do -- and this project
   // has been bitten by a desktop path that diverged from the device's before.
+  // A restore target wins over the counting choice, exactly as on the card path.
+  if (startAt_ != Cursor{}) {
+    const Cursor want = startAt_;
+    startAt_ = Cursor{};
+    openAtCursor(want);
+    syncVm();
+    return;
+  }
   // The same two-pass-or-one choice the card path makes, for the same reason.
   if (chapter_.sizeBytes() > 0 && chapter_.sizeBytes() <= kEagerCountBytes) {
     buildIndex();
@@ -166,6 +182,20 @@ bool ReaderScreen::walkToChapter(int c, bool atEnd) {
       at_ = static_cast<int>(starts_.size()) - 1;
       return seekTo(at_);
     }() : [&] {
+      // A RESTORED POSITION LANDS WHERE IT LEFT OFF, before either counting choice
+      // below is considered: the walk to the cursor records the boundaries it passes,
+      // so it already leaves the index in the state those branches would build.
+      //
+      // THE CURSOR IS SPENT ON THE FIRST CANDIDATE. The walk starts at the spine
+      // entry the position was saved in, so that entry is the one the cursor is
+      // about; a later candidate is only reached because this one paginated to
+      // nothing, and a cursor into a chapter with no pages says nothing about the
+      // next chapter.
+      if (startAt_ != Cursor{}) {
+        const Cursor want = startAt_;
+        startAt_ = Cursor{};
+        return openAtCursor(want);
+      }
       // THE COUNT DECIDES BEFORE LANDING, NOT AFTER. Landing first and then counting
       // decodes page one, then the whole chapter, then page one AGAIN -- three passes
       // where two will do, and the wasted one is the reason a small chapter felt as
@@ -252,6 +282,77 @@ bool ReaderScreen::openFirstPage() {
     return false;
   }
   return true;
+}
+
+Cursor ReaderScreen::currentCursor() const {
+  if (at_ < 0 || at_ >= static_cast<int>(starts_.size())) return Cursor{};
+  return starts_[static_cast<size_t>(at_)];
+}
+
+bool ReaderScreen::openAtCursor(Cursor want) {
+  // THE TOP OF THE CHAPTER IS NOT A WALK. It is also what a Rebound restore asks for
+  // (the book's bytes changed, so only the spine survived), so this is the common
+  // case rather than a corner of one.
+  if (want == Cursor{}) return openFirstPage();
+
+  starts_.clear();
+  indexComplete_ = false;
+  pb_.reset();
+  page_ = Page{};
+  if (body_ == nullptr || !chapter_.ok() || !chapter_.rewind()) return false;
+
+  PageBuilder pb(*body_, metrics_);
+  if (!pb.viable()) return false;
+  // Boundaries, not pages: the lines of every page before the target would be built
+  // and dropped. Same reason buildIndex counts this way.
+  pb.countOnly();
+
+  // The start of the page being filled, pushed once that page completes -- the same
+  // one-behind bookkeeping buildIndex does, and for the same reason.
+  Cursor pending = pb.pageStart();
+  Block b;
+  int i = 0;
+  bool found = false;
+  for (int guard = 0; guard < kMaxPages * 4 && !found; ++guard) {
+    if (!chapter_.next(b)) break;
+    pb.add(b, i++);
+    b = Block{};  // dropped: the whole point of streaming
+    while (pb.ready()) {
+      starts_.push_back(pending);
+      pb.take();
+      pending = pb.pageStart();
+      // `want` is on the page just recorded exactly when the NEXT page starts after
+      // it. Strictly after: a cursor EQUAL to the next page's start belongs to that
+      // next page, not to this one.
+      if (earlier(want, pending) || static_cast<int>(starts_.size()) >= kMaxPages) {
+        found = true;
+        break;
+      }
+    }
+  }
+
+  if (!found) {
+    // THE CHAPTER ENDED BEFORE THE CURSOR DID. A shorter chapter at the same path, or
+    // a record written against a shorter column so its block index runs past this
+    // layout's last block. The end of the chapter is the closest honest answer to
+    // "past the end of the chapter" -- and the whole chapter really was walked, so
+    // the count is known.
+    if (pb.pageHasContent() && static_cast<int>(starts_.size()) < kMaxPages)
+      starts_.push_back(pending);
+    pb.finish();
+    indexComplete_ = true;
+  }
+
+  if (starts_.empty()) {
+    // No pages at all: a cover or a title page. Nought is a KNOWN count, exactly as
+    // openFirstPage treats it.
+    indexComplete_ = true;
+    return false;
+  }
+  // The target is the last boundary recorded, in both branches: the loop stops having
+  // just pushed the page that holds the cursor, and the fallback stops having just
+  // pushed the chapter's last.
+  return seekTo(static_cast<int>(starts_.size()) - 1);
 }
 
 bool ReaderScreen::seekTo(int p) {

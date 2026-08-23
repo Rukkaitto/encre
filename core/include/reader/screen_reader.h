@@ -141,6 +141,26 @@ class ReaderScreen : public Screen {
   int pageIndex() const { return at_; }
   // Which spine entry is open, and how many there are.
   int chapterIndex() const { return chapterAt_; }
+
+  // WHERE THE READER IS, as the one thing worth saving: the start cursor of the page
+  // on screen. A page INDEX would be the obvious thing to store and it is the wrong
+  // thing -- page 7 is page 7 only at one type size and one column width, where a
+  // cursor names a block and a line of the document itself. See reading_position.h,
+  // which grades exactly that difference.
+  //
+  // {0, 0} when nothing is open, which is also the top of a chapter -- the caller
+  // cannot tell those apart from here and does not need to, because both mean "start
+  // this chapter at its beginning".
+  Cursor currentCursor() const;
+
+  // LAND HERE WHEN THE METRICS ARRIVE, instead of on page one. Restoring a saved
+  // reading position is the only caller.
+  //
+  // MUST BE CALLED BEFORE setMetrics, because setMetrics is the landing -- a
+  // constructor cannot do it (there is no column height yet) and after the landing
+  // it would be too late. The cursor is SPENT by the first chapter the walk lands
+  // on, so a spine entry reached by skipping an empty one gets page one.
+  void restoreAt(Cursor at) { startAt_ = at; }
   // How many bytes the open chapter inflates to -- what kEagerCountBytes is compared
   // against. Exposed so the shell can report which branch an open actually took;
   // without it the device cannot say, and the eager path has no log line of its own.
@@ -180,6 +200,15 @@ class ReaderScreen : public Screen {
   bool advance();
   // Lands on page one of the chapter already begun, without counting the rest of it.
   bool openFirstPage();
+  // Lands on the page CONTAINING `want`, recording every page boundary up to it.
+  //
+  // That walk is what makes the footer able to say which page this is: a cursor does
+  // not carry a page number, and the number is a count of the boundaries before it.
+  // It stops at the target rather than counting the whole chapter, so a restore
+  // costs a walk to the page being restored and not to the end of the book's longest
+  // chapter -- and the total then arrives in the quiet window exactly as it does for
+  // any other chapter.
+  bool openAtCursor(Cursor want);
   void syncVm();
 
   ChapterReader chapter_;
@@ -192,6 +221,11 @@ class ReaderScreen : public Screen {
   std::vector<Cursor> starts_;
   bool indexComplete_ = false;
   int at_ = 0;
+
+  // A restore target waiting for setMetrics, and cleared the moment it is used.
+  // Cursor{} means "no target", which is indistinguishable from "the top of the
+  // chapter" and correctly takes the cheaper path for both.
+  Cursor startAt_{};
 
   // The live position: a builder mid-chapter and the index of the next block to
   // feed it. Null when the stream is not positioned for a forward turn.

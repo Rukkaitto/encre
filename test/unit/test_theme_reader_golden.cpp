@@ -11,6 +11,7 @@
 #include "doctest.h"
 #include "golden.h"
 #include "ramp.h"
+#include "reader_fixture.h"
 #include "epub_fixtures.h"
 #include "fake_fs.h"
 #include "reader/book.h"
@@ -26,16 +27,13 @@
 
 namespace {
 
-// The body face at the board's `font-size: 32px`, with its bytes beside it: a
-// ScalableFont borrows the buffer it was initialised from and never copies it.
-struct Body {
-  std::vector<uint8_t> bytes = golden::slurp(std::string(ASSETS_DIR) + "/built/literata_body.ttf");
-  reader::ScalableFont face;
-  Body() {
-    REQUIRE(face.init(bytes.data(), bytes.size(), reader::kBodyPpem));
-    REQUIRE(face.ready());
-  }
-};
+// The fixtures live in reader_fixture.h -- see its header for why they moved out of
+// this file. Aliased so the cases below read exactly as they did.
+using readerfix::Body;
+using readerfix::deferredChapter;
+using readerfix::longChapter;
+using readerfix::pageText;
+using readerfix::Reading;
 
 }  // namespace
 
@@ -162,57 +160,9 @@ TEST_CASE("every page's lines are inside the column the theme reported") {
 
 namespace {
 
-// A chapter big enough to have real pagination, as XHTML so it goes through the
-// same tokenizer and block builder a card would feed.
-std::string longChapter(int paragraphs) {
-  std::string d = "<html><body><h1>Chapter One</h1>";
-  for (int i = 0; i < paragraphs; ++i) {
-    d += "<p>Paragraph " + std::to_string(i) +
-         " of a chapter long enough that its pages have to be found rather than "
-         "assumed, carrying an accent (caf&#233;) and an em dash &#8212; so the "
-         "decoder is exercised alongside the layout.</p>";
-  }
-  d += "</body></html>";
-  return d;
-}
 
-struct Reading {
-  ramp::Ramp ramp;
-  reader::QuietTheme theme;
-  Body body;
-  reader::PageMetrics m;
-  std::unique_ptr<reader::ReaderScreen> scr;
 
-  // `settled` completes the page index, which is what the device does within five
-  // seconds of a chapter opening -- so it is the state almost every test wants. Pass
-  // false to observe the moment a chapter opens, before the count is known.
-  explicit Reading(const std::string& xhtml, bool settled = true, int w = 480, int h = 800) {
-    theme.readerMetrics(w, h, ramp.fonts, body.face, m);
-    scr = std::make_unique<reader::ReaderScreen>(xhtml, "Middlemarch", "CH. 01", &body.face);
-    scr->setMetrics(m);
-    if (settled) scr->completeIndex();
-  }
-};
 
-std::string pageText(const reader::Page& p) {
-  std::string s;
-  for (const reader::LaidLine& ln : p.lines) s += ln.text + "|";
-  return s;
-}
-
-// A chapter big enough that its page count is DEFERRED rather than taken before the
-// first paint. Sized against the constant rather than a magic paragraph count, so it
-// stays a deferred chapter if the threshold ever moves.
-std::string deferredChapter() {
-  int paragraphs = 64;
-  std::string d = longChapter(paragraphs);
-  while (d.size() <= reader::ReaderScreen::kEagerCountBytes + 4096) {
-    paragraphs *= 2;
-    d = longChapter(paragraphs);
-    if (paragraphs > 8192) break;  // guard; never reached with any sane threshold
-  }
-  return d;
-}
 
 }  // namespace
 
