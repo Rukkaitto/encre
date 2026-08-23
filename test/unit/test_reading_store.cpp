@@ -1,9 +1,11 @@
 // Progress on the card: the sidecars, the pointer, and the write that must not be
 // fatal when it fails.
 #include <string>
+#include <vector>
 
 #include "doctest.h"
 #include "fake_fs.h"
+#include "reader/json.h"
 #include "reader/book.h"
 #include "reader/reading_store.h"
 
@@ -290,4 +292,73 @@ TEST_CASE("progress is bounded even when the inputs are not") {
   const int p = reader::progressPercent(b, 1, 999, 5);
   CHECK(p >= 0);
   CHECK(p <= 100);
+}
+
+// --- The progress index -------------------------------------------------------
+
+TEST_CASE("the progress index reads every started book in one pass") {
+  FakeFileSystem fs;
+  ReadingPosition a = pos("/books/a.epub", 3);
+  a.percent = 31;
+  ReadingPosition b = pos("/books/Classics/b.epub", 12);
+  b.percent = 6;
+  REQUIRE(reader::savePosition(fs, a) == SaveResult::Written);
+  REQUIRE(reader::savePosition(fs, b) == SaveResult::Written);
+
+  std::vector<reader::ProgressEntry> index;
+  REQUIRE(reader::loadProgressIndex(fs, index));
+  CHECK(index.size() == 2);
+  CHECK(reader::percentFor(index, "/books/a.epub") == 31);
+  CHECK(reader::percentFor(index, "/books/Classics/b.epub") == 6);
+  // NOT STARTED is -1, not 0: a book at 0% has been opened and a book that has not
+  // been opened reads NEW, and the Library draws those differently.
+  CHECK(reader::percentFor(index, "/books/never.epub") == -1);
+}
+
+TEST_CASE("a card nothing has been read on has an empty index, not a failure") {
+  // The normal state of every card until the first book is opened -- so an absent
+  // /.reader/state must not read as an error the Library has to handle.
+  FakeFileSystem fs;
+  std::vector<reader::ProgressEntry> index;
+  CHECK(reader::loadProgressIndex(fs, index));
+  CHECK(index.empty());
+}
+
+TEST_CASE("one corrupt record costs one book its percentage and no more") {
+  FakeFileSystem fs;
+  ReadingPosition good = pos("/books/good.epub");
+  good.percent = 77;
+  REQUIRE(reader::savePosition(fs, good) == SaveResult::Written);
+  // A save cut by a power loss, sitting in the same directory.
+  REQUIRE(fs.writeAll(reader::statePathFor("/books/torn.epub"), "{\n  \"path\": \"/bo"));
+
+  std::vector<reader::ProgressEntry> index;
+  REQUIRE(reader::loadProgressIndex(fs, index));
+  CHECK(reader::percentFor(index, "/books/good.epub") == 77);
+  CHECK(reader::percentFor(index, "/books/torn.epub") == -1);
+}
+
+TEST_CASE("the percentage survives the sidecar round trip") {
+  // It is stored rather than derived precisely so the Library need not open a book to
+  // learn it, so it had better come back.
+  ReadingPosition p = pos();
+  p.percent = 64;
+  ReadingPosition out;
+  REQUIRE(reader::parsePosition(reader::serialise(p), out));
+  CHECK(out.percent == 64);
+}
+
+TEST_CASE("a percentage outside 0..100 is clamped on the way in") {
+  // It is read straight onto a screen, and the file is hand-editable.
+  reader::JsonObject o;
+  o.setInt("version", reader::kPositionVersion);
+  o.setString("path", "/books/a.epub");
+  o.setInt("spine", 1);
+  o.setInt("percent", 900);
+  ReadingPosition out;
+  REQUIRE(reader::parsePosition(o.dump(), out));
+  CHECK(out.percent == 100);
+  o.setInt("percent", -3);
+  REQUIRE(reader::parsePosition(o.dump(), out));
+  CHECK(out.percent == 0);
 }

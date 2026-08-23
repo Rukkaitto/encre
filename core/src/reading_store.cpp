@@ -124,4 +124,36 @@ int progressPercent(const OpenedBook& book, int spine, int page, int pageTotal) 
   return pct > 100 ? 100 : static_cast<int>(pct);
 }
 
+bool loadProgressIndex(FileSystem& fs, std::vector<ProgressEntry>& out) {
+  out.clear();
+  std::vector<DirEntry> entries;
+  // AN ABSENT DIRECTORY IS AN EMPTY INDEX, not a failure: it is the state of a card
+  // nothing has been read on, which is every card until the first book is opened.
+  if (!fs.exists(kStateDir)) return true;
+  if (!fs.list(kStateDir, entries)) return false;
+
+  std::string path(kStateDir);
+  path += '/';
+  const size_t base = path.size();
+  for (const DirEntry& e : entries) {
+    if (e.isDir) continue;
+    path.resize(base);
+    path += e.name;
+    std::string text;
+    if (!fs.readAll(path, text)) continue;
+    ReadingPosition p;
+    // SKIPPED INDIVIDUALLY, never fatal. A truncated record -- a save cut by a power
+    // loss -- costs that one book its percentage and says nothing about the rest.
+    if (!parsePosition(text, p) || p.bookPath.empty()) continue;
+    out.push_back(ProgressEntry{p.bookPath, p.percent});
+  }
+  return true;
+}
+
+int percentFor(const std::vector<ProgressEntry>& index, std::string_view bookPath) {
+  for (const ProgressEntry& e : index)
+    if (e.bookPath == bookPath) return e.percent;
+  return -1;
+}
+
 }  // namespace reader

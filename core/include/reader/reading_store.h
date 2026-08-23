@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <vector>
 #include <string_view>
 
 #include "reader/book.h"
@@ -63,6 +64,40 @@ enum class SaveResult : uint8_t { Written, Unchanged, Failed };
 
 SaveResult savePosition(FileSystem& fs, const ReadingPosition& p);
 SaveResult saveLastRead(FileSystem& fs, const LastRead& l);
+
+// --- Every book that has been started ----------------------------------------
+//
+// design/Library.dc.html gives each row a percentage or `NEW`, and the Library header
+// recorded that the percentage "needs `/.reader/state/`, which has nothing to record
+// until the Reader exists". It does now, and this is how a whole screen's worth is
+// read at once.
+//
+// ONE LISTING PLUS ONE READ PER RECORD -- not per book on the card, which is the
+// whole reason it is shaped this way. `/.reader/state/` holds an entry for each book
+// that has been OPENED, so a card with 203 books and three of them started costs a
+// listing and three reads. Asking each book for its own sidecar instead would be 203
+// opens, most of them misses, on a screen that has to paint.
+//
+// It is also why ReadingPosition stores its percentage rather than deriving one: a
+// derived percentage needs the book's chapter byte layout, so it would mean opening
+// every started book's archive here.
+struct ProgressEntry {
+  std::string bookPath;
+  int percent = 0;
+};
+
+// False only if the directory could not be read at all -- an absent directory is an
+// empty index and a normal answer, because nothing has been read yet. Unparseable or
+// stale records are skipped individually rather than failing the lot.
+bool loadProgressIndex(FileSystem& fs, std::vector<ProgressEntry>& out);
+
+// The percentage recorded for `bookPath`, or -1 if the book has not been started.
+// Linear, because the index holds one entry per book READ and a card's started books
+// are few; if that ever stops being true this is the line to change.
+int percentFor(const std::vector<ProgressEntry>& index, std::string_view bookPath);
+
+// Where the sidecars live, which is what loadProgressIndex lists.
+inline constexpr const char* kStateDir = "/.reader/state";
 
 // Removes the pointer, for a book that is gone. Not the per-book sidecars: spec 4.0
 // says deleting a book "never erases reading progress", so a book that comes back

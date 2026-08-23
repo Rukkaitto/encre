@@ -1,5 +1,7 @@
 #include "reader/screen_library.h"
 
+#include "reader/reading_store.h"
+
 #include "reader/filesystem.h"
 #include "reader/text.h"  // upperAscii
 #include "reader/theme.h"
@@ -77,6 +79,11 @@ bool LibraryScreen::rescan() {
   if (fs_ != nullptr) {
     std::vector<BookEntry> entries;
     ok = BookList::scan(*fs_, path_, entries);
+    // Every book that has been opened, read once for the whole listing rather than
+    // once per row. An empty index is the normal state of a card nothing has been
+    // read on, so a failure here costs percentages and nothing else.
+    std::vector<ProgressEntry> started;
+    loadProgressIndex(*fs_, started);
     items_.reserve(entries.size());
     for (BookEntry& e : entries) {
       LibraryItem item;
@@ -88,7 +95,18 @@ bool LibraryScreen::rescan() {
       // full recursive walk of a card would be an unbounded cost on a screen
       // that has to paint.
       item.childBooks = dir ? BookList::countBooks(*fs_, join(e.name)) : -1;
-      item.progress = dir ? "" : kNewBook;
+      // A PERCENTAGE IF THE BOOK HAS BEEN STARTED, `NEW` if it has not.
+      //
+      // design/Library.dc.html gives rows both forms, and this header used to say
+      // "on the device today the author is blank and every book reads NEW" because a
+      // percentage needed `/.reader/state/` and there was nothing in it. There is
+      // now.
+      //
+      // The index is read ONCE per rescan, above -- one listing plus one read per
+      // book STARTED. Asking each row for its own sidecar would be one open per book
+      // on the card, most of them misses.
+      const int pct = dir ? -1 : percentFor(started, join(e.name));
+      item.progress = dir ? "" : (pct >= 0 ? std::to_string(pct) + "%" : kNewBook);
       item.entry = std::move(e);
       items_.push_back(std::move(item));
     }

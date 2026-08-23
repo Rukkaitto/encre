@@ -1574,6 +1574,39 @@ anything is drawn — Home confidently offering to continue a book that cannot b
 is worse than not offering. `HomeMissing.dc.html` is the boarded state for that case
 and is not built, so a stale pointer currently falls back to the nothing-open screen.
 
+**A WAKE CANNOT RESTORE THE READER WITHOUT ITS BOOK, and that is why sleeping on a
+page woke to the Library.** `App::restore` pushes the record's stack, the Reader's push
+goes through the factory, and the factory REFUSES a Reader with no book — deliberately,
+since falling through to the demo is how this device once woke into Middlemarch. So the
+restore correctly stopped short of a screen that could not be built. Nothing was wrong
+with the restore; the book had never been set.
+
+The shell now primes the factory from `last.json` before restoring, when the record
+names the Reader anywhere in its stack. **Two records, two jobs:** the session record
+says WHICH SCREENS and has never known about a book; the card says where in the book.
+`openBookAt(path, bytes, push)` is the one function both a button press and a wake go
+through — extracted precisely because they must agree, with `push` false for the wake
+because `App::restore` does the pushing.
+
+**EVERY BOOK READ `NEW` IN THE LIBRARY, and `screen_library.h` had already written down
+why:** "a real percentage needs `/.reader/state/`, which has nothing to record until the
+Reader exists". It does now. Two things had to change together:
+
+- **The sidecar STORES its percentage.** Derived data in a record is usually a smell and
+  this is the exception that earns itself: recovering it needs the book's chapter byte
+  layout, so the Library would have to OPEN every started book's archive to draw a
+  column of numbers. It is exact when written and goes stale only if the book changes —
+  which `bookBytes` already detects, and which drops the position anyway.
+- **`loadProgressIndex` reads the whole directory once.** One listing plus one read per
+  book STARTED — not per book on the card, which is the point: 203 books with three
+  started costs a listing and three reads, where asking each row for its own sidecar
+  would be 203 opens, most of them misses, on a screen that has to paint. A corrupt
+  record is skipped individually, so a save cut by a power loss costs one book its
+  percentage and nothing else.
+
+`percentFor` returns **-1 for "not started", not 0**: a book at 0% has been opened and
+one that has not reads `NEW`, and the board draws those differently.
+
 **HOME'S TITLE WRAPS, AND IT USED TO ELIDE.** The board said `text-overflow:
 ellipsis` and the device showed a truncated book name on the one screen whose whole
 job is to name the book being read — where an ellipsis on a *list row* hides only
