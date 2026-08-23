@@ -42,7 +42,22 @@
     <div class="dither-dots" style="width: 112px; height: 168px; border: 2px solid #000000; box-sizing: border-box; flex-shrink: 0;"></div>
     <div style="display: flex; flex-direction: column; justify-content: flex-start; gap: 22px; flex-grow: 1; padding: 2px 0;">
       <div style="display: flex; flex-direction: column; gap: 5px;">
-        <div style="font-size: var(--t-title); font-weight: 700; line-height: 1.05; text-transform: uppercase;">Walden</div>
+                <!-- IT WRAPS, and it used to elide. `text-overflow: ellipsis` with
+             `white-space: nowrap` hid the end of any real book's name: the device
+             showed a truncated title on the one screen whose whole job is to name
+             the book you are reading, and the name is the content there.
+
+             This is BookDetails.dc.html's rule, for BookDetails' reason -- an
+             ellipsis on a LIST ROW hides only which of seven rows this is, and here
+             it hides the thing the screen exists to say. `overflow-wrap: anywhere`
+             because the break has to be allowed inside a word: a title falling back
+             to a filename is usually one word, and CSS offers no break opportunity
+             at an underscore or a hyphen.
+
+             THE WRAP IS BOUNDED and the block below it does not move: the progress
+             bar, CONTINUE, the menu and the hint bar are fixed, so the NAME yields.
+             The bound is derived from the box model in renderHome, not pinned here. -->
+        <div style="font-size: var(--t-title); font-weight: 700; line-height: 1.05; text-transform: uppercase; overflow-wrap: anywhere;">Walden</div>
         <div style="font-size: var(--t-body);">Henry David Thoreau</div>
       </div>
       <div style="display: flex; flex-direction: column; gap: 4px;">

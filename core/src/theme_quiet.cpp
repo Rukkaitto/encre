@@ -209,14 +209,66 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   // presentation decision, so the theme applies it rather than the view-model
   // carrying a pre-shouted string.
   //
-  // And it truncates, per the board's own `text-overflow: ellipsis`: the stats
-  // column is the row's last flex item, so what the title has is everything from
-  // the column's left edge to the screen margin. Derived from the box model and
-  // not pinned, which is what keeps it right on both panels -- 304px on the X4
-  // and 352 on the X3.
-  drawTextElided(fb, title, rightX, baselineIn(title, ry, kTitleLineH), upperAscii(vm.title),
-                 fb.width() - kMargin - rightX, Ink::Black, {}, plane);
-  ry += kTitleLineH + kTitleAuthorGap;
+  // IT WRAPS, AND IT USED TO ELIDE. The board now says `overflow-wrap: anywhere`
+  // where it said `text-overflow: ellipsis` -- and the reason is BookDetails'
+  // reason: an ellipsis on a list ROW hides only which of seven rows this is, and
+  // here it hides the thing the screen exists to say. The device showed a truncated
+  // name on the one screen whose whole job is to name the book being read.
+  //
+  // `WordBreak::Anywhere` because the break has to be allowed inside a word: a
+  // title that fell back to a filename is usually one word, and there is no break
+  // opportunity at an underscore or a hyphen.
+  //
+  // The column is everything from its left edge to the screen margin -- derived,
+  // not pinned, which is what keeps it right on both panels (304px on the X4, 352
+  // on the X3).
+  const int titleW = fb.width() - kMargin - rightX;
+
+  // THE WRAP IS BOUNDED, and the bound is DERIVED the way Book details derives its
+  // own: everything below this block is fixed -- the progress bar, CONTINUE, the
+  // menu and the hint bar -- so the NAME is what yields. Room for the block is the
+  // canvas less the band and this block's top padding, less the bar and the slab
+  // with their gaps, less the bottom-anchored menu and bar. The column's other runs
+  // are fixed; what is left, over the title's line box, is how many lines it may
+  // have.
+  //
+  // A constant here would be a second copy of three other boxes' models, and it
+  // would be wrong the first time any of them changed.
+  const int belowBlock = kBlockGap + kBarH + kBlockGap + kBlockH;
+  const int bottomAnchored =
+      hintBarHeight(fonts, homeHints) + static_cast<int>(vm.menu.size()) * kRowH;
+  const int blockRoom = fb.height() - y - belowBlock - bottomAnchored;
+  // Both of the board's 2px column paddings, the two gaps, and the three runs that
+  // are not the title.
+  const int columnFixedH = 2 * kColPadTop + kTitleAuthorGap + body.lineHeight() + kGroupGap +
+                           kDisplayLineH + kMetaGap + meta.lineHeight();
+  int maxTitleLines = (blockRoom - columnFixedH) / kTitleLineH;
+  if (maxTitleLines < 1) maxTitleLines = 1;
+
+  // The board's `line-height: 1.05`, passed as a LEAD rather than an em multiple:
+  // 1.05 is the board's number and 44 is what it resolves to, and wrapProseLead is
+  // the form that takes a line box the board tightened by hand.
+  //
+  // Casing is applied before the wrap, not after: the caps run is wider than the
+  // mixed-case one, so wrapping the original would break in the wrong places.
+  // THE SHOUTED STRING IS NAMED, and it has to be: `Prose::lines` are string_VIEWS
+  // into the text handed to the wrap, "which must outlive the Prose" (components.h
+  // says so). Passing `upperAscii(vm.title)` inline made that text a temporary that
+  // died at the end of the expression, and drawProse then read freed memory -- which
+  // rendered as a column of notdef boxes for a title long enough to wrap, and
+  // rendered CORRECTLY for a short one, because the freed bytes were still there.
+  // Silently right in the case every golden covers.
+  const std::string shouted = upperAscii(vm.title);
+  std::string titleTail;
+  Prose titleProse =
+      wrapProseLead(title, shouted, titleW, pxToF26(kTitleLineH), {}, WordBreak::Anywhere);
+  clampProse(title, titleProse, maxTitleLines, titleW, titleTail);
+  // One line is bit-identical to the drawText this replaced: drawProse's first
+  // baseline is baselineInF26(font, pxToF26(ry), pxToF26(kTitleLineH)), which is
+  // baselineIn's own definition -- so an ordinary short title moves nothing.
+  ry += f26ToPx(drawProse(fb, title, titleProse, rightX, titleW, pxToF26(ry), Ink::Black, plane,
+                          ProseAlign::Left));
+  ry += kTitleAuthorGap;
 
   drawText(fb, body, rightX, baselineIn(body, ry, body.lineHeight()), vm.author, Ink::Black, {},
            plane);
@@ -276,18 +328,13 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   drawIcon(fb, mark, kMargin + barW - kBlockPadX - mark.w, iconTopIn(y, kBlockH, mark.h), cink,
            plane);
 
-  // The ring comes from the view model, not from this function: a slot shows a
-  // hold mark if and only if the screen bound a long-press to that button.
-  Hint hints[4];
-  buildHints(kHomeMarks, vm.hints, vm.holds, hints);
-
   // Menu rows sit above the hint bar, so the bar's height decides where they
   // start. That height is the bar's to compute -- from its own padding and its
   // own content -- and asking it is what keeps this stacking correct when a
   // screen sets its hints in a larger role or pairs them with a taller mark. A
   // constant here would be a second, private copy of the bar's box model.
   const int menuTop =
-      fb.height() - hintBarHeight(fonts, hints) - static_cast<int>(vm.menu.size()) * kRowH;
+      fb.height() - hintBarHeight(fonts, homeHints) - static_cast<int>(vm.menu.size()) * kRowH;
   for (size_t i = 0; i < vm.menu.size(); ++i) {
     // A row states a quantity or discloses a screen, never both: the design gives
     // LIBRARY its count and SETTINGS a chevron. Keying the mark on an absent
@@ -299,7 +346,7 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
             plane);
   }
 
-  drawHintBar(fb, fonts, hints, plane);
+  drawHintBar(fb, fonts, homeHints, plane);
 }
 
 void QuietTheme::renderSdMissing(Framebuffer& fb, const FontSet& fonts,
