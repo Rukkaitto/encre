@@ -58,21 +58,42 @@ class GlyphSource;
 class ReaderScreen : public Screen {
  public:
   // COUNT A CHAPTER'S PAGES BEFORE THE FIRST PAINT IF IT IS THIS SMALL, and defer
-  // otherwise. The number comes from two measurements on this device.
+  // otherwise. THE NUMBER IS MEASURED ON THE PANEL, and the first version of it was
+  // not -- it was 64 KB, derived from a desktop figure times a remembered ratio, and
+  // the device then priced a 33 KB chapter at 484 ms where that model predicted 60.
   //
-  // Counting costs ~1.79 ms a KB of inflated XHTML (41.1 us/page desktop over 7,968
-  // real pages, at this project's ~37x device ratio). So 64 KB is at most ~114 ms --
-  // under a fifth of a ~570 ms page turn, and below the run-to-run spread of the
-  // render figures themselves.
+  // The desktop figure was right: 41.1 us/page, and this chapter's count pass really
+  // is 1.7-1.9 ms there. THE RATIO WAS WRONG. 37x came from a render measurement, and
+  // this path is not render-bound -- it is SD reads through SdFat on the display's SPI
+  // bus, plus an inflate on a part with no FPU, neither of which the desktop does at
+  // all. Against 3.5 ms of desktop work for two passes the device spent 484 ms: ~135x.
   //
-  // What it buys: over a real book's 92 spine entries, 63% are under 64 KB and get
-  // their total the moment the page appears. Median is 53 KB.
+  // So the constant is stated in device milliseconds per KB, from the panel:
+  //
+  //   484 ms / 32.7 KB = 14.8 ms/KB for the TWO-pass eager open (count, then seek
+  //   back to page one). That is ~7.2 ms/KB a pass, which independently matches the
+  //   ~545 ms this project measured counting a long chapter.
+  //
+  // At that price 64 KB is 932 ms -- 163% of a ~570 ms page turn, so the eager count
+  // cost MORE than the turn it was meant to hide inside. That is the 1.14 s crossing
+  // this whole design exists to avoid, reintroduced at a smaller size.
+  //
+  // 8 KB is 118 ms, ~21% of a turn, which is the budget the threshold was always
+  // supposed to buy. It covers 14% of a real book's 92 chapters -- the front matter a
+  // reader lands on when they open the book, where a six-page chapter reading "1 / -"
+  // looks like a defect. The median chapter is 53 KB and gets the dash, as designed.
+  //
+  // TWO PASSES IS INHERENT, not slop. One pass ends at the chapter's END, and a
+  // forward turn needs the builder live just after page one -- so the content and the
+  // stream position cannot both come from the same walk. Counting on a second
+  // ChapterReader would buy one pass for another 32 KB window, against a 45,840-byte
+  // heap floor.
   //
   // BOUNDED BY BYTES, NOT BY A PAGE BUDGET, because the bytes are known BEFORE any
   // work is done -- the central directory said so. A page budget would spend the
   // whole budget on a long chapter and then still have no total, which is the worst
   // of both.
-  static constexpr uint32_t kEagerCountBytes = 64u * 1024u;
+  static constexpr uint32_t kEagerCountBytes = 8u * 1024u;
 
   // A BOOK, not a chapter. `fs` and `body` must outlive the screen.
   //

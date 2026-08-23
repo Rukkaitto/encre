@@ -1221,16 +1221,41 @@ a time as pages are passed. Three consequences, each load-bearing:
 **A SMALL CHAPTER IS COUNTED BEFORE ITS FIRST PAINT, and a big one is not.** Folding
 the count into the refinement made a **four-page chapter take four seconds** to show
 its total — the refinement's 5 s window is sized for an expensive cosmetic repaint,
-and counting is neither. Two measurements set the threshold:
+and counting is neither.
 
-- Counting costs **~1.79 ms a KB** of inflated XHTML (41.1 µs/page on the desktop
-  over 7,968 real pages, at this project's ~37× device ratio).
-- Over a real book's 92 spine entries the median is 53 KB and **63% are under 64 KB**.
+`ReaderScreen::kEagerCountBytes` is **8 KB**, and the number is measured **on the
+panel**. It was first set to 64 KB from a desktop figure times a remembered ratio, and
+that was wrong by 8×:
 
-So `ReaderScreen::kEagerCountBytes` is 64 KB: at most ~114 ms, under a fifth of a
-~570 ms page turn and below the run-to-run spread of the render figures. **Bounded by
-bytes, not by a page budget** — the bytes are known before any work is done, where a
-page budget would spend itself on a long chapter and still have no total.
+- **The desktop figure was right** — 41.1 µs/page, and a 33 KB chapter's count pass
+  really is 1.7–1.9 ms there.
+- **THE RATIO WAS WRONG.** 37× came from a *render* measurement. This path is not
+  render-bound: it is SD reads through SdFat on the display's SPI bus plus an inflate
+  on a part with no FPU, and **the desktop does neither**. Against 3.5 ms of desktop
+  work for two passes the device spent **484 ms** — ~135×.
+- So the constant is device milliseconds per KB: **14.8 ms/KB for the two-pass eager
+  open**, ~7.2 ms/KB a pass, which independently matches the ~545 ms this project
+  measured counting a long chapter.
+
+At that price **64 KB is 932 ms — 163% of a ~570 ms page turn**, so the eager count
+cost more than the turn it was hiding inside: the 1.14 s crossing this design exists
+to avoid, reintroduced at a smaller size. 8 KB is 118 ms, ~21% of a turn, and covers
+14% of a real book's 92 chapters — the front matter a reader lands on, where a
+six-page chapter reading `1 / —` looks like a defect. The median chapter is 53 KB and
+gets the dash, as designed. **Bounded by bytes, not by a page budget** — the bytes are
+known before any work is done, where a page budget would spend itself on a long
+chapter and still have no total.
+
+**TWO PASSES IS INHERENT here, not slop.** One pass ends at the chapter's END, and a
+forward turn needs the builder live just after page one — the content and the stream
+position cannot both come from one walk. Counting on a second `ChapterReader` would
+buy one pass for another 32 KB window against a 45,840-byte floor.
+
+**AND THE LESSON GENERALISES: THIS FILE'S ~37× RATIO IS A RENDER RATIO.** It is quoted
+in "What the desktop measures" for cold page draws, where it holds. Applying it to
+anything that touches the card or the inflater underestimates by ~4×. The paragraph
+below already says the pagination walk "is the part with no desktop analogue worth
+trusting"; this is what ignoring that costs.
 
 A chapter over the threshold is counted in a quiet window of its own,
 `kCountQuietMs` = 1200 ms, **and does not repaint**: counting changes one number in
