@@ -1,0 +1,147 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+  </style>
+</helmet>
+
+<!-- HOME WITH BOOKS ON THE CARD AND NONE OF THEM OPEN.
+
+     The third Home state, and the last one to get a board. Main.dc.html has a
+     reading position to show; HomeEmpty.dc.html has no books at all; this is the
+     gap between them, which is what a device looks like from the moment the user
+     copies books onto the card until the moment they open one. Nothing had
+     described it, so the firmware filled the CONTINUE block with demo fiction and
+     showed a stranger's Middlemarch at 6% on a card that has never been read.
+
+     IT IS HomeEmpty's SHAPE, NOT A NEW ONE, and that is deliberate rather than
+     lazy. The reading column and the CONTINUE slab both say "here is where you
+     were", and there is no answer to that yet -- so the honest screen is the one
+     that has no reading column, which HomeEmpty already is. The view model's flag
+     is even called `libraryEmpty` while its own comment calls the concept NOTHING
+     TO CONTINUE: two copies through one mechanism, not two mechanisms.
+
+     WHAT DIFFERS FROM HomeEmpty, and it is only three things:
+       * the title and the sentence -- a different state needs different words;
+       * the LIBRARY row shows the real COUNT where HomeEmpty shows `EMPTY`, which
+         is the whole distinction the user can act on: there are books, go look;
+       * nothing else. Same band, same 112px mark, same focused first row, same
+         dead first hint slot.
+
+     WHY NOT OFFER A BOOK HERE. The obvious alternative was to keep the reading
+     column, fill it with some book and change CONTINUE to START. It was rejected on
+     two counts. There is no non-arbitrary book to pick: nothing has been opened, so
+     there is no most-recent, and FileSystem carries no timestamps so there is no
+     newest either -- alphabetical order is the only order available and it is not a
+     recommendation. And three of the block's five fields (the 67px percentage, the
+     page counter, the progress bar) exist only to describe progress, so they would
+     all blank at once, which reads as a broken screen rather than a fresh one. -->
+
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
+
+  <!-- NO `NOW READING` LABEL AND NO BOTTOM RULE, exactly as HomeEmpty. The band on
+       Main.dc.html titles the reading column beneath it; with no column the label
+       would title nothing and the rule would divide nothing from nothing. What is
+       left is the battery, which is true on every screen. -->
+  <div style="display: flex; justify-content: flex-end; align-items: center; gap: 7px; padding: 18px 24px 0 24px;">
+    <div style="font-size: var(--t-value); font-weight: 700;">87%</div>
+    <svg width="38" height="21" viewBox="0 0 22 12" fill="none"><rect x="0.5" y="0.5" width="18" height="11" stroke="#000000"></rect><rect x="2" y="2" width="14" height="8" fill="#000000"></rect><rect x="19.5" y="3.5" width="2" height="5" fill="#000000"></rect></svg>
+  </div>
+
+  <div style="display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 44px 24px 0 24px; flex-shrink: 1; min-height: 0; overflow: hidden; text-align: center;">
+    <!-- `kBookLarge`, the 112px second asset of the same drawing as the 25px
+         `kBook` in the hint bar -- these are pre-rendered bitmaps and there is no
+         scaling one up. It already exists for HomeEmpty, so this board adds no
+         asset. -->
+    <svg width="112" height="112" viewBox="0 0 16 16" fill="none"><path d="M8 3.2C6.6 2 4.3 1.7 2 2v11c2.3-.3 4.6 0 6 1.2 1.4-1.2 3.7-1.5 6-1.2V2c-2.3-.3-4.6 0-6 1.2z" stroke="#000000" stroke-width="0.9"></path><path d="M8 3.2v11" stroke="#000000" stroke-width="0.9"></path></svg>
+
+    <!-- ON THE RAMP at `--t-title`, and untracked, for the reason HomeEmpty's
+         title records: Title700 is drawn untracked everywhere else it appears, and
+         a size off the ramp is a new 15-20 KB asset. Parallel in form to
+         `NO BOOKS YET` because they are the same kind of statement about a
+         different fact. -->
+    <div style="font-size: var(--t-title); font-weight: 700;">NOTHING OPEN YET</div>
+
+    <!-- ONE SENTENCE, and it points at the row below rather than at a control this
+         screen does not have. HomeEmpty has to explain something the device cannot
+         do for you (get books onto the card); this only has to say where to go, and
+         the place to go is focused and one press away.
+
+         `max-width: 400px` is HomeEmpty's number and this copy is shorter than
+         HomeEmpty's, so it should wrap no wider. IT IS STILL A NUMBER TO CHECK IN
+         BOTH ENGINES: the firmware's autohinted faces have whole-pixel advances and
+         measure wide, which is why SdMissing's board says 420 where Chrome only
+         needed 400. Verify against the render before trusting this. -->
+    <div style="font-size: var(--t-body); line-height: 1.55; max-width: 400px;">Choose a book from your library to start reading.</div>
+  </div>
+
+  <!-- MAIN'S MENU, unchanged in style. HomeEmpty's copy of this had drifted into an
+       older revision of Home's menu once already -- sentence case at `--t-value`
+       with a `border-bottom` -- so it is worth saying explicitly that this is
+       `--t-label` caps at 0.18em with a `border-top`, and that the only thing this
+       board changes about it is the value. -->
+  <div style="display: flex; flex-direction: column; margin-top: auto;">
+    <!-- FOCUSED, because the hint bar says SELECT and something has to be selected
+         for it to select. Home's focus lives on the CONTINUE block (-1) and there is
+         no CONTINUE block here, so it falls to the first row that does anything --
+         which is also the row this screen is telling the user to press.
+
+         IT KEEPS ITS `border-top`, invisible against the fill and load-bearing: an
+         unfocused row is 80px plus a 1px rule, so dropping the rule would make the
+         focused one 80px and the menu's total height would depend on whether a row
+         was focused -- stepping the whole block a pixel the moment focus entered it.
+         Black on black costs nothing and holds the pitch at 81. -->
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000; background: #000000; color: #ffffff;">
+      <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">LIBRARY</div>
+      <!-- THE COUNT, which is the one fact separating this screen from HomeEmpty's
+           `EMPTY`. A user looking at "NOTHING OPEN YET" needs to know the books are
+           there; this is where they find out. -->
+      <div style="font-size: var(--t-value); font-weight: 700;">12</div>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000;">
+      <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">SETTINGS</div>
+      <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
+    </div>
+  </div>
+
+  <!-- THE FIRST SLOT IS A DEAD 36px, not a READ hint. Main.dc.html binds READ there
+       because there is a book to resume; there is not one here, and a bar promising
+       a button the screen does not use is worse than one promising nothing. The 36px
+       is the boards' own width for a dead slot and `space-between` divides the
+       leftover around it -- measuring it as zero would move SELECT, UP and DOWN. -->
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
+  <div style="width: 36px;"></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">SELECT</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">UP</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M4 9l4 4 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">DOWN</div></div>
+</div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
