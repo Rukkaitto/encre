@@ -43,6 +43,7 @@
 #include "reader/screen_reader.h"
 #include "reader/layout.h"
 #include "reader/scalablefont.h"
+#include "reader/reading_store.h"
 #include "reader/screens.h"
 #include "reader/session_record.h"
 #include "reader/settings.h"
@@ -324,6 +325,21 @@ static bool gSdBeganOnce = false;
 // answer different questions -- "did the hardware ever come up this boot" versus
 // "is the card usable right now" -- and the RETRY path needs both.
 static bool gStorageUsable = false;
+
+// WHAT A POSITION SAVE NEEDS ABOUT THE OPEN BOOK, captured when it was opened.
+//
+// The ReaderScreen knows where the reader IS but not what the book is called or how
+// big its file is, and openBook's result is released back to the factory -- so the
+// few facts a sidecar and the Home pointer need are kept here rather than re-read
+// off the card at save time. `bytes` is the EPUB's file size, which is the staleness
+// check: see ReadingPosition::bookBytes for why that and not a checksum.
+static struct {
+  std::string path;
+  std::string title;
+  std::string author;
+  uint32_t bytes = 0;
+  bool open = false;
+} gReading;
 
 // Bring-up instrumentation. Serial here is native USB CDC, so the port
 // re-enumerates when the app starts and anything printed in the first second is
@@ -828,17 +844,11 @@ static reader::HomeViewModel homeVmForCard() {
   // advice about a card the device cannot see. They keep the ordinary Home, whose
   // LIBRARY row shows a blank count, and the SD-missing screen handles the case
   // where the card really has gone.
-  // THREE STATES, AND NONE OF THEM IS demoHomeVm's MIDDLEMARCH. That is what this
-  // line used to choose for any card with books on it, so a device that had never
-  // opened a book showed a stranger's novel at 6% -- fiction presented as the
-  // user's reading position, the same defect class as the Reader factory falling
-  // through to demo content on a session restore.
-  //
-  // `demoHomeUnopenedVm` is correct UNCONDITIONALLY today, because nothing yet
-  // persists a reading position: there is no book in progress on any card. When
-  // progress persistence lands, the third branch appears HERE -- a real book's
-  // title, author and percent in the reading column -- and this becomes the
-  // fallback for "books, but none of them started".
+  // THREE STATES, AND NONE OF THEM IS demoHomeVm's MIDDLEMARCH. This line used to
+  // choose that for any card with books on it, so a device that had never opened a
+  // book showed a stranger's novel at 6% -- fiction presented as the user's reading
+  // position, the same defect class as the Reader factory falling through to demo
+  // content on a session restore.
   reader::HomeViewModel vm =
       books == 0 ? reader::demoHomeEmptyVm() : reader::demoHomeUnopenedVm();
   if (books == 0) {
@@ -938,6 +948,52 @@ static reader::HomeViewModel homeVmForCard() {
   // Library, so row 0 is the row to patch. Guarded anyway: an empty menu here
   // would be a change in the shared catalogue, and indexing into it would be a
   // crash rather than a wrong label.
+  // THE READING COLUMN, from the card's own pointer.
+  //
+  // Everything it draws comes out of /.reader/last.json, which the reader wrote on
+  // the way out of the book -- so nothing here opens an EPUB. Doing it properly
+  // would mean a central directory and an OPF parse at boot, ~100 ms and ~32 KB of
+  // transient, for a block the user may not be looking at.
+  //
+  // THE POINTER IS CHECKED AGAINST THE CARD, not trusted. A book deleted on a
+  // computer, or a different card in the slot, leaves a pointer naming something
+  // that is not there -- and drawing it would be Home confidently offering to
+  // continue a book that cannot be opened. `exists` is one cheap call and it is the
+  // whole check. (design/HomeMissing.dc.html is the state that shows the last book
+  // WITH a warning; it is boarded and not built, so for now a stale pointer falls
+  // back to the nothing-open screen, which is honest if less informative.)
+  if (books > 0 && gStorageUsable) {
+    reader::LastRead last;
+    if (reader::loadLastRead(gSd, last)) {
+      if (!gSd.exists(last.bookPath)) {
+        Serial.printf("[progress] the last book is gone from the card: %s\n",
+                      last.bookPath.c_str());
+      } else {
+        vm = reader::demoHomeVm();     // the reading-column shape, then every field
+        vm.nothingToContinue = false;  // ...replaced, because none of it is this book
+        vm.title = last.title.empty() ? last.bookPath : last.title;
+        vm.author = last.author;
+        vm.percent = last.percent;
+        // THE BOARD'S COUNTER: spine position of spine count, which is what
+        // Main.dc.html draws now -- a page counter for the book would mean
+        // paginating all of it. A book whose count is unknown says just the
+        // position rather than inventing a total.
+        char label[24];
+        if (last.spineCount > 0)
+          std::snprintf(label, sizeof(label), "CH. %02d OF %d", last.spine + 1,
+                        last.spineCount);
+        else
+          std::snprintf(label, sizeof(label), "CH. %02d", last.spine + 1);
+        vm.chapterLabel = label;
+        vm.focusedMenuIndex = -1;  // the CONTINUE block, which exists again
+        vm.hints = {"READ", "SELECT", "UP", "DOWN"};
+        Serial.printf("[progress] Home continues \"%s\" at %d%%, spine %d of %d\n",
+                      vm.title.c_str(), last.percent, last.spine + 1, last.spineCount);
+      }
+      Serial.flush();
+    }
+  }
+
   const bool patched = !vm.menu.empty() && books >= 0;
   if (!vm.menu.empty()) vm.menu[0].value = books >= 0 ? std::to_string(books) : std::string();
   // `patched`, not `books >= 0`: the guard above exists because an empty menu
@@ -1118,6 +1174,65 @@ static void buildSdMissingApp() {
 // appears" or "the log says why". Repainting the Library would cost a full refresh
 // to show an unchanged screen; a Push of an error screen is design/BookError.dc.html
 // and is not built.
+// SAVE WHERE THE READER IS, to the card, if a book is open.
+//
+// Called on the three edges that change the answer: leaving the book, crossing into
+// another chapter, and going to sleep. NOT on every page turn -- a turn is ~570 ms
+// of panel and a card write on top of each one would be felt, and the three edges
+// above already bound how much reading a power cut can lose to one chapter.
+//
+// A FAILURE HERE IS LOGGED AND NOTHING ELSE, which is the one hazard in this whole
+// feature. A card can be readable and refuse writes -- a physical write-protect tab
+// does exactly that -- and writeAll calls noteCardGone() when a write it had already
+// opened goes wrong, which pollCardPresence turns into an App rooted at
+// SdMissingScreen. So treating a failed save as an error to act on would throw the
+// reader out of a book they can still perfectly well read. There is nothing to do
+// about it and nothing worth telling the user, so it goes in the log and the reader
+// keeps reading.
+static void saveReadingPosition(const char* why) {
+  if (!gReading.open || gApp == nullptr) return;
+  if (gApp->top().id() != reader::ScreenId::Reader) return;
+  const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
+
+  reader::ReadingPosition p;
+  p.bookPath = gReading.path;
+  p.spine = rd->chapterIndex();
+  const reader::Cursor at = rd->currentCursor();
+  p.block = at.block;
+  p.line = at.line;
+  p.bookBytes = gReading.bytes;
+  // THE GEOMETRY THE LINE WAS MEASURED AT, which is what makes `line` reusable or
+  // not. Read from the live metrics rather than assumed, so a future type-size
+  // setting invalidates exactly the field it should.
+  p.ppem = reader::kBodyPpem;
+  p.columnW = gFactory.readerMetrics().columnW;
+
+  reader::LastRead last;
+  last.bookPath = gReading.path;
+  last.title = gReading.title;
+  last.author = gReading.author;
+  last.spine = rd->chapterIndex();
+  last.spineCount = rd->chapterCount();
+  // By BYTES through the book, because a page-based percentage would need every
+  // chapter counted -- ~49 s of decode on this device. See progressPercent.
+  last.percent = reader::progressPercent(gFactory.readerBook(), rd->chapterIndex(),
+                                         rd->vm().page, rd->vm().pageTotal);
+
+  const reader::SaveResult a = reader::savePosition(gSd, p);
+  const reader::SaveResult b = reader::saveLastRead(gSd, last);
+  // NOT NAMED `word`: Arduino.h defines word(...) as a macro over makeWord, so a
+  // lambda by that name compiles on the desktop and fails only in the firmware.
+  const auto outcome = [](reader::SaveResult r) {
+    return r == reader::SaveResult::Written ? "written"
+           : r == reader::SaveResult::Unchanged ? "unchanged" : "FAILED";
+  };
+  // Logged at every outcome including `unchanged`, because "the save did nothing"
+  // and "the save did not happen" look identical on a device and are not the same.
+  Serial.printf("[progress] %s: spine=%d block=%d line=%d %d%% -- position %s, pointer %s\n", why,
+                p.spine, p.block, p.line, last.percent, outcome(a), outcome(b));
+  Serial.flush();
+}
+
 // WHAT OPENING THIS CHAPTER COST, AND WHICH BRANCH TOOK IT. A chapter under
 // kEagerCountBytes is counted before its first paint and a larger one is not, and
 // only the deferred side had a log line -- so a report of "no dash, and the page is
@@ -1132,22 +1247,52 @@ static void logChapterOpen(const reader::ReaderScreen* rd, uint32_t elapsedMs) {
 static void handleOpen() {
   gApp->clearOpenRequest();  // first, so a book that refuses does not re-fire
 
-  reader::LibraryScreen* lib = gFactory.library();
-  if (lib == nullptr) {
-    Serial.println("[open] no Library to ask");
-    return;
+  // TWO SCREENS CAN ASK TO OPEN A BOOK, and they mean different books. The Library
+  // means the row it has selected; Home's CONTINUE means the one the card's pointer
+  // names. Action::Kind::Open carries no path -- deliberately, since core/ does no
+  // storage -- so resolving it is this function's job.
+  std::string path;
+  uint32_t bookBytes = 0;
+  if (gApp->top().id() == reader::ScreenId::Home) {
+    reader::LastRead last;
+    if (!reader::loadLastRead(gSd, last)) {
+      Serial.println("[open] CONTINUE with no saved book");
+      return;
+    }
+    // Checked again here, not just when Home was built: the card can have changed in
+    // between, and openBook would fail less clearly.
+    if (!gSd.exists(last.bookPath)) {
+      Serial.printf("[open] CONTINUE names a book that is gone: %s\n", last.bookPath.c_str());
+      return;
+    }
+    path = last.bookPath;
+  } else {
+    reader::LibraryScreen* lib = gFactory.library();
+    if (lib == nullptr) {
+      Serial.println("[open] no Library to ask");
+      return;
+    }
+    const reader::LibraryItem* item = lib->focusedItem();
+    if (item == nullptr || item->entry.isDir) {
+      Serial.println("[open] nothing selected, or a folder");
+      return;
+    }
+    // BookEntry::name is a leaf name and never a path (booklist.h), so the path is
+    // the Library's current directory joined with it -- which is also why this
+    // cannot live in core/: only the Library knows where it has descended to.
+    path = lib->path();
+    if (path.empty() || path.back() != '/') path += '/';
+    path += item->entry.name;
+    bookBytes = item->entry.size;
   }
-  const reader::LibraryItem* item = lib->focusedItem();
-  if (item == nullptr || item->entry.isDir) {
-    Serial.println("[open] nothing selected, or a folder");
-    return;
+  // THE FILE'S SIZE IS THE STALENESS CHECK for a saved position, so it has to be
+  // known on both paths. The Library already listed it; the CONTINUE path opens the
+  // handle for it, which is one ~100-byte allocation dropped immediately -- cheaper
+  // than a directory listing, and openBook is about to open the file anyway.
+  if (bookBytes == 0) {
+    std::unique_ptr<reader::FileHandle> h = gSd.openRead(path);
+    if (h != nullptr) bookBytes = h->size();
   }
-  // BookEntry::name is a leaf name and never a path (booklist.h), so the path is
-  // the Library's current directory joined with it -- which is also why this
-  // cannot live in core/: only the Library knows where it has descended to.
-  std::string path = lib->path();
-  if (path.empty() || path.back() != '/') path += '/';
-  path += item->entry.name;
 
   const uint32_t t0 = millis();
   const uint32_t heapBefore = ESP.getFreeHeap();
@@ -1181,7 +1326,38 @@ static void handleOpen() {
   // THE BOOK, not one chapter: the reader pages between spine entries itself, which
   // is what it needs to be a reader -- entry 0 of a real EPUB is a cover with no
   // text at all, and it showed as a blank page reading 0/0.
-  gFactory.setReaderBook(opened, 0);
+  // WHERE THE READER LEFT OFF, if this book has a saved position.
+  //
+  // The fit is GRADED rather than trusted: a book re-exported on a computer keeps
+  // only its spine entry, a body size or column change keeps the block but not the
+  // line, and a record found under a colliding hash keeps nothing. See
+  // reading_position.h -- the point is that the top of the right chapter beats the
+  // front of the book, which beats nothing.
+  int startChapter = 0;
+  reader::Cursor startAt{};
+  reader::ReadingPosition saved;
+  if (reader::loadPosition(gSd, path, saved)) {
+    const reader::PositionFit fit = reader::fitOf(saved, path, bookBytes, reader::kBodyPpem,
+                                                  gFactory.readerMetrics().columnW);
+    const reader::PositionRestore r = reader::restoreFrom(saved, fit);
+    static const char* kFitWord[] = {"exact", "relaid", "rebound", "unusable"};
+    Serial.printf("[progress] found a position for this book: spine=%d block=%d line=%d, fit=%s\n",
+                  saved.spine, saved.block, saved.line,
+                  kFitWord[static_cast<int>(fit)]);
+    Serial.flush();
+    if (r.any) {
+      startChapter = r.spine;
+      startAt = r.cursor;
+    }
+  }
+  // WHAT A SAVE WILL NEED, captured now while it is all in hand.
+  gReading.path = path;
+  gReading.title = opened.title;
+  gReading.author = opened.author;
+  gReading.bytes = bookBytes;
+  gReading.open = true;
+
+  gFactory.setReaderBook(opened, startChapter, startAt);
   const bool pushed = gApp->pushScreen(reader::ScreenId::Reader);
   // The push builds the screen, which locates the chapter, decodes it once to index
   // its pages, and lays out the first -- the whole expensive part.
@@ -2504,6 +2680,10 @@ void setup() {
   //   * this line never appears at all -> the sleep path is the problem: the
   //     Power press is not arriving as an event, or something slept without
   //     coming through here.
+  // THE READING POSITION GOES DOWN WITH THE DEVICE. Deep sleep is a chip reset, so
+  // nothing in RAM survives it -- and a reader who closes the cover mid-page expects
+  // that page back.
+  saveReadingPosition("sleep");
   Serial.printf("[power] sleeping from screen=%s; the record should name it on wake. Wake with "
                 "the power button\n",
                 reader::screenName(gApp->top().id()));
@@ -2626,6 +2806,17 @@ void loop() {
     // write that was supposed to fix it happened at NAVIGATION time, not at sleep
     // time -- so look for saveWhereWeAre's line on the navigation, not here.
     if (ev.button == reader::Button::Power) sleepNow();
+    // LEAVING THE BOOK, saved BEFORE the dispatch -- which is the whole subtlety.
+    // Back pops the Reader, and once it is popped there is no screen left to ask
+    // where the reader was. This is the edge the user actually reported: going back
+    // to the Library and returning lost the page.
+    //
+    // Back is the ONLY way out (ReaderScreen answers Action::pop() for Gesture::Back
+    // and none() for everything it does not use), so this is one save on the way out
+    // rather than a save on every event. If a Back ever stops popping, the cost is a
+    // save that reports `unchanged`.
+    if (ev.button == reader::Button::Back && gApp->top().id() == reader::ScreenId::Reader)
+      saveReadingPosition("leaving");
     const uint32_t beforeDispatch = millis();
     gApp->dispatch(ev);
     // Between the dispatch and the mask refresh below, so the refresh sees
@@ -2649,7 +2840,24 @@ void loop() {
         // say whether the count ran, or how long it took. `indexPending` is the
         // branch: false means the count already happened.
         logChapterOpen(rd, millis() - beforeDispatch);
+        // A CROSSING IS ONE OF THE THREE SAVE EDGES. It is also the coarsest unit a
+        // power cut can cost the reader, which is what makes saving per page turn
+        // unnecessary rather than merely expensive.
+        if (lastChapter >= 0) saveReadingPosition("chapter");
       }
+    }
+    // LEAVING THE BOOK, which is the edge the user actually reported: going back to
+    // the Library and returning lost the page. Saved BEFORE the screen is gone --
+    // hence the ordering here, after the dispatch that popped it but reading the
+    // position captured while it still stood.
+    // THE BOOK IS CLOSED: forget it, so a later save cannot fire against a book that
+    // is no longer on screen. The position itself was written just above, before the
+    // dispatch that popped the Reader -- there is nothing to save here, only state to
+    // drop.
+    if (gReading.open && gApp->top().id() != reader::ScreenId::Reader) {
+      gReading.open = false;
+      Serial.println("[progress] book closed");
+      Serial.flush();
     }
     if (gApp->retryRequested()) handleRetry();
     // Same placement and the same reason: the mask refresh below must see whatever

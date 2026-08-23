@@ -228,15 +228,13 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
            std::to_string(vm.percent) + "%", Ink::Black, {}, plane);
   ry += kDisplayLineH + kMetaGap;
 
-  // Two meta lines, two trackings: the board sets the page count at 0.16em and
-  // the chapter label at 0.10em. They are not the same run.
-  drawText(fb, meta, rightX, baselineIn(meta, ry, meta.lineHeight()),
-           "PAGE " + std::to_string(vm.currentPage) + " / " + std::to_string(vm.pageCount),
-           Ink::Black, trackingEm(meta, kMetaEm), plane);
-  ry += meta.lineHeight() + kMetaGap;
-
+  // ONE meta line at the counter tracking, 0.16em. The board carried two -- a page
+  // counter above a named chapter -- and neither was obtainable: a book-wide page
+  // count is ~49 s of decode on this device, and a chapter's name needs a table of
+  // contents that is not built. `chapterLabel` carries what IS free, the spine
+  // position and count, and the 0.16em belongs to it because it is a counter.
   drawText(fb, meta, rightX, baselineIn(meta, ry, meta.lineHeight()), vm.chapterLabel, Ink::Black,
-           trackingEm(meta, kTightMetaEm), plane);
+           trackingEm(meta, kMetaEm), plane);
   ry += meta.lineHeight();
 
   // The block is as tall as its taller column. The stats column now normally

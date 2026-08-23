@@ -16,8 +16,11 @@ struct HomeViewModel {
   std::string author;
   std::string chapterLabel;
   int percent = 0;
-  int currentPage = 0;
-  int pageCount = 0;
+  // NO PAGE COUNTER HERE, and design/Main.dc.html states why: a page count for the
+  // BOOK means paginating every chapter -- ~49 s of decode on this device for a real
+  // novel -- and `chapterLabel` carries the free counter instead (`CH. 08 OF 92`).
+  // The Reader's own footer is a different question: that counter is within ONE
+  // chapter, which is affordable, and it lives in ReaderViewModel.
   int batteryPercent = 0;
   // Cover art is not decoded yet (Phase 3 owns EPUB images), so the theme draws
   // a dithered placeholder carrying the title. This flag says whether a real

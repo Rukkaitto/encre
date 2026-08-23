@@ -62,15 +62,37 @@ TEST_CASE("confirm on a menu row pushes that row's screen") {
   CHECK(a.target == ScreenId::Settings);
 }
 
-TEST_CASE("confirm on Continue does nothing yet -- the Reader is Phase 3") {
+// These two cases used to assert that CONTINUE and READ did NOTHING -- "the Reader
+// is Phase 3". It is not any more, and a CONTINUE slab that draws and does nothing is
+// the dead-button defect this project has shipped twice. They pin the action now.
+
+TEST_CASE("confirm on Continue asks to open the book") {
   HomeScreen h = makeHome();
   REQUIRE(h.focus() == -1);
-  CHECK(h.onEvent(kConfirm).kind == Action::Kind::None);
+  // Action::open(), not a push: opening a book reads a file off the card, and
+  // storage is not core/'s. The shell resolves WHICH book.
+  CHECK(h.onEvent(kConfirm).kind == Action::Kind::Open);
 }
 
-TEST_CASE("back on Home does nothing -- its board binds Back to Read, which is Phase 3") {
+TEST_CASE("back on Home is the board's READ shortcut, and opens the book too") {
+  // Spec 4.1: there is nothing to go back to from the root, so the slot carries the
+  // one action worth a shortcut.
   HomeScreen h = makeHome();
-  CHECK(h.onEvent(kBack).kind == Action::Kind::None);
+  CHECK(h.onEvent(kBack).kind == Action::Kind::Open);
+}
+
+TEST_CASE("neither fires when there is no book to continue") {
+  // The two no-reading-column variants draw an EMPTY first hint slot, and a bar that
+  // promises nothing must not do something. CONTINUE is unreachable there by the
+  // model -- the focus ring is built Noneless -- and READ is gated explicitly.
+  for (const reader::HomeViewModel& vm :
+       {reader::demoHomeEmptyVm(), reader::demoHomeUnopenedVm()}) {
+    HomeScreen h(vm, reader::demoHomeTargets());
+    CHECK(h.onEvent(kBack).kind == Action::Kind::None);
+    // ...and the focus cannot be on a CONTINUE block, so Confirm is a menu push.
+    REQUIRE(h.focus() >= 0);
+    CHECK(h.onEvent(kConfirm).kind == Action::Kind::Push);
+  }
 }
 
 TEST_CASE("a row with no target screen is inert rather than pushing the wrong one") {

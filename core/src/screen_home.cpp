@@ -45,14 +45,26 @@ Action HomeScreen::onGesture(const GestureEvent& g) {
       return moveFocus(-1);
     case Gesture::Activate: {
       const int i = vm_.focusedMenuIndex;
-      // Continue: the Reader is Phase 3.
-      if (i < 0) return Action::none();
+      // CONTINUE, which is focus -1. It answers Action::open() -- "open the book I
+      // have selected" -- because opening a book is reading a file off the card and
+      // storage is not core/'s; the shell resolves WHICH book from the same pointer
+      // that filled this reading column in.
+      //
+      // It cannot fire on the no-reading-column variants: those build the focus ring
+      // Noneless, so -1 is unreachable there. The model prevents it rather than a
+      // guard here, which is why there is no second check.
+      if (i < 0) return Action::open();
       if (i >= static_cast<int>(targets_.size())) return Action::none();
       return Action::push(targets_[static_cast<size_t>(i)]);
     }
-    // Home's board binds Back to "Read" (spec 4.1: there is nothing to go back
-    // to), which opens the Reader -- Phase 3.
+    // HOME'S BOARD BINDS BACK TO `READ` -- spec 4.1: there is nothing to go back to
+    // from the root, so the slot carries the one action worth a shortcut. Same
+    // action as CONTINUE, from a button instead of a selection.
+    //
+    // Gated on there being a book, because the no-reading-column variants draw an
+    // EMPTY first hint slot: a bar that promises nothing must not do something.
     case Gesture::Back:
+      return vm_.nothingToContinue ? Action::none() : Action::open();
     default:
       return Action::none();
   }

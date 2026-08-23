@@ -1479,6 +1479,108 @@ they were worth:
 
 **0 of 96,658 lines overhang now.**
 
+### Reading progress lives on the card
+
+`/.reader/state/<hash>.json` per book, plus `/.reader/last.json` naming the book last
+open. **Card-side, not NVS**, and the reasoning is worth keeping because the session
+record went the other way: a wake must work with no card, so *which screen* has to
+survive an empty slot — but a reading position does not, because with no card there is
+no book to open. What card-side then buys is a correct card swap **by construction**,
+where NVS keyed by path would restore page 400 into a different hundred-page novel.
+Spec 4.0 had already named `/.reader/state/` when it said deleting a book "never
+erases reading progress".
+
+**THE RECORD DEGRADES INSTEAD OF BEING DISCARDED** (`reading_position.h`), three
+numbers of decreasing durability:
+
+| field | survives | because |
+|---|---|---|
+| `spine` | nearly everything | it indexes the OPF's spine, the book's own structure |
+| `block` | a re-layout | blocks are `document.h`'s and owe nothing to a column or a ppem |
+| `line` | neither | it is a line *within* a block at one ppem and one column width |
+
+So `fitOf` grades a record `Exact` / `Relaid` / `Rebound` / `Unusable`, **weakest
+wins**, and `restoreFrom` zeroes what the grade cannot support. The top of the right
+paragraph beats the front of the book, which beats nothing; landing on line 9 of a
+block that now has four lines is a wrong page that looks like a bug.
+
+`bookBytes` is the identity check — the cheapest one a `FileSystem` with no timestamps
+and no hashes can offer, and `DirEntry` already carries it. Not a checksum and it does
+not pretend to be.
+
+**THE SIDECAR'S NAME IS A HASH** (FNV-1a, 8 hex) because a book path is not a
+filename: it holds `/` by construction, FAT forbids more, and real cards carry
+accented 90-character titles. Collisions are handled rather than assumed away — the
+path is stored *in* the file and a mismatch reads `Unusable`, so a collision costs one
+book its position and can never misapply another's. Refused in two independent places
+(`loadPosition` and `fitOf`).
+
+**A SAVE HAS THREE ANSWERS AND THE MIDDLE ONE MATTERS.** `Unchanged` means the card
+already says this, so nothing was written — the common case when a save fires on
+leaving a book the reader did not move in, and it rests on `serialise()` sorting its
+keys. **`Failed` MUST NOT BE TREATED AS FATAL**, and that is the one hazard in the
+feature: a card can be readable and refuse writes (a physical write-protect tab), and
+`writeAll` calls `noteCardGone()` when a write it had already opened goes wrong, which
+`pollCardPresence` turns into an App rooted at `SdMissingScreen`. So acting on a
+failed save would throw the reader out of a book they can still read. The shell logs
+it and carries on.
+
+**THREE SAVE EDGES, NOT EVERY PAGE TURN**: leaving the book, crossing a chapter, and
+sleeping. A turn is ~570 ms of panel and a card write on each one would be felt; a
+chapter is also the most a power cut can cost. **Leaving is saved BEFORE the
+dispatch** — Back pops the Reader and once popped there is no screen left to ask where
+the reader was. Back is the only way out (`Gesture::Back` → `Action::pop()`), so this
+is one save on the way out rather than a save per event.
+
+**RESTORING COSTS A WALK TO THE READER'S PAGE, NOT A COUNT OF THE CHAPTER.**
+`ReaderScreen::openAtCursor` walks page boundaries to the page holding the cursor and
+stops — which is what lets the footer say *which* page this is, since a cursor carries
+no page number and the number is a count of the boundaries before it. The total then
+arrives in the quiet window like any other chapter's, so a restore shows `7 / —` with
+a right numerator and an honest denominator. `Cursor{}` is both "no target" and "the
+top of the chapter" and takes the cheap path for both — which is also what a `Rebound`
+restore asks for.
+
+Tested by the restore equivalent of the strongest paging property here: **a cursor
+saved on a page reproduces THAT page, checked for every page of a chapter** — a walk
+that stops a boundary early is right at page 1 and wrong everywhere after it.
+
+**PROGRESS IS A FRACTION OF THE BOOK'S BYTES, NOT ITS PAGES**, and that is what makes
+it affordable at all. A page-based percentage needs every chapter paginated: 6.94 MB
+of inflated XHTML for one real novel, **~49 s of decode** at the measured 7.2 ms/KB.
+The byte layout is already in `ChapterSpan`, so `progressPercent` is a sum over 92
+integers. It interpolates within the open chapter only when that chapter's count is
+known, so the number can sharpen when a deferred count lands — which is honest.
+
+**`last.json` CACHES title, author and percent** so Home can name the real book
+without opening an EPUB at boot (a central directory plus an OPF parse, ~100 ms and
+~32 KB of transient, for a block the user may not be looking at). The cost is that it
+can go stale, so **it is checked against the card** with one `exists` call before
+anything is drawn — Home confidently offering to continue a book that cannot be opened
+is worse than not offering. `HomeMissing.dc.html` is the boarded state for that case
+and is not built, so a stale pointer currently falls back to the nothing-open screen.
+
+**HOME'S CONTINUE BLOCK LOST ITS PAGE COUNTER, and the board says why.** It drew
+`PAGE 53 / 890` over `CH. 01 — MISS BROOKE` and **neither was obtainable**: the first
+needs the ~49 s book-wide count, the second needs a table of contents
+(`Contents.dc.html`, not built — which is also why the Reader's own footer says a bare
+`CH. 03`). Both lines became one that is free and true, `CH. 08 OF 92`, at the 0.16em
+counter tracking of the line it replaces. `HomeViewModel::currentPage`/`pageCount` are
+gone with it. Re-blessing the four Home goldens was verified the strong way: the change
+is confined to rows 283–468 with **0 pixels differing** above or below, so the header
+band, cover dither, title, author, the 67px numeral, both menu rows and the hint bar
+are bit-identical.
+
+**CONTINUE AND THE BOARD'S `READ` HINT BOTH ANSWER `Action::open()`** — they used to
+answer `none()` behind a "the Reader is Phase 3" comment, and a slab that draws and
+does nothing is the dead-button defect this project has shipped twice. Two screens can
+now ask to open a book and they mean different ones, so `handleOpen` resolves it: the
+Library means its selected row, Home means the pointer's path. `Action::Kind::Open`
+carries no path deliberately, since `core/` does no storage. Neither fires on a
+no-reading-column variant: CONTINUE is unreachable there by the model (the ring is
+built `Noneless`) and `READ` is gated on `nothingToContinue`, because those boards draw
+an empty first hint slot and a bar that promises nothing must not do something.
+
 ### Home has THREE states, and two of them share one mechanism
 
 `Main.dc.html` has a reading position to show. `HomeEmpty.dc.html` has no books.

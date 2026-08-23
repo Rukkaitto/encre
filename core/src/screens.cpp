@@ -14,10 +14,10 @@ HomeViewModel demoHomeVm() {
   HomeViewModel vm;
   vm.title = "Middlemarch";
   vm.author = "George Eliot";
-  vm.chapterLabel = "CH. 01 \xE2\x80\x94 MISS BROOKE";
+  // THE BOARD'S OWN COUNTER, spine position of spine count -- not a chapter name,
+  // which would need a table of contents. See design/Main.dc.html.
+  vm.chapterLabel = "CH. 01 OF 24";
   vm.percent = 6;
-  vm.currentPage = 53;
-  vm.pageCount = 890;
   vm.batteryPercent = 87;
   vm.hasCover = false;
   vm.menu = {{"LIBRARY", "12"}, {"SETTINGS", ""}};
@@ -254,6 +254,9 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       if (!readerBook_.path.empty() && fs_ != nullptr) {
         scr = std::make_unique<ReaderScreen>(*fs_, readerBook_, readerStartChapter_,
                                              readerBody_);
+        // BEFORE setMetrics, which is the landing -- see ReaderScreen::restoreAt.
+        // Cursor{} is a no-op, so an ordinary open costs nothing for this.
+        scr->restoreAt(readerStartAt_);
       } else if (readerDemo_) {
         scr = std::make_unique<ReaderScreen>(demoReaderXhtml(), title, "CH. 01", readerBody_);
       } else {

@@ -128,6 +128,10 @@ class DemoScreenFactory : public ScreenFactory {
   // indistinguishable from a book that failed to open.
   void setReaderBody(const GlyphSource* body) { readerBody_ = body; }
   void setReaderMetrics(const PageMetrics& m) { readerMetrics_ = m; }
+  // The column the Reader is laid out in. Read by a caller that has to record WHICH
+  // geometry a saved line was measured at -- see ReadingPosition. One source of
+  // truth: the screen was built from this same value.
+  const PageMetrics& readerMetrics() const { return readerMetrics_; }
   // WHERE the chapter is, not the chapter itself -- a path and three numbers, which
   // is what openBook hands back and all a ChapterReader needs. An empty bookPath
   // means the demo content: design/Reader.dc.html's own two paragraphs, streamed
@@ -148,10 +152,20 @@ class DemoScreenFactory : public ScreenFactory {
   // THE BOOK'S WHOLE GEOMETRY, from one openBook: its path, its metadata and twelve
   // bytes an entry. The reader reaches another chapter by picking a row out of it,
   // where it used to re-parse the archive per chapter.
-  void setReaderBook(OpenedBook book, int startChapter) {
+  // `startAt` is a RESTORED POSITION -- the cursor of the page the reader was on --
+  // and Cursor{} means page one, which is both "no saved position" and "the top of
+  // the chapter". The screen spends it on the first chapter it lands on.
+  void setReaderBook(OpenedBook book, int startChapter, Cursor startAt = Cursor{}) {
     readerBook_ = std::move(book);
     readerStartChapter_ = startChapter;
+    readerStartAt_ = startAt;
   }
+
+  // The open book's geometry, for a caller that needs to say something about the
+  // book as a whole -- progressPercent sums its chapters' sizes. A reference rather
+  // than a copy: this is 12 bytes a spine entry and the shell would otherwise keep a
+  // third copy of it beside this one and openBook's.
+  const OpenedBook& readerBook() const { return readerBook_; }
 
  private:
   FileSystem* fs_ = nullptr;
@@ -169,6 +183,7 @@ class DemoScreenFactory : public ScreenFactory {
   OpenedBook readerBook_{};
   bool readerDemo_ = false;
   int readerStartChapter_ = 0;
+  Cursor readerStartAt_{};
   std::string readerBookTitle_;
   std::string readerChapter_;
 };

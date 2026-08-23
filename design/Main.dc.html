@@ -45,8 +45,25 @@
       </div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
         <div style="font-size: var(--t-display); font-weight: 700; line-height: 1;">6%</div>
-        <div style="font-size: var(--t-meta); letter-spacing: 0.16em;">PAGE 53 / 890</div>
-        <div style="font-size: var(--t-meta); letter-spacing: 0.1em;">CH. 01 &mdash; MISS BROOKE</div>
+        <!-- ONE COUNTER LINE, where this board had two meta lines -- `PAGE 53 / 890`
+             above `CH. 01 &mdash; MISS BROOKE`. NEITHER WAS OBTAINABLE:
+
+               * A page counter for the BOOK needs every chapter paginated. Measured
+                 on a real novel that is 6.94 MB of inflated XHTML, ~49 s of decode
+                 at this device's 7.2 ms/KB -- paid on a first open, with the panel
+                 blocked and no background thread to hide it in.
+               * The chapter's NAME needs a table of contents. Contents.dc.html is
+                 not built, and the Reader's own footer already shows a bare
+                 `CH. 03` for exactly this reason.
+
+             What IS free is the spine position and the spine count, both of which
+             the Home pointer already caches. So the two lines become one that is
+             true, rather than one that is drawn and wrong -- `PAGE 0 / 0` was the
+             alternative and it is the kind of claim this firmware refuses.
+
+             It keeps the 0.16em of the line it replaces, not the 0.10em of the one
+             below it: this is a COUNTER, which is what that tracking was for. -->
+        <div style="font-size: var(--t-meta); letter-spacing: 0.16em;">CH. 01 OF 24</div>
       </div>
     </div>
   </div>
