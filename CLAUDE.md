@@ -1258,12 +1258,28 @@ below already says the pagination walk "is the part with no desktop analogue wor
 trusting"; this is what ignoring that costs.
 
 A chapter over the threshold is counted in a quiet window of its own,
-`kCountQuietMs` = 1200 ms, **and does not repaint**: counting changes one number in
-the footer, and a ~570 ms paint plus a waveform to fill it in is a bad trade. The
-total appears on the next page turn, which for a chapter that long comes well inside
-the ~23 s a reader spends on a page; if the reader sits still instead, the refinement
-paints it. The refinement completes it too, as a backstop, and a press arriving during
-that count cancels the refinement rather than queueing behind it.
+`kCountQuietMs` = 1200 ms, **and then repaints on the FAST path**. That repaint was
+originally left out — "counting changes one number in the footer, and a ~570 ms paint
+plus a waveform to fill it in is a bad trade; the total appears on the next page turn"
+— and the device showed the flaw in it. Measured across a chapter crossing:
+
+```
+[chapter] spine=4 bytes=33463 deferred pages=1 in 90ms   <- press at 24226
+[index] pages=40 in 440ms (deferred: chapter over 8192B) <- counted by 25782
+[refine] done total=1423ms                               <- on glass at 30565
+```
+
+**The count finished at 1.56 s and the number was not visible until 6.34 s**, because
+the "next page turn" almost never wins the race against the refinement's 5 s window.
+So "no extra waveform" bought nothing and cost four seconds of a footer reading
+`1 / —` with the answer already in memory. One fast paint (~596 ms) puts it on glass
+at ~2.2 s, and the refinement still follows on its own schedule — `renderTop` leaves
+it owed for a grayscale screen anyway.
+
+**A press arriving during the count cancels the paint**, checked after the count as
+well as before it: the page on glass is already correct, so getting out of the way
+beats putting ~596 ms in front of a page turn. The refinement completes the count too,
+as a backstop, and applies the same rule to itself.
 
 **A BACKWARD crossing still pays the full count**, and cannot avoid it — landing on
 the previous chapter's *last* page means knowing which page that is.

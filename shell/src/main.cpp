@@ -2680,20 +2680,35 @@ void loop() {
   //
   // `!gApp->dirty()` as well as the quiet window: a screen change already queued
   // supersedes the refinement, and renderTop clears the flag anyway.
-  // THE PAGE COUNT FIRST, on its own shorter window -- see kCountQuietMs. No paint:
-  // the number lands in the view model and shows on the next thing that draws.
+  // THE PAGE COUNT FIRST, on its own shorter window -- see kCountQuietMs -- AND IT
+  // PAINTS. This said "no paint: the number lands in the view model and shows on the
+  // next thing that draws", and the device showed what that next thing really is.
+  // Measured on a chapter crossing: the count finished 1.56 s after the press and the
+  // 40 was not on glass until the REFINEMENT's paint at 6.34 s. The reasoning assumed
+  // a page turn would come first and repaint it, but the refinement's 5 s window
+  // almost always wins that race -- so "no extra waveform" bought nothing and cost
+  // four seconds of a footer reading "1 / -" with the answer already in memory.
+  //
+  // So it repaints on the FAST path (one waveform, ~596 ms) and leaves the refinement
+  // owed, which renderTop sets for a grayscale screen anyway. The number lands at
+  // ~2.2 s and the four-level upgrade still arrives on its own schedule.
   if (!gApp->dirty() && rawSamplesPending() == 0 &&
       static_cast<uint32_t>(millis() - gLastInputMs) >= kCountQuietMs &&
       gApp->top().id() == reader::ScreenId::Reader) {
     auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
     if (rd->indexPending()) {
       const uint32_t t = millis();
-      rd->completeIndex();
+      const bool done = rd->completeIndex();
       mark("index-completed");
       Serial.printf("[index] pages=%d in %lums (deferred: chapter over %uB)\n",
                     rd->pageCount(), (unsigned long)(millis() - t),
                     (unsigned)reader::ReaderScreen::kEagerCountBytes);
       Serial.flush();
+      // A press during the count wins: the page on glass is already correct -- the
+      // count changes one number in the footer, not the text -- so getting out of the
+      // way beats putting a ~596 ms paint in front of a page turn. The same rule
+      // refineNow applies to itself, for the same reason.
+      if (done && rawSamplesPending() == 0) renderTop();
     }
   }
 
