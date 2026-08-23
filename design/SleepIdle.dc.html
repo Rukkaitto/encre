@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+    .dither-field { background-color: #ffffff; background-image: radial-gradient(circle, #000000 1.1px, transparent 1.3px); background-size: 4px 4px; }
+  </style>
+</helmet>
+<div class="dither-field" style="width: 480px; height: 800px; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; box-sizing: border-box; position: relative;">
+
+  <!-- NO READING CARD, because there is nothing to put in it.
+       
+       Sleep.dc.html's card IS the reading state -- NOW READING, the title, the
+       author, the bar, the percentage -- and the device is asleep from Home or the
+       Library as often as from a book. Painting that card with a blank title, or a
+       0% bar, would be the screen claiming a book the user is not reading; painting
+       nothing at all is worse, because e-ink holds the last image and a Library left
+       on the glass gives no clue the device is asleep rather than frozen. That clue
+       is the whole reason this screen exists.
+       
+       So the BADGE is the load-bearing half and it stays; the card is the half that
+       has something to say only sometimes, and it goes. Same field, same badge, same
+       position -- one screen with and without its content, not two screens. -->
+
+  <div style="position: absolute; bottom: 34px; background: #ffffff; border: 1px solid #000000; padding: 8px 18px;">
+    <div style="font-size: var(--t-meta); letter-spacing: 0.2em;">ASLEEP &middot; PRESS POWER TO WAKE</div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

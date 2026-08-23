@@ -820,6 +820,13 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   const Font& progress = fonts[Role::Label500];
   const Font& note = fonts[Role::Meta400];
 
+  // THE BADGE ALONE when no book is open -- design/SleepIdle.dc.html. The card IS the
+  // reading state, so with nothing to read there is nothing to put in it; the badge is
+  // the half that carries this screen's whole purpose, which is telling the user the
+  // device is asleep rather than frozen. Drawn by the shared tail below, so the two
+  // states cannot disagree about where it sits.
+  if (!vm.nothingToContinue) {
+
   // The card's width is the board's max, or the panel less a margin on the
   // narrower X4 -- `max-width` is a ceiling, not a pin.
   const int roomy = fb.width() - 2 * kMargin;
@@ -871,8 +878,11 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
 
   drawCentredText(fb, progress, cx, contentW, baselineIn(progress, y, progress.lineHeight()),
                   vm.progress, Ink::Black, trackingEm(progress, kSleepProgressEm), plane);
+  }
 
-  // The badge, measured from the BOTTOM as the board positions it.
+  // The badge, measured from the BOTTOM as the board positions it -- and OUTSIDE the
+  // branch above, because both states draw it in the same place. That is what makes
+  // SleepIdle one screen with its content removed rather than a second screen.
   const int noteW = note.measure(vm.note, trackingEm(note, kSleepNoteEm));
   const int badgeW = noteW + 2 * (kSleepBadgeBorder + kSleepBadgePadX);
   const int badgeH = note.lineHeight() + 2 * (kSleepBadgeBorder + kSleepBadgePadY);

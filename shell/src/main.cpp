@@ -44,6 +44,7 @@
 #include "reader/layout.h"
 #include "reader/scalablefont.h"
 #include "reader/reading_store.h"
+#include "reader/screen_sleep.h"
 #include "reader/screens.h"
 #include "reader/session_record.h"
 #include "reader/settings.h"
@@ -2735,6 +2736,63 @@ void setup() {
   saveCrumbs();
 }
 
+// THE SLEEP SCREEN, PAINTED WITHOUT BEING PUSHED -- and that is the whole trap this
+// screen has carried a warning about since it was written. The session record names the
+// top of the stack, so pushing SleepScreen would make the next wake RESTORE INTO IT: the
+// user would press power and get "asleep, press power to wake" back. It wants a direct
+// render after the record is saved, not a navigation.
+//
+// So this bypasses App entirely, which means two things App normally owns are this
+// function's:
+//   * the CLEAR, because nothing else is going to do it;
+//   * gFrameContentsUnknown, because App's partial-repaint record now describes a frame
+//     that no longer exists. Nothing will read it before the chip resets, but leaving a
+//     lie in it would be a trap for whoever paints something after this one day.
+//
+// WHAT IT SHOWS comes from the same pointer Home reads. Its board is the reading state
+// -- NOW READING, the title, the author, the bar -- and the device sleeps from Home or
+// the Library as often as from a book, so with nothing open it draws the badge alone
+// (design/SleepIdle.dc.html). The badge is the half that carries the screen's purpose:
+// e-ink holds its last image, so without it a Library left on the glass gives no clue
+// the device is asleep rather than frozen.
+static void paintSleepScreen() {
+  reader::SleepViewModel vm;
+  vm.note = std::string("ASLEEP") + "\xC2\xB7" + "PRESS POWER TO WAKE";
+  vm.nothingToContinue = true;
+
+  reader::LastRead last;
+  if (gStorageUsable && reader::loadLastRead(gSd, last) && gSd.exists(last.bookPath)) {
+    vm.nothingToContinue = false;
+    vm.label = "NOW READING";
+    vm.title = last.title.empty() ? last.bookPath : last.title;
+    vm.author = last.author;
+    vm.progressPercent = last.percent;
+    // The board's `6% - CH. 01`, from the two facts the pointer has. A chapter NAME
+    // would need a table of contents, which is not built -- the same reason the
+    // Reader's own footer says a bare `CH. 03`.
+    // THE LITERAL IS SPLIT, and it has to be: a C++ hex escape is UNBOUNDED, so
+    // "\xC2\xB7CH." parses \xB7C as one value -- clang rejects it outright and the
+    // ESP32's GCC accepted it as something that is not U+00B7. This project already
+    // recorded the same trap once ("\xA0b" is 0xA0B); adjacent literals end the escape.
+    char line[32];
+    std::snprintf(line, sizeof(line), "%d%%\xC2\xB7" "CH. %02d", last.percent,
+                  last.spine + 1);
+    vm.progress = line;
+  }
+
+  reader::SleepScreen scr(vm);
+  gFrame->clear(true);
+  scr.render(*gFrame, *gFonts, gTheme, reader::Plane::Bw);
+  gFrameContentsUnknown = true;
+  Serial.printf("[power] sleep screen: %s\n",
+                vm.nothingToContinue ? "the badge alone, nothing open" : vm.title.c_str());
+  Serial.flush();
+  // FULL, not fast: this is the last thing the panel is asked to do for hours and a
+  // differential update would leave the previous screen's residue under it.
+  showOnePass(reader::RefreshMode::Full);
+  mark("sleep-painted");
+}
+
 [[noreturn]] static void sleepNow() {
   // The Sleep screen is boarded and belongs to Phase 2C. Painting nothing is
   // not a gap in the picture: e-ink holds its last image with no power, so the
@@ -2751,10 +2809,14 @@ void setup() {
   //   * this line never appears at all -> the sleep path is the problem: the
   //     Power press is not arriving as an event, or something slept without
   //     coming through here.
+  // AFTER the position is saved and BEFORE the panel is put to sleep. It costs one
+  // full waveform (~825 ms) on every sleep, which is the price of the device looking
+  // asleep rather than frozen.
   // THE READING POSITION GOES DOWN WITH THE DEVICE. Deep sleep is a chip reset, so
   // nothing in RAM survives it -- and a reader who closes the cover mid-page expects
   // that page back.
   saveReadingPosition("sleep");
+  paintSleepScreen();
   Serial.printf("[power] sleeping from screen=%s; the record should name it on wake. Wake with "
                 "the power button\n",
                 reader::screenName(gApp->top().id()));

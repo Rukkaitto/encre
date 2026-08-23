@@ -85,6 +85,7 @@ FLOW_SCREENS = [
     ("home_empty",      "HomeEmpty.dc.html",      "Home / empty"),
     ("home_unopened",   "HomeUnopened.dc.html",   "Home / nothing open"),
     ("home_missing",    "HomeMissing.dc.html",    "Home / missing book"),
+    ("sleep_idle",      "SleepIdle.dc.html",      "Sleep / nothing open"),
     ("library_scrolled", "LibraryScrolled.dc.html", "Library / scrolled"),
     ("library_actions", "LibraryActions.dc.html", "Library actions"),
     ("delete_confirm",  "DeleteConfirm.dc.html",  "Delete confirm"),

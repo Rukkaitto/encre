@@ -198,6 +198,14 @@ struct BookDetailsViewModel {
 // and no focus -- the shell paints this and then sleeps, so there is nobody to
 // press anything. The only way out is the power button, which the badge says.
 struct SleepViewModel {
+  // NOTHING TO CONTINUE: no reading card, only the badge. design/SleepIdle.dc.html.
+  //
+  // The same name HomeViewModel uses for the same fact, deliberately -- one rule
+  // should have one spelling, and this project has twice had to write a rule down in
+  // several comments to keep it single. A flag rather than inferring it from an empty
+  // title, for HomeViewModel's reason: a book whose metadata gave no title is still a
+  // book being read.
+  bool nothingToContinue = false;
   std::string label;      // "NOW READING"
   std::string title;      // the book, shouted by the theme
   std::string author;

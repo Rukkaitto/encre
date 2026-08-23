@@ -13,6 +13,7 @@
 #include "ramp.h"
 #include "reader/framebuffer.h"
 #include "reader/screen_sleep.h"
+#include "reader/screens.h"
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
 
@@ -91,4 +92,79 @@ TEST_CASE("SLEEP'S BAR FILL IS INSIDE ITS BORDER, as box-sizing: border-box says
   // And the pixel immediately left of the right border is white -- the fill did
   // not run to the edge.
   CHECK(fb.getPixel(barX + 168, mid));
+}
+
+// --- Asleep with nothing open --------------------------------------------------
+//
+// design/SleepIdle.dc.html. The card IS the reading state, and the device sleeps from
+// Home or the Library as often as from a book -- so with nothing open the badge is
+// drawn alone. It is the badge that carries this screen's purpose: e-ink holds its
+// last image, so without it a Library left on the glass gives no clue the device is
+// asleep rather than frozen.
+
+TEST_CASE("QuietTheme renders the idle Sleep screen to golden on both geometries") {
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  auto renderOne = [&](int w, int h, const std::string& name) {
+    reader::Framebuffer fb(w, h);
+    theme.renderSleep(fb, ramp.fonts, reader::demoSleepIdleVm(), reader::Plane::Bw);
+    golden::checkGolden(fb, name);
+  };
+  SUBCASE("X4 480x800") { renderOne(480, 800, "sleep_idle"); }
+  SUBCASE("X3 528x792") { renderOne(528, 792, "sleep_idle_x3"); }
+}
+
+TEST_CASE("the idle Sleep screen draws the badge and NOTHING where the card was") {
+  // Asserted against the reading render rather than by counting ink: the card's rows
+  // must be bare field, and the badge's rows must be byte-identical to the state that
+  // has a book -- which is what makes this one screen with its content removed rather
+  // than a second screen that happens to look similar.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  reader::Framebuffer withCard(480, 800), idle(480, 800), field(480, 800);
+  theme.renderSleep(withCard, ramp.fonts, reader::demoSleepVm(), reader::Plane::Bw);
+  theme.renderSleep(idle, ramp.fonts, reader::demoSleepIdleVm(), reader::Plane::Bw);
+  // The field alone, for comparison: a view model whose note is empty draws no badge.
+  reader::SleepViewModel bare;
+  bare.nothingToContinue = true;
+  theme.renderSleep(field, ramp.fonts, bare, reader::Plane::Bw);
+
+  // Rows the two renders disagree on are exactly the card's rows.
+  int firstDiff = -1, lastDiff = -1;
+  for (int y = 0; y < 800; ++y) {
+    bool diff = false;
+    for (int x = 0; x < 480; ++x)
+      if (withCard.getPixel(x, y) != idle.getPixel(x, y)) { diff = true; break; }
+    if (diff) {
+      if (firstDiff < 0) firstDiff = y;
+      lastDiff = y;
+    }
+  }
+  REQUIRE(firstDiff > 0);
+  // The card is centred, so the disagreement is in the middle band and nowhere near
+  // the badge at the bottom.
+  CHECK(firstDiff > 100);
+  CHECK(lastDiff < 700);
+
+  // And in that band the idle render is the untouched field.
+  for (int y = firstDiff; y <= lastDiff; ++y)
+    for (int x = 0; x < 480; ++x)
+      if (idle.getPixel(x, y) != field.getPixel(x, y)) {
+        CHECK_MESSAGE(false, "the idle render is not bare field at row " << y);
+        y = lastDiff;
+        break;
+      }
+}
+
+TEST_CASE("the idle view model says nothing about a book") {
+  // Every other field on this view model describes one, so the shape of the state is
+  // that they are all empty -- not that the theme is trusted to ignore them.
+  const reader::SleepViewModel vm = reader::demoSleepIdleVm();
+  CHECK(vm.nothingToContinue);
+  CHECK(vm.title.empty());
+  CHECK(vm.author.empty());
+  CHECK(vm.label.empty());
+  CHECK(vm.progress.empty());
+  CHECK(vm.progressPercent == 0);
+  CHECK_FALSE(vm.note.empty());  // ...except the one that does not
 }

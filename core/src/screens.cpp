@@ -99,6 +99,17 @@ SleepViewModel demoSleepVm() {
 }
 
 // design/Reader.dc.html's own two paragraphs, verbatim, on the same reasoning as
+// design/SleepIdle.dc.html. Asleep with no book open -- the badge and nothing else.
+//
+// The note is the ONLY field set, and that is the shape of the state rather than an
+// omission: every other field on this view model describes a book.
+SleepViewModel demoSleepIdleVm() {
+  SleepViewModel vm;
+  vm.nothingToContinue = true;
+  vm.note = std::string("ASLEEP") + kDot + "PRESS POWER TO WAKE";
+  return vm;
+}
+
 // demoSleepVm: a screen the simulator and the goldens must render needs a source
 // for its content, and the board's copy is the one source that makes the
 // comparison sheet meaningful.
@@ -252,7 +263,7 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // The shell builds its own from the book it was actually reading -- this is
       // the demo catalogue, and a screen nothing can navigate TO needs a source
       // for its values either way.
-      return std::make_unique<SleepScreen>(demoSleepVm());
+      return std::make_unique<SleepScreen>(sleepIdle_ ? demoSleepIdleVm() : demoSleepVm());
     case ScreenId::Reader: {
       // REFUSED without a body face, rather than built empty. A Reader that
       // rendered nothing looks exactly like a book that failed to open, and the

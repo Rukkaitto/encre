@@ -259,18 +259,19 @@ int main(int argc, char** argv) {
   const bool isBookDetails = std::strcmp(argv[1], "book_details") == 0;
   const bool isSettings = std::strcmp(argv[1], "settings") == 0;
   const bool isSleep = std::strcmp(argv[1], "sleep") == 0;
+  const bool isSleepIdle = std::strcmp(argv[1], "sleep_idle") == 0;
   const bool isHomeEmpty = std::strcmp(argv[1], "home_empty") == 0;
   const bool isHomeUnopened = std::strcmp(argv[1], "home_unopened") == 0;
   const bool isLibraryScrolled = std::strcmp(argv[1], "library_scrolled") == 0;
   const bool isReader = std::strcmp(argv[1], "reader") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
-      !isHomeUnopened && !isLibraryScrolled && !isReader) {
+      !isHomeUnopened && !isLibraryScrolled && !isReader && !isSleepIdle) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
-                 "'sleep', 'home_empty', 'home_unopened', 'library_scrolled', "
-                 "'reader' or 'app')\n",
+                 "'sleep', 'sleep_idle', 'home_empty', 'home_unopened', "
+                 "'library_scrolled', 'reader' or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -463,7 +464,10 @@ int main(int argc, char** argv) {
     app.dispatch({reader::Button::Down, reader::PressKind::Short});
     app.dispatch({reader::Button::Confirm, reader::PressKind::Short});
   }
-  if (isSleep) {
+  // The idle variant is the same screen with nothing to show, so it takes the same
+  // direct push -- the factory picks which view model.
+  if (isSleepIdle) factory.setSleepIdle();
+  if (isSleep || isSleepIdle) {
     // NOT reached by pressing: nothing navigates to the sleep screen, the idle
     // timer or the power button puts the device there. So it is pushed directly,
     // which is the honest model -- and it is why this screen has no journey to

@@ -37,6 +37,8 @@ std::vector<ScreenId> demoHomeTargets();
 
 // design/Sleep.dc.html's own values -- see the definition.
 SleepViewModel demoSleepVm();
+// design/SleepIdle.dc.html: asleep with nothing open, so the badge without the card.
+SleepViewModel demoSleepIdleVm();
 
 // design/Library.dc.html's own seven rows, with the authors and percentages the
 // board draws. The device fills the same fields from the card -- filenames, blank
@@ -164,6 +166,12 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // substitutes content is worse than one that refuses.
   void setReaderDemo() { readerDemo_ = true; }
 
+  // Build the IDLE sleep screen -- asleep with no book open, design/SleepIdle.dc.html
+  // -- rather than the board's reading one. Asked for, like setReaderDemo, because a
+  // screen nothing navigates to has no state to infer it from: the simulator names
+  // which of the two it wants, and the shell builds its own view model either way.
+  void setSleepIdle() { sleepIdle_ = true; }
+
   // THE BOOK'S WHOLE GEOMETRY, from one openBook: its path, its metadata and twelve
   // bytes an entry. The reader reaches another chapter by picking a row out of it,
   // where it used to re-parse the archive per chapter.
@@ -208,6 +216,7 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   PageMetrics readerMetrics_{};
   OpenedBook readerBook_{};
   bool readerDemo_ = false;
+  bool sleepIdle_ = false;
   int readerStartChapter_ = 0;
   Cursor readerStartAt_{};
   std::string readerBookTitle_;
