@@ -740,14 +740,18 @@ Three things about the change:
   memory for allocation count and nothing else. No glyph rasterises differently —
   all 686 tests pass, `text_sample.png` (Literata body text, the golden this file
   says to stop on) included, byte for byte.
-- **IT DID NOT RAISE THE OBSERVED MINIMUM, so the attribution was wrong.** `min` was
+- **IT DID NOT RAISE THE OBSERVED MINIMUM, so that attribution was wrong.** `min` was
   18,952 before the patch and 18,948 after — four bytes apart across two builds,
-  which is not what a removed 52 KB transient looks like. Something else sets that
-  floor. The patch is still right (a 15.6× smaller spike, and faster), but the
-  reader's real low-water mark is unexplained, and `mark("open-located")` /
-  `mark("open-paginated")` / `mark("refine-complete")` exist to localise it: the
-  stage where `min` falls is the stage that spent it. **Do not guess at this a
-  second time.**
+  which is not what a removed 52 KB transient looks like. **The real cause was the
+  repeated archive parse in `walkToChapter`**: three `openBook` calls, each building
+  a 121-entry `Zip` and a 92-chapter `Epub` on top of the previous chapter's live
+  state. Removing it — done for speed, not for memory — took the floor from ~18,950
+  to **45,840**, measured on the device across a full session. The stb patch is still
+  right (15.6× smaller spike, and faster); it just was not this.
+  `mark("open-located")` / `mark("open-paginated")` / `mark("chapter-opened")` /
+  `mark("refine-complete")` are what settled it, and the stage where `min` falls is
+  the stage that spent it. **Do not reason about heap from code shape; read the
+  marks.**
 - **It is also FASTER.** Three runs each on the desktop: cold page draw 572/530/500 µs
   against 1008/732/645, warm 372/366/314 against 634/473/414. A 56 KB malloc plus
   touching 56 KB of cold memory costs more than a 3.6 KB one. Note that the first run
@@ -1202,7 +1206,9 @@ turns. That is the index pass, and two thirds of it was waste.
 | before | 41.4 ms | 1.22 ms | 35.6 ms |
 | after | **14.8 ms** | **0.46 ms** | **14.7 ms** |
 
-Desktop, three runs each within 1%. Two changes, and the second was much the larger:
+Desktop, three runs each within 1%. On the device the whole open went **511 → 192 ms**
+and its pagination phase **433 → 119 ms**. Two changes, and the second was much the
+larger:
 
 - **An index pass wants page BOUNDARIES, not pages** (`PageBuilder::countOnly`). It
   was building a `LaidLine` per line — an owned string copy and a justification
@@ -1214,6 +1220,11 @@ Desktop, three runs each within 1%. Two changes, and the second was much the lar
   `measure()` calls both — while `wrapProseLead` grows lines greedily and measures
   every candidate, so every glyph of a chapter was measured several times over. 1 KB,
   cleared by `init()` because the advances are in pixels.
+
+**WHAT DID NOT IMPROVE: the draw.** A page turn's `render` stayed at 125–165 ms on
+the device, unchanged by the advance cache — the coverage blit dominates it and
+`kerning`'s cmap searches were noise beside it. If a page turn has to get faster than
+~570 ms, the blit is the target and the metrics are not.
 
 **The neutrality of counting mode is asserted, not assumed**: a probe indexed all 92
 chapters both ways and got 7,968 pages each, 0 chapters differing. An index that

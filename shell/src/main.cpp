@@ -2562,6 +2562,20 @@ void loop() {
     // Between the dispatch and the mask refresh below, so the refresh sees
     // whatever screen the retry left on top -- on success that is a brand new App
     // rooted at Home, whose holds are not the SD-missing screen's.
+    // A CHAPTER CROSSING IS THE ONE READER PATH THE MARKS DO NOT SEE. It happens
+    // inside ReaderScreen::onGesture, which the shell only observes as a redraw --
+    // and it used to be the most expensive thing the reader did, re-reading the
+    // archive's central directory and the OPF. That is gone, but it was also the
+    // suspected cause of a heap floor 27 KB below where it now sits, so the path
+    // wants a stage line of its own rather than another round trip to find out.
+    if (gApp->top().id() == reader::ScreenId::Reader) {
+      const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
+      static int lastChapter = -1;
+      if (rd->chapterIndex() != lastChapter) {
+        lastChapter = rd->chapterIndex();
+        mark("chapter-opened");
+      }
+    }
     if (gApp->retryRequested()) handleRetry();
     // Same placement and the same reason: the mask refresh below must see whatever
     // screen the open left on top.
