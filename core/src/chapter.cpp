@@ -127,6 +127,10 @@ bool ChapterReader::startStream() {
   return true;
 }
 
+uint32_t ChapterReader::sizeBytes() const {
+  return fromBuffer_ ? static_cast<uint32_t>(buffer_.size()) : where_.uncompressedSize;
+}
+
 bool ChapterReader::next(Block& out) {
   if (blocks_ == nullptr || !ok()) return false;
   if (!blocks_->next(out)) {

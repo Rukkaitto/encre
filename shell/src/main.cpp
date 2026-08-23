@@ -181,6 +181,22 @@ static uint32_t gLastInputMs = 0;
 // ~80 ms after each paint finished, which is exactly where the median 72 ms gap
 // puts the next press.
 constexpr uint32_t kRefineQuietMs = 5000;
+
+// The page count of a chapter too big to have been counted before its first paint
+// (ReaderScreen::kEagerCountBytes -- 63% of a real book's chapters are under it).
+//
+// ITS OWN WINDOW, AND A MUCH SHORTER ONE, because the two jobs are not alike: the
+// count is cheap and NEEDED -- the footer reads "1 / —" until it lands -- and the
+// refinement is expensive and cosmetic. Sharing the refinement's 5 s made a
+// four-page chapter take four seconds to show its total, which was the report that
+// found this.
+//
+// It does NOT repaint. Counting changes a number in the footer and nothing else, and
+// a ~570 ms paint plus a waveform to fill in one number is a bad trade -- so the
+// total appears on the next page turn, which for a chapter this long comes well
+// inside the ~23 s a reader spends on a page. If the reader sits still instead, the
+// refinement paints it.
+constexpr uint32_t kCountQuietMs = 1200;
 static bool gRefineOwed = false;
 
 // Everything the render needs has to outlive setup(), so it lives here rather
@@ -2645,6 +2661,23 @@ void loop() {
   //
   // `!gApp->dirty()` as well as the quiet window: a screen change already queued
   // supersedes the refinement, and renderTop clears the flag anyway.
+  // THE PAGE COUNT FIRST, on its own shorter window -- see kCountQuietMs. No paint:
+  // the number lands in the view model and shows on the next thing that draws.
+  if (!gApp->dirty() && rawSamplesPending() == 0 &&
+      static_cast<uint32_t>(millis() - gLastInputMs) >= kCountQuietMs &&
+      gApp->top().id() == reader::ScreenId::Reader) {
+    auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
+    if (rd->indexPending()) {
+      const uint32_t t = millis();
+      rd->completeIndex();
+      mark("index-completed");
+      Serial.printf("[index] pages=%d in %lums (deferred: chapter over %uB)\n",
+                    rd->pageCount(), (unsigned long)(millis() - t),
+                    (unsigned)reader::ReaderScreen::kEagerCountBytes);
+      Serial.flush();
+    }
+  }
+
   // `rawSamplesPending()` as well as the clock: a transition already queued means
   // the user is still going, and starting something the panel cannot interrupt in
   // front of it is the whole defect this window exists to avoid. The queue is

@@ -50,6 +50,7 @@ bool openBook(FileSystem& fs, std::string_view path, OpenedBook& out, const char
     if (entry != nullptr) {
       span.localHeaderOffset = entry->localHeaderOffset;
       span.compressedSize = entry->compressedSize;
+      span.uncompressedSize = entry->uncompressedSize;
       span.deflated = entry->deflated;
     }
     out.chapters.push_back(span);

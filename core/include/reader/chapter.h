@@ -21,6 +21,7 @@ struct ChapterLocation {
   std::string bookPath;          // the EPUB, absolute on the card
   uint32_t localHeaderOffset = 0;  // the entry's local header; the data follows it
   uint32_t compressedSize = 0;
+  uint32_t uncompressedSize = 0;   // what it inflates to; see ChapterSpan
   bool deflated = true;          // false for a stored entry: the bytes are the text
 };
 
@@ -62,6 +63,11 @@ class ChapterReader {
 
   // The next block. False means the chapter ended (`ok()`) or was refused.
   bool next(Block& out);
+
+  // How many bytes this chapter inflates to -- the buffer's own size for an
+  // in-memory chapter. What a caller needs to decide whether counting its pages is
+  // cheap enough to do eagerly.
+  uint32_t sizeBytes() const;
 
   // The index of the block `next()` will return, which is what a page Cursor names.
   int position() const { return position_; }

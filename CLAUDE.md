@@ -1218,11 +1218,27 @@ a time as pages are passed. Three consequences, each load-bearing:
   count unknown the index cannot say. `advance()` returns false only when the
   chapter's blocks are exhausted, and that is also the moment the count becomes known.
 
-**The count is completed inside the refinement**, which repaints anyway — so the
-total appears with the four-level upgrade and costs no extra waveform. The em dash is
-therefore visible for one page of each chapter. A press arriving during the count
-cancels the refinement rather than queueing behind it: the count is cheap and needed,
-the refinement is expensive and cosmetic.
+**A SMALL CHAPTER IS COUNTED BEFORE ITS FIRST PAINT, and a big one is not.** Folding
+the count into the refinement made a **four-page chapter take four seconds** to show
+its total — the refinement's 5 s window is sized for an expensive cosmetic repaint,
+and counting is neither. Two measurements set the threshold:
+
+- Counting costs **~1.79 ms a KB** of inflated XHTML (41.1 µs/page on the desktop
+  over 7,968 real pages, at this project's ~37× device ratio).
+- Over a real book's 92 spine entries the median is 53 KB and **63% are under 64 KB**.
+
+So `ReaderScreen::kEagerCountBytes` is 64 KB: at most ~114 ms, under a fifth of a
+~570 ms page turn and below the run-to-run spread of the render figures. **Bounded by
+bytes, not by a page budget** — the bytes are known before any work is done, where a
+page budget would spend itself on a long chapter and still have no total.
+
+A chapter over the threshold is counted in a quiet window of its own,
+`kCountQuietMs` = 1200 ms, **and does not repaint**: counting changes one number in
+the footer, and a ~570 ms paint plus a waveform to fill it in is a bad trade. The
+total appears on the next page turn, which for a chapter that long comes well inside
+the ~23 s a reader spends on a page; if the reader sits still instead, the refinement
+paints it. The refinement completes it too, as a backstop, and a press arriving during
+that count cancels the refinement rather than queueing behind it.
 
 **A BACKWARD crossing still pays the full count**, and cannot avoid it — landing on
 the previous chapter's *last* page means knowing which page that is.

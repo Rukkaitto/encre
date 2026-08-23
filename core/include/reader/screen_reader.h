@@ -57,6 +57,23 @@ class GlyphSource;
 // to 300 ms on device against a ~520 ms panel refresh.
 class ReaderScreen : public Screen {
  public:
+  // COUNT A CHAPTER'S PAGES BEFORE THE FIRST PAINT IF IT IS THIS SMALL, and defer
+  // otherwise. The number comes from two measurements on this device.
+  //
+  // Counting costs ~1.79 ms a KB of inflated XHTML (41.1 us/page desktop over 7,968
+  // real pages, at this project's ~37x device ratio). So 64 KB is at most ~114 ms --
+  // under a fifth of a ~570 ms page turn, and below the run-to-run spread of the
+  // render figures themselves.
+  //
+  // What it buys: over a real book's 92 spine entries, 63% are under 64 KB and get
+  // their total the moment the page appears. Median is 53 KB.
+  //
+  // BOUNDED BY BYTES, NOT BY A PAGE BUDGET, because the bytes are known BEFORE any
+  // work is done -- the central directory said so. A page budget would spend the
+  // whole budget on a long chapter and then still have no total, which is the worst
+  // of both.
+  static constexpr uint32_t kEagerCountBytes = 64u * 1024u;
+
   // A BOOK, not a chapter. `fs` and `body` must outlive the screen.
   //
   // It took a single ChapterLocation and could therefore only ever show one chapter

@@ -52,11 +52,11 @@ void ReaderScreen::setMetrics(const PageMetrics& m) {
     openChapterAt(chapterAt_, false);
     return;
   }
-  // The in-memory chapter, through the SAME lazy landing the card path takes. Two
-  // paths that paginate differently would mean the goldens and the simulator testing
-  // something the device does not do -- and this project has been bitten by a
-  // desktop path that diverged from the device's before.
-  openFirstPage();
+  // The in-memory chapter, through the SAME lazy landing and the SAME size threshold
+  // the card path takes. Two paths that paginate differently would mean the goldens
+  // and the simulator testing something the device does not do -- and this project
+  // has been bitten by a desktop path that diverged from the device's before.
+  if (openFirstPage() && chapter_.sizeBytes() <= kEagerCountBytes) completeIndex();
   syncVm();
 }
 
@@ -160,6 +160,13 @@ bool ReaderScreen::walkToChapter(int c, bool atEnd) {
       return seekTo(at_);
     }() : openFirstPage();
     if (landed) {
+      // A SMALL CHAPTER IS COUNTED NOW, so the footer says "1 / 6" rather than
+      // "1 / —" and then correcting itself seconds later. A four-page chapter taking
+      // four seconds to show its total was the report that prompted this: the count
+      // was folded into the refinement, whose window is sized for an expensive
+      // cosmetic repaint, and counting is neither.
+      if (!atEnd && chapter_.sizeBytes() > 0 && chapter_.sizeBytes() <= kEagerCountBytes)
+        completeIndex();
       updateChapterLabel();
       syncVm();
       return true;

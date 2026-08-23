@@ -45,7 +45,11 @@ struct ChapterSpan {
   // more than the pagination it was meant to make cheap. ChapterReader resolves the
   // one chapter it is asked for.
   uint32_t localHeaderOffset = 0;
-  uint32_t compressedSize = 0;  // 0 means the spine named an entry the archive lacks
+  uint32_t compressedSize = 0;    // 0 means the spine named an entry the archive lacks
+  // What it inflates to. Not needed to READ the chapter -- it is needed to decide
+  // whether counting its pages is cheap enough to do before the first paint, and the
+  // central directory has already said, so it costs nothing to carry.
+  uint32_t uncompressedSize = 0;
   bool deflated = true;         // false for a stored entry: the bytes are the text
 
   // A spine entry with no bytes. Epub::open validates EVERY spine entry against the
@@ -74,6 +78,7 @@ struct OpenedBook {
     if (!c.readable()) return out;
     out.bookPath = path;
     out.localHeaderOffset = c.localHeaderOffset;
+    out.uncompressedSize = c.uncompressedSize;
     out.compressedSize = c.compressedSize;
     out.deflated = c.deflated;
     return out;
