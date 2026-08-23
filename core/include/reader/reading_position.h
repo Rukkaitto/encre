@@ -1,0 +1,133 @@
+#pragma once
+#include <cstdint>
+#include <string>
+#include <string_view>
+
+#include "reader/layout.h"  // Cursor
+
+namespace reader {
+
+// WHERE THE READER WAS IN ONE BOOK, and whether that is still true.
+//
+// It lives ON THE CARD, in `/.reader/state/`, which is the location spec 4.0
+// already named when it said deleting a book "never erases reading progress".
+// The alternative was NVS, where the session record lives, and the argument that
+// puts the session record there does not reach this:
+//
+//   * A WAKE MUST WORK WITH NO CARD -- that is the whole state SdMissingScreen
+//     exists for -- so which screen you were on has to survive an empty slot. A
+//     reading position does not: with no card there is no book to open, so the
+//     position is unusable whatever we did with it.
+//   * A CARD SWAP IS THEN CORRECT BY CONSTRUCTION. In NVS the position is keyed
+//     by a path like `/books/Fleau.epub`; put in a different card and that path
+//     either does not exist or holds a DIFFERENT book, and restoring page 400
+//     into a hundred-page novel is a worse failure than forgetting. Detecting
+//     that needs a book-identity check -- which is this struct's `bookBytes`,
+//     doing the job a correct location does for free.
+//   * And the position travels with the book, which is what a user means by
+//     putting their library on a card.
+//
+// --- IT DEGRADES INSTEAD OF BEING DISCARDED ------------------------------------
+//
+// A saved position is three numbers of decreasing durability, and the honest thing
+// is to keep whichever of them still mean something rather than to treat the record
+// as all-or-nothing:
+//
+//   `spine`  survives nearly everything. It indexes the OPF's spine, which is the
+//            book's own structure.
+//   `block`  survives a RE-LAYOUT. Blocks come from document.h -- paragraphs and
+//            headings -- and owe nothing to a column width or a type size.
+//   `line`   does not. It is a line WITHIN a block at one ppem and one column
+//            width, so changing either makes it a number about a layout that no
+//            longer exists.
+//
+// So the record carries the three facts that decide which tier is usable, and
+// `fitOf` grades them. Landing at the top of the right block is a small, visible
+// imprecision; landing on line 9 of a block that now has four lines is a wrong page
+// that looks like a bug.
+struct ReadingPosition {
+  // WHICH BOOK, stored inside the file rather than only encoded in its name. The
+  // filename is a hash (see statePathFor) and a hash can collide; the path is what
+  // makes a collision detectable instead of silently restoring another book's
+  // position. It is also what makes the file readable on a computer.
+  std::string bookPath;
+
+  int spine = 0;
+  int block = 0;
+  int line = 0;
+
+  // THE STALENESS FACTS. Each one invalidates a different tier above.
+  //
+  // `bookBytes` is the EPUB's size, which is the cheapest identity a FileSystem
+  // with no timestamps and no hashes can offer -- `DirEntry` already carries it, so
+  // checking it costs a listing this device does anyway. It is not a checksum and
+  // does not pretend to be: two different books of exactly equal size compare
+  // equal. What it reliably catches is the case that actually happens, a book
+  // re-exported or replaced on the card.
+  uint32_t bookBytes = 0;
+  int ppem = 0;     // the body size `line` was laid at
+  int columnW = 0;  // the column width likewise
+
+  bool operator==(const ReadingPosition& o) const;
+};
+
+// How much of a saved position still applies, given what the book and the layout
+// are NOW. Ordered weakest-last, and a caller should switch on it rather than
+// compare -- the point is that there are four answers, not two.
+enum class PositionFit : uint8_t {
+  Exact,     // spine, block and line all usable
+  Relaid,    // the type or the column moved: spine and block usable, line is not
+  Rebound,   // the book's bytes changed: spine only
+  Unusable,  // not this book at all
+};
+
+// `bookPath` must match or the answer is Unusable, whatever else agrees: a record
+// reached through a colliding filename is about a different book.
+PositionFit fitOf(const ReadingPosition& saved, std::string_view bookPath, uint32_t bookBytes,
+                  int ppem, int columnW);
+
+// The spine entry and cursor to actually open, with whatever the fit does not
+// support zeroed. Zeroing rather than refusing is the whole point of grading: the
+// top of the right chapter beats the front of the book, which beats nothing.
+struct PositionRestore {
+  bool any = false;  // false only for Unusable
+  int spine = 0;
+  Cursor cursor{};
+};
+PositionRestore restoreFrom(const ReadingPosition& saved, PositionFit fit);
+
+// --- The wire format ---------------------------------------------------------
+//
+// One flat JSON object through json.h, which is exactly what that subset holds --
+// no nesting and no arrays. (Bookmarks WILL need an array and are a different file
+// for that reason; this one must not grow into them.)
+//
+// Keys are sorted by dump(), so saving an unchanged position produces a
+// byte-identical file -- which is what lets the shell skip a write that would
+// change nothing, and a card write is the expensive thing here.
+std::string serialise(const ReadingPosition& p);
+
+// Total: any malformed, truncated or wrong-version text is a clean false with `out`
+// untouched. A half-finished write is the case this must survive, and it is a real
+// one -- the device can lose power mid-save.
+bool parsePosition(std::string_view text, ReadingPosition& out);
+
+// Where one book's sidecar lives: `/.reader/state/<hash>.json`.
+//
+// A HASH, NOT THE PATH, because a book path is not a filename: it contains `/` by
+// construction, FAT forbids more (`\ : * ? " < > |`), and the names on a real card
+// are whatever a user's computer wrote -- accents, quotes, a 90-character title.
+// Escaping all that into one safe name is a second format to get wrong, and it
+// would still need a length cap.
+//
+// FNV-1a 32-bit, eight hex characters. Collisions are POSSIBLE and handled rather
+// than assumed away: the path is stored in the file, and `fitOf` answers Unusable
+// when it does not match, so a collision costs one book its position and never
+// misapplies another's.
+std::string statePathFor(std::string_view bookPath);
+
+// The record's own version. Bumped when the meaning of a field changes, which makes
+// every older file read as "no position" rather than as a wrong one.
+inline constexpr int kPositionVersion = 1;
+
+}  // namespace reader
