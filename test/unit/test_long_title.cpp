@@ -5,9 +5,15 @@
 // the case the user actually hit: a real card, whose filenames are as long as
 // whoever made them felt like. This file is that case, on each of the four
 // screens that draw a title, and it is here as its own file rather than folded
-// into the per-screen tests because what it pins is one behaviour crossing four
-// screens -- the boards' `text-overflow: ellipsis`, and Book details' deliberate
-// exception to it.
+// into the per-screen tests because what it pins is one behaviour crossing several
+// screens -- the boards' `text-overflow: ellipsis`, and the two deliberate
+// exceptions to it.
+//
+// IT SAID "FOUR SCREENS" AND COVERED FOUR THAT DO NOT INCLUDE HOME, which draws the
+// most prominent title on the device. Home elided, the device showed a truncated
+// book name on the one screen whose whole job is to name the book being read, and
+// nothing here noticed -- so changing Home's title to wrap broke no test. Home's
+// cases are below.
 #include <string>
 #include <vector>
 
@@ -16,6 +22,9 @@
 #include "ramp.h"
 #include "reader/components.h"
 #include "reader/framebuffer.h"
+#include "reader/icons.h"
+#include "reader/screens.h"
+#include "reader/screen_home.h"
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
 
@@ -242,5 +251,148 @@ TEST_CASE("the delete panel stays on the glass for a pathologically long name") 
       CHECK_MESSAGE(longestRun(barTop - 1) < panelW,
                     "panel border under the bar, repeats " << repeats);
     }
+  }
+}
+
+
+// --- Home ---------------------------------------------------------------------
+
+namespace {
+
+// Home's four hint marks, which decide the bar's height and therefore where the
+// menu starts. `kHomeMarks` is file-local to theme_quiet.cpp and stays that way --
+// widening a theme's surface for a test is the wrong trade -- so this is the same
+// four icons, and it is the one place a drift between them would show up as a
+// failure here rather than as a wrong answer.
+const reader::Icon* const kHomeHintMarks[4] = {&reader::icons::kBook, &reader::icons::kDot,
+                                               &reader::icons::kUp, &reader::icons::kDown};
+
+reader::HomeViewModel longHome() {
+  reader::HomeViewModel vm = reader::demoHomeVm();
+  vm.title = kLongTitle;
+  return vm;
+}
+
+}  // namespace
+
+TEST_CASE("a long title on Home matches its golden") {
+  // THE ONLY CHECK HERE THAT WOULD HAVE CAUGHT THE BUG THIS CODE SHIPPED WITH.
+  // `Prose::lines` are views into the text handed to the wrap, and the theme passed
+  // a temporary -- so a title long enough to wrap drew from freed memory and came
+  // out as a column of notdef boxes. Every row-counting assertion below passed
+  // anyway, because a notdef box inks rows exactly like a letter does.
+  //
+  // A golden is what distinguishes ink that spells something from ink that does not,
+  // and it is what the Library and Book details cases in this file already use.
+  Ramp r;
+  reader::QuietTheme theme;
+  for (const int w : {480, 528}) {
+    const int h = w == 480 ? 800 : 792;
+    reader::Framebuffer fb(w, h);
+    theme.renderHome(fb, r.fonts, longHome(), reader::Plane::Bw);
+    golden::checkGolden(fb, w == 480 ? "home_long_title" : "home_long_title_x3");
+  }
+}
+
+TEST_CASE("a long title on Home WRAPS rather than eliding") {
+  Ramp r;
+  reader::QuietTheme theme;
+  reader::Framebuffer plain(480, 800), wrapped(480, 800);
+  theme.renderHome(plain, r.fonts, reader::demoHomeVm(), reader::Plane::Bw);
+  theme.renderHome(wrapped, r.fonts, longHome(), reader::Plane::Bw);
+  // The whole point: a long name takes more vertical room than a short one. If it
+  // elided, these two frames would ink the same rows.
+  int plainRows = 0, wrappedRows = 0;
+  for (int y = 0; y < 800; ++y) {
+    for (int x = 0; x < 480; ++x) {
+      if (!plain.getPixel(x, y)) { ++plainRows; break; }
+    }
+    for (int x = 0; x < 480; ++x) {
+      if (!wrapped.getPixel(x, y)) { ++wrappedRows; break; }
+    }
+  }
+  CHECK(wrappedRows > plainRows);
+}
+
+TEST_CASE("a short title on Home is bit-identical to the drawText that elided it") {
+  // The wrap replaced a drawTextElided, and drawProse's first baseline is
+  // baselineIn's own definition -- so an ordinary one-line title must move NOTHING.
+  // This is what let the Home goldens keep passing through the change, and it is
+  // asserted rather than inferred from them.
+  Ramp r;
+  reader::QuietTheme theme;
+  for (const int w : {480, 528}) {
+    const int h = w == 480 ? 800 : 792;
+    reader::Framebuffer fb(w, h);
+    theme.renderHome(fb, r.fonts, reader::demoHomeVm(), reader::Plane::Bw);
+    golden::checkGolden(fb, w == 480 ? "home_quiet" : "home_quiet_x3");
+  }
+}
+
+TEST_CASE("Home keeps its menu and hint bar exactly where they were, however long the title") {
+  Ramp r;
+  reader::QuietTheme theme;
+  // The menu and the bar are BOTTOM-ANCHORED, and the title's line budget is derived
+  // from the room left over once they and the slab are accounted for. So the thing
+  // that must not happen is a name tall enough to push any of them -- which is the
+  // same property Book details asserts about its field rows, on a screen whose
+  // fixed furniture is different.
+  //
+  // Both geometries, because the budget is arithmetic over the canvas and the two
+  // take different branches of it.
+  struct Case {
+    int w, h;
+  };
+  for (const Case c : {Case{480, 800}, Case{528, 792}}) {
+    reader::Framebuffer shortFb(c.w, c.h);
+    theme.renderHome(shortFb, r.fonts, reader::demoHomeVm(), reader::Plane::Bw);
+
+    reader::Hint hints[4];
+    const reader::HomeViewModel probe = reader::demoHomeVm();
+    reader::buildHints(kHomeHintMarks, probe.hints, probe.holds, hints);
+    const int menuTop = c.h - reader::hintBarHeight(r.fonts, hints) -
+                        static_cast<int>(probe.menu.size()) * 81;
+
+    for (int repeats = 1; repeats <= 8; ++repeats) {
+      reader::HomeViewModel vm = longHome();
+      vm.title.clear();
+      for (int i = 0; i < repeats; ++i) vm.title += kLongTitle;
+
+      reader::Framebuffer fb(c.w, c.h);
+      theme.renderHome(fb, r.fonts, vm, reader::Plane::Bw);
+
+      // EVERY ROW FROM THE MENU DOWN IS BYTE-IDENTICAL to the short-title render.
+      // Stronger than "nothing fell off the bottom": it says the title cannot move
+      // the furniture at all, however many lines the budget grants it.
+      for (int y = menuTop; y < c.h; ++y) {
+        for (int x = 0; x < c.w; ++x) {
+          if (fb.getPixel(x, y) != shortFb.getPixel(x, y)) {
+            CHECK_MESSAGE(false, "row " << y << " moved at repeats " << repeats << " on " << c.w
+                                        << "x" << c.h);
+            y = c.h;  // one failure per case is enough
+            break;
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("a pathologically long Home title stays inside the canvas") {
+  Ramp r;
+  reader::QuietTheme theme;
+  std::string huge;
+  for (int i = 0; i < 40; ++i) huge += kLongTitle;
+  for (const int w : {480, 528}) {
+    const int h = w == 480 ? 800 : 792;
+    reader::HomeViewModel vm = longHome();
+    vm.title = huge;
+    reader::Framebuffer fb(w, h);
+    theme.renderHome(fb, r.fonts, vm, reader::Plane::Bw);
+    // No crash, and the frame is still a frame: the bottom row belongs to the hint
+    // bar's content, not to a title that ran off the end.
+    reader::Hint hints[4];
+    reader::buildHints(kHomeHintMarks, vm.hints, vm.holds, hints);
+    CHECK(reader::hintBarHeight(r.fonts, hints) > 0);
   }
 }

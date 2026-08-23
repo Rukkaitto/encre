@@ -68,6 +68,19 @@ struct ReadingPosition {
   int ppem = 0;     // the body size `line` was laid at
   int columnW = 0;  // the column width likewise
 
+  // HOW FAR THROUGH THE BOOK, 0..100, stored rather than derived.
+  //
+  // Derived data in a record is usually a smell, and this is the exception that
+  // earns itself: recovering it needs the book's chapter byte layout, which means
+  // OPENING THE EPUB -- a central directory and an OPF parse each. The Library shows
+  // a percentage per ROW, so deriving it would be one archive open per book on the
+  // card, hundreds of milliseconds each, on a screen that has to paint.
+  //
+  // It is exact when written (progressPercent, at the moment the position was saved)
+  // and it goes stale only if the book itself changes -- which `bookBytes` already
+  // detects, and which drops the position anyway.
+  int percent = 0;
+
   bool operator==(const ReadingPosition& o) const;
 };
 

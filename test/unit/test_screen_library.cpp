@@ -12,6 +12,7 @@
 #include "reader/booklist.h"
 #include "reader/components.h"
 #include "reader/framebuffer.h"
+#include "reader/reading_store.h"
 #include "reader/screen_library.h"
 #include "reader/screen_sd_missing.h"
 #include "reader/screens.h"
@@ -601,4 +602,78 @@ TEST_CASE("scrolling down moves the thumb, because firstRow follows the window")
   for (int i = 0; i < visible + 20; ++i) lib.onEvent(kDown);
   CHECK(lib.vm().firstRow > 0);
   CHECK(lib.vm().totalRows == 200);
+}
+
+// --- Progress on the rows -----------------------------------------------------
+//
+// design/Library.dc.html gives each row a percentage or `NEW`. Every book read NEW on
+// the device because the percentage needed `/.reader/state/` and there was nothing in
+// it -- and this file's own fixture already had a `kStatePath` constant for asserting
+// that a delete does not touch that directory, so the seam was here before the data
+// was.
+//
+// Asserted through `vm().rows`, which is what the theme draws, rather than through the
+// items behind them: a row's `value` is the field on the glass.
+
+namespace {
+
+// The drawn value for one row, by title, or "<absent>" if that row is not on screen.
+std::string valueOf(const LibraryScreen& lib, std::string_view title) {
+  for (const reader::LibraryRow& r : lib.vm().rows)
+    if (r.title == title) return r.value;
+  return "<absent>";
+}
+
+}  // namespace
+
+TEST_CASE("a started book shows its percentage and an unopened one reads NEW") {
+  FakeFileSystem fs = cardWithBooks();
+  reader::ReadingPosition p;
+  p.bookPath = "/books/Middlemarch.epub";
+  p.spine = 4;
+  p.percent = 31;
+  p.bookBytes = 1;
+  p.ppem = 32;
+  p.columnW = 492;
+  REQUIRE(reader::savePosition(fs, p) == reader::SaveResult::Written);
+
+  LibraryScreen lib(fs, "/books");
+  lib.setVisibleRows(8);
+  CHECK(valueOf(lib, "Middlemarch") == "31%");
+  // NEW, not a blank and not 0% -- a book at 0% has been opened. Both halves
+  // asserted, or the case is checking one row and calling it a rule.
+  CHECK(valueOf(lib, "Walden") == "NEW");
+}
+
+TEST_CASE("a folder row has no progress value at all") {
+  // The board gives a folder `FOLDER - 6 BOOKS` in its meta line, so a percentage in
+  // the value slot would be two facts in one field.
+  FakeFileSystem fs = cardWithBooks();
+  LibraryScreen lib(fs, "/books");
+  lib.setVisibleRows(8);
+  for (const reader::LibraryRow& r : lib.vm().rows)
+    if (r.isFolder) CHECK(r.value.empty());
+}
+
+TEST_CASE("a book in a subfolder is matched by its full path, not its name") {
+  // The index is keyed by the path stored in the sidecar, and two folders may hold
+  // books with the same filename. Matching on the leaf would give one the other's
+  // position.
+  FakeFileSystem fs = cardWithBooks();
+  fs.writeAll("/books/Dubliners.epub", "top-level namesake");
+  reader::ReadingPosition p;
+  p.bookPath = "/books/Classics/Dubliners.epub";
+  p.percent = 48;
+  p.bookBytes = 1;
+  p.ppem = 32;
+  p.columnW = 492;
+  REQUIRE(reader::savePosition(fs, p) == reader::SaveResult::Written);
+
+  LibraryScreen top(fs, "/books");
+  top.setVisibleRows(8);
+  CHECK(valueOf(top, "Dubliners") == "NEW");  // the namesake, not the started one
+
+  LibraryScreen inner(fs, "/books/Classics");
+  inner.setVisibleRows(8);
+  CHECK(valueOf(inner, "Dubliners") == "48%");
 }

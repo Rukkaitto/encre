@@ -1221,6 +1221,11 @@ static void saveReadingPosition(const char* why) {
   // setting invalidates exactly the field it should.
   p.ppem = reader::kBodyPpem;
   p.columnW = gFactory.readerMetrics().columnW;
+  // The percentage goes IN the sidecar, so the Library can show it per row without
+  // opening every book's archive to recompute one. Computed once, just below, and
+  // shared with the Home pointer.
+  p.percent = reader::progressPercent(gFactory.readerBook(), rd->chapterIndex(), rd->vm().page,
+                                      rd->vm().pageTotal);
 
   reader::LastRead last;
   last.bookPath = gReading.path;
@@ -1230,8 +1235,7 @@ static void saveReadingPosition(const char* why) {
   last.spineCount = rd->chapterCount();
   // By BYTES through the book, because a page-based percentage would need every
   // chapter counted -- ~49 s of decode on this device. See progressPercent.
-  last.percent = reader::progressPercent(gFactory.readerBook(), rd->chapterIndex(),
-                                         rd->vm().page, rd->vm().pageTotal);
+  last.percent = p.percent;
 
   const reader::SaveResult a = reader::savePosition(gSd, p);
   const reader::SaveResult b = reader::saveLastRead(gSd, last);
@@ -1261,6 +1265,11 @@ static void logChapterOpen(const reader::ReaderScreen* rd, uint32_t elapsedMs) {
                 (unsigned)rd->chapterBytes(), rd->indexPending() ? "deferred" : "counted",
                 rd->pageCount(), (unsigned long)elapsedMs);
 }
+
+// Defined below, because it is long and handleOpen reads better as the resolution of
+// WHICH book followed by one call. Declared here rather than reordered so the two
+// stay adjacent.
+static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push);
 
 static void handleOpen() {
   gApp->clearOpenRequest();  // first, so a book that refuses does not re-fire
@@ -1312,6 +1321,23 @@ static void handleOpen() {
     if (h != nullptr) bookBytes = h->size();
   }
 
+  openBookAt(path, bookBytes, /*push=*/true);
+}
+
+// PRIME THE FACTORY WITH A BOOK AND ITS SAVED POSITION. Everything the Reader needs
+// before it can be pushed, in one place, because TWO paths need it and they must
+// agree: a button press (the Library's selection, or Home's CONTINUE) and a WAKE.
+//
+// The wake is why this was extracted. App::restore pushes the record's stack, the
+// Reader's push goes through the factory, and the factory refuses a Reader with no
+// book -- deliberately, since falling through to the demo is how the device once woke
+// into Middlemarch. So sleeping on a page and waking landed on the Library: the
+// restore correctly stopped short of a screen that could not be built. Nothing was
+// wrong with the restore; the book was never set.
+// `push` is false for the WAKE, where App::restore does the pushing -- it walks the
+// record's whole stack and the Reader is one entry in it. Everything before the push
+// is identical either way, which is the point of there being one function.
+static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   const uint32_t t0 = millis();
   const uint32_t heapBefore = ESP.getFreeHeap();
   reader::OpenedBook opened;
@@ -1326,7 +1352,7 @@ static void handleOpen() {
                   why, (unsigned)ESP.getFreeHeap(),
                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     Serial.flush();
-    return;
+    return false;
   }
   const uint32_t t1 = millis();
   // mark() carries heap AND min, so these two make the open's phases visible in the
@@ -1376,7 +1402,7 @@ static void handleOpen() {
   gReading.open = true;
 
   gFactory.setReaderBook(opened, startChapter, startAt);
-  const bool pushed = gApp->pushScreen(reader::ScreenId::Reader);
+  const bool pushed = push && gApp->pushScreen(reader::ScreenId::Reader);
   // The push builds the screen, which locates the chapter, decodes it once to index
   // its pages, and lays out the first -- the whole expensive part.
   mark("open-paginated");
@@ -1412,6 +1438,7 @@ static void handleOpen() {
                 (unsigned)ESP.getMinFreeHeap(), pushed ? 1 : 0,
                 readerWhy[0] != '\0' ? " reader-refused: " : "", readerWhy);
   Serial.flush();
+  return true;
 }
 
 static void handleRetry() {
@@ -2604,6 +2631,32 @@ void setup() {
                     reader::screenName(gApp->top().id()));
       Serial.flush();
     } else {
+      // THE READER CANNOT BE RESTORED WITHOUT ITS BOOK, and the factory is right to
+      // refuse one -- falling through to the demo is how this device once woke into
+      // Middlemarch. So a record naming the Reader needs the book set FIRST, from the
+      // same pointer Home reads; without this, sleeping on a page woke to the Library
+      // because the restore correctly stopped short of a screen that could not build.
+      //
+      // The position comes from the sidecar, exactly as a button press would get it:
+      // the record says WHICH SCREENS, and the card says where in the book. Two
+      // records, two jobs -- the session record has never known about a book.
+      bool namesReader = false;
+      for (const reader::StackEntry& e : stack)
+        if (e.screen == reader::ScreenId::Reader) namesReader = true;
+      if (namesReader && gStorageUsable) {
+        reader::LastRead last;
+        if (!reader::loadLastRead(gSd, last) || !gSd.exists(last.bookPath)) {
+          Serial.println("[session] the record names the Reader but no saved book is on the "
+                         "card; it will stop at the screen below it");
+          Serial.flush();
+        } else {
+          uint32_t bytes = 0;
+          std::unique_ptr<reader::FileHandle> h = gSd.openRead(last.bookPath);
+          if (h != nullptr) bytes = h->size();
+          h.reset();
+          openBookAt(last.bookPath, bytes, /*push=*/false);
+        }
+      }
       const reader::App::RestoreReport r = gApp->restore(stack);
       if (!r.rootMatched) {
         // The record describes a different world from the one that booted -- in

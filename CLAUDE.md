@@ -819,6 +819,20 @@ will come looking for this lever and needs to find it already spent.
 - **Assets are generated from the design, not transcribed.** `iconc.py` reads
   each icon's SVG and size from its named board at generation time. It once held
   copies and silently swallowed a design fix.
+- **THE SIDE BUTTONS ARE MOVERS, and until page turns landed they did nothing at
+  all.** `Button::Left` and `Button::Right` are the two side buttons — the shell maps
+  the SDK's `BTN_UP`/`BTN_DOWN` onto them, because the SDK's names describe its band
+  order and not this device's panel — and `gestureFor` had no case for either, so they
+  fell through to `default: return {}`. Spec 4.0 puts page turns on them; the shell's
+  own comment said "the sides turn pages in the Reader (Phase 3) and do nothing before
+  it — verify when page turns land". Page turns landed and the mapping did not, and
+  **nothing in `test_gesture.cpp` mentioned Left or Right**, so adding them broke no
+  test. They share Up/Down's code path rather than getting a second one, so they
+  inherit its repeat gating, its held flag and its dropped-`Long` rule; the Reader
+  declares no auto-repeat, so a held side button turns exactly one page. Which
+  physical side is which was never verified against behaviour, because until now there
+  was none to verify against — if they turn pages the wrong way, the fix is the two
+  `BTN_UP`/`BTN_DOWN` lines in the shell, not `gesture.cpp`.
 - **The hint bar has exactly four slots and is always one line tall**, one slot
   per front button, in hardware order (Back, Confirm, Up, Down). A button with no
   action gets an empty slot. A long-press variant is a **hollow ring after that
@@ -999,7 +1013,7 @@ worth knowing before changing it:
 
 | Screen | Board | The thing |
 |---|---|---|
-| Home | `Main.dc.html` | Focus starts on the CONTINUE block (`-1`), not the menu. |
+| Home | `Main.dc.html` | Focus starts on the CONTINUE block (`-1`), not the menu. Its title WRAPS. |
 | Home / empty | `HomeEmpty.dc.html` | A **variant**, not a screen: same `ScreenId`, same view model, same menu. |
 | Home / nothing open | `HomeUnopened.dc.html` | The same variant with different words. What the device actually shows today. |
 | Library | `Library.dc.html` | The only list that scrolls today, and the only screen with a rail. |
@@ -1568,6 +1582,72 @@ can go stale, so **it is checked against the card** with one `exists` call befor
 anything is drawn — Home confidently offering to continue a book that cannot be opened
 is worse than not offering. `HomeMissing.dc.html` is the boarded state for that case
 and is not built, so a stale pointer currently falls back to the nothing-open screen.
+
+**A WAKE CANNOT RESTORE THE READER WITHOUT ITS BOOK, and that is why sleeping on a
+page woke to the Library.** `App::restore` pushes the record's stack, the Reader's push
+goes through the factory, and the factory REFUSES a Reader with no book — deliberately,
+since falling through to the demo is how this device once woke into Middlemarch. So the
+restore correctly stopped short of a screen that could not be built. Nothing was wrong
+with the restore; the book had never been set.
+
+The shell now primes the factory from `last.json` before restoring, when the record
+names the Reader anywhere in its stack. **Two records, two jobs:** the session record
+says WHICH SCREENS and has never known about a book; the card says where in the book.
+`openBookAt(path, bytes, push)` is the one function both a button press and a wake go
+through — extracted precisely because they must agree, with `push` false for the wake
+because `App::restore` does the pushing.
+
+**EVERY BOOK READ `NEW` IN THE LIBRARY, and `screen_library.h` had already written down
+why:** "a real percentage needs `/.reader/state/`, which has nothing to record until the
+Reader exists". It does now. Two things had to change together:
+
+- **The sidecar STORES its percentage.** Derived data in a record is usually a smell and
+  this is the exception that earns itself: recovering it needs the book's chapter byte
+  layout, so the Library would have to OPEN every started book's archive to draw a
+  column of numbers. It is exact when written and goes stale only if the book changes —
+  which `bookBytes` already detects, and which drops the position anyway.
+- **`loadProgressIndex` reads the whole directory once.** One listing plus one read per
+  book STARTED — not per book on the card, which is the point: 203 books with three
+  started costs a listing and three reads, where asking each row for its own sidecar
+  would be 203 opens, most of them misses, on a screen that has to paint. A corrupt
+  record is skipped individually, so a save cut by a power loss costs one book its
+  percentage and nothing else.
+
+`percentFor` returns **-1 for "not started", not 0**: a book at 0% has been opened and
+one that has not reads `NEW`, and the board draws those differently.
+
+**HOME'S TITLE WRAPS, AND IT USED TO ELIDE.** The board said `text-overflow:
+ellipsis` and the device showed a truncated book name on the one screen whose whole
+job is to name the book being read — where an ellipsis on a *list row* hides only
+which of seven rows this is. Both Home boards now say `overflow-wrap: anywhere`, and
+the theme reuses Book details' mechanism: `wrapProseLead(..., WordBreak::Anywhere)` →
+`clampProse` → `drawProse`. `Anywhere` because a title falling back to a filename is
+usually one word with no break opportunity at an underscore or a hyphen.
+
+**The line budget is DERIVED, not pinned**: the canvas less the band and the block's
+padding, less the bar and the slab with their gaps, less the bottom-anchored menu and
+hint bar, less the column's three fixed runs, over the title's line box. It comes out
+4 lines on the X4 and 3 on the X3 — different branches of one arithmetic, which is
+why both geometries are tested. `renderHome` built its hints twice; the reading path
+now reuses the pair built at the top, because the bar's height is an *input* to the
+budget.
+
+**IT SHIPPED A USE-AFTER-FREE FIRST, and the way it hid is the lesson.** `Prose::lines`
+are `string_view`s into the text handed to the wrap — components.h says "which must
+outlive the Prose" — and the theme passed `upperAscii(vm.title)` inline, a temporary
+that died at the end of the expression. A title long enough to wrap drew from freed
+memory and rendered as a column of **notdef boxes**; a short one rendered correctly,
+because the freed bytes were still there. So every golden passed, and so did the
+row-counting test written to prove the wrap works — **a notdef box inks rows exactly
+like a letter does**. What caught it was rendering a long title to a PNG and looking
+at it. `home_long_title` goldens exist at both geometries now, which is the check that
+distinguishes ink that spells something from ink that does not.
+
+**`test_long_title.cpp` SAID "FOUR SCREENS" AND HOME WAS NOT ONE OF THEM** — the four
+were Library, Book details, the actions panel and the delete panel. So the most
+prominent title on the device was the one uncovered by the file that exists for
+titles, and changing Home's from eliding to wrapping broke no test. Its cases are
+there now.
 
 **HOME'S VIEW MODEL IS BUILT ONCE, AND THAT WAS A BUG.** Home is the App's ROOT, so
 returning to it hands back the same instance with the view model it was CONSTRUCTED
