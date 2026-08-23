@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <vector>
 
 #include "reader/chapter.h"
 #include "reader/document.h"
@@ -23,29 +24,65 @@ namespace reader {
 // outlive every page laid out from it -- three lifetimes with one correct nesting,
 // which is exactly the sort of thing each caller would get subtly differently.
 //
-// WHAT IT HANDS BACK IS A LOCATION, NOT A DOCUMENT. It used to return the whole
-// chapter's blocks, which is exactly what could not be afforded: Le Fléau's longest
-// chapter is 228,849 bytes of them. So it opens the archive, reads the metadata,
-// finds where the chapter's compressed bytes begin, and closes -- and a
-// ChapterReader streams from that location afterwards.
+// WHAT IT HANDS BACK IS THE BOOK'S GEOMETRY, NOT A CHAPTER. It used to return the
+// whole chapter's blocks, which is exactly what could not be afforded: Le Fléau's
+// longest chapter is 228,849 bytes of them.
 //
-// The archive is therefore parsed once per chapter OPENED, not per page turned: a
-// ChapterLocation is a path and three numbers, so re-reading the chapter for a
-// backward page turn needs no central directory at all.
-struct OpenedBook {
-  std::string title;   // from the OPF, as authored
-  std::string author;
-  int chapterCount = 0;
-  ChapterLocation chapter;  // where the requested chapter's bytes are
+// AND NOT ONE CHAPTER'S LOCATION EITHER, which was the next mistake. It took a
+// chapter index and returned that chapter's offsets, so the reader called it again
+// for every chapter it wanted -- and every call re-parses the 121-entry central
+// directory and re-inflates the 8,472-byte OPF. The device measured it: the open's
+// pagination phase took minimum free heap from 85,860 to 41,188 and cost 433 ms of
+// a 511 ms open, because reaching this book's first chapter with text means trying
+// three spine entries and therefore three of those parses.
+//
+// The whole spine's offsets are 12 bytes an entry -- 1,104 for a 92-chapter book --
+// so they are read ONCE and kept. A chapter change is then picking a row: no
+// archive, no directory, no OPF.
+struct ChapterSpan {
+  uint32_t dataOffset = 0;      // where this entry's compressed bytes begin
+  uint32_t compressedSize = 0;  // 0 means the spine named an entry the archive lacks
+  bool deflated = true;         // false for a stored entry: the bytes are the text
+
+  // A spine entry that cannot be read, which is narrower than it looks: Epub::open
+  // validates EVERY spine entry against the archive and refuses the whole book if
+  // one is missing (epub.cpp:186 and :189, two distinct messages). So the only way
+  // here is zip.locate() failing -- a corrupt local header, or data running past the
+  // end of the file. The reader skips such an entry exactly as it skips one with no
+  // text.
+  bool readable() const { return compressedSize > 0; }
 };
 
-// `path` is the EPUB, absolute on `fs`. `chapter` indexes Epub::chapters().
+struct OpenedBook {
+  std::string path;    // the EPUB on the card, as given
+  std::string title;   // from the OPF, as authored
+  std::string author;
+  // One per spine entry, in spine order. `size()` is the chapter count.
+  std::vector<ChapterSpan> chapters;
+
+  int chapterCount() const { return static_cast<int>(chapters.size()); }
+
+  // Where chapter `i` is, for a ChapterReader. An unreadable or out-of-range index
+  // yields a location with no size, which ChapterReader refuses.
+  ChapterLocation locate(int i) const {
+    ChapterLocation out;
+    if (i < 0 || i >= chapterCount()) return out;
+    const ChapterSpan& c = chapters[static_cast<size_t>(i)];
+    if (!c.readable()) return out;
+    out.bookPath = path;
+    out.dataOffset = c.dataOffset;
+    out.compressedSize = c.compressedSize;
+    out.deflated = c.deflated;
+    return out;
+  }
+};
+
+// `path` is the EPUB, absolute on `fs`.
 //
-// False with `*reason` set for every failure -- a missing file, a zip that is not
-// one, an OPF that does not parse, a chapter index past the spine, an entry the
-// spine names but the archive does not contain. NEVER an abort: this is bytes off a
-// user's card, and the caller has a screen it can put the reason on.
-bool openBook(FileSystem& fs, std::string_view path, int chapter, OpenedBook& out,
-              const char** reason);
+// False with `*reason` set for a missing file, a zip that is not one, an OPF that
+// does not parse, a spine with nothing in it, or -- via Epub::open -- any spine
+// entry the manifest or the archive does not hold. NEVER an abort: this is bytes off
+// a user's card, and the caller has a screen it can put the reason on.
+bool openBook(FileSystem& fs, std::string_view path, OpenedBook& out, const char** reason);
 
 }  // namespace reader

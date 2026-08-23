@@ -1115,7 +1115,7 @@ static void handleOpen() {
   const uint32_t heapBefore = ESP.getFreeHeap();
   reader::OpenedBook opened;
   const char* why = "";
-  if (!reader::openBook(gSd, path, 0, opened, &why)) {
+  if (!reader::openBook(gSd, path, opened, &why)) {
     // THE HEAP GOES IN THE REFUSAL LINE, because "not enough memory" is only
     // actionable next to how much there was and how fragmented it is. The largest
     // free BLOCK is the number that actually decides: the reader's allocations are
@@ -1143,7 +1143,7 @@ static void handleOpen() {
   // THE BOOK, not one chapter: the reader pages between spine entries itself, which
   // is what it needs to be a reader -- entry 0 of a real EPUB is a cover with no
   // text at all, and it showed as a blank page reading 0/0.
-  gFactory.setReaderBook(path, opened.title, opened.chapterCount, 0);
+  gFactory.setReaderBook(opened, 0);
   const bool pushed = gApp->pushScreen(reader::ScreenId::Reader);
   // The push builds the screen, which locates the chapter, decodes it once to index
   // its pages, and lays out the first -- the whole expensive part.
@@ -1171,9 +1171,9 @@ static void handleOpen() {
                 (unsigned)getArduinoLoopTaskStackSize());
   Serial.printf("[open] %s -> \"%s\" ch=1/%d: locate=%lums total=%lums pages=%d "
                 "entry=%uB heap %u -> %u (cost %ld) min=%u pushed=%d%s%s\n",
-                path.c_str(), opened.title.c_str(), opened.chapterCount,
+                path.c_str(), opened.title.c_str(), opened.chapterCount(),
                 (unsigned long)(t1 - t0), (unsigned long)(millis() - t0), pages,
-                (unsigned)opened.chapter.compressedSize, (unsigned)heapBefore,
+                (unsigned)opened.locate(0).compressedSize, (unsigned)heapBefore,
                 (unsigned)ESP.getFreeHeap(),
                 (long)heapBefore - (long)ESP.getFreeHeap(),
                 (unsigned)ESP.getMinFreeHeap(), pushed ? 1 : 0,

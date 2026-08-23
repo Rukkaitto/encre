@@ -296,9 +296,9 @@ TEST_CASE("a chapter streamed from a card reads the same as one from memory") {
                                        epubfix::kEpubGoodLen)));
   reader::OpenedBook ob;
   const char* why = "";
-  REQUIRE_MESSAGE(reader::openBook(fs, "/books/b.epub", 0, ob, &why), std::string(why));
+  REQUIRE_MESSAGE(reader::openBook(fs, "/books/b.epub", ob, &why), std::string(why));
 
-  reader::ReaderScreen fromCard(fs, "/books/b.epub", "T", ob.chapterCount, 0, &body.face);
+  reader::ReaderScreen fromCard(fs, ob, 0, &body.face);
   fromCard.setMetrics(m);
 
   // The same chapter's bytes, read out whole and streamed from memory instead.
@@ -339,9 +339,9 @@ TEST_CASE("PAGING OFF THE END OF A CHAPTER OPENS THE NEXT ONE") {
                                        epubfix::kEpubGoodLen)));
   reader::OpenedBook ob;
   const char* why = "";
-  REQUIRE_MESSAGE(reader::openBook(fs, "/books/b.epub", 0, ob, &why), std::string(why));
+  REQUIRE_MESSAGE(reader::openBook(fs, "/books/b.epub", ob, &why), std::string(why));
 
-  reader::ReaderScreen scr(fs, "/books/b.epub", ob.title, ob.chapterCount, 0, &body.face);
+  reader::ReaderScreen scr(fs, ob, 0, &body.face);
   scr.setMetrics(m);
   REQUIRE(scr.pageCount() > 0);
   const int firstChapter = scr.chapterIndex();
@@ -355,7 +355,7 @@ TEST_CASE("PAGING OFF THE END OF A CHAPTER OPENS THE NEXT ONE") {
   while (scr.chapterIndex() == firstChapter && guard++ < 200) {
     if (scr.onEvent(down).kind != reader::Action::Kind::Redraw) break;
   }
-  if (ob.chapterCount > 1) {
+  if (ob.chapterCount() > 1) {
     // It moved on rather than stopping.
     CHECK(scr.chapterIndex() > firstChapter);
     CHECK(scr.pageCount() > 0);
@@ -419,9 +419,9 @@ TEST_CASE("A REFUSED CHAPTER TURN LEAVES THE SCREEN WHERE IT WAS") {
                                        epubfix::kEpubGoodLen)));
   reader::OpenedBook ob;
   const char* why = "";
-  REQUIRE(reader::openBook(fs, "/books/b.epub", 0, ob, &why));
+  REQUIRE(reader::openBook(fs, "/books/b.epub", ob, &why));
 
-  reader::ReaderScreen scr(fs, "/books/b.epub", ob.title, ob.chapterCount, 0, &body.face);
+  reader::ReaderScreen scr(fs, ob, 0, &body.face);
   scr.setMetrics(m);
   REQUIRE(scr.pageCount() > 0);
 

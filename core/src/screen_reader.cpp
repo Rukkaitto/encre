@@ -18,13 +18,12 @@ constexpr int kMaxPages = 4096;
 
 }  // namespace
 
-ReaderScreen::ReaderScreen(FileSystem& fs, std::string bookPath, std::string bookTitle,
-                           int chapterCount, int startChapter, const GlyphSource* body)
+ReaderScreen::ReaderScreen(FileSystem& fs, OpenedBook book, int startChapter,
+                           const GlyphSource* body)
     : body_(body),
-      bookTitle_(std::move(bookTitle)),
+      bookTitle_(book.title),
       fs_(&fs),
-      bookPath_(std::move(bookPath)),
-      chapterCount_(chapterCount),
+      book_(std::move(book)),
       chapterAt_(startChapter) {
   // Nothing is opened here: a chapter cannot be paginated without a column height,
   // and setMetrics is the first moment one exists. So the constructor is cheap and
@@ -46,7 +45,7 @@ ReaderScreen::~ReaderScreen() = default;
 
 void ReaderScreen::setMetrics(const PageMetrics& m) {
   metrics_ = m;
-  if (fs_ != nullptr && !bookPath_.empty()) {
+  if (fs_ != nullptr && !book_.path.empty()) {
     // The expensive call: locating the chapter and decoding it once to index its
     // pages, plus however many empty spine entries have to be skipped to reach
     // text.
@@ -92,18 +91,26 @@ bool ReaderScreen::openChapterAt(int c, bool atEnd) {
 }
 
 bool ReaderScreen::walkToChapter(int c, bool atEnd) {
-  if (fs_ == nullptr || bookPath_.empty() || body_ == nullptr) return false;
+  if (fs_ == nullptr || book_.path.empty() || body_ == nullptr) return false;
   const int dir = atEnd ? -1 : +1;
 
   // Bounded by the spine's own length: every step moves one entry, so this cannot
   // loop even if every chapter were empty.
-  for (int guard = 0; guard <= chapterCount_; ++guard) {
-    if (c < 0 || c >= chapterCount_) return false;
+  for (int guard = 0; guard <= book_.chapterCount(); ++guard) {
+    if (c < 0 || c >= book_.chapterCount()) return false;
 
-    OpenedBook ob;
-    const char* why = "";
-    if (!openBook(*fs_, bookPath_, c, ob, &why)) return false;
-    if (!chapter_.begin(*fs_, ob.chapter)) return false;
+    // A ROW LOOKUP, not an archive parse. This called openBook per candidate, and
+    // each call re-read the central directory and re-inflated the OPF -- ~32 KB
+    // transient and ~140 ms, three times over, just to reach this book's first
+    // chapter with text. The offsets were read once when the book was opened.
+    const ChapterLocation where = book_.locate(c);
+    if (where.compressedSize == 0) {
+      // The spine named an entry the archive does not contain. Skip it exactly as a
+      // chapter with no text is skipped.
+      c += dir;
+      continue;
+    }
+    if (!chapter_.begin(*fs_, where)) return false;
 
     chapterAt_ = c;
     buildIndex();

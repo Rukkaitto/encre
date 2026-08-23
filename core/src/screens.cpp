@@ -223,9 +223,9 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       if (readerBody_ == nullptr) return nullptr;
       const std::string title = readerBookTitle_.empty() ? "Middlemarch" : readerBookTitle_;
       std::unique_ptr<ReaderScreen> scr;
-      if (!readerPath_.empty() && fs_ != nullptr) {
-        scr = std::make_unique<ReaderScreen>(*fs_, readerPath_, title, readerChapterCount_,
-                                            readerStartChapter_, readerBody_);
+      if (!readerBook_.path.empty() && fs_ != nullptr) {
+        scr = std::make_unique<ReaderScreen>(*fs_, readerBook_, readerStartChapter_,
+                                             readerBody_);
       } else if (readerDemo_) {
         scr = std::make_unique<ReaderScreen>(demoReaderXhtml(), title, "CH. 01", readerBody_);
       } else {

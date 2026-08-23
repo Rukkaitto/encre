@@ -5,6 +5,7 @@
 #include "reader/app.h"
 #include "reader/screen_settings.h"
 #include "reader/screen_library.h"
+#include "reader/book.h"
 #include "reader/screen_reader.h"
 #include "reader/viewmodel.h"
 
@@ -136,13 +137,11 @@ class DemoScreenFactory : public ScreenFactory {
   // substitutes content is worse than one that refuses.
   void setReaderDemo() { readerDemo_ = true; }
 
-  // THE BOOK, not one chapter: a path, its title, how many spine entries it has and
-  // which to open.
-  void setReaderBook(std::string bookPath, std::string bookTitle, int chapterCount,
-                     int startChapter) {
-    readerPath_ = std::move(bookPath);
-    readerBookTitle_ = std::move(bookTitle);
-    readerChapterCount_ = chapterCount;
+  // THE BOOK'S WHOLE GEOMETRY, from one openBook: its path, its metadata and twelve
+  // bytes an entry. The reader reaches another chapter by picking a row out of it,
+  // where it used to re-parse the archive per chapter.
+  void setReaderBook(OpenedBook book, int startChapter) {
+    readerBook_ = std::move(book);
     readerStartChapter_ = startChapter;
   }
 
@@ -159,9 +158,8 @@ class DemoScreenFactory : public ScreenFactory {
   int settingsHeaderH_ = 0;
   const GlyphSource* readerBody_ = nullptr;
   PageMetrics readerMetrics_{};
-  std::string readerPath_;
+  OpenedBook readerBook_{};
   bool readerDemo_ = false;
-  int readerChapterCount_ = 0;
   int readerStartChapter_ = 0;
   std::string readerBookTitle_;
   std::string readerChapter_;

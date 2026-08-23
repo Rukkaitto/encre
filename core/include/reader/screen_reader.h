@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "reader/app.h"
+#include "reader/book.h"
 #include "reader/chapter.h"
 #include "reader/layout.h"
 #include "reader/viewmodel.h"
@@ -53,8 +54,7 @@ class ReaderScreen : public Screen {
   // Library is not until setVisibleRows: a page count depends on a column height
   // and onGesture has no framebuffer to ask. Before it, the page is empty and the
   // counter reads 0 -- a readable screen rather than an abort.
-  ReaderScreen(FileSystem& fs, std::string bookPath, std::string bookTitle,
-               int chapterCount, int startChapter, const GlyphSource* body);
+  ReaderScreen(FileSystem& fs, OpenedBook book, int startChapter, const GlyphSource* body);
 
   // A single chapter already in memory, through the same layers minus the inflate.
   // What the simulator and the goldens render, having no card -- and the reason
@@ -84,7 +84,7 @@ class ReaderScreen : public Screen {
   int pageIndex() const { return at_; }
   // Which spine entry is open, and how many there are.
   int chapterIndex() const { return chapterAt_; }
-  int chapterCount() const { return chapterCount_; }
+  int chapterCount() const { return book_.chapterCount(); }
 
   // Why the chapter stopped being readable, or empty. A card pulled mid-book, or a
   // stream that turned out to be corrupt partway through.
@@ -126,11 +126,13 @@ class ReaderScreen : public Screen {
   ReaderViewModel vm_{};
   std::string bookTitle_, chapter_label_;
 
-  // The book, for reaching another chapter. Empty bookPath_ means the in-memory
-  // constructor was used and there is no book to page into.
+  // THE WHOLE BOOK'S GEOMETRY, read once. 12 bytes a spine entry, so 1,104 for a
+  // 92-chapter book -- against the ~32 KB transient a re-parse of the central
+  // directory and the OPF costs, which is what reaching another chapter used to
+  // pay. An empty path means the in-memory constructor was used and there is no
+  // book to page into.
   FileSystem* fs_ = nullptr;
-  std::string bookPath_;
-  int chapterCount_ = 0;
+  OpenedBook book_{};
   int chapterAt_ = 0;
 };
 

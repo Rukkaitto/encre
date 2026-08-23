@@ -7,14 +7,14 @@
 
 namespace reader {
 
-bool openBook(FileSystem& fs, std::string_view path, int chapter, OpenedBook& out,
-              const char** reason) {
+bool openBook(FileSystem& fs, std::string_view path, OpenedBook& out, const char** reason) {
   out = OpenedBook{};
 
-  // The nesting the header describes, spelled once. Every one of these is a local:
-  // what leaves this function is a path and three numbers, so the archive, its
-  // central directory and the OPF's parse are all released before a single block is
-  // read. That is what makes opening a chapter cost the same whatever the book.
+  // Every one of these is a local: what leaves this function is a path, two strings
+  // and twelve bytes a chapter, so the archive, its central directory and the OPF's
+  // parse are all released before a single block is read. That is what makes
+  // opening a chapter cost the same whatever the book -- and what makes reaching
+  // ANOTHER chapter cost nothing at all.
   std::unique_ptr<FileHandle> file = fs.openRead(path);
   if (file == nullptr) {
     *reason = "cannot open the book file";
@@ -33,34 +33,32 @@ bool openBook(FileSystem& fs, std::string_view path, int chapter, OpenedBook& ou
     return false;
   }
 
+  out.path = std::string(path);
   out.title = book.title();
   out.author = book.author();
-  out.chapterCount = static_cast<int>(book.chapters().size());
-  if (chapter < 0 || chapter >= out.chapterCount) {
-    *reason = "no such chapter";
-    return false;
+  out.chapters.reserve(book.chapters().size());
+
+  for (const Epub::Chapter& ch : book.chapters()) {
+    ChapterSpan span;
+    const Zip::Entry* entry = zip.find(ch.path);
+    // `find` cannot fail here and `locate` can. Epub::open has already refused the
+    // book if any spine entry is missing from the manifest or the archive, so what
+    // is left is a local header that does not parse or data running past the end of
+    // the file -- recorded as unreadable rather than failing the book, because one
+    // bad header is one chapter the reader can skip.
+    uint32_t dataOffset = 0;
+    if (entry != nullptr && zip.locate(*file, *entry, dataOffset)) {
+      span.dataOffset = dataOffset;
+      span.compressedSize = entry->compressedSize;
+      span.deflated = entry->deflated;
+    }
+    out.chapters.push_back(span);
   }
 
-  const Zip::Entry* entry = zip.find(book.chapters()[static_cast<size_t>(chapter)].path);
-  if (entry == nullptr) {
-    // The spine named a manifest item whose file is not in the archive. Epub::open
-    // does not catch this: it resolves hrefs against the OPF's directory without
-    // checking that the result exists, because a book with one broken chapter
-    // should still open.
-    *reason = "the chapter named by the spine is not in the archive";
+  if (out.chapters.empty()) {
+    *reason = "the spine names no chapters";
     return false;
   }
-
-  uint32_t dataOffset = 0;
-  if (!zip.locate(*file, *entry, dataOffset)) {
-    *reason = zip.reason();
-    return false;
-  }
-
-  out.chapter.bookPath = std::string(path);
-  out.chapter.dataOffset = dataOffset;
-  out.chapter.compressedSize = entry->compressedSize;
-  out.chapter.deflated = entry->deflated;
   return true;
 }
 

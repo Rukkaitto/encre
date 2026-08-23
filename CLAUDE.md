@@ -1192,6 +1192,37 @@ to nothing passed silently. **A check that reports on less than it claims** — 
 same shape as the card probe answered from cache, and the `make compare` default that
 skipped four screens.
 
+### openBook reads the whole spine once
+
+It used to take a chapter index and return that chapter's offsets, so the reader
+called it again for every chapter it wanted — and **every call re-reads the
+121-entry central directory and re-inflates the 8,472-byte OPF**, about 32 KB of
+transient allocation. Reaching this book's first chapter with text means trying
+three spine entries, so that is three of them.
+
+The device measured it, once `mark()` was put either side of the open:
+
+```
+[stage] open-located    heap=133712 min=85860
+[stage] open-paginated  heap=87160  min=41188
+```
+
+**The pagination phase took minimum free heap from 85,860 to 41,188** and cost
+433 ms of a 511 ms open. So the whole spine's offsets are read once and kept:
+`ChapterSpan` is 12 bytes an entry, **1,104 for a 92-chapter book**, and a chapter
+change is a row lookup with no archive, no directory and no OPF.
+
+**`Epub::open` VALIDATES EVERY SPINE ENTRY** against the manifest and the archive and
+refuses the whole book if one is missing — `epub.cpp:186` and `:189`, two distinct
+messages. So `ChapterSpan::readable()` is narrower than it looks: the only way to an
+unreadable span is `zip.locate()` failing on a corrupt local header.
+
+A comment in `book.cpp` claimed the opposite — that `Epub::open` lets a broken
+chapter through so a book with one still opens — and that claim was **never true of
+the code**. It was asserted three times, propagated into another header, and finally
+into a test expectation, which is what made someone read `epub.cpp`. **A comment
+about a neighbouring layer is not evidence about it.**
+
 ### A grayscale screen is painted twice: fast, then four levels
 
 `renderTop` paints a `Fidelity::Grayscale` screen with ONE waveform and `loop()`
