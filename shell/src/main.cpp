@@ -341,6 +341,22 @@ static struct {
   bool open = false;
 } gReading;
 
+// HOME'S VIEW MODEL IS BUILT ONCE AND HAS TO BE REBUILT, which is the whole of a bug
+// the device reported: after reading a book, going Home still said NOTHING OPEN YET.
+// Home is the App's ROOT, so returning to it hands back the same instance with the
+// view model it was constructed with -- and that one was built at boot, before any
+// pointer existed.
+//
+// A REBUILD IS NOT FREE, which is why this is a flag and not an unconditional
+// refresh: homeVmForCard() counts /books, and a listing costs ~2.7 ms an ENTRY on
+// this card -- ~1.1 s on a 203-book library, since macOS writes a `._name` beside
+// every file. Paying that on every Back to Home would be a second's pause on a
+// navigation that is currently instant.
+//
+// So it is set exactly when the thing Home draws has changed: a reading position was
+// saved. Nothing else on the device moves that block.
+static bool gHomeStale = false;
+
 // Bring-up instrumentation. Serial here is native USB CDC, so the port
 // re-enumerates when the app starts and anything printed in the first second is
 // lost to the host. Every stage is announced and the last one reached is
@@ -1228,6 +1244,9 @@ static void saveReadingPosition(const char* why) {
   };
   // Logged at every outcome including `unchanged`, because "the save did nothing"
   // and "the save did not happen" look identical on a device and are not the same.
+  // Home now has something different to say, whether or not the card took the write:
+  // the pointer in hand is newer than the one Home was built from either way.
+  gHomeStale = true;
   Serial.printf("[progress] %s: spine=%d block=%d line=%d %d%% -- position %s, pointer %s\n", why,
                 p.spine, p.block, p.line, last.percent, outcome(a), outcome(b));
   Serial.flush();
@@ -2857,6 +2876,27 @@ void loop() {
     if (gReading.open && gApp->top().id() != reader::ScreenId::Reader) {
       gReading.open = false;
       Serial.println("[progress] book closed");
+      Serial.flush();
+    }
+    // BACK AT HOME WITH A NEWER POINTER: rebuild it, so the reading column shows the
+    // book that was just being read instead of the state Home was born in.
+    //
+    // The whole App is replaced rather than the view model swapped, because the two
+    // Home states have different FOCUS RINGS -- WithNone where a CONTINUE block
+    // exists, Noneless where it does not -- and Focus::None is a construction-time
+    // property. Only ever done at depth 1, where the root is the only screen and
+    // there is nothing above it to lose.
+    //
+    // THE FOCUS IS CARRIED ACROSS. A rebuild would otherwise drop the user on
+    // whatever row the fresh view model names, so pressing Back from the Library
+    // would move a selection they did not touch. setFocus clamps, which is what makes
+    // this safe across a ring that changed shape.
+    if (gHomeStale && gApp->depth() == 1 && gApp->top().id() == reader::ScreenId::Home) {
+      const int was = gApp->top().focus();
+      buildHomeApp();
+      gApp->top().setFocus(was);
+      gHomeStale = false;
+      Serial.println("[progress] Home rebuilt with the current reading position");
       Serial.flush();
     }
     if (gApp->retryRequested()) handleRetry();

@@ -1560,6 +1560,29 @@ anything is drawn — Home confidently offering to continue a book that cannot b
 is worse than not offering. `HomeMissing.dc.html` is the boarded state for that case
 and is not built, so a stale pointer currently falls back to the nothing-open screen.
 
+**HOME'S VIEW MODEL IS BUILT ONCE, AND THAT WAS A BUG.** Home is the App's ROOT, so
+returning to it hands back the same instance with the view model it was CONSTRUCTED
+with — built at boot, before any pointer existed. The device reported it directly:
+after reading a book, going Home still said `NOTHING OPEN YET`.
+
+The whole App is replaced (`buildHomeApp`) rather than the view model swapped, because
+the two Home shapes have different **focus rings** — `WithNone` where a CONTINUE block
+exists, `Noneless` where it does not — and `Focus::None` is a construction-time
+property with no setter. Only ever at depth 1, where the root is the only screen.
+
+**IT IS GATED ON A FLAG, NOT DONE UNCONDITIONALLY, and the reason is the cost:**
+`homeVmForCard()` counts `/books`, and a listing is ~2.7 ms an ENTRY on this card —
+~1.1 s on a 203-book library, since macOS writes a `._name` beside every file. An
+unconditional refresh would put a second's pause on a Back that is currently instant.
+`gHomeStale` is set exactly when a reading position is saved, which is the only thing
+on the device that changes what that block says.
+
+**The focus is carried across the rebuild.** Otherwise pressing Back from the Library
+would move a selection the user never touched. `setFocus` clamps, which is what makes
+it safe across a ring that changed shape. It does mean landing back on `LIBRARY`
+rather than on the new CONTINUE block — predictable rather than helpful, and the
+opposite choice would be a focus jump nobody asked for.
+
 **HOME'S CONTINUE BLOCK LOST ITS PAGE COUNTER, and the board says why.** It drew
 `PAGE 53 / 890` over `CH. 01 — MISS BROOKE` and **neither was obtainable**: the first
 needs the ~49 s book-wide count, the second needs a table of contents
