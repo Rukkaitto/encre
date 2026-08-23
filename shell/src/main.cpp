@@ -1999,7 +1999,7 @@ void setup() {
   // DRAWS body text yet -- that is 3B and 3C -- so this is a parse-and-rasterise
   // check and nothing more, and it is here rather than deferred for two reasons.
   //
-  // It is what pays the flash. kFontBodySerif is 236,652 bytes of `.rodata` and
+  // It is what pays the flash. kFontBodySerif is 169,144 bytes of `.rodata` and
   // an array nothing references is an array the linker never emits, so without a
   // caller the cost of the body face would read as zero in every size report
   // right up until 3B added the first draw call and it appeared all at once.

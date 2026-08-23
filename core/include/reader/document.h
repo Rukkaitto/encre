@@ -16,14 +16,28 @@ namespace reader {
 // same for `<img>`, which 3C owns. Approximating is how a reader ends up showing
 // something that looks like a bug in the book.
 //
-// INLINE EMPHASIS IS NOT MODELLED, and that is this slice's honest limit rather
-// than an oversight. `<em>` and `<strong>` contribute their text inline with no
-// marker, so a sentence reads correctly and reads unemphasised. The reason is that
-// there is nothing to render it WITH: the body face is one TTF with one weight,
-// and italics are a second asset nobody has decided on. Modelling it now would be
-// a field layout must ignore, and a run-per-emphasis structure that line breaking
-// would have to straddle for no visible gain -- so 3C adds runs when it adds a
-// face that can show them.
+// INLINE EMPHASIS IS NOT MODELLED, and that is an honest limit rather than an
+// oversight. `<em>` and `<strong>` contribute their text inline with no marker, so a
+// sentence reads correctly and reads unemphasised.
+//
+// THE REASON IS THAT NO ITALIC OUTLINE EXISTS ANYWHERE IN THIS REPOSITORY, and it is
+// worth stating precisely because "add an italic" sounds like a build-flag change and
+// is not. `assets/fonts/Literata.ttf` carries exactly two axes, `opsz` and `wght`,
+// with `head.macStyle = 0x00` and `post.italicAngle = 0` -- there is no `ital` axis
+// and no `slnt` axis, so no instancing of this file produces a slanted glyph.
+// `tools/ttfprep.py` refuses an unpinned axis on principle and could not pin one that
+// is not there. An italic therefore means a SECOND FONT FILE, its own `ttfprep` pass,
+// its own flash, and a second `ScalableFont` with its own 16 KB glyph cache -- one
+// face per object, by construction.
+//
+// design/Reader.dc.html DOES request an italic from Google Fonts
+// (`Literata:ital,...;1,7..72,400`), so the board renders emphasis the firmware
+// cannot currently produce. That divergence is real and worth knowing before anyone
+// concludes from the board that the asset exists.
+//
+// Modelling emphasis before then would be a field layout must ignore, and a
+// run-per-emphasis structure that line breaking would have to straddle for no
+// visible gain.
 enum class BlockKind : uint8_t {
   Paragraph,
   Heading,     // h1-h6 all land here; the level is not modelled because the board
