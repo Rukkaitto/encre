@@ -11,6 +11,7 @@
 #include "reader/framebuffer.h"
 #include "reader/icons.h"
 #include "reader/screen_home.h"
+#include "reader/screens.h"
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
 
@@ -41,6 +42,27 @@ TEST_CASE("QuietTheme renders Home to golden on both panel geometries") {
 
   SUBCASE("X4 480x800") { renderOne(480, 800, "home_quiet"); }
   SUBCASE("X3 528x792") { renderOne(528, 792, "home_quiet_x3"); }
+}
+
+// design/HomeUnopened.dc.html, pixel-exact at both geometries.
+//
+// THE NO-READING-COLUMN LAYOUT HAD NO GOLDEN AT ALL until this. `home_empty` has
+// been compared only by `make compare`, which renders both sides fresh and so
+// cannot notice the two drifting together -- and this layout is the one with the
+// most arithmetic on the screen: a centred 112px mark, a centred title and a
+// wrapped paragraph, all accumulated in 1/64 px because the prose's height is a
+// fraction (1.55 x 29px = 44.95) and rounding it early would move everything under
+// it. That is precisely the kind of code a golden is for.
+TEST_CASE("QuietTheme renders Home with nothing open to golden on both geometries") {
+  Ramp ramp;
+  reader::QuietTheme theme;
+  auto renderOne = [&](int w, int h, const std::string& name) {
+    reader::Framebuffer fb(w, h);
+    theme.renderHome(fb, ramp.fonts, reader::demoHomeUnopenedVm(), reader::Plane::Bw);
+    golden::checkGolden(fb, name);
+  };
+  SUBCASE("X4 480x800") { renderOne(480, 800, "home_unopened"); }
+  SUBCASE("X3 528x792") { renderOne(528, 792, "home_unopened_x3"); }
 }
 
 TEST_CASE("Home's action block carries the long arrow, not the row chevron") {

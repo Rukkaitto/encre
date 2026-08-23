@@ -992,6 +992,7 @@ worth knowing before changing it:
 |---|---|---|
 | Home | `Main.dc.html` | Focus starts on the CONTINUE block (`-1`), not the menu. |
 | Home / empty | `HomeEmpty.dc.html` | A **variant**, not a screen: same `ScreenId`, same view model, same menu. |
+| Home / nothing open | `HomeUnopened.dc.html` | The same variant with different words. What the device actually shows today. |
 | Library | `Library.dc.html` | The only list that scrolls today, and the only screen with a rail. |
 | Library / scrolled | `LibraryScrolled.dc.html` | Reached by pressing PAST the focused row and back — arriving from above windows it differently. |
 | Item actions, Delete confirm | their own boards | Overlays; a focus move repaints the overlay alone. |
@@ -1477,6 +1478,49 @@ they were worth:
   fit a line at all, which is CSS's `overflow-wrap: break-word`.
 
 **0 of 96,658 lines overhang now.**
+
+### Home has THREE states, and two of them share one mechanism
+
+`Main.dc.html` has a reading position to show. `HomeEmpty.dc.html` has no books.
+`HomeUnopened.dc.html` is the gap between them — **books on the card and none of them
+open** — and until it existed the shell filled the CONTINUE block with `demoHomeVm()`
+for any card with books on it, so a device that had never opened a book showed a
+stranger's Middlemarch at 6%. Same defect class as the section below: content
+substituted where the honest answer was "there is nothing here yet".
+
+**The two no-reading-column states are ONE mechanism**, and the flag that drives it
+is `HomeViewModel::nothingToContinue` — renamed from `libraryEmpty`, which named only
+one of its two causes. It replaces the reading column with a centred block and builds
+the focus ring `Noneless` so -1 (the CONTINUE block) is unreachable. The states differ
+in **what they say** and in the LIBRARY row's value (`EMPTY` against a count), never
+in what they draw; a second flag or a second render branch would be two ways to spell
+one layout, and the boards say it is one layout.
+
+`test_screen_home.cpp` asserts the structural fields of the two variants **against
+each other** rather than against literals, so a change made to one and not the other
+fails — that drift is the thing the shared mechanism is supposed to make impossible.
+
+**`demoHomeUnopenedVm()` is unconditionally correct on the device today**, because
+nothing persists a reading position: no card has a book in progress. When progress
+persistence lands, the third branch appears in `homeVmForCard` and this becomes the
+fallback for "books, but none started".
+
+**Rejected: keeping the reading column and offering a book with a START slab.** There
+is no non-arbitrary book to pick — nothing has been opened so there is no most-recent,
+and `FileSystem` carries no timestamps so there is no newest either — and three of the
+block's five fields (the 67px percentage, the page counter, the progress bar) exist
+only to describe progress, so they would all blank at once and read as a broken screen
+rather than a fresh one.
+
+**THE NO-READING-COLUMN LAYOUT NOW HAS GOLDENS**, at both geometries, and it had none
+before: `home_empty` was checked only by `make compare`, which renders both sides fresh
+and so cannot see the two drifting together. It is also the layout with the most
+arithmetic on screen — a centred 112px mark, a centred title and a wrapped paragraph,
+all accumulated in 1/64 px because the prose's height is a fraction (1.55 × 29px =
+44.95). Design-vs-firmware mismatch measured **1.34% / 1.23%**, against the ~5.4%/6.4%
+this project averages, and the firmware wraps the sentence at the same break as Chrome
+— so `max-width: 400px` holds in both engines here, unlike SdMissing's, which needed
+420.
 
 ### A factory that substitutes content is worse than one that refuses
 

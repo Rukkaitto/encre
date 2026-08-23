@@ -25,6 +25,14 @@ std::vector<LibraryItem> demoLibraryScrolledItems();
 // design/HomeEmpty.dc.html -- Home with nothing to continue.
 HomeViewModel demoHomeEmptyVm();
 
+// design/HomeUnopened.dc.html. Books on the card, none of them open -- the third
+// Home state and the one the device is actually in until a reading position
+// exists. Same mechanism as the empty variant (nothingToContinue), different copy,
+// and a real count on the LIBRARY row rather than `EMPTY`: that count is the whole
+// fact separating the two screens, because it is what tells the user the books are
+// there and it is worth going to look.
+HomeViewModel demoHomeUnopenedVm();
+
 std::vector<ScreenId> demoHomeTargets();
 
 // design/Sleep.dc.html's own values -- see the definition.

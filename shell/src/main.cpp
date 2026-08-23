@@ -828,8 +828,19 @@ static reader::HomeViewModel homeVmForCard() {
   // advice about a card the device cannot see. They keep the ordinary Home, whose
   // LIBRARY row shows a blank count, and the SD-missing screen handles the case
   // where the card really has gone.
+  // THREE STATES, AND NONE OF THEM IS demoHomeVm's MIDDLEMARCH. That is what this
+  // line used to choose for any card with books on it, so a device that had never
+  // opened a book showed a stranger's novel at 6% -- fiction presented as the
+  // user's reading position, the same defect class as the Reader factory falling
+  // through to demo content on a session restore.
+  //
+  // `demoHomeUnopenedVm` is correct UNCONDITIONALLY today, because nothing yet
+  // persists a reading position: there is no book in progress on any card. When
+  // progress persistence lands, the third branch appears HERE -- a real book's
+  // title, author and percent in the reading column -- and this becomes the
+  // fallback for "books, but none of them started".
   reader::HomeViewModel vm =
-      books == 0 ? reader::demoHomeEmptyVm() : reader::demoHomeVm();
+      books == 0 ? reader::demoHomeEmptyVm() : reader::demoHomeUnopenedVm();
   if (books == 0) {
     Serial.printf("[boot] /books holds no readable book: Home shows the empty state\n");
     Serial.flush();

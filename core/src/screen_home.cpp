@@ -7,7 +7,8 @@ namespace reader {
 // WithNone: -1 is the CONTINUE block, a place the user can be, not the absence
 // of a selection.
 //
-// EXCEPT ON THE EMPTY VARIANT, which draws no CONTINUE block: its first hint
+// EXCEPT WHERE THERE IS NOTHING TO CONTINUE, which draws no CONTINUE block: its
+// first hint
 // slot is empty because there is nothing to read, so a focus on -1 would be a
 // selection on an invisible row with a blank action. Building the ring Noneless
 // is the model being right, and it closes both ways in at once -- Up from
@@ -15,7 +16,7 @@ namespace reader {
 // row, which wrapping added.
 HomeScreen::HomeScreen(HomeViewModel vm, std::vector<ScreenId> targets)
     : FocusScreen(static_cast<int>(vm.menu.size()), static_cast<int>(vm.menu.size()),
-                  vm.libraryEmpty ? Focus::Noneless : Focus::WithNone),
+                  vm.nothingToContinue ? Focus::Noneless : Focus::WithNone),
       vm_(std::move(vm)),
       targets_(std::move(targets)) {
   // The view-model may arrive with a focus already set -- the goldens author one

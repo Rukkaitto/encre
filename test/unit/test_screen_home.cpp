@@ -178,7 +178,7 @@ TEST_CASE("the empty variant keeps Home's identity and menu") {
   const reader::HomeViewModel vm = reader::demoHomeEmptyVm();
   reader::HomeScreen screen(vm, reader::demoHomeTargets());
   CHECK(screen.id() == reader::ScreenId::Home);
-  CHECK(vm.libraryEmpty);
+  CHECK(vm.nothingToContinue);
   // Same two rows, in the same order, so navigation is unchanged.
   REQUIRE(vm.menu.size() == 2);
   CHECK(vm.menu[0].label == "LIBRARY");
@@ -213,9 +213,73 @@ TEST_CASE("the empty variant carries the board's copy, not the theme's") {
   CHECK(vm.emptyBody.find("Wi-Fi") == std::string::npos);  // V1 is card-only
 }
 
+// design/HomeUnopened.dc.html: books on the card, none of them open. The THIRD
+// Home state, and also a variant rather than a screen -- so what these cases pin
+// is mostly that it behaves identically to the empty variant, because the whole
+// argument for reusing that mechanism is that the two states differ in words and
+// in one value, never in layout or navigation.
+
+TEST_CASE("the unopened variant is the empty variant's mechanism, not a new one") {
+  const reader::HomeViewModel unopened = reader::demoHomeUnopenedVm();
+  const reader::HomeViewModel empty = reader::demoHomeEmptyVm();
+  reader::HomeScreen screen(unopened, reader::demoHomeTargets());
+  CHECK(screen.id() == reader::ScreenId::Home);
+  // The same flag drives both, which is what keeps them one layout.
+  CHECK(unopened.nothingToContinue);
+  // EVERYTHING STRUCTURAL IS EQUAL. Asserted as a comparison against the other
+  // variant rather than against literals, so a change to one that is not made to
+  // the other fails here -- that drift is exactly what a second render branch or a
+  // second flag would have allowed, and the boards say the states share a layout.
+  CHECK(unopened.focusedMenuIndex == empty.focusedMenuIndex);
+  CHECK(unopened.hints == empty.hints);
+  CHECK(unopened.holds == empty.holds);
+  REQUIRE(unopened.menu.size() == empty.menu.size());
+  CHECK(unopened.menu[0].label == empty.menu[0].label);
+  CHECK(unopened.menu[1].label == empty.menu[1].label);
+}
+
+TEST_CASE("the unopened variant says there ARE books, which is the whole difference") {
+  const reader::HomeViewModel vm = reader::demoHomeUnopenedVm();
+  // A count, not `EMPTY`. This is the one fact the user can act on: the books are
+  // there, so the sentence above it is worth following. The shell overwrites the
+  // value with the card's real number, so what matters here is that it is not the
+  // empty variant's word.
+  CHECK(vm.menu[0].value != "EMPTY");
+  CHECK(vm.menu[0].value.find_first_not_of("0123456789") == std::string::npos);
+  CHECK_FALSE(vm.menu[0].value.empty());
+}
+
+TEST_CASE("the unopened variant carries its own copy, and not the empty one's") {
+  const reader::HomeViewModel vm = reader::demoHomeUnopenedVm();
+  CHECK(vm.emptyTitle == "NOTHING OPEN YET");
+  CHECK(vm.emptyBody.find("library") != std::string::npos);
+  // NOT HomeEmpty's words. Both states used to be one, and the failure mode of
+  // sharing a mechanism is sharing the copy with it -- telling a user with twelve
+  // books to go and copy some onto the card.
+  CHECK(vm.emptyBody.find("SD card") == std::string::npos);
+  CHECK(vm.emptyBody.find("/books") == std::string::npos);
+  CHECK(vm.emptyTitle != reader::demoHomeEmptyVm().emptyTitle);
+  CHECK(vm.emptyBody != reader::demoHomeEmptyVm().emptyBody);
+}
+
+TEST_CASE("the unopened variant has no CONTINUE slot either, in either direction") {
+  // The same closure the empty variant gets, and tested separately rather than
+  // assumed from the shared flag: this is the property a user can reach with a
+  // button, and it was a real bug on the empty variant before lists wrapped.
+  reader::HomeScreen h(reader::demoHomeUnopenedVm(), reader::demoHomeTargets());
+  reader::Screen& s = h;
+  REQUIRE(s.focus() == 0);
+  h.onEvent({reader::Button::Up, reader::PressKind::Short});
+  CHECK(s.focus() == 1);  // wrapped to SETTINGS, not down to a CONTINUE block
+  h.onEvent({reader::Button::Down, reader::PressKind::Short});
+  CHECK(s.focus() == 0);
+  s.setFocus(-1);
+  CHECK(s.focus() == 0);
+}
+
 TEST_CASE("an ordinary Home is not the empty variant") {
   const reader::HomeViewModel vm = reader::demoHomeVm();
-  CHECK_FALSE(vm.libraryEmpty);
+  CHECK_FALSE(vm.nothingToContinue);
   CHECK(vm.focusedMenuIndex == -1);  // the CONTINUE block
   CHECK(vm.hints[0] == "READ");
 }

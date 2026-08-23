@@ -119,7 +119,7 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   Hint homeHints[4];
   buildHints(kHomeMarks, vm.hints, vm.holds, homeHints);
 
-  if (vm.libraryEmpty) {
+  if (vm.nothingToContinue) {
     // NOT A HEADER BAND, and drawHeaderBand is the wrong primitive for it. This
     // board's top strip is a bare right-aligned battery -- `padding: 18px 24px 0`,
     // no label and NO `border-bottom` -- where the band has a label and a 2px

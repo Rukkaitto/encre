@@ -260,15 +260,17 @@ int main(int argc, char** argv) {
   const bool isSettings = std::strcmp(argv[1], "settings") == 0;
   const bool isSleep = std::strcmp(argv[1], "sleep") == 0;
   const bool isHomeEmpty = std::strcmp(argv[1], "home_empty") == 0;
+  const bool isHomeUnopened = std::strcmp(argv[1], "home_unopened") == 0;
   const bool isLibraryScrolled = std::strcmp(argv[1], "library_scrolled") == 0;
   const bool isReader = std::strcmp(argv[1], "reader") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
-      !isLibraryScrolled && !isReader) {
+      !isHomeUnopened && !isLibraryScrolled && !isReader) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
-                 "'sleep', 'home_empty', 'library_scrolled', 'reader' or 'app')\n",
+                 "'sleep', 'home_empty', 'home_unopened', 'library_scrolled', "
+                 "'reader' or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -391,12 +393,15 @@ int main(int argc, char** argv) {
     shown.fullOnTransition = true;
     factory.setSettings(shown);
   }
-  // The empty variant is a different ROOT, not a different navigation: it is Home
-  // with nothing to continue, so there is no journey that reaches it -- the card
-  // is what decides, and on the desktop that is a choice of view model.
+  // Both no-reading-column variants are a different ROOT, not a different
+  // navigation: they are Home with nothing to continue, so there is no journey that
+  // reaches either -- the card is what decides, and on the desktop that is a choice
+  // of view model.
   reader::App app(
       std::make_unique<reader::HomeScreen>(
-          isHomeEmpty ? reader::demoHomeEmptyVm() : reader::demoHomeVm(),
+          isHomeEmpty      ? reader::demoHomeEmptyVm()
+          : isHomeUnopened ? reader::demoHomeUnopenedVm()
+                           : reader::demoHomeVm(),
           reader::demoHomeTargets()),
       factory);
 

@@ -29,11 +29,11 @@ HomeViewModel demoHomeVm() {
 }
 
 // design/HomeEmpty.dc.html. The same screen with nothing to continue, so the
-// reading column is replaced -- see HomeViewModel::libraryEmpty.
+// reading column is replaced -- see HomeViewModel::nothingToContinue.
 HomeViewModel demoHomeEmptyVm() {
   HomeViewModel vm;
   vm.batteryPercent = 87;
-  vm.libraryEmpty = true;
+  vm.nothingToContinue = true;
   vm.emptyTitle = "NO BOOKS YET";
   vm.emptyBody = "Put the SD card in your computer and copy EPUB files into its /books folder.";
   // LIBRARY says EMPTY where Home says a count -- the value is what the state
@@ -43,6 +43,34 @@ HomeViewModel demoHomeEmptyVm() {
   // NO READ HINT: slot 0 is empty, because there is nothing to read. The bar keeps
   // its four slots and the empty one keeps its 36px -- measuring it as nothing
   // would move every other slot along.
+  vm.hints = {"", "SELECT", "UP", "DOWN"};
+  vm.holds = {false, false, false, false};
+  return vm;
+}
+
+// design/HomeUnopened.dc.html. Home with books on the card and nothing open.
+//
+// It is demoHomeEmptyVm's SHAPE with different words, and deliberately so: the
+// reading column and the CONTINUE slab both answer "where were you", and there is
+// no answer in either state. What differs is the sentence -- HomeEmpty has to
+// explain something the device cannot do for you, this only has to point at the row
+// below it -- and the LIBRARY value, which is a count here rather than `EMPTY`.
+//
+// THE COUNT IS NOT SET HERE. `12` is the board's number and the shell overwrites
+// row 0's value with the card's real one, exactly as it does for demoHomeVm. It is
+// authored anyway so the simulator and the comparison sheet render the board.
+HomeViewModel demoHomeUnopenedVm() {
+  HomeViewModel vm;
+  vm.batteryPercent = 87;
+  vm.nothingToContinue = true;
+  vm.emptyTitle = "NOTHING OPEN YET";
+  vm.emptyBody = "Choose a book from your library to start reading.";
+  vm.menu = {{"LIBRARY", "12"}, {"SETTINGS", ""}};
+  // The first menu row, not the CONTINUE block: there is no block, and it is also
+  // the row this screen's sentence is telling the user to press.
+  vm.focusedMenuIndex = 0;
+  // NO READ HINT, for demoHomeEmptyVm's reason -- nothing is open, so there is
+  // nothing to resume. The empty slot keeps its 36px.
   vm.hints = {"", "SELECT", "UP", "DOWN"};
   vm.holds = {false, false, false, false};
   return vm;
