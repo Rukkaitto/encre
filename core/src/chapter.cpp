@@ -14,6 +14,16 @@ bool ChapterReader::begin(FileSystem& fs, const ChapterLocation& where) {
     error_ = "cannot open the book file";
     return false;
   }
+  if (where_.compressedSize == 0) {
+    error_ = "this chapter has no bytes";
+    return false;
+  }
+  // ONE 30-byte read, here rather than when the book was opened -- see
+  // ChapterSpan. Cached, so a rewind does not go back to the card for it.
+  if (!Zip::locateData(*file_, where_.localHeaderOffset, where_.compressedSize, dataOffset_)) {
+    error_ = "this chapter's local header will not parse";
+    return false;
+  }
   return startStream();
 }
 
@@ -79,7 +89,7 @@ bool ChapterReader::startStream() {
     return true;
   }
 
-  entry_.reset(*file_, where_.dataOffset, where_.compressedSize);
+  entry_.reset(*file_, dataOffset_, where_.compressedSize);
 
   if (where_.deflated) {
     // begin() reuses the window if one is already allocated, which is what keeps a

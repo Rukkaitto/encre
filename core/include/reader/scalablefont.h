@@ -138,6 +138,14 @@ class ScalableFont : public GlyphSource {
   // resolution, not a missing pair.
   int kerning(char32_t left, char32_t right) const override;
 
+ private:
+  // The glyph index for a codepoint, from a 256-entry Latin-1 cache where it can
+  // be. See the cache's own comment in scalablefont.cpp: a wrap measures every
+  // glyph several times and each measure did three cmap binary searches.
+  int gidFor(char32_t cp) const;
+
+ public:
+
   // --- What the cache is doing ----------------------------------------------
   //
   // Exposed because two of this task's design decisions are unenforceable

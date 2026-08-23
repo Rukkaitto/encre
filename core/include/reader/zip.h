@@ -75,6 +75,15 @@ class Zip {
   // central-directory scan.
   bool locate(FileHandle& file, const Entry& entry, uint32_t& dataOffset) const;
 
+  // The same answer WITHOUT AN ARCHIVE, from the two numbers the central directory
+  // already gave. A local header adds nothing but the sizes of its two
+  // variable-length fields, so this is one 30-byte read -- and doing it lazily, once
+  // per chapter actually opened, is the difference between 4 ms and 368 ms: reading
+  // all 92 of a real book's headers up front cost more than the work it was meant to
+  // save, because they are scattered across 12.7 MB and SdFat has one sector cache.
+  static bool locateData(FileHandle& file, uint32_t localHeaderOffset, uint32_t compressedSize,
+                         uint32_t& dataOffset);
+
   // Why the last open() or read() failed. A sentence, for a log line.
   const char* reason() const { return reason_; }
 

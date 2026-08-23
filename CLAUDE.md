@@ -1192,6 +1192,38 @@ to nothing passed silently. **A check that reports on less than it claims** — 
 same shape as the card probe answered from cache, and the `make compare` default that
 skipped four screens.
 
+### Opening a chapter: what the two seconds were
+
+The device reported a 40-page chapter taking ~2 s to open against near-instant page
+turns. That is the index pass, and two thirds of it was waste.
+
+| | index pass | forward turn | backward turn |
+|---|---|---|---|
+| before | 41.4 ms | 1.22 ms | 35.6 ms |
+| after | **14.8 ms** | **0.46 ms** | **14.7 ms** |
+
+Desktop, three runs each within 1%. Two changes, and the second was much the larger:
+
+- **An index pass wants page BOUNDARIES, not pages** (`PageBuilder::countOnly`). It
+  was building a `LaidLine` per line — an owned string copy and a justification
+  `measure()` — and then discarding all of them: ~480 of each for a 40-page chapter.
+  Worth 41.4 → 35.5 ms, which is less than it sounds like it should be.
+- **A 256-entry Latin-1 advance/gid cache in `ScalableFont`**, which the roadmap had
+  recorded as a lever and which turned out to be most of the cost: 35.5 → 14.8 ms.
+  `advance()` did a cmap binary search per character and `kerning()` did **two**, and
+  `measure()` calls both — while `wrapProseLead` grows lines greedily and measures
+  every candidate, so every glyph of a chapter was measured several times over. 1 KB,
+  cleared by `init()` because the advances are in pixels.
+
+**The neutrality of counting mode is asserted, not assumed**: a probe indexed all 92
+chapters both ways and got 7,968 pages each, 0 chapters differing. An index that
+disagreed with what gets rendered would be the worst possible bug here.
+
+`PageBuilder::pageHasContent()` exists because of it. `buildIndex` used
+`finish().lines.empty()` to mean "was there a trailing partial page", which in
+counting mode is always true — so every chapter's last page vanished from the index,
+and a chapter that fits on one page indexed to nothing at all.
+
 ### openBook reads the whole spine once
 
 It used to take a chapter index and return that chapter's offsets, so the reader
@@ -1208,9 +1240,16 @@ The device measured it, once `mark()` was put either side of the open:
 ```
 
 **The pagination phase took minimum free heap from 85,860 to 41,188** and cost
-433 ms of a 511 ms open. So the whole spine's offsets are read once and kept:
-`ChapterSpan` is 12 bytes an entry, **1,104 for a 92-chapter book**, and a chapter
-change is a row lookup with no archive, no directory and no OPF.
+433 ms of a 511 ms open. So the whole spine is read once and kept: `ChapterSpan` is
+12 bytes an entry, **1,104 for a 92-chapter book**, and a chapter change is a row
+lookup with no archive, no directory and no OPF.
+
+**IT KEEPS THE LOCAL-HEADER OFFSET, NOT THE DATA OFFSET, and the first attempt got
+that wrong.** Resolving one to the other is a 30-byte read, and doing all 92 when the
+book opened took `locate` from 76 ms to **444 ms** — more than the pagination it was
+meant to make cheap, because the headers are scattered across 12.7 MB and SdFat has
+one sector cache. `ChapterReader` resolves the one chapter it is asked for and caches
+it, so a rewind does not go back to the card. **Moving work is not removing it.**
 
 **`Epub::open` VALIDATES EVERY SPINE ENTRY** against the manifest and the archive and
 refuses the whole book if one is missing — `epub.cpp:186` and `:189`, two distinct

@@ -137,6 +137,14 @@ void PageBuilder::drain() {
       pageStart_ = Cursor{blockIndex_, line_};
     }
 
+    if (!linesWanted_) {
+      // Counting only: the wrap above already decided where this line ends, which is
+      // all a page boundary needs.
+      ++line_;
+      ++row_;
+      continue;
+    }
+
     const std::string_view text = prose_.lines[static_cast<size_t>(line_)];
     // Only line 0 carries the indent, and only when the page did not resume
     // mid-paragraph: a page that begins at line 3 begins at the left margin.

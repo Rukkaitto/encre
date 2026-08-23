@@ -191,7 +191,33 @@ bool looksLikeSfnt(const uint8_t* d, size_t len) {
 // paragraph -- the two behave alike, because nothing is re-used at a distance
 // greater than the alphabet. It is worth knowing that they are not the same
 // thing if 3C ever measures a pattern where they diverge.
+// A DIRECT-MAPPED CACHE FOR LATIN-1, which is the lever the roadmap recorded:
+// "each char pays a cmap binary search plus two more for the kern pair lookup, and a
+// 256-entry direct-mapped advance/gid cache for Latin-1 would be a few hundred bytes
+// against most of that".
+//
+// It is the wrap that made it worth taking. wrapProseLead grows a line greedily and
+// MEASURES EACH CANDIDATE, so every glyph of a chapter is measured several times
+// over, and measure() calls advance() and kerning() per character -- three cmap
+// binary searches each. Indexing a 40-page chapter therefore walked the cmap tens of
+// thousands of times for answers that never change.
+//
+// 1 KB, resolved lazily, cleared by init() because the advance is in PIXELS and so
+// depends on the size. `gid == kUnresolved` means "not asked yet" and `gid == 0`
+// means "this face has no glyph", which is a real answer worth caching too.
+struct LatinCache {
+  static constexpr uint16_t kUnresolved = 0xFFFF;
+  uint16_t gid[256];
+  int16_t advancePx[256];
+
+  void clear() {
+    for (size_t i = 0; i < 256; ++i) gid[i] = kUnresolved;
+  }
+};
+
 struct ScalableFont::Impl {
+  LatinCache latin{};
+
   stbtt_fontinfo info{};
   bool fontOk = false;
   float scale = 0.0f;  // font units -> pixels, i.e. sizePx / unitsPerEm
@@ -324,6 +350,8 @@ bool ScalableFont::init(const uint8_t* ttf, size_t len, int sizePx) {
   if (!impl_ || impl_->entryCap == 0) return false;
   impl_->fontOk = false;
   impl_->flush();
+  // The cached advances are in pixels, so they belong to the size being replaced.
+  impl_->latin.clear();
   ascent_ = descent_ = lineGap_ = 0;
   ppem_ = weight_ = 0;
   bpp_ = 2;
@@ -361,6 +389,21 @@ bool ScalableFont::init(const uint8_t* ttf, size_t len, int sizePx) {
 
 bool ScalableFont::ready() const { return impl_ && impl_->fontOk; }
 
+int ScalableFont::gidFor(char32_t cp) const {
+  if (cp >= 256) return stbtt_FindGlyphIndex(&impl_->info, static_cast<int>(cp));
+  LatinCache& lc = impl_->latin;
+  const size_t at = static_cast<size_t>(cp);
+  if (lc.gid[at] == LatinCache::kUnresolved) {
+    const int g = stbtt_FindGlyphIndex(&impl_->info, static_cast<int>(cp));
+    lc.gid[at] = static_cast<uint16_t>(g);
+    int aw = 0, lsb = 0;
+    if (g != 0) stbtt_GetGlyphHMetrics(&impl_->info, g, &aw, &lsb);
+    lc.advancePx[at] =
+        static_cast<int16_t>(g == 0 ? 0 : roundPx(static_cast<float>(aw) * impl_->scale));
+  }
+  return static_cast<int>(lc.gid[at]);
+}
+
 std::optional<int> ScalableFont::advance(char32_t cp) const {
   if (!ready()) return std::nullopt;
   // Glyph index 0 is .notdef, and in most faces it has an outline -- a hollow
@@ -368,6 +411,14 @@ std::optional<int> ScalableFont::advance(char32_t cp) const {
   // while measure() and drawText agreed about neither with Font's notdef path.
   // So an unmapped codepoint is nullopt here, and GlyphSource::notdefAdvance is
   // what both then use: one missing-glyph rule for both faces.
+  // Latin-1 comes out of the table; anything above it pays the cmap search. Body
+  // text is overwhelmingly below 256, and what is not (curly quotes, an em dash) is
+  // rare enough that a bigger table would be memory for nothing.
+  if (cp < 256) {
+    if (gidFor(cp) == 0) return std::nullopt;
+    return static_cast<int>(impl_->latin.advancePx[static_cast<size_t>(cp)]);
+  }
+
   const int gid = stbtt_FindGlyphIndex(&impl_->info, static_cast<int>(cp));
   if (gid == 0) return std::nullopt;
   int aw = 0, lsb = 0;
@@ -379,8 +430,11 @@ std::optional<int> ScalableFont::advance(char32_t cp) const {
 
 int ScalableFont::kerning(char32_t left, char32_t right) const {
   if (!ready()) return 0;
-  const int l = stbtt_FindGlyphIndex(&impl_->info, static_cast<int>(left));
-  const int r = stbtt_FindGlyphIndex(&impl_->info, static_cast<int>(right));
+  // TWO cmap searches per PAIR, which measure() does for every character after the
+  // first -- so this was two thirds of the cmap work in a wrap. A cached gid is the
+  // same number the advance lookup already resolved.
+  const int l = gidFor(left);
+  const int r = gidFor(right);
   if (l == 0 || r == 0) return 0;
   const int k = stbtt_GetGlyphKernAdvance(&impl_->info, l, r);
   if (k == 0) return 0;

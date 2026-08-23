@@ -216,7 +216,7 @@ TEST_CASE("THE WHOLE SPINE IS LOCATED IN ONE CALL") {
     CAPTURE(i);
     const reader::ChapterSpan& c = out.chapters[static_cast<size_t>(i)];
     if (!c.readable()) continue;
-    CHECK(c.dataOffset > 0);
+    CHECK(c.localHeaderOffset > 0);
     const char* w = "";
     const std::string blocks = streamChapter(fs, out.locate(i), &w);
     CHECK(std::strlen(w) == 0);

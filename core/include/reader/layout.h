@@ -186,12 +186,35 @@ class PageBuilder {
   // The blocks have run out. The partial page, marked as the last.
   Page finish();
 
+  // AN INDEX PASS WANTS PAGE BOUNDARIES, NOT PAGES. In counting mode the builder
+  // still wraps every block -- that is what decides where a page ends -- but it does
+  // not build a LaidLine: no owned string per line, and no justification measure.
+  //
+  // Both of those are pure waste when the pages are discarded, and there is a lot of
+  // them: a 40-page chapter is ~480 lines, so 480 string copies and 480 extra walks
+  // over every glyph of the chapter (stretchFor calls measure() on the finished
+  // line, on top of the measures the greedy wrap already did). The device reported a
+  // 40-page chapter taking about two seconds to open against near-instant page
+  // turns; this is the half of that which was avoidable.
+  //
+  // Set it before the first add(). pageStart() still tracks, take() and finish()
+  // still delimit pages -- they just hand back empty ones.
+  void countOnly() { linesWanted_ = false; }
+
   // False when the column cannot hold even one line box. A caller must check it
   // rather than loop on an empty page -- see layoutPage.
   bool viable() const { return rows_ > 0; }
 
   // Where the page currently being built began. This is what a page index records.
   Cursor pageStart() const { return pageStart_; }
+
+  // Whether the page being built has anything on it yet.
+  //
+  // A caller cannot ask the Page instead: in counting mode `finish()` hands back a
+  // page with no lines whether or not there was one, so a trailing partial page was
+  // silently dropped from the index -- which for a chapter that fits on one page
+  // meant an index with NOTHING in it and a Reader reporting 0 pages.
+  bool pageHasContent() const { return row_ > 0; }
 
   // Discards everything before `at`, then begins a page there. For `layoutPage`'s
   // "a page starting exactly HERE" semantics, which is not necessarily a boundary
@@ -217,6 +240,7 @@ class PageBuilder {
   int line_ = 0;
   bool haveBlock_ = false;
   bool indentThis_ = false;
+  bool linesWanted_ = true;
 
   Page page_{};
   int row_ = 0;

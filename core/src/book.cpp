@@ -41,14 +41,14 @@ bool openBook(FileSystem& fs, std::string_view path, OpenedBook& out, const char
   for (const Epub::Chapter& ch : book.chapters()) {
     ChapterSpan span;
     const Zip::Entry* entry = zip.find(ch.path);
-    // `find` cannot fail here and `locate` can. Epub::open has already refused the
-    // book if any spine entry is missing from the manifest or the archive, so what
-    // is left is a local header that does not parse or data running past the end of
-    // the file -- recorded as unreadable rather than failing the book, because one
-    // bad header is one chapter the reader can skip.
-    uint32_t dataOffset = 0;
-    if (entry != nullptr && zip.locate(*file, *entry, dataOffset)) {
-      span.dataOffset = dataOffset;
+    // NO LOCAL HEADER IS READ HERE. Epub::open has already refused the book if any
+    // spine entry is missing, so `find` succeeds; what is left is two numbers the
+    // central directory already holds. Resolving them to a data offset is a 30-byte
+    // read per entry, and doing all 92 of a real book's cost 368 ms -- more than the
+    // pagination it was supposed to make cheap. ChapterReader does it for the one
+    // chapter it opens.
+    if (entry != nullptr) {
+      span.localHeaderOffset = entry->localHeaderOffset;
       span.compressedSize = entry->compressedSize;
       span.deflated = entry->deflated;
     }

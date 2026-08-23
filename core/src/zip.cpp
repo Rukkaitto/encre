@@ -272,6 +272,19 @@ bool Zip::read(FileHandle& file, const Entry& entry, std::string& out) const {
   return true;
 }
 
+bool Zip::locateData(FileHandle& file, uint32_t localHeaderOffset, uint32_t compressedSize,
+                     uint32_t& dataOffset) {
+  unsigned char header[30];
+  if (!readAt(file, localHeaderOffset, header, sizeof(header))) return false;
+  if (le32(header) != kLocalSig) return false;
+  const uint16_t nameLen = le16(header + 26);
+  const uint16_t extraLen = le16(header + 28);
+  const uint64_t at = static_cast<uint64_t>(localHeaderOffset) + 30u + nameLen + extraLen;
+  if (at + compressedSize > file.size()) return false;
+  dataOffset = static_cast<uint32_t>(at);
+  return true;
+}
+
 bool Zip::locate(FileHandle& file, const Entry& entry, uint32_t& dataOffset) const {
   // The local header restates the sizes and may disagree with the directory; only
   // its LENGTHS are read, to find where the data begins. The directory is the

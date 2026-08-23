@@ -40,16 +40,19 @@ namespace reader {
 // so they are read ONCE and kept. A chapter change is then picking a row: no
 // archive, no directory, no OPF.
 struct ChapterSpan {
-  uint32_t dataOffset = 0;      // where this entry's compressed bytes begin
+  // The LOCAL HEADER's offset, not the data's. Resolving one to the other is a
+  // 30-byte read, and doing it for all 92 entries when the book opens cost 368 ms --
+  // more than the pagination it was meant to make cheap. ChapterReader resolves the
+  // one chapter it is asked for.
+  uint32_t localHeaderOffset = 0;
   uint32_t compressedSize = 0;  // 0 means the spine named an entry the archive lacks
   bool deflated = true;         // false for a stored entry: the bytes are the text
 
-  // A spine entry that cannot be read, which is narrower than it looks: Epub::open
-  // validates EVERY spine entry against the archive and refuses the whole book if
-  // one is missing (epub.cpp:186 and :189, two distinct messages). So the only way
-  // here is zip.locate() failing -- a corrupt local header, or data running past the
-  // end of the file. The reader skips such an entry exactly as it skips one with no
-  // text.
+  // A spine entry with no bytes. Epub::open validates EVERY spine entry against the
+  // manifest and the archive and refuses the whole book if one is missing
+  // (epub.cpp:186 and :189, two distinct messages), so in practice this is only a
+  // zero-length entry. A local header that will not parse is found later, by
+  // ChapterReader, and refused there.
   bool readable() const { return compressedSize > 0; }
 };
 
@@ -70,7 +73,7 @@ struct OpenedBook {
     const ChapterSpan& c = chapters[static_cast<size_t>(i)];
     if (!c.readable()) return out;
     out.bookPath = path;
-    out.dataOffset = c.dataOffset;
+    out.localHeaderOffset = c.localHeaderOffset;
     out.compressedSize = c.compressedSize;
     out.deflated = c.deflated;
     return out;

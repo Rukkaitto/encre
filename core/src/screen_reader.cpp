@@ -136,6 +136,9 @@ void ReaderScreen::buildIndex() {
 
   PageBuilder pb(*body_, metrics_);
   if (!pb.viable()) return;
+  // The lines of every page in the chapter would be built and immediately dropped;
+  // all this pass keeps is one cursor per page.
+  pb.countOnly();
 
   // The start of the page currently being filled. Pushed when that page completes,
   // so a cursor is only recorded once there is really a page at it -- otherwise a
@@ -154,9 +157,13 @@ void ReaderScreen::buildIndex() {
       pending = pb.pageStart();
     }
   }
-  const Page last = pb.finish();
-  if (!last.lines.empty() && static_cast<int>(starts_.size()) < kMaxPages)
-    starts_.push_back(pending);
+  // ASKED OF THE BUILDER, not inferred from the page it returns: in counting mode
+  // that page has no lines whether or not there was one, and reading emptiness off
+  // it dropped every trailing partial page -- so a chapter that fits on one page
+  // indexed to nothing at all.
+  const bool trailing = pb.pageHasContent();
+  pb.finish();
+  if (trailing && static_cast<int>(starts_.size()) < kMaxPages) starts_.push_back(pending);
 }
 
 bool ReaderScreen::seekTo(int p) {

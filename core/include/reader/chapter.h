@@ -19,7 +19,7 @@ namespace reader {
 // an inflate instead of an inflate plus a central-directory scan.
 struct ChapterLocation {
   std::string bookPath;          // the EPUB, absolute on the card
-  uint32_t dataOffset = 0;       // where this entry's compressed bytes begin
+  uint32_t localHeaderOffset = 0;  // the entry's local header; the data follows it
   uint32_t compressedSize = 0;
   bool deflated = true;          // false for a stored entry: the bytes are the text
 };
@@ -71,6 +71,10 @@ class ChapterReader {
 
  private:
   bool startStream();
+
+  // The data offset, resolved by one 30-byte read of the local header. Cached,
+  // because a rewind must not go back to the card for it.
+  uint32_t dataOffset_ = 0;
 
   FileSystem* fs_ = nullptr;
   // Set when the chapter came from beginBuffer: there is no file, no entry and no
