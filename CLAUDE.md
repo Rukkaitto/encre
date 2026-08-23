@@ -1243,6 +1243,21 @@ that count cancels the refinement rather than queueing behind it.
 **A BACKWARD crossing still pays the full count**, and cannot avoid it — landing on
 the previous chapter's *last* page means knowing which page that is.
 
+**THE COUNT DECIDES BEFORE LANDING, NOT AFTER**, and the first version got that
+backwards: it landed on page one and *then* counted, which decodes page one, then the
+whole chapter, then page one again — **three passes where two will do**. On device the
+wasted pass is why a small chapter still felt as slow to open as it had before any of
+this, and why the em dash never appeared to compensate. The size is known the moment
+the stream is begun (the central directory said so), so the branch costs nothing to
+take early. Worst eager open over a real book's 58 sub-threshold chapters: 4.4 ms
+desktop, ~162 ms at this project's ratio, against 0.6 ms for a deferred one.
+
+**AND THE EAGER SIDE NEEDS ITS OWN LOG LINE.** Only the deferred path had one, so a
+device reporting "no dash, and the page is slow again" could not say whether the
+count had run or how long it took — the branch was unobservable from the one place
+that can measure it. `[chapter] spine=N bytes=B counted|deferred pages=P in Xms` is
+printed at both open sites, and `indexPending()` IS the branch.
+
 Two bugs this shape cost, both in restoring state:
 
 - `openChapterAt` moves the index out before walking and puts it back on failure.

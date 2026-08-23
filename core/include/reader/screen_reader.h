@@ -120,6 +120,10 @@ class ReaderScreen : public Screen {
   int pageIndex() const { return at_; }
   // Which spine entry is open, and how many there are.
   int chapterIndex() const { return chapterAt_; }
+  // How many bytes the open chapter inflates to -- what kEagerCountBytes is compared
+  // against. Exposed so the shell can report which branch an open actually took;
+  // without it the device cannot say, and the eager path has no log line of its own.
+  uint32_t chapterBytes() const { return chapter_.sizeBytes(); }
   int chapterCount() const { return book_.chapterCount(); }
 
   // Whether the chapter's page count is still unknown. The shell completes it inside

@@ -56,7 +56,14 @@ void ReaderScreen::setMetrics(const PageMetrics& m) {
   // the card path takes. Two paths that paginate differently would mean the goldens
   // and the simulator testing something the device does not do -- and this project
   // has been bitten by a desktop path that diverged from the device's before.
-  if (openFirstPage() && chapter_.sizeBytes() <= kEagerCountBytes) completeIndex();
+  // The same two-pass-or-one choice the card path makes, for the same reason.
+  if (chapter_.sizeBytes() > 0 && chapter_.sizeBytes() <= kEagerCountBytes) {
+    buildIndex();
+    at_ = 0;
+    if (!starts_.empty()) seekTo(0);
+  } else {
+    openFirstPage();
+  }
   syncVm();
 }
 
@@ -158,15 +165,24 @@ bool ReaderScreen::walkToChapter(int c, bool atEnd) {
       if (starts_.empty()) return false;
       at_ = static_cast<int>(starts_.size()) - 1;
       return seekTo(at_);
-    }() : openFirstPage();
+    }() : [&] {
+      // THE COUNT DECIDES BEFORE LANDING, NOT AFTER. Landing first and then counting
+      // decodes page one, then the whole chapter, then page one AGAIN -- three passes
+      // where two will do, and the wasted one is the reason a small chapter felt as
+      // slow to open as it did before any of this.
+      //
+      // The size is known the moment the stream is begun (the central directory said
+      // so), so the choice costs nothing to make here.
+      const uint32_t bytes = chapter_.sizeBytes();
+      if (bytes > 0 && bytes <= kEagerCountBytes) {
+        buildIndex();
+        if (starts_.empty()) return false;
+        at_ = 0;
+        return seekTo(0);
+      }
+      return openFirstPage();
+    }();
     if (landed) {
-      // A SMALL CHAPTER IS COUNTED NOW, so the footer says "1 / 6" rather than
-      // "1 / —" and then correcting itself seconds later. A four-page chapter taking
-      // four seconds to show its total was the report that prompted this: the count
-      // was folded into the refinement, whose window is sized for an expensive
-      // cosmetic repaint, and counting is neither.
-      if (!atEnd && chapter_.sizeBytes() > 0 && chapter_.sizeBytes() <= kEagerCountBytes)
-        completeIndex();
       updateChapterLabel();
       syncVm();
       return true;

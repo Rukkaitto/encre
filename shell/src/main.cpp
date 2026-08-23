@@ -1107,6 +1107,17 @@ static void buildSdMissingApp() {
 // appears" or "the log says why". Repainting the Library would cost a full refresh
 // to show an unchanged screen; a Push of an error screen is design/BookError.dc.html
 // and is not built.
+// WHAT OPENING THIS CHAPTER COST, AND WHICH BRANCH TOOK IT. A chapter under
+// kEagerCountBytes is counted before its first paint and a larger one is not, and
+// only the deferred side had a log line -- so a report of "no dash, and the page is
+// slow again" could not be told from "the count ran and was cheap". `indexPending()`
+// IS the branch: false means the pages are already known.
+static void logChapterOpen(const reader::ReaderScreen* rd, uint32_t elapsedMs) {
+  Serial.printf("[chapter] spine=%d bytes=%u %s pages=%d in %lums\n", rd->chapterIndex(),
+                (unsigned)rd->chapterBytes(), rd->indexPending() ? "deferred" : "counted",
+                rd->pageCount(), (unsigned long)elapsedMs);
+}
+
 static void handleOpen() {
   gApp->clearOpenRequest();  // first, so a book that refuses does not re-fire
 
@@ -1175,6 +1186,7 @@ static void handleOpen() {
     const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
     pages = rd->pageCount();
     readerWhy = rd->error();
+    logChapterOpen(rd, millis() - t0);
   }
   // THE STACK HIGH-WATER MARK, because a stack is the one budget this firmware had
   // no instrument for -- and the first thing to exhaust it did so on the very first
@@ -2603,6 +2615,7 @@ void loop() {
     // write that was supposed to fix it happened at NAVIGATION time, not at sleep
     // time -- so look for saveWhereWeAre's line on the navigation, not here.
     if (ev.button == reader::Button::Power) sleepNow();
+    const uint32_t beforeDispatch = millis();
     gApp->dispatch(ev);
     // Between the dispatch and the mask refresh below, so the refresh sees
     // whatever screen the retry left on top -- on success that is a brand new App
@@ -2619,6 +2632,12 @@ void loop() {
       if (rd->chapterIndex() != lastChapter) {
         lastChapter = rd->chapterIndex();
         mark("chapter-opened");
+        // WHICH BRANCH, AND WHAT IT COST. A small chapter is counted before its
+        // first paint and a big one is not, and the eager side had no line -- so a
+        // device reporting "the dash never appears and the page is slow" could not
+        // say whether the count ran, or how long it took. `indexPending` is the
+        // branch: false means the count already happened.
+        logChapterOpen(rd, millis() - beforeDispatch);
       }
     }
     if (gApp->retryRequested()) handleRetry();
