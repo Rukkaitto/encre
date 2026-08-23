@@ -402,21 +402,106 @@ TEST_CASE("an empty library reports no selection, which is not row 0") {
   CHECK(s.focus() == -1);
 }
 
-TEST_CASE("the factory can be told the Library it named is gone") {
-  // The shell's factory outlives the App it builds screens for, and replacing the
-  // App (a lost card, a successful retry) destroys the Library the factory's
-  // pointer names. forgetLibrary is what keeps that pointer from outliving it.
+TEST_CASE("popping the Library clears the pointer the factory kept") {
+  // THE HOLE THAT WAS LEFT WHEN THE POINTER'S SAFETY WAS A COMMENT. The factory
+  // outlives the App, and the App destroys a Library in two entirely different
+  // ways: the whole App is replaced (a lost card, a successful retry), or the
+  // Library is simply POPPED while the App lives on. Only the first had anything
+  // clearing the pointer -- the shell called forgetLibrary() at each swap site --
+  // so Home > Library > Back left the factory naming freed memory. Nothing could
+  // reach it, which is exactly why nothing failed: the overlays are only ever
+  // pushed by a live Library and handleOpen's Library branch only runs with one on
+  // top. A hole nothing can reach today is still a hole, and the next caller added
+  // would not have known the rule.
+  //
+  // The Library nulls the pointer from its own destructor now, so this holds for
+  // every way it can die and no caller has to remember anything.
   Ramp ramp;
   reader::QuietTheme theme;
   libapp::LibraryApp app(theme, ramp.fonts, 800);
   REQUIRE(app.factory.library() != nullptr);
-  app.factory.forgetLibrary();
+  app.app.dispatch(kBack);
+  REQUIRE(app.app.top().id() == ScreenId::Home);
   CHECK(app.factory.library() == nullptr);
   // ...and with no Library to act on, an overlay is REFUSED rather than built
   // over freed memory.
   CHECK(app.factory.create(ScreenId::ItemActions) == nullptr);
   CHECK(app.factory.create(ScreenId::DeleteConfirm) == nullptr);
   CHECK(app.factory.create(ScreenId::BookDetails) == nullptr);
+}
+
+TEST_CASE("destroying the App clears the pointer too") {
+  // The other half of the same fact, and the one the shell's replaceApp used to
+  // own by hand: the App owns the Library, so the App going away takes it with it.
+  // The factory has to outlive both, which is what it does on the device -- a
+  // global beside a gApp that is replaced under it -- so this fixture puts the
+  // factory outside the scope the App lives in.
+  Ramp ramp;
+  reader::QuietTheme theme;
+  reader::DemoScreenFactory factory;
+  factory.setLibraryVisibleRows(theme.libraryVisibleRows(800, ramp.fonts));
+  {
+    reader::App app(std::make_unique<reader::HomeScreen>(reader::demoHomeVm(),
+                                                        reader::demoHomeTargets()),
+                    factory);
+    app.dispatch(kDown);
+    app.dispatch(kConfirm);
+    REQUIRE(app.top().id() == ScreenId::Library);
+    REQUIRE(factory.library() != nullptr);
+  }
+  CHECK(factory.library() == nullptr);
+}
+
+TEST_CASE("a Library notifies only the watcher still watching it") {
+  // THE MIRROR OF THE DANGLE THIS ALL STARTED WITH, and it is a hazard the fix
+  // INTRODUCED: the Library now holds a pointer to its watcher, so a watcher that
+  // dies first is a use-after-free in the other direction. The shell's globals are
+  // declared gApp-then-gFactory, so at exit the factory would go first and the
+  // App's Library would call into it -- unreachable on a device that never exits,
+  // which is exactly the reasoning that let the original hole stand.
+  //
+  // So the link is two-way and one slot: stopWatching is how it is broken, and it
+  // is guarded on WHO is asking so that one watcher cannot cancel another's.
+  struct Counting : reader::LibraryWatcher {
+    int calls = 0;
+    void libraryGone(const reader::LibraryScreen*) override { ++calls; }
+  };
+  Counting watching;
+  Counting other;
+  {
+    LibraryScreen lib(reader::demoLibraryItems());
+    lib.watchedBy(watching);
+    lib.stopWatching(other);  // not yours to cancel
+  }
+  CHECK(watching.calls == 1);
+  CHECK(other.calls == 0);
+  {
+    LibraryScreen lib(reader::demoLibraryItems());
+    lib.watchedBy(watching);
+    lib.stopWatching(watching);
+  }
+  CHECK(watching.calls == 1);  // ...and no second call: nobody is watching now
+}
+
+TEST_CASE("an older Library's destruction does not clear a newer one") {
+  // A FACTORY CAN HAVE BEEN HANDED A NEWER LIBRARY BEFORE THE OLD ONE DIES, and
+  // clearing on the older one's death would null a pointer to a live screen -- an
+  // overlay refused over a Library that is sitting right there. That failure would
+  // be REACHABLE, where the dangle this all replaces was not.
+  //
+  // Two things make it true and they are not redundant. Adopting a newer Library
+  // releases the old one, so the old one notifies nobody; and libraryGone is
+  // guarded on which Library is going, which is what keeps it safe for a direct
+  // caller -- it is a public method taking an arbitrary pointer.
+  reader::DemoScreenFactory factory;
+  std::unique_ptr<reader::Screen> first = factory.create(ScreenId::Library);
+  REQUIRE(first != nullptr);
+  REQUIRE(static_cast<reader::Screen*>(factory.library()) == first.get());
+  std::unique_ptr<reader::Screen> second = factory.create(ScreenId::Library);
+  REQUIRE(second != nullptr);
+  REQUIRE(static_cast<reader::Screen*>(factory.library()) == second.get());
+  first.reset();
+  CHECK(static_cast<reader::Screen*>(factory.library()) == second.get());
 }
 
 // --- The rail, through renderLibrary ----------------------------------------

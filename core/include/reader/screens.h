@@ -44,16 +44,24 @@ SleepViewModel demoSleepVm();
 // the RENDERING while the data they show is still Phase 3's.
 std::vector<LibraryItem> demoLibraryItems();
 
-class DemoScreenFactory : public ScreenFactory {
+class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
  public:
   DemoScreenFactory() = default;
   // Over a card: the Library lists `root` through `fs`. Without one it lists the
   // board's sample content, which is what the simulator and the goldens want.
   DemoScreenFactory(FileSystem& fs, std::string root);
+  // THE WATCHER LETS GO ON THE WAY OUT. The Library holds a pointer back here so
+  // it can null library_ when it dies, which makes the factory dying first the
+  // mirror of the dangle that pointer used to have -- and it is not hypothetical:
+  // the shell declares gApp before gFactory, so at process exit the factory would
+  // go first and the App's Library would notify freed memory. A device never
+  // exits, which is precisely the reasoning that let the first hole stand.
+  ~DemoScreenFactory() override { dropWatch(); }
 
   std::unique_ptr<Screen> create(ScreenId id) override;
 
-  // The Library this factory built last, or null before it has built one.
+  // The Library this factory built last, or null before it has built one -- and
+  // null again the moment that Library is destroyed.
   //
   // An overlay acts on the focused row of the screen UNDER it, and it reads that
   // through this pointer rather than being handed a copy of the selection: the
@@ -66,25 +74,32 @@ class DemoScreenFactory : public ScreenFactory {
   // (through Action::push from its own onEvent), which is by construction the
   // most recent one. It is not a general-purpose handle.
   //
-  // WHAT BOUNDS ITS LIFETIME, now that the shell has a long-lived factory: the
-  // App owns the screen, so the pointer is valid exactly as long as the App that
-  // built it. The shell REPLACES its App in three places (a successful retry, a
-  // card lost at runtime, and the boot path itself), and each of them destroys
-  // the Library this points at -- so each of them calls forgetLibrary(). That is
-  // the whole of the relationship, and it is stated here because the pointer's
-  // safety is not local to this class.
+  // WHAT BOUNDS ITS LIFETIME: the Library itself. Every Library this factory
+  // builds is registered with it (LibraryWatcher), so the screen's own destructor
+  // nulls this -- whether it was popped off a live App, taken down with an App the
+  // shell replaced, or simply dropped. There is nothing for a caller to remember
+  // and no ordering to get right.
+  //
+  // IT USED TO BE A RULE IN THIS COMMENT, and the rule had a hole. It said the
+  // pointer was valid "exactly as long as the App that built it" and named the
+  // three places the shell replaces its App, each of which called forgetLibrary().
+  // A POP was none of those: Home > Library > Back destroys the Library and keeps
+  // the App, so the pointer dangled from then on. Nothing could reach it -- the
+  // overlays are only pushed by a live Library and the shell's open path only asks
+  // for one with a Library on top -- so nothing failed, which is what let it stand.
+  // The mechanism is the screen's destructor now, and this paragraph is history
+  // rather than instructions.
   LibraryScreen* library() const { return library_; }
 
-  // The Library this factory last built is gone. Called by whoever destroyed the
-  // App that owned it, BEFORE anything can ask for an overlay again.
+  // LibraryWatcher: the Library this factory named is being destroyed.
   //
-  // Without it a dangling pointer survives an App swap, and the overlay factory
-  // cases below would hand an overlay a reference to freed memory. Today nothing
-  // could reach them in that state -- the swap roots the new App at Home or at
-  // the SD-missing screen, and an overlay is only pushed by a live Library -- but
-  // "nothing can currently reach it" is a property of two other files, and the
-  // session restore already pushes a screen with no press behind it.
-  void forgetLibrary() { library_ = nullptr; }
+  // GUARDED ON WHICH ONE, and not defensively: a second Library can be built
+  // before the first is destroyed (two on a stack, or two held side by side), and
+  // clearing unconditionally would null a pointer to a live screen. That failure
+  // would be reachable, where the dangle this replaces was not.
+  void libraryGone(const LibraryScreen* which) override {
+    if (library_ == which) library_ = nullptr;
+  }
 
   // How many rows a Library this factory builds should show, from
   // Theme::libraryVisibleRows. Held here because the factory is what constructs
@@ -168,6 +183,17 @@ class DemoScreenFactory : public ScreenFactory {
   const OpenedBook& readerBook() const { return readerBook_; }
 
  private:
+  // Break the link in the direction the SCREEN holds it: called when a newer
+  // Library replaces the one library_ names, and from the destructor, so AT MOST
+  // ONE live Library ever points back here -- which is what makes the destructor's
+  // guarantee total rather than covering only the tracked one.
+  //
+  // Dereferencing library_ is safe for exactly the reason the pointer exists: it
+  // is nulled when the screen dies. The two halves are each other's guarantee.
+  void dropWatch() {
+    if (library_ != nullptr) library_->stopWatching(*this);
+  }
+
   FileSystem* fs_ = nullptr;
   std::string root_;
   LibraryScreen* library_ = nullptr;

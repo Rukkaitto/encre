@@ -217,6 +217,15 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
                                       libraryItems_.empty() ? demoLibraryItems()
                                                             : libraryItems_);
       lib->setVisibleRows(libraryVisibleRows_);
+      // REGISTERED, so the pointer below cannot outlive what it names. The screen
+      // notifies on the way out however it dies -- popped off a live App, taken
+      // down with a replaced one, or dropped by a unique_ptr in a test.
+      //
+      // The Library being replaced is released FIRST: the link is two-way, and
+      // leaving an older screen pointing back at this factory would leave a
+      // watcher pointer to outlive the watcher.
+      dropWatch();
+      lib->watchedBy(*this);
       library_ = lib.get();
       return lib;
     }

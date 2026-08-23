@@ -1040,16 +1040,15 @@ static void syncRecognizer() {
 // the reasons a fresh App is right are the callers' (see buildHomeApp and
 // buildSdMissingApp); what this function owns is the ORDER:
 //
-//   1. forgetLibrary() FIRST -- the App about to be destroyed owns the Library
-//      the factory's pointer names, and DemoScreenFactory::forgetLibrary's
-//      header says the pointer's safety is not local to that class. It used to
-//      be a rule each swap site remembered, and a prose list of the sites that
-//      remembered it; now it is structural.
-//   2. the new App, which starts dirty and in transition, so the swap paints
-//      itself as the screen change it is.
-//   3. the recognizer re-sync, because the top screen just changed.
+//   1. the new App, which starts dirty and in transition, so the swap paints
+//      itself as the screen change it is. Assigning it destroys the old App and
+//      with it whatever Library was on its stack -- which is what nulls the
+//      factory's pointer, from the screen's own destructor. This used to be a
+//      forgetLibrary() call HERE, ordered before the swap, and that only covered
+//      the App-replacing sites: a Library popped off a live App left the pointer
+//      dangling, because a pop is not a swap. See DemoScreenFactory::library().
+//   2. the recognizer re-sync, because the top screen just changed.
 static void replaceApp(std::unique_ptr<reader::Screen> root) {
-  gFactory.forgetLibrary();
   gApp = std::make_unique<reader::App>(std::move(root), gFactory);
   syncRecognizer();
 }
@@ -1141,8 +1140,8 @@ static void saveWhereWeAre() {
 // Overwriting it with SD-MISSING would throw away the only useful thing it holds.
 static void buildSdMissingApp() {
   // The card going away at runtime is the one swap that can happen with a
-  // Library on the stack -- replaceApp's forgetLibrary ordering is what this
-  // path made matter.
+  // Library on the stack -- so the pointer the factory keeps to that Library has
+  // to go with it, which the Library's own destructor does.
   replaceApp(std::make_unique<reader::SdMissingScreen>());
 }
 

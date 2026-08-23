@@ -59,6 +59,32 @@ struct LibraryItem {
   int childBooks = -1;
 };
 
+class LibraryScreen;
+
+// WHO IS HOLDING A POINTER TO THE LIBRARY, so the Library can null it on the way
+// out. The one implementer is DemoScreenFactory, which keeps the Library it built
+// last so that an overlay can read the row under it (see its library()).
+//
+// IT IS THE SCREEN THAT NOTIFIES, not whoever destroyed it, and that is the whole
+// point of the interface existing. The pointer's safety used to be a RULE written
+// in a comment -- "called by whoever destroyed the App that owned it" -- with the
+// App-swap sites remembering to call it and the POP path not covered at all, since
+// popping the Library destroys it while the App lives on. A rule stated in prose
+// is a mechanism not yet written: this one holds for every way a Library can die,
+// including one held by nothing but a unique_ptr in a test.
+//
+// An interface rather than a callback for the reason ScreenFactory and
+// SettingsSink are ones: -fno-exceptions makes a std::function's allocation an
+// abort() with no diagnostic, and this has to work on the way out of a screen.
+class LibraryWatcher {
+ public:
+  virtual ~LibraryWatcher() = default;
+  // `which` is being destroyed NOW. Drop the pointer only if it is the one you
+  // hold: a watcher may already have been handed a NEWER Library, and clearing
+  // unconditionally would null a live pointer.
+  virtual void libraryGone(const LibraryScreen* which) = 0;
+};
+
 // The Library (spec 4.1), from design/Library.dc.html.
 //
 // Movement is ScrollWindow's -- focus plus first-visible, clamped, scrolling by
@@ -78,6 +104,29 @@ class LibraryScreen : public FocusScreen {
  public:
   LibraryScreen(FileSystem& fs, std::string root);
   explicit LibraryScreen(std::vector<LibraryItem> sample);
+  ~LibraryScreen() override;
+
+  // NEITHER COPYABLE NOR MOVABLE, because an instance registers ITSELF with a
+  // watcher: a copy would leave two screens claiming one registration and a move
+  // would leave the watcher naming the husk. Same reasoning as FileHandle's, and
+  // nothing copies a screen -- the App owns them through unique_ptr.
+  LibraryScreen(const LibraryScreen&) = delete;
+  LibraryScreen& operator=(const LibraryScreen&) = delete;
+
+  // Tell `w` when this screen is destroyed. Called by whatever kept a pointer to
+  // it; a Library nobody watches notifies nobody.
+  //
+  // AND THE LINK IS TWO-WAY, because otherwise this fixes one dangle by creating
+  // its mirror: the screen holds a pointer to the watcher, so a watcher that dies
+  // first is the same use-after-free the other way round. `stopWatching` is how a
+  // watcher lets go -- on its own destruction, or when it has adopted a newer
+  // Library and no longer cares about this one. GUARDED ON WHO IS ASKING, so one
+  // watcher cannot cancel another's registration; only one watcher at a time is
+  // held, which is all the one implementer needs.
+  void watchedBy(LibraryWatcher& w) { watcher_ = &w; }
+  void stopWatching(const LibraryWatcher& w) {
+    if (watcher_ == &w) watcher_ = nullptr;
+  }
 
   ScreenId id() const override { return ScreenId::Library; }
   // The one screen with a list long enough to need it -- 256 rows at the cap, and
@@ -135,6 +184,7 @@ class LibraryScreen : public FocusScreen {
   void syncVm() override;
   std::string join(std::string_view leaf) const;
 
+  LibraryWatcher* watcher_ = nullptr;
   FileSystem* fs_ = nullptr;  // null = sample content
   std::string root_;          // where the Library starts; Back at this level pops
   std::string path_;          // what is being listed now

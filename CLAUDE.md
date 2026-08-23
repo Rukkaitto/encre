@@ -797,8 +797,17 @@ will come looking for this lever and needs to find it already spent.
     made structural (`FocusScreen` made the pair `final`, and the failure mode
     stopped being writable);
   - an ordering or a caller list maintained in PROSE is a function not yet
-    written (`replaceApp` replaced a comment enumerating who remembered to call
-    `forgetLibrary`);
+    written — and the factory's Library pointer is the whole arc of that in one
+    place. It began as a comment enumerating who remembered to call
+    `forgetLibrary`; `replaceApp` replaced the enumeration with one function; and
+    the function was still wrong, because the prose it inherited said the pointer
+    lived "as long as the App that built it" and a POP destroys the Library while
+    the App lives on. Home > Library > Back dangled it, unreachably, for as long
+    as the rule was a rule. It is the Library's own destructor now
+    (`LibraryWatcher`), which needs no caller to remember anything — so the third
+    attempt is the first one that could not have the hole. **A caller list turned
+    into a function is only half done if the function still encodes the prose's
+    assumptions.**
   - one table spelled in more than one build world is a manifest
     (`font_manifest.h`).
   When building screen N+1, the question is not "what does this screen need"

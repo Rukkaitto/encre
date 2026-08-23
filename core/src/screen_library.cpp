@@ -61,6 +61,10 @@ LibraryScreen::LibraryScreen(std::vector<LibraryItem> sample)
   syncVm();
 }
 
+LibraryScreen::~LibraryScreen() {
+  if (watcher_ != nullptr) watcher_->libraryGone(this);
+}
+
 std::string LibraryScreen::join(std::string_view leaf) const {
   // FileSystem paths never end in '/', and "/" itself is the root, so the only
   // case that needs care is a root that IS "/": joining naively would produce
