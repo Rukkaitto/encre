@@ -310,6 +310,12 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "the factory refused ScreenId::Reader\n");
       return 1;
     }
+    // THE SETTLED STATE, as the goldens render and as the board shows. A chapter
+    // opens with its page count unknown -- the footer draws an em dash for it -- and
+    // the device fills it in within five seconds, inside the refinement. A simulator
+    // that showed the transient state would put `1 / —` in the comparison sheet
+    // against a board that says `53 / 890`, and would disagree with the goldens.
+    static_cast<reader::ReaderScreen*>(scr.get())->completeIndex();
     if (!renderToPng(*scr, fonts, theme, w, h, argv[2])) return 1;
     const auto& rd = static_cast<const reader::ReaderScreen&>(*scr);
     std::printf("wrote %s (%dx%d) page %d/%d, %zu lines, column %dx%d\n", argv[2], w, h,

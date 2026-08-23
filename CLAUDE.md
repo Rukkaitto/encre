@@ -1196,6 +1196,53 @@ to nothing passed silently. **A check that reports on less than it claims** — 
 same shape as the card probe answered from cache, and the `make compare` default that
 skipped four screens.
 
+### A chapter's page count arrives after its first page
+
+Counting a chapter is one decode of it — ~545 ms on the device for a long one — and
+paying that before the first page appeared made **crossing into a chapter cost 1.14 s
+against 575 ms for an ordinary page turn**. A crossing *is* a page turn from the
+reader's side, so it should cost what one costs.
+
+So a forward landing decodes only as far as page one, and the index grows a cursor at
+a time as pages are passed. Three consequences, each load-bearing:
+
+- **`ReaderViewModel::pageTotal` is 0 while the count is unknown**, and the footer
+  draws an **em dash** for it — `3 / —`. `design/Reader.dc.html`'s footer states the
+  form and why: a blank makes the slash read as broken, `0` would be a lie, nothing
+  here animates, and a dash is the same width every time so the counter does not
+  reflow when the number arrives.
+- **`pageCount()` is pages KNOWN, not pages total.** Reporting it as the total would
+  count up as the reader advanced — `1 / 1`, `2 / 2` — which is worse than admitting
+  it is not known. `indexPending()` is what distinguishes them.
+- **The stream decides whether a next page exists, not the index**, because with the
+  count unknown the index cannot say. `advance()` returns false only when the
+  chapter's blocks are exhausted, and that is also the moment the count becomes known.
+
+**The count is completed inside the refinement**, which repaints anyway — so the
+total appears with the four-level upgrade and costs no extra waveform. The em dash is
+therefore visible for one page of each chapter. A press arriving during the count
+cancels the refinement rather than queueing behind it: the count is cheap and needed,
+the refinement is expensive and cosmetic.
+
+**A BACKWARD crossing still pays the full count**, and cannot avoid it — landing on
+the previous chapter's *last* page means knowing which page that is.
+
+Two bugs this shape cost, both in restoring state:
+
+- `openChapterAt` moves the index out before walking and puts it back on failure.
+  Restoring through the forward landing instead threw the count away, so paging back
+  off the front of the book left a counted chapter reading `1 / —` again.
+- With **no book behind the screen** (the in-memory constructor), the walk fails
+  immediately and the moved-out index was never put back — pressing past the last
+  page of the demo chapter left the screen reporting **zero** pages. There is now an
+  early return before anything is disturbed.
+
+**The simulator and the goldens both complete the index before rendering**, because
+the board shows the settled state. A simulator that rendered the transient one would
+put `1 / —` in the comparison sheet against a board that says `53 / 890`, and would
+disagree with the goldens — the desktop-diverging-from-the-device trap this project
+has hit before.
+
 ### Opening a chapter: what the two seconds were
 
 The device reported a 40-page chapter taking ~2 s to open against near-instant page

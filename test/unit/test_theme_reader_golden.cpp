@@ -57,6 +57,11 @@ TEST_CASE("QuietTheme renders Reader to golden on both panel geometries") {
     std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Reader);
     REQUIRE(scr != nullptr);
     REQUIRE(scr->fidelity() == reader::Fidelity::Grayscale);
+    // THE SETTLED STATE, which is what the board shows: a chapter opens with its
+    // total unknown and the count arrives with the four-level refinement, within
+    // five seconds. Rendering before that would pin `1 / —` as the baseline for a
+    // screen the board draws as `53 / 890`.
+    static_cast<reader::ReaderScreen*>(scr.get())->completeIndex();
     // Two planes composed into four levels, exactly as the panel's controller
     // combines them -- golden::checkGoldenGray has existed unused since the
     // grayscale path landed, waiting for the first screen that declares it.
@@ -90,10 +95,13 @@ TEST_CASE("A PAGE TURN MOVES THE PAGE, AND THE ENDS DO NOT WRAP") {
   reader::DemoScreenFactory factory;
   factory.setReaderBody(&body.face);
   factory.setReaderMetrics(m);
-    factory.setReaderDemo();
+  factory.setReaderDemo();
   std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Reader);
   REQUIRE(scr != nullptr);
   auto& rd = static_cast<reader::ReaderScreen&>(*scr);
+  // The settled state: a chapter opens with its count unknown and the device fills it
+  // in within five seconds, inside the refinement.
+  rd.completeIndex();
   REQUIRE(rd.pageCount() >= 2);
 
   const reader::InputEvent down{reader::Button::Down, reader::PressKind::Short};
@@ -175,10 +183,14 @@ struct Reading {
   reader::PageMetrics m;
   std::unique_ptr<reader::ReaderScreen> scr;
 
-  explicit Reading(const std::string& xhtml, int w = 480, int h = 800) {
+  // `settled` completes the page index, which is what the device does within five
+  // seconds of a chapter opening -- so it is the state almost every test wants. Pass
+  // false to observe the moment a chapter opens, before the count is known.
+  explicit Reading(const std::string& xhtml, bool settled = true, int w = 480, int h = 800) {
     theme.readerMetrics(w, h, ramp.fonts, body.face, m);
     scr = std::make_unique<reader::ReaderScreen>(xhtml, "Middlemarch", "CH. 01", &body.face);
     scr->setMetrics(m);
+    if (settled) scr->completeIndex();
   }
 };
 
@@ -393,6 +405,8 @@ TEST_CASE("A CHAPTER THAT PAGINATES TO NOTHING IS SKIPPED, not shown blank") {
   reader::ReaderScreen empty("<html><body><img src=\"cover.png\"/></body></html>", "T",
                              "CH. 01", &body.face);
   empty.setMetrics(m);
+  // Nought pages is a KNOWN count, so nothing is pending.
+  CHECK_FALSE(empty.indexPending());
   CHECK(empty.pageCount() == 0);
   CHECK(empty.vm().pageTotal == 0);
   CHECK(empty.page().lines.empty());
@@ -433,7 +447,9 @@ TEST_CASE("A REFUSED CHAPTER TURN LEAVES THE SCREEN WHERE IT WAS") {
   // Whatever it landed on, it is a REAL position: a page count, a page inside it,
   // and lines on the screen.
   CHECK(scr.pageCount() > 0);
-  CHECK(scr.vm().pageTotal == scr.pageCount());
+  // pageTotal is 0 while the count is unknown -- pageCount() is pages KNOWN. Either
+  // it is unknown, or it agrees.
+  CHECK((scr.vm().pageTotal == 0 || scr.vm().pageTotal == scr.pageCount()));
   CHECK(scr.vm().page >= 1);
   CHECK(scr.vm().page <= scr.pageCount());
   CHECK_FALSE(scr.page().lines.empty());
@@ -472,4 +488,92 @@ TEST_CASE("THE FACTORY REFUSES A READER IT HAS NO BOOK FOR") {
   std::unique_ptr<reader::Screen> demo = bare.create(reader::ScreenId::Reader);
   REQUIRE(demo != nullptr);
   CHECK(static_cast<reader::ReaderScreen*>(demo.get())->pageCount() > 0);
+}
+
+
+// --- The index built by reading ----------------------------------------------
+
+TEST_CASE("A CHAPTER OPENS WITH ITS TOTAL UNKNOWN, and completeIndex fills it in") {
+  // Counting the whole chapter before the first page appeared cost ~545 ms on the
+  // device and made a crossing twice an ordinary turn. So the count arrives later,
+  // and until it does the footer says so -- pageTotal 0, which the theme draws as an
+  // em dash (design/Reader.dc.html states it).
+  Reading r(longChapter(40), /*settled=*/false);
+  REQUIRE(r.scr->pageCount() >= 1);
+  CHECK(r.scr->indexPending());
+  CHECK(r.scr->vm().pageTotal == 0);
+  CHECK(r.scr->vm().progressPercent == 0);  // a percentage of an unknown is not a number
+  CHECK(r.scr->vm().page == 1);
+  CHECK_FALSE(r.scr->page().lines.empty());
+
+  // Completing it does not move the reader.
+  const std::string wasOn = pageText(r.scr->page());
+  REQUIRE(r.scr->completeIndex());
+  CHECK_FALSE(r.scr->indexPending());
+  CHECK(r.scr->vm().pageTotal == r.scr->pageCount());
+  CHECK(r.scr->vm().pageTotal > 5);
+  CHECK(r.scr->vm().page == 1);
+  CHECK(pageText(r.scr->page()) == wasOn);
+  CHECK(r.scr->vm().progressPercent > 0);
+  // And it is idempotent.
+  CHECK_FALSE(r.scr->completeIndex());
+}
+
+TEST_CASE("THE INDEX GROWS BY READING, and the pages are the same either way") {
+  // The risk in building the index lazily is that a page reached by streaming
+  // differs from the same page reached through a completed index. Every page, both
+  // ways.
+  const std::string doc = longChapter(30);
+  const reader::InputEvent down{reader::Button::Down, reader::PressKind::Short};
+
+  Reading lazy(doc, /*settled=*/false);
+  std::vector<std::string> viaStream;
+  viaStream.push_back(pageText(lazy.scr->page()));
+  int known = lazy.scr->pageCount();
+  CHECK(known == 1);  // only page one is known at the start
+  for (int i = 0; i < 200; ++i) {
+    if (lazy.scr->onEvent(down).kind != reader::Action::Kind::Redraw) break;
+    viaStream.push_back(pageText(lazy.scr->page()));
+    // It grew by exactly one each time.
+    CHECK(lazy.scr->pageCount() == static_cast<int>(viaStream.size()));
+  }
+  REQUIRE(viaStream.size() > 4);
+  CHECK_FALSE(lazy.scr->indexPending());  // the end was reached, so the count is known
+
+  Reading eager(doc, /*settled=*/false);
+  REQUIRE(eager.scr->completeIndex());
+  REQUIRE(eager.scr->pageCount() == static_cast<int>(viaStream.size()));
+  std::vector<std::string> viaIndex;
+  viaIndex.push_back(pageText(eager.scr->page()));
+  for (size_t i = 1; i < viaStream.size(); ++i) {
+    REQUIRE(eager.scr->onEvent(down).kind == reader::Action::Kind::Redraw);
+    viaIndex.push_back(pageText(eager.scr->page()));
+  }
+  for (size_t i = 0; i < viaStream.size(); ++i) {
+    CAPTURE(i);
+    CHECK(viaStream[i] == viaIndex[i]);
+  }
+}
+
+TEST_CASE("going back works on an index that was built by reading") {
+  // The pages visited are in the index, so a backward turn has a cursor to seek to
+  // even though the chapter was never counted.
+  Reading r(longChapter(30), /*settled=*/false);
+  const reader::InputEvent down{reader::Button::Down, reader::PressKind::Short};
+  const reader::InputEvent up{reader::Button::Up, reader::PressKind::Short};
+
+  std::vector<std::string> forward{pageText(r.scr->page())};
+  for (int i = 0; i < 4; ++i) {
+    REQUIRE(r.scr->onEvent(down).kind == reader::Action::Kind::Redraw);
+    forward.push_back(pageText(r.scr->page()));
+  }
+  CHECK(r.scr->indexPending());  // still not counted to the end
+  for (int i = 3; i >= 0; --i) {
+    REQUIRE(r.scr->onEvent(up).kind == reader::Action::Kind::Redraw);
+    CAPTURE(i);
+    CHECK(pageText(r.scr->page()) == forward[static_cast<size_t>(i)]);
+  }
+  // And forward again after the backward turns, which takes the re-seek path.
+  REQUIRE(r.scr->onEvent(down).kind == reader::Action::Kind::Redraw);
+  CHECK(pageText(r.scr->page()) == forward[1]);
 }

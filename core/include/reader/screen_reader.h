@@ -33,6 +33,21 @@ class GlyphSource;
 // The pass costs one decode of the chapter, at open. It is the price of being able
 // to say "3 / 12" at all.
 //
+// --- THE INDEX IS BUILT BY READING, NOT BEFORE IT ----------------------------
+//
+// Paginating the whole chapter before the first page appeared cost ~545 ms on the
+// device, which made crossing into a chapter 1.14 s against 575 ms for an ordinary
+// page turn -- and a crossing IS a page turn from the reader's side.
+//
+// So a crossing decodes only as far as page one, and `starts_` grows a cursor at a
+// time as pages are passed. Until the chapter's end has been reached the total is
+// UNKNOWN, and `ReaderViewModel::pageTotal` is 0, which the footer draws as an em
+// dash (design/Reader.dc.html states it).
+//
+// The full count then happens inside the four-level refinement, which repaints
+// anyway -- so the total appears with the upgrade and costs no extra waveform. The
+// em dash is therefore visible for one page of each chapter.
+//
 // --- FORWARD IS FREE; BACKWARD RE-DECODES ------------------------------------
 //
 // A DEFLATE stream cannot be seeked, and checkpointing one costs 32 KB a
@@ -80,11 +95,22 @@ class ReaderScreen : public Screen {
 
   const ReaderViewModel& vm() const { return vm_; }
   const Page& page() const { return page_; }
+  // PAGES KNOWN, not pages total: the index grows as the chapter is read, so this
+  // equals the chapter's page count only once `indexPending()` is false. The view
+  // model reports 0 for an unknown total rather than this number, which would count
+  // up as the reader advanced.
   int pageCount() const { return static_cast<int>(starts_.size()); }
   int pageIndex() const { return at_; }
   // Which spine entry is open, and how many there are.
   int chapterIndex() const { return chapterAt_; }
   int chapterCount() const { return book_.chapterCount(); }
+
+  // Whether the chapter's page count is still unknown. The shell completes it inside
+  // the refinement; see the class comment.
+  bool indexPending() const;
+  // Counts the rest of the chapter and returns to the page being read. ~545 ms for a
+  // long chapter, so it belongs in a quiet window rather than in a page turn.
+  bool completeIndex();
 
   // Why the chapter stopped being readable, or empty. A card pulled mid-book, or a
   // stream that turned out to be corrupt partway through.
@@ -101,20 +127,28 @@ class ReaderScreen : public Screen {
   bool openChapterAt(int c, bool atEnd);
   // The walk itself. Separate so openChapterAt can undo it on failure.
   bool walkToChapter(int c, bool atEnd);
+  // Re-establishes a chapter's stream without touching the index or the page, for
+  // undoing a walk that failed.
+  bool reopenChapter(int c);
   void updateChapterLabel();
   // Renders page `p` by rewinding and decoding forward to it. The general path.
   bool seekTo(int p);
   // Renders the page after the current one by continuing the live stream. The
   // common path, and the reason the builder is kept alive between turns.
   bool advance();
+  // Lands on page one of the chapter already begun, without counting the rest of it.
+  bool openFirstPage();
   void syncVm();
 
   ChapterReader chapter_;
   const GlyphSource* body_;
   PageMetrics metrics_{};
 
-  // One cursor per page, in order.
+  // One cursor per page, in order -- but only as far as has been READ, unless
+  // `indexComplete_` says the chapter's end was reached. So `starts_.size()` is
+  // "pages known", not "pages total", and only the flag makes it the latter.
   std::vector<Cursor> starts_;
+  bool indexComplete_ = false;
   int at_ = 0;
 
   // The live position: a builder mid-chapter and the index of the next block to

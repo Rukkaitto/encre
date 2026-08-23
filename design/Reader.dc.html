@@ -80,6 +80,24 @@
     <div style="width: 210px; height: 5px; border: 1px solid #000000; box-sizing: border-box;">
       <div style="width: 6%; height: 100%; background: #000000;"></div>
     </div>
+    <!-- THE TOTAL CAN BE UNKNOWN, AND THEN IT IS AN EM DASH: `53 / —`.
+         Not a placeholder and not an error -- a real, brief state of this screen.
+
+         Knowing the total means paginating the whole chapter, which is one decode of
+         it: ~545 ms on the device for a long one, measured. Paying that before the
+         first page appears made crossing into a chapter cost 1.14 s against 575 ms
+         for an ordinary page turn, and a chapter crossing IS a page turn from the
+         reader's side. So the page appears first and the count follows a moment
+         later, and the footer has to be able to say "I do not know yet".
+
+         An em dash rather than a blank, a zero or a spinner: the slash needs
+         something after it or the line reads as broken, `0` would be a lie, and
+         nothing on this device animates. It is also the same width every time, so
+         the counter does not reflow when the number arrives.
+
+         The board shows the settled state because that is the one a reader sees for
+         all but a moment of a chapter. If the transient state ever needs comparing
+         against the firmware it wants its own board file. -->
     <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">53 / 890</div>
   </div>
 

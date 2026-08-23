@@ -1774,6 +1774,35 @@ static void renderTop() {
 static void refineNow() {
   if (!bindFrameToDriver("refine")) return;
   gRefineOwed = false;
+
+  // THE PAGE COUNT IS FILLED IN HERE, before the repaint that was going to happen
+  // anyway. A chapter opens with its total unknown -- counting it is one decode,
+  // ~545 ms, and paying that before the first page appeared made a crossing twice an
+  // ordinary turn -- so the footer shows an em dash until this runs. Folding it into
+  // the refinement means the number arrives with the four-level upgrade and costs no
+  // extra waveform.
+  //
+  // Then the pending check AGAIN: the count is cheap and needed, the refinement is
+  // expensive and cosmetic, so a press that arrives during the count cancels the
+  // refinement rather than queueing behind it.
+  if (gApp->top().id() == reader::ScreenId::Reader) {
+    auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
+    if (rd->indexPending()) {
+      const uint32_t t = millis();
+      const bool done = rd->completeIndex();
+      mark("index-completed");
+      Serial.printf("[index] %s pages=%d in %lums\n", done ? "counted" : "refused",
+                    rd->pageCount(), (unsigned long)(millis() - t));
+      Serial.flush();
+      if (rawSamplesPending() != 0) {
+        // Someone pressed while it counted. The page on glass is still correct -- the
+        // count does not change it -- so leave the refinement owed and get out of the
+        // way.
+        gRefineOwed = true;
+        return;
+      }
+    }
+  }
   Serial.printf("[refine] screen=%s -> four levels\n", reader::screenName(gApp->top().id()));
   Serial.flush();
   gRenderMs = gDrawMs = 0;

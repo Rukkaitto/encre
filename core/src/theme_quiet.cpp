@@ -900,6 +900,9 @@ constexpr int kReadBarW = 210;
 constexpr int kReadBarH = 5;
 constexpr int kReadTitleEm = 180;  // MIDDLEMARCH, 0.18em
 constexpr int kReadMetaEm = 120;   // the chapter, the percent and the counter, 0.12em
+// U+2014, the real character. Every chrome face's subset carries it (tools/fontc.py
+// adds it alongside the quotes and the ellipsis), so this is not a hyphen standing in.
+constexpr std::string_view kEmDash = "\xE2\x80\x94";
 
 }  // namespace
 
@@ -972,7 +975,12 @@ void QuietTheme::renderReader(Framebuffer& fb, const FontSet& fonts, const Glyph
   const Tracking pctTrack = trackingEm(metaPct, kReadMetaEm);
   drawText(fb, metaPct, kReadPadX, base, pct, Ink::Black, pctTrack, plane);
 
-  const std::string counter = std::to_string(vm.page) + " / " + std::to_string(vm.pageTotal);
+  // AN EM DASH FOR AN UNKNOWN TOTAL, which the board states. Not a blank (the slash
+  // would read as broken), not a zero (that would be a lie), and the same width
+  // every time so the counter does not reflow when the number arrives.
+  const std::string counter =
+      std::to_string(vm.page) + " / " +
+      (vm.pageTotal > 0 ? std::to_string(vm.pageTotal) : std::string(kEmDash));
   const int counterW = meta.measure(counter, metaTrack);
   drawText(fb, meta, right - counterW, base, counter, Ink::Black, metaTrack, plane);
 

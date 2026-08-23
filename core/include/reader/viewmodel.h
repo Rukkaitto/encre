@@ -202,12 +202,16 @@ struct ReaderViewModel {
   std::string bookTitle;  // "Middlemarch" -- the board shouts it, the theme does that
   std::string chapter;    // "CH. 01", already composed: the theme does not do arithmetic
   int progressPercent = 0;
-  // The footer's "53 / 890". CHAPTER-RELATIVE in this slice, not book-wide, and
-  // the board's copy is book-wide -- a book-wide page number needs an index of
-  // every chapter's page count, which is a pass over the whole EPUB and does not
-  // exist yet. Carried as two plain numbers so that pass can fill them in later
-  // without this struct or the theme changing.
+  // The footer's "53 / 890". CHAPTER-RELATIVE, not book-wide -- a book-wide page
+  // number needs an index of every chapter, which is a pass over the whole EPUB.
+  // Carried as two plain numbers so that pass can fill them in later without this
+  // struct or the theme changing.
   int page = 0;
+
+  // ZERO MEANS NOT KNOWN YET, and the theme draws an em dash for it -- see
+  // design/Reader.dc.html's footer. Knowing the total means paginating the whole
+  // chapter, one decode of it, and paying that before the first page appears made
+  // crossing into a chapter cost twice what a page turn costs.
   int pageTotal = 0;
 };
 

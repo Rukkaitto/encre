@@ -52,10 +52,11 @@ void ReaderScreen::setMetrics(const PageMetrics& m) {
     openChapterAt(chapterAt_, false);
     return;
   }
-  // The in-memory chapter: already begun by the constructor.
-  buildIndex();
-  at_ = 0;
-  seekTo(0);
+  // The in-memory chapter, through the SAME lazy landing the card path takes. Two
+  // paths that paginate differently would mean the goldens and the simulator testing
+  // something the device does not do -- and this project has been bitten by a
+  // desktop path that diverged from the device's before.
+  openFirstPage();
   syncVm();
 }
 
@@ -75,19 +76,55 @@ bool ReaderScreen::openChapterAt(int c, bool atEnd) {
   // off either end of the book left `chapterAt_` on the last thing tried and
   // `starts_` empty -- the device reported "spine 0, page 1/7" for a spine entry
   // with no pages at all, with a stale page still on the panel.
+  // NOTHING TO PAGE INTO, so nothing may be disturbed. The in-memory constructor has
+  // no book behind it, and without this the moved-out index below was never put back
+  // -- pressing past the last page of the demo chapter left the screen reporting
+  // zero pages.
+  if (fs_ == nullptr || book_.path.empty() || body_ == nullptr) return false;
+
   const int wasAt = chapterAt_;
   const int wasPage = at_;
+  // MOVED OUT, not copied: the index can be thousands of cursors and this runs on a
+  // device with ~46 KB of headroom. A move is a pointer swap, and walkToChapter
+  // clears `starts_` anyway.
+  std::vector<Cursor> wasStarts = std::move(starts_);
+  const bool wasComplete = indexComplete_;
+  starts_.clear();
+
   if (walkToChapter(c, atEnd)) return true;
   if (!starts_.empty() && chapterAt_ == wasAt) return false;  // nothing was disturbed
-  // Put back exactly what was showing. One extra chapter decode, once, at the
-  // book's edge.
-  if (walkToChapter(wasAt, false) && wasPage < static_cast<int>(starts_.size())) {
-    at_ = wasPage;
-    seekTo(at_);
-    updateChapterLabel();
-    syncVm();
+
+  // Put back exactly what was showing, INDEX INCLUDED. Restoring through the forward
+  // landing was the first attempt and it threw the count away: paging back off the
+  // front of the book left a chapter that had been counted reading `1 / —` again.
+  // One extra chapter decode, once, at the book's edge.
+  if (!reopenChapter(wasAt)) {
+    // Even a failed restore must leave the index intact: the page on glass is still
+    // the one it describes.
+    starts_ = std::move(wasStarts);
+    return false;
   }
+  starts_ = std::move(wasStarts);
+  indexComplete_ = wasComplete;
+  if (starts_.empty()) return false;
+  at_ = wasPage < static_cast<int>(starts_.size()) ? wasPage
+                                                   : static_cast<int>(starts_.size()) - 1;
+  seekTo(at_);
+  updateChapterLabel();
+  syncVm();
   return false;
+}
+
+bool ReaderScreen::reopenChapter(int c) {
+  // The stream alone -- no index, no page. For putting a chapter back exactly as it
+  // was after a walk that failed.
+  if (fs_ == nullptr || book_.path.empty() || c < 0 || c >= book_.chapterCount())
+    return false;
+  const ChapterLocation where = book_.locate(c);
+  if (where.compressedSize == 0) return false;
+  if (!chapter_.begin(*fs_, where)) return false;
+  chapterAt_ = c;
+  return true;
 }
 
 bool ReaderScreen::walkToChapter(int c, bool atEnd) {
@@ -113,10 +150,16 @@ bool ReaderScreen::walkToChapter(int c, bool atEnd) {
     if (!chapter_.begin(*fs_, where)) return false;
 
     chapterAt_ = c;
-    buildIndex();
-    if (!starts_.empty()) {
-      at_ = atEnd ? static_cast<int>(starts_.size()) - 1 : 0;
-      seekTo(at_);
+    // GOING FORWARD, ONLY PAGE ONE IS DECODED -- the count follows later, inside the
+    // refinement. Going BACKWARD needs the last page, and there is no way to know
+    // which that is without counting, so that direction still pays.
+    const bool landed = atEnd ? [&] {
+      buildIndex();
+      if (starts_.empty()) return false;
+      at_ = static_cast<int>(starts_.size()) - 1;
+      return seekTo(at_);
+    }() : openFirstPage();
+    if (landed) {
       updateChapterLabel();
       syncVm();
       return true;
@@ -130,6 +173,7 @@ bool ReaderScreen::walkToChapter(int c, bool atEnd) {
 
 void ReaderScreen::buildIndex() {
   starts_.clear();
+  indexComplete_ = false;
   pb_.reset();
   if (body_ == nullptr || !chapter_.ok()) return;
   if (!chapter_.rewind()) return;
@@ -164,6 +208,27 @@ void ReaderScreen::buildIndex() {
   const bool trailing = pb.pageHasContent();
   pb.finish();
   if (trailing && static_cast<int>(starts_.size()) < kMaxPages) starts_.push_back(pending);
+  // The whole chapter was walked, so `starts_.size()` really is the page count.
+  indexComplete_ = true;
+}
+
+bool ReaderScreen::openFirstPage() {
+  // Page one starts where the chapter does -- the one cursor that is known without
+  // counting anything. seekTo then decodes only far enough to fill it.
+  starts_.clear();
+  starts_.push_back(Cursor{0, 0});
+  indexComplete_ = false;
+  at_ = 0;
+  if (!seekTo(0) || page_.lines.empty()) {
+    // A CHAPTER WITH NO TEXT AT ALL -- a cover, a title page. The provisional cursor
+    // has to go with it, or the screen reports one page and shows nothing, which is
+    // the blank-page-reading-0/0 defect the device found once already. Nought pages
+    // is a KNOWN count, so the index is complete.
+    starts_.clear();
+    indexComplete_ = true;
+    return false;
+  }
+  return true;
 }
 
 bool ReaderScreen::seekTo(int p) {
@@ -203,6 +268,11 @@ bool ReaderScreen::seekTo(int p) {
 
 bool ReaderScreen::advance() {
   if (pb_ == nullptr) return false;
+  // Where the page about to be produced BEGINS. Captured before it is taken, because
+  // take() immediately moves pageStart() on to the following one -- and this cursor
+  // is what the index records.
+  const Cursor thisStart = pb_->pageStart();
+
   Block b;
   for (int guard = 0; guard < kMaxPages * 4; ++guard) {
     if (pb_->ready()) break;
@@ -210,27 +280,62 @@ bool ReaderScreen::advance() {
     pb_->add(b, fed_++);
     b = Block{};
   }
+
+  Page produced;
   if (pb_->ready()) {
-    page_ = pb_->take();
+    produced = pb_->take();
   } else {
-    page_ = pb_->finish();
+    // The blocks ran out. Whatever is on the part-built page is the chapter's last,
+    // and either way its end has now been seen -- so the count is known.
+    const bool trailing = pb_->pageHasContent();
+    Page last = pb_->finish();
     pb_.reset();
+    indexComplete_ = true;
+    if (!trailing) return false;  // there was no next page: the chapter is finished
+    produced = std::move(last);
   }
+
   ++at_;
-  page_.lastPage = (at_ + 1 >= static_cast<int>(starts_.size()));
+  // The index grows by reading. A page reached for the first time appends its start;
+  // one revisited after a backward turn is already there.
+  if (at_ >= static_cast<int>(starts_.size()) && at_ < kMaxPages) starts_.push_back(thisStart);
+  page_ = std::move(produced);
+  page_.lastPage = indexComplete_ && at_ + 1 >= static_cast<int>(starts_.size());
+  return true;
+}
+
+bool ReaderScreen::indexPending() const {
+  // Not gated on having a book: an in-memory chapter is counted the same way, so the
+  // simulator and the goldens exercise the same path the device does.
+  return !indexComplete_ && body_ != nullptr && !starts_.empty();
+}
+
+bool ReaderScreen::completeIndex() {
+  if (!indexPending()) return false;
+  const int wasPage = at_;
+  buildIndex();  // rewinds and counts the whole chapter
+  if (starts_.empty()) return false;
+  at_ = wasPage < static_cast<int>(starts_.size()) ? wasPage
+                                                   : static_cast<int>(starts_.size()) - 1;
+  seekTo(at_);
+  syncVm();
   return true;
 }
 
 void ReaderScreen::syncVm() {
   vm_.bookTitle = bookTitle_;
   vm_.chapter = chapter_label_;
-  const int total = static_cast<int>(starts_.size());
-  vm_.pageTotal = total;
-  vm_.page = total == 0 ? 0 : at_ + 1;
+  const int known = static_cast<int>(starts_.size());
+  // ZERO UNTIL THE CHAPTER'S END HAS BEEN SEEN. `starts_.size()` is pages KNOWN, and
+  // reporting it as the total would count up as the reader advanced -- "1 / 1",
+  // "2 / 2" -- which is worse than admitting it is not known. The footer draws an em
+  // dash for 0; see design/Reader.dc.html.
+  vm_.pageTotal = indexComplete_ ? known : 0;
+  vm_.page = known == 0 ? 0 : at_ + 1;
   // Rounded once, and off the page just READ rather than the one about to be: the
   // board's 53 of 890 is 5.955%, shown as 6%, so the number is the position reached
-  // and not the position started from.
-  vm_.progressPercent = total == 0 ? 0 : (vm_.page * 100 + total / 2) / total;
+  // and not the position started from. Unknown while the total is.
+  vm_.progressPercent = vm_.pageTotal == 0 ? 0 : (vm_.page * 100 + vm_.pageTotal / 2) / vm_.pageTotal;
 }
 
 Action ReaderScreen::onGesture(const GestureEvent& g) {
@@ -240,18 +345,20 @@ Action ReaderScreen::onGesture(const GestureEvent& g) {
       // what accelerates a Library scroll; on a panel that costs ~520 ms a repaint
       // and a page that has to be decoded, a repeat that skipped four pages would
       // be four pages the reader never saw.
-      if (at_ + 1 >= static_cast<int>(starts_.size())) {
-        // OFF THE END OF THE CHAPTER IS THE NEXT CHAPTER, which is what makes this a
-        // reader rather than a chapter viewer. Locating one costs a reopen and a
-        // directory parse -- ~76 ms on device -- against a ~520 ms refresh.
-        if (!openChapterAt(chapterAt_ + 1, false)) return Action::none();
+      // THE STREAM DECIDES WHETHER THERE IS A NEXT PAGE, not the index -- because
+      // with the count still unknown the index cannot say. advance() returns false
+      // only when the chapter's blocks are exhausted.
+      //
+      // A backward turn spends the builder, so re-establish it first: seekTo(at_)
+      // re-renders the page being read and leaves the stream positioned to continue.
+      if (pb_ == nullptr && !seekTo(at_)) return Action::none();
+      if (advance()) {
+        syncVm();
         return Action::redraw();
       }
-      // THE FAST PATH: continue the live stream rather than decoding the chapter
-      // again. Falls back to a seek if the stream is not positioned -- after the
-      // last page, or after a backward turn that spent the builder.
-      if (!advance() && !seekTo(at_ + 1)) return Action::none();
-      syncVm();
+      // OFF THE END OF THE CHAPTER IS THE NEXT CHAPTER, which is what makes this a
+      // reader rather than a chapter viewer.
+      if (!openChapterAt(chapterAt_ + 1, false)) return Action::none();
       return Action::redraw();
     }
     case Gesture::Prev: {
