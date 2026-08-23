@@ -253,12 +253,12 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   // mixed-case one, so wrapping the original would break in the wrong places.
   // THE SHOUTED STRING IS NAMED, and it has to be: `Prose::lines` are string_VIEWS
   // into the text handed to the wrap, "which must outlive the Prose" (components.h
-  // says so). Passing `upperAscii(vm.title)` inline made that text a temporary that
+  // says so). Passing `upperLatin1(vm.title)` inline made that text a temporary that
   // died at the end of the expression, and drawProse then read freed memory -- which
   // rendered as a column of notdef boxes for a title long enough to wrap, and
   // rendered CORRECTLY for a short one, because the freed bytes were still there.
   // Silently right in the case every golden covers.
-  const std::string shouted = upperAscii(vm.title);
+  const std::string shouted = upperLatin1(vm.title);
   std::string titleTail;
   Prose titleProse =
       wrapProseLead(title, shouted, titleW, pxToF26(kTitleLineH), {}, WordBreak::Anywhere);
@@ -546,7 +546,7 @@ void QuietTheme::renderItemActions(Framebuffer& fb, const FontSet& fonts,
       vm.status.empty() ? 0
                         : capValueFont.measure(vm.status, trackingEm(capValueFont, kHintEm)) +
                               kBandGap;
-  const std::string caption = elideToWidth(fonts[Role::Label500], upperAscii(vm.title),
+  const std::string caption = elideToWidth(fonts[Role::Label500], upperLatin1(vm.title),
                                            panelCaptionColumnW(contentW) - statusW,
                                            trackingEm(fonts[Role::Label500], kBandLabelEm));
   const Prose label = wrapPanelCaption(fonts, caption, contentW);
@@ -837,7 +837,7 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   // children and five gaps, and pinning it would be the mistake the header band
   // and the menu rows both taught. The title is measured elided, so a long book
   // cannot make the card taller than it was laid out to be.
-  const std::string shownTitle = elideToWidth(title, upperAscii(vm.title), contentW);
+  const std::string shownTitle = elideToWidth(title, upperLatin1(vm.title), contentW);
   const int contentH = label.lineHeight() + kSleepGap + kSleepRuleH + kSleepGap +
                        title.lineHeight() + kSleepGap + author.lineHeight() + kSleepGap +
                        kSleepBarTopGap + kSleepBarH + kSleepGap + progress.lineHeight();
@@ -866,7 +866,7 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   y += title.lineHeight() + kSleepGap;
 
   drawCentredText(fb, author, cx, contentW, baselineIn(author, y, author.lineHeight()),
-                  upperAscii(vm.author), Ink::Black, trackingEm(author, kSleepAuthorEm), plane);
+                  upperLatin1(vm.author), Ink::Black, trackingEm(author, kSleepAuthorEm), plane);
   y += author.lineHeight() + kSleepGap + kSleepBarTopGap;
 
   // The bar: a 1px outline with a proportional fill, the treatment kBattery uses
@@ -1009,7 +1009,7 @@ void QuietTheme::renderReader(Framebuffer& fb, const FontSet& fonts, const Glyph
   const Tracking metaTrack = trackingEm(meta, kReadMetaEm);
   const int chapterW = meta.measure(vm.chapter, metaTrack);
   drawText(fb, meta, right - chapterW, headBase, vm.chapter, Ink::Black, metaTrack, plane);
-  drawTextElided(fb, metaTitle, kReadPadX, headBase, upperAscii(vm.bookTitle),
+  drawTextElided(fb, metaTitle, kReadPadX, headBase, upperLatin1(vm.bookTitle),
                  fb.width() - 2 * kReadPadX - chapterW - kReadPadX, Ink::Black, titleTrack,
                  plane);
 

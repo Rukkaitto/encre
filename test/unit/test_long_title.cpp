@@ -44,7 +44,7 @@ reader::LibraryViewModel longLibrary() {
   reader::LibraryViewModel vm;
   // The band's label is data too -- a subfolder's own name -- so the screen it
   // draws is a folder, not the root.
-  vm.title = reader::upperAscii(kLongTitle);
+  vm.title = reader::upperLatin1(kLongTitle);
   vm.bookCount = 12;
   vm.rows.push_back({"Classics_and_Other_Assorted_Older_Books", "FOLDER \xC2\xB7 6 BOOKS", "",
                      true});
@@ -87,7 +87,7 @@ reader::ItemActionsViewModel longItemActions(std::string title) {
 reader::DeleteConfirmViewModel longDeleteConfirm(const std::string& name) {
   reader::DeleteConfirmViewModel vm;
   // Composed the way DeleteConfirmScreen composes it, quotes and all.
-  vm.title = "DELETE \xE2\x80\x9C" + reader::upperAscii(name) + "\xE2\x80\x9D?";
+  vm.title = "DELETE \xE2\x80\x9C" + reader::upperLatin1(name) + "\xE2\x80\x9D?";
   vm.message =
       "The file leaves the SD card. Your progress and bookmarks are kept in case it comes back.";
   vm.cancelLabel = "CANCEL";
@@ -394,5 +394,26 @@ TEST_CASE("a pathologically long Home title stays inside the canvas") {
     reader::Hint hints[4];
     reader::buildHints(kHomeHintMarks, vm.hints, vm.holds, hints);
     CHECK(reader::hintBarHeight(r.fonts, hints) > 0);
+  }
+}
+
+TEST_CASE("an accented title shouts, and its accented capitals have real glyphs") {
+  // THE CASE THE DEVICE REPORTED: `Le Fleau` with an acute came out `LE FLeAU`,
+  // because the shout was ASCII-only. test_text.cpp pins the mapping; this pins the
+  // RENDER, which is the half a string comparison cannot see -- an uppercase accent
+  // the font subset lacked would map correctly and then draw as a notdef box.
+  //
+  // fontc.py's subset is 0x20..0x7E plus ALL of Latin-1, so the glyphs are there; this
+  // is what says so.
+  Ramp r;
+  reader::QuietTheme theme;
+  reader::HomeViewModel vm = reader::demoHomeVm();
+  vm.title = "Le Fl\xC3\xA9""au";
+  vm.author = "Stephen King";
+  for (const int w : {480, 528}) {
+    const int h = w == 480 ? 800 : 792;
+    reader::Framebuffer fb(w, h);
+    theme.renderHome(fb, r.fonts, vm, reader::Plane::Bw);
+    golden::checkGolden(fb, w == 480 ? "home_accented_title" : "home_accented_title_x3");
   }
 }

@@ -221,9 +221,21 @@ int centreIn(int boxStart, int boxSize, int itemSize);
 // inside it, and a panel's caption is a caps label whose text arrives from a
 // filename. So this is one function rather than a private copy per file.
 //
-// Deliberately not a Unicode case mapping: that is a table core/ should not
-// carry, and the titles that need one (accented Latin, Greek, Cyrillic) arrive
-// with real EPUB metadata in Phase 3. Non-ASCII bytes pass through untouched
-// rather than being mangled.
-std::string upperAscii(std::string_view s);
+// ASCII AND THE LATIN-1 SUPPLEMENT, which is what the fonts actually carry:
+// fontc.py's subset is 0x20..0x7E plus ALL of 0xA0..0xFF, so `E9` has an `C9` to
+// become. It was ASCII-only, and this header said a Unicode mapping was "a table
+// core/ should not carry" and that "the titles that need one arrive with real EPUB
+// metadata in Phase 3" -- which they now have: the device showed `LE FLéAU`.
+//
+// It needs no table. U+00E0..U+00FE is `C3 A0`..`C3 BE` in UTF-8 and the uppercase
+// U+00C0..U+00DE is `C3 80`..`C3 9E`, so the second byte drops by 0x20 exactly as an
+// ASCII letter's only byte does. Three characters are excluded because their
+// uppercase is not one byte away; text.cpp names each and why.
+//
+// ANYTHING BEYOND LATIN-1 STILL PASSES THROUGH UNTOUCHED -- Greek, Cyrillic, and the
+// Latin Extended ranges. That is not laziness but the same rule as before: a
+// character the font subset has no uppercase glyph for would render as a notdef box,
+// which is worse than a lowercase letter. Widening this means widening the subset
+// first.
+std::string upperLatin1(std::string_view s);
 }  // namespace reader

@@ -221,10 +221,35 @@ int centreIn(int boxStart, int boxSize, int itemSize) {
 int iconTopIn(int boxTop, int boxH, int itemH) { return centreIn(boxTop, boxH, itemH); }
 
 
-std::string upperAscii(std::string_view s) {
+std::string upperLatin1(std::string_view s) {
   std::string out(s);
-  for (char& c : out)
-    if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+  for (size_t i = 0; i < out.size(); ++i) {
+    unsigned char c = static_cast<unsigned char>(out[i]);
+    if (c >= 'a' && c <= 'z') {
+      out[i] = static_cast<char>(c - 'a' + 'A');
+      continue;
+    }
+    // THE LATIN-1 SUPPLEMENT, in UTF-8: U+00E0..U+00FE is `C3 A0`..`C3 BE`, and the
+    // uppercase U+00C0..U+00DE is `C3 80`..`C3 9E` -- so the SECOND byte drops by
+    // 0x20, exactly as an ASCII letter's only byte does. One subtraction, no table.
+    if (c != 0xC3 || i + 1 >= out.size()) continue;
+    const unsigned char lo = static_cast<unsigned char>(out[i + 1]);
+    // THREE EXCLUSIONS, and each is a character whose uppercase is not one byte away:
+    //
+    //   0xB7 (U+00F7 division sign) is not a letter at all, and 0xB7-0x20 is 0x97 --
+    //        U+00D7, the MULTIPLICATION sign. Shouting a divide into a times.
+    //   0xBF (U+00FF y-diaeresis) uppercases to U+0178, which is outside Latin-1 and
+    //        outside every font subset this project builds -- so it would render as a
+    //        notdef box, which is worse than a lowercase letter.
+    //   0x9F (U+00DF sharp s) is already outside the lowercase range below, and its
+    //        uppercase is two letters (SS) or U+1E9E. Left alone by the bounds.
+    //
+    // The range therefore stops at 0xBE and skips 0xB7.
+    if (lo >= 0xA0 && lo <= 0xBE && lo != 0xB7) {
+      out[i + 1] = static_cast<char>(lo - 0x20);
+      ++i;  // the pair is done; do not re-examine the byte just written
+    }
+  }
   return out;
 }
 

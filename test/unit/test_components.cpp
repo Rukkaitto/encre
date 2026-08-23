@@ -1609,7 +1609,7 @@ TEST_CASE("the header band's label truncates instead of running into its value")
   for (int width : {480, 528}) {
     reader::Framebuffer fb(width, 200);
     fb.clear(true);
-    const int h = reader::drawHeaderBand(fb, f.fonts, reader::upperAscii(kLongName), "12 BOOKS",
+    const int h = reader::drawHeaderBand(fb, f.fonts, reader::upperLatin1(kLongName), "12 BOOKS",
                                          nullptr);
     // Where the value starts: it keeps its width, and the label may not reach it.
     const reader::Font& vf = f.fonts[reader::Role::Value700];
@@ -1620,7 +1620,7 @@ TEST_CASE("the header band's label truncates instead of running into its value")
     // value. Scanning the strip left of the value is what isolates the label.
     reader::Framebuffer labelOnly(width, 200);
     labelOnly.clear(true);
-    reader::drawHeaderBand(labelOnly, f.fonts, reader::upperAscii(kLongName), "", nullptr);
+    reader::drawHeaderBand(labelOnly, f.fonts, reader::upperLatin1(kLongName), "", nullptr);
     CHECK(rightmostInk(labelOnly, 0, h - reader::kBandRuleH) <= width - reader::kMargin);
     // And with the value present there is a gap between the two runs.
     int gapStart = -1;
@@ -1668,7 +1668,7 @@ TEST_CASE("a book row's title and meta line both truncate inside their column") 
     fb.clear(true);
     // The meta line has to be a named string: BookRowContent holds views, so a
     // temporary here is a dangling read at draw time.
-    const std::string meta = reader::upperAscii(kLongName);
+    const std::string meta = reader::upperLatin1(kLongName);
     const reader::BookRowContent row{kLongName, meta, "31%", false};
     const int consumed = reader::drawBookRow(fb, f.fonts, 0, row, false, true);
     const reader::Font& vf = f.fonts[reader::Role::Value700];

@@ -3,7 +3,7 @@
 #include "reader/reading_store.h"
 
 #include "reader/filesystem.h"
-#include "reader/text.h"  // upperAscii
+#include "reader/text.h"  // upperLatin1
 #include "reader/theme.h"
 
 namespace reader {
@@ -140,7 +140,7 @@ void LibraryScreen::syncVm() {
   // Shouted here rather than by the theme because the theme shouts what the
   // board declares `text-transform: uppercase` on, and this band's label is a
   // caps label whose text arrives from a directory name.
-  vm_.title = (path_ == root_) ? "LIBRARY" : upperAscii(BookList::titleFor(leafOf(path_), true));
+  vm_.title = (path_ == root_) ? "LIBRARY" : upperLatin1(BookList::titleFor(leafOf(path_), true));
 
   // The band's count is the books here plus the books one level down, which is
   // what the board's `12 BOOKS` over 6 books and a 6-book folder measures.

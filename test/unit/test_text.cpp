@@ -427,3 +427,68 @@ TEST_CASE("drawTextElided draws the elided run and no ink past its budget") {
       if (fb.getPixel(px, y) != same.getPixel(px, y)) { identical = false; break; }
   CHECK(identical);
 }
+
+// --- Shouting a title -----------------------------------------------------------
+//
+// upperLatin1 was upperAscii, and the device showed `LE FLéAU` for `Le Fléau`. Its
+// header had recorded the deferral -- "the titles that need one arrive with real EPUB
+// metadata in Phase 3" -- and they did.
+
+TEST_CASE("ASCII shouts exactly as it always did") {
+  CHECK(reader::upperLatin1("Middlemarch") == "MIDDLEMARCH");
+  CHECK(reader::upperLatin1("a-z 0-9 _!") == "A-Z 0-9 _!");
+  CHECK(reader::upperLatin1("") == "");
+  CHECK(reader::upperLatin1("ALREADY") == "ALREADY");
+}
+
+TEST_CASE("the Latin-1 accents shout, which is the whole point") {
+  // The case the device reported.
+  CHECK(reader::upperLatin1("Le Fl\xC3\xA9""au") == "LE FL\xC3\x89""AU");
+  // And the one the goldens carry deliberately, to keep a non-ASCII glyph in them.
+  CHECK(reader::upperLatin1("Charlotte Bront\xC3\xAB") == "CHARLOTTE BRONT\xC3\x8B");
+  // Every letter in the block, checked as a range rather than a sample: U+00E0..U+00FE
+  // maps to U+00C0..U+00DE, and one hand-picked example would not catch an off-by-one
+  // at either end.
+  for (unsigned char lo = 0xA0; lo <= 0xBE; ++lo) {
+    if (lo == 0xB7) continue;  // the division sign, excluded on purpose
+    const std::string in = std::string("\xC3") + static_cast<char>(lo);
+    const std::string want = std::string("\xC3") + static_cast<char>(lo - 0x20);
+    CHECK(reader::upperLatin1(in) == want);
+  }
+}
+
+TEST_CASE("the three characters whose uppercase is not one byte away are left alone") {
+  // Each would be actively wrong rather than merely unshouted.
+  // U+00F7 division sign: -0x20 is U+00D7, MULTIPLICATION. A divide is not a letter.
+  CHECK(reader::upperLatin1("\xC3\xB7") == "\xC3\xB7");
+  // U+00FF y-diaeresis: uppercase is U+0178, outside Latin-1 and outside the font
+  // subset, so it would render as a notdef box -- worse than a lowercase letter.
+  CHECK(reader::upperLatin1("\xC3\xBF") == "\xC3\xBF");
+  // U+00DF sharp s: uppercase is SS or U+1E9E, neither one byte away.
+  CHECK(reader::upperLatin1("\xC3\x9F") == "\xC3\x9F");
+}
+
+TEST_CASE("anything past Latin-1 passes through untouched") {
+  // Not laziness: a character the subset has no uppercase glyph for would be a notdef
+  // box. Widening this means widening fontc.py's CODEPOINTS first.
+  const char* const greek = "\xCE\xB1\xCE\xB2";           // alpha beta
+  const char* const cyrillic = "\xD0\xB4\xD0\xB0";        // de a
+  const char* const extendedA = "\xC5\x93";               // U+0153 oe ligature
+  CHECK(reader::upperLatin1(greek) == greek);
+  CHECK(reader::upperLatin1(cyrillic) == cyrillic);
+  CHECK(reader::upperLatin1(extendedA) == extendedA);
+}
+
+TEST_CASE("a truncated multi-byte sequence is not read past its end") {
+  // A filename is bytes off a card and need not be valid UTF-8. A lone lead byte at
+  // the end of the string must not have its non-existent continuation examined.
+  CHECK(reader::upperLatin1("caf\xC3") == "CAF\xC3");
+  CHECK(reader::upperLatin1("\xC3") == "\xC3");
+}
+
+TEST_CASE("shouting is idempotent") {
+  // It runs on values that may already have been through it -- a board's own caps run
+  // reaching a theme that shouts again.
+  const std::string once = reader::upperLatin1("Le Fl\xC3\xA9""au");
+  CHECK(reader::upperLatin1(once) == once);
+}

@@ -3,7 +3,7 @@
 #include <string>
 
 #include "reader/screen_library.h"
-#include "reader/text.h"  // upperAscii
+#include "reader/text.h"  // upperLatin1
 #include "reader/theme.h"
 
 namespace reader {
@@ -16,7 +16,7 @@ namespace {
 std::string formatOf(std::string_view name) {
   const size_t dot = name.rfind('.');
   if (dot == std::string_view::npos || dot == 0 || dot + 1 >= name.size()) return {};
-  return upperAscii(name.substr(dot + 1));
+  return upperLatin1(name.substr(dot + 1));
 }
 
 // `0.4 MB`, which is what the board writes for a 416 KB file -- so its unit is
@@ -53,7 +53,7 @@ BookDetailsScreen::BookDetailsScreen(const LibraryScreen& library) {
                   // Shouted and with the board's trailing slash: `/BOOKS/`. The
                   // path is the directory the book was listed from, which is the
                   // Library's, so a book inside a folder says so.
-                  {"Location", upperAscii(library.path()) + "/"}};
+                  {"Location", upperLatin1(library.path()) + "/"}};
   }
   // BACK, and three dead slots. The board draws exactly that -- one label and
   // three of the boards' `width: 36px` placeholders -- because there is nothing
