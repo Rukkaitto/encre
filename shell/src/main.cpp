@@ -39,6 +39,7 @@
 #include "reader/input.h"
 #include "reader/json.h"
 #include "reader/power.h"
+#include "reader/profile.h"
 #include "reader/refresh.h"
 #include "reader/screen_home.h"
 #include "reader/screen_sd_missing.h"
@@ -2285,6 +2286,7 @@ static void renderTop() {
                                                                             : "mono";
   gRenderMs = gDrawMs = 0;
   gUploadMs = gWaveMs = 0;
+  reader::Profile::reset();
   gPartialPaint = false;
   // Any new paint supersedes a refinement that was owed for the old frame.
   gRefineOwed = false;
@@ -2349,6 +2351,34 @@ static void renderTop() {
        (unsigned long)total, (unsigned long)gRenderMs, (unsigned long)gDrawMs,
        (unsigned long)(total - gRenderMs), (unsigned long)gUploadMs, (unsigned long)gWaveMs,
        gPartialPaint ? "top" : "stack", gRefineOwed ? " refine-owed" : "");
+
+  // WHERE THE RENDER WENT, per PRIMITIVE. `render=` says a reader menu costs 266 ms
+  // and Contents 62; this says which primitive spent it, and because the primitives
+  // are shared the answer is about every screen that draws one rather than about
+  // this screen. Microseconds, because the interesting slots are single-digit
+  // milliseconds and rounding them to 0 would hide exactly the ones that are cheap.
+  //
+  // `other` is the remainder -- layout arithmetic, measuring, wrapping, eliding --
+  // and it is a real slot rather than a rounding error: on the desktop the reader
+  // menu spends 22% there against the actions panel's 2%, which is a question about
+  // this screen's caption wrap and not about any primitive.
+  {
+    char line[224];
+    int at = snprintf(line, sizeof(line), "[render] total=%luus", (unsigned long)(gRenderMs * 1000u));
+    uint32_t accounted = 0;
+    for (int i = 0; i < reader::kPhaseCount && at > 0 && at < (int)sizeof(line); ++i) {
+      const auto ph = static_cast<reader::Phase>(i);
+      const uint32_t us = reader::Profile::micros(ph);
+      if (us == 0) continue;
+      accounted += us;
+      at += snprintf(line + at, sizeof(line) - (size_t)at, " %s=%lu/%lu",
+                     reader::Profile::name(ph), (unsigned long)us,
+                     (unsigned long)reader::Profile::calls(ph));
+    }
+    const uint32_t totalUs = gRenderMs * 1000u;
+    logf("%s other=%lu\n", line,
+         (unsigned long)(totalUs > accounted ? totalUs - accounted : 0));
+  }
 }
 
 // The four-level upgrade of a frame already on glass. Runs from loop() once the
@@ -2784,6 +2814,11 @@ void setup() {
     mark("frame-bind-FAILED");
     return;
   }
+  // The render profiler's clock. core/ has none and must not acquire one, so the
+  // owner supplies it -- see reader/profile.h. Two reads per PRIMITIVE CALL and
+  // never per pixel, so ~100 calls a frame against a 100-300 ms render: it is left
+  // on rather than gated, exactly as the stage marks and the interaction line are.
+  reader::Profile::install([]() -> uint32_t { return static_cast<uint32_t>(micros()); });
   mark("frame-bound");
 
   // Which grayscale path the selected driver actually offers. Logged because

@@ -1,5 +1,7 @@
 #include "reader/framebuffer.h"
 
+#include "reader/profile.h"
+
 #include <cstring>
 
 namespace reader {
@@ -87,6 +89,14 @@ bool Framebuffer::getPixel(int x, int y) const {
 }
 
 void Framebuffer::fillRect(int x, int y, int w, int h, bool white) {
+  // THE PRIMITIVE MOST LIKELY TO BE THE ANSWER, which is why it is measured
+  // rather than assumed. It is a per-pixel setPixel loop -- a bounds check, a
+  // byteIndex (a division under rotation), a bitMask (a modulo) and a
+  // read-modify-write, for every pixel -- and that is the exact shape veilRect
+  // was rewritten byte-wise to escape. An overlay panel is ~340x420 and a
+  // full-bleed focused row is ~300x72, so one reader-menu frame asks for on the
+  // order of 200,000 of them.
+  PhaseSpan sp(Phase::Fill);
   for (int yy = y; yy < y + h; ++yy)
     for (int xx = x; xx < x + w; ++xx)
       setPixel(xx, yy, white);

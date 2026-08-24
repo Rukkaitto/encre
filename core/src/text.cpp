@@ -5,6 +5,7 @@
 
 #include "reader/framebuffer.h"
 #include "reader/glyphsource.h"
+#include "reader/profile.h"
 
 namespace reader {
 
@@ -21,6 +22,10 @@ namespace reader {
 static int drawRunF26(Framebuffer& fb, const GlyphSource& font, int penFIn, int baselineY,
                       std::string_view utf8, Ink ink, Tracking tracking, Plane plane,
                       int extraPerGapF26) {
+  // ONE SPAN PER RUN, never per glyph: the clock would then cost more than the
+  // blit it was timing. A run is a whole string at one face, so a page of body
+  // text is ~12 of these and a chrome screen a few dozen.
+  PhaseSpan sp(Phase::Glyph);
   const bool white = (ink == Ink::White);
   // The pen is 26.6 fixed point; `pen` below is only ever the *paint* position,
   // rounded off it. With integer tracking penF stays a multiple of 64 and every

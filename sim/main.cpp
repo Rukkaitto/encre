@@ -15,6 +15,7 @@
 #include "reader/framebuffer.h"
 #include "reader/host_fs.h"
 #include "reader/png.h"
+#include "reader/profile.h"
 #include "reader/screen_home.h"
 #include "reader/screen_library.h"
 #include "reader/screen_sd_missing.h"
@@ -123,6 +124,16 @@ using PaintPass = std::function<void(reader::Framebuffer&, reader::Plane)>;
 // and the waveform starting.
 static int gBenchIters = 0;
 
+// The desktop's clock for reader::Profile. The device installs micros(); this is
+// the same job with std::chrono, so `--bench` reports the SAME breakdown the
+// device's `[render]` line does and a change can be judged before it is flashed.
+static uint32_t simMicros() {
+  return static_cast<uint32_t>(
+      std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+}
+
 static void benchPaint(const PaintPass& paint, reader::Plane plane, int w, int h,
                        const char* label) {
   if (gBenchIters <= 0) return;
@@ -140,6 +151,26 @@ static void benchPaint(const PaintPass& paint, reader::Plane plane, int w, int h
   const double us =
       std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / 1000.0 / gBenchIters;
   std::printf("[bench] %s %dx%d %.1f us/pass (n=%d)\n", label, w, h, us, gBenchIters);
+
+  // ...and where inside the pass it went. Timed over ONE further pass with the
+  // profiler installed, not over the loop above, so the clock reads the span
+  // costs add are not folded into the headline figure.
+  reader::Profile::install(simMicros);
+  reader::Profile::reset();
+  fb.clear(true);
+  paint(fb, plane);
+  double accounted = 0;
+  for (int i = 0; i < reader::kPhaseCount; ++i) {
+    const auto ph = static_cast<reader::Phase>(i);
+    const uint32_t m = reader::Profile::micros(ph);
+    if (m == 0) continue;
+    accounted += m;
+    std::printf("[bench]   %-7s %6u us  x%-4u\n", reader::Profile::name(ph), m,
+                reader::Profile::calls(ph));
+  }
+  std::printf("[bench]   %-7s %6.0f us  (layout, measuring, wrapping)\n", "other",
+              us - accounted > 0 ? us - accounted : 0);
+  reader::Profile::install(nullptr);
 }
 
 static bool renderPassesToPng(const PaintPass& paint, reader::Fidelity fidelity, int w, int h,

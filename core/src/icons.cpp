@@ -3,6 +3,7 @@
 
 #include "icons_data.h"
 #include "reader/framebuffer.h"
+#include "reader/profile.h"
 
 namespace reader {
 
@@ -17,6 +18,7 @@ uint8_t coverage(const Icon& icon, int col, int row) {
 }
 
 void drawIcon(Framebuffer& fb, const Icon& icon, int x, int y, Ink ink, Plane plane) {
+  PhaseSpan sp(Phase::Icon);
   const bool white = (ink == Ink::White);
   for (int row = 0; row < icon.h; ++row)
     for (int col = 0; col < icon.w; ++col) {

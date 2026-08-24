@@ -1,6 +1,7 @@
 #include "reader/dither.h"
 
 #include "reader/framebuffer.h"
+#include "reader/profile.h"
 
 namespace reader {
 
@@ -159,6 +160,7 @@ void veilPhysRun(uint8_t* row, int pxLo, int pxHi, bool full) {
 int bayer4(int x, int y) { return kBayer[y & 3][x & 3]; }
 
 void ditherRect(Framebuffer& fb, int x, int y, int w, int h, int level, Ink ink) {
+  PhaseSpan sp(Phase::Dither);
   if (level <= 0) return;
   if (level > 4) level = 4;
   // level 1..4 -> threshold 4, 8, 12, 16 out of 16 cells inked.
@@ -196,6 +198,7 @@ void veilRect(Framebuffer& fb, int x, int y, int w, int h) {
   // both geometries, under both rotations, and for runs that start and end
   // mid-byte.
   if (w <= 0 || h <= 0) return;
+  PhaseSpan sp(Phase::Veil);
   const int fw = fb.width(), fh = fb.height();
   if (fw <= 0 || fh <= 0) return;
   // CLIP FIRST, which is what setPixel's own bounds check used to do one pixel at

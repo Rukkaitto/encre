@@ -35,6 +35,9 @@ LINE = re.compile(
     r"total=(?P<total>\d+)ms ser=(?P<ser>\d+) net=(?P<net>\d+)(?P<nopaint> paint=none)?"
 )
 FS = re.compile(r"\[fs\] (?P<op>\w+) (?P<path>\S+).*? in (?P<ms>\d+)ms")
+# [render] total=266000us fill=102000/17 glyph=88000/28 veil=8000/1 icon=3000/8 other=65000
+RENDER = re.compile(r"\[render\] total=(?P<total>\d+)us (?P<rest>.*)")
+RENDER_SLOT = re.compile(r"(\w+)=(\d+)(?:/(\d+))?")
 STAGES = ("wait", "pre", "disp", "post", "render", "up", "wave")
 
 
@@ -47,6 +50,10 @@ def median(xs):
 def main(paths):
     rows = []
     fs = defaultdict(list)
+    # A [render] line precedes the [i] line of the same paint, so the pending one
+    # is attached to the next interaction rather than matched by an id.
+    renders = []
+    pending_render = None
     for path in paths or ["-"]:
         f = sys.stdin if path == "-" else open(path, errors="replace")
         for line in f:
@@ -55,7 +62,17 @@ def main(paths):
                 d = m.groupdict()
                 for k in STAGES + ("total", "ser", "net", "ev"):
                     d[k] = int(d[k])
+                if pending_render is not None:
+                    d["render_slots"] = pending_render
+                    renders.append((d["to"], pending_render))
+                    pending_render = None
                 rows.append(d)
+                continue
+            m = RENDER.search(line)
+            if m:
+                slots = {k: int(v) for k, v, _ in RENDER_SLOT.findall(m.group("rest"))}
+                slots["total"] = int(m.group("total"))
+                pending_render = slots
                 continue
             m = FS.search(line)
             if m:
@@ -94,6 +111,25 @@ def main(paths):
     if none:
         print(f"\n{len(none)} press(es) produced NO paint: " +
               ", ".join(sorted({f"{r['button']} on {r['frm']}" for r in none})))
+
+    if renders:
+        # PER SCREEN, because the render is the screen's; but the PRIMITIVES are
+        # shared, so a slot that dominates here dominates everywhere it is drawn.
+        by_screen = defaultdict(list)
+        for screen, slots in renders:
+            by_screen[screen].append(slots)
+        keys = ["fill", "glyph", "veil", "dither", "icon", "other"]
+        print("\nrender, microseconds (median), by primitive:")
+        head = f"  {'screen':<16}{'n':>3}{'total':>9}" + "".join(f"{k:>9}" for k in keys)
+        print(head)
+        print("  " + "-" * (len(head) - 2))
+        for screen in sorted(by_screen, key=lambda s: -median([r["total"] for r in by_screen[s]])):
+            g = by_screen[screen]
+            line = f"  {screen:<16}{len(g):>3}{median([r['total'] for r in g]):>9.0f}"
+            for k in keys:
+                vals = [r.get(k, 0) for r in g]
+                line += f"{median(vals):>9.0f}" if any(vals) else f"{'-':>9}"
+            print(line)
 
     if fs:
         print("\ncard operations over the slow threshold:")
