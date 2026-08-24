@@ -2325,6 +2325,14 @@ passed — `shell/` has no harness, so nothing on the desktop touches that loop.
   while the commit describing them went through. Both times the assert failed for the
   dullest reason — the anchor text had already been edited by a previous commit, so it no
   longer matched what I remembered.
+- **A CASE'S EARLY-RETURN GUARD IS PART OF THE CHANGE.** `ScreenId::BookDetails` opened
+  with `if (library_ == nullptr) return nullptr;` — true while the screen was built from
+  a Library reference. The change that removed that requirement replaced the `return`
+  and left the GUARD, so `About this book` still did nothing from a Reader opened
+  through Home's CONTINUE: refused before the facts were consulted, which is exactly the
+  case it was written to fix. **The duplicated guard two lines below was the visible
+  tell** — when a replacement leaves a condition stated twice, one of them is stale.
+  Every test passed before and after, because every one of them had a Library.
 - **AN ANCHOR IS NOT WHAT YOU REMEMBER WRITING.** Read the target region first. This file
   is edited constantly; a paragraph tracked its own subject through three states in one
   session, and each rewrite invalidated the anchor the next one guessed at.

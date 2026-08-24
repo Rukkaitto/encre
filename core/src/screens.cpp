@@ -274,13 +274,17 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       if (library_ == nullptr) return nullptr;
       return std::make_unique<DeleteConfirmScreen>(*library_);
     case ScreenId::BookDetails:
-      if (library_ == nullptr) return nullptr;
-      // THE SHELL'S FACTS WIN, and the Library is the fallback that keeps the simulator
-      // and the goldens working. Two callers can open this screen and only one of them
-      // has a Library behind it: the reader menu's `About this book` is reached from a
-      // Reader, which may have been opened from Home's CONTINUE with no Library on the
-      // stack at all.
+      // THE FACTS ARE CHECKED FIRST, and a `library_ == nullptr` guard used to sit ABOVE
+      // this line -- left over from when the screen was built from a Library reference.
+      // The change that removed that requirement replaced the `return` and not the
+      // GUARD, so `About this book` still did nothing from a Reader opened through
+      // Home's CONTINUE: refused before the facts were ever consulted, which is exactly
+      // the case it was meant to fix. The duplicated guard below was the visible tell.
+      //
+      // WHEN A CASE'S EARLY RETURN ENCODES AN ASSUMPTION A CHANGE REMOVES, THE GUARD IS
+      // PART OF THE CHANGE.
       if (detailsFactsSet_) return std::make_unique<BookDetailsScreen>(detailsFacts_);
+      // The Library is the fallback, and it is what the simulator and the goldens use.
       if (library_ == nullptr) return nullptr;
       if (const LibraryItem* it = library_->focusedItem()) {
         BookDetailsScreen::Facts f;

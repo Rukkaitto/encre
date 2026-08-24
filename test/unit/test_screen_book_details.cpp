@@ -196,3 +196,70 @@ TEST_CASE("book details' rules land where the board's do") {
     CHECK_FALSE(fullWidthRule(616));
   }
 }
+
+// --- Built from facts, with no Library anywhere ---------------------------------
+
+TEST_CASE("BOOK DETAILS BUILDS FROM FACTS WITH NO LIBRARY ON THE STACK") {
+  // THE CASE THE WHOLE CHANGE EXISTS FOR, and nothing covered it: a `library_ == nullptr`
+  // guard survived above the facts check, so `About this book` from a Reader opened
+  // through Home's CONTINUE was refused before the facts were consulted. Every test
+  // passed before and after the fix, because every one of them had a Library.
+  reader::DemoScreenFactory f;  // no Library ever built
+  reader::BookDetailsScreen::Facts facts;
+  facts.title = "Le Fleau";
+  facts.author = "Stephen King";
+  facts.fileName = "Le Fleau.epub";
+  facts.directory = "/books";
+  facts.progress = "42%";
+  facts.chapter = "LIVRE I";
+  facts.bytes = 12'700'000;
+  f.setDetailsFacts(facts);
+
+  auto scr = f.create(reader::ScreenId::BookDetails);
+  REQUIRE(scr != nullptr);
+  const auto& vm = static_cast<reader::BookDetailsScreen*>(scr.get())->vm();
+  CHECK(vm.title == "Le Fleau");
+  CHECK(vm.author == "Stephen King");
+  CHECK(vm.format == "EPUB");
+  REQUIRE(vm.fields.size() == 5);
+  CHECK(vm.fields[0].value == "42%");
+  CHECK(vm.fields[1].value == "LIVRE I");
+  CHECK(vm.fields[4].value == "/BOOKS/");
+}
+
+TEST_CASE("with neither facts nor a Library it is refused, not built empty") {
+  // A screen with nothing on it looks exactly like a screen that failed to load, and
+  // this factory refuses rather than substituting -- the rule the Reader established.
+  reader::DemoScreenFactory f;
+  CHECK(f.create(reader::ScreenId::BookDetails) == nullptr);
+}
+
+TEST_CASE("clearing the facts puts the screen back on the Library's row") {
+  // The Library path clears them, and it has to: opening details from the Library after
+  // opening them from a book would otherwise show the BOOK -- a stale answer wearing the
+  // right screen's clothes.
+  Ramp r;
+  reader::QuietTheme theme;
+  FakeFileSystem fs;
+  fs.mkdirs("/books");
+  fs.writeAll("/books/Middlemarch.epub", std::string(400 * 1024, 'm'));
+  reader::DemoScreenFactory f(fs, "/books");
+  f.setLibraryVisibleRows(theme.libraryVisibleRows(800, r.fonts));
+  auto lib = f.create(reader::ScreenId::Library);
+  REQUIRE(lib != nullptr);
+
+  reader::BookDetailsScreen::Facts facts;
+  facts.title = "A DIFFERENT BOOK";
+  facts.fileName = "other.epub";
+  f.setDetailsFacts(facts);
+  auto fromFacts = f.create(reader::ScreenId::BookDetails);
+  REQUIRE(fromFacts != nullptr);
+  CHECK(static_cast<reader::BookDetailsScreen*>(fromFacts.get())->vm().title ==
+        "A DIFFERENT BOOK");
+
+  f.clearDetailsFacts();
+  auto fromLibrary = f.create(reader::ScreenId::BookDetails);
+  REQUIRE(fromLibrary != nullptr);
+  CHECK(static_cast<reader::BookDetailsScreen*>(fromLibrary.get())->vm().title !=
+        "A DIFFERENT BOOK");
+}
