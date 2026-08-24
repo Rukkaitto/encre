@@ -176,6 +176,16 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // which of the two it wants, and the shell builds its own view model either way.
   void setSleepIdle() { sleepIdle_ = true; }
 
+  // THE BOARD'S OWN CONTENTS AND MENU HEADER, ASKED FOR. Same rule as setReaderDemo,
+  // and it is here because the alternative had just shipped its consequence: the
+  // factory fell back to a demo table of contents whenever nothing had set one, so a
+  // failure to read the real one showed as MIDDLEMARCH'S CHAPTERS over Le Fleau. A
+  // silent substitution turned a diagnosable failure into a puzzle.
+  //
+  // "A factory that substitutes content is worse than one that refuses" was already
+  // written down for exactly this, one screen earlier.
+  void setContentsDemo() { contentsDemo_ = true; }
+
   // THE BOOK'S TABLE OF CONTENTS, for the Contents screen. Set by the shell when the
   // menu's Contents row is chosen -- reading it is card work (`toc.h` re-opens the
   // archive) and `core/` does no storage, so the factory is handed the answer rather
@@ -190,6 +200,11 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   void setContents(std::vector<TocEntry> toc, int spine) {
     contentsToc_ = std::move(toc);
     contentsSpine_ = spine;
+    // PRIMED IS ITS OWN FLAG, not "the list is non-empty". A real book with no NCX
+    // primes an EMPTY list and must still build -- it reads fine and simply cannot name
+    // its chapters. Inferring from emptiness collapses that into "nothing was primed",
+    // which is a shell bug and is refused.
+    contentsPrimed_ = true;
   }
 
   // What the reader menu's header says. Two strings rather than a reach down the stack
@@ -245,8 +260,10 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   OpenedBook readerBook_{};
   bool readerDemo_ = false;
   bool sleepIdle_ = false;
+  bool contentsDemo_ = false;
   std::vector<TocEntry> contentsToc_;
   int contentsSpine_ = 0;
+  bool contentsPrimed_ = false;
   int contentsRows_ = 0;
   std::string menuTitle_, menuProgress_;
   int readerStartChapter_ = 0;

@@ -2121,12 +2121,37 @@ there is no screen left to ask), and calls `ReaderScreen::goToChapter` once the 
 back. That lands on page ONE of the target rather than a saved position: a reader who
 picked a chapter from a list asked for its beginning.
 
-**THE TOC IS READ WHEN THE MENU'S CONTENTS ROW IS PRESSED**, not when a book opens — one
-archive re-open (~32 KB transient) and ~1.2 KB of labels, paid on a screen the reader
-opens occasionally rather than carried for a whole session. `App::at(index)` exists
-because the menu is an overlay and the chapter it marks `NOW` belongs to the Reader
-underneath: reached through the stack rather than remembered, since a chapter crossing
-while the menu is closed would make a remembered one stale.
+**THE TOC IS READ WHEN THE BOOK OPENS, AND IT HAD TO BE.** It was read on demand — one
+archive re-open when Contents opened, to avoid a resident cost — and on the device that
+could not allocate: `loadToc` needs a second `Inflater` (**36,956 bytes** of window and
+tables) plus the zip's 121-entry directory and the epub's 92 chapters, about **48 KB**,
+against a heap floor with a page on glass of **45,840**. It failed every time, returned
+empty, and the factory substituted its demo — so Le Fléau showed Middlemarch's chapters.
+
+**THIS FILE ALREADY HAD THE ANSWER**, under the eager page count: "counting on a second
+`ChapterReader` would buy one pass for another 32 KB window against a 45,840-byte
+floor". Same window, same floor, one screen later.
+
+At OPEN there is room — `openBook` has released its archive and the Reader's own
+inflater does not exist yet, so the heap is ~133 KB — and it is cheap to keep: **1,161
+bytes of labels for a 96-entry book**, ~12 a row. So the shell reads it in `openBookAt`
+and hands over a copy when Contents opens, with no card work on that press at all.
+
+**AND THE FACTORY MUST NOT SUBSTITUTE.** `contentsToc_.empty() ? demoContents() : …` is
+what turned a diagnosable allocation failure into a puzzle. The demo is asked for now
+(`setContentsDemo()`, as `setReaderDemo()` is) and an unprimed Contents or reader menu
+is **refused** — a refused push leaves the menu standing, which is wrong in a way the
+reader can see through, and the log says why. `contentsPrimed_` is its own flag rather
+than "the list is non-empty", because a real book with no NCX primes an EMPTY list and
+must still build: it reads fine and simply cannot name its chapters.
+
+**`readerBookTitle_` IS NEVER ASSIGNED** — a factory member read by two cases with no
+setter anywhere, so Contents' band would have drawn an empty book name. The title comes
+from `readerBook_.title`, which is the OPF's own and arrives with the spine.
+
+`App::at(index)` exists because the menu is an overlay and the chapter it marks `NOW`
+belongs to the Reader underneath: reached through the stack rather than remembered, since
+a chapter crossing while the menu is closed would make a remembered one stale.
 
 **AND TWO STALE DEAD BUTTONS WENT WITH THIS.** The Reader's Activate answered `none()`
 behind "ReaderMenu is not built", which was true when written. The actions overlay's

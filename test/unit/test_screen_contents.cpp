@@ -198,3 +198,57 @@ TEST_CASE("the menu's panel never changes height, so every focus move is partial
   CHECK(m.paintFootprint() == before);
   CHECK(before != 0);  // zero is "no promise" and would refuse the fast path
 }
+
+// --- The factory refuses rather than substituting ------------------------------
+
+TEST_CASE("a Contents nothing primed is REFUSED, not filled with the board's own") {
+  // THIS IS THE BUG THAT SHIPPED. The factory fell back to demoContents() whenever
+  // nothing had set a real one, so a book whose table of contents failed to LOAD showed
+  // Middlemarch's chapters -- and the load had failed for a diagnosable reason (a second
+  // 32 KB inflate window against a 45,840-byte heap floor) that the substitution hid
+  // completely.
+  //
+  // "A factory that substitutes content is worse than one that refuses" was already
+  // written down for the Reader, one screen earlier.
+  reader::DemoScreenFactory f;
+  f.setContentsVisibleRows(8);
+  CHECK(f.create(ScreenId::Contents) == nullptr);
+  CHECK(f.create(ScreenId::ReaderMenu) == nullptr);
+}
+
+TEST_CASE("the demo is built when it is ASKED for") {
+  // What the simulator and the goldens do, exactly as they call setReaderDemo.
+  reader::DemoScreenFactory f;
+  f.setContentsVisibleRows(8);
+  f.setContentsDemo();
+  auto contents = f.create(ScreenId::Contents);
+  REQUIRE(contents != nullptr);
+  CHECK(static_cast<ContentsScreen*>(contents.get())->rowCount() > 0);
+  CHECK(f.create(ScreenId::ReaderMenu) != nullptr);
+}
+
+TEST_CASE("a real book with NO table of contents still builds, and builds empty") {
+  // The distinction the refusal has to preserve: "nothing was primed" is a shell bug,
+  // and "this book has no NCX" is a book that reads perfectly well and cannot name its
+  // chapters. The second must render honestly rather than be refused.
+  reader::DemoScreenFactory f;
+  f.setContentsVisibleRows(8);
+  f.setContents({}, 0);
+  auto contents = f.create(ScreenId::Contents);
+  REQUIRE(contents != nullptr);
+  CHECK(static_cast<ContentsScreen*>(contents.get())->rowCount() == 0);
+}
+
+TEST_CASE("a real book's contents are the ones built, never the demo's") {
+  reader::DemoScreenFactory f;
+  f.setContentsVisibleRows(8);
+  f.setContents(sectioned(), 2);
+  auto scr = f.create(ScreenId::Contents);
+  REQUIRE(scr != nullptr);
+  const auto& c = *static_cast<ContentsScreen*>(scr.get());
+  CHECK(c.rowCount() == static_cast<int>(sectioned().size()));
+  // The title comes from the opened book, which this fixture has none of -- what is
+  // pinned here is that the ROWS are the real ones.
+  // ...and the demo's first label is nowhere in it.
+  for (const reader::ListRow& r : c.vm().rows) CHECK(r.label.find("Miss Brooke") == std::string::npos);
+}

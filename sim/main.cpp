@@ -313,6 +313,7 @@ int main(int argc, char** argv) {
     factory.setReaderBody(&body);
     factory.setReaderMetrics(m);
     factory.setReaderDemo();
+    factory.setContentsDemo();  // the menu's header comes from the same demo catalogue
     std::unique_ptr<reader::Screen> page = factory.create(reader::ScreenId::Reader);
     if (page == nullptr) {
       std::fprintf(stderr, "the factory refused ScreenId::Reader\n");
@@ -336,6 +337,10 @@ int main(int argc, char** argv) {
     // A full screen, so it renders on its own -- and the row count comes from the
     // theme, as the Library's does, because a list told nothing renders empty.
     reader::DemoScreenFactory factory;
+    // ASKED FOR, as the Reader's demo is: the factory refuses a Contents that nothing
+    // primed, so a device that failed to read a real one shows no list rather than the
+    // board's.
+    factory.setContentsDemo();
     factory.setContentsVisibleRows(theme.contentsVisibleRows(h, fonts));
     std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Contents);
     if (scr == nullptr) {

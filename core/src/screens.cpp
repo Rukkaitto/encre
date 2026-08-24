@@ -282,24 +282,34 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       return scr;
     }
     case ScreenId::ReaderMenu:
-      // A DEMO HEADER WHEN NOTHING SET ONE, unlike the Reader, and the difference is
-      // what a wrong answer costs. A Reader with no book would show a stranger's
-      // NOVEL, which is why that one refuses; this shows a name in a panel header, and
-      // an empty one is a panel that looks broken. The simulator and the goldens need
-      // a source for it either way.
-      return std::make_unique<ReaderMenuScreen>(
-          menuTitle_.empty() ? "Middlemarch" : menuTitle_,
-          menuProgress_.empty() ? "6%" : menuProgress_);
+      // THE DEMO HAS TO BE ASKED FOR. This fell back to the board's own name whenever
+      // nothing set one, and the device then showed `MIDDLEMARCH` in the header over a
+      // real book -- the substitution hid the fact that the shell had primed nothing.
+      if (!menuTitle_.empty()) return std::make_unique<ReaderMenuScreen>(menuTitle_, menuProgress_);
+      if (contentsDemo_) return std::make_unique<ReaderMenuScreen>("Middlemarch", "6%");
+      return nullptr;
     case ScreenId::Contents: {
-      // The board's own contents when nothing set any -- same reasoning as the menu
-      // header above, and it is what `make compare` and the goldens render.
-      std::vector<TocEntry> toc = contentsToc_.empty() ? demoContents() : contentsToc_;
-      const int spine = contentsToc_.empty() ? demoContentsSpine() : contentsSpine_;
-      const std::string title = readerBookTitle_.empty() ? "Middlemarch" : readerBookTitle_;
-      // HOW MANY ROWS FIT is the theme's answer and the shell sets it, exactly as the
-      // Library's visible rows are set -- 0 means "not told", and the list then renders
-      // empty rather than guessing a panel height.
-      return std::make_unique<ContentsScreen>(std::move(toc), title, spine, contentsRows_);
+      // AND HERE, WHICH IS WHERE IT ACTUALLY BIT. The fallback was
+      // `contentsToc_.empty() ? demoContents() : contentsToc_`, so a real book whose
+      // table of contents failed to LOAD showed Middlemarch's chapters -- and the
+      // failure had a cause worth seeing (a second 32 KB inflate window against a
+      // 45,840-byte floor) that the substitution completely hid.
+      //
+      // A refused push leaves the menu standing, which is wrong in a way the reader can
+      // see through, and the shell's own log says why. Same call the Reader makes.
+      if (contentsDemo_)
+        return std::make_unique<ContentsScreen>(demoContents(), "Middlemarch",
+                                                demoContentsSpine(), contentsRows_);
+      // PRIMED, not non-empty: a real book with no NCX primes an empty list and still
+      // builds, because it reads fine and simply cannot name its chapters. Only
+      // "nothing was primed at all" is refused.
+      if (!contentsPrimed_) return nullptr;
+      // THE TITLE COMES FROM THE OPENED BOOK, not from `readerBookTitle_` -- which
+      // NOTHING ASSIGNS. It is a member the factory reads and no setter writes, so the
+      // band would have drawn an empty book name on the device. `readerBook_.title` is
+      // the OPF's own, set by setReaderBook along with the spine.
+      return std::make_unique<ContentsScreen>(contentsToc_, readerBook_.title, contentsSpine_,
+                                              contentsRows_);
     }
     case ScreenId::Sleep:
       // The board's own copy, which is what the simulator and the goldens render.

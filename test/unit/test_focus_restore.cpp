@@ -75,6 +75,11 @@ std::unique_ptr<Standalone> build(ScreenId id) {
   // comment above is about, and it happened: the count came back 6 where the two new
   // screens should have made it 7.
   b->factory.setContentsVisibleRows(8);
+  // AND THE DEMO ASKED FOR, because the factory now refuses a reader menu or a contents
+  // that nothing primed -- it used to substitute the board's own, which is how a real
+  // book came to show Middlemarch's chapters on the device. A fixture that did not ask
+  // would get a null screen, which is the refusal working.
+  b->factory.setContentsDemo();
   if (id == ScreenId::Reader) {
     // GIVEN a body face rather than skipped. Excluding Reader from the loop would
     // have been a screen this file claims to cover and does not -- and Reader is a

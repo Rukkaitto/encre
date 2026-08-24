@@ -343,6 +343,23 @@ static struct {
   std::string author;
   uint32_t bytes = 0;
   bool open = false;
+  // THE BOOK'S CONTENTS, read at OPEN rather than when the list is asked for.
+  //
+  // Reading it on demand could not work and the numbers were already written down:
+  // loadToc re-opens the archive, so it needs a second Inflater (~36,956 bytes of
+  // window and tables) plus the zip's 121-entry directory and the epub's 92 chapters
+  // -- about 48 KB -- and the heap floor with a page on glass is 45,840. It failed to
+  // allocate every time, returned empty, and the factory substituted its demo: the
+  // device showed Middlemarch's chapters for Le Fleau.
+  //
+  // CLAUDE.md had the answer under the eager page count: "counting on a second
+  // ChapterReader would buy one pass for another 32 KB window against a 45,840-byte
+  // floor". Same window, same floor, and I did it anyway one screen later.
+  //
+  // At OPEN there is room -- openBook has released its archive and the Reader's own
+  // inflater does not exist yet, so the heap is ~133 KB. And it is cheap to keep:
+  // measured 1,161 bytes of labels for a 96-entry book, ~12 a row.
+  std::vector<reader::TocEntry> toc;
 } gReading;
 
 // HOME'S VIEW MODEL IS BUILT ONCE AND HAS TO BE REBUILT, which is the whole of a bug
@@ -1402,6 +1419,23 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
       startAt = r.cursor;
     }
   }
+  // THE CONTENTS, HERE AND NOWHERE ELSE -- see gReading.toc for why this cannot happen
+  // when the list is opened. A book with no NCX yields an empty list, which is a book
+  // that reads fine and cannot name its chapters, so a failure is logged and dropped.
+  gReading.toc.clear();
+  {
+    const uint32_t t = millis();
+    const uint32_t before = ESP.getFreeHeap();
+    const char* tocWhy = "";
+    const bool ok = reader::loadToc(gSd, path, gReading.toc, &tocWhy);
+    Serial.printf("[toc] %s: %u entries in %lums, heap %u -> %u, min %u%s%s\n",
+                  ok ? "read" : "REFUSED", (unsigned)gReading.toc.size(),
+                  (unsigned long)(millis() - t), (unsigned)before,
+                  (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+                  tocWhy[0] != '\0' ? " -- " : "", tocWhy);
+    Serial.flush();
+  }
+
   // WHAT A SAVE WILL NEED, captured now while it is all in hand.
   gReading.path = path;
   gReading.title = opened.title;
@@ -2987,119 +3021,25 @@ void loop() {
         gFactory.setReaderMenuHeader(gReading.title.empty() ? gReading.path : gReading.title,
                                      pct);
       } else if (gApp->top().id() == reader::ScreenId::ReaderMenu) {
-        // READ ONCE PER OPENING, not held resident: a 96-entry contents is ~1.2 KB of
-        // labels and the archive re-open is ~32 KB of transient, so paying it when the
-        // screen opens is cheaper than carrying it for a whole reading session.
         const auto* menu = static_cast<const reader::ReaderMenuScreen*>(&gApp->top());
         if (menu->vm().focusedRow == reader::ReaderMenuScreen::kContents) {
-          std::vector<reader::TocEntry> toc;
-          const char* why = "";
-          const uint32_t t = millis();
-          const bool ok = reader::loadToc(gSd, gReading.path, toc, &why);
+          // NO CARD WORK HERE. The contents were read when the book opened, where there
+          // was heap for them -- see gReading.toc. This hands over a copy and reads the
+          // chapter to mark from the Reader under this panel, reached through the stack
+          // rather than remembered, since a crossing while the menu is closed would make
+          // a remembered one stale.
           int spine = 0;
           if (gApp->depth() >= 2) {
-            // The Reader sits under this panel, and its chapter is what marks `NOW`.
-            // Reached through the stack rather than remembered, because a chapter
-            // crossing while the menu is closed would make a remembered one stale.
             const reader::Screen& under = gApp->at(gApp->depth() - 2);
             if (under.id() == reader::ScreenId::Reader)
               spine = static_cast<const reader::ReaderScreen&>(under).chapterIndex();
           }
-          Serial.printf("[toc] %s: %u entries in %lums%s%s\n", ok ? "read" : "REFUSED",
-                        (unsigned)toc.size(), (unsigned long)(millis() - t),
-                        why[0] != '\0' ? " -- " : "", why);
+          gFactory.setContents(gReading.toc, spine);
+          Serial.printf("[toc] handing over %u entries, marking spine %d\n",
+                        (unsigned)gReading.toc.size(), spine);
           Serial.flush();
-          gFactory.setContents(std::move(toc), spine);
         }
       }
-    }
-    // THE CHOSEN CHAPTER, taken while Contents is still on top -- the dispatch below
-    // pops it, and after that there is no screen left to ask.
-    if (ev.button == reader::Button::Confirm && gApp->top().id() == reader::ScreenId::Contents)
-      gPendingSpine = static_cast<const reader::ContentsScreen*>(&gApp->top())->chosenSpine();
-    const uint32_t beforeDispatch = millis();
-    gApp->dispatch(ev);
-    // Between the dispatch and the mask refresh below, so the refresh sees
-    // whatever screen the retry left on top -- on success that is a brand new App
-    // rooted at Home, whose holds are not the SD-missing screen's.
-    // A CHAPTER CROSSING IS THE ONE READER PATH THE MARKS DO NOT SEE. It happens
-    // inside ReaderScreen::onGesture, which the shell only observes as a redraw --
-    // and it used to be the most expensive thing the reader did, re-reading the
-    // archive's central directory and the OPF. That is gone, but it was also the
-    // suspected cause of a heap floor 27 KB below where it now sits, so the path
-    // wants a stage line of its own rather than another round trip to find out.
-    if (gApp->top().id() == reader::ScreenId::Reader) {
-      const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
-      static int lastChapter = -1;
-      if (rd->chapterIndex() != lastChapter) {
-        lastChapter = rd->chapterIndex();
-        mark("chapter-opened");
-        // WHICH BRANCH, AND WHAT IT COST. A small chapter is counted before its
-        // first paint and a big one is not, and the eager side had no line -- so a
-        // device reporting "the dash never appears and the page is slow" could not
-        // say whether the count ran, or how long it took. `indexPending` is the
-        // branch: false means the count already happened.
-        logChapterOpen(rd, millis() - beforeDispatch);
-        // A CROSSING IS ONE OF THE THREE SAVE EDGES. It is also the coarsest unit a
-        // power cut can cost the reader, which is what makes saving per page turn
-        // unnecessary rather than merely expensive.
-        if (lastChapter >= 0) saveReadingPosition("chapter");
-      }
-    }
-    // LEAVING THE BOOK, which is the edge the user actually reported: going back to
-    // the Library and returning lost the page. Saved BEFORE the screen is gone --
-    // hence the ordering here, after the dispatch that popped it but reading the
-    // position captured while it still stood.
-    // THE BOOK IS CLOSED: forget it, so a later save cannot fire against a book that
-    // is no longer on screen. The position itself was written just above, before the
-    // dispatch that popped the Reader -- there is nothing to save here, only state to
-    // drop.
-    if (gReading.open && gApp->top().id() != reader::ScreenId::Reader) {
-      gReading.open = false;
-      Serial.println("[progress] book closed");
-      Serial.flush();
-    }
-    // A CHOSEN CHAPTER, acted on AFTER the pop that Contents' GO returns. The screen
-    // cannot jump the Reader itself: the Reader is already on the stack under it, and
-    // pushing a second one would leave the first below with its own position -- so
-    // Contents answers popTo(Reader) and names the chapter, and this moves it.
-    //
-    // Read BEFORE the dispatch would be too early (the choice is made by the press) and
-    // reading it after the pop is too late (the screen is gone), so the spine is taken
-    // off the Contents screen while it is still on top, just above.
-    if (gPendingSpine >= 0 && gApp->top().id() == reader::ScreenId::Reader) {
-      auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
-      const int want = gPendingSpine;
-      gPendingSpine = -1;
-      if (want != rd->chapterIndex()) {
-        const uint32_t t = millis();
-        const bool ok = rd->goToChapter(want);
-        Serial.printf("[toc] jump to spine %d: %s in %lums\n", want, ok ? "ok" : "REFUSED",
-                      (unsigned long)(millis() - t));
-        Serial.flush();
-      }
-    }
-
-    // BACK AT HOME WITH A NEWER POINTER: rebuild it, so the reading column shows the
-    // book that was just being read instead of the state Home was born in.
-    //
-    // The whole App is replaced rather than the view model swapped, because the two
-    // Home states have different FOCUS RINGS -- WithNone where a CONTINUE block
-    // exists, Noneless where it does not -- and Focus::None is a construction-time
-    // property. Only ever done at depth 1, where the root is the only screen and
-    // there is nothing above it to lose.
-    //
-    // THE FOCUS IS CARRIED ACROSS. A rebuild would otherwise drop the user on
-    // whatever row the fresh view model names, so pressing Back from the Library
-    // would move a selection they did not touch. setFocus clamps, which is what makes
-    // this safe across a ring that changed shape.
-    if (gHomeStale && gApp->depth() == 1 && gApp->top().id() == reader::ScreenId::Home) {
-      const int was = gApp->top().focus();
-      buildHomeApp();
-      gApp->top().setFocus(was);
-      gHomeStale = false;
-      Serial.println("[progress] Home rebuilt with the current reading position");
-      Serial.flush();
     }
     if (gApp->retryRequested()) handleRetry();
     // Same placement and the same reason: the mask refresh below must see whatever
