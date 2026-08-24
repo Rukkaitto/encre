@@ -90,6 +90,24 @@ struct ReadingPosition {
   // and the row says that, which is honest.
   std::string chapter;
 
+  // --- THE WAY BACK, and -1 in `anchorSpine` means there is none ----------------
+  //
+  // The return anchor (return_anchor.h), which is the same {spine, block, line}
+  // shape as the position above -- so it needs no new representation and no nesting,
+  // which json.h does not have. Three flat integers.
+  //
+  // IT RIDES THIS RECORD'S SAVE EDGES AND ADDS NONE. `saveReadingPosition` already
+  // fires on leaving the book, crossing a chapter and sleeping; the anchor goes with
+  // it. In particular NOT one write per page turn: losing an anchor to a power cut
+  // costs the reader a shortcut and nothing else, because they are still sitting on
+  // a real page. A benign failure does not justify a write on an edge that does not
+  // already take one.
+  int anchorSpine = -1;
+  int anchorBlock = 0;
+  int anchorLine = 0;
+
+  bool hasAnchor() const { return anchorSpine >= 0; }
+
   bool operator==(const ReadingPosition& o) const;
 };
 
@@ -115,6 +133,16 @@ struct PositionRestore {
   bool any = false;  // false only for Unusable
   int spine = 0;
   Cursor cursor{};
+
+  // THE ANCHOR DEGRADES WITH THE POSITION, NOT INDEPENDENTLY, and that is the whole
+  // rule: its `line` is exactly as fragile as the position's, so anything below
+  // `Exact` drops it rather than keeping a part of it. An anchor that lands the
+  // reader on the WRONG page is worse than no anchor -- the same reasoning that
+  // already zeroes `line` on a re-layout, and the reason this is not graded
+  // separately.
+  bool anchorAny = false;
+  int anchorSpine = 0;
+  Cursor anchorCursor{};
 };
 PositionRestore restoreFrom(const ReadingPosition& saved, PositionFit fit);
 

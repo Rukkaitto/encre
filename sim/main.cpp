@@ -271,16 +271,21 @@ int main(int argc, char** argv) {
   // state board has one: a flag on `reader` would mean the goldens and the comparison
   // sheet could not name them.
   const bool isChapterOpen = std::strcmp(argv[1], "reader_chapter_open") == 0;
+  // The Reader WITH a way back. Reached by paging -- forward then back -- because
+  // that is the transition that sets an anchor, and a state assigned directly would
+  // pin the same pixels while proving nothing about the rule that produces them.
+  const bool isAnchored = std::strcmp(argv[1], "reader_anchored") == 0;
   const bool isReaderList = std::strcmp(argv[1], "reader_list") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
       !isHomeUnopened && !isLibraryScrolled && !isReader && !isSleepIdle &&
-      !isReaderMenu && !isContents && !isChapterOpen && !isReaderList) {
+      !isReaderMenu && !isContents && !isChapterOpen && !isReaderList && !isAnchored) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
                  "'sleep', 'sleep_idle', 'home_empty', 'home_unopened', "
-                 "'library_scrolled', 'reader', 'reader_chapter_open', 'reader_list', "
+                 "'library_scrolled', 'reader', 'reader_anchored', "
+                 "'reader_chapter_open', 'reader_list', "
                  "'reader_menu', 'contents' or 'app')\n",
                  argv[1]);
     return 3;
@@ -302,7 +307,7 @@ int main(int argc, char** argv) {
   // for the same reason the roman's does.
   std::vector<uint8_t> italicTtf;
   reader::ScalableFont italic;
-  if (isReader || isReaderMenu || isChapterOpen || isReaderList) {
+  if (isReader || isReaderMenu || isChapterOpen || isReaderList || isAnchored) {
     bodyTtf = slurp(std::string(ASSETS_DIR) + "/built/literata_body.ttf");
     if (!body.init(bodyTtf.data(), bodyTtf.size(), reader::kBodyPpem)) {
       std::fprintf(stderr, "body face failed to load\n");
@@ -398,6 +403,38 @@ int main(int argc, char** argv) {
     std::printf("wrote %s (%dx%d) page %d/%d, %zu lines, column %dx%d, %d%%\n", argv[2], w,
                 h, rd.vm().page, rd.vm().pageTotal, rd.page().lines.size(), m.columnW,
                 m.columnH, rd.vm().progressPercent);
+    return 0;
+  }
+
+  if (isAnchored) {
+    // The same path as `reader`, with two presses on the end.
+    reader::PageMetrics m;
+    theme.readerMetrics(w, h, fonts, body, m);
+    m.italic = &italic;
+    reader::DemoScreenFactory factory;
+    factory.setReaderBody(&body);
+    factory.setReaderItalic(&italic);
+    factory.setReaderMetrics(m);
+    factory.setReaderDemo();
+    std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Reader);
+    if (scr == nullptr) {
+      std::fprintf(stderr, "the factory refused ScreenId::Reader\n");
+      return 1;
+    }
+    auto* rd = static_cast<reader::ReaderScreen*>(scr.get());
+    rd->completeIndex();
+    // THE SIDES PAGE. Button::Right/Left ARE the side buttons -- the shell's mapping
+    // is crossed, so read it rather than the names. Forward, then back: the backward
+    // turn is what sets the anchor to the page being left.
+    rd->onEvent({reader::Button::Right, reader::PressKind::Short});
+    rd->onEvent({reader::Button::Left, reader::PressKind::Short});
+    if (rd->vm().anchorLabel.empty()) {
+      std::fprintf(stderr, "no anchor after paging forward and back\n");
+      return 1;
+    }
+    if (!renderToPng(*scr, fonts, theme, w, h, argv[2])) return 1;
+    std::printf("wrote %s (%dx%d) page %d/%d, anchor \"%s\"\n", argv[2], w, h, rd->vm().page,
+                rd->vm().pageTotal, rd->vm().anchorLabel.c_str());
     return 0;
   }
 

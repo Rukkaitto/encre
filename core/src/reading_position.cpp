@@ -18,6 +18,13 @@ constexpr const char* kKeyPpem = "ppem";
 constexpr const char* kKeyColumnW = "columnW";
 constexpr const char* kKeyPercent = "percent";
 constexpr const char* kKeyChapter = "chapter";
+// The anchor's three. Written only when there IS one, so a record for a reader with
+// nowhere to go back to is byte-identical to one written before the anchor existed --
+// which is what keeps the shell's "skip a write that changes nothing" true for the
+// common case.
+constexpr const char* kKeyAnchorSpine = "anchor_spine";
+constexpr const char* kKeyAnchorBlock = "anchor_block";
+constexpr const char* kKeyAnchorLine = "anchor_line";
 
 // A negative index is not a position, and a file is free to claim one. Clamped at
 // the boundary rather than refused: the rest of the record is still usable, which is
@@ -29,7 +36,8 @@ int nonNegative(int64_t v) { return v < 0 ? 0 : static_cast<int>(v > 0x7fffffff 
 bool ReadingPosition::operator==(const ReadingPosition& o) const {
   return bookPath == o.bookPath && spine == o.spine && block == o.block && line == o.line &&
          bookBytes == o.bookBytes && ppem == o.ppem && columnW == o.columnW &&
-         percent == o.percent && chapter == o.chapter;
+         percent == o.percent && chapter == o.chapter && anchorSpine == o.anchorSpine &&
+         anchorBlock == o.anchorBlock && anchorLine == o.anchorLine;
 }
 
 PositionFit fitOf(const ReadingPosition& saved, std::string_view bookPath, uint32_t bookBytes,
@@ -67,6 +75,14 @@ PositionRestore restoreFrom(const ReadingPosition& saved, PositionFit fit) {
       r.any = true;
       r.spine = saved.spine;
       r.cursor = Cursor{saved.block, saved.line};
+      // ONLY HERE. Relaid and Rebound both fall through above without touching the
+      // anchor fields, which leaves `anchorAny` false -- so the drop is the default
+      // rather than three more lines that have to remember to zero it.
+      if (saved.hasAnchor()) {
+        r.anchorAny = true;
+        r.anchorSpine = saved.anchorSpine;
+        r.anchorCursor = Cursor{saved.anchorBlock, saved.anchorLine};
+      }
       return r;
   }
   return r;
@@ -84,6 +100,14 @@ std::string serialise(const ReadingPosition& p) {
   o.setInt(kKeyColumnW, p.columnW);
   o.setInt(kKeyPercent, p.percent);
   o.setString(kKeyChapter, p.chapter);
+  // ABSENT RATHER THAN -1 when there is no anchor. Three keys that appear only for a
+  // reader who has somewhere to go back to, so the common record does not grow and
+  // an unchanged save stays byte-identical.
+  if (p.hasAnchor()) {
+    o.setInt(kKeyAnchorSpine, p.anchorSpine);
+    o.setInt(kKeyAnchorBlock, p.anchorBlock);
+    o.setInt(kKeyAnchorLine, p.anchorLine);
+  }
   return o.dump();
 }
 
@@ -120,6 +144,16 @@ bool parsePosition(std::string_view text, ReadingPosition& out) {
   // OPTIONAL, because every sidecar written before this field existed lacks it -- and a
   // position is still perfectly usable without a chapter name. The row draws blank.
   o.getString(kKeyChapter, p.chapter);
+  // OPTIONAL AS A GROUP, and the SPINE is what decides. A record from a firmware that
+  // did not know about anchors has none of the three; one written by a reader with no
+  // way back has none either. Both must read as "no anchor" rather than as an anchor
+  // at spine 0 -- which is a real page, so a defaulted zero would send `Up` to the
+  // front of the book.
+  if (o.getInt(kKeyAnchorSpine, v) && v >= 0) {
+    p.anchorSpine = nonNegative(v);
+    if (o.getInt(kKeyAnchorBlock, v)) p.anchorBlock = nonNegative(v);
+    if (o.getInt(kKeyAnchorLine, v)) p.anchorLine = nonNegative(v);
+  }
 
   out = p;
   return true;

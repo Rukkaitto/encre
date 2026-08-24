@@ -60,14 +60,13 @@
      any fit grade below `Exact` drops it. An anchor that lands you on the wrong
      page is worse than no anchor.
 
-     THE COLUMN IS READER.DC.HTML'S, ARTIFACT INCLUDED. Its last visible line is
-     sliced in half horizontally, because that board's text block is `flex-grow: 1;
-     overflow: hidden` over a column whose height is not a whole multiple of the
-     54.4px line box. That is inherited on purpose and NOT fixed here: the firmware
-     lays out whole lines only, so it is a real board defect, but fixing it in one
-     of the two Reader boards and not the other would put a difference between them
-     that nobody designed. It is filed separately; fix Reader.dc.html and this
-     follows. Peek.dc.html does not have it -- its panel is sized by its text. -->
+     THE COLUMN IS READER.DC.HTML'S, AND ITS SLICED LINE IS FIXED IN BOTH (2026-08-24).
+     This note used to say the defect was inherited on purpose and would follow from
+     fixing Reader.dc.html. It did not follow -- they are two files, and this one
+     needed the same edit applied. The column is now 676px outer (which holds the
+     footer down) with a 652.8px inner box for the twelve whole rows the firmware can
+     actually seat; see Reader.dc.html for the full reasoning and the measurement.
+     Peek.dc.html never had it -- its panel is sized by its text. -->
 
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: Literata, Georgia, serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; padding: 20px 18px 0 18px;">
 

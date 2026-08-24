@@ -473,7 +473,7 @@ bool ReaderScreen::goToChapter(int spine) {
   // Contents safe, which shipped without it and took the reader's place with it.
   const AnchorPos from = here();
   if (!openChapterAt(spine, /*atEnd=*/false)) return false;
-  anchor_.jumped(from, here());
+  anchorJumped(from);
   return true;
 }
 
@@ -520,6 +520,27 @@ void ReaderScreen::syncVm() {
   // board's 53 of 890 is 5.955%, shown as 6%, so the number is the position reached
   // and not the position started from. Unknown while the total is.
   vm_.progressPercent = vm_.pageTotal == 0 ? 0 : (vm_.page * 100 + vm_.pageTotal / 2) / vm_.pageTotal;
+  syncAnchorLabel();
+}
+
+// THE THREE TRANSITIONS GO THROUGH HERE, and the reason is an ordering bug this
+// caught: `openChapterAt` calls `syncVm()` itself, so on the chapter-crossing paths
+// the footer label was computed BEFORE the anchor was set and came out empty -- an
+// anchor that existed and did not draw, which is the dead-button defect wearing the
+// other face. Every transition now re-syncs the label immediately after, in one
+// place, rather than at each of the four call sites where one can be missed.
+void ReaderScreen::anchorPagedForward(const AnchorPos& from) {
+  anchor_.pagedForward(from, here());
+  syncAnchorLabel();
+}
+
+void ReaderScreen::anchorPagedBackward(const AnchorPos& from) {
+  anchor_.pagedBackward(from, here());
+  syncAnchorLabel();
+}
+
+void ReaderScreen::anchorJumped(const AnchorPos& from) {
+  anchorJumped(from);
   syncAnchorLabel();
 }
 
@@ -576,7 +597,7 @@ Action ReaderScreen::onGesture(const GestureEvent& g) {
         // FORWARD NEVER RAISES AN ANCHOR, it only spends one -- reading back up to
         // where you were ends the excursion. The transition runs AFTER the move
         // because it compares against where the reader arrived.
-        anchor_.pagedForward(fromNext, here());
+        anchorPagedForward(fromNext);
         syncVm();
         return Action::redraw();
       }
@@ -587,7 +608,7 @@ Action ReaderScreen::onGesture(const GestureEvent& g) {
       // overwrite the anchor with the position being left, so a reader who paged
       // back and then read on through a chapter boundary would find their anchor
       // silently moved to the boundary.
-      anchor_.pagedForward(fromNext, here());
+      anchorPagedForward(fromNext);
       return Action::redraw();
     }
     case Gesture::Prev: {
@@ -600,14 +621,14 @@ Action ReaderScreen::onGesture(const GestureEvent& g) {
         // backwards through a book is continuous rather than stopping at each
         // chapter's start.
         if (!openChapterAt(chapterAt_ - 1, true)) return Action::none();
-        anchor_.pagedBackward(fromPrev, here());
+        anchorPagedBackward(fromPrev);
         return Action::redraw();
       }
       if (!seekTo(at_ - 1)) return Action::none();
       // PAGING BACK IS HOW A READER LOSES THEIR PLACE, far more often than by
       // jumping -- so this is the transition that makes the anchor appear during
       // ordinary reading. It sets only if unset; one already standing holds still.
-      anchor_.pagedBackward(fromPrev, here());
+      anchorPagedBackward(fromPrev);
       syncVm();
       return Action::redraw();
     }

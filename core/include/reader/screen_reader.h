@@ -126,6 +126,13 @@ class ReaderScreen : public Screen {
   // only: every transition belongs to a movement, and a caller that could set it
   // directly is a second place that decides the rule.
   const ReturnAnchor& anchor() const { return anchor_; }
+  // A RESTORED anchor, from the sidecar. Not a transition -- the record already holds
+  // the result of one -- so this is the one path that sets it without a movement, and
+  // the only reason `anchor_` is not otherwise writable from outside.
+  void restoreAnchor(const AnchorPos& a) {
+    anchor_.set(a);
+    syncAnchorLabel();
+  }
   // Where the reader is, as the anchor spells a page.
   AnchorPos here() const;
 
@@ -264,6 +271,11 @@ class ReaderScreen : public Screen {
   ReturnAnchor anchor_;
   bool goToAnchor(const AnchorPos& to);
   void syncAnchorLabel();
+  // Each applies one transition and re-syncs the footer label -- see the note in
+  // screen_reader.cpp for the ordering bug that made that one call rather than four.
+  void anchorPagedForward(const AnchorPos& from);
+  void anchorPagedBackward(const AnchorPos& from);
+  void anchorJumped(const AnchorPos& from);
   PageMetrics metrics_{};
 
   // One cursor per page, in order -- but only as far as has been READ, unless

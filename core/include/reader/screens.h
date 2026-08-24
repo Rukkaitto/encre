@@ -256,6 +256,15 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
     readerStartChapter_ = startChapter;
     readerStartAt_ = startAt;
   }
+  // The restored way back, or nothing. Separate from setReaderBook because it comes
+  // from a DIFFERENT grade of the same record -- restoreFrom keeps the anchor only at
+  // an Exact fit -- and folding it into the book call would invite a caller to pass
+  // one the fit had already refused.
+  void setReaderAnchor(const AnchorPos& a) {
+    readerAnchor_ = a;
+    readerHasAnchor_ = true;
+  }
+  void clearReaderAnchor() { readerHasAnchor_ = false; }
 
   // The open book's geometry, for a caller that needs to say something about the
   // book as a whole -- progressPercent sums its chapters' sizes. A reference rather
@@ -288,6 +297,8 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   const GlyphSource* readerBody_ = nullptr;
   const GlyphSource* readerItalic_ = nullptr;
   ReaderStyleDemo readerStyleDemo_ = ReaderStyleDemo::None;
+  AnchorPos readerAnchor_{};
+  bool readerHasAnchor_ = false;
   PageMetrics readerMetrics_{};
   OpenedBook readerBook_{};
   bool readerDemo_ = false;

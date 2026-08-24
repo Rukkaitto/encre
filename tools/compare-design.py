@@ -62,6 +62,7 @@ V1_SCREENS = [
     # The two styled specimens. Their own rows rather than variants of `reader`,
     # because the mismatch percentage is per screen and folding them in would average
     # a styling regression away against a board that has no styles on it.
+    ("reader_anchored",     "ReaderAnchored.dc.html",    "Reader - with a way back"),
     ("reader_chapter_open", "ReaderChapterOpen.dc.html", "Reader - chapter open"),
     ("reader_list",         "ReaderList.dc.html",        "Reader - list"),
     ("settings",     "Settings.dc.html",   "Settings"),

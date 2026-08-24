@@ -235,3 +235,111 @@ TEST_CASE("different books get different state paths") {
   CHECK(reader::statePathFor("/books/a.epub") != reader::statePathFor("/books/a.epub "));
   CHECK(reader::statePathFor("/books/x/a.epub") != reader::statePathFor("/books/y/a.epub"));
 }
+
+// --- The return anchor, through the sidecar ------------------------------------
+
+TEST_CASE("the anchor round-trips, and its absence is not spine 0") {
+  // A DEFAULTED ZERO WOULD BE A REAL PAGE. Spine 0 is the front of the book, so a
+  // record with no anchor that read back as "anchor at spine 0" would give `Up` a
+  // destination -- sending a reader who never asked for one to the cover.
+  reader::ReadingPosition with;
+  with.bookPath = "/books/b.epub";
+  with.spine = 3;
+  with.block = 40;
+  with.line = 2;
+  with.bookBytes = 1234;
+  with.ppem = 32;
+  with.columnW = 444;
+  with.anchorSpine = 7;
+  with.anchorBlock = 300;
+  with.anchorLine = 1;
+  REQUIRE(with.hasAnchor());
+
+  reader::ReadingPosition back;
+  REQUIRE(reader::parsePosition(reader::serialise(with), back));
+  CHECK(back == with);
+  REQUIRE(back.hasAnchor());
+  CHECK(back.anchorSpine == 7);
+  CHECK(back.anchorBlock == 300);
+  CHECK(back.anchorLine == 1);
+
+  reader::ReadingPosition without = with;
+  without.anchorSpine = -1;
+  without.anchorBlock = 0;
+  without.anchorLine = 0;
+  REQUIRE_FALSE(without.hasAnchor());
+  reader::ReadingPosition back2;
+  REQUIRE(reader::parsePosition(reader::serialise(without), back2));
+  CHECK_FALSE(back2.hasAnchor());
+  CHECK(back2.anchorSpine == -1);
+}
+
+TEST_CASE("a record written by a firmware that did not know about anchors reads clean") {
+  // The upgrade path, and the one the spec asks for by name. The three keys are simply
+  // absent, and the record is still a perfectly good position.
+  reader::ReadingPosition old;
+  old.bookPath = "/books/b.epub";
+  old.spine = 2;
+  old.block = 11;
+  old.line = 3;
+  old.bookBytes = 99;
+  old.ppem = 32;
+  old.columnW = 444;
+  old.anchorSpine = -1;
+  const std::string text = reader::serialise(old);
+  CHECK(text.find("anchor_") == std::string::npos);  // written absent, not as -1
+
+  reader::ReadingPosition back;
+  REQUIRE(reader::parsePosition(text, back));
+  CHECK_FALSE(back.hasAnchor());
+  CHECK(back.spine == 2);
+  CHECK(back.block == 11);
+}
+
+TEST_CASE("THE ANCHOR DEGRADES WITH THE POSITION, dropped below Exact") {
+  // Its `line` is exactly as fragile as the position's, so a re-layout that cannot
+  // support one cannot support the other. An anchor landing the reader on the wrong
+  // page is worse than no anchor.
+  reader::ReadingPosition p;
+  p.bookPath = "/books/b.epub";
+  p.spine = 3;
+  p.block = 40;
+  p.line = 2;
+  p.bookBytes = 1234;
+  p.ppem = 32;
+  p.columnW = 444;
+  p.anchorSpine = 7;
+  p.anchorBlock = 300;
+  p.anchorLine = 1;
+
+  SUBCASE("Exact keeps it") {
+    const auto r = reader::restoreFrom(p, reader::PositionFit::Exact);
+    REQUIRE(r.any);
+    REQUIRE(r.anchorAny);
+    CHECK(r.anchorSpine == 7);
+    CHECK(r.anchorCursor.block == 300);
+    CHECK(r.anchorCursor.line == 1);
+  }
+  SUBCASE("Relaid drops it, though it keeps the block") {
+    const auto r = reader::restoreFrom(p, reader::PositionFit::Relaid);
+    REQUIRE(r.any);
+    CHECK(r.cursor.block == 40);
+    CHECK_FALSE(r.anchorAny);
+  }
+  SUBCASE("Rebound drops it") {
+    const auto r = reader::restoreFrom(p, reader::PositionFit::Rebound);
+    REQUIRE(r.any);
+    CHECK_FALSE(r.anchorAny);
+  }
+  SUBCASE("Unusable drops everything") {
+    const auto r = reader::restoreFrom(p, reader::PositionFit::Unusable);
+    CHECK_FALSE(r.any);
+    CHECK_FALSE(r.anchorAny);
+  }
+  SUBCASE("and an Exact fit with no anchor stays without one") {
+    p.anchorSpine = -1;
+    const auto r = reader::restoreFrom(p, reader::PositionFit::Exact);
+    REQUIRE(r.any);
+    CHECK_FALSE(r.anchorAny);
+  }
+}

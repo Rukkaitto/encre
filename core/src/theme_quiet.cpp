@@ -1063,13 +1063,37 @@ void QuietTheme::renderReader(Framebuffer& fb, const FontSet& fonts, const Glyph
   const int counterW = meta.measure(counter, metaTrack);
   drawText(fb, meta, right - counterW, base, counter, Ink::Black, metaTrack, plane);
 
-  // The bar is `justify-content: space-between`'s middle child, so it is centred
-  // across the WHOLE row rather than in the space left over -- which is what the
-  // board's three equal-weight children resolve to and is why it is placed off
-  // fb.width() and not off the two measured runs.
-  const int barX = centreIn(kReadPadX, fb.width() - 2 * kReadPadX, kReadBarW);
-  const int barY = iconTopIn(footerTop, meta.lineHeight(), kReadBarH);
-  drawProgressBar(fb, barX, barY, kReadBarW, kReadBarH, vm.progressPercent);
+  // THE CENTRE SLOT HOLDS ONE OF TWO THINGS, and design/ReaderAnchored.dc.html is
+  // unambiguous about which: with a way back, the arrow and its label take the
+  // progress bar's place rather than sitting beside it. The bar is what gives way
+  // because the PERCENT IS STILL THERE on the left -- progress is still stated, as a
+  // number instead of a length -- while there is nowhere else on this screen for the
+  // return to live. The Reader draws no hint bar, which is the whole reason the
+  // footer has to teach its own button.
+  //
+  // Either way it is `justify-content: space-between`'s middle child, so it is
+  // centred across the WHOLE row rather than in the space left over -- which is what
+  // the board's three equal-weight children resolve to, and is why both are placed
+  // off fb.width() and not off the two measured runs.
+  if (!vm.anchorLabel.empty()) {
+    // `gap: 7px` between the mark and its text, and the mark is the same `kUp` the
+    // hint bars draw -- the board's SVG is that chevron, so a second drawing of it
+    // would be a second thing to keep in step.
+    constexpr int kAnchorGap = 7;
+    const Font& anchorFont = fonts[Role::Meta500];
+    const Tracking anchorTrack = trackingEm(anchorFont, kReadMetaEm);
+    const int textW = anchorFont.measure(vm.anchorLabel, anchorTrack);
+    const int groupW = icons::kUp.w + kAnchorGap + textW;
+    const int groupX = centreIn(kReadPadX, fb.width() - 2 * kReadPadX, groupW);
+    drawIcon(fb, icons::kUp, groupX, iconTopIn(footerTop, meta.lineHeight(), icons::kUp.h),
+             Ink::Black, plane);
+    drawText(fb, anchorFont, groupX + icons::kUp.w + kAnchorGap, base, vm.anchorLabel,
+             Ink::Black, anchorTrack, plane);
+  } else {
+    const int barX = centreIn(kReadPadX, fb.width() - 2 * kReadPadX, kReadBarW);
+    const int barY = iconTopIn(footerTop, meta.lineHeight(), kReadBarH);
+    drawProgressBar(fb, barX, barY, kReadBarW, kReadBarH, vm.progressPercent);
+  }
 }
 
 // --- The reader's menu -------------------------------------------------------

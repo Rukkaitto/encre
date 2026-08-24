@@ -1270,6 +1270,16 @@ static void saveReadingPosition(const char* why) {
   // book with no contents stores the `CH. 08` fallback and Book details' "Current story"
   // says that, rather than inventing a name or leaving the row blank.
   p.chapter = rd->vm().chapter;
+  // THE WAY BACK, riding this record's edges and adding none of its own. Losing an
+  // anchor to a power cut costs a shortcut and nothing else -- the reader is still
+  // sitting on a real page -- so it does not justify a write on an edge that does not
+  // already take one.
+  if (rd->anchor().isSet()) {
+    const reader::AnchorPos a = rd->anchor().get();
+    p.anchorSpine = a.spine;
+    p.anchorBlock = a.block;
+    p.anchorLine = a.line;
+  }
 
   reader::LastRead last;
   last.bookPath = gReading.path;
@@ -1423,6 +1433,10 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // front of the book, which beats nothing.
   int startChapter = 0;
   reader::Cursor startAt{};
+  // THE WAY BACK, restored only at an Exact fit -- restoreFrom decides, so this is
+  // not a second place that grades it.
+  reader::AnchorPos startAnchor{};
+  bool haveAnchor = false;
   reader::ReadingPosition saved;
   if (reader::loadPosition(gSd, path, saved)) {
     const reader::PositionFit fit = reader::fitOf(saved, path, bookBytes, reader::kBodyPpem,
@@ -1437,6 +1451,14 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
       startChapter = r.spine;
       startAt = r.cursor;
     }
+    if (r.anchorAny) {
+      startAnchor = reader::AnchorPos{r.anchorSpine, r.anchorCursor.block, r.anchorCursor.line};
+      haveAnchor = true;
+    }
+    if (saved.hasAnchor())
+      Serial.printf("[progress] and a way back: spine=%d block=%d line=%d, %s\n",
+                    saved.anchorSpine, saved.anchorBlock, saved.anchorLine,
+                    r.anchorAny ? "restored" : "DROPPED (fit below exact)");
   }
   // THE CONTENTS, HERE AND NOWHERE ELSE -- see gReading.toc for why this cannot happen
   // when the list is opened. A book with no NCX yields an empty list, which is a book
@@ -1468,6 +1490,14 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // which row is marked, since the reader will have moved by then.
   gFactory.setContents(gReading.toc, startChapter);
   gFactory.setReaderBook(opened, startChapter, startAt);
+  // ...and the way back, or explicitly NONE. Cleared rather than left alone: the
+  // factory outlives one book, so a stale anchor from the previous one would offer
+  // this reader a page in a book they closed.
+  if (haveAnchor) {
+    gFactory.setReaderAnchor(startAnchor);
+  } else {
+    gFactory.clearReaderAnchor();
+  }
   const bool pushed = push && gApp->pushScreen(reader::ScreenId::Reader);
   // The push builds the screen, which locates the chapter, decodes it once to index
   // its pages, and lays out the first -- the whole expensive part.

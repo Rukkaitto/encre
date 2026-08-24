@@ -724,3 +724,141 @@ TEST_CASE("the sides page and the front row does not, which is the split") {
   rd.onEvent({reader::Button::Down, reader::PressKind::Short});
   CHECK(rd.vm().page == 2);   // the front row does not
 }
+
+TEST_CASE("QuietTheme renders the Reader WITH a way back, to golden") {
+  // design/ReaderAnchored.dc.html. The centre slot holds the arrow and its label
+  // where the no-anchor state holds the progress bar -- the board is unambiguous
+  // that they swap rather than coexist, and the percent on the left is what keeps
+  // progress stated while the bar is displaced.
+  //
+  // REACHED BY PAGING, forward then back, because the backward turn is the
+  // transition that sets an anchor. A state assigned directly would pin the same
+  // pixels and prove nothing about the rule that produces them.
+  //
+  // The companion assertion is `reader_quiet` staying blessed: the spec says the
+  // WITHOUT-anchor golden matters most, because it is the claim that the common case
+  // is the board exactly as it was.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  Italic italic;
+
+  auto renderOne = [&](int w, int h, const std::string& name) {
+    reader::PageMetrics m;
+    theme.readerMetrics(w, h, ramp.fonts, body.face, m);
+    m.italic = &italic.face;
+    reader::DemoScreenFactory factory;
+    factory.setReaderBody(&body.face);
+    factory.setReaderItalic(&italic.face);
+    factory.setReaderMetrics(m);
+    factory.setReaderDemo();
+    std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Reader);
+    REQUIRE(scr != nullptr);
+    auto* rd = static_cast<reader::ReaderScreen*>(scr.get());
+    rd->completeIndex();
+    rd->onEvent({reader::Button::Right, reader::PressKind::Short});  // a side: page on
+    rd->onEvent({reader::Button::Left, reader::PressKind::Short});   // a side: page back
+    REQUIRE_FALSE(rd->vm().anchorLabel.empty());
+    reader::Framebuffer lsb(w, h), msb(w, h);
+    scr->render(lsb, ramp.fonts, theme, reader::Plane::Lsb);
+    scr->render(msb, ramp.fonts, theme, reader::Plane::Msb);
+    golden::checkGoldenGray(lsb, msb, name);
+  };
+
+  SUBCASE("X4 480x800") { renderOne(480, 800, "reader_anchored"); }
+  SUBCASE("X3 528x792") { renderOne(528, 792, "reader_anchored_x3"); }
+}
+
+TEST_CASE("READING BACK UP TO THE ANCHOR WITHDRAWS IT, without pressing anything") {
+  // FOUND BY A MUTATION THAT NOTHING CAUGHT. Deleting the Reader's
+  // `anchor_.pagedForward(...)` call left all 866 tests passing: the forward-satisfies
+  // rule is covered in test_return_anchor.cpp, but nothing here paged FORWARD back up
+  // to an anchor -- the strong-property case always returns with the button instead.
+  // So the state machine was tested and its wiring was not.
+  //
+  // The behaviour matters on its own terms: a reader who turns back to re-read and
+  // then simply reads on must not be left with a stale field promising a page they
+  // are already standing on.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  reader::ReaderScreen rd(longChapter(30), "Middlemarch", "CH. 01", &body.face);
+  rd.setMetrics(m);
+  rd.completeIndex();
+  const reader::InputEvent fwd{reader::Button::Right, reader::PressKind::Short};
+  const reader::InputEvent back{reader::Button::Left, reader::PressKind::Short};
+
+  for (int i = 0; i < 5; ++i) rd.onEvent(fwd);
+  const int from = rd.vm().page;
+  REQUIRE(rd.vm().anchorLabel.empty());       // forward alone raises nothing
+  rd.onEvent(back);
+  rd.onEvent(back);
+  REQUIRE(rd.vm().anchorLabel == "P. " + std::to_string(from));
+
+  // Read forward again. The field must survive the step that does not reach it...
+  rd.onEvent(fwd);
+  CHECK(rd.vm().anchorLabel == "P. " + std::to_string(from));
+  // ...and be withdrawn by the one that arrives.
+  rd.onEvent(fwd);
+  CHECK(rd.vm().page == from);
+  CHECK(rd.vm().anchorLabel.empty());
+  // And reading on raises nothing new.
+  rd.onEvent(fwd);
+  CHECK(rd.vm().anchorLabel.empty());
+}
+
+TEST_CASE("paging BACKWARD across a chapter boundary anchors, and forward spends it") {
+  // The cross-chapter half of the rule, on a fixture whose chapters are ONE PAGE each
+  // -- so the only way to move is across a boundary, which is exactly what makes it
+  // the right fixture for this. An anchor in another chapter also exercises the
+  // footer label's other branch: naming the CHAPTER, because naming the page would
+  // mean paginating a chapter the reader is not in.
+  //
+  // And it pins that a boundary crossing is PAGING, not a jump. A jump overwrites the
+  // anchor with the position being left, so a reader who paged back and then read on
+  // through a boundary would find their anchor silently moved to the boundary.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  FakeFileSystem fs;
+  REQUIRE(fs.writeAll("/books/b.epub",
+                      std::string_view(reinterpret_cast<const char*>(epubfix::kEpubGood),
+                                       epubfix::kEpubGoodLen)));
+  reader::OpenedBook ob;
+  const char* why = "";
+  REQUIRE_MESSAGE(reader::openBook(fs, "/books/b.epub", ob, &why), std::string(why));
+  reader::ReaderScreen rd(fs, ob, 0, &body.face);
+  rd.setMetrics(m);
+  const reader::InputEvent fwd{reader::Button::Right, reader::PressKind::Short};
+  const reader::InputEvent back{reader::Button::Left, reader::PressKind::Short};
+
+  const int first = rd.chapterIndex();
+  REQUIRE(rd.vm().anchorLabel.empty());
+  // Forward until the chapter changes -- guarded, because a fixture that cannot
+  // cross would otherwise spin.
+  int guard = 0;
+  while (rd.chapterIndex() == first && guard++ < 50) rd.onEvent(fwd);
+  REQUIRE(rd.chapterIndex() != first);
+  const int second = rd.chapterIndex();
+  CHECK(rd.vm().anchorLabel.empty());  // forward across a boundary raises nothing
+
+  // Back across it. The anchor is the page being LEFT, which is in `second`.
+  rd.onEvent(back);
+  REQUIRE(rd.chapterIndex() == first);
+  const std::string promise = rd.vm().anchorLabel;
+  REQUIRE_FALSE(promise.empty());
+  // It is in ANOTHER chapter, so the label names the chapter rather than a page --
+  // the branch that exists because paginating an absent chapter is the cost this
+  // reader is built to avoid.
+  CHECK(promise.rfind("P. ", 0) != 0);
+
+  // Forward across the boundary again satisfies it: the reader is back where they
+  // were, and nothing was jumped.
+  rd.onEvent(fwd);
+  REQUIRE(rd.chapterIndex() == second);
+  CHECK(rd.vm().anchorLabel.empty());
+}
