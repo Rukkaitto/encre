@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include "reader/dir_cache.h"
 #include "reader/filesystem.h"
 
 // THE SHARED SPI BUS.
@@ -168,7 +169,40 @@ class SdFileSystem : public reader::FileSystem {
 
   // Entries list() dropped because their name did not fit kNameBufBytes. Non-zero
   // means the user has a file this build cannot address; see list().
+  //
+  // COUNTED ON A CARD WALK, NOT ON EVERY CALL. A listing served out of the cache
+  // below does not re-count, because the entries were dropped before the store
+  // and are not in it. So this is "names this build could not address, per real
+  // read of the card", which is the question it was written to answer.
   size_t skippedNames() const { return skippedNames_; }
+
+  // How many times remove() has been ASKED to delete something, whether or not
+  // that call is the one that changed the card.
+  //
+  // Deliberately bumped before the refusals rather than on success: a caller
+  // that asked to delete a book is reason enough for anything holding a derived
+  // view of the tree -- Home's book count is the other one -- to distrust it. A
+  // counter rather than a flag so a reader can tell "nothing has changed" from
+  // "something changed and was already dealt with".
+  uint32_t removals() const { return removals_; }
+
+  // THE OTHER DERIVED VIEW IS HOME'S `LIBRARY` COUNT, and it is keyed on this.
+  // It is one directory listing plus one per folder for a single integer, on the
+  // critical path of a Back out of a book -- see libraryCountForHome() in
+  // shell/src/main.cpp. It is NOT held by this class the way the listing cache
+  // is, because it is not a listing: it is an answer the layer above derives from
+  // one, so this counter is what tells that layer to derive it again.
+
+  // The held directory listings, for a log line. See list() for what fills them
+  // and reader/dir_cache.h for why they exist at all.
+  //
+  // WORTH PRINTING SOMEWHERE. `hits()`, `misses()`, `slotsHeld()` and
+  // `residentBytes()` are the only way to tell a cache that is working from one
+  // that has quietly stopped: a hit produces no `[fs] list` line at all, so the
+  // absence of that line is the ONLY visible symptom of success, and it is
+  // indistinguishable from the absence of the call. This project has already
+  // shipped a card probe that reported success while doing nothing.
+  const reader::DirListingCache& listings() const { return listings_; }
 
   // Longest leaf name list() will report, including the terminator.
   //
@@ -200,25 +234,6 @@ class SdFileSystem : public reader::FileSystem {
   bool mkdirs(std::string_view path) override;
   bool remove(std::string_view path) override;
 
-  // How many remove() calls have been made this boot.
-  //
-  // THE INVALIDATION HOOK FOR ANYTHING DERIVED FROM A DIRECTORY LISTING. Home's
-  // LIBRARY count is one directory listing plus one per folder -- ~1.1 s on a
-  // 203-book card at ~2.7 ms an entry -- and it changes for exactly two reasons:
-  // the card changed under us, or a book was deleted. Books cannot ARRIVE while
-  // the firmware runs (V1 is card transfer only, so putting one there means the
-  // card is in a computer), and a delete is the only mutation of /books there is.
-  //
-  // Counted here rather than reported by the Library because the Library is
-  // destroyed by the pop that leaves it, so there is no screen left to ask by the
-  // time Home wants the number. Every deletion goes through this method whoever
-  // asked for it, which is the property a cache needs and a caller list is not.
-  //
-  // Deliberately counts ATTEMPTS, not successes: `remove` reports the END state,
-  // so even a call that changes nothing means something tried to. Over-
-  // invalidating costs one recount; under-invalidating shows a wrong number.
-  uint32_t removals() const { return removals_; }
-
  private:
   friend class SdFileHandle;
 
@@ -237,6 +252,19 @@ class SdFileSystem : public reader::FileSystem {
   bool live_ = false;
   size_t skippedNames_ = 0;
   uint32_t removals_ = 0;
+
+  // THE ONE DIRECTORY LISTING THIS CLASS HOLDS. See reader/dir_cache.h for the
+  // measurement, for why the walk itself cannot be made cheaper, and for the
+  // memory argument behind the two constants.
+  //
+  // The reason it belongs to this object rather than to the Library screen that
+  // suffers from the cost: every way to change what is on the card is a method
+  // on this class, so writeAll, mkdirs and remove can each drop it and there is
+  // no mutation path that misses the invalidation. A cache the Library owned
+  // would have to be told, and a caller list maintained in prose is a function
+  // not yet written.
+  reader::DirListingCache listings_{reader::DirListingCache::kDeviceMinEntries,
+                                   reader::DirListingCache::kDeviceMaxBytes};
   ProbeTarget probeTarget_ = ProbeTarget::RootDir;
   std::string probeTargetPath_;
   // Bytes the FAT scan reported at arm time. 0 means "not armed".

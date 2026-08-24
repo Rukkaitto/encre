@@ -3775,11 +3775,19 @@ void loop() {
     // `heap` is whatever is free at this instant, while a pagination peak happens
     // BETWEEN two [alive] lines and would otherwise never be seen. 3A's entire
     // memory case rested on a figure nothing was measuring.
+    // THE LISTING CACHE IS ON THIS LINE BECAUSE A HIT IS OTHERWISE INVISIBLE.
+    // A miss prints `[fs] list ... 590ms`; a hit prints nothing at all, which on a
+    // device reads exactly like the call never having happened -- so "it got
+    // faster" and "it stopped being called" look identical, and this file records
+    // that shape as a defect three times over. hits/misses is what tells a cache
+    // that is working from one that is merely quiet.
     logf("[alive] last-stage=%s heap=%u minHeap=%u screen=%s depth=%d "
-         "dropped=%lu/%lu\n",
+         "dropped=%lu/%lu listings=%u slots/%uB hit=%u miss=%u\n",
          stage, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
          reader::screenName(gApp->top().id()), gApp->depth(),
-         (unsigned long)rawSamplesDropped(), (unsigned long)gPresses.dropped());
+         (unsigned long)rawSamplesDropped(), (unsigned long)gPresses.dropped(),
+         (unsigned)gSd.listings().slotsHeld(), (unsigned)gSd.listings().residentBytes(),
+         (unsigned)gSd.listings().hits(), (unsigned)gSd.listings().misses());
     logFlush();
   }
   // IDLE ON THE QUEUE, NOT ON THE CLOCK. Identical to the delay(10) this replaces
