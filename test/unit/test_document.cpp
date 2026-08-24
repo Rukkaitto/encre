@@ -313,3 +313,118 @@ TEST_CASE("A PARAGRAPH OF NOTHING BUT NBSP IS DROPPED") {
   CHECK(flatten("<p>Note\xC2\xA0" ": ceci</p>") == "P[Note\xC2\xA0" ": ceci]");
   CHECK(flatten("<p>a\xC2\xA0" "b</p>") == "P[a\xC2\xA0" "b]");
 }
+
+// --- Inline emphasis ---------------------------------------------------------
+
+namespace {
+
+// A block's text with its emphasis spans marked, so a span and the bytes it covers
+// are asserted TOGETHER. An offset asserted on its own passes just as happily when
+// it points at the wrong letter.
+std::string marked(std::string_view xhtml) {
+  reader::Document d;
+  const char* why = "";
+  if (!reader::buildDocument(xhtml, d, &why)) return std::string("!") + why;
+  std::string out;
+  for (const reader::Block& b : d.blocks) {
+    out += "[";
+    for (size_t i = 0; i < b.text.size(); ++i) {
+      const bool here = reader::emphasisedAt(b.emphasis, i);
+      const bool prev = i > 0 && reader::emphasisedAt(b.emphasis, i - 1);
+      if (here && !prev) out += "<";
+      if (!here && prev) out += ">";
+      out += b.text[i];
+    }
+    if (!b.text.empty() && reader::emphasisedAt(b.emphasis, b.text.size() - 1)) out += ">";
+    out += "]";
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("em, i and cite are emphasis; strong and b are not") {
+  CHECK(marked("<p>a <em>b</em> c</p>") == "[a <b> c]");
+  CHECK(marked("<p>a <i>b</i> c</p>") == "[a <b> c]");
+  CHECK(marked("<p>a <cite>b</cite> c</p>") == "[a <b> c]");
+  // 220 characters across eight real books, six of them with none. Their text still
+  // arrives; it is simply not marked.
+  CHECK(marked("<p>a <strong>b</strong> c</p>") == "[a b c]");
+  CHECK(marked("<p>a <b>b</b> c</p>") == "[a b c]");
+}
+
+TEST_CASE("nested emphasis is ONE run, not two") {
+  // `<em><cite>x</cite></em>` is one emphasised phrase, and a flag rather than a
+  // depth would close the run on the inner tag and leave the rest roman.
+  CHECK(marked("<p>a <em><cite>b c</cite></em> d</p>") == "[a <b c> d]");
+  CHECK(marked("<p><em>a <i>b</i> c</em></p>") == "[<a b c>]");
+}
+
+TEST_CASE("adjacent emphasised tags stay one word and TWO runs") {
+  // document.cpp's own rule: `<em>b</em><i>c</i>` must read as "bc" because that is
+  // one word a generator split for styling. Both halves are emphasised, and they are
+  // contiguous, so the marker shows one region -- but they are two spans, because
+  // nothing merges them and nothing needs to.
+  const std::string m = marked("<p><em>b</em><i>c</i></p>");
+  CHECK(m == "[<bc>]");
+  reader::Document d;
+  const char* why = "";
+  REQUIRE(reader::buildDocument("<p><em>b</em><i>c</i></p>", d, &why));
+  REQUIRE(d.blocks.size() == 1);
+  CHECK(d.blocks[0].emphasis.size() == 2);
+}
+
+TEST_CASE("an empty emphasis leaves no span") {
+  // A zero-length range is something every walk over the vector then has to skip.
+  reader::Document d;
+  const char* why = "";
+  REQUIRE(reader::buildDocument("<p>a<em></em>b</p>", d, &why));
+  REQUIRE(d.blocks.size() == 1);
+  CHECK(d.blocks[0].text == "ab");
+  CHECK(d.blocks[0].emphasis.empty());
+}
+
+TEST_CASE("emphasis spanning a block boundary closes at it and reopens") {
+  // Real markup, and the alternative is a span indexing a string it does not belong
+  // to -- offsets travel with the text they were measured against.
+  CHECK(marked("<em><p>a b</p><p>c d</p></em>") == "[<a b>][<c d>]");
+}
+
+TEST_CASE("the trailing-space trim clips a span rather than leaving it past the end") {
+  // `<p>a <em>b </em></p>` collapses to "a b": the span was opened over "b " and the
+  // trim takes the space, so an unclipped span would run one byte past the string.
+  // Every test whose text has no trailing space passes either way.
+  reader::Document d;
+  const char* why = "";
+  REQUIRE(reader::buildDocument("<p>a <em>b </em></p>", d, &why));
+  REQUIRE(d.blocks.size() == 1);
+  CHECK(d.blocks[0].text == "a b");
+  REQUIRE(d.blocks[0].emphasis.size() == 1);
+  const reader::Span& s = d.blocks[0].emphasis[0];
+  CHECK(s.off == 2);
+  CHECK(s.len == 1);
+  CHECK(s.end() <= d.blocks[0].text.size());
+}
+
+TEST_CASE("emphasis inside a suppressed element never reaches a block") {
+  // `<style>` text must not reach a page, and neither must a span pointing into it.
+  CHECK(marked("<head><style><em>x</em></style></head><p>a</p>") == "[a]");
+}
+
+TEST_CASE("emphasis in a heading, a blockquote and a list item") {
+  // The spans are independent of the kind, and asserting it here is what stops a
+  // later change from wiring them to Paragraph only.
+  CHECK(marked("<h1>a <em>b</em></h1>") == "[a <b>]");
+  CHECK(marked("<blockquote><p>a <em>b</em></p></blockquote>") == "[a <b>]");
+  CHECK(marked("<li>a <em>b</em></li>") == "[a <b>]");
+}
+
+TEST_CASE("too much emphasis in one block is refused, not truncated") {
+  std::string x = "<p>";
+  for (size_t i = 0; i <= reader::kMaxEmphasisPerBlock; ++i) x += "<em>a</em>-";
+  x += "</p>";
+  reader::Document d;
+  const char* why = "";
+  CHECK_FALSE(reader::buildDocument(x, d, &why));
+  CHECK(std::strstr(why, "emphasis") != nullptr);
+}

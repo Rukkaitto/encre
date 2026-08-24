@@ -3,6 +3,7 @@
 #include <string_view>
 #include <vector>
 
+#include "reader/emphasis.h"        // Span
 #include "reader/inflate_stream.h"  // ByteSource
 
 namespace reader {
@@ -16,28 +17,37 @@ namespace reader {
 // same for `<img>`, which 3C owns. Approximating is how a reader ends up showing
 // something that looks like a bug in the book.
 //
-// INLINE EMPHASIS IS NOT MODELLED, and that is an honest limit rather than an
-// oversight. `<em>` and `<strong>` contribute their text inline with no marker, so a
-// sentence reads correctly and reads unemphasised.
+// INLINE EMPHASIS IS MODELLED AS BYTE RANGES, not as a run-per-style structure the
+// text is broken into -- see emphasis.h for why, and for the measurement that
+// decided it: `<em>` covers 0.6% to 5.8% of a chapter's characters across eight real
+// books, so almost every line has none and the empty case must be free.
 //
-// THE REASON IS THAT NO ITALIC OUTLINE EXISTS ANYWHERE IN THIS REPOSITORY, and it is
-// worth stating precisely because "add an italic" sounds like a build-flag change and
-// is not. `assets/fonts/Literata.ttf` carries exactly two axes, `opsz` and `wght`,
-// with `head.macStyle = 0x00` and `post.italicAngle = 0` -- there is no `ital` axis
-// and no `slnt` axis, so no instancing of this file produces a slanted glyph.
-// `tools/ttfprep.py` refuses an unpinned axis on principle and could not pin one that
-// is not there. An italic therefore means a SECOND FONT FILE, its own `ttfprep` pass,
-// its own flash, and a second `ScalableFont` with its own 16 KB glyph cache -- one
-// face per object, by construction.
+// `<em>`, `<i>` and `<cite>` all become emphasis; the distinction between them is
+// not modelled for the same reason h1-h6 collapse to one Heading -- there is one
+// face to render them with.
 //
-// design/Reader.dc.html DOES request an italic from Google Fonts
-// (`Literata:ital,...;1,7..72,400`), so the board renders emphasis the firmware
-// cannot currently produce. That divergence is real and worth knowing before anyone
-// concludes from the board that the asset exists.
+// `<strong>` AND `<b>` ARE DELIBERATELY NOT EMPHASIS, and are dropped the way they
+// always were. Measured over the same eight books: 17 runs and **220 characters in
+// total**, six of the eight having none at all. Mapping them onto the italic would
+// be a lie about the author's markup; giving them their own face means a second
+// prepped asset and a second glyph cache for 220 characters. Both are worse than
+// setting them roman.
 //
-// Modelling emphasis before then would be a field layout must ignore, and a
-// run-per-emphasis structure that line breaking would have to straddle for no
-// visible gain.
+// THE ITALIC IS A SECOND FONT FILE, and it had to be: `assets/fonts/Literata.ttf`
+// carries exactly two axes, `opsz` and `wght`, with `head.macStyle = 0x00` and
+// `post.italicAngle = 0` -- no `ital` axis and no `slnt` axis, so no instancing of
+// it produces a slanted glyph. `assets/fonts/LiterataItalic.ttf` is vendored beside
+// it (OFL, same Reserved Font Name), prepped to 164,360 bytes, carrying the same two
+// axes and the same `unitsPerEm` of 1000. That last number is what lets ONE line
+// hold both faces without the measuring pass and the drawing pass disagreeing about
+// where a run ends.
+//
+// AND THE TWO FACES ARE NOT THE SAME WIDTH: measured at ppem 32, the italic runs
+// **6% to 9% NARROWER** than the roman over the same string. So emphasis cannot be
+// measured with the roman and drawn with the italic -- on a 444px column a 20-byte
+// italic phrase mis-measures by ~20px, which is most of a word, enough to break a
+// line in the wrong place and to compute the wrong justification slack for it. The
+// wrap therefore measures per run; see `StyledFace` in components.h.
 enum class BlockKind : uint8_t {
   Paragraph,
   Heading,     // h1-h6 all land here; the level is not modelled because the board
@@ -49,6 +59,10 @@ enum class BlockKind : uint8_t {
 struct Block {
   BlockKind kind = BlockKind::Paragraph;
   std::string text;
+  // Byte ranges of `text` that are emphasised, sorted and non-overlapping. Empty
+  // for the overwhelming majority of blocks, which is the case emphasis.h is
+  // designed around.
+  std::vector<Span> emphasis;
 };
 
 struct Document {

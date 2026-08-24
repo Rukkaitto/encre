@@ -28,6 +28,16 @@ bool separatesWords(std::string_view t) {
   return t == "td" || t == "th" || t == "br";
 }
 
+// EMPHASIS. `<cite>` is here because a cited title is set in italics by every
+// convention this face was designed for, and books use it that way.
+//
+// `<strong>` AND `<b>` ARE ABSENT ON PURPOSE, and the measurement is in document.h:
+// 17 runs and 220 characters across eight real books. They keep contributing their
+// text with no marker, which is what they always did.
+bool isEmphasis(std::string_view t) {
+  return t == "em" || t == "i" || t == "cite";
+}
+
 // NOT CONTENT. Their text must never reach a page: a stylesheet rendered as a
 // paragraph is the most obvious way a reader can look broken.
 bool isSuppressed(std::string_view t) {
@@ -137,6 +147,13 @@ struct BlockReader::State {
   Block cur;
   bool open = false;
   bool finished = false;
+  // HOW DEEP INSIDE EMPHASIS THE PARSER IS, and a depth rather than a flag because
+  // `<em><cite>x</cite></em>` is one emphasised run and not two nested ones. Only
+  // the transitions 0->1 and 1->0 open and close a span.
+  size_t emDepth = 0;
+  // Where the open span started, as an offset into `cur.text`. Meaningful only
+  // while emDepth > 0.
+  size_t emStart = 0;
 
   explicit State(ByteSource& src) : xml(src) {}
 };
@@ -155,6 +172,8 @@ void BlockReader::restart(ByteSource& src) {
   st_->cur = Block{};
   st_->open = false;
   st_->finished = false;
+  st_->emDepth = 0;
+  st_->emStart = 0;
   emitted_ = 0;
   error_ = "";
 }
@@ -170,13 +189,41 @@ bool BlockReader::next(Block& out) {
     if (!st.cur.text.empty() && st.cur.text.back() != ' ') st.cur.text.push_back(' ');
   };
 
+  // Closes the emphasis span that is open, if one is, at the text's current end.
+  // Returns false only on the cap.
+  //
+  // AN EMPTY SPAN IS DROPPED. `<em></em>`, and `<em> </em>` once the space collapses
+  // away, would otherwise leave a zero-length range that every walk has to skip.
+  const auto closeSpan = [&]() -> bool {
+    if (st.emStart >= st.cur.text.size()) return true;
+    if (st.cur.emphasis.size() >= kMaxEmphasisPerBlock) {
+      error_ = "too much emphasis in one block";
+      return false;
+    }
+    st.cur.emphasis.push_back(
+        Span{static_cast<uint32_t>(st.emStart),
+             static_cast<uint32_t>(st.cur.text.size() - st.emStart)});
+    return true;
+  };
+
   // Moves the block being built into `out`, if it has anything in it. An empty
   // block is DROPPED, not emitted blank: `<p></p>` between chapters is a
   // generator's artifact and a blank block would take a line of the page.
   const auto take = [&](bool& have) -> bool {
     have = false;
     if (st.open) {
+      // EMPHASIS STILL OPEN AT A BLOCK BOUNDARY IS CLOSED AT IT. `<em><p>a</p>
+      // <p>b</p></em>` is markup a book really does contain, and the alternative --
+      // carrying the span across the boundary -- would mean a span indexing a
+      // string it does not belong to. It reopens against the next block below.
+      if (st.emDepth > 0 && !closeSpan()) return false;
+      const size_t before = st.cur.text.size();
       while (!st.cur.text.empty() && st.cur.text.back() == ' ') st.cur.text.pop_back();
+      // THE TRIM CAN LAND INSIDE A SPAN, and an offset past the end of the string is
+      // the kind of thing that reads fine in every test whose text has no trailing
+      // space. `<p>a <em>b </em></p>` trims one byte off a span that ended there.
+      if (before != st.cur.text.size())
+        st.cur.emphasis = clipTo(st.cur.emphasis, 0, st.cur.text.size());
       if (!onlyWhitespace(st.cur.text)) {
         if (emitted_ >= static_cast<int>(kMaxBlocks)) {
           error_ = "too many blocks";
@@ -195,6 +242,9 @@ bool BlockReader::next(Block& out) {
   const auto beginBlock = [&]() {
     st.cur.kind = kindFromStack(st.stack, st.depth);
     st.open = true;
+    // Emphasis that was open across the boundary starts again at byte 0 of the new
+    // block -- the other half of the rule take() states.
+    if (st.emDepth > 0) st.emStart = 0;
   };
 
   for (;;) {
@@ -248,6 +298,13 @@ bool BlockReader::next(Block& out) {
         if (!st.open) beginBlock();
         appendSpace();
       }
+      if (isEmphasis(st.xml.name())) {
+        // A bare `<em>` with no block around it is still the book's words, exactly
+        // as a bare text node is -- so it opens one, or `emStart` would index a
+        // block that beginBlock is about to replace.
+        if (!st.open) beginBlock();
+        if (st.emDepth++ == 0) st.emStart = st.cur.text.size();
+      }
       continue;
     }
 
@@ -273,6 +330,14 @@ bool BlockReader::next(Block& out) {
         continue;
       }
       if (separatesWords(st.xml.name())) appendSpace();
+      if (isEmphasis(st.xml.name()) && st.emDepth > 0) {
+        // Only the OUTERMOST close ends the run: `<em><cite>x</cite></em>` is one
+        // emphasised phrase. The depth is guarded rather than asserted because an
+        // `</em>` with no `<em>` is markup, and this parser reads a user's card --
+        // though the stack check above has already refused a mismatched close, so
+        // this can only fire on a close whose open was inside a suppressed element.
+        if (--st.emDepth == 0 && !closeSpan()) return false;
+      }
       continue;
     }
 
