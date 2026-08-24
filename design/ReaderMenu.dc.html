@@ -63,6 +63,24 @@
         <div style="font-size: var(--t-value); font-weight: 500;">Bookmarks</div>
         <div style="font-size: var(--t-value); font-weight: 700;">2</div>
       </div>
+      <!-- NAMES -- "who's this character again?", the one row on this sheet that
+           answers a question rather than moving you somewhere. Placed beside
+           Bookmarks because both are references you consult and come back from,
+           and Names is the only one that opens a PEEK rather than a screen: it
+           lists the names the book has used up to where you have read, and
+           selecting one shows the sentence that introduced them over the page you
+           are on. See design/Names.dc.html.
+
+           A CHEVRON, NOT A COUNT, where Bookmarks shows a bold `2`. Bookmarks
+           counts a thing the reader made and can therefore verify -- two
+           bookmarks, both theirs. A names count is an artefact of the display
+           threshold: the same book reads 300 at five mentions and 713 at two, so
+           the number would be large, meaningless and quietly arbitrary. The
+           chevron promises a screen, which is the honest promise. -->
+      <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 20px; border-bottom: 1px solid #000000;">
+        <div style="font-size: var(--t-value); font-weight: 500;">Names</div>
+        <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
+      </div>
       <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 20px; border-bottom: 1px solid #000000;">
         <div style="font-size: var(--t-value); font-weight: 500;">About this book</div>
         <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>

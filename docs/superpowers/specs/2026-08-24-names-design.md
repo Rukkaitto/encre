@@ -188,6 +188,21 @@ on the Library: with alphabetical ordering a thumb 60% down the track is roughly
 
 **Rows** are the Library's title-over-author shape minus the cover: the name in
 Body500 over its fullest form in tracked uppercase Meta — `Stu` over `STUART REDMAN`.
+
+**Two row heights, measured off the board: 90px with a fullest form, 60px without.**
+A place or an already-full name has nothing for a second line, and that is 30–40% of
+rows on a real book, so a blank second line would read as broken on a third of the
+screen. The theme therefore reports the **box model** — both heights — and the screen
+counts how many fit, exactly as `settingsMetrics` already does, because the item table
+belongs to the screen. The list box is 671px at 480×800 and 663px at 528×792, so a
+typical mix is **eight rows**.
+
+**The slack below the last row is the check, and it has an invariant**: a
+`ScrollWindow` draws whole rows only, so with two row heights some empty space at the
+bottom is inevitable and varies with which rows are on screen. **Slack must be less
+than the shortest row height**, because 60px or more means another row would have
+fitted. The board's first draft had 132px of it and understated the screen by a whole
+row; it is 42px at 480×800 and 34px at 528×792 now.
 The fullest form is often most of the answer before a peek is even opened. Aliases
 still *merge*; they are not all displayed. The probe's raw label,
 `Stu (Stuart/Stu Redman/Redman/Stuart Redman)`, does not fit a 480px row and reads as

@@ -440,6 +440,24 @@
       "w": 480,
       "h": 800,
       "page": "page-4"
+    },
+    {
+      "file": "Names.dc.html",
+      "title": "Names",
+      "x": 2320,
+      "y": 1800,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "NamesEmpty.dc.html",
+      "title": "Names · Empty",
+      "x": 2900,
+      "y": 1800,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
     }
   ],
   "annotations": [
@@ -617,6 +635,22 @@
       "y": 830,
       "w": 460,
       "text": "Reader · Anchored — the Reader with somewhere to go back to. The footer's middle slot holds the return anchor and the progress bar yields it: at 21px the bar plus both counters overrun the 444px of usable width, and the bar is only a graphical restatement of the percentage beside it.\nSet by paging BACKWARD as much as by a jump — that is the common way to lose a place. The mark is the kUp icon, not a glyph: U+2191 is outside fontc.py's subset and would render as a notdef box.\nReader.dc.html stays the no-anchor state, unchanged: that is the common case.",
+      "page": "page-4"
+    },
+    {
+      "id": "note-names",
+      "x": 2320,
+      "y": 2730,
+      "w": 460,
+      "text": "Names — \"who's this character again?\", answered on a device with no network and no pointer. The list is built by scanning each chapter as its pages are counted, so it knows only what you have read: spoiler-proof by construction, and the band's right slot states that boundary rather than a count.\nIt says NAMES, not CHARACTERS. A capitalisation heuristic cannot tell a person from a place, so LOWICK and MIDDLEMARCH are correct entries.\nAlphabetical, which inverts the obvious order: the name you cannot place is rare, so most-mentioned-first buries exactly what you came for.\nConfirm opens a PEEK at the introducing sentence — there is no detail screen.",
+      "page": "page-4"
+    },
+    {
+      "id": "note-names-empty",
+      "x": 2900,
+      "y": 2730,
+      "w": 460,
+      "text": "Names · Empty — a variant, not a second screen: same ScreenId, same view model, same band, copy where the rows would be. A book opened at chapter one legitimately knows almost nothing, and the copy names the mechanism (reading fills it) rather than just reporting emptiness — otherwise a reader concludes the feature is broken.\nNo action slab: nothing here can be pressed to help, and a primary action that cannot work is worse than none.",
       "page": "page-4"
     }
   ],

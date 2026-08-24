@@ -1,0 +1,98 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+  </style>
+</helmet>
+
+<!-- NOTHING TO SHOW YET, WHICH IS A REAL STATE AND NOT AN ERROR.
+     A VARIANT of Names.dc.html, not a second screen: same ScreenId, same view
+     model, same band -- copy where the rows would be. Home's empty and
+     nothing-open states are the same mechanism, and the reason is the same: two
+     render branches would be two ways to spell one layout.
+
+     THE INDEX IS BUILT AS YOU READ, one chapter at a time as its pages are
+     counted, so a book opened at chapter one legitimately knows almost nothing.
+     That is the feature working, not failing: scanning ahead is what would make
+     it a spoiler machine, and the boundary the band states (TO CH. 01) is the
+     same boundary that keeps it honest.
+
+     SO THE COPY SAYS WHEN IT WILL FILL, NOT THAT IT IS EMPTY. "No names yet"
+     alone invites the reader to conclude the feature is broken or that this book
+     is not supported; naming the mechanism -- reading is what fills it -- turns
+     an empty screen into an explained one. Same reasoning as HomeEmpty's
+     paragraph, which had to carry its screen's whole call to action once the
+     Wi-Fi slab was cut.
+
+     NO ACTION SLAB, deliberately, and for HomeEmpty's stated reason: a primary
+     action that cannot work is worse than none. There is nothing to press here
+     -- the only thing that fills this list is turning pages -- so the hint bar
+     promises exactly one thing, BACK, and the other three slots are the boards'
+     36px dead spacers. -->
+
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
+
+  <!-- The band is UNCHANGED from Names.dc.html, including the coverage slot, and
+       that is the point of it being a variant: the reader can see that the index
+       covers one chapter, which is precisely why there is nothing below. -->
+  <div style="display: flex; justify-content: space-between; align-items: center; gap: 7px; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
+    <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">NAMES</div>
+    <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">TO CH. 01</div>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: 0 40px; text-align: center; min-height: 0; overflow: hidden;">
+
+    <!-- kBookLarge at 112px, the mark HomeEmpty already uses for "the shelf is not
+         the problem, there is simply nothing on it yet". Reusing it rather than
+         drawing a new one is deliberate: a second 112px asset is 3,136 bytes of
+         flash for a screen that is saying the same kind of thing. -->
+    <svg width="112" height="112" viewBox="0 0 16 16" fill="none"><path d="M8 3.2C6.6 2 4.3 1.7 2 2v11c2.3-.3 4.6 0 6 1.2 1.4-1.2 3.7-1.5 6-1.2V2c-2.3-.3-4.6 0-6 1.2z" stroke="#000000" stroke-width="0.9"></path><path d="M8 3.2v11" stroke="#000000" stroke-width="0.9"></path></svg>
+
+    <div style="font-size: var(--t-title); font-weight: 700;">NO NAMES YET</div>
+
+    <!-- max-width 400 at 480 wide. SdMissing's board says 420 for the same shape
+         because 400 was three lines in Chrome and four in the firmware -- the
+         autohinted faces have whole-pixel advances and measure wider. Kerning has
+         since closed part of that gap but not all of it, so THIS NUMBER IS ONE TO
+         CHECK IN BOTH ENGINES rather than trust from Chrome. -->
+    <div style="font-size: var(--t-body); line-height: 1.55; max-width: 400px;">Names appear as you read. Keep going and the people and places this book uses will collect here.</div>
+
+  </div>
+
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">BACK</div></div>
+    <div style="width: 36px;"></div>
+    <div style="width: 36px;"></div>
+    <div style="width: 36px;"></div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

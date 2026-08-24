@@ -97,6 +97,12 @@ FLOW_SCREENS = [
     # Peek and return (3D). `peek` is the overlay -- book text over the veiled page
     # you are on -- and `reader_anchored` is the Reader with somewhere to go back to,
     # its own board so that Reader.dc.html stays pinned as the no-anchor common case.
+    # NAMES (3E). `names` is the alphabetical list -- two row heights, a rail -- and
+    # `names_empty` is the same screen before reading has filled it, a variant rather
+    # than a second screen. Selecting a row opens the peek, so there is no name
+    # detail board to compare.
+    ("names",           "Names.dc.html",          "Names"),
+    ("names_empty",     "NamesEmpty.dc.html",     "Names / empty"),
     ("peek",            "Peek.dc.html",           "Peek"),
     ("reader_anchored", "ReaderAnchored.dc.html", "Reader / anchored"),
     ("bookmarks",       "Bookmarks.dc.html",      "Bookmarks"),
