@@ -16,7 +16,8 @@
 // WHAT IT FOUND, over three real novels (Le Fleau, Neuromancien, Darkly Dreaming
 // Dexter): the top of the list is the cast. 25 of the top 26 for Le Fleau are real
 // named entities -- Stu, Larry, Harold, Nick, Frannie, Flagg, La Poubelle, Kojak the
-// dog -- and the one false positive is `Dieu`, an interjection. Neuromancien returns
+// dog -- and `Dieu`, which is French for God: a proper noun, always capitalised, and
+// so a CORRECT entry on a screen that says NAMES. Neuromancien returns
 // Case, Molly, Armitage, Wintermute, Chiba, Tessier-Ashpool.
 //
 // THE RULES, each of which replaced something that looked reasonable and was wrong.
@@ -136,8 +137,6 @@
 //
 //  * PERSON VERSUS PLACE IS NOT SEPARATED, by decision -- the screen says NAMES.
 //    Boulder, Las Vegas, New York and Miami all rank, correctly.
-//  * `Dieu` -- an interjection, capitalised, frequent, mid-sentence. Rank 8 in Le
-//    Fleau. No non-semantic rule reaches it, and it is the one durable false positive.
 //  * `Il` SURVIVES AT RANK 57 in Le Fleau, 27 mentions, below anything a reader
 //    would scroll to. The residue is other punctuation edges; see rule 11 for the two
 //    causes that were fixed and why chasing the rest is not worth a rule.
