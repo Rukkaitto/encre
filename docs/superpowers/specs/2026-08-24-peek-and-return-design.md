@@ -73,12 +73,29 @@ the anchor *behind* the reader and clear it, throwing away the one breadcrumb th
 wanted. Distinguishing a departure from a drift is not a special case; it is the
 whole distinction.
 
-### Comparison is across chapters, not within one
+### THE ANCHOR IS A PAGE — and the comparison still has to work across chapters
 
-`at_` is an index into the current chapter's `starts_`, so "furthest" cannot be a
-page number. It is `(spine, block, line)` compared lexicographically. Spine order
-**is** reading order, so that ordering is the book's own. It is also the triple
-`ReadingPosition` already stores, so the anchor needs no new representation.
+**Granularity first, because an earlier draft of this section was read as saying the
+opposite.** The anchor names **one page**, not one chapter. Page back three pages
+inside a single chapter and the anchor is the page you left; `Up` returns to that
+page. Nothing here is chapter-granular.
+
+What it stores is `(spine, block, line)`, and that triple *is* a page position: a
+page-start cursor is exactly `(block, line)`, which is what `starts_` holds one of
+per page. So the anchor is a page expressed the way this codebase already expresses
+a page.
+
+The reason it is not stored as a **page number** is that `at_` is an index into the
+*current chapter's* `starts_`, so page 7 means nothing once you are in a different
+chapter — two positions in different chapters could not be compared, and the
+high-water rule is entirely a comparison. `(spine, block, line)` compares
+lexicographically, spine order **is** reading order, so that ordering is the book's
+own. It is also the triple `ReadingPosition` already stores, so the anchor needs no
+new representation.
+
+The page NUMBER the footer shows is therefore computed, not stored — `openAtCursor`
+lands on the page containing a cursor and counts boundaries to name it, which is the
+same mechanism the reading-position restore already uses.
 
 ### Persistence rides the existing save edges
 

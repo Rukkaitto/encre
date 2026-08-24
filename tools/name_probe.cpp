@@ -431,6 +431,12 @@ int main(int argc, char** argv) {
   std::map<std::string, Cand> cands;
   long words = 0, blocks = 0, sents = 0, bytes = 0, headings = 0;
   int whyShown = 0;
+  // WHAT A NAIVE ON-DEVICE TABLE WOULD COST. The probe holds every candidate for
+  // the whole book because a desktop can; the device has a 45,840-byte floor, so
+  // this is the number 3E's design turns on. Peak per CHAPTER is the interesting
+  // one: it is what a scan that merges into the card per chapter would need.
+  size_t peakChapterRuns = 0, peakChapterBytes = 0;
+  std::map<std::string, size_t> chapterRuns;
 
   struct Tok {
     std::string text;
@@ -447,6 +453,7 @@ int main(int argc, char** argv) {
     const reader::ChapterLocation loc = book.locate(c);
     if (loc.compressedSize == 0) continue;
     if (!cr.begin(fs, loc)) continue;
+    chapterRuns.clear();
     int blockInChapter = -1;
     reader::Block b;
     while (cr.next(b)) {
@@ -541,6 +548,9 @@ int main(int argc, char** argv) {
           }
           std::string run = toks[i].text;
           for (size_t k = i + 1; k <= j; ++k) { run += ' '; run += toks[k].text; }
+          // name bytes + one stored sentence + ~12 bytes of counters
+          if (chapterRuns.find(run) == chapterRuns.end())
+            chapterRuns[run] = run.size() + 12;
           Cand& cd = cands[run];
           ++cd.mentions;
           if (i == 0 || toks[i].opener) ++cd.initial;
@@ -558,11 +568,24 @@ int main(int argc, char** argv) {
         }
       }
     }
+    size_t cb = 0;
+    for (auto& kv : chapterRuns) cb += kv.second;
+    if (chapterRuns.size() > peakChapterRuns) peakChapterRuns = chapterRuns.size();
+    if (cb > peakChapterBytes) peakChapterBytes = cb;
   }
 
   std::printf("walked : %ld blocks, %ld sentences, %ld words, %ld text bytes\n", blocks, sents,
               words, bytes);
   std::printf("headings: %ld (%s)\n", headings, skipHeadings ? "skipped" : "included");
+  {
+    size_t wholeBook = 0;
+    for (auto& kv : cands) wholeBook += kv.first.size() + 12;
+    std::printf("\nMEMORY, if a table held every candidate:\n");
+    std::printf("  whole book : %zu runs, %zu bytes of keys+counters (no sentences)\n",
+                cands.size(), wholeBook);
+    std::printf("  worst chapter: %zu runs, %zu bytes\n", peakChapterRuns, peakChapterBytes);
+    std::printf("  ...against a measured 45,840-byte device heap floor.\n");
+  }
 
   // Is this a list or a dictionary? A NAMES screen has to be scrollable, not endless.
   std::printf("\nentities by mention threshold:\n");
