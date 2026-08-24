@@ -1255,8 +1255,11 @@ was already going. Locating a chapter costs a reopen and a directory parse, ~76 
 on device, against a ~520 ms refresh.
 
 The label is the SPINE POSITION, not a chapter number — spine 2 shows `CH. 03`.
-Without a table of contents (`Contents.dc.html`, not built) the position is the only
-thing honestly known.
+**A table of contents now EXISTS** (`reader/toc.h`, read from the book's NCX) and
+`Contents` is built, so the position is no longer the only thing honestly known — but
+`ReaderScreen::updateChapterLabel` still prints `CH. %02d` and its comment still
+claims otherwise. Wiring the footer to the TOC is an open follow-up, not a
+constraint.
 
 **`<p>&nbsp;</p>` IS HOW AN EBOOK MAKES VERTICAL SPACE**, and it is everywhere: the
 first text chapter of `Le Fléau` opens with three of them. Trimming only ASCII space

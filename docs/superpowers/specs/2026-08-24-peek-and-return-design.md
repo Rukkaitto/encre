@@ -244,12 +244,15 @@ It *should* be consistent — white in `Bw` is paper, and 0 in `Lsb`/`Msb` is co
 0, also paper — but this codebase's own notes are pointed about the difference
 between "should be" and "was measured". It gets a test, not a footnote.
 
-**The overlay has no opener until `Contents` lands.** `Contents` is in progress in a
-parallel session and is the overlay's first caller. Until it exists a peek is
-reachable from the simulator and the goldens only — which is precisely the state the
-Sleep screen sat in for two phases, recorded in `CLAUDE.md` as a trap rather than a
-pattern. **The anchor does not share this problem**: its caller is ordinary backward
-paging, so it is reachable the day it lands.
+**`Contents` HAS LANDED, so the overlay's first caller now exists** — and it landed
+without a way back, which turns this spec's premise from a prediction into a fact.
+`ContentsScreen::onGesture` answers `Gesture::Activate` with
+`Action::popTo(ScreenId::Reader)` and **nothing records where the reader was**: the
+jump takes their place with it. So a screen that ships today is the one that wants
+the anchor, and the peek has somewhere to be opened from on the day it is built.
+
+Neither half is blocked any more. The anchor never was — its caller is ordinary
+backward paging, so it is reachable the day it lands.
 
 **A footer that gains a field can crowd.** Three fields at 480px on the X4 is the
 geometry to check, and it is a board question before it is a code question.

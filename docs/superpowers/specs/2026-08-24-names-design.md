@@ -169,6 +169,13 @@ new write edge.
 
 ## The screen
 
+**Rows are `ListRow`** (`viewmodel.h:251`), the shared row view model Settings and the
+reader menu already use — `SettingsRow` is a typedef of it. It carries `isHeader`,
+`discloses`, `trackingEm1000` and `live`, so the Names list should extend it rather
+than introduce a second row type. Note that its taller-row axis is `isHeader`, which
+is *not* the axis this screen needs: here the two heights are "has a fullest form" and
+"does not", so that is a field to add rather than a flag to reuse.
+
 `NamesScreen` derives from `FocusScreen`, which gives it `focus()`/`setFocus()` as a
 `final` pair — so the focus-restore contract is structural rather than remembered,
 which is the rule this project shipped one-way on three screens before making it
@@ -273,8 +280,11 @@ table's string-keyed map, ~412 inserts a chapter. **Measure before tuning, and r
 **Peak memory at the merge**, addressed by the chapter-crossing window above, is the
 thing most likely to need a second pass on hardware.
 
-**`ReaderMenu` is unbuilt**, so 3E is blocked behind it. The peek is blocked behind
-`Contents`. Neither is this spec's work.
+**`ReaderMenu` and `Contents` have both LANDED, so nothing here is blocked any more.**
+`screen_reader_menu.{h,cpp}` and `screen_contents.{h,cpp}` exist, which means the
+`Names` row this design adds to the sheet has a real item table to go into rather than
+only a board. Neither is this spec's work, but both were listed as blockers and are
+not.
 
 ## Verification
 
