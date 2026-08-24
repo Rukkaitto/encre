@@ -422,6 +422,24 @@
       "w": 960,
       "h": 620,
       "page": "page-5"
+    },
+    {
+      "file": "Peek.dc.html",
+      "title": "Peek",
+      "x": 2320,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "ReaderAnchored.dc.html",
+      "title": "Reader · Anchored",
+      "x": 2900,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
     }
   ],
   "annotations": [
@@ -584,6 +602,22 @@
       "w": 480,
       "text": "Instapaper was cut from V1 on 2026-08-20 to keep the first release achievable — these boards are finished design waiting for V2, not V1 scope.\nThe flow: Articles opens \"not set up\" -> the device shows a QR/URL -> the user signs in on the device-served web page (nothing typed on the device) -> the device keeps only an access token and syncs. Reading is offline; archive/like queue locally and push on the next sync.",
       "page": "page-6"
+    },
+    {
+      "id": "note-peek",
+      "x": 2320,
+      "y": 830,
+      "w": 460,
+      "text": "Peek — book text over the veiled page you are on, so a jump never costs you your place. It is what makes Contents, Go to page and Bookmarks (this row) worth having: a jump that loses your position is one readers learn not to make.\nInset, so the column is narrower, so the text re-wraps — which is why it says CH. 01 · 4% and not a page number. GO HERE still lands exactly: the cursor travels and the page number is counted on arrival.\nEight lines by design. Content-sized at eleven it filled the glass and stopped reading as a modal.",
+      "page": "page-4"
+    },
+    {
+      "id": "note-reader-anchored",
+      "x": 2900,
+      "y": 830,
+      "w": 460,
+      "text": "Reader · Anchored — the Reader with somewhere to go back to. The footer's middle slot holds the return anchor and the progress bar yields it: at 21px the bar plus both counters overrun the 444px of usable width, and the bar is only a graphical restatement of the percentage beside it.\nSet by paging BACKWARD as much as by a jump — that is the common way to lose a place. The mark is the kUp icon, not a glyph: U+2191 is outside fontc.py's subset and would render as a notdef box.\nReader.dc.html stays the no-anchor state, unchanged: that is the common case.",
+      "page": "page-4"
     }
   ],
   "pages": [

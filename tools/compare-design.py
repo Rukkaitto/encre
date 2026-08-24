@@ -94,6 +94,11 @@ FLOW_SCREENS = [
     ("typography",      "Typography.dc.html",     "Typography"),
     ("contents",        "Contents.dc.html",       "Contents"),
     ("goto_page",       "GoToPage.dc.html",       "Go to page"),
+    # Peek and return (3D). `peek` is the overlay -- book text over the veiled page
+    # you are on -- and `reader_anchored` is the Reader with somewhere to go back to,
+    # its own board so that Reader.dc.html stays pinned as the no-anchor common case.
+    ("peek",            "Peek.dc.html",           "Peek"),
+    ("reader_anchored", "ReaderAnchored.dc.html", "Reader / anchored"),
     ("bookmarks",       "Bookmarks.dc.html",      "Bookmarks"),
     ("book_end",        "BookEnd.dc.html",        "Book finished"),
     ("sd_missing",      "SdMissing.dc.html",      "No SD card"),

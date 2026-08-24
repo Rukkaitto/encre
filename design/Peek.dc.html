@@ -1,0 +1,213 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600&amp;family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+    .dim-veil { background-image: radial-gradient(circle, #ffffff 1.3px, transparent 1.5px); background-size: 3px 3px; }
+  </style>
+</helmet>
+
+<!-- LOOKING SOMEWHERE ELSE IN THE BOOK WITHOUT LEAVING THE PAGE YOU ARE ON.
+     The peek is what makes Contents, Go to page and Bookmarks worth having: a
+     jump that costs you your place is a jump readers learn not to make. Every
+     one of those three is boarded and unbuilt, and all three need this first.
+
+     THE STORY THIS BOARD TELLS, and it is deliberately the character-lookup one,
+     because that is the case the whole feature came from: the reader is 300 pages
+     into Middlemarch (CH. 07, 34%, visible under the veil) and has met a name they
+     cannot place. They have peeked back to the book's opening -- CH. 01, 4% -- and
+     are reading the sentence that introduced her. Their own page is still there,
+     untouched, four dots of veil away.
+
+     WHY IT IS AN OVERLAY AND NOT A SCREEN. `Screen::isOverlay()` already means
+     "leaves the screen beneath visible under a veil", and `App::render` already
+     walks down to the topmost non-overlay, renders it, veils, then renders what is
+     above. So the mechanism exists and this is its fourth caller after the actions
+     panel and the delete prompt. What is NEW is that those two sit over the
+     Library, which is `Fidelity::Mono`; this sits over the Reader, which is the
+     only `Fidelity::Grayscale` screen on the device. So `veilRect` gets applied
+     once per plane for the first time here. It should be consistent -- white in
+     `Bw` is paper, and 0 in `Lsb`/`Msb` is coverage 0, also paper -- but this
+     project's notes are pointed about the difference between "should be" and "was
+     measured", so it wants a test rather than a footnote.
+
+     AND A SECOND READER DOES NOT FIT, which is what shapes the whole thing. A live
+     chapter peaks at 69,884 bytes with a 36,956-byte single allocation, against a
+     measured 45,840-byte heap floor -- two of them leaves single-digit kilobytes on
+     a part where a failed allocation is `abort()` with no diagnostic. It works
+     because the Reader BENEATH releases its chapter while this is up: all of
+     `ChapterReader` is behind `unique_ptr`, `pb_` is already nullable and its own
+     comment says so, and the retained `page_` is what lets `App::render` draw the
+     veiled page underneath with no decode at all. Closing costs one `seekTo` --
+     33.9 ms desktop for the worst page in a real book, well under one refresh.
+     ONE LIVE CHAPTER AT ANY MOMENT, so the floor never moves. -->
+
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; position: relative;">
+
+  <!-- The page being read, underneath. Same geometry as Reader.dc.html because it
+       IS the Reader: this layer is not drawn by the peek, it is the parent screen
+       the App renders below it. -->
+  <div style="position: absolute; top: 0; left: 0; width: 480px; height: 800px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; padding: 20px 18px 0 18px; font-family: Literata, Georgia, serif;">
+    <div style="display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 22px; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
+      <div style="font-size: var(--t-meta); letter-spacing: 0.18em; font-weight: 500;">MIDDLEMARCH</div>
+      <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">CH. 07</div>
+    </div>
+    <div style="flex-grow: 1; overflow: hidden; font-size: 32px; line-height: 1.7; text-align: justify;">
+      <p style="margin: 0;">She had been used to think of him as a man whose opinions were settled, and it was a new thing to find that he could be persuaded by a morning's weather and the look of a room.</p>
+      <p style="margin: 0; text-indent: 1.5em;">The letter lay where it had been left. Nobody in the house would have moved it, and that was its own kind of answer.</p>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0 16px 0; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
+      <div style="font-size: var(--t-meta); letter-spacing: 0.12em; font-weight: 700;">34%</div>
+      <div style="width: 210px; height: 5px; border: 1px solid #000000; box-sizing: border-box;">
+        <div style="width: 34%; height: 100%; background: #000000;"></div>
+      </div>
+      <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">300 / 890</div>
+    </div>
+  </div>
+
+  <!-- CLUSTERED WHITE ON A 3px GRID, and the 3px is the load-bearing number: a 4px
+       veil is half as dense and reads as a smudge rather than as "not this". It is
+       its own pattern for its own job -- see dither.cpp, which carries all three
+       and why they cannot be shared. -->
+  <div class="dim-veil" style="position: absolute; top: 0; left: 0; width: 480px; height: 800px;"></div>
+
+  <!-- THE PANEL IS INSET, AND THAT COSTS IT THE PAGE NUMBER.
+       Inset means a narrower column, a narrower column means the text re-wraps, and
+       re-wrapped text paginates differently -- so "page 53" inside the peek is not
+       page 53 of the book, and the panel must not claim it is. It says chapter and
+       percent instead, which is true at any column width.
+
+       COMMITTING IS STILL EXACT, which is what makes that acceptable rather than a
+       compromise: `openAtCursor` lands on the page CONTAINING a cursor and counts
+       boundaries to name it, so the cursor is what travels and the page number is
+       computed on arrival. GO HERE always puts the reader on a real page with a
+       real number, whatever width they were reading at.
+
+       THE ALTERNATIVE WAS A FULL-WIDTH PANEL in a hairline frame, so that one
+       pagination serves both and the peek could say `53 / 890` exactly like the
+       Reader. Rejected: it barely reads as an overlay, which leaves the header and
+       the hint bar as the only signals that anything is different -- and the whole
+       point of a peek is that you can see you have not lost your place.
+
+       Authored at 480 wide, as LibraryActions and DeleteConfirm are, and centred
+       BOTH ways so one board serves both panels: `left`+`width` are symmetric about
+       the authored frame, which is the condition compare-design.py requires before
+       it will re-centre horizontally (34*2 + 412 = 480, so at 528 it rewrites left
+       to 58 and says so), and the vertical uses `top: 50%` with a `translateY`,
+       which needs no rewriting at all. A fixed `top` would have been 8px out at
+       792 and, worse, would have been a number to maintain. The intent is 34px of
+       veil either side; the implementation should DERIVE it rather than pin 412.
+       The X4 is the tight geometry and fails first. -->
+  <div style="position: absolute; top: 50%; transform: translateY(-50%); left: 34px; width: 412px; max-height: 100%; background: #ffffff; border: 2px solid #000000; box-sizing: border-box; overflow: hidden;">
+
+    <!-- The band pattern the Library and the delete prompt already use: a tracked
+         label left, a value right. `PEEK` names the state, because `CH. 01 - 4%`
+         alone would read as the Reader's own header and this panel has to be
+         unmistakably not that. -->
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 7px; padding: 18px 20px; border-bottom: 2px solid #000000;">
+      <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">PEEK</div>
+      <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">CH. 01 &middot; 4%</div>
+    </div>
+
+    <!-- The peeked text, at the SAME 32px/1.7 the Reader sets, because this is the
+         same book at the same reading size -- only the column is narrower. Same
+         paragraph convention too: separated by an indent, not a gap, and the first
+         one after a break is flush. A gap would cost a line box, and this panel has
+         eight of them.
+
+         THE PANEL IS SIZED BY ITS TEXT, NOT THE OTHER WAY ROUND, and the first
+         draft had it backwards: a pinned 560px height with `overflow: hidden` cut
+         the last line in half lengthwise, which reads as a rendering fault rather
+         than as a page boundary. A PAGE OF TEXT ENDS ON A WHOLE LINE -- always,
+         and that is `PageBuilder`'s job in the firmware, where the panel's height
+         is a RESULT of the line count exactly as `headerBandHeight()` and
+         `hintBarHeight()` are results. So the board states it the same way: no
+         height here, the content sets it. `max-height: 100%` is the only bound,
+         for a paragraph long enough to outgrow the glass.
+
+         EIGHT LINES, AND THE NUMBER IS THE DESIGN. Content-sizing is right and it
+         is not sufficient: the first content-sized draft ran to eleven lines and
+         the panel then filled the glass to within 48px of the top, which reads as
+         a bordered full screen rather than as a modal -- precisely the full-width
+         alternative rejected above, arrived at by accident rather than chosen.
+
+         Measured off the render at 480x800: the panel is 544px, of which a 70px
+         header band and eight 54.4px line boxes, leaving 128px of veil above it
+         and 65px between it and the hint bar. Eight lines is about 180 characters,
+         one or two sentences -- which is the whole answer to "who is this again?".
+
+         So the firmware picks the LINE COUNT and the height follows, rather than
+         picking a height and discovering a line count. Text past the last line is
+         a page turn away, not a layout failure; the side buttons turn pages inside
+         the peek exactly as they do while reading. -->
+    <div style="padding: 16px 20px 20px 20px; font-family: Literata, Georgia, serif; font-size: 32px; line-height: 1.7; text-align: justify;">
+      <p style="margin: 0;">Miss Brooke had that kind of beauty which seems to be thrown into relief by poor dress. Her hand and wrist were so finely formed that she could wear sleeves not less bare of style.</p>
+    </div>
+  </div>
+
+  <!-- TWO LIVE SLOTS AND TWO DEAD ONES, and the dead ones are 36px wide rather
+       than zero -- eight boards author a dead button as a 36px spacer and
+       `space-between` divides the leftover around it. Measuring one as 0 is not
+       "drawing nothing", it is drawing the other slots in the wrong places.
+
+       This is the peek's OWN bar; the Reader has none at all (header, body,
+       footer, nothing else), so this is the only place the peek can say what it
+       responds to.
+
+       PREV / NEXT ON UP AND DOWN WAS DRAWN FIRST AND REMOVED, for two reasons that
+       both point the same way:
+
+         * UP ALREADY MEANS SOMETHING ELSE ON THE SCREEN UNDERNEATH. In
+           ReaderAnchored.dc.html, Up is "return to where I was". Binding it to
+           "previous page" here would give one button two meanings on two screens
+           the reader moves between in a single press, which is worse than leaving
+           it unbound. The side buttons turn pages in the peek exactly as they do
+           while reading -- the buttons that page keep paging -- and a second way
+           to do the same thing teaches nothing a consistent first way does not.
+         * IT DID NOT FIT. Measured on the render at 480 wide, the four-label bar
+           left about 4px of slack, and the firmware's autohinted faces have
+           whole-pixel advances that measure ~3% wider than Chrome -- roughly 9px
+           of overflow on the real panel. That is the SdMissing lesson exactly
+           (its board says `max-width: 420px` because 400 was three lines in
+           Chrome and four on the device): A BOARD'S WIDTH IS A NUMBER TO CHECK IN
+           BOTH ENGINES, never one to trust from Chrome.
+
+       GO HERE is the commit: the Reader re-seeks to the peeked cursor and the
+       return anchor is set to WHERE THE READER WAS -- the departure point, not the
+       destination. See ReaderAnchored.dc.html for what that leaves on screen. -->
+  <div style="position: absolute; bottom: 0; left: 0; width: 100%; background: #ffffff; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">CLOSE</div></div>
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">GO HERE</div></div>
+    <div style="width: 36px;"></div>
+    <div style="width: 36px;"></div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

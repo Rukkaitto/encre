@@ -1,0 +1,163 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600;1,7..72,400&amp;family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+  </style>
+</helmet>
+<!-- THE READER WITH SOMEWHERE TO GO BACK TO.
+     A variant of Reader.dc.html, not a new screen: same header, same column, same
+     type, one field different in the footer. It is its own board because the
+     no-anchor state is the common one and must stay pinned exactly as it is --
+     "the common case is the board unchanged" is the assertion worth having a
+     golden for.
+
+     THE STORY CONTINUES Peek.dc.html's. The reader was at page 300 of CH. 07, met
+     a name they could not place, peeked back to the book's opening and pressed GO
+     HERE. So they are reading CH. 01 now, at 6%, page 53 -- and the footer holds
+     the way back to page 300.
+
+     WHAT SETS THE ANCHOR, and it is not only a jump. Paging BACKWARD sets it too,
+     which is the far more common way to lose your place: read to 300, page back to
+     re-read something, and the anchor is 300. One optional value, four transitions:
+     paging forward leaves it alone and CLEARS it if it reaches it; paging backward
+     sets it to the position being left, if unset; a jump OVERWRITES it with the
+     position being left, forward or backward. Reading forward never RAISES an
+     anchor -- one appears only when the reader turns back, and then holds still
+     while they move around below it, so it always names the furthest point of the
+     current excursion rather than the last thing they did.
+
+     The jump case needs the overwrite: commit a peek from CH. 01 into CH. 07 and a
+     pure high-water rule would find the anchor BEHIND the reader and clear it,
+     throwing away the one breadcrumb they wanted. Distinguishing a departure from
+     a drift is the whole distinction.
+
+     It costs no card write of its own -- it rides the three save edges the reading
+     position already has (leaving the book, crossing a chapter, sleeping), because
+     losing an anchor to a power cut costs a shortcut and nothing else: the reader
+     is still sitting on a real page. And it degrades WITH the position rather than
+     separately: the anchor's `line` is exactly as fragile as the position's, so
+     any fit grade below `Exact` drops it. An anchor that lands you on the wrong
+     page is worse than no anchor.
+
+     THE COLUMN IS READER.DC.HTML'S, ARTIFACT INCLUDED. Its last visible line is
+     sliced in half horizontally, because that board's text block is `flex-grow: 1;
+     overflow: hidden` over a column whose height is not a whole multiple of the
+     54.4px line box. That is inherited on purpose and NOT fixed here: the firmware
+     lays out whole lines only, so it is a real board defect, but fixing it in one
+     of the two Reader boards and not the other would put a difference between them
+     that nobody designed. It is filed separately; fix Reader.dc.html and this
+     follows. Peek.dc.html does not have it -- its panel is sized by its text. -->
+
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: Literata, Georgia, serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; padding: 20px 18px 0 18px;">
+
+  <div style="display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 22px; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
+    <div style="font-size: var(--t-meta); letter-spacing: 0.18em; font-weight: 500;">MIDDLEMARCH</div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">CH. 01</div>
+  </div>
+
+  <div style="flex-grow: 1; overflow: hidden; font-size: 32px; line-height: 1.7; text-align: justify;">
+    <!-- NO DROP CAP. This opened with a 102px floated `M`, and it is dropped from
+         V1 rather than deferred -- the mechanism note is kept because it is the
+         interesting part and whoever brings it back will need it:
+
+           * A drop cap is a BOUNDED set -- 26 letters and a few quote marks --
+             where body text's size set is unbounded, which is exactly why the
+             reader rasterises at runtime. So it wants a PRE-RENDERED asset, like
+             the chrome ramp: the opposite mechanism from the one the body face
+             uses, on the same screen.
+           * At 102px it does not fit the glyph cache. 2bpp is ceil(102/4)*102 =
+             2,652 bytes for ONE glyph, against an 8 KB arena that printable ASCII
+             at ppem 29 already fills to 7,785. Rasterising it would evict a third
+             of the page and re-rasterise those glyphs at ~3,794us each.
+           * `float: left` is a layout feature nothing else on this device needs:
+             the first N lines indent by the cap's width, N depending on its height
+             and the line height. One ornament is a thin reason to put a float in
+             the layout engine.
+
+         Justification stays, because that is not ornament -- it is what the
+         paragraph looks like. -->
+    <!-- PARAGRAPHS ARE SEPARATED BY AN INDENT, NOT A GAP, and the second paragraph
+         is here because a board with one paragraph does not state that. `margin: 0`
+         alone says "no gap"; it does not say what marks the boundary, and with
+         neither a gap nor an indent two consecutive paragraphs read as one.
+
+         An indent rather than a blank line, on two grounds. It is what a printed
+         book does, which is the reference this whole screen is drawn against. And
+         a gap costs a line box of a 20-line page -- 5% of the text on screen for
+         every paragraph break -- where an indent costs nothing vertical, which on
+         a panel that repaints in ~520ms is the difference between a page turn and
+         two.
+
+         1.5em at 32px is 48px, the conventional book indent (1 to 2 ems).
+
+         THE FIRST PARAGRAPH AFTER A BREAK IS FLUSH. That is the other half of the
+         convention and the reason mkepub.py marks its openers `class="first"`:
+         an indent says "this continues what you were reading", so a paragraph
+         with nothing above it has nothing to distinguish itself from. -->
+    <p style="margin: 0;">Miss Brooke had that kind of beauty which seems to be thrown into relief by poor dress. Her hand and wrist were so finely formed that she could wear sleeves not less bare of style than those in which the Blessed Virgin appeared to Italian painters.</p>
+    <p style="margin: 0; text-indent: 1.5em;">Her sister Celia wore a necklace, and the two of them had that air of being dressed alike which is never quite an accident. It was the kind of morning that makes a plain room look deliberate.</p>
+  </div>
+
+  <!-- THE FOOTER'S MIDDLE SLOT IS THE RETURN ANCHOR, AND THE PROGRESS BAR YIELDS IT.
+       Not a free choice -- it is arithmetic. Space Grotesk at 21px with 0.12em
+       tracking runs about 15px a character, so `6%` is ~30px, `53 / 890` ~120px,
+       and the anchor with its mark ~122px. Against 444px of usable width the
+       210px bar leaves 482px of content: it does not fit, and shrinking it to
+       120px leaves three gaps of 17px, which is not a footer, it is a queue.
+
+       So the bar goes, and NOTHING IS ACTUALLY LOST: the bar is a graphical
+       restatement of the percentage standing immediately to its left. Both
+       readings of progress survive -- `6%` and `53 / 890` -- and what is removed
+       is the redundant one, transiently, only while there is somewhere to return
+       to. The alternative reading (a bar that changes width by state) was
+       rejected for the reason a varying hint-bar height was: furniture whose size
+       depends on state reads as a fault rather than as information.
+
+       THE MARK IS AN ICON, NOT A GLYPH, and that distinction is load-bearing.
+       `fontc.py`'s subset is 0x20..0x7E plus 0xA0..0xFF -- U+2191 is not in it, so
+       a literal up arrow would render as a NOTDEF BOX. It is `kUp` instead, the
+       same stem-and-chevron the hint bars use for that button, which is what makes
+       it read as "the Up button" rather than as decoration.
+
+       AND THE FIELD IS THE PROMISE. There is no hint bar on this screen, so
+       nothing else can say what Up does -- and Up does NOTHING when no anchor is
+       set. A field that is absent promises nothing and a button that does nothing
+       is then not a dead button but an unpromised one. Home's READ hint is gated
+       on `nothingToContinue` for exactly this reason. Reader.dc.html is the
+       no-anchor state and is unchanged: the common case is still that board. -->
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0 16px 0; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
+    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; font-weight: 700;">6%</div>
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; font-weight: 500; white-space: nowrap;">P. 300</div></div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">53 / 890</div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
