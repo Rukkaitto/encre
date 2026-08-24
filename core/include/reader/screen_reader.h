@@ -7,6 +7,7 @@
 #include "reader/book.h"
 #include "reader/chapter.h"
 #include "reader/layout.h"
+#include "reader/return_anchor.h"
 #include "reader/toc.h"
 #include "reader/viewmodel.h"
 
@@ -121,6 +122,13 @@ class ReaderScreen : public Screen {
   // MUST BE SET BEFORE THE BOOK IS OPENED. It goes into `metrics_`, which the page
   // builder reads at `add()` time, so a face arriving after the first page was laid
   // would measure that page roman and draw it italic.
+  // The anchor, for the shell to persist and for a test to inspect. Const access
+  // only: every transition belongs to a movement, and a caller that could set it
+  // directly is a second place that decides the rule.
+  const ReturnAnchor& anchor() const { return anchor_; }
+  // Where the reader is, as the anchor spells a page.
+  AnchorPos here() const;
+
   void setItalic(const GlyphSource* italic) {
     italic_ = italic;
     metrics_.italic = italic;
@@ -250,6 +258,12 @@ class ReaderScreen : public Screen {
   // layout measured in one face and drawn in two, which is the disagreement
   // StyledFace exists to prevent.
   const GlyphSource* italic_ = nullptr;
+  // WHERE THE READER WAS BEFORE THEY STOPPED READING LINEARLY. The rule is in
+  // return_anchor.h and is tested without a book; this screen only tells it which
+  // of the three movements just happened.
+  ReturnAnchor anchor_;
+  bool goToAnchor(const AnchorPos& to);
+  void syncAnchorLabel();
   PageMetrics metrics_{};
 
   // One cursor per page, in order -- but only as far as has been READ, unless

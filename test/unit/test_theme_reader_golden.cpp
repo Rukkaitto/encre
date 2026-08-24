@@ -27,6 +27,20 @@
 
 namespace {
 
+// PAGING PRESSES THE SIDE BUTTONS, and these cases used to press the front row.
+//
+// Both worked while `gestureFor` folded the two movement pairs together -- `(Up |
+// Left) -> Prev` -- so `Button::Down` paged forward as readily as `Button::Right`.
+// The Reader declares `declareSplitMovers()` now, because the peek-and-return spec
+// wanted a free button and with the pairs folded there was NO free button on this
+// screen: all four paged. So the front row is `AltPrev`/`AltNext` here and only the
+// SIDES page.
+//
+// `Button::Left`/`Right` ARE the sides -- read shell/src/main.cpp before trusting
+// the names, it maps BTN_UP/BTN_DOWN (the physical sides) onto them on purpose.
+// These cases are more faithful for the change, not less: they now press what a
+// reader's thumb presses.
+
 // The fixtures live in reader_fixture.h -- see its header for why they moved out of
 // this file. Aliased so the cases below read exactly as they did.
 using readerfix::Body;
@@ -103,8 +117,8 @@ TEST_CASE("A PAGE TURN MOVES THE PAGE, AND THE ENDS DO NOT WRAP") {
   rd.completeIndex();
   REQUIRE(rd.pageCount() >= 2);
 
-  const reader::InputEvent down{reader::Button::Down, reader::PressKind::Short};
-  const reader::InputEvent up{reader::Button::Up, reader::PressKind::Short};
+  const reader::InputEvent down{reader::Button::Right, reader::PressKind::Short};
+  const reader::InputEvent up{reader::Button::Left, reader::PressKind::Short};
 
   CHECK(rd.vm().page == 1);
   CHECK(rd.onEvent(down).kind == reader::Action::Kind::Redraw);
@@ -148,7 +162,7 @@ TEST_CASE("every page's lines are inside the column the theme reported") {
         CHECK(ln.baselineY > m.columnTop);
         CHECK(ln.baselineY <= m.columnTop + m.columnH);
       }
-      rd.onEvent({reader::Button::Down, reader::PressKind::Short});
+      rd.onEvent({reader::Button::Right, reader::PressKind::Short});
     }
   }
 }
@@ -170,7 +184,7 @@ namespace {
 TEST_CASE("A LONG CHAPTER PAGINATES AND EVERY PAGE IS REACHABLE FORWARD") {
   Reading r(longChapter(60));
   REQUIRE(r.scr->pageCount() > 8);
-  const reader::InputEvent down{reader::Button::Down, reader::PressKind::Short};
+  const reader::InputEvent down{reader::Button::Right, reader::PressKind::Short};
 
   std::vector<std::string> pages;
   pages.push_back(pageText(r.scr->page()));
@@ -196,8 +210,8 @@ TEST_CASE("READING BACKWARD GIVES EXACTLY THE PAGES READING FORWARD GAVE") {
   Reading r(longChapter(40));
   const int n = r.scr->pageCount();
   REQUIRE(n > 6);
-  const reader::InputEvent down{reader::Button::Down, reader::PressKind::Short};
-  const reader::InputEvent up{reader::Button::Up, reader::PressKind::Short};
+  const reader::InputEvent down{reader::Button::Right, reader::PressKind::Short};
+  const reader::InputEvent up{reader::Button::Left, reader::PressKind::Short};
 
   std::vector<std::string> forward;
   forward.push_back(pageText(r.scr->page()));
@@ -222,8 +236,8 @@ TEST_CASE("a forward turn after a backward one still continues correctly") {
   // path rather than the fast one. Both must land on the same page.
   Reading r(longChapter(30));
   REQUIRE(r.scr->pageCount() > 4);
-  const reader::InputEvent down{reader::Button::Down, reader::PressKind::Short};
-  const reader::InputEvent up{reader::Button::Up, reader::PressKind::Short};
+  const reader::InputEvent down{reader::Button::Right, reader::PressKind::Short};
+  const reader::InputEvent up{reader::Button::Left, reader::PressKind::Short};
 
   r.scr->onEvent(down);
   r.scr->onEvent(down);
@@ -324,8 +338,8 @@ TEST_CASE("PAGING OFF THE END OF A CHAPTER OPENS THE NEXT ONE") {
   const int firstChapter = scr.chapterIndex();
   const std::string firstPage = pageText(scr.page());
 
-  const reader::InputEvent down{reader::Button::Down, reader::PressKind::Short};
-  const reader::InputEvent up{reader::Button::Up, reader::PressKind::Short};
+  const reader::InputEvent down{reader::Button::Right, reader::PressKind::Short};
+  const reader::InputEvent up{reader::Button::Left, reader::PressKind::Short};
 
   // Page to the end of this chapter.
   int guard = 0;
@@ -404,7 +418,7 @@ TEST_CASE("A REFUSED CHAPTER TURN LEAVES THE SCREEN WHERE IT WAS") {
   scr.setMetrics(m);
   REQUIRE(scr.pageCount() > 0);
 
-  const reader::InputEvent up{reader::Button::Up, reader::PressKind::Short};
+  const reader::InputEvent up{reader::Button::Left, reader::PressKind::Short};
   // Page back to the very front of the book.
   int guard = 0;
   while (scr.onEvent(up).kind == reader::Action::Kind::Redraw && guard++ < 2000) {
@@ -493,7 +507,7 @@ TEST_CASE("THE INDEX GROWS BY READING, and the pages are the same either way") {
   // differs from the same page reached through a completed index. Every page, both
   // ways.
   const std::string doc = deferredChapter();
-  const reader::InputEvent down{reader::Button::Down, reader::PressKind::Short};
+  const reader::InputEvent down{reader::Button::Right, reader::PressKind::Short};
 
   // The count first, so the walk below has a guard derived from the chapter rather
   // than a number picked out of the air -- an arbitrary 200 truncated this at 201
@@ -532,8 +546,8 @@ TEST_CASE("going back works on an index that was built by reading") {
   // The pages visited are in the index, so a backward turn has a cursor to seek to
   // even though the chapter was never counted.
   Reading r(deferredChapter(), /*settled=*/false);
-  const reader::InputEvent down{reader::Button::Down, reader::PressKind::Short};
-  const reader::InputEvent up{reader::Button::Up, reader::PressKind::Short};
+  const reader::InputEvent down{reader::Button::Right, reader::PressKind::Short};
+  const reader::InputEvent up{reader::Button::Left, reader::PressKind::Short};
 
   std::vector<std::string> forward{pageText(r.scr->page())};
   for (int i = 0; i < 4; ++i) {
@@ -601,4 +615,112 @@ TEST_CASE("QuietTheme renders the styled reader specimens to golden") {
   }
   SUBCASE("list, X4") { renderOne(480, 800, Demo::List, "reader_list"); }
   SUBCASE("list, X3") { renderOne(528, 792, Demo::List, "reader_list_x3"); }
+}
+
+// --- The return anchor, through a real chapter ---------------------------------
+//
+// spec: "paging back N pages and returning lands exactly on the page you left,
+// checked for every page of a chapter. A rule that is off by one is right at page 1
+// and wrong everywhere after it."
+
+TEST_CASE("PAGING BACK N AND RETURNING LANDS EXACTLY WHERE YOU LEFT, for every page") {
+  // THE STRONG PROPERTY, mirroring the best test already in this file (reading
+  // backward gives exactly the pages reading forward gave). EVERY page of the
+  // chapter is used as a departure point, because a rule that is off by one is right
+  // at page 1 and wrong everywhere after it.
+  //
+  // One fresh Reader per departure page, and from each it pages back ALL the way --
+  // which exercises every distance without O(n^2) paginations, and checks the
+  // high-water rule at every step: only the first backward turn may set the anchor.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+
+  const reader::InputEvent side_fwd{reader::Button::Right, reader::PressKind::Short};
+  const reader::InputEvent side_back{reader::Button::Left, reader::PressKind::Short};
+  // THE FRONT ROW follows the anchor. Button::Up IS the front row -- the shell's
+  // mapping is crossed on purpose; see Gesture::AltPrev.
+  const reader::InputEvent front_left{reader::Button::Up, reader::PressKind::Short};
+
+  int total = 0;
+  {
+    reader::ReaderScreen probe(longChapter(30), "Middlemarch", "CH. 01", &body.face);
+    probe.setMetrics(m);
+    probe.completeIndex();
+    total = probe.vm().pageTotal;
+  }
+  REQUIRE(total > 6);
+
+  for (int from = 1; from < total; ++from) {
+    reader::ReaderScreen rd(longChapter(30), "Middlemarch", "CH. 01", &body.face);
+    rd.setMetrics(m);
+    rd.completeIndex();
+    for (int i = 0; i < from; ++i) rd.onEvent(side_fwd);
+    REQUIRE(rd.vm().page == from + 1);
+    const std::string left = pageText(rd.page());
+    const std::string promise = [&] {
+      rd.onEvent(side_back);
+      return rd.vm().anchorLabel;
+    }();
+    // The promise is drawn, and it NAMES THE DEPARTURE PAGE rather than the page
+    // being stood on.
+    REQUIRE_FALSE(promise.empty());
+    CHECK(promise == "P. " + std::to_string(from + 1));
+
+    // ...and it HOLDS STILL for every further turn back.
+    for (int i = rd.vm().page; i > 1; --i) {
+      rd.onEvent(side_back);
+      CHECK(rd.vm().anchorLabel == promise);
+    }
+    CHECK(rd.vm().page == 1);
+
+    // One press returns, from however far away.
+    rd.onEvent(front_left);
+    CHECK(rd.vm().page == from + 1);
+    CHECK(pageText(rd.page()) == left);          // the same page, not merely the same number
+    CHECK(rd.vm().anchorLabel.empty());   // spent, so the promise is withdrawn
+  }
+}
+
+TEST_CASE("the front row does NOTHING when there is no anchor, and pages nothing") {
+  // The dead-button question, asserted both ways: it must not move the page (which
+  // is what it did before the split) and it must not act on an anchor that is not
+  // there.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  reader::ReaderScreen rd(longChapter(12), "Middlemarch", "CH. 01", &body.face);
+  rd.setMetrics(m);
+  rd.completeIndex();
+  for (int i = 0; i < 3; ++i) rd.onEvent({reader::Button::Right, reader::PressKind::Short});
+  const int page = rd.vm().page;
+  const std::string before = pageText(rd.page());
+  REQUIRE(rd.vm().anchorLabel.empty());
+
+  rd.onEvent({reader::Button::Up, reader::PressKind::Short});    // front row, no anchor
+  CHECK(rd.vm().page == page);
+  CHECK(pageText(rd.page()) == before);
+  rd.onEvent({reader::Button::Down, reader::PressKind::Short});  // the reserved one
+  CHECK(rd.vm().page == page);
+  CHECK(pageText(rd.page()) == before);
+}
+
+TEST_CASE("the sides page and the front row does not, which is the split") {
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  reader::ReaderScreen rd(longChapter(12), "Middlemarch", "CH. 01", &body.face);
+  rd.setMetrics(m);
+  rd.completeIndex();
+  REQUIRE(rd.vm().page == 1);
+  rd.onEvent({reader::Button::Right, reader::PressKind::Short});
+  CHECK(rd.vm().page == 2);   // the side pages
+  rd.onEvent({reader::Button::Down, reader::PressKind::Short});
+  CHECK(rd.vm().page == 2);   // the front row does not
 }

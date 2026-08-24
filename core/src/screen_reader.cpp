@@ -36,6 +36,11 @@ ReaderScreen::ReaderScreen(FileSystem& fs, OpenedBook book, int startChapter,
   // Nothing is opened here: a chapter cannot be paginated without a column height,
   // and setMetrics is the first moment one exists. So the constructor is cheap and
   // the work is in one place rather than half in each.
+  // THE SIDES PAGE AND THE FRONT ROW DOES NOT, which is unique to this screen and
+  // is what makes a fifth binding exist at all: every other screen folds the two
+  // movement pairs together, and with them folded all four buttons page here. See
+  // Gesture::AltPrev.
+  declareSplitMovers();
   updateChapterLabel();
   syncVm();
 }
@@ -45,6 +50,11 @@ ReaderScreen::ReaderScreen(std::string_view xhtml, std::string bookTitle, std::s
     : body_(body),
       bookTitle_(std::move(bookTitle)),
       chapter_label_(std::move(chapter)) {
+  // THE SIDES PAGE AND THE FRONT ROW DOES NOT, which is unique to this screen and
+  // is what makes a fifth binding exist at all: every other screen folds the two
+  // movement pairs together, and with them folded all four buttons page here. See
+  // Gesture::AltPrev.
+  declareSplitMovers();
   chapter_.beginBuffer(xhtml);
   syncVm();
 }
@@ -302,6 +312,15 @@ bool ReaderScreen::openFirstPage() {
   return true;
 }
 
+// WHERE THE READER IS, spelled the way the anchor spells a page. `currentCursor()`
+// is the position within the chapter and `chapterAt_` is which chapter, and the
+// anchor needs both -- a cursor alone cannot be compared across chapters, which is
+// the whole reason the anchor stores a spine.
+AnchorPos ReaderScreen::here() const {
+  const Cursor c = currentCursor();
+  return AnchorPos{chapterAt_, c.block, c.line};
+}
+
 Cursor ReaderScreen::currentCursor() const {
   if (at_ < 0 || at_ >= static_cast<int>(starts_.size())) return Cursor{};
   return starts_[static_cast<size_t>(at_)];
@@ -449,7 +468,24 @@ bool ReaderScreen::advance() {
 bool ReaderScreen::goToChapter(int spine) {
   if (spine < 0 || spine >= book_.chapterCount()) return false;
   if (spine == chapterAt_) return true;  // already there; a jump to here is a no-op
-  return openChapterAt(spine, /*atEnd=*/false);
+  // A JUMP OVERWRITES THE ANCHOR UNCONDITIONALLY, with the position being LEFT.
+  // Captured before the move for that reason -- and this is the call that makes
+  // Contents safe, which shipped without it and took the reader's place with it.
+  const AnchorPos from = here();
+  if (!openChapterAt(spine, /*atEnd=*/false)) return false;
+  anchor_.jumped(from, here());
+  return true;
+}
+
+// Landing on an anchor. A jump in mechanism and NOT in the anchor's sense -- the
+// anchor has already been spent by `follow()`, so this must not re-set it.
+bool ReaderScreen::goToAnchor(const AnchorPos& to) {
+  if (to.spine != chapterAt_) {
+    if (!openChapterAt(to.spine, /*atEnd=*/false)) return false;
+  }
+  if (!openAtCursor(Cursor{to.block, to.line})) return false;
+  syncVm();
+  return true;
 }
 
 bool ReaderScreen::indexPending() const {
@@ -484,6 +520,41 @@ void ReaderScreen::syncVm() {
   // board's 53 of 890 is 5.955%, shown as 6%, so the number is the position reached
   // and not the position started from. Unknown while the total is.
   vm_.progressPercent = vm_.pageTotal == 0 ? 0 : (vm_.page * 100 + vm_.pageTotal / 2) / vm_.pageTotal;
+  syncAnchorLabel();
+}
+
+// The footer's third field, or empty when there is nowhere to go.
+void ReaderScreen::syncAnchorLabel() {
+  vm_.anchorLabel.clear();
+  if (!anchor_.isSet()) return;
+  const AnchorPos a = anchor_.get();
+  if (a.spine == chapterAt_) {
+    // SAME CHAPTER, so the page is a lookup and nothing is decoded. The anchor's
+    // page is the last page whose start is at or before it -- which is what a page
+    // CONTAINING a cursor means, and why this is not a search for an exact match.
+    int page = 0;
+    for (size_t i = 0; i < starts_.size(); ++i) {
+      const AnchorPos start{chapterAt_, starts_[i].block, starts_[i].line};
+      if (start <= a) page = static_cast<int>(i) + 1;
+    }
+    if (page > 0) {
+      vm_.anchorLabel = "P. " + std::to_string(page);
+      return;
+    }
+    // The index does not reach it yet -- the count grows by reading. The chapter
+    // label is still true, so fall through rather than promising nothing.
+  }
+  // ACROSS CHAPTERS THE PAGE IS NOT FREE, so this says the chapter. Naming the page
+  // would mean paginating the anchor's chapter to count its boundaries.
+  const int at = tocIndexForSpine(names_, a.spine);
+  if (at >= 0 && !names_[static_cast<size_t>(at)].label.empty()) {
+    vm_.anchorLabel = names_[static_cast<size_t>(at)].label;
+    return;
+  }
+  // The same fallback updateChapterLabel uses, for a book with no contents.
+  char buf[16];
+  std::snprintf(buf, sizeof(buf), "CH. %02d", a.spine + 1);
+  vm_.anchorLabel.assign(buf);
 }
 
 Action ReaderScreen::onGesture(const GestureEvent& g) {
@@ -500,27 +571,43 @@ Action ReaderScreen::onGesture(const GestureEvent& g) {
       // A backward turn spends the builder, so re-establish it first: seekTo(at_)
       // re-renders the page being read and leaves the stream positioned to continue.
       if (pb_ == nullptr && !seekTo(at_)) return Action::none();
+      const AnchorPos fromNext = here();
       if (advance()) {
+        // FORWARD NEVER RAISES AN ANCHOR, it only spends one -- reading back up to
+        // where you were ends the excursion. The transition runs AFTER the move
+        // because it compares against where the reader arrived.
+        anchor_.pagedForward(fromNext, here());
         syncVm();
         return Action::redraw();
       }
       // OFF THE END OF THE CHAPTER IS THE NEXT CHAPTER, which is what makes this a
       // reader rather than a chapter viewer.
       if (!openChapterAt(chapterAt_ + 1, false)) return Action::none();
+      // OFF THE END OF A CHAPTER IS STILL PAGING FORWARD, not a jump. A jump would
+      // overwrite the anchor with the position being left, so a reader who paged
+      // back and then read on through a chapter boundary would find their anchor
+      // silently moved to the boundary.
+      anchor_.pagedForward(fromNext, here());
       return Action::redraw();
     }
     case Gesture::Prev: {
       // Where the page index earns itself: the stream only goes forward, so an
       // earlier page means rewinding and decoding to its recorded cursor. Without
       // the index there would be no cursor to decode TO.
+      const AnchorPos fromPrev = here();
       if (at_ <= 0) {
         // And back off the top is the PREVIOUS chapter's LAST page, so paging
         // backwards through a book is continuous rather than stopping at each
         // chapter's start.
         if (!openChapterAt(chapterAt_ - 1, true)) return Action::none();
+        anchor_.pagedBackward(fromPrev, here());
         return Action::redraw();
       }
       if (!seekTo(at_ - 1)) return Action::none();
+      // PAGING BACK IS HOW A READER LOSES THEIR PLACE, far more often than by
+      // jumping -- so this is the transition that makes the anchor appear during
+      // ordinary reading. It sets only if unset; one already standing holds still.
+      anchor_.pagedBackward(fromPrev, here());
       syncVm();
       return Action::redraw();
     }
@@ -531,6 +618,20 @@ Action ReaderScreen::onGesture(const GestureEvent& g) {
     // button that does nothing is a defect this project has shipped twice. It is built.
     case Gesture::Activate:
       return Action::push(ScreenId::ReaderMenu);
+    // THE FRONT ROW'S LEFT BUTTON, which reaches here only because this screen
+    // declares `declareSplitMovers()` -- with the pairs folded together as every
+    // other screen has them, all four movement buttons page and there is no free
+    // binding at all. See Gesture::AltPrev.
+    case Gesture::AltPrev: {
+      AnchorPos target{};
+      // NOTHING WHEN THERE IS NO ANCHOR, and the footer draws no field then. The
+      // absence of the promise is the absence of the affordance -- this project has
+      // shipped a dead button twice, so the two are wired to the same fact rather
+      // than to two agreeing conditions.
+      if (!anchor_.follow(&target)) return Action::none();
+      if (!goToAnchor(target)) return Action::none();
+      return Action::redraw();
+    }
     default:
       return Action::none();
   }

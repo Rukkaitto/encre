@@ -2,7 +2,8 @@
 
 namespace reader {
 
-GestureEvent gestureFor(const InputEvent& ev, ButtonMask holds, ButtonMask repeats) {
+GestureEvent gestureFor(const InputEvent& ev, ButtonMask holds, ButtonMask repeats,
+                        bool splitMovers) {
   GestureEvent out;
 
   switch (ev.button) {
@@ -42,8 +43,18 @@ GestureEvent gestureFor(const InputEvent& ev, ButtonMask holds, ButtonMask repea
       // verified against behaviour, because until now there was none to verify it
       // against -- if the sides turn pages the wrong way round on glass, the fix is
       // the two BTN_UP/BTN_DOWN lines in shell/src/main.cpp, not this.
-      out.what = (ev.button == Button::Up || ev.button == Button::Left) ? Gesture::Prev
-                                                                       : Gesture::Next;
+      // ON A SPLIT SCREEN the front row keeps its own identity. `Button::Up`/`Down`
+      // ARE the front row -- the shell's mapping is crossed, so read it rather than
+      // the names -- and they arrive as AltPrev/AltNext. The sides still page.
+      if (splitMovers) {
+        out.what = ev.button == Button::Up      ? Gesture::AltPrev
+                   : ev.button == Button::Down  ? Gesture::AltNext
+                   : ev.button == Button::Left  ? Gesture::Prev
+                                                : Gesture::Next;
+      } else {
+        out.what = (ev.button == Button::Up || ev.button == Button::Left) ? Gesture::Prev
+                                                                         : Gesture::Next;
+      }
       out.steps = ev.kind == PressKind::Repeat ? ev.steps : 1;
       out.held = ev.kind == PressKind::Repeat;
       return out;

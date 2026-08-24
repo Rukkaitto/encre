@@ -34,6 +34,26 @@ enum class Gesture : uint8_t {
   Secondary,  // Confirm, HELD -- and only where the hint bar draws a ring
   Prev,       // Up
   Next,       // Down
+  // --- Only on a screen that declares `declareSplitMovers()` -----------------
+  //
+  // THE DEVICE HAS TWO MOVEMENT PAIRS, and on every screen but one they mean the
+  // same thing. The front row is BACK CONFIRM LEFT RIGHT and the two side buttons
+  // sit above it; the shell maps the FRONT pair to `Button::Up`/`Down` and the
+  // SIDES to `Button::Left`/`Right` (read shell/src/main.cpp before trusting those
+  // names -- they are crossed on purpose). `gestureFor` normally folds
+  // `(Up|Left) -> Prev` and `(Down|Right) -> Next`, which is right for a list:
+  // either pair moves the focus and nobody has to learn which.
+  //
+  // The Reader is the exception, and it took a spec to notice. Its sides turn
+  // pages, and the peek-and-return design wanted a free button for "back to where
+  // I was" -- but with both pairs folded together there is NO free button on that
+  // screen: all four move pages. So a screen may ask for the pairs to stay apart,
+  // and then the FRONT pair arrives here instead.
+  //
+  // Named for the shape rather than the feature -- "the other movement pair" --
+  // because the Reader binds only AltPrev today and AltNext is deliberately free.
+  AltPrev,    // the front row's left, on a split screen
+  AltNext,    // the front row's right, on a split screen
 };
 
 struct GestureEvent {
@@ -75,6 +95,9 @@ struct GestureEvent {
 //     but the mapping should not depend on that being true elsewhere.
 //   * Up and Down are Prev and Next whatever the kind: they are the only buttons
 //     whose held form means MORE OF THE SAME rather than something else.
-GestureEvent gestureFor(const InputEvent& ev, ButtonMask holds, ButtonMask repeats);
+// `splitMovers` keeps the front row and the sides apart -- see Gesture::AltPrev.
+// False everywhere but the Reader, so no existing screen's input changes.
+GestureEvent gestureFor(const InputEvent& ev, ButtonMask holds, ButtonMask repeats,
+                        bool splitMovers = false);
 
 }  // namespace reader

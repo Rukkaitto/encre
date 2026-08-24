@@ -110,6 +110,7 @@ class Screen {
  private:
   ButtonMask holds_ = 0;
   ButtonMask repeats_ = 0;
+  bool splitMovers_ = false;
 
  public:
   virtual ScreenId id() const = 0;
@@ -231,7 +232,7 @@ class Screen {
   // screen had to remember (`if (ev.kind != Short) return none()`) whose omission
   // silently made a hold do a press's job.
   Action onEvent(const InputEvent& ev) {
-    const GestureEvent g = gestureFor(ev, holds_, repeats_);
+    const GestureEvent g = gestureFor(ev, holds_, repeats_, splitMovers_);
     if (g.what == Gesture::None) return Action::none();
     return onGesture(g);
   }
@@ -248,6 +249,10 @@ class Screen {
   // Which buttons scroll while held. Only a list long enough to need it -- on a
   // four-row overlay a held button that ran away would be a defect.
   void declareRepeat(ButtonMask mask) { repeats_ = mask; }
+  // Keep the front row and the side buttons apart -- see Gesture::AltPrev. Only
+  // the Reader asks, because only the Reader has a use for a fifth binding and no
+  // free button to put it on.
+  void declareSplitMovers() { splitMovers_ = true; }
 
  public:
   virtual void render(Framebuffer& fb, const FontSet& fonts, Theme& theme,

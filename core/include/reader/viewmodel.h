@@ -236,6 +236,28 @@ struct ReaderViewModel {
   // chapter, one decode of it, and paying that before the first page appears made
   // crossing into a chapter cost twice what a page turn costs.
   int pageTotal = 0;
+
+  // --- The way back, and EMPTY MEANS THERE IS NONE -------------------------------
+  //
+  // design/ReaderAnchored.dc.html: a third footer field, between the percent and the
+  // counter, present only while the reader has somewhere to return to. Empty is the
+  // common case and draws nothing, which is the whole affordance -- the field IS the
+  // promise, and `AltPrev` does nothing without it. Wiring both to one string rather
+  // than to two conditions that have to agree is deliberate.
+  //
+  // A STRING RATHER THAN A NUMBER, because the honest label is not always a page.
+  // The board says `P. 300` and that is right for the common case, where the anchor
+  // is in the chapter being read: its page is a lookup in `starts_`, free. Across
+  // chapters it is NOT free -- naming the page would mean paginating the anchor's
+  // chapter, ~7.2 ms/KB on the device and the cost this reader is built to avoid --
+  // so a cross-chapter anchor says its CHAPTER instead. Same move as the footer's em
+  // dash for an unknown total and the bare `CH. 03` before the contents existed: say
+  // the true thing rather than the impressive one.
+  //
+  // It costs no vertical space, which matters more here than anywhere else on the
+  // device: a footer that changed height would reflow the text column and
+  // re-paginate the chapter mid-read.
+  std::string anchorLabel;
 };
 
 // A ROW IN A LIST THAT INTERLEAVES SECTION HEADERS WITH ITEMS, and where some items
