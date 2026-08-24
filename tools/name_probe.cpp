@@ -437,6 +437,12 @@ int main(int argc, char** argv) {
   // one: it is what a scan that merges into the card per chapter would need.
   size_t peakChapterRuns = 0, peakChapterBytes = 0;
   std::map<std::string, size_t> chapterRuns;
+  // AND HOW FAST WOULD THE CARD INDEX GROW if a run has to EARN its slot -- seen at
+  // least twice mid-sentence within one chapter -- rather than being admitted on
+  // first sight? That is the number the sidecar format's viability rests on.
+  std::map<std::string, long> chapterHits;   // this chapter's mid-sentence counts
+  std::map<std::string, long> admitted;      // the card index, as it would grow
+  size_t peakAdmittedPerChapter = 0;
 
   struct Tok {
     std::string text;
@@ -454,6 +460,7 @@ int main(int argc, char** argv) {
     if (loc.compressedSize == 0) continue;
     if (!cr.begin(fs, loc)) continue;
     chapterRuns.clear();
+    chapterHits.clear();
     int blockInChapter = -1;
     reader::Block b;
     while (cr.next(b)) {
@@ -551,6 +558,7 @@ int main(int argc, char** argv) {
           // name bytes + one stored sentence + ~12 bytes of counters
           if (chapterRuns.find(run) == chapterRuns.end())
             chapterRuns[run] = run.size() + 12;
+          if (i != 0) ++chapterHits[run];
           Cand& cd = cands[run];
           ++cd.mentions;
           if (i == 0 || toks[i].opener) ++cd.initial;
@@ -568,6 +576,15 @@ int main(int argc, char** argv) {
         }
       }
     }
+    size_t newly = 0;
+    for (auto& kv : chapterHits) {
+      // Already on the card: keep accumulating whatever this chapter saw.
+      auto it = admitted.find(kv.first);
+      if (it != admitted.end()) { it->second += kv.second; continue; }
+      // Not yet: admit only if this chapter alone saw it twice mid-sentence.
+      if (kv.second >= 2) { admitted[kv.first] = kv.second; ++newly; }
+    }
+    if (newly > peakAdmittedPerChapter) peakAdmittedPerChapter = newly;
     size_t cb = 0;
     for (auto& kv : chapterRuns) cb += kv.second;
     if (chapterRuns.size() > peakChapterRuns) peakChapterRuns = chapterRuns.size();
@@ -585,6 +602,12 @@ int main(int argc, char** argv) {
                 cands.size(), wholeBook);
     std::printf("  worst chapter: %zu runs, %zu bytes\n", peakChapterRuns, peakChapterBytes);
     std::printf("  ...against a measured 45,840-byte device heap floor.\n");
+    size_t ab = 0;
+    for (auto& kv : admitted) ab += kv.first.size() + 12;
+    std::printf("\nIF A RUN MUST EARN ITS SLOT (>=2 mid-sentence in one chapter):\n");
+    std::printf("  card index would hold %zu runs, %zu bytes (%.1f%% of the naive table)\n",
+                admitted.size(), ab, cands.empty() ? 0.0 : 100.0 * ab / wholeBook);
+    std::printf("  most admitted by any one chapter: %zu\n", peakAdmittedPerChapter);
   }
 
   // Is this a list or a dictionary? A NAMES screen has to be scrollable, not endless.
