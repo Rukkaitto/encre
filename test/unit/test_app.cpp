@@ -98,8 +98,8 @@ class NullTheme : public Theme {
   void renderContents(Framebuffer&, const FontSet&, const ContentsViewModel&, Plane) override {}
   int contentsVisibleRows(int, const FontSet&) override { return 8; }
   void readerMetrics(int, int, const FontSet&, const GlyphSource&, PageMetrics&) const override {}
-  void renderReader(Framebuffer&, const FontSet&, const GlyphSource&, const ReaderViewModel&,
-                    const Page&, Plane) override {}
+  void renderReader(Framebuffer&, const FontSet&, const GlyphSource&, const GlyphSource*,
+                    const ReaderViewModel&, const Page&, Plane) override {}
   void settingsMetrics(int, const FontSet&, int& listH, int& rowH, int& headerH) const override {
     listH = 0;
     rowH = 1;

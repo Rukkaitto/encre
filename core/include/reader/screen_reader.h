@@ -118,6 +118,14 @@ class ReaderScreen : public Screen {
                const GlyphSource* body);
   ~ReaderScreen() override;
 
+  // MUST BE SET BEFORE THE BOOK IS OPENED. It goes into `metrics_`, which the page
+  // builder reads at `add()` time, so a face arriving after the first page was laid
+  // would measure that page roman and draw it italic.
+  void setItalic(const GlyphSource* italic) {
+    italic_ = italic;
+    metrics_.italic = italic;
+  }
+
   ScreenId id() const override { return ScreenId::Reader; }
   Action onGesture(const GestureEvent& g) override;
   void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
@@ -237,6 +245,11 @@ class ReaderScreen : public Screen {
 
   ChapterReader chapter_;
   const GlyphSource* body_;
+  // The italic face, or null. Held beside `body_` and pushed into `metrics_` so the
+  // WRAP measures with it -- setting it after a page has been laid would leave the
+  // layout measured in one face and drawn in two, which is the disagreement
+  // StyledFace exists to prevent.
+  const GlyphSource* italic_ = nullptr;
   PageMetrics metrics_{};
 
   // One cursor per page, in order -- but only as far as has been READ, unless

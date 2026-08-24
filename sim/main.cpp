@@ -292,10 +292,19 @@ int main(int argc, char** argv) {
   // would leave it rasterising from freed heap.
   std::vector<uint8_t> bodyTtf;
   reader::ScalableFont body;
+  // THE ITALIC IS A SECOND FILE AND A SECOND FACE, and its buffer has to outlive it
+  // for the same reason the roman's does.
+  std::vector<uint8_t> italicTtf;
+  reader::ScalableFont italic;
   if (isReader || isReaderMenu) {
     bodyTtf = slurp(std::string(ASSETS_DIR) + "/built/literata_body.ttf");
     if (!body.init(bodyTtf.data(), bodyTtf.size(), reader::kBodyPpem)) {
       std::fprintf(stderr, "body face failed to load\n");
+      return 1;
+    }
+    italicTtf = slurp(std::string(ASSETS_DIR) + "/built/literata_italic.ttf");
+    if (!italic.init(italicTtf.data(), italicTtf.size(), reader::kBodyPpem)) {
+      std::fprintf(stderr, "italic face failed to load\n");
       return 1;
     }
   }
@@ -309,8 +318,10 @@ int main(int argc, char** argv) {
     // App::render.
     reader::PageMetrics m;
     theme.readerMetrics(w, h, fonts, body, m);
+    m.italic = &italic;
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body);
+    factory.setReaderItalic(&italic);
     factory.setReaderMetrics(m);
     factory.setReaderDemo();
     factory.setContentsDemo();  // the menu's header comes from the same demo catalogue
@@ -362,8 +373,10 @@ int main(int argc, char** argv) {
     // this is the first screen in the project whose golden is not a 1-bit frame.
     reader::PageMetrics m;
     theme.readerMetrics(w, h, fonts, body, m);
+    m.italic = &italic;
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body);
+    factory.setReaderItalic(&italic);
     factory.setReaderMetrics(m);
     factory.setReaderDemo();
     std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Reader);

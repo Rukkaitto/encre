@@ -131,7 +131,11 @@ class Theme {
   // took only a view model would have to lay the page out itself, and then the
   // screen could not know how many pages there are or which one it is on.
   virtual void renderReader(Framebuffer& fb, const FontSet& fonts, const GlyphSource& body,
-                            const ReaderViewModel& vm, const Page& page, Plane plane) = 0;
+                            // THE ITALIC, AND NULL IS A SUPPORTED STATE: emphasis is then
+                            // drawn roman, which is what the firmware did before the second
+                            // asset existed and what any caller with one face gets.
+                            const GlyphSource* italic, const ReaderViewModel& vm,
+                            const Page& page, Plane plane) = 0;
 
 };
 }  // namespace reader

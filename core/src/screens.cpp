@@ -371,6 +371,12 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
         // a way the user can see through, rather than wrong in a way they cannot.
         return nullptr;
       }
+      // BEFORE setMetrics, and that ordering is the whole point: setMetrics lays the
+      // chapter out, and the wrap measures emphasis with this face. Setting it after
+      // would leave the first page measured roman and drawn in two faces -- the
+      // measure/draw disagreement StyledFace exists to prevent, and invisible on any
+      // page that happens to have no emphasis.
+      scr->setItalic(readerItalic_);
       // The expensive call: one decode of the chapter to build the page index.
       scr->setMetrics(readerMetrics_);
       return scr;

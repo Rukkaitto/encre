@@ -149,6 +149,9 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // building one that renders nothing: a screen with no text is
   // indistinguishable from a book that failed to open.
   void setReaderBody(const GlyphSource* body) { readerBody_ = body; }
+  // The italic face for emphasis, or null for "draw it roman". Set alongside the
+  // body, because it belongs to `readerMetrics_` too and the WRAP reads it.
+  void setReaderItalic(const GlyphSource* italic) { readerItalic_ = italic; }
   void setReaderMetrics(const PageMetrics& m) { readerMetrics_ = m; }
   // The column the Reader is laid out in. Read by a caller that has to record WHICH
   // geometry a saved line was measured at -- see ReadingPosition. One source of
@@ -278,6 +281,7 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   int settingsRowH_ = 0;
   int settingsHeaderH_ = 0;
   const GlyphSource* readerBody_ = nullptr;
+  const GlyphSource* readerItalic_ = nullptr;
   PageMetrics readerMetrics_{};
   OpenedBook readerBook_{};
   bool readerDemo_ = false;

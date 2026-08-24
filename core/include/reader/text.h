@@ -2,6 +2,9 @@
 #include <string>
 #include <string_view>
 
+#include <vector>
+
+#include "reader/emphasis.h"
 #include "reader/tracking.h"
 
 namespace reader {
@@ -64,6 +67,62 @@ int drawText(Framebuffer& fb, const GlyphSource& font, int x, int baselineY, std
 //
 // Returns the advance consumed, INCLUDING the stretch -- so the return is the
 // justified line's real width and a caller can check it against the column.
+// --- A face that changes part-way through the text ---------------------------
+//
+// What the reader wraps body text with once a block can carry emphasis. Every
+// chrome caller keeps the single-face overload above and nothing on any existing
+// board moves.
+//
+// IT EXISTS BECAUSE THE TWO FACES ARE NOT THE SAME WIDTH. Measured at ppem 32 on
+// the prepped assets, Literata's italic runs **6% to 9% narrower** than the roman
+// over the same string -- "poor dress" is 159px roman and 149px italic, and
+// "ABCDEFGHIJKLMNOPQRSTUVWXYZ" is 601 against 549. So measuring emphasis with the
+// roman and drawing it with the italic mis-measures a 20-byte phrase by ~20px on a
+// 444px column: most of a word, enough to break the line in the wrong place AND to
+// hand justification the wrong slack for it.
+//
+// KERNING IS LOST ACROSS A FACE BOUNDARY, and that is the right trade rather than
+// an oversight. Measuring in pieces cannot see the pair that straddles a
+// roman-to-italic join -- but there is no such pair to see, because the two faces
+// have separate `kern` tables and nothing defines a pair between them. What matters
+// is that the DRAW splits at exactly the same boundaries, so the measuring pass and
+// the drawing pass agree; a joined measure and a split draw would not.
+struct StyledFace {
+  const GlyphSource* roman = nullptr;
+  // Null means "measure emphasis as roman" -- the state the firmware was in before
+  // the italic asset existed, and still the state of any caller that has no second
+  // face to offer. It is a degradation rather than a failure.
+  const GlyphSource* italic = nullptr;
+  // Byte ranges into the text being wrapped, sorted and non-overlapping. Null or
+  // empty is the overwhelmingly common case and takes the single-face path whole.
+  const std::vector<Span>* emphasis = nullptr;
+
+  bool anyEmphasis() const {
+    return italic != nullptr && emphasis != nullptr && !emphasis->empty();
+  }
+  // Out of line: this header only forward-declares GlyphSource.
+  const GlyphSource& at(size_t off) const;
+  // `text[from, to)`, in as few pieces as there are style changes in it -- which is
+  // ONE piece for almost every line ever measured.
+  int measure(std::string_view text, size_t from, size_t to, Tracking tracking) const;
+};
+
+// Draws one line whose face may change part-way through, and returns its advance.
+//
+// THE PEN CARRIES ACROSS THE PIECES IN 26.6, which is the whole reason this is not
+// a loop of `drawTextJustified` calls in the caller. `drawRun` takes an integer x
+// and returns an integer advance, so chaining pieces at whole pixels would round at
+// every face boundary -- and the fractional pen is one of the fidelity fixes
+// text.cpp exists to keep in ONE place.
+//
+// KERNING RESETS AT A BOUNDARY, and it must: `kerning()` is a call into one
+// GlyphSource about a pair of ITS glyphs, and there is no pair defined across two
+// faces. StyledFace::measure splits at the same boundaries and does the same, which
+// is what keeps the measuring pass and this one in agreement.
+int drawTextStyled(Framebuffer& fb, const StyledFace& face, int x, int baselineY,
+                   std::string_view utf8, const std::vector<Span>& emphasis,
+                   int extraPerGapF26, Ink ink, Tracking tracking, Plane plane);
+
 int drawTextJustified(Framebuffer& fb, const GlyphSource& font, int x, int baselineY,
                       std::string_view utf8, int extraPerGapF26, Ink ink = Ink::Black,
                       Tracking tracking = {}, Plane plane = Plane::Bw);

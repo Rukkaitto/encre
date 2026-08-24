@@ -13,15 +13,20 @@ namespace reader {
 // place for the fractional pen, the kern-before-glyph order, the notdef box and
 // every fidelity fix this file has accumulated to be got subtly differently. The
 // header says one text path; this is where that is true or not.
-static int drawRun(Framebuffer& fb, const GlyphSource& font, int x, int baselineY,
-                   std::string_view utf8, Ink ink, Tracking tracking, Plane plane,
-                   int extraPerGapF26) {
+// THE PEN IS THE ARGUMENT AND THE RETURN, in 26.6. It used to take an integer x
+// and return an integer advance, which was exactly right while a line was one run
+// in one face -- and rounds at every boundary once a line can change face
+// part-way. `drawRun` below keeps the integer signature for every caller that has
+// one run, so nothing else moves.
+static int drawRunF26(Framebuffer& fb, const GlyphSource& font, int penFIn, int baselineY,
+                      std::string_view utf8, Ink ink, Tracking tracking, Plane plane,
+                      int extraPerGapF26) {
   const bool white = (ink == Ink::White);
   // The pen is 26.6 fixed point; `pen` below is only ever the *paint* position,
   // rounded off it. With integer tracking penF stays a multiple of 64 and every
   // glyph lands exactly where the old integer pen put it, so this is a strict
   // generalisation rather than a re-rounding of the untracked runs.
-  int penF = pxToF26(x);
+  int penF = penFIn;
   char32_t prev = 0;
   for (size_t i = 0; i < utf8.size();) {
     const char32_t cp = utf8Next(utf8, i);
@@ -99,8 +104,47 @@ static int drawRun(Framebuffer& fb, const GlyphSource& font, int x, int baseline
     if (cp == U' ') penF += extraPerGapF26;
     prev = cp;
   }
+  return penF;
+}
+
+static int drawRun(Framebuffer& fb, const GlyphSource& font, int x, int baselineY,
+                   std::string_view utf8, Ink ink, Tracking tracking, Plane plane,
+                   int extraPerGapF26) {
+  const int penF =
+      drawRunF26(fb, font, pxToF26(x), baselineY, utf8, ink, tracking, plane, extraPerGapF26);
   // f26ToPx is exact-linear in x (x is a whole pixel, so it factors out of the
   // rounding), which is why this equals Font::measure of the same run.
+  return f26ToPx(penF) - x;
+}
+
+const GlyphSource& StyledFace::at(size_t off) const {
+  return anyEmphasis() && emphasisedAt(*emphasis, off) ? *italic : *roman;
+}
+
+int drawTextStyled(Framebuffer& fb, const StyledFace& face, int x, int baselineY,
+                   std::string_view utf8, const std::vector<Span>& emphasis,
+                   int extraPerGapF26, Ink ink, Tracking tracking, Plane plane) {
+  // The common case is ONE piece in ONE face, and it takes the same call the
+  // unstyled path takes -- so a page with no emphasis on it costs what it did.
+  if (face.italic == nullptr || emphasis.empty())
+    return drawRun(fb, *face.roman, x, baselineY, utf8, ink, tracking, plane, extraPerGapF26);
+
+  // A LOCAL FACE OVER THE LINE'S OWN SPANS. `face.emphasis` indexes whatever text
+  // the WRAP was given -- a whole block -- and this function is handed one LINE
+  // with spans re-based onto it. Using the caller's face here would read the block's
+  // offsets against the line's bytes, which is the same class of error as a stale
+  // guard: both operands look right and mean different things.
+  const StyledFace local{face.roman, face.italic, &emphasis};
+
+  int penF = pxToF26(x);
+  size_t pos = 0;
+  while (pos < utf8.size()) {
+    const size_t next = nextStyleBoundary(emphasis, pos, utf8.size());
+    const size_t stop = (next > pos && next <= utf8.size()) ? next : utf8.size();
+    penF = drawRunF26(fb, local.at(pos), penF, baselineY, utf8.substr(pos, stop - pos), ink,
+                      tracking, plane, extraPerGapF26);
+    pos = stop;
+  }
   return f26ToPx(penF) - x;
 }
 

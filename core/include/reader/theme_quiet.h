@@ -39,7 +39,8 @@ class QuietTheme : public Theme {
   void readerMetrics(int panelW, int panelH, const FontSet& fonts, const GlyphSource& body,
                      PageMetrics& out) const override;
   void renderReader(Framebuffer& fb, const FontSet& fonts, const GlyphSource& body,
-                    const ReaderViewModel& vm, const Page& page, Plane plane) override;
+                    const GlyphSource* italic, const ReaderViewModel& vm, const Page& page,
+                    Plane plane) override;
 
 };
 

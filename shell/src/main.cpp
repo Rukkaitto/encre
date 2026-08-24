@@ -18,6 +18,7 @@
 #include "font_body500.h"
 #include "font_body700.h"
 #include "font_body_serif.h"
+#include "font_body_serif_italic.h"
 #include "font_display700.h"
 #include "font_label400.h"
 #include "font_label500.h"
@@ -317,6 +318,20 @@ static reader::DemoScreenFactory gFactory(gSd, reader::kBooksRoot);
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 
 static reader::ScalableFont gBody;
+// THE ITALIC, WITH ITS OWN CACHE, and the budget is measured rather than defaulted.
+//
+// 16 KB is right for the ROMAN: it is hot on every line of every page, and the union
+// of printable ASCII plus the accents fontc.py subsets is 12,292 B at ppem 32. The
+// italic is not hot. Measured over eight real books, `<em>` covers 0.6%-5.8% of a
+// chapter's characters over 103 distinct codepoints -- 9,969 B to hold the union of
+// all eight books and never evict.
+//
+// 10 KB therefore holds essentially the whole working set, and the failure mode if a
+// book exceeds it is that the arena wraps and re-rasterises: SLOWER, never dead,
+// which is the property ScalableFont's fixed budget exists to give. Against a
+// measured heap floor of 45,840 bytes with a page on glass, taking 16 KB here for a
+// face that sets 3% of the text would have been the easy wrong answer.
+static reader::ScalableFont gItalic(10u * 1024u);
 // Did SDCardManager::begin() ever return true this boot? It opens with
 // `if (initialized) return true;` and the SPI path exposes no end()/unmount(), so
 // after one success a later begin() reports success WITHOUT touching the
@@ -2341,6 +2356,25 @@ void setup() {
       const std::optional<reader::Glyph> g = body.glyph('a');
       const uint32_t t3 = micros();
       const reader::ScalableFont::CacheStats cs = body.cacheStats();
+      // THE ITALIC IS INITIALISED HERE TOO, and a failure is logged rather than
+      // fatal: emphasis falls back to roman, which is exactly what `italic == nullptr`
+      // means everywhere below. A book still opens.
+      const uint32_t i0 = micros();
+      const bool italOk =
+          gItalic.init(kFontBodySerifItalic, kFontBodySerifItalicSize, reader::kBodyPpem);
+      const uint32_t i1 = micros();
+      const reader::ScalableFont::CacheStats ics = gItalic.cacheStats();
+      Serial.printf("[italic] %s ppem=%d line=%d init=%uus cache=%u/%u+%u\n",
+                    italOk ? "ok" : "FAILED", gItalic.ppem(), gItalic.lineHeight(),
+                    (unsigned)(i1 - i0), (unsigned)ics.usedBytes,
+                    (unsigned)ics.capacityBytes, (unsigned)ics.overheadBytes);
+      // THE TWO FACES MUST AGREE ON THE LINE BOX. One baseline per line, so an
+      // italic with a different ascent would sit off it -- and both files are
+      // unitsPerEm 1000 pinned to the same coordinates, so this is a check on the
+      // ASSETS rather than on the code.
+      if (italOk && gItalic.lineHeight() != body.lineHeight())
+        Serial.printf("[italic] LINE BOX MISMATCH roman=%d italic=%d\n", body.lineHeight(),
+                      gItalic.lineHeight());
       Serial.printf(
           "[body] ppem=%d weight=%d ascent=%d descent=%d line=%d init=%uus "
           "glyph_a=%dx%d raster=%uus cache=%u/%u+%u\n",
@@ -2615,8 +2649,12 @@ void setup() {
   // landscape height once and showed four rows instead of seven.
   reader::PageMetrics readerMetrics;
   gTheme.readerMetrics(logicalW, logicalH, fonts, gBody, readerMetrics);
+  // The WRAP measures emphasis with this, so it has to be in the metrics the factory
+  // hands the reader -- not only in the draw.
+  readerMetrics.italic = &gItalic;
   gFactory.setReaderMetrics(readerMetrics);
   gFactory.setReaderBody(&gBody);
+  gFactory.setReaderItalic(&gItalic);
   Serial.printf("[boot] Reader column %dx%d at (%d,%d), body ppem %d\n", readerMetrics.columnW,
                 readerMetrics.columnH, readerMetrics.columnLeft, readerMetrics.columnTop,
                 gBody.ppem());

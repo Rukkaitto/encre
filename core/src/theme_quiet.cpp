@@ -987,6 +987,7 @@ void QuietTheme::readerMetrics(int panelW, int panelH, const FontSet& fonts,
 }
 
 void QuietTheme::renderReader(Framebuffer& fb, const FontSet& fonts, const GlyphSource& body,
+                              const GlyphSource* italic,
                               const ReaderViewModel& vm, const Page& page, Plane plane) {
   const Font& meta = fonts[Role::Meta400];
   const Font& metaTitle = fonts[Role::Meta500];  // the header's book title, 21px/500
@@ -1032,9 +1033,12 @@ void QuietTheme::renderReader(Framebuffer& fb, const FontSet& fonts, const Glyph
   // Already positioned by reader/layout.h, in these coordinates. All this does is
   // draw each line with the stretch layout computed, which is what keeps
   // justification a property of the measurement rather than of the paint.
+  // ONE CALL PER LINE, and it takes the same path as before when the line carries no
+  // emphasis -- which is almost every line of almost every book.
+  const StyledFace face{&body, italic, nullptr};
   for (const LaidLine& ln : page.lines)
-    drawTextJustified(fb, body, ln.x, ln.baselineY, ln.text, ln.extraPerGapF26, Ink::Black,
-                      {}, plane);
+    drawTextStyled(fb, face, ln.x, ln.baselineY, ln.text, ln.emphasis, ln.extraPerGapF26,
+                   Ink::Black, {}, plane);
 
   // --- The footer: percent, bar, counter ---
   const int footerTop = fb.height() - kReadFooterPadBottom - meta.lineHeight();

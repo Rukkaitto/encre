@@ -539,7 +539,7 @@ Action ReaderScreen::onGesture(const GestureEvent& g) {
 void ReaderScreen::render(Framebuffer& fb, const FontSet& fonts, Theme& theme,
                           Plane plane) const {
   if (body_ == nullptr) return;
-  theme.renderReader(fb, fonts, *body_, vm_, page_, plane);
+  theme.renderReader(fb, fonts, *body_, italic_, vm_, page_, plane);
 }
 
 }  // namespace reader
