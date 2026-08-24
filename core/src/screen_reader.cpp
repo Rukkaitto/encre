@@ -395,26 +395,55 @@ bool ReaderScreen::openAtCursor(Cursor want) {
   page_ = Page{};
   if (body_ == nullptr || !chapter_.ok() || !chapter_.rewind()) return false;
 
-  PageBuilder pb(*body_, metrics_);
-  if (!pb.viable()) return false;
-  // Boundaries, not pages: the lines of every page before the target would be built
-  // and dropped. Same reason buildIndex counts this way.
-  pb.countOnly();
+  // ONE WALK, NOT TWO, AND THE LINES ARE KEPT. This counted boundaries and then
+  // handed the answer to seekTo(), which REWOUND AND WALKED THE WHOLE CHAPTER AGAIN
+  // to lay out the one page it wanted -- so restoring a position cost two full
+  // decodes of everything before it. On the device that is what CONTINUE was: a
+  // saved position on page 99 of a 248 KB chapter measured `post=2269ms`, and the
+  // walk on its own is ~1010 ms.
+  //
+  // The trade is exact and it is the same one the eager page count got wrong in the
+  // other direction: counting mode skips building the LINES of every page it passes,
+  // which this project measured at ~15% of a walk, and it was buying that 15% at the
+  // price of a second whole walk. So the lines stay on, the most recently completed
+  // page is held, and when the target is found that page IS the answer.
+  //
+  // What makes it land rather than merely be cheaper: the builder is left LIVE, sat
+  // exactly one page past the target, which is precisely the state a forward turn
+  // needs -- the same state seekTo() used to hand back. So this is not "seekTo with
+  // its work skipped", it is seekTo's own postcondition reached once.
+  pb_.reset(new (std::nothrow) PageBuilder(*body_, metrics_));
+  if (pb_ == nullptr || !pb_->viable()) {
+    pb_.reset();
+    return false;
+  }
 
   // The start of the page being filled, pushed once that page completes -- the same
   // one-behind bookkeeping buildIndex does, and for the same reason.
-  Cursor pending = pb.pageStart();
+  Cursor pending = pb_->pageStart();
+  Page held;
+  Cursor heldStart{};
+  bool haveHeld = false;
   Block b;
-  int i = 0;
+  fed_ = 0;
   bool found = false;
   for (int guard = 0; guard < kMaxPages * 4 && !found; ++guard) {
     if (!chapter_.next(b)) break;
-    pb.add(b, i++);
+    pb_->add(b, fed_++);
     b = Block{};  // dropped: the whole point of streaming
-    while (pb.ready()) {
+    while (pb_->ready()) {
       starts_.push_back(pending);
-      pb.take();
-      pending = pb.pageStart();
+      heldStart = pending;
+      held = pb_->take();
+      haveHeld = true;
+      pending = pb_->pageStart();
+      // EVERY PAGE PASSED GOES INTO THE RING on its way past, which costs nothing --
+      // it was laid out anyway and the ring drops all but the newest few. So a
+      // restore lands with the pages BEFORE the target already held, and the first
+      // backward turns off a resumed position need no decode at all. They were the
+      // worst case there was: a restore puts the reader deep in a chapter, which is
+      // exactly where a rewind costs most.
+      cachePage(chapterAt_, heldStart, held);
       // `want` is on the page just recorded exactly when the NEXT page starts after
       // it. Strictly after: a cursor EQUAL to the next page's start belongs to that
       // next page, not to this one.
@@ -431,22 +460,34 @@ bool ReaderScreen::openAtCursor(Cursor want) {
     // layout's last block. The end of the chapter is the closest honest answer to
     // "past the end of the chapter" -- and the whole chapter really was walked, so
     // the count is known.
-    if (pb.pageHasContent() && static_cast<int>(starts_.size()) < kMaxPages)
+    if (pb_->pageHasContent() && static_cast<int>(starts_.size()) < kMaxPages) {
       starts_.push_back(pending);
-    pb.finish();
+      heldStart = pending;
+      held = pb_->finish();
+      haveHeld = true;
+      cachePage(chapterAt_, heldStart, held);
+    } else {
+      pb_->finish();
+    }
+    // SPENT, exactly as seekTo marks it: the builder has been asked for the chapter's
+    // end, so there is nothing left for a forward turn to continue and it must
+    // re-establish one rather than read false as "no next page".
+    pb_.reset();
     indexComplete_ = true;
   }
 
-  if (starts_.empty()) {
+  if (starts_.empty() || !haveHeld) {
     // No pages at all: a cover or a title page. Nought is a KNOWN count, exactly as
     // openFirstPage treats it.
+    pb_.reset();
     indexComplete_ = true;
     return false;
   }
-  // The target is the last boundary recorded, in both branches: the loop stops having
-  // just pushed the page that holds the cursor, and the fallback stops having just
-  // pushed the chapter's last.
-  return seekTo(static_cast<int>(starts_.size()) - 1);
+  at_ = static_cast<int>(starts_.size()) - 1;
+  page_ = std::move(held);
+  page_.lastPage = indexComplete_ && at_ + 1 >= static_cast<int>(starts_.size());
+  syncVm();
+  return true;
 }
 
 // --- THE RING OF LAID-OUT PAGES ------------------------------------------------
@@ -461,6 +502,10 @@ const Page* ReaderScreen::cachedPage(int chapter, Cursor start) const {
 }
 
 void ReaderScreen::cachePage(int chapter, Cursor start, const Page& p) {
+  // COUNTED BEFORE THE DEPTH GUARD, so the figure is "pages laid out" and not "pages
+  // the ring happened to keep" -- the second would go to zero if the ring were ever
+  // disabled and would take the restore's cost measurement with it.
+  if (!p.lines.empty()) ++ring_.stored;
   if (kPageCacheDepth <= 0) return;
   // An empty page is not worth a slot and is the one thing a hit must never be
   // mistaken for -- a chapter that paginates to nothing takes the same code path.
@@ -520,20 +565,40 @@ bool ReaderScreen::seekTo(int p, bool needStream) {
   // and the number the ring exists to avoid paying. Counted here rather than at the
   // call sites so the figure cannot miss one.
   ++ring_.decodes;
-  pb_->startAt(starts_[static_cast<size_t>(p)]);
+  // AND IT STOPS SKIPPING A FEW PAGES EARLY, KEEPING WHAT IT PASSES. The walk goes
+  // over those pages either way -- the inflate, the parse and the wrap are already
+  // paid for every one of them -- and all `startAt` saves on them is the LINE
+  // BUILDING, which this project measured at ~15% of a whole walk. Building three
+  // pages of lines instead of one is a fraction of that fraction.
+  //
+  // What it buys is the case the ring could not reach: a reader going BACKWARDS
+  // through new ground. That was one full rewind per page -- ~1010 ms each on the
+  // device, deep in a long chapter, and it is what the device reported after the
+  // ring landed. It is now one rewind per kPageCacheDepth pages, with the rest free.
+  //
+  // Only the ring's own depth back, never further: pages older than it can hold
+  // would be laid out and immediately evicted, which is the cost with none of the
+  // benefit.
+  const int from = p >= kPageCacheDepth ? p - (kPageCacheDepth - 1) : 0;
+  pb_->startAt(starts_[static_cast<size_t>(from)]);
 
   fed_ = 0;
   Block b;
+  int at = from;
   for (int guard = 0; guard < kMaxPages * 4; ++guard) {
     if (!chapter_.next(b)) break;
     pb_->add(b, fed_++);
     b = Block{};
-    if (pb_->ready()) {
-      page_ = pb_->take();
-      at_ = p;
-      page_.lastPage = (p + 1 >= static_cast<int>(starts_.size()));
-      cachePage(chapterAt_, starts_[static_cast<size_t>(p)], page_);
-      return true;
+    while (pb_->ready() && at <= p) {
+      Page produced = pb_->take();
+      cachePage(chapterAt_, starts_[static_cast<size_t>(at)], produced);
+      if (at == p) {
+        page_ = std::move(produced);
+        at_ = p;
+        page_.lastPage = (p + 1 >= static_cast<int>(starts_.size()));
+        return true;
+      }
+      ++at;
     }
   }
   page_ = pb_->finish();

@@ -352,3 +352,47 @@ TEST_CASE("completing the index does not decode the page it returns to") {
   CHECK(pageText(r.scr->page()) == wasText);
   CHECK(r.scr->pageIndex() == 3);
 }
+
+// --- SUSTAINED BACKWARD READING ----------------------------------------------
+//
+// The ring alone only serves a reader who comes BACK to a page. A reader going
+// backwards through new ground -- which is what a restore deep in a chapter leaves
+// you doing -- missed it every time, and the device measured that at ~1010 ms a
+// turn. seekTo now stops skipping kPageCacheDepth pages early and keeps what it
+// passes, so one rewind serves that many turns.
+TEST_CASE("one rewind serves a whole ring's worth of backward turns") {
+  const std::string doc = readerfix::longChapter(60);
+  readerfix::Reading fwd(doc);
+  std::vector<std::string> text;
+  for (int i = 0;; ++i) {
+    text.push_back(readerfix::pageText(fwd.scr->page()));
+    const int was = fwd.scr->pageIndex();
+    fwd.scr->onGesture({reader::Gesture::Next});
+    if (fwd.scr->pageIndex() == was) break;
+  }
+  REQUIRE(static_cast<int>(text.size()) > reader::ReaderScreen::kPageCacheDepth + 4);
+
+  readerfix::Reading r(doc);
+  const int last = static_cast<int>(text.size()) - 1;
+  for (int i = 0; i < last; ++i) r.scr->onGesture({reader::Gesture::Next});
+  REQUIRE(r.scr->pageIndex() == last);
+
+  // TWICE the ring's depth, and that is the point rather than thoroughness: reading
+  // forward already seeded the ring with the last kPageCacheDepth pages, so a walk
+  // back only that far is served entirely by what the forward pass left and says
+  // nothing about this change. Written that way first, and the mutation passed.
+  //
+  // Over 2*depth turns the fix pays a rewind every depth pages; without it every
+  // turn past the forward-seeded ones pays its own.
+  const int depth = reader::ReaderScreen::kPageCacheDepth;
+  const uint32_t before = r.scr->ringStats().decodes;
+  for (int i = 0; i < depth * 2; ++i) {
+    r.scr->onGesture({reader::Gesture::Prev});
+    CHECK(r.scr->pageIndex() == last - 1 - i);
+    // ...and every one of them is the page reading forward gave, which is the
+    // property that makes a cached page worth anything at all.
+    CHECK(readerfix::pageText(r.scr->page()) == text[static_cast<size_t>(last - 1 - i)]);
+  }
+  const uint32_t spent = r.scr->ringStats().decodes - before;
+  CHECK(spent <= 2);
+}

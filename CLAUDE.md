@@ -2346,6 +2346,33 @@ A DEFLATE stream cannot be seeked and checkpointing one costs 32 KB a checkpoint
   ~520 ms refresh. Buffers are reused, so it allocates nothing — churning 32 KB per
   turn is how a heap with 142 KB free becomes one that cannot serve the next chapter.
 
+**AND THE COST IS PROPORTIONAL TO THE PAGE INDEX, which is what the first fix
+missed.** A rewind decodes pages 0..p, so it costs what page you are ON, not what
+page you are going to. The device showed it plainly once a real saved position was
+restored: at page 38 a backward turn was ~376 ms, and at **page 99 of the same
+chapter it was ~1010 ms**. Two consequences, and both are fixed:
+
+- **A RESTORE WALKED THE CHAPTER TWICE.** `openAtCursor` counted boundaries with
+  `countOnly()` to find which page holds the cursor, then handed that page index to
+  `seekTo()`, which rewound and walked the whole prefix AGAIN to lay one page out.
+  On the device that was `post=2269ms` on CONTINUE against ~1010 ms for one walk.
+  It is one walk now, with the lines kept: counting mode saves the LINE BUILDING of
+  every page it passes, ~15% of a walk, and it was buying that 15% at the price of a
+  second whole walk. The builder is left live one page past the target, which is
+  `seekTo`'s own postcondition reached once instead of twice.
+- **A REWIND NOW KEEPS WHAT IT PASSES.** `seekTo` stops skipping `kPageCacheDepth`
+  pages early and caches each one it takes. The inflate, the parse and the wrap for
+  those pages are already paid — only the line building was being skipped — so one
+  rewind serves a whole ring's worth of backward turns instead of one. Sustained
+  backward reading goes from a rewind per page to a rewind per `kPageCacheDepth`.
+
+**A TEST THAT WALKS BACK ONLY `kPageCacheDepth` PAGES CANNOT SEE THAT CHANGE**, and
+was written that way first. Reading forward already seeds the ring with the last
+`kPageCacheDepth` pages, so such a walk is served entirely by what the forward pass
+left behind — the mutation passed. It walks back **twice** the depth now. Same
+lesson as the no-op mutation recorded under **Goldens**: check the mutation lands
+before believing what it tells you.
+
 **SO THERE IS A RING OF LAID-OUT PAGES, DEPTH 3**, and turning back to the page you
 just left now decodes nothing at all: 5,858 → **8.3 µs** desktop for a backward turn,
 and a Prev,Prev,Next,Next burst 4,696 → **22.6 µs with zero decodes**.

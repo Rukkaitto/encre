@@ -337,6 +337,12 @@ class ReaderScreen : public Screen {
   struct RingStats {
     uint32_t hits = 0;
     uint32_t decodes = 0;
+    // PAGES LAID OUT, counted where they are handed to the ring -- which is every
+    // page any walk completes, so this is the walk's real unit of work. It is what
+    // distinguishes a restore that lays the prefix out ONCE from one that lays it
+    // out twice, and a green suite cannot tell those apart: both produce the right
+    // page. See test_reader_restore.cpp.
+    uint32_t stored = 0;
   };
   RingStats ringStats() const { return ring_; }
 
