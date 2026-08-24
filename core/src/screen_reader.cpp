@@ -539,8 +539,21 @@ void ReaderScreen::anchorPagedBackward(const AnchorPos& from) {
   syncAnchorLabel();
 }
 
+// A NOTE ON THE SHAPE OF THESE THREE, because one of them shipped as infinite
+// recursion and took the device down with a stack-protection fault.
+//
+// The bug: a scripted edit rewrote the call sites `anchor_.jumped(from, here())` into
+// `anchorJumped(from)` with a replace that had NO COUNT -- and this helper's own body
+// was character-for-character one of those call sites, because it used the same
+// parameter name `from`. So it replaced itself with a call to itself. Its two siblings
+// escaped only because their call sites happened to say `fromNext` and `fromPrev`.
+//
+// NO TEST CAUGHT IT. 873 passed over a function that could only ever recurse, because
+// nothing exercised `goToChapter` -- the jump, which is the Contents path. That gap is
+// closed now; the shape is kept as a reminder that a replacement matching more than
+// you meant is this project's most productive source of defects.
 void ReaderScreen::anchorJumped(const AnchorPos& from) {
-  anchorJumped(from);
+  anchor_.jumped(from, here());
   syncAnchorLabel();
 }
 

@@ -2411,6 +2411,29 @@ passed — `shell/` has no harness, so nothing on the desktop touches that loop.
   like a passing test: I patched `rowRuleFor` in components.cpp where it lives in
   theme_quiet.cpp, so "0 failures" meant "nothing was changed", not "the goldens are
   blind". Check the mutation landed before believing what it tells you.
+- **A SCRIPTED REPLACE WITH NO COUNT REWROTE A FUNCTION INTO A CALL TO ITSELF**, and
+  it reached the device as a stack-protection fault. Rewriting the call sites
+  `anchor_.jumped(from, here())` into `anchorJumped(from)` used `s.replace(a, b)`
+  without a count -- and the new helper's OWN BODY was character-for-character one of
+  those call sites, because it used the same parameter name `from`. So it replaced
+  itself with a call to itself. Its two siblings escaped ONLY because their call sites
+  happened to say `fromNext` and `fromPrev`.
+  **873 TESTS PASSED OVER A FUNCTION THAT COULD ONLY EVER RECURSE**, because nothing
+  exercised `goToChapter` -- the jump, which is what Contents does. Two lessons, and
+  the second is the one that costs:
+  - **Count every scripted replace, and check the anchor is not inside what you just
+    wrote.** This is the THIRD instance today: a note quoting the string it documented
+    was the first match; a helper's body was a call site; and earlier a stale guard
+    survived a replacement that only touched the `return`. The family is always the
+    same -- a pattern matching more than was meant.
+  - **A helper extracted from N call sites needs a test per call site, not per helper.**
+    The extraction looks like one change and is N+1.
+- **THE CRASH DUMP NAMED THE BUG IN THREE LINES.** `RA` repeating with an unchanging
+  frame pointer in 16-byte frames all the way down 16 KB is infinite recursion and not
+  a deep call tree, and `riscv32-esp-elf-addr2line -pfiaC -e .pio/build/xteink/firmware.elf
+  <MEPC> <RA>` resolved it to the function and line. Check the report's
+  `ELF file SHA256` against `shasum -a 256 .pio/build/xteink/firmware.elf` FIRST -- it
+  matched here, which is what made it worth debugging rather than reflashing.
 - **A SPECIMEN BOARD MUST NOT PUT A LINE ON THE WRAP BOUNDARY.** `ReaderList` measured
   7.63%/7.90% against 4.5% for its sibling, and the cause was one list item: "Space is
   measured in rows." is **408px against a 406px measure**. Two separate faults sat on

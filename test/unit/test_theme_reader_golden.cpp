@@ -956,3 +956,77 @@ TEST_CASE("a cross-chapter way back is BOUNDED -- CH. NN, never a chapter's name
   // ...while the HEADER still carries the long name, which is where it belongs.
   CHECK(rd.vm().chapter.find("PARTIE") != std::string::npos);
 }
+
+TEST_CASE("A JUMP TO A CHAPTER SETS THE ANCHOR TO WHERE THE READER WAS") {
+  // THE PATH THAT SHIPPED INFINITE RECURSION. `anchorJumped` had been rewritten into a
+  // call to itself by a scripted edit whose pattern matched the helper's own body, and
+  // 873 tests passed over it because NOTHING EXERCISED goToChapter -- the jump, which
+  // is what Contents does. It took a stack-protection fault on the device to find.
+  //
+  // So this drives the jump, which is the only thing that would have caught it, and it
+  // also pins the rule the jump exists for: the anchor names the DEPARTURE, so a
+  // reader who jumps away has a way back to what they were reading.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  FakeFileSystem fs;
+  REQUIRE(fs.writeAll("/books/b.epub",
+                      std::string_view(reinterpret_cast<const char*>(epubfix::kEpubGood),
+                                       epubfix::kEpubGoodLen)));
+  reader::OpenedBook ob;
+  const char* why = "";
+  REQUIRE_MESSAGE(reader::openBook(fs, "/books/b.epub", ob, &why), std::string(why));
+  REQUIRE(ob.chapterCount() > 1);
+
+  reader::ReaderScreen rd(fs, ob, 0, &body.face);
+  rd.setMetrics(m);
+  const int from = rd.chapterIndex();
+  REQUIRE(rd.vm().anchorLabel.empty());
+
+  // Jump forward. It must return, not recurse, and it must leave a way back.
+  REQUIRE(rd.goToChapter(ob.chapterCount() - 1));
+  CHECK(rd.chapterIndex() == ob.chapterCount() - 1);
+  REQUIRE(rd.anchor().isSet());
+  CHECK(rd.anchor().get().spine == from);          // the DEPARTURE, not the destination
+  REQUIRE_FALSE(rd.vm().anchorLabel.empty());      // and the footer says so
+
+  // A SECOND JUMP OVERWRITES IT, which is the rule that needs the two cases: a pure
+  // high-water rule would find this anchor behind the reader and clear it as
+  // satisfied, throwing away the breadcrumb they wanted.
+  const int mid = rd.chapterIndex();
+  REQUIRE(rd.goToChapter(from));
+  CHECK(rd.chapterIndex() == from);
+  REQUIRE(rd.anchor().isSet());
+  CHECK(rd.anchor().get().spine == mid);
+
+  // And following it lands back and withdraws the promise.
+  rd.onEvent({reader::Button::Up, reader::PressKind::Short});
+  CHECK(rd.chapterIndex() == mid);
+  CHECK(rd.vm().anchorLabel.empty());
+}
+
+TEST_CASE("a jump to the chapter already open changes nothing, anchor included") {
+  // goToChapter answers true early for its own spine. That must not raise an anchor
+  // pointing at the page the reader is standing on -- a promise to go nowhere.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  FakeFileSystem fs;
+  REQUIRE(fs.writeAll("/books/b.epub",
+                      std::string_view(reinterpret_cast<const char*>(epubfix::kEpubGood),
+                                       epubfix::kEpubGoodLen)));
+  reader::OpenedBook ob;
+  const char* why = "";
+  REQUIRE_MESSAGE(reader::openBook(fs, "/books/b.epub", ob, &why), std::string(why));
+  reader::ReaderScreen rd(fs, ob, 0, &body.face);
+  rd.setMetrics(m);
+  const int here = rd.chapterIndex();
+  REQUIRE(rd.goToChapter(here));
+  CHECK(rd.chapterIndex() == here);
+  CHECK_FALSE(rd.anchor().isSet());
+  CHECK(rd.vm().anchorLabel.empty());
+}
