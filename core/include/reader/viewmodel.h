@@ -252,6 +252,16 @@ struct ListRow {
   std::string label;
   std::string value;      // empty on a section header, or where the row discloses
   bool isHeader = false;  // tracked caps, its own rule, never focusable
+  // WHETHER THIS ROW LEADS SOMEWHERE, drawn as a chevron. It cannot be derived from an
+  // empty `value`: the reader menu's `Close book` has neither a value NOR a chevron,
+  // because it acts in place rather than disclosing a screen -- and deriving it drew a
+  // chevron promising a screen that does not exist. ItemActionEntry carries the same
+  // flag explicitly, for the same reason.
+  bool discloses = false;
+  // The board's own tracking where it gives a row one. `Close book` is `0.06em` and its
+  // five siblings are untracked, which is 1.5px a gap at Value500 -- about 15px across
+  // that label, so it is visible rather than pedantic.
+  int trackingEm1000 = 0;
   // Whether this row responds to a press. An unfocusable row is drawn EXACTLY as an
   // unfocused focusable one -- the flag is about input, not about appearance, and the
   // theme must not be tempted to dim it.

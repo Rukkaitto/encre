@@ -428,6 +428,12 @@ bool ReaderScreen::advance() {
   return true;
 }
 
+bool ReaderScreen::goToChapter(int spine) {
+  if (spine < 0 || spine >= book_.chapterCount()) return false;
+  if (spine == chapterAt_) return true;  // already there; a jump to here is a no-op
+  return openChapterAt(spine, /*atEnd=*/false);
+}
+
 bool ReaderScreen::indexPending() const {
   // Not gated on having a book: an in-memory chapter is counted the same way, so the
   // simulator and the goldens exercise the same path the device does.
@@ -502,10 +508,11 @@ Action ReaderScreen::onGesture(const GestureEvent& g) {
     }
     case Gesture::Back:
       return Action::pop();
-    // Activate opens design/ReaderMenu.dc.html, which is not built. It answers
-    // none() rather than doing something approximate, and it is listed as a known
-    // no-op rather than left to be discovered -- a button that does nothing is a
-    // defect this project has shipped twice.
+    // ACTIVATE OPENS THE MENU. It answered none() while ReaderMenu.dc.html was not
+    // built -- listed as a known no-op rather than left to be discovered, because a
+    // button that does nothing is a defect this project has shipped twice. It is built.
+    case Gesture::Activate:
+      return Action::push(ScreenId::ReaderMenu);
     default:
       return Action::none();
   }

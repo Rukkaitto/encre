@@ -2050,6 +2050,91 @@ sides. One central-directory parse and one OPF inflate (~32 KB transient) when C
 opens, not when a book does. Measured 0.2–0.6 ms on the desktop for 28–96 entries, and
 labels total **1,161 bytes for 96 entries** (mean 12.1), so the resident cost is small.
 
+## The reader's menu and the chapter list
+
+`ReaderMenu.dc.html` opens on the page's Activate, and its Contents row opens
+`Contents.dc.html`. Between them they are the "go to chapter" the roadmap lists as
+`contents`.
+
+**THE MENU IS ASSEMBLY, NOT NEW GEOMETRY.** `components.h` already listed ReaderMenu
+among the eight boards sharing the overlay panel box, `kActionsPanelW` is the same 340,
+and `drawPanelRow` was already "72 tall, inset on a panel's own 20px padding, discloses
+with a chevron". The only thing the menu added to the primitives is a row that states a
+VALUE — its `Bookmarks` count — which is the other half of Home's "a row states a
+quantity or discloses a screen, never both".
+
+**IT DECLARES `Mono` WHERE THE READER DECLARES `Grayscale`.** Fidelity comes from the
+top screen, so the menu paints in one waveform instead of three and its focus moves are
+eligible for the overlay-only partial repaint (grayscale never is). The page under the
+veil is hard-thresholded for those frames — the trade, and acceptable because the menu
+is chrome and the page is the one thing here that wanted four levels. Its
+`paintFootprint` is a constant, unlike the actions panel's: all six rows are one height,
+so the panel cannot change height when the focus moves and every move takes the fast
+path.
+
+**`discloses` CANNOT BE DERIVED FROM AN EMPTY VALUE**, and deriving it drew a chevron on
+`Close book` promising a screen that does not exist. That row has neither a value nor a
+mark — it acts in place — so `ListRow` carries the flag explicitly, as `ItemActionEntry`
+already did. It also carries the board's per-row tracking, because `Close book` is
+`0.06em` where its five siblings are untracked: 1.5px a gap at Value500, ~15px across
+that label, so visible rather than pedantic. Both fixes took the menu from 3.24% to
+**3.02%** against its board.
+
+**FOUR OF THE MENU'S SIX ROWS DO NOTHING AND ARE DRAWN ANYWAY** — Settings' rule, and
+the board was edited to match before the screen was written: it had focused Typography,
+which is not built, so implementing it faithfully would have drawn a selection on a dead
+row. `Contents` and `Close book` respond. **`Close book` answers `popTo(Library)`**, and
+its absence is handled by `popTo`'s own documented rule rather than a branch: "stops at
+the root if `target` is not on the stack". A reader who opened from the Library lands
+back there; one who came through Home's CONTINUE lands on Home. Both are where they came
+from.
+
+**CONTENTS IS SETTINGS' SHAPE**: a header band, a list interleaving section headers with
+64px rows, a rail when it overflows, a hint bar. `drawDetailRow`'s own comment was
+written anticipating it — "`focused` inverts it, which BookDetails never does and
+Contents does on the chapter you are in". The section header turned out to be **byte
+identical on both boards** (`--t-meta`, 0.2em/500, `padding: 18px 24px 6px 24px`, a 2px
+`border-top` except the first), so it is `drawSectionHeader` now rather than a second
+copy — and it returns the height it ACTUALLY drew, because a first header is shorter by
+its missing rule and a caller advancing by the nominal height puts every row 2px low.
+Settings shipped that exact bug once.
+
+**A DEPTH-1 ENTRY IS A HEADER ONLY IN A BOOK THAT HAS DEEPER ONES.** Two of the four
+measured books are flat, and treating depth 1 as a header unconditionally would render
+one as nothing but headers — no focusable row, nothing to select. `sectioned()` decides
+once, from the list. **A sectioned book therefore always has a focusable row by
+construction**, since `sectioned()` requires a depth-2 entry and every such entry is a
+row; the only nothing-to-select case is an empty contents. That invariant replaced a
+test case written for a state that cannot exist.
+
+**A SECTION HEADER IS ALSO A TARGET AND IS STILL NOT FOCUSABLE.** An NCX header carries
+its own `content src`, so jumping to it would work — but the board draws it as a tracked
+caps label with its own rule and no value, which is not a row a selection sits on. The
+cost is one unreachable target per section, and its first child usually names the same
+spine entry anyway.
+
+**GO POPS TO THE READER; THE SHELL MOVES IT.** Contents cannot push a Reader — one is
+already under the menu it was opened from, and a second would leave the first below with
+its own position. So it answers `popTo(Reader)` and names the chapter, the shell reads
+`chosenSpine()` **while Contents is still on top** (the dispatch pops it, and after that
+there is no screen left to ask), and calls `ReaderScreen::goToChapter` once the Reader is
+back. That lands on page ONE of the target rather than a saved position: a reader who
+picked a chapter from a list asked for its beginning.
+
+**THE TOC IS READ WHEN THE MENU'S CONTENTS ROW IS PRESSED**, not when a book opens — one
+archive re-open (~32 KB transient) and ~1.2 KB of labels, paid on a screen the reader
+opens occasionally rather than carried for a whole session. `App::at(index)` exists
+because the menu is an overlay and the chapter it marks `NOW` belongs to the Reader
+underneath: reached through the stack rather than remembered, since a chapter crossing
+while the menu is closed would make a remembered one stale.
+
+**AND TWO STALE DEAD BUTTONS WENT WITH THIS.** The Reader's Activate answered `none()`
+behind "ReaderMenu is not built", which was true when written. The actions overlay's
+`Open` row answered `none()` behind "the Reader is Phase 3, exactly as Confirm on a
+Library row is" — and Confirm on a Library row opens a book, so that row had become a
+dead button on a shipped screen while its test kept pinning the placeholder. Both are
+live, and both tests now assert the action.
+
 ## Goldens
 
 `test/golden/*.png` are human-approved, pixel-exact baselines. A golden test

@@ -29,6 +29,12 @@ enum class ScreenId : uint8_t {
   // The reading page -- see screen_reader.h. Last of the V1 screens to arrive and
   // the only one whose content is the book's rather than the app's.
   Reader,
+  // The overlay the Reader's Activate opens, and the chapter list it reaches. APPENDED
+  // rather than inserted beside Reader: the session record stores a screen by NAME
+  // (session_record.h) so an insertion could not silently become another screen, but
+  // appending also leaves every existing ordinal where it was.
+  ReaderMenu,
+  Contents,
   SdMissing
 };
 
@@ -289,6 +295,14 @@ class App {
 
   Screen& top();
   const Screen& top() const;
+
+  // THE SCREEN AT `depth` FROM THE ROOT, 0 being the root itself. What a caller needs
+  // to ask an overlay's PARENT something -- the reader menu is a panel over the Reader,
+  // and the chapter it marks `NOW` is the Reader's, not the menu's.
+  //
+  // Bounds-checked to the top rather than asserting: an out-of-range index is a caller
+  // bug, and returning the top is a readable screen where a crash is a dead device.
+  const Screen& at(int index) const;
   int depth() const { return static_cast<int>(stack_.size()); }
 
   // Paints the stack: the topmost non-overlay screen, then every overlay above

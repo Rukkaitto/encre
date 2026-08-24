@@ -35,7 +35,7 @@ namespace {
 constexpr ScreenId kAllScreens[] = {
     ScreenId::Home,     ScreenId::Library,      ScreenId::ItemActions, ScreenId::DeleteConfirm,
     ScreenId::BookDetails, ScreenId::Settings,  ScreenId::Sleep,       ScreenId::Reader,
-    ScreenId::SdMissing,
+    ScreenId::ReaderMenu,  ScreenId::Contents,  ScreenId::SdMissing,
 };
 static_assert(sizeof(kAllScreens) / sizeof(kAllScreens[0]) ==
                   static_cast<size_t>(ScreenId::SdMissing) + 1,
@@ -68,6 +68,13 @@ std::unique_ptr<Standalone> build(ScreenId id) {
   // is refused (ScrollWindow's rule, which Settings now shares instead of
   // hand-rolling around it).
   b->factory.setSettingsMetrics(700, 55, 45);
+  // AND Contents, for the same reason again -- a window with no height refuses
+  // movement, so a Contents that was never told a row count would sit in the loop
+  // below reporting an immovable focus and be counted as one of the screens that
+  // legitimately cannot move. That is the "reports on less than it claims" failure the
+  // comment above is about, and it happened: the count came back 6 where the two new
+  // screens should have made it 7.
+  b->factory.setContentsVisibleRows(8);
   if (id == ScreenId::Reader) {
     // GIVEN a body face rather than skipped. Excluding Reader from the loop would
     // have been a screen this file claims to cover and does not -- and Reader is a
@@ -106,9 +113,9 @@ TEST_CASE("every screen accepts back the focus it reports") {
   // Counted, not assumed. A refactor that made every screen report a fixed focus
   // would leave the loop below passing on nothing at all, which is the failure
   // mode this project keeps hitting -- a check that reports on less than it
-  // claims. Five screens can move their focus today: Home, Library, the two
-  // overlays and Settings. BookDetails, the Input Monitor and the SD-missing
-  // prompt have one thing on them and legitimately report 0.
+  // claims. SEVEN screens can move their focus today: Home, Library, the two Library
+  // overlays, Settings, the reader menu and the contents. BookDetails, Sleep, the
+  // Reader and the SD-missing prompt have one thing on them and legitimately report 0.
   int movable = 0;
 
   for (const ScreenId id : kAllScreens) {
@@ -132,7 +139,7 @@ TEST_CASE("every screen accepts back the focus it reports") {
     CHECK(restored->get().focus() == moved);
   }
 
-  CHECK(movable == 5);
+  CHECK(movable == 7);
 }
 
 TEST_CASE("every screen with a movable focus wraps off the end") {
@@ -163,7 +170,7 @@ TEST_CASE("every screen with a movable focus wraps off the end") {
     CHECK(wrapped);
     ++wrapping;
   }
-  CHECK(wrapping == 5);
+  CHECK(wrapping == 7);
 }
 
 TEST_CASE("restoring the focus a screen is already on is a no-op, not a failure") {

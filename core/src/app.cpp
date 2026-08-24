@@ -32,6 +32,12 @@ App::App(std::unique_ptr<Screen> root, ScreenFactory& factory) : factory_(factor
   stack_.push_back(std::move(root));
 }
 
+const Screen& App::at(int index) const {
+  if (index < 0) index = 0;
+  if (index >= static_cast<int>(stack_.size())) index = static_cast<int>(stack_.size()) - 1;
+  return *stack_[static_cast<size_t>(index)];
+}
+
 Screen& App::top() { return *stack_.back(); }
 const Screen& App::top() const { return *stack_.back(); }
 

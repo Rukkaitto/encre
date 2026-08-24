@@ -1,5 +1,7 @@
 #include "reader/screens.h"
 
+#include "reader/screen_contents.h"
+#include "reader/screen_reader_menu.h"
 #include "reader/screen_sleep.h"
 
 #include "reader/screen_book_details.h"
@@ -75,6 +77,27 @@ HomeViewModel demoHomeUnopenedVm() {
   vm.holds = {false, false, false, false};
   return vm;
 }
+
+// design/Contents.dc.html's own list: two sections over eight chapters, with the
+// reader on the first. Depths, not indentation -- a depth-1 entry is a section header
+// and the rest are rows, which is how toc.h reports a real NCX (see its header: one of
+// four measured books is three levels deep and two are flat).
+//
+// A screen the simulator and the goldens must render needs a source for its values,
+// exactly as demoSleepVm and demoHomeVm do.
+std::vector<TocEntry> demoContents() {
+  return {
+      {0, 1, "BOOK I \xC2\xB7 MISS BROOKE"}, {0, 2, "I \xC2\xB7 Miss Brooke"},
+      {1, 2, "II \xC2\xB7 Sir James courts"}, {2, 2, "III \xC2\xB7 The engagement"},
+      {3, 2, "IV \xC2\xB7 Celia\xE2\x80\x99s doubts"},
+      {4, 2, "V \xC2\xB7 Mr. Casaubon writes"}, {5, 2, "VI \xC2\xB7 Mrs. Cadwallader"},
+      {6, 1, "BOOK II \xC2\xB7 OLD AND YOUNG"}, {6, 2, "VII \xC2\xB7 Rome"},
+      {7, 2, "VIII \xC2\xB7 Will Ladislaw"},
+  };
+}
+
+// The board marks its FIRST chapter row `NOW`, so the demo reader is on spine 0.
+int demoContentsSpine() { return 0; }
 
 std::vector<ScreenId> demoHomeTargets() { return {ScreenId::Library, ScreenId::Settings}; }
 
@@ -257,6 +280,26 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       auto scr = std::make_unique<SettingsScreen>(settings_, settingsSink_);
       scr->setMetrics(settingsListH_, settingsRowH_, settingsHeaderH_);
       return scr;
+    }
+    case ScreenId::ReaderMenu:
+      // A DEMO HEADER WHEN NOTHING SET ONE, unlike the Reader, and the difference is
+      // what a wrong answer costs. A Reader with no book would show a stranger's
+      // NOVEL, which is why that one refuses; this shows a name in a panel header, and
+      // an empty one is a panel that looks broken. The simulator and the goldens need
+      // a source for it either way.
+      return std::make_unique<ReaderMenuScreen>(
+          menuTitle_.empty() ? "Middlemarch" : menuTitle_,
+          menuProgress_.empty() ? "6%" : menuProgress_);
+    case ScreenId::Contents: {
+      // The board's own contents when nothing set any -- same reasoning as the menu
+      // header above, and it is what `make compare` and the goldens render.
+      std::vector<TocEntry> toc = contentsToc_.empty() ? demoContents() : contentsToc_;
+      const int spine = contentsToc_.empty() ? demoContentsSpine() : contentsSpine_;
+      const std::string title = readerBookTitle_.empty() ? "Middlemarch" : readerBookTitle_;
+      // HOW MANY ROWS FIT is the theme's answer and the shell sets it, exactly as the
+      // Library's visible rows are set -- 0 means "not told", and the list then renders
+      // empty rather than guessing a panel height.
+      return std::make_unique<ContentsScreen>(std::move(toc), title, spine, contentsRows_);
     }
     case ScreenId::Sleep:
       // The board's own copy, which is what the simulator and the goldens render.

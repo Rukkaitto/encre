@@ -43,8 +43,12 @@ Action ItemActionsScreen::onGesture(const GestureEvent& g) {
     case Gesture::Activate:
       switch (vm_.focusedAction) {
         case kOpen:
-          // The Reader is Phase 3, exactly as Confirm on a Library row is.
-          return Action::none();
+          // OPENS THE BOOK. This said "the Reader is Phase 3, exactly as Confirm on a
+          // Library row is" -- and Confirm on a Library row opens a book now, so this
+          // row had become a dead button on a shipped screen. Action::open() means "the
+          // book I have selected", which is the Library's focused row either way: this
+          // overlay is built from it and cannot outlive its selection changing.
+          return Action::open();
         case kDetails:
           return Action::push(ScreenId::BookDetails);
         case kFinished:
