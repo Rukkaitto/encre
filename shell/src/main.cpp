@@ -2539,6 +2539,11 @@ void setup() {
     return;
   }
   const int libraryRows = gTheme.libraryVisibleRows(logicalH, fonts);
+  // How many contents rows fit, told ONCE -- it is a property of the panel and the type
+  // ramp, exactly as the Library's is, not something to recompute per press. Setting it
+  // inside the per-press priming was how it came to be missed on a path that ran too
+  // late, and a list told nothing renders empty.
+  gFactory.setContentsVisibleRows(gTheme.contentsVisibleRows(logicalH, fonts));
   gFactory.setLibraryVisibleRows(libraryRows);
   Serial.printf("[boot] Library fits %d rows on this %dx%d logical canvas "
                 "(panel is %dx%d native)\n",
@@ -2957,6 +2962,57 @@ void loop() {
     // save that reports `unchanged`.
     if (ev.button == reader::Button::Back && gApp->top().id() == reader::ScreenId::Reader)
       saveReadingPosition("leaving");
+    // THE MENU AND THE CONTENTS ARE PRIMED BEFORE THE DISPATCH THAT PUSHES THEM, and
+    // this block sat AFTER it -- while this comment already said "before". The
+    // consequences were both reported off the device: the menu header branch tested
+    // `top == Reader` and by then the menu was on top, so the factory fell back to
+    // "Middlemarch"; and the contents branch tested `top == ReaderMenu` when Contents
+    // was already on top, so the row count was never set and the list drew ZERO rows.
+    //
+    // THIS IS THE THIRD TIME IN ONE SESSION that something needing to run before a
+    // dispatch was written after it -- the position save on leaving a book, and Home's
+    // rebuild, were the other two. The dispatch is what changes the top of the stack, so
+    // anything that asks "what is on top" to decide what to build has to run first.
+    //
+    // Keyed on the gesture rather than on the screen that results, because the priming
+    // has to happen BEFORE the push: Activate on the Reader opens the menu, and
+    // Activate on the menu's Contents row opens the list.
+    if (gReading.open && ev.button == reader::Button::Confirm) {
+      if (gApp->top().id() == reader::ScreenId::Reader) {
+        const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
+        char pct[8];
+        std::snprintf(pct, sizeof(pct), "%d%%",
+                      reader::progressPercent(gFactory.readerBook(), rd->chapterIndex(),
+                                              rd->vm().page, rd->vm().pageTotal));
+        gFactory.setReaderMenuHeader(gReading.title.empty() ? gReading.path : gReading.title,
+                                     pct);
+      } else if (gApp->top().id() == reader::ScreenId::ReaderMenu) {
+        // READ ONCE PER OPENING, not held resident: a 96-entry contents is ~1.2 KB of
+        // labels and the archive re-open is ~32 KB of transient, so paying it when the
+        // screen opens is cheaper than carrying it for a whole reading session.
+        const auto* menu = static_cast<const reader::ReaderMenuScreen*>(&gApp->top());
+        if (menu->vm().focusedRow == reader::ReaderMenuScreen::kContents) {
+          std::vector<reader::TocEntry> toc;
+          const char* why = "";
+          const uint32_t t = millis();
+          const bool ok = reader::loadToc(gSd, gReading.path, toc, &why);
+          int spine = 0;
+          if (gApp->depth() >= 2) {
+            // The Reader sits under this panel, and its chapter is what marks `NOW`.
+            // Reached through the stack rather than remembered, because a chapter
+            // crossing while the menu is closed would make a remembered one stale.
+            const reader::Screen& under = gApp->at(gApp->depth() - 2);
+            if (under.id() == reader::ScreenId::Reader)
+              spine = static_cast<const reader::ReaderScreen&>(under).chapterIndex();
+          }
+          Serial.printf("[toc] %s: %u entries in %lums%s%s\n", ok ? "read" : "REFUSED",
+                        (unsigned)toc.size(), (unsigned long)(millis() - t),
+                        why[0] != '\0' ? " -- " : "", why);
+          Serial.flush();
+          gFactory.setContents(std::move(toc), spine);
+        }
+      }
+    }
     // THE CHOSEN CHAPTER, taken while Contents is still on top -- the dispatch below
     // pops it, and after that there is no screen left to ask.
     if (ev.button == reader::Button::Confirm && gApp->top().id() == reader::ScreenId::Contents)
@@ -3044,50 +3100,6 @@ void loop() {
       gHomeStale = false;
       Serial.println("[progress] Home rebuilt with the current reading position");
       Serial.flush();
-    }
-    // THE MENU AND THE CONTENTS ARE PRIMED ON THE WAY UP, before the dispatch that
-    // pushes them -- the factory constructs a screen from what it was told, and reading
-    // a table of contents is card work that `core/` does not do.
-    //
-    // Keyed on the gesture rather than on the screen that results, because the priming
-    // has to happen BEFORE the push: Activate on the Reader opens the menu, and
-    // Activate on the menu's Contents row opens the list.
-    if (gReading.open && ev.button == reader::Button::Confirm) {
-      if (gApp->top().id() == reader::ScreenId::Reader) {
-        const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
-        char pct[8];
-        std::snprintf(pct, sizeof(pct), "%d%%",
-                      reader::progressPercent(gFactory.readerBook(), rd->chapterIndex(),
-                                              rd->vm().page, rd->vm().pageTotal));
-        gFactory.setReaderMenuHeader(gReading.title.empty() ? gReading.path : gReading.title,
-                                     pct);
-      } else if (gApp->top().id() == reader::ScreenId::ReaderMenu) {
-        // READ ONCE PER OPENING, not held resident: a 96-entry contents is ~1.2 KB of
-        // labels and the archive re-open is ~32 KB of transient, so paying it when the
-        // screen opens is cheaper than carrying it for a whole reading session.
-        const auto* menu = static_cast<const reader::ReaderMenuScreen*>(&gApp->top());
-        if (menu->vm().focusedRow == reader::ReaderMenuScreen::kContents) {
-          std::vector<reader::TocEntry> toc;
-          const char* why = "";
-          const uint32_t t = millis();
-          const bool ok = reader::loadToc(gSd, gReading.path, toc, &why);
-          int spine = 0;
-          if (gApp->depth() >= 2) {
-            // The Reader sits under this panel, and its chapter is what marks `NOW`.
-            // Reached through the stack rather than remembered, because a chapter
-            // crossing while the menu is closed would make a remembered one stale.
-            const reader::Screen& under = gApp->at(gApp->depth() - 2);
-            if (under.id() == reader::ScreenId::Reader)
-              spine = static_cast<const reader::ReaderScreen&>(under).chapterIndex();
-          }
-          Serial.printf("[toc] %s: %u entries in %lums%s%s\n", ok ? "read" : "REFUSED",
-                        (unsigned)toc.size(), (unsigned long)(millis() - t),
-                        why[0] != '\0' ? " -- " : "", why);
-          Serial.flush();
-          gFactory.setContentsVisibleRows(gTheme.contentsVisibleRows(gFrame->height(), *gFonts));
-          gFactory.setContents(std::move(toc), spine);
-        }
-      }
     }
     if (gApp->retryRequested()) handleRetry();
     // Same placement and the same reason: the mask refresh below must see whatever
