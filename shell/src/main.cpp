@@ -234,6 +234,32 @@ constexpr uint32_t kRefineQuietMs = 5000;
 // with was corrected once already, by a device log showing the counted total taking
 // four seconds to reach the glass because the next page turn almost never won the
 // race against the refinement's window.)
+//
+// AND IT STAYS AT THE REFINEMENT'S NUMBER NOW THAT THE COUNT IS INTERRUPTIBLE, which
+// is the opposite of what interruptibility first suggests. The argument for putting
+// it back to 1200 ms is that abandoning is now nearly free -- one block, ~6 ms -- so
+// the reason for widening it has gone. It has not, and the reason is a cost that
+// belongs to the press AFTER the one that interrupted:
+//
+//   ReaderScreen::completeIndex resets `pb_` BEFORE it walks, because the walk
+//   rewinds the ChapterReader the builder reads from. An abandoned count restores
+//   `starts_`, `at_` and the page -- but not the builder, and there is no second
+//   stream to rebuild it from (that is another 32 KB inflate window against a
+//   42,152-byte floor). So the next FORWARD turn misses the page ring, which holds
+//   pages already visited and not the one ahead, and pays a full seekTo: ~376 ms on
+//   the device against ~20 ms with the stream standing.
+//
+// So a short window does not cost the interrupting press any more; it costs the one
+// after it, once per abandon. At 1200 ms a reader who pauses to think and then turns
+// the page pays that routinely, and every abandon also throws away the walk it had
+// done. At 5000 ms the count runs when the reader has really stopped -- and a reader
+// spends ~23 s on a page, so it gets its chance -- and usually completes, which
+// leaves a live builder behind it.
+//
+// WHAT WOULD ACTUALLY EARN THE SHORTER WINDOW is re-establishing the spent stream in
+// a later quiet window, so an abandon costs nothing at all. That needs a
+// needStream-only entry point on ReaderScreen and a call site here; it is the honest
+// version of this trade and it is not written yet.
 constexpr uint32_t kCountQuietMs = kRefineQuietMs;
 static bool gRefineOwed = false;
 
@@ -2401,9 +2427,14 @@ static void refineNow() {
     auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
     if (rd->indexPending()) {
       const uint32_t t = millis();
-      const bool done = rd->completeIndex();
+      // THE SAME PREDICATE AS THE DEFERRED SITE, and it has to be: this is the
+      // second of the two places a chapter gets counted, and leaving one of them
+      // uninterruptible would mean the 2-3.6 s block came back on whichever path
+      // the reader happened to take. It was missed once already -- the fix went in
+      // at the deferred site alone and this one kept the old blocking call.
+      const bool done = rd->completeIndex([](void*) { return rawSamplesPending() != 0; }, nullptr);
       mark("index-completed");
-      logf("[index] %s pages=%d in %lums\n", done ? "counted" : "refused",
+      logf("[index] %s pages=%d in %lums\n", done ? "counted" : "abandoned",
            rd->pageCount(), (unsigned long)(millis() - t));
       logFlush();
       if (rawSamplesPending() != 0) {
@@ -3686,10 +3717,19 @@ void loop() {
     auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
     if (rd->indexPending()) {
       const uint32_t t = millis();
-      const bool done = rd->completeIndex();
+      // ABANDONED THE MOMENT A BUTTON IS PRESSED. The window above only makes the
+      // count rarer; this is what stops it blocking the loop for the 2-3.6 s the
+      // device measured. A capture-less lambda IS the `bool(*)(void*)` the count
+      // takes -- see ReaderScreen::StopFn for why it is not std::function.
+      const bool done = rd->completeIndex([](void*) { return rawSamplesPending() != 0; }, nullptr);
       mark("index-completed");
-      logf("[index] pages=%d in %lums (deferred: chapter over %uB)\n",
-           rd->pageCount(), (unsigned long)(millis() - t),
+      // `done` IS IN THE LINE, because `pageCount()` on an abandoned count is the
+      // OLD partial figure and the line would otherwise report it as the answer --
+      // "a check that reports on less than it claims", which this file records as a
+      // defect shape in three other places. An abandoned count is the normal case
+      // now, not an error, so it needs to be legible rather than silent.
+      logf("[index] %s pages=%d in %lums (deferred: chapter over %uB)\n",
+           done ? "counted" : "abandoned", rd->pageCount(), (unsigned long)(millis() - t),
            (unsigned)reader::ReaderScreen::kEagerCountBytes);
       logFlush();
       // A press during the count wins: the page on glass is already correct -- the
