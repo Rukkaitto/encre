@@ -169,9 +169,37 @@
        no-anchor state and is unchanged: the common case is still that board. -->
   </div>
 
-  <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0 16px 0; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
+  <!-- THE FIELD SITS WHERE `UP` SITS ON A HINT BAR, and it was CENTRED first, which
+       was the defect: a centred field names no button. Every other screen on this
+       device puts a hint's label at its BUTTON'S PLACE IN THE ROW -- the bar reads
+       BACK, SELECT, UP, DOWN across the width, in the physical order of the buttons
+       it names (the front row is BACK CONFIRM LEFT RIGHT, and the shell maps its
+       third button onto `Button::Up`). So the third of four slots IS how this device
+       says "the UP button", and the centre falls between the second and the third,
+       naming neither.
+
+       62.5% of the content box is that slot's centre -- 5/8, the third of four
+       evenly spaced. Measured rather than estimated: it puts the group at x 263..327
+       on the X4, against a counter that starts at 383 even when it reads `53 / 890`,
+       and the footer's middle has ~320px of which this uses ~90.
+
+       ABSOLUTELY PLACED rather than made a fourth flex child, because there are only
+       three things in this footer and a phantom slot pushing the field rightwards
+       would be a lie about the layout for the next person to decode. The percent and
+       the counter keep `space-between` and do not move -- so the NO-ANCHOR footer is
+       untouched, which is the state that has a golden.
+
+       AND THE LABEL IS BOUNDED, which is the other half of the same fix. It read a
+       chapter's NAME when the anchor was in another chapter, and a real one is
+       `PREMIÈRE PARTIE : À LIRE AVANT L'ACHAT` -- no business in a 21px field, and
+       eliding it to `PREMIÈRE PA…` says less than nothing. `CH. 07` is the shorthand
+       this device already falls back to in the header when a book has no contents:
+       seven characters, fixed width, and it cannot be mistaken for the chapter NAME
+       sitting directly above it in the header. WHICH chapter to return to is the
+       useful fact; what it is CALLED is already on screen. -->
+  <div style="position: relative; display: flex; justify-content: space-between; align-items: center; padding: 12px 0 16px 0; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
     <div style="font-size: var(--t-meta); letter-spacing: 0.12em; font-weight: 700;">6%</div>
-    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; font-weight: 500; white-space: nowrap;">P. 300</div></div>
+    <div style="position: absolute; left: 62.5%; transform: translateX(-50%); display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; font-weight: 500; white-space: nowrap;">P. 300</div></div>
     <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">53 / 890</div>
   </div>
 

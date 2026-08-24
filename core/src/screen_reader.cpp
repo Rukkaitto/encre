@@ -565,14 +565,19 @@ void ReaderScreen::syncAnchorLabel() {
     // The index does not reach it yet -- the count grows by reading. The chapter
     // label is still true, so fall through rather than promising nothing.
   }
-  // ACROSS CHAPTERS THE PAGE IS NOT FREE, so this says the chapter. Naming the page
-  // would mean paginating the anchor's chapter to count its boundaries.
-  const int at = tocIndexForSpine(names_, a.spine);
-  if (at >= 0 && !names_[static_cast<size_t>(at)].label.empty()) {
-    vm_.anchorLabel = names_[static_cast<size_t>(at)].label;
-    return;
-  }
-  // The same fallback updateChapterLabel uses, for a book with no contents.
+  // ACROSS CHAPTERS THE PAGE IS NOT FREE, so this says which chapter. Naming the
+  // page would mean paginating the anchor's chapter to count its boundaries.
+  //
+  // AND IT IS THE POSITION, NOT THE NAME, which this got wrong first. A chapter's
+  // name is unbounded -- a real one is `PREMIÈRE PARTIE : À LIRE AVANT L'ACHAT` --
+  // and this field has ~90px between the percent and the counter. Eliding it to
+  // `PREMIÈRE PA…` says less than nothing.
+  //
+  // `CH. NN` is bounded at seven characters, is the shorthand the header already
+  // falls back to for a book with no contents, and CANNOT BE CONFUSED WITH THE
+  // HEADER, which is showing the current chapter's name two hundred pixels above.
+  // Which chapter to return to is the useful fact; what it is called is already on
+  // screen.
   char buf[16];
   std::snprintf(buf, sizeof(buf), "CH. %02d", a.spine + 1);
   vm_.anchorLabel.assign(buf);

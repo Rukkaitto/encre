@@ -1084,7 +1084,21 @@ void QuietTheme::renderReader(Framebuffer& fb, const FontSet& fonts, const Glyph
     const Tracking anchorTrack = trackingEm(anchorFont, kReadMetaEm);
     const int textW = anchorFont.measure(vm.anchorLabel, anchorTrack);
     const int groupW = icons::kUp.w + kAnchorGap + textW;
-    const int groupX = centreIn(kReadPadX, fb.width() - 2 * kReadPadX, groupW);
+    // NOT CENTRED, and that was the defect: a centred field names no button. Every
+    // other screen puts a hint's label at its BUTTON'S PLACE IN THE ROW -- a bar
+    // reads BACK, SELECT, UP, DOWN across the width in the physical order of the
+    // buttons it names -- so the THIRD OF FOUR slots is how this device says "the UP
+    // button". The centre falls between the second and the third and names neither.
+    //
+    // 5/8 of the content box is that slot's centre, which is what
+    // design/ReaderAnchored.dc.html's `left: 62.5%` states. Clamped at the left
+    // rather than trusted: the group is ~90px against ~320px of middle, so the clamp
+    // cannot fire today, and it is here so that a wider label crowds the counter
+    // rather than reaching back over the percent.
+    const int content = fb.width() - 2 * kReadPadX;
+    const int slotCentre = kReadPadX + content * 5 / 8;
+    const int wantX = slotCentre - groupW / 2;
+    const int groupX = wantX > kReadPadX ? wantX : kReadPadX;
     drawIcon(fb, icons::kUp, groupX, iconTopIn(footerTop, meta.lineHeight(), icons::kUp.h),
              Ink::Black, plane);
     drawText(fb, anchorFont, groupX + icons::kUp.w + kAnchorGap, base, vm.anchorLabel,

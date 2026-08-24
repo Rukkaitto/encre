@@ -862,3 +862,97 @@ TEST_CASE("paging BACKWARD across a chapter boundary anchors, and forward spends
   REQUIRE(rd.chapterIndex() == second);
   CHECK(rd.vm().anchorLabel.empty());
 }
+TEST_CASE("the way-back field sits where UP sits on a hint bar, not in the centre") {
+  // THE FIX FOR A REAL AMBIGUITY: centred, the field named no button. Every other
+  // screen puts a hint's label at its BUTTON'S place in the row -- a bar reads BACK,
+  // SELECT, UP, DOWN across the width in the physical order of the buttons it names --
+  // so the THIRD OF FOUR slots is how this device says "the UP button", and the centre
+  // falls between the second and the third.
+  //
+  // Asserted on drawn pixels rather than on the constant, because the constant being
+  // right is not the claim; where the ink lands is.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  reader::ReaderScreen rd(longChapter(30), "Middlemarch", "CH. 01", &body.face);
+  rd.setMetrics(m);
+  rd.completeIndex();
+  rd.onEvent({reader::Button::Right, reader::PressKind::Short});
+  rd.onEvent({reader::Button::Left, reader::PressKind::Short});
+  REQUIRE_FALSE(rd.vm().anchorLabel.empty());
+
+  reader::Framebuffer fb(480, 800);
+  fb.clear(true);
+  rd.render(fb, ramp.fonts, theme, reader::Plane::Bw);
+
+  // The footer's ink, in columns, split into its fields.
+  std::vector<std::pair<int, int>> runs;
+  int start = -1, prev = -2;
+  for (int x = 0; x < 480; ++x) {
+    bool inked = false;
+    for (int y = 730; y < 800 && !inked; ++y) inked = !fb.getPixel(x, y);
+    if (!inked) continue;
+    if (x - prev > 20) {
+      if (start >= 0) runs.push_back({start, prev});
+      start = x;
+    }
+    prev = x;
+  }
+  if (start >= 0) runs.push_back({start, prev});
+  REQUIRE(runs.size() == 3);  // percent, the way back, counter
+
+  const int content = 480 - 2 * 18;
+  const int upSlot = 18 + content * 5 / 8;      // the third of four, ~295
+  const int centre = 18 + content / 2;          // ~240, where it used to be
+  const int drawn = (runs[1].first + runs[1].second) / 2;
+  CHECK(std::abs(drawn - upSlot) <= 2);         // at the UP slot
+  CHECK(std::abs(drawn - centre) > 20);         // and demonstrably NOT centred
+  // Clear of the counter, which is the collision the position risks.
+  CHECK(runs[1].second < runs[2].first);
+}
+
+TEST_CASE("a cross-chapter way back is BOUNDED -- CH. NN, never a chapter's name") {
+  // The other half of the same defect. A real chapter name is
+  // `PREMIÈRE PARTIE : À LIRE AVANT L'ACHAT`, which has no business in a field with
+  // ~90px between the percent and the counter -- and eliding it to `PREMIÈRE PA…`
+  // says less than nothing. `CH. NN` is seven characters and cannot be mistaken for
+  // the header's chapter NAME two hundred pixels above it.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  FakeFileSystem fs;
+  REQUIRE(fs.writeAll("/books/b.epub",
+                      std::string_view(reinterpret_cast<const char*>(epubfix::kEpubGood),
+                                       epubfix::kEpubGoodLen)));
+  reader::OpenedBook ob;
+  const char* why = "";
+  REQUIRE_MESSAGE(reader::openBook(fs, "/books/b.epub", ob, &why), std::string(why));
+  reader::ReaderScreen rd(fs, ob, 0, &body.face);
+  // A CONTENTS WITH AN ABSURD NAME, which is the case this is about: the label must
+  // not come from here at all.
+  std::vector<reader::TocEntry> toc;
+  toc.push_back({0, 1, "PREMIERE PARTIE : A LIRE ABSOLUMENT AVANT L'ACHAT DU LIVRE"});
+  toc.push_back({1, 1, "DEUXIEME PARTIE : ENCORE PLUS LONGUE QUE LA PREMIERE"});
+  rd.setChapterNames(toc);
+  rd.setMetrics(m);
+
+  const int first = rd.chapterIndex();
+  int guard = 0;
+  while (rd.chapterIndex() == first && guard++ < 50)
+    rd.onEvent({reader::Button::Right, reader::PressKind::Short});
+  REQUIRE(rd.chapterIndex() != first);
+  rd.onEvent({reader::Button::Left, reader::PressKind::Short});
+  REQUIRE(rd.chapterIndex() == first);
+
+  const std::string label = rd.vm().anchorLabel;
+  REQUIRE_FALSE(label.empty());
+  CHECK(label.rfind("CH. ", 0) == 0);
+  CHECK(label.size() <= 7);
+  CHECK(label.find("PARTIE") == std::string::npos);
+  // ...while the HEADER still carries the long name, which is where it belongs.
+  CHECK(rd.vm().chapter.find("PARTIE") != std::string::npos);
+}
