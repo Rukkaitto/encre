@@ -88,6 +88,11 @@ struct PageMetrics {
   int leadEm1000 = kBodyLeadEm;
   int indentEm1000 = kBodyIndentEm;
   Tracking tracking{};
+  // The face emphasised runs are measured with. NULL IS A SUPPORTED STATE, not an
+  // oversight: it means emphasis is measured -- and drawn -- as roman, which is
+  // what every caller with no second face gets, and what the firmware did before
+  // the italic asset existed. A degradation, not a failure.
+  const GlyphSource* italic = nullptr;
 };
 
 // Where a page begins: a block, and a line within that block's wrap.
@@ -121,6 +126,16 @@ struct LaidLine {
   // and every line too empty to justify (see kMinJustifyFillPercent).
   int extraPerGapF26 = 0;
   BlockKind kind = BlockKind::Paragraph;
+  // Which bytes of THIS LINE's `text` are emphasised -- re-based, not shared with
+  // the block. Empty for almost every line ever laid, which is the case emphasis.h
+  // is built around.
+  //
+  // RE-BASED FOR THE SAME REASON `text` IS OWNED. A line holding offsets into a
+  // block would be a second lifetime rule to enforce across a page turn while
+  // blocks are dropped behind the reader -- and this project has already shipped
+  // one bug of exactly that shape, where `Prose::lines` were views into a
+  // temporary and long titles rendered as notdef boxes past every golden.
+  std::vector<Span> emphasis;
 
   // WHICH BLOCK THIS LINE CAME FROM, and whether it is that block's last line.
   //
@@ -234,6 +249,8 @@ class PageBuilder {
   // The block being laid out, owned -- see the class comment.
   std::string held_;
   Prose prose_{};
+  // The held block's emphasis, copied beside `held_` and for the same reason.
+  std::vector<Span> emphasis_;
   BlockKind kind_ = BlockKind::Paragraph;
   BlockKind prevKind_ = BlockKind::Heading;  // a break precedes the first block
   int blockIndex_ = 0;

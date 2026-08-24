@@ -325,15 +325,15 @@ namespace {
 // one" is what stops a column too narrow for a single glyph from making this an
 // infinite loop -- the line then overhangs by construction, which is the honest
 // outcome and the same one wrapProse's first-word rule already has.
-size_t fitPrefixEnd(const GlyphSource& font, std::string_view text, size_t from, size_t to, int maxW,
-                    Tracking tracking) {
+size_t fitPrefixEnd(const StyledFace& face, std::string_view text, size_t from, size_t to,
+                    int maxW, Tracking tracking) {
   size_t i = from;
   size_t fits = from;
   while (i < to) {
     const size_t before = i;
     utf8Next(text, i);
     if (i > to) i = to;  // a sequence straddling the word's end: do not read past
-    if (font.measure(text.substr(from, i - from), tracking) > maxW) {
+    if (face.measure(text, from, i, tracking) > maxW) {
       // The first codepoint alone is already too wide, so it is the answer.
       return fits == from ? i : fits;
     }
@@ -346,6 +346,33 @@ size_t fitPrefixEnd(const GlyphSource& font, std::string_view text, size_t from,
 
 Prose wrapProseLead(const GlyphSource& font, std::string_view text, int maxW, int leadF26,
                     Tracking tracking, WordBreak breaking, int firstIndentF26) {
+  // ONE IMPLEMENTATION, NOT TWO. Every chrome caller arrives here and gets a face
+  // with no italic and no spans, which `StyledFace::measure` short-circuits to a
+  // single `roman->measure` -- the same call it made before. Two wrap loops would
+  // drift, and the drift would be silent: the reader's would get the fixes and the
+  // twenty chrome callers' would not.
+  const StyledFace face{&font, nullptr, nullptr};
+  return wrapProseStyled(face, text, maxW, leadF26, tracking, breaking, firstIndentF26);
+}
+
+int StyledFace::measure(std::string_view text, size_t from, size_t to, Tracking tracking) const {
+  if (to <= from) return 0;
+  // THE COMMON CASE IS ONE CALL. No italic face or no spans means no boundary can
+  // fall inside the range, so this is exactly what the single-face wrap did.
+  if (!anyEmphasis()) return roman->measure(text.substr(from, to - from), tracking);
+  int w = 0;
+  size_t pos = from;  // not `at`: that is this struct's own accessor
+  while (pos < to) {
+    const size_t next = nextStyleBoundary(*emphasis, pos, to);
+    const size_t stop = (next > pos && next <= to) ? next : to;
+    w += at(pos).measure(text.substr(pos, stop - pos), tracking);
+    pos = stop;
+  }
+  return w;
+}
+
+Prose wrapProseStyled(const StyledFace& face, std::string_view text, int maxW, int leadF26,
+                      Tracking tracking, WordBreak breaking, int firstIndentF26) {
   Prose out;
   out.tracking = tracking;
   out.leadF26 = leadF26;
@@ -368,8 +395,8 @@ Prose wrapProseLead(const GlyphSource& font, std::string_view text, int maxW, in
   // overhangs, which is the behaviour every paragraph on every board relies on.
   const auto startLine = [&](size_t wordStart, size_t wordEnd) {
     if (breaking == WordBreak::Anywhere) {
-      while (font.measure(text.substr(wordStart, wordEnd - wordStart), tracking) > limit()) {
-        const size_t cut = fitPrefixEnd(font, text, wordStart, wordEnd, limit(), tracking);
+      while (face.measure(text, wordStart, wordEnd, tracking) > limit()) {
+        const size_t cut = fitPrefixEnd(face, text, wordStart, wordEnd, limit(), tracking);
         if (cut <= wordStart || cut >= wordEnd) break;
         out.lines.push_back(text.substr(wordStart, cut - wordStart));
         wordStart = cut;
@@ -411,7 +438,7 @@ Prose wrapProseLead(const GlyphSource& font, std::string_view text, int maxW, in
     // The candidate is measured from the line's start, spaces included, because
     // that is the run that will be drawn -- measuring the word alone and adding
     // a space's advance would lose every kern across the join.
-    if (font.measure(text.substr(lineStart, i - lineStart), tracking) <= limit()) {
+    if (face.measure(text, lineStart, i, tracking) <= limit()) {
       lineEnd = i;
       continue;
     }

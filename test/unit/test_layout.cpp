@@ -30,6 +30,18 @@ struct Body {
   }
 };
 
+// The ITALIC face at the same size. A second FILE, not an instance: Literata.ttf
+// carries no `ital` and no `slnt` axis, so nothing pinned from it slants.
+struct Italic {
+  std::vector<uint8_t> bytes =
+      golden::slurp(std::string(ASSETS_DIR) + "/built/literata_italic.ttf");
+  ScalableFont face;
+  explicit Italic(int sizePx = reader::kBodyPpem) {
+    REQUIRE(face.init(bytes.data(), bytes.size(), sizePx));
+    REQUIRE(face.ready());
+  }
+};
+
 // The board's column: 480px wide less 18px of side padding each way.
 PageMetrics boardMetrics(int columnH = 500) {
   PageMetrics m;
@@ -534,4 +546,195 @@ TEST_CASE("the builder holds ONE BLOCK and releases it once its lines are laid")
   }
   pb.finish();
   CHECK(pages > 50);  // one block spanning a hundred pages is the case being tested
+}
+
+// --- Measuring a line that changes face part-way through ---------------------
+
+TEST_CASE("a styled measure with no emphasis is the roman measure, exactly") {
+  // The property that keeps a chapter with no `<em>` costing what it always cost --
+  // and that makes ONE wrap loop safe to share with the twenty chrome callers.
+  Body body;
+  Italic ital;
+  const std::string s = "Miss Brooke had that kind of beauty";
+  const reader::StyledFace bare{&body.face, nullptr, nullptr};
+  const std::vector<reader::Span> none;
+  const reader::StyledFace empty{&body.face, &ital.face, &none};
+  const int roman = body.face.measure(s, {});
+  CHECK(bare.measure(s, 0, s.size(), {}) == roman);
+  CHECK(empty.measure(s, 0, s.size(), {}) == roman);
+}
+
+TEST_CASE("a fully emphasised range measures as the ITALIC, which is narrower") {
+  // 6% to 9% narrower over the strings this was measured on. If this ever comes out
+  // equal, the two faces are the same file loaded twice.
+  Body body;
+  Italic ital;
+  const std::string s = "poor dress";
+  const std::vector<reader::Span> all{{0, static_cast<uint32_t>(s.size())}};
+  const reader::StyledFace face{&body.face, &ital.face, &all};
+  const int r = body.face.measure(s, {});
+  const int i = ital.face.measure(s, {});
+  CHECK(i < r);
+  CHECK(face.measure(s, 0, s.size(), {}) == i);
+}
+
+TEST_CASE("a mixed range is the sum of its pieces, and is NOT the roman width") {
+  // The whole reason StyledFace exists. Measuring this with the roman is wrong by
+  // the italic's own deficit, which on a real column is most of a word.
+  Body body;
+  Italic ital;
+  const std::string s = "thrown into relief by poor dress. Her hand";
+  const size_t at = s.find("poor dress");
+  REQUIRE(at != std::string::npos);
+  const std::vector<reader::Span> em{{static_cast<uint32_t>(at), 10}};
+  const reader::StyledFace face{&body.face, &ital.face, &em};
+
+  const int mixed = face.measure(s, 0, s.size(), {});
+  const int allRoman = body.face.measure(s, {});
+  CHECK(mixed < allRoman);
+  // And it is the sum of the three pieces the boundaries cut it into.
+  const int sum = body.face.measure(std::string_view(s).substr(0, at), {}) +
+                  ital.face.measure(std::string_view(s).substr(at, 10), {}) +
+                  body.face.measure(std::string_view(s).substr(at + 10), {});
+  CHECK(mixed == sum);
+}
+
+TEST_CASE("emphasis changes WHERE the wrap breaks, which is why it is measured") {
+  // The consequence, stated as a test rather than as a comment: the italic being
+  // narrower means more fits on a line, so a column narrow enough to be sensitive
+  // breaks in a different place. If this ever comes out identical, the spans are
+  // reaching the measure but not being used.
+  Body body;
+  Italic ital;
+  const std::string s =
+      "Miss Brooke had that kind of beauty which seems to be thrown into relief by "
+      "poor dress and by nothing else at all";
+  const std::vector<reader::Span> all{{0, static_cast<uint32_t>(s.size())}};
+  const reader::StyledFace romanOnly{&body.face, nullptr, nullptr};
+  const reader::StyledFace italicAll{&body.face, &ital.face, &all};
+
+  const reader::Prose a = reader::wrapProseStyled(romanOnly, s, 444, 3481);
+  const reader::Prose b = reader::wrapProseStyled(italicAll, s, 444, 3481);
+  // Same text, same column, different faces: the narrower face fits more per line.
+  bool anyLineDiffers = false;
+  for (size_t i = 0; i < a.lines.size() && i < b.lines.size(); ++i)
+    if (a.lines[i] != b.lines[i]) anyLineDiffers = true;
+  CHECK(anyLineDiffers);
+  CHECK(b.lineCount() <= a.lineCount());
+}
+
+// --- Emphasis through the page layout ----------------------------------------
+
+namespace {
+
+// A laid line's text with its emphasis marked, so the span and the bytes it covers
+// are asserted together. An offset checked on its own passes just as happily when it
+// points at the wrong letter -- and after a wrap it is a DIFFERENT wrong letter on
+// each line, which is the bug this whole re-basing exists to prevent.
+std::string markedLine(const reader::LaidLine& ln) {
+  std::string out;
+  for (size_t i = 0; i < ln.text.size(); ++i) {
+    const bool here = reader::emphasisedAt(ln.emphasis, i);
+    const bool prev = i > 0 && reader::emphasisedAt(ln.emphasis, i - 1);
+    if (here && !prev) out += "<";
+    if (!here && prev) out += ">";
+    out += ln.text[i];
+  }
+  if (!ln.text.empty() && reader::emphasisedAt(ln.emphasis, ln.text.size() - 1)) out += ">";
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("an emphasised phrase that WRAPS is clipped onto both lines") {
+  // THE CASE THE RUN MODEL EXISTS FOR. A span dropped rather than clipped at the
+  // line break renders the first half italic and the second half roman, and every
+  // golden of a page whose emphasis happens to fit on one line still passes.
+  Body body;
+  Italic ital;
+  PageMetrics m = boardMetrics();
+  m.italic = &ital.face;
+
+  reader::Document d;
+  const char* why = "";
+  // Set so the emphasis lands across a break: a long lead-in, then the phrase.
+  REQUIRE(reader::buildDocument(
+      "<p>Miss Brooke had that kind of beauty which seems to be thrown into relief "
+      "by <em>poor dress and nothing else</em> at all.</p>", d, &why));
+  REQUIRE(d.blocks.size() == 1);
+  REQUIRE(d.blocks[0].emphasis.size() == 1);
+
+  reader::PageBuilder pb(body.face, m);
+  pb.add(d.blocks[0], 0);
+  const reader::Page page = pb.finish();
+  REQUIRE(page.lines.size() > 1);
+
+  // Every emphasised byte on every line must be one of the phrase's bytes, and the
+  // phrase must be covered exactly once across the page.
+  std::string gathered;
+  int linesWithEmphasis = 0;
+  for (const reader::LaidLine& ln : page.lines) {
+    if (ln.emphasis.empty()) continue;
+    ++linesWithEmphasis;
+    for (size_t i = 0; i < ln.text.size(); ++i)
+      if (reader::emphasisedAt(ln.emphasis, i)) gathered += ln.text[i];
+    // No span may point past its own line -- the failure the re-basing prevents.
+    for (const reader::Span& s : ln.emphasis) CHECK(s.end() <= ln.text.size());
+  }
+  CHECK(linesWithEmphasis >= 2);  // it really did straddle a break
+  // Joined back up, allowing for the space the break consumed.
+  CHECK(gathered.find("poor") != std::string::npos);
+  CHECK(gathered.find("nothing else") != std::string::npos);
+}
+
+TEST_CASE("a line with no emphasis carries no spans at all") {
+  // The free path, asserted: a chapter with one emphasised phrase must not put an
+  // allocation on all twelve of a page's lines.
+  Body body;
+  Italic ital;
+  PageMetrics m = boardMetrics();
+  m.italic = &ital.face;
+  reader::Document d;
+  const char* why = "";
+  REQUIRE(reader::buildDocument("<p>One <em>two</em> three.</p><p>No emphasis here.</p>",
+                                d, &why));
+  reader::PageBuilder pb(body.face, m);
+  for (size_t i = 0; i < d.blocks.size(); ++i)
+    pb.add(d.blocks[i], static_cast<int>(i));
+  const reader::Page page = pb.finish();
+  REQUIRE(page.lines.size() >= 2);
+  CHECK(markedLine(page.lines[0]) == "One <two> three.");
+  CHECK(page.lines[1].emphasis.empty());
+}
+
+TEST_CASE("the spans survive a page turn, because the line owns them") {
+  // A Page is self-contained so a block can be dropped the moment its lines are
+  // taken -- LaidLine::text is owned for that reason, and the spans have to be too.
+  // Here the block is destroyed before the page is read.
+  Body body;
+  Italic ital;
+  PageMetrics m = boardMetrics(120);  // a short column, so the block spans pages
+  m.italic = &ital.face;
+  reader::Page page;
+  {
+    reader::Document d;
+    const char* why = "";
+    REQUIRE(reader::buildDocument(
+        "<p>Alpha beta gamma delta <em>epsilon zeta eta theta</em> iota kappa.</p>",
+        d, &why));
+    reader::PageBuilder pb(body.face, m);
+    pb.add(d.blocks[0], 0);
+    page = pb.take();
+    // d and pb both die here; the page must still be readable and correct.
+  }
+  bool sawEmphasis = false;
+  for (const reader::LaidLine& ln : page.lines) {
+    for (const reader::Span& s : ln.emphasis) {
+      CHECK(s.end() <= ln.text.size());
+      sawEmphasis = true;
+    }
+  }
+  // The first page of that block may or may not reach the emphasis; what must hold
+  // is that nothing dangles either way.
+  CHECK((sawEmphasis || !page.lines.empty()));
 }

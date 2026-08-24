@@ -30,6 +30,18 @@ struct Body {
   }
 };
 
+// The ITALIC face, at the same ppem. A second file, because Literata.ttf carries no
+// `ital` and no `slnt` axis -- see document.h.
+struct Italic {
+  std::vector<uint8_t> bytes =
+      golden::slurp(std::string(ASSETS_DIR) + "/built/literata_italic.ttf");
+  reader::ScalableFont face;
+  Italic() {
+    REQUIRE(face.init(bytes.data(), bytes.size(), reader::kBodyPpem));
+    REQUIRE(face.ready());
+  }
+};
+
 // A chapter big enough to have real pagination, as XHTML so it goes through the
 // same tokenizer and block builder a card would feed.
 inline std::string longChapter(int paragraphs) {

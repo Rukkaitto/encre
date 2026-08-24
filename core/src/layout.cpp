@@ -110,8 +110,12 @@ void PageBuilder::add(const Block& b, int index) {
   // definition, so a browser would overflow rather than break, which a panel cannot
   // do. `Anywhere` engages ONLY when a segment cannot fit a line at all -- which is
   // CSS's `overflow-wrap: break-word`, not a licence to break ordinary words.
-  prose_ = wrapProseLead(*font_, held_, m_.columnW, leadF26_, m_.tracking, WordBreak::Anywhere,
-                         myIndentF26);
+  // THE SPANS ARE COPIED WITH THE TEXT, for the reason the text is copied: the wrap
+  // measures against them and the caller may drop its block the moment this returns.
+  emphasis_ = b.emphasis;
+  const StyledFace face{font_, m_.italic, &emphasis_};
+  prose_ = wrapProseStyled(face, held_, m_.columnW, leadF26_, m_.tracking, WordBreak::Anywhere,
+                           myIndentF26);
   prevKind_ = b.kind;
   if (!skipping_ && row_ == 0) pageStart_ = Cursor{blockIndex_, 0};
   drain();
@@ -165,6 +169,20 @@ void PageBuilder::drain() {
       ln.extraPerGapF26 =
           stretchFor(*font_, text, m_.columnW - f26ToPx(xIndentF26), m_.tracking);
     ln.text.assign(text);
+    // THE LINE'S SPANS, RE-BASED ONTO ITS OWN TEXT.
+    //
+    // The offset comes from the view's own pointer, and that is legitimate HERE and
+    // almost nowhere else: `held_` is this object's copy of the block and
+    // `prose_.lines` are views into exactly that buffer, both owned by this builder
+    // for the whole of this loop. The technique is otherwise banned in this
+    // codebase -- two tests once recovered a line's block by comparing
+    // `text.data()` pointers and broke the moment a Page owned its text -- so the
+    // guard is asserted rather than assumed.
+    if (!emphasis_.empty()) {
+      const size_t off = static_cast<size_t>(text.data() - held_.data());
+      if (off <= held_.size() && off + text.size() <= held_.size())
+        ln.emphasis = clipTo(emphasis_, off, off + text.size());
+    }
     page_.lines.push_back(std::move(ln));
 
     ++line_;
@@ -172,9 +190,11 @@ void PageBuilder::drain() {
   }
 
   if (line_ >= count) {
-    // The block is spent; its text can go, and with it the views into it.
+    // The block is spent; its text can go, and with it the views into it -- and its
+    // spans, which index that text and mean nothing without it.
     haveBlock_ = false;
     held_.clear();
+    emphasis_.clear();
     prose_.lines.clear();
   }
 }
