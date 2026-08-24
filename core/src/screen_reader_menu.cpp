@@ -33,7 +33,11 @@ constexpr Item kItems[ReaderMenuScreen::kRowCount] = {
     // its four unbuilt siblings -- it becomes focusable in the commit that gives it a
     // screen, and needs no change here when it does.
     {"Names", "", false, true, 0},
-    {"About this book", "", false, true, 0},
+    // ABOUT THIS BOOK OPENS BOOK DETAILS, and it was inert because that screen used to be
+    // built from the LIBRARY's focused row -- fine from the Library and wrong from a
+    // Reader opened through Home's CONTINUE, where there is no Library on the stack. It
+    // takes facts now, so both callers can answer it.
+    {"About this book", "", true, true, 0},
     // NO MARK AND ITS OWN TRACKING, both of which the board states. It closes the book
     // rather than opening a screen, so a chevron would promise somewhere to go -- and
     // `letter-spacing: 0.06em` is the one row on this panel the board tracks.
@@ -82,6 +86,8 @@ Action ReaderMenuScreen::onGesture(const GestureEvent& g) {
       switch (vm_.focusedRow) {
         case kContents:
           return Action::push(ScreenId::Contents);
+        case kAboutBook:
+          return Action::push(ScreenId::BookDetails);
         case kCloseBook:
           // CLOSE THE BOOK: this panel AND the Reader under it, in one action, because
           // a screen returns one Action and a Pop followed by a second Pop would be

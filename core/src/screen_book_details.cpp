@@ -31,35 +31,27 @@ std::string megabytes(uint32_t bytes) {
 
 }  // namespace
 
-BookDetailsScreen::BookDetailsScreen(const LibraryScreen& library, std::string author) {
-  const LibraryItem* item = library.focusedItem();
-  if (item != nullptr) {
-    vm_.title = std::string(item->entry.title());
-    // THE SHELL'S ANSWER WINS, because it is the only one that read the book. The
-    // Library's `details.author` is the demo content's field and is empty on a card --
-    // it stays as the fallback so the simulator and the goldens keep their value.
-    vm_.author = author.empty() ? item->details.author : author;
-    vm_.format = formatOf(item->entry.name);
-    // The board's six rows, in the board's order. Four of the values need
-    // metadata that does not exist yet and are therefore EMPTY strings rather
-    // than invented ones -- a row whose value is blank is honest, and a "0%" or a
-    // fabricated date would be a claim.
-    //
-    // `Bookmarks` is the exception that is genuinely zero: there is no way to
-    // make a bookmark yet, so nought is a fact rather than a placeholder.
-    vm_.fields = {{"Progress", item->details.progress},
-                  {"Current chapter", item->details.chapter},
-                  {"Bookmarks", "0"},
-                  {"File size", megabytes(item->entry.size)},
-                  // Shouted and with the board's trailing slash: `/BOOKS/`. The
-                  // path is the directory the book was listed from, which is the
-                  // Library's, so a book inside a folder says so.
-                  {"Location", upperLatin1(library.path()) + "/"}};
-  }
-  // BACK, and three dead slots. The board draws exactly that -- one label and
-  // three of the boards' `width: 36px` placeholders -- because there is nothing
-  // on this screen to move a focus through or to select, and a bar promising a
-  // button the screen does not use is worse than one promising nothing.
+BookDetailsScreen::BookDetailsScreen(Facts facts) {
+  vm_.title = std::move(facts.title);
+  vm_.author = std::move(facts.author);
+  vm_.format = formatOf(facts.fileName);
+  // The board's FIVE rows, in the board's order. A value that is not known is an EMPTY
+  // string rather than an invented one -- a blank row is honest and a "0%" would be a
+  // claim about a book nobody has opened.
+  //
+  // `Bookmarks` is the exception that is genuinely zero: there is no way to make a
+  // bookmark yet, so nought is a fact rather than a placeholder.
+  vm_.fields = {{"Progress", std::move(facts.progress)},
+                {"Current chapter", std::move(facts.chapter)},
+                {"Bookmarks", "0"},
+                {"File size", megabytes(facts.bytes)},
+                // Shouted and with the board's trailing slash: `/BOOKS/`. The directory
+                // the book lives in, so a book inside a folder says so.
+                {"Location", upperLatin1(facts.directory) + "/"}};
+  // BACK, and three dead slots. The board draws exactly that -- one label and three of
+  // the boards' `width: 36px` placeholders -- because there is nothing on this screen to
+  // move a focus through or to select, and a bar promising a button the screen does not
+  // use is worse than one promising nothing.
   vm_.hints = {"BACK", "", "", ""};
   vm_.holds = {false, false, false, false};
   declareHints(vm_.holds);

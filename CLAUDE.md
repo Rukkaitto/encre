@@ -2169,7 +2169,24 @@ The menu board still drew a **drop cap** that `Reader.dc.html` drops from V1 wit
 mechanism note, and still said `CH. 01` where the Reader's slot had become a chapter
 name. Both fixed on the board; the menu is back to 3.06% / 3.60%.
 
-**FIVE OF THE MENU'S SEVEN ROWS DO NOTHING AND ARE DRAWN ANYWAY** — Settings' rule, and
+**`About this book` WAS INERT FOR A REASON THAT WAS FIXABLE.** Book details was built from
+the LIBRARY's focused row, which is fine from the Library and wrong from a Reader: a
+reader who arrived through Home's CONTINUE has no Library on the stack, so the factory
+refused the push. Making the row focusable anyway would have been **a button that works
+only sometimes** — worse than one that never does, because nobody can learn the rule.
+
+So the screen takes **facts** (`BookDetailsScreen::Facts`) instead of a Library
+reference. The Library answers them from a row and the Reader answers them from the book
+it has open, and neither has to know how the other is shaped. Two details worth keeping:
+
+- **The progress and chapter come from the READER, not the sidecar**, when the screen is
+  opened from inside a book: the reader has moved since the last save, and a details
+  screen opened mid-book should say where they *are*.
+- **The Library path CLEARS the facts.** Without that, opening details from the Library
+  after opening them from a book would show the book — a stale answer that looks like the
+  right screen.
+
+**FOUR OF THE MENU'S SEVEN ROWS DO NOTHING AND ARE DRAWN ANYWAY** — Settings' rule, and
 the board was edited to match before the screen was written: it had focused Typography,
 which is not built, so implementing it faithfully would have drawn a selection on a dead
 row. `Contents` and `Close book` respond. **`Close book` answers `popTo(Library)`**, and

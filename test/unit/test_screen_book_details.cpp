@@ -102,7 +102,17 @@ TEST_CASE("on a card, the fields that need EPUB metadata are blank rather than i
   fs.writeAll("/books/Walden.txt", std::string(700 * 1024, 'w'));
   reader::LibraryScreen lib(fs, "/books");
   lib.setVisibleRows(theme.libraryVisibleRows(800, r.fonts));
-  reader::BookDetailsScreen details(lib);
+  // Built from FACTS, as the screen now is -- the Library is one source of them and the
+  // Reader is the other, which is what lets the reader menu's `About this book` work from
+  // a stack with no Library on it. Derived here the way the factory derives them.
+  const reader::LibraryItem* it = lib.focusedItem();
+  REQUIRE(it != nullptr);
+  reader::BookDetailsScreen::Facts f;
+  f.title = std::string(it->entry.title());
+  f.fileName = it->entry.name;
+  f.directory = lib.path();
+  f.bytes = it->entry.size;
+  reader::BookDetailsScreen details(f);
 
   CHECK(details.vm().title == "Walden");
   CHECK(details.vm().format == "TXT");

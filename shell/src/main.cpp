@@ -3032,6 +3032,10 @@ void loop() {
     if (ev.button == reader::Button::Confirm &&
         gApp->top().id() == reader::ScreenId::ItemActions) {
       gFactory.setDetailsAuthor("");
+      // ...and the Library answers from its own row, so any facts a previous visit from
+      // the reader menu left behind must go. Without this, opening details from the
+      // Library after opening them from a book would show the BOOK.
+      gFactory.clearDetailsFacts();
       reader::LibraryScreen* lib = gFactory.library();
       const reader::LibraryItem* sel = lib != nullptr ? lib->focusedItem() : nullptr;
       if (sel != nullptr && !sel->entry.isDir) {
@@ -3068,6 +3072,39 @@ void loop() {
         // the last chapter change -- the same defect Back had, arriving by another door.
         if (menu->vm().focusedRow == reader::ReaderMenuScreen::kCloseBook)
           saveReadingPosition("closing");
+        // ABOUT THIS BOOK, answered from the book the READER has open rather than from a
+        // Library row -- there may be no Library on the stack at all, which is exactly
+        // why this row was inert. Everything the screen draws is already in hand: the
+        // path, the metadata read at open, the file's size, and the position's own
+        // percentage and chapter from the sidecar.
+        if (menu->vm().focusedRow == reader::ReaderMenuScreen::kAboutBook) {
+          reader::BookDetailsScreen::Facts f;
+          const size_t slash = gReading.path.rfind('/');
+          const std::string leaf =
+              slash == std::string::npos ? gReading.path : gReading.path.substr(slash + 1);
+          f.fileName = leaf;
+          f.directory = slash == std::string::npos ? "" : gReading.path.substr(0, slash);
+          // The OPF's title where the book gave one, and the filename otherwise -- the
+          // same fallback Home's reading column makes.
+          f.title = gReading.title.empty() ? reader::BookList::titleFor(leaf, true)
+                                           : gReading.title;
+          f.author = gReading.author;
+          f.bytes = gReading.bytes;
+          // FROM THE READER, not the sidecar: the reader has moved since the last save,
+          // and a details screen opened from inside a book should say where the reader IS.
+          if (gApp->depth() >= 2) {
+            const reader::Screen& under = gApp->at(gApp->depth() - 2);
+            if (under.id() == reader::ScreenId::Reader) {
+              const auto& rd = static_cast<const reader::ReaderScreen&>(under);
+              f.chapter = rd.vm().chapter;
+              f.progress = std::to_string(reader::progressPercent(
+                               gFactory.readerBook(), rd.chapterIndex(), rd.vm().page,
+                               rd.vm().pageTotal)) +
+                           "%";
+            }
+          }
+          gFactory.setDetailsFacts(std::move(f));
+        }
         if (menu->vm().focusedRow == reader::ReaderMenuScreen::kContents) {
           // NO CARD WORK HERE. The contents were read when the book opened, where
           // there was heap for them -- see gReading.toc.

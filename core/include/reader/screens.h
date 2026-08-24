@@ -5,6 +5,7 @@
 
 #include "reader/app.h"
 #include "reader/screen_settings.h"
+#include "reader/screen_book_details.h"
 #include "reader/screen_library.h"
 #include "reader/book.h"
 #include "reader/screen_reader.h"
@@ -197,6 +198,16 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // Empty leaves the row blank, which is what it has always drawn.
   void setDetailsAuthor(std::string author) { detailsAuthor_ = std::move(author); }
 
+  // EVERYTHING BOOK DETAILS DRAWS, for the caller that has no Library row to point at.
+  // The reader menu's `About this book` is that caller: it opens from a Reader, which may
+  // have been reached through Home's CONTINUE with no Library on the stack. Clearing it
+  // puts the screen back on the Library's row, which is what the simulator uses.
+  void setDetailsFacts(BookDetailsScreen::Facts f) {
+    detailsFacts_ = std::move(f);
+    detailsFactsSet_ = true;
+  }
+  void clearDetailsFacts() { detailsFactsSet_ = false; }
+
   // THE BOOK'S TABLE OF CONTENTS, for the Contents screen. Set by the shell when the
   // menu's Contents row is chosen -- reading it is card work (`toc.h` re-opens the
   // archive) and `core/` does no storage, so the factory is handed the answer rather
@@ -273,6 +284,8 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   bool sleepIdle_ = false;
   bool contentsDemo_ = false;
   std::string detailsAuthor_;
+  BookDetailsScreen::Facts detailsFacts_{};
+  bool detailsFactsSet_ = false;
   std::vector<TocEntry> contentsToc_;
   int contentsSpine_ = 0;
   bool contentsPrimed_ = false;

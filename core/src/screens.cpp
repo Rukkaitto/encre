@@ -275,7 +275,27 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       return std::make_unique<DeleteConfirmScreen>(*library_);
     case ScreenId::BookDetails:
       if (library_ == nullptr) return nullptr;
-      return std::make_unique<BookDetailsScreen>(*library_, detailsAuthor_);
+      // THE SHELL'S FACTS WIN, and the Library is the fallback that keeps the simulator
+      // and the goldens working. Two callers can open this screen and only one of them
+      // has a Library behind it: the reader menu's `About this book` is reached from a
+      // Reader, which may have been opened from Home's CONTINUE with no Library on the
+      // stack at all.
+      if (detailsFactsSet_) return std::make_unique<BookDetailsScreen>(detailsFacts_);
+      if (library_ == nullptr) return nullptr;
+      if (const LibraryItem* it = library_->focusedItem()) {
+        BookDetailsScreen::Facts f;
+        f.title = std::string(it->entry.title());
+        // The shell's author wins where it read one; the Library's field is the demo
+        // content's and is empty on a card.
+        f.author = detailsAuthor_.empty() ? it->details.author : detailsAuthor_;
+        f.fileName = it->entry.name;
+        f.directory = library_->path();
+        f.progress = it->details.progress;
+        f.chapter = it->details.chapter;
+        f.bytes = it->entry.size;
+        return std::make_unique<BookDetailsScreen>(std::move(f));
+      }
+      return std::make_unique<BookDetailsScreen>(BookDetailsScreen::Facts{});
     case ScreenId::Settings: {
       auto scr = std::make_unique<SettingsScreen>(settings_, settingsSink_);
       scr->setMetrics(settingsListH_, settingsRowH_, settingsHeaderH_);

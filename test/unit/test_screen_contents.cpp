@@ -154,9 +154,12 @@ TEST_CASE("the reader menu focuses Contents, skipping the rows that do nothing")
   CHECK(m.isOverlay());
   CHECK(m.focus() == reader::ReaderMenuScreen::kContents);
   CHECK(m.onEvent(kGo).kind == Action::Kind::Push);
-  // Down from Contents skips Typography, Go to page and Bookmarks and About this book,
-  // landing on Close book -- four inert rows in a row, which is the case a naive skip
-  // walk gets wrong.
+  // Down from Contents skips Typography, Go to page, Bookmarks and Names -- FOUR inert
+  // rows in a row, which is the case a naive skip walk gets wrong -- and lands on About
+  // this book, which is live because Book details takes facts now rather than a Library
+  // row.
+  m.onEvent(kDown);
+  CHECK(m.focus() == reader::ReaderMenuScreen::kAboutBook);
   m.onEvent(kDown);
   CHECK(m.focus() == reader::ReaderMenuScreen::kCloseBook);
   // ...and wraps back round to Contents rather than sticking.
@@ -164,8 +167,22 @@ TEST_CASE("the reader menu focuses Contents, skipping the rows that do nothing")
   CHECK(m.focus() == reader::ReaderMenuScreen::kContents);
 }
 
+TEST_CASE("About this book opens Book details") {
+  // It was inert, because Book details was built from the LIBRARY's focused row -- fine
+  // from the Library and wrong from a Reader opened through Home's CONTINUE, where there
+  // is no Library on the stack. Making it focusable without fixing that would have been
+  // a button that works only sometimes, which nobody can learn.
+  reader::ReaderMenuScreen m("Middlemarch", "6%");
+  m.onEvent(kDown);
+  REQUIRE(m.focus() == reader::ReaderMenuScreen::kAboutBook);
+  const Action a = m.onEvent(kGo);
+  CHECK(a.kind == Action::Kind::Push);
+  CHECK(a.target == ScreenId::BookDetails);
+}
+
 TEST_CASE("Close book closes the book AND the panel over it") {
   reader::ReaderMenuScreen m("Middlemarch", "6%");
+  m.onEvent(kDown);
   m.onEvent(kDown);
   REQUIRE(m.focus() == reader::ReaderMenuScreen::kCloseBook);
   const Action a = m.onEvent(kGo);
