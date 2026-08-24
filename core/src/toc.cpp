@@ -62,7 +62,14 @@ bool loadToc(FileSystem& fs, std::string_view bookPath, std::vector<TocEntry>& o
     src = inflated.get();
   }
 
-  Xml x(*src);
+  // ON THE HEAP, because sizeof(Xml) is 2,560 and this runs inside a book open that
+  // already reported `loopTask free at worst: 2632 bytes of 16384`. The reader's own
+  // path holds its Xml inside a heap-allocated BlockReader for the same reason; a
+  // stack-allocated one here spends a tenth of the task's whole budget for the length
+  // of a parse.
+  std::unique_ptr<Xml> xml(new (std::nothrow) Xml(*src));
+  if (xml == nullptr) return say("not enough memory to read the table of contents");
+  Xml& x = *xml;
   // The NCX's shape, and only the parts that carry meaning here:
   //
   //   <navPoint> <navLabel> <text>LABEL</text> </navLabel> <content src="..."/> </navPoint>

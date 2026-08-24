@@ -1606,8 +1606,10 @@ feature: a card can be readable and refuse writes (a physical write-protect tab)
 failed save would throw the reader out of a book they can still read. The shell logs
 it and carries on.
 
-**THREE SAVE EDGES, NOT EVERY PAGE TURN**: leaving the book, crossing a chapter, and
-sleeping. A turn is ~570 ms of panel and a card write on each one would be felt; a
+**FOUR SAVE EDGES, NOT EVERY PAGE TURN**: leaving the book with Back, closing it from
+the reader menu, crossing a chapter, and sleeping. The menu's `Close book` is a second
+way out and the `leaving` save cannot see it — that one fires on Back with the Reader ON
+TOP, and Close book pops the Reader from underneath an overlay. A turn is ~570 ms of panel and a card write on each one would be felt; a
 chapter is also the most a power cut can cost. **Leaving is saved BEFORE the
 dispatch** — Back pops the Reader and once popped there is no screen left to ask where
 the reader was. Back is the only way out (`Gesture::Back` → `Action::pop()`), so this
@@ -1640,6 +1642,14 @@ can go stale, so **it is checked against the card** with one `exists` call befor
 anything is drawn — Home confidently offering to continue a book that cannot be opened
 is worse than not offering. `HomeMissing.dc.html` is the boarded state for that case
 and is not built, so a stale pointer currently falls back to the nothing-open screen.
+
+**"THE BOOK IS CLOSED" MEANS NO READER IS LEFT ON THE STACK**, not that one is no
+longer on TOP — and it asked the wrong question the moment the reader menu existed. The
+menu and the contents are pushed ABOVE the Reader, so opening the menu declared the book
+closed, cleared `gReading.open`, and with it the gate on the factory priming: pressing
+Contents primed nothing, the factory refused (correctly, now that it refuses), and the
+device reported "opening Contents does nothing". Scanned rather than tracked, because a
+depth count would be a second copy of the stack's own shape.
 
 **A WAKE CANNOT RESTORE THE READER WITHOUT ITS BOOK, and that is why sleeping on a
 page woke to the Library.** `App::restore` pushes the record's stack, the Reader's push

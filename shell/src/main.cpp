@@ -3021,10 +3021,13 @@ void loop() {
         gFactory.setReaderMenuHeader(gReading.title.empty() ? gReading.path : gReading.title,
                                      pct);
       } else if (gApp->top().id() == reader::ScreenId::ReaderMenu) {
-        // READ ONCE PER OPENING, not held resident: a 96-entry contents is ~1.2 KB of
-        // labels and the archive re-open is ~32 KB of transient, so paying it when the
-        // screen opens is cheaper than carrying it for a whole reading session.
         const auto* menu = static_cast<const reader::ReaderMenuScreen*>(&gApp->top());
+        // CLOSE BOOK IS A SECOND WAY OUT, and the `leaving` save cannot see it: that one
+        // fires on Back with the Reader ON TOP, and this pops the Reader from under an
+        // overlay. Without it, closing a book through the menu loses everything since
+        // the last chapter change -- the same defect Back had, arriving by another door.
+        if (menu->vm().focusedRow == reader::ReaderMenuScreen::kCloseBook)
+          saveReadingPosition("closing");
         if (menu->vm().focusedRow == reader::ReaderMenuScreen::kContents) {
           // NO CARD WORK HERE. The contents were read when the book opened, where
           // there was heap for them -- see gReading.toc.
@@ -3081,11 +3084,19 @@ void loop() {
     // the Library and returning lost the page. Saved BEFORE the screen is gone --
     // hence the ordering here, after the dispatch that popped it but reading the
     // position captured while it still stood.
-    // THE BOOK IS CLOSED: forget it, so a later save cannot fire against a book that
-    // is no longer on screen. The position itself was written just above, before the
-    // dispatch that popped the Reader -- there is nothing to save here, only state to
-    // drop.
-    if (gReading.open && gApp->top().id() != reader::ScreenId::Reader) {
+    // THE BOOK IS CLOSED WHEN NO READER IS LEFT ON THE STACK -- not when one is no
+    // longer on TOP, which is what this asked and which was wrong the moment the reader
+    // menu existed. The menu and the contents are pushed ABOVE the Reader, so opening
+    // the menu declared the book closed, cleared gReading.open, and with it the gate on
+    // the priming block: pressing Contents then primed nothing, the factory refused
+    // (correctly), and the device reported "opening Contents does nothing".
+    //
+    // Scanned rather than tracked: a depth count would be a second copy of the stack's
+    // own shape, and the stack is three deep at most here.
+    bool readerOnStack = false;
+    for (int i = 0; i < gApp->depth(); ++i)
+      if (gApp->at(i).id() == reader::ScreenId::Reader) readerOnStack = true;
+    if (gReading.open && !readerOnStack) {
       gReading.open = false;
       Serial.println("[progress] book closed");
       Serial.flush();
