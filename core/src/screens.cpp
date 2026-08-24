@@ -183,10 +183,10 @@ std::vector<LibraryItem> demoLibraryItems() {
   // what the details screen formats as the board's `0.4 MB`.
   auto dubliners = [](LibraryItem item) {
     item.details.author = "James Joyce";
-    item.details.subtitle = "Fifteen stories \xC2\xB7 1914";
-    item.details.progress = "31% \xC2\xB7 PAGE 78 OF 252";
+    // THE PERCENTAGE ALONE, as the board now draws it: a page number for a place in the
+    // BOOK needs every chapter paginated, ~49 s of decode on this device.
+    item.details.progress = "31%";
     item.details.chapter = "ARABY";
-    item.details.added = "AUG 14, 2026";
     return item;
   };
 

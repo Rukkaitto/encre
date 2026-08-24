@@ -691,7 +691,6 @@ void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
   // font-weight, so both are CSS default 400. This is the distinction that had
   // Home's author line rendering 19% over the board's ink.
   const Font& author = fonts[Role::Body400];
-  const Font& subtitle = fonts[Role::Label400];
 
   // The bar and the rows are measured before the title is laid out, because they
   // are what decides how many lines the title may have. Building the hints here
@@ -728,7 +727,7 @@ void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
   const int blockRoom = fb.height() - (bandH + kDetailsPadTop) -
                         (kDetailsPadBottom + kDetailsRuleH + rowsH + hintBarHeight(fonts, hints));
   const int columnFixedH = kDetailsColPadTop + kDetailsColGap + author.lineHeight() +
-                           kDetailsColGap + subtitle.lineHeight();
+                           kDetailsColGap;
   int maxTitleLines = (blockRoom - columnFixedH) / kDetailsTitleLineH;
   if (maxTitleLines < 1) maxTitleLines = 1;
 
@@ -750,9 +749,9 @@ void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
   drawText(fb, author, colX, baselineIn(author, cy, author.lineHeight()), vm.author, Ink::Black,
            {}, plane);
   cy += author.lineHeight() + kDetailsColGap;
-  drawText(fb, subtitle, colX, baselineIn(subtitle, cy, subtitle.lineHeight()), vm.subtitle,
-           Ink::Black, {}, plane);
-  cy += subtitle.lineHeight();
+  // NO SUBTITLE RUN. It drew a field no book carries -- and removing it also gives the
+  // TITLE its line back, because the budget below is the block's room less the column's
+  // FIXED runs, and the subtitle was one of them.
 
   // The block is as tall as its taller column plus the block's own bottom
   // padding. Keyed on whichever is taller rather than on the cover, so a book

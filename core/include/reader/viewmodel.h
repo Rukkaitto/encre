@@ -177,7 +177,9 @@ struct DeleteConfirmViewModel {
 struct BookDetailsViewModel {
   std::string title;     // "Dubliners"              -- from the filename today
   std::string author;    // "James Joyce"            -- Phase 3
-  std::string subtitle;  // "Fifteen stories - 1914" -- Phase 3
+  // NO SUBTITLE. The board drew one and no book carries the data: across four real
+  // EPUBs, not one has a `title-type=subtitle` refinement or any subtitle marker. A
+  // field that can never be filled reads as a device that failed to load something.
   std::string format;    // the band's value: "EPUB" / "TXT", from the extension
   // The board's six label/value rows, in its order: Progress, Current story,
   // Bookmarks, File size, Added, Location. A vector rather than six fields

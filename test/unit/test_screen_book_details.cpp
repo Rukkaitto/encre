@@ -76,17 +76,19 @@ TEST_CASE("book details shows the board's fields, and leaves the unknowable blan
   CHECK(details.vm().author == "James Joyce");
   CHECK(details.vm().format == "EPUB");
 
-  // The board's six rows, in the board's order.
-  REQUIRE(details.vm().fields.size() == 6);
+  // The board's FIVE rows, in the board's order. `Added` was a sixth and is gone: it
+  // wanted a file timestamp and DirEntry is {name, isDir, size}.
+  REQUIRE(details.vm().fields.size() == 5);
   CHECK(details.vm().fields[0].label == "Progress");
-  CHECK(details.vm().fields[1].label == "Current story");
+  // `Current chapter`, not `Current story` -- every other slot on the device that names
+  // this thing calls it a chapter, and one screen calling it a story was the odd one out.
+  CHECK(details.vm().fields[1].label == "Current chapter");
   CHECK(details.vm().fields[2].label == "Bookmarks");
   CHECK(details.vm().fields[3].label == "File size");
-  CHECK(details.vm().fields[4].label == "Added");
-  CHECK(details.vm().fields[5].label == "Location");
+  CHECK(details.vm().fields[4].label == "Location");
   // Two values are real today: the file's size, and where it lives.
   CHECK(details.vm().fields[3].value == "0.4 MB");
-  CHECK(details.vm().fields[5].value == "/BOOKS/");
+  CHECK(details.vm().fields[4].value == "/BOOKS/");
   // And one is honestly zero rather than blank: there is no way to make a
   // bookmark yet, so nought is a fact.
   CHECK(details.vm().fields[2].value == "0");
@@ -105,17 +107,17 @@ TEST_CASE("on a card, the fields that need EPUB metadata are blank rather than i
   CHECK(details.vm().title == "Walden");
   CHECK(details.vm().format == "TXT");
   CHECK(details.vm().author.empty());
-  CHECK(details.vm().subtitle.empty());
+  // No subtitle field at all now: no real book carries the data, and a field that can
+  // never be filled reads as a failure to load.
   // Blank, not "0%" and not a fabricated date: a row with no value is honest and
   // a made-up one is a claim.
-  CHECK(details.vm().fields[0].value.empty());  // Progress
-  CHECK(details.vm().fields[1].value.empty());  // Current story
-  CHECK(details.vm().fields[4].value.empty());  // Added
+  CHECK(details.vm().fields[0].value.empty());  // Progress -- this book has no sidecar
+  CHECK(details.vm().fields[1].value.empty());  // Current chapter, likewise
   // The two the filesystem knows.
   CHECK(details.vm().fields[3].value == "0.7 MB");
-  CHECK(details.vm().fields[5].value == "/BOOKS/");
-  // ...and it renders with four of its six values missing, which is the state the
-  // device is in until Phase 3.
+  CHECK(details.vm().fields[4].value == "/BOOKS/");
+  // ...and it renders with two of its five values missing, which is the state a book
+  // nobody has opened is legitimately in.
   reader::Framebuffer fb(480, 800);
   details.render(fb, r.fonts, theme, reader::Plane::Bw);
 }
@@ -159,9 +161,15 @@ TEST_CASE("book details matches its golden at both geometries") {
 TEST_CASE("book details' rules land where the board's do") {
   Ramp r;
   reader::QuietTheme theme;
-  // Measured off design/BookDetails.dc.html in Chrome: the band's 2px rule at
-  // 64-65, the 2px rule above the fields at 290-291, then the five field rules,
-  // and the hint bar's at 736 (728 on the shorter X3 panel).
+  // RE-MEASURED off design/BookDetails.dc.html after `Added` and the subtitle were
+  // removed: the band's 2px rule at 64-65, the 2px rule above the fields still at
+  // 290-291, then FOUR field rules (five rows, and the last has none), and the hint
+  // bar's at h-64.
+  //
+  // The block above did NOT move when the subtitle went, and that is worth knowing
+  // rather than assuming: the cover is 180px tall and the column was shorter than it,
+  // so the block's height is the COVER's and losing a column run changed nothing above
+  // the fields.
   for (const int h : {800, 792}) {
     libapp::LibraryApp app = detailsOf(theme, r.fonts, h);
     reader::Framebuffer fb(480, h);
@@ -171,10 +179,10 @@ TEST_CASE("book details' rules land where the board's do") {
         if (fb.getPixel(x, y)) return false;
       return true;
     };
-    for (const int y : {64, 65, 290, 291, 356, 421, 486, 551, 616}) CHECK(fullWidthRule(y));
+    for (const int y : {64, 65, 290, 291, 356, 421, 486, 551}) CHECK(fullWidthRule(y));
     CHECK(fullWidthRule(h - 64));
     // The last field row has no rule: the board leaves the list's bottom edge
     // open above the slack, as the Library's does.
-    CHECK_FALSE(fullWidthRule(681));
+    CHECK_FALSE(fullWidthRule(616));
   }
 }

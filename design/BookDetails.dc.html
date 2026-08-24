@@ -48,7 +48,15 @@
     <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 4px; flex: 1; min-width: 0;">
       <div style="font-size: var(--t-title); font-weight: 700; line-height: 1.1; overflow-wrap: anywhere;">Dubliners</div>
       <div style="font-size: var(--t-body);">James Joyce</div>
-      <div style="font-size: var(--t-label);">Fifteen stories &middot; 1914</div>
+      <!-- NO SUBTITLE LINE. This drew `Fifteen stories - 1914`, and there is no such
+           field in the data: checked across four real books, NOT ONE carries a
+           `title-type=subtitle` refinement or any subtitle marker. `dc:date` is in all
+           four, but a publication year is not a subtitle -- deriving one from the other
+           would be a different fact wearing its clothes.
+
+           The board's copy was authored, and a row that can never be filled is worse
+           than one that is not there: it reads as a device that failed to load
+           something. Removed rather than left blank. -->
     </div>
   </div>
   <div style="display: flex; flex-direction: column; border-top: 2px solid #000000;">
@@ -66,7 +74,12 @@
   <div style="font-size: var(--t-value); font-weight: 700;">31%</div>
 </div>
     <div style="display: flex; justify-content: space-between; align-items: center; height: 64px; padding: 0 24px; border-bottom: 1px solid #000000;">
-  <div style="font-size: var(--t-value); font-weight: 500;">Current story</div>
+  <div style="font-size: var(--t-value); font-weight: 500;">Current chapter</div>
+  <!-- `Current chapter`, and this row said `Current story`. Every other slot on the
+       device that names this thing calls it a chapter -- the reading page's header, the
+       contents list, Home's counter -- and one screen calling it a story was the odd one
+       out. The value is the chapter's own name from the book's table of contents,
+       carried in the reading position's sidecar. -->
   <div style="font-size: var(--t-value); font-weight: 700;">ARABY</div>
 </div>
     <div style="display: flex; justify-content: space-between; align-items: center; height: 64px; padding: 0 24px; border-bottom: 1px solid #000000;">
@@ -77,10 +90,14 @@
   <div style="font-size: var(--t-value); font-weight: 500;">File size</div>
   <div style="font-size: var(--t-value); font-weight: 700;">0.4 MB</div>
 </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 64px; padding: 0 24px; border-bottom: 1px solid #000000;">
-  <div style="font-size: var(--t-value); font-weight: 500;">Added</div>
-  <div style="font-size: var(--t-value); font-weight: 700;">AUG 14, 2026</div>
-</div>
+    <!-- NO `Added` ROW. It wanted a file timestamp and `DirEntry` is
+         `{name, isDir, size}` -- no date anywhere in the FileSystem interface, so
+         filling it is a change across three implementations and the contract's 27
+         clauses rather than a metadata question. SdFat does expose file dates, so it is
+         reachable; it is just not this screen's work.
+
+         Same call as the subtitle above: a row that cannot be filled reads as a failure
+         to load, so it goes rather than sitting blank. Five rows now, not six. -->
     <div style="display: flex; justify-content: space-between; align-items: center; height: 64px; padding: 0 24px;">
   <div style="font-size: var(--t-value); font-weight: 500;">Location</div>
   <div style="font-size: var(--t-value); font-weight: 700;">/BOOKS/</div>

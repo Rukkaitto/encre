@@ -47,14 +47,12 @@ struct LibraryItem {
     // diaeresis is on the board precisely to keep a non-ASCII glyph in the
     // goldens, and ASCII folding would render it `BRONTe`.
     std::string author;
-    std::string subtitle;  // "Fifteen stories - 1914"
     // The Progress ROW's value, which is a superset of the Library row's `31%`:
     // the board writes `31% - PAGE 78 OF 252`. Two strings for one fact because
     // the two boards state two different runs, and deriving the long one from the
     // short one is not possible in either direction.
     std::string progress;
     std::string chapter;  // "ARABY"
-    std::string added;    // "AUG 14, 2026" -- FileSystem carries no timestamps
   } details;
   int childBooks = -1;
 };

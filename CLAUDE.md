@@ -1714,15 +1714,35 @@ ONE book, so the shell reads it on the press that opens the screen — one open,
 is heap for it precisely because no Reader is on the stack, the same 48 KB the table of
 contents could not find from under a live one.
 
-**TWO ROWS STILL CANNOT BE FILLED, and both were measured rather than assumed:**
+**TWO FIELDS WERE REMOVED RATHER THAN LEFT BLANK**, because a row that can never be
+filled reads as a device that failed to load something:
 
-- **`Added`** needs a file timestamp. `DirEntry` is `{name, isDir, size}` — no date — so
-  this is a `FileSystem` change across three implementations and the contract's 27
-  clauses, not a metadata question.
-- **The subtitle** is not in the data. Checked across four real books: **not one** carries
-  a `title-type=subtitle` refinement or any subtitle marker. The board's "Fifteen stories
-  · 1914" is authored copy, and inventing it from `dc:date` would be a different fact
-  wearing its clothes.
+- **`Added`** wanted a file timestamp and `DirEntry` is `{name, isDir, size}` — no date
+  anywhere in `FileSystem`, so filling it is a change across three implementations and
+  the contract's 27 clauses rather than a metadata question. SdFat does expose file
+  dates, so it is reachable; it is not this screen's work. **Five field rows now, not
+  six.**
+- **The subtitle** is not in the data at all. Checked across four real books: **not one**
+  carries a `title-type=subtitle` refinement or any subtitle marker. `dc:date` is in all
+  four, but a publication year is not a subtitle — deriving one from the other would be a
+  different fact wearing its clothes. The board's "Fifteen stories · 1914" was authored
+  copy.
+
+Removing the subtitle gave the TITLE its line back, because the title's line budget is
+the block's room less the column's FIXED runs and the subtitle was one of them. And the
+block above the fields did NOT move — the cover is 180px and the column was shorter than
+it, so the block's height is the cover's. That was measured off the board's own render
+rather than reasoned about, which is why the rule positions in
+`test_screen_book_details.cpp` are still 290/291.
+
+**`Current chapter`, not `Current story`.** Every other slot on the device that names this
+thing calls it a chapter — the reading page's header, the contents list, Home's counter —
+and one screen calling it a story was the odd one out.
+
+**A NEW SIDECAR FIELD READS BLANK ON AN OLD SIDECAR**, and that is worth expecting rather
+than diagnosing: `chapter` was added after positions were already being written, so the
+row is empty until the book is saved once more. `percent` had the same first run. The
+record loads either way — refusing it would cost the reader their place to gain a label.
 
 **AND THE PROGRESS ROW LOST ITS PAGE COUNT** — the third slot on the third board to do
 so, after Home's CONTINUE block and Contents' rows, for the same ~49 s reason every time.

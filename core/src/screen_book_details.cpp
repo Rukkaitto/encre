@@ -39,7 +39,6 @@ BookDetailsScreen::BookDetailsScreen(const LibraryScreen& library, std::string a
     // Library's `details.author` is the demo content's field and is empty on a card --
     // it stays as the fallback so the simulator and the goldens keep their value.
     vm_.author = author.empty() ? item->details.author : author;
-    vm_.subtitle = item->details.subtitle;
     vm_.format = formatOf(item->entry.name);
     // The board's six rows, in the board's order. Four of the values need
     // metadata that does not exist yet and are therefore EMPTY strings rather
@@ -49,10 +48,9 @@ BookDetailsScreen::BookDetailsScreen(const LibraryScreen& library, std::string a
     // `Bookmarks` is the exception that is genuinely zero: there is no way to
     // make a bookmark yet, so nought is a fact rather than a placeholder.
     vm_.fields = {{"Progress", item->details.progress},
-                  {"Current story", item->details.chapter},
+                  {"Current chapter", item->details.chapter},
                   {"Bookmarks", "0"},
                   {"File size", megabytes(item->entry.size)},
-                  {"Added", item->details.added},
                   // Shouted and with the board's trailing slash: `/BOOKS/`. The
                   // path is the directory the book was listed from, which is the
                   // Library's, so a book inside a folder says so.

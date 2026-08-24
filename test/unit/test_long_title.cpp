@@ -61,13 +61,11 @@ reader::BookDetailsViewModel longBookDetails() {
   reader::BookDetailsViewModel vm;
   vm.title = kLongTitle;
   vm.author = "George Eliot";
-  vm.subtitle = "Eight books \xC2\xB7 1871";
   vm.format = "EPUB";
   vm.fields = {{"Progress", "6% \xC2\xB7 PAGE 53 OF 890"},
                {"Current story", "MISS BROOKE"},
                {"Bookmarks", "0"},
                {"File size", "1.8 MB"},
-               {"Added", "AUG 14, 2026"},
                {"Location", "/BOOKS/"}};
   vm.hints = {"BACK", "", "", ""};
   return vm;
