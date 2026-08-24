@@ -511,6 +511,14 @@ which is what kills `triggerDisplay`'s fall-back guard and `displayBuffer`'s
 FAST→HALF promotion. What it buys is the one division the log could not make: `up`
 is ours and bounded by the 20 MHz SPI clock, `wave` is the panel's.
 
+**`[render] total=… fill=…/N glyph=…/N …`** is the second half of `[paint] done`
+and breaks a render down by PRIMITIVE — see "Which primitive spent the render"
+below for what it found. `reader::Profile` (`core/include/reader/profile.h`) is
+five slots and an injected clock: `core/` has no clock and must not acquire one,
+so the shell installs `micros()`, the simulator installs `std::chrono`, and a
+build that installs neither pays a load and a branch. Two clock reads per
+primitive CALL, never per pixel.
+
 **`[fs] list … (N.NN ms/entry)`** over 15 ms is the other half. `[i]` can say a
 Confirm on Home spent two seconds in `disp=`; only this says the two seconds were
 one `list()` over 406 entries. The ~2.7 ms an entry quoted throughout this file is
@@ -621,16 +629,65 @@ it directly: median 549 ms, max 937 ms, the difference being entirely `wait`.
    under the eager page count. Not fixed. The bounded fix is a small ring of
    recently laid-out pages (~1 KB each) so the common case — turning back to the
    page you just left — needs no decode at all.
-3. **THE READER MENU IS THE MOST EXPENSIVE RENDER ON THE DEVICE**: 266 ms as a full
-   stack render, and still **172 ms** as an overlay-only partial repaint
-   (`scope=top`). The reader page underneath is only ~97 ms of that, so the veil
-   plus a five-row panel costs more than a whole page of body text. Not fixed, and
-   not guessable — it needs the render broken down before anything is changed.
+3. **THE OVERLAYS ARE THE MOST EXPENSIVE RENDERS ON THE DEVICE** — the actions
+   panel at 256 ms and the reader menu at 260 ms, against Contents' 62 ms. The
+   guess recorded here first was the veil, and **the veil was wrong**: it is 10 ms.
+   See the breakdown below, which is what settled it.
 4. **`/books` LISTS AT 2.92–2.96 ms AN ENTRY**, confirming the figure this file has
    quoted for two phases, and 203 entries is **~600 ms** on every Library push. Not
    the 1.1 s estimated elsewhere here: that assumed 406 entries because macOS writes
    a `._name` beside every file, and **this card has none**. Home's count is cached
    now; the Library's own `rescan()` is not.
+
+### Which primitive spent the render
+
+`[render]` is the second half of `[paint] done`, and it is per PRIMITIVE rather
+than per screen — deliberately, because the primitives are shared: whatever is
+expensive here is expensive on every screen that draws one, where a per-screen
+breakdown would have to be read once per screen to notice that. Five slots, each
+a leaf that touches pixels, so nothing nests and nothing is double-counted;
+`outlineRect` is four `fillRect`s and is not a slot, `drawPanelRow` is a fill plus
+a run and is not one either. Measured on the device, microseconds:
+
+| screen | total | **fill** | glyph | veil | dither | icon | other |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| ITEM-ACTIONS | 256 000 | **157 836** (62%) | 57 032 | 9 923 | 5 044 | 8 076 | 18 089 |
+| READER-MENU | 260 000 | **138 246** (53%) | 103 621 | 9 965 | — | 5 918 | 2 250 |
+| READER, a page | 215 000 | 299 | **212 935** (99%) | — | — | — | 1 766 |
+| LIBRARY | 105 000 | 36 054 (34%) | 44 506 | — | 4 939 | 3 719 | 15 782 |
+| HOME | 74 000 | 34 225 (46%) | 26 616 | — | 4 974 | 6 048 | 2 137 |
+
+**`Framebuffer::fillRect` IS 34–62% OF EVERY CHROME RENDER, and it is the same
+defect `veilRect` was already fixed for.** It is still a per-pixel `setPixel`
+loop — a bounds check, a `byteIndex` (a division under rotation), a `bitMask`
+(a modulo) and a read-modify-write, per pixel. An overlay panel is ~340×450 and a
+full-bleed focused row ~300×72, so one actions-panel frame asks for on the order
+of 200,000 of them. The arithmetic that makes this unambiguous:
+
+| | pixels | cost | per pixel |
+|---|--:|--:|--:|
+| `veilRect`, byte-wise, whole frame | 418,176 | 9.9 ms | **24 ns** |
+| `fillRect`, per-pixel | ~200,000 | 158 ms | **790 ns** |
+
+Same class of work, **33× apart**, and the difference is entirely `setPixel`.
+
+**A READER PAGE IS 99% GLYPH BLIT** — 213 ms of a 215 ms render, and the same
+per-pixel shape in `drawRunF26`. That is the biggest single render cost in the
+product, because the reader is the screen a user spends their time on. `fill` on
+that screen is 299 µs: the page draws almost no furniture.
+
+**`other` IS A REAL SLOT, NOT A ROUNDING ERROR.** It is the remainder — layout
+arithmetic, measuring, wrapping, eliding — and on the Library it is 11–16 ms and
+VARIES between renders of the same screen, which is elision measuring real
+filenames rather than the boards' short demo titles. Not chased yet.
+
+**And the desktop agrees, which is what makes `--bench` worth trusting for this.**
+`reader_sim <screen> --bench N` installs the same profiler through a
+`std::chrono` clock and reports the same slots: it called the actions panel 62%
+fill against the device's 62%, and the reader page 97% glyph against 99%. So a
+change to a drawing primitive can be judged before it is flashed. It does NOT
+transfer to anything touching the card or the inflater — see the ratio warnings
+above.
 
 **And one dead button the timing exposed rather than the logic**: `UP` on the
 Reader is `Gesture::AltPrev`, the way back, and answers `none()` with no anchor
