@@ -19,17 +19,18 @@
 // dog -- and the one false positive is `Dieu`, an interjection. Neuromancien returns
 // Case, Molly, Armitage, Wintermute, Chiba, Tessier-Ashpool.
 //
-// FIVE RULES, each of which replaced something that looked reasonable and was wrong:
+// THE RULES, each of which replaced something that looked reasonable and was wrong.
+// They are restated at their sites; this is the index.
 //
-//  1. SENTENCE-INITIAL SUPPRESSION IS THE LOAD-BEARING RULE. Rank by mentions that
-//     are NOT the first word of a sentence. Ranking by total mentions floods the list
+//  1. SENTENCE-INITIAL SUPPRESSION IS THE LOAD-BEARING RULE. Rank on mentions that
+//     are NOT the first word of a sentence. Ranking on total mentions floods the list
 //     with Il / Je / Et / Elle -- a French pronoun starts thousands of sentences.
 //     This one rule is the difference between a cast list and a word frequency table.
 //
 //  2. A SHORT CAPITALISED WORD BEFORE A PERIOD IS NOT AN ABBREVIATION. Names are
 //     short. Guarding on length alone means "parla a Stu. Je crois" never splits, and
-//     every following word counts as mid-sentence -- which is how the pronouns got in.
-//     Only a single-letter initial or a listed abbreviation.
+//     every following word then counts as mid-sentence -- which is how the pronouns
+//     got in. Only a single-letter initial, or one of a dozen listed abbreviations.
 //
 //  3. AN ENTITY IS A MAXIMAL RUN, COUNTED ONCE. Counting each token separately as
 //     well put `La` in the list beside `La Poubelle` with 316 mentions of its own,
@@ -46,21 +47,56 @@
 //     preface, and the best-scoring sentence there was one listing eight of them --
 //     which introduces none of them. A capital after the comma means a list.
 //
-// WHAT IT DID NOT SOLVE, and what 3E has to decide:
+//  6. TRIM WHAT AN APOSTROPHE GLUES ON, at both ends. `I'm`, `I'd` and `Deborah's`
+//     read as names in English; `d'Amy` and `l'Enfant` read as names in French.
 //
-//  * THE INTRODUCTION HAPPENS AT THE FULL NAME AND THE READER IS STUCK ON THE
-//    FORENAME. "Stuart Redman, sans doute l'homme le plus tranquille d'Arnette" is a
-//    perfect answer filed under `Redman`; `Stu`, which is what is on the page 849
-//    times, gets a sentence that says nothing. Surnames fold into full names by
-//    string containment; Stu -> Stuart does not, because they are different tokens.
-//    A prefix rule (Stu c Stuart, Fran c Frannie, Tom c Thomas) is untested and is
-//    the obvious next thing to try.
-//  * PERSON VERSUS PLACE IS NOT SEPARATED and by decision is not attempted -- the
-//    screen says NAMES. Boulder, Las Vegas, New York and Miami all rank, correctly.
-//  * `Dieu` -- an interjection that is capitalised, frequent and mid-sentence. No
-//    non-semantic rule reaches it.
+//  7. THE CONTAINMENT LINK TAKES NO RATIO GUARD, and this was the single largest
+//     improvement in the whole probe. The guard existed so `Larry` would not be
+//     LABELLED "Larry Underwood" -- the book calls him Larry -- but the label is
+//     chosen separately, from the most-mentioned member. So the guard was only ever
+//     costing a group its INTRODUCTION. Removing it took Le Fleau's top 16 from ~4
+//     useful introductions to 11: Nick Andros "prisonnier du sherif de Shoyo", Ralph
+//     Brentner "l'homme de la radio", Nadine Cross "douce, gentille avec les enfants,
+//     excellente institutrice", Randall Flagg "l'homme noir".
+//     ONE RULE WAS ANSWERING TWO QUESTIONS -- which member to show, and which member
+//     to quote -- and they have different right answers.
+//
+//  8. ON A TIE, THE SENTENCE COMES FROM THE FULLER NAME. Stu and Stuart Redman are
+//     both tier 3; the tie went alphabetically to Stu, and the group kept a sentence
+//     saying nothing while the perfect appositive sat one member away.
+//
+//  9. PREFIX EDGES ARE WORTH TAKING, GUARDED TWICE. Stu -> Stuart, Fran -> Frannie,
+//     Deb -> Deborah, Dex -> Dexter. Guard one: a plural is not a nickname (Noir ->
+//     Noirs and Etat -> Etats were 2 of the first 8 merges). Guard two: an ambiguous
+//     prefix is declined unless one extension dominates 3:1 -- `Fran` extends to both
+//     `Frank` and `Frannie`, and merging Frank into Frannie is far worse than leaving
+//     a nickname unlinked. `Carl ~ Carla, Carley Yates` is still declined, correctly.
+//
+//     MEASURED, because it is the one rule whose value was not obvious. Le Fleau: 7
+//     merges, 2 clearly right (Stu and Fran -- ranks 1 and 4, the highest-value
+//     entities in the book), 2 clearly wrong (Brad -> Bradenton, Rich -> Richardson),
+//     3 unverifiable. Dexter: 2 merges, both right, none wrong. Neuromancien: none
+//     drawn. It earns itself because ITS WINS LAND AT THE TOP OF THE LIST AND ITS
+//     ERRORS LAND IN THE TAIL, on entities with under 30 mentions that a reader is
+//     unlikely to look up -- and where the cost is one imperfect sentence, not a
+//     wrong list. `--prefix 0` turns it off; the comparison is the evidence.
+//
+// WHAT IS STILL WRONG, and what 3E inherits:
+//
+//  * PERSON VERSUS PLACE IS NOT SEPARATED, by decision -- the screen says NAMES.
+//    Boulder, Las Vegas, New York and Miami all rank, correctly.
+//  * `Dieu` -- an interjection, capitalised, frequent, mid-sentence. Rank 8 in Le
+//    Fleau. No non-semantic rule reaches it, and it is the one durable false positive.
+//  * PRONOUNS STILL LEAK ON A SHORT BOOK. `Elle` and `Il` are ranks 7 and 8 in
+//    Neuromancien, where the real names are fewer. Proportional to book length.
+//  * THE BOOK'S OWN TITLE RANKS, folding into a character where they share a name
+//    ("Dexter (Darkly Dreaming Dexter/Dex)"). Headings should probably be excluded
+//    from candidate detection, which is one line and was not tried.
+//  * ALIAS LISTS GET LONG -- "Stu (Stuart/Stu Redman/Redman/Stuart Redman)" does not
+//    fit a 480px row. A display problem, not a detection one.
 //
 #include <algorithm>
+#include <functional>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -308,9 +344,11 @@ int main(int argc, char** argv) {
   }
   long minCount = 3;
   int top = 60;
+  bool usePrefix = true;
   for (int i = 2; i + 1 < argc; i += 2) {
     if (std::strcmp(argv[i], "--min") == 0) minCount = std::atol(argv[i + 1]);
     else if (std::strcmp(argv[i], "--top") == 0) top = std::atoi(argv[i + 1]);
+    else if (std::strcmp(argv[i], "--prefix") == 0) usePrefix = (std::atoi(argv[i + 1]) != 0);
   }
 
   reader::HostFileSystem fs("/");
@@ -428,63 +466,195 @@ int main(int argc, char** argv) {
   for (auto& kv : cands) if (kv.second.mentions == kv.second.initial) ++onlyInitial;
   std::printf("  never seen mid-sentence (suppressed): %ld\n", onlyInitial);
 
-  // A SINGLE-TOKEN ENTITY FOLDS INTO A LONGER ONE that accounts for most of it:
-  // "Redman" is always "Stuart Redman", so it is not a second person. "Larry" is not
-  // folded into "Larry Underwood", and should not be -- the book calls him Larry.
-  std::map<std::string, std::string> canon;
-  for (auto& [name, cd] : cands) {
-    canon[name] = name;
+  // ------------------------------------------------------------------ grouping
+  // Two kinds of edge join entities that name one person, and neither needs a
+  // vocabulary or a list of nicknames.
+  //
+  //  * CONTAINMENT: a single token that is the head or tail of a longer run, when the
+  //    run accounts for most of that token's mentions. "Redman" is always "Stuart
+  //    Redman". "Larry" is NOT folded into "Larry Underwood" and should not be -- the
+  //    book calls him Larry far more often than it calls him Larry Underwood.
+  //
+  //  * PREFIX: a token that is a strict prefix of another entity's FIRST token.
+  //    Stu -> Stuart Redman, Fran -> Frannie, Deb -> Deborah, Dex -> Dexter. This is
+  //    the edge that matters most, because THE INTRODUCTION HAPPENS AT THE FULL NAME
+  //    AND THE READER IS STUCK ON THE FORENAME: without it, "Stuart Redman, sans
+  //    doute l'homme le plus tranquille d'Arnette" is filed under Redman while `Stu`
+  //    -- 849 mentions, the one actually on the page -- gets a sentence saying nothing.
+  //
+  //    GUARDED ON AMBIGUITY, not just on length. `Fran` is a prefix of `Frannie` AND
+  //    of `Frank`, and unioning on both makes two people one person -- a far worse
+  //    failure than leaving a nickname unlinked. So a prefix edge is drawn only when
+  //    exactly ONE frequent entity extends it. An ambiguous nickname is not resolvable
+  //    without semantics, so it is declined and said so.
+  auto charLen = [](const std::string& t) {
+    int n = 0;
+    for (const char* r = t.data(); r < t.data() + t.size();) { r += classify(r, t.data() + t.size()).len; ++n; }
+    return n;
+  };
+  auto firstTok = [](const std::string& e) {
+    const size_t sp = e.find(' ');
+    return sp == std::string::npos ? e : e.substr(0, sp);
+  };
+
+  // Only entities above the threshold take part; a hapax must not drag a name around.
+  std::vector<const std::string*> live;
+  for (auto& [name, cd] : cands)
+    if (cd.mentions - cd.initial >= minCount) live.push_back(&name);
+
+  std::map<std::string, std::string> parent;
+  for (const std::string* n : live) parent[*n] = *n;
+  std::function<std::string(std::string)> findRoot = [&](std::string x) {
+    while (parent[x] != x) x = parent[x];
+    return x;
+  };
+  auto unite = [&](const std::string& a, const std::string& b) {
+    const std::string ra = findRoot(a), rb = findRoot(b);
+    if (ra != rb) parent[ra] = rb;
+  };
+
+  // --- containment edges
+  for (const std::string* np : live) {
+    const std::string& name = *np;
     if (name.find(' ') != std::string::npos) continue;
-    const std::string* bestRun = nullptr;
+    const std::string* best = nullptr;
     long bestN = 0;
-    for (auto& [other, ocd] : cands) {
+    for (const std::string* op : live) {
+      const std::string& other = *op;
       if (other.find(' ') == std::string::npos) continue;
       const bool head = other.compare(0, name.size(), name) == 0 && other[name.size()] == ' ';
       const bool tail = other.size() > name.size() + 1 &&
                         other.compare(other.size() - name.size(), name.size(), name) == 0 &&
                         other[other.size() - name.size() - 1] == ' ';
       if (!head && !tail) continue;
-      const long on = ocd.mentions - ocd.initial;
-      if (on > bestN) { bestN = on; bestRun = &other; }
+      const long on = cands[other].mentions - cands[other].initial;
+      if (on > bestN) { bestN = on; best = &other; }
     }
-    if (bestRun != nullptr && bestN * 2 >= cd.mentions - cd.initial) canon[name] = *bestRun;
+    // NO RATIO GUARD, and the reason is that the guard was answering two questions
+    // with one rule. It existed so that `Larry` would not be LABELLED "Larry
+    // Underwood" -- the book calls him Larry. But the label is chosen separately,
+    // from the most-mentioned member, so the guard was only ever costing the group
+    // its introduction: `Frannie` refused to link to `Frannie Goldsmith` and kept a
+    // sentence saying nothing while the appositive sat one member away.
+    //
+    // Linking is safe here because only the BEST run per token is joined, never every
+    // run containing it -- so `Goldsmith` joins one Goldsmith and a family is not
+    // collapsed into one person.
+    if (best != nullptr) unite(name, *best);
   }
 
-  struct Ent { long n = 0; const Cand* src = nullptr; std::vector<std::string> alias; };
-  std::map<std::string, Ent> ents;
-  for (auto& [name, cd] : cands) {
-    const long nonInitial = cd.mentions - cd.initial;
-    if (nonInitial < minCount) continue;
-    Ent& e = ents[canon[name]];
-    e.n += nonInitial;
-    if (canon[name] != name) e.alias.push_back(name);
-    if (e.src == nullptr || nonInitial > e.src->mentions - e.src->initial ||
-        cd.bestTier > e.src->bestTier) e.src = &cd;
+  // --- prefix edges, with the ambiguity guard
+  struct Merge { std::string from, to; };
+  std::vector<Merge> merges;
+  std::vector<std::pair<std::string, std::vector<std::string>>> declined;
+  for (const std::string* np : live) {
+    if (!usePrefix) break;
+    const std::string& name = *np;
+    if (name.find(' ') != std::string::npos) continue;
+    if (charLen(name) < 3) continue;
+    std::vector<std::string> ext;
+    for (const std::string* op : live) {
+      const std::string& other = *op;
+      if (other == name) continue;
+      const std::string ft = firstTok(other);
+      if (ft.size() <= name.size()) continue;
+      if (ft.compare(0, name.size(), name) != 0) continue;
+      // A PLURAL IS NOT A NICKNAME. Noir -> Noirs and Etat -> Etats were two of the
+      // eight merges this rule first drew, and both are one word inflected.
+      const std::string tail = ft.substr(name.size());
+      if (tail == "s" || tail == "es" || tail == "x") continue;
+      // Distinct only if the extending FIRST TOKEN differs -- "Stuart" and
+      // "Stuart Redman" are not two ways to be ambiguous.
+      bool seen = false;
+      for (const std::string& e : ext) if (firstTok(e) == ft) seen = true;
+      if (!seen) ext.push_back(other);
+    }
+    if (ext.empty()) continue;
+    // AMBIGUOUS, BUT NOT ALWAYS UNRESOLVABLE. `Fran` extends to both `Frank` and
+    // `Frannie`, and declining outright cost a top-three entity its introduction.
+    // A DOMINANT extension -- 3x the mentions of the runner-up -- is taken; a close
+    // call is still declined, because merging Frank into Frannie is far worse than
+    // leaving a nickname unlinked.
+    std::sort(ext.begin(), ext.end(), [&](const std::string& a, const std::string& b) {
+      return cands[a].mentions - cands[a].initial > cands[b].mentions - cands[b].initial;
+    });
+    if (ext.size() > 1) {
+      const long n0 = cands[ext[0]].mentions - cands[ext[0]].initial;
+      const long n1 = cands[ext[1]].mentions - cands[ext[1]].initial;
+      if (n0 < n1 * 3) { declined.push_back({name, ext}); continue; }
+    }
+    unite(name, ext[0]);
+    merges.push_back({name, ext[0]});
   }
 
-  std::vector<std::pair<std::string, const Ent*>> ranked;
-  for (auto& kv : ents) ranked.push_back({kv.first, &kv.second});
+  struct Ent {
+    long n = 0;
+    const Cand* src = nullptr;
+    std::string srcName;
+    std::vector<std::string> members;
+  };
+  std::map<std::string, Ent> groups;
+  for (const std::string* np : live) {
+    const Cand& cd = cands[*np];
+    Ent& g = groups[findRoot(*np)];
+    g.n += cd.mentions - cd.initial;
+    g.members.push_back(*np);
+    // The sentence comes from the best tier, and ON A TIE FROM THE FULLER NAME --
+    // which is the whole point of grouping, and which the first version got wrong.
+    // Stu and Stuart Redman are both tier 3, the tie went alphabetically to Stu, and
+    // the group kept a sentence saying nothing while the perfect appositive sat one
+    // member away. More tokens first, then longer.
+    const auto fuller = [&](const std::string& a, const std::string& b) {
+      const long ta = std::count(a.begin(), a.end(), ' ');
+      const long tb = std::count(b.begin(), b.end(), ' ');
+      if (ta != tb) return ta > tb;
+      return a.size() > b.size();
+    };
+    if (g.src == nullptr || cd.bestTier > g.src->bestTier ||
+        (cd.bestTier == g.src->bestTier && fuller(*np, g.srcName))) {
+      g.src = &cd;
+      g.srcName = *np;
+    }
+  }
+
+  std::vector<std::pair<std::string, Ent*>> ranked;
+  for (auto& kv : groups) ranked.push_back({kv.first, &kv.second});
   std::sort(ranked.begin(), ranked.end(), [](auto& a, auto& b) {
     if (a.second->n != b.second->n) return a.second->n > b.second->n;
     return a.first < b.first;
   });
 
+  std::printf("\nprefix rule: %s\n", usePrefix ? "ON" : "OFF");
+  std::printf("prefix merges drawn: %zu\n", merges.size());
+  for (auto& m : merges) std::printf("    %s -> %s\n", m.from.c_str(), m.to.c_str());
+  std::printf("prefix merges DECLINED as ambiguous: %zu\n", declined.size());
+  for (auto& [n, ex] : declined) {
+    std::printf("    %s ~ ", n.c_str());
+    for (size_t i = 0; i < ex.size(); ++i) { if (i) std::printf(", "); std::printf("%s", ex[i].c_str()); }
+    std::printf("\n");
+  }
+
   std::printf("\nentities: %zu at min %ld (of %zu distinct runs)\n\n", ranked.size(), minCount,
               cands.size());
   int shown = 0;
-  for (auto& [name, e] : ranked) {
+  for (auto& [root, g] : ranked) {
     if (shown++ >= top) break;
-    std::string label = name;
-    if (!e->alias.empty()) {
+    // Label: the most-mentioned member first, so what is ON THE PAGE is findable,
+    // then the rest -- the full name is what actually answers "who is this".
+    std::sort(g->members.begin(), g->members.end(), [&](const std::string& a, const std::string& b) {
+      return cands[a].mentions - cands[a].initial > cands[b].mentions - cands[b].initial;
+    });
+    std::string label = g->members[0];
+    if (g->members.size() > 1) {
       label += " (";
-      for (size_t i = 0; i < e->alias.size(); ++i) { if (i) label += "/"; label += e->alias[i]; }
+      for (size_t i = 1; i < g->members.size(); ++i) { if (i > 1) label += "/"; label += g->members[i]; }
       label += ")";
     }
-    std::string snip = e->src ? e->src->best.sentence : std::string();
-    if (snip.size() > 165) { snip.resize(165); snip += "..."; }
+    std::string snip = g->src ? g->src->best.sentence : std::string();
+    if (snip.size() > 150) { snip.resize(150); snip += "..."; }
     for (char& ch : snip) if (ch == '\n' || ch == '\r') ch = ' ';
-    std::printf("%5ld  T%d %-30s sp%-3d %s\n", e->n, e->src ? e->src->bestTier : -1,
-                label.c_str(), e->src ? e->src->firstSpine : -1, snip.c_str());
+    std::printf("%5ld T%d %-38s %s\n", g->n, g->src ? g->src->bestTier : -1, label.c_str(),
+                snip.c_str());
   }
   return 0;
 }
