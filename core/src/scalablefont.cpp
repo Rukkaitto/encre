@@ -85,9 +85,18 @@ const uint8_t* coverageLut() {
   static uint8_t lut[256];
   static const bool built = [] {
     for (int v = 0; v < 256; ++v) {
+#ifdef ENCRE_AA_THRESHOLDS_4BIT
+      // The reference firmware's shape: 8-bit coverage down to 4 bits, then three
+      // linear thresholds on that. See ScalableFont::kAaThresholds4Bit for the
+      // measurement that makes this an experiment rather than a fix.
+      const int bm = (v * 15 + 127) / 255;
+      const uint8_t* const t = ScalableFont::kAaThresholds4Bit;
+      const int level = bm >= t[2] ? 3 : bm >= t[1] ? 2 : bm >= t[0] ? 1 : 0;
+#else
       const float t = std::pow(static_cast<float>(v) / 255.0f,
                                1.0f / ScalableFont::kCoverageGamma);
       const int level = static_cast<int>(t * 3.0f + 0.5f);
+#endif
       lut[v] = static_cast<uint8_t>(level < 3 ? level : 3);
     }
     return true;

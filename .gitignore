@@ -1,4 +1,6 @@
 build/
+# The anti-alias A/B's second build tree: same sources, ENCRE_AA_THRESHOLDS_4BIT on.
+build-aa/
 .pio/
 .cache/
 __pycache__/

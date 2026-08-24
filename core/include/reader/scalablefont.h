@@ -60,6 +60,38 @@ class ScalableFont : public GlyphSource {
   // here is a way for body text and chrome to end up different weights.
   static constexpr float kCoverageGamma = 2.0f;
 
+  // --- The A/B: an alternative CURVE SHAPE, not another gamma ------------------
+  //
+  // The reference firmware quantises differently: it rasterises to 4 bits and
+  // thresholds that 0..15 value linearly, at (4, 8, 12) by default and at
+  // (3, 6, 10) under `--darken-aa`. The roadmap recorded this as "3/6/10 against
+  // our 4/8/12" and read it as us being LIGHTER. Measured on real rendered text at
+  // ppem 32, that is backwards: our curve carries **100%** of the ink, their
+  // darken-aa **97.7%** and their default **93.9%**. Adopting theirs would make
+  // body text lighter.
+  //
+  // THE REAL DIFFERENCE IS SHAPE, AND NO GAMMA EXPRESSES IT. Our 0->1 step is at
+  // coverage **8/255** where their darken-aa needs **43** -- so every glyph edge
+  // carries a wide halo of level-1 pixels, which on this glass may read as haze
+  // rather than as smoothness. Their ramp is crisp at the bottom AND dark at the
+  // top (43/94/162); gamma 1.0 gives the crisp bottom with a light top
+  // (43/128/213), and gamma 2.5 the dark top with our hazy bottom (3/46/162).
+  // One exponent cannot be both.
+  //
+  // So this is a threshold ramp rather than a gamma, selected by
+  // `-DENCRE_AA_THRESHOLDS_4BIT` and OFF by default -- the desktop build never
+  // sets it, so the goldens stay blessed against the shipping curve. It exists to
+  // be compared ON THE PANEL, which is the only place the question can be
+  // settled: 15.7% of a page's glyph pixels are anti-aliased edge, and the whole
+  // disagreement lives in those.
+  //
+  // IT CHANGES THE BODY FACE ONLY. Chrome is a pre-rendered Space Grotesk ramp
+  // built by fontc.py, and regenerating twelve assets per variant to test a
+  // question about body text is not worth it -- so a body-vs-chrome weight
+  // difference in a variant build is an artifact of the experiment, not of the
+  // candidate.
+  static constexpr uint8_t kAaThresholds4Bit[3] = {3, 6, 10};
+
   // Sized to hold the WHOLE working set of the reading face, measured rather than
   // scaled -- because both of the obvious estimates are wrong, in opposite
   // directions.
