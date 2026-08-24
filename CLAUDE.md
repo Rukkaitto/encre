@@ -2347,6 +2347,21 @@ passed — `shell/` has no harness, so nothing on the desktop touches that loop.
   while the commit describing them went through. Both times the assert failed for the
   dullest reason — the anchor text had already been edited by a previous commit, so it no
   longer matched what I remembered.
+- **EVERY BUILT SCREEN HAS A GOLDEN NOW** (2026-08-24). Seven of the seventeen did not:
+  `reader_menu`, `contents`, `reader_chapter_open`, `reader_list`, `settings`,
+  `home_empty`, `library_scrolled` -- checked by unit tests and by `make compare` and by
+  nothing that looked at a pixel in CI. Four were the reader family, which is what made
+  it urgent rather than tidy: the emphasis work restructured the shared text path, and a
+  screen with no golden cannot report a regression in it.
+- **A GOLDEN THAT PASSES WITHOUT BITING IS WORTHLESS, so mutate and watch it fail.**
+  Every golden added here was proved by breaking the code it defends: blockquote no
+  longer italic fails 2, heading no longer centred fails 2, blank rows between blocks
+  off fails 4, the menu's `Bookmarks` value removed fails 2, and the section header's
+  positional rule dropped fails exactly 4 -- `contents` and `settings` at both
+  geometries and none of the other three. **One of my mutations was a no-op** and looked
+  like a passing test: I patched `rowRuleFor` in components.cpp where it lives in
+  theme_quiet.cpp, so "0 failures" meant "nothing was changed", not "the goldens are
+  blind". Check the mutation landed before believing what it tells you.
 - **A SPECIMEN BOARD MUST NOT PUT A LINE ON THE WRAP BOUNDARY.** `ReaderList` measured
   7.63%/7.90% against 4.5% for its sibling, and the cause was one list item: "Space is
   measured in rows." is **408px against a 406px measure**. Two separate faults sat on
