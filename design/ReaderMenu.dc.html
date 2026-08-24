@@ -55,10 +55,18 @@
       <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">6%</div>
     </div>
     <div style="display: flex; flex-direction: column;">
-      <!-- FOCUS IS ON CONTENTS, and this board had it on Typography. FOUR of these six
-           rows are not built -- Typography, Go to page, Bookmarks, About this book --
-           and the board focused one of them, so implementing it faithfully would have
-           drawn a selection on a row that does nothing.
+      <!-- FIVE ROWS. `Go to page` and `Close book` were cut, and neither was cut for
+           room: NOBODY NAVIGATES AN EPUB BY PAGE NUMBER -- a reflowable book has no
+           stable page to go to, and the number a picker would offer changes with the
+           type size, so the honest way to jump is the chapter name, which Contents
+           already gives. `Close book` was a second door to a room Back already opens
+           from the page: it duplicated the reader's own Back and had to carry its own
+           save edge to stay correct.
+
+           FOCUS IS ON CONTENTS, and this board had it on Typography. THREE of these
+           five rows are not built -- Typography, Bookmarks, Names -- and the board
+           focused one of them, so implementing it faithfully would have drawn a
+           selection on a row that does nothing.
 
            SETTINGS' RULE APPLIES, and it is already written down for that screen: every
            board row is DRAWN, and the focus SKIPS the ones that cannot act. A row that
@@ -67,18 +75,14 @@
            is drawn EXACTLY as an unfocused live one -- no dimming, because focusability
            is about input and a visual difference nobody designed is worse than none.
 
-           What responds today: Contents, and Close book. The rest arrive with their own
-           screens and need no change here when they do. -->
+           What responds today: Contents and About this book. The rest arrive with
+           their own screens and need no change here when they do. -->
       <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 20px; background: #000000; color: #ffffff;">
         <div style="font-size: var(--t-value); font-weight: 700;">Contents</div>
         <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#ffffff" stroke-width="2"></path></svg>
       </div>
       <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 20px; border-bottom: 1px solid #000000;">
         <div style="font-size: var(--t-value); font-weight: 500;">Typography</div>
-        <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
-      </div>
-      <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 20px; border-bottom: 1px solid #000000;">
-        <div style="font-size: var(--t-value); font-weight: 500;">Go to page&hellip;</div>
         <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
       </div>
       <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 20px; border-bottom: 1px solid #000000;">
@@ -103,12 +107,13 @@
         <div style="font-size: var(--t-value); font-weight: 500;">Names</div>
         <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
       </div>
-      <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 20px; border-bottom: 1px solid #000000;">
+      <!-- THE LAST ROW, and it carries no rule -- the panel's own border closes the
+           list. `Close book` used to sit here and hold that job; it is gone, and the
+           row that inherits the position inherits the missing border with it. A rule
+           left behind here draws a line one pixel above the panel's own. -->
+      <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 20px;">
         <div style="font-size: var(--t-value); font-weight: 500;">About this book</div>
         <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
-      </div>
-      <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 20px;">
-        <div style="font-size: var(--t-value); font-weight: 500; letter-spacing: 0.06em;">Close book</div>
       </div>
     </div>
   </div>

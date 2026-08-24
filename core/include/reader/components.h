@@ -50,8 +50,8 @@ inline constexpr int kRowH = kRowContentH + kRowRuleH;
 // 29 of the 30 hint bars (the exception is DirectionTerminal, an exploration
 // board, not a V1 screen).
 //
-// The 8 boards that state something else for a top rule -- ReaderMenu,
-// DeleteConfirm, GoToPage and the other overlays, all `padding: 21px 20px` --
+// The 7 boards that state something else for a top rule -- ReaderMenu,
+// DeleteConfirm and the other overlays, all `padding: 21px 20px` --
 // are not header bands: they are the caption of a modal panel, inset from the
 // panel's own edge rather than the screen margin. When those screens are built
 // they want their own primitive, not a widened kBandPadTop.
@@ -621,8 +621,9 @@ int drawDetailRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view
 // --- An overlay's panel ------------------------------------------------------
 //
 // The floating panel the overlay boards put over a veiled parent
-// (LibraryActions, DeleteConfirm, ReaderMenu, GoToPage, ArticleActions,
-// WifiConnect, WifiError, BookError -- eight boards, one box):
+// (LibraryActions, DeleteConfirm, ReaderMenu, ArticleActions, WifiConnect,
+// WifiError, BookError -- seven boards, one box; GoToPage was an eighth until
+// its board was cut):
 //
 //   border: 2px solid; box-sizing: border-box; background: #ffffff
 //   top: 50%; transform: translateY(-50%)          vertically centred

@@ -56,16 +56,20 @@ class ReaderMenuScreen : public FocusScreen {
   // seven, which `make compare` reported as "firmware ok" because it RENDERED. Measured
   // per pixel it was 13.02% against 3.02% before -- "ok" means the sim produced a frame,
   // not that the frame matches, and only the mismatch number says which.
+  //
+  // `kGoToPage` and `kCloseBook` are GONE, and the board states why: a reflowable book
+  // has no stable page to go to, and Back from the page already closes the book. The
+  // enum is not a stable numbering to be preserved -- the ONE thing that persists a row
+  // index is FocusScreen's restore, and it refuses an index it cannot land on, which is
+  // exactly the case a shrunk table creates.
   enum Row : int {
     kContents,
     kTypography,
-    kGoToPage,
     kBookmarks,
     kNames,
     kAboutBook,
-    kCloseBook,
   };
-  static constexpr int kRowCount = 7;
+  static constexpr int kRowCount = 5;
 
  protected:
   void syncVm() override;

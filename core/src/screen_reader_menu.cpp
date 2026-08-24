@@ -6,42 +6,44 @@ namespace reader {
 
 namespace {
 
-// The board's six rows. `value` is the row's right slot where the board puts one and
+// The board's five rows. `value` is the row's right slot where the board puts one and
 // empty where it draws a chevron -- the same "a row states a quantity or discloses a
 // screen, never both" rule the menu rows on Home follow.
 //
 // WHAT RESPONDS is the second flag, and it is a statement about what exists rather
-// than about the design: Typography, Go to page and Bookmarks have boards and no
-// screens, and About this book has a screen that is built from the LIBRARY's selection
-// -- which a reader who arrived through Home's CONTINUE does not have. Each becomes
-// focusable in the commit that gives it something to do.
+// than about the design: Typography and Bookmarks have boards and no screens. Each
+// becomes focusable in the commit that gives it something to do.
+//
+// NO TRACKING COLUMN. `Close book` was the only row on any panel in this firmware that
+// the boards letter-spaced, so with it gone `ListRow::trackingEm1000` and
+// `drawPanelRow`'s label tracking have NO producer. The plumbing stays -- it is a
+// generic component parameter and a board can ask for it again -- but nothing exercises
+// it now, so it is untested capability rather than working behaviour.
 struct Item {
   const char* label;
   const char* value;
   bool live;
   bool discloses;
-  int trackingEm1000;
 };
 constexpr Item kItems[ReaderMenuScreen::kRowCount] = {
-    {"Contents", "", true, true, 0},
-    {"Typography", "", false, true, 0},
-    {"Go to page\xE2\x80\xA6", "", false, true, 0},
+    {"Contents", "", true, true},
+    {"Typography", "", false, true},
     // The board shows `2`, a bookmark count. Zero would be a claim about a feature that
     // cannot make one, so the row carries the board's own value and does not act.
-    {"Bookmarks", "2", false, false, 0},
+    {"Bookmarks", "2", false, false},
     // The character index another branch boards as Names.dc.html. Drawn and inert like
     // its four unbuilt siblings -- it becomes focusable in the commit that gives it a
     // screen, and needs no change here when it does.
-    {"Names", "", false, true, 0},
+    {"Names", "", false, true},
     // ABOUT THIS BOOK OPENS BOOK DETAILS, and it was inert because that screen used to be
     // built from the LIBRARY's focused row -- fine from the Library and wrong from a
     // Reader opened through Home's CONTINUE, where there is no Library on the stack. It
     // takes facts now, so both callers can answer it.
-    {"About this book", "", true, true, 0},
-    // NO MARK AND ITS OWN TRACKING, both of which the board states. It closes the book
-    // rather than opening a screen, so a chevron would promise somewhere to go -- and
-    // `letter-spacing: 0.06em` is the one row on this panel the board tracks.
-    {"Close book", "", true, false, 60},
+    //
+    // THE LAST ROW, so the panel's own border closes the list and this one draws no
+    // rule. `Close book` held that position and that job; the row that inherits the
+    // position inherits the missing rule with it.
+    {"About this book", "", true, true},
 };
 
 }  // namespace
@@ -52,8 +54,8 @@ ReaderMenuScreen::ReaderMenuScreen(std::string bookTitle, std::string progress)
   vm_.progress = std::move(progress);
   vm_.rows.reserve(kRowCount);
   for (const Item& it : kItems)
-    vm_.rows.push_back(
-        ListRow{it.label, it.value, /*isHeader=*/false, it.discloses, it.trackingEm1000, it.live});
+    vm_.rows.push_back(ListRow{it.label, it.value, /*isHeader=*/false, it.discloses,
+                               /*trackingEm1000=*/0, it.live});
   // The board's own labels. CLOSE rather than BACK, because Back here dismisses a
   // panel rather than leaves a screen -- the actions overlay says the same for the
   // same reason. No holds, so no slot shows a ring.
@@ -88,18 +90,6 @@ Action ReaderMenuScreen::onGesture(const GestureEvent& g) {
           return Action::push(ScreenId::Contents);
         case kAboutBook:
           return Action::push(ScreenId::BookDetails);
-        case kCloseBook:
-          // CLOSE THE BOOK: this panel AND the Reader under it, in one action, because
-          // a screen returns one Action and a Pop followed by a second Pop would be
-          // this screen reaching into the stack. `popTo` is the primitive the delete
-          // confirmation already needed for the same shape.
-          //
-          // THE TARGET IS THE LIBRARY, and its absence is handled by popTo's own
-          // documented rule rather than by a branch here: "stops at the root if
-          // `target` is not on the stack". A reader who opened the book from the
-          // Library lands back on it; one who came through Home's CONTINUE has no
-          // Library on the stack and lands on Home. Both are where they came from.
-          return Action::popTo(ScreenId::Library);
         default:
           // An inert row cannot be focused, so this is unreachable by a press. It
           // answers none() rather than asserting, because a restored focus is the one

@@ -235,15 +235,6 @@
       "page": "page-4"
     },
     {
-      "file": "GoToPage.dc.html",
-      "title": "Go To Page",
-      "x": 1160,
-      "y": 900,
-      "w": 480,
-      "h": 800,
-      "page": "page-4"
-    },
-    {
       "file": "Bookmarks.dc.html",
       "title": "Bookmarks",
       "x": 1740,
@@ -458,6 +449,33 @@
       "w": 480,
       "h": 800,
       "page": "page-4"
+    },
+    {
+      "file": "HomeUnopened.dc.html",
+      "title": "Home · Nothing Open",
+      "x": 3480,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "SleepIdle.dc.html",
+      "title": "Sleep · Idle",
+      "x": 1160,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "LibraryScrolled.dc.html",
+      "title": "Library · Scrolled",
+      "x": 3480,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
     }
   ],
   "annotations": [
@@ -626,7 +644,7 @@
       "x": 2320,
       "y": 830,
       "w": 460,
-      "text": "Peek — book text over the veiled page you are on, so a jump never costs you your place. It is what makes Contents, Go to page and Bookmarks (this row) worth having: a jump that loses your position is one readers learn not to make.\nInset, so the column is narrower, so the text re-wraps — which is why it says CH. 01 · 4% and not a page number. GO HERE still lands exactly: the cursor travels and the page number is counted on arrival.\nEight lines by design. Content-sized at eleven it filled the glass and stopped reading as a modal.",
+      "text": "Peek — book text over the veiled page you are on, so a jump never costs you your place. It is what makes Contents and Bookmarks (this row) worth having: a jump that loses your position is one readers learn not to make.\nInset, so the column is narrower, so the text re-wraps — which is why it says CH. 01 · 4% and not a page number. GO HERE still lands exactly: the cursor travels and the page number is counted on arrival.\nEight lines by design. Content-sized at eleven it filled the glass and stopped reading as a modal.",
       "page": "page-4"
     },
     {

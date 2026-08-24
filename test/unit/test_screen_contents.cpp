@@ -154,17 +154,37 @@ TEST_CASE("the reader menu focuses Contents, skipping the rows that do nothing")
   CHECK(m.isOverlay());
   CHECK(m.focus() == reader::ReaderMenuScreen::kContents);
   CHECK(m.onEvent(kGo).kind == Action::Kind::Push);
-  // Down from Contents skips Typography, Go to page, Bookmarks and Names -- FOUR inert
-  // rows in a row, which is the case a naive skip walk gets wrong -- and lands on About
-  // this book, which is live because Book details takes facts now rather than a Library
-  // row.
+  // Down from Contents skips Typography, Bookmarks and Names -- THREE inert rows in a
+  // row, which is the case a naive skip walk gets wrong -- and lands on About this
+  // book, which is live because Book details takes facts now rather than a Library row.
   m.onEvent(kDown);
   CHECK(m.focus() == reader::ReaderMenuScreen::kAboutBook);
-  m.onEvent(kDown);
-  CHECK(m.focus() == reader::ReaderMenuScreen::kCloseBook);
-  // ...and wraps back round to Contents rather than sticking.
+  // ...and wraps back round to Contents rather than sticking. About this book is the
+  // LAST row now, so this is also the wrap-from-the-end case that `Close book` used to
+  // stand in for.
   m.onEvent(kDown);
   CHECK(m.focus() == reader::ReaderMenuScreen::kContents);
+  // Up from Contents wraps the other way to the same live row, over the same three.
+  m.onEvent(kUp);
+  CHECK(m.focus() == reader::ReaderMenuScreen::kAboutBook);
+}
+
+TEST_CASE("the menu has five rows, and neither cut row is among them") {
+  // GO TO PAGE AND CLOSE BOOK ARE GONE, for reasons that are about reading rather than
+  // about room: a reflowable book has no stable page to go to -- the number a picker
+  // would offer moves with the type size -- so the honest jump is the chapter name,
+  // which Contents gives. And Back from the page already closes the book, so that row
+  // was a second door to a room with one, and had to carry its own save edge to stay
+  // correct.
+  const reader::ReaderMenuScreen m("Middlemarch", "6%");
+  const auto& rows = m.vm().rows;
+  REQUIRE(rows.size() == 5);
+  REQUIRE(reader::ReaderMenuScreen::kRowCount == 5);
+  for (const auto& r : rows) {
+    CHECK(r.label.find("Go to page") == std::string::npos);
+    CHECK(r.label.find("Close book") == std::string::npos);
+  }
+  CHECK(rows[reader::ReaderMenuScreen::kAboutBook].label == "About this book");
 }
 
 TEST_CASE("About this book opens Book details") {
@@ -180,32 +200,41 @@ TEST_CASE("About this book opens Book details") {
   CHECK(a.target == ScreenId::BookDetails);
 }
 
-TEST_CASE("Close book closes the book AND the panel over it") {
+TEST_CASE("the menu's only way out is CLOSE, and it dismisses the panel not the book") {
+  // `Close book` used to pop the Reader from under this overlay. With it gone the menu
+  // returns a plain Pop for Back and nothing else leaves a screen -- the Reader's own
+  // Back closes the book, which is where the `leaving` save already fires.
   reader::ReaderMenuScreen m("Middlemarch", "6%");
-  m.onEvent(kDown);
-  m.onEvent(kDown);
-  REQUIRE(m.focus() == reader::ReaderMenuScreen::kCloseBook);
-  const Action a = m.onEvent(kGo);
-  // popTo, not pop: a screen returns ONE action, and a Pop followed by a second Pop
-  // would be this screen reaching into the stack.
-  CHECK(a.kind == Action::Kind::PopTo);
-  CHECK(a.target == ScreenId::Library);
+  const Action a = m.onEvent(kBack);
+  CHECK(a.kind == Action::Kind::Pop);
+  // No row answers with a PopTo any more. Walked rather than indexed, so it covers
+  // exactly the rows a reader can actually reach -- every live row, once round.
+  reader::ReaderMenuScreen n("Middlemarch", "6%");
+  const int first = n.focus();
+  int seen = 0;
+  do {
+    CHECK(n.onEvent(kGo).kind == Action::Kind::Push);
+    ++seen;
+    n.onEvent(kDown);
+  } while (n.focus() != first && seen < reader::ReaderMenuScreen::kRowCount);
+  CHECK(seen == 2);  // Contents and About this book
 }
 
-TEST_CASE("Close book draws no chevron, and the board says so") {
-  // It acts in place. Deriving `discloses` from an empty value drew a chevron promising
-  // a screen that does not exist -- and `Bookmarks` is the other half of the same rule,
-  // a value where its siblings have marks.
+TEST_CASE("a row states a quantity or discloses a screen, never both") {
+  // Deriving `discloses` from an empty value drew a chevron promising a screen that
+  // does not exist. `Bookmarks` is the surviving instance: a value where its siblings
+  // have marks, and no mark of its own.
   const reader::ReaderMenuScreen m("Middlemarch", "6%");
   const auto& rows = m.vm().rows;
   REQUIRE(rows.size() == reader::ReaderMenuScreen::kRowCount);
-  CHECK_FALSE(rows[reader::ReaderMenuScreen::kCloseBook].discloses);
-  CHECK(rows[reader::ReaderMenuScreen::kCloseBook].value.empty());
   CHECK(rows[reader::ReaderMenuScreen::kContents].discloses);
+  CHECK(rows[reader::ReaderMenuScreen::kContents].value.empty());
   CHECK_FALSE(rows[reader::ReaderMenuScreen::kBookmarks].discloses);
   CHECK(rows[reader::ReaderMenuScreen::kBookmarks].value == "2");
-  // The one row the board tracks.
-  CHECK(rows[reader::ReaderMenuScreen::kCloseBook].trackingEm1000 > 0);
+  // NO ROW IS TRACKED NOW. `Close book` was the only one on any panel the boards
+  // letter-spaced, so this asserts the absence rather than leaving the reader of this
+  // file to assume the tracking path still has a producer.
+  for (const auto& r : rows) CHECK(r.trackingEm1000 == 0);
 }
 
 TEST_CASE("the menu's panel never changes height, so every focus move is partial") {

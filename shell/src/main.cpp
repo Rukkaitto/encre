@@ -3066,12 +3066,10 @@ void loop() {
                                      pct);
       } else if (gApp->top().id() == reader::ScreenId::ReaderMenu) {
         const auto* menu = static_cast<const reader::ReaderMenuScreen*>(&gApp->top());
-        // CLOSE BOOK IS A SECOND WAY OUT, and the `leaving` save cannot see it: that one
-        // fires on Back with the Reader ON TOP, and this pops the Reader from under an
-        // overlay. Without it, closing a book through the menu loses everything since
-        // the last chapter change -- the same defect Back had, arriving by another door.
-        if (menu->vm().focusedRow == reader::ReaderMenuScreen::kCloseBook)
-          saveReadingPosition("closing");
+        // THE `closing` SAVE WENT WITH `Close book`. It existed because that row popped
+        // the Reader from UNDER an overlay, where the `leaving` save -- which fires on
+        // Back with the Reader on TOP -- could not see it. With the row gone there is
+        // one way out of a book again, Back from the page, and `leaving` covers it.
         // ABOUT THIS BOOK, answered from the book the READER has open rather than from a
         // Library row -- there may be no Library on the stack at all, which is exactly
         // why this row was inert. Everything the screen draws is already in hand: the

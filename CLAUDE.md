@@ -1626,10 +1626,12 @@ feature: a card can be readable and refuse writes (a physical write-protect tab)
 failed save would throw the reader out of a book they can still read. The shell logs
 it and carries on.
 
-**FOUR SAVE EDGES, NOT EVERY PAGE TURN**: leaving the book with Back, closing it from
-the reader menu, crossing a chapter, and sleeping. The menu's `Close book` is a second
-way out and the `leaving` save cannot see it — that one fires on Back with the Reader ON
-TOP, and Close book pops the Reader from underneath an overlay. A turn is ~570 ms of panel and a card write on each one would be felt; a
+**THREE SAVE EDGES, NOT EVERY PAGE TURN**: leaving the book with Back, crossing a
+chapter, and sleeping. There were FOUR: the reader menu's `Close book` popped the Reader
+from underneath an overlay, which the `leaving` save — fired on Back with the Reader ON
+TOP — could not see, so it carried its own `closing` edge. **That row was cut
+(2026-08-24) and its edge with it**: Back from the page is the one way out of a book
+again. A turn is ~570 ms of panel and a card write on each one would be felt; a
 chapter is also the most a power cut can cost. **Leaving is saved BEFORE the
 dispatch** — Back pops the Reader and once popped there is no screen left to ask where
 the reader was. Back is the only way out (`Gesture::Back` → `Action::pop()`), so this
@@ -2144,17 +2146,24 @@ top screen, so the menu paints in one waveform instead of three and its focus mo
 eligible for the overlay-only partial repaint (grayscale never is). The page under the
 veil is hard-thresholded for those frames — the trade, and acceptable because the menu
 is chrome and the page is the one thing here that wanted four levels. Its
-`paintFootprint` is a constant, unlike the actions panel's: all six rows are one height,
-so the panel cannot change height when the focus moves and every move takes the fast
-path.
+`paintFootprint` is a constant, unlike the actions panel's: all five rows are one
+height, so the panel cannot change height when the focus moves and every move takes the
+fast path.
 
 **`discloses` CANNOT BE DERIVED FROM AN EMPTY VALUE**, and deriving it drew a chevron on
-`Close book` promising a screen that does not exist. That row has neither a value nor a
-mark — it acts in place — so `ListRow` carries the flag explicitly, as `ItemActionEntry`
-already did. It also carries the board's per-row tracking, because `Close book` is
-`0.06em` where its five siblings are untracked: 1.5px a gap at Value500, ~15px across
-that label, so visible rather than pedantic. Both fixes took the menu from 3.24% to
-**3.02%** against its board.
+`Close book` promising a screen that does not exist — that row had neither a value nor a
+mark, because it acted in place. So `ListRow` carries the flag explicitly, as
+`ItemActionEntry` already did. `Bookmarks` is the surviving instance of the same rule
+from the other side: a value where its siblings have marks. Both fixes took the menu from
+3.24% to **3.02%** against its board.
+
+**`ListRow::trackingEm1000` NOW HAS NO PRODUCER.** `Close book` was `0.06em` where its
+siblings were untracked — 1.5px a gap at Value500, ~15px across that label — and it was
+the only letter-spaced row on any panel in this firmware. With the row cut (2026-08-24)
+the field, `drawPanelRow`'s `labelTrackingEm1000` and the `trackingEm` call it guards are
+**untested capability rather than working behaviour**. Kept because it is a generic
+component parameter a board can ask for again; a test asserts every row is `0` so this
+stays a stated fact rather than an assumption.
 
 **A MERGE CHANGED THIS BOARD UNDER THE SCREEN, and `make compare` said "firmware ok"
 the whole time.** Another branch (`claude/book-character-identification`) added a `Names`
@@ -2186,14 +2195,27 @@ it has open, and neither has to know how the other is shaped. Two details worth 
   after opening them from a book would show the book — a stale answer that looks like the
   right screen.
 
-**FOUR OF THE MENU'S SEVEN ROWS DO NOTHING AND ARE DRAWN ANYWAY** — Settings' rule, and
+**THREE OF THE MENU'S FIVE ROWS DO NOTHING AND ARE DRAWN ANYWAY** — Settings' rule, and
 the board was edited to match before the screen was written: it had focused Typography,
 which is not built, so implementing it faithfully would have drawn a selection on a dead
-row. `Contents` and `Close book` respond. **`Close book` answers `popTo(Library)`**, and
-its absence is handled by `popTo`'s own documented rule rather than a branch: "stops at
-the root if `target` is not on the stack". A reader who opened from the Library lands
-back there; one who came through Home's CONTINUE lands on Home. Both are where they came
-from.
+row. `Contents` and `About this book` respond; Typography, Bookmarks and Names do not.
+
+**TWO ROWS WERE CUT ENTIRELY (2026-08-24), NEITHER FOR ROOM.** `Go to page…` because
+**nobody navigates an EPUB by page number**: a reflowable book has no stable page to go
+to and the number a picker offers moves with the type size, so the honest jump is the
+chapter name `Contents` already gives. (Its board and its roadmap entry went too; the
+`Peek` spec listed it as one of three callers and now has two.) `Close book` because
+**Back from the page already closes the book** — it was a second door to a room with
+one, and it cost a fourth save edge to stay correct. Removing it deleted that edge, the
+`popTo(Library)` it was the only user of on this screen, and the only producer of row
+tracking in the firmware. The enum shrank with it: **a row index is not a stable
+numbering** here, because the one thing that persists one is `FocusScreen`'s restore,
+and that refuses an index it cannot land on — exactly what a shrunk table produces.
+
+The menu measures **3.10% / 3.60%** against the board after the cut, against 3.06% /
+3.60% before: the panel shrank consistently on both sides, so the residual is the same
+rasteriser difference rather than new drift. **That the number barely moved is the
+check** — a structural mismatch would have shown as a jump.
 
 **THE ROW'S RIGHT SLOT HAS HELD TWO WRONG THINGS.** It was `P. 21`, a page number for a
 place in the book, which needs every chapter paginated (~49 s). That became `CH. 01`, the
