@@ -64,17 +64,39 @@
          HANGING INDENT, which is the whole reason a list item is its own BlockKind
          rather than a paragraph with a dash typed into it: the marker sits in the
          column's own left edge and the text runs in a narrower measure beside it,
-         so a wrapped second line aligns under the FIRST WORD and not under the
-         dash. `padding-left: 38px; text-indent: -38px` is the two-property form of
-         that -- 38px is 1.2em at 32px, wide enough for the dash and its space.
+         so a wrapped second line aligns under the FIRST WORD and not under the dash.
+         38px is 1.2em at 32px, wide enough for the dash and its space.
+
+         THE MARKER IS POSITIONED, NOT INDENTED, and this board said
+         `padding-left: 38px; text-indent: -38px` first -- which is the idiomatic CSS
+         and is WRONG here by 10px. That form puts the dash and its spaces IN the
+         text and pulls the first line back by the full 38px, so the first line gets
+         444 - 28 = 416px for its text while every line after it gets 406. The
+         firmware gives every line 406 and draws the marker in the gutter, which is
+         what a hanging indent means -- and `make compare` found the disagreement as
+         a real wrap difference, not as rasteriser noise: "Space is measured in rows."
+         measured 408px in the firmware, so it fitted the board's first line and
+         wrapped on the device. Measured at 7.63%/7.90% against 4.5% for its sibling
+         board, which is what made it worth chasing.
+
+         AND THE COPY IS CHOSEN TO SIT OFF THE WRAP BOUNDARY, which is the second
+         half of the same finding. Fixing the marker still left the item wrapping
+         differently, because 408px is the FIRMWARE's measurement: this board is
+         rasterised by Chrome from the real Literata webfont, and the device uses the
+         prepped TTF with a `kern` table ttfprep.py synthesised. A string within half
+         a percent of the measure lands on opposite sides of the break in the two, and
+         no fidelity work can close that -- so a SPECIMEN board must not put a line
+         there. "Space is counted in rows." is 382px against a 406px measure, 24px of
+         clearance. Do not lengthen it back to the edge to make it read better; the
+         line's job here is to demonstrate a single-row item.
 
          NOT JUSTIFIED, and `justifiable()` in layout.cpp already says so: it lists
          Paragraph and Blockquote and omits ListItem. A list item is usually a
          fragment rather than a sentence, and justifying a three-word fragment
          across 406px opens gaps that read as a fault. -->
-    <div style="padding-left: 38px; text-indent: -38px; text-align: left;">&#8211;&nbsp;&nbsp;A block may begin on any row, but not between two.</div>
-    <div style="padding-left: 38px; text-indent: -38px; text-align: left;">&#8211;&nbsp;&nbsp;Space is measured in rows.</div>
-    <div style="padding-left: 38px; text-indent: -38px; text-align: left;">&#8211;&nbsp;&nbsp;A row holds one line.</div>
+    <div style="position: relative; padding-left: 38px; text-align: left;"><span style="position: absolute; left: 0;">&#8211;</span>A block may begin on any row, but not between two.</div>
+    <div style="position: relative; padding-left: 38px; text-align: left;"><span style="position: absolute; left: 0;">&#8211;</span>Space is counted in rows.</div>
+    <div style="position: relative; padding-left: 38px; text-align: left;"><span style="position: absolute; left: 0;">&#8211;</span>A row holds one line.</div>
 
     <div>&nbsp;</div>
 
@@ -86,12 +108,28 @@
     </div>
   </div>
 
+  <!-- THE FOOTER STATES WHAT THIS SPECIMEN ACTUALLY PRODUCES, not what a real book
+       would. This board exists to specify the TEXT STYLES, and `make compare`
+       measures it against the simulator running the same content -- so a footer
+       reading `1 / 14` against a specimen that paginates to two pages would make the
+       mismatch percentage mostly footer digits, and hide the thing being checked.
+       The footer's own design is Reader.dc.html's job and is measured there.
+
+       ONE BOARD CANNOT STATE BOTH GEOMETRIES' PAGE COUNT. tools/compare-design.py
+       renders this board at 480x800 and at 528x792, and the X3's column is 492px
+       wide against the X4's 444 -- so the same specimen paginates to two pages on
+       one panel and one page on the other, and the firmware's footer reads `1 / 2`
+       at 50% there and `1 / 1` at 100% here. The counter below is the X4's, because
+       the X4 is the narrower panel and the one that fails first. Measured: the footer
+       band matches BETTER than the text column does either way, so this divergence
+       is not what the percentage is made of.
+       -->
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0 16px 0; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
-    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; font-weight: 700;">44%</div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; font-weight: 700;">50%</div>
     <div style="width: 210px; height: 5px; border: 1px solid #000000; box-sizing: border-box;">
-      <div style="width: 44%; height: 100%; background: #000000;"></div>
+      <div style="width: 50%; height: 100%; background: #000000;"></div>
     </div>
-    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">9 / 21</div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">1 / 2</div>
   </div>
 
 </div>

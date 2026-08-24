@@ -267,15 +267,21 @@ int main(int argc, char** argv) {
   const bool isHomeUnopened = std::strcmp(argv[1], "home_unopened") == 0;
   const bool isLibraryScrolled = std::strcmp(argv[1], "library_scrolled") == 0;
   const bool isReader = std::strcmp(argv[1], "reader") == 0;
+  // The two styled specimens, each its own subcommand for the reason every other
+  // state board has one: a flag on `reader` would mean the goldens and the comparison
+  // sheet could not name them.
+  const bool isChapterOpen = std::strcmp(argv[1], "reader_chapter_open") == 0;
+  const bool isReaderList = std::strcmp(argv[1], "reader_list") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
       !isHomeUnopened && !isLibraryScrolled && !isReader && !isSleepIdle &&
-      !isReaderMenu && !isContents) {
+      !isReaderMenu && !isContents && !isChapterOpen && !isReaderList) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
                  "'sleep', 'sleep_idle', 'home_empty', 'home_unopened', "
-                 "'library_scrolled', 'reader', 'reader_menu', 'contents' or 'app')\n",
+                 "'library_scrolled', 'reader', 'reader_chapter_open', 'reader_list', "
+                 "'reader_menu', 'contents' or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -296,7 +302,7 @@ int main(int argc, char** argv) {
   // for the same reason the roman's does.
   std::vector<uint8_t> italicTtf;
   reader::ScalableFont italic;
-  if (isReader || isReaderMenu) {
+  if (isReader || isReaderMenu || isChapterOpen || isReaderList) {
     bodyTtf = slurp(std::string(ASSETS_DIR) + "/built/literata_body.ttf");
     if (!body.init(bodyTtf.data(), bodyTtf.size(), reader::kBodyPpem)) {
       std::fprintf(stderr, "body face failed to load\n");
@@ -362,6 +368,36 @@ int main(int argc, char** argv) {
     const auto& c = static_cast<const reader::ContentsScreen&>(*scr);
     std::printf("wrote %s (%dx%d) %d entries, %s, focus %d\n", argv[2], w, h, c.rowCount(),
                 c.sectioned() ? "sectioned" : "flat", c.focus());
+    return 0;
+  }
+
+  if (isChapterOpen || isReaderList) {
+    // THE SAME PATH AS `reader`, with the demo swapped -- through the real
+    // ReaderScreen and the real Theme::readerMetrics, so the PNG is laid out by the
+    // arithmetic the device runs. What these two add is content that exercises every
+    // BlockKind: a heading, an italic inset blockquote, prose with inline emphasis,
+    // and a hanging-indent list.
+    reader::PageMetrics m;
+    theme.readerMetrics(w, h, fonts, body, m);
+    m.italic = &italic;
+    reader::DemoScreenFactory factory;
+    factory.setReaderBody(&body);
+    factory.setReaderItalic(&italic);
+    factory.setReaderMetrics(m);
+    factory.setReaderStyleDemo(isChapterOpen
+                                   ? reader::DemoScreenFactory::ReaderStyleDemo::ChapterOpen
+                                   : reader::DemoScreenFactory::ReaderStyleDemo::List);
+    std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Reader);
+    if (scr == nullptr) {
+      std::fprintf(stderr, "the factory refused ScreenId::Reader\n");
+      return 1;
+    }
+    static_cast<reader::ReaderScreen*>(scr.get())->completeIndex();
+    if (!renderToPng(*scr, fonts, theme, w, h, argv[2])) return 1;
+    const auto& rd = static_cast<const reader::ReaderScreen&>(*scr);
+    std::printf("wrote %s (%dx%d) page %d/%d, %zu lines, column %dx%d, %d%%\n", argv[2], w,
+                h, rd.vm().page, rd.vm().pageTotal, rd.page().lines.size(), m.columnW,
+                m.columnH, rd.vm().progressPercent);
     return 0;
   }
 

@@ -2347,6 +2347,36 @@ passed — `shell/` has no harness, so nothing on the desktop touches that loop.
   while the commit describing them went through. Both times the assert failed for the
   dullest reason — the anchor text had already been edited by a previous commit, so it no
   longer matched what I remembered.
+- **A SPECIMEN BOARD MUST NOT PUT A LINE ON THE WRAP BOUNDARY.** `ReaderList` measured
+  7.63%/7.90% against 4.5% for its sibling, and the cause was one list item: "Space is
+  measured in rows." is **408px against a 406px measure**. Two separate faults sat on
+  top of each other. First the board's marker: `padding-left: 38px; text-indent: -38px`
+  is the idiomatic CSS and is WRONG by 10px, because it puts the dash and its spaces in
+  the TEXT and pulls the first line back by the full 38 -- so the first line gets 416px
+  and every line after it 406. The firmware gives every line 406 and draws the marker in
+  the gutter, which is what a hanging indent means. Fixing that left the item still
+  wrapping differently, because **408px is the FIRMWARE's number**: a board is
+  rasterised by Chrome from the real webfont and the device uses the prepped TTF with a
+  `kern` table `ttfprep.py` synthesised, so a string within half a percent of the measure
+  lands on opposite sides of the break and NO fidelity work closes that. The copy was
+  moved to 382px, 24px of clearance.
+- **MY OWN NOTE WAS THE FIRST MATCH.** Changing that copy with `replace(old, new, 1)`
+  hit the explanatory comment I had just written -- which quoted the string -- and left
+  the row untouched, so the board rendered the old text while the note misquoted itself.
+  The rule already here ("an anchor is not what you remember writing") now has a second
+  form: **when a note quotes the string you are replacing, the note is an occurrence.**
+- **THE READER'S MISMATCH IS NOT COMPARABLE TO THE MENU'S.** The menu is 1-bit, so
+  counting pixels either side of a threshold is exact and 3.06% means 3.06%. The reader
+  declares `Fidelity::Grayscale`, so a threshold-at-128 count over four levels inflates
+  the figure -- `reader` itself measures **5.34%/6.38%** that way. Comparing a grayscale
+  screen's number against a 1-bit screen's is how a healthy screen gets chased as a
+  regression. Compare like with like: `reader_chapter_open` is 4.53%/4.39% and
+  `reader_list` 5.20%/6.60%, against `reader`'s 5.34%/6.38%.
+- **ONE BOARD CANNOT STATE BOTH GEOMETRIES' PAGE COUNT.** The X3's column is 492px
+  against the X4's 444, so a specimen paginating to two pages on one panel makes one on
+  the other and the footer reads `1 / 2` at 50% against `1 / 1` at 100%. The boards state
+  the X4's, the narrower panel that fails first, and say so. Measured: the footer band
+  matches BETTER than the text column, so this is not what the percentage is made of.
 - **A CASE'S EARLY-RETURN GUARD IS PART OF THE CHANGE.** `ScreenId::BookDetails` opened
   with `if (library_ == nullptr) return nullptr;` — true while the screen was built from
   a Library reference. The change that removed that requirement replaced the `return`

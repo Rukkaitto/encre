@@ -155,6 +155,39 @@ std::string_view demoReaderXhtml() {
       "</body></html>";
 }
 
+// THE STYLED BOARDS' OWN CONTENT, so `make compare` measures the STYLING rather than
+// the difference between two sets of sample prose. Each is the board's text verbatim,
+// as XHTML -- which means it goes through the same tokenizer and block builder a card
+// would feed, so the block KINDS are decided by the parser and not asserted here.
+std::string_view demoChapterOpenXhtml() {
+  return
+      "<html><body>"
+      "<h1>Chapter I</h1>"
+      "<blockquote>Since I can do no good because a woman.</blockquote>"
+      "<p>Miss Brooke had that kind of beauty which seems to be thrown into relief by "
+      "<em>poor dress</em>. Her hand and wrist were so finely formed that she could "
+      "wear sleeves not less bare of style than those in which the Blessed Virgin "
+      "appeared to Italian painters.</p>"
+      "<p>Her sister Celia wore a necklace, and the two of them had that air of being "
+      "dressed alike which is never quite an accident.</p>"
+      "</body></html>";
+}
+
+std::string_view demoListXhtml() {
+  return
+      "<html><body>"
+      "<p>A page is not a container that text is poured into. It is a grid of line "
+      "boxes.</p>"
+      "<ul>"
+      "<li>A block may begin on any row, but not between two.</li>"
+      "<li>Space is counted in rows.</li>"
+      "<li>A row holds one line.</li>"
+      "</ul>"
+      "<p>The third of those is the one that surprises people, and it is the one the "
+      "reader cannot bend.</p>"
+      "</body></html>";
+}
+
 std::vector<LibraryItem> demoLibraryItems() {
   // The board's rows, in the board's order, with the board's own authors and
   // right-hand values. The folder's `childBooks` is 6 because the board says
@@ -357,6 +390,14 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
         // The chapter names, so the header says `LIVRE I` and not `CH. 08`. Empty for a
         // book with no contents, which falls the label back to the position.
         scr->setChapterNames(contentsToc_);
+      } else if (readerStyleDemo_ != ReaderStyleDemo::None) {
+        // THE STYLED SPECIMENS. Their headers are the boards' own, because the header
+        // is chrome the reader is handed rather than something it derives.
+        const bool open = readerStyleDemo_ == ReaderStyleDemo::ChapterOpen;
+        scr = std::make_unique<ReaderScreen>(
+            open ? demoChapterOpenXhtml() : demoListXhtml(),
+            open ? "Middlemarch" : "The Craft of Type", open ? "CHAPTER I" : "THE PAGE",
+            readerBody_);
       } else if (readerDemo_) {
         // A NAME, as the board now draws: the header holds the chapter's name where the
         // contents supply one, and `CH. 01` is only the fallback for a book that has

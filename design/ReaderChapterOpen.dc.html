@@ -143,12 +143,28 @@
 
   </div>
 
+  <!-- THE FOOTER STATES WHAT THIS SPECIMEN ACTUALLY PRODUCES, not what a real book
+       would. This board exists to specify the TEXT STYLES, and `make compare`
+       measures it against the simulator running the same content -- so a footer
+       reading `1 / 14` against a specimen that paginates to two pages would make the
+       mismatch percentage mostly footer digits, and hide the thing being checked.
+       The footer's own design is Reader.dc.html's job and is measured there.
+
+       ONE BOARD CANNOT STATE BOTH GEOMETRIES' PAGE COUNT. tools/compare-design.py
+       renders this board at 480x800 and at 528x792, and the X3's column is 492px
+       wide against the X4's 444 -- so the same specimen paginates to two pages on
+       one panel and one page on the other, and the firmware's footer reads `1 / 2`
+       at 50% there and `1 / 1` at 100% here. The counter below is the X4's, because
+       the X4 is the narrower panel and the one that fails first. Measured: the footer
+       band matches BETTER than the text column does either way, so this divergence
+       is not what the percentage is made of.
+       -->
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0 16px 0; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
-    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; font-weight: 700;">1%</div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; font-weight: 700;">50%</div>
     <div style="width: 210px; height: 5px; border: 1px solid #000000; box-sizing: border-box;">
-      <div style="width: 1%; height: 100%; background: #000000;"></div>
+      <div style="width: 50%; height: 100%; background: #000000;"></div>
     </div>
-    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">1 / 14</div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">1 / 2</div>
   </div>
 
 </div>

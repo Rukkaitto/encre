@@ -173,6 +173,11 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // from sleep showing fiction from a book the user was not reading. A factory that
   // substitutes content is worse than one that refuses.
   void setReaderDemo() { readerDemo_ = true; }
+  // WHICH STYLED SPECIMEN, and asked for rather than inferred -- the rule setReaderDemo
+  // established after the factory substituted the demo for a real book and hid a
+  // failure to load its contents.
+  enum class ReaderStyleDemo { None, ChapterOpen, List };
+  void setReaderStyleDemo(ReaderStyleDemo which) { readerStyleDemo_ = which; }
 
   // Build the IDLE sleep screen -- asleep with no book open, design/SleepIdle.dc.html
   // -- rather than the board's reading one. Asked for, like setReaderDemo, because a
@@ -282,6 +287,7 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   int settingsHeaderH_ = 0;
   const GlyphSource* readerBody_ = nullptr;
   const GlyphSource* readerItalic_ = nullptr;
+  ReaderStyleDemo readerStyleDemo_ = ReaderStyleDemo::None;
   PageMetrics readerMetrics_{};
   OpenedBook readerBook_{};
   bool readerDemo_ = false;
