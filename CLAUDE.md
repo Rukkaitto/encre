@@ -542,14 +542,61 @@ file — so **~1.1 s**, paid on the critical path in two places:
   transfer is the change that breaks that argument** and it needs a one-line
   invalidation beside whatever writes the file.
 - **The Library's own `rescan()`**, on every push — the Library is destroyed by the
-  pop that leaves it, so Home → Library → Back → Library lists twice. **Not fixed**,
-  and deliberately not fixed blind: a cached listing is ~20 KB against a 45,840-byte
-  floor while a book is open, and the alternative theory — that `openNextFile()` +
-  `getName()` walks each long-name chain twice against SdFat's single 512-byte cache
-  slot — is an *argument about cache geometry*, which is the exact shape of reasoning
-  this project has already had wrong twice (the root-directory probe, the stb heap
-  attribution). The `[dispatch]` line above is what settles it: read the number off
-  the device before choosing between a cache and a faster walk.
+  pop that leaves it, so Home → Library → Back → Library lists twice. **FIXED by
+  holding the listing, because the walk itself cannot be made cheaper** — and that
+  was settled by reading SdFat rather than by arguing, which this file had left as
+  an open question between "cache geometry" and "a double LFN walk". It is BOTH:
+  - `FatFile::getName8()` is the only API that yields a long name. It opens a
+    second `FatFile` over the directory's first cluster and calls
+    `cacheDir(m_dirIndex - order)` once per LFN entry with the index **decreasing**,
+    and `cacheDir` is `seekSet` + read. `seekSet` takes its "follow the chain from
+    the first cluster" branch whenever the target is behind the current position,
+    which a decreasing index always is — so **every LFN entry of every name
+    re-walks the directory's cluster chain from its start**.
+  - `USE_SEPARATE_FAT_CACHE` is gated on `__arm__`, so on the RISC-V C3 the FAT
+    sector and the directory sector evict each other in one 512-byte buffer, turn
+    for turn.
+  - Nothing is left to remove: `getName` is already called once an entry,
+    `isDirectory`/`fileSize` are RAM reads off the open handle, and `close()`
+    reaches `syncDevice()`, which touches no bus outside a read/write stream. The
+    remaining routes are editing a submodule this project does not edit, or
+    decoding FAT **and** exFAT directory entries from raw sectors in `shell/`.
+  - **exFAT does not have this defect** — `ExFatFile::dirCache` seeks relative to
+    the file's own recorded `m_dirPos` with no restart. If a card ever measures
+    fast, that is why.
+
+**THE LISTING IS HELD BY `SdFileSystem`, NOT BY THE LIBRARY, AND THAT IS WHAT MAKES
+THE INVALIDATION STRUCTURAL.** Every way to change what is on the card is a method
+on that one object, so `writeAll`, `mkdirs` and `remove` each drop it and there is
+no mutation path that can miss it. That is strictly stronger than the `removals()`
+key Home's count uses, whose premise — a book cannot ARRIVE while the firmware runs
+— is the one **V2's Wi-Fi transfer breaks**: a transfer writes through `writeAll`
+and drops this cache by construction, with no line to remember to add.
+
+- **Two slots, not one**, because `rescan()` lists `/books` and *then*
+  `/.reader/state`. With one slot the sidecars would take it on every rescan and the
+  Library would hit the cache exactly once, ever — a fix that silently stops working
+  on a well-used device.
+- **Eviction takes the SMALLEST listing held**, because the cost is per entry. LRU
+  would throw `/books` out for the directory read that follows it, and "refuse
+  anything smaller than what is held" wedges: one big folder locks `/books` out for
+  good.
+- **20 KB ceiling, and never resident at the 42–46 KB floor**, because `openRead()`
+  drops everything — and `openRead` *is* the EPUB path (`readAll` serves the small
+  JSON), so nothing but opening a book reaches it. It adds to the no-book-open peak,
+  where there is ~133 KB free.
+- **ONE BEHAVIOUR CHANGED: a cache hit never touches the bus**, so `list()` stops
+  being a place a dead card is noticed. Affordable because `pollCardPresence()` was
+  always the detector — operation feedback never fires in V1, which this file
+  already records — and the cost is at most one stale listing inside a window that
+  ends at the SD-missing screen.
+- **The card probe is NOT answerable from it**, checked rather than assumed:
+  `readRootDirectory()` and `readProbeTargetFile()` both go straight to SdFat and
+  neither routes through `list()`. That is the recorded defect this would otherwise
+  have reintroduced.
+- **A HIT PRINTS NOTHING**, which on a device is indistinguishable from the call not
+  happening — so `[alive]` carries `listings=N slots/NB hit=N miss=N`. "It got
+  faster" and "it stopped being called" must not look the same.
 
 **What was looked at and left alone, with the reason, so it is not re-derived:**
 
@@ -616,28 +663,28 @@ it directly: median 549 ms, max 937 ms, the difference being entirely `wait`.
 
 **The four things the run actually indicts:**
 
-1. **THE DEFERRED PAGE COUNT BLOCKS THE LOOP FOR 2–3.6 s** (`[index] pages=315 in
+1. **THE DEFERRED PAGE COUNT BLOCKED THE LOOP FOR 2–3.6 s** (`[index] pages=315 in
    3605ms`), which is *more* than the refinement's 1409 ms, while `kCountQuietMs`
    was 1200 ms — barely two paints. Two presses landed inside a count: one waited
-   1304 ms to be noticed and then drew nothing, one took 3401 ms end to end. Fixed
-   by giving it the refinement's window; see the constant.
-2. **A BACKWARD PAGE TURN SPENDS ~390 ms IN THE DISPATCH**, against 20–33 ms
-   forward — so paging back costs 1055 ms against 634 ms, and the rewind is now
+   1304 ms to be noticed and then drew nothing, one took 3401 ms end to end.
+   **FIXED, AND WIDENING THE WINDOW WAS NOT THE FIX** — that only made it rarer.
+   `completeIndex` takes a stop predicate now; see below.
+2. **A BACKWARD PAGE TURN SPENT ~390 ms IN THE DISPATCH**, against 20–33 ms
+   forward — so paging back cost 1055 ms against 634 ms, and the rewind was
    comparable to the whole waveform. This file dismissed it as "33.9 ms desktop
    against a ~520 ms panel refresh"; **the desktop→device ratio on the inflate path
    is ~11×, not ~1×**, which is the same "37× is a RENDER ratio" trap recorded
-   under the eager page count. Not fixed. The bounded fix is a small ring of
-   recently laid-out pages (~1 KB each) so the common case — turning back to the
-   page you just left — needs no decode at all.
+   under the eager page count. **Fixed by the page ring; see below.**
 3. **THE OVERLAYS ARE THE MOST EXPENSIVE RENDERS ON THE DEVICE** — the actions
    panel at 256 ms and the reader menu at 260 ms, against Contents' 62 ms. The
    guess recorded here first was the veil, and **the veil was wrong**: it is 10 ms.
    See the breakdown below, which is what settled it.
-4. **`/books` LISTS AT 2.92–2.96 ms AN ENTRY**, confirming the figure this file has
+4. **`/books` LISTS AT 2.90–2.96 ms AN ENTRY**, confirming the figure this file has
    quoted for two phases, and 203 entries is **~600 ms** on every Library push. Not
    the 1.1 s estimated elsewhere here: that assumed 406 entries because macOS writes
-   a `._name` beside every file, and **this card has none**. Home's count is cached
-   now; the Library's own `rescan()` is not.
+   a `._name` beside every file, and **this card has none**. Both are fixed now —
+   Home's count by `libraryCountForHome`, the listing itself by holding it; see
+   **Storage**, which also names why the walk cannot be made faster.
 
 ### Which primitive spent the render
 
@@ -695,14 +742,50 @@ Two things it inherits from the veil and one it does not:
   but the veil's per-phase byte shape would fit it. Home's cover placeholder is
   its big caller, at 15–22 µs desktop, so it is small and known rather than next.
 
-**WITH FILL GONE, THE GLYPH BLIT IS THE DOMINANT SLOT ON EVERY SCREEN** — 192 µs
-of `library_actions`' remaining 351, 364 of `reader_menu`'s 437, 158 of
-`library`'s 219. That is where the next render work is, not in the furniture.
+**A READER PAGE WAS 99% GLYPH BLIT** — 213 ms of a 215 ms render, the same
+per-pixel shape in `drawRunF26`, and the biggest single render cost in the
+product because the reader is the screen a user spends their time on. `fill` on
+that screen is 299 µs: a page draws almost no furniture.
 
-**A READER PAGE IS 99% GLYPH BLIT** — 213 ms of a 215 ms render, and the same
-per-pixel shape in `drawRunF26`. That is the biggest single render cost in the
-product, because the reader is the screen a user spends their time on. `fill` on
-that screen is 299 µs: the page draws almost no furniture.
+**IT IS BYTE-WISE TOO NOW.** Clip the glyph box once; decide the plane **per
+physical row** as a four-entry "which coverages ink" table, so `BwDithered`'s
+Bayer phase stays keyed on absolute panel coordinates; hoist the glyph row
+pointer; accumulate a byte of bits and skip bytes that ink nothing. Under CCW the
+outer loop walks the glyph's **columns**, because a logical column is a physical
+row — **`text.cpp` is the second routine in `core/` that has to know `Rotation`
+exists**, for the identical reason as the veil and with the identical trap: it
+passes every golden and smears on glass.
+
+Cumulative, µs a pass at 528×792 (`-O3`), over both rewrites:
+
+| screen | was | after `fill` | after `glyph` |
+|---|--:|--:|--:|
+| reader, one dithered pass | 474 | 474 | **144** |
+| reader_menu | 1004 | 437 | **209** |
+| library_actions | 706 | 351 | **192** |
+| library | 277 | 219 | **113** |
+| home | 187 | 137 | **74** |
+
+**THE PROOF THAT MATTERS WAS NOT THE SUITE.** Every simulator screen was rendered
+at both geometries against a binary built from the old blit — **36 of 36
+byte-identical PNGs** — and the rotated screens verified as `rotate90CCW` of the
+unrotated ones, 24 of 24, across all four planes. The reference-implementation
+test was then proved by MUTATION: a rotated-row bug fails 860 assertions, the
+dither phase 616, partial-byte alignment 1584. That pass also caught a bug in the
+TEST, which had been filling the field with the ink's own colour so every
+comparison was trivially true — a golden-shaped failure inside the thing checking
+the goldens.
+
+**WHAT IS LEFT ON THAT SCREEN IS THE PEN AND THE GLYPH CACHE**, not the blit:
+`glyph()` and `measure()` are the remainder. If a page turn has to get faster
+again, that is the target, and the note under **Opening a chapter** saying "the
+blit is the target" has been spent.
+
+**AND A µs FIGURE MUST SAY WHICH TREE PRODUCED IT.** `cmake -S . -B build` sets no
+`CMAKE_BUILD_TYPE`, so a fresh tree builds `core/` at **-O0** and every number
+above would be ~5× larger. The figures in this file are `-O3`/`-Os`; they differ
+from each other by a few percent and from a default tree by a factor. A bench
+quoted without its build type is not a measurement.
 
 **`other` IS A REAL SLOT, NOT A ROUNDING ERROR.** It is the remainder — layout
 arithmetic, measuring, wrapping, eliding — and on the Library it is 11–16 ms and
@@ -1698,8 +1781,32 @@ anything that touches the card or the inflater underestimates by ~4×. The parag
 below already says the pagination walk "is the part with no desktop analogue worth
 trusting"; this is what ignoring that costs.
 
+**THE COUNT IS INTERRUPTIBLE, AND THAT — NOT THE QUIET WINDOW — IS WHAT STOPPED IT
+BLOCKING.** `completeIndex` takes a `bool (*)(void*)` stop predicate (a function
+pointer, not a `std::function`: this is `-fno-exceptions` embedded code), which the
+shell answers from `rawSamplesPending()`. The index is built into a SCRATCH vector
+and committed only on completion, so an abandoned count leaves `starts_`, `at_` and
+the page on glass byte-identical — invisible to everything but the builder.
+
+- **The check is per BLOCK.** It was set to every 8 blocks first, from a "1–3 ms a
+  block" estimate; the device's own `pages=315 in 3605ms` over ~600 blocks says
+  **~6 ms a block**, so 8 was ~48 ms of latency bought for 0.03% of the walk. Another
+  instance of the ratio trap under `kEagerCountBytes`. A block is the floor —
+  `chapter_.next()` and `pb.add()` cannot be stopped half way.
+- **The one thing it does not restore is the live `PageBuilder`**, because the walk
+  rewinds the `ChapterReader` the builder reads from and there is no second stream to
+  rebuild it with (another 32 KB window against a 42 KB floor). So an abandon costs
+  the NEXT FORWARD turn a full `seekTo` — which is why `kCountQuietMs` stays long;
+  see the constant, which carries the whole argument.
+- **There are TWO count sites**, the deferred one in `loop()` and one inside
+  `refineNow()`. Fixing one and not the other would have brought the freeze back on
+  whichever path the reader happened to take.
+- **Both `[index]` lines say `counted|abandoned`.** `pageCount()` on an abandoned
+  count is the old partial figure, and the line reported it as the answer — the
+  "reports on less than it claims" shape again.
+
 A chapter over the threshold is counted in a quiet window of its own,
-`kCountQuietMs` = 1200 ms, **and then repaints on the FAST path**. That repaint was
+`kCountQuietMs`, **and then repaints on the FAST path**. That repaint was
 originally left out — "counting changes one number in the footer, and a ~570 ms paint
 plus a waveform to fill it in is a bad trade; the total appears on the next page turn"
 — and the device showed the flaw in it. Measured across a chapter crossing:
@@ -2234,10 +2341,33 @@ A DEFLATE stream cannot be seeked and checkpointing one costs 32 KB a checkpoint
 - **A forward turn continues the live stream** — the reading position keeps its
   `ChapterReader` and its `PageBuilder`. Measured 1.16 ms on the desktop for the
   worst page in the book.
-- **A backward turn rewinds and decodes forward** to the recorded cursor. 33.9 ms
-  desktop for the worst case, against a ~520 ms panel refresh. Buffers are reused, so
-  it allocates nothing — churning 32 KB per turn is how a heap with 142 KB free
-  becomes one that cannot serve the next chapter.
+- **A backward turn rewinds and decodes forward** to the recorded cursor — **~390 ms
+  on the device**, not the 33.9 ms desktop figure this line used to quote against a
+  ~520 ms refresh. Buffers are reused, so it allocates nothing — churning 32 KB per
+  turn is how a heap with 142 KB free becomes one that cannot serve the next chapter.
+
+**SO THERE IS A RING OF LAID-OUT PAGES, DEPTH 3**, and turning back to the page you
+just left now decodes nothing at all: 5,858 → **8.3 µs** desktop for a backward turn,
+and a Prev,Prev,Next,Next burst 4,696 → **22.6 µs with zero decodes**.
+
+- **Keyed on the chapter plus the page's start `Cursor`**, NOT its index. An index is
+  a position in a list that grows as the chapter is read and is replaced outright by
+  a count, so it names a different page before and after one.
+- **Pages are COPIES.** `LaidLine::text` is owned exactly so a Page can outlive the
+  blocks it was laid from; a ring of views would resurrect the notdef-box lifetime
+  bug recorded under **The lifetime rules that changed**.
+- **A HIT LEAVES NO LIVE BUILDER, and that is the sharp edge.** `Gesture::Next` tries
+  the ring first — the page ahead is exactly the one a reader who came back is
+  returning to — and otherwise decodes with `needStream`. Taking a hit where a stream
+  was needed is not slow, it is WRONG: `advance()` answers false, and the screen reads
+  that as the end of the chapter and turns to the next one from the middle of this
+  one. Dropping `needStream` fails seven tests, two of them pre-existing paging
+  properties.
+- **A live builder still beats the ring** — ~20 ms against ~376 ms to re-establish
+  one — so the whole branch sits under a null check.
+- **1,471 B a page on the X4 and 1,512 on the X3**, measured; the ring is 4,536 B,
+  10.8% of the 42,152-byte floor, with a test asserting the ceiling so it cannot
+  drift.
 
 The strongest test of all this is `READING BACKWARD GIVES EXACTLY THE PAGES READING
 FORWARD GAVE`: it exercises the rewind, the buffer reuse, `startAt`'s discard path
