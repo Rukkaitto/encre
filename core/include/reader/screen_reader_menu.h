@@ -20,7 +20,7 @@ namespace reader {
 // those frames, which is the trade: it is under a veil and the menu is chrome, where
 // the page is the one thing on this device that wanted four levels.
 //
-// FOUR OF ITS SIX ROWS ARE NOT BUILT and are drawn anyway, with the focus skipping
+// FIVE OF ITS SEVEN ROWS ARE NOT BUILT and are drawn anyway, with the focus skipping
 // them -- Settings' rule, and its reasoning verbatim: a row that cannot be reached
 // cannot mislead, where a row that focuses and then ignores SELECT is the silent no-op
 // this project has been bitten by twice. An inert row is drawn EXACTLY as an unfocused
@@ -50,8 +50,22 @@ class ReaderMenuScreen : public FocusScreen {
   uint32_t paintFootprint() const override { return 1; }
 
   // The board's rows, in the board's order.
-  enum Row : int { kContents, kTypography, kGoToPage, kBookmarks, kAboutBook, kCloseBook };
-  static constexpr int kRowCount = 6;
+  //
+  // `kNames` arrived from another branch's board edit (the character index it boards as
+  // Names.dc.html), and this screen was built before it: six rows against the board's
+  // seven, which `make compare` reported as "firmware ok" because it RENDERED. Measured
+  // per pixel it was 13.02% against 3.02% before -- "ok" means the sim produced a frame,
+  // not that the frame matches, and only the mismatch number says which.
+  enum Row : int {
+    kContents,
+    kTypography,
+    kGoToPage,
+    kBookmarks,
+    kNames,
+    kAboutBook,
+    kCloseBook,
+  };
+  static constexpr int kRowCount = 7;
 
  protected:
   void syncVm() override;

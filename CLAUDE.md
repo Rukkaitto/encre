@@ -2110,7 +2110,20 @@ already did. It also carries the board's per-row tracking, because `Close book` 
 that label, so visible rather than pedantic. Both fixes took the menu from 3.24% to
 **3.02%** against its board.
 
-**FOUR OF THE MENU'S SIX ROWS DO NOTHING AND ARE DRAWN ANYWAY** — Settings' rule, and
+**A MERGE CHANGED THIS BOARD UNDER THE SCREEN, and `make compare` said "firmware ok"
+the whole time.** Another branch (`claude/book-character-identification`) added a `Names`
+row — its own boarded character index — so the board had SEVEN rows against this screen's
+six. The comparison sheet reported it as fine because "ok" means the simulator produced a
+frame, not that the frame matches: measured per pixel it was **13.02%** against 3.02%
+before the merge. **The percentage is the check; the word is not.**
+
+Two board inconsistencies surfaced with it, both about the page UNDER the veil, which IS
+the reader's page — so `ReaderMenu.dc.html` and `Reader.dc.html` have to agree about it.
+The menu board still drew a **drop cap** that `Reader.dc.html` drops from V1 with a long
+mechanism note, and still said `CH. 01` where the Reader's slot had become a chapter
+name. Both fixed on the board; the menu is back to 3.06% / 3.60%.
+
+**FIVE OF THE MENU'S SEVEN ROWS DO NOTHING AND ARE DRAWN ANYWAY** — Settings' rule, and
 the board was edited to match before the screen was written: it had focused Typography,
 which is not built, so implementing it faithfully would have drawn a selection on a dead
 row. `Contents` and `Close book` respond. **`Close book` answers `popTo(Library)`**, and

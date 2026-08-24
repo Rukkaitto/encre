@@ -29,6 +29,10 @@ constexpr Item kItems[ReaderMenuScreen::kRowCount] = {
     // The board shows `2`, a bookmark count. Zero would be a claim about a feature that
     // cannot make one, so the row carries the board's own value and does not act.
     {"Bookmarks", "2", false, false, 0},
+    // The character index another branch boards as Names.dc.html. Drawn and inert like
+    // its four unbuilt siblings -- it becomes focusable in the commit that gives it a
+    // screen, and needs no change here when it does.
+    {"Names", "", false, true, 0},
     {"About this book", "", false, true, 0},
     // NO MARK AND ITS OWN TRACKING, both of which the board states. It closes the book
     // rather than opening a screen, so a chevron would promise somewhere to go -- and

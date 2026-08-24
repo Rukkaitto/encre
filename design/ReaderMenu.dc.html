@@ -32,10 +32,18 @@
   <div style="position: absolute; top: 0; left: 0; width: 480px; height: 800px; box-sizing: border-box; padding: 20px 18px 0 18px; display: flex; flex-direction: column;">
     <div class="grotesk" style="display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 22px;">
       <div style="font-size: var(--t-meta); letter-spacing: 0.18em; font-weight: 500;">MIDDLEMARCH</div>
-      <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">CH. 01</div>
+      <!-- THE CHAPTER'S NAME, as Reader.dc.html now carries: `CH. 01` is only the
+         fallback for a book whose contents cannot name this chapter. Same slot, same
+         page -- two boards drawing one screen have to agree about it. -->
+    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-left: 16px;">LIVRE I</div>
     </div>
     <div style="flex-grow: 1; overflow: hidden; font-size: 32px; line-height: 1.7; text-align: justify;">
-      <p style="margin: 0;"><span style="float: left; font-size: 102px; line-height: 0.86; font-weight: 600; padding: 6px 8px 0 0;">M</span>iss Brooke had that kind of beauty which seems to be thrown into relief by poor dress. Her hand and wrist were so finely formed that she could wear sleeves not less bare of style than those in which the Blessed Virgin appeared to Italian painters.</p>
+      <!-- NO DROP CAP, matching Reader.dc.html, which drops it from V1 and states the
+             mechanism at length (a bounded pre-rendered asset, and 2,652 bytes for one
+             glyph against a 16 KB arena). The page under this veil IS the reader's page,
+             so a drop cap here was this board disagreeing with that one about the same
+             screen -- and it showed up as design-vs-firmware mismatch on the MENU. -->
+        <p style="margin: 0;">Miss Brooke had that kind of beauty which seems to be thrown into relief by poor dress. Her hand and wrist were so finely formed that she could wear sleeves not less bare of style than those in which the Blessed Virgin appeared to Italian painters.</p>
     </div>
   </div>
 
