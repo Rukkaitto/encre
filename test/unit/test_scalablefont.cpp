@@ -568,3 +568,85 @@ TEST_CASE("body text renders to golden through the dithered path") {
 
   golden::checkGolden(fb, "body_text_dithered");
 }
+
+// --- The italic face ---------------------------------------------------------
+
+namespace {
+std::vector<uint8_t> italicTtf() {
+  return golden::slurp(std::string(ASSETS_DIR) + "/built/literata_italic.ttf");
+}
+}  // namespace
+
+TEST_CASE("the italic face rasterises, and its glyphs are NOT the roman's") {
+  // THE POINT OF A SECOND FILE, asserted rather than assumed. Literata.ttf has no
+  // `ital` or `slnt` axis (macStyle 0x00, italicAngle 0), so no instancing of the
+  // roman could produce this -- and Literata's italic is a TRUE italic with its own
+  // letterforms at only -2 degrees, so an oblique transform of the roman would not
+  // have matched it either. If these two faces ever rasterise the same bitmap for a
+  // letter with a distinct italic form, something is loading one file twice.
+  const std::vector<uint8_t> rom = bodyTtf();
+  const std::vector<uint8_t> ital = italicTtf();
+  REQUIRE_FALSE(rom.empty());
+  REQUIRE_FALSE(ital.empty());
+
+  reader::ScalableFont roman, italic;
+  REQUIRE(roman.init(rom.data(), rom.size(), 32));
+  REQUIRE(italic.init(ital.data(), ital.size(), 32));
+
+  // `a`, `e`, `f`, `g` are the letters whose italic forms differ most from the
+  // roman in a serif face -- single-storey `a`, descending `f`.
+  int differing = 0;
+  for (char32_t cp : {U'a', U'e', U'f', U'g', U'n'}) {
+    const auto r = roman.glyph(cp);
+    const auto i = italic.glyph(cp);
+    REQUIRE(r.has_value());
+    REQUIRE(i.has_value());
+    // Compared by bitmap, not by advance: two faces can agree on width and still
+    // draw different shapes, which is exactly the case here.
+    const bool same =
+        r->bitmapW == i->bitmapW && r->bitmapH == i->bitmapH &&
+        std::equal(r->bitmap, r->bitmap + (r->stride * r->bitmapH), i->bitmap);
+    if (!same) ++differing;
+  }
+  CHECK(differing == 5);
+}
+
+TEST_CASE("italic metrics line up with the roman, so a mixed line does not drift") {
+  // BOTH FILES ARE unitsPerEm 1000 and pinned to the same axis coordinates, which is
+  // what lets one line hold both faces. A mismatch here would not look like a bug in
+  // the font -- it would look like justification being broken, because the measuring
+  // pass and the drawing pass would disagree about where a run ends.
+  const std::vector<uint8_t> rom = bodyTtf();
+  const std::vector<uint8_t> ital = italicTtf();
+  reader::ScalableFont roman, italic;
+  REQUIRE(roman.init(rom.data(), rom.size(), 32));
+  REQUIRE(italic.init(ital.data(), ital.size(), 32));
+
+  CHECK(roman.ppem() == italic.ppem());
+  // The same line box: a mixed line has ONE baseline, so a face with different
+  // ascent or line height would sit off it.
+  CHECK(roman.lineHeight() == italic.lineHeight());
+  CHECK(roman.ascent() == italic.ascent());
+}
+
+TEST_CASE("the italic covers everything the roman does over fontc's subset") {
+  // A missing glyph in the italic renders as notdef, and a notdef box inks rows
+  // exactly like a letter does -- this project has already shipped that defect once
+  // and every golden passed. So coverage is asserted over the whole subset rather
+  // than sampled.
+  const std::vector<uint8_t> rom = bodyTtf();
+  const std::vector<uint8_t> ital = italicTtf();
+  reader::ScalableFont roman, italic;
+  REQUIRE(roman.init(rom.data(), rom.size(), 32));
+  REQUIRE(italic.init(ital.data(), ital.size(), 32));
+
+  int romanHas = 0, italicMissing = 0;
+  for (char32_t cp = 0x20; cp <= 0xFF; ++cp) {
+    if (cp > 0x7E && cp < 0xA0) continue;  // the C1 gap fontc.py also skips
+    if (!roman.glyph(cp).has_value()) continue;
+    ++romanHas;
+    if (!italic.glyph(cp).has_value()) ++italicMissing;
+  }
+  CHECK(romanHas > 180);  // the subset really was loaded
+  CHECK(italicMissing == 0);
+}

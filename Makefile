@@ -95,6 +95,14 @@ fonts:
 # for the same reason fontc.py's are, and to the same values literata_18.rfnt
 # uses.
 	$(PYTHON) tools/ttfprep.py assets/fonts/Literata.ttf --axis wght=400 --axis opsz=12 --out assets/built/literata_body.ttf
+# THE ITALIC IS A SECOND FILE, and it has to be: Literata.ttf carries `opsz` and
+# `wght` and NO `ital` or `slnt` axis (macStyle 0x00, italicAngle 0), so no
+# instancing of the roman produces a slanted glyph -- and Literata's italic is a
+# true italic with its own letterforms at only -2 degrees, so an oblique
+# transform was never a substitute either. Same axes, same unitsPerEm of 1000,
+# pinned to the same coordinates as the roman so a line that mixes the two does
+# not find their advances disagreeing.
+	$(PYTHON) tools/ttfprep.py assets/fonts/LiterataItalic.ttf --axis wght=400 --axis opsz=12 --out assets/built/literata_italic.ttf
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_400_10pt.rfnt --out shell/src/font_meta400.h --symbol kFontMeta400
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_500_10pt.rfnt --out shell/src/font_meta500.h --symbol kFontMeta500
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_10pt.rfnt --out shell/src/font_meta700.h --symbol kFontMeta700
@@ -108,6 +116,7 @@ fonts:
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_20pt.rfnt --out shell/src/font_title700.h --symbol kFontTitle700
 	$(PYTHON) tools/embed_font.py assets/built/spacegrotesk_700_32pt.rfnt --out shell/src/font_display700.h --symbol kFontDisplay700
 	$(PYTHON) tools/embed_font.py assets/built/literata_body.ttf --out shell/src/font_body_serif.h --symbol kFontBodySerif
+	$(PYTHON) tools/embed_font.py assets/built/literata_italic.ttf --out shell/src/font_body_serif_italic.h --symbol kFontBodySerifItalic
 # Rebuilds the UI icon bitmaps from the design boards' own inline SVG, the same
 # relationship `fonts` gives type. Needs Google Chrome (the only SVG rasteriser
 # on this machine, and the one tools/compare-design.py measures the design with)
