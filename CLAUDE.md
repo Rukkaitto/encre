@@ -657,19 +657,47 @@ a run and is not one either. Measured on the device, microseconds:
 | LIBRARY | 105 000 | 36 054 (34%) | 44 506 | — | 4 939 | 3 719 | 15 782 |
 | HOME | 74 000 | 34 225 (46%) | 26 616 | — | 4 974 | 6 048 | 2 137 |
 
-**`Framebuffer::fillRect` IS 34–62% OF EVERY CHROME RENDER, and it is the same
-defect `veilRect` was already fixed for.** It is still a per-pixel `setPixel`
-loop — a bounds check, a `byteIndex` (a division under rotation), a `bitMask`
-(a modulo) and a read-modify-write, per pixel. An overlay panel is ~340×450 and a
-full-bleed focused row ~300×72, so one actions-panel frame asks for on the order
-of 200,000 of them. The arithmetic that makes this unambiguous:
+**`Framebuffer::fillRect` WAS 34–62% OF EVERY CHROME RENDER, and it was the same
+defect `veilRect` had already been fixed for** — a per-pixel `setPixel` loop, so a
+bounds check, a `byteIndex` (a division under rotation), a `bitMask` (a modulo)
+and a read-modify-write, per pixel. An overlay panel is ~340×450 and a full-bleed
+focused row ~300×72, so one actions-panel frame asked for ~200,000 of them. The
+arithmetic that made it unambiguous, and which is the shape to look for next time:
 
 | | pixels | cost | per pixel |
 |---|--:|--:|--:|
 | `veilRect`, byte-wise, whole frame | 418,176 | 9.9 ms | **24 ns** |
 | `fillRect`, per-pixel | ~200,000 | 158 ms | **790 ns** |
 
-Same class of work, **33× apart**, and the difference is entirely `setPixel`.
+Same class of work, **33× apart**, and the difference was entirely `setPixel`.
+
+**IT IS BYTE-WISE NOW**: clip once, resolve the run to a first byte, a last byte
+and two edge masks, then per physical row write the masked first byte, `memset`
+the middle and write the masked last byte. **A fill has no PHASE** — unlike the
+veil and the dither it is keyed on nothing — so its run is identical for every
+row and the masks hoist out of the loop, which `veilRect` cannot do. Desktop, µs
+a pass: `library_actions` 706 → **351** (fill 441 → 3), `reader_menu` 1004 → **437**
+(402 → 4), `library` 277 → **219**, `home` 187 → **137**.
+
+Two things it inherits from the veil and one it does not:
+
+- **The rotation hazard is the same and so is the structure.** Under CCW a logical
+  row is a physical column, so the outer loop is the logical **x**. Getting it
+  wrong passes every desktop test and every golden and smears on glass.
+- **The edge masks need their own tests**, because the panel widths are multiples
+  of 8 and *overlay geometry is not* — it is derived by subtraction from a centred
+  panel, so a run starting or ending mid-byte, and a negative origin, are real
+  cases. `test_framebuffer.cpp` keeps the per-pixel form as its reference and
+  asserts byte-identity across 37 rectangles × both rotations × both colours, and
+  each of its cases was proved by MUTATION rather than by passing.
+- **`ditherRect` is now the last per-pixel area primitive.** It cannot take this
+  structure directly — its mask varies per row by tile phase, as the veil's does —
+  but the veil's per-phase byte shape would fit it. Home's cover placeholder is
+  its big caller, at 15–22 µs desktop, so it is small and known rather than next.
+
+**WITH FILL GONE, THE GLYPH BLIT IS THE DOMINANT SLOT ON EVERY SCREEN** — 192 µs
+of `library_actions`' remaining 351, 364 of `reader_menu`'s 437, 158 of
+`library`'s 219. That is where the next render work is, not in the furniture.
 
 **A READER PAGE IS 99% GLYPH BLIT** — 213 ms of a 215 ms render, and the same
 per-pixel shape in `drawRunF26`. That is the biggest single render cost in the
