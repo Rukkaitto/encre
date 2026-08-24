@@ -92,6 +92,13 @@ FLOW_SCREENS = [
     ("home_unopened",   "HomeUnopened.dc.html",   "Home / nothing open"),
     ("home_missing",    "HomeMissing.dc.html",    "Home / missing book"),
     ("sleep_idle",      "SleepIdle.dc.html",      "Sleep / nothing open"),
+    # THE LOADING STATE, and it is two boards rather than one because the mechanism
+    # has two homes: it replaces the HINT BAR on a screen that draws one, and it
+    # replaces the badge's words on Sleep, which draws no hint bar because it takes
+    # no input. Same slot, same box, same tracked line -- so a change to one has to
+    # be made to the other, which is exactly what a second board makes visible.
+    ("library_opening", "LibraryOpening.dc.html", "Library / opening a book"),
+    ("sleep_waking",    "SleepWaking.dc.html",    "Sleep / waking"),
     ("library_scrolled", "LibraryScrolled.dc.html", "Library / scrolled"),
     ("library_actions", "LibraryActions.dc.html", "Library actions"),
     ("delete_confirm",  "DeleteConfirm.dc.html",  "Delete confirm"),

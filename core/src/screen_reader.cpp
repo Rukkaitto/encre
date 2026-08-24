@@ -1,5 +1,7 @@
 #include "reader/screen_reader.h"
 
+#include "reader/progress.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
@@ -315,6 +317,7 @@ ReaderScreen::CountOutcome ReaderScreen::countPages(std::vector<Cursor>& out, St
     // to the most expensive step of the loop before it could get out of the way.
     if (stop != nullptr && i % kStopCheckBlocks == 0 && i > 0 && stop(ctx))
       return CountOutcome::Abandoned;
+    Progress::tick();
     if (!chapter_.next(b)) break;
     pb.add(b, i++);
     b = Block{};  // dropped: the whole point of streaming
@@ -428,6 +431,7 @@ bool ReaderScreen::openAtCursor(Cursor want) {
   fed_ = 0;
   bool found = false;
   for (int guard = 0; guard < kMaxPages * 4 && !found; ++guard) {
+    Progress::tick();
     if (!chapter_.next(b)) break;
     pb_->add(b, fed_++);
     b = Block{};  // dropped: the whole point of streaming
@@ -586,6 +590,7 @@ bool ReaderScreen::seekTo(int p, bool needStream) {
   Block b;
   int at = from;
   for (int guard = 0; guard < kMaxPages * 4; ++guard) {
+    Progress::tick();
     if (!chapter_.next(b)) break;
     pb_->add(b, fed_++);
     b = Block{};
@@ -619,6 +624,7 @@ bool ReaderScreen::advance() {
   Block b;
   for (int guard = 0; guard < kMaxPages * 4; ++guard) {
     if (pb_->ready()) break;
+    Progress::tick();
     if (!chapter_.next(b)) break;
     pb_->add(b, fed_++);
     b = Block{};

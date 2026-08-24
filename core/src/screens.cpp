@@ -373,7 +373,11 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // The shell builds its own from the book it was actually reading -- this is
       // the demo catalogue, and a screen nothing can navigate TO needs a source
       // for its values either way.
-      return std::make_unique<SleepScreen>(sleepIdle_ ? demoSleepIdleVm() : demoSleepVm());
+    {
+      SleepViewModel vm = sleepIdle_ ? demoSleepIdleVm() : demoSleepVm();
+      if (sleepWaking_) vm.note = kStatusWaking;
+      return std::make_unique<SleepScreen>(std::move(vm));
+    }
     case ScreenId::Reader: {
       // REFUSED without a body face, rather than built empty. A Reader that
       // rendered nothing looks exactly like a book that failed to open, and the

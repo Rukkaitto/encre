@@ -90,6 +90,13 @@ inline constexpr int kBandLabelEm = 220;   // 0.22em, header band label
 inline constexpr int kRowLabelEm = 180;    // 0.18em, menu row label
 inline constexpr int kBlockLabelEm = 200;  // 0.20em, action block label
 inline constexpr int kHintEm = 120;        // 0.12em, hint bar label
+// 0.2em, the loading line -- WIDER than a hint label on purpose, and it is the
+// Sleep badge's tracking rather than the hint bar's. A hint label sits beside a
+// mark and is read as one of four; this is a single centred statement with the
+// whole bar to itself, and it is the same run Sleep already uses for exactly that
+// (design/Sleep.dc.html's `ASLEEP - PRESS POWER TO WAKE`, and SleepWaking's
+// `WAKING...` in the same badge). One spelling for one kind of line.
+inline constexpr int kStatusEm = 200;
 inline constexpr int kMetaEm = 160;        // 0.16em, the page-count meta line
 inline constexpr int kTightMetaEm = 100;   // 0.10em, the chapter meta line
 inline constexpr int kActionEm = 180;      // 0.18em, a prompt button's label
@@ -210,6 +217,44 @@ int drawHeaderBand(Framebuffer& fb, const FontSet& fonts, std::string_view label
 int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label,
             std::string_view value, bool focused, const Icon* trailing = nullptr,
             Plane plane = Plane::Bw);
+// THE LOADING LINE, AND IT REPLACES THE HINT BAR RATHER THAN JOINING IT.
+//
+// design/LibraryOpening.dc.html. The same box as the hint bar -- same rule, same
+// padding, so the bar's height cannot differ between the two states and the list
+// stacked above it cannot move when one replaces the other -- but one centred
+// tracked run and no marks.
+//
+// WHY IT TAKES THE HINT BAR'S PLACE rather than sitting somewhere of its own: the
+// hint bar is a promise about what the four buttons do, and while the device is
+// blocked they do nothing. Replacing it is not a compromise for want of room, it is
+// the more honest of the two states.
+//
+// IT IS DRAWN OVER A FINISHED FRAME, by the shell, and no screen knows it exists.
+// That is what makes it one mechanism instead of a flag on every view model: the
+// thing that knows an operation is taking too long is the shell, not the screen it
+// is taking too long on. It CLEARS its own box first, because what is under it is
+// the hint bar it is replacing.
+//
+// IT TAKES NO HINTS, and that is the point of the signature: the shell draws this
+// over a finished frame and has no view model in hand, so requiring the screen's
+// own hints would have put a lookup at every call site for a number that does not
+// depend on them. A slot's height comes from its MARK and its type role, never
+// from its label -- so the marks-only set is the same height as any real bar, and
+// deriving it through hintBarHeight is what keeps the two boxes identical rather
+// than merely equal today.
+void drawStatusBar(Framebuffer& fb, const FontSet& fonts, std::string_view label,
+                   Plane plane = Plane::Bw);
+
+// THE TWO THINGS IT EVER SAYS, spelled once. The ellipsis is the single character
+// U+2026 and not three full stops: the boards write `&hellip;`, and three periods
+// at 0.2em tracking are three separated dots rather than an ellipsis.
+//
+// The shell owns WHEN each is shown; naming them here keeps the words with the
+// component that draws them, and keeps the simulator's Sleep board and the
+// device's wake from spelling the same line two ways.
+inline constexpr const char* kStatusOpening = "OPENING\u2026";
+inline constexpr const char* kStatusWaking = "WAKING\u2026";
+
 // Draws at the bottom of fb. Reports each slot's x in slotXOut[4] so tests and
 // callers can assert the distribution.
 int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], int slotXOut[4],

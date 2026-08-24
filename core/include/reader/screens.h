@@ -185,6 +185,12 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // which of the two it wants, and the shell builds its own view model either way.
   void setSleepIdle() { sleepIdle_ = true; }
 
+  // design/SleepWaking.dc.html -- the same badge, waking rather than asleep. It is a
+  // NOTE and nothing else: SleepViewModel::note already carries that line's words, so
+  // the waking state needed no field, no flag on the theme and no second render path.
+  // The two boards differ by one run for the same reason.
+  void setSleepWaking() { sleepWaking_ = true; }
+
   // THE BOARD'S OWN CONTENTS AND MENU HEADER, ASKED FOR. Same rule as setReaderDemo,
   // and it is here because the alternative had just shipped its consequence: the
   // factory fell back to a demo table of contents whenever nothing had set one, so a
@@ -303,6 +309,7 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   OpenedBook readerBook_{};
   bool readerDemo_ = false;
   bool sleepIdle_ = false;
+  bool sleepWaking_ = false;
   bool contentsDemo_ = false;
   std::string detailsAuthor_;
   BookDetailsScreen::Facts detailsFacts_{};

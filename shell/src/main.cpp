@@ -40,6 +40,7 @@
 #include "reader/json.h"
 #include "reader/power.h"
 #include "reader/profile.h"
+#include "reader/progress.h"
 #include "reader/refresh.h"
 #include "reader/screen_home.h"
 #include "reader/screen_sd_missing.h"
@@ -1043,6 +1044,8 @@ static void armCardProbes(const char* why) {
   gLastSdDeepPollMs = gLastSdPollMs;
 }
 
+static reader::SleepViewModel sleepVmFromCard(std::string note);
+
 // --- The app, and the session record -------------------------------------
 
 // HOME'S `LIBRARY` ROW SHOWS THE REAL COUNT. demoHomeVm() carries the board's
@@ -1534,6 +1537,65 @@ static void logChapterOpen(const reader::ReaderScreen* rd, uint32_t elapsedMs) {
 // Defined below, because it is long and handleOpen reads better as the resolution of
 // WHICH book followed by one call. Declared here rather than reordered so the two
 // stay adjacent.
+// --- TELLING THE USER SOMETHING IS STILL HAPPENING ---------------------------
+//
+// design/LibraryOpening.dc.html. One tracked line where the hint bar was, drawn
+// OVER the frame already on the panel -- so no screen carries a flag for it, and
+// adding a slow operation later needs no screen work at all. See drawStatusBar for
+// why it replaces the hint bar rather than sitting somewhere of its own.
+//
+// IT COSTS A WHOLE WAVEFORM, ~439 ms, and there is no cheaper way: a windowed
+// update would still drive every gate line, because the rotation is CCW and a
+// portrait row band is a landscape column band. So this is bought, not free -- the
+// content it is reporting on arrives 439 ms later than it would in silence. That is
+// the trade this file already states as its own rule: on e-ink, feedback and speed
+// are separate problems.
+//
+// THE DEADLINE IS WHY IT IS WORTH IT. Below it nothing is drawn and nothing is
+// spent; a book that opens quickly never pays. It is only the operations that were
+// already going to feel broken that buy the extra refresh.
+constexpr uint32_t kStatusAfterMs = 1000;
+
+static uint32_t gSlowOpStartedMs = 0;
+static const char* gSlowOpLabel = nullptr;
+static bool gSlowOpShown = false;
+
+// Defined further down, beside showOnePass -- it needs the panel and this does not.
+static void paintStatusBar(const char* label);
+
+// Installed as reader::Progress's handler for the duration of a slow operation. It
+// is called from inside the reader's decode walks, per block, so it must stay a
+// comparison in the common case -- the paint happens once and then never again for
+// this operation.
+static void slowOpTick(void*) {
+  if (gSlowOpShown || gSlowOpLabel == nullptr) return;
+  if (static_cast<uint32_t>(millis() - gSlowOpStartedMs) < kStatusAfterMs) return;
+  gSlowOpShown = true;
+  paintStatusBar(gSlowOpLabel);
+}
+
+// RAII, because every path out of an open -- including the refusals, of which
+// openBookAt has several -- has to take the hook back down. A handler left
+// installed would fire inside the next chapter turn, which is not a slow operation
+// and must never grow a status bar.
+struct SlowOperation {
+  explicit SlowOperation(const char* label) {
+    gSlowOpStartedMs = millis();
+    gSlowOpLabel = label;
+    gSlowOpShown = false;
+    reader::Progress::install(slowOpTick, nullptr);
+  }
+  ~SlowOperation() {
+    reader::Progress::install(nullptr, nullptr);
+    gSlowOpLabel = nullptr;
+  }
+  SlowOperation(const SlowOperation&) = delete;
+  SlowOperation& operator=(const SlowOperation&) = delete;
+  // True when the bar went up, so the caller knows the panel no longer holds what
+  // it thinks and a transition is owed.
+  bool shown() const { return gSlowOpShown; }
+};
+
 static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push);
 
 static void handleOpen() {
@@ -1603,6 +1665,11 @@ static void handleOpen() {
 // record's whole stack and the Reader is one entry in it. Everything before the push
 // is identical either way, which is the point of there being one function.
 static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
+  // ONE PLACE, because this is the one function both CONTINUE and a Library row go
+  // through -- and the wake restore as well. Putting the deadline at the call sites
+  // instead would have been three copies of it, and the third would have been added
+  // late and differently.
+  SlowOperation slow(reader::kStatusOpening);
   const uint32_t t0 = millis();
   const uint32_t heapBefore = ESP.getFreeHeap();
   reader::OpenedBook opened;
@@ -2999,6 +3066,64 @@ void setup() {
   gCrumbs.mountOk = storage ? 1 : 0;
   saveCrumbs();
   if (storage) {
+    // WAKING, PAINTED BEFORE ANY OF THE EXPENSIVE BOOT WORK. A wake is the slowest
+    // path this device has and the panel is still showing the sleep screen, which
+    // says the device is ASLEEP -- so until the first real paint the glass is
+    // actively wrong rather than merely stale.
+    //
+    // HERE AND NOT EARLIER, and the constraint is honesty rather than ordering: the
+    // sleep screen names the book being read, and that comes from the card, so this
+    // is the first moment a truthful one can be drawn. It is still well before the
+    // costs that make a wake slow -- Home's book count, and restoring the reader.
+    //
+    // Unconditional on a resume rather than deadline-gated like an open, because a
+    // wake is known-slow: there is no cheap case to protect.
+    if (fromSleep) {
+      // ONE FLASH ON A WAKE, NOT TWO, and getting there needs the driver's
+      // boot-clear budget spent deliberately rather than by accident.
+      //
+      // Uc8279Driver::initController grants TWO forced GC refreshes after every
+      // reset (_initialFullsRemaining = 2), for a consumer that paints a splash and
+      // then its first real screen. A wake is a chip reset, so the budget is back --
+      // and with a paint here as well as setup's, BOTH were being spent adjacently:
+      // the waking line flashed, and then Home flashed. That is what was reported.
+      //
+      // The budget is already handled AFTER setup's first paint (see
+      // skipInitialResync below, "the panel now holds a frame we just wrote"). This
+      // is the same assertion made one paint earlier, and on a wake it is a
+      // DIFFERENT and weaker claim, which is the part to understand before touching
+      // it:
+      //
+      //   * The glass holds the SLEEP SCREEN -- e-ink keeps its image with no power.
+      //   * The CONTROLLER's DTM1 baseline does not survive; after the reset it is
+      //     whatever the RAM powered up as. skipInitialResync asserts it is valid,
+      //     so the DU below diffs against that.
+      //   * CLAUDE.md records this exact call producing "a split second of noisy
+      //     banding on every wake" -- but that was a differential onto a WHOLE NEW
+      //     SCREEN. Here the frame being painted is the sleep screen with one line
+      //     changed, so almost every pixel the garbage baseline calls unchanged
+      //     really is unchanged, and keeping what the glass holds is correct.
+      //
+      // IF THAT IS WRONG ON GLASS the symptom is specific and worth naming: the
+      // WAKING line faint, banded, or absent, with the rest of the card intact. The
+      // fallback is one line -- move skipInitialResync() to AFTER the paint and drop
+      // requestResync(). The wake then flashes once, here, instead of once at Home,
+      // which is still better than the two it started with.
+      display.skipInitialResync();
+      const reader::SleepViewModel vm = sleepVmFromCard(reader::kStatusWaking);
+      reader::SleepScreen scr(vm);
+      gFrame->clear(true);
+      scr.render(*gFrame, *gFonts, gTheme, reader::Plane::Bw);
+      gFrameContentsUnknown = true;
+      // FAST, so this is a DU and the badge's words change without a flash.
+      showOnePass(reader::RefreshMode::Fast);
+      // ...and the NEXT paint is the strong one. Home is a whole new screen over a
+      // baseline we have just admitted we do not know, so it takes the GC -- which
+      // is both the honest refresh and the one that clears anything the DU above got
+      // wrong. This is the flash a screen change is allowed to have.
+      display.requestResync();
+      mark("waking-painted");
+    }
     // The root is Home, built from the shared catalogue. Nothing rebuilds it, so
     // popping back to Home returns this object with its focus intact.
     buildHomeApp();
@@ -3178,9 +3303,14 @@ void setup() {
 // (design/SleepIdle.dc.html). The badge is the half that carries the screen's purpose:
 // e-ink holds its last image, so without it a Library left on the glass gives no clue
 // the device is asleep rather than frozen.
-static void paintSleepScreen() {
+// THE SLEEP SCREEN'S VIEW MODEL, and both states build it here. Extracted the
+// moment there was a second caller rather than the fifth: waking draws the same
+// card with a different line under it, and two copies of "what the badge says about
+// the book" would be two chances to disagree about a screen the user sees at both
+// ends of a sleep.
+static reader::SleepViewModel sleepVmFromCard(std::string note) {
   reader::SleepViewModel vm;
-  vm.note = std::string("ASLEEP") + "\xC2\xB7" + "PRESS POWER TO WAKE";
+  vm.note = std::move(note);
   vm.nothingToContinue = true;
 
   reader::LastRead last;
@@ -3202,6 +3332,28 @@ static void paintSleepScreen() {
                   last.spine + 1);
     vm.progress = line;
   }
+  return vm;
+}
+
+static void paintStatusBar(const char* label) {
+  if (!bindFrameToDriver("status")) return;
+  SpiBusGuard bus;
+  // OVER THE EXISTING FRAME, not over a cleared one: what is on the panel is the
+  // screen the user pressed from, and it should stay. Only the bar's own box is
+  // touched, which drawStatusBar clears for itself.
+  reader::drawStatusBar(*gFrame, *gFonts, label);
+  // App's partial-repaint record now describes a frame that no longer matches, and
+  // it cannot see this: its check compares the Framebuffer's ADDRESS, which has not
+  // changed. Same reason paintSleepScreen sets it.
+  gFrameContentsUnknown = true;
+  showOnePass(reader::RefreshMode::Fast);
+  logf("[status] %s\n", label);
+  logFlush();
+}
+
+static void paintSleepScreen() {
+  const reader::SleepViewModel vm =
+      sleepVmFromCard(std::string("ASLEEP") + "\xC2\xB7" + "PRESS POWER TO WAKE");
 
   reader::SleepScreen scr(vm);
   gFrame->clear(true);

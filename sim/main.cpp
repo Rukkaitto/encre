@@ -325,6 +325,12 @@ int main(int argc, char** argv) {
   const bool isSettings = std::strcmp(argv[1], "settings") == 0;
   const bool isSleep = std::strcmp(argv[1], "sleep") == 0;
   const bool isSleepIdle = std::strcmp(argv[1], "sleep_idle") == 0;
+  const bool isSleepWaking = std::strcmp(argv[1], "sleep_waking") == 0;
+  // design/LibraryOpening.dc.html. The SAME journey as `library` -- it is the same
+  // screen, with the status line drawn over its hint bar the way the shell draws it
+  // over a finished frame. Rendering it any other way would compare a board against
+  // a path the device does not take.
+  const bool isLibraryOpening = std::strcmp(argv[1], "library_opening") == 0;
   const bool isReaderMenu = std::strcmp(argv[1], "reader_menu") == 0;
   const bool isContents = std::strcmp(argv[1], "contents") == 0;
   const bool isHomeEmpty = std::strcmp(argv[1], "home_empty") == 0;
@@ -343,14 +349,16 @@ int main(int argc, char** argv) {
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
       !isHomeUnopened && !isLibraryScrolled && !isReader && !isSleepIdle &&
-      !isReaderMenu && !isContents && !isChapterOpen && !isReaderList && !isAnchored) {
+      !isReaderMenu && !isContents && !isChapterOpen && !isReaderList && !isAnchored &&
+      !isSleepWaking && !isLibraryOpening) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
                  "'sleep', 'sleep_idle', 'home_empty', 'home_unopened', "
                  "'library_scrolled', 'reader', 'reader_anchored', "
                  "'reader_chapter_open', 'reader_list', "
-                 "'reader_menu', 'contents' or 'app')\n",
+                 "'reader_menu', 'contents', 'sleep_waking', 'library_opening' "
+                 "or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -631,10 +639,15 @@ int main(int argc, char** argv) {
     for (const reader::InputEvent& ev : libraryEntry(13)) app.dispatch(ev);
     app.dispatch({reader::Button::Up, reader::PressKind::Short});
   }
-  if (isLibrary) {
+  if (isLibrary || isLibraryOpening) {
     // Home's first row is LIBRARY, so one Confirm opens it; then the board's own
     // focus, which is its second row. Reached by pressing rather than by
     // assignment, so the render pins the navigation too.
+    //
+    // LibraryOpening takes the IDENTICAL journey, because it is the identical
+    // screen: the only difference is the status line drawn over the finished frame,
+    // which is exactly how the device differs. A second journey here would let the
+    // two boards drift apart in the one way the comparison could not see.
     for (const reader::InputEvent& ev : libraryEntry()) app.dispatch(ev);
   }
   if (isLibraryActions || isDeleteConfirm || isBookDetails) {
@@ -675,7 +688,8 @@ int main(int argc, char** argv) {
   // The idle variant is the same screen with nothing to show, so it takes the same
   // direct push -- the factory picks which view model.
   if (isSleepIdle) factory.setSleepIdle();
-  if (isSleep || isSleepIdle) {
+  if (isSleepWaking) factory.setSleepWaking();
+  if (isSleep || isSleepIdle || isSleepWaking) {
     // NOT reached by pressing: nothing navigates to the sleep screen, the idle
     // timer or the power button puts the device there. So it is pushed directly,
     // which is the honest model -- and it is why this screen has no journey to
@@ -690,6 +704,20 @@ int main(int argc, char** argv) {
   // Through App::render, not top().render: with an overlay on the stack the top
   // screen alone is a panel floating on white, and one paint path is what keeps
   // the simulator, the goldens and the shell from disagreeing about that.
+  if (isLibraryOpening) {
+    // The shell's own sequence: App::render fills the frame, then the status bar is
+    // drawn OVER the hint bar it replaces. No screen knows it happened, which is why
+    // there is no view-model flag to set here.
+    if (!renderPassesToPng(
+            [&](reader::Framebuffer& fb, reader::Plane pl) {
+              app.render(fb, fonts, theme, pl);
+              reader::drawStatusBar(fb, fonts, reader::kStatusOpening, pl);
+            },
+            app.top().fidelity(), w, h, argv[2]))
+      return 1;
+    std::printf("wrote %s (%dx%d) library, opening a book\n", argv[2], w, h);
+    return 0;
+  }
   if (!renderAppToPng(app, fonts, theme, w, h, argv[2])) return 1;
   std::printf("wrote %s (%dx%d) screen=%d depth=%d\n", argv[2], w, h,
               static_cast<int>(app.top().id()), app.depth());
