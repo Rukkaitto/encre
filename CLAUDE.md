@@ -2347,6 +2347,28 @@ passed — `shell/` has no harness, so nothing on the desktop touches that loop.
   while the commit describing them went through. Both times the assert failed for the
   dullest reason — the anchor text had already been edited by a previous commit, so it no
   longer matched what I remembered.
+- **THE BODY FACE USES A THRESHOLD RAMP, CHROME KEEPS THE GAMMA CURVE** (2026-08-24),
+  and the split is measured rather than preferred. Judged on the panel, the reference
+  firmware's shape reads better for body text: 8-bit coverage to 4 bits, then thresholds
+  at (3, 6, 10). **It is not darker** -- 97.7% of the gamma curve's ink on real text,
+  94.6% through the whole firmware path. What it removes is the HALO: the gamma curve
+  inks a level-1 pixel at coverage **8/255** where this one needs **43**, and that wide
+  band of barely-inked edge is what read as haze at reading size. No gamma expresses
+  the shape -- it is crisp at the bottom AND dark at the top; gamma 1.0 gets the first
+  and gamma 2.5 the second.
+  **CHROME MUST NOT FOLLOW, and this is the number that says so.** Small type is mostly
+  edge: 44.9% of `Meta400`'s glyph pixels at ppem 21 against 15.7% of the body face's at
+  32, so the same ramp costs it **-10.2%** of its ink and `Label500` **-10.4%**, against
+  -2.3% for the body. Those two are the hint bar and the row metadata, already at the
+  floor this glass holds. Ten percent off them to win 2.3% on the body is the wrong
+  trade.
+  **Two checks that made the change safe.** Nine goldens moved and only the nine that
+  draw body text -- Home, Library, Settings, Contents, Sleep and Book details did not,
+  which is what proves chrome untouched. And every changed pixel on those nine is
+  ADJACENT TO EXISTING INK (`isolated == 0`), so no glyph moved; the menu's ~120
+  isolated pixels are the veil's stipple having already blanked their neighbours.
+  Board fidelity went 0.1pp the RIGHT way on all six measurements, so abandoning the
+  Chrome-matched gamma did not drift from the boards.
 - **THE SDK'S ASYNC OVERLAP CANNOT BE DONE ON THIS HARDWARE** (investigated 2026-08-24,
   not built). `freeink-sdk/docs/deferred-refresh-migration.md` measures "page turn
   1274 ms -> 822 ms by overlapping the grayscale plane rendering with the BW waveform

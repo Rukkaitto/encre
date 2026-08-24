@@ -60,36 +60,55 @@ class ScalableFont : public GlyphSource {
   // here is a way for body text and chrome to end up different weights.
   static constexpr float kCoverageGamma = 2.0f;
 
-  // --- The A/B: an alternative CURVE SHAPE, not another gamma ------------------
+  // --- Why the body face does NOT use that gamma any more ----------------------
   //
-  // The reference firmware quantises differently: it rasterises to 4 bits and
-  // thresholds that 0..15 value linearly, at (4, 8, 12) by default and at
-  // (3, 6, 10) under `--darken-aa`. The roadmap recorded this as "3/6/10 against
-  // our 4/8/12" and read it as us being LIGHTER. Measured on real rendered text at
-  // ppem 32, that is backwards: our curve carries **100%** of the ink, their
-  // darken-aa **97.7%** and their default **93.9%**. Adopting theirs would make
-  // body text lighter.
+  // IT USES A THRESHOLD RAMP, and the two pipelines are deliberately no longer the
+  // same. That contradicts the paragraph above, which is left standing because its
+  // reasoning about matching Chrome was right and its conclusion was superseded on
+  // the panel -- judged on glass, the reference firmware's shape reads better.
   //
-  // THE REAL DIFFERENCE IS SHAPE, AND NO GAMMA EXPRESSES IT. Our 0->1 step is at
-  // coverage **8/255** where their darken-aa needs **43** -- so every glyph edge
-  // carries a wide halo of level-1 pixels, which on this glass may read as haze
-  // rather than as smoothness. Their ramp is crisp at the bottom AND dark at the
-  // top (43/94/162); gamma 1.0 gives the crisp bottom with a light top
-  // (43/128/213), and gamma 2.5 the dark top with our hazy bottom (3/46/162).
-  // One exponent cannot be both.
+  // WHAT THE RAMP IS: 8-bit coverage down to 4 bits, then three linear thresholds
+  // on that 0..15 value, at (3, 6, 10) -- the reference firmware's `--darken-aa`.
   //
-  // So this is a threshold ramp rather than a gamma, selected by
-  // `-DENCRE_AA_THRESHOLDS_4BIT` and OFF by default -- the desktop build never
-  // sets it, so the goldens stay blessed against the shipping curve. It exists to
-  // be compared ON THE PANEL, which is the only place the question can be
-  // settled: 15.7% of a page's glyph pixels are anti-aliased edge, and the whole
-  // disagreement lives in those.
+  // AND IT IS NOT DARKER, which is worth stating because the roadmap recorded it as
+  // "3/6/10 against our 4/8/12" and read lower numbers as more ink. The two are not
+  // on the same scale. Measured on real text at ppem 32 this ramp carries **97.7%**
+  // of the gamma curve's ink, and through the whole firmware path on a rendered page
+  // **94.6%** -- 8,076 pixels lighter against 1,961 darker. What it changes is the
+  // EDGE: the gamma curve's 0->1 step is at coverage **8/255** and this one's is at
+  // **43**, so a glyph edge stops carrying a wide halo of barely-inked level-1
+  // pixels. That halo is what read as haze at reading size.
   //
-  // IT CHANGES THE BODY FACE ONLY. Chrome is a pre-rendered Space Grotesk ramp
-  // built by fontc.py, and regenerating twelve assets per variant to test a
-  // question about body text is not worth it -- so a body-vs-chrome weight
-  // difference in a variant build is an artifact of the experiment, not of the
-  // candidate.
+  // NO GAMMA EXPRESSES IT, which is why this is a different form and not a tuned
+  // constant: this ramp is crisp at the bottom AND dark at the top (43/94/162).
+  // Gamma 1.0 gives the crisp bottom with a light top (43/128/213) and gamma 2.5 the
+  // dark top with the hazy bottom (3/46/162). One exponent cannot be both.
+  //
+  // --- CHROME KEEPS THE GAMMA CURVE, and that asymmetry is the measured part ------
+  //
+  // The rule this breaks is stated above -- "a per-face knob here is a way for body
+  // text and chrome to end up different weights" -- so breaking it needs a number
+  // rather than a preference. Applying this ramp to `fontc.py`'s eleven chrome roles
+  // costs, by role and ppem:
+  //
+  //     Meta400   ppem 21   -10.2%      (44.9% of its pixels are AA edge)
+  //     Label500  ppem 23   -10.4%      (39.6%)
+  //     Value700  ppem 25    -4.8%      (35.4%)
+  //     Title700  ppem 42    -3.9%      (21.5%)
+  //     Display700 ppem 67   -1.5%      (14.0%)
+  //     body serif ppem 32   -2.3%      (15.7%)
+  //
+  // SMALL TYPE IS MOSTLY EDGE -- 44.9% of Meta400's glyph pixels against 15.7% of
+  // the body face's -- so the identical ramp hits it four times harder. Meta400 and
+  // Label500 are the hint bar and the row metadata, already at the floor this panel
+  // can hold (the boards' ramp says sizes below ~10pt are not legible on this
+  // glass). Taking 10% of their ink to win 2.3% on the body is the wrong trade, and
+  // nobody asked for it.
+  //
+  // So body and chrome now differ by ~2.3% of ink at their respective sizes, in
+  // different typefaces, and the screen where they sit together is the one that was
+  // judged. If that ever reads wrong, the fix is this ramp applied to fontc.py with
+  // Meta400 and Label500 measured on the panel FIRST -- not a third curve.
   static constexpr uint8_t kAaThresholds4Bit[3] = {3, 6, 10};
 
   // Sized to hold the WHOLE working set of the reading face, measured rather than

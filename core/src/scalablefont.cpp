@@ -77,26 +77,24 @@ namespace {
 
 // 8-bit linear coverage -> 2-bit level, built once and shared by every face.
 //
-// Character for character the same expression tools/fontc.py's coverage_lut()
-// evaluates -- `min(3, int((v / 255) ** (1 / gamma) * 3 + 0.5))` -- because the
-// two pipelines producing the same level for the same coverage is the whole
-// reason this table exists. See ScalableFont::kCoverageGamma.
+// NO LONGER the same expression tools/fontc.py's coverage_lut() evaluates, and that
+// is the one thing to know before editing either. It was
+// `min(3, int((v / 255) ** (1 / gamma) * 3 + 0.5))` in both, so that chrome and body
+// landed on the same level for the same coverage. Judged on the panel, the body face
+// reads better on the reference firmware's threshold ramp -- and applying that ramp
+// to chrome costs its two smallest roles 10% of their ink, which is the measurement
+// that keeps them apart. See ScalableFont::kAaThresholds4Bit.
 const uint8_t* coverageLut() {
   static uint8_t lut[256];
   static const bool built = [] {
     for (int v = 0; v < 256; ++v) {
-#ifdef ENCRE_AA_THRESHOLDS_4BIT
-      // The reference firmware's shape: 8-bit coverage down to 4 bits, then three
-      // linear thresholds on that. See ScalableFont::kAaThresholds4Bit for the
-      // measurement that makes this an experiment rather than a fix.
+      // 8-bit coverage down to 4 bits, then three linear thresholds on that 0..15
+      // value. NOT the gamma curve fontc.py uses for chrome, and not by accident --
+      // ScalableFont::kAaThresholds4Bit carries the per-role measurement that says
+      // why the two pipelines diverge here and why chrome must not follow.
       const int bm = (v * 15 + 127) / 255;
       const uint8_t* const t = ScalableFont::kAaThresholds4Bit;
       const int level = bm >= t[2] ? 3 : bm >= t[1] ? 2 : bm >= t[0] ? 1 : 0;
-#else
-      const float t = std::pow(static_cast<float>(v) / 255.0f,
-                               1.0f / ScalableFont::kCoverageGamma);
-      const int level = static_cast<int>(t * 3.0f + 0.5f);
-#endif
       lut[v] = static_cast<uint8_t>(level < 3 ? level : 3);
     }
     return true;
