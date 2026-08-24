@@ -2160,6 +2160,36 @@ Library row is" — and Confirm on a Library row opens a book, so that row had b
 dead button on a shipped screen while its test kept pinning the placeholder. Both are
 live, and both tests now assert the action.
 
+## Editing this repo with scripts
+
+Most edits here are made by heredoc Python over the source. Three separate failures in
+one session came from the SAME mistake in that method, and none of them announced
+itself:
+
+| what happened | the mechanism |
+|---|---|
+| CLAUDE.md committed as **0 bytes** | `open(p,'w').write(open(p).read()...)` — Python evaluates `open(p,'w')` first, truncating before the read |
+| four TEST_CASEs silently deleted | a slice end found by scanning for a marker that also appears later |
+| **`gApp->dispatch(ev)`** and four hooks deleted | `src.index(marker)` searching from the START of the file for a slice that began mid-file |
+
+The third is the sharpest: the loop lost its dispatch, so every button on every screen
+did nothing, and the firmware still built and every one of 803 desktop tests still
+passed — `shell/` has no harness, so nothing on the desktop touches that loop.
+
+**The rules, each earned:**
+
+- **Read fully, mutate in memory, assert, write ONCE at the end.** Never call
+  `open(p,'w')` in an expression that also reads the file.
+- **Never compute a slice from `str.index` on a marker that is not unique.** Prefer
+  exact-string `replace` of the whole region, with an `assert` that the region is
+  present. If a slice is unavoidable, search for its end FROM the start index and
+  assert the result is close to it.
+- **Check the diff stat before committing.** A 128 KB deletion or a 102-line deletion
+  is obvious in one line of `git diff --stat` and invisible in a script's success
+  message. Every one of the three above would have been caught by looking.
+- **A green suite is not evidence for a shell edit.** The desktop cannot see
+  `shell/src/main.cpp`'s loop at all.
+
 ## Goldens
 
 `test/golden/*.png` are human-approved, pixel-exact baselines. A golden test

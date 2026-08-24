@@ -335,3 +335,31 @@ TEST_CASE("an ordinary Home still has its CONTINUE slot") {
   CHECK(s.setFocus(-1));
   CHECK(s.focus() == -1);
 }
+
+TEST_CASE("DOWN MOVES AN ORDINARY HOME OFF THE CONTINUE BLOCK") {
+  // The device reported Home's buttons doing nothing, with `[session] stored home:-1`
+  // after each press -- the dispatch ran and the focus never left -1.
+  //
+  // NOTHING HERE PRESSED DOWN ON AN ORDINARY HOME. The empty variant's closure is
+  // tested in both directions, and the ordinary one only through setFocus -- so the one
+  // path a user takes on the screen the device boots to was uncovered.
+  reader::HomeScreen h(reader::demoHomeVm(), reader::demoHomeTargets());
+  reader::Screen& s = h;
+  REQUIRE(s.focus() == -1);  // the CONTINUE block
+  const Action a = h.onEvent(kDown);
+  CHECK(a.kind == Action::Kind::Redraw);
+  CHECK(s.focus() == 0);  // LIBRARY
+  h.onEvent(kDown);
+  CHECK(s.focus() == 1);  // SETTINGS
+  // ...and round, because every list wraps.
+  h.onEvent(kDown);
+  CHECK(s.focus() == -1);
+}
+
+TEST_CASE("UP moves an ordinary Home the other way") {
+  reader::HomeScreen h(reader::demoHomeVm(), reader::demoHomeTargets());
+  reader::Screen& s = h;
+  REQUIRE(s.focus() == -1);
+  h.onEvent(kUp);
+  CHECK(s.focus() == 1);  // wraps up to SETTINGS
+}
