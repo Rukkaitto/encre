@@ -30,6 +30,7 @@ namespace {
 // The fixtures live in reader_fixture.h -- see its header for why they moved out of
 // this file. Aliased so the cases below read exactly as they did.
 using readerfix::Body;
+using readerfix::Italic;
 using readerfix::deferredChapter;
 using readerfix::longChapter;
 using readerfix::pageText;
@@ -548,4 +549,56 @@ TEST_CASE("going back works on an index that was built by reading") {
   // And forward again after the backward turns, which takes the re-seek path.
   REQUIRE(r.scr->onEvent(down).kind == reader::Action::Kind::Redraw);
   CHECK(pageText(r.scr->page()) == forward[1]);
+}
+
+
+// --- The styled specimens ------------------------------------------------------
+//
+// design/ReaderChapterOpen.dc.html and design/ReaderList.dc.html. These two exist
+// because the reader can now do four things to a block that `reader_quiet` shows
+// none of -- a heading, an italic inset blockquote, inline emphasis and a
+// hanging-indent list -- and because the work that added them RESTRUCTURED the
+// shared text path: `drawRun` became an F26 core with the integer form as a wrapper,
+// and PageBuilder's emit loop grew per-kind columns, tracking and blank rows.
+//
+// `reader_quiet` cannot catch a regression in any of that. Its demo has no heading,
+// no quote, no list and no `<em>`, so every one of those code paths is dead in it.
+// These are the goldens that make the refactor defended rather than merely tested.
+
+TEST_CASE("QuietTheme renders the styled reader specimens to golden") {
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  Italic italic;
+
+  auto renderOne = [&](int w, int h, reader::DemoScreenFactory::ReaderStyleDemo which,
+                       const std::string& name) {
+    reader::PageMetrics m;
+    theme.readerMetrics(w, h, ramp.fonts, body.face, m);
+    // THE ITALIC GOES IN THE METRICS, not only in the draw: the WRAP measures
+    // emphasis with it, and the two faces differ in width by 6%-9%. A golden blessed
+    // with it missing here would pin a page measured roman and drawn in two faces.
+    m.italic = &italic.face;
+    reader::DemoScreenFactory factory;
+    factory.setReaderBody(&body.face);
+    factory.setReaderItalic(&italic.face);
+    factory.setReaderMetrics(m);
+    factory.setReaderStyleDemo(which);
+    std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Reader);
+    REQUIRE(scr != nullptr);
+    REQUIRE(scr->fidelity() == reader::Fidelity::Grayscale);
+    static_cast<reader::ReaderScreen*>(scr.get())->completeIndex();
+    reader::Framebuffer lsb(w, h), msb(w, h);
+    scr->render(lsb, ramp.fonts, theme, reader::Plane::Lsb);
+    scr->render(msb, ramp.fonts, theme, reader::Plane::Msb);
+    golden::checkGoldenGray(lsb, msb, name);
+  };
+
+  using Demo = reader::DemoScreenFactory::ReaderStyleDemo;
+  SUBCASE("chapter open, X4") { renderOne(480, 800, Demo::ChapterOpen, "reader_chapter_open"); }
+  SUBCASE("chapter open, X3") {
+    renderOne(528, 792, Demo::ChapterOpen, "reader_chapter_open_x3");
+  }
+  SUBCASE("list, X4") { renderOne(480, 800, Demo::List, "reader_list"); }
+  SUBCASE("list, X3") { renderOne(528, 792, Demo::List, "reader_list_x3"); }
 }
