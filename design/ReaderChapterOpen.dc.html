@@ -1,0 +1,140 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600;1,7..72,400&amp;family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+  </style>
+</helmet>
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: Literata, Georgia, serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; padding: 20px 18px 0 18px;">
+
+
+  <div style="display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 22px; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
+    <div style="font-size: var(--t-meta); letter-spacing: 0.18em; font-weight: 500;">MIDDLEMARCH</div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-left: 16px;">CHAPTER I</div>
+  </div>
+
+  <!-- 12 WHOLE LINES, 652.8px = 12 x 54.4. See Reader.dc.html for why this is a
+       fixed height and not `flex-grow: 1`: the reader lays out whole rows only, and
+       a column that fills all 676px slices its thirteenth line in half.
+
+       EVERY STYLE ON THIS PAGE SITS ON THE SAME 54.4px GRID, and that is the
+       constraint the whole design is built around rather than a happy accident.
+       `PageBuilder` advances an integer `row_` -- `rows_ = columnH / lead` -- so
+       space above or below a block can only be a WHOLE row. A heading with 0.6 of
+       a row beneath it is not something this layout can express, and asking for
+       one would mean the board and the firmware disagreeing about where line two
+       of the next paragraph sits, on every page after it. -->
+  <div style="flex-grow: 1; overflow: hidden;">
+    <div style="height: 652.8px; overflow: hidden; font-size: 32px; line-height: 1.7; text-align: justify;">
+
+    <!-- THE CHAPTER HEADING, and the whole point is that it costs NO NEW FACE.
+         The obvious design is a bigger heading, and it is the expensive one:
+         `ScalableFont::init` PINS the pixel size and re-initing flushes the cache,
+         so a heading at 42px is a second instance with its own arena -- measured at
+         16,006 B for the 96 codepoints eight real books put in headings, against a
+         45,840-byte heap floor with a page on glass.
+
+         Caps, centred, and tracked instead. Every glyph is one the body face is
+         already holding, so the cache does not grow by a byte -- and on a 444px
+         column at 32px, capitals centred in their own row read as a heading
+         without a size change. Hierarchy here is POSITION AND CASE, which are
+         free, rather than SIZE, which is not.
+
+         WEIGHT 400, NOT BOLD, for the same reason and a measured one: across eight
+         real books there are 220 characters of `<strong>` in total, six of the
+         eight have none, so no bold face is built for the reader to draw with.
+
+         ONE STYLE FOR h1-h6, which document.h already says: the level is not
+         modelled because there is one heading style to model it with. A book that
+         nests four levels of heading gets four identical ones -- honest, and
+         better than four sizes invented here. -->
+    <div style="text-align: center; letter-spacing: 0.12em; text-transform: uppercase;">Chapter I</div>
+
+    <!-- ONE BLANK ROW after a heading, and it is a row rather than a margin so the
+         grid survives. `&nbsp;` rather than an empty div, because an empty block
+         with no content has no line box at all and collapses to nothing. -->
+    <div>&nbsp;</div>
+
+    <!-- THE EPIGRAPH IS A BLOCKQUOTE, and Middlemarch is why this board can show
+         one honestly: its chapters really do open on a verse epigraph, so this is
+         the page a real book produces rather than a specimen invented to exercise
+         a style. (Beaumont and Fletcher, The Maid's Tragedy, 1619.)
+
+         INDENTED BOTH SIDES BY 1.5em -- 48px at 32px, the same measure the
+         paragraph indent uses, because a quote that shares its indent with the
+         prose around it reads as related to it. 444 - 96 = 348px of column.
+
+         STILL JUSTIFIED: `justifiable()` in layout.cpp already lists Blockquote
+         beside Paragraph, and that was the right call -- a quote is prose, and
+         setting it ragged would make it look like the feature had failed rather
+         than like a deliberate choice.
+
+         NO FIRST-LINE INDENT. The indent's job is to mark a paragraph boundary
+         inside running prose; a block that is already inset on both sides has
+         announced its boundary with its own edges. -->
+    <div style="margin: 0 48px;">Since I can do no good because a woman.</div>
+
+    <div>&nbsp;</div>
+
+    <!-- THE FIRST PARAGRAPH AFTER A BREAK IS FLUSH, which Reader.dc.html states at
+         length: an indent says "this continues what you were reading", and a
+         paragraph under a heading has nothing above it to continue.
+
+         AND THE ITALIC IS REAL NOW. This board has always asked Google Fonts for
+         `Literata:ital,...;1,7..72,400` and the firmware could not produce it --
+         `Literata.ttf` carries `opsz` and `wght` and no `ital` or `slnt` axis
+         (macStyle 0x00, italicAngle 0), so no instancing of it slants a glyph, and
+         Literata's italic is a TRUE italic at -2 degrees with its own letterforms,
+         so an oblique transform was never a substitute either.
+         `assets/fonts/LiterataItalic.ttf` is vendored beside the roman now, prepped
+         to 164,360 bytes, same axes and the same unitsPerEm of 1000 -- which is
+         what lets ONE line hold both faces without the measuring pass and the
+         drawing pass disagreeing about where a run ends.
+
+         IT IS WORTH ITS CACHE, and that was measured before it was built: eight
+         real books carry 160 to 997 `<em>` runs each, 0.6% to 5.8% of their
+         characters, over 103 distinct codepoints -> 9,969 B to never evict once.
+         Le Fléau carries ZERO, across 14,464 paragraphs, which is worth knowing
+         before testing this on it. -->
+    <p style="margin: 0;">Miss Brooke had that kind of beauty which seems to be thrown into relief by <em>poor dress</em>. Her hand and wrist were so finely formed that she could wear sleeves not less bare of style than those in which the Blessed Virgin appeared to Italian painters.</p>
+
+    <p style="margin: 0; text-indent: 1.5em;">Her sister Celia wore a necklace, and the two of them had that air of being dressed alike which is never quite an accident.</p>
+
+  </div>
+
+  </div>
+
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0 16px 0; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
+    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; font-weight: 700;">1%</div>
+    <div style="width: 210px; height: 5px; border: 1px solid #000000; box-sizing: border-box;">
+      <div style="width: 1%; height: 100%; background: #000000;"></div>
+    </div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">1 / 14</div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+</script>
+</body>
+</html>

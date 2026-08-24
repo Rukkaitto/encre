@@ -476,6 +476,24 @@
       "w": 480,
       "h": 800,
       "page": "page-4"
+    },
+    {
+      "file": "ReaderChapterOpen.dc.html",
+      "title": "Reader · Chapter Open",
+      "x": 0,
+      "y": 1800,
+      "w": 480,
+      "h": 800,
+      "page": "page-2"
+    },
+    {
+      "file": "ReaderList.dc.html",
+      "title": "Reader · List",
+      "x": 580,
+      "y": 1800,
+      "w": 480,
+      "h": 800,
+      "page": "page-2"
     }
   ],
   "annotations": [

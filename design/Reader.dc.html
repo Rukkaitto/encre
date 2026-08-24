@@ -45,7 +45,29 @@
     <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-left: 16px;">LIVRE I</div>
   </div>
 
-  <div style="flex-grow: 1; overflow: hidden; font-size: 32px; line-height: 1.7; text-align: justify;">
+  <!-- THE COLUMN IS 676px AND SEATS 12 WHOLE LINES, WHICH IS 652.8 OF THEM.
+       Both numbers belong on this board, and using only one of them is how it went
+       wrong twice.
+
+       676px is the firmware's column -- `panelH - padTop - headerH - footerH`, and
+       `reader_sim` reports it as `column 444x676`. That is the BOX, so the footer is
+       placed off it and has to keep its position: this board measured 3.06% against
+       the firmware with the footer where 676 puts it, and clipping the box instead
+       of its contents moved the footer up 23px.
+
+       652.8px is what can hold TEXT: `rows_ = columnH / lead`, and the row is
+       `leadEm1000 = 1700` on a 32px face, so 676 / 54.4 = 12.42 and the reader draws
+       twelve. This board used to let its prose fill all 676px, and its THIRTEENTH
+       line began at y=738 and came out sliced in half lengthwise by the panel edge
+       -- rendering what PageBuilder cannot, overstating how much text a page holds,
+       and reported as `firmware ok` throughout, because "ok" means a frame was
+       produced and nothing more.
+
+       So the outer box is the column and holds the footer down; the inner box is the
+       twelve rows. The ~23px between them is not slack to tidy away, it is column
+       the firmware genuinely cannot seat a line in. -->
+  <div style="flex-grow: 1; overflow: hidden;">
+    <div style="height: 652.8px; overflow: hidden; font-size: 32px; line-height: 1.7; text-align: justify;">
     <!-- NO DROP CAP. This opened with a 102px floated `M`, and it is dropped from
          V1 rather than deferred -- the mechanism note is kept because it is the
          interesting part and whoever brings it back will need it:
@@ -86,6 +108,8 @@
          with nothing above it has nothing to distinguish itself from. -->
     <p style="margin: 0;">Miss Brooke had that kind of beauty which seems to be thrown into relief by poor dress. Her hand and wrist were so finely formed that she could wear sleeves not less bare of style than those in which the Blessed Virgin appeared to Italian painters.</p>
     <p style="margin: 0; text-indent: 1.5em;">Her sister Celia wore a necklace, and the two of them had that air of being dressed alike which is never quite an accident. It was the kind of morning that makes a plain room look deliberate.</p>
+  </div>
+
   </div>
 
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0 16px 0; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">

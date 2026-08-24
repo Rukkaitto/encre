@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600;1,7..72,400&amp;family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+  </style>
+</helmet>
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: Literata, Georgia, serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; padding: 20px 18px 0 18px;">
+
+
+  <div style="display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 22px; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
+    <div style="font-size: var(--t-meta); letter-spacing: 0.18em; font-weight: 500;">THE CRAFT OF TYPE</div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-left: 16px;">THE PAGE</div>
+  </div>
+
+  <!-- WHY A SECOND STYLED BOARD RATHER THAN ONE SPECIMEN. A page holding a heading,
+       an epigraph, a list and an italic at once is not a page any book produces, and
+       every other board here is a real screen. Lists live in non-fiction and
+       epigraphs live in novels, so they get one board each -- and the measurement
+       says both are real: across eight books, list items run 244, 461, 541 and 749
+       per book in the four that have them, while blockquotes appear in only two
+       (6 and 16). Lists are the commoner style of the two by an order of magnitude.
+
+       676px outer / 652.8px inner, for the reason Reader.dc.html states at length. -->
+  <div style="flex-grow: 1; overflow: hidden;">
+    <div style="height: 652.8px; overflow: hidden; font-size: 32px; line-height: 1.7; text-align: justify;">
+
+    <p style="margin: 0;">A page is not a container that text is poured into. It is a grid of line boxes.</p>
+
+    <div>&nbsp;</div>
+
+    <!-- THE MARKER IS AN EN DASH, AND THAT IS A SUBSET DECISION RATHER THAN A
+         TYPOGRAPHIC ONE. U+2022 BULLET is not in `fontc.py`'s CODEPOINTS -- the
+         subset is ASCII, Latin-1, six quote marks, two dashes and U+FFFD -- so a
+         real bullet means adding a codepoint to the shared subset, which regrows
+         every one of the twelve pre-rendered chrome `.rfnt` assets and the
+         `font_*.h` headers built from them, and re-blesses every golden that draws
+         text. For one glyph.
+
+         U+2013 is already there and already used: it is the dash the boards set
+         between a book's title and its author. So the list marker costs nothing,
+         and a dash is a conventional list mark in set prose besides.
+
+         HANGING INDENT, which is the whole reason a list item is its own BlockKind
+         rather than a paragraph with a dash typed into it: the marker sits in the
+         column's own left edge and the text runs in a narrower measure beside it,
+         so a wrapped second line aligns under the FIRST WORD and not under the
+         dash. `padding-left: 38px; text-indent: -38px` is the two-property form of
+         that -- 38px is 1.2em at 32px, wide enough for the dash and its space.
+
+         NOT JUSTIFIED, and `justifiable()` in layout.cpp already says so: it lists
+         Paragraph and Blockquote and omits ListItem. A list item is usually a
+         fragment rather than a sentence, and justifying a three-word fragment
+         across 406px opens gaps that read as a fault. -->
+    <div style="padding-left: 38px; text-indent: -38px; text-align: left;">&#8211;&nbsp;&nbsp;A block may begin on any row, but not between two.</div>
+    <div style="padding-left: 38px; text-indent: -38px; text-align: left;">&#8211;&nbsp;&nbsp;Space is measured in rows.</div>
+    <div style="padding-left: 38px; text-indent: -38px; text-align: left;">&#8211;&nbsp;&nbsp;A row holds one line.</div>
+
+    <div>&nbsp;</div>
+
+    <!-- FLUSH, not indented: the paragraph after a list is resuming the argument
+         rather than continuing a sentence, and the list's own left edge has already
+         marked the boundary that an indent would mark again. -->
+    <p style="margin: 0;">The third of those is the one that surprises people, and it is the one the reader cannot bend.</p>
+
+    </div>
+  </div>
+
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0 16px 0; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
+    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; font-weight: 700;">44%</div>
+    <div style="width: 210px; height: 5px; border: 1px solid #000000; box-sizing: border-box;">
+      <div style="width: 44%; height: 100%; background: #000000;"></div>
+    </div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">9 / 21</div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+</script>
+</body>
+</html>
