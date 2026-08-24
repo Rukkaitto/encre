@@ -91,8 +91,27 @@
 
          NO FIRST-LINE INDENT. The indent's job is to mark a paragraph boundary
          inside running prose; a block that is already inset on both sides has
-         announced its boundary with its own edges. -->
-    <div style="margin: 0 48px;">Since I can do no good because a woman.</div>
+         announced its boundary with its own edges.
+
+         AND IT IS SET IN THE ITALIC. This board said roman first, and the roman was
+         wrong twice over: print convention sets a verse epigraph in italic, and
+         `tools/mkepub.py` -- this project's own fixture, written long before the
+         face existed -- says `blockquote { font-style: italic; }` in its stylesheet
+         and puts the sentence "A blockquote, indented and italic" inside one. That
+         sentence described something the device could not do, and reading it on
+         glass is what found this.
+
+         THE FIRMWARE READS NO CSS, so the fixture's stylesheet is not what makes
+         this happen: `<style>` is suppressed as non-content and a linked sheet is
+         never fetched. The italic is a property of the BlockKind, decided here.
+         Which also means a blockquote is italic even where a book's own CSS says
+         otherwise -- a default, chosen because there is no author intent available
+         to honour, not an override of one.
+
+         `<em>` INSIDE A BLOCKQUOTE DOES NOT INVERT. Fine typography sets it back to
+         roman to keep the contrast; that is a refinement, and the honest simple rule
+         is that an emphasised phrase inside an italic block is already italic. -->
+    <div style="margin: 0 48px; font-style: italic;">Since I can do no good because a woman.</div>
 
     <div>&nbsp;</div>
 

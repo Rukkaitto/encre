@@ -61,16 +61,57 @@ int stretchFor(const GlyphSource& font, std::string_view line, int availW, Track
   return pxToF26(availW - naturalW) / gaps;
 }
 
+// HOW MANY BLANK ROWS GO ABOVE THIS BLOCK.
+//
+// Rows, not pixels, and that is the constraint the whole design is built on rather
+// than a simplification: `rows_ = columnH / lead` and this advances an integer
+// `row_`, so space between blocks can only be a WHOLE line box. A heading with 0.6
+// of a row beneath it is not expressible, and asking for one would put the board and
+// the firmware in disagreement about where every line after it sits.
+//
+// The rule reproduces both styled boards exactly, which is how it was chosen rather
+// than invented: ReaderChapterOpen is heading + blank + quote(2) + blank + prose(7)
+// = 12 rows, and ReaderList is prose(3) + blank + list(4) + blank + prose(3) = 12.
+int blankRowsBefore(BlockKind prev, BlockKind here, bool isFirst) {
+  // Nothing above it to be separated from, and a page that opened with a blank row
+  // would look like a rendering fault.
+  if (isFirst) return 0;
+  if (here == BlockKind::Heading || prev == BlockKind::Heading) return 1;
+  if (here == BlockKind::Blockquote || prev == BlockKind::Blockquote) return 1;
+  // ENTERING OR LEAVING a list, never BETWEEN its items: a blank row between every
+  // item makes a three-item list read as three paragraphs.
+  if ((here == BlockKind::ListItem) != (prev == BlockKind::ListItem)) return 1;
+  return 0;
+}
+
 }  // namespace
 
 PageBuilder::PageBuilder(const GlyphSource& font, const PageMetrics& m)
     : font_(&font), m_(m) {
   leadF26_ = Tracking::em(font.ppem(), m.leadEm1000).f26();
   indentF26_ = Tracking::em(font.ppem(), m.indentEm1000).f26();
+  quoteInsetPx_ = f26ToPx(Tracking::em(font.ppem(), kQuoteInsetEm).f26());
+  listHangPx_ = f26ToPx(Tracking::em(font.ppem(), kListHangEm).f26());
   // A column that cannot hold one line box yields no pages at all, rather than
   // dividing by zero -- layout.h says a caller must not loop on that.
   rows_ = (leadF26_ > 0 && m.columnW > 0) ? pxToF26(m.columnH) / leadF26_ : 0;
   beginPage();
+}
+
+// A BLOCK'S OWN COLUMN. Everything else on the page uses the page's.
+int PageBuilder::columnLeftFor(BlockKind k) const {
+  if (k == BlockKind::Blockquote) return m_.columnLeft + quoteInsetPx_;
+  // EVERY LINE of a list item, including the first: the text runs in the narrower
+  // measure and only the MARKER sits out at the margin. That is what a hanging indent
+  // is, and it is why the first line is not a special case here.
+  if (k == BlockKind::ListItem) return m_.columnLeft + listHangPx_;
+  return m_.columnLeft;
+}
+
+int PageBuilder::columnWFor(BlockKind k) const {
+  if (k == BlockKind::Blockquote) return m_.columnW - 2 * quoteInsetPx_;
+  if (k == BlockKind::ListItem) return m_.columnW - listHangPx_;
+  return m_.columnW;
 }
 
 void PageBuilder::beginPage() {
@@ -112,10 +153,33 @@ void PageBuilder::add(const Block& b, int index) {
   // CSS's `overflow-wrap: break-word`, not a licence to break ordinary words.
   // THE SPANS ARE COPIED WITH THE TEXT, for the reason the text is copied: the wrap
   // measures against them and the caller may drop its block the moment this returns.
+  // A HEADING IS SET IN CAPS, and it is transformed HERE rather than at draw time
+  // because the wrap has to measure what will be drawn -- "Chapter I" and "CHAPTER
+  // I" are not the same width, and measuring one to draw the other overflows the
+  // column by the difference.
+  if (b.kind == BlockKind::Heading) held_ = upperLatin1(held_);
+  blockTracking_ = b.kind == BlockKind::Heading
+                       ? Tracking::em(font_->ppem(), kHeadingTrackEm)
+                       : m_.tracking;
+  // The air above this block, in whole rows. Charged before its first line is laid.
+  pendingBlankRows_ = blankRowsBefore(prevKind_, b.kind, index == 0);
   emphasis_ = b.emphasis;
+  // A BLOCKQUOTE IS ITALIC AS A BLOCK, and it says so by being wholly emphasised
+  // rather than by a second mechanism. That is the point: the wrap then MEASURES it
+  // in the italic and the draw uses the same spans, so the two passes cannot
+  // disagree -- where a "draw this kind italic" branch in the theme would be
+  // measured roman and drawn italic, which is the 6%-to-9% error StyledFace exists
+  // to remove.
+  //
+  // IT REPLACES the block's own spans rather than merging with them: `<em>` inside a
+  // blockquote does not invert to roman. Fine typography does invert it; that is a
+  // refinement, and the honest simple rule is that an emphasised phrase inside an
+  // italic block is already italic.
+  if (b.kind == BlockKind::Blockquote && !held_.empty())
+    emphasis_ = {Span{0, static_cast<uint32_t>(held_.size())}};
   const StyledFace face{font_, m_.italic, &emphasis_};
-  prose_ = wrapProseStyled(face, held_, m_.columnW, leadF26_, m_.tracking, WordBreak::Anywhere,
-                           myIndentF26);
+  prose_ = wrapProseStyled(face, held_, columnWFor(b.kind), leadF26_, blockTracking_,
+                           WordBreak::Anywhere, myIndentF26);
   prevKind_ = b.kind;
   if (!skipping_ && row_ == 0) pageStart_ = Cursor{blockIndex_, 0};
   drain();
@@ -126,6 +190,13 @@ void PageBuilder::drain() {
   const int count = prose_.lineCount();
   const int myIndentF26 = indentThis_ ? indentF26_ : 0;
 
+  // THE BLANK ROWS ARE CHARGED BEFORE THE FIRST LINE, and while `skipping_` too --
+  // a counting pass that skipped them would put a page boundary in a different place
+  // from the drawing pass, which is the one thing pagination may never do.
+  while (pendingBlankRows_ > 0 && row_ < rows_ && line_ < count) {
+    --pendingBlankRows_;
+    ++row_;
+  }
   while (line_ < count && row_ < rows_) {
     // Everything before the requested start is measured and thrown away -- the
     // lines still have to be produced, because a page boundary depends on how many
@@ -157,7 +228,21 @@ void PageBuilder::drain() {
     ln.kind = kind_;
     ln.block = blockIndex_;
     ln.lastOfBlock = (line_ == count - 1);
-    ln.x = m_.columnLeft + f26ToPx(xIndentF26);
+    ln.firstOfBlock = (line_ == 0);
+    // The marker goes out at the column's own edge, beside the first line only.
+    if (kind_ == BlockKind::ListItem && ln.firstOfBlock) ln.markerX = m_.columnLeft;
+    ln.tracking = blockTracking_;
+    // A HEADING IS CENTRED ON ITS OWN MEASURED WIDTH, which is what `text-align:
+    // center` does -- not on the column's centre with a half-width offset, and not on
+    // the widest line's width. Measured with the SAME face and tracking the wrap
+    // used, or a heading would centre off a width it was not laid out at.
+    if (kind_ == BlockKind::Heading) {
+      const StyledFace hface{font_, m_.italic, &emphasis_};
+      const int w = hface.measure(text, 0, text.size(), blockTracking_);
+      ln.x = columnLeftFor(kind_) + (columnWFor(kind_) - w) / 2;
+    } else {
+      ln.x = columnLeftFor(kind_) + f26ToPx(xIndentF26);
+    }
     // One line box per row, its top accumulated in 1/64 px so the twentieth line
     // does not sit a pixel high off twenty roundings, and the baseline centred in
     // it by the same rule every other box on every screen uses.
@@ -165,9 +250,13 @@ void PageBuilder::drain() {
     // THE LAST LINE OF A PARAGRAPH IS RAGGED. It is short by however much the
     // paragraph happened to end short, and stretching it to the margin is the
     // single most recognisable way justified text can be wrong.
+    // JUSTIFIED TO THE BLOCK'S OWN COLUMN, not the page's. A blockquote inset 48px
+    // each side that stretched its lines to `m_.columnW` would push them 96px past
+    // its own right edge -- and it would look like justification is broken rather
+    // than like the inset is.
     if (!ln.lastOfBlock && justifiable(kind_))
-      ln.extraPerGapF26 =
-          stretchFor(*font_, text, m_.columnW - f26ToPx(xIndentF26), m_.tracking);
+      ln.extraPerGapF26 = stretchFor(*font_, text, columnWFor(kind_) - f26ToPx(xIndentF26),
+                                     blockTracking_);
     ln.text.assign(text);
     // THE LINE'S SPANS, RE-BASED ONTO ITS OWN TEXT.
     //

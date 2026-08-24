@@ -37,6 +37,34 @@ class GlyphSource;
 inline constexpr int kBodyPpem = 32;         // `font-size: 32px`
 inline constexpr int kBodyLeadEm = 1700;     // `line-height: 1.7`
 inline constexpr int kBodyIndentEm = 1500;   // `text-indent: 1.5em` on a continuing paragraph
+// A blockquote's inset, BOTH SIDES -- design/ReaderChapterOpen.dc.html's
+// `margin: 0 48px`, which is 1.5em at the board's 32px face. The same measure as the
+// paragraph indent, deliberately: a quote that shares its indent with the prose
+// around it reads as related to it.
+inline constexpr int kQuoteInsetEm = 1500;
+// A HEADING'S TRACKING, and its whole claim to being a heading. It is set at the
+// body's own size in the body's own weight -- design/ReaderChapterOpen.dc.html says
+// why at length: `ScalableFont::init` pins the pixel size, so a larger heading is a
+// second face with its own arena (16,006 B for the 96 codepoints eight real books
+// put in headings, against a 45,840-byte heap floor). Caps, centred and tracked
+// uses glyphs the body face is already holding, so the cache does not grow by a
+// byte.
+inline constexpr int kHeadingTrackEm = 120;  // `letter-spacing: 0.12em`
+// A list item's HANGING indent -- design/ReaderList.dc.html's `padding-left: 38px;
+// text-indent: -38px`, which is 1.2em at 32px, wide enough for the marker and its
+// space. The marker sits in the column's own left edge and the text runs in a
+// narrower measure beside it, so a wrapped second line aligns under the first WORD
+// and not under the marker. That alignment is the whole reason a list item is its own
+// BlockKind rather than a paragraph with a dash typed into it.
+inline constexpr int kListHangEm = 1200;
+// AND THE MARKER IS AN EN DASH, WHICH IS A SUBSET DECISION. U+2022 BULLET is not in
+// tools/fontc.py's CODEPOINTS -- ASCII, Latin-1, six quote marks, two dashes and
+// U+FFFD -- so a real bullet means adding a codepoint to the SHARED subset, which
+// regrows all twelve pre-rendered chrome `.rfnt` assets and the headers built from
+// them, and re-blesses every golden that draws text. For one glyph. U+2013 is
+// already there, already used between a book's title and its author, and a dash is
+// a conventional list mark in set prose besides.
+inline constexpr const char* kListMarker = "\u2013";
 
 // How full a line must be, as a percentage of its column, before it is justified
 // at all. Below this it is set ragged.
@@ -126,6 +154,11 @@ struct LaidLine {
   // and every line too empty to justify (see kMinJustifyFillPercent).
   int extraPerGapF26 = 0;
   BlockKind kind = BlockKind::Paragraph;
+  // The line's own tracking. Zero for body text; a heading is letter-spaced, and it
+  // has to travel WITH the line because the wrap measured with it -- a draw that
+  // reached for `m_.tracking` would space a heading it had measured unspaced, and
+  // the line would run past the column by exactly the tracking.
+  Tracking tracking{};
   // Which bytes of THIS LINE's `text` are emphasised -- re-based, not shared with
   // the block. Empty for almost every line ever laid, which is the case emphasis.h
   // is built around.
@@ -146,6 +179,13 @@ struct LaidLine {
   // a page index keys on: a Cursor is a block and a line within it.
   int block = 0;
   bool lastOfBlock = false;
+  // Its block's FIRST line, which is the one a list marker goes beside.
+  bool firstOfBlock = false;
+  // Where a list marker is drawn, or -1 for no marker. Carried as a POSITION rather
+  // than as a flag the theme resolves, so the hanging indent lives in exactly one
+  // place: a theme that computed `ln.x - hang` would be a second copy of the measure
+  // the wrap was done at, free to disagree with it.
+  int markerX = -1;
 };
 
 struct Page {
@@ -237,6 +277,8 @@ class PageBuilder {
   void startAt(Cursor at);
 
  private:
+  int columnLeftFor(BlockKind k) const;
+  int columnWFor(BlockKind k) const;
   void beginPage();
   void drain();
 
@@ -251,6 +293,11 @@ class PageBuilder {
   Prose prose_{};
   // The held block's emphasis, copied beside `held_` and for the same reason.
   std::vector<Span> emphasis_;
+  int quoteInsetPx_ = 0;
+  // The held block's own tracking, and the rows of air owed above it.
+  Tracking blockTracking_{};
+  int listHangPx_ = 0;
+  int pendingBlankRows_ = 0;
   BlockKind kind_ = BlockKind::Paragraph;
   BlockKind prevKind_ = BlockKind::Heading;  // a break precedes the first block
   int blockIndex_ = 0;

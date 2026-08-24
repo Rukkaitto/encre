@@ -320,12 +320,83 @@ TEST_CASE("A CONTINUING PARAGRAPH IS INDENTED AND THE FIRST IS NOT") {
 }
 
 TEST_CASE("a paragraph after a heading is flush, because the heading is the break") {
+  // THE PARAGRAPH's lines, not every line on the page. This used to assert `x == 18`
+  // across the whole page, which was true while a heading was set flush left like
+  // everything else -- and headings are CENTRED now, so the assertion had to become
+  // specific about which lines it was ever really about. The heading's own position
+  // gets its own case below rather than being folded into this one.
   Body b;
   Document d;
   d.blocks.push_back({BlockKind::Heading, "One: The Rope Ferry"});
   d.blocks.push_back({BlockKind::Paragraph, longPara("The ferry was a rope.", 3)});
   const Page p = reader::layoutPage(d, b.face, boardMetrics(2400), Cursor{});
-  for (const LaidLine& ln : p.lines) CHECK(ln.x == 18);
+  int paragraphLines = 0;
+  for (const LaidLine& ln : p.lines) {
+    if (ln.kind != BlockKind::Paragraph) continue;
+    ++paragraphLines;
+    CHECK(ln.x == 18);
+  }
+  CHECK(paragraphLines > 1);  // it really did lay the paragraph
+}
+
+TEST_CASE("a heading is CAPS, centred and tracked, and costs no second face") {
+  // Its whole claim to being a heading, at the body's own size in the body's own
+  // weight -- because ScalableFont::init pins the size, so a larger heading is a
+  // second instance with its own arena.
+  Body b;
+  Document d;
+  d.blocks.push_back({BlockKind::Heading, "Chapter One"});
+  d.blocks.push_back({BlockKind::Paragraph, longPara("The ferry was a rope.", 3)});
+  const Page p = reader::layoutPage(d, b.face, boardMetrics(2400), Cursor{});
+  REQUIRE_FALSE(p.lines.empty());
+  const LaidLine& h = p.lines[0];
+  REQUIRE(h.kind == BlockKind::Heading);
+  CHECK(h.text == "CHAPTER ONE");
+  // Tracked, and the tracking TRAVELS WITH THE LINE: a draw that reached for the
+  // page's tracking would space a heading it had measured unspaced, and the line
+  // would run past the column by exactly the tracking.
+  CHECK(h.tracking.f26() > 0);
+  // Centred on its own measured width, measured with the same tracking.
+  const int w = b.face.measure(h.text, h.tracking);
+  CHECK(h.x == 18 + (444 - w) / 2);
+  CHECK(h.x > 18);  // it really moved off the margin
+}
+
+TEST_CASE("a blank row separates a heading from what follows, and it is a WHOLE row") {
+  // Rows, not pixels: `rows_ = columnH / lead` and the builder advances an integer
+  // row, so space between blocks can only be a whole line box.
+  Body b;
+  Document d;
+  d.blocks.push_back({BlockKind::Heading, "Chapter One"});
+  d.blocks.push_back({BlockKind::Paragraph, longPara("The ferry was a rope.", 3)});
+  const Page p = reader::layoutPage(d, b.face, boardMetrics(2400), Cursor{});
+  REQUIRE(p.lines.size() >= 2);
+  const int leadF26 = reader::Tracking::em(b.face.ppem(), reader::kBodyLeadEm).f26();
+  const int gap = p.lines[1].baselineY - p.lines[0].baselineY;
+  // TWO rows apart, not one: the heading's own row, then the blank one. Computed off
+  // the FRACTIONAL lead and rounded once -- `2 * f26ToPx(lead)` rounds twice and is
+  // a pixel out at 54.4, which is exactly the accumulation the F26 pen exists to
+  // avoid.
+  CHECK(gap == reader::f26ToPx(2 * leadF26));
+  // AND THE SAME PAGE WITH NO HEADING PUTS ITS LINES ONE ROW APART -- which is what
+  // makes the assertion above about the blank row rather than about the lead.
+  //
+  // Asserted over N rows and not between two, because THE LEAD IS FRACTIONAL: 1.7em
+  // on a 32px face is 54.4px, so consecutive baselines really do alternate 54 and 55
+  // and twelve lines span 653 rather than 648. That accumulation is the whole reason
+  // the row top is carried in 1/64 px, and a test demanding a constant 54 would be
+  // demanding the bug.
+  Document plain;
+  plain.blocks.push_back({BlockKind::Paragraph, longPara("The ferry was a rope.", 6)});
+  const Page q = reader::layoutPage(plain, b.face, boardMetrics(2400), Cursor{});
+  REQUIRE(q.lines.size() >= 4);
+  const int n = static_cast<int>(q.lines.size()) - 1;
+  CHECK(q.lines.back().baselineY - q.lines[0].baselineY == reader::f26ToPx(n * leadF26));
+  // No gap anywhere is two rows: nothing here is separated by a blank.
+  for (size_t i = 1; i < q.lines.size(); ++i) {
+    const int g = q.lines[i].baselineY - q.lines[i - 1].baselineY;
+    CHECK(g < reader::f26ToPx(2 * leadF26));
+  }
 }
 
 TEST_CASE("an indented line is wrapped to the narrower column it is drawn in") {
@@ -737,4 +808,110 @@ TEST_CASE("the spans survive a page turn, because the line owns them") {
   // The first page of that block may or may not reach the emphasis; what must hold
   // is that nothing dangles either way.
   CHECK((sawEmphasis || !page.lines.empty()));
+}
+
+TEST_CASE("a list item hangs: the marker is out at the margin, the text is not") {
+  // THE WHOLE REASON ListItem IS ITS OWN KIND rather than a paragraph with a dash
+  // typed into it. A wrapped second line must align under the first WORD, not under
+  // the marker -- which means every line of the item, including the first, runs in
+  // the narrower measure, and only the marker sits at the column edge.
+  Body b;
+  Document d;
+  d.blocks.push_back({BlockKind::ListItem,
+                      "A list item long enough that it has to wrap onto a second line "
+                      "so the hanging indent is actually exercised."});
+  const Page p = reader::layoutPage(d, b.face, boardMetrics(2400), Cursor{});
+  REQUIRE(p.lines.size() >= 2);
+
+  const int hang = reader::f26ToPx(reader::Tracking::em(b.face.ppem(), reader::kListHangEm).f26());
+  CHECK(hang > 0);
+  // EVERY line is indented, first included -- that is what makes it a hanging indent
+  // rather than a first-line one.
+  for (const LaidLine& ln : p.lines) CHECK(ln.x == 18 + hang);
+  // The marker goes beside the FIRST line only, out at the column's own edge.
+  CHECK(p.lines[0].firstOfBlock);
+  CHECK(p.lines[0].markerX == 18);
+  for (size_t i = 1; i < p.lines.size(); ++i) CHECK(p.lines[i].markerX == -1);
+}
+
+TEST_CASE("a list item is not justified, and a blockquote is") {
+  // layout.cpp's `justifiable()` already said so and this pins it: a list item is
+  // usually a fragment, and justifying three words across 406px opens gaps that read
+  // as a fault. A quote is prose, so it is set like prose.
+  Body b;
+  Document d;
+  d.blocks.push_back({BlockKind::ListItem,
+                      "A list item long enough to wrap onto a second line so that a "
+                      "non-final line exists to be justified at all."});
+  d.blocks.push_back({BlockKind::Blockquote,
+                      "A quotation long enough to wrap onto a second line so that a "
+                      "non-final line exists to be justified at all."});
+  const Page p = reader::layoutPage(d, b.face, boardMetrics(2400), Cursor{});
+  bool sawListNonFinal = false, sawQuoteNonFinal = false;
+  for (const LaidLine& ln : p.lines) {
+    if (ln.lastOfBlock) continue;
+    if (ln.kind == BlockKind::ListItem) {
+      sawListNonFinal = true;
+      CHECK(ln.extraPerGapF26 == 0);
+    }
+    if (ln.kind == BlockKind::Blockquote) {
+      sawQuoteNonFinal = true;
+      CHECK(ln.extraPerGapF26 > 0);
+    }
+  }
+  CHECK(sawListNonFinal);
+  CHECK(sawQuoteNonFinal);
+}
+
+TEST_CASE("a blockquote is inset BOTH sides and justified to its own column") {
+  // A quote inset 48px each side that stretched its lines to the page's column would
+  // push them 96px past its own right edge -- and it would look like justification is
+  // broken rather than like the inset is.
+  Body b;
+  Italic ital;
+  PageMetrics m = boardMetrics(2400);
+  m.italic = &ital.face;
+  Document d;
+  d.blocks.push_back({BlockKind::Blockquote,
+                      "A quotation long enough to wrap onto several lines so that its "
+                      "justified measure can be checked against its own column."});
+  const Page p = reader::layoutPage(d, b.face, m, Cursor{});
+  REQUIRE(p.lines.size() >= 2);
+  const int inset =
+      reader::f26ToPx(reader::Tracking::em(b.face.ppem(), reader::kQuoteInsetEm).f26());
+  const int ownW = 444 - 2 * inset;
+  for (const LaidLine& ln : p.lines) {
+    CHECK(ln.x == 18 + inset);
+    // Drawn, and it must land inside the quote's own column -- not the page's.
+    reader::Framebuffer fb(480, 2600);
+    const reader::StyledFace face{&b.face, &ital.face, nullptr};
+    const int w = reader::drawTextStyled(fb, face, ln.x, ln.baselineY, ln.text, ln.emphasis,
+                                         ln.extraPerGapF26, reader::Ink::Black, ln.tracking,
+                                         reader::Plane::Bw);
+    CHECK(w <= ownW);
+  }
+}
+
+TEST_CASE("a blockquote is set wholly in the italic, and says so as emphasis") {
+  // It says so by being wholly EMPHASISED rather than by a second mechanism, which is
+  // the point: the wrap then measures it in the italic and the draw uses the same
+  // spans, so the two passes cannot disagree. A "draw this kind italic" branch in the
+  // theme would be measured roman and drawn italic -- the 6%-to-9% error.
+  Body b;
+  Italic ital;
+  PageMetrics m = boardMetrics(2400);
+  m.italic = &ital.face;
+  Document d;
+  d.blocks.push_back({BlockKind::Blockquote, "Since I can do no good because a woman."});
+  d.blocks.push_back({BlockKind::Paragraph, "Ordinary prose, set roman."});
+  const Page p = reader::layoutPage(d, b.face, m, Cursor{});
+  REQUIRE(p.lines.size() >= 2);
+  for (const LaidLine& ln : p.lines) {
+    if (ln.kind == BlockKind::Blockquote) {
+      REQUIRE_FALSE(ln.emphasis.empty());
+      // Wholly: every byte of the line.
+      for (size_t i = 0; i < ln.text.size(); ++i) CHECK(reader::emphasisedAt(ln.emphasis, i));
+    }
+    if (ln.kind == BlockKind::Paragraph) CHECK(ln.emphasis.empty());
+  }
 }
