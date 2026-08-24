@@ -112,6 +112,15 @@ class Framebuffer {
   void clear(bool white = true);
   void setPixel(int x, int y, bool white);
   bool getPixel(int x, int y) const;
+  // Clips silently: a negative origin, a rect running off any edge, and a zero
+  // or negative extent all draw only the part that is on the frame, which is
+  // exactly what the per-pixel setPixel loop this used to be did. Overlay
+  // geometry is derived by subtraction from a centred panel, so a negative
+  // origin is a real case rather than a defensive one.
+  //
+  // Writes BYTES into the physical store, so it is rotation-aware in a way the
+  // rest of this class hides -- see framebuffer.cpp, which explains what the
+  // per-pixel form cost and why the two rotations are two loops.
   void fillRect(int x, int y, int w, int h, bool white);
 
  private:
