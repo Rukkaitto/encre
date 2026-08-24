@@ -3344,7 +3344,11 @@ void loop() {
     auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
     if (rd->indexPending()) {
       const uint32_t t = millis();
-      const bool done = rd->completeIndex();
+      // ABANDONED THE MOMENT A BUTTON IS PRESSED. The window above only makes the
+      // count rarer; this is what stops it blocking the loop for the 2-3.6 s the
+      // device measured. A capture-less lambda IS the `bool(*)(void*)` the count
+      // takes -- see ReaderScreen::StopFn for why it is not std::function.
+      const bool done = rd->completeIndex([](void*) { return rawSamplesPending() != 0; }, nullptr);
       mark("index-completed");
       Serial.printf("[index] pages=%d in %lums (deferred: chapter over %uB)\n",
                     rd->pageCount(), (unsigned long)(millis() - t),
