@@ -189,11 +189,20 @@ CONTAINER = b"""<?xml version="1.0"?>
 
 
 def opf(*, uid_ref="bookid", uid_id="bookid", spine=("ch1", "ch2"),
-        manifest=(("ch1", "ch1.xhtml"), ("ch2", "ch2.xhtml"))):
+        manifest=(("ch1", "ch1.xhtml"), ("ch2", "ch2.xhtml")),
+        ncx=None, spine_toc=None):
+    """`ncx` adds a manifest item for a table of contents, by the media type that
+    makes an NCX an NCX. `spine_toc` sets the spine's `toc` attribute, which is the
+    formal route to the same file and is OPTIONAL in real books -- three of the four
+    measured carry it, so both paths need a fixture."""
     items = b"".join(
         b'    <item id="%s" href="%s" media-type="application/xhtml+xml"/>\n'
         % (i.encode(), h.encode()) for i, h in manifest)
+    if ncx is not None:
+        items += (b'    <item id="ncx" href="%s" media-type="application/x-dtbncx+xml"/>\n'
+                  % ncx.encode())
     refs = b"".join(b'    <itemref idref="%s"/>\n' % r.encode() for r in spine)
+    spine_open = b"<spine>" if spine_toc is None else b'<spine toc="%s">' % spine_toc.encode()
     return b"""<?xml version="1.0"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="%s">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
@@ -204,9 +213,9 @@ def opf(*, uid_ref="bookid", uid_id="bookid", spine=("ch1", "ch2"),
   </metadata>
   <manifest>
 %s  </manifest>
-  <spine>
+  %s
 %s  </spine>
-</package>""" % (uid_ref.encode(), uid_id.encode(), items, refs)
+</package>""" % (uid_ref.encode(), uid_id.encode(), items, spine_open, refs)
 
 
 CH1 = (b"<?xml version='1.0'?><html><body><h1>One</h1>"
@@ -214,6 +223,34 @@ CH1 = (b"<?xml version='1.0'?><html><body><h1>One</h1>"
        b"relief by poor dress. Her hand and wrist were so finely formed &#8212; "
        b"caf&#233;.</p></body></html>")
 CH2 = b"<?xml version='1.0'?><html><body><h1>Two</h1><p>Weights and measures.</p></body></html>"
+
+
+def ncx(points=((("Miss Brooke",), "ch1.xhtml"), (("Weights",), "ch2.xhtml")),
+        nested=False):
+    """An EPUB 2 toc.ncx. `points` is (labels, href) -- several labels on one href is
+    what a book does when one file holds several sections, and it is why the reader
+    keeps distinct labels for one spine entry and drops exact repeats.
+
+    An accented label is in here on purpose: NCX labels are UTF-8 and the theme shouts
+    them, so a caps mapping that only handled ASCII would show up as `MISS BROOKé`."""
+    body = b""
+    for labels, href in points:
+        for label in labels:
+            point = (b'<navPoint><navLabel><text>%s</text></navLabel>'
+                     b'<content src="%s"/>' % (label.encode(), href.encode()))
+            # A nested point sits INSIDE its parent, which the reader flattens: no
+            # measured book nests, so this exists to prove the flattening rather than
+            # to describe a book anyone has.
+            if nested:
+                point += (b'<navPoint><navLabel><text>%s (inner)</text></navLabel>'
+                          b'<content src="%s"/></navPoint>' % (label.encode(), href.encode()))
+            body += point + b'</navPoint>'
+    return b"""<?xml version="1.0"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head><meta name="dtb:uid" content="urn:uuid:0000-1111"/></head>
+  <docTitle><text>Middlemarch</text></docTitle>
+  <navMap>%s</navMap>
+</ncx>""" % body
 
 
 def epub(*, container_path=b"OEBPS/content.opf", opf_bytes=None, files=None,
@@ -252,6 +289,43 @@ def epub_fixtures():
     f["kEpubSpineRefMissing"] = (
         "an itemref whose idref is in no manifest item",
         epub(opf_bytes=opf(spine=("ch1", "ghost"))))
+    # --- Tables of contents ------------------------------------------------
+    #
+    # Measured over four real books before any of this was written: every one carries
+    # an EPUB 2 `toc.ncx` and NOT ONE has an EPUB 3 nav document, and none nests. So
+    # the NCX is what has fixtures, and the nested one is a proof of flattening rather
+    # than a shape anyone ships.
+    f["kEpubToc"] = (
+        "an NCX reached by the spine's `toc` attribute",
+        epub(opf_bytes=opf(ncx="toc.ncx", spine_toc="ncx"),
+             files=[("OEBPS/ch1.xhtml", CH1), ("OEBPS/ch2.xhtml", CH2),
+                    ("OEBPS/toc.ncx", ncx())]))
+    f["kEpubTocNoSpineAttr"] = (
+        "an NCX found only by its media type -- the spine has no `toc`",
+        epub(opf_bytes=opf(ncx="toc.ncx"),
+             files=[("OEBPS/ch1.xhtml", CH1), ("OEBPS/ch2.xhtml", CH2),
+                    ("OEBPS/toc.ncx", ncx())]))
+    f["kEpubTocRepeats"] = (
+        "an NCX naming one file twice identically and another twice with two labels",
+        epub(opf_bytes=opf(ncx="toc.ncx", spine_toc="ncx"),
+             files=[("OEBPS/ch1.xhtml", CH1), ("OEBPS/ch2.xhtml", CH2),
+                    ("OEBPS/toc.ncx",
+                     ncx(points=((("Pour Tabby", "Pour Tabby"), "ch1.xhtml"),
+                                 (("PREMI\u00c8RE PARTIE", "DEUXI\u00c8ME PARTIE"),
+                                  "ch2.xhtml"))))]))
+    f["kEpubTocNested"] = (
+        "an NCX with nested navPoints, which the reader flattens",
+        epub(opf_bytes=opf(ncx="toc.ncx", spine_toc="ncx"),
+             files=[("OEBPS/ch1.xhtml", CH1), ("OEBPS/ch2.xhtml", CH2),
+                    ("OEBPS/toc.ncx", ncx(nested=True))]))
+    f["kEpubTocOffSpine"] = (
+        "an NCX naming a file the spine does not read, plus a fragment target",
+        epub(opf_bytes=opf(ncx="toc.ncx", spine_toc="ncx"),
+             files=[("OEBPS/ch1.xhtml", CH1), ("OEBPS/ch2.xhtml", CH2),
+                    ("OEBPS/notes.xhtml", CH2),
+                    ("OEBPS/toc.ncx",
+                     ncx(points=((("Notes",), "notes.xhtml"),
+                                 (("Two, part two",), "ch2.xhtml#part2"))))]))
     f["kEpubHrefMissing"] = (
         "a manifest item whose href is not in the archive",
         epub(opf_bytes=opf(manifest=(("ch1", "ch1.xhtml"), ("ch2", "gone.xhtml")))))

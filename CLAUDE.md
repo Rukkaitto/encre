@@ -1981,6 +1981,75 @@ Desktop, 12-line page, 444px column, ppem 32: paginate 349 µs/page, lay out one
 trusting. The `[open]` serial line reports parse, total, blocks, pages and the heap
 cost of an open for exactly this reason.
 
+## The table of contents
+
+The seventh reader layer (`toc.h`), and the last one that reads the archive rather than
+the text. The spine gives an ORDER and no names, which is why the Reader's footer says
+`CH. 03`, Book details' "Current story" is blank and there is no chapter list to jump
+from.
+
+**IT IS THE NCX, NOT THE EPUB 3 NAV DOCUMENT.** Measured over four real books before
+writing anything: every one carries an EPUB 2 `toc.ncx` and **not one** has a nav
+document. Building the modern form first would have parsed something no book on this
+card contains. The nav document is a later job and a small one — `Epub::tocPath()`
+already answers "which part is the contents" by media type, so it is the only thing
+that would need widening.
+
+**`Epub` NOTES THE NCX DURING THE OPF WALK**, which already resolves every manifest
+href — finding it later would mean re-parsing the OPF, and scanning the archive for
+`*.ncx` would be a guess where the manifest is a statement. Two routes, both needed:
+the spine's `toc` attribute is the formal one and is OPTIONAL (real files omit it), and
+the `application/x-dtbncx+xml` media type is what makes an NCX an NCX. The spine's
+answer wins where both exist.
+
+**A MEASUREMENT WAS WRONG AND IT CHANGED THE DESIGN.** This section first said real
+files are flat, and that `Contents.dc.html`'s two-level grouping "does not exist in
+real files". The check was a regex looking for a `navPoint` inside a `navPoint` that
+allowed only tags between them — real files put text there, so it reported every book
+as flat. Parsed properly:
+
+| book | entries | by depth |
+|---|---|---|
+| Le Fléau | 96 | **`{1: 10, 2: 84, 3: 2}`** |
+| Darkly Dreaming Dexter | 28 | `{1: 28}` |
+| …another edition | 31 | `{1: 31}` |
+
+So one book is three levels deep — ten section headers over eighty-four chapters — and
+the board was right. `TocEntry::depth` carries it. **The list stays LINEAR**, not a
+tree: a tree needs allocation per node and a traversal to draw, where a screen wants
+"the Nth visible row", and a depth is all the board's grouping needs. Every entry is a
+real target either way, because a section header in an NCX carries its own
+`content src`.
+
+**A LOOSE REGEX IS NOT A MEASUREMENT.** This project's habit of measuring before
+designing is what caught the nav-document question; the same habit applied carelessly
+got the nesting question backwards and wrote the wrong claim into a header. Where the
+answer decides a design, parse the thing.
+
+**COMMITTING AN ENTRY HAPPENS AT TWO MOMENTS**, and only handling one lost every
+parent: a `navPoint` is complete when it closes AND when a CHILD opens, because the
+child's start clears the label the parent had already read. A test caught it. State is
+cleared after each commit, so a parent's close adds nothing — verified by deleting the
+duplicate rule and confirming the nested case still passes, since it used to be correct
+only by accident of that rule.
+
+**AN IDENTICAL ROW TWICE IS NOISE; A DIFFERENT NAME FOR ONE TARGET IS CONTENT.** Real
+books produce both, and only the PREVIOUS entry is compared — an NCX is authored in
+reading order (0 out-of-order entries across all four), so a repeat is adjacent and a
+full scan would be quadratic for a case that cannot happen far apart.
+
+**THE LIMITATION WORTH KNOWING:** an NCX target is a file plus an optional fragment
+(`ch3.xhtml#part2`) and the reader positions by spine entry only, so several entries
+pointing into one file all land at that file's start. They are kept rather than
+merged — their labels are real content — but selecting one is approximate. That is why
+Le Fléau has 96 entries for 92 spine entries.
+
+**It re-opens the archive**, deliberately: `OpenedBook` holds twelve bytes a spine entry
+and no hrefs, and matching an NCX target to a spine index needs the real paths on both
+sides. One central-directory parse and one OPF inflate (~32 KB transient) when Contents
+opens, not when a book does. Measured 0.2–0.6 ms on the desktop for 28–96 entries, and
+labels total **1,161 bytes for 96 entries** (mean 12.1), so the resident cost is small.
+
 ## Goldens
 
 `test/golden/*.png` are human-approved, pixel-exact baselines. A golden test

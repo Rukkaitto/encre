@@ -42,6 +42,14 @@ class Epub {
 
   const std::vector<Chapter>& chapters() const { return chapters_; }
 
+  // The table of contents' resolved archive path, or EMPTY when the book has none.
+  //
+  // Empty is not a failure. Measured over four real books, every one carries an EPUB 2
+  // `toc.ncx` and NOT ONE has an EPUB 3 nav document -- so this is the NCX's path in
+  // practice. A book with neither still opens and reads; it just cannot offer a
+  // chapter list, which is a missing feature and not a broken book.
+  const std::string& tocPath() const { return tocPath_; }
+
   const char* reason() const { return reason_; }
 
  private:
@@ -51,6 +59,7 @@ class Epub {
   std::string author_;
   std::string identifier_;
   std::vector<Chapter> chapters_;
+  std::string tocPath_;
   const char* reason_ = "";
 };
 
