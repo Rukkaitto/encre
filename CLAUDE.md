@@ -2347,6 +2347,33 @@ passed — `shell/` has no harness, so nothing on the desktop touches that loop.
   while the commit describing them went through. Both times the assert failed for the
   dullest reason — the anchor text had already been edited by a previous commit, so it no
   longer matched what I remembered.
+- **THE SDK'S ASYNC OVERLAP CANNOT BE DONE ON THIS HARDWARE** (investigated 2026-08-24,
+  not built). `freeink-sdk/docs/deferred-refresh-migration.md` measures "page turn
+  1274 ms -> 822 ms by overlapping the grayscale plane rendering with the BW waveform
+  via the no-shadow split", and it is the largest single number anywhere in the SDK's
+  docs. It does not transfer, for two independent reasons and a third that makes it
+  moot:
+  1. **Busy staging is unsupported by our drivers.** The mechanism needs
+     `supportsBusyGrayscaleStaging()`, whose contract is that the driver "must not touch
+     SPI in either `writeGrayscalePlaneStrip()` or `prepareGrayscaleTarget()`". Only
+     `PaperMonoDriver` returns true. `Uc8279Driver` (our X3) and `Uc8279X4Driver` DO
+     override `supportsStripGrayscale()` and `writeGrayscalePlaneStrip`, so strips work
+     -- they just touch SPI, so they cannot run under a BUSY waveform.
+  2. **The shadow is unaffordable, and this file already proved it.** We build
+     `-DEINK_DISPLAY_SINGLE_BUFFER_MODE=1`, where `displayBufferAsync` allocates a
+     **48 KB shadow** so the caller may redraw immediately. The ToC finding above
+     measured a **48 KB** allocation against the **45,840-byte** floor: "it failed every
+     time". A second frame is 52 KB and worse. `displayBufferAsyncNoShadow` needs the
+     frame intact until the wait, which is the opposite of what overlap needs.
+  3. **The arithmetic is already spent.** The SDK's figure is against a firmware paying
+     the full grayscale sequence per turn. Dithered-first already took that win: our
+     turn is ~570 ms, ~478 of it waveform. A perfect render overlap saves the ~92 ms
+     render pass and no more -- 16% of a turn, against physics for the rest.
+  **WHAT IS AVAILABLE** and needs no RAM: `displayStart`/`displayFinish` deferral, which
+  both our drivers support. The loop blocks ~520 ms per turn doing nothing, and the
+  position save is currently restricted to THREE edges only because "a card write on
+  each one would be felt". Hidden under the waveform it could run every turn -- a
+  durability change rather than a speed one, and the honest version of this task.
 - **EVERY BUILT SCREEN HAS A GOLDEN NOW** (2026-08-24). Seven of the seventeen did not:
   `reader_menu`, `contents`, `reader_chapter_open`, `reader_list`, `settings`,
   `home_empty`, `library_scrolled` -- checked by unit tests and by `make compare` and by
