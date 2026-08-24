@@ -366,3 +366,224 @@ TEST_CASE("a view is not cleared on construction and never frees its storage") {
   CHECK(storage[0] == 0x25);
   CHECK(storage[7] == 0xA5);
 }
+
+// --- fillRect: the byte-wise path against the per-pixel one it replaced -------
+//
+// fillRect used to be a per-pixel loop over setPixel -- a bounds check, a
+// byteIndex division, a bitMask modulo and a read-modify-write per pixel -- and
+// it now writes the rectangle eight columns at a time straight into the physical
+// store. That is PURE OPTIMISATION: every golden in the suite, and every screen
+// test, pins the output it must keep producing.
+//
+// The reference below is that per-pixel loop, kept here for the same reason
+// test_dither.cpp keeps veilRectReference and test_rotate.cpp keeps
+// rotate90CCW_reference: it IS the specification, because it is the code whose
+// output the goldens were blessed against. Any disagreement means the fast path
+// is wrong, never the reference.
+//
+// The comparison is over data() rather than over pixels, because the fast path
+// writes bytes: a mapping that is right per pixel but lays the bytes out
+// differently is still a wrong frame from the panel driver's point of view. And
+// it runs under Rotation::Ccw as well as Rotation::None, because CCW is how the
+// device paints -- a byte-wise path that assumed a logical row is a physical row
+// would pass every desktop test and every golden and smear on glass.
+
+namespace {
+
+void fillRectReference(Framebuffer& fb, int x, int y, int w, int h, bool white) {
+  for (int yy = y; yy < y + h; ++yy)
+    for (int xx = x; xx < x + w; ++xx) fb.setPixel(xx, yy, white);
+}
+
+// A deterministic ground with no byte-level symmetry, so a fast path that is off
+// by a bit, a byte or a row cannot coincidentally match. A plain white or plain
+// black ground would hide a mask that is too WIDE whenever the fill colour
+// happened to match the ground.
+void fillPseudoRandom(Framebuffer& fb, uint32_t seed) {
+  uint32_t s = seed | 1u;
+  for (int y = 0; y < fb.height(); ++y)
+    for (int x = 0; x < fb.width(); ++x) {
+      s ^= s << 13; s ^= s >> 17; s ^= s << 5;  // xorshift32
+      fb.setPixel(x, y, (s & 0x10u) != 0);
+    }
+}
+
+struct FillCase {
+  int fw, fh, x, y, w, h;
+  const char* what;
+};
+
+void checkFillMatchesReference(const FillCase& c, reader::Rotation rot, bool white) {
+  Framebuffer fast(c.fw, c.fh, rot), ref(c.fw, c.fh, rot);
+  const uint32_t seed = static_cast<uint32_t>(c.fw * 7919 + c.fh * 104729 + c.x * 31 + c.w);
+  fillPseudoRandom(fast, seed);
+  fillPseudoRandom(ref, seed);
+  fast.fillRect(c.x, c.y, c.w, c.h, white);
+  fillRectReference(ref, c.x, c.y, c.w, c.h, white);
+
+  REQUIRE(fast.sizeBytes() == ref.sizeBytes());
+  int diffs = 0, first = -1;
+  for (int i = 0; i < ref.sizeBytes(); ++i)
+    if (fast.data()[i] != ref.data()[i]) {
+      if (diffs == 0) first = i;
+      ++diffs;
+    }
+  const char* rn = rot == reader::Rotation::Ccw ? "Ccw" : "None";
+  CHECK_MESSAGE(diffs == 0, c.what << " rot=" << rn << " white=" << white << ": " << diffs
+                                   << " of " << ref.sizeBytes()
+                                   << " bytes differ, first at offset " << first);
+}
+
+}  // namespace
+
+TEST_CASE("the byte-wise fillRect is byte-identical to the per-pixel one") {
+  const FillCase cases[] = {
+      // The two panels, full frame: what a clear-shaped fill asks for.
+      {528, 792, 0, 0, 528, 792, "X3 full frame"},
+      {480, 800, 0, 0, 480, 800, "X4 full frame"},
+      // The shapes an actual paint asks for: the actions panel, a full-bleed
+      // focused row, a header band, and a 1px rule.
+      {528, 792, 94, 212, 340, 368, "the actions panel"},
+      {528, 792, 0, 300, 528, 72, "a full-bleed row"},
+      {528, 792, 0, 0, 528, 96, "the header band"},
+      {528, 792, 24, 100, 480, 1, "a hairline rule"},
+      {528, 792, 24, 100, 1, 480, "a hairline rule, vertical"},
+      // Origins and widths that are not multiples of 8, which is where a
+      // byte-wise path's edge masks are the whole of the correctness. Both panel
+      // widths are multiples of 8, so nothing on the device exercises this --
+      // but overlay geometry is derived by subtraction from a centred panel.
+      {528, 792, 1, 0, 526, 792, "inset by one pixel"},
+      {528, 792, 7, 3, 513, 785, "ragged origin and width"},
+      {528, 792, 3, 0, 5, 792, "a five-pixel column inside one byte"},
+      {528, 792, 6, 0, 4, 10, "a run straddling one byte boundary"},
+      {528, 792, 8, 0, 8, 10, "a run that is exactly one byte"},
+      {528, 792, 0, 0, 8, 10, "a run that is exactly the first byte"},
+      {528, 792, 520, 0, 8, 10, "a run that is exactly the last byte"},
+      {64, 64, 0, 0, 64, 64, "aligned 64x64"},
+      {64, 64, 5, 5, 54, 54, "inset 64x64"},
+      // Every start and end phase within a byte, so no edge mask is missed.
+      {64, 64, 1, 0, 1, 64, "single column at phase 1"},
+      {64, 64, 2, 0, 3, 64, "phase 2, three wide"},
+      {64, 64, 5, 0, 2, 64, "phase 5, two wide"},
+      {64, 64, 7, 0, 9, 64, "phase 7, crossing two boundaries"},
+      // Negative origins: overlay geometry is derived by subtraction from a
+      // centred panel, so a panel wider than the narrow geometry produces one.
+      {36, 36, -4, -4, 8, 8, "negative origin"},
+      {36, 36, -7, -5, 20, 20, "negative origin, odd offsets"},
+      {36, 36, -10, -10, 100, 100, "negative origin, overhanging both ends"},
+      // Off the far edge, so the clip has to shorten the run rather than write
+      // past the row.
+      {36, 36, 30, 30, 20, 20, "overhanging the far edge"},
+      // Degenerate: nothing drawn, nothing walked off.
+      {36, 36, 4, 4, 0, 8, "zero width"},
+      {36, 36, 4, 4, 8, 0, "zero height"},
+      {36, 36, 4, 4, -5, -5, "negative extent"},
+      {36, 36, 100, 100, 8, 8, "wholly off-screen"},
+      {36, 36, -50, -50, 8, 8, "wholly off-screen, negative"},
+      // Frames whose own dimensions are not multiples of 8, in both axes, which
+      // under rotation is where the stride comes from the other one.
+      {13, 21, 0, 0, 13, 21, "ragged frame 13x21"},
+      {21, 13, 0, 0, 21, 13, "ragged frame 21x13"},
+      {13, 21, 2, 3, 9, 15, "ragged frame, ragged rect"},
+      {1, 1, 0, 0, 1, 1, "single pixel"},
+      {1, 800, 0, 0, 1, 800, "single column"},
+      {800, 1, 0, 0, 800, 1, "single row"},
+  };
+  for (const FillCase& c : cases)
+    for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw})
+      for (const bool white : {false, true}) checkFillMatchesReference(c, rot, white);
+}
+
+TEST_CASE("the byte-wise fillRect writes nothing outside the rect it was given") {
+  // The fast path indexes raw bytes, so an off-by-one in an edge mask corrupts a
+  // neighbour rather than failing a pattern check. Fill a rect inset by one pixel
+  // on every side and require the border ring is untouched -- one pixel is inside
+  // the first and last byte of every row, so the masks are doing the work rather
+  // than the byte arithmetic. Both colours, because a mask that is too wide is
+  // invisible when the fill colour matches the ground.
+  for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw})
+    for (const bool white : {false, true}) {
+      Framebuffer fb(64, 48, rot);
+      fb.clear(!white);  // the ground is the OTHER colour, so any leak shows
+      fb.fillRect(1, 1, 62, 46, white);
+      for (int x = 0; x < 64; ++x) {
+        CHECK(fb.getPixel(x, 0) == !white);
+        CHECK(fb.getPixel(x, 47) == !white);
+      }
+      for (int y = 0; y < 48; ++y) {
+        CHECK(fb.getPixel(0, y) == !white);
+        CHECK(fb.getPixel(63, y) == !white);
+      }
+      // ...and it did draw something, so the check above is not passing on a no-op.
+      CHECK(fb.getPixel(1, 1) == white);
+      CHECK(fb.getPixel(62, 46) == white);
+    }
+}
+
+TEST_CASE("a degenerate fillRect draws nothing and does not walk off the buffer") {
+  // The byte path computes b0/b1 from the run, and (pxHi - 1) >> 3 on an empty
+  // run would name a byte before the start of it. Every one of these must return
+  // before that arithmetic happens. ASAN is the real assertion here; the frame
+  // being untouched is the visible one.
+  for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw}) {
+    Framebuffer fb(24, 16, rot);
+    fb.clear(true);
+    fb.fillRect(4, 4, 0, 8, false);
+    fb.fillRect(4, 4, 8, 0, false);
+    fb.fillRect(4, 4, -5, -5, false);
+    fb.fillRect(100, 100, 8, 8, false);
+    fb.fillRect(-100, -100, 8, 8, false);
+    fb.fillRect(-8, 4, 8, 8, false);  // ends exactly at the left edge
+    fb.fillRect(24, 4, 8, 8, false);  // starts exactly at the right edge
+    fb.fillRect(4, -8, 8, 8, false);  // ends exactly at the top edge
+    fb.fillRect(4, 16, 8, 8, false);  // starts exactly at the bottom edge
+    int inked = 0;
+    for (int i = 0; i < fb.sizeBytes(); ++i)
+      if (fb.data()[i] != 0xFF) ++inked;
+    CHECK(inked == 0);
+  }
+  // An inert buffer has no store at all, so every one of these must be a no-op
+  // before data() is dereferenced.
+  Framebuffer empty(0, 0);
+  empty.fillRect(0, 0, 10, 10, false);
+  empty.fillRect(-5, -5, 100, 100, true);
+  CHECK(empty.sizeBytes() == 0);
+}
+
+TEST_CASE("fillRect over the whole frame is exactly what clear writes") {
+  // The two ways to paint a frame have to agree byte for byte, because the paint
+  // path uses one and screens use the other over the same pixels. Under rotation
+  // this also pins that a full-frame fill covers the whole store rather than the
+  // logical rows it names.
+  for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw})
+    for (const bool white : {false, true}) {
+      Framebuffer a(528, 792, rot), b(528, 792, rot);
+      a.clear(white);
+      b.clear(!white);
+      b.fillRect(0, 0, 528, 792, white);
+      REQUIRE(a.sizeBytes() == b.sizeBytes());
+      int diffs = 0;
+      for (int i = 0; i < a.sizeBytes(); ++i)
+        if (a.data()[i] != b.data()[i]) ++diffs;
+      CHECK(diffs == 0);
+    }
+}
+
+TEST_CASE("fillRect draws the same bytes into a viewing frame as into an owning one") {
+  // The fast path writes through data(), which branches on whether the store is
+  // owned or borrowed. A view is what the shell paints into on the device, so it
+  // is the case that matters and the one no golden covers.
+  for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw}) {
+    Framebuffer owned(64, 48, rot);
+    const size_t need = static_cast<size_t>(owned.sizeBytes());
+    std::vector<uint8_t> storage(need, 0xFF);
+    Framebuffer viewed(storage.data(), storage.size(), 64, 48, rot);
+    REQUIRE(viewed.sizeBytes() == owned.sizeBytes());
+    owned.fillRect(3, 5, 37, 29, false);
+    viewed.fillRect(3, 5, 37, 29, false);
+    int diffs = 0;
+    for (int i = 0; i < owned.sizeBytes(); ++i)
+      if (owned.data()[i] != viewed.data()[i]) ++diffs;
+    CHECK(diffs == 0);
+  }
+}
