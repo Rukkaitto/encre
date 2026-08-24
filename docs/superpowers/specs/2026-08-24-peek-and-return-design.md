@@ -266,6 +266,14 @@ decisions are taken and are recorded here so they are not re-argued from scratch
   it is a full cast list with a scroll rail — Library's existing mechanism.
 - **Its `Go to page` opens a peek**, which is why this spec exists first.
 
+**And the heuristic has since been measured** — `tools/name_probe.cpp`, run over three
+real novels. 25 of the top 26 names in `Le Fléau` are real entities; the cast of
+`Neuromancien` and of `Darkly Dreaming Dexter` come out whole, so it is not
+French-specific. The list is good; the *introducing sentence* is a coin flip, and
+better on surnames than forenames, because the introduction happens at the full name
+while the reader is stuck on the forename. The roadmap's 3E entry carries the five
+rules and the open question.
+
 **It does not make page numbers book-wide.** The Reader's footer is still
 chapter-relative and the peek says nothing about it either way.
 

@@ -40,6 +40,15 @@ target_compile_definitions(unit_tests PRIVATE
   BUILD_DIR="${CMAKE_BINARY_DIR}")
 add_test(NAME unit COMMAND unit_tests)
 
+# The NAMES probe (3E): does a capitalisation-and-frequency heuristic yield a list
+# worth reading on a real book? Not a test -- it needs a real novel, and the repo's
+# generated EPUBs are 1,400-word stubs where every threshold reports zero. The
+# findings and the five rules that produced them are in the file's own header.
+add_executable(name_probe ${CMAKE_SOURCE_DIR}/tools/name_probe.cpp)
+target_link_libraries(name_probe PRIVATE reader_core)
+target_compile_options(name_probe PRIVATE ${READER_WARNINGS})
+target_compile_definitions(name_probe PRIVATE READER_DESKTOP=1)
+
 add_executable(reader_sim ${CMAKE_SOURCE_DIR}/sim/main.cpp)
 target_link_libraries(reader_sim PRIVATE reader_core)
 target_compile_options(reader_sim PRIVATE ${READER_WARNINGS})
