@@ -8,6 +8,205 @@
 
 namespace reader {
 
+namespace {
+
+// --- The glyph blit ----------------------------------------------------------
+//
+// WHAT THIS USED TO BE, and why it is worth the arithmetic below: a per-pixel
+// loop calling font.coverage() then fb.setPixel(). Measured on the device, a
+// reader page's render is 99% this -- 213 ms of a 215 ms render, 352 ms of a
+// cold one -- which makes it the single most expensive drawing routine in the
+// firmware, ahead of the veil this file's neighbour (dither.cpp) already
+// rewrote for the same reason and in the same shape.
+//
+// Four costs per emitted pixel, none of which depends on the pixel:
+//
+//   - coverage() recomputed `bitmap + row * stride` per PIXEL, a multiply for a
+//     row pointer that is constant across the row, and branched on the face's
+//     bit depth per pixel;
+//   - the Plane switch re-decided per pixel what the plane decides per SCREEN
+//     (and per row, for the dither's phase);
+//   - setPixel bounds-checked a coordinate the glyph's own box already settles;
+//   - byteIndex()/bitMask() divided and took a modulus per pixel, and then did
+//     a read-modify-write of one bit -- eight of them per byte.
+//
+// So: clip the glyph's box ONCE, hoist the plane decision to a four-entry table
+// per physical row, hoist the row pointer, and accumulate a byte's worth of
+// bits before touching memory. Nothing about the OUTPUT changes;
+// test_text.cpp keeps the per-pixel form as its reference and asserts this
+// produces the identical framebuffer for a spread of glyphs, all four planes,
+// both rotations, both panel geometries and glyphs clipped at each edge.
+//
+// The notdef box is deliberately NOT routed through here. It is four setPixel
+// runs on a face that has no glyph for a codepoint, which is a case a correct
+// screen never hits at all -- and it is drawn from geometry rather than from a
+// bitmap, so it shares none of the machinery below.
+
+// WHICH COVERAGES INK, as a 4-bit set indexed by coverage: bit c set means a
+// pixel of coverage c emits. That is the whole of the Plane switch, decided
+// once instead of per pixel, and it is expressible as a table only because
+// coverage is 0..3 for every face (glyphsource.h makes that structural: a 1bpp
+// face reports 0 or 3, never 1 or 2).
+constexpr uint8_t kEmitBw = 0b1100;   // cov >= 2
+constexpr uint8_t kEmitLsb = 0b1010;  // cov & 1
+constexpr uint8_t kEmitMsb = 0b1100;  // cov & 2 -- the same set as Bw, and not
+                                      // by coincidence: `cov >= 2` and
+                                      // `cov & 2` select {2,3} either way on a
+                                      // 2-bit scale. Spelled separately so the
+                                      // two planes stay two decisions.
+
+// The same set for the dithered plane, where it depends on the pixel's Bayer
+// rank as well as its coverage: `(cov * 16) / 3 > rank`, which is 0, 5, 10, 16
+// for coverage 0..3. So coverage 0 never inks (0 > rank is false for every rank
+// in 0..15) and coverage 3 always does (16 > 15) -- a glyph's interior is never
+// stippled, and its blank surround never speckles -- and only the two edge
+// coverages consult the tile.
+constexpr uint8_t ditherEmitMask(int rank) {
+  return static_cast<uint8_t>((5 > rank ? 0b0010 : 0) | (10 > rank ? 0b0100 : 0) | 0b1000);
+}
+
+// Coverage of one pixel of a glyph ROW, from a pointer to that row.
+//
+// A SECOND COPY OF GlyphSource::coverage's UNPACKING, and a deliberate one --
+// this project's rule is that the second copy is the extraction point, so the
+// reason has to be written down rather than assumed. The interface's coverage()
+// takes (glyph, col, row) and so must recompute `bitmap + row * stride` on every
+// call; hoisting that out of the inner loop is a third of what this rewrite is,
+// and GlyphSource has no accessor that would let it be hoisted. The pin is a
+// test rather than a shared function: test_text.cpp's reference implementation
+// reads its coverage through GlyphSource::coverage and its frames are compared
+// with these byte for byte, so an unpacking that disagreed by one pixel of one
+// glyph fails there rather than drifting in silence.
+//
+// THE DEPTH IS A TEMPLATE PARAMETER RATHER THAN AN ARGUMENT, and the measurement
+// is the only reason: at -Os on the desktop, a page of body text went 179 -> 151
+// us unrotated with it and 147 -> 148 rotated, which is to say it buys ~15% on
+// the path the goldens, the tests and `make compare` take and NOTHING on the
+// device's own (Ccw) path, where the source walk strides and the unpacking is
+// not what the loop is waiting for. Two instantiations of blitGlyphT is what it
+// costs. Every face in the repo is 2bpp except literata_18, so the branch it
+// removes was perfectly predicted -- what the template buys is the addressing
+// being folded, not the branch.
+template <int Bpp>
+inline uint8_t coverageInRow(const uint8_t* row, int col) {
+  if (Bpp == 1) return ((row[col >> 3] >> (7 - (col & 7))) & 1) ? 3 : 0;
+  // 2bpp, MSB-first: two bits per pixel, four pixels per byte.
+  return static_cast<uint8_t>((row[col >> 2] >> (6 - 2 * (col & 3))) & 0x3);
+}
+
+// One PHYSICAL row of the blit: `n` consecutive physical columns starting at
+// `pc0`, taking their coverage from `cov(i)` for i in [0, n).
+//
+// The bits are accumulated into a byte and written once, which is the other
+// half of the win: a bit-addressed read-modify-write per pixel becomes one per
+// eight, and a byte no pixel of which inks is not touched at all -- which is
+// most of a glyph's bounding box, since a glyph is mostly its surround.
+//
+// `masks[(phase0 + i) & 3]` is the emit set for pixel i. For every plane but
+// BwDithered the four entries are equal and the indexing costs a load; for
+// BwDithered they are the four phases of the Bayer tile along whichever axis
+// this run walks, which is what keeps the stipple keyed on ABSOLUTE panel
+// coordinates -- the phase must not shift with the glyph, or two words on one
+// line stipple out of step with each other.
+template <typename CovFn>
+inline void blitPhysRun(uint8_t* prow, int pc0, int n, bool white, const uint8_t masks[4],
+                        int phase0, CovFn cov) {
+  int i = 0;
+  int pc = pc0;
+  while (i < n) {
+    const int byte = pc >> 3;
+    const int bit0 = pc & 7;
+    int take = 8 - bit0;
+    if (take > n - i) take = n - i;
+    uint8_t m = 0;
+    for (int k = 0; k < take; ++k) {
+      const uint8_t c = cov(i + k);
+      if ((masks[(phase0 + i + k) & 3] >> c) & 1)
+        m = static_cast<uint8_t>(m | (0x80u >> (bit0 + k)));
+    }
+    // Skipping an all-zero mask is not an optimisation of the write, it is the
+    // absence of one: `|= 0` and `&= ~0` are both no-ops, so the branch replaces
+    // a load and a store with nothing.
+    if (m != 0) {
+      if (white) prow[byte] = static_cast<uint8_t>(prow[byte] | m);
+      else prow[byte] = static_cast<uint8_t>(prow[byte] & ~m);
+    }
+    i += take;
+    pc += take;
+  }
+}
+
+// Blit one glyph's coverage with its bitmap's top-left at logical (gx, gy) --
+// which the caller derives from the pen and the glyph's bearings, so the two
+// halves of that arithmetic (the 26.6 pen, and where a bitmap sits relative to
+// the baseline) stay where they were.
+template <int Bpp>
+void blitGlyphT(Framebuffer& fb, const Glyph& g, int gx, int gy, bool white, Plane plane) {
+  const int fw = fb.width(), fh = fb.height();
+  // An inert framebuffer (a non-positive geometry, or a refused view) reports
+  // zero here and has no bytes behind data(); the clip below would already
+  // reject every pixel, but this returns before a pointer is formed from null.
+  if (fw <= 0 || fh <= 0) return;
+  // CLIP THE BOX ONCE, which is what setPixel's own bounds check used to do one
+  // pixel at a time. After this every coordinate the loops produce is in range,
+  // which is also what makes the `& 3` phases below safe without the extra
+  // rescue a negative coordinate would need.
+  const int c0 = gx < 0 ? -gx : 0;
+  const int c1 = (gx + g.bitmapW) > fw ? fw - gx : g.bitmapW;
+  const int r0 = gy < 0 ? -gy : 0;
+  const int r1 = (gy + g.bitmapH) > fh ? fh - gy : g.bitmapH;
+  if (c0 >= c1 || r0 >= r1) return;
+
+  uint8_t* const base = fb.data();
+  const int stride = fb.physRowBytes();
+  const int gstride = g.stride;
+  const bool dithered = (plane == Plane::BwDithered);
+  const uint8_t flat = plane == Plane::Lsb ? kEmitLsb : (plane == Plane::Msb ? kEmitMsb : kEmitBw);
+  uint8_t masks[4] = {flat, flat, flat, flat};
+
+  if (fb.rotation() == Rotation::Ccw) {
+    // UNDER ROTATION A LOGICAL ROW IS A PHYSICAL COLUMN, so accumulating bits
+    // along a glyph row would write one bit into each of eight different bytes
+    // and, worse, into the wrong ones -- the mistake veilRect records, which
+    // passes every desktop test and every golden and smears only on glass.
+    // A logical COLUMN is a physical row (physX = logY, physY = width - 1 - logX
+    // -- framebuffer.cpp's byteIndex), so the outer loop walks the glyph's
+    // COLUMNS: each one is one physical row, whose consecutive bits are the
+    // glyph's successive ROWS. The source walk is then a stride jump per pixel
+    // instead of a shift within a byte, which costs nothing measurable because a
+    // glyph's bitmap is a few hundred bytes and sits in L1 for the whole blit.
+    for (int col = c0; col < c1; ++col) {
+      const int px = gx + col;
+      if (dithered)
+        for (int p = 0; p < 4; ++p) masks[p] = ditherEmitMask(bayer4(px, p));
+      uint8_t* const prow = base + static_cast<size_t>(fw - 1 - px) * static_cast<size_t>(stride);
+      const uint8_t* const src = g.bitmap + static_cast<size_t>(r0) * static_cast<size_t>(gstride);
+      blitPhysRun(prow, gy + r0, r1 - r0, white, masks, (gy + r0) & 3, [&](int i) {
+        return coverageInRow<Bpp>(src + static_cast<size_t>(i) * static_cast<size_t>(gstride), col);
+      });
+    }
+  } else {
+    // Unrotated: a logical row IS a physical row, so this is the plain case and
+    // the source walk is sequential within the glyph's own row.
+    for (int row = r0; row < r1; ++row) {
+      const int py = gy + row;
+      if (dithered)
+        for (int p = 0; p < 4; ++p) masks[p] = ditherEmitMask(bayer4(p, py));
+      uint8_t* const prow = base + static_cast<size_t>(py) * static_cast<size_t>(stride);
+      const uint8_t* const src = g.bitmap + static_cast<size_t>(row) * static_cast<size_t>(gstride);
+      blitPhysRun(prow, gx + c0, c1 - c0, white, masks, (gx + c0) & 3,
+                  [&](int i) { return coverageInRow<Bpp>(src, c0 + i); });
+    }
+  }
+}
+
+void blitGlyph(Framebuffer& fb, const Glyph& g, int gx, int gy, int bpp, bool white, Plane plane) {
+  if (bpp == 1) blitGlyphT<1>(fb, g, gx, gy, white, plane);
+  else blitGlyphT<2>(fb, g, gx, gy, white, plane);
+}
+
+}  // namespace
+
 // THE ONE PEN LOOP. drawText and drawTextJustified are both this, differing by
 // `extraPerGapF26` alone -- a second loop for justified text would be a second
 // place for the fractional pen, the kern-before-glyph order, the notdef box and
@@ -67,35 +266,12 @@ static int drawRunF26(Framebuffer& fb, const GlyphSource& font, int penFIn, int 
     }
     penF += kernF;
     const int pen = f26ToPx(penF);
-    for (int row = 0; row < g->bitmapH; ++row)
-      for (int col = 0; col < g->bitmapW; ++col) {
-        const uint8_t cov = font.coverage(*g, col, row);
-        bool emit = false;
-        switch (plane) {
-          case Plane::Bw:
-            emit = cov >= 2;
-            break;
-          case Plane::Lsb:
-            emit = (cov & 1) != 0;
-            break;
-          case Plane::Msb:
-            emit = (cov & 2) != 0;
-            break;
-          case Plane::BwDithered: {
-            // Stipple the edge instead of thresholding it away. Coverage is
-            // 0..3, so the nominal ink fraction is cov/3; comparing cov*16/3
-            // against the dispersed Bayer rank makes cov 1 ink 5 cells of 16,
-            // cov 2 ink 10, and cov 3 ink all 16 -- monotonic, with full
-            // coverage staying solid (a glyph's interior must never be
-            // stippled) and zero staying blank.
-            const int px = pen + g->xOff + col;
-            const int py = baselineY - g->yOff + row;
-            emit = (cov * 16) / 3 > bayer4(px, py);
-            break;
-          }
-        }
-        if (emit) fb.setPixel(pen + g->xOff + col, baselineY - g->yOff + row, white);
-      }
+    // The coverage blit, which is 99% of a reader page's render on the device --
+    // see blitGlyph above for what it does and what it used to do. What the
+    // plane means, including the dither's `(cov * 16) / 3 > bayer4(px, py)`
+    // stipple, lives there now: it is decided per row rather than per pixel, so
+    // it cannot be spelled here as well without being spelled twice.
+    blitGlyph(fb, *g, pen + g->xOff, baselineY - g->yOff, font.bpp(), white, plane);
     penF += pxToF26(g->advance) + tracking.f26();
     // The word gap stretch, applied to ASCII space and nothing else. The set has
     // to match layout.cpp's gap COUNT exactly -- it divides the line's slack by
