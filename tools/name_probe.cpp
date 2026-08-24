@@ -100,14 +100,47 @@
 //     Dexter`, and on the other two it removes NOTHING and leaves their top 40
 //     byte-identical. `--frontcut 0` turns it off; the `f` column is the percentage.
 //
+// 11. THE PRONOUN LEAK WAS NEVER LEXICAL. `Il` and `Elle` ranked 7th and 8th on a
+//     short book, and the obvious diagnosis -- that separating a pronoun from a name
+//     needs a stopword list, and therefore a per-language dictionary -- was wrong.
+//     A pronoun can only rank at all if it appears MID-SENTENCE with a capital, so
+//     every one of its mentions was a sentence boundary this file had missed. Dumping
+//     the preceding 46 bytes (`--why Il`) showed it in one screen: every case ended in
+//     a closing guillemet.
+//
+//     Two positional causes, no vocabulary:
+//
+//     a. NBSP IS WHITESPACE FOR SPLITTING. French typography sets a non-breaking space
+//        inside guillemets and before ! ? :, so a quoted sentence really reads
+//        "\u00ABBonjour\u00A0!\u00A0\u00BB". Skipping only ASCII spaces meant the
+//        splitter stopped on the NBSP, never reached the closing guillemet, and never
+//        split -- so the NEXT sentence's opening word counted as mid-sentence. Fixing
+//        it found 268 more sentences in Neuromancien and 163 in Le Fleau, and REMOVED
+//        Il and Elle from Neuromancien's list entirely. `Le Finlandais` lost its
+//        spurious `Le` alias at the same time and for the same reason.
+//
+//     b. A WORD OPENING REPORTED SPEECH IS SENTENCE-INITIAL WHEREVER IT SITS.
+//        `Elle disait : "Je n'arrive pas a respirer"` puts `Je` mid-sentence by
+//        position and first-word by grammar. Only a quote or a colon counts --
+//        deliberately NOT a dash or a paren, since French sets parenthetical
+//        em-dashes mid-sentence ("les trois - Stu, Larry et Glen - partirent") and
+//        suppressing a real name there could push it under the threshold.
+//
+//     Le Fleau's `Je` and `Tu` are gone and `Il` fell to rank 57 with 27 mentions.
+//     The top twelve moved by 2-4 mentions each and did not reorder, so nothing real
+//     was suppressed. THE LESSON IS THE SHAPE: a false positive that looks like it
+//     needs a dictionary may be a punctuation bug wearing a linguistic disguise, and
+//     the way to tell is to print the context rather than reason about the category.
+//
 // WHAT IS STILL WRONG, and what 3E inherits:
 //
 //  * PERSON VERSUS PLACE IS NOT SEPARATED, by decision -- the screen says NAMES.
 //    Boulder, Las Vegas, New York and Miami all rank, correctly.
 //  * `Dieu` -- an interjection, capitalised, frequent, mid-sentence. Rank 8 in Le
 //    Fleau. No non-semantic rule reaches it, and it is the one durable false positive.
-//  * PRONOUNS STILL LEAK ON A SHORT BOOK. `Elle` and `Il` are ranks 7 and 8 in
-//    Neuromancien, where the real names are fewer. Proportional to book length.
+//  * `Il` SURVIVES AT RANK 57 in Le Fleau, 27 mentions, below anything a reader
+//    would scroll to. The residue is other punctuation edges; see rule 11 for the two
+//    causes that were fixed and why chasing the rest is not worth a rule.
 //  * ALIAS LISTS GET LONG -- "Stu (Stuart/Stu Redman/Redman/Stuart Redman)" does not
 //    fit a 480px row. A display problem, not a detection one.
 //
@@ -129,7 +162,7 @@ namespace {
 // ---------------------------------------------------------------- character class
 // UTF-8, but only as far as Latin-1 -- which is exactly as far as fontc.py's subset
 // goes, so it is also as far as anything could be RENDERED. Past that, Other.
-enum Cls { Upper, Lower, Apos, Digit, SentEnd, QuoteOpen, Dash, Comma, Other };
+enum Cls { Upper, Lower, Apos, Digit, SentEnd, QuoteOpen, Dash, Comma, Space, Other };
 
 struct Ch {
   int len;
@@ -147,6 +180,7 @@ Ch classify(const char* p, const char* end) {
     if (c0 == '"') return {1, QuoteOpen};
     if (c0 == '-') return {1, Dash};
     if (c0 == ',') return {1, Comma};
+    if (c0 == ' ' || c0 == '\t' || c0 == '\n' || c0 == '\r') return {1, Space};
     return {1, Other};
   }
   if (c0 == 0xC3 && p + 1 < end) {
@@ -160,7 +194,13 @@ Ch classify(const char* p, const char* end) {
   if (c0 == 0xC2 && p + 1 < end) {
     const unsigned char c1 = static_cast<unsigned char>(p[1]);
     if (c1 == 0xAB || c1 == 0xBB) return {2, QuoteOpen};  // guillemets
-    if (c1 == 0xA0) return {2, Other};                    // nbsp
+    // NBSP IS WHITESPACE FOR SPLITTING, and missing that was the whole pronoun leak.
+    // French typography sets one INSIDE guillemets and before ! ? : -- so a quoted
+    // sentence really reads "\u00ABBonjour\u00A0!\u00A0\u00BB". Skipping only ASCII
+    // spaces meant the splitter stopped dead on the NBSP, never reached the closing
+    // guillemet, and never split -- so the NEXT sentence's opening word counted as
+    // mid-sentence. That, and nothing lexical, is why Il and Elle ranked.
+    if (c1 == 0xA0) return {2, Space};                    // nbsp
     return {2, Other};
   }
   if (c0 == 0xE2 && p + 2 < end) {
@@ -171,6 +211,7 @@ Ch classify(const char* p, const char* end) {
       if (c2 == 0x9C || c2 == 0x9D) return {3, QuoteOpen};            // curly quotes
       if (c2 == 0x93 || c2 == 0x94) return {3, Dash};                 // en/em dash
       if (c2 == 0xA6) return {3, SentEnd};                            // ellipsis
+      if (c2 == 0xAF || c2 == 0x89 || c2 == 0x8A) return {3, Space};   // narrow/thin spaces
     }
   }
   // Any other lead byte: skip the whole sequence.
@@ -285,7 +326,7 @@ std::vector<std::string_view> sentences(const std::string& text) {
     bool sawSpace = false;
     while (u < end) {
       Ch c = classify(u, end);
-      if (*u == ' ' || *u == '\t' || *u == '\n' || *u == '\r') { sawSpace = true; ++u; continue; }
+      if (c.cls == Space) { sawSpace = true; u += c.len; continue; }
       if (c.cls == QuoteOpen || (c.len == 1 && (*u == ')' || *u == ']'))) { u += c.len; continue; }
       break;
     }
@@ -346,7 +387,11 @@ int tierOf(const Occurrence& o) {
 bool dialogueStart(std::string_view s) {
   const char* p = s.data();
   const char* end = p + s.size();
-  while (p < end && (*p == ' ' || *p == '\t')) ++p;
+  while (p < end) {
+    Ch sp = classify(p, end);
+    if (sp.cls != Space) break;
+    p += sp.len;
+  }
   if (p >= end) return false;
   Ch c = classify(p, end);
   return c.cls == QuoteOpen || c.cls == Dash;
@@ -363,6 +408,7 @@ int main(int argc, char** argv) {
   int top = 60;
   bool usePrefix = true;
   bool skipHeadings = true;
+  const char* why = nullptr;
   long frontCut = 50;  // drop a run this % or more of whose mentions are chapter-openers
   for (int i = 2; i + 1 < argc; i += 2) {
     if (std::strcmp(argv[i], "--min") == 0) minCount = std::atol(argv[i + 1]);
@@ -370,6 +416,7 @@ int main(int argc, char** argv) {
     else if (std::strcmp(argv[i], "--prefix") == 0) usePrefix = (std::atoi(argv[i + 1]) != 0);
     else if (std::strcmp(argv[i], "--headings") == 0) skipHeadings = (std::atoi(argv[i + 1]) == 0);
     else if (std::strcmp(argv[i], "--frontcut") == 0) frontCut = std::atol(argv[i + 1]);
+    else if (std::strcmp(argv[i], "--why") == 0) why = argv[i + 1];
   }
 
   reader::HostFileSystem fs("/");
@@ -384,9 +431,12 @@ int main(int argc, char** argv) {
 
   std::map<std::string, Cand> cands;
   long words = 0, blocks = 0, sents = 0, bytes = 0, headings = 0;
+  int whyShown = 0;
 
   struct Tok {
     std::string text;
+    size_t off = 0;   // byte offset of the token's start within the sentence
+    bool opener = false;  // preceded by a quote or colon: reported speech starts here
     bool cand = false;
     bool comma = false;
     bool nextLower = false;  // the following word starts lowercase
@@ -431,6 +481,7 @@ int main(int argc, char** argv) {
           }
           ++words;
           Tok t;
+          t.off = static_cast<size_t>(ws - sv.data());
           t.text = trimApostrophe(std::string(ws, static_cast<size_t>(p - ws)));
           // Re-decide on the TRIMMED token: "I'm" trims to "I", a single capital,
           // which the Xxxx rule then rejects as an initial.
@@ -448,6 +499,25 @@ int main(int argc, char** argv) {
         }
         for (size_t i = 0; i + 1 < toks.size(); ++i) toks[i].nextLower = !toks[i + 1].cand;
 
+        // A WORD OPENING REPORTED SPEECH IS SENTENCE-INITIAL WHEREVER IT SITS.
+        // `Elle disait : "Je n'arrive pas a respirer"` puts `Je` mid-sentence by
+        // position and first-word by grammar, and it was the residue of the pronoun
+        // leak after the NBSP fix. Only a quote or a colon counts -- deliberately NOT
+        // a dash or a paren, because French sets parenthetical em-dashes mid-sentence
+        // ("les trois - Stu, Larry et Glen - partirent") and suppressing a real name
+        // there could push it under the threshold. Position, not vocabulary.
+        for (Tok& t : toks) {
+          const char* r = sv.data() + t.off;
+          while (r > sv.data()) {
+            const char* q = r - 1;
+            while (q > sv.data() && (static_cast<unsigned char>(*q) & 0xC0) == 0x80) --q;
+            Ch c = classify(q, sv.data() + sv.size());
+            if (c.cls == Space) { r = q; continue; }
+            if (c.cls == QuoteOpen || *q == ':') t.opener = true;
+            break;
+          }
+        }
+
         // AN ENTITY IS A MAXIMAL RUN, COUNTED ONCE. Counting each token separately as
         // well is what put `La` in the list beside `La Poubelle` with 316 of its own
         // mentions -- every "La Poubelle" was also being counted as a "La".
@@ -462,11 +532,19 @@ int main(int argc, char** argv) {
         const int names = static_cast<int>(spans.size());
 
         for (auto& [i, j] : spans) {
+          if (why != nullptr && i != 0 && toks[i].text == why && whyShown < 24) {
+            ++whyShown;
+            const size_t o = toks[i].off;
+            const size_t from = o > 46 ? o - 46 : 0;
+            std::string before(sv.data() + from, o - from);
+            for (char& ch : before) if (ch == '\n' || ch == '\r') ch = ' ';
+            std::printf("  ...%s[%s]\n", before.c_str(), why);
+          }
           std::string run = toks[i].text;
           for (size_t k = i + 1; k <= j; ++k) { run += ' '; run += toks[k].text; }
           Cand& cd = cands[run];
           ++cd.mentions;
-          if (i == 0) ++cd.initial;
+          if (i == 0 || toks[i].opener) ++cd.initial;
           if (blockInChapter <= 1) ++cd.frontBlock;
           if (cd.firstSpine < 0) cd.firstSpine = c;
           Occurrence o;
