@@ -81,6 +81,25 @@
 //     unlikely to look up -- and where the cost is one imperfect sentence, not a
 //     wrong list. `--prefix 0` turns it off; the comparison is the evidence.
 //
+// 10. A RUNNING HEADER IS NOT A CHARACTER, and the position finds it where the tag
+//     does not. SKIPPING `Heading` BLOCKS WAS THE OBVIOUS FIX AND IS A NO-OP -- worth
+//     recording, because it is the first thing anyone will try. Two of three real
+//     EPUBs contain NO h1-h6 at all (Le Fleau: 0 of 14,662 blocks; Dexter: 0), and the
+//     third's 32 of 3,241 changed the list not at all -- identical rows, identical
+//     sentences, counts moving by one. Real books put chapter titles in
+//     <p class="...">, which document.h correctly calls a Paragraph.
+//
+//     What works is measuring WHERE a run sits: a running header appears in the FIRST
+//     BLOCK of every chapter file. Real characters spend 0-7% of their mentions
+//     opening a chapter; the book's own title run is far above that. The cut is 50%,
+//     applied per RUN and BEFORE grouping -- the title folds into the character
+//     sharing its name and dilutes the group's figure (Dexter's group reads 29% with
+//     the title in it and 18% without).
+//
+//     Measured across the three books: it removes exactly ONE run, `Darkly Dreaming
+//     Dexter`, and on the other two it removes NOTHING and leaves their top 40
+//     byte-identical. `--frontcut 0` turns it off; the `f` column is the percentage.
+//
 // WHAT IS STILL WRONG, and what 3E inherits:
 //
 //  * PERSON VERSUS PLACE IS NOT SEPARATED, by decision -- the screen says NAMES.
@@ -89,9 +108,6 @@
 //    Fleau. No non-semantic rule reaches it, and it is the one durable false positive.
 //  * PRONOUNS STILL LEAK ON A SHORT BOOK. `Elle` and `Il` are ranks 7 and 8 in
 //    Neuromancien, where the real names are fewer. Proportional to book length.
-//  * THE BOOK'S OWN TITLE RANKS, folding into a character where they share a name
-//    ("Dexter (Darkly Dreaming Dexter/Dex)"). Headings should probably be excluded
-//    from candidate detection, which is one line and was not tried.
 //  * ALIAS LISTS GET LONG -- "Stu (Stuart/Stu Redman/Redman/Stuart Redman)" does not
 //    fit a 480px row. A display problem, not a detection one.
 //
@@ -300,6 +316,7 @@ struct Occurrence {
 struct Cand {
   long mentions = 0;
   long initial = 0;
+  long frontBlock = 0;  // mentions sitting in a chapter's first two blocks
   int firstSpine = -1;
   Occurrence best;
   int bestTier = -1;
@@ -345,10 +362,14 @@ int main(int argc, char** argv) {
   long minCount = 3;
   int top = 60;
   bool usePrefix = true;
+  bool skipHeadings = true;
+  long frontCut = 50;  // drop a run this % or more of whose mentions are chapter-openers
   for (int i = 2; i + 1 < argc; i += 2) {
     if (std::strcmp(argv[i], "--min") == 0) minCount = std::atol(argv[i + 1]);
     else if (std::strcmp(argv[i], "--top") == 0) top = std::atoi(argv[i + 1]);
     else if (std::strcmp(argv[i], "--prefix") == 0) usePrefix = (std::atoi(argv[i + 1]) != 0);
+    else if (std::strcmp(argv[i], "--headings") == 0) skipHeadings = (std::atoi(argv[i + 1]) == 0);
+    else if (std::strcmp(argv[i], "--frontcut") == 0) frontCut = std::atol(argv[i + 1]);
   }
 
   reader::HostFileSystem fs("/");
@@ -362,7 +383,7 @@ int main(int argc, char** argv) {
               book.author.c_str(), book.chapterCount());
 
   std::map<std::string, Cand> cands;
-  long words = 0, blocks = 0, sents = 0, bytes = 0;
+  long words = 0, blocks = 0, sents = 0, bytes = 0, headings = 0;
 
   struct Tok {
     std::string text;
@@ -377,9 +398,18 @@ int main(int argc, char** argv) {
     const reader::ChapterLocation loc = book.locate(c);
     if (loc.compressedSize == 0) continue;
     if (!cr.begin(fs, loc)) continue;
+    int blockInChapter = -1;
     reader::Block b;
     while (cr.next(b)) {
       ++blocks;
+      ++blockInChapter;
+      // A HEADING IS THE BOOK TALKING ABOUT ITSELF, not the story. Chapter titles put
+      // the book's own title in the list ("Dexter 1 - Darkly Dreaming Dexter"), where
+      // it then folds into the character who shares its name.
+      if (b.kind == reader::BlockKind::Heading) {
+        ++headings;
+        if (skipHeadings) continue;
+      }
       bytes += static_cast<long>(b.text.size());
       for (std::string_view sv : sentences(b.text)) {
         ++sents;
@@ -437,6 +467,7 @@ int main(int argc, char** argv) {
           Cand& cd = cands[run];
           ++cd.mentions;
           if (i == 0) ++cd.initial;
+          if (blockInChapter <= 1) ++cd.frontBlock;
           if (cd.firstSpine < 0) cd.firstSpine = c;
           Occurrence o;
           o.spine = c;
@@ -454,6 +485,7 @@ int main(int argc, char** argv) {
 
   std::printf("walked : %ld blocks, %ld sentences, %ld words, %ld text bytes\n", blocks, sents,
               words, bytes);
+  std::printf("headings: %ld (%s)\n", headings, skipHeadings ? "skipped" : "included");
 
   // Is this a list or a dictionary? A NAMES screen has to be scrollable, not endless.
   std::printf("\nentities by mention threshold:\n");
@@ -498,9 +530,26 @@ int main(int argc, char** argv) {
   };
 
   // Only entities above the threshold take part; a hapax must not drag a name around.
+  // A RUNNING HEADER IS NOT A CHARACTER, and it has a sharp signature: it sits in the
+  // FIRST BLOCK of every chapter file. Excluding `Heading` blocks was the obvious fix
+  // and turned out to be a no-op -- two of three real EPUBs have no h1-h6 at all, and
+  // the third's 32 changed nothing, because real books put chapter titles in
+  // <p class="...">. This measures the position instead of trusting the tag.
+  //
+  // Measured: real characters run 0-7% chapter-opening mentions; a book's own title
+  // run is far higher. The cut is applied per RUN and BEFORE grouping, because the
+  // title folds into the character sharing its name and dilutes the group's figure.
   std::vector<const std::string*> live;
-  for (auto& [name, cd] : cands)
-    if (cd.mentions - cd.initial >= minCount) live.push_back(&name);
+  long cut = 0;
+  for (auto& [name, cd] : cands) {
+    if (cd.mentions - cd.initial < minCount) continue;
+    if (frontCut > 0 && cd.mentions > 0 && cd.frontBlock * 100 / cd.mentions >= frontCut) {
+      ++cut;
+      continue;
+    }
+    live.push_back(&name);
+  }
+  std::printf("\nfurniture cut (>=%ld%% of mentions open a chapter): %ld runs\n", frontCut, cut);
 
   std::map<std::string, std::string> parent;
   for (const std::string* n : live) parent[*n] = *n;
@@ -653,8 +702,10 @@ int main(int argc, char** argv) {
     std::string snip = g->src ? g->src->best.sentence : std::string();
     if (snip.size() > 150) { snip.resize(150); snip += "..."; }
     for (char& ch : snip) if (ch == '\n' || ch == '\r') ch = ' ';
-    std::printf("%5ld T%d %-38s %s\n", g->n, g->src ? g->src->bestTier : -1, label.c_str(),
-                snip.c_str());
+    long front = 0, tot = 0;
+    for (const std::string& m : g->members) { front += cands[m].frontBlock; tot += cands[m].mentions; }
+    std::printf("%5ld T%d f%-3ld %-34s %s\n", g->n, g->src ? g->src->bestTier : -1,
+                tot ? front * 100 / tot : 0, label.c_str(), snip.c_str());
   }
   return 0;
 }
