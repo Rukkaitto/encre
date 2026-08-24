@@ -635,7 +635,18 @@ int drawDetailRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view
   // is tracked -- the board sets no letter-spacing on either.
   const Font& lf = fonts[Role::Value500];
   const Font& vf = fonts[Role::Value700];
-  drawText(fb, lf, kMargin, baselineIn(lf, y, kDetailRowContentH), label, ink, {}, plane);
+  // THE LABEL ELIDES, and it did not: it was drawn at full length from the left margin,
+  // so a long one ran under the value and off the panel. Book details' labels are field
+  // names and never overflowed, which is why this only surfaced when Contents put real
+  // chapter names through it -- "PREMIÈRE PARTIE : À LIRE AVANT L'ACHAT" is wider than
+  // the row.
+  //
+  // FIXED IN THE PRIMITIVE, not in the screen: a row that overflows its own box is
+  // wrong on every screen that draws one, and the next caller would inherit it.
+  const int valueW = value.empty() ? 0 : vf.measure(value) + kBandGap;
+  const int labelW = fb.width() - 2 * kMargin - valueW;
+  drawText(fb, lf, kMargin, baselineIn(lf, y, kDetailRowContentH),
+           elideToWidth(lf, label, labelW), ink, {}, plane);
   if (!value.empty())
     drawText(fb, vf, fb.width() - kMargin - vf.measure(value),
              baselineIn(vf, y, kDetailRowContentH), value, ink, {}, plane);

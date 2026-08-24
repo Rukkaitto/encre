@@ -29,7 +29,20 @@
 
   <div style="display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 22px; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
     <div style="font-size: var(--t-meta); letter-spacing: 0.18em; font-weight: 500;">MIDDLEMARCH</div>
-    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">CH. 01</div>
+    <!-- THE CHAPTER'S NAME, and this said `CH. 01`. The position was all the device
+         honestly had: the spine gives an order and no names, so a bare `CH. 03` was the
+         only true thing to put here. The table of contents supplies the name now.
+
+         IT ELIDES, and it has to: a real book's chapter names run long ("PREMIÈRE
+         PARTIE : À LIRE AVANT L'ACHAT") and this row is `space-between` with the book's
+         title on its left. `min-width: 0` is what lets a flex item shrink below its
+         content at all -- without it the name pushes the title off instead of
+         truncating.
+
+         THE POSITION IS THE FALLBACK, not a second element: a book with no table of
+         contents, or a chapter its contents does not name, still shows `CH. 03` here.
+         One slot, the best name available for it. -->
+    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-left: 16px;">LIVRE I</div>
   </div>
 
   <div style="flex-grow: 1; overflow: hidden; font-size: 32px; line-height: 1.7; text-align: justify;">

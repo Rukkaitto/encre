@@ -3,6 +3,9 @@
 #include <vector>
 
 #include "doctest.h"
+#include "ramp.h"
+#include "reader/framebuffer.h"
+#include "reader/theme_quiet.h"
 #include "reader/screen_contents.h"
 #include "reader/screen_reader_menu.h"
 #include "reader/screens.h"
@@ -251,4 +254,59 @@ TEST_CASE("a real book's contents are the ones built, never the demo's") {
   // pinned here is that the ROWS are the real ones.
   // ...and the demo's first label is nowhere in it.
   for (const reader::ListRow& r : c.vm().rows) CHECK(r.label.find("Miss Brooke") == std::string::npos);
+}
+
+TEST_CASE("A LONG CHAPTER NAME ELIDES INSIDE THE ROW") {
+  // The device showed names running off the panel. drawDetailRow drew the label at full
+  // length from the left margin -- Book details' labels are field names and never
+  // overflowed, so it only surfaced when real chapter names went through it.
+  //
+  // Asserted on the PIXELS, because the elision is the primitive's and a view-model
+  // check would pass on a label the renderer then overflows.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  const char* const kLong =
+      "PREMI\xC3\x88RE PARTIE : \xC3\x80 LIRE AVANT L'ACHAT ET AUSSI APR\xC3\x88S, "
+      "UN TITRE QUI NE FINIT JAMAIS";
+  for (const int w : {480, 528}) {
+    const int h = w == 480 ? 800 : 792;
+    // The long name on an UNFOCUSED row: the focused one is full-bleed and its own
+    // fill would mask an overflow rather than reveal it.
+    ContentsScreen s({{0, 1, "Short"}, {1, 1, kLong}}, "Book", 0, 8);
+    reader::Framebuffer fb(w, h);
+    theme.renderContents(fb, ramp.fonts, s.vm(), reader::Plane::Bw);
+    // NO TEXT IS INKED IN THE RIGHT MARGIN. kMargin is the board's 24px, so the last
+    // column a label may touch is w - 24 - 1.
+    //
+    // THE FOCUSED ROW'S FILL IS NOT AN OVERFLOW, and this test first reported it as
+    // one: that row is FULL-BLEED inverted, so it legitimately inks x=0 to x=w-1. The
+    // discriminator is x=0 -- a full-bleed fill inks it and an overrunning label never
+    // reaches it, since every label starts at kMargin.
+    for (int y = 0; y < h; ++y) {
+      if (!fb.getPixel(0, y)) continue;  // a full-bleed focused row, ink to both edges
+      for (int x = w - 24; x < w; ++x)
+        if (!fb.getPixel(x, y)) {
+          CHECK_MESSAGE(false, "label ink in the right margin at " << x << "," << y << " on " << w);
+          y = h;
+          break;
+        }
+    }
+  }
+}
+
+TEST_CASE("held UP or DOWN scrolls, as the Library's does") {
+  // A 96-entry contents needs it: one row a press is ~570 ms of panel a row.
+  ContentsScreen s(flat(), "Dexter", 0, 8);
+  const reader::ButtonMask repeats = s.autoRepeat();
+  CHECK((repeats & reader::buttonBit(reader::Button::Down)) != 0);
+  CHECK((repeats & reader::buttonBit(reader::Button::Up)) != 0);
+  // A repeat carries a DISTANCE, and the screen must spend it rather than step once --
+  // a paint blocks the loop for ~570 ms, so one event stands for all the time the panel
+  // was busy.
+  std::vector<TocEntry> many;
+  for (int i = 0; i < 40; ++i) many.push_back({i, 1, "Chapter " + std::to_string(i)});
+  ContentsScreen big(many, "Long", 0, 7);
+  const int was = big.focus();
+  big.onEvent(reader::InputEvent{reader::Button::Down, reader::PressKind::Repeat, 9});
+  CHECK(big.focus() == was + 9);
 }

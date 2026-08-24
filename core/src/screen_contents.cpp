@@ -35,6 +35,15 @@ ContentsScreen::ContentsScreen(std::vector<TocEntry> toc, std::string bookTitle,
   vm_.hints = {"BACK", "GO", "UP", "DOWN"};
   vm_.holds = {false, false, false, false};
   declareHints(vm_.holds);
+  // HELD UP OR DOWN SCROLLS, accelerating, exactly as the Library's does -- a 96-entry
+  // contents is long enough to need it, and a list that only steps one row a press is
+  // ~570 ms a row on this panel. `moveFocus(±steps, held)` above already takes the
+  // distance and the held flag, so this is the declaration that makes them arrive.
+  //
+  // Up and Down only, matching the Library. The SIDE buttons are movers now too, and a
+  // held one on a list currently resolves as Long and is dropped -- worth deciding
+  // deliberately for both screens rather than changing one of them here.
+  declareRepeat(static_cast<ButtonMask>(buttonBit(Button::Up) | buttonBit(Button::Down)));
 
   // THE FIRST FOCUSABLE ROW, NOT ROW 0: row 0 is a section header in a sectioned book.
   // Set through the gated path so it lands on a row that can act whatever the book's
@@ -79,18 +88,13 @@ void ContentsScreen::syncVm() {
     row.label = e.label;
     row.isHeader = isHeaderAt(at);
     row.focusable = !row.isHeader;
-    // `CH. 03`, and `CH. 03 - NOW` on the chapter being read. The spine POSITION, not
-    // a page number: a page number for a place in the book needs every chapter
-    // paginated, which is ~49 s of decode on this device. design/Contents.dc.html
-    // states the swap and why.
-    if (!row.isHeader) {
-      char buf[24];
-      if (e.spine == spine_)
-        std::snprintf(buf, sizeof(buf), "CH. %02d \xC2\xB7" " NOW", e.spine + 1);
-      else
-        std::snprintf(buf, sizeof(buf), "CH. %02d", e.spine + 1);
-      row.value = buf;
-    }
+    // `NOW` on the chapter being read and NOTHING on the others. This slot has held two
+    // wrong things: a page number (which needs the whole book paginated) and then the
+    // spine position, which is free and true and read WORSE on a real book -- chapter
+    // names carry their own numbering, so a row said `Chapitre 1.        CH. 09`, two
+    // numbering systems side by side with neither explaining the other. The board says
+    // so now.
+    if (!row.isHeader && e.spine == spine_) row.value = "NOW";
     vm_.rows.push_back(std::move(row));
   }
   vm_.focusedRow = s.focused;

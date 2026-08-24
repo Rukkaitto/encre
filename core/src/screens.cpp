@@ -330,8 +330,15 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
         // BEFORE setMetrics, which is the landing -- see ReaderScreen::restoreAt.
         // Cursor{} is a no-op, so an ordinary open costs nothing for this.
         scr->restoreAt(readerStartAt_);
+        // The chapter names, so the header says `LIVRE I` and not `CH. 08`. Empty for a
+        // book with no contents, which falls the label back to the position.
+        scr->setChapterNames(contentsToc_);
       } else if (readerDemo_) {
-        scr = std::make_unique<ReaderScreen>(demoReaderXhtml(), title, "CH. 01", readerBody_);
+        // A NAME, as the board now draws: the header holds the chapter's name where the
+        // contents supply one, and `CH. 01` is only the fallback for a book that has
+        // none. The in-memory constructor takes the label directly, so the demo states
+        // it rather than looking it up.
+        scr = std::make_unique<ReaderScreen>(demoReaderXhtml(), title, "LIVRE I", readerBody_);
       } else {
         // NO BOOK AND NO DEMO ASKED FOR: refused. This is the session-restore path --
         // the shell sets the book from a button press, so a wake has nothing set --

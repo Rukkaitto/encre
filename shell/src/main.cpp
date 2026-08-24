@@ -1443,6 +1443,11 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   gReading.bytes = bookBytes;
   gReading.open = true;
 
+  // THE CONTENTS GO TO THE FACTORY HERE, not when the list is opened, because the READER
+  // wants them too -- its header names the chapter, and that has to be right from the
+  // first paint rather than after a visit to the menu. The menu press still updates
+  // which row is marked, since the reader will have moved by then.
+  gFactory.setContents(gReading.toc, startChapter);
   gFactory.setReaderBook(opened, startChapter, startAt);
   const bool pushed = push && gApp->pushScreen(reader::ScreenId::Reader);
   // The push builds the screen, which locates the chapter, decodes it once to index

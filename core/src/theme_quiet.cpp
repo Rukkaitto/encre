@@ -954,7 +954,11 @@ constexpr int kReadFooterPadBottom = 16;
 constexpr int kReadBarW = 210;
 constexpr int kReadBarH = 5;
 constexpr int kReadTitleEm = 180;  // MIDDLEMARCH, 0.18em
-constexpr int kReadMetaEm = 120;   // the chapter, the percent and the counter, 0.12em
+constexpr int kReadMetaEm = 120;
+// The narrowest the chapter run may be squeezed to before the BOOK TITLE starts giving
+// way instead. Enough for `CH. 01` plus an ellipsis, so the fallback form always fits
+// whole and a long name always shows something.
+constexpr int kReadChapterFloor = 96;   // the chapter, the percent and the counter, 0.12em
 // U+2014, the real character. Every chrome face's subset carries it (tools/fontc.py
 // adds it alongside the quotes and the ellipsis), so this is not a hyphen standing in.
 constexpr std::string_view kEmDash = "\xE2\x80\x94";
@@ -1002,16 +1006,27 @@ void QuietTheme::renderReader(Framebuffer& fb, const FontSet& fonts, const Glyph
   const Tracking titleTrack = trackingEm(metaTitle, kReadTitleEm);
   const int right = fb.width() - kReadPadX;
 
-  // The chapter is drawn FIRST and its width reserved, because it is the run that
-  // must not be truncated: "CH. 01" is `white-space: nowrap` on the board and the
-  // book title is the run with `space-between` slack to give up. A long title on
-  // the narrower panel is the case this orders for.
+  // THE PRIORITY INVERTED WHEN THE CHAPTER BECAME A NAME. This reserved the chapter's
+  // full width first, because `CH. 01` was `white-space: nowrap` on the board and the
+  // book title was the run with slack to give up. The board now gives the chapter
+  // `min-width: 0; text-overflow: ellipsis` and leaves the title alone -- so the NAME is
+  // the run that yields, which is right: a chapter name runs long ("PREMIÈRE PARTIE : À
+  // LIRE AVANT L'ACHAT") where a book title is a book title.
+  //
+  // THE TITLE IS STILL CAPPED, so the chapter can never be squeezed to nothing: it takes
+  // its natural width up to everything but a floor for the chapter. Both runs elide, and
+  // that matters -- either can be arbitrarily long on a real card.
   const Tracking metaTrack = trackingEm(meta, kReadMetaEm);
-  const int chapterW = meta.measure(vm.chapter, metaTrack);
-  drawText(fb, meta, right - chapterW, headBase, vm.chapter, Ink::Black, metaTrack, plane);
-  drawTextElided(fb, metaTitle, kReadPadX, headBase, upperLatin1(vm.bookTitle),
-                 fb.width() - 2 * kReadPadX - chapterW - kReadPadX, Ink::Black, titleTrack,
-                 plane);
+  const int row = fb.width() - 2 * kReadPadX;
+  const int titleNatural = metaTitle.measure(upperLatin1(vm.bookTitle), titleTrack);
+  const int titleCap = row - kReadPadX - kReadChapterFloor;
+  const int titleW = titleNatural < titleCap ? titleNatural : (titleCap > 0 ? titleCap : 0);
+  drawTextElided(fb, metaTitle, kReadPadX, headBase, upperLatin1(vm.bookTitle), titleW,
+                 Ink::Black, titleTrack, plane);
+  const int chapterRoom = row - titleW - kReadPadX;
+  const std::string chapter = elideToWidth(meta, vm.chapter, chapterRoom, metaTrack);
+  drawText(fb, meta, right - meta.measure(chapter, metaTrack), headBase, chapter, Ink::Black,
+           metaTrack, plane);
 
   // --- The page ---
   //

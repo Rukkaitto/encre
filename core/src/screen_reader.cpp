@@ -83,11 +83,29 @@ void ReaderScreen::setMetrics(const PageMetrics& m) {
   syncVm();
 }
 
+void ReaderScreen::setChapterNames(std::vector<TocEntry> toc) {
+  names_ = std::move(toc);
+  updateChapterLabel();  // whatever is open now gets its name immediately
+  syncVm();
+}
+
 void ReaderScreen::updateChapterLabel() {
-  // The SPINE POSITION, not a chapter number, and the distinction is real: spine
-  // entry 0 of a real book is its cover. Without a table of contents -- which is
-  // design/Contents.dc.html and is not built -- the position is the only thing
-  // honestly known, so that is what is shown.
+  // THE CHAPTER'S NAME when the book's contents supply one. This composed a SPINE
+  // POSITION for two phases, and said so: "without a table of contents -- which is
+  // design/Contents.dc.html and is not built -- the position is the only thing honestly
+  // known". It is built.
+  //
+  // THE LAST entry naming this spine, which is tocIndexForSpine's rule: where several
+  // entries point into one file the later ones are further into it, so the last is the
+  // closest thing to "where you are" that a spine-granular position can name.
+  const int at = tocIndexForSpine(names_, chapterAt_);
+  if (at >= 0 && !names_[static_cast<size_t>(at)].label.empty()) {
+    chapter_label_ = names_[static_cast<size_t>(at)].label;
+    return;
+  }
+  // THE POSITION IS STILL THE FALLBACK, for a book with no contents and for a chapter
+  // its contents does not mention -- spine entry 0 of a real book is its cover, and
+  // nothing names that.
   char buf[16];
   std::snprintf(buf, sizeof(buf), "CH. %02d", chapterAt_ + 1);
   chapter_label_.assign(buf);

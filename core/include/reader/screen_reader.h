@@ -7,6 +7,7 @@
 #include "reader/book.h"
 #include "reader/chapter.h"
 #include "reader/layout.h"
+#include "reader/toc.h"
 #include "reader/viewmodel.h"
 
 namespace reader {
@@ -153,6 +154,19 @@ class ReaderScreen : public Screen {
   // this chapter at its beginning".
   Cursor currentCursor() const;
 
+  // THE BOOK'S CHAPTER NAMES, so the header can say `LIVRE I` instead of `CH. 08`.
+  //
+  // The spine gives an ORDER and no names, which is why this screen composed its label
+  // from a position for two phases. `toc.h` supplies the names; a book with none, or a
+  // chapter its contents does not mention, still falls back to the position -- one slot,
+  // the best name available for it.
+  //
+  // A COPY, and it costs ~1.2 KB for a 96-entry book (measured: 1,161 bytes of labels).
+  // The alternative is a reference into something the shell owns for exactly as long as
+  // the screen, which is a lifetime rule to enforce across a chapter crossing for a
+  // saving smaller than one page of laid-out text.
+  void setChapterNames(std::vector<TocEntry> toc);
+
   // LAND HERE WHEN THE METRICS ARRIVE, instead of on page one. Restoring a saved
   // reading position is the only caller.
   //
@@ -245,6 +259,7 @@ class ReaderScreen : public Screen {
   Page page_{};
   ReaderViewModel vm_{};
   std::string bookTitle_, chapter_label_;
+  std::vector<TocEntry> names_;
 
   // THE WHOLE BOOK'S GEOMETRY, read once. 12 bytes a spine entry, so 1,104 for a
   // 92-chapter book -- against the ~32 KB transient a re-parse of the central
