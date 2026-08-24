@@ -695,8 +695,32 @@ int drawPanelCaption(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
 
 int panelRowHeight(bool rule) { return kPanelRowContentH + (rule ? kPanelRowRuleH : 0); }
 
+// --- A list's section header -------------------------------------------------
+
+int sectionHeaderHeight(const FontSet& fonts) {
+  return kSectionRuleH + kSectionPadTop + fonts[Role::Meta500].lineHeight() + kSectionPadBottom;
+}
+
+int drawSectionHeader(Framebuffer& fb, const FontSet& fonts, int y, int w,
+                      std::string_view label, bool rule, Plane plane) {
+  const Font& f = fonts[Role::Meta500];
+  // POSITIONAL, not by identity: the rule separates a section from the content above
+  // it, and at the top of a window the header band IS that separation whichever
+  // section happens to be scrolled there. Drawing it unconditionally read as a stray
+  // separator against the top bar on Settings, which is where this box was written.
+  const int ruleH = rule ? kSectionRuleH : 0;
+  if (rule) fb.fillRect(0, y, w, kSectionRuleH, false);
+  const int textTop = y + ruleH + kSectionPadTop;
+  drawText(fb, f, kMargin, baselineIn(f, textTop, f.lineHeight()), label, Ink::Black,
+           trackingEm(f, kSectionEm), plane);
+  // The height ACTUALLY DRAWN, so a caller advancing by it cannot disagree with what
+  // is on glass -- a first header is shorter by its missing rule.
+  return sectionHeaderHeight(fonts) - (kSectionRuleH - ruleH);
+}
+
 int drawPanelRow(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
-                 std::string_view label, bool focused, bool discloses, bool rule, Plane plane) {
+                 std::string_view label, bool focused, bool discloses, bool rule, Plane plane,
+                 std::string_view value, int labelTrackingEm1000) {
   const Ink ink = focused ? Ink::White : Ink::Black;
   if (focused)
     fb.fillRect(x, y, w, kPanelRowContentH, false);
@@ -705,8 +729,17 @@ int drawPanelRow(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
   // Value700 focused, Value500 otherwise -- the board's own declaration, and the
   // same weight-follows-focus rule a Library row's title has.
   const Font& lf = fonts[focused ? Role::Value700 : Role::Value500];
-  drawText(fb, lf, x + kPanelPadX, baselineIn(lf, y, kPanelRowContentH), label, ink, {}, plane);
-  if (discloses) {
+  drawText(fb, lf, x + kPanelPadX, baselineIn(lf, y, kPanelRowContentH), label, ink,
+           labelTrackingEm1000 == 0 ? Tracking{} : trackingEm(lf, labelTrackingEm1000), plane);
+  // A ROW STATES A QUANTITY OR DISCLOSES A SCREEN, NEVER BOTH -- the same rule Home's
+  // menu rows follow, and the reader menu is where a panel row first needed the other
+  // half of it: its `Bookmarks` row carries a count where its five siblings carry
+  // chevrons. Value700 in both focus states, as the board draws it.
+  if (!value.empty()) {
+    const Font& vf = fonts[Role::Value700];
+    drawText(fb, vf, x + w - kPanelPadX - vf.measure(value), baselineIn(vf, y, kPanelRowContentH),
+             value, ink, {}, plane);
+  } else if (discloses) {
     const Icon& chev = icons::kChevron;
     drawIcon(fb, chev, x + w - kPanelPadX - chev.w,
              iconTopIn(y, kPanelRowContentH, chev.h), ink, plane);

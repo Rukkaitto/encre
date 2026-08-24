@@ -14,6 +14,8 @@ struct BookDetailsViewModel;
 struct SettingsViewModel;
 struct SleepViewModel;
 struct ReaderViewModel;
+struct ReaderMenuViewModel;
+struct ContentsViewModel;
 
 // Themes own the entire presentation, layout structure included (spec 3.3).
 // The FontSet is supplied by the caller so device knowledge — which asset backs
@@ -80,6 +82,22 @@ class Theme {
   // design/Sleep.dc.html. No hint bar and no focus -- the device is asleep.
   virtual void renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepViewModel& vm,
                            Plane plane) = 0;
+
+  // The reader's menu overlay, and the chapter list it opens.
+  virtual void renderReaderMenu(Framebuffer& fb, const FontSet& fonts,
+                                const ReaderMenuViewModel& vm, Plane plane) = 0;
+  virtual void renderContents(Framebuffer& fb, const FontSet& fonts,
+                              const ContentsViewModel& vm, Plane plane) = 0;
+
+  // HOW MANY CONTENTS ROWS FIT, which the screen needs before it can window its list.
+  //
+  // A ROW COUNT, unlike settingsMetrics' box model, and the difference is real: a
+  // Settings list interleaves two heights and only the screen knows which items are
+  // headers, where a Contents list is also mixed but its section headers come from the
+  // BOOK -- so neither side can count without the other's data. The conservative
+  // answer is what a caller can actually use: how many of the SHORTER box fit, so a
+  // window sized by it never overflows when some of its rows turn out to be taller.
+  virtual int contentsVisibleRows(int panelH, const FontSet& fonts) = 0;
 
   virtual void settingsMetrics(int panelH, const FontSet& fonts, int& listH, int& rowH,
                                int& headerH) const = 0;

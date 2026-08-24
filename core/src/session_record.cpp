@@ -21,7 +21,8 @@ namespace {
 // Reader as "sd-missing" and restores an SdMissing as a Reader.
 constexpr const char* kNames[] = {
     "home", "library", "item-actions", "delete-confirm",
-    "book-details", "settings", "sleep", "reader", "sd-missing",
+    "book-details", "settings", "sleep", "reader", "reader-menu",
+    "contents", "sd-missing",
 };
 
 // Clamped so the encoded length is bounded. -1 is the floor rather than 0 because
@@ -79,7 +80,16 @@ const char* sessionWireName(ScreenId id) {
     // session record exists to keep. ScreenFactory refuses to build one, which is
     // what makes the refusal happen at the push rather than silently.
     case ScreenId::Reader: return kNames[7];
-    case ScreenId::SdMissing: return kNames[8];
+    // NAMEABLE, and restorable only as far as the Reader under them is. A wake that
+    // restored the menu or the contents would put a panel over a Reader the factory
+    // refuses to build without a book -- and App::restore stops at the screen that
+    // will not build, so the stack simply lands shorter. They need names so this
+    // switch is exhaustive and so a record cannot encode them as something else,
+    // which is the failure the name table exists to prevent: an id with no case
+    // returned kNames[0] and would have stored Contents as "home".
+    case ScreenId::ReaderMenu: return kNames[8];
+    case ScreenId::Contents: return kNames[9];
+    case ScreenId::SdMissing: return kNames[10];
   }
   return kNames[0];
 }

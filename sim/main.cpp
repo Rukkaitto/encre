@@ -17,6 +17,7 @@
 #include "reader/screen_library.h"
 #include "reader/screen_sd_missing.h"
 #include "reader/scalablefont.h"
+#include "reader/screen_contents.h"
 #include "reader/screen_reader.h"
 #include "reader/screens.h"
 #include "reader/settings.h"
@@ -260,18 +261,21 @@ int main(int argc, char** argv) {
   const bool isSettings = std::strcmp(argv[1], "settings") == 0;
   const bool isSleep = std::strcmp(argv[1], "sleep") == 0;
   const bool isSleepIdle = std::strcmp(argv[1], "sleep_idle") == 0;
+  const bool isReaderMenu = std::strcmp(argv[1], "reader_menu") == 0;
+  const bool isContents = std::strcmp(argv[1], "contents") == 0;
   const bool isHomeEmpty = std::strcmp(argv[1], "home_empty") == 0;
   const bool isHomeUnopened = std::strcmp(argv[1], "home_unopened") == 0;
   const bool isLibraryScrolled = std::strcmp(argv[1], "library_scrolled") == 0;
   const bool isReader = std::strcmp(argv[1], "reader") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
-      !isHomeUnopened && !isLibraryScrolled && !isReader && !isSleepIdle) {
+      !isHomeUnopened && !isLibraryScrolled && !isReader && !isSleepIdle &&
+      !isReaderMenu && !isContents) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
                  "'sleep', 'sleep_idle', 'home_empty', 'home_unopened', "
-                 "'library_scrolled', 'reader' or 'app')\n",
+                 "'library_scrolled', 'reader', 'reader_menu', 'contents' or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -288,12 +292,66 @@ int main(int argc, char** argv) {
   // would leave it rasterising from freed heap.
   std::vector<uint8_t> bodyTtf;
   reader::ScalableFont body;
-  if (isReader) {
+  if (isReader || isReaderMenu) {
     bodyTtf = slurp(std::string(ASSETS_DIR) + "/built/literata_body.ttf");
     if (!body.init(bodyTtf.data(), bodyTtf.size(), reader::kBodyPpem)) {
       std::fprintf(stderr, "body face failed to load\n");
       return 1;
     }
+  }
+
+  if (isReaderMenu) {
+    // AN OVERLAY NEEDS ITS PARENT, so this goes through an App rooted at the Reader
+    // rather than rendering one screen: App::render walks down to the topmost
+    // non-overlay, paints it, then paints each overlay above -- and rendering
+    // top().render alone is the mistake that paints a panel floating on white, which
+    // nothing on the desktop can catch because every other path here goes through
+    // App::render.
+    reader::PageMetrics m;
+    theme.readerMetrics(w, h, fonts, body, m);
+    reader::DemoScreenFactory factory;
+    factory.setReaderBody(&body);
+    factory.setReaderMetrics(m);
+    factory.setReaderDemo();
+    factory.setContentsDemo();  // the menu's header comes from the same demo catalogue
+    std::unique_ptr<reader::Screen> page = factory.create(reader::ScreenId::Reader);
+    if (page == nullptr) {
+      std::fprintf(stderr, "the factory refused ScreenId::Reader\n");
+      return 1;
+    }
+    static_cast<reader::ReaderScreen*>(page.get())->completeIndex();
+    reader::App app(std::move(page), factory);
+    if (!app.pushScreen(reader::ScreenId::ReaderMenu)) {
+      std::fprintf(stderr, "the factory refused ScreenId::ReaderMenu\n");
+      return 1;
+    }
+    if (!renderPassesToPng(
+            [&](reader::Framebuffer& fb, reader::Plane pl) { app.render(fb, fonts, theme, pl); },
+            app.top().fidelity(), w, h, argv[2]))
+      return 1;
+    std::printf("wrote %s (%dx%d) reader menu over the page\n", argv[2], w, h);
+    return 0;
+  }
+
+  if (isContents) {
+    // A full screen, so it renders on its own -- and the row count comes from the
+    // theme, as the Library's does, because a list told nothing renders empty.
+    reader::DemoScreenFactory factory;
+    // ASKED FOR, as the Reader's demo is: the factory refuses a Contents that nothing
+    // primed, so a device that failed to read a real one shows no list rather than the
+    // board's.
+    factory.setContentsDemo();
+    factory.setContentsVisibleRows(theme.contentsVisibleRows(h, fonts));
+    std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Contents);
+    if (scr == nullptr) {
+      std::fprintf(stderr, "the factory refused ScreenId::Contents\n");
+      return 1;
+    }
+    if (!renderToPng(*scr, fonts, theme, w, h, argv[2])) return 1;
+    const auto& c = static_cast<const reader::ContentsScreen&>(*scr);
+    std::printf("wrote %s (%dx%d) %d entries, %s, focus %d\n", argv[2], w, h, c.rowCount(),
+                c.sectioned() ? "sectioned" : "flat", c.focus());
+    return 0;
   }
 
   if (isReader) {

@@ -1048,6 +1048,115 @@ void QuietTheme::renderReader(Framebuffer& fb, const FontSet& fonts, const Glyph
   drawProgressBar(fb, barX, barY, kReadBarW, kReadBarH, vm.progressPercent);
 }
 
+// --- The reader's menu -------------------------------------------------------
+//
+// design/ReaderMenu.dc.html. The SAME 340px panel the actions overlay draws -- eight
+// boards share that box (components.h lists them) -- with a header that names the book
+// and six 72px rows. So this is assembly, not new geometry: the only thing it adds to
+// the shared primitives is a row that states a value.
+constexpr int kReaderMenuPanelW = 340;
+
+void QuietTheme::renderReaderMenu(Framebuffer& fb, const FontSet& fonts,
+                                  const ReaderMenuViewModel& vm, Plane plane) {
+  // NO fb.clear(): App::render has already painted the Reader, and this screen's whole
+  // job is to be in front of it.
+  veilRect(fb, 0, 0, fb.width(), fb.height());
+
+  const int contentW = panelContentW(kReaderMenuPanelW);
+  // The book's name, elided to the caption's column less what the progress value on
+  // its right takes -- the actions panel's reasoning verbatim, and for the same reason:
+  // a name allowed to wrap makes the panel a different height for every book, which on
+  // an overlay also means a different partial-repaint footprint for every book.
+  const Font& capValue = fonts[Role::Meta400];
+  const int valueW =
+      vm.progress.empty() ? 0
+                          : capValue.measure(vm.progress, trackingEm(capValue, kHintEm)) + kBandGap;
+  const std::string caption = elideToWidth(fonts[Role::Label500], upperLatin1(vm.bookTitle),
+                                           panelCaptionColumnW(contentW) - valueW,
+                                           trackingEm(fonts[Role::Label500], kBandLabelEm));
+  const Prose label = wrapPanelCaption(fonts, caption, contentW);
+
+  const int rows = static_cast<int>(vm.rows.size());
+  int rowsH = 0;
+  for (int i = 0; i < rows; ++i) rowsH += panelRowHeight(rowRuleFor(i, rows, i == vm.focusedRow));
+  const int panelH = 2 * kPanelBorder + panelCaptionHeight(fonts, label) + rowsH;
+
+  const int x = panelLeft(fb.width(), kReaderMenuPanelW);
+  const int y = centreIn(0, fb.height(), panelH);
+  drawPanel(fb, x, y, kReaderMenuPanelW, panelH);
+
+  const int cx = x + kPanelBorder;
+  int cy = y + kPanelBorder;
+  cy += drawPanelCaption(fb, fonts, cx, cy, contentW, label, vm.progress, plane);
+  for (int i = 0; i < rows; ++i) {
+    const ListRow& row = vm.rows[static_cast<size_t>(i)];
+    const bool focused = (i == vm.focusedRow);
+    // AN INERT ROW IS DRAWN EXACTLY AS AN UNFOCUSED LIVE ONE. `row.focusable` is
+    // deliberately not read: the flag is about input, and a theme that dimmed on it
+    // would be inventing a design decision nobody made. renderSettings says the same.
+    cy += drawPanelRow(fb, fonts, cx, cy, contentW, row.label, focused, row.discloses,
+                       rowRuleFor(i, rows, focused), plane, row.value, row.trackingEm1000);
+  }
+
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+  drawOverlayHintBar(fb, fonts, hints, plane);
+}
+
+// --- The table of contents ---------------------------------------------------
+//
+// design/Contents.dc.html. Structurally Settings: a header band, then a list that
+// interleaves section headers with 64px rows, a rail when it overflows, and a hint
+// bar. The row is `drawDetailRow`, whose own comment was written anticipating this
+// screen -- "`focused` inverts it, which BookDetails never does and Contents does on
+// the chapter you are in".
+void QuietTheme::renderContents(Framebuffer& fb, const FontSet& fonts,
+                                const ContentsViewModel& vm, Plane plane) {
+  fb.clear(true);
+  const int listTop = drawHeaderBand(fb, fonts, vm.title, upperLatin1(vm.bookTitle), nullptr,
+                                     plane);
+  int y = listTop;
+
+  const int rows = static_cast<int>(vm.rows.size());
+  // ASKED, not assumed: a book with a short contents does not overflow, and the gutter
+  // exists only where the rail does -- reserving it on a list that fits leaves a white
+  // strip beside the full-bleed focused row, which reads as a rendering fault.
+  const int inset = vm.scrollable ? kListGutterW : 0;
+  const int listW = fb.width() - inset;
+
+  for (int i = 0; i < rows; ++i) {
+    const ListRow& row = vm.rows[static_cast<size_t>(i)];
+    if (row.isHeader) {
+      y += drawSectionHeader(fb, fonts, y, listW, upperLatin1(row.label), /*rule=*/i != 0, plane);
+      continue;
+    }
+    const bool focused = (i == vm.focusedRow);
+    // THE LAST DRAWN ROW HAS NO RULE, which is renderLibrary's and renderSettings' rule
+    // verbatim -- the list ends at the hint bar and a trailing hairline reads as a row
+    // that was cut off.
+    y += drawDetailRow(fb, fonts, y, row.label, row.value, focused,
+                       rowRuleFor(i, rows, focused), plane);
+  }
+
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+  // The rail spans the LIST, band to bar -- and it takes the list's top from the same
+  // value the rows started at rather than re-deriving it, because a second
+  // drawHeaderBand call here would paint the band twice as well as answer the question.
+  if (vm.scrollable)
+    drawScrollRail(fb, listTop, fb.height() - hintBarHeight(fonts, hints), vm.scrollFirst,
+                   vm.scrollCount, vm.scrollTotal, plane);
+  drawHintBar(fb, fonts, hints, plane);
+}
+
+int QuietTheme::contentsVisibleRows(int panelH, const FontSet& fonts) {
+  Hint measuring[4];
+  measuringHints(measuring);
+  const int list = panelH - headerBandHeight(fonts) - hintBarHeight(fonts, measuring);
+  const int pitch = detailRowHeight(true);
+  return pitch > 0 && list > 0 ? list / pitch : 0;
+}
+
 void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
                                 const SettingsViewModel& vm, Plane plane) {
   fb.clear(true);
@@ -1083,13 +1192,10 @@ void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
       // whichever section happens to be scrolled there. Same shape as
       // drawBookRow's last-row rule, which is also about where a row is rather
       // than which row it is.
-      const bool underTheBand = (i == 0);
-      if (!underTheBand) fb.fillRect(0, y, fb.width() - inset, kSettingsHeaderRuleH, false);
-      const int ruleH = underTheBand ? 0 : kSettingsHeaderRuleH;
-      const int textTop = y + ruleH + kSettingsHeaderPadTop;
-      drawText(fb, header, kMargin, baselineIn(header, textTop, header.lineHeight()), row.label,
-               Ink::Black, trackingEm(header, kSettingsHeaderEm), plane);
-      y += settingsHeaderHeight(fonts) - (kSettingsHeaderRuleH - ruleH);
+      // drawSectionHeader owns the box and the positional rule now -- Contents.dc.html
+      // declares the same one byte for byte, and it returns the height it actually
+      // drew so a first header being shorter cannot put the rows below it 2px low.
+      y += drawSectionHeader(fb, fonts, y, fb.width() - inset, row.label, /*rule=*/i != 0, plane);
       continue;
     }
 

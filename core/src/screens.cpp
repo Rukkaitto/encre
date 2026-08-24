@@ -1,5 +1,7 @@
 #include "reader/screens.h"
 
+#include "reader/screen_contents.h"
+#include "reader/screen_reader_menu.h"
 #include "reader/screen_sleep.h"
 
 #include "reader/screen_book_details.h"
@@ -75,6 +77,27 @@ HomeViewModel demoHomeUnopenedVm() {
   vm.holds = {false, false, false, false};
   return vm;
 }
+
+// design/Contents.dc.html's own list: two sections over eight chapters, with the
+// reader on the first. Depths, not indentation -- a depth-1 entry is a section header
+// and the rest are rows, which is how toc.h reports a real NCX (see its header: one of
+// four measured books is three levels deep and two are flat).
+//
+// A screen the simulator and the goldens must render needs a source for its values,
+// exactly as demoSleepVm and demoHomeVm do.
+std::vector<TocEntry> demoContents() {
+  return {
+      {0, 1, "BOOK I \xC2\xB7 MISS BROOKE"}, {0, 2, "I \xC2\xB7 Miss Brooke"},
+      {1, 2, "II \xC2\xB7 Sir James courts"}, {2, 2, "III \xC2\xB7 The engagement"},
+      {3, 2, "IV \xC2\xB7 Celia\xE2\x80\x99s doubts"},
+      {4, 2, "V \xC2\xB7 Mr. Casaubon writes"}, {5, 2, "VI \xC2\xB7 Mrs. Cadwallader"},
+      {6, 1, "BOOK II \xC2\xB7 OLD AND YOUNG"}, {6, 2, "VII \xC2\xB7 Rome"},
+      {7, 2, "VIII \xC2\xB7 Will Ladislaw"},
+  };
+}
+
+// The board marks its FIRST chapter row `NOW`, so the demo reader is on spine 0.
+int demoContentsSpine() { return 0; }
 
 std::vector<ScreenId> demoHomeTargets() { return {ScreenId::Library, ScreenId::Settings}; }
 
@@ -257,6 +280,36 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       auto scr = std::make_unique<SettingsScreen>(settings_, settingsSink_);
       scr->setMetrics(settingsListH_, settingsRowH_, settingsHeaderH_);
       return scr;
+    }
+    case ScreenId::ReaderMenu:
+      // THE DEMO HAS TO BE ASKED FOR. This fell back to the board's own name whenever
+      // nothing set one, and the device then showed `MIDDLEMARCH` in the header over a
+      // real book -- the substitution hid the fact that the shell had primed nothing.
+      if (!menuTitle_.empty()) return std::make_unique<ReaderMenuScreen>(menuTitle_, menuProgress_);
+      if (contentsDemo_) return std::make_unique<ReaderMenuScreen>("Middlemarch", "6%");
+      return nullptr;
+    case ScreenId::Contents: {
+      // AND HERE, WHICH IS WHERE IT ACTUALLY BIT. The fallback was
+      // `contentsToc_.empty() ? demoContents() : contentsToc_`, so a real book whose
+      // table of contents failed to LOAD showed Middlemarch's chapters -- and the
+      // failure had a cause worth seeing (a second 32 KB inflate window against a
+      // 45,840-byte floor) that the substitution completely hid.
+      //
+      // A refused push leaves the menu standing, which is wrong in a way the reader can
+      // see through, and the shell's own log says why. Same call the Reader makes.
+      if (contentsDemo_)
+        return std::make_unique<ContentsScreen>(demoContents(), "Middlemarch",
+                                                demoContentsSpine(), contentsRows_);
+      // PRIMED, not non-empty: a real book with no NCX primes an empty list and still
+      // builds, because it reads fine and simply cannot name its chapters. Only
+      // "nothing was primed at all" is refused.
+      if (!contentsPrimed_) return nullptr;
+      // THE TITLE COMES FROM THE OPENED BOOK, not from `readerBookTitle_` -- which
+      // NOTHING ASSIGNS. It is a member the factory reads and no setter writes, so the
+      // band would have drawn an empty book name on the device. `readerBook_.title` is
+      // the OPF's own, set by setReaderBook along with the spine.
+      return std::make_unique<ContentsScreen>(contentsToc_, readerBook_.title, contentsSpine_,
+                                              contentsRows_);
     }
     case ScreenId::Sleep:
       // The board's own copy, which is what the simulator and the goldens render.

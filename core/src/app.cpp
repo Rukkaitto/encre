@@ -9,6 +9,11 @@ const char* screenName(ScreenId id) {
     case ScreenId::ItemActions: return "ITEM-ACTIONS";
     case ScreenId::DeleteConfirm: return "DELETE-CONFIRM";
     case ScreenId::BookDetails: return "BOOK-DETAILS";
+    // Without these the paint and alive lines said `screen=?` for both new screens --
+    // a log label, so this is not the session record's name table (that one is a
+    // storage format and lives in session_record.cpp).
+    case ScreenId::ReaderMenu: return "READER-MENU";
+    case ScreenId::Contents: return "CONTENTS";
     case ScreenId::Settings: return "SETTINGS";
     // Sleep was missing from this switch and fell through to "?", so every log
     // line naming it named nothing. Not caught by -Wswitch because the function
@@ -30,6 +35,12 @@ App::App(std::unique_ptr<Screen> root, ScreenFactory& factory) : factory_(factor
   // only the screen itself.
   stack_.reserve(kMaxDepth);
   stack_.push_back(std::move(root));
+}
+
+const Screen& App::at(int index) const {
+  if (index < 0) index = 0;
+  if (index >= static_cast<int>(stack_.size())) index = static_cast<int>(stack_.size()) - 1;
+  return *stack_[static_cast<size_t>(index)];
 }
 
 Screen& App::top() { return *stack_.back(); }

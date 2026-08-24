@@ -45,6 +45,9 @@
 #include "reader/scalablefont.h"
 #include "reader/reading_store.h"
 #include "reader/screen_sleep.h"
+#include "reader/screen_contents.h"
+#include "reader/screen_reader_menu.h"
+#include "reader/toc.h"
 #include "reader/screens.h"
 #include "reader/session_record.h"
 #include "reader/settings.h"
@@ -340,6 +343,23 @@ static struct {
   std::string author;
   uint32_t bytes = 0;
   bool open = false;
+  // THE BOOK'S CONTENTS, read at OPEN rather than when the list is asked for.
+  //
+  // Reading it on demand could not work and the numbers were already written down:
+  // loadToc re-opens the archive, so it needs a second Inflater (~36,956 bytes of
+  // window and tables) plus the zip's 121-entry directory and the epub's 92 chapters --
+  // about 48 KB -- and the heap floor with a page on glass is 45,840. It failed to
+  // allocate every time, returned empty, and the factory substituted its demo: the
+  // device showed Middlemarch's chapters for Le Fleau.
+  //
+  // CLAUDE.md had the answer under the eager page count: "counting on a second
+  // ChapterReader would buy one pass for another 32 KB window against a 45,840-byte
+  // floor". Same window, same floor, and I did it anyway one screen later.
+  //
+  // At OPEN there is room -- openBook has released its archive and the Reader's own
+  // inflater does not exist yet, so the heap is ~133 KB. And it is cheap to keep:
+  // measured 1,161 bytes of labels for a 96-entry book, ~12 a row.
+  std::vector<reader::TocEntry> toc;
 } gReading;
 
 // HOME'S VIEW MODEL IS BUILT ONCE AND HAS TO BE REBUILT, which is the whole of a bug
@@ -357,6 +377,10 @@ static struct {
 // So it is set exactly when the thing Home draws has changed: a reading position was
 // saved. Nothing else on the device moves that block.
 static bool gHomeStale = false;
+
+// The spine Contents chose, or -1. Held for exactly one dispatch: the choice is made
+// while Contents is on top and acted on once the pop has put the Reader back.
+static int gPendingSpine = -1;
 
 // Bring-up instrumentation. Serial here is native USB CDC, so the port
 // re-enumerates when the app starts and anything printed in the first second is
@@ -1395,6 +1419,23 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
       startAt = r.cursor;
     }
   }
+  // THE CONTENTS, HERE AND NOWHERE ELSE -- see gReading.toc for why this cannot happen
+  // when the list is opened. A book with no NCX yields an empty list, which is a book
+  // that reads fine and cannot name its chapters, so a failure is logged and dropped.
+  gReading.toc.clear();
+  {
+    const uint32_t tocT = millis();
+    const uint32_t tocHeap = ESP.getFreeHeap();
+    const char* tocWhy = "";
+    const bool tocOk = reader::loadToc(gSd, path, gReading.toc, &tocWhy);
+    Serial.printf("[toc] %s: %u entries in %lums, heap %u -> %u, min %u%s%s\n",
+                  tocOk ? "read" : "REFUSED", (unsigned)gReading.toc.size(),
+                  (unsigned long)(millis() - tocT), (unsigned)tocHeap,
+                  (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+                  tocWhy[0] != '\0' ? " -- " : "", tocWhy);
+    Serial.flush();
+  }
+
   // WHAT A SAVE WILL NEED, captured now while it is all in hand.
   gReading.path = path;
   gReading.title = opened.title;
@@ -2532,6 +2573,11 @@ void setup() {
     return;
   }
   const int libraryRows = gTheme.libraryVisibleRows(logicalH, fonts);
+  // How many contents rows fit, told ONCE -- it is a property of the panel and the type
+  // ramp, exactly as the Library's is, not something to recompute per press. Setting it
+  // inside the per-press priming was how it came to be missed on a path that ran too
+  // late, and a list told nothing renders empty.
+  gFactory.setContentsVisibleRows(gTheme.contentsVisibleRows(logicalH, fonts));
   gFactory.setLibraryVisibleRows(libraryRows);
   Serial.printf("[boot] Library fits %d rows on this %dx%d logical canvas "
                 "(panel is %dx%d native)\n",
@@ -2950,6 +2996,61 @@ void loop() {
     // save that reports `unchanged`.
     if (ev.button == reader::Button::Back && gApp->top().id() == reader::ScreenId::Reader)
       saveReadingPosition("leaving");
+    // THE MENU AND THE CONTENTS ARE PRIMED BEFORE THE DISPATCH THAT PUSHES THEM, and
+    // this block sat AFTER it -- while this comment already said "before". The
+    // consequences were both reported off the device: the menu header branch tested
+    // `top == Reader` and by then the menu was on top, so the factory fell back to
+    // "Middlemarch"; and the contents branch tested `top == ReaderMenu` when Contents
+    // was already on top, so the row count was never set and the list drew ZERO rows.
+    //
+    // THIS IS THE THIRD TIME IN ONE SESSION that something needing to run before a
+    // dispatch was written after it -- the position save on leaving a book, and Home's
+    // rebuild, were the other two. The dispatch is what changes the top of the stack, so
+    // anything that asks "what is on top" to decide what to build has to run first.
+    //
+    // Keyed on the gesture rather than on the screen that results, because the priming
+    // has to happen BEFORE the push: Activate on the Reader opens the menu, and
+    // Activate on the menu's Contents row opens the list.
+    if (gReading.open && ev.button == reader::Button::Confirm) {
+      if (gApp->top().id() == reader::ScreenId::Reader) {
+        const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
+        char pct[8];
+        std::snprintf(pct, sizeof(pct), "%d%%",
+                      reader::progressPercent(gFactory.readerBook(), rd->chapterIndex(),
+                                              rd->vm().page, rd->vm().pageTotal));
+        gFactory.setReaderMenuHeader(gReading.title.empty() ? gReading.path : gReading.title,
+                                     pct);
+      } else if (gApp->top().id() == reader::ScreenId::ReaderMenu) {
+        const auto* menu = static_cast<const reader::ReaderMenuScreen*>(&gApp->top());
+        // CLOSE BOOK IS A SECOND WAY OUT, and the `leaving` save cannot see it: that one
+        // fires on Back with the Reader ON TOP, and this pops the Reader from under an
+        // overlay. Without it, closing a book through the menu loses everything since
+        // the last chapter change -- the same defect Back had, arriving by another door.
+        if (menu->vm().focusedRow == reader::ReaderMenuScreen::kCloseBook)
+          saveReadingPosition("closing");
+        if (menu->vm().focusedRow == reader::ReaderMenuScreen::kContents) {
+          // NO CARD WORK HERE. The contents were read when the book opened, where
+          // there was heap for them -- see gReading.toc.
+          int spine = 0;
+          if (gApp->depth() >= 2) {
+            // The Reader sits under this panel, and its chapter is what marks `NOW`.
+            // Reached through the stack rather than remembered, because a chapter
+            // crossing while the menu is closed would make a remembered one stale.
+            const reader::Screen& under = gApp->at(gApp->depth() - 2);
+            if (under.id() == reader::ScreenId::Reader)
+              spine = static_cast<const reader::ReaderScreen&>(under).chapterIndex();
+          }
+          gFactory.setContents(gReading.toc, spine);
+          Serial.printf("[toc] handing over %u entries, marking spine %d\n",
+                        (unsigned)gReading.toc.size(), spine);
+          Serial.flush();
+        }
+      }
+    }
+    // THE CHOSEN CHAPTER, taken while Contents is still on top -- the dispatch below
+    // pops it, and after that there is no screen left to ask.
+    if (ev.button == reader::Button::Confirm && gApp->top().id() == reader::ScreenId::Contents)
+      gPendingSpine = static_cast<const reader::ContentsScreen*>(&gApp->top())->chosenSpine();
     const uint32_t beforeDispatch = millis();
     gApp->dispatch(ev);
     // Between the dispatch and the mask refresh below, so the refresh sees
@@ -2983,15 +3084,44 @@ void loop() {
     // the Library and returning lost the page. Saved BEFORE the screen is gone --
     // hence the ordering here, after the dispatch that popped it but reading the
     // position captured while it still stood.
-    // THE BOOK IS CLOSED: forget it, so a later save cannot fire against a book that
-    // is no longer on screen. The position itself was written just above, before the
-    // dispatch that popped the Reader -- there is nothing to save here, only state to
-    // drop.
-    if (gReading.open && gApp->top().id() != reader::ScreenId::Reader) {
+    // THE BOOK IS CLOSED WHEN NO READER IS LEFT ON THE STACK -- not when one is no
+    // longer on TOP, which is what this asked and which was wrong the moment the reader
+    // menu existed. The menu and the contents are pushed ABOVE the Reader, so opening
+    // the menu declared the book closed, cleared gReading.open, and with it the gate on
+    // the priming block: pressing Contents then primed nothing, the factory refused
+    // (correctly), and the device reported "opening Contents does nothing".
+    //
+    // Scanned rather than tracked: a depth count would be a second copy of the stack's
+    // own shape, and the stack is three deep at most here.
+    bool readerOnStack = false;
+    for (int i = 0; i < gApp->depth(); ++i)
+      if (gApp->at(i).id() == reader::ScreenId::Reader) readerOnStack = true;
+    if (gReading.open && !readerOnStack) {
       gReading.open = false;
       Serial.println("[progress] book closed");
       Serial.flush();
     }
+    // A CHOSEN CHAPTER, acted on AFTER the pop that Contents' GO returns. The screen
+    // cannot jump the Reader itself: the Reader is already on the stack under it, and
+    // pushing a second one would leave the first below with its own position -- so
+    // Contents answers popTo(Reader) and names the chapter, and this moves it.
+    //
+    // Read BEFORE the dispatch would be too early (the choice is made by the press) and
+    // reading it after the pop is too late (the screen is gone), so the spine is taken
+    // off the Contents screen while it is still on top, just above.
+    if (gPendingSpine >= 0 && gApp->top().id() == reader::ScreenId::Reader) {
+      auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
+      const int want = gPendingSpine;
+      gPendingSpine = -1;
+      if (want != rd->chapterIndex()) {
+        const uint32_t t = millis();
+        const bool ok = rd->goToChapter(want);
+        Serial.printf("[toc] jump to spine %d: %s in %lums\n", want, ok ? "ok" : "REFUSED",
+                      (unsigned long)(millis() - t));
+        Serial.flush();
+      }
+    }
+
     // BACK AT HOME WITH A NEWER POINTER: rebuild it, so the reading column shows the
     // book that was just being read instead of the state Home was born in.
     //

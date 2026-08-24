@@ -1,4 +1,5 @@
 #pragma once
+#include "reader/toc.h"
 #include <string>
 #include <vector>
 
@@ -37,6 +38,9 @@ std::vector<ScreenId> demoHomeTargets();
 
 // design/Sleep.dc.html's own values -- see the definition.
 SleepViewModel demoSleepVm();
+// design/Contents.dc.html's own list, for the simulator and the goldens.
+std::vector<TocEntry> demoContents();
+int demoContentsSpine();
 // design/SleepIdle.dc.html: asleep with nothing open, so the badge without the card.
 SleepViewModel demoSleepIdleVm();
 
@@ -172,6 +176,45 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // which of the two it wants, and the shell builds its own view model either way.
   void setSleepIdle() { sleepIdle_ = true; }
 
+  // THE BOARD'S OWN CONTENTS AND MENU HEADER, ASKED FOR. Same rule as setReaderDemo,
+  // and it is here because the alternative had just shipped its consequence: the
+  // factory fell back to a demo table of contents whenever nothing had set one, so a
+  // failure to read the real one showed as MIDDLEMARCH'S CHAPTERS over Le Fleau. A
+  // silent substitution turned a diagnosable failure into a puzzle.
+  //
+  // "A factory that substitutes content is worse than one that refuses" was already
+  // written down for exactly this, one screen earlier.
+  void setContentsDemo() { contentsDemo_ = true; }
+
+  // THE BOOK'S TABLE OF CONTENTS, for the Contents screen. Set by the shell when the
+  // menu's Contents row is chosen -- reading it is card work (`toc.h` re-opens the
+  // archive) and `core/` does no storage, so the factory is handed the answer rather
+  // than the question. Empty means the book has none, which Contents renders as an
+  // empty list rather than refusing: a book with no NCX still reads.
+  // How many Contents rows fit, from Theme::contentsVisibleRows. Held here for the
+  // reason libraryVisibleRows is: the factory constructs the screen and a panel height
+  // is not something `core/` can ask for. 0 means "not told", and the list renders
+  // empty rather than guessing.
+  void setContentsVisibleRows(int n) { contentsRows_ = n; }
+
+  void setContents(std::vector<TocEntry> toc, int spine) {
+    contentsToc_ = std::move(toc);
+    contentsSpine_ = spine;
+    // PRIMED IS ITS OWN FLAG, not "the list is non-empty". A real book with no NCX
+    // primes an EMPTY list and must still build -- it reads fine and simply cannot name
+    // its chapters. Inferring from emptiness collapses that into "nothing was primed",
+    // which is a shell bug and is refused.
+    contentsPrimed_ = true;
+  }
+
+  // What the reader menu's header says. Two strings rather than a reach down the stack
+  // into the Reader: an overlay that read its parent would be a second place that
+  // knows how a Reader is shaped.
+  void setReaderMenuHeader(std::string bookTitle, std::string progress) {
+    menuTitle_ = std::move(bookTitle);
+    menuProgress_ = std::move(progress);
+  }
+
   // THE BOOK'S WHOLE GEOMETRY, from one openBook: its path, its metadata and twelve
   // bytes an entry. The reader reaches another chapter by picking a row out of it,
   // where it used to re-parse the archive per chapter.
@@ -217,6 +260,12 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   OpenedBook readerBook_{};
   bool readerDemo_ = false;
   bool sleepIdle_ = false;
+  bool contentsDemo_ = false;
+  std::vector<TocEntry> contentsToc_;
+  int contentsSpine_ = 0;
+  bool contentsPrimed_ = false;
+  int contentsRows_ = 0;
+  std::string menuTitle_, menuProgress_;
   int readerStartChapter_ = 0;
   Cursor readerStartAt_{};
   std::string readerBookTitle_;

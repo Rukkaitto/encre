@@ -1606,8 +1606,10 @@ feature: a card can be readable and refuse writes (a physical write-protect tab)
 failed save would throw the reader out of a book they can still read. The shell logs
 it and carries on.
 
-**THREE SAVE EDGES, NOT EVERY PAGE TURN**: leaving the book, crossing a chapter, and
-sleeping. A turn is ~570 ms of panel and a card write on each one would be felt; a
+**FOUR SAVE EDGES, NOT EVERY PAGE TURN**: leaving the book with Back, closing it from
+the reader menu, crossing a chapter, and sleeping. The menu's `Close book` is a second
+way out and the `leaving` save cannot see it — that one fires on Back with the Reader ON
+TOP, and Close book pops the Reader from underneath an overlay. A turn is ~570 ms of panel and a card write on each one would be felt; a
 chapter is also the most a power cut can cost. **Leaving is saved BEFORE the
 dispatch** — Back pops the Reader and once popped there is no screen left to ask where
 the reader was. Back is the only way out (`Gesture::Back` → `Action::pop()`), so this
@@ -1640,6 +1642,14 @@ can go stale, so **it is checked against the card** with one `exists` call befor
 anything is drawn — Home confidently offering to continue a book that cannot be opened
 is worse than not offering. `HomeMissing.dc.html` is the boarded state for that case
 and is not built, so a stale pointer currently falls back to the nothing-open screen.
+
+**"THE BOOK IS CLOSED" MEANS NO READER IS LEFT ON THE STACK**, not that one is no
+longer on TOP — and it asked the wrong question the moment the reader menu existed. The
+menu and the contents are pushed ABOVE the Reader, so opening the menu declared the book
+closed, cleared `gReading.open`, and with it the gate on the factory priming: pressing
+Contents primed nothing, the factory refused (correctly, now that it refuses), and the
+device reported "opening Contents does nothing". Scanned rather than tracked, because a
+depth count would be a second copy of the stack's own shape.
 
 **A WAKE CANNOT RESTORE THE READER WITHOUT ITS BOOK, and that is why sleeping on a
 page woke to the Library.** `App::restore` pushes the record's stack, the Reader's push
@@ -1980,6 +1990,215 @@ Desktop, 12-line page, 444px column, ppem 32: paginate 349 µs/page, lay out one
 ~110–140 ms there and the pagination walk is the part with no desktop analogue worth
 trusting. The `[open]` serial line reports parse, total, blocks, pages and the heap
 cost of an open for exactly this reason.
+
+## The table of contents
+
+The seventh reader layer (`toc.h`), and the last one that reads the archive rather than
+the text. The spine gives an ORDER and no names, which is why the Reader's footer says
+`CH. 03`, Book details' "Current story" is blank and there is no chapter list to jump
+from.
+
+**IT IS THE NCX, NOT THE EPUB 3 NAV DOCUMENT.** Measured over four real books before
+writing anything: every one carries an EPUB 2 `toc.ncx` and **not one** has a nav
+document. Building the modern form first would have parsed something no book on this
+card contains. The nav document is a later job and a small one — `Epub::tocPath()`
+already answers "which part is the contents" by media type, so it is the only thing
+that would need widening.
+
+**`Epub` NOTES THE NCX DURING THE OPF WALK**, which already resolves every manifest
+href — finding it later would mean re-parsing the OPF, and scanning the archive for
+`*.ncx` would be a guess where the manifest is a statement. Two routes, both needed:
+the spine's `toc` attribute is the formal one and is OPTIONAL (real files omit it), and
+the `application/x-dtbncx+xml` media type is what makes an NCX an NCX. The spine's
+answer wins where both exist.
+
+**A MEASUREMENT WAS WRONG AND IT CHANGED THE DESIGN.** This section first said real
+files are flat, and that `Contents.dc.html`'s two-level grouping "does not exist in
+real files". The check was a regex looking for a `navPoint` inside a `navPoint` that
+allowed only tags between them — real files put text there, so it reported every book
+as flat. Parsed properly:
+
+| book | entries | by depth |
+|---|---|---|
+| Le Fléau | 96 | **`{1: 10, 2: 84, 3: 2}`** |
+| Darkly Dreaming Dexter | 28 | `{1: 28}` |
+| …another edition | 31 | `{1: 31}` |
+
+So one book is three levels deep — ten section headers over eighty-four chapters — and
+the board was right. `TocEntry::depth` carries it. **The list stays LINEAR**, not a
+tree: a tree needs allocation per node and a traversal to draw, where a screen wants
+"the Nth visible row", and a depth is all the board's grouping needs. Every entry is a
+real target either way, because a section header in an NCX carries its own
+`content src`.
+
+**A LOOSE REGEX IS NOT A MEASUREMENT.** This project's habit of measuring before
+designing is what caught the nav-document question; the same habit applied carelessly
+got the nesting question backwards and wrote the wrong claim into a header. Where the
+answer decides a design, parse the thing.
+
+**COMMITTING AN ENTRY HAPPENS AT TWO MOMENTS**, and only handling one lost every
+parent: a `navPoint` is complete when it closes AND when a CHILD opens, because the
+child's start clears the label the parent had already read. A test caught it. State is
+cleared after each commit, so a parent's close adds nothing — verified by deleting the
+duplicate rule and confirming the nested case still passes, since it used to be correct
+only by accident of that rule.
+
+**AN IDENTICAL ROW TWICE IS NOISE; A DIFFERENT NAME FOR ONE TARGET IS CONTENT.** Real
+books produce both, and only the PREVIOUS entry is compared — an NCX is authored in
+reading order (0 out-of-order entries across all four), so a repeat is adjacent and a
+full scan would be quadratic for a case that cannot happen far apart.
+
+**THE LIMITATION WORTH KNOWING:** an NCX target is a file plus an optional fragment
+(`ch3.xhtml#part2`) and the reader positions by spine entry only, so several entries
+pointing into one file all land at that file's start. They are kept rather than
+merged — their labels are real content — but selecting one is approximate. That is why
+Le Fléau has 96 entries for 92 spine entries.
+
+**It re-opens the archive**, deliberately: `OpenedBook` holds twelve bytes a spine entry
+and no hrefs, and matching an NCX target to a spine index needs the real paths on both
+sides. One central-directory parse and one OPF inflate (~32 KB transient) when Contents
+opens, not when a book does. Measured 0.2–0.6 ms on the desktop for 28–96 entries, and
+labels total **1,161 bytes for 96 entries** (mean 12.1), so the resident cost is small.
+
+## The reader's menu and the chapter list
+
+`ReaderMenu.dc.html` opens on the page's Activate, and its Contents row opens
+`Contents.dc.html`. Between them they are the "go to chapter" the roadmap lists as
+`contents`.
+
+**THE MENU IS ASSEMBLY, NOT NEW GEOMETRY.** `components.h` already listed ReaderMenu
+among the eight boards sharing the overlay panel box, `kActionsPanelW` is the same 340,
+and `drawPanelRow` was already "72 tall, inset on a panel's own 20px padding, discloses
+with a chevron". The only thing the menu added to the primitives is a row that states a
+VALUE — its `Bookmarks` count — which is the other half of Home's "a row states a
+quantity or discloses a screen, never both".
+
+**IT DECLARES `Mono` WHERE THE READER DECLARES `Grayscale`.** Fidelity comes from the
+top screen, so the menu paints in one waveform instead of three and its focus moves are
+eligible for the overlay-only partial repaint (grayscale never is). The page under the
+veil is hard-thresholded for those frames — the trade, and acceptable because the menu
+is chrome and the page is the one thing here that wanted four levels. Its
+`paintFootprint` is a constant, unlike the actions panel's: all six rows are one height,
+so the panel cannot change height when the focus moves and every move takes the fast
+path.
+
+**`discloses` CANNOT BE DERIVED FROM AN EMPTY VALUE**, and deriving it drew a chevron on
+`Close book` promising a screen that does not exist. That row has neither a value nor a
+mark — it acts in place — so `ListRow` carries the flag explicitly, as `ItemActionEntry`
+already did. It also carries the board's per-row tracking, because `Close book` is
+`0.06em` where its five siblings are untracked: 1.5px a gap at Value500, ~15px across
+that label, so visible rather than pedantic. Both fixes took the menu from 3.24% to
+**3.02%** against its board.
+
+**FOUR OF THE MENU'S SIX ROWS DO NOTHING AND ARE DRAWN ANYWAY** — Settings' rule, and
+the board was edited to match before the screen was written: it had focused Typography,
+which is not built, so implementing it faithfully would have drawn a selection on a dead
+row. `Contents` and `Close book` respond. **`Close book` answers `popTo(Library)`**, and
+its absence is handled by `popTo`'s own documented rule rather than a branch: "stops at
+the root if `target` is not on the stack". A reader who opened from the Library lands
+back there; one who came through Home's CONTINUE lands on Home. Both are where they came
+from.
+
+**CONTENTS IS SETTINGS' SHAPE**: a header band, a list interleaving section headers with
+64px rows, a rail when it overflows, a hint bar. `drawDetailRow`'s own comment was
+written anticipating it — "`focused` inverts it, which BookDetails never does and
+Contents does on the chapter you are in". The section header turned out to be **byte
+identical on both boards** (`--t-meta`, 0.2em/500, `padding: 18px 24px 6px 24px`, a 2px
+`border-top` except the first), so it is `drawSectionHeader` now rather than a second
+copy — and it returns the height it ACTUALLY drew, because a first header is shorter by
+its missing rule and a caller advancing by the nominal height puts every row 2px low.
+Settings shipped that exact bug once.
+
+**A DEPTH-1 ENTRY IS A HEADER ONLY IN A BOOK THAT HAS DEEPER ONES.** Two of the four
+measured books are flat, and treating depth 1 as a header unconditionally would render
+one as nothing but headers — no focusable row, nothing to select. `sectioned()` decides
+once, from the list. **A sectioned book therefore always has a focusable row by
+construction**, since `sectioned()` requires a depth-2 entry and every such entry is a
+row; the only nothing-to-select case is an empty contents. That invariant replaced a
+test case written for a state that cannot exist.
+
+**A SECTION HEADER IS ALSO A TARGET AND IS STILL NOT FOCUSABLE.** An NCX header carries
+its own `content src`, so jumping to it would work — but the board draws it as a tracked
+caps label with its own rule and no value, which is not a row a selection sits on. The
+cost is one unreachable target per section, and its first child usually names the same
+spine entry anyway.
+
+**GO POPS TO THE READER; THE SHELL MOVES IT.** Contents cannot push a Reader — one is
+already under the menu it was opened from, and a second would leave the first below with
+its own position. So it answers `popTo(Reader)` and names the chapter, the shell reads
+`chosenSpine()` **while Contents is still on top** (the dispatch pops it, and after that
+there is no screen left to ask), and calls `ReaderScreen::goToChapter` once the Reader is
+back. That lands on page ONE of the target rather than a saved position: a reader who
+picked a chapter from a list asked for its beginning.
+
+**THE TOC IS READ WHEN THE BOOK OPENS, AND IT HAD TO BE.** It was read on demand — one
+archive re-open when Contents opened, to avoid a resident cost — and on the device that
+could not allocate: `loadToc` needs a second `Inflater` (**36,956 bytes** of window and
+tables) plus the zip's 121-entry directory and the epub's 92 chapters, about **48 KB**,
+against a heap floor with a page on glass of **45,840**. It failed every time, returned
+empty, and the factory substituted its demo — so Le Fléau showed Middlemarch's chapters.
+
+**THIS FILE ALREADY HAD THE ANSWER**, under the eager page count: "counting on a second
+`ChapterReader` would buy one pass for another 32 KB window against a 45,840-byte
+floor". Same window, same floor, one screen later.
+
+At OPEN there is room — `openBook` has released its archive and the Reader's own
+inflater does not exist yet, so the heap is ~133 KB — and it is cheap to keep: **1,161
+bytes of labels for a 96-entry book**, ~12 a row. So the shell reads it in `openBookAt`
+and hands over a copy when Contents opens, with no card work on that press at all.
+
+**AND THE FACTORY MUST NOT SUBSTITUTE.** `contentsToc_.empty() ? demoContents() : …` is
+what turned a diagnosable allocation failure into a puzzle. The demo is asked for now
+(`setContentsDemo()`, as `setReaderDemo()` is) and an unprimed Contents or reader menu
+is **refused** — a refused push leaves the menu standing, which is wrong in a way the
+reader can see through, and the log says why. `contentsPrimed_` is its own flag rather
+than "the list is non-empty", because a real book with no NCX primes an EMPTY list and
+must still build: it reads fine and simply cannot name its chapters.
+
+**`readerBookTitle_` IS NEVER ASSIGNED** — a factory member read by two cases with no
+setter anywhere, so Contents' band would have drawn an empty book name. The title comes
+from `readerBook_.title`, which is the OPF's own and arrives with the spine.
+
+`App::at(index)` exists because the menu is an overlay and the chapter it marks `NOW`
+belongs to the Reader underneath: reached through the stack rather than remembered, since
+a chapter crossing while the menu is closed would make a remembered one stale.
+
+**AND TWO STALE DEAD BUTTONS WENT WITH THIS.** The Reader's Activate answered `none()`
+behind "ReaderMenu is not built", which was true when written. The actions overlay's
+`Open` row answered `none()` behind "the Reader is Phase 3, exactly as Confirm on a
+Library row is" — and Confirm on a Library row opens a book, so that row had become a
+dead button on a shipped screen while its test kept pinning the placeholder. Both are
+live, and both tests now assert the action.
+
+## Editing this repo with scripts
+
+Most edits here are made by heredoc Python over the source. Three separate failures in
+one session came from the SAME mistake in that method, and none of them announced
+itself:
+
+| what happened | the mechanism |
+|---|---|
+| CLAUDE.md committed as **0 bytes** | `open(p,'w').write(open(p).read()...)` — Python evaluates `open(p,'w')` first, truncating before the read |
+| four TEST_CASEs silently deleted | a slice end found by scanning for a marker that also appears later |
+| **`gApp->dispatch(ev)`** and four hooks deleted | `src.index(marker)` searching from the START of the file for a slice that began mid-file |
+
+The third is the sharpest: the loop lost its dispatch, so every button on every screen
+did nothing, and the firmware still built and every one of 803 desktop tests still
+passed — `shell/` has no harness, so nothing on the desktop touches that loop.
+
+**The rules, each earned:**
+
+- **Read fully, mutate in memory, assert, write ONCE at the end.** Never call
+  `open(p,'w')` in an expression that also reads the file.
+- **Never compute a slice from `str.index` on a marker that is not unique.** Prefer
+  exact-string `replace` of the whole region, with an `assert` that the region is
+  present. If a slice is unavoidable, search for its end FROM the start index and
+  assert the result is close to it.
+- **Check the diff stat before committing.** A 128 KB deletion or a 102-line deletion
+  is obvious in one line of `git diff --stat` and invisible in a script's success
+  message. Every one of the three above would have been caught by looking.
+- **A green suite is not evidence for a shell edit.** The desktop cannot see
+  `shell/src/main.cpp`'s loop at all.
 
 ## Goldens
 

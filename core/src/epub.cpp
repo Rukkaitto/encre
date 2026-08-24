@@ -113,6 +113,7 @@ bool Epub::open(FileHandle& file, Zip& zip) {
   std::string identifierWithId;  // the dc:identifier whose id matches uniqueIdRef
   std::vector<std::pair<std::string, std::string>> manifest;  // id -> path
   std::vector<std::string> spine;
+  std::string tocId;  // the spine's `toc` attribute, resolved against the manifest below
 
   {
     Xml x(opf);
@@ -139,7 +140,25 @@ bool Epub::open(FileHandle& file, Zip& zip) {
           if (!resolveHref(opfPath, x.attr("href"), resolved))
             return fail("a manifest item's href does not resolve inside the archive");
           if (manifest.size() >= kMaxChapters) return fail("the manifest is too large");
+          // THE NCX, NOTED IN PASSING. A table of contents lives in a manifest item
+          // like any other part, so the one walk that resolves every href is the
+          // cheapest place to notice it -- finding it later would mean re-parsing the
+          // OPF, and scanning the archive for `*.ncx` would be a guess where the
+          // manifest is a statement.
+          //
+          // BY MEDIA TYPE, which is the reliable half. The formal route is the
+          // spine's `toc` attribute naming a manifest id, and that is honoured below
+          // where the spine is read -- but the attribute is optional and real files
+          // omit it, while the media type is what makes an NCX an NCX.
+          if (x.attr("media-type") == "application/x-dtbncx+xml" && tocPath_.empty())
+            tocPath_ = resolved;
           manifest.emplace_back(std::string(x.attr("id")), std::move(resolved));
+        } else if (tag == "spine") {
+          // The spine's `toc` names the manifest id of the table of contents. It
+          // takes precedence over the media-type guess above: it is the book saying
+          // which of its parts is the contents, where the media type only says which
+          // parts COULD be.
+          if (x.hasAttr("toc")) tocId.assign(x.attr("toc"));
         } else if (tag == "itemref" && x.hasAttr("idref")) {
           if (spine.size() >= kMaxChapters) return fail("the spine is too long");
           spine.emplace_back(x.attr("idref"));
@@ -174,6 +193,18 @@ bool Epub::open(FileHandle& file, Zip& zip) {
   // 4. The spine, resolved through the manifest. A missing item is a refusal and
   //    not a skip: a spine is a reading ORDER, and dropping an entry gives the
   //    reader a book missing a chapter with no way to know it happened.
+  // The spine's own answer wins over the media-type one, and a `toc` naming an id the
+  // manifest does not list is simply ignored -- a missing table of contents is not a
+  // reason to refuse a book, which is the same call this layer makes nowhere else
+  // (a missing spine item IS a refusal, because a spine is a reading order).
+  if (!tocId.empty()) {
+    for (const auto& item : manifest)
+      if (item.first == tocId) {
+        tocPath_ = item.second;
+        break;
+      }
+  }
+
   if (spine.empty()) return fail("the spine is empty, so there is nothing to read");
   chapters_.reserve(spine.size());
   for (const std::string& idref : spine) {

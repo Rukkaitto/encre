@@ -167,6 +167,16 @@ class ReaderScreen : public Screen {
   uint32_t chapterBytes() const { return chapter_.sizeBytes(); }
   int chapterCount() const { return book_.chapterCount(); }
 
+  // JUMP TO A SPINE ENTRY, for the table of contents. False leaves the screen exactly
+  // where it was -- `openChapterAt` restores the previous chapter on failure, which is
+  // what makes a refused jump safe rather than a blank page with a stale index.
+  //
+  // Lands on page ONE of the target, not on a saved position: a reader who picked a
+  // chapter from a list asked for its beginning. Skipping an entry that paginates to
+  // nothing is openChapterAt's own behaviour and is right here too -- a cover selected
+  // from the contents lands on the first thing with text rather than on a blank page.
+  bool goToChapter(int spine);
+
   // Whether the chapter's page count is still unknown. The shell completes it inside
   // the refinement; see the class comment.
   bool indexPending() const;

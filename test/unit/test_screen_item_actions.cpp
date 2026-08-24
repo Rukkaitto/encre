@@ -93,8 +93,10 @@ TEST_CASE("the actions overlay's four rows do what the plan says, including noth
   libapp::LibraryApp app = actionsOver(theme, r.fonts, 800);
   auto& actions = static_cast<reader::ItemActionsScreen&>(app.app.top());
 
-  // Open: the Reader is Phase 3.
-  CHECK(actions.onEvent(kConfirm).kind == Action::Kind::None);
+  // OPEN opens the book. This said "the Reader is Phase 3" and asserted none() -- and
+  // Confirm on a Library row opens a book now, so this row had become a dead button on
+  // a shipped screen while the test kept pinning the placeholder.
+  CHECK(actions.onEvent(kConfirm).kind == Action::Kind::Open);
 
   CHECK(actions.onEvent(kDown).kind == Action::Kind::Redraw);
   const Action details = actions.onEvent(kConfirm);

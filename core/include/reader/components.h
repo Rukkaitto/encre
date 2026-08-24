@@ -591,6 +591,30 @@ inline constexpr int kDetailRowContentH = 64;
 inline constexpr int kDetailRowRuleH = 1;
 
 int detailRowHeight(bool rule);
+
+// --- A list's section header -------------------------------------------------
+//
+// `--t-meta` tracked caps at 0.2em/500 in an 18/6 padding box under a 2px rule, and
+// it is BYTE-IDENTICAL on two boards: Settings.dc.html's `DEVICE` and
+// Contents.dc.html's `BOOK I - MISS BROOKE` declare the same
+// `padding: 18px 24px 6px 24px` and the same `border-top: 2px`. One box on two boards
+// is a primitive, not a copy -- so this is shared rather than written twice, which is
+// this project's own rule about the second copy.
+//
+// THE RULE IS POSITIONAL: the FIRST header in a window has none, because the header
+// band's own 2px border is already the separation and a second doubles it into a 4px
+// slab. `drawSectionHeader` returns the height it ACTUALLY drew for that reason -- a
+// first header is shorter by its missing rule, and a caller that advanced by the
+// nominal height would put every row below it 2px low. Settings shipped exactly that
+// bug once, in its section-final rule.
+inline constexpr int kSectionRuleH = 2;
+inline constexpr int kSectionPadTop = 18;
+inline constexpr int kSectionPadBottom = 6;
+inline constexpr int kSectionEm = 200;
+
+int sectionHeaderHeight(const FontSet& fonts);
+int drawSectionHeader(Framebuffer& fb, const FontSet& fonts, int y, int w,
+                      std::string_view label, bool rule, Plane plane = Plane::Bw);
 int drawDetailRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label,
                   std::string_view value, bool focused, bool rule, Plane plane = Plane::Bw);
 
@@ -670,8 +694,12 @@ int drawPanelCaption(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
 // trailing chevron: LibraryActions gives one to Open and Book details, which
 // lead somewhere, and none to Mark as finished or Delete..., which act in place.
 int panelRowHeight(bool rule);
+// `value` is the row's right slot where the board gives one, and empty where it draws
+// a chevron -- a row states a quantity or discloses a screen, never both. Defaulted
+// empty so the actions panel, which only ever discloses, is unchanged.
 int drawPanelRow(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
                  std::string_view label, bool focused, bool discloses, bool rule,
-                 Plane plane = Plane::Bw);
+                 Plane plane = Plane::Bw, std::string_view value = {},
+                 int labelTrackingEm1000 = 0);
 
 }  // namespace reader

@@ -236,14 +236,72 @@ struct ReaderViewModel {
   int pageTotal = 0;
 };
 
-struct SettingsRow {
+// A ROW IN A LIST THAT INTERLEAVES SECTION HEADERS WITH ITEMS, and where some items
+// do not respond.
+//
+// Settings defined this shape; the reader menu and the table of contents both wanted
+// it, which makes them the second and third copies -- so it is extracted rather than
+// retyped, on this project's own rule. `SettingsRow` remains as an alias, because
+// Settings' code reads better naming its own rows and nothing about the shape is
+// Settings-specific.
+//
+// The three screens use it differently and that is the point of it being one type:
+// Settings has headers and inert rows, the reader menu has inert rows and no headers,
+// and Contents has headers (an NCX's depth-1 entries) with every row live.
+struct ListRow {
   std::string label;
-  std::string value;      // empty on a section header
+  std::string value;      // empty on a section header, or where the row discloses
   bool isHeader = false;  // tracked caps, its own rule, never focusable
-  // Whether this row responds to CHANGE. An unfocusable row is drawn EXACTLY as
-  // an unfocused focusable one -- the flag is about input, not about appearance,
-  // and the theme must not be tempted to dim it.
+  // WHETHER THIS ROW LEADS SOMEWHERE, drawn as a chevron. It cannot be derived from an
+  // empty `value`: the reader menu's `Close book` has neither a value NOR a chevron,
+  // because it acts in place rather than disclosing a screen -- and deriving it drew a
+  // chevron promising a screen that does not exist. ItemActionEntry carries the same
+  // flag explicitly, for the same reason.
+  bool discloses = false;
+  // The board's own tracking where it gives a row one. `Close book` is `0.06em` and its
+  // five siblings are untracked, which is 1.5px a gap at Value500 -- about 15px across
+  // that label, so it is visible rather than pedantic.
+  int trackingEm1000 = 0;
+  // Whether this row responds to a press. An unfocusable row is drawn EXACTLY as an
+  // unfocused focusable one -- the flag is about input, not about appearance, and the
+  // theme must not be tempted to dim it.
   bool focusable = false;
+};
+using SettingsRow = ListRow;
+
+// design/ReaderMenu.dc.html: the overlay the Reader's Activate opens.
+//
+// An OVERLAY, so the page stays visible under a veil -- the reader has not left the
+// book, they have asked it a question. Four of its six rows are not built, and they
+// are DRAWN and skipped by the focus, which is Settings' rule: a row that cannot be
+// reached cannot mislead, where a row that focuses and then does nothing is the silent
+// no-op this project has been bitten by twice.
+struct ReaderMenuViewModel {
+  std::string bookTitle;  // the panel's header, shouted by the theme
+  std::string progress;   // its right slot: "6%"
+  std::vector<ListRow> rows;
+  int focusedRow = 0;
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
+// design/Contents.dc.html: the book's chapters, and a jump to one.
+//
+// A full screen rather than an overlay -- it is a list you read and scroll, not a
+// question about the page behind it. Its rows come from `toc.h`, whose entries carry a
+// DEPTH: an NCX's depth-1 entries become section headers and the rest become rows,
+// which is what draws the board's `BOOK I - MISS BROOKE` grouping. A flat NCX (two of
+// the four books measured) yields no headers at all and the screen is simply a list.
+struct ContentsViewModel {
+  std::string title;      // "CONTENTS"
+  std::string bookTitle;  // the band's right slot
+  // The VISIBLE slice, as every windowed list here reports it -- never the whole book.
+  std::vector<ListRow> rows;
+  int focusedRow = -1;  // within `rows`, or -1 when the focus is off-window
+  bool scrollable = false;
+  int scrollFirst = 0, scrollCount = 0, scrollTotal = 0;
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
 };
 
 struct SettingsViewModel {
