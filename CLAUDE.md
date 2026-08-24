@@ -1254,12 +1254,29 @@ LAST page, and an entry with no pages is skipped in whichever direction the read
 was already going. Locating a chapter costs a reopen and a directory parse, ~76 ms
 on device, against a ~520 ms refresh.
 
-The label is the SPINE POSITION, not a chapter number — spine 2 shows `CH. 03`.
-**A table of contents now EXISTS** (`reader/toc.h`, read from the book's NCX) and
-`Contents` is built, so the position is no longer the only thing honestly known — but
-`ReaderScreen::updateChapterLabel` still prints `CH. %02d` and its comment still
-claims otherwise. Wiring the footer to the TOC is an open follow-up, not a
-constraint.
+**THE LABEL IS THE CHAPTER'S NAME**, from `toc.h`, and it was a spine position for two
+phases because the spine gives an order and no names. This paragraph tracked that in
+three states — first "the position is the only thing honestly known", then "a table of
+contents now exists but `updateChapterLabel` still prints `CH. %02d`", and now the
+wiring. The second of those was a **follow-up recorded in prose**, which is the shape
+this file warns about: it stayed true for exactly as long as nobody read it.
+
+**THE POSITION IS STILL THE FALLBACK**, for a book with no contents and for a chapter its
+contents does not mention — spine entry 0 of a real book is its cover, and nothing names
+that. One slot, the best name available for it.
+
+**AND THE HEADER'S PRIORITY INVERTED WITH IT.** The theme drew the chapter FIRST and
+reserved its width, because `CH. 01` was `white-space: nowrap` and the book title was the
+run with slack to give up. A NAME is the long run now ("PREMIÈRE PARTIE : À LIRE AVANT
+L'ACHAT"), so the board gives it `min-width: 0` and the title keeps its space — with the
+title capped so the chapter can never be squeezed below `kReadChapterFloor`, enough for
+the fallback form plus an ellipsis. Both runs elide; either can be arbitrarily long on a
+real card.
+
+**AND ONE LABEL THAT LOOKS LIKE A BUG IS NOT ONE.** Le Fléau's contents names a chapter
+`S...`, and that is the book's own data: the chapter has no title and opens "Sally." with
+the S as a drop cap, so the publisher generated the label from its first characters. The
+parse is right; the ebook is thin.
 
 **`<p>&nbsp;</p>` IS HOW AN EBOOK MAKES VERTICAL SPACE**, and it is everywhere: the
 first text chapter of `Le Fléau` opens with three of them. Trimming only ASCII space
@@ -2102,6 +2119,28 @@ the root if `target` is not on the stack". A reader who opened from the Library 
 back there; one who came through Home's CONTINUE lands on Home. Both are where they came
 from.
 
+**THE ROW'S RIGHT SLOT HAS HELD TWO WRONG THINGS.** It was `P. 21`, a page number for a
+place in the book, which needs every chapter paginated (~49 s). That became `CH. 01`, the
+spine position — free, true, and WORSE on a real book: chapter names carry their own
+numbering, so a row read `Chapitre 1.        CH. 09`, two numbering systems side by side
+with neither explaining the other. It is `NOW` on the row being read and empty elsewhere:
+the NAME is the content of a table of contents, and the full width belongs to it.
+
+**THE LABEL ELIDES, AND `drawDetailRow` DID NOT.** It drew the label at full length from
+the left margin, so a long one ran under the value and off the panel. Book details'
+labels are field names and never overflowed, which is why it only surfaced when real
+chapter names went through the same primitive. Fixed IN the primitive — a row that
+overflows its own box is wrong on every screen that draws one.
+
+The test for it first reported the FOCUSED row as an overflow: that row is full-bleed
+inverted, so its fill legitimately inks both margins. `x=0` is the discriminator — a
+full-bleed fill inks it and an overrunning label never reaches it, since every label
+starts at `kMargin`.
+
+**HELD UP OR DOWN SCROLLS**, `declareRepeat` on the two front movers as the Library does.
+The SIDE buttons are movers now too, and a held one on a list still resolves as `Long`
+and is dropped — worth deciding deliberately for both screens rather than changing one.
+
 **CONTENTS IS SETTINGS' SHAPE**: a header band, a list interleaving section headers with
 64px rows, a rail when it overflows, a hint bar. `drawDetailRow`'s own comment was
 written anticipating it — "`focused` inverts it, which BookDetails never does and
@@ -2202,6 +2241,17 @@ passed — `shell/` has no harness, so nothing on the desktop touches that loop.
   message. Every one of the three above would have been caught by looking.
 - **A green suite is not evidence for a shell edit.** The desktop cannot see
   `shell/src/main.cpp`'s loop at all.
+- **VERIFY THE WRITE LANDED, every time**, with a `grep` for a marker from the new text.
+  A script with several `assert`s writes ONCE at the end, so a later assert failing means
+  NONE of the earlier edits were written — and if the next command in the chain is a
+  `git commit`, it commits the code without the documentation. That happened twice: a
+  save was documented that did not exist, and then this section's own edits were skipped
+  while the commit describing them went through. Both times the assert failed for the
+  dullest reason — the anchor text had already been edited by a previous commit, so it no
+  longer matched what I remembered.
+- **AN ANCHOR IS NOT WHAT YOU REMEMBER WRITING.** Read the target region first. This file
+  is edited constantly; a paragraph tracked its own subject through three states in one
+  session, and each rewrite invalidated the anchor the next one guessed at.
 
 ## Goldens
 
