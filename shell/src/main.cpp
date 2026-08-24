@@ -9,6 +9,8 @@
 #include <Preferences.h>  // esp_restart(), for the RETRY-after-a-pull branch
 #include <XteinkDetect.h>
 
+#include <cstdarg>
+#include <cstdio>
 #include <memory>
 #include <optional>
 #include <string>
@@ -191,18 +193,47 @@ constexpr uint32_t kRefineQuietMs = 5000;
 // The page count of a chapter too big to have been counted before its first paint
 // (ReaderScreen::kEagerCountBytes -- 63% of a real book's chapters are under it).
 //
-// ITS OWN WINDOW, AND A MUCH SHORTER ONE, because the two jobs are not alike: the
-// count is cheap and NEEDED -- the footer reads "1 / —" until it lands -- and the
-// refinement is expensive and cosmetic. Sharing the refinement's 5 s made a
-// four-page chapter take four seconds to show its total, which was the report that
-// found this.
+// IT WAS 1200 ms AND THAT WAS WRONG, ON THE DEVICE'S OWN EVIDENCE. The reasoning
+// was "the count is cheap and NEEDED where the refinement is expensive and
+// cosmetic, so it can have a much shorter window", and the first half of that is
+// simply false. Measured over a real book, `[index]` lines:
 //
-// It does NOT repaint. Counting changes a number in the footer and nothing else, and
-// a ~570 ms paint plus a waveform to fill in one number is a bad trade -- so the
-// total appears on the next page turn, which for a chapter this long comes well
-// inside the ~23 s a reader spends on a page. If the reader sits still instead, the
-// refinement paints it.
-constexpr uint32_t kCountQuietMs = 1200;
+//     [index] pages=315 in 3605ms      [index] pages=203 in 2092ms
+//
+// against `[refine] done total=1409ms`. **The count is the MORE expensive of the
+// two**, by up to 2.5x, and like the refinement it runs from loop() and cannot be
+// interrupted. So it could not justify a shorter window than the cheaper job it
+// was being contrasted with.
+//
+// What that cost, from the same run -- two presses inside a count:
+//
+//     [i] #31 UP ... | wait=1304 ... | total=1356ms  paint=none
+//     [i] #53 UP ... | wait=1962 disp=874 ... | total=3401ms
+//
+// A press that took 1.3 s to be NOTICED and then did nothing visible, and one that
+// took 3.4 s end to end -- against a 505-550 ms chrome interaction. 1200 ms is
+// barely two paints, so it fired into exactly the gap a reader turning pages
+// leaves, which is the identical mistake kRefineQuietMs records at 600 ms and for
+// the identical reason.
+//
+// SO IT IS THE REFINEMENT'S NUMBER NOW, because it is answering the refinement's
+// question: has the user stopped, not is the user between turns. The ordering that
+// made two windows seem necessary is preserved by the code rather than by the
+// constants -- the count block sits above the refinement block in loop(), so the
+// count still lands and repaints before the four-level upgrade reads the footer.
+//
+// WHAT IT COSTS is the footer reading `3 / —` for longer on a big chapter. That is
+// the designed state (design/Reader.dc.html states the em dash and why), and it is
+// strictly better than seconds of dead buttons. The case the old comment was
+// written for -- "a four-page chapter took four seconds to show its total" -- can
+// no longer reach this path at all: four pages is under kEagerCountBytes, so it is
+// counted before its first paint and never deferred.
+//
+// (It DOES repaint, on the fast path -- the "it does not" this comment used to end
+// with was corrected once already, by a device log showing the counted total taking
+// four seconds to reach the glass because the next page turn almost never won the
+// race against the refinement's window.)
+constexpr uint32_t kCountQuietMs = kRefineQuietMs;
 static bool gRefineOwed = false;
 
 // Everything the render needs has to outlive setup(), so it lives here rather
@@ -383,11 +414,16 @@ static struct {
 // view model it was constructed with -- and that one was built at boot, before any
 // pointer existed.
 //
-// A REBUILD IS NOT FREE, which is why this is a flag and not an unconditional
-// refresh: homeVmForCard() counts /books, and a listing costs ~2.7 ms an ENTRY on
-// this card -- ~1.1 s on a 203-book library, since macOS writes a `._name` beside
-// every file. Paying that on every Back to Home would be a second's pause on a
-// navigation that is currently instant.
+// A REBUILD USED TO BE THE MOST EXPENSIVE THING ON A NAVIGATION, which is why this
+// is a flag and not an unconditional refresh: homeVmForCard() counts /books, and a
+// listing costs ~2.7 ms an ENTRY on this card -- ~1.1 s on a 203-book library, since
+// macOS writes a `._name` beside every file. Paying that on every Back to Home would
+// be a second's pause on a navigation that is currently instant.
+//
+// The count is CACHED now (see libraryCountForHome), so the rebuild costs a
+// last.json read and an exists() rather than a second of listing -- but the flag
+// stays, because "cheap" is not "free" and the rule it encodes is still the honest
+// one: rebuild when the thing Home draws has changed, not on a timer.
 //
 // So it is set exactly when the thing Home draws has changed: a reading position was
 // saved. Nothing else on the device moves that block.
@@ -397,11 +433,119 @@ static bool gHomeStale = false;
 // while Contents is on top and acted on once the pop has put the Reader back.
 static int gPendingSpine = -1;
 
+// --- ONE LINE PER INTERACTION ------------------------------------------------
+//
+// Everything from the button going down to the panel being finished with, as a
+// single greppable record. It exists because the cost was spread across four log
+// families that could not be added up: `[input]` said a press happened, `[paint]
+// done` said what the panel cost, and the stretch between them -- a Library
+// rescan, an archive open for an author, a chapter jump, an NVS write, two SD
+// writes for a reading position -- had no line at all. A navigation that felt slow
+// could not say which part was slow, which is how a second of directory listing
+// sat on the critical path of a Back with nobody able to name it.
+//
+// A BURST IS ONE INTERACTION. Several events can drain before a single paint --
+// that is the coalescing the loop exists to do -- so this reports the FIRST
+// event's timestamp against the paint that eventually satisfied it, with `ev=N`
+// saying how many presses went into that frame. Reporting per event would divide
+// one visible response between N lines and make every one of them look fast.
+//
+// The fields, in the order the time is spent:
+//   wait   -- the event's own timestamp to this loop picking it up. Raw queue,
+//             loop wake, drain. NOT the whole input latency: the input task's
+//             10 ms poll and the SDK's 5 ms debounce happen before the timestamp
+//             exists and are only knowable from the constants.
+//   pre    -- work done because of what is on top BEFORE the dispatch: the details
+//             author's archive open, the contents hand-over, the position save on
+//             the way out of a book.
+//   disp   -- App::dispatch. A push builds a screen, so a Library's rescan is here.
+//   post   -- everything the dispatch made necessary: handleOpen, a chapter jump,
+//             Home's rebuild, the session record.
+//   render -- drawing the frame, all passes.
+//   up     -- the plane upload to the controller, before the waveform starts.
+//   wave   -- the waveform, plus the baseline sync that follows it.
+//   ser    -- how much of `total` was this device talking to the USB host. See
+//             logf(): unplugged it is ~0, and `net` is then the whole story.
+//   net    -- total minus ser. THE NUMBER TO COMPARE ACROSS RUNS.
+struct Interaction {
+  bool pending = false;
+  uint32_t at = 0;      // InputEvent::at of the first event of the burst
+  uint32_t popped = 0;  // millis() when this loop began handling it
+  uint32_t preMs = 0, dispMs = 0, postMs = 0;
+  uint32_t logAtStart = 0;
+  int events = 0;
+  reader::Button button = reader::Button::Back;
+  reader::PressKind kind = reader::PressKind::Short;
+  // screenName returns a string literal, so holding the pointer is safe and
+  // holding a std::string here would allocate on the path being measured.
+  const char* from = "";
+};
+static Interaction gAct;
+static uint32_t gInteractionSeq = 0;
+
 // Bring-up instrumentation. Serial here is native USB CDC, so the port
 // re-enumerates when the app starts and anything printed in the first second is
 // lost to the host. Every stage is announced and the last one reached is
 // repeated from loop(), so a hang can be located by attaching at any time.
 static const char* stage = "boot";
+
+// --- THE COST OF WATCHING ----------------------------------------------------
+//
+// SERIAL BLOCKS WHEN A HOST IS ATTACHED, AND IS FREE WHEN ONE IS NOT. Both halves
+// matter and the second is why this was never noticed:
+//
+//   * unplugged -- HWCDC::write and HWCDC::flush both short-circuit on
+//     `!isCDC_Connected()` and just drain the ring. Microseconds. This is the
+//     device's real behaviour, since it spends its life on battery.
+//   * plugged    -- write() sends what fits the TX ring and then BLOCKS until the
+//     host takes the rest; flush() spins `delay(1)` until the ring empties, up to
+//     tx_timeout_ms (100). So a burst of lines costs real milliseconds.
+//
+// The consequence is that EVERY TIMING TAKEN OVER USB IS INFLATED BY THE CABLE,
+// and a device measured while being watched is not the device. This project has
+// already paid once for a measurement artefact read as a device fact -- a 2.5 s
+// delay in setup() was recorded as the panel detection's cost because the first
+// timestamped line was read as time zero.
+//
+// So the cost is MEASURED rather than removed. Every log site inside a paint's
+// critical window goes through logf(), which accumulates into gLogMs, and the
+// per-interaction line reports it as `ser=` beside a `net=` with it subtracted.
+// Unplugged that field reads ~0 and `net == total`, which is the proof that the
+// numbers either side of it are the device's own.
+static uint32_t gLogMs = 0;
+
+static void logf(const char* fmt, ...) {
+  const uint32_t t0 = millis();
+  va_list args;
+  va_start(args, fmt);
+  // vprintf rather than a formatted buffer: Print::printf builds into a stack
+  // buffer of its own and this part is not what costs anything.
+  char line[512];
+  const int n = vsnprintf(line, sizeof(line), fmt, args);
+  va_end(args);
+  if (n > 0) Serial.write(reinterpret_cast<const uint8_t*>(line),
+                          static_cast<size_t>(n) < sizeof(line) ? static_cast<size_t>(n)
+                                                                : sizeof(line) - 1);
+  gLogMs += millis() - t0;
+}
+
+// The flush half, timed the same way. SEPARATE FROM logf ON PURPOSE: this file has
+// 92 print sites and 63 flushes, so folding the flush into logf would ADD one at
+// the 29 sites that deliberately do not have it -- a behaviour change smuggled in
+// under a measurement change, and a slower device than the one being measured.
+// Every existing Serial.flush() became one of these and nothing else moved.
+static void logFlush() {
+  const uint32_t t0 = millis();
+  // NOT logFlush(). The sweep that turned every `Serial.flush();` in this file
+  // into a `logFlush();` matched this line too, because this function's body IS
+  // one of the call sites it was rewriting -- so it replaced itself with a call to
+  // itself and would have been a stack-protection fault on the first log line.
+  // CLAUDE.md records the identical shape from a previous session; a pattern that
+  // matches more than was meant is the whole family.
+  Serial.flush();
+  gLogMs += millis() - t0;
+}
+
 // Every bring-up stage already prints, so carrying the heap on that line turns
 // the existing stage trail into a heap TRACE for nothing -- and the trace is what
 // a single figure cannot give.
@@ -479,20 +623,20 @@ static void reportAndResetCrumbs(esp_reset_reason_t rst, esp_sleep_wakeup_cause_
     }
   }
   if (gCrumbs.magic == kCrumbMagic) {
-    Serial.printf("[prev] the boot before this one: reset=%u wake=%u mount=%s "
-                  "firstProbe=%s@%lums firstPaint=%lums lastStage=%s\n",
-                  (unsigned)gCrumbs.resetReason, (unsigned)gCrumbs.wakeCause,
-                  gCrumbs.mountOk ? "ok" : "FAILED",
-                  !gCrumbs.probeFirstDone ? "never-ran"
+    logf("[prev] the boot before this one: reset=%u wake=%u mount=%s "
+         "firstProbe=%s@%lums firstPaint=%lums lastStage=%s\n",
+         (unsigned)gCrumbs.resetReason, (unsigned)gCrumbs.wakeCause,
+         gCrumbs.mountOk ? "ok" : "FAILED",
+         !gCrumbs.probeFirstDone ? "never-ran"
                                           : (gCrumbs.probeFirstOk ? "ok" : "FAILED"),
                   (unsigned long)gCrumbs.probeFirstMs, (unsigned long)gCrumbs.firstPaintMs,
                   gCrumbs.lastStage[0] ? gCrumbs.lastStage : "(none)");
     if (gCrumbs.cardLostMs != 0)
-      Serial.printf("[prev] ...and the card stopped answering at %lums, detected by: %s\n",
-                    (unsigned long)gCrumbs.cardLostMs, gCrumbs.lostBy);
+      logf("[prev] ...and the card stopped answering at %lums, detected by: %s\n",
+           (unsigned long)gCrumbs.cardLostMs, gCrumbs.lostBy);
     else
-      Serial.printf("[prev] ...and the card answered for the whole of it\n");
-    Serial.flush();
+      logf("[prev] ...and the card answered for the whole of it\n");
+    logFlush();
   }
   gCrumbs = WakeCrumbs{};
   gCrumbs.magic = kCrumbMagic;
@@ -513,9 +657,9 @@ static void mark(const char* s) {
   // read as time zero, which put a 2.5 s delay in setup() down as the panel
   // detection's cost. Everything before the first timestamp is invisible, so
   // every stage gets one.
-  Serial.printf("[stage] %lums %s heap=%u min=%u\n", (unsigned long)millis(), s,
-                (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
-  Serial.flush();
+  logf("[stage] %lums %s heap=%u min=%u\n", (unsigned long)millis(), s,
+       (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
+  logFlush();
 }
 
 // --- Storage -------------------------------------------------------------
@@ -544,15 +688,15 @@ static void mark(const char* s) {
 static bool bringUpStorage(const char* why) {
   const bool begun = gSd.mount();  // logs "[sd] mount ok" / "... FAILED"
   if (!begun) {
-    Serial.printf("[sd] %s: no usable storage\n", why);
-    Serial.flush();
+    logf("[sd] %s: no usable storage\n", why);
+    logFlush();
     return false;
   }
   const bool wasFirst = !gSdBeganOnce;
   gSdBeganOnce = true;
   if (gSd.probe() && gSd.mounted()) {
-    Serial.printf("[sd] %s: storage usable (mount confirmed by a root-directory read)\n", why);
-    Serial.flush();
+    logf("[sd] %s: storage usable (mount confirmed by a root-directory read)\n", why);
+    logFlush();
     return true;
   }
   // begin() said yes and the card would not answer. Two ways to get here:
@@ -570,18 +714,18 @@ static bool bringUpStorage(const char* why) {
   // a silent "storage unusable" on a lying begin() is the hard version of this
   // bug to find, and one printf is cheap insurance against reintroducing it.
   if (wasFirst) {
-    Serial.printf("[sd] %s: begin() succeeded but the card would not answer a directory "
-                  "read; not treating storage as usable\n",
-                  why);
+    logf("[sd] %s: begin() succeeded but the card would not answer a directory "
+         "read; not treating storage as usable\n",
+         why);
   } else {
-    Serial.printf("[sd] %s: begin() returned true WITHOUT touching the card -- it "
-                  "short-circuits on its own `initialized` flag -- and the card is not "
-                  "answering. A card that mounted once and was then pulled cannot be "
-                  "re-mounted without a REBOOT; staying on the SD-missing screen (and this "
-                  "caller should have restarted instead -- see handleRetry)\n",
-                  why);
+    logf("[sd] %s: begin() returned true WITHOUT touching the card -- it "
+         "short-circuits on its own `initialized` flag -- and the card is not "
+         "answering. A card that mounted once and was then pulled cannot be "
+         "re-mounted without a REBOOT; staying on the SD-missing screen (and this "
+         "caller should have restarted instead -- see handleRetry)\n",
+         why);
   }
-  Serial.flush();
+  logFlush();
   return false;
 }
 
@@ -654,13 +798,13 @@ class ShellSettingsSink : public reader::SettingsSink {
     // the one thing still lying.
     gFactory.setSettings(gSettings);
     const bool wrote = reader::saveSettings(gSd, gSettings);
-    Serial.printf("[settings] sleepAfterMs=%lu fullRefreshEvery=%d fullOnTransition=%d -> %s\n",
-                  (unsigned long)gSettings.sleepAfterMs, gSettings.fullRefreshEvery,
-                  (int)gSettings.fullOnTransition,
-                  wrote ? "applied and saved"
+    logf("[settings] sleepAfterMs=%lu fullRefreshEvery=%d fullOnTransition=%d -> %s\n",
+         (unsigned long)gSettings.sleepAfterMs, gSettings.fullRefreshEvery,
+         (int)gSettings.fullOnTransition,
+         wrote ? "applied and saved"
                         : "APPLIED BUT NOT SAVED (the change is live; it will not survive a "
                           "reboot)");
-    Serial.flush();
+    logFlush();
     return wrote;
   }
 };
@@ -672,17 +816,17 @@ static ShellSettingsSink gSettingsSink;
 static void loadAndApplySettings() {
   const bool ok = reader::loadSettings(gSd, gSettings);
   if (ok) {
-    Serial.printf("[boot] settings loaded from %s\n", reader::kSettingsPath);
+    logf("[boot] settings loaded from %s\n", reader::kSettingsPath);
   } else {
     const SettingsVerdict v = settingsFailure(gSd);
-    Serial.printf("[boot] settings %s: %s\n", v.defaulted ? "DEFAULTED" : "CORRECTED", v.reason);
+    logf("[boot] settings %s: %s\n", v.defaulted ? "DEFAULTED" : "CORRECTED", v.reason);
   }
   applySettings();
-  Serial.printf("[boot] settings in force: sleepAfterMs=%lu fullRefreshEvery=%d "
-                "fullOnTransition=%d\n",
-                (unsigned long)gSettings.sleepAfterMs, gSettings.fullRefreshEvery,
-                (int)gSettings.fullOnTransition);
-  Serial.flush();
+  logf("[boot] settings in force: sleepAfterMs=%lu fullRefreshEvery=%d "
+       "fullOnTransition=%d\n",
+       (unsigned long)gSettings.sleepAfterMs, gSettings.fullRefreshEvery,
+       (int)gSettings.fullOnTransition);
+  logFlush();
 }
 
 // --- /books ---------------------------------------------------------------
@@ -726,16 +870,16 @@ static void loadAndApplySettings() {
 static void ensureBooksDir(const char* why) {
   if (gSd.exists(reader::kBooksRoot)) return;  // the ordinary case, and silent
   if (gSd.mkdirs(reader::kBooksRoot)) {
-    Serial.printf("[sd] %s: no %s on the card, so it was created -- put EPUBs there and they "
-                  "appear in the Library\n",
-                  why, reader::kBooksRoot);
+    logf("[sd] %s: no %s on the card, so it was created -- put EPUBs there and they "
+         "appear in the Library\n",
+         why, reader::kBooksRoot);
   } else {
-    Serial.printf("[sd] %s: %s does not exist and could NOT be created (card write-protected, "
-                  "full, or failing). The Library will open and list nothing, and Home's "
-                  "LIBRARY row will show no count rather than a 0\n",
-                  why, reader::kBooksRoot);
+    logf("[sd] %s: %s does not exist and could NOT be created (card write-protected, "
+         "full, or failing). The Library will open and list nothing, and Home's "
+         "LIBRARY row will show no count rather than a 0\n",
+         why, reader::kBooksRoot);
   }
-  Serial.flush();
+  logFlush();
 }
 
 // --- The card-liveness probes --------------------------------------------
@@ -796,33 +940,33 @@ static uint32_t gLastSdDeepPollMs = 0;
 static void armCardProbes(const char* why) {
   if (!gSd.exists(reader::kSettingsPath)) {
     if (reader::saveSettings(gSd, gSettings)) {
-      Serial.printf("[sd] %s: no settings file on the card, so this build's defaults were "
-                    "written to %s -- hand-editable from here on\n",
-                    why, reader::kSettingsPath);
+      logf("[sd] %s: no settings file on the card, so this build's defaults were "
+           "written to %s -- hand-editable from here on\n",
+           why, reader::kSettingsPath);
     } else {
-      Serial.printf("[sd] %s: there is no settings file and %s could NOT be written (card "
-                    "full, write-protected, or failing). Running on defaults\n",
-                    why, reader::kSettingsPath);
+      logf("[sd] %s: there is no settings file and %s could NOT be written (card "
+           "full, write-protected, or failing). Running on defaults\n",
+           why, reader::kSettingsPath);
     }
-    Serial.flush();
+    logFlush();
   }
 
   if (gSd.useFileProbeTarget(reader::kSettingsPath)) {
-    Serial.printf("[sd] %s: fast probe reads %s every %lu ms. Opening it walks the root "
-                  "directory, then /.reader, then a data sector -- three sectors against "
-                  "SdFat's one 512-byte cache, so it cannot be answered from RAM\n",
-                  why, gSd.probeTargetPath(), (unsigned long)kSdPollMs);
+    logf("[sd] %s: fast probe reads %s every %lu ms. Opening it walks the root "
+         "directory, then /.reader, then a data sector -- three sectors against "
+         "SdFat's one 512-byte cache, so it cannot be answered from RAM\n",
+         why, gSd.probeTargetPath(), (unsigned long)kSdPollMs);
   } else {
     // The one state that must never be quiet. Reaching here means the settings
     // file is absent or unreadable after the attempt above, so probe() is back to
     // the root-directory read that could not see a pulled card at all.
-    Serial.printf("[sd] %s: fast probe DEGRADED to a root-directory read -- %s is missing or "
-                  "would not open, so there is no file to read. That read can be served from "
-                  "SdFat's sector cache, which is exactly the defect this target exists to "
-                  "avoid; the %lu ms FAT-scan backstop is what will catch a pull now\n",
-                  why, reader::kSettingsPath, (unsigned long)kSdDeepPollMs);
+    logf("[sd] %s: fast probe DEGRADED to a root-directory read -- %s is missing or "
+         "would not open, so there is no file to read. That read can be served from "
+         "SdFat's sector cache, which is exactly the defect this target exists to "
+         "avoid; the %lu ms FAT-scan backstop is what will catch a pull now\n",
+         why, reader::kSettingsPath, (unsigned long)kSdDeepPollMs);
   }
-  Serial.flush();
+  logFlush();
 
   // ARM THE BACKSTOP ONLY IF THE FAST PROBE IS DEGRADED.
   //
@@ -843,29 +987,29 @@ static void armCardProbes(const char* why) {
   // scan is the only check there is, and fourteen seconds every twenty-five is
   // better than never noticing. That path also announces itself loudly above.
   if (gSd.probeTarget() == SdFileSystem::ProbeTarget::File) {
-    Serial.printf("[sd] %s: FAT-scan backstop NOT armed -- the fast probe reads a real file, "
-                  "which the device has confirmed detects a pull in ~2 s. The scan costs "
-                  "~14 s on this card and is only worth that when the fast probe is "
-                  "degraded\n",
-                  why);
-    Serial.flush();
+    logf("[sd] %s: FAT-scan backstop NOT armed -- the fast probe reads a real file, "
+         "which the device has confirmed detects a pull in ~2 s. The scan costs "
+         "~14 s on this card and is only worth that when the fast probe is "
+         "degraded\n",
+         why);
+    logFlush();
     return;
   }
   const uint32_t t0 = millis();
   const bool armed = gSd.armDeepProbe();
   const uint32_t scanMs = millis() - t0;
   if (armed) {
-    Serial.printf("[sd] %s: FAT-scan backstop armed (%llu bytes used, scan took %lu ms) and "
-                  "re-runs every %lu ms -- it is the check that cannot be served from cache\n",
-                  why, (unsigned long long)gSd.deepProbeBaselineBytes(), (unsigned long)scanMs,
-                  (unsigned long)kSdDeepPollMs);
+    logf("[sd] %s: FAT-scan backstop armed (%llu bytes used, scan took %lu ms) and "
+         "re-runs every %lu ms -- it is the check that cannot be served from cache\n",
+         why, (unsigned long long)gSd.deepProbeBaselineBytes(), (unsigned long)scanMs,
+         (unsigned long)kSdDeepPollMs);
   } else {
-    Serial.printf("[sd] %s: FAT-scan backstop NOT armed -- the scan reported 0 bytes used, "
-                  "which is also how it reports its own failure, so it could never tell a "
-                  "dead card from this volume. The fast probe is the only card check\n",
-                  why);
+    logf("[sd] %s: FAT-scan backstop NOT armed -- the scan reported 0 bytes used, "
+         "which is also how it reports its own failure, so it could never tell a "
+         "dead card from this volume. The fast probe is the only card check\n",
+         why);
   }
-  Serial.flush();
+  logFlush();
   // Both clocks restart here, so the first poll of each kind lands one full
   // interval after this -- the reads above have just answered both questions.
   gLastSdPollMs = millis();
@@ -885,10 +1029,50 @@ static void armCardProbes(const char* why) {
 // 0: "no books" and "could not look" are different claims, and the second one is
 // not ours to make on the user's behalf.
 //
-// It is one directory listing plus one per folder, at boot and after a retry
-// only. Not on a paint, and not on a timer.
+// IT IS ONE DIRECTORY LISTING PLUS ONE PER FOLDER, AND IT IS CACHED, because the
+// sentence above this one used to say "at boot and after a retry only. Not on a
+// paint, and not on a timer" and that stopped being true the moment Home learned
+// to rebuild itself: gHomeStale puts this on the critical path of a Back from a
+// book, which is ~1.1 s of directory listing on a 203-book card -- for one
+// integer -- with the user holding a button and nothing on the panel.
+//
+// THE CACHE IS SOUND BECAUSE OF WHAT V1 IS. The count can only change if a book
+// arrives or leaves. Nothing can arrive: transfer is card-only, so putting a book
+// on the card means the card is in a computer and this firmware is not running.
+// So the only mutation is a delete, and every delete goes through
+// SdFileSystem::remove -- see removals() there for why the counter lives on the
+// filesystem rather than on the Library. gStorageUsable is the other half: a card
+// that went away or came back invalidates the count for a different reason, and
+// both are checked rather than either being assumed to imply the other.
+//
+// Wi-Fi transfer returns in V2 and books WILL be able to arrive while the device
+// runs. That is the change that has to invalidate this, and it is a one-line
+// invalidation next to whatever writes the file.
+static int gLibraryCount = 0;
+static bool gLibraryCountValid = false;
+static uint32_t gLibraryCountAtRemovals = 0;
+static bool gLibraryCountWhileUsable = false;
+
+static int libraryCountForHome() {
+  if (gLibraryCountValid && gLibraryCountAtRemovals == gSd.removals() &&
+      gLibraryCountWhileUsable == gStorageUsable)
+    return gLibraryCount;
+  const uint32_t t0 = millis();
+  gLibraryCount = gStorageUsable ? reader::BookList::countLibrary(gSd, reader::kBooksRoot) : -1;
+  gLibraryCountValid = true;
+  gLibraryCountAtRemovals = gSd.removals();
+  gLibraryCountWhileUsable = gStorageUsable;
+  // The cost, once, where it is paid. A second of listing that shows up on a
+  // navigation the user thinks is instant is exactly the kind of thing that has
+  // to be in the log rather than inferred from a device feeling slow.
+  logf("[library] counted %d book(s) in %s in %lums\n", gLibraryCount,
+       reader::kBooksRoot, (unsigned long)(millis() - t0));
+  logFlush();
+  return gLibraryCount;
+}
+
 static reader::HomeViewModel homeVmForCard() {
-  const int books = gStorageUsable ? reader::BookList::countLibrary(gSd, reader::kBooksRoot) : -1;
+  const int books = libraryCountForHome();
 
   // NO BOOKS ON THE CARD is its own state, not Home with a blank count: there is
   // nothing to continue, so the whole reading column goes and the board's
@@ -908,8 +1092,8 @@ static reader::HomeViewModel homeVmForCard() {
   reader::HomeViewModel vm =
       books == 0 ? reader::demoHomeEmptyVm() : reader::demoHomeUnopenedVm();
   if (books == 0) {
-    Serial.printf("[boot] /books holds no readable book: Home shows the empty state\n");
-    Serial.flush();
+    logf("[boot] /books holds no readable book: Home shows the empty state\n");
+    logFlush();
     return vm;
   }
 
@@ -962,7 +1146,7 @@ static reader::HomeViewModel homeVmForCard() {
     const uint32_t listHeld = h1 - ESP.getFreeHeap();
     const size_t rowN = rows.size();
 
-    Serial.printf(
+    logf(
         "[library] %s entries=%u rows=%u | raw %lu B (%lu/entry, %luus) | "
         "list %lu B (%lu/row, %luus) | peak %lu B | sizeof DirEntry=%u "
         "BookEntry=%u\n",
@@ -989,15 +1173,15 @@ static reader::HomeViewModel homeVmForCard() {
     // CARD, not more arithmetic: `make epubs-bulk N=200`.
     if (rowN) {
       const uint32_t perRow = listHeld / rowN;
-      Serial.printf("[library] extrapolated retained: 256 rows = %lu KB, "
-                    "1024 rows = %lu KB, 4096 rows = %lu KB "
-                    "(inflated %ux by rows<entries)\n",
-                    (unsigned long)(perRow * 256u / 1024u),
-                    (unsigned long)(perRow * 1024u / 1024u),
-                    (unsigned long)(perRow * 4096u / 1024u),
-                    (unsigned)(rowN ? (rawN + rowN - 1) / rowN : 1));
+      logf("[library] extrapolated retained: 256 rows = %lu KB, "
+           "1024 rows = %lu KB, 4096 rows = %lu KB "
+           "(inflated %ux by rows<entries)\n",
+           (unsigned long)(perRow * 256u / 1024u),
+           (unsigned long)(perRow * 1024u / 1024u),
+           (unsigned long)(perRow * 4096u / 1024u),
+           (unsigned)(rowN ? (rawN + rowN - 1) / rowN : 1));
     }
-    Serial.flush();
+    logFlush();
   }
 #endif  // ENCRE_LIBRARY_PROBE
   // demoHomeTargets() runs parallel to this menu and its first entry is the
@@ -1022,8 +1206,8 @@ static reader::HomeViewModel homeVmForCard() {
     reader::LastRead last;
     if (reader::loadLastRead(gSd, last)) {
       if (!gSd.exists(last.bookPath)) {
-        Serial.printf("[progress] the last book is gone from the card: %s\n",
-                      last.bookPath.c_str());
+        logf("[progress] the last book is gone from the card: %s\n",
+             last.bookPath.c_str());
       } else {
         vm = reader::demoHomeVm();     // the reading-column shape, then every field
         vm.nothingToContinue = false;  // ...replaced, because none of it is this book
@@ -1043,10 +1227,10 @@ static reader::HomeViewModel homeVmForCard() {
         vm.chapterLabel = label;
         vm.focusedMenuIndex = -1;  // the CONTINUE block, which exists again
         vm.hints = {"READ", "SELECT", "UP", "DOWN"};
-        Serial.printf("[progress] Home continues \"%s\" at %d%%, spine %d of %d\n",
-                      vm.title.c_str(), last.percent, last.spine + 1, last.spineCount);
+        logf("[progress] Home continues \"%s\" at %d%%, spine %d of %d\n",
+             vm.title.c_str(), last.percent, last.spine + 1, last.spineCount);
       }
-      Serial.flush();
+      logFlush();
     }
   }
 
@@ -1057,11 +1241,11 @@ static reader::HomeViewModel homeVmForCard() {
   // the strength of `books` alone undid it two lines later. Unreachable today
   // (demoHomeVm always fills two rows) and exactly the kind of latent hole a
   // shared catalogue change opens.
-  Serial.printf("[boot] Home's LIBRARY row: %s (%s)\n",
-                patched ? vm.menu[0].value.c_str() : "blank",
-                books >= 0 ? "books in /books plus one level down"
+  logf("[boot] Home's LIBRARY row: %s (%s)\n",
+       patched ? vm.menu[0].value.c_str() : "blank",
+       books >= 0 ? "books in /books plus one level down"
                            : "/books could not be read, so no count is claimed");
-  Serial.flush();
+  logFlush();
   return vm;
 }
 
@@ -1149,16 +1333,16 @@ static void saveWhereWeAre() {
     // The other half of defect "wake came back to Home": a save that fails here
     // leaves a record that either does not exist or describes an older stack, and
     // the wake then looks like the restore failed when it was the write.
-    Serial.printf("[session] NOT stored: %s will not be restored by the next wake\n",
-                  reader::encodeSessionStack(stack).c_str());
-    Serial.flush();
+    logf("[session] NOT stored: %s will not be restored by the next wake\n",
+         reader::encodeSessionStack(stack).c_str());
+    logFlush();
     gLogged = false;
     return;
   }
   if (changed) {
-    Serial.printf("[session] stored %s; a wake will come back here\n",
-                  reader::encodeSessionStack(stack).c_str());
-    Serial.flush();
+    logf("[session] stored %s; a wake will come back here\n",
+         reader::encodeSessionStack(stack).c_str());
+    logFlush();
   }
   gLastLogged = stack;
   gLogged = true;
@@ -1304,9 +1488,9 @@ static void saveReadingPosition(const char* why) {
   // Home now has something different to say, whether or not the card took the write:
   // the pointer in hand is newer than the one Home was built from either way.
   gHomeStale = true;
-  Serial.printf("[progress] %s: spine=%d block=%d line=%d %d%% -- position %s, pointer %s\n", why,
-                p.spine, p.block, p.line, last.percent, outcome(a), outcome(b));
-  Serial.flush();
+  logf("[progress] %s: spine=%d block=%d line=%d %d%% -- position %s, pointer %s\n", why,
+       p.spine, p.block, p.line, last.percent, outcome(a), outcome(b));
+  logFlush();
 }
 
 // WHAT OPENING THIS CHAPTER COST, AND WHICH BRANCH TOOK IT. A chapter under
@@ -1315,9 +1499,9 @@ static void saveReadingPosition(const char* why) {
 // slow again" could not be told from "the count ran and was cheap". `indexPending()`
 // IS the branch: false means the pages are already known.
 static void logChapterOpen(const reader::ReaderScreen* rd, uint32_t elapsedMs) {
-  Serial.printf("[chapter] spine=%d bytes=%u %s pages=%d in %lums\n", rd->chapterIndex(),
-                (unsigned)rd->chapterBytes(), rd->indexPending() ? "deferred" : "counted",
-                rd->pageCount(), (unsigned long)elapsedMs);
+  logf("[chapter] spine=%d bytes=%u %s pages=%d in %lums\n", rd->chapterIndex(),
+       (unsigned)rd->chapterBytes(), rd->indexPending() ? "deferred" : "counted",
+       rd->pageCount(), (unsigned long)elapsedMs);
 }
 
 // Defined below, because it is long and handleOpen reads better as the resolution of
@@ -1337,25 +1521,25 @@ static void handleOpen() {
   if (gApp->top().id() == reader::ScreenId::Home) {
     reader::LastRead last;
     if (!reader::loadLastRead(gSd, last)) {
-      Serial.println("[open] CONTINUE with no saved book");
+      logf("[open] CONTINUE with no saved book\n");
       return;
     }
     // Checked again here, not just when Home was built: the card can have changed in
     // between, and openBook would fail less clearly.
     if (!gSd.exists(last.bookPath)) {
-      Serial.printf("[open] CONTINUE names a book that is gone: %s\n", last.bookPath.c_str());
+      logf("[open] CONTINUE names a book that is gone: %s\n", last.bookPath.c_str());
       return;
     }
     path = last.bookPath;
   } else {
     reader::LibraryScreen* lib = gFactory.library();
     if (lib == nullptr) {
-      Serial.println("[open] no Library to ask");
+      logf("[open] no Library to ask\n");
       return;
     }
     const reader::LibraryItem* item = lib->focusedItem();
     if (item == nullptr || item->entry.isDir) {
-      Serial.println("[open] nothing selected, or a folder");
+      logf("[open] nothing selected, or a folder\n");
       return;
     }
     // BookEntry::name is a leaf name and never a path (booklist.h), so the path is
@@ -1402,10 +1586,10 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
     // free BLOCK is the number that actually decides: the reader's allocations are
     // single contiguous buffers, and a heap with 140 KB free in 40 KB pieces cannot
     // serve a 60 KB chapter.
-    Serial.printf("[open] %s REFUSED: %s (heap %u free, largest block %u)\n", path.c_str(),
-                  why, (unsigned)ESP.getFreeHeap(),
-                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-    Serial.flush();
+    logf("[open] %s REFUSED: %s (heap %u free, largest block %u)\n", path.c_str(),
+         why, (unsigned)ESP.getFreeHeap(),
+         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    logFlush();
     return false;
   }
   const uint32_t t1 = millis();
@@ -1443,10 +1627,10 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
                                                   gFactory.readerMetrics().columnW);
     const reader::PositionRestore r = reader::restoreFrom(saved, fit);
     static const char* kFitWord[] = {"exact", "relaid", "rebound", "unusable"};
-    Serial.printf("[progress] found a position for this book: spine=%d block=%d line=%d, fit=%s\n",
-                  saved.spine, saved.block, saved.line,
-                  kFitWord[static_cast<int>(fit)]);
-    Serial.flush();
+    logf("[progress] found a position for this book: spine=%d block=%d line=%d, fit=%s\n",
+         saved.spine, saved.block, saved.line,
+         kFitWord[static_cast<int>(fit)]);
+    logFlush();
     if (r.any) {
       startChapter = r.spine;
       startAt = r.cursor;
@@ -1456,9 +1640,9 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
       haveAnchor = true;
     }
     if (saved.hasAnchor())
-      Serial.printf("[progress] and a way back: spine=%d block=%d line=%d, %s\n",
-                    saved.anchorSpine, saved.anchorBlock, saved.anchorLine,
-                    r.anchorAny ? "restored" : "DROPPED (fit below exact)");
+      logf("[progress] and a way back: spine=%d block=%d line=%d, %s\n",
+           saved.anchorSpine, saved.anchorBlock, saved.anchorLine,
+           r.anchorAny ? "restored" : "DROPPED (fit below exact)");
   }
   // THE CONTENTS, HERE AND NOWHERE ELSE -- see gReading.toc for why this cannot happen
   // when the list is opened. A book with no NCX yields an empty list, which is a book
@@ -1469,12 +1653,12 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
     const uint32_t tocHeap = ESP.getFreeHeap();
     const char* tocWhy = "";
     const bool tocOk = reader::loadToc(gSd, path, gReading.toc, &tocWhy);
-    Serial.printf("[toc] %s: %u entries in %lums, heap %u -> %u, min %u%s%s\n",
-                  tocOk ? "read" : "REFUSED", (unsigned)gReading.toc.size(),
-                  (unsigned long)(millis() - tocT), (unsigned)tocHeap,
-                  (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
-                  tocWhy[0] != '\0' ? " -- " : "", tocWhy);
-    Serial.flush();
+    logf("[toc] %s: %u entries in %lums, heap %u -> %u, min %u%s%s\n",
+         tocOk ? "read" : "REFUSED", (unsigned)gReading.toc.size(),
+         (unsigned long)(millis() - tocT), (unsigned)tocHeap,
+         (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+         tocWhy[0] != '\0' ? " -- " : "", tocWhy);
+    logFlush();
   }
 
   // WHAT A SAVE WILL NEED, captured now while it is all in hand.
@@ -1521,19 +1705,19 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // ever had, so this is the worst case across everything the device has done since
   // boot, the inflate included. If it approaches zero, the next layer added to the
   // reader panics like the first one did.
-  Serial.printf("[stack] loopTask free at worst: %u bytes of %u\n",
-                (unsigned)(uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t)),
-                (unsigned)getArduinoLoopTaskStackSize());
-  Serial.printf("[open] %s -> \"%s\" ch=1/%d: locate=%lums total=%lums pages=%d "
-                "entry=%uB heap %u -> %u (cost %ld) min=%u pushed=%d%s%s\n",
-                path.c_str(), opened.title.c_str(), opened.chapterCount(),
-                (unsigned long)(t1 - t0), (unsigned long)(millis() - t0), pages,
-                (unsigned)opened.locate(0).compressedSize, (unsigned)heapBefore,
-                (unsigned)ESP.getFreeHeap(),
-                (long)heapBefore - (long)ESP.getFreeHeap(),
-                (unsigned)ESP.getMinFreeHeap(), pushed ? 1 : 0,
-                readerWhy[0] != '\0' ? " reader-refused: " : "", readerWhy);
-  Serial.flush();
+  logf("[stack] loopTask free at worst: %u bytes of %u\n",
+       (unsigned)(uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t)),
+       (unsigned)getArduinoLoopTaskStackSize());
+  logf("[open] %s -> \"%s\" ch=1/%d: locate=%lums total=%lums pages=%d "
+       "entry=%uB heap %u -> %u (cost %ld) min=%u pushed=%d%s%s\n",
+       path.c_str(), opened.title.c_str(), opened.chapterCount(),
+       (unsigned long)(t1 - t0), (unsigned long)(millis() - t0), pages,
+       (unsigned)opened.locate(0).compressedSize, (unsigned)heapBefore,
+       (unsigned)ESP.getFreeHeap(),
+       (long)heapBefore - (long)ESP.getFreeHeap(),
+       (unsigned)ESP.getMinFreeHeap(), pushed ? 1 : 0,
+       readerWhy[0] != '\0' ? " reader-refused: " : "", readerWhy);
+  logFlush();
   return true;
 }
 
@@ -1542,13 +1726,13 @@ static void handleRetry() {
   gApp->clearRetryRequest();
   mark("sd-retry");
   if (gSdBeganOnce) {
-    Serial.printf("[sd] retry: the card mounted earlier this boot and was then lost. "
-                  "SDCardManager::begin() short-circuits on its own `initialized` flag and "
-                  "the SPI path has no end()/unmount(), so it cannot be re-initialised in "
-                  "process -- RESTARTING, which re-runs the whole mount path\n");
-    Serial.flush();
+    logf("[sd] retry: the card mounted earlier this boot and was then lost. "
+         "SDCardManager::begin() short-circuits on its own `initialized` flag and "
+         "the SPI path has no end()/unmount(), so it cannot be re-initialised in "
+         "process -- RESTARTING, which re-runs the whole mount path\n");
+    logFlush();
     mark("sd-retry-restart");
-    Serial.flush();  // the restart is immediate; nothing buffered survives it
+    logFlush();  // the restart is immediate; nothing buffered survives it
     esp_restart();
   }
   if (!bringUpStorage("retry")) {
@@ -1691,11 +1875,11 @@ static void pollCardPresence(uint32_t now) {
   gCrumbs.cardLostMs = now == 0 ? 1u : now;  // 0 is the "never" sentinel
   snprintf(gCrumbs.lostBy, sizeof(gCrumbs.lostBy), "%s", by);
   saveCrumbs();  // the event this whole record exists for
-  Serial.printf("[sd] THE CARD IS NO LONGER ANSWERING -- pulled, or failed. Detected by %s. "
-                "Routing to the SD-missing screen; RETRY will restart the device, because a "
-                "card lost after a mount cannot be re-mounted in process\n",
-                by);
-  Serial.flush();
+  logf("[sd] THE CARD IS NO LONGER ANSWERING -- pulled, or failed. Detected by %s. "
+       "Routing to the SD-missing screen; RETRY will restart the device, because a "
+       "card lost after a mount cannot be re-mounted in process\n",
+       by);
+  logFlush();
   buildSdMissingApp();
   mark("sd-lost");
 }
@@ -1713,9 +1897,9 @@ static void detectAndSelectBoard() {
   uint8_t s1 = 0, s2 = 0;
   const auto verdict = freeink::detectXteinkVerdict(&s1, &s2);
   const bool isX3 = (verdict == freeink::XteinkVerdict::X3Confirmed);
-  Serial.printf("[detect] i2c verdict=%s (pass scores %u/%u) -> %s\n",
-                verdict == freeink::XteinkVerdict::X3Confirmed    ? "X3Confirmed"
-                : verdict == freeink::XteinkVerdict::X4Confirmed  ? "X4Confirmed"
+  logf("[detect] i2c verdict=%s (pass scores %u/%u) -> %s\n",
+       verdict == freeink::XteinkVerdict::X3Confirmed    ? "X3Confirmed"
+       : verdict == freeink::XteinkVerdict::X4Confirmed  ? "X4Confirmed"
                                                                   : "Inconclusive",
                 s1, s2, isX3 ? "X3" : "X4");
 
@@ -1724,18 +1908,18 @@ static void detectAndSelectBoard() {
 
   const bool promoted = freeink::applyXteinkDisplayController();
   const auto& diag = freeink::getXteinkDisplayProbeDiag();
-  Serial.printf("[detect] controller probe valid=%d promoted=%d "
-                "ver=%02X %02X %02X %02X %02X flg=%02X\n",
-                diag.valid, promoted, diag.ver[0], diag.ver[1], diag.ver[2],
-                diag.ver[3], diag.ver[4], diag.flg);
+  logf("[detect] controller probe valid=%d promoted=%d "
+       "ver=%02X %02X %02X %02X %02X flg=%02X\n",
+       diag.valid, promoted, diag.ver[0], diag.ver[1], diag.ver[2],
+       diag.ver[3], diag.ver[4], diag.flg);
 
   if (isX3 && BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8279) {
     BoardConfig::selectDevice(BoardConfig::Board::XteinkX3Uc8279);
-    Serial.printf("[detect] promoted profile to XteinkX3Uc8279\n");
+    logf("[detect] promoted profile to XteinkX3Uc8279\n");
   }
-  Serial.printf("[detect] active controller=%u\n",
-                (unsigned)BoardConfig::ACTIVE.displayController);
-  Serial.flush();
+  logf("[detect] active controller=%u\n",
+       (unsigned)BoardConfig::ACTIVE.displayController);
+  logFlush();
 
   // SPI must be up, with MISO, before the driver owns the display pins.
   SPI.begin(EPD_SCLK, SPI_MISO, EPD_MOSI, EPD_CS);
@@ -1813,8 +1997,8 @@ static bool bindFrameToDriver(const char* why) {
   if (bytes == nullptr) {
     // Lent out. Not fatal and not a bug: it is a phase that borrowed the frame
     // and has not given it back, and the panel keeps showing its last image.
-    Serial.printf("[frame] %s: driver framebuffer is lent out; nothing to paint into\n", why);
-    Serial.flush();
+    logf("[frame] %s: driver framebuffer is lent out; nothing to paint into\n", why);
+    logFlush();
     gFrame.reset();
     gFrameBytes = nullptr;
     gFrameContentsUnknown = true;
@@ -1839,18 +2023,18 @@ static bool bindFrameToDriver(const char* why) {
   // exactly this many bytes and still laid out wrong, so it is not the whole
   // proof -- test_rotate.cpp's byte-identity case against rotate90CCW is).
   if (gFrame->sizeBytes() != static_cast<int>(display.getBufferSize())) {
-    Serial.printf("[fatal] frame view %d bytes != driver buffer %u (panel %dx%d)\n",
-                  gFrame->sizeBytes(), (unsigned)display.getBufferSize(),
-                  (int)display.getDisplayWidth(), (int)display.getDisplayHeight());
-    Serial.flush();
+    logf("[fatal] frame view %d bytes != driver buffer %u (panel %dx%d)\n",
+         gFrame->sizeBytes(), (unsigned)display.getBufferSize(),
+         (int)display.getDisplayWidth(), (int)display.getDisplayHeight());
+    logFlush();
     mark("frame-view-REFUSED");
     gFrame.reset();
     gFrameBytes = nullptr;
     return false;
   }
-  Serial.printf("[frame] %s: viewing driver framebuffer %p, %d bytes, logical %dx%d CCW\n", why,
-                (const void*)gFrameBytes, gFrame->sizeBytes(), gFrame->width(), gFrame->height());
-  Serial.flush();
+  logf("[frame] %s: viewing driver framebuffer %p, %d bytes, logical %dx%d CCW\n", why,
+       (const void*)gFrameBytes, gFrame->sizeBytes(), gFrame->width(), gFrame->height());
+  logFlush();
   return true;
 }
 
@@ -2006,9 +2190,43 @@ static void paintGray() {
 // frameBuffer directly in single-buffer mode (EINK_DISPLAY_SINGLE_BUFFER_MODE=1,
 // which is how this firmware is built), so the frame it sends is the one just
 // rendered.
+//
+// SPLIT INTO ITS TWO HALVES, AND THE SPLIT IS A MEASUREMENT, NOT A BEHAVIOUR
+// CHANGE. `displayBuffer` is `displayStart` then `displayFinish` with nothing in
+// between (Uc8279Driver::display is literally those two lines), and
+// `triggerDisplay`/`completeDisplay` are the same pair with the seam exposed --
+// verified against FreeInkDisplay.cpp for the configuration this firmware builds:
+//
+//   * EINK_DISPLAY_SINGLE_BUFFER_MODE, so both take the `prev == nullptr` branch
+//     and neither swaps buffers.
+//   * `_inverted` and `_inversionDirty` are false forever -- nothing here calls
+//     setInverted -- so triggerDisplay's fall-back-to-displayBuffer guard and
+//     displayBuffer's FAST->HALF promotion are both dead for us.
+//   * completeDisplay() is syncPendingAsync(), which is the driver's
+//     displayFinish() and nothing else.
+//
+// What it buys is the one division the log could not make: `up=` is the 52,272-byte
+// plane write plus the bank load plus the trigger, which is OURS and bounded by
+// the 20 MHz SPI clock; `wave=` is the BUSY wait plus the post-waveform DTM1 sync.
+// Before this, both were "panel" and a slow paint could not say which.
+//
+// NOTE WHAT `wave=` STILL CONTAINS: displayFinish waits out the waveform and THEN
+// writes the 52 KB baseline plane again, so ~21 ms of it is a second SPI upload
+// happening after the image is already on glass. That part is not latency the user
+// sees; it is latency the NEXT press waits behind.
+static uint32_t gUploadMs = 0;
+static uint32_t gWaveMs = 0;
+
 static void showOnePass(reader::RefreshMode mode) {
-  display.displayBuffer(mode == reader::RefreshMode::Full ? EInkDisplay::FULL_REFRESH
-                                                          : EInkDisplay::FAST_REFRESH);
+  const EInkDisplay::RefreshMode m = mode == reader::RefreshMode::Full
+                                         ? EInkDisplay::FULL_REFRESH
+                                         : EInkDisplay::FAST_REFRESH;
+  const uint32_t t0 = millis();
+  display.triggerDisplay(m);
+  const uint32_t t1 = millis();
+  display.completeDisplay();
+  gUploadMs += t1 - t0;
+  gWaveMs += millis() - t1;
 }
 
 // The hard 1-bit path, and what every chrome screen ships on: one render pass
@@ -2057,14 +2275,16 @@ static void renderTop() {
   // contradiction -- it means the cadence had a fast slot available and this
   // screen could not use it. Nothing declares Grayscale or Dithered today, so in
   // practice every paint is `fidelity=mono`.
-  Serial.printf("[paint] screen=%s fidelity=%s mode=%s sinceFull=%d\n",
-                reader::screenName(gApp->top().id()),
-                fidelity == reader::Fidelity::Grayscale  ? "gray"
-                : fidelity == reader::Fidelity::Dithered ? "dithered"
-                                                         : "mono",
-                mode == reader::RefreshMode::Full ? "FULL" : "FAST", gRefresh.sinceFull());
-  Serial.flush();
+  // WHAT THIS PAINT IS, printed AFTER it rather than before. It used to be a
+  // printf plus a flush sitting between the dispatch and the render -- inside the
+  // window every latency number here is trying to measure, and with a host
+  // attached that flush is real milliseconds attributed to the paint. The fields
+  // are unchanged, they have just moved onto the `done` line below.
+  const char* const fidelityWord = fidelity == reader::Fidelity::Grayscale  ? "gray"
+                                   : fidelity == reader::Fidelity::Dithered ? "dithered"
+                                                                            : "mono";
   gRenderMs = gDrawMs = 0;
+  gUploadMs = gWaveMs = 0;
   gPartialPaint = false;
   // Any new paint supersedes a refinement that was owed for the old frame.
   gRefineOwed = false;
@@ -2118,11 +2338,17 @@ static void renderTop() {
   // the grayscale sequence has four, and it is in the log because a stale-pixel
   // report needs to say which path drew the frame that showed it -- guessing from
   // the screen name is exactly the wrong way round.
-  Serial.printf("[paint] done total=%lums render=%lums (draw=%lu) panel=%lums scope=%s%s\n",
-                (unsigned long)total, (unsigned long)gRenderMs, (unsigned long)gDrawMs,
-                (unsigned long)(total - gRenderMs), gPartialPaint ? "top" : "stack",
-                gRefineOwed ? " refine-owed" : "");
-  Serial.flush();
+  // `up` and `wave` are the two halves of what used to be one `panel` figure --
+  // the SPI plane upload against the waveform wait; see showOnePass. They do not
+  // add up to `panel` on the grayscale path, which uses its own display calls, so
+  // `panel` stays as the total of everything that is not render.
+  logf("[paint] done screen=%s fidelity=%s mode=%s sinceFull=%d total=%lums "
+       "render=%lums (draw=%lu) panel=%lums (up=%lu wave=%lu) scope=%s%s\n",
+       reader::screenName(gApp->top().id()), fidelityWord,
+       mode == reader::RefreshMode::Full ? "FULL" : "FAST", gRefresh.sinceFull(),
+       (unsigned long)total, (unsigned long)gRenderMs, (unsigned long)gDrawMs,
+       (unsigned long)(total - gRenderMs), (unsigned long)gUploadMs, (unsigned long)gWaveMs,
+       gPartialPaint ? "top" : "stack", gRefineOwed ? " refine-owed" : "");
 }
 
 // The four-level upgrade of a frame already on glass. Runs from loop() once the
@@ -2147,9 +2373,9 @@ static void refineNow() {
       const uint32_t t = millis();
       const bool done = rd->completeIndex();
       mark("index-completed");
-      Serial.printf("[index] %s pages=%d in %lums\n", done ? "counted" : "refused",
-                    rd->pageCount(), (unsigned long)(millis() - t));
-      Serial.flush();
+      logf("[index] %s pages=%d in %lums\n", done ? "counted" : "refused",
+           rd->pageCount(), (unsigned long)(millis() - t));
+      logFlush();
       if (rawSamplesPending() != 0) {
         // Someone pressed while it counted. The page on glass is still correct -- the
         // count does not change it -- so leave the refinement owed and get out of the
@@ -2159,8 +2385,8 @@ static void refineNow() {
       }
     }
   }
-  Serial.printf("[refine] screen=%s -> four levels\n", reader::screenName(gApp->top().id()));
-  Serial.flush();
+  logf("[refine] screen=%s -> four levels\n", reader::screenName(gApp->top().id()));
+  logFlush();
   gRenderMs = gDrawMs = 0;
   gPartialPaint = false;
   const uint32_t t0 = millis();
@@ -2170,13 +2396,21 @@ static void refineNow() {
   mark("refine-complete");
   // Reported separately from [paint] so the two costs stay distinguishable: a page
   // turn is the fast paint, and this is what the page settles into afterwards.
-  Serial.printf("[refine] done total=%lums render=%lums panel=%lums\n",
-                (unsigned long)total, (unsigned long)gRenderMs,
-                (unsigned long)(total - gRenderMs));
-  Serial.flush();
+  logf("[refine] done total=%lums render=%lums panel=%lums\n",
+       (unsigned long)total, (unsigned long)gRenderMs,
+       (unsigned long)(total - gRenderMs));
+  logFlush();
 }
 
 void setup() {
+  // A BIGGER TX RING, BEFORE begin() ALLOCATES IT. HWCDC::write posts what fits
+  // the ring without blocking and then blocks for the remainder until the host
+  // takes it, so the ring size is exactly how much log a busy stretch can emit
+  // before the cable starts costing the device time. 4 KB is ~40 of this
+  // firmware's lines against a default that is a fraction of that, and it is 4 KB
+  // of 320. It does not make serial free -- see logf() and the `ser=` field --
+  // it makes the common case not block at all.
+  Serial.setTxBufferSize(4096);
   Serial.begin(115200);
   // WAIT FOR THE HOST, NOT FOR A CONSTANT. This was `delay(2500)` -- an
   // unconditional 2.5 seconds on every boot so USB CDC could enumerate before the
@@ -2232,10 +2466,10 @@ void setup() {
   // Reported because it is the one boot cost that varies with something outside
   // the firmware, and a slow boot with a big number here is a USB question rather
   // than a firmware one.
-  Serial.printf("[boot] waited %lums for USB CDC (cap %lu, plugged=%d, open=%d)\n",
-                (unsigned long)gSerialWaitMs, 400ul, (int)HWCDC::isPlugged(),
-                Serial ? 1 : 0);
-  Serial.flush();
+  logf("[boot] waited %lums for USB CDC (cap %lu, plugged=%d, open=%d)\n",
+       (unsigned long)gSerialWaitMs, 400ul, (int)HWCDC::isPlugged(),
+       Serial ? 1 : 0);
+  logFlush();
 
   detectAndSelectBoard();
 
@@ -2283,20 +2517,20 @@ void setup() {
                         : rst == ESP_RST_BROWNOUT ? "BROWNOUT"
                         : rst == ESP_RST_EXT     ? "EXT (reset pin)"
                                                  : "other";
-  Serial.printf("[boot] reset reason=%d %s; sleep wake cause=%d; slept-flag=%d -> %s\n",
-                (int)rst, rstName, (int)wake, sleptDeliberately ? 1 : 0,
-                fromSleep ? "RESUME" : "cold start");
-  Serial.flush();
+  logf("[boot] reset reason=%d %s; sleep wake cause=%d; slept-flag=%d -> %s\n",
+       (int)rst, rstName, (int)wake, sleptDeliberately ? 1 : 0,
+       fromSleep ? "RESUME" : "cold start");
+  logFlush();
   // Before anything overwrites it: this prints the PREVIOUS cycle and starts a
   // new record, so a fault that only happens unplugged is readable next time the
   // device is plugged in.
   reportAndResetCrumbs(rst, wake);
-  Serial.printf("[boot] wake cause=%d -> %s\n", (int)wake,
-                fromSleep ? "resumed from sleep (the panel holds our frame, but the "
+  logf("[boot] wake cause=%d -> %s\n", (int)wake,
+       fromSleep ? "resumed from sleep (the panel holds our frame, but the "
                             "controller's baseline did not survive, so it is reseeded)"
                           : "cold boot, reseeding the controller's baseline (the "
                             "panel keeps its last image until the first paint)");
-  Serial.flush();
+  logFlush();
   // BOTH branches let the driver seed its own baseline. On wake this used to call
   // skipInitialResync() instead, and that was wrong in a way worth recording.
   //
@@ -2325,11 +2559,11 @@ void setup() {
   // until the session restore is trustworthy enough to bet a frame on.
   display.requestResync();
 
-  Serial.printf("[info] panel %dx%d, buffer %u bytes\n", display.getDisplayWidth(),
-                display.getDisplayHeight(), (unsigned)display.getBufferSize());
-  Serial.printf("[info] free heap %u, largest block %u\n", (unsigned)ESP.getFreeHeap(),
-                (unsigned)ESP.getMaxAllocHeap());
-  Serial.flush();
+  logf("[info] panel %dx%d, buffer %u bytes\n", display.getDisplayWidth(),
+       display.getDisplayHeight(), (unsigned)display.getBufferSize());
+  logf("[info] free heap %u, largest block %u\n", (unsigned)ESP.getFreeHeap(),
+       (unsigned)ESP.getMaxAllocHeap());
+  logFlush();
 
   reader::FontSet& fonts = gFonts.emplace();
   // The ramp is the manifest's (reader/font_manifest.h) -- one list, three
@@ -2394,25 +2628,25 @@ void setup() {
           gItalic.init(kFontBodySerifItalic, kFontBodySerifItalicSize, reader::kBodyPpem);
       const uint32_t i1 = micros();
       const reader::ScalableFont::CacheStats ics = gItalic.cacheStats();
-      Serial.printf("[italic] %s ppem=%d line=%d init=%uus cache=%u/%u+%u\n",
-                    italOk ? "ok" : "FAILED", gItalic.ppem(), gItalic.lineHeight(),
-                    (unsigned)(i1 - i0), (unsigned)ics.usedBytes,
-                    (unsigned)ics.capacityBytes, (unsigned)ics.overheadBytes);
+      logf("[italic] %s ppem=%d line=%d init=%uus cache=%u/%u+%u\n",
+           italOk ? "ok" : "FAILED", gItalic.ppem(), gItalic.lineHeight(),
+           (unsigned)(i1 - i0), (unsigned)ics.usedBytes,
+           (unsigned)ics.capacityBytes, (unsigned)ics.overheadBytes);
       // THE TWO FACES MUST AGREE ON THE LINE BOX. One baseline per line, so an
       // italic with a different ascent would sit off it -- and both files are
       // unitsPerEm 1000 pinned to the same coordinates, so this is a check on the
       // ASSETS rather than on the code.
       if (italOk && gItalic.lineHeight() != body.lineHeight())
-        Serial.printf("[italic] LINE BOX MISMATCH roman=%d italic=%d\n", body.lineHeight(),
-                      gItalic.lineHeight());
-      Serial.printf(
+        logf("[italic] LINE BOX MISMATCH roman=%d italic=%d\n", body.lineHeight(),
+             gItalic.lineHeight());
+      logf(
           "[body] ppem=%d weight=%d ascent=%d descent=%d line=%d init=%uus "
           "glyph_a=%dx%d raster=%uus cache=%u/%u+%u\n",
           body.ppem(), body.weight(), body.ascent(), body.descent(), body.lineHeight(),
           (unsigned)(t1 - t0), g ? g->bitmapW : -1, g ? g->bitmapH : -1,
           (unsigned)(t3 - t2), (unsigned)cs.usedBytes, (unsigned)cs.capacityBytes,
           (unsigned)cs.overheadBytes);
-      Serial.flush();
+      logFlush();
 
       // THE SWEEP BELOW IS OFF BY DEFAULT: it rasterises 95 glyphs twice at
       // ~3.79 ms each, which is ~362 ms of EVERY boot for a measurement that has
@@ -2485,7 +2719,7 @@ void setup() {
       const reader::ScalableFont::CacheStats meas = body.cacheStats();
 
       const uint32_t coldUs = c1 - c0, warmUs = w1 - w0;
-      Serial.printf(
+      logf(
           "[body] sweep glyphs=%d cold=%luus (%luus/glyph) warm=%luus "
           "(%luus/glyph) speedup=%lux\n",
           found, (unsigned long)coldUs,
@@ -2493,17 +2727,17 @@ void setup() {
           (unsigned long)warmUs,
           (unsigned long)(found ? warmUs / (uint32_t)found : 0),
           (unsigned long)(warmUs ? coldUs / warmUs : 0));
-      Serial.printf(
+      logf(
           "[body] cache after sweep: %u/%u bytes, %d/%d entries, "
           "cold hit/miss=%lu/%lu warm hit/miss=%lu/%lu evict=%lu wrap=%lu "
           "bypass=%lu\n",
           (unsigned)warm.usedBytes, (unsigned)warm.capacityBytes, warm.entries,
           warm.capacityEntries, cold.hits, cold.misses, warm.hits, warm.misses,
           warm.evictions, warm.wraps, warm.bypasses);
-      Serial.printf("[body] measure %u chars = %dpx in %luus, rast=%lu (MUST be 0)\n",
-                    (unsigned)(sizeof(kLine) - 1), lineW, (unsigned long)(m1 - m0),
-                    meas.rasterisations);
-      Serial.flush();
+      logf("[body] measure %u chars = %dpx in %luus, rast=%lu (MUST be 0)\n",
+           (unsigned)(sizeof(kLine) - 1), lineW, (unsigned long)(m1 - m0),
+           meas.rasterisations);
+      logFlush();
 #endif  // ENCRE_BODY_SWEEP
       mark("body-face-ok");
     }
@@ -2543,9 +2777,9 @@ void setup() {
   // headroom itself is still worth logging -- Phase 3's page cache is what will
   // want it.
   const unsigned frameBytes = display.getBufferSize();
-  Serial.printf("[info] frame %u bytes x1, the driver's own; free heap %u, largest block %u\n",
-                frameBytes, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
-  Serial.flush();
+  logf("[info] frame %u bytes x1, the driver's own; free heap %u, largest block %u\n",
+       frameBytes, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+  logFlush();
   if (!bindFrameToDriver("boot")) {
     mark("frame-bind-FAILED");
     return;
@@ -2555,10 +2789,10 @@ void setup() {
   // Which grayscale path the selected driver actually offers. Logged because
   // the sequence below is only correct for a driver that does NOT combine the
   // base frame into the gray waveform (X3/X4 do not; only Paper Mono does).
-  Serial.printf("[info] gray caps: combinesBase=%d busyStaging=%d strip=%d\n",
-                display.combinesGrayscaleBase(), display.supportsBusyGrayscaleStaging(),
-                display.supportsStripGrayscale());
-  Serial.flush();
+  logf("[info] gray caps: combinesBase=%d busyStaging=%d strip=%d\n",
+       display.combinesGrayscaleBase(), display.supportsBusyGrayscaleStaging(),
+       display.supportsStripGrayscale());
+  logFlush();
 
   // MOUNT THE CARD -- after the display is up, and deliberately so.
   //
@@ -2590,8 +2824,8 @@ void setup() {
   // harness, and an on-device routine nothing invokes checks nothing.
   const int fsFailures = runSdFsContractSelfTest(gSd);
   if (fsFailures >= 0) {
-    Serial.printf("[sd] contract self-test: %d failed assertion(s)\n", fsFailures);
-    Serial.flush();
+    logf("[sd] contract self-test: %d failed assertion(s)\n", fsFailures);
+    logFlush();
   }
 
   // Settings on either branch. With no card every FileSystem method fails, so
@@ -2638,10 +2872,10 @@ void setup() {
   // driver. A log line was the only artefact in the system that knew, and reading
   // it was luck. This fails loudly instead.
   if (logicalW != panelH || logicalH != panelW) {
-    Serial.printf("[fatal] logical canvas %dx%d is not the transpose of the panel's "
-                  "native %dx%d -- the rotation and the geometry disagree\n",
-                  logicalW, logicalH, panelW, panelH);
-    Serial.flush();
+    logf("[fatal] logical canvas %dx%d is not the transpose of the panel's "
+         "native %dx%d -- the rotation and the geometry disagree\n",
+         logicalW, logicalH, panelW, panelH);
+    logFlush();
     mark("frame-geometry-MISMATCH");
     return;
   }
@@ -2652,9 +2886,9 @@ void setup() {
   // late, and a list told nothing renders empty.
   gFactory.setContentsVisibleRows(gTheme.contentsVisibleRows(logicalH, fonts));
   gFactory.setLibraryVisibleRows(libraryRows);
-  Serial.printf("[boot] Library fits %d rows on this %dx%d logical canvas "
-                "(panel is %dx%d native)\n",
-                libraryRows, logicalW, logicalH, panelW, panelH);
+  logf("[boot] Library fits %d rows on this %dx%d logical canvas "
+       "(panel is %dx%d native)\n",
+       libraryRows, logicalW, logicalH, panelW, panelH);
 
   // Settings, and it takes THREE numbers rather than one because its items are not
   // all the same height -- the theme owns the box model, the screen owns the item
@@ -2671,8 +2905,8 @@ void setup() {
   gFactory.setSettingsMetrics(settingsListH, settingsRowH, settingsHeaderH);
   gFactory.setSettingsSink(&gSettingsSink);
   gFactory.setSettings(gSettings);
-  Serial.printf("[boot] Settings list %dpx: rows %dpx, section headers %dpx\n", settingsListH,
-                settingsRowH, settingsHeaderH);
+  logf("[boot] Settings list %dpx: rows %dpx, section headers %dpx\n", settingsListH,
+       settingsRowH, settingsHeaderH);
 
   // Reader, the third screen whose box model the theme owns. The LOGICAL geometry,
   // for the reason spelled out above: libraryVisibleRows was handed the native
@@ -2685,10 +2919,10 @@ void setup() {
   gFactory.setReaderMetrics(readerMetrics);
   gFactory.setReaderBody(&gBody);
   gFactory.setReaderItalic(&gItalic);
-  Serial.printf("[boot] Reader column %dx%d at (%d,%d), body ppem %d\n", readerMetrics.columnW,
-                readerMetrics.columnH, readerMetrics.columnLeft, readerMetrics.columnTop,
-                gBody.ppem());
-  Serial.flush();
+  logf("[boot] Reader column %dx%d at (%d,%d), body ppem %d\n", readerMetrics.columnW,
+       readerMetrics.columnH, readerMetrics.columnLeft, readerMetrics.columnTop,
+       gBody.ppem());
+  logFlush();
 
   // The shell's own view of storage, which is what roots the app and what the
   // presence poll in loop() watches for a usable -> unusable edge.
@@ -2724,8 +2958,8 @@ void setup() {
     clearSession();
     // Not "starting at Home": with no card the root above is the SD-missing
     // screen, and this line must not contradict it.
-    Serial.printf("[session] cold boot: record cleared, nothing to restore\n");
-    Serial.flush();
+    logf("[session] cold boot: record cleared, nothing to restore\n");
+    logFlush();
   } else if (storage) {
     // EVERY OUTCOME BELOW IS LOGGED, and it was not always so. This used to read
     // `if (loadSession(s) && s.screen != ScreenId::Home) { ... }` with no else at
@@ -2749,11 +2983,11 @@ void setup() {
       // loadSession() has already said WHICH no-record this is: no namespace, a
       // version this build does not know, or a stack it cannot decode. This line
       // is what that means from here.
-      Serial.printf("[session] no usable record, so nothing to restore; staying on %s. If a "
-                    "'[session] stored ...' line appeared before the last sleep, the WRITE "
-                    "is what failed, not the restore\n",
-                    reader::screenName(gApp->top().id()));
-      Serial.flush();
+      logf("[session] no usable record, so nothing to restore; staying on %s. If a "
+           "'[session] stored ...' line appeared before the last sleep, the WRITE "
+           "is what failed, not the restore\n",
+           reader::screenName(gApp->top().id()));
+      logFlush();
     } else {
       // THE READER CANNOT BE RESTORED WITHOUT ITS BOOK, and the factory is right to
       // refuse one -- falling through to the demo is how this device once woke into
@@ -2770,9 +3004,9 @@ void setup() {
       if (namesReader && gStorageUsable) {
         reader::LastRead last;
         if (!reader::loadLastRead(gSd, last) || !gSd.exists(last.bookPath)) {
-          Serial.println("[session] the record names the Reader but no saved book is on the "
-                         "card; it will stop at the screen below it");
-          Serial.flush();
+          logf("[session] the record names the Reader but no saved book is on the "
+               "card; it will stop at the screen below it\n");
+          logFlush();
         } else {
           uint32_t bytes = 0;
           std::unique_ptr<reader::FileHandle> h = gSd.openRead(last.bookPath);
@@ -2789,11 +3023,11 @@ void setup() {
         // showing the user a message that is no longer true, and layering Home
         // over the no-card prompt would let Back walk into a library that cannot
         // be read.
-        Serial.printf("[session] the record is rooted at %s and this boot is rooted at %s; "
-                      "nothing restored\n",
-                      reader::screenName(stack.front().screen),
-                      reader::screenName(gApp->top().id()));
-        Serial.flush();
+        logf("[session] the record is rooted at %s and this boot is rooted at %s; "
+             "nothing restored\n",
+             reader::screenName(stack.front().screen),
+             reader::screenName(gApp->top().id()));
+        logFlush();
       } else {
         // WHERE IT LANDED is what gets logged, not what was asked for. A restore
         // that lands short is a real outcome and a common one: books deleted
@@ -2802,21 +3036,21 @@ void setup() {
         // it come back where I left it" is a string comparison rather than an
         // inference.
         const std::string landed = reader::encodeSessionStack(gApp->snapshot());
-        Serial.printf("[session] restored %d of %d screen(s): %s%s\n", r.restored, r.requested,
-                      landed.c_str(),
-                      landed == reader::encodeSessionStack(stack)
+        logf("[session] restored %d of %d screen(s): %s%s\n", r.restored, r.requested,
+             landed.c_str(),
+             landed == reader::encodeSessionStack(stack)
                           ? ""
                           : " (not what the record named: a screen it wants no longer builds, "
                             "or a focused row is no longer in its list)");
-        Serial.flush();
+        logFlush();
         mark("session-restored");
       }
     }
   } else {
     // Woke with no card. The record is left ALONE rather than cleared: it is
     // still true, and the next wake with a card in the slot can honour it.
-    Serial.printf("[session] woke with no usable storage; the record is kept for next time\n");
-    Serial.flush();
+    logf("[session] woke with no usable storage; the record is kept for next time\n");
+    logFlush();
   }
 
   // Before the first poll, not just after each dispatch: a hold started on the
@@ -2907,9 +3141,9 @@ static void paintSleepScreen() {
   gFrame->clear(true);
   scr.render(*gFrame, *gFonts, gTheme, reader::Plane::Bw);
   gFrameContentsUnknown = true;
-  Serial.printf("[power] sleep screen: %s\n",
-                vm.nothingToContinue ? "the badge alone, nothing open" : vm.title.c_str());
-  Serial.flush();
+  logf("[power] sleep screen: %s\n",
+       vm.nothingToContinue ? "the badge alone, nothing open" : vm.title.c_str());
+  logFlush();
   // FULL, not fast: this is the last thing the panel is asked to do for hours and a
   // differential update would leave the previous screen's residue under it.
   showOnePass(reader::RefreshMode::Full);
@@ -2940,10 +3174,10 @@ static void paintSleepScreen() {
   // that page back.
   saveReadingPosition("sleep");
   paintSleepScreen();
-  Serial.printf("[power] sleeping from screen=%s; the record should name it on wake. Wake with "
-                "the power button\n",
-                reader::screenName(gApp->top().id()));
-  Serial.flush();
+  logf("[power] sleeping from screen=%s; the record should name it on wake. Wake with "
+       "the power button\n",
+       reader::screenName(gApp->top().id()));
+  logFlush();
   display.deepSleep();
   // Cuts the X3's SD rail (GPIO13) and any other gated rail, latched so the
   // switches stay off through sleep. Without it the card stays powered and
@@ -2971,9 +3205,9 @@ void loop() {
   // diagnosable failure into a crash loop that looks like a bootloader hang.
   if (!gApp) {
     static uint32_t n = 0;
-    Serial.printf("[alive] %lu last-stage=%s heap=%u (setup did not complete)\n",
-                  (unsigned long)++n, stage, (unsigned)ESP.getFreeHeap());
-    Serial.flush();
+    logf("[alive] %lu last-stage=%s heap=%u (setup did not complete)\n",
+         (unsigned long)++n, stage, (unsigned)ESP.getFreeHeap());
+    logFlush();
     delay(2000);
     return;
   }
@@ -2993,8 +3227,8 @@ void loop() {
   static uint32_t lastDropped = 0;
   const uint32_t droppedNow = rawSamplesDropped();
   if (droppedNow != lastDropped) {
-    Serial.printf("[input] %lu raw edge(s) dropped -- forgetting held buttons\n",
-                  (unsigned long)(droppedNow - lastDropped));
+    logf("[input] %lu raw edge(s) dropped -- forgetting held buttons\n",
+         (unsigned long)(droppedNow - lastDropped));
     lastDropped = droppedNow;
     gPresses.forgetPresses();
   }
@@ -3043,8 +3277,31 @@ void loop() {
 
   reader::InputEvent ev{};
   while (gPresses.pop(ev)) {
-    Serial.printf("[input] %s %s\n", reader::buttonName(ev.button),
-                  ev.kind == reader::PressKind::Long ? "LONG" : "SHORT");
+    // BEFORE THE PRE-DISPATCH WORK, not before the dispatch: most of what this
+    // measures happens above gApp->dispatch(), not inside it -- the details
+    // author's archive open, the contents hand-over, the position save on the way
+    // out of a book. `beforeDispatch` below is deliberately a different, later
+    // mark, because logChapterOpen wants the chapter open's own cost and not the
+    // press's.
+    const uint32_t eventStart = millis();
+    // THE FIRST EVENT OF A BURST OPENS THE RECORD and the rest only add to it, so
+    // a paint that satisfied three presses is reported against the first of them
+    // -- which is when the user started waiting.
+    if (!gAct.pending) {
+      gAct = Interaction{};
+      gAct.pending = true;
+      gAct.at = ev.at;
+      gAct.popped = eventStart;
+      gAct.logAtStart = gLogMs;
+      gAct.button = ev.button;
+      gAct.kind = ev.kind;
+      gAct.from = reader::screenName(gApp->top().id());
+    }
+    ++gAct.events;
+    // The `[input]` line that used to be here is gone: it named the button and the
+    // kind, which the [i] line below names, and it was a print AND a flush inside
+    // the window every field in that line is trying to measure. Power keeps one,
+    // because sleepNow() never returns and so never reports.
     // POWER IS HANDLED BEFORE dispatch() AND BEFORE saveWhereWeAre(), and that
     // ordering is correct rather than an oversight -- worth stating, because it
     // reads like a bug the first time and re-deriving it costs an hour.
@@ -3061,7 +3318,12 @@ void loop() {
     // The consequence for defect diagnosis: if the record is wrong at wake, the
     // write that was supposed to fix it happened at NAVIGATION time, not at sleep
     // time -- so look for saveWhereWeAre's line on the navigation, not here.
-    if (ev.button == reader::Button::Power) sleepNow();
+    if (ev.button == reader::Button::Power) {
+      logf("[input] POWER %s after %lums -- sleeping, so there is no [i] line for this one\n",
+           ev.kind == reader::PressKind::Long ? "LONG" : "SHORT",
+           (unsigned long)(eventStart - ev.at));
+      sleepNow();
+    }
     // LEAVING THE BOOK, saved BEFORE the dispatch -- which is the whole subtlety.
     // Back pops the Reader, and once it is popped there is no screen left to ask
     // where the reader was. This is the edge the user actually reported: going back
@@ -3115,12 +3377,12 @@ void loop() {
         const uint32_t t = millis();
         if (reader::openBook(gSd, p, meta, &why)) {
           gFactory.setDetailsAuthor(meta.author);
-          Serial.printf("[details] %s by \"%s\" in %lums\n", meta.title.c_str(),
-                        meta.author.c_str(), (unsigned long)(millis() - t));
+          logf("[details] %s by \"%s\" in %lums\n", meta.title.c_str(),
+               meta.author.c_str(), (unsigned long)(millis() - t));
         } else {
-          Serial.printf("[details] no metadata for %s: %s\n", p.c_str(), why);
+          logf("[details] no metadata for %s: %s\n", p.c_str(), why);
         }
-        Serial.flush();
+        logFlush();
       }
     }
     if (gReading.open && ev.button == reader::Button::Confirm) {
@@ -3184,9 +3446,9 @@ void loop() {
               spine = static_cast<const reader::ReaderScreen&>(under).chapterIndex();
           }
           gFactory.setContents(gReading.toc, spine);
-          Serial.printf("[toc] handing over %u entries, marking spine %d\n",
-                        (unsigned)gReading.toc.size(), spine);
-          Serial.flush();
+          logf("[toc] handing over %u entries, marking spine %d\n",
+               (unsigned)gReading.toc.size(), spine);
+          logFlush();
         }
       }
     }
@@ -3195,7 +3457,10 @@ void loop() {
     if (ev.button == reader::Button::Confirm && gApp->top().id() == reader::ScreenId::Contents)
       gPendingSpine = static_cast<const reader::ContentsScreen*>(&gApp->top())->chosenSpine();
     const uint32_t beforeDispatch = millis();
+    gAct.preMs += beforeDispatch - eventStart;
     gApp->dispatch(ev);
+    const uint32_t afterDispatch = millis();
+    gAct.dispMs += afterDispatch - beforeDispatch;
     // Between the dispatch and the mask refresh below, so the refresh sees
     // whatever screen the retry left on top -- on success that is a brand new App
     // rooted at Home, whose holds are not the SD-missing screen's.
@@ -3241,8 +3506,8 @@ void loop() {
       if (gApp->at(i).id() == reader::ScreenId::Reader) readerOnStack = true;
     if (gReading.open && !readerOnStack) {
       gReading.open = false;
-      Serial.println("[progress] book closed");
-      Serial.flush();
+      logf("[progress] book closed\n");
+      logFlush();
     }
     // A CHOSEN CHAPTER, acted on AFTER the pop that Contents' GO returns. The screen
     // cannot jump the Reader itself: the Reader is already on the stack under it, and
@@ -3259,9 +3524,9 @@ void loop() {
       if (want != rd->chapterIndex()) {
         const uint32_t t = millis();
         const bool ok = rd->goToChapter(want);
-        Serial.printf("[toc] jump to spine %d: %s in %lums\n", want, ok ? "ok" : "REFUSED",
-                      (unsigned long)(millis() - t));
-        Serial.flush();
+        logf("[toc] jump to spine %d: %s in %lums\n", want, ok ? "ok" : "REFUSED",
+             (unsigned long)(millis() - t));
+        logFlush();
       }
     }
 
@@ -3283,8 +3548,8 @@ void loop() {
       buildHomeApp();
       gApp->top().setFocus(was);
       gHomeStale = false;
-      Serial.println("[progress] Home rebuilt with the current reading position");
-      Serial.flush();
+      logf("[progress] Home rebuilt with the current reading position\n");
+      logFlush();
     }
     if (gApp->retryRequested()) handleRetry();
     // Same placement and the same reason: the mask refresh below must see whatever
@@ -3297,6 +3562,8 @@ void loop() {
     // Where the user is now, for a wake to restore. An unchanged record is not
     // rewritten, so this is nearly free on an event that did not move the stack.
     saveWhereWeAre();
+
+    gAct.postMs += millis() - afterDispatch;
   }
 
   if (gApp->sleepRequested() || gIdle.tick(millis()) == reader::PowerAction::Sleep) sleepNow();
@@ -3313,9 +3580,49 @@ void loop() {
   // penalty on one paint against a ~3x saving on a burst, and it is below what
   // is noticeable next to the refresh itself.
   const bool settled = static_cast<uint32_t>(millis() - gLastInputMs) >= kCoalesceMs;
-  if (gApp->dirty() && settled) {
+  const bool painted = gApp->dirty() && settled;
+  if (painted) {
     renderTop();
     gApp->clearDirty();
+  }
+
+  // THE INTERACTION, CLOSED AND REPORTED. Gated on nothing being owed to the panel
+  // rather than on `painted`, so the two cases that are not a paint are still
+  // reported rather than silently dropped:
+  //   * a press that changed nothing -- a refused push, a Retry that failed, a
+  //     gesture the screen answered none() to. It reads `paint=none`, and a press
+  //     with no visible result is exactly the thing worth having a line for.
+  //   * a press held back by the coalescing window, which stays pending until the
+  //     paint it is waiting for actually happens.
+  if (gAct.pending && !gApp->dirty()) {
+    const uint32_t now = millis();
+    const uint32_t total = now - gAct.at;
+    const uint32_t ser = gLogMs - gAct.logAtStart;
+    logf("[i] #%lu %s %s from=%s to=%s ev=%d | wait=%lu pre=%lu disp=%lu post=%lu "
+         "render=%lu up=%lu wave=%lu | total=%lums ser=%lu net=%lu%s\n",
+         (unsigned long)++gInteractionSeq, reader::buttonName(gAct.button),
+         gAct.kind == reader::PressKind::Long     ? "LONG"
+         : gAct.kind == reader::PressKind::Repeat ? "REPEAT"
+                                                  : "SHORT",
+         gAct.from, reader::screenName(gApp->top().id()), gAct.events,
+         (unsigned long)(gAct.popped - gAct.at), (unsigned long)gAct.preMs,
+         (unsigned long)gAct.dispMs, (unsigned long)gAct.postMs,
+         (unsigned long)(painted ? gRenderMs : 0), (unsigned long)(painted ? gUploadMs : 0),
+         (unsigned long)(painted ? gWaveMs : 0), (unsigned long)total, (unsigned long)ser,
+         (unsigned long)(total >= ser ? total - ser : 0), painted ? "" : " paint=none");
+    // Flushed AFTER the measurement is taken, so it cannot be part of it. This is
+    // the line the analysis reads, and a reset that eats the last one loses the
+    // interaction that most likely caused the reset.
+    logFlush();
+    gAct.pending = false;
+  } else if (painted) {
+    // A PAINT NOBODY PRESSED FOR, named rather than left to look like a missing
+    // interaction: the first frame after boot, the card-lost rebuild, the deferred
+    // page count's repaint. Same fields so the two line shapes parse alike.
+    logf("[i] #-- (no press) to=%s | render=%lu up=%lu wave=%lu\n",
+         reader::screenName(gApp->top().id()), (unsigned long)gRenderMs,
+         (unsigned long)gUploadMs, (unsigned long)gWaveMs);
+    logFlush();
   }
 
   // THE FOUR-LEVEL UPGRADE, once the buttons have been quiet and nothing is owed
@@ -3346,10 +3653,10 @@ void loop() {
       const uint32_t t = millis();
       const bool done = rd->completeIndex();
       mark("index-completed");
-      Serial.printf("[index] pages=%d in %lums (deferred: chapter over %uB)\n",
-                    rd->pageCount(), (unsigned long)(millis() - t),
-                    (unsigned)reader::ReaderScreen::kEagerCountBytes);
-      Serial.flush();
+      logf("[index] pages=%d in %lums (deferred: chapter over %uB)\n",
+           rd->pageCount(), (unsigned long)(millis() - t),
+           (unsigned)reader::ReaderScreen::kEagerCountBytes);
+      logFlush();
       // A press during the count wins: the page on glass is already correct -- the
       // count changes one number in the footer, not the text -- so getting out of the
       // way beats putting a ~596 ms paint in front of a page turn. The same rule
@@ -3372,7 +3679,20 @@ void loop() {
   // is waiting for goes out first; and if the poll does find the card gone, the
   // fresh App it builds is dirty, so the SD-missing screen paints on the next
   // iteration ten milliseconds later.
-  if (!gApp->dirty()) pollCardPresence(millis());
+  //
+  // AND NOT WITH A PRESS ALREADY QUEUED, which is the same rule the refinement and
+  // the deferred page count apply to themselves and for the same reason: this is
+  // SPI work the user's next paint has to wait behind. The fast probe is a few
+  // sector reads, so it is small -- but the FAT-scan backstop is measured at 14 s
+  // on the user's own card, and putting that in front of a button press is the
+  // difference between a device that feels slow and one that looks broken. The
+  // backstop is normally disarmed (armCardProbes explains when it is not), so this
+  // guard is for the case where it is the only card check there is.
+  //
+  // Deferring a probe costs at most one poll interval of detection latency on a
+  // card that was pulled WHILE the user was pressing buttons -- and the press they
+  // are making will hit the card itself soon enough.
+  if (!gApp->dirty() && rawSamplesPending() == 0) pollCardPresence(millis());
 
   static uint32_t beat = 0;
   if (++beat % 200 == 0) {
@@ -3380,12 +3700,19 @@ void loop() {
     // `heap` is whatever is free at this instant, while a pagination peak happens
     // BETWEEN two [alive] lines and would otherwise never be seen. 3A's entire
     // memory case rested on a figure nothing was measuring.
-    Serial.printf("[alive] last-stage=%s heap=%u minHeap=%u screen=%s depth=%d "
-                  "dropped=%lu/%lu\n",
-                  stage, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
-                  reader::screenName(gApp->top().id()), gApp->depth(),
-                  (unsigned long)rawSamplesDropped(), (unsigned long)gPresses.dropped());
-    Serial.flush();
+    logf("[alive] last-stage=%s heap=%u minHeap=%u screen=%s depth=%d "
+         "dropped=%lu/%lu\n",
+         stage, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+         reader::screenName(gApp->top().id()), gApp->depth(),
+         (unsigned long)rawSamplesDropped(), (unsigned long)gPresses.dropped());
+    logFlush();
   }
-  delay(10);
+  // IDLE ON THE QUEUE, NOT ON THE CLOCK. Identical to the delay(10) this replaces
+  // when nothing arrives, and the difference is the whole point when something
+  // does: an edge queued one millisecond into a delay() sat there for the other
+  // nine before this loop looked at it. A peek returns the moment the input task
+  // posts, so the ~5 ms this used to average in front of every press is gone --
+  // and the 10 ms ceiling is unchanged, which is what keeps tick(), the idle
+  // timer and both quiet windows running at the cadence they were tuned at.
+  waitForRawSample(10);
 }

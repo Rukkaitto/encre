@@ -200,6 +200,25 @@ class SdFileSystem : public reader::FileSystem {
   bool mkdirs(std::string_view path) override;
   bool remove(std::string_view path) override;
 
+  // How many remove() calls have been made this boot.
+  //
+  // THE INVALIDATION HOOK FOR ANYTHING DERIVED FROM A DIRECTORY LISTING. Home's
+  // LIBRARY count is one directory listing plus one per folder -- ~1.1 s on a
+  // 203-book card at ~2.7 ms an entry -- and it changes for exactly two reasons:
+  // the card changed under us, or a book was deleted. Books cannot ARRIVE while
+  // the firmware runs (V1 is card transfer only, so putting one there means the
+  // card is in a computer), and a delete is the only mutation of /books there is.
+  //
+  // Counted here rather than reported by the Library because the Library is
+  // destroyed by the pop that leaves it, so there is no screen left to ask by the
+  // time Home wants the number. Every deletion goes through this method whoever
+  // asked for it, which is the property a cache needs and a caller list is not.
+  //
+  // Deliberately counts ATTEMPTS, not successes: `remove` reports the END state,
+  // so even a call that changes nothing means something tried to. Over-
+  // invalidating costs one recount; under-invalidating shows a wrong number.
+  uint32_t removals() const { return removals_; }
+
  private:
   friend class SdFileHandle;
 
@@ -217,6 +236,7 @@ class SdFileSystem : public reader::FileSystem {
 
   bool live_ = false;
   size_t skippedNames_ = 0;
+  uint32_t removals_ = 0;
   ProbeTarget probeTarget_ = ProbeTarget::RootDir;
   std::string probeTargetPath_;
   // Bytes the FAT scan reported at arm time. 0 means "not armed".

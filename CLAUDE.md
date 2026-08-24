@@ -27,6 +27,12 @@ make icons      # regenerate icon bitmaps from the design boards' SVG
 make compare    # design-vs-firmware contact sheet, all 28 boards (~2.5 min)
 ```
 
+```
+pio device monitor -e xteink | tee run.log   # capture a device run
+python3 tools/latency.py run.log             # what each interaction cost, by press
+reader_sim <screen> out.png --bench 200      # render cost per pass, on the desktop
+```
+
 `make compare COMPARE_ARGS="--only home --export build/overlay"` writes bare
 panel-size PNGs for overlaying in a design tool.
 
@@ -313,12 +319,45 @@ what needs hardware — raw button samples, the panel calls, deep sleep.
     seconds of held button as a 150-row jump. The surplus is dropped, not banked.
 - **One physical press is exactly one event** — with `Repeat` the one exception
   above, which is why it is a distinct `PressKind` rather than a repeated `Short`. A hold fires `Long` while the
-  button is still down; the release then emits nothing. A button *outside* the
-  long-press mask fires `Short` on release however long it was held — never
-  nothing. And because `tick()` only runs from the main loop, which a gray
-  refresh blocks for ~1.5 s, the **release edge classifies the press too**: a
-  hold made entirely inside a repaint would otherwise arrive as a `Short`, which
-  on a list means opening the item instead of its actions overlay.
+  button is still down; the release then emits nothing. And because `tick()` only
+  runs from the main loop, which a gray refresh blocks for ~1.5 s, the **release
+  edge classifies the press too**: a hold made entirely inside a repaint would
+  otherwise arrive as a `Short`, which on a list means opening the item instead of
+  its actions overlay.
+- **A `Short` FIRES ON THE DOWN EDGE unless the button binds a hold**, and until
+  it did, every press on the device paid its own duration — 80–200 ms of dead time
+  in front of a ~520 ms waveform, on every button of every screen. Only a
+  long-press binding makes a press ambiguous, and **exactly one button in this
+  firmware binds one**: `Confirm`, on the Library (`vm_.holds = {false, true,
+  false, false}`). Everything else — every page turn, every Back, every Confirm on
+  Home or Settings or the reader menu, every focus move — was waiting on the
+  release for an ambiguity it does not have. `ReaderScreen` does not call
+  `declareHints` at all, so the *reader*, the screen with the most presses on it,
+  had nothing to wait for and waited anyway.
+  - **An auto-repeat button fires too, which makes held scroll typematic.** The
+    ramp is unchanged (still from `downAt + kRepeatDelayMs`), so what this removes
+    is a hold's dead first row: nothing moved until the 400 ms delay *plus* a whole
+    row of the 6 rows/s slow rate — ~567 ms before the list acknowledged a held
+    button.
+  - **Two flags, and they are not the same flag.** `firedShort` says the down edge
+    spent the press, so the release owes nothing; `consumed` says a `Long` fired,
+    so `tick()` stops looking at the button at all. An auto-repeat press needs the
+    first and must not have the second.
+  - **POWER NOW SLEEPS ON THE DOWN EDGE, and the SDK already handles the finger
+    still being on the button.** `deepSleepUntilPowerButton()` opens with
+    `waitForPowerButtonRelease()`, so the wake cannot be satisfied by the press
+    that asked for the sleep — which would have been an immediate wake, and would
+    have looked like the device refusing to sleep. In practice the question does
+    not arise: `sleepNow()` paints the Sleep screen first, and that is a FULL
+    waveform (~825 ms), by which time the button is long since up.
+  - **`repeatable` is LATCHED at the down edge**, for the reason `consumed`
+    already was: the mask follows the top of the stack, and the press that fires on
+    the down edge may itself push a screen where that button repeats. Re-reading
+    would start scrolling the new screen under a finger that has not yet come up
+    from the press that opened it. `tick()`'s long-press branch skips a
+    `firedShort` press for the mirror case — Home's `Confirm` opens the Library,
+    where `Confirm` IS long-pressable, and the finger is still down when that mask
+    arrives.
 - **`InputManager::beginAsync()` cannot support a long press** — it queues press
   edges only, no releases and no durations. `shell/src/input_task.cpp` is its own
   poll loop over `update()`, queuing both edges with a `millis()` timestamp.
@@ -383,6 +422,221 @@ what needs hardware — raw button samples, the panel calls, deep sleep.
   `PowerManager::powerDownRailsForSleep()` → `deepSleepUntilPowerButton()`. That
   middle call does cut the X3's SD rail (the profile declares
   `sd.powerEnable = 13`), despite the SDK header calling it a no-op on X3/X4.
+
+## What an interaction costs
+
+The budget from the button going down to the panel starting to move, measured or
+derived on the X3. **The waveform is not the interesting part** — it is 389 ms
+(DU) or 693 ms (GC) and there is no third bank; `RefreshMode` has only
+`FULL`/`HALF`/`FAST`, `HALF` maps to GC, and there is no A2. Everything *before*
+it is what was worth attacking, and it was ~150–1200 ms depending on the screen.
+
+| stage | cost | where |
+|---|---|---|
+| press → the input task sees the edge | 0–10 ms poll + ~6 ms debounce | `kPollMs`, the SDK's `DEBOUNCE_DELAY = 5` needing a later sample |
+| ~~down → release~~ | ~~80–200 ms~~ **gone** | see the `Short`-on-down rule above |
+| queued → the loop looks | ~~0–10 ms~~ **~0** | `waitForRawSample(10)`, which was `delay(10)` |
+| pre-dispatch card work | 0 / ~100 ms / **~1100 ms** | details author `openBook`; a `/books` listing |
+| dispatch + `saveWhereWeAre` (NVS) | ~2–15 ms | one small `putString` |
+| `saveReadingPosition` (2 SD writes) | ~20–100 ms, on Back-from-a-book and chapter crossings | |
+| render | chrome ~40 ms, an overlay ~3× that, a reader page 125–165 ms | `[paint] render=` |
+| plane write, 52,272 B at 20 MHz | ~21 ms | `Uc8279Driver::displayStart` |
+| **the waveform** | **389 ms / 693 ms** | `BW_DU` / `BW_GC` |
+| DTM1 sync, a second 52 KB write | ~21 ms, *after* the image is on glass | `displayFinish` |
+
+Desktop render, `reader_sim <screen> out.png --canvas 528x792 --bench 200`, µs a
+pass warm: home 252, library 292, settings 208, contents 199, book_details 116,
+library_actions 698, reader_menu 764, reader (dithered) 474. **An overlay costs
+~3× a bare screen** because it renders the parent, the veil and the panel; that
+is what `App::renderTopOnly` exists to avoid on a focus move, and it does not
+apply to the push that opens one.
+
+### Reading a run off the device
+
+**One `[i]` line per interaction**, from the button going down to the panel being
+finished with it. It exists because the cost used to be spread across log families
+that could not be added up — `[input]` said a press happened, `[paint] done` said
+what the panel cost, and everything between them had no line at all, which is how
+a second of directory listing sat on the critical path of a Back with nobody able
+to name it.
+
+```
+[i] #12 CONFIRM SHORT from=home to=library ev=1 | wait=7 pre=0 disp=1103 post=2
+        render=41 up=24 wave=712 | total=1889ms ser=31 net=1858
+```
+
+`tools/latency.py run.log` groups those by where the press landed and reports
+medians. **Median, not mean**: one interaction that caught the card doing internal
+housekeeping drags a mean somewhere no press ever was.
+
+| field | is |
+|---|---|
+| `wait` | the event's own timestamp to the loop picking it up — raw queue, loop wake, drain |
+| `pre` | work done because of what is on top, *before* the dispatch |
+| `disp` | `App::dispatch` — **a push builds a screen, so a Library rescan is here** |
+| `post` | what the dispatch made necessary: `handleOpen`, a chapter jump, Home's rebuild, the session record |
+| `render` | drawing the frame, all passes |
+| `up` | the plane upload to the controller, *before* the waveform starts |
+| `wave` | the waveform, plus the ~21 ms baseline sync that follows it |
+| `ser` | how much of `total` was this device talking to the USB host |
+| `net` | `total − ser`. **The number to compare across runs.** |
+
+**A BURST IS ONE INTERACTION.** Several events can drain before one paint — that
+is the coalescing the loop exists to do — so the line reports the FIRST event's
+timestamp against the paint that satisfied it, with `ev=N`. Reporting per event
+would divide one visible response between N lines and make every one look fast.
+`paint=none` marks a press that changed nothing, which is exactly the case worth
+having a line for.
+
+**`ser` EXISTS BECAUSE WATCHING THE DEVICE CHANGES IT.** `HWCDC::write` posts what
+fits the TX ring and then **blocks** until the host takes the rest; `flush()` spins
+`delay(1)` until the ring empties, up to 100 ms. Unplugged, both short-circuit on
+`!isCDC_Connected()` and cost microseconds — which is the device's real behaviour,
+since it lives on battery, and is why this was never noticed. So **every timing
+taken over USB is inflated by the cable**, and this project has already paid once
+for a measurement artefact read as a device fact (a `delay(2500)` in `setup()`
+recorded as the panel detection's cost, because the first *timestamped* line was
+read as time zero). Every print site in `shell/src/main.cpp` goes through `logf()`
+/ `logFlush()`, which time themselves into `gLogMs`; `ser` is the delta across the
+interaction. Unplugged it reads ~0 and `net == total`, which is the proof that the
+numbers either side of it are the device's own.
+
+**`up=` and `wave=` are a split, not a change.** `showOnePass` calls
+`triggerDisplay` then `completeDisplay` where it used to call `displayBuffer`, and
+for the configuration this firmware builds those are the same two driver calls with
+the seam exposed — `Uc8279Driver::display` is literally `displayStart` then
+`displayFinish`; single-buffer means both take the `prev == nullptr` branch; and
+`_inverted`/`_inversionDirty` are false forever because nothing calls `setInverted`,
+which is what kills `triggerDisplay`'s fall-back guard and `displayBuffer`'s
+FAST→HALF promotion. What it buys is the one division the log could not make: `up`
+is ours and bounded by the 20 MHz SPI clock, `wave` is the panel's.
+
+**`[fs] list … (N.NN ms/entry)`** over 15 ms is the other half. `[i]` can say a
+Confirm on Home spent two seconds in `disp=`; only this says the two seconds were
+one `list()` over 406 entries. The ~2.7 ms an entry quoted throughout this file is
+a figure from one session that has never been re-checked against the card in the
+slot, and where a number decides a design this project's rule is to measure the
+thing rather than argue about it.
+
+**THE BIGGEST REMAINING NUMBER IS A DIRECTORY LISTING, AND IT IS NOT THE PANEL'S
+FAULT.** `SdFileSystem::list` costs ~2.7 ms an ENTRY on the user's card, and a
+203-book library is 406 entries because macOS writes a `._name` beside every
+file — so **~1.1 s**, paid on the critical path in two places:
+
+- **Home's `LIBRARY` count**, which is `countLibrary`: one listing plus one per
+  folder, for one integer. It went on the critical path the moment Home learned to
+  rebuild itself (`gHomeStale`), so a Back out of a book cost a second of listing
+  with nothing on the panel. **Cached now** — `libraryCountForHome`, keyed on
+  `SdFileSystem::removals()` and `gStorageUsable`. The key is sound *because of
+  what V1 is*: a book cannot ARRIVE while the firmware runs (transfer is card-only,
+  so putting one there means the card is in a computer), which leaves delete as the
+  only mutation of `/books`, and every delete goes through `remove`. **V2's Wi-Fi
+  transfer is the change that breaks that argument** and it needs a one-line
+  invalidation beside whatever writes the file.
+- **The Library's own `rescan()`**, on every push — the Library is destroyed by the
+  pop that leaves it, so Home → Library → Back → Library lists twice. **Not fixed**,
+  and deliberately not fixed blind: a cached listing is ~20 KB against a 45,840-byte
+  floor while a book is open, and the alternative theory — that `openNextFile()` +
+  `getName()` walks each long-name chain twice against SdFat's single 512-byte cache
+  slot — is an *argument about cache geometry*, which is the exact shape of reasoning
+  this project has already had wrong twice (the root-directory probe, the stb heap
+  attribution). The `[dispatch]` line above is what settles it: read the number off
+  the device before choosing between a cache and a faster walk.
+
+**What was looked at and left alone, with the reason, so it is not re-derived:**
+
+- **`Serial.flush()` in the paint path is free on battery.** `HWCDC::write` and
+  `flush` both short-circuit when `isCDC_Connected()` is false. **They are not free
+  with a logger attached** — `flush` spins `delay(1)` up to 100 ms — so *every
+  timing taken over USB includes serial drain that the device never pays*.
+- **The transition FULL refresh (693 ms vs 389 ms) stays**, and the roadmap's own
+  measurement is why: the paints that *felt* quicker were the slowest, because the
+  GC flash reads as the device acknowledging the press. **On e-ink, feedback and
+  speed are separate problems.**
+- **Deferring the panel wait** (`triggerDisplay`/`completeDisplay`, which the X3
+  driver really does support) buys less than it looks like. The framebuffer must not
+  be overwritten between the two calls, so the *next* render cannot overlap; and the
+  contract is explicitly "non-SPI work", so no card access can either. What is left
+  to overlap is CPU work and NVS — a few milliseconds. The SDK's own headline
+  1274→822 ms figure needs `supportsBusyGrayscaleStaging()`, which only
+  `PaperMonoDriver` returns true for.
+- **The SPI clock is already at the datasheet maximum** (20 MHz, both X3 profiles),
+  so the two 52 KB plane writes cannot be shortened without going out of spec.
+- **`kPollMs` stays at 10 ms.** Halving it saves ~3 ms of a ~550 ms interaction and
+  doubles the ADC duty cycle on a device built to sit idle. The queue peek was the
+  free half of that trade; this is the half that costs battery for nothing.
+- **`saveWhereWeAre`'s NVS write stays on the critical path.** A ~40-byte
+  `putString` into a page with room is ~2–5 ms, and deferring it past the paint
+  means `sleepNow()` — which is `[[noreturn]]` and can be reached in the same drain
+  loop as the navigation that dirtied the record — has to flush it first. That is a
+  correctness hazard bought with 1% of a paint. Measure it first; the
+  `[session] stored` line is already there to hang a duration on.
+
+### What a real run measured (2026-08-24, X3/UC8279, 203-book card)
+
+53 interactions off the device, `ser=0%` — the cable was not in the numbers.
+`tools/latency.py` medians, milliseconds:
+
+| press | n | net | wait | disp | post | render | up | wave |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| CONFIRM Library → Reader | 1 | **1753** | 0 | 0 | **1012** | 306 | 25 | 415 |
+| UP Reader | 5 | **1355** (max **3401**) | 533 | 0 | 0 | — | — | — |
+| CONFIRM Home → Library | 1 | **1214** | 0 | **666** | 4 | 105 | 25 | 415 |
+| LEFT Reader (page back) | 7 | **1055** | 97 | **376** | 0 | 155 | 25 | 414 |
+| CONFIRM Reader → menu | 2 | 718 | 0 | 0 | 14 | **266** | 25 | 414 |
+| RIGHT Reader (page fwd) | 2 | 634 | 38 | 26 | 0 | 131 | 25 | 414 |
+| DOWN Library | 16 | 549 | 0 | 0 | 4 | 100 | 25 | 414 |
+| CONFIRM Home → Settings | 1 | 515 | 0 | 0 | 4 | 71 | 25 | 414 |
+| UP Contents | 2 | 508 | 3 | 0 | 5 | 62 | 25 | 414 |
+
+**THE PANEL IS 439 ms AND IT NEVER VARIES** — `up=25` plus `wave=414` on every
+one-pass paint in the run, ±1 ms. `up` is the 52,272-byte plane write at 20 MHz;
+`wave` is the SDK's own `8279_DRF (389 ms)` plus the ~25 ms DTM1 baseline write
+that follows it. **So an ordinary chrome interaction is 80–87% panel** and chrome
+is finished: the only movable part left is a 62–106 ms render.
+
+**Every transition in the run was FAST**, because this card's `settings.json` has
+`fullOnTransition=0`. A screen change therefore costs the same 439 ms as a focus
+move, and the 693 ms GC appears only on the first paint after boot. The "a
+transition costs ~825 ms" arithmetic elsewhere in this file is the *default*
+setting's, not this device's.
+
+**`wait=` IS NOT A DEFECT.** It is how much of the *previous* paint the press
+landed inside — the loop is blocked for the paint's whole duration, so pressing
+faster than 550 ms puts the remainder in front of your press. Library DOWN shows
+it directly: median 549 ms, max 937 ms, the difference being entirely `wait`.
+
+**The four things the run actually indicts:**
+
+1. **THE DEFERRED PAGE COUNT BLOCKS THE LOOP FOR 2–3.6 s** (`[index] pages=315 in
+   3605ms`), which is *more* than the refinement's 1409 ms, while `kCountQuietMs`
+   was 1200 ms — barely two paints. Two presses landed inside a count: one waited
+   1304 ms to be noticed and then drew nothing, one took 3401 ms end to end. Fixed
+   by giving it the refinement's window; see the constant.
+2. **A BACKWARD PAGE TURN SPENDS ~390 ms IN THE DISPATCH**, against 20–33 ms
+   forward — so paging back costs 1055 ms against 634 ms, and the rewind is now
+   comparable to the whole waveform. This file dismissed it as "33.9 ms desktop
+   against a ~520 ms panel refresh"; **the desktop→device ratio on the inflate path
+   is ~11×, not ~1×**, which is the same "37× is a RENDER ratio" trap recorded
+   under the eager page count. Not fixed. The bounded fix is a small ring of
+   recently laid-out pages (~1 KB each) so the common case — turning back to the
+   page you just left — needs no decode at all.
+3. **THE READER MENU IS THE MOST EXPENSIVE RENDER ON THE DEVICE**: 266 ms as a full
+   stack render, and still **172 ms** as an overlay-only partial repaint
+   (`scope=top`). The reader page underneath is only ~97 ms of that, so the veil
+   plus a five-row panel costs more than a whole page of body text. Not fixed, and
+   not guessable — it needs the render broken down before anything is changed.
+4. **`/books` LISTS AT 2.92–2.96 ms AN ENTRY**, confirming the figure this file has
+   quoted for two phases, and 203 entries is **~600 ms** on every Library push. Not
+   the 1.1 s estimated elsewhere here: that assumed 406 entries because macOS writes
+   a `._name` beside every file, and **this card has none**. Home's count is cached
+   now; the Library's own `rescan()` is not.
+
+**And one dead button the timing exposed rather than the logic**: `UP` on the
+Reader is `Gesture::AltPrev`, the way back, and answers `none()` with no anchor
+set — three presses in the run reported `paint=none`, two of them after waiting out
+a count. It is correct behaviour and it reads as a broken device, which is a design
+question (the hint bar advertises nothing there) rather than a performance one.
 
 ## Storage
 

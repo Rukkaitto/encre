@@ -284,7 +284,26 @@ bool SdFileSystem::exists(std::string_view path) {
   return SdMan.exists(p.c_str());
 }
 
+// --- WHAT THE CARD COSTS -----------------------------------------------------
+//
+// THE BIGGEST NUMBER IN AN INTERACTION IS A DIRECTORY LISTING, AND IT HAD NO LOG
+// LINE. `[i]` says a Confirm on Home took two seconds and that the time went to
+// `disp=`; it cannot say that the two seconds were one call to list() over 406
+// entries. That is the difference between knowing a screen is slow and knowing
+// what to change, and this project's standing rule is that where the answer
+// decides a design you measure the thing rather than argue about it -- the
+// ~2.7 ms an entry this firmware quotes everywhere is a figure from one session
+// that has never been re-checked against the card in the slot.
+//
+// Threshold rather than every call, because exists() and readAll() on a small
+// file run in single-digit milliseconds and a line each would bury the one that
+// matters. `perEntry` is printed because that, not the total, is the number that
+// says whether a 203-book card is slow for a reason worth fixing.
+static constexpr uint32_t kSlowFsMs = 15;
+
 bool SdFileSystem::list(std::string_view path, std::vector<reader::DirEntry>& out) {
+  const uint32_t fsT0 = millis();
+  const size_t had = out.size();
   SpiBusGuard bus;
   if (!mounted()) return false;
   const std::string p = normalise(path);
@@ -374,10 +393,17 @@ bool SdFileSystem::list(std::string_view path, std::vector<reader::DirEntry>& ou
   // allocation that fails an abort() with no diagnostic rather than a false.
   out.insert(out.end(), std::make_move_iterator(found.begin()),
              std::make_move_iterator(found.end()));
+  const uint32_t fsMs = millis() - fsT0;
+  const size_t got = out.size() - had;
+  if (fsMs >= kSlowFsMs)
+    Serial.printf("[fs] list %s -> %u entries in %lums (%lu.%02lu ms/entry)\n", p.c_str(),
+                  (unsigned)got, (unsigned long)fsMs, (unsigned long)(got ? fsMs / got : 0),
+                  (unsigned long)(got ? (fsMs * 100u / got) % 100u : 0));
   return true;
 }
 
 bool SdFileSystem::readAll(std::string_view path, std::string& out) {
+  const uint32_t fsT0 = millis();
   SpiBusGuard bus;
   if (!mounted()) return false;
   const std::string p = normalise(path);
@@ -417,6 +443,10 @@ bool SdFileSystem::readAll(std::string_view path, std::string& out) {
   }
   f.close();
   out = std::move(body);
+  const uint32_t fsMs = millis() - fsT0;
+  if (fsMs >= kSlowFsMs)
+    Serial.printf("[fs] readAll %s %u bytes in %lums\n", p.c_str(), (unsigned)out.size(),
+                  (unsigned long)fsMs);
   return true;
 }
 
@@ -539,6 +569,7 @@ std::unique_ptr<reader::FileHandle> SdFileSystem::openRead(std::string_view path
 }
 
 bool SdFileSystem::writeAll(std::string_view path, std::string_view data) {
+  const uint32_t fsT0 = millis();
   SpiBusGuard bus;
   if (!mounted()) return false;
   const std::string p = normalise(path);
@@ -571,6 +602,16 @@ bool SdFileSystem::writeAll(std::string_view path, std::string_view data) {
     noteCardGone("writeAll");
     return false;
   }
+  // A CARD WRITE IS ONE OF THE THREE THINGS THAT CAN STALL A PRESS, and it is the
+  // one with no ceiling: a small file plus its FAT metadata is usually tens of
+  // milliseconds, and a card doing internal housekeeping can take far longer with
+  // nothing on our side to see it. Two of these fire on the way out of a book (the
+  // position and the pointer), which is why `post=` on that interaction is the
+  // field to read.
+  const uint32_t fsMs = millis() - fsT0;
+  if (fsMs >= kSlowFsMs)
+    Serial.printf("[fs] writeAll %s %u bytes in %lums\n", p.c_str(), (unsigned)data.size(),
+                  (unsigned long)fsMs);
   return true;
 }
 
@@ -590,6 +631,11 @@ bool SdFileSystem::mkdirs(std::string_view path) {
 
 bool SdFileSystem::remove(std::string_view path) {
   SpiBusGuard bus;
+  // Counted before any of the refusals below, and that is the point: a caller
+  // that asked to delete something is reason enough to distrust a cached
+  // listing, whether or not this call is the one that changes the card. See
+  // removals() in the header.
+  ++removals_;
   if (!mounted()) return false;
   const std::string p = normalise(path);
   if (p == "/") return false;

@@ -15,16 +15,18 @@ struct Drain {
 };
 }  // namespace
 
-TEST_CASE("a quick press fires one Short on release") {
+TEST_CASE("a quick press fires one Short on the DOWN edge, and nothing on release") {
+  // With no hold bound there is nothing the release could tell us that the down
+  // edge did not, so waiting for it is pure latency -- see the header.
   PressRecognizer r;
   r.sample(Button::Confirm, true, 1000);
-  r.tick(1050);
-  CHECK(Drain(r).n == 0);  // nothing while still down
-  r.sample(Button::Confirm, false, 1100);
   Drain d(r);
   REQUIRE(d.n == 1);
   CHECK(d.ev[0].button == Button::Confirm);
   CHECK(d.ev[0].kind == PressKind::Short);
+  r.tick(1050);
+  r.sample(Button::Confirm, false, 1100);
+  CHECK(Drain(r).n == 0);  // one physical press, one event
 }
 
 TEST_CASE("a hold on a long-pressable button fires Long while still down, and the release fires nothing") {
@@ -99,17 +101,21 @@ TEST_CASE("a long release on a button with no hold bound is still Short") {
   CHECK(d.ev[0].kind == PressKind::Short);
 }
 
-TEST_CASE("a hold on a button with no long action still fires Short on release") {
+TEST_CASE("a hold on a button with no long action is one Short, fired at the down edge") {
+  // A user who presses slowly must not be punished for it -- and now is not made
+  // to wait for their own finger either. Holding this button for five seconds is
+  // still exactly the one Short that pressing it briefly gives.
   PressRecognizer r;
   r.setLongPressable(buttonBit(Button::Confirm));  // Up is NOT in the mask
   r.sample(Button::Up, true, 1000);
-  r.tick(1000 + kLongPressMs * 10);
-  CHECK(Drain(r).n == 0);
-  r.sample(Button::Up, false, 1000 + kLongPressMs * 10);
   Drain d(r);
   REQUIRE(d.n == 1);
   CHECK(d.ev[0].button == Button::Up);
   CHECK(d.ev[0].kind == PressKind::Short);
+  r.tick(1000 + kLongPressMs * 10);
+  CHECK(Drain(r).n == 0);
+  r.sample(Button::Up, false, 1000 + kLongPressMs * 10);
+  CHECK(Drain(r).n == 0);
 }
 
 TEST_CASE("the mask changing mid-hold does not resurrect a consumed press") {
@@ -129,17 +135,19 @@ TEST_CASE("two buttons held at once classify independently") {
   PressRecognizer r;
   r.setLongPressable(buttonBit(Button::Confirm));
   r.sample(Button::Confirm, true, 1000);
+  // Up binds no hold, so it is already spent by the time Confirm's is decided.
   r.sample(Button::Up, true, 1010);
+  Drain immediate(r);
+  REQUIRE(immediate.n == 1);
+  CHECK(immediate.ev[0].button == Button::Up);
+  CHECK(immediate.ev[0].kind == PressKind::Short);
   r.tick(1000 + kLongPressMs);
-  Drain first(r);
-  REQUIRE(first.n == 1);
-  CHECK(first.ev[0].button == Button::Confirm);
-  CHECK(first.ev[0].kind == PressKind::Long);
+  Drain held(r);
+  REQUIRE(held.n == 1);
+  CHECK(held.ev[0].button == Button::Confirm);
+  CHECK(held.ev[0].kind == PressKind::Long);
   r.sample(Button::Up, false, 1600);
-  Drain second(r);
-  REQUIRE(second.n == 1);
-  CHECK(second.ev[0].button == Button::Up);
-  CHECK(second.ev[0].kind == PressKind::Short);
+  CHECK(Drain(r).n == 0);
 }
 
 TEST_CASE("a hold measured across a millisecond-clock wrap still fires") {
@@ -260,10 +268,15 @@ TEST_CASE("a real release arriving after a forget is ignored, not misread") {
   // the same rule that makes a wake-button release on a fresh boot silent.
   reader::PressRecognizer r;
   r.sample(reader::Button::Back, true, 100);
+  // The down edge already emitted this press -- a real one, which forgetPresses
+  // deliberately keeps (see the case above). Drain it so what is left under test
+  // is the release alone.
+  reader::InputEvent e{};
+  REQUIRE(r.pop(e));
+  CHECK(e.kind == reader::PressKind::Short);
   r.forgetPresses();
   r.sample(reader::Button::Back, false, 200);
 
-  reader::InputEvent e{};
   CHECK_FALSE(r.pop(e));
 }
 
@@ -296,13 +309,14 @@ int drainSteps(reader::PressRecognizer& r) {
 TEST_CASE("a tap shorter than the delay is still exactly one Short") {
   reader::PressRecognizer r = scroller();
   r.sample(reader::Button::Down, true, 1000);
-  r.tick(1000 + reader::kRepeatDelayMs - 50);
   reader::InputEvent e{};
-  CHECK_FALSE(r.pop(e));  // nothing yet: the delay is what separates hold from tap
-  r.sample(reader::Button::Down, false, 1000 + reader::kRepeatDelayMs - 40);
-  REQUIRE(r.pop(e));
+  REQUIRE(r.pop(e));  // typematic: the first row moves at once
   CHECK(e.kind == reader::PressKind::Short);
   CHECK(e.steps == 1);
+  // The delay is still what separates a hold from a tap: nothing more until it.
+  r.tick(1000 + reader::kRepeatDelayMs - 50);
+  CHECK_FALSE(r.pop(e));
+  r.sample(reader::Button::Down, false, 1000 + reader::kRepeatDelayMs - 40);
   CHECK_FALSE(r.pop(e));
 }
 
@@ -373,12 +387,13 @@ TEST_CASE("no single event can cash in an unbounded stall") {
 TEST_CASE("a button outside the mask never repeats, however long it is held") {
   reader::PressRecognizer r = scroller();  // Down repeats, Up does not
   r.sample(reader::Button::Up, true, 0);
-  r.tick(10000);
   reader::InputEvent e{};
-  CHECK_FALSE(r.pop(e));
-  r.sample(reader::Button::Up, false, 10010);
-  REQUIRE(r.pop(e));
+  REQUIRE(r.pop(e));  // its one Short, at the down edge
   CHECK(e.kind == reader::PressKind::Short);
+  r.tick(10000);
+  CHECK_FALSE(r.pop(e));  // ten seconds held, and not one Repeat
+  r.sample(reader::Button::Up, false, 10010);
+  CHECK_FALSE(r.pop(e));
 }
 
 TEST_CASE("auto-repeat and long-press are mutually exclusive, and enforced") {
@@ -434,4 +449,161 @@ TEST_CASE("forgetPresses stops a repeat dead") {
   r.tick(reader::kRepeatDelayMs + 2000);
   reader::InputEvent e{};
   CHECK_FALSE(r.pop(e));
+}
+
+
+// --- FIRING ON THE DOWN EDGE -------------------------------------------------
+//
+// The latency contract, and the reason it is a contract rather than an
+// optimisation: a Short used to be emitted on the RELEASE, so every press cost
+// its own duration -- 80-200 ms of dead time in front of a ~520 ms waveform, on
+// every button on every screen. A button with nothing else it could mean has
+// nothing to wait for.
+
+TEST_CASE("a press with no hold and no repeat bound fires on the DOWN edge") {
+  PressRecognizer r;  // no masks: nothing this button could turn into
+  r.sample(Button::Confirm, true, 1000);
+  Drain d(r);
+  REQUIRE(d.n == 1);
+  CHECK(d.ev[0].button == Button::Confirm);
+  CHECK(d.ev[0].kind == PressKind::Short);
+  CHECK(d.ev[0].steps == 1);
+  // ONE physical press is still exactly one event: the release adds nothing.
+  r.tick(1200);
+  r.sample(Button::Confirm, false, 1400);
+  CHECK(Drain(r).n == 0);
+}
+
+TEST_CASE("a long-pressable button still waits, because the press could mean two things") {
+  PressRecognizer r;
+  r.setLongPressable(buttonBit(Button::Confirm));
+  r.sample(Button::Confirm, true, 1000);
+  CHECK(Drain(r).n == 0);  // nothing yet: this one has to wait
+  r.sample(Button::Confirm, false, 1100);
+  Drain d(r);
+  REQUIRE(d.n == 1);
+  CHECK(d.ev[0].kind == PressKind::Short);
+}
+
+TEST_CASE("an auto-repeat button fires its first row immediately, then repeats") {
+  // Typematic, which is what every keyboard does: one unit at once, then the
+  // delay, then the ramp. Before this the first row of a HELD Down did not move
+  // until kRepeatDelayMs plus a whole row's worth of the slow rate.
+  PressRecognizer r;
+  r.setAutoRepeat(buttonBit(Button::Down));
+  r.sample(Button::Down, true, 1000);
+  Drain first(r);
+  REQUIRE(first.n == 1);
+  CHECK(first.ev[0].kind == PressKind::Short);
+  CHECK(first.ev[0].steps == 1);
+  // The delay is still measured from the down edge, so the ramp is unchanged.
+  r.tick(1000 + kRepeatDelayMs - 1);
+  CHECK(Drain(r).n == 0);
+  r.tick(1000 + kRepeatDelayMs + 1000);
+  Drain rep(r);
+  REQUIRE(rep.n >= 1);
+  CHECK(rep.ev[0].kind == PressKind::Repeat);
+  // ...and the release still adds nothing after repeats.
+  r.sample(Button::Down, false, 1000 + kRepeatDelayMs + 1100);
+  CHECK(Drain(r).n == 0);
+}
+
+TEST_CASE("a tap on an auto-repeat button is still exactly one event") {
+  PressRecognizer r;
+  r.setAutoRepeat(buttonBit(Button::Down));
+  r.sample(Button::Down, true, 1000);
+  r.tick(1050);
+  r.sample(Button::Down, false, 1080);
+  Drain d(r);
+  REQUIRE(d.n == 1);
+  CHECK(d.ev[0].kind == PressKind::Short);
+  CHECK(d.ev[0].steps == 1);
+}
+
+TEST_CASE("a mask that gains a hold mid-press cannot fire a second event") {
+  // The press was already spent on the down edge. A screen pushed by that very
+  // press may bind a hold to the same button -- Home's Confirm opens the Library,
+  // where Confirm IS long-pressable -- and the user is still holding it.
+  PressRecognizer r;
+  r.sample(Button::Confirm, true, 1000);
+  REQUIRE(Drain(r).n == 1);
+  r.setLongPressable(buttonBit(Button::Confirm));
+  r.tick(1000 + kLongPressMs + 100);
+  CHECK(Drain(r).n == 0);
+  r.sample(Button::Confirm, false, 2000);
+  CHECK(Drain(r).n == 0);
+}
+
+TEST_CASE("repeatability is latched at the down edge, not re-read while held") {
+  // A press that began where nothing repeats must not start repeating because the
+  // screen it opened does. Same latching rule the long-press side already uses.
+  PressRecognizer r;
+  r.sample(Button::Down, true, 1000);
+  REQUIRE(Drain(r).n == 1);  // Short, immediately
+  r.setAutoRepeat(buttonBit(Button::Down));
+  r.tick(1000 + kRepeatDelayMs + 5000);
+  CHECK(Drain(r).n == 0);
+}
+
+TEST_CASE("forgetPresses after a down-edge fire leaves nothing to release") {
+  PressRecognizer r;
+  r.sample(Button::Back, true, 1000);
+  REQUIRE(Drain(r).n == 1);
+  r.forgetPresses();
+  r.sample(Button::Back, false, 1100);
+  CHECK(Drain(r).n == 0);
+}
+
+
+// --- InputEvent::at ----------------------------------------------------------
+//
+// The shell's per-interaction latency line subtracts this from millis(), so a
+// wrong value here does not fail anything -- it silently reports the device as
+// faster or slower than it is. That is the worst kind of measurement bug, so the
+// four cases are pinned.
+
+TEST_CASE("a down-edge Short is stamped with the edge, not with when it was drained") {
+  PressRecognizer r;
+  r.sample(Button::Confirm, true, 12345);
+  Drain d(r);
+  REQUIRE(d.n == 1);
+  CHECK(d.ev[0].at == 12345);
+}
+
+TEST_CASE("a release-classified press is stamped with the release edge") {
+  PressRecognizer r;
+  r.setLongPressable(buttonBit(Button::Confirm));
+  r.sample(Button::Confirm, true, 1000);
+  r.sample(Button::Confirm, false, 1100);
+  Drain d(r);
+  REQUIRE(d.n == 1);
+  CHECK(d.ev[0].kind == PressKind::Short);
+  CHECK(d.ev[0].at == 1100);
+}
+
+TEST_CASE("a Long is stamped with the THRESHOLD, so a late tick reports its own lateness") {
+  // A paint blocks the loop for 520-825 ms, so the tick that notices a hold is
+  // routinely hundreds of milliseconds late. Stamping the tick's own clock would
+  // move the press forward to meet the delay and erase it from the measurement.
+  PressRecognizer r;
+  r.setLongPressable(buttonBit(Button::Confirm));
+  r.sample(Button::Confirm, true, 1000);
+  r.tick(1000 + kLongPressMs + 700);  // the loop was busy for 700 ms
+  Drain d(r);
+  REQUIRE(d.n == 1);
+  CHECK(d.ev[0].kind == PressKind::Long);
+  CHECK(d.ev[0].at == 1000 + kLongPressMs);
+}
+
+TEST_CASE("a Repeat is stamped with the tick, because its steps already span the gap") {
+  PressRecognizer r;
+  r.setAutoRepeat(buttonBit(Button::Down));
+  r.sample(Button::Down, true, 1000);
+  REQUIRE(Drain(r).n == 1);  // the immediate first row
+  const uint32_t at = 1000 + kRepeatDelayMs + 1000;
+  r.tick(at);
+  Drain d(r);
+  REQUIRE(d.n == 1);
+  CHECK(d.ev[0].kind == PressKind::Repeat);
+  CHECK(d.ev[0].at == at);
 }

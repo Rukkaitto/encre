@@ -1,4 +1,6 @@
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -114,6 +116,32 @@ static bool parseKeys(const char* spec, std::vector<reader::InputEvent>& out) {
 // panel floating on white).
 using PaintPass = std::function<void(reader::Framebuffer&, reader::Plane)>;
 
+// --bench N: repeat the paint N times and report per-pass microseconds instead of
+// only writing the PNG. The desktop cannot tell you what a waveform costs, but the
+// RENDER is the same code the shell runs, so this is the one half of a paint the
+// desktop can measure honestly -- and it is the half that sits between the button
+// and the waveform starting.
+static int gBenchIters = 0;
+
+static void benchPaint(const PaintPass& paint, reader::Plane plane, int w, int h,
+                       const char* label) {
+  if (gBenchIters <= 0) return;
+  reader::Framebuffer fb(w, h);
+  // One warm pass first: the glyph cache is cold on the very first render and the
+  // shell's cache is warm for every paint but the first after a font change.
+  fb.clear(true);
+  paint(fb, plane);
+  const auto t0 = std::chrono::steady_clock::now();
+  for (int i = 0; i < gBenchIters; ++i) {
+    fb.clear(true);
+    paint(fb, plane);
+  }
+  const auto t1 = std::chrono::steady_clock::now();
+  const double us =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / 1000.0 / gBenchIters;
+  std::printf("[bench] %s %dx%d %.1f us/pass (n=%d)\n", label, w, h, us, gBenchIters);
+}
+
 static bool renderPassesToPng(const PaintPass& paint, reader::Fidelity fidelity, int w, int h,
                               const char* out) {
   if (fidelity == reader::Fidelity::Grayscale) {
@@ -122,6 +150,8 @@ static bool renderPassesToPng(const PaintPass& paint, reader::Fidelity fidelity,
     // image so the desktop sees what the panel will paint. `bw` is rendered (not
     // skipped) so the simulator drives the same call sequence the shell does.
     reader::Framebuffer bw(w, h), lsb(w, h), msb(w, h);
+    benchPaint(paint, reader::Plane::BwDithered, w, h, "gray-fastpass(dithered)");
+    benchPaint(paint, reader::Plane::Bw, w, h, "gray-bw");
     paint(bw, reader::Plane::Bw);
     paint(lsb, reader::Plane::Lsb);
     paint(msb, reader::Plane::Msb);
@@ -132,6 +162,8 @@ static bool renderPassesToPng(const PaintPass& paint, reader::Fidelity fidelity,
   // (Dithered).
   const reader::Plane plane = fidelity == reader::Fidelity::Dithered ? reader::Plane::BwDithered
                                                                      : reader::Plane::Bw;
+  benchPaint(paint, plane,  w, h,
+             plane == reader::Plane::BwDithered ? "dithered" : "mono");
   reader::Framebuffer fb(w, h);
   paint(fb, plane);
   return reader::writePng(fb, out);
@@ -225,6 +257,7 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--canvas") == 0) std::sscanf(argv[i + 1], "%dx%d", &w, &h);
     else if (std::strcmp(argv[i], "--keys") == 0) keys = argv[i + 1];
     else if (std::strcmp(argv[i], "--root") == 0) root = argv[i + 1];
+    else if (std::strcmp(argv[i], "--bench") == 0) gBenchIters = std::atoi(argv[i + 1]);
   }
   if (argc > 3 && std::strncmp(argv[argc - 1], "--", 2) == 0) {
     std::fprintf(stderr, "%s needs a value\n", argv[argc - 1]);

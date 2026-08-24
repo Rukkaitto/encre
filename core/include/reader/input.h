@@ -29,6 +29,27 @@ struct InputEvent {
   // event represent all the time that passed while the panel was busy, so held
   // scrolling runs at a real rate instead of the repaint rate.
   int steps = 1;
+
+  // WHEN THIS EVENT BECAME KNOWABLE, on the same millisecond clock the shell
+  // feeds sample() and tick(). Not when it was popped -- the point is precisely
+  // the gap between the two.
+  //
+  // It is the recognizer's honest answer to "the user's action was determined at
+  // this instant", which is a different instant for each kind:
+  //   * Short on the down edge  -- the edge's own timestamp, captured by the
+  //     input task at its true time, not when the loop got round to it.
+  //   * Short or Long on release -- the release edge's timestamp, same reason.
+  //   * Long from tick()        -- `downAt + kLongPressMs`, NOT the tick's own
+  //     time. The threshold is when the hold became a hold; a tick arriving late
+  //     is latency to be measured, not a later press.
+  //   * Repeat                  -- the tick's time, because `steps` has already
+  //     accounted for the elapsed period this event stands for.
+  //
+  // The shell subtracts this from millis() at dispatch to get the `wait=` field
+  // of its per-interaction line. What it CANNOT see is everything before the
+  // input task looked: the 10 ms poll interval and the SDK's 5 ms debounce are
+  // upstream of this timestamp and are only knowable from the constants.
+  uint32_t at = 0;
 };
 
 // A set of buttons. Bit (1 << index).
@@ -70,13 +91,31 @@ const char* buttonName(Button b);
 
 // Turns raw level transitions into classified presses.
 //
-// Two rules govern everything here:
-//   * One physical press produces EXACTLY ONE event. A hold that fires Long
-//     while the button is still down consumes the press, so the release that
-//     follows emits nothing.
-//   * A button outside the long-press mask fires Short ON RELEASE however long
-//     it was held -- never nothing. A user who presses slowly must not be
-//     punished for it.
+// Three rules govern everything here:
+//   * One physical press produces EXACTLY ONE event (plus its repeats, where the
+//     screen asked for them). Whichever edge classified the press consumes it, so
+//     the other edge emits nothing.
+//   * A button that CANNOT mean two things fires Short on the DOWN edge. There is
+//     nothing to wait for: only a long-press binding makes a press ambiguous, and
+//     without one the release carries no information the down edge did not.
+//   * A button INSIDE the long-press mask fires on the RELEASE (or from tick(),
+//     while still held), because until the finger comes up the press could still
+//     be either thing. It fires Short however long it was held -- never nothing.
+//     A user who presses slowly must not be punished for it.
+//
+// WHY THE DOWN EDGE, and why it is a contract rather than a tweak: a Short used
+// to be emitted on the release without exception, so every press paid its own
+// duration -- 80-200 ms of dead time in front of a ~520 ms waveform -- on every
+// button of every screen. Exactly one button in this firmware binds a hold
+// (Confirm, on the Library), so the release wait was being paid by every page
+// turn, every Back, every Confirm and every focus move to buy an ambiguity that
+// only one of them has.
+//
+// For an auto-repeat button the down edge fires the FIRST unit and the ramp
+// follows from kRepeatDelayMs as before -- typematic, which is what a keyboard
+// does. It is not a second rule: `Repeat` was never the thing a tap produced, and
+// a held button's first row used to wait out the delay AND a whole row of the
+// slow rate before anything moved.
 class PressRecognizer {
  public:
   // Which buttons have a long-press action right now. The App sets this from the
@@ -132,11 +171,23 @@ class PressRecognizer {
  private:
   static constexpr int kQueueLen = 16;
 
-  void emit(Button b, PressKind kind, int steps = 1);
+  void emit(Button b, PressKind kind, uint32_t at, int steps = 1);
 
   struct State {
     bool down = false;
     bool consumed = false;  // Long already fired for this press
+    // A Short was already emitted on the DOWN edge, so the release owes nothing.
+    // Separate from `consumed` because an auto-repeat button fires this AND goes
+    // on repeating, where `consumed` stops tick() looking at the button at all.
+    bool firedShort = false;
+    // Whether this button was in the auto-repeat mask AT THE DOWN EDGE.
+    //
+    // LATCHED, not re-read while held, for the same reason the long-press side
+    // latches `consumed`: the mask follows the top of the stack, and the press
+    // that fired on the down edge may itself have pushed a screen where this
+    // button repeats. Re-reading would then start scrolling the new screen
+    // because the user had not yet let go of the button that opened it.
+    bool repeatable = false;
     // When the last Repeat was accounted for, and whether any fired. A press that
     // repeated emits nothing on release, exactly as a Long does: the repeats WERE
     // the press, and a trailing Short would move the list one further row after

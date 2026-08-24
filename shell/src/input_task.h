@@ -34,3 +34,14 @@ uint32_t rawSamplesDropped();
 // How many transitions are waiting. For deciding whether to start something the
 // panel cannot interrupt: a press already queued means the user is still going.
 size_t rawSamplesPending();
+
+// Block until a transition is waiting or `timeoutMs` elapses, whichever is first.
+// The sample is LEFT IN THE QUEUE -- this is a peek, so the next popRawSample()
+// still sees it.
+//
+// This is what the main loop idles on instead of delay(). The two are identical
+// when nothing happens, and the difference is the whole point when something
+// does: a delay() sleeps out its full period whatever arrives, so an edge queued
+// one millisecond in cost the user the other nine before the loop even looked.
+// That is dead time in front of a ~520 ms waveform, and it is free to remove.
+bool waitForRawSample(uint32_t timeoutMs);
