@@ -81,6 +81,15 @@ struct ReadingPosition {
   // detects, and which drops the position anyway.
   int percent = 0;
 
+  // THE CHAPTER'S NAME AT THIS POSITION, for Book details' "Current story" row.
+  //
+  // Stored for the SAME reason `percent` is, and it is a stronger case: recovering it
+  // means opening the book's archive AND parsing its NCX, where the Library needs the
+  // answer for a row it draws without opening anything. It is exact when written -- the
+  // Reader's own header label, so a book with no contents stores the `CH. 08` fallback
+  // and the row says that, which is honest.
+  std::string chapter;
+
   bool operator==(const ReadingPosition& o) const;
 };
 

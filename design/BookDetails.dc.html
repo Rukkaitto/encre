@@ -54,7 +54,16 @@
   <div style="display: flex; flex-direction: column; border-top: 2px solid #000000;">
     <div style="display: flex; justify-content: space-between; align-items: center; height: 64px; padding: 0 24px; border-bottom: 1px solid #000000;">
   <div style="font-size: var(--t-value); font-weight: 500;">Progress</div>
-  <div style="font-size: var(--t-value); font-weight: 700;">31% &middot; PAGE 78 OF 252</div>
+      <!-- THE PERCENTAGE ALONE. This said `31% - PAGE 78 OF 252`, and a page number for
+           a place in the BOOK needs every chapter paginated: 6.94 MB of inflated XHTML
+           for a real novel, ~49 s of decode at this device's measured 7.2 ms/KB, paid
+           before this screen could draw.
+
+           The percentage is free -- it is stored in the book's own sidecar when the
+           reader leaves it, computed from the book's BYTE layout rather than its pages
+           (reading_store.h). Third slot on the third board to lose a page count for the
+           same reason; Home's CONTINUE block and Contents' rows were the others. -->
+  <div style="font-size: var(--t-value); font-weight: 700;">31%</div>
 </div>
     <div style="display: flex; justify-content: space-between; align-items: center; height: 64px; padding: 0 24px; border-bottom: 1px solid #000000;">
   <div style="font-size: var(--t-value); font-weight: 500;">Current story</div>

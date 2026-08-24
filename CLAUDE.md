@@ -1701,6 +1701,32 @@ Reader exists". It does now. Two things had to change together:
   record is skipped individually, so a save cut by a power loss costs one book its
   percentage and nothing else.
 
+**BOOK DETAILS' ROWS COME FROM THE SAME INDEX**, and this is why the sidecar carries
+derived data at all. Its `Progress` row is the percentage and its `Current story` is the
+chapter name, both read from the one listing the Library already does — where deriving
+either would mean opening the book's archive, and the chapter name would mean parsing its
+NCX as well, per row.
+
+**THE AUTHOR CANNOT COME FROM THE SCAN**, and that is the one field that needed a
+different answer. It lives in the OPF, so learning it per row is ~100 ms an archive open
+and **~20 s for a 203-book library**, on a screen that has to paint. Book details shows
+ONE book, so the shell reads it on the press that opens the screen — one open, and there
+is heap for it precisely because no Reader is on the stack, the same 48 KB the table of
+contents could not find from under a live one.
+
+**TWO ROWS STILL CANNOT BE FILLED, and both were measured rather than assumed:**
+
+- **`Added`** needs a file timestamp. `DirEntry` is `{name, isDir, size}` — no date — so
+  this is a `FileSystem` change across three implementations and the contract's 27
+  clauses, not a metadata question.
+- **The subtitle** is not in the data. Checked across four real books: **not one** carries
+  a `title-type=subtitle` refinement or any subtitle marker. The board's "Fifteen stories
+  · 1914" is authored copy, and inventing it from `dc:date` would be a different fact
+  wearing its clothes.
+
+**AND THE PROGRESS ROW LOST ITS PAGE COUNT** — the third slot on the third board to do
+so, after Home's CONTINUE block and Contents' rows, for the same ~49 s reason every time.
+
 `percentFor` returns **-1 for "not started", not 0**: a book at 0% has been opened and
 one that has not reads `NEW`, and the board draws those differently.
 

@@ -17,6 +17,7 @@ constexpr const char* kKeyBytes = "bookBytes";
 constexpr const char* kKeyPpem = "ppem";
 constexpr const char* kKeyColumnW = "columnW";
 constexpr const char* kKeyPercent = "percent";
+constexpr const char* kKeyChapter = "chapter";
 
 // A negative index is not a position, and a file is free to claim one. Clamped at
 // the boundary rather than refused: the rest of the record is still usable, which is
@@ -28,7 +29,7 @@ int nonNegative(int64_t v) { return v < 0 ? 0 : static_cast<int>(v > 0x7fffffff 
 bool ReadingPosition::operator==(const ReadingPosition& o) const {
   return bookPath == o.bookPath && spine == o.spine && block == o.block && line == o.line &&
          bookBytes == o.bookBytes && ppem == o.ppem && columnW == o.columnW &&
-         percent == o.percent;
+         percent == o.percent && chapter == o.chapter;
 }
 
 PositionFit fitOf(const ReadingPosition& saved, std::string_view bookPath, uint32_t bookBytes,
@@ -82,6 +83,7 @@ std::string serialise(const ReadingPosition& p) {
   o.setInt(kKeyPpem, p.ppem);
   o.setInt(kKeyColumnW, p.columnW);
   o.setInt(kKeyPercent, p.percent);
+  o.setString(kKeyChapter, p.chapter);
   return o.dump();
 }
 
@@ -115,6 +117,9 @@ bool parsePosition(std::string_view text, ReadingPosition& out) {
   if (o.getInt(kKeyColumnW, v)) p.columnW = nonNegative(v);
   // Clamped, not trusted: this one is read straight onto a screen.
   if (o.getInt(kKeyPercent, v)) p.percent = v < 0 ? 0 : (v > 100 ? 100 : static_cast<int>(v));
+  // OPTIONAL, because every sidecar written before this field existed lacks it -- and a
+  // position is still perfectly usable without a chapter name. The row draws blank.
+  o.getString(kKeyChapter, p.chapter);
 
   out = p;
   return true;

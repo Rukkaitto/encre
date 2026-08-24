@@ -109,8 +109,20 @@ bool LibraryScreen::rescan() {
       // The index is read ONCE per rescan, above -- one listing plus one read per
       // book STARTED. Asking each row for its own sidecar would be one open per book
       // on the card, most of them misses.
-      const int pct = dir ? -1 : percentFor(started, join(e.name));
-      item.progress = dir ? "" : (pct >= 0 ? std::to_string(pct) + "%" : kNewBook);
+      // ONE LOOKUP FOR BOTH ROWS. The Library's own row wants a percentage and Book
+      // details wants a percentage AND the chapter name, and they come out of the same
+      // entry -- two scans for one answer would be two scans.
+      const ProgressEntry* seen = dir ? nullptr : progressFor(started, join(e.name));
+      item.progress = dir ? "" : (seen != nullptr ? std::to_string(seen->percent) + "%"
+                                                  : kNewBook);
+      if (seen != nullptr) {
+        // BOOK DETAILS' OWN RUNS, which are not the row's. Its Progress row is the
+        // percentage without the page count the board used to ask for, and its "Current
+        // story" is the chapter name the sidecar carries -- so both cost the listing the
+        // percentages already cost rather than an archive open per book.
+        item.details.progress = std::to_string(seen->percent) + "%";
+        item.details.chapter = seen->chapter;
+      }
       item.entry = std::move(e);
       items_.push_back(std::move(item));
     }

@@ -31,11 +31,14 @@ std::string megabytes(uint32_t bytes) {
 
 }  // namespace
 
-BookDetailsScreen::BookDetailsScreen(const LibraryScreen& library) {
+BookDetailsScreen::BookDetailsScreen(const LibraryScreen& library, std::string author) {
   const LibraryItem* item = library.focusedItem();
   if (item != nullptr) {
     vm_.title = std::string(item->entry.title());
-    vm_.author = item->details.author;
+    // THE SHELL'S ANSWER WINS, because it is the only one that read the book. The
+    // Library's `details.author` is the demo content's field and is empty on a card --
+    // it stays as the fallback so the simulator and the goldens keep their value.
+    vm_.author = author.empty() ? item->details.author : author;
     vm_.subtitle = item->details.subtitle;
     vm_.format = formatOf(item->entry.name);
     // The board's six rows, in the board's order. Four of the values need

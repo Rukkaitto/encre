@@ -275,7 +275,7 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       return std::make_unique<DeleteConfirmScreen>(*library_);
     case ScreenId::BookDetails:
       if (library_ == nullptr) return nullptr;
-      return std::make_unique<BookDetailsScreen>(*library_);
+      return std::make_unique<BookDetailsScreen>(*library_, detailsAuthor_);
     case ScreenId::Settings: {
       auto scr = std::make_unique<SettingsScreen>(settings_, settingsSink_);
       scr->setMetrics(settingsListH_, settingsRowH_, settingsHeaderH_);

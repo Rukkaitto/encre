@@ -186,6 +186,17 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // written down for exactly this, one screen earlier.
   void setContentsDemo() { contentsDemo_ = true; }
 
+  // THE AUTHOR FOR BOOK DETAILS, read by the shell from the one book that screen shows.
+  //
+  // It cannot come from the Library's scan: the author lives in the OPF, so learning it
+  // per row means opening every book on the card -- ~100 ms each, ~20 s for a 203-book
+  // library, on a screen that has to paint. Book details shows ONE book, so it is one
+  // archive open on the press that opens it, and there is heap for it because no Reader
+  // is on the stack.
+  //
+  // Empty leaves the row blank, which is what it has always drawn.
+  void setDetailsAuthor(std::string author) { detailsAuthor_ = std::move(author); }
+
   // THE BOOK'S TABLE OF CONTENTS, for the Contents screen. Set by the shell when the
   // menu's Contents row is chosen -- reading it is card work (`toc.h` re-opens the
   // archive) and `core/` does no storage, so the factory is handed the answer rather
@@ -261,6 +272,7 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   bool readerDemo_ = false;
   bool sleepIdle_ = false;
   bool contentsDemo_ = false;
+  std::string detailsAuthor_;
   std::vector<TocEntry> contentsToc_;
   int contentsSpine_ = 0;
   bool contentsPrimed_ = false;

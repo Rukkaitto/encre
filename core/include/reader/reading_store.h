@@ -84,6 +84,10 @@ SaveResult saveLastRead(FileSystem& fs, const LastRead& l);
 struct ProgressEntry {
   std::string bookPath;
   int percent = 0;
+  // The chapter name at the saved position -- Book details' "Current story". Carried
+  // here so that row costs the same listing the percentages already cost, rather than
+  // an archive open and an NCX parse per book.
+  std::string chapter;
 };
 
 // False only if the directory could not be read at all -- an absent directory is an
@@ -95,6 +99,12 @@ bool loadProgressIndex(FileSystem& fs, std::vector<ProgressEntry>& out);
 // Linear, because the index holds one entry per book READ and a card's started books
 // are few; if that ever stops being true this is the line to change.
 int percentFor(const std::vector<ProgressEntry>& index, std::string_view bookPath);
+
+// The whole entry for `bookPath`, or nullptr when the book has not been started. For a
+// caller that wants more than the percentage -- Book details wants the chapter too, and
+// two linear scans for one lookup is two scans.
+const ProgressEntry* progressFor(const std::vector<ProgressEntry>& index,
+                                 std::string_view bookPath);
 
 // Where the sidecars live, which is what loadProgressIndex lists.
 inline constexpr const char* kStateDir = "/.reader/state";

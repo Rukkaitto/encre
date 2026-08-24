@@ -145,15 +145,21 @@ bool loadProgressIndex(FileSystem& fs, std::vector<ProgressEntry>& out) {
     // SKIPPED INDIVIDUALLY, never fatal. A truncated record -- a save cut by a power
     // loss -- costs that one book its percentage and says nothing about the rest.
     if (!parsePosition(text, p) || p.bookPath.empty()) continue;
-    out.push_back(ProgressEntry{p.bookPath, p.percent});
+    out.push_back(ProgressEntry{p.bookPath, p.percent, p.chapter});
   }
   return true;
 }
 
 int percentFor(const std::vector<ProgressEntry>& index, std::string_view bookPath) {
+  const ProgressEntry* e = progressFor(index, bookPath);
+  return e == nullptr ? -1 : e->percent;
+}
+
+const ProgressEntry* progressFor(const std::vector<ProgressEntry>& index,
+                                 std::string_view bookPath) {
   for (const ProgressEntry& e : index)
-    if (e.bookPath == bookPath) return e.percent;
-  return -1;
+    if (e.bookPath == bookPath) return &e;
+  return nullptr;
 }
 
 }  // namespace reader

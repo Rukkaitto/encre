@@ -24,7 +24,10 @@ class LibraryScreen;
 // one with.
 class BookDetailsScreen : public Screen {
  public:
-  explicit BookDetailsScreen(const LibraryScreen& library);
+  // `author` is the book's own, from its OPF -- the shell reads it for the one book this
+  // screen shows, because the Library's scan cannot (see ScreenFactory::setDetailsAuthor).
+  // Empty leaves the row blank, which is what it drew before anything could fill it.
+  explicit BookDetailsScreen(const LibraryScreen& library, std::string author = {});
 
   ScreenId id() const override { return ScreenId::BookDetails; }
   Action onGesture(const GestureEvent& g) override;

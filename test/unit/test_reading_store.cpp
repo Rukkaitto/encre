@@ -362,3 +362,49 @@ TEST_CASE("a percentage outside 0..100 is clamped on the way in") {
   REQUIRE(reader::parsePosition(o.dump(), out));
   CHECK(out.percent == 0);
 }
+
+// --- Book details' rows come from the sidecar -----------------------------------
+
+TEST_CASE("the sidecar carries the chapter name, for Current story") {
+  // Stored for the same reason `percent` is, and a stronger case: recovering it means
+  // opening the book's archive AND parsing its NCX, where the Library needs the answer
+  // for a row it draws without opening anything.
+  FakeFileSystem fs;
+  ReadingPosition p = pos();
+  p.percent = 31;
+  p.chapter = "LIVRE I";
+  REQUIRE(reader::savePosition(fs, p) == SaveResult::Written);
+
+  std::vector<reader::ProgressEntry> index;
+  REQUIRE(reader::loadProgressIndex(fs, index));
+  const reader::ProgressEntry* e = reader::progressFor(index, p.bookPath);
+  REQUIRE(e != nullptr);
+  CHECK(e->percent == 31);
+  CHECK(e->chapter == "LIVRE I");
+  CHECK(reader::progressFor(index, "/books/never.epub") == nullptr);
+}
+
+TEST_CASE("a sidecar written before the chapter field existed still loads") {
+  // Every position saved by an earlier firmware lacks it, and a position is perfectly
+  // usable without a chapter name -- the row simply draws blank. Refusing the record
+  // would lose the reader their place to gain a label.
+  reader::JsonObject o;
+  o.setInt("version", reader::kPositionVersion);
+  o.setString("path", "/books/a.epub");
+  o.setInt("spine", 4);
+  o.setInt("percent", 12);
+  ReadingPosition out;
+  REQUIRE(reader::parsePosition(o.dump(), out));
+  CHECK(out.spine == 4);
+  CHECK(out.percent == 12);
+  CHECK(out.chapter.empty());
+}
+
+TEST_CASE("an accented chapter name survives the sidecar") {
+  // Real ones are accented, and the theme shouts some of them.
+  ReadingPosition p = pos();
+  p.chapter = "PREMI\xC3\x88RE PARTIE";
+  ReadingPosition out;
+  REQUIRE(reader::parsePosition(reader::serialise(p), out));
+  CHECK(out.chapter == p.chapter);
+}

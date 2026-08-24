@@ -1251,6 +1251,10 @@ static void saveReadingPosition(const char* why) {
   // shared with the Home pointer.
   p.percent = reader::progressPercent(gFactory.readerBook(), rd->chapterIndex(), rd->vm().page,
                                       rd->vm().pageTotal);
+  // THE CHAPTER'S NAME AS THE READER SEES IT, which is the header's own label -- so a
+  // book with no contents stores the `CH. 08` fallback and Book details' "Current story"
+  // says that, rather than inventing a name or leaving the row blank.
+  p.chapter = rd->vm().chapter;
 
   reader::LastRead last;
   last.bookPath = gReading.path;
@@ -3016,6 +3020,37 @@ void loop() {
     // Keyed on the gesture rather than on the screen that results, because the priming
     // has to happen BEFORE the push: Activate on the Reader opens the menu, and
     // Activate on the menu's Contents row opens the list.
+    // BOOK DETAILS' AUTHOR, read BEFORE the dispatch that pushes it -- the third time
+    // today that "what is on top decides what to build" had to run first, and the first
+    // time it was written that way from the start.
+    //
+    // ONE ARCHIVE OPEN, for the one book the screen shows. The Library's scan cannot
+    // learn an author: it lives in the OPF, so per row it would be ~100 ms an open and
+    // ~20 s for a 203-book library. And there is heap for it here precisely because no
+    // Reader is on the stack -- the same 48 KB that could not be found when the table of
+    // contents tried to load from under a live one.
+    if (ev.button == reader::Button::Confirm &&
+        gApp->top().id() == reader::ScreenId::ItemActions) {
+      gFactory.setDetailsAuthor("");
+      reader::LibraryScreen* lib = gFactory.library();
+      const reader::LibraryItem* sel = lib != nullptr ? lib->focusedItem() : nullptr;
+      if (sel != nullptr && !sel->entry.isDir) {
+        std::string p = lib->path();
+        if (p.empty() || p.back() != '/') p += '/';
+        p += sel->entry.name;
+        reader::OpenedBook meta;
+        const char* why = "";
+        const uint32_t t = millis();
+        if (reader::openBook(gSd, p, meta, &why)) {
+          gFactory.setDetailsAuthor(meta.author);
+          Serial.printf("[details] %s by \"%s\" in %lums\n", meta.title.c_str(),
+                        meta.author.c_str(), (unsigned long)(millis() - t));
+        } else {
+          Serial.printf("[details] no metadata for %s: %s\n", p.c_str(), why);
+        }
+        Serial.flush();
+      }
+    }
     if (gReading.open && ev.button == reader::Button::Confirm) {
       if (gApp->top().id() == reader::ScreenId::Reader) {
         const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
