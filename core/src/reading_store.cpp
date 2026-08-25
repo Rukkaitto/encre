@@ -96,7 +96,8 @@ bool forgetLastRead(FileSystem& fs) {
   return fs.remove(kLastReadPath);
 }
 
-int progressPercent(const OpenedBook& book, int spine, int page, int pageTotal) {
+int progressPercent(const OpenedBook& book, int spine, int page, int pageTotal,
+                    uint32_t bytesIntoChapter) {
   const int chapters = book.chapterCount();
   if (chapters <= 0 || spine < 0) return 0;
 
@@ -108,13 +109,23 @@ int progressPercent(const OpenedBook& book, int spine, int page, int pageTotal) 
   for (int c = 0; c < chapters && c < spine; ++c)
     through += book.chapters[static_cast<size_t>(c)].uncompressedSize;
 
-  // WITHIN the open chapter, only when its page count is known. Page 1 is zero
-  // through it, which is why this is (page - 1): arriving at a chapter has not read
-  // any of it yet.
-  if (spine < chapters && pageTotal > 0 && page > 0) {
+  // WITHIN the open chapter. BY BYTES WHERE THEY ARE KNOWN, because that is the
+  // same quantity the rest of this sum is made of and it needs no page count -- the
+  // old page/pageTotal form did not advance AT ALL until the deferred count landed,
+  // so a reader moving through a long chapter watched the number sit still and then
+  // jump. Worse, a save taken in that window persisted the un-advanced figure over a
+  // better one, which is how the percentage went BACKWARDS on the device.
+  if (spine < chapters) {
     const uint64_t here = book.chapters[static_cast<size_t>(spine)].uncompressedSize;
-    const int within = page - 1 > pageTotal ? pageTotal : page - 1;
-    through += here * static_cast<uint64_t>(within) / static_cast<uint64_t>(pageTotal);
+    if (bytesIntoChapter > 0 && here > 0) {
+      const uint64_t within = bytesIntoChapter < here ? bytesIntoChapter : here;
+      through += within;
+    } else if (pageTotal > 0 && page > 0) {
+      // The fallback. Page 1 is zero through the chapter, which is why this is
+      // (page - 1): arriving at a chapter has not read any of it yet.
+      const int within = page - 1 > pageTotal ? pageTotal : page - 1;
+      through += here * static_cast<uint64_t>(within) / static_cast<uint64_t>(pageTotal);
+    }
   }
 
   if (through > total) through = total;

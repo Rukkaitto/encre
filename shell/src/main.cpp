@@ -1480,7 +1480,7 @@ static void saveReadingPosition(const char* why) {
   // opening every book's archive to recompute one. Computed once, just below, and
   // shared with the Home pointer.
   p.percent = reader::progressPercent(gFactory.readerBook(), rd->chapterIndex(), rd->vm().page,
-                                      rd->vm().pageTotal);
+                                      rd->vm().pageTotal, rd->chapterBytesRead());
   // THE CHAPTER'S NAME AS THE READER SEES IT, which is the header's own label -- so a
   // book with no contents stores the `CH. 08` fallback and Book details' "Current story"
   // says that, rather than inventing a name or leaving the row blank.
@@ -3649,7 +3649,8 @@ void loop() {
         char pct[8];
         std::snprintf(pct, sizeof(pct), "%d%%",
                       reader::progressPercent(gFactory.readerBook(), rd->chapterIndex(),
-                                              rd->vm().page, rd->vm().pageTotal));
+                                              rd->vm().page, rd->vm().pageTotal,
+                                              rd->chapterBytesRead()));
         gFactory.setReaderMenuHeader(gReading.title.empty() ? gReading.path : gReading.title,
                                      pct);
       } else if (gApp->top().id() == reader::ScreenId::ReaderMenu) {
@@ -3685,7 +3686,7 @@ void loop() {
               f.chapter = rd.vm().chapter;
               f.progress = std::to_string(reader::progressPercent(
                                gFactory.readerBook(), rd.chapterIndex(), rd.vm().page,
-                               rd.vm().pageTotal)) +
+                               rd.vm().pageTotal, rd.chapterBytesRead())) +
                            "%";
             }
           }

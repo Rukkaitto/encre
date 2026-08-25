@@ -458,6 +458,9 @@ class ReaderScreen : public Screen {
   // StyledFace exists to prevent.
   const GlyphSource* italic_ = nullptr;
   std::vector<std::string> italicClasses_;
+  // Bytes into the chapter at the end of `page_`. Carried on the ring too, because a
+  // page served from it was decoded long ago and the stream has moved since.
+  uint32_t pageBytes_ = 0;
 
  public:
   // WHETHER AN ITALIC FACE IS INSTALLED AT ALL. drawTextStyled falls back to the
@@ -478,6 +481,16 @@ class ReaderScreen : public Screen {
     chapter_.setItalicClasses(italicClasses_.empty() ? nullptr : &italicClasses_);
   }
   size_t italicClassCount() const { return italicClasses_.size(); }
+
+  // HOW FAR INTO THE OPEN CHAPTER THE PAGE ON SCREEN SITS, in inflated bytes, or 0
+  // when that is not knowable (a stored entry, an in-memory chapter). This is what
+  // makes book progress independent of the page count -- see ChapterReader::bytesRead.
+  //
+  // It is the END of the current page rather than its start, which is the honest
+  // reading of "how much have I read": the page in front of you has been read by the
+  // time you leave it, and the alternative would report 0% on page one of a chapter
+  // you are looking at.
+  uint32_t chapterBytesRead() const { return pageBytes_; }
 
   // How many emphasised runs the page currently laid out carries. Zero means the
   // PARSE found none in this text -- `<em>`, `<i>` and `<cite>` are what document.cpp
@@ -535,12 +548,16 @@ class ReaderScreen : public Screen {
     int chapter = -1;
     Cursor start{};
     Page page{};
+    // Where the stream stood when this page was laid out. Without it a ring hit
+    // would report the byte position of whatever was decoded LAST, which after a
+    // rewind is a different part of the chapter entirely.
+    uint32_t bytes = 0;
   };
   std::vector<CachedPage> pageRing_;
   int pageCacheDepth_ = kPageCacheDepth;
   RingStats ring_{};
-  const Page* cachedPage(int chapter, Cursor start) const;
-  void cachePage(int chapter, Cursor start, const Page& p);
+  const CachedPage* cachedPage(int chapter, Cursor start) const;
+  void cachePage(int chapter, Cursor start, const Page& p, uint32_t bytes);
   // EVERY ENTRY IS INVALID THE MOMENT THE LAYOUT CHANGES, because a Page is lines
   // measured at one face and one column. Called from the two places that can change
   // either.

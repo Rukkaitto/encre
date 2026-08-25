@@ -2096,6 +2096,33 @@ Tested by the restore equivalent of the strongest paging property here: **a curs
 saved on a page reproduces THAT page, checked for every page of a chapter** — a walk
 that stops a boundary early is right at page 1 and wrong everywhere after it.
 
+**AND WITHIN THE OPEN CHAPTER IT IS BYTES TOO, WHICH IT WAS NOT AT FIRST.** It
+interpolated on `page`/`pageTotal`, and `pageTotal` is **0 until the deferred count
+lands** — so for a long chapter the number did not advance at all for the first
+seconds, and did not advance while the reader kept pressing at all. Reported off the
+device as "I've advanced but I'm still at 40%", against a Kobo's 42% at the same
+place. Two consequences, and the second is the sharper one:
+
+- **A SAVE TAKEN IN THAT WINDOW PERSISTED THE UN-ADVANCED FIGURE**, over a better one
+  written by an earlier save that did have the count. That is how the percentage went
+  BACKWARDS — 42% on the sleep screen, 40% on Home, then 40% everywhere.
+- **Widening `kCountQuietMs` from 1200 ms to 5000 made it worse**, because the count
+  lands later. A latency fix and a correctness bug meeting in one constant is worth
+  noticing: the constant was right and the thing depending on it was wrong.
+
+`ChapterReader::bytesRead()` is the inflater's `produced()`, which is the SAME
+quantity the rest of the sum is made of and needs no count and no walk.
+`ReaderScreen` records it at the end of the page on screen — the end rather than the
+start, because the page in front of you has been read by the time you leave it — and
+**the ring carries it per slot**, since a page served from the ring was decoded long
+ago and the stream has moved since.
+
+**`page`/`pageTotal` REMAIN AS THE FALLBACK, not as a second answer.** They are used
+only where bytes are unknowable: a stored archive entry and an in-memory chapter have
+no inflater to ask. Where both are offered the bytes win, and there is a test that
+says so — the alternative is two spellings of one fact, which this file has a rule
+about.
+
 **PROGRESS IS A FRACTION OF THE BOOK'S BYTES, NOT ITS PAGES**, and that is what makes
 it affordable at all. A page-based percentage needs every chapter paginated: 6.94 MB
 of inflated XHTML for one real novel, **~49 s of decode** at the measured 7.2 ms/KB.

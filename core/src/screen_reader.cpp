@@ -450,7 +450,8 @@ bool ReaderScreen::openAtCursor(Cursor want) {
       // backward turns off a resumed position need no decode at all. They were the
       // worst case there was: a restore puts the reader deep in a chapter, which is
       // exactly where a rewind costs most.
-      cachePage(chapterAt_, heldStart, held);
+      pageBytes_ = chapter_.bytesRead();
+      cachePage(chapterAt_, heldStart, held, pageBytes_);
       // `want` is on the page just recorded exactly when the NEXT page starts after
       // it. Strictly after: a cursor EQUAL to the next page's start belongs to that
       // next page, not to this one.
@@ -472,7 +473,8 @@ bool ReaderScreen::openAtCursor(Cursor want) {
       heldStart = pending;
       held = pb_->finish();
       haveHeld = true;
-      cachePage(chapterAt_, heldStart, held);
+      pageBytes_ = chapter_.bytesRead();
+      cachePage(chapterAt_, heldStart, held, pageBytes_);
     } else {
       pb_->finish();
     }
@@ -502,9 +504,9 @@ bool ReaderScreen::openAtCursor(Cursor want) {
 // A linear scan over at most kPageCacheDepth entries, deliberately: at three entries
 // a map is more code, more allocation and slower than three comparisons of two ints.
 
-const Page* ReaderScreen::cachedPage(int chapter, Cursor start) const {
+const ReaderScreen::CachedPage* ReaderScreen::cachedPage(int chapter, Cursor start) const {
   for (const CachedPage& e : pageRing_)
-    if (e.chapter == chapter && e.start == start) return &e.page;
+    if (e.chapter == chapter && e.start == start) return &e;
   return nullptr;
 }
 
@@ -564,7 +566,7 @@ bool ReaderScreen::warmPageRing(StopFn stop, void* ctx) {
     b = Block{};
     while (pb->ready() && at <= p) {
       Page produced = pb->take();
-      cachePage(chapterAt_, starts_[static_cast<size_t>(at)], produced);
+      cachePage(chapterAt_, starts_[static_cast<size_t>(at)], produced, chapter_.bytesRead());
       if (at == p) {
         // Landed where we started. `page_` and `at_` were never touched -- this page
         // is the one already on the panel -- and the builder is live one page past
@@ -582,7 +584,7 @@ bool ReaderScreen::warmPageRing(StopFn stop, void* ctx) {
   return false;
 }
 
-void ReaderScreen::cachePage(int chapter, Cursor start, const Page& p) {
+void ReaderScreen::cachePage(int chapter, Cursor start, const Page& p, uint32_t bytes) {
   // COUNTED BEFORE THE DEPTH GUARD, so the figure is "pages laid out" and not "pages
   // the ring happened to keep" -- the second would go to zero if the ring were ever
   // disabled and would take the restore's cost measurement with it.
@@ -607,15 +609,19 @@ void ReaderScreen::cachePage(int chapter, Cursor start, const Page& p) {
   // allocations (measured -- test_page_cache.cpp). Against a 439 ms panel and a
   // ~376 ms decode it is noise, and it cannot be a move: `page_` is what the theme
   // renders.
-  pageRing_.insert(pageRing_.begin(), CachedPage{chapter, start, p});
+  pageRing_.insert(pageRing_.begin(), CachedPage{chapter, start, p, bytes});
 }
 
 bool ReaderScreen::showCached(int p) {
   if (p < 0 || p >= static_cast<int>(starts_.size())) return false;
-  const Page* hit = cachedPage(chapterAt_, starts_[static_cast<size_t>(p)]);
+  const CachedPage* hit = cachedPage(chapterAt_, starts_[static_cast<size_t>(p)]);
   if (hit == nullptr) return false;
   ++ring_.hits;
-  page_ = *hit;
+  // FROM THE SLOT, NOT FROM THE STREAM. Nothing was decoded, so chapter_.bytesRead()
+  // is wherever the last walk stopped -- after a rewind that is a different part of
+  // the chapter, and reading it here would make the percentage jump about.
+  pageBytes_ = hit->bytes;
+  page_ = hit->page;
   at_ = p;
   // RECOMPUTED, NOT RESTORED, and it is the one field of a Page that is not a
   // property of the page: `lastPage` is "is there another one after this", which
@@ -626,7 +632,7 @@ bool ReaderScreen::showCached(int p) {
   // caller that needs one asks for it (seekTo's `needStream`); Gesture::Next handles
   // a null builder already.
   pb_.reset();
-  cachePage(chapterAt_, starts_[static_cast<size_t>(p)], page_);  // freshen its slot
+  cachePage(chapterAt_, starts_[static_cast<size_t>(p)], page_, pageBytes_);  // freshen its slot
   return true;
 }
 
@@ -675,8 +681,9 @@ bool ReaderScreen::seekTo(int p, bool needStream) {
     b = Block{};
     while (pb_->ready() && at <= p) {
       Page produced = pb_->take();
-      cachePage(chapterAt_, starts_[static_cast<size_t>(at)], produced);
+      cachePage(chapterAt_, starts_[static_cast<size_t>(at)], produced, chapter_.bytesRead());
       if (at == p) {
+        pageBytes_ = chapter_.bytesRead();
         page_ = std::move(produced);
         at_ = p;
         page_.lastPage = (p + 1 >= static_cast<int>(starts_.size()));
@@ -689,7 +696,8 @@ bool ReaderScreen::seekTo(int p, bool needStream) {
   at_ = p;
   page_.lastPage = true;
   pb_.reset();  // spent: a forward turn from here has nothing to continue
-  cachePage(chapterAt_, starts_[static_cast<size_t>(p)], page_);
+  pageBytes_ = chapter_.bytesRead();
+  cachePage(chapterAt_, starts_[static_cast<size_t>(p)], page_, pageBytes_);
   return true;
 }
 
@@ -724,6 +732,7 @@ bool ReaderScreen::advance() {
   }
 
   ++at_;
+  pageBytes_ = chapter_.bytesRead();
   // The index grows by reading. A page reached for the first time appends its start;
   // one revisited after a backward turn is already there.
   if (at_ >= static_cast<int>(starts_.size()) && at_ < kMaxPages) starts_.push_back(thisStart);
@@ -733,7 +742,8 @@ bool ReaderScreen::advance() {
   // construction here: seekTo looks the page up by `starts_[p]`, so a store keyed any
   // other way would be a second spelling of the key, free to disagree with the first.
   if (at_ >= 0 && at_ < static_cast<int>(starts_.size()))
-    cachePage(chapterAt_, starts_[static_cast<size_t>(at_)], page_);
+    pageBytes_ = chapter_.bytesRead();
+    cachePage(chapterAt_, starts_[static_cast<size_t>(at_)], page_, pageBytes_);
   return true;
 }
 
