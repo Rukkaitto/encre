@@ -1595,7 +1595,17 @@ static void logChapterOpen(const reader::ReaderScreen* rd, uint32_t elapsedMs) {
 // THE DEADLINE IS WHY IT IS WORTH IT. Below it nothing is drawn and nothing is
 // spent; a book that opens quickly never pays. It is only the operations that were
 // already going to feel broken that buy the extra refresh.
-constexpr uint32_t kStatusAfterMs = 1000;
+//
+// 500 ms, DOWN FROM 1000 after using it on the device. What that buys is feedback
+// half a second sooner on the one operation that arms this -- opening a book, which
+// measured 1000-2300 ms depending on how deep the saved position was.
+//
+// WHAT IT COSTS is the band between the two: an open that would have finished in
+// 600 ms now shows the bar and pays a whole waveform for it, so it takes ~1040 ms
+// instead. That is the trade being made deliberately -- on this glass feedback and
+// speed are separate problems, and an open in that band is one where the device
+// looked frozen for long enough to notice.
+constexpr uint32_t kStatusAfterMs = 500;
 
 static uint32_t gSlowOpStartedMs = 0;
 static const char* gSlowOpLabel = nullptr;
