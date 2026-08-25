@@ -3098,6 +3098,110 @@ without needing to trust an eyeball on 384000 pixels. Note the level→byte mapp
 is `0..3 → white..black`, so **byte 170 is coverage 1 and byte 85 is coverage 2** —
 easy to get backwards, and it inverts the conclusion if you do.
 
+## The board
+
+`https://github.com/users/Rukkaitto/projects/1` — 48 items, and **the only index
+of this project's deferred work.** Before it existed, every deferral lived as a
+prose bullet inside the roadmap phase that spawned it, which is why this file has
+had to record the same class of loss more than once: a follow-up note that
+"stayed true for exactly as long as nobody read it", a paragraph that tracked its
+own subject through three states in one session, `ListRow::trackingEm1000`
+outliving its last producer, and two boarded screens (`BookEnd`, `Boot`) that the
+roadmap does not mention at all. **A deferral with no card is a deferral nobody
+will find.**
+
+**THE BOARD HOLDS STATUS AND NOTHING ELSE.** The roadmap holds the reasoning; a
+card holds a `Source` pointer back to it (`roadmap:832`, `CLAUDE.md`) and at most
+two sentences of context. That split is the one rule here and it is not tidiness:
+a card that restates *why* is a second copy of a paragraph, and this file's whole
+history is second copies drifting from first ones. If a card wants a paragraph,
+the paragraph goes in the roadmap and the card gets the line number.
+
+| Field | Holds |
+|---|---|
+| `Release` | `V1` / `V2` / `Someday`. What is left for each is the **Left to do** view, grouped by this |
+| `Status` | the six stages below, with two entry doors |
+| `Kind` | `Screen` / `Engine` / `Fidelity` / `Perf` / `Hardware` / `Tooling` / `Docs` — **and it names the skill**: `Screen` goes through `implement-screen`, `Fidelity` through `design-change`, an `On glass` move through `flash-device` |
+| `Board` | which `.dc.html`, or empty |
+| `Source` | `roadmap:<line>` or `CLAUDE.md`. A pointer, never an argument |
+
+**The stages are this project's own gates, not generic kanban, and THERE ARE TWO
+ENTRY DOORS** because there are two kinds of work:
+
+- UI: `Needs a board` → `Boarded` → `Building` → `On glass` → `Done`
+- everything else: `Todo` → `Building` → `On glass` → `Done`
+
+**`Needs a board` IS FOR `Kind = Screen` AND `Kind = Fidelity` ONLY**, and the
+first version of this section got that wrong — it stated the gate as universal, so
+`Tag v0.1.0`, `TXT importer` and `Rotation CCW is unverified on the X4` all landed
+in a column whose exit condition is "a `.dc.html` exists", which they can never
+satisfy. **Eighteen of V1's twenty were parked in a state with no exit**, which is
+the dead-button defect this file records twice elsewhere: a control that cannot do
+anything reads as broken. Non-UI work enters at `Todo`; `Boarded` never applies to
+it.
+
+- **`Needs a board` → `Boarded` needs the `.dc.html` to exist**, because a UI
+  change goes into the design HTML first. A `Kind = Screen` card past this stage
+  with an empty `Board` field is in the wrong column. Note the reverse is not a
+  contradiction: a card can name a board it needs *changed* (`HomeEmpty.dc.html`
+  for the cut action slab) and still sit in `Needs a board`.
+- **`Building` → `On glass` needs `make test` green.**
+- **`On glass` → `Done` NEEDS DEVICE EVIDENCE, AND THEREFORE AN AGENT CAN NEVER
+  MAKE THAT MOVE.** Flashing must be run by the user (see **Hardware facts**), so
+  the user is the only one who can produce the photo or the serial log. **An agent
+  moves a card as far as `On glass` and stops there**, naming what needs
+  verifying. This is the column the board exists for: this repo has shipped work
+  that passed every desktop test and was wrong on the panel — the `App::render`
+  overlay bug, the `anchorJumped` self-recursion, the veil smearing diagonally
+  under CCW rotation. `shell/` has no harness and the desktop cannot see the
+  glass, so **"the tests pass" is not evidence and must not close a card.**
+
+**WHAT TO DO, AND WHEN:**
+
+- **Starting work:** set the card to `Building` before the first commit, so a
+  session that dies mid-task leaves a trace of what it was doing.
+- **Finishing something with no hardware surface:** `Closes #N` in the commit or
+  PR moves the card to `Done` on its own, which is exactly why the V1 items are
+  real issues rather than drafts. Prefer it to editing the field by hand.
+- **Finishing anything the panel can be wrong about:** set `On glass`, and do
+  **not** write `Closes #N` — it would close the card on desktop evidence, which
+  is the failure above with a keyword attached.
+- **Finding something deferrable:** make a card. Not a `TODO`, not a bullet in a
+  plan, not a paragraph here. **This is the rule the board is for.**
+
+**V1 IS ISSUES; V2 AND SOMEDAY ARE DRAFT ITEMS, DELIBERATELY.** `#1`–`#30` are
+real issues so a commit can close one; the eighteen parked items are drafts so
+Wi-Fi's nine boards and the spec §8 shelf are not sitting in the tracker as open
+work nobody is doing. Same reasoning as `V2_SCREENS` in `tools/compare-design.py`:
+reachable, not counted. Promoting a draft is
+`convertProjectV2DraftIssueItemToIssue` and **the reverse does not exist**, so
+promote when the work starts and not before.
+
+**Two API limits worth not rediscovering:**
+
+- **Grouping and a board's column field are UI-only.** `createProjectV2View`
+  accepts `name`, `layout`, `filter` and `visibleFieldIds` and nothing else, so a
+  view's grouping can be neither scripted nor restored. Do not spend a turn
+  trying.
+- **The token needs the `project` scope**, which is account-wide rather than
+  repo-scoped, and **only the user can grant it** — `gh auth refresh -s project`
+  is interactive. A missing scope reads as
+  `your authentication token is missing required scopes`.
+
+The ids, rediscoverable with `gh project field-list 1 --owner Rukkaitto` if they
+ever go stale:
+
+| | id |
+|---|---|
+| project | `PVT_kwHOAkvc3c4BhZ5g` |
+| `Status` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwC4` — `Needs a board` `75d83950`, `Boarded` `7ae6b024`, `Building` `000256fb`, `On glass` `5012a8f7`, `Done` `ae97917c` |
+| `Release` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUQ` — `V1` `245a6600`, `V2` `5696d63f`, `Someday` `ebc1c1c1` |
+
+Moving one card is `gh project item-edit --id <item> --project-id <project>
+--field-id <field> --single-select-option-id <option>`; the item id comes from
+`gh project item-list 1 --owner Rukkaitto --format json`, matched on
+`.content.number` for an issue.
+
 ## Where to look
 
 `docs/superpowers/plans/2026-08-20-v1-roadmap.md` — phases, and two sections
