@@ -130,6 +130,54 @@ class ReaderScreen : public Screen {
   // Raising it is one constant and the test above prices it.
   static constexpr int kPageCacheDepth = 3;
 
+  // ...AND THE CEILING WHEN THE HEAP CAN AFFORD MORE. The depth above is the safe
+  // default, sized for the worst floor this device has: 42,152 bytes free, which is
+  // what a Reader opened THROUGH THE LIBRARY leaves, because 203 books sit resident
+  // underneath it at ~59 KB. Come in through Home's CONTINUE instead and the same
+  // book leaves 76,476 -- a 34 KB difference that depends on nothing but which
+  // button was pressed.
+  //
+  // A fixed depth has to be sized for the worse case, so it is the shell that sets
+  // this: it is the only layer that can ask the allocator, and it already knows
+  // whether the Library is on the stack. core/ takes a number and never a policy.
+  static constexpr int kPageCacheMaxDepth = 8;
+
+  // How many pages the ring may hold. Clamped into [1, kPageCacheMaxDepth]; the
+  // excess is dropped immediately rather than at the next insertion, so shrinking
+  // gives the heap back at the moment the caller asked for it.
+  void setPageCacheDepth(int pages);
+  int pageCacheDepth() const { return pageCacheDepth_; }
+
+  // How many pages BELOW the current one the ring holds without a gap. This is the
+  // number of backward turns that will not touch the card, and it is what the idle
+  // warm below is gated on -- a rewind is worth doing early only when the headroom
+  // it would restore has actually been spent.
+  int backwardHeadroom() const;
+
+  // REFILL THE RING WHILE NOBODY IS WAITING. The reader's one remaining slow
+  // interaction is a backward turn that misses: it rewinds and decodes from the
+  // chapter start, which costs what page you are ON -- ~1010 ms at page 99 of a
+  // 248 KB chapter, and ~3 s deep in one. Nothing can make that cheaper, because a
+  // DEFLATE stream cannot be seeked and a second one is a 32 KB window against a
+  // 42 KB floor. What it CAN do is happen when the user is reading rather than when
+  // they have just pressed a button.
+  //
+  // So this is the same rewind, taken early: it walks to the current page, caching
+  // the depth's worth of pages that end there, and leaves the builder live exactly
+  // where it found it. Nothing visible changes -- `page_` and `at_` are untouched
+  // on every path, including the abandoned one.
+  //
+  // Returns false when there was nothing to do, when the walk was abandoned, or
+  // when it could not run. `stop` is the same shape completeIndex takes and for the
+  // same reason: the shell answers it from the input queue, so a press interrupts
+  // the warm at the next block rather than seconds later.
+  //
+  // THE ONE COST OF ABANDONING is the live builder, which the rewind spends and
+  // cannot rebuild -- so the next FORWARD turn pays a seekTo. That is the identical
+  // trade completeIndex makes, and it is why both are gated on a long quiet window
+  // rather than a short one.
+  bool warmPageRing(StopFn stop = nullptr, void* ctx = nullptr);
+
   // COUNT A CHAPTER'S PAGES BEFORE THE FIRST PAINT IF IT IS THIS SMALL, and defer
   // otherwise. THE NUMBER IS MEASURED ON THE PANEL, and the first version of it was
   // not -- it was 64 KB, derived from a desktop figure times a remembered ratio, and
@@ -455,6 +503,7 @@ class ReaderScreen : public Screen {
     Page page{};
   };
   std::vector<CachedPage> pageRing_;
+  int pageCacheDepth_ = kPageCacheDepth;
   RingStats ring_{};
   const Page* cachedPage(int chapter, Cursor start) const;
   void cachePage(int chapter, Cursor start, const Page& p);

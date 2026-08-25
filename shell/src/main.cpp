@@ -3901,6 +3901,53 @@ void loop() {
     refineNow();
   }
 
+  // THE READER'S LAST SLOW INTERACTION, MOVED OFF THE BUTTON.
+  //
+  // A backward turn that misses the page ring rewinds and decodes from the chapter
+  // start, and that costs what page you are ON -- the device measured ~1010 ms at
+  // page 99 of a 248 KB chapter, and it is worse deeper in. Nothing makes it
+  // cheaper: a DEFLATE stream cannot be seeked, and a second one is a 32 KB window
+  // against a 42 KB floor, which this file has already refused twice. So it is not
+  // made cheaper, it is made to happen while the user is reading. A page takes ~23 s
+  // to read and the rewind takes one to three; it fits.
+  //
+  // LAST OF THE THREE QUIET-WINDOW JOBS, deliberately: the page count puts a number
+  // on the glass and the refinement puts grey on it, and both are things the user
+  // can see. This one is invisible by construction, so it goes behind them.
+  //
+  // THE SAME WINDOW AS THE REFINEMENT, and for the reason the count's constant sets
+  // out at length: abandoning spends the live PageBuilder, so the cost of firing too
+  // early lands on the next FORWARD turn rather than on the press that interrupted.
+  if (!gApp->dirty() && rawSamplesPending() == 0 && !gRefineOwed &&
+      static_cast<uint32_t>(millis() - gLastInputMs) >= kRefineQuietMs &&
+      gApp->top().id() == reader::ScreenId::Reader) {
+    auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
+    // SIZED FROM THE HEAP THAT IS ACTUALLY THERE, every time, because it moves by
+    // 34 KB depending on nothing but which button opened the book: a Reader reached
+    // THROUGH THE LIBRARY has 203 books resident underneath it at ~59 KB and leaves
+    // 42,152 free, where the same book through Home's CONTINUE leaves 76,476. A
+    // constant would have to be sized for the first and would then waste the second.
+    //
+    // An eighth of what is free, at ~1.5 KB a page. The default of 3 is the floor,
+    // so this can only ever raise it -- a heap under pressure keeps the behaviour
+    // that shipped rather than getting something worse.
+    const int affordable = static_cast<int>(ESP.getFreeHeap() / 8u / 1536u);
+    rd->setPageCacheDepth(affordable);
+    if (rd->backwardHeadroom() < rd->pageCacheDepth() - 1) {
+      const uint32_t t = millis();
+      const int was = rd->backwardHeadroom();
+      const bool done = rd->warmPageRing([](void*) { return rawSamplesPending() != 0; }, nullptr);
+      // LOGGED EVEN THOUGH NOTHING IS VISIBLE -- especially because nothing is
+      // visible. An idle optimisation that silently stops working looks exactly like
+      // one that is working, which this file records as a defect shape three times
+      // over. depth/headroom is what says whether the ring is actually deeper.
+      logf("[warm] %s depth=%d headroom %d->%d in %lums (heap %u)\n",
+           done ? "ready" : "abandoned", rd->pageCacheDepth(), was, rd->backwardHeadroom(),
+           (unsigned long)(millis() - t), (unsigned)ESP.getFreeHeap());
+      logFlush();
+    }
+  }
+
   // AFTER the paint block and only with nothing owed to the panel. The poll is
   // SPI traffic on the display's bus (see pollCardPresence), so a frame the user
   // is waiting for goes out first; and if the poll does find the card gone, the

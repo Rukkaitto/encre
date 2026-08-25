@@ -505,6 +505,79 @@ const Page* ReaderScreen::cachedPage(int chapter, Cursor start) const {
   return nullptr;
 }
 
+void ReaderScreen::setPageCacheDepth(int pages) {
+  pageCacheDepth_ = pages < 1 ? 1 : (pages > kPageCacheMaxDepth ? kPageCacheMaxDepth : pages);
+  // SHRUNK NOW, not at the next insertion. A caller lowering this is asking for the
+  // heap back -- on this device because a Library went resident under the Reader --
+  // and giving it back later would be giving it back after the allocation that
+  // needed it has already failed.
+  while (static_cast<int>(pageRing_.size()) > pageCacheDepth_) pageRing_.pop_back();
+}
+
+int ReaderScreen::backwardHeadroom() const {
+  int n = 0;
+  for (int p = at_ - 1; p >= 0; --p) {
+    if (cachedPage(chapterAt_, starts_[static_cast<size_t>(p)]) == nullptr) break;
+    ++n;
+  }
+  return n;
+}
+
+bool ReaderScreen::warmPageRing(StopFn stop, void* ctx) {
+  if (body_ == nullptr || !chapter_.ok()) return false;
+  if (at_ < 1 || at_ >= static_cast<int>(starts_.size())) return false;
+  // NOTHING TO DO while there is still headroom to spend. Without this the warm
+  // would re-run every quiet window, paying a full rewind to cache pages it already
+  // holds -- battery and panel-bus traffic for no change at all.
+  if (backwardHeadroom() >= pageCacheDepth_ - 1) return false;
+
+  const int p = at_;
+  const int from = p >= pageCacheDepth_ ? p - (pageCacheDepth_ - 1) : 0;
+  // Already as far back as the chapter goes, and already held.
+  if (from == 0 && backwardHeadroom() >= p) return false;
+
+  if (!chapter_.rewind()) return false;
+  // SPENT BEFORE THE WALK, exactly as completeIndex spends it: the rewind moves the
+  // stream the live builder reads from, so a builder left standing would point at a
+  // position that no longer exists.
+  pb_.reset();
+  std::unique_ptr<PageBuilder> pb(new (std::nothrow) PageBuilder(*body_, metrics_));
+  if (pb == nullptr || !pb->viable()) return false;
+  ++ring_.decodes;
+  pb->startAt(starts_[static_cast<size_t>(from)]);
+
+  int fed = 0;
+  int at = from;
+  Block b;
+  for (int guard = 0; guard < kMaxPages * 4; ++guard) {
+    // Asked before the block is fetched: chapter_.next() is the card read and the
+    // inflate, so a check on the far side of it commits to the most expensive step
+    // of the loop before it can get out of the way. completeIndex says the same.
+    if (stop != nullptr && stop(ctx)) return false;
+    Progress::tick();
+    if (!chapter_.next(b)) break;
+    pb->add(b, fed++);
+    b = Block{};
+    while (pb->ready() && at <= p) {
+      Page produced = pb->take();
+      cachePage(chapterAt_, starts_[static_cast<size_t>(at)], produced);
+      if (at == p) {
+        // Landed where we started. `page_` and `at_` were never touched -- this page
+        // is the one already on the panel -- and the builder is live one page past
+        // it, which is the state a forward turn wants.
+        pb_ = std::move(pb);
+        fed_ = fed;
+        return true;
+      }
+      ++at;
+    }
+  }
+  // Ran out of blocks before reaching the page we are on. That is a contradiction
+  // rather than a state, so nothing is claimed: the ring keeps whatever it gathered
+  // and the builder stays null, which the forward turn already handles.
+  return false;
+}
+
 void ReaderScreen::cachePage(int chapter, Cursor start, const Page& p) {
   // COUNTED BEFORE THE DEPTH GUARD, so the figure is "pages laid out" and not "pages
   // the ring happened to keep" -- the second would go to zero if the ring were ever
@@ -524,7 +597,8 @@ void ReaderScreen::cachePage(int chapter, Cursor start, const Page& p) {
       return;
     }
   }
-  if (static_cast<int>(pageRing_.size()) >= kPageCacheDepth) pageRing_.pop_back();
+  while (static_cast<int>(pageRing_.size()) >= pageCacheDepth_ && !pageRing_.empty())
+    pageRing_.pop_back();
   // THE COPY IS THE COST AND IT IS PAID ON EVERY PAGE TURN: ~1.5 KB and a dozen small
   // allocations (measured -- test_page_cache.cpp). Against a 439 ms panel and a
   // ~376 ms decode it is noise, and it cannot be a move: `page_` is what the theme
@@ -583,7 +657,7 @@ bool ReaderScreen::seekTo(int p, bool needStream) {
   // Only the ring's own depth back, never further: pages older than it can hold
   // would be laid out and immediately evicted, which is the cost with none of the
   // benefit.
-  const int from = p >= kPageCacheDepth ? p - (kPageCacheDepth - 1) : 0;
+  const int from = p >= pageCacheDepth_ ? p - (pageCacheDepth_ - 1) : 0;
   pb_->startAt(starts_[static_cast<size_t>(from)]);
 
   fed_ = 0;

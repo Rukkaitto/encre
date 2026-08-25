@@ -2392,9 +2392,38 @@ and a Prev,Prev,Next,Next burst 4,696 → **22.6 µs with zero decodes**.
   properties.
 - **A live builder still beats the ring** — ~20 ms against ~376 ms to re-establish
   one — so the whole branch sits under a null check.
-- **1,471 B a page on the X4 and 1,512 on the X3**, measured; the ring is 4,536 B,
-  10.8% of the 42,152-byte floor, with a test asserting the ceiling so it cannot
-  drift.
+- **1,471 B a page on the X4 and 1,512 on the X3**, measured; the ring is 4,536 B at
+  the default depth of 3, 10.8% of the 42,152-byte floor, with a test asserting the
+  ceiling so it cannot drift.
+
+**AND THE REWIND THAT REMAINS HAPPENS WHILE THE USER IS READING.** A deeper ring
+alone only postpones the slow turn -- it cannot remove it, because holding a whole
+chapter is 315 pages at ~1.5 KB. What removes it is doing the rewind in a quiet
+window: `warmPageRing` walks to the page already on screen, caches the depth's worth
+of pages ending there, and leaves the builder live exactly where it found it.
+**`page_` and `at_` are untouched on every path**, so nothing visible changes -- that
+is the property the other three tests rest on and it is asserted first.
+
+- **Gated on headroom, not on a timer.** Reading FORWARD already fills the ring, so a
+  warm straight after it correctly finds nothing to do; without that gate it would
+  pay a full rewind every quiet window to cache pages it already holds. The first
+  version of the test tripped over exactly this and had to spend the headroom first.
+- **The depth is the SHELL's**, sized from `ESP.getFreeHeap()` at each warm, because
+  the floor moves by 34 KB on nothing but which button opened the book: through the
+  Library there are 203 books resident underneath at ~59 KB and **42,152 bytes**
+  free; through Home's CONTINUE the same book leaves **76,476**. A constant has to be
+  sized for the first and then wastes the second. An eighth of what is free, and the
+  default of 3 is the floor, so a heap under pressure keeps the shipped behaviour.
+- **Abandoning costs the next FORWARD turn**, because the warm spends the live
+  builder and cannot rebuild it -- the identical trade `completeIndex` makes, and why
+  both wait for the refinement's window rather than a short one.
+- **It is LOGGED although nothing is visible**, precisely because nothing is: an idle
+  optimisation that silently stops working looks exactly like one that is working.
+  `[warm] ready|abandoned depth=N headroom A->B` is what tells them apart.
+- **WHAT IT STILL DOES NOT FIX**, and the honest limit: skimming backward faster than
+  the warm can run -- a turn every ~500 ms against a rewind of one to three seconds --
+  still meets a slow turn, and the rewind is proportional to the page index, so it is
+  worse deep in a chapter, which is the opposite of what it feels like.
 
 The strongest test of all this is `READING BACKWARD GIVES EXACTLY THE PAGES READING
 FORWARD GAVE`: it exercises the rewind, the buffer reuse, `startAt`'s discard path

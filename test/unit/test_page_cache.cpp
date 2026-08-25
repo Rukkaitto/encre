@@ -396,3 +396,120 @@ TEST_CASE("one rewind serves a whole ring's worth of backward turns") {
   const uint32_t spent = r.scr->ringStats().decodes - before;
   CHECK(spent <= 2);
 }
+
+// --- WARMING THE RING WHILE NOBODY IS WAITING --------------------------------
+//
+// The reader's last slow interaction is a backward turn that misses the ring: it
+// rewinds and decodes from the chapter start, costing what page you are ON. That
+// cost cannot be removed -- a DEFLATE stream cannot be seeked, and a second one is a
+// 32 KB window against a 42 KB floor -- so it is MOVED, off the button and into a
+// quiet window.
+
+TEST_CASE("a warm changes nothing the user can see") {
+  // The property everything else here depends on. A warm rewinds the stream the live
+  // builder reads from, so if it disturbed the page or the position it would be a
+  // screen that changed by itself while being read.
+  const std::string doc = readerfix::longChapter(60);
+  readerfix::Reading r(doc);
+  r.scr->setPageCacheDepth(6);
+  for (int i = 0; i < 12; ++i) r.scr->onGesture({reader::Gesture::Next});
+  // SPEND THE HEADROOM FIRST. Reading forward fills the ring by itself, so a warm
+  // straight afterwards correctly finds nothing to do -- which is what the first
+  // version of this test tripped over.
+  for (int i = 0; i < 5; ++i) r.scr->onGesture({reader::Gesture::Prev});
+  REQUIRE(r.scr->backwardHeadroom() < r.scr->pageCacheDepth() - 1);
+
+  const int wasPage = r.scr->pageIndex();
+  const std::string wasText = readerfix::pageText(r.scr->page());
+  const reader::Cursor wasCursor = r.scr->currentCursor();
+
+  REQUIRE(r.scr->warmPageRing());
+  CHECK(r.scr->pageIndex() == wasPage);
+  CHECK(readerfix::pageText(r.scr->page()) == wasText);
+  CHECK(r.scr->currentCursor() == wasCursor);
+}
+
+TEST_CASE("a warm removes the slow turn a deeper ring alone only postpones") {
+  const std::string doc = readerfix::longChapter(60);
+  readerfix::Reading fwd(doc);
+  std::vector<std::string> text;
+  for (;;) {
+    text.push_back(readerfix::pageText(fwd.scr->page()));
+    const int was = fwd.scr->pageIndex();
+    fwd.scr->onGesture({reader::Gesture::Next});
+    if (fwd.scr->pageIndex() == was) break;
+  }
+  const int depth = 4;
+  REQUIRE(static_cast<int>(text.size()) > depth * 3);
+
+  readerfix::Reading r(doc);
+  r.scr->setPageCacheDepth(depth);
+  const int last = static_cast<int>(text.size()) - 1;
+  for (int i = 0; i < last; ++i) r.scr->onGesture({reader::Gesture::Next});
+
+  // Turn back through TWICE the ring, warming between turns the way an idle loop
+  // would. Every turn must be a hit: the rewinds all happened in the warms.
+  const uint32_t decodesBefore = r.scr->ringStats().decodes;
+  uint32_t hitsBefore = r.scr->ringStats().hits;
+  for (int i = 0; i < depth * 2; ++i) {
+    r.scr->onGesture({reader::Gesture::Prev});
+    CHECK(r.scr->pageIndex() == last - 1 - i);
+    CHECK(readerfix::pageText(r.scr->page()) == text[static_cast<size_t>(last - 1 - i)]);
+    CHECK(r.scr->ringStats().hits > hitsBefore);  // this turn touched no card
+    hitsBefore = r.scr->ringStats().hits;
+    r.scr->warmPageRing();  // ...and the idle window pays for the next one
+  }
+  // The warms decoded; the TURNS did not. That distinction is the whole feature, so
+  // it is asserted rather than the total.
+  CHECK(r.scr->ringStats().decodes > decodesBefore);
+}
+
+TEST_CASE("a warm with headroom left does nothing at all") {
+  // Otherwise it would re-rewind on every quiet window, paying a full walk to cache
+  // pages it already holds -- battery and bus traffic for no change.
+  const std::string doc = readerfix::longChapter(60);
+  readerfix::Reading r(doc);
+  r.scr->setPageCacheDepth(6);
+  for (int i = 0; i < 12; ++i) r.scr->onGesture({reader::Gesture::Next});
+  // Reading forward already leaves the ring full, so this is true before any warm --
+  // and it is the case the gate exists for.
+  CHECK_FALSE(r.scr->warmPageRing());
+  for (int i = 0; i < 5; ++i) r.scr->onGesture({reader::Gesture::Prev});
+  REQUIRE(r.scr->warmPageRing());
+  const uint32_t decodes = r.scr->ringStats().decodes;
+  CHECK_FALSE(r.scr->warmPageRing());
+  CHECK(r.scr->ringStats().decodes == decodes);
+}
+
+TEST_CASE("an abandoned warm leaves the page and the position untouched") {
+  const std::string doc = readerfix::longChapter(60);
+  readerfix::Reading r(doc);
+  r.scr->setPageCacheDepth(6);
+  for (int i = 0; i < 12; ++i) r.scr->onGesture({reader::Gesture::Next});
+  for (int i = 0; i < 5; ++i) r.scr->onGesture({reader::Gesture::Prev});
+  const int wasPage = r.scr->pageIndex();
+  const std::string wasText = readerfix::pageText(r.scr->page());
+
+  CHECK_FALSE(r.scr->warmPageRing([](void*) { return true; }, nullptr));
+  CHECK(r.scr->pageIndex() == wasPage);
+  CHECK(readerfix::pageText(r.scr->page()) == wasText);
+  // ...and the reader still works both ways afterwards, which is what makes an
+  // abandoned warm merely wasted rather than damaging.
+  r.scr->onGesture({reader::Gesture::Prev});
+  CHECK(r.scr->pageIndex() == wasPage - 1);
+  r.scr->onGesture({reader::Gesture::Next});
+  CHECK(r.scr->pageIndex() == wasPage);
+  CHECK(readerfix::pageText(r.scr->page()) == wasText);
+}
+
+TEST_CASE("shrinking the depth gives the heap back at once") {
+  const std::string doc = readerfix::longChapter(60);
+  readerfix::Reading r(doc);
+  r.scr->setPageCacheDepth(8);
+  for (int i = 0; i < 12; ++i) r.scr->onGesture({reader::Gesture::Next});
+  REQUIRE(r.scr->backwardHeadroom() >= 2);
+  r.scr->setPageCacheDepth(2);
+  CHECK(r.scr->pageCacheDepth() == 2);
+  // At most one page below the current one can still be held.
+  CHECK(r.scr->backwardHeadroom() <= 1);
+}
