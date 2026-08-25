@@ -28,7 +28,8 @@ make compare    # design-vs-firmware contact sheet, all 28 boards (~2.5 min)
 ```
 
 ```
-pio device monitor -e xteink | tee run.log   # capture a device run
+pio device monitor -e xteink | tee run.log   # capture a device run, PLUGGED
+# ...or unplugged: set logToCard in /.reader/settings.json and read /encre.log
 python3 tools/latency.py run.log             # what each interaction cost, by press
 reader_sim <screen> out.png --bench 200      # render cost per pass, on the desktop
 ```
@@ -518,6 +519,40 @@ five slots and an injected clock: `core/` has no clock and must not acquire one,
 so the shell installs `micros()`, the simulator installs `std::chrono`, and a
 build that installs neither pays a load and a branch. Two clock reads per
 primitive CALL, never per pixel.
+
+**AND THERE IS A LOG ON THE CARD, because the cable changes the device.**
+`logToCard` in `/.reader/settings.json` (off by default, hand-edited — it is a
+diagnostic, not a preference, so it has no Settings row and needs no board) tees
+everything `logf()` writes to `/encre.log`.
+
+It exists for the one class of fault serial cannot see. `HWCDC::write` and `flush`
+short-circuit unplugged and BLOCK when a host is attached, so a timing taken over
+USB is not the device's — and attaching after a sleep can reset the chip, turning
+the wake being investigated into a cold boot. **A fault that only happens unplugged
+is not observable over the wire at all.**
+
+- **IT MUST NOT MAKE THE DELAY IT IS HUNTING**, which is the whole design. A card
+  write costs ~40 ms and takes the DISPLAY'S SPI BUS, so one per line would put tens
+  of milliseconds into every interaction and be indistinguishable from the fault. It
+  buffers 4 KB in RAM and flushes **only when the panel and the buttons are both
+  quiet** — the gate `pollCardPresence` already uses.
+- **IT REPORTS ITS OWN WEIGHT**: `[log] wrote NB in Xms` per flush and
+  `buffered/dropped/sdTotal` on `[alive]`. Same reason `ser=` exists — an instrument
+  that hides its cost lets you attribute it to the device.
+- **A DROPPED LINE IS COUNTED, NEVER SILENT.** An overrun between two idle windows
+  leaves a HOLE in the log, and a hole must not read as the device having gone quiet.
+- **It flushes on the way into sleep**, after `markSleeping()` — the flag is what the
+  next boot needs and the log is only what a human needs, so the ordering says which
+  one may not be lost.
+- **`appendToCard` is a free function in `shell/`, not a `FileSystem` method.**
+  `reader::FileSystem` has no append and should not grow one for this: the contract
+  is 27 clauses driven by two harnesses, and widening it means widening both for
+  something `core/` will never call. It also deliberately does NOT ask
+  `SdFileSystem::mounted()` — the reason that object thinks the card has gone is
+  exactly the kind of thing worth having in the log.
+- The file is capped at 256 KB and restarted past it, so a device left running
+  cannot fill the card. Losing the oldest half beats refusing to write, which loses
+  the newest.
 
 **`[fs] list … (N.NN ms/entry)`** over 15 ms is the other half. `[i]` can say a
 Confirm on Home spent two seconds in `disp=`; only this says the two seconds were

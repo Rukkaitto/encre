@@ -704,6 +704,29 @@ bool SdFileSystem::mkdirs(std::string_view path) {
   return isDirectory(p);  // the end state decides, not the return value
 }
 
+bool appendToCard(const char* path, const char* data, size_t len, uint32_t capBytes) {
+  if (path == nullptr || data == nullptr || len == 0) return false;
+  SpiBusGuard bus;
+  // NO mounted() CHECK THROUGH SdFileSystem: this must work even while that object
+  // believes the card has gone, because the reason it believes that is exactly the
+  // kind of thing worth having in the log. SdFat answers for itself below.
+  FsFile f = SdMan.open(path, O_WRONLY | O_CREAT | O_APPEND);
+  if (!f) return false;
+  if (f.fileSize() > capBytes) {
+    f.close();
+    // Truncate by reopening with O_TRUNC rather than by removing: a remove plus a
+    // create is two directory mutations where this is one, and the file's identity
+    // (anything holding it open on a computer) survives.
+    f = SdMan.open(path, O_WRONLY | O_CREAT | O_TRUNC);
+    if (!f) return false;
+  }
+  const size_t wrote = f.write(data, len);
+  const bool err = f.getWriteError();
+  const bool synced = f.sync();
+  f.close();
+  return wrote == len && !err && synced;
+}
+
 bool SdFileSystem::remove(std::string_view path) {
   SpiBusGuard bus;
   // BOTH OF THESE COUNT THE ASK, NOT THE DELETION, and sit above every refusal

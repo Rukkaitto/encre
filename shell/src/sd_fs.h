@@ -38,6 +38,25 @@
 // the day anything moves off that task (a background library scan is the obvious
 // candidate for Phase 3, and a cover-image decode is the next) the fault it
 // prevents is intermittent, bus-level and miserable to find.
+// APPEND BYTES TO A FILE ON THE CARD. Returns false on any failure, and says
+// nothing about why -- the one caller is the diagnostic log, which must never be
+// able to break the thing it is observing.
+//
+// A FREE FUNCTION AND NOT A FileSystem METHOD, deliberately. `reader::FileSystem`
+// has no append and should not grow one for this: its contract is 27 clauses driven
+// by two harnesses (test_filesystem.cpp on the desktop, sd_selftest.cpp against a
+// real card), and widening it means widening both for something `core/` will never
+// call. The log is a shell concern from end to end.
+//
+// `capBytes` restarts the file rather than growing it forever: past that size it is
+// truncated and reopened, so a device left running cannot fill the card. Losing the
+// oldest half of a log is a fair price for that, and the alternative -- refusing to
+// write once full -- loses the NEWEST, which is the half you want.
+//
+// Takes the bus guard itself. The caller still has to choose a moment when the
+// panel is idle: this makes the write safe, not free.
+bool appendToCard(const char* path, const char* data, size_t len, uint32_t capBytes);
+
 class SpiBusGuard {
  public:
   SpiBusGuard();

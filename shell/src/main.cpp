@@ -543,6 +543,8 @@ static const char* stage = "boot";
 // numbers either side of it are the device's own.
 static uint32_t gLogMs = 0;
 
+static void logTee(const char* s, size_t n);
+
 static void logf(const char* fmt, ...) {
   const uint32_t t0 = millis();
   va_list args;
@@ -552,9 +554,15 @@ static void logf(const char* fmt, ...) {
   char line[512];
   const int n = vsnprintf(line, sizeof(line), fmt, args);
   va_end(args);
-  if (n > 0) Serial.write(reinterpret_cast<const uint8_t*>(line),
-                          static_cast<size_t>(n) < sizeof(line) ? static_cast<size_t>(n)
-                                                                : sizeof(line) - 1);
+  const size_t took = n > 0 ? (static_cast<size_t>(n) < sizeof(line) ? static_cast<size_t>(n)
+                                                                     : sizeof(line) - 1)
+                            : 0;
+  if (took > 0) Serial.write(reinterpret_cast<const uint8_t*>(line), took);
+  // THE ONE CHOKE POINT, which is why the tee is one line: every print site in this
+  // file goes through logf, so the card log and the serial log cannot diverge about
+  // what happened. It is counted inside gLogMs deliberately -- a memcpy into RAM is
+  // microseconds, and pretending it is free is the habit that produced `ser=`.
+  logTee(line, took);
   gLogMs += millis() - t0;
 }
 
@@ -563,6 +571,73 @@ static void logf(const char* fmt, ...) {
 // the 29 sites that deliberately do not have it -- a behaviour change smuggled in
 // under a measurement change, and a slower device than the one being measured.
 // Every existing Serial.flush() became one of these and nothing else moved.
+// --- THE LOG ON THE CARD ------------------------------------------------------
+//
+// Everything logf() writes is TEED into a RAM buffer and appended to /encre.log in
+// an idle window. It exists for the one class of fault the cable cannot see: serial
+// write and flush short-circuit when no host is attached and BLOCK when one is, so
+// a timing taken over USB is not the device's -- and attaching after a sleep can
+// reset the chip, which turns the wake being investigated into a cold boot.
+//
+// THE MEASUREMENT MUST NOT MAKE THE THING IT MEASURES. That is the whole design
+// here, and it is why this is a buffer and not a write per line:
+//
+//   * A CARD WRITE COSTS ~40 ms, measured (`[fs] writeAll ... in 40ms`), and takes
+//     the DISPLAY'S SPI BUS. One per log line would put tens of milliseconds into
+//     every interaction -- and a delay is precisely what is being hunted, so the
+//     instrument would be indistinguishable from the fault.
+//   * SO IT FLUSHES ONLY WHEN THE PANEL AND THE BUTTONS ARE BOTH QUIET, under the
+//     same gate the card-presence poll uses, and never inside a paint.
+//   * AND IT REPORTS ITS OWN COST, for the reason `ser=` exists: an instrument that
+//     hides its own weight lets you attribute it to the device.
+//
+// Bounded on both sides: 4 KB of RAM, and the file is truncated and restarted past
+// kLogFileCapBytes so a device left running cannot fill the card.
+constexpr size_t kLogBufBytes = 4096;
+// Flush at three quarters rather than at full: a burst arriving after the threshold
+// still has room, so the newest lines are not the ones dropped.
+constexpr size_t kLogFlushAtBytes = 3072;
+constexpr uint32_t kLogFileCapBytes = 256u * 1024u;
+constexpr const char* kLogPath = "/encre.log";
+
+static bool gLogToCard = false;
+static char gLogBuf[kLogBufBytes];
+static size_t gLogLen = 0;
+static uint32_t gLogDropped = 0;  // bytes the buffer could not hold
+static uint32_t gLogSdMs = 0;     // time spent writing the card, cumulative
+
+// Append into the buffer. Never blocks, never allocates, never touches the card.
+static void logTee(const char* s, size_t n) {
+  if (!gLogToCard || n == 0) return;
+  if (gLogLen + n > kLogBufBytes) {
+    // DROPPED, AND COUNTED. Silently losing lines would make a gap in the log look
+    // like a gap in the device's behaviour, which is the worst thing a diagnostic
+    // can do.
+    gLogDropped += static_cast<uint32_t>(n);
+    return;
+  }
+  for (size_t i = 0; i < n; ++i) gLogBuf[gLogLen + i] = s[i];
+  gLogLen += n;
+}
+
+// Write what is buffered. Returns the milliseconds it cost, which the caller logs
+// -- see the header note: an instrument that hides its own weight lets you
+// attribute it to the device.
+static uint32_t flushLogToCard() {
+  if (!gLogToCard || gLogLen == 0) return 0;
+  const uint32_t t0 = millis();
+  const bool ok = appendToCard(kLogPath, gLogBuf, gLogLen, kLogFileCapBytes);
+  // DROPPED EITHER WAY. A card that refuses the write must not make the buffer grow
+  // until it starts losing lines silently -- and a log that stops the device
+  // working is worse than no log. The failure shows up as a gap plus the dropped
+  // count on the next line that does land.
+  if (!ok) gLogDropped += static_cast<uint32_t>(gLogLen);
+  gLogLen = 0;
+  const uint32_t took = millis() - t0;
+  gLogSdMs += took;
+  return took;
+}
+
 static void logFlush() {
   const uint32_t t0 = millis();
   // NOT logFlush(). The sweep that turned every `Serial.flush();` in this file
@@ -3503,6 +3578,15 @@ static void paintSleepScreen() {
   // indistinguishable from a first-ever start. The flag is what makes the next
   // boot know it was a resume; see session.h.
   markSleeping();
+  // THE LAST THING BEFORE THE CHIP STOPS. Without this the buffer dies with the RAM
+  // and the log ends at whatever idle flush happened last -- which on a device that
+  // sleeps after five minutes is most of what you wanted to read. It is after
+  // markSleeping deliberately: the flag is what the next boot needs and this is only
+  // what a human needs, so the ordering says which one may not be lost.
+  if (gLogToCard && gLogLen > 0) {
+    logf("[log] sleeping\n");
+    flushLogToCard();
+  }
   freeink::PowerManager::deepSleepUntilPowerButton();
 }
 
@@ -4078,6 +4162,14 @@ void loop() {
          (unsigned long)rawSamplesDropped(), (unsigned long)gPresses.dropped(),
          (unsigned)gSd.listings().slotsHeld(), (unsigned)gSd.listings().residentBytes(),
          (unsigned)gSd.listings().hits(), (unsigned)gSd.listings().misses());
+    // WHAT THE CARD LOG HAS COST AND WHAT IT HAS LOST, on the heartbeat rather than
+    // per flush. `dropped` non-zero means the buffer overran between two idle
+    // windows and the log has a HOLE in it -- which must never be mistaken for the
+    // device having gone quiet. `sdMs` is the instrument's own weight; subtract it
+    // before believing any total measured with logging on.
+    if (gLogToCard)
+      logf("[log] buffered=%uB dropped=%luB sdTotal=%lums\n", (unsigned)gLogLen,
+           (unsigned long)gLogDropped, (unsigned long)gLogSdMs);
     logFlush();
   }
   // IDLE ON THE QUEUE, NOT ON THE CLOCK. Identical to the delay(10) this replaces
