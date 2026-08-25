@@ -40,6 +40,7 @@
 #include "reader/json.h"
 #include "reader/power.h"
 #include "reader/profile.h"
+#include "reader/document.h"
 #include "reader/progress.h"
 #include "reader/refresh.h"
 #include "reader/screen_home.h"
@@ -2418,6 +2419,20 @@ static void renderTop() {
       break;
     case reader::Fidelity::Dithered: paintDithered(mode); break;
     case reader::Fidelity::Mono: paintMono(mode); break;
+  }
+  // WHAT THE MARKUP CLAIMED, beside what reached the page. `emph=0` says this parser
+  // found nothing it understands; these say whether there was anything to find. A
+  // book whose italics are `<span class="x">` with a stylesheet shows classed>0 and
+  // em=0; one using an inline style shows italicStyle>0. The two are different jobs,
+  // and the counts are what decides which -- rather than a guess about what Calibre
+  // emits. See reader/document.h.
+  //
+  // Only on a Reader paint, and it is three integers off a struct: no walk, no
+  // allocation, nothing on the card.
+  if (gApp->top().id() == reader::ScreenId::Reader) {
+    const reader::MarkupHints& h = reader::lastMarkupHints();
+    logf("[markup] em=%d styled=%d italicStyle=%d classed=%d sample='%s'\n", h.emphasisTags,
+         h.styledSpans, h.italicStyles, h.classedSpans, h.sampleClass);
   }
   // WHAT THE READER'S PAGE ACTUALLY CARRIES. "This word should be italic and is not"
   // has two explanations that look identical on glass, and this is what separates

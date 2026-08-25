@@ -38,6 +38,17 @@ bool isEmphasis(std::string_view t) {
   return t == "em" || t == "i" || t == "cite";
 }
 
+// See document.h. Diagnostic only -- nothing reads these to decide anything.
+MarkupHints gHints;
+
+// Whether a `style` value asks for italics. Deliberately a substring search and not
+// a CSS parse: this only has to answer "is there something here we are not reading",
+// and a false positive costs a log line.
+bool mentionsItalic(std::string_view style) {
+  return style.find("italic") != std::string_view::npos ||
+         style.find("oblique") != std::string_view::npos;
+}
+
 // NOT CONTENT. Their text must never reach a page: a stylesheet rendered as a
 // paragraph is the most obvious way a reader can look broken.
 bool isSuppressed(std::string_view t) {
@@ -298,6 +309,29 @@ bool BlockReader::next(Block& out) {
         if (!st.open) beginBlock();
         appendSpace();
       }
+      // COUNTED BEFORE THE TAG IS ACTED ON, so it sees every inline tag whether or
+      // not this parser understands it. That is the whole point: the tags it does
+      // NOT understand are the question.
+      if (isEmphasis(st.xml.name())) {
+        ++gHints.emphasisTags;
+      } else {
+        const std::string_view style = st.xml.attr("style");
+        if (!style.empty()) {
+          ++gHints.styledSpans;
+          if (mentionsItalic(style)) ++gHints.italicStyles;
+        }
+        const std::string_view cls = st.xml.attr("class");
+        if (!cls.empty()) {
+          ++gHints.classedSpans;
+          if (gHints.sampleClass[0] == '\0') {
+            const size_t take = cls.size() < sizeof(gHints.sampleClass) - 1
+                                    ? cls.size()
+                                    : sizeof(gHints.sampleClass) - 1;
+            for (size_t i = 0; i < take; ++i) gHints.sampleClass[i] = cls[i];
+            gHints.sampleClass[take] = '\0';
+          }
+        }
+      }
       if (isEmphasis(st.xml.name())) {
         // A bare `<em>` with no block around it is still the book's words, exactly
         // as a bare text node is -- so it opens one, or `emStart` would index a
@@ -377,5 +411,8 @@ bool buildDocument(std::string_view xhtml, Document& out, const char** reason) {
   }
   return true;
 }
+
+const MarkupHints& lastMarkupHints() { return gHints; }
+void resetMarkupHints() { gHints = MarkupHints{}; }
 
 }  // namespace reader

@@ -17,6 +17,7 @@
 #include "doctest.h"
 #include "ramp.h"
 #include "reader_fixture.h"
+#include "reader/document.h"
 #include "reader/layout.h"
 #include "reader/screen_reader.h"
 #include "reader/theme_quiet.h"
@@ -101,4 +102,53 @@ TEST_CASE("the italic face reaches the glass, and its absence is silent") {
   for (int i = 0; i < roman.sizeBytes(); ++i)
     if (roman.data()[i] != slanted.data()[i]) { identical = false; break; }
   CHECK_FALSE(identical);
+}
+
+// --- WHAT THE MARKUP CLAIMED --------------------------------------------------
+//
+// The third explanation for a missing italic is the one that cannot be tested
+// against a real book from here, because it is a property of the book. These pin
+// the DIAGNOSTIC instead: a counter that is wrong is worse than none, because the
+// whole point of it is to be believed from a log.
+TEST_CASE("the markup hints tell the three shapes of italic apart") {
+  ramp::Ramp ramp;
+  readerfix::Body body;
+  reader::PageMetrics m;
+  reader::QuietTheme theme;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+
+  auto hintsFor = [&](const std::string& doc) {
+    reader::resetMarkupHints();
+    auto scr = std::make_unique<reader::ReaderScreen>(doc, "T", "CH. 01", &body.face);
+    scr->setMetrics(m);
+    return reader::lastMarkupHints();
+  };
+
+  SUBCASE("what this parser understands") {
+    const reader::MarkupHints h = hintsFor("<html><body><p>a <em>b</em> c</p></body></html>");
+    CHECK(h.emphasisTags == 1);
+    CHECK(h.classedSpans == 0);
+    CHECK(h.italicStyles == 0);
+  }
+  SUBCASE("an inline style, which it does not") {
+    const reader::MarkupHints h = hintsFor(
+        "<html><body><p>a <span style=\"font-style: italic\">b</span> c</p></body></html>");
+    CHECK(h.emphasisTags == 0);
+    CHECK(h.styledSpans == 1);
+    CHECK(h.italicStyles == 1);
+  }
+  SUBCASE("a class and a stylesheet, which it does not either") {
+    const reader::MarkupHints h = hintsFor(
+        "<html><body><p>a <span class=\"calibre3\">b</span> c</p></body></html>");
+    CHECK(h.emphasisTags == 0);
+    CHECK(h.classedSpans == 1);
+    CHECK(h.italicStyles == 0);
+    CHECK(std::string(h.sampleClass) == "calibre3");
+  }
+  SUBCASE("a style that is not about slant is counted but not claimed") {
+    const reader::MarkupHints h = hintsFor(
+        "<html><body><p>a <span style=\"color: red\">b</span> c</p></body></html>");
+    CHECK(h.styledSpans == 1);
+    CHECK(h.italicStyles == 0);
+  }
 }

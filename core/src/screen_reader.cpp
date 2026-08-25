@@ -1,5 +1,6 @@
 #include "reader/screen_reader.h"
 
+#include "reader/document.h"
 #include "reader/progress.h"
 
 #include <algorithm>
@@ -289,6 +290,7 @@ ReaderScreen::CountOutcome ReaderScreen::countPages(std::vector<Cursor>& out, St
   out.clear();
   if (body_ == nullptr || !chapter_.ok()) return CountOutcome::Failed;
   if (!chapter_.rewind()) return CountOutcome::Failed;
+  resetMarkupHints();  // see document.h: the hints describe THIS walk
 
   PageBuilder pb(*body_, metrics_);
   if (!pb.viable()) return CountOutcome::Failed;
@@ -397,6 +399,7 @@ bool ReaderScreen::openAtCursor(Cursor want) {
   pb_.reset();
   page_ = Page{};
   if (body_ == nullptr || !chapter_.ok() || !chapter_.rewind()) return false;
+  resetMarkupHints();
 
   // ONE WALK, NOT TWO, AND THE LINES ARE KEPT. This counted boundaries and then
   // handed the answer to seekTo(), which REWOUND AND WALKED THE WHOLE CHAPTER AGAIN
@@ -537,6 +540,7 @@ bool ReaderScreen::warmPageRing(StopFn stop, void* ctx) {
   if (from == 0 && backwardHeadroom() >= p) return false;
 
   if (!chapter_.rewind()) return false;
+  resetMarkupHints();
   // SPENT BEFORE THE WALK, exactly as completeIndex spends it: the rewind moves the
   // stream the live builder reads from, so a builder left standing would point at a
   // position that no longer exists.
@@ -632,6 +636,7 @@ bool ReaderScreen::seekTo(int p, bool needStream) {
   pb_.reset();
   if (body_ == nullptr || p < 0 || p >= static_cast<int>(starts_.size())) return false;
   if (!chapter_.rewind()) return false;
+  resetMarkupHints();
 
   pb_.reset(new (std::nothrow) PageBuilder(*body_, metrics_));
   if (pb_ == nullptr || !pb_->viable()) {
