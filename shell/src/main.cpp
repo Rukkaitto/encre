@@ -1047,6 +1047,52 @@ static void armCardProbes(const char* why) {
 
 static reader::SleepViewModel sleepVmFromCard(std::string note);
 
+// --- WHAT THE CARD'S POINTER SAYS ---------------------------------------------
+//
+// `/.reader/last.json` read, checked and shaped, once. Home's reading column and
+// the Sleep screen's card are the same four facts about the same book, and they
+// were reading and shaping them SEPARATELY -- the same load, the same `exists`
+// check against the card, the same title fallback, written twice.
+//
+// They never disagreed about the DATA, and the device's 42%-asleep against
+// 40%-at-home was not this: both take `last.percent`, and the difference was WHEN
+// each read it (Home builds its view model once and holds a snapshot; Sleep builds
+// its at the moment it paints). But a second copy is where a rule stops being one,
+// and this file's own says the second copy is the extraction point rather than the
+// fifth. The title fallback is the part most likely to have drifted: it is the same
+// decision Book details makes about a book with no OPF title.
+struct ReadingPointer {
+  bool valid = false;      // there is a pointer AND the book it names is still there
+  std::string bookPath;
+  std::string title;       // the OPF's, or the filename
+  std::string author;
+  int percent = 0;
+  int spine = 0;
+  int spineCount = 0;
+};
+
+static ReadingPointer readingPointer() {
+  ReadingPointer p;
+  reader::LastRead last;
+  if (!gStorageUsable || !reader::loadLastRead(gSd, last)) return p;
+  // CHECKED AGAINST THE CARD, not trusted. A book deleted on a computer, or a
+  // different card in the slot, leaves a pointer naming something that is not
+  // there -- and offering to continue a book that cannot be opened is worse than
+  // not offering.
+  if (!gSd.exists(last.bookPath)) {
+    logf("[progress] the last book is gone from the card: %s\n", last.bookPath.c_str());
+    return p;
+  }
+  p.valid = true;
+  p.bookPath = last.bookPath;
+  p.title = last.title.empty() ? last.bookPath : last.title;
+  p.author = last.author;
+  p.percent = last.percent;
+  p.spine = last.spine;
+  p.spineCount = last.spineCount;
+  return p;
+}
+
 // --- The app, and the session record -------------------------------------
 
 // HOME'S `LIBRARY` ROW SHOWS THE REAL COUNT. demoHomeVm() carries the board's
@@ -1233,34 +1279,28 @@ static reader::HomeViewModel homeVmForCard() {
   // whole check. (design/HomeMissing.dc.html is the state that shows the last book
   // WITH a warning; it is boarded and not built, so for now a stale pointer falls
   // back to the nothing-open screen, which is honest if less informative.)
-  if (books > 0 && gStorageUsable) {
-    reader::LastRead last;
-    if (reader::loadLastRead(gSd, last)) {
-      if (!gSd.exists(last.bookPath)) {
-        logf("[progress] the last book is gone from the card: %s\n",
-             last.bookPath.c_str());
-      } else {
-        vm = reader::demoHomeVm();     // the reading-column shape, then every field
-        vm.nothingToContinue = false;  // ...replaced, because none of it is this book
-        vm.title = last.title.empty() ? last.bookPath : last.title;
-        vm.author = last.author;
-        vm.percent = last.percent;
-        // THE BOARD'S COUNTER: spine position of spine count, which is what
-        // Main.dc.html draws now -- a page counter for the book would mean
-        // paginating all of it. A book whose count is unknown says just the
-        // position rather than inventing a total.
-        char label[24];
-        if (last.spineCount > 0)
-          std::snprintf(label, sizeof(label), "CH. %02d OF %d", last.spine + 1,
-                        last.spineCount);
-        else
-          std::snprintf(label, sizeof(label), "CH. %02d", last.spine + 1);
-        vm.chapterLabel = label;
-        vm.focusedMenuIndex = -1;  // the CONTINUE block, which exists again
-        vm.hints = {"READ", "SELECT", "UP", "DOWN"};
-        logf("[progress] Home continues \"%s\" at %d%%, spine %d of %d\n",
-             vm.title.c_str(), last.percent, last.spine + 1, last.spineCount);
-      }
+  if (books > 0) {
+    const ReadingPointer p = readingPointer();
+    if (p.valid) {
+      vm = reader::demoHomeVm();     // the reading-column shape, then every field
+      vm.nothingToContinue = false;  // ...replaced, because none of it is this book
+      vm.title = p.title;
+      vm.author = p.author;
+      vm.percent = p.percent;
+      // THE BOARD'S COUNTER: spine position of spine count, which is what
+      // Main.dc.html draws now -- a page counter for the book would mean
+      // paginating all of it. A book whose count is unknown says just the
+      // position rather than inventing a total.
+      char label[24];
+      if (p.spineCount > 0)
+        std::snprintf(label, sizeof(label), "CH. %02d OF %d", p.spine + 1, p.spineCount);
+      else
+        std::snprintf(label, sizeof(label), "CH. %02d", p.spine + 1);
+      vm.chapterLabel = label;
+      vm.focusedMenuIndex = -1;  // the CONTINUE block, which exists again
+      vm.hints = {"READ", "SELECT", "UP", "DOWN"};
+      logf("[progress] Home continues \"%s\" at %d%%, spine %d of %d\n", vm.title.c_str(),
+           p.percent, p.spine + 1, p.spineCount);
       logFlush();
     }
   }
