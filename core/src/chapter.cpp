@@ -79,12 +79,14 @@ bool ChapterReader::startStream() {
     bytes = bufSrc_.get();
     if (blocks_ == nullptr) {
       blocks_.reset(new (std::nothrow) BlockReader(*bytes));
+      if (blocks_ != nullptr) blocks_->setItalicClasses(italicClasses_);
       if (blocks_ == nullptr || !blocks_->ok()) {
         error_ = "not enough memory to read this chapter";
         return false;
       }
     } else {
       blocks_->restart(*bytes);
+    blocks_->setItalicClasses(italicClasses_);
     }
     return true;
   }
@@ -117,12 +119,14 @@ bool ChapterReader::startStream() {
 
   if (blocks_ == nullptr) {
     blocks_.reset(new (std::nothrow) BlockReader(*bytes));
+    if (blocks_ != nullptr) blocks_->setItalicClasses(italicClasses_);
     if (blocks_ == nullptr || !blocks_->ok()) {
       error_ = "not enough memory to read this chapter";
       return false;
     }
   } else {
     blocks_->restart(*bytes);
+    blocks_->setItalicClasses(italicClasses_);
   }
   return true;
 }

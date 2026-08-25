@@ -152,3 +152,80 @@ TEST_CASE("the markup hints tell the three shapes of italic apart") {
     CHECK(h.italicStyles == 0);
   }
 }
+
+// --- ITALIC BY CLASS ----------------------------------------------------------
+//
+// The shape a real book uses. Measured on the user's card: one chapter carries 609
+// classed inline tags and not one <em>, <i> or <cite>.
+TEST_CASE("a class the stylesheet italicises is an emphasis run") {
+  ramp::Ramp ramp;
+  readerfix::Body body;
+  readerfix::Italic italic;
+  reader::QuietTheme theme;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+
+  const std::string doc =
+      "<html><body><p>il avait <span class=\"lattes-i\">faim</span> ce soir</p></body></html>";
+
+  auto runsWith = [&](std::vector<std::string> classes) {
+    auto scr = std::make_unique<reader::ReaderScreen>(doc, "T", "CH. 01", &body.face);
+    scr->setItalic(&italic.face);
+    scr->setItalicClasses(std::move(classes));
+    scr->setMetrics(m);
+    return scr->pageEmphasisRuns();
+  };
+
+  // Without the stylesheet's answer there is nothing to emphasise -- which is the
+  // bug this fixes, and it is what every build before this did.
+  CHECK(runsWith({}) == 0);
+  CHECK(runsWith({"lattes-i"}) == 1);
+  // A class the sheet does not italicise stays roman.
+  CHECK(runsWith({"other"}) == 0);
+  // ...and an element carrying several classes still matches on one of them.
+  CHECK(runsWith({"x", "lattes-i"}) == 1);
+}
+
+TEST_CASE("a class-italic run covers exactly its own text") {
+  ramp::Ramp ramp;
+  readerfix::Body body;
+  readerfix::Italic italic;
+  reader::QuietTheme theme;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+
+  auto scr = std::make_unique<reader::ReaderScreen>(
+      "<html><body><p>aa <span class=\"i\">bb</span> cc</p></body></html>", "T", "CH. 01",
+      &body.face);
+  scr->setItalic(&italic.face);
+  scr->setItalicClasses({"i"});
+  scr->setMetrics(m);
+  REQUIRE(scr->page().lines.size() == 1);
+  const reader::LaidLine& ln = scr->page().lines[0];
+  REQUIRE(ln.emphasis.size() == 1);
+  // "aa " is three bytes, "bb" is two. The offsets index THIS LINE's own text.
+  CHECK(ln.text.substr(ln.emphasis[0].off, ln.emphasis[0].len) == "bb");
+}
+
+TEST_CASE("the close is matched by the ELEMENT, not by its name") {
+  // A class-italic run ends at a `</span>` that is indistinguishable from every
+  // other one, so the parser cannot re-test the name. Nested plain spans inside an
+  // italic one must not end it early.
+  ramp::Ramp ramp;
+  readerfix::Body body;
+  readerfix::Italic italic;
+  reader::QuietTheme theme;
+  reader::PageMetrics m;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+
+  auto scr = std::make_unique<reader::ReaderScreen>(
+      "<html><body><p>a <span class=\"i\">b <span>c</span> d</span> e</p></body></html>", "T",
+      "CH. 01", &body.face);
+  scr->setItalic(&italic.face);
+  scr->setItalicClasses({"i"});
+  scr->setMetrics(m);
+  REQUIRE(scr->page().lines.size() == 1);
+  const reader::LaidLine& ln = scr->page().lines[0];
+  REQUIRE(ln.emphasis.size() == 1);
+  CHECK(ln.text.substr(ln.emphasis[0].off, ln.emphasis[0].len) == "b c d");
+}

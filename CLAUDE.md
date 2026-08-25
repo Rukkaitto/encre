@@ -2455,6 +2455,42 @@ complaint. The document builder keeps a stack to know which block it is in, so i
 notices an unclosed tag at `Eof` for free; a second stack in the parser would be a
 second depth cap and a second allocation for a check the layer above cannot skip.
 
+**A REAL BOOK'S ITALICS ARE IN ITS STYLESHEET, NOT IN ITS TAGS.** `document.cpp`
+reads `<em>`, `<i>` and `<cite>`, and one chapter of the user's own `Le Fléau`
+carries **609 classed inline tags and not one of the three** — its italics are
+`<span class="...">` against a publisher sheet, which is what a converted EPUB
+usually emits. So without `css.h` most books on a real card rendered no italics at
+all, silently, and it read as a regression when nothing had regressed.
+
+- **`collectItalicClasses` IS NOT A CSS ENGINE AND MUST NOT BECOME ONE.** It answers
+  one question — which class names carry `font-style: italic` — in a forward scan
+  with no tree, no cascade and no specificity. The OUTPUT is a handful of short
+  names; that bound is what makes it affordable.
+- **IT OVER-MATCHES ON PURPOSE, three ways**: a later rule turning italic back off is
+  not modelled, `@media` bodies are scanned like any other, and only classes are
+  collected (an element selector would italicise a whole chapter). Over-matching sets
+  a run in italic that should be roman, which is a typographic wrong you can see;
+  under-matching is invisible, and invisible is what this was.
+- **`font-family: "Italic Garamond"` MENTIONS BOTH WORDS AND ASKS FOR NEITHER**, so
+  the value has to follow the property through its colon rather than being two
+  independent searches. That has its own test.
+- **THE CLOSE IS MATCHED BY THE ELEMENT, NOT BY ITS NAME.** A class-italic run ends
+  at a `</span>` indistinguishable from every other, so `TagName` carries an
+  `openedEmphasis` flag set at the start tag. The tag-based path rides the same flag
+  rather than re-testing the name, so the two cannot disagree — and it made that path
+  stricter, since an `</em>` whose `<em>` was inside a suppressed element no longer
+  decrements a depth it never incremented.
+- **IT RIDES `loadToc`'s ARCHIVE OPEN.** Both are "what the book says about itself",
+  both are wanted at the same moment, and a second open is ~100 ms and a second
+  central-directory parse. The read is capped at 32 KB a sheet — sized against the
+  ~133 KB free at book open, not against what CSS can be — and a sheet that will not
+  read is skipped rather than fatal.
+- **`[css] N italic class(es)` and `[markup] em=N classed=N sample='…'`** are what
+  told these apart from the device. A word that should be italic and is not has three
+  explanations that look identical on glass: the parse found nothing it reads, the
+  wrap lost it, or no italic face is installed. `[page] … emph=N ital=N` separates the
+  last two.
+
 **EVERYTHING THE XHTML SAYS THAT `document.h` DOES NOT MODEL IS DROPPED, NOT
 APPROXIMATED.** A `<table>` becomes its cells in reading order or nothing, never a
 guess at a layout. `<style>` and `<script>` text never reaches a page. **Inline

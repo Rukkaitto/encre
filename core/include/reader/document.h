@@ -128,6 +128,17 @@ struct Document {
 class BlockReader {
  public:
   explicit BlockReader(ByteSource& src);
+
+  // WHICH CLASS NAMES MEAN ITALIC, from the book's own stylesheets -- see
+  // reader/css.h for the measurement that makes this necessary rather than nice.
+  // A POINTER because the set belongs to the book and outlives every chapter read
+  // from it; null, and the default, is "this book says nothing", which is what the
+  // in-memory constructor and every test that does not care get.
+  //
+  // Set before the first next(). Changing it mid-chapter would emphasise part of a
+  // block and not the rest, which is a wrong the reader cannot see and the writer
+  // cannot debug.
+  void setItalicClasses(const std::vector<std::string>* classes);
   BlockReader(const BlockReader&) = delete;
   BlockReader& operator=(const BlockReader&) = delete;
   ~BlockReader();

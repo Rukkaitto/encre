@@ -1,5 +1,7 @@
 #include "reader/toc.h"
 
+#include "reader/css.h"
+
 #include <memory>
 
 #include "reader/epub.h"
@@ -21,7 +23,7 @@ std::string_view withoutFragment(std::string_view src) {
 }  // namespace
 
 bool loadToc(FileSystem& fs, std::string_view bookPath, std::vector<TocEntry>& out,
-             const char** reason) {
+             const char** reason, std::vector<std::string>* italicClassesOut) {
   out.clear();
   const auto say = [reason](const char* why) {
     if (reason != nullptr) *reason = why;
@@ -35,6 +37,13 @@ bool loadToc(FileSystem& fs, std::string_view bookPath, std::vector<TocEntry>& o
   if (!zip.open(*file)) return say(zip.reason());
   Epub epub;
   if (!epub.open(*file, zip)) return say(epub.reason());
+
+  // THE STYLES FIRST, because a book with no contents still has italics and the
+  // early return below would skip them. Failures are swallowed: see readItalicClasses.
+  if (italicClassesOut != nullptr) {
+    italicClassesOut->clear();
+    readItalicClasses(*file, zip, epub, *italicClassesOut);
+  }
 
   // NO TABLE OF CONTENTS IS NOT A FAILURE. The book reads perfectly well; it just
   // cannot name its chapters, and every caller's answer to that is to fall back on

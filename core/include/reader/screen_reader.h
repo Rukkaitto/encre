@@ -457,6 +457,7 @@ class ReaderScreen : public Screen {
   // layout measured in one face and drawn in two, which is the disagreement
   // StyledFace exists to prevent.
   const GlyphSource* italic_ = nullptr;
+  std::vector<std::string> italicClasses_;
 
  public:
   // WHETHER AN ITALIC FACE IS INSTALLED AT ALL. drawTextStyled falls back to the
@@ -464,6 +465,19 @@ class ReaderScreen : public Screen {
   // not rendering has two completely different explanations and they look identical
   // on glass. This is what tells them apart from a log.
   bool hasItalic() const { return italic_ != nullptr; }
+
+  // THE BOOK'S ITALIC CLASS NAMES, from its own stylesheets. Owned here because the
+  // screen outlives every chapter it reads and the set is the same for all of them;
+  // the ChapterReader below is handed a pointer to it.
+  //
+  // SET BEFORE setMetrics, exactly as the italic FACE is and for the identical
+  // reason: setMetrics lays the chapter out, the wrap measures emphasis, and a set
+  // arriving after would leave the first page measured roman and drawn in two faces.
+  void setItalicClasses(std::vector<std::string> classes) {
+    italicClasses_ = std::move(classes);
+    chapter_.setItalicClasses(italicClasses_.empty() ? nullptr : &italicClasses_);
+  }
+  size_t italicClassCount() const { return italicClasses_.size(); }
 
   // How many emphasised runs the page currently laid out carries. Zero means the
   // PARSE found none in this text -- `<em>`, `<i>` and `<cite>` are what document.cpp

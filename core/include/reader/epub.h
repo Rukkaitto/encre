@@ -50,6 +50,10 @@ class Epub {
   // chapter list, which is a missing feature and not a broken book.
   const std::string& tocPath() const { return tocPath_; }
 
+  // Every stylesheet the manifest declares, in manifest order. Usually one; a
+  // converted book sometimes carries two or three.
+  const std::vector<std::string>& cssPaths() const { return cssPaths_; }
+
   const char* reason() const { return reason_; }
 
  private:
@@ -60,6 +64,10 @@ class Epub {
   std::string identifier_;
   std::vector<Chapter> chapters_;
   std::string tocPath_;
+  // A book declaring more stylesheets than this is not a book, and the cap is what
+  // keeps a malformed manifest from becoming an unbounded read on the open path.
+  static constexpr size_t kMaxStylesheets = 8;
+  std::vector<std::string> cssPaths_;
   const char* reason_ = "";
 };
 

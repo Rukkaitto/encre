@@ -91,8 +91,13 @@ inline constexpr size_t kMaxTocLabelBytes = 128;
 // (~32 KB transient) rather than growing every book's resident footprint for a screen
 // the reader opens occasionally. It is called when Contents opens, not when a book
 // does.
+// `italicClassesOut`, when given, also collects the class names the book's own
+// stylesheets set in italics -- see reader/css.h. It rides this call rather than
+// having its own because both are "what the book says about itself", both are wanted
+// at the same moment, and a second archive open costs ~100 ms and a second
+// central-directory parse to learn something this one already has the handles for.
 bool loadToc(FileSystem& fs, std::string_view bookPath, std::vector<TocEntry>& out,
-             const char** reason);
+             const char** reason, std::vector<std::string>* italicClassesOut = nullptr);
 
 // The entry naming `spine`, or -1. What the Reader needs to put a chapter's NAME in
 // its footer, and what Contents needs to mark the row the reader is on.

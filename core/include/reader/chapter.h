@@ -57,6 +57,11 @@ class ChapterReader {
   // The bytes are copied, so the caller need not keep them.
   bool beginBuffer(std::string_view xhtml);
 
+  // The book's italic class names, handed on to every BlockReader this makes. Not
+  // owned: the set belongs to the book and outlives every chapter read from it. See
+  // reader/css.h for why a real book needs it at all.
+  void setItalicClasses(const std::vector<std::string>* classes) { italicClasses_ = classes; }
+
   // Back to block 0, reusing every buffer -- no 32 KB reallocation. This is what a
   // backward page turn costs.
   bool rewind();
@@ -96,6 +101,7 @@ class ChapterReader {
   // deflated entry, the entry's own bytes for a stored one.
   std::unique_ptr<InflateSource> inflated_;
   std::unique_ptr<BlockReader> blocks_;
+  const std::vector<std::string>* italicClasses_ = nullptr;
   int position_ = 0;
   const char* error_ = "";
 };

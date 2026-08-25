@@ -152,6 +152,13 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // The italic face for emphasis, or null for "draw it roman". Set alongside the
   // body, because it belongs to `readerMetrics_` too and the WRAP reads it.
   void setReaderItalic(const GlyphSource* italic) { readerItalic_ = italic; }
+
+  // The book's italic class names, read from its stylesheets when it was opened.
+  // Beside the face rather than with the book, because both answer the same
+  // question -- how is emphasis rendered -- and a Reader needs both or neither.
+  void setReaderItalicClasses(std::vector<std::string> classes) {
+    readerItalicClasses_ = std::move(classes);
+  }
   void setReaderMetrics(const PageMetrics& m) { readerMetrics_ = m; }
   // The column the Reader is laid out in. Read by a caller that has to record WHICH
   // geometry a saved line was measured at -- see ReadingPosition. One source of
@@ -302,6 +309,7 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   int settingsHeaderH_ = 0;
   const GlyphSource* readerBody_ = nullptr;
   const GlyphSource* readerItalic_ = nullptr;
+  std::vector<std::string> readerItalicClasses_;
   ReaderStyleDemo readerStyleDemo_ = ReaderStyleDemo::None;
   AnchorPos readerAnchor_{};
   bool readerHasAnchor_ = false;

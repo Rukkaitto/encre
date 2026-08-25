@@ -422,6 +422,11 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // measure/draw disagreement StyledFace exists to prevent, and invisible on any
       // page that happens to have no emphasis.
       scr->setItalic(readerItalic_);
+      // BEFORE setMetrics for the reason stated just above, and it applies more
+      // sharply here: the classes decide which runs are emphasised at all, so a set
+      // arriving after the landing would leave the first page with no emphasis and
+      // every page after it with some.
+      scr->setItalicClasses(readerItalicClasses_);
       // BEFORE setMetrics, like the italic and for a related reason: setMetrics lands
       // the page, and syncVm computes the footer's way-back label off the anchor. An
       // anchor arriving after would be restored but invisible until the next turn.

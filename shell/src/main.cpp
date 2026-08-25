@@ -1747,13 +1747,25 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
     const uint32_t tocT = millis();
     const uint32_t tocHeap = ESP.getFreeHeap();
     const char* tocWhy = "";
-    const bool tocOk = reader::loadToc(gSd, path, gReading.toc, &tocWhy);
+    // THE STYLESHEETS RIDE THIS CALL. Both are "what the book says about itself"
+    // and both are wanted here, where the archive is already open and there is heap
+    // for it -- openBook has released its own and the Reader's inflater does not
+    // exist yet. A second open would be ~100 ms and a second directory parse.
+    std::vector<std::string> italicClasses;
+    const bool tocOk = reader::loadToc(gSd, path, gReading.toc, &tocWhy, &italicClasses);
     logf("[toc] %s: %u entries in %lums, heap %u -> %u, min %u%s%s\n",
          tocOk ? "read" : "REFUSED", (unsigned)gReading.toc.size(),
          (unsigned long)(millis() - tocT), (unsigned)tocHeap,
          (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
          tocWhy[0] != '\0' ? " -- " : "", tocWhy);
+    // NAMED IN THE LOG, because a book whose italics do not render has three
+    // explanations and this is the one that used to be invisible. `[markup]` says
+    // what the chapter CLAIMED; this says what the stylesheet ANSWERED.
+    logf("[css] %u italic class(es)%s%s\n", (unsigned)italicClasses.size(),
+         italicClasses.empty() ? "" : ", first: ",
+         italicClasses.empty() ? "" : italicClasses.front().c_str());
     logFlush();
+    gFactory.setReaderItalicClasses(std::move(italicClasses));
   }
 
   // WHAT A SAVE WILL NEED, captured now while it is all in hand.
