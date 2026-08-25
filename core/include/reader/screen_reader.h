@@ -457,6 +457,26 @@ class ReaderScreen : public Screen {
   // layout measured in one face and drawn in two, which is the disagreement
   // StyledFace exists to prevent.
   const GlyphSource* italic_ = nullptr;
+
+ public:
+  // WHETHER AN ITALIC FACE IS INSTALLED AT ALL. drawTextStyled falls back to the
+  // roman when this is null, silently and correctly -- so a book whose emphasis is
+  // not rendering has two completely different explanations and they look identical
+  // on glass. This is what tells them apart from a log.
+  bool hasItalic() const { return italic_ != nullptr; }
+
+  // How many emphasised runs the page currently laid out carries. Zero means the
+  // PARSE found none in this text -- `<em>`, `<i>` and `<cite>` are what document.cpp
+  // recognises, and a book that marks its italics with a class and a stylesheet
+  // carries none of them. Non-zero means the spans reached layout and the question is
+  // downstream of it.
+  int pageEmphasisRuns() const {
+    int n = 0;
+    for (const LaidLine& ln : page_.lines) n += static_cast<int>(ln.emphasis.size());
+    return n;
+  }
+
+ private:
   // WHERE THE READER WAS BEFORE THEY STOPPED READING LINEARLY. The rule is in
   // return_anchor.h and is tested without a book; this screen only tells it which
   // of the three movements just happened.

@@ -2419,6 +2419,19 @@ static void renderTop() {
     case reader::Fidelity::Dithered: paintDithered(mode); break;
     case reader::Fidelity::Mono: paintMono(mode); break;
   }
+  // WHAT THE READER'S PAGE ACTUALLY CARRIES. "This word should be italic and is not"
+  // has two explanations that look identical on glass, and this is what separates
+  // them: `emph` is how many emphasised runs reached LAYOUT, so zero means the PARSE
+  // found none -- document.cpp reads `<em>`, `<i>` and `<cite>`, and a book that
+  // marks its italics with a class and a stylesheet carries none of the three. A
+  // non-zero count means the spans got as far as the page and the loss is after it.
+  // `ital` catches the third case: no italic face installed, where drawTextStyled
+  // falls back to the roman silently and correctly.
+  if (gApp->top().id() == reader::ScreenId::Reader) {
+    const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
+    logf("[page] %d/%d lines=%u emph=%d ital=%d\n", rd->vm().page, rd->vm().pageTotal,
+         (unsigned)rd->page().lines.size(), rd->pageEmphasisRuns(), (int)rd->hasItalic());
+  }
   const uint32_t total = millis() - t0;
   // render = drawing all passes (4 for gray: Bw, Lsb, Msb, then Bw again for the
   // cleanup rebase; 1 for mono and for dithered). panel = everything else, which
