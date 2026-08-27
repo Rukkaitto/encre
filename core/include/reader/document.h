@@ -8,6 +8,40 @@
 
 namespace reader {
 
+// --- WHAT THE MARKUP CLAIMED, FOR DIAGNOSIS ONLY -----------------------------
+//
+// A word that should be italic and is not has three explanations and they look
+// identical on glass. `[page] ... emph=N ital=N` separates the last two; this
+// separates the FIRST, which is the one that cannot be tested from here because it
+// is a property of somebody's book.
+//
+// document.cpp reads `<em>`, `<i>` and `<cite>`. It does not read a class plus a
+// stylesheet (`<span class="calibre3">`, which is what a Calibre conversion emits)
+// and it does not read an inline `style="font-style: italic"`. Those are two
+// different jobs -- one needs the OPF's CSS inflated and parsed, the other is a
+// handful of lines -- so which one a real book uses decides the work, and this
+// project's rule where an answer decides a design is to parse the thing rather than
+// argue about it.
+//
+// Counted over the chapter last built, reset per document. Bounded: three counters
+// and one fixed sample buffer, no allocation.
+struct MarkupHints {
+  int styledSpans = 0;    // any inline tag carrying a `style` attribute
+  int italicStyles = 0;   // ...whose style mentions `italic`
+  int classedSpans = 0;   // any inline tag carrying a `class` attribute
+  int emphasisTags = 0;   // <em>, <i>, <cite> -- what IS understood
+  // The first class value seen, truncated. One sample is enough to say what shape
+  // the book uses; a list would be an allocation on the open path for a diagnostic.
+  char sampleClass[32] = {0};
+};
+
+// The hints from the most recent buildDocument. A file-scope reading rather than a
+// return value because it is diagnostic and every layer between here and the shell
+// would otherwise have to carry it -- the same reason Profile and Progress are
+// installed rather than passed.
+const MarkupHints& lastMarkupHints();
+void resetMarkupHints();
+
 // A book's chapter, as a list of blocks. Deliberately the smallest model that
 // serves design/Reader.dc.html, because a model is a promise to render what it
 // holds and this slice renders paragraphs.
@@ -94,6 +128,17 @@ struct Document {
 class BlockReader {
  public:
   explicit BlockReader(ByteSource& src);
+
+  // WHICH CLASS NAMES MEAN ITALIC, from the book's own stylesheets -- see
+  // reader/css.h for the measurement that makes this necessary rather than nice.
+  // A POINTER because the set belongs to the book and outlives every chapter read
+  // from it; null, and the default, is "this book says nothing", which is what the
+  // in-memory constructor and every test that does not care get.
+  //
+  // Set before the first next(). Changing it mid-chapter would emphasise part of a
+  // block and not the rest, which is a wrong the reader cannot see and the writer
+  // cannot debug.
+  void setItalicClasses(const std::vector<std::string>* classes);
   BlockReader(const BlockReader&) = delete;
   BlockReader& operator=(const BlockReader&) = delete;
   ~BlockReader();

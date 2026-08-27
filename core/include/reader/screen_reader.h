@@ -55,10 +55,129 @@ class GlyphSource;
 // A DEFLATE stream cannot be seeked, and checkpointing one costs 32 KB a
 // checkpoint. So the reading position keeps its stream and its PageBuilder alive
 // and TURNING FORWARD CONTINUES THEM -- the common case, and it costs one page of
-// layout. Going back, or jumping, rewinds and decodes forward to the target: ~100
-// to 300 ms on device against a ~520 ms panel refresh.
+// layout. Going back, or jumping, rewinds and decodes forward to the target.
+//
+// --- ...AND A RING OF THE PAGES ALREADY LAID OUT -----------------------------
+//
+// THAT RE-DECODE WAS MEASURED AT ~376 ms ON THE DEVICE, against 20-33 ms for a
+// forward turn -- so paging back cost 1055 ms end to end against 634 ms forward.
+// This file used to dismiss it as "33.9 ms desktop against a ~520 ms panel
+// refresh", which is the ~37x render ratio applied to a path that is not
+// render-bound: the rewind is SdFat reads on the display's SPI bus plus an inflate
+// on a part with no FPU, and the real desktop-to-device ratio there is ~11x. The
+// same mistake this project made once already with the eager page count.
+//
+// So the last few pages LAID OUT are kept, keyed on the chapter and the page's own
+// start Cursor, and the dominant pattern -- turning back to the page you just came
+// from -- needs no decode at all. Two things about it that are not obvious:
+//
+//   * A HIT LEAVES NO LIVE BUILDER, because nothing was decoded. That is the same
+//     state a spent stream leaves and Gesture::Next already handles it, so the
+//     forward turn after a run of cached ones re-establishes the stream then. The
+//     TOTAL cost of back-then-forward is therefore unchanged; what changes is where
+//     it falls -- the presses the reader makes in a burst become instant, and the
+//     decode is paid once when they read on past what is cached.
+//   * A LIVE BUILDER STILL WINS over a cache hit on a forward turn (see
+//     Gesture::Next), because advancing the stream is ~20 ms and cheaper than the
+//     decode the reset would eventually cost.
+//
+// The pages are COPIES, and they have to be: LaidLine::text is owned exactly so a
+// Page can outlive the blocks it was laid from, and a cache of views would resurrect
+// the lifetime bug that rule exists to prevent. Measured cost is in
+// kPageCacheDepth's comment.
 class ReaderScreen : public Screen {
  public:
+  // A PREDICATE THE PAGE COUNT ASKS AS IT WALKS, so that counting a chapter can be
+  // GIVEN UP ON rather than blocking the main loop for seconds.
+  //
+  // The device reported `[index] pages=315 in 3605ms`, and for the whole of those
+  // 3.6 s no button did anything: two presses in one run waited 1304 ms and 1962 ms
+  // to be looked at, one of which then drew nothing at all. An ordinary chrome
+  // interaction on this device is 505-550 ms, so the count was an order of magnitude
+  // worse than everything it sat between.
+  //
+  // A FUNCTION POINTER PLUS A CONTEXT, not std::function: this is -fno-exceptions
+  // embedded code and std::function allocates. And a predicate rather than a
+  // millisecond budget, because `core/` has no clock and must not acquire one -- the
+  // shell's answer is "is there a raw input sample queued", which is a better
+  // question than any deadline anyway.
+  using StopFn = bool (*)(void*);
+
+  // HOW MANY RECENTLY LAID-OUT PAGES ARE KEPT. See the class comment for what the
+  // ring buys; this is what it costs.
+  //
+  // MEASURED, not guessed -- test_page_cache.cpp sums the heap a Page's lines really
+  // hold (every LaidLine's string capacity and emphasis vector, plus the line vector
+  // itself) over every page of a chapter at BOTH panel geometries, and asserts a
+  // ceiling so the figure cannot drift:
+  //
+  //   X4, 444px column: 1,471 bytes a page.  X3, 492px: 1,512.
+  //   Three of them: 4,536 bytes.
+  //
+  // THE FLOOR IT IS SPENT AGAINST IS 42,152 BYTES -- minimum free heap on the device
+  // with a book open -- so this is 10.8% of the margin, spent on the one page turn
+  // that is 18x slower than its counterpart.
+  //
+  // WHY THREE AND NOT ONE: the page CURRENTLY ON GLASS takes a slot, because it is
+  // stored as it is produced -- which is what makes the page count's restore leg free
+  // as well (see completeIndex). So depth 3 holds the current page plus TWO behind
+  // it, which is the "turning back to the page you just left, twice" that a reader
+  // skimming back actually does. Depth 2 would hold only one page back.
+  //
+  // WHY NOT MORE: the cost is linear and the value is not -- a third page back is
+  // rare -- and what has to fit beside it is a 32 KB inflate window plus a page turn's
+  // own transient (a block copy of up to 4,406 bytes, a wrap, and the new Page).
+  // Raising it is one constant and the test above prices it.
+  static constexpr int kPageCacheDepth = 3;
+
+  // ...AND THE CEILING WHEN THE HEAP CAN AFFORD MORE. The depth above is the safe
+  // default, sized for the worst floor this device has: 42,152 bytes free, which is
+  // what a Reader opened THROUGH THE LIBRARY leaves, because 203 books sit resident
+  // underneath it at ~59 KB. Come in through Home's CONTINUE instead and the same
+  // book leaves 76,476 -- a 34 KB difference that depends on nothing but which
+  // button was pressed.
+  //
+  // A fixed depth has to be sized for the worse case, so it is the shell that sets
+  // this: it is the only layer that can ask the allocator, and it already knows
+  // whether the Library is on the stack. core/ takes a number and never a policy.
+  static constexpr int kPageCacheMaxDepth = 8;
+
+  // How many pages the ring may hold. Clamped into [1, kPageCacheMaxDepth]; the
+  // excess is dropped immediately rather than at the next insertion, so shrinking
+  // gives the heap back at the moment the caller asked for it.
+  void setPageCacheDepth(int pages);
+  int pageCacheDepth() const { return pageCacheDepth_; }
+
+  // How many pages BELOW the current one the ring holds without a gap. This is the
+  // number of backward turns that will not touch the card, and it is what the idle
+  // warm below is gated on -- a rewind is worth doing early only when the headroom
+  // it would restore has actually been spent.
+  int backwardHeadroom() const;
+
+  // REFILL THE RING WHILE NOBODY IS WAITING. The reader's one remaining slow
+  // interaction is a backward turn that misses: it rewinds and decodes from the
+  // chapter start, which costs what page you are ON -- ~1010 ms at page 99 of a
+  // 248 KB chapter, and ~3 s deep in one. Nothing can make that cheaper, because a
+  // DEFLATE stream cannot be seeked and a second one is a 32 KB window against a
+  // 42 KB floor. What it CAN do is happen when the user is reading rather than when
+  // they have just pressed a button.
+  //
+  // So this is the same rewind, taken early: it walks to the current page, caching
+  // the depth's worth of pages that end there, and leaves the builder live exactly
+  // where it found it. Nothing visible changes -- `page_` and `at_` are untouched
+  // on every path, including the abandoned one.
+  //
+  // Returns false when there was nothing to do, when the walk was abandoned, or
+  // when it could not run. `stop` is the same shape completeIndex takes and for the
+  // same reason: the shell answers it from the input queue, so a press interrupts
+  // the warm at the next block rather than seconds later.
+  //
+  // THE ONE COST OF ABANDONING is the live builder, which the rewind spends and
+  // cannot rebuild -- so the next FORWARD turn pays a seekTo. That is the identical
+  // trade completeIndex makes, and it is why both are gated on a long quiet window
+  // rather than a short one.
+  bool warmPageRing(StopFn stop = nullptr, void* ctx = nullptr);
+
   // COUNT A CHAPTER'S PAGES BEFORE THE FIRST PAINT IF IT IS THIS SMALL, and defer
   // otherwise. THE NUMBER IS MEASURED ON THE PANEL, and the first version of it was
   // not -- it was 64 KB, derived from a desktop figure times a remembered ratio, and
@@ -139,6 +258,9 @@ class ReaderScreen : public Screen {
   void setItalic(const GlyphSource* italic) {
     italic_ = italic;
     metrics_.italic = italic;
+    // A second face changes what every line MEASURES, so every page already laid out
+    // was laid at a different geometry. See dropPageRing.
+    dropPageRing();
   }
 
   ScreenId id() const override { return ScreenId::Reader; }
@@ -217,16 +339,76 @@ class ReaderScreen : public Screen {
   // Whether the chapter's page count is still unknown. The shell completes it inside
   // the refinement; see the class comment.
   bool indexPending() const;
+
   // Counts the rest of the chapter and returns to the page being read. ~545 ms for a
-  // long chapter, so it belongs in a quiet window rather than in a page turn.
-  bool completeIndex();
+  // long chapter and 3.6 s for the longest in a real book, so it belongs in a quiet
+  // window rather than in a page turn -- AND IT MUST BE ABANDONABLE, because a quiet
+  // window only makes it rarer and does nothing about the seconds of dead buttons
+  // when it does fire.
+  //
+  // `stop` is asked every few blocks and true means give up. What that costs is the
+  // work already done, thrown away: this returns false, `indexComplete_` stays false,
+  // and the next quiet window starts the count from the beginning. That is the right
+  // trade because abandoning is now nearly free -- see the three properties below,
+  // which are what make it safe to abandon at all:
+  //
+  //   * THE INDEX IS BUILT INTO A SCRATCH VECTOR AND COMMITTED ONLY ON COMPLETION.
+  //     Counting used to clear `starts_` on its first line, so a half-finished walk
+  //     left an index that might not even contain the page being read. Nothing an
+  //     abandoned count touched can be seen from outside: `starts_`, `at_` and the
+  //     page on glass are exactly as they were.
+  //   * THE PAGE ON GLASS IS ALREADY CORRECT. Counting changes one number in the
+  //     footer and never the text, which is why a press may cancel it outright.
+  //   * THE ONE THING SPENT IS THE LIVE BUILDER, because the walk rewinds the shared
+  //     ChapterReader and there is no second one to walk with (a second would be
+  //     another 32 KB inflate window against a ~42 KB floor -- the same arithmetic
+  //     that keeps the eager count to two passes). A null builder is an
+  //     already-handled state: Gesture::Next re-establishes it, and after this change
+  //     it usually re-establishes it FROM THE PAGE RING for nothing.
+  //
+  // Defaults to the uninterruptible form, which is what the simulator and the goldens
+  // want: the boards show the settled state, so they complete the index before
+  // rendering and must never be given a half-counted one.
+  bool completeIndex(StopFn stop = nullptr, void* ctx = nullptr);
 
   // Why the chapter stopped being readable, or empty. A card pulled mid-book, or a
   // stream that turned out to be corrupt partway through.
   const char* error() const { return chapter_.error(); }
 
+  // WHAT THE PAGE RING ACTUALLY DID, on the same principle as the glyph cache's
+  // rasterisation counter: the claim being made is "a backward turn no longer
+  // decodes", and a test that only checked the page came out right would pass just as
+  // happily with the ring removed. `decodes` counts rewind-and-walk-forward passes,
+  // which is the ~376 ms the defect is about; `hits` counts pages served from the
+  // ring. Two counters and not one, because "no decode happened" and "the ring
+  // answered" are different facts and only the pair pins the mechanism.
+  struct RingStats {
+    uint32_t hits = 0;
+    uint32_t decodes = 0;
+    // PAGES LAID OUT, counted where they are handed to the ring -- which is every
+    // page any walk completes, so this is the walk's real unit of work. It is what
+    // distinguishes a restore that lays the prefix out ONCE from one that lays it
+    // out twice, and a green suite cannot tell those apart: both produce the right
+    // page. See test_reader_restore.cpp.
+    uint32_t stored = 0;
+  };
+  RingStats ringStats() const { return ring_; }
+
  private:
   void buildIndex();
+
+  // What a counting walk did. THREE ANSWERS, NOT TWO: `Failed` is a chapter that
+  // cannot be walked at all (no face, no stream, a column too short for a line box)
+  // and must leave the caller with an empty index, where `Abandoned` is a perfectly
+  // good chapter the caller asked to stop counting -- and must leave the caller with
+  // the index it already had. Collapsing them into a bool is how an abandoned count
+  // would come to look like a chapter with no pages.
+  enum class CountOutcome { Failed, Abandoned, Counted };
+  // Walks the chapter from its start recording one Cursor per page boundary, into
+  // `out` and NOWHERE ELSE: it touches neither `starts_` nor `at_` nor `page_`, which
+  // is the whole reason abandoning it is safe. It does rewind the shared
+  // ChapterReader, so the caller owns resetting `pb_`.
+  CountOutcome countPages(std::vector<Cursor>& out, StopFn stop, void* ctx);
   // Opens spine entry `c` and lands on its first page, or its last when `atEnd`.
   //
   // SKIPS CHAPTERS THAT PAGINATE TO NOTHING, continuing in whichever direction it
@@ -241,7 +423,17 @@ class ReaderScreen : public Screen {
   bool reopenChapter(int c);
   void updateChapterLabel();
   // Renders page `p` by rewinding and decoding forward to it. The general path.
-  bool seekTo(int p);
+  //
+  // `needStream` demands the decode even when the ring already holds the page: a
+  // caller that is about to call advance() needs the live builder the decode leaves
+  // behind, and a cache hit produces a page without one. Getting that round the wrong
+  // way is not a slow path but a WRONG one -- Gesture::Next would find `pb_` still
+  // null, read advance()'s false as "the chapter ended", and turn to the next chapter
+  // in the middle of this one.
+  bool seekTo(int p, bool needStream = false);
+  // Shows page `p` from the ring, or false if it is not there. Sets `page_` and `at_`
+  // and leaves no live builder.
+  bool showCached(int p);
   // Renders the page after the current one by continuing the live stream. The
   // common path, and the reason the builder is kept alive between turns.
   bool advance();
@@ -265,6 +457,53 @@ class ReaderScreen : public Screen {
   // layout measured in one face and drawn in two, which is the disagreement
   // StyledFace exists to prevent.
   const GlyphSource* italic_ = nullptr;
+  std::vector<std::string> italicClasses_;
+  // Bytes into the chapter at the end of `page_`. Carried on the ring too, because a
+  // page served from it was decoded long ago and the stream has moved since.
+  uint32_t pageBytes_ = 0;
+
+ public:
+  // WHETHER AN ITALIC FACE IS INSTALLED AT ALL. drawTextStyled falls back to the
+  // roman when this is null, silently and correctly -- so a book whose emphasis is
+  // not rendering has two completely different explanations and they look identical
+  // on glass. This is what tells them apart from a log.
+  bool hasItalic() const { return italic_ != nullptr; }
+
+  // THE BOOK'S ITALIC CLASS NAMES, from its own stylesheets. Owned here because the
+  // screen outlives every chapter it reads and the set is the same for all of them;
+  // the ChapterReader below is handed a pointer to it.
+  //
+  // SET BEFORE setMetrics, exactly as the italic FACE is and for the identical
+  // reason: setMetrics lays the chapter out, the wrap measures emphasis, and a set
+  // arriving after would leave the first page measured roman and drawn in two faces.
+  void setItalicClasses(std::vector<std::string> classes) {
+    italicClasses_ = std::move(classes);
+    chapter_.setItalicClasses(italicClasses_.empty() ? nullptr : &italicClasses_);
+  }
+  size_t italicClassCount() const { return italicClasses_.size(); }
+
+  // HOW FAR INTO THE OPEN CHAPTER THE PAGE ON SCREEN SITS, in inflated bytes, or 0
+  // when that is not knowable (a stored entry, an in-memory chapter). This is what
+  // makes book progress independent of the page count -- see ChapterReader::bytesRead.
+  //
+  // It is the END of the current page rather than its start, which is the honest
+  // reading of "how much have I read": the page in front of you has been read by the
+  // time you leave it, and the alternative would report 0% on page one of a chapter
+  // you are looking at.
+  uint32_t chapterBytesRead() const { return pageBytes_; }
+
+  // How many emphasised runs the page currently laid out carries. Zero means the
+  // PARSE found none in this text -- `<em>`, `<i>` and `<cite>` are what document.cpp
+  // recognises, and a book that marks its italics with a class and a stylesheet
+  // carries none of them. Non-zero means the spans reached layout and the question is
+  // downstream of it.
+  int pageEmphasisRuns() const {
+    int n = 0;
+    for (const LaidLine& ln : page_.lines) n += static_cast<int>(ln.emphasis.size());
+    return n;
+  }
+
+ private:
   // WHERE THE READER WAS BEFORE THEY STOPPED READING LINEARLY. The rule is in
   // return_anchor.h and is tested without a book; this screen only tells it which
   // of the three movements just happened.
@@ -296,6 +535,34 @@ class ReaderScreen : public Screen {
   int fed_ = 0;
 
   Page page_{};
+
+  // THE PAGES ALREADY LAID OUT, most recent first. See kPageCacheDepth.
+  //
+  // KEYED ON THE PAGE'S START CURSOR, not on its index. A page index is a position in
+  // `starts_`, which grows as the chapter is read and is rebuilt outright by a count
+  // -- so an index is a name that can come to mean a different page. A start cursor
+  // names a block and a line of the document, which is the same identity a saved
+  // reading position uses and for the same reason. The chapter is part of the key
+  // because a cursor is only meaningful within one spine entry.
+  struct CachedPage {
+    int chapter = -1;
+    Cursor start{};
+    Page page{};
+    // Where the stream stood when this page was laid out. Without it a ring hit
+    // would report the byte position of whatever was decoded LAST, which after a
+    // rewind is a different part of the chapter entirely.
+    uint32_t bytes = 0;
+  };
+  std::vector<CachedPage> pageRing_;
+  int pageCacheDepth_ = kPageCacheDepth;
+  RingStats ring_{};
+  const CachedPage* cachedPage(int chapter, Cursor start) const;
+  void cachePage(int chapter, Cursor start, const Page& p, uint32_t bytes);
+  // EVERY ENTRY IS INVALID THE MOMENT THE LAYOUT CHANGES, because a Page is lines
+  // measured at one face and one column. Called from the two places that can change
+  // either.
+  void dropPageRing() { pageRing_.clear(); }
+
   ReaderViewModel vm_{};
   std::string bookTitle_, chapter_label_;
   std::vector<TocEntry> names_;

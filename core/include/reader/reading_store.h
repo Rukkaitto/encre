@@ -128,7 +128,18 @@ bool forgetLastRead(FileSystem& fs);
 // deferred count lands, which is honest: it got more precise.
 //
 // Pages are 1-based, as the view model reports them. `pageTotal <= 0` means unknown.
-int progressPercent(const OpenedBook& book, int spine, int page, int pageTotal);
+// `bytesIntoChapter` is how far into the open chapter the reader has actually
+// decoded (ReaderScreen::chapterBytesRead). It is the TRUTH here, because the
+// percentage is a fraction of the book's bytes and this is the same quantity --
+// and because it needs no page count, which for a long chapter is not known for
+// the first seconds and not known at all while the reader keeps pressing.
+//
+// `page`/`pageTotal` remain as the FALLBACK for when it is zero: a stored archive
+// entry and an in-memory chapter have no inflater to ask. Not a second way of
+// answering the same question -- a fallback, the way the chapter label falls back
+// to a spine position when the contents name nothing.
+int progressPercent(const OpenedBook& book, int spine, int page, int pageTotal,
+                    uint32_t bytesIntoChapter = 0);
 
 // Where the pointer lives. The per-book sidecars are statePathFor's.
 inline constexpr const char* kLastReadPath = "/.reader/last.json";

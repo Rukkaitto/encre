@@ -57,6 +57,11 @@ class ChapterReader {
   // The bytes are copied, so the caller need not keep them.
   bool beginBuffer(std::string_view xhtml);
 
+  // The book's italic class names, handed on to every BlockReader this makes. Not
+  // owned: the set belongs to the book and outlives every chapter read from it. See
+  // reader/css.h for why a real book needs it at all.
+  void setItalicClasses(const std::vector<std::string>* classes) { italicClasses_ = classes; }
+
   // Back to block 0, reusing every buffer -- no 32 KB reallocation. This is what a
   // backward page turn costs.
   bool rewind();
@@ -71,6 +76,18 @@ class ChapterReader {
 
   // The index of the block `next()` will return, which is what a page Cursor names.
   int position() const { return position_; }
+
+  // HOW FAR INTO THE CHAPTER THE STREAM HAS DECODED, in inflated bytes. Zero means
+  // "not knowable here", which is the stored-entry and in-memory cases -- the blocks
+  // then come straight off a buffer with no inflater to ask.
+  //
+  // It exists because BOOK PROGRESS SHOULD NOT WAIT FOR A PAGE COUNT. The percentage
+  // is a fraction of the book's bytes, and within the open chapter it used to
+  // interpolate on page/pageTotal -- so with the count deferred (which is the normal
+  // state of a long chapter for its first seconds, and longer while the reader keeps
+  // pressing) it did not advance at all. This is the same quantity the percentage is
+  // already made of, available with no count and no walk.
+  uint32_t bytesRead() const { return inflated_ != nullptr ? inflater_.produced() : 0; }
 
   bool ok() const { return error_[0] == '\0'; }
   const char* error() const { return error_; }
@@ -96,6 +113,7 @@ class ChapterReader {
   // deflated entry, the entry's own bytes for a stored one.
   std::unique_ptr<InflateSource> inflated_;
   std::unique_ptr<BlockReader> blocks_;
+  const std::vector<std::string>* italicClasses_ = nullptr;
   int position_ = 0;
   const char* error_ = "";
 };

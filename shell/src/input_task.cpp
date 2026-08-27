@@ -66,3 +66,15 @@ size_t rawSamplesPending() {
   if (!gQueue) return 0;
   return static_cast<size_t>(uxQueueMessagesWaiting(gQueue));
 }
+
+bool waitForRawSample(uint32_t timeoutMs) {
+  if (!gQueue) {
+    vTaskDelay(pdMS_TO_TICKS(timeoutMs));
+    return false;
+  }
+  // PEEK, not receive: the loop's own drain at the top of the next iteration is
+  // what owns these, and a receive here would consume a transition nothing had
+  // classified yet.
+  RawSample ignored{};
+  return xQueuePeek(gQueue, &ignored, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
+}

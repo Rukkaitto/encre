@@ -16,12 +16,12 @@ const char* buttonName(Button b) {
   return "?";
 }
 
-void PressRecognizer::emit(Button b, PressKind kind, int steps) {
+void PressRecognizer::emit(Button b, PressKind kind, uint32_t at, int steps) {
   if (count_ >= kQueueLen) {
     ++dropped_;
     return;
   }
-  queue_[(head_ + count_) % kQueueLen] = InputEvent{b, kind, steps};
+  queue_[(head_ + count_) % kQueueLen] = InputEvent{b, kind, steps, at};
   ++count_;
 }
 
@@ -61,13 +61,39 @@ void PressRecognizer::sample(Button b, bool down, uint32_t ms) {
       s.down = true;
       s.consumed = false;
       s.repeated = false;
+      s.firedShort = false;
       s.lastRepeatAt = ms;
       s.downAt = ms;
+      // LATCHED HERE, not read again while held -- see the header. The press that
+      // fires on this edge can itself push a screen that repeats this button, and
+      // re-reading the mask would then scroll the new screen under a finger that
+      // has not yet come up from the press that opened it.
+      s.repeatable = maskHas(autoRepeat_, b);
+      // THE PRESS FIRES NOW unless it could still turn out to be a hold. Only a
+      // long-press binding makes it ambiguous; without one the release adds
+      // nothing but its own duration, which is 80-200 ms in front of a waveform.
+      //
+      // An auto-repeat button fires too, and its ramp still starts from downAt +
+      // kRepeatDelayMs -- typematic. `firedShort` rather than `consumed` is what
+      // keeps tick() looking at it.
+      if (!maskHas(longPressable_, b)) {
+        s.firedShort = true;
+        emit(b, PressKind::Short, ms);
+      }
     }
     return;
   }
   if (!s.down) return;  // release with no matching down
   s.down = false;
+  // The down edge already spent this press. Emitting here as well is how one
+  // physical press becomes two events -- on a list, a focus move followed by a
+  // second focus move the user never asked for.
+  if (s.firedShort) {
+    s.firedShort = false;
+    s.repeated = false;
+    s.consumed = false;
+    return;
+  }
   // A press that repeated is already spent: the repeats WERE the press, and a
   // trailing Short here would move the list one more row after the user let go.
   if (s.repeated) {
@@ -88,7 +114,7 @@ void PressRecognizer::sample(Button b, bool down, uint32_t ms) {
     // a hold opens the item-actions overlay and a press opens the item. Firing
     // the hold late is tolerable; silently doing the other thing is not.
     const bool heldLongEnough = static_cast<uint32_t>(ms - s.downAt) >= kLongPressMs;
-    emit(b, heldLongEnough && maskHas(longPressable_, b) ? PressKind::Long : PressKind::Short);
+    emit(b, heldLongEnough && maskHas(longPressable_, b) ? PressKind::Long : PressKind::Short, ms);
   }
   s.consumed = false;
 }
@@ -99,7 +125,7 @@ void PressRecognizer::tick(uint32_t ms) {
     if (!s.down || s.consumed) continue;
     const Button b = static_cast<Button>(i);
 
-    if (maskHas(autoRepeat_, b)) {
+    if (s.repeatable) {
       const uint32_t held = static_cast<uint32_t>(ms - s.downAt);
       const int rate = repeatRateFor(held);
       if (rate <= 0) continue;
@@ -123,16 +149,24 @@ void PressRecognizer::tick(uint32_t ms) {
         s.lastRepeatAt += (static_cast<uint32_t>(steps) * 1000u) / static_cast<uint32_t>(rate);
       }
       s.repeated = true;
-      emit(b, PressKind::Repeat, steps);
+      emit(b, PressKind::Repeat, ms, steps);
       continue;
     }
 
+    // A press already spent on the down edge cannot become a hold, however the
+    // mask has moved since. Home's Confirm opens the Library, where Confirm IS
+    // long-pressable, and the finger is still down when that mask arrives.
+    if (s.firedShort) continue;
     if (!maskHas(longPressable_, b)) continue;
     // Unsigned subtraction, so a clock that has wrapped past zero still yields
     // the true elapsed time.
     if (static_cast<uint32_t>(ms - s.downAt) >= kLongPressMs) {
       s.consumed = true;
-      emit(b, PressKind::Long);
+      // The THRESHOLD, not this tick's clock. A tick that ran late -- which is the
+      // normal case, since a paint blocks the loop for 520-825 ms -- would
+      // otherwise report the press as having happened late rather than reporting
+      // itself as late, and the latency it caused would vanish from the log.
+      emit(b, PressKind::Long, s.downAt + kLongPressMs);
     }
   }
 }

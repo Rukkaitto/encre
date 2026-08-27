@@ -28,6 +28,7 @@
 #include "reader/screen_contents.h"
 #include "reader/screen_home.h"
 #include "reader/screen_reader.h"
+#include "reader/components.h"
 #include "reader/screens.h"
 #include "reader/settings.h"
 #include "reader/theme_quiet.h"
@@ -196,6 +197,61 @@ TEST_CASE("QuietTheme renders the scrolled Library to golden, reached by pressin
 
   SUBCASE("X4 480x800") { renderOne(480, 800, "library_scrolled"); }
   SUBCASE("X3 528x792") { renderOne(528, 792, "library_scrolled_x3"); }
+}
+
+// --- The loading line ----------------------------------------------------------
+//
+// design/LibraryOpening.dc.html and design/SleepWaking.dc.html. The two homes of one
+// mechanism: it replaces the HINT BAR on a screen that draws one, and the badge's
+// words on Sleep, which draws no hint bar because it takes no input.
+//
+// A GOLDEN AND NOT ONLY A UNIT TEST, because the thing worth pinning is a position:
+// the status bar has to occupy the hint bar's box exactly, or the list above it moves
+// when one replaces the other. hintBarHeight derives both, so nothing here can
+// disagree by arithmetic -- but nothing checked that with a pixel until this.
+TEST_CASE("QuietTheme renders the Library's loading line to golden, over the hint bar") {
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+
+  auto renderOne = [&](int w, int h, const std::string& name) {
+    reader::DemoScreenFactory factory;
+    primeForJourney(factory, theme, ramp.fonts, h, /*scrolledLibrary=*/false);
+    reader::App app(
+        std::make_unique<reader::HomeScreen>(reader::demoHomeVm(), reader::demoHomeTargets()),
+        factory);
+    for (const reader::InputEvent& ev : libraryEntry()) app.dispatch(ev);
+    REQUIRE(app.top().id() == reader::ScreenId::Library);
+    reader::Framebuffer fb(w, h);
+    // THE SHELL'S OWN SEQUENCE: the stack is rendered, and the status bar goes over
+    // the finished frame. No screen knows it happened -- which is the whole design,
+    // and is why this test drives it the same way rather than through a view model.
+    app.render(fb, ramp.fonts, theme, reader::Plane::Bw);
+    reader::drawStatusBar(fb, ramp.fonts, reader::kStatusOpening);
+    golden::checkGolden(fb, name);
+  };
+
+  SUBCASE("X4 480x800") { renderOne(480, 800, "library_opening"); }
+  SUBCASE("X3 528x792") { renderOne(528, 792, "library_opening_x3"); }
+}
+
+TEST_CASE("QuietTheme renders the waking Sleep screen to golden") {
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+
+  auto renderOne = [&](int w, int h, const std::string& name) {
+    reader::DemoScreenFactory factory;
+    factory.setSleepWaking();
+    reader::App app(
+        std::make_unique<reader::HomeScreen>(reader::demoHomeVm(), reader::demoHomeTargets()),
+        factory);
+    REQUIRE(app.pushScreen(reader::ScreenId::Sleep));
+    reader::Framebuffer fb(w, h);
+    app.render(fb, ramp.fonts, theme, reader::Plane::Bw);
+    golden::checkGolden(fb, name);
+  };
+
+  SUBCASE("X4 480x800") { renderOne(480, 800, "sleep_waking"); }
+  SUBCASE("X3 528x792") { renderOne(528, 792, "sleep_waking_x3"); }
 }
 
 // --- Home with an empty card ---------------------------------------------------

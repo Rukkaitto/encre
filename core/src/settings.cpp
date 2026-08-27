@@ -119,6 +119,7 @@ bool loadSettings(FileSystem& fs, Settings& out) {
   readClampedInt(o, "fullRefreshEvery", parsed.fullRefreshEvery, 0, kFullRefreshEveryMax,
                  ok);
   readBool(o, "fullOnTransition", parsed.fullOnTransition, ok);
+  readBool(o, "logToCard", parsed.logToCard, ok);
 
   if (!parsed.validate()) ok = false;
 
@@ -135,6 +136,7 @@ bool saveSettings(FileSystem& fs, const Settings& in) {
   o.setInt("sleepAfterMs", static_cast<int64_t>(valid.sleepAfterMs));
   o.setInt("fullRefreshEvery", valid.fullRefreshEvery);
   o.setBool("fullOnTransition", valid.fullOnTransition);
+  o.setBool("logToCard", valid.logToCard);
   // writeAll creates /.reader on the way past, so there is no mkdirs here.
   return fs.writeAll(kSettingsPath, o.dump());
 }

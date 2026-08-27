@@ -373,7 +373,11 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // The shell builds its own from the book it was actually reading -- this is
       // the demo catalogue, and a screen nothing can navigate TO needs a source
       // for its values either way.
-      return std::make_unique<SleepScreen>(sleepIdle_ ? demoSleepIdleVm() : demoSleepVm());
+    {
+      SleepViewModel vm = sleepIdle_ ? demoSleepIdleVm() : demoSleepVm();
+      if (sleepWaking_) vm.note = kStatusWaking;
+      return std::make_unique<SleepScreen>(std::move(vm));
+    }
     case ScreenId::Reader: {
       // REFUSED without a body face, rather than built empty. A Reader that
       // rendered nothing looks exactly like a book that failed to open, and the
@@ -418,6 +422,11 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // measure/draw disagreement StyledFace exists to prevent, and invisible on any
       // page that happens to have no emphasis.
       scr->setItalic(readerItalic_);
+      // BEFORE setMetrics for the reason stated just above, and it applies more
+      // sharply here: the classes decide which runs are emphasised at all, so a set
+      // arriving after the landing would leave the first page with no emphasis and
+      // every page after it with some.
+      scr->setItalicClasses(readerItalicClasses_);
       // BEFORE setMetrics, like the italic and for a related reason: setMetrics lands
       // the page, and syncVm computes the footer's way-back label off the anchor. An
       // anchor arriving after would be restored but invisible until the next turn.

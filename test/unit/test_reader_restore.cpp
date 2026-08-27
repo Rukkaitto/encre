@@ -217,3 +217,66 @@ TEST_CASE("the LAST entry naming a chapter wins, which is where you are in it") 
   r.scr->setChapterNames({{0, 1, "PART ONE"}, {0, 2, "Section two"}});
   CHECK(r.scr->vm().chapter == "Section two");
 }
+
+// --- WHAT A RESTORE COSTS ----------------------------------------------------
+//
+// A restore used to walk the chapter TWICE: once counting boundaries to find which
+// page holds the cursor, then again inside seekTo() to lay that page out -- so
+// resuming on page 99 of a 248 KB chapter decoded everything before it, twice. The
+// device measured the pair at `post=2269ms` against ~1010 ms for one walk.
+//
+// A green suite does not distinguish "fixed" from "unchanged", so this measures.
+// Not in milliseconds, which would make it a flaky test on a shared machine, but in
+// the two things a walk actually spends: pages laid out, and pages the ring was
+// handed on the way past.
+
+TEST_CASE("a restore lays out the chapter's pages ONCE, not twice") {
+  const std::string doc = longChapter(60);
+  const Walked fwd = readForward(doc);
+  REQUIRE(fwd.cursors.size() > 8);
+  // Deep enough that a second walk would be unmistakable.
+  const int target = static_cast<int>(fwd.cursors.size()) - 2;
+
+  Reading r(doc, /*settled=*/false, 480, 800, fwd.cursors[static_cast<size_t>(target)]);
+  REQUIRE(r.scr->pageIndex() == target);
+
+  // The ring is handed every page the walk completes, so its `stored` count IS the
+  // number of pages laid out. Two walks would lay out the prefix twice; one lays out
+  // each page once. `target + 1` is pages 0..target inclusive.
+  const reader::ReaderScreen::RingStats st = r.scr->ringStats();
+  CHECK(st.stored == target + 1);
+}
+
+TEST_CASE("a restore lands with the pages BEFORE it already held") {
+  // The worst case a rewind has: a restore puts the reader deep in a chapter, which
+  // is exactly where turning back costs most. The walk passed those pages anyway.
+  const std::string doc = longChapter(60);
+  const Walked fwd = readForward(doc);
+  const int target = static_cast<int>(fwd.cursors.size()) - 2;
+  REQUIRE(target >= 2);
+
+  Reading r(doc, /*settled=*/false, 480, 800, fwd.cursors[static_cast<size_t>(target)]);
+  const size_t decodesBefore = r.scr->ringStats().decodes;
+
+  // One turn back, and it must come out of the ring rather than off a rewind.
+  r.scr->onGesture({reader::Gesture::Prev});
+  CHECK(r.scr->pageIndex() == target - 1);
+  CHECK(pageText(r.scr->page()) == fwd.text[static_cast<size_t>(target - 1)]);
+  CHECK(r.scr->ringStats().decodes == decodesBefore);
+}
+
+TEST_CASE("a restored position turns FORWARD without re-establishing the stream") {
+  // The builder is left live one page past the target -- seekTo's own postcondition,
+  // reached once instead of twice. If it were not, the forward turn would rewind.
+  const std::string doc = longChapter(60);
+  const Walked fwd = readForward(doc);
+  const int target = static_cast<int>(fwd.cursors.size()) - 3;
+  REQUIRE(target >= 1);
+
+  Reading r(doc, /*settled=*/false, 480, 800, fwd.cursors[static_cast<size_t>(target)]);
+  const size_t decodesBefore = r.scr->ringStats().decodes;
+  r.scr->onGesture({reader::Gesture::Next});
+  CHECK(r.scr->pageIndex() == target + 1);
+  CHECK(pageText(r.scr->page()) == fwd.text[static_cast<size_t>(target + 1)]);
+  CHECK(r.scr->ringStats().decodes == decodesBefore);
+}

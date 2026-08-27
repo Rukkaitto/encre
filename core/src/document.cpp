@@ -1,5 +1,7 @@
 #include "reader/document.h"
 
+#include "reader/css.h"
+
 #include <new>
 
 #include "reader/xml.h"
@@ -38,6 +40,17 @@ bool isEmphasis(std::string_view t) {
   return t == "em" || t == "i" || t == "cite";
 }
 
+// See document.h. Diagnostic only -- nothing reads these to decide anything.
+MarkupHints gHints;
+
+// Whether a `style` value asks for italics. Deliberately a substring search and not
+// a CSS parse: this only has to answer "is there something here we are not reading",
+// and a false positive costs a log line.
+bool mentionsItalic(std::string_view style) {
+  return style.find("italic") != std::string_view::npos ||
+         style.find("oblique") != std::string_view::npos;
+}
+
 // NOT CONTENT. Their text must never reach a page: a stylesheet rendered as a
 // paragraph is the most obvious way a reader can look broken.
 bool isSuppressed(std::string_view t) {
@@ -66,6 +79,12 @@ constexpr size_t kTagNameBytes = 24;
 struct TagName {
   char bytes[kTagNameBytes];
   uint8_t len = 0;
+  // DID THIS ELEMENT OPEN AN EMPHASIS RUN. Recorded at the start tag, read at the
+  // matching end tag -- because by then the attributes are gone, and a `</span>`
+  // cannot say whether its `<span>` carried an italic class. The tag-based path
+  // (`<em>`, `<i>`, `<cite>`) rides the same flag rather than re-testing the name,
+  // so the two cannot disagree about which close ends which run.
+  bool openedEmphasis = false;
 
   void set(std::string_view s) {
     len = static_cast<uint8_t>(s.size() < kTagNameBytes ? s.size() : kTagNameBytes);
@@ -154,12 +173,19 @@ struct BlockReader::State {
   // Where the open span started, as an offset into `cur.text`. Meaningful only
   // while emDepth > 0.
   size_t emStart = 0;
+  // The book's italic class names, or null. Not owned -- see BlockReader::
+  // setItalicClasses.
+  const std::vector<std::string>* italicClasses = nullptr;
 
   explicit State(ByteSource& src) : xml(src) {}
 };
 
 BlockReader::BlockReader(ByteSource& src) : st_(new (std::nothrow) State(src)) {
   if (st_ == nullptr) error_ = "not enough memory to read this chapter";
+}
+
+void BlockReader::setItalicClasses(const std::vector<std::string>* classes) {
+  if (st_ != nullptr) st_->italicClasses = classes;
 }
 
 BlockReader::~BlockReader() { delete st_; }
@@ -273,6 +299,7 @@ bool BlockReader::next(Block& out) {
         error_ = "nesting too deep";
         return false;
       }
+      st.stack[st.depth].openedEmphasis = false;
       st.stack[st.depth++].set(st.xml.name());
 
       if (st.suppressAt != 0) continue;
@@ -298,12 +325,44 @@ bool BlockReader::next(Block& out) {
         if (!st.open) beginBlock();
         appendSpace();
       }
+      // COUNTED BEFORE THE TAG IS ACTED ON, so it sees every inline tag whether or
+      // not this parser understands it. That is the whole point: the tags it does
+      // NOT understand are the question.
+      // ITALIC BY CLASS, from the book's own stylesheet. The tag-based test comes
+      // first so a `<em class="x">` is one run and not two.
+      const bool italicByClass =
+          st.italicClasses != nullptr && !isEmphasis(st.xml.name()) &&
+          classAttrIsItalic(st.xml.attr("class"), *st.italicClasses);
       if (isEmphasis(st.xml.name())) {
+        ++gHints.emphasisTags;
+      } else {
+        const std::string_view style = st.xml.attr("style");
+        if (!style.empty()) {
+          ++gHints.styledSpans;
+          if (mentionsItalic(style)) ++gHints.italicStyles;
+        }
+        const std::string_view cls = st.xml.attr("class");
+        if (!cls.empty()) {
+          ++gHints.classedSpans;
+          if (gHints.sampleClass[0] == '\0') {
+            const size_t take = cls.size() < sizeof(gHints.sampleClass) - 1
+                                    ? cls.size()
+                                    : sizeof(gHints.sampleClass) - 1;
+            for (size_t i = 0; i < take; ++i) gHints.sampleClass[i] = cls[i];
+            gHints.sampleClass[take] = '\0';
+          }
+        }
+      }
+      if (isEmphasis(st.xml.name()) || italicByClass) {
         // A bare `<em>` with no block around it is still the book's words, exactly
         // as a bare text node is -- so it opens one, or `emStart` would index a
         // block that beginBlock is about to replace.
         if (!st.open) beginBlock();
         if (st.emDepth++ == 0) st.emStart = st.cur.text.size();
+        // RECORDED ON THE ELEMENT, because the close cannot work it out again: by
+        // then the attributes are gone and `</span>` says nothing about which
+        // `<span>` it ends. depth-1 is this tag's slot, pushed just above.
+        st.stack[st.depth - 1].openedEmphasis = true;
       }
       continue;
     }
@@ -330,12 +389,14 @@ bool BlockReader::next(Block& out) {
         continue;
       }
       if (separatesWords(st.xml.name())) appendSpace();
-      if (isEmphasis(st.xml.name()) && st.emDepth > 0) {
+      // THE ELEMENT'S OWN FLAG, not its name. A class-italic run is closed by a
+      // `</span>` that is indistinguishable from every other one, so the name cannot
+      // answer this -- and reading the flag makes the tag-based path stricter too: an
+      // `</em>` whose `<em>` was inside a suppressed element no longer decrements a
+      // depth it never incremented.
+      if (st.stack[st.depth].openedEmphasis && st.emDepth > 0) {
         // Only the OUTERMOST close ends the run: `<em><cite>x</cite></em>` is one
-        // emphasised phrase. The depth is guarded rather than asserted because an
-        // `</em>` with no `<em>` is markup, and this parser reads a user's card --
-        // though the stack check above has already refused a mismatched close, so
-        // this can only fire on a close whose open was inside a suppressed element.
+        // emphasised phrase.
         if (--st.emDepth == 0 && !closeSpan()) return false;
       }
       continue;
@@ -377,5 +438,8 @@ bool buildDocument(std::string_view xhtml, Document& out, const char** reason) {
   }
   return true;
 }
+
+const MarkupHints& lastMarkupHints() { return gHints; }
+void resetMarkupHints() { gHints = MarkupHints{}; }
 
 }  // namespace reader

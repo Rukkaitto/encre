@@ -152,6 +152,13 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // The italic face for emphasis, or null for "draw it roman". Set alongside the
   // body, because it belongs to `readerMetrics_` too and the WRAP reads it.
   void setReaderItalic(const GlyphSource* italic) { readerItalic_ = italic; }
+
+  // The book's italic class names, read from its stylesheets when it was opened.
+  // Beside the face rather than with the book, because both answer the same
+  // question -- how is emphasis rendered -- and a Reader needs both or neither.
+  void setReaderItalicClasses(std::vector<std::string> classes) {
+    readerItalicClasses_ = std::move(classes);
+  }
   void setReaderMetrics(const PageMetrics& m) { readerMetrics_ = m; }
   // The column the Reader is laid out in. Read by a caller that has to record WHICH
   // geometry a saved line was measured at -- see ReadingPosition. One source of
@@ -184,6 +191,12 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // screen nothing navigates to has no state to infer it from: the simulator names
   // which of the two it wants, and the shell builds its own view model either way.
   void setSleepIdle() { sleepIdle_ = true; }
+
+  // design/SleepWaking.dc.html -- the same badge, waking rather than asleep. It is a
+  // NOTE and nothing else: SleepViewModel::note already carries that line's words, so
+  // the waking state needed no field, no flag on the theme and no second render path.
+  // The two boards differ by one run for the same reason.
+  void setSleepWaking() { sleepWaking_ = true; }
 
   // THE BOARD'S OWN CONTENTS AND MENU HEADER, ASKED FOR. Same rule as setReaderDemo,
   // and it is here because the alternative had just shipped its consequence: the
@@ -296,6 +309,7 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   int settingsHeaderH_ = 0;
   const GlyphSource* readerBody_ = nullptr;
   const GlyphSource* readerItalic_ = nullptr;
+  std::vector<std::string> readerItalicClasses_;
   ReaderStyleDemo readerStyleDemo_ = ReaderStyleDemo::None;
   AnchorPos readerAnchor_{};
   bool readerHasAnchor_ = false;
@@ -303,6 +317,7 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   OpenedBook readerBook_{};
   bool readerDemo_ = false;
   bool sleepIdle_ = false;
+  bool sleepWaking_ = false;
   bool contentsDemo_ = false;
   std::string detailsAuthor_;
   BookDetailsScreen::Facts detailsFacts_{};

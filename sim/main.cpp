@@ -1,4 +1,6 @@
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -13,6 +15,7 @@
 #include "reader/framebuffer.h"
 #include "reader/host_fs.h"
 #include "reader/png.h"
+#include "reader/profile.h"
 #include "reader/screen_home.h"
 #include "reader/screen_library.h"
 #include "reader/screen_sd_missing.h"
@@ -114,6 +117,62 @@ static bool parseKeys(const char* spec, std::vector<reader::InputEvent>& out) {
 // panel floating on white).
 using PaintPass = std::function<void(reader::Framebuffer&, reader::Plane)>;
 
+// --bench N: repeat the paint N times and report per-pass microseconds instead of
+// only writing the PNG. The desktop cannot tell you what a waveform costs, but the
+// RENDER is the same code the shell runs, so this is the one half of a paint the
+// desktop can measure honestly -- and it is the half that sits between the button
+// and the waveform starting.
+static int gBenchIters = 0;
+
+// The desktop's clock for reader::Profile. The device installs micros(); this is
+// the same job with std::chrono, so `--bench` reports the SAME breakdown the
+// device's `[render]` line does and a change can be judged before it is flashed.
+static uint32_t simMicros() {
+  return static_cast<uint32_t>(
+      std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+}
+
+static void benchPaint(const PaintPass& paint, reader::Plane plane, int w, int h,
+                       const char* label) {
+  if (gBenchIters <= 0) return;
+  reader::Framebuffer fb(w, h);
+  // One warm pass first: the glyph cache is cold on the very first render and the
+  // shell's cache is warm for every paint but the first after a font change.
+  fb.clear(true);
+  paint(fb, plane);
+  const auto t0 = std::chrono::steady_clock::now();
+  for (int i = 0; i < gBenchIters; ++i) {
+    fb.clear(true);
+    paint(fb, plane);
+  }
+  const auto t1 = std::chrono::steady_clock::now();
+  const double us =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / 1000.0 / gBenchIters;
+  std::printf("[bench] %s %dx%d %.1f us/pass (n=%d)\n", label, w, h, us, gBenchIters);
+
+  // ...and where inside the pass it went. Timed over ONE further pass with the
+  // profiler installed, not over the loop above, so the clock reads the span
+  // costs add are not folded into the headline figure.
+  reader::Profile::install(simMicros);
+  reader::Profile::reset();
+  fb.clear(true);
+  paint(fb, plane);
+  double accounted = 0;
+  for (int i = 0; i < reader::kPhaseCount; ++i) {
+    const auto ph = static_cast<reader::Phase>(i);
+    const uint32_t m = reader::Profile::micros(ph);
+    if (m == 0) continue;
+    accounted += m;
+    std::printf("[bench]   %-7s %6u us  x%-4u\n", reader::Profile::name(ph), m,
+                reader::Profile::calls(ph));
+  }
+  std::printf("[bench]   %-7s %6.0f us  (layout, measuring, wrapping)\n", "other",
+              us - accounted > 0 ? us - accounted : 0);
+  reader::Profile::install(nullptr);
+}
+
 static bool renderPassesToPng(const PaintPass& paint, reader::Fidelity fidelity, int w, int h,
                               const char* out) {
   if (fidelity == reader::Fidelity::Grayscale) {
@@ -122,6 +181,8 @@ static bool renderPassesToPng(const PaintPass& paint, reader::Fidelity fidelity,
     // image so the desktop sees what the panel will paint. `bw` is rendered (not
     // skipped) so the simulator drives the same call sequence the shell does.
     reader::Framebuffer bw(w, h), lsb(w, h), msb(w, h);
+    benchPaint(paint, reader::Plane::BwDithered, w, h, "gray-fastpass(dithered)");
+    benchPaint(paint, reader::Plane::Bw, w, h, "gray-bw");
     paint(bw, reader::Plane::Bw);
     paint(lsb, reader::Plane::Lsb);
     paint(msb, reader::Plane::Msb);
@@ -132,6 +193,8 @@ static bool renderPassesToPng(const PaintPass& paint, reader::Fidelity fidelity,
   // (Dithered).
   const reader::Plane plane = fidelity == reader::Fidelity::Dithered ? reader::Plane::BwDithered
                                                                      : reader::Plane::Bw;
+  benchPaint(paint, plane,  w, h,
+             plane == reader::Plane::BwDithered ? "dithered" : "mono");
   reader::Framebuffer fb(w, h);
   paint(fb, plane);
   return reader::writePng(fb, out);
@@ -225,6 +288,7 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--canvas") == 0) std::sscanf(argv[i + 1], "%dx%d", &w, &h);
     else if (std::strcmp(argv[i], "--keys") == 0) keys = argv[i + 1];
     else if (std::strcmp(argv[i], "--root") == 0) root = argv[i + 1];
+    else if (std::strcmp(argv[i], "--bench") == 0) gBenchIters = std::atoi(argv[i + 1]);
   }
   if (argc > 3 && std::strncmp(argv[argc - 1], "--", 2) == 0) {
     std::fprintf(stderr, "%s needs a value\n", argv[argc - 1]);
@@ -261,6 +325,12 @@ int main(int argc, char** argv) {
   const bool isSettings = std::strcmp(argv[1], "settings") == 0;
   const bool isSleep = std::strcmp(argv[1], "sleep") == 0;
   const bool isSleepIdle = std::strcmp(argv[1], "sleep_idle") == 0;
+  const bool isSleepWaking = std::strcmp(argv[1], "sleep_waking") == 0;
+  // design/LibraryOpening.dc.html. The SAME journey as `library` -- it is the same
+  // screen, with the status line drawn over its hint bar the way the shell draws it
+  // over a finished frame. Rendering it any other way would compare a board against
+  // a path the device does not take.
+  const bool isLibraryOpening = std::strcmp(argv[1], "library_opening") == 0;
   const bool isReaderMenu = std::strcmp(argv[1], "reader_menu") == 0;
   const bool isContents = std::strcmp(argv[1], "contents") == 0;
   const bool isHomeEmpty = std::strcmp(argv[1], "home_empty") == 0;
@@ -279,14 +349,16 @@ int main(int argc, char** argv) {
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
       !isHomeUnopened && !isLibraryScrolled && !isReader && !isSleepIdle &&
-      !isReaderMenu && !isContents && !isChapterOpen && !isReaderList && !isAnchored) {
+      !isReaderMenu && !isContents && !isChapterOpen && !isReaderList && !isAnchored &&
+      !isSleepWaking && !isLibraryOpening) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
                  "'sleep', 'sleep_idle', 'home_empty', 'home_unopened', "
                  "'library_scrolled', 'reader', 'reader_anchored', "
                  "'reader_chapter_open', 'reader_list', "
-                 "'reader_menu', 'contents' or 'app')\n",
+                 "'reader_menu', 'contents', 'sleep_waking', 'library_opening' "
+                 "or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -567,10 +639,15 @@ int main(int argc, char** argv) {
     for (const reader::InputEvent& ev : libraryEntry(13)) app.dispatch(ev);
     app.dispatch({reader::Button::Up, reader::PressKind::Short});
   }
-  if (isLibrary) {
+  if (isLibrary || isLibraryOpening) {
     // Home's first row is LIBRARY, so one Confirm opens it; then the board's own
     // focus, which is its second row. Reached by pressing rather than by
     // assignment, so the render pins the navigation too.
+    //
+    // LibraryOpening takes the IDENTICAL journey, because it is the identical
+    // screen: the only difference is the status line drawn over the finished frame,
+    // which is exactly how the device differs. A second journey here would let the
+    // two boards drift apart in the one way the comparison could not see.
     for (const reader::InputEvent& ev : libraryEntry()) app.dispatch(ev);
   }
   if (isLibraryActions || isDeleteConfirm || isBookDetails) {
@@ -611,7 +688,8 @@ int main(int argc, char** argv) {
   // The idle variant is the same screen with nothing to show, so it takes the same
   // direct push -- the factory picks which view model.
   if (isSleepIdle) factory.setSleepIdle();
-  if (isSleep || isSleepIdle) {
+  if (isSleepWaking) factory.setSleepWaking();
+  if (isSleep || isSleepIdle || isSleepWaking) {
     // NOT reached by pressing: nothing navigates to the sleep screen, the idle
     // timer or the power button puts the device there. So it is pushed directly,
     // which is the honest model -- and it is why this screen has no journey to
@@ -626,6 +704,20 @@ int main(int argc, char** argv) {
   // Through App::render, not top().render: with an overlay on the stack the top
   // screen alone is a panel floating on white, and one paint path is what keeps
   // the simulator, the goldens and the shell from disagreeing about that.
+  if (isLibraryOpening) {
+    // The shell's own sequence: App::render fills the frame, then the status bar is
+    // drawn OVER the hint bar it replaces. No screen knows it happened, which is why
+    // there is no view-model flag to set here.
+    if (!renderPassesToPng(
+            [&](reader::Framebuffer& fb, reader::Plane pl) {
+              app.render(fb, fonts, theme, pl);
+              reader::drawStatusBar(fb, fonts, reader::kStatusOpening, pl);
+            },
+            app.top().fidelity(), w, h, argv[2]))
+      return 1;
+    std::printf("wrote %s (%dx%d) library, opening a book\n", argv[2], w, h);
+    return 0;
+  }
   if (!renderAppToPng(app, fonts, theme, w, h, argv[2])) return 1;
   std::printf("wrote %s (%dx%d) screen=%d depth=%d\n", argv[2], w, h,
               static_cast<int>(app.top().id()), app.depth());

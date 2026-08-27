@@ -202,6 +202,38 @@ int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], Plan
   return drawHintBar(fb, fonts, hints, slots, plane);
 }
 
+void drawStatusBar(Framebuffer& fb, const FontSet& fonts, std::string_view label,
+                   Plane plane) {
+  const Font& mf = fonts[Role::Meta400];
+  // The marks with no labels: a slot is one line of Meta whatever it says, so this
+  // measures the same bar the screen would have drawn. Same reasoning as the
+  // theme's own measuring set, and the marks are KEPT because they are half of what
+  // sets the height.
+  Hint hints[4];
+  for (int i = 0; i < 4; ++i) hints[i] = {kHintSlotMarks[i], "", false};
+  // THE HINT BAR'S OWN HEIGHT, asked of the same function rather than recomputed --
+  // the board gives the two states the identical box, and this is what makes that
+  // true in the firmware rather than merely intended. Deriving it twice is how the
+  // header band ended up 6px out.
+  const int barH = hintBarHeight(fonts, hints);
+  const int top = fb.height() - barH;
+  // CLEARED FIRST. This is drawn over a frame that already holds the hint bar it
+  // replaces, so without the clear the two would be superimposed -- which reads as
+  // corruption rather than as a state.
+  fb.fillRect(0, top, fb.width(), barH, true);
+  fb.fillRect(0, top, fb.width(), kHintRuleH, false);
+
+  // Centred in the CONTENT box -- the strip the board's padding leaves between the
+  // rule and the bottom edge -- exactly as every hint slot is. The padding is
+  // asymmetric (20 above, 16 below), so centring in the bar instead would put this
+  // line 2px high, which is the defect drawHintBar records against itself.
+  const int contentTop = top + kHintRuleH + kHintPadTop;
+  const int contentH = hintContentH(fonts, hints);
+  const Tracking tracking = trackingEm(mf, kStatusEm);
+  const int baseline = contentTop + (contentH - mf.lineHeight()) / 2 + mf.ascent();
+  drawCentredText(fb, mf, 0, fb.width(), baseline, label, Ink::Black, tracking, plane);
+}
+
 int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4], int slotXOut[4],
                 Plane plane) {
   const Font& mf = fonts[Role::Meta400];

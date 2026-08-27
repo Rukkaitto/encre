@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+    .dither-field { background-color: #ffffff; background-image: radial-gradient(circle, #000000 1.1px, transparent 1.3px); background-size: 4px 4px; }
+  </style>
+</helmet>
+<div class="dither-field" style="width: 480px; height: 800px; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; box-sizing: border-box; position: relative;">
+
+  <div style="background: #ffffff; border: 2px solid #000000; padding: 38px 42px; display: flex; flex-direction: column; align-items: center; gap: 14px; max-width: 400px;">
+    <div style="font-size: var(--t-meta); letter-spacing: 0.26em; font-weight: 500;">NOW READING</div>
+    <div style="width: 44px; border-top: 2px solid #000000;"></div>
+    <!-- ON THE RAMP, at `--t-title`. This said `font-size: 53px`, which is in no
+         role: the ramp is 21/23/25/29/42/67 at 150 DPI and 53px is 25.4pt, not a
+         value anything else asks for. A role costs a pre-rendered asset per size
+         AND weight -- 15-20 KB of flash -- and this is the only board that wanted
+         it.
+         
+         The soft hyphen went with it. It was there because MIDDLEMARCH at 53px is
+         ~390px against this card's 316px of content, so the title had to break;
+         at 42px it measures ~308px and fits on one line. A longer title elides,
+         which is the rule for every screen but Book details.
+         
+         The cost, stated rather than hidden: the hero of this screen is smaller
+         than it was drawn. If it reads as too quiet on glass, the fix is a new
+         role and a wrap that honours a soft hyphen -- both real work, and neither
+         worth it for a screen shown while the device is asleep until the panel
+         says so. -->
+    <div style="font-size: var(--t-title); font-weight: 700; text-align: center; line-height: 1.1; text-transform: uppercase;">Middlemarch</div>
+    <div style="font-size: var(--t-label); letter-spacing: 0.22em;">GEORGE ELIOT</div>
+    <div style="width: 170px; height: 8px; border: 1px solid #000000; box-sizing: border-box; margin-top: 8px;">
+      <div style="width: 6%; height: 100%; background: #000000;"></div>
+    </div>
+    <div style="font-size: var(--t-label); letter-spacing: 0.14em; font-weight: 700;">6% &middot; CH. 01</div>
+  </div>
+
+  <div style="position: absolute; bottom: 34px; background: #ffffff; border: 1px solid #000000; padding: 8px 18px;">
+    <div style="font-size: var(--t-meta); letter-spacing: 0.2em;">WAKING&hellip;</div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

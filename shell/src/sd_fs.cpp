@@ -68,12 +68,20 @@ SpiBusGuard::~SpiBusGuard() {
 void SdFileSystem::noteCardGone(const char* where) {
   if (!live_) return;
   live_ = false;
+  // Give the held listing back. Correctness does not depend on this -- list()
+  // checks mounted() BEFORE it consults the cache, so a dead card can never be
+  // answered out of RAM -- but there is no reason to hold ~10 KB describing a
+  // directory nobody can reach.
+  listings_.clear();
   Serial.printf("[sd] card stopped answering during %s; storage is now unmounted\n", where);
   Serial.flush();
 }
 
 bool SdFileSystem::mount() {
   SpiBusGuard bus;  // begin() drives the display's CS line; see sd_fs.h
+  // A mount is a new volume as far as anything above is concerned, so nothing
+  // learned before it may survive it.
+  listings_.clear();
   live_ = SdMan.begin();
   Serial.printf("[sd] mount %s\n", live_ ? "ok" : "FAILED (no card, or it would not mount)");
   Serial.flush();
@@ -284,10 +292,49 @@ bool SdFileSystem::exists(std::string_view path) {
   return SdMan.exists(p.c_str());
 }
 
+// --- WHAT THE CARD COSTS -----------------------------------------------------
+//
+// THE BIGGEST NUMBER IN AN INTERACTION IS A DIRECTORY LISTING, AND IT HAD NO LOG
+// LINE. `[i]` says a Confirm on Home took two seconds and that the time went to
+// `disp=`; it cannot say that the two seconds were one call to list() over 406
+// entries. That is the difference between knowing a screen is slow and knowing
+// what to change, and this project's standing rule is that where the answer
+// decides a design you measure the thing rather than argue about it -- the
+// ~2.7 ms an entry this firmware quotes everywhere is a figure from one session
+// that has never been re-checked against the card in the slot.
+//
+// Threshold rather than every call, because exists() and readAll() on a small
+// file run in single-digit milliseconds and a line each would bury the one that
+// matters. `perEntry` is printed because that, not the total, is the number that
+// says whether a 203-book card is slow for a reason worth fixing.
+static constexpr uint32_t kSlowFsMs = 15;
+
 bool SdFileSystem::list(std::string_view path, std::vector<reader::DirEntry>& out) {
+  const uint32_t fsT0 = millis();
+  const size_t had = out.size();
   SpiBusGuard bus;
+  // MOUNTED FIRST, THEN THE CACHE, and the order is the whole safety argument.
+  // This project has already shipped a probe that was answered out of SdFat's
+  // sector cache and kept reporting success with the card in the user's hand; a
+  // listing served without asking whether there is still a card would be that
+  // defect again, one layer up. test_dir_cache.cpp pins this ordering.
+  //
+  // WHAT THIS DOES GIVE UP, stated plainly because it is a real change: a
+  // listing served out of RAM never touches the bus, so it can no longer be the
+  // thing that NOTICES a card has gone. Between the pull and the next probe,
+  // one list() of a held directory succeeds where it used to fail into
+  // noteCardGone.
+  //
+  // That is affordable because operation feedback was never the detector here.
+  // pollCardPresence() is -- the 2 s file-byte probe and the 25 s FAT-scan
+  // backstop -- and it exists precisely because V1 does so little filesystem
+  // work after boot that feedback "never fires": a card pulled on Home stayed
+  // invisible, which is what those two layers were written for. The cost of a
+  // hit is therefore at most one stale listing inside a window that already
+  // ends in the SD-missing screen, not a card death nobody sees.
   if (!mounted()) return false;
   const std::string p = normalise(path);
+  if (listings_.appendTo(p, out)) return true;
 
   FsFile dir = SdMan.open(p.c_str(), O_RDONLY);
   if (!dir) {
@@ -366,6 +413,23 @@ bool SdFileSystem::list(std::string_view path, std::vector<reader::DirEntry>& ou
     return false;
   }
 
+  // STORE, THEN SERVE FROM THE STORE, so a cached listing and a freshly walked
+  // one are produced by literally the same code. The alternative -- append
+  // `found` here and let only the SECOND caller go through the cache -- has two
+  // faults, and the second is the one that decided it: it leaves a divergence
+  // between the two paths that nothing exercises, and it means the desktop
+  // contract run (test_dir_cache.cpp drives all 27 clauses through this exact
+  // policy) never reaches appendTo at all, because most clauses list a path
+  // once. A check that reports on less than it claims is worse than no check.
+  //
+  // The extra cost is one pass rebuilding ~10 KB of std::strings out of the
+  // blob, against the 590 ms of card this call just spent.
+  if (listings_.store(p, found) && listings_.appendTo(p, out)) return true;
+
+  // Not cached -- too small to be worth it, too big for the ceiling, or the
+  // allocation was refused. This is exactly what shipped before the cache
+  // existed, which is what makes a refusal a non-event.
+  //
   // MOVED, not copied. `found` is built to the side so a read that fails part
   // way appends nothing (the check above), and it dies at the closing brace --
   // so copying meant every entry's name string existed twice, transiently, for
@@ -374,10 +438,17 @@ bool SdFileSystem::list(std::string_view path, std::vector<reader::DirEntry>& ou
   // allocation that fails an abort() with no diagnostic rather than a false.
   out.insert(out.end(), std::make_move_iterator(found.begin()),
              std::make_move_iterator(found.end()));
+  const uint32_t fsMs = millis() - fsT0;
+  const size_t got = out.size() - had;
+  if (fsMs >= kSlowFsMs)
+    Serial.printf("[fs] list %s -> %u entries in %lums (%lu.%02lu ms/entry)\n", p.c_str(),
+                  (unsigned)got, (unsigned long)fsMs, (unsigned long)(got ? fsMs / got : 0),
+                  (unsigned long)(got ? (fsMs * 100u / got) % 100u : 0));
   return true;
 }
 
 bool SdFileSystem::readAll(std::string_view path, std::string& out) {
+  const uint32_t fsT0 = millis();
   SpiBusGuard bus;
   if (!mounted()) return false;
   const std::string p = normalise(path);
@@ -417,6 +488,10 @@ bool SdFileSystem::readAll(std::string_view path, std::string& out) {
   }
   f.close();
   out = std::move(body);
+  const uint32_t fsMs = millis() - fsT0;
+  if (fsMs >= kSlowFsMs)
+    Serial.printf("[fs] readAll %s %u bytes in %lums\n", p.c_str(), (unsigned)out.size(),
+                  (unsigned long)fsMs);
   return true;
 }
 
@@ -524,6 +599,20 @@ class SdFileHandle : public reader::FileHandle {
 
 std::unique_ptr<reader::FileHandle> SdFileSystem::openRead(std::string_view path) {
   SpiBusGuard bus;
+  // A HANDLE MEANS A BOOK IS OPENING, AND THAT IS WHERE THE HEAP GOES BACK.
+  //
+  // openRead IS the EPUB path -- readAll serves the small JSON and is capped at
+  // 64 KB precisely because it is not this -- so nothing but a book (or its
+  // table of contents) ever reaches here. That makes this the one place in the
+  // class that can tell, with no help from the shell and no knowledge of the
+  // screen stack, that the reader is about to want a 32 KB inflate window out of
+  // a heap this project measured at a 45,840-byte floor.
+  //
+  // So the cache is never resident at that floor. It is a strictly smaller
+  // stand-in for work that happens when NO book is open, and it is gone before
+  // the expensive case begins. Re-listing after a book is closed costs the
+  // 590 ms once, on a navigation that is already paying for a save.
+  listings_.clear();
   if (!mounted()) return nullptr;
   const std::string p = normalise(path);
   if (p == "/") return nullptr;  // the root is a directory
@@ -539,7 +628,18 @@ std::unique_ptr<reader::FileHandle> SdFileSystem::openRead(std::string_view path
 }
 
 bool SdFileSystem::writeAll(std::string_view path, std::string_view data) {
+  const uint32_t fsT0 = millis();
   SpiBusGuard bus;
+  // BEFORE ANYTHING, and regardless of what happens next. Dropping it up here
+  // rather than after the write means none of the several early returns below
+  // can skip it -- an invalidation that has to be reached is an invalidation
+  // that will eventually not be.
+  //
+  // This is also what makes the cache survive V2. CLAUDE.md's existing argument
+  // for Home's cached book count is "a book cannot ARRIVE while the firmware
+  // runs, because transfer is card-only", and it says in as many words that
+  // Wi-Fi transfer is the change that breaks it. A transfer writes through here.
+  listings_.clear();
   if (!mounted()) return false;
   const std::string p = normalise(path);
   if (p == "/") return false;
@@ -571,11 +671,27 @@ bool SdFileSystem::writeAll(std::string_view path, std::string_view data) {
     noteCardGone("writeAll");
     return false;
   }
+  // A CARD WRITE IS ONE OF THE THREE THINGS THAT CAN STALL A PRESS, and it is the
+  // one with no ceiling: a small file plus its FAT metadata is usually tens of
+  // milliseconds, and a card doing internal housekeeping can take far longer with
+  // nothing on our side to see it. Two of these fire on the way out of a book (the
+  // position and the pointer), which is why `post=` on that interaction is the
+  // field to read.
+  const uint32_t fsMs = millis() - fsT0;
+  if (fsMs >= kSlowFsMs)
+    Serial.printf("[fs] writeAll %s %u bytes in %lums\n", p.c_str(), (unsigned)data.size(),
+                  (unsigned long)fsMs);
   return true;
 }
 
 bool SdFileSystem::mkdirs(std::string_view path) {
   SpiBusGuard bus;
+  // A new directory changes its PARENT's listing, which is the one a caller is
+  // most likely to be holding. Cleared before the idempotent early return as
+  // well, which costs a re-listing on a mkdirs that did nothing -- the cheap
+  // side of the trade, and writeAll calls this so it happens twice on a write.
+  // The mutex is recursive and clear() is a few stores; that is the whole cost.
+  listings_.clear();
   if (!mounted()) return false;
   const std::string p = normalise(path);
   if (p.empty() || p == "/") return true;  // the root is the mount, and it exists
@@ -588,8 +704,38 @@ bool SdFileSystem::mkdirs(std::string_view path) {
   return isDirectory(p);  // the end state decides, not the return value
 }
 
+bool appendToCard(const char* path, const char* data, size_t len, uint32_t capBytes) {
+  if (path == nullptr || data == nullptr || len == 0) return false;
+  SpiBusGuard bus;
+  // NO mounted() CHECK THROUGH SdFileSystem: this must work even while that object
+  // believes the card has gone, because the reason it believes that is exactly the
+  // kind of thing worth having in the log. SdFat answers for itself below.
+  FsFile f = SdMan.open(path, O_WRONLY | O_CREAT | O_APPEND);
+  if (!f) return false;
+  if (f.fileSize() > capBytes) {
+    f.close();
+    // Truncate by reopening with O_TRUNC rather than by removing: a remove plus a
+    // create is two directory mutations where this is one, and the file's identity
+    // (anything holding it open on a computer) survives.
+    f = SdMan.open(path, O_WRONLY | O_CREAT | O_TRUNC);
+    if (!f) return false;
+  }
+  const size_t wrote = f.write(data, len);
+  const bool err = f.getWriteError();
+  const bool synced = f.sync();
+  f.close();
+  return wrote == len && !err && synced;
+}
+
 bool SdFileSystem::remove(std::string_view path) {
   SpiBusGuard bus;
+  // BOTH OF THESE COUNT THE ASK, NOT THE DELETION, and sit above every refusal
+  // below on purpose. A caller that asked to delete a book is reason enough for
+  // anything holding a derived view of the tree to distrust it, whether or not
+  // this particular call is the one that changed the card -- and reasoning about
+  // which refusals are "safe" is how an invalidation ends up with a hole in it.
+  ++removals_;
+  listings_.clear();
   if (!mounted()) return false;
   const std::string p = normalise(path);
   if (p == "/") return false;

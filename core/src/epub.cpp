@@ -152,6 +152,12 @@ bool Epub::open(FileHandle& file, Zip& zip) {
           // omit it, while the media type is what makes an NCX an NCX.
           if (x.attr("media-type") == "application/x-dtbncx+xml" && tocPath_.empty())
             tocPath_ = resolved;
+          // THE STYLESHEETS, NOTED IN PASSING for the same reason the NCX is: the
+          // manifest is the book STATING what its parts are, where scanning the
+          // archive for `*.css` would be a guess. They are what says which class
+          // names mean italic -- see reader/css.h for why that matters at all.
+          if (x.attr("media-type") == "text/css" && cssPaths_.size() < kMaxStylesheets)
+            cssPaths_.push_back(resolved);
           manifest.emplace_back(std::string(x.attr("id")), std::move(resolved));
         } else if (tag == "spine") {
           // The spine's `toc` names the manifest id of the table of contents. It

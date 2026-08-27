@@ -1,5 +1,8 @@
+#include <cstring>
 #include <fstream>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "doctest.h"
@@ -8,6 +11,8 @@
 #include "reader/font.h"
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
+#include "reader/glyphsource.h"
+#include "reader/scalablefont.h"
 #include "reader/text.h"
 #include "rfnt_builder.h"
 
@@ -491,4 +496,199 @@ TEST_CASE("shouting is idempotent") {
   // reaching a theme that shouts again.
   const std::string once = reader::upperLatin1("Le Fl\xC3\xA9""au");
   CHECK(reader::upperLatin1(once) == once);
+}
+
+// --- The glyph blit, against the per-pixel form it replaced -------------------
+//
+// drawRunF26 used to walk a glyph's bitmap pixel by pixel: coverage(), a switch
+// on Plane, then setPixel -- a bounds check, a division, a modulus and a
+// read-modify-write of one bit, per pixel. It now clips the glyph's box once,
+// decides the plane per physical row and accumulates a byte of bits before
+// touching memory (core/src/text.cpp).
+//
+// The per-pixel form is kept HERE as the reference, exactly as test_dither.cpp
+// keeps veilRect's, and for the same reason: the rewrite's whole claim is that
+// not one pixel moved, and a claim about every pixel is checked by comparing
+// every pixel rather than by looking at a screen. The goldens cover the shipped
+// screens; this covers what they cannot reach -- a glyph hanging off each edge
+// of the frame, both rotations, all four planes, both bit depths, both inks.
+//
+// It is a COPY, and copies drift: this one is pinned by being run against the
+// real implementation on every build, which is the only pinning a reference
+// implementation can have.
+static void referenceDrawRun(reader::Framebuffer& fb, const reader::GlyphSource& font, int x,
+                             int baselineY, std::string_view utf8, reader::Ink ink,
+                             reader::Tracking tracking, reader::Plane plane, int extraPerGapF26) {
+  const bool white = (ink == reader::Ink::White);
+  int penF = reader::pxToF26(x);
+  char32_t prev = 0;
+  for (size_t i = 0; i < utf8.size();) {
+    const char32_t cp = reader::utf8Next(utf8, i);
+    const int kernF = prev ? reader::pxToF26(font.kerning(prev, cp)) : 0;
+    const std::optional<reader::Glyph> g = font.glyph(cp);
+    if (!g) {
+      const int pen = reader::f26ToPx(penF);
+      const int h = font.ascent() * 2 / 3;
+      const int w = h / 2 + 1;
+      const int top = baselineY - h;
+      for (int col = 0; col < w; ++col) {
+        fb.setPixel(pen + col, top, white);
+        fb.setPixel(pen + col, baselineY - 1, white);
+      }
+      for (int row = 0; row < h; ++row) {
+        fb.setPixel(pen, top + row, white);
+        fb.setPixel(pen + w - 1, top + row, white);
+      }
+      penF += reader::pxToF26(font.notdefAdvance()) + tracking.f26();
+      prev = 0;
+      continue;
+    }
+    penF += kernF;
+    const int pen = reader::f26ToPx(penF);
+    for (int row = 0; row < g->bitmapH; ++row)
+      for (int col = 0; col < g->bitmapW; ++col) {
+        const uint8_t cov = font.coverage(*g, col, row);
+        bool emit = false;
+        switch (plane) {
+          case reader::Plane::Bw: emit = cov >= 2; break;
+          case reader::Plane::Lsb: emit = (cov & 1) != 0; break;
+          case reader::Plane::Msb: emit = (cov & 2) != 0; break;
+          case reader::Plane::BwDithered: {
+            const int px = pen + g->xOff + col;
+            const int py = baselineY - g->yOff + row;
+            emit = (cov * 16) / 3 > reader::bayer4(px, py);
+            break;
+          }
+        }
+        if (emit) fb.setPixel(pen + g->xOff + col, baselineY - g->yOff + row, white);
+      }
+    penF += reader::pxToF26(g->advance) + tracking.f26();
+    if (cp == U' ') penF += extraPerGapF26;
+    prev = cp;
+  }
+}
+
+// Compared as BYTES rather than through getPixel: a byte-wise blit's
+// characteristic failure is writing the right bit into the wrong byte, and
+// under rotation that lands outside the glyph altogether. Comparing the store
+// catches a stray bit anywhere in the frame; walking the glyph's own box would
+// not.
+static bool sameFrame(const reader::Framebuffer& a, const reader::Framebuffer& b) {
+  if (a.sizeBytes() != b.sizeBytes()) return false;
+  return std::memcmp(a.data(), b.data(), static_cast<size_t>(a.sizeBytes())) == 0;
+}
+
+namespace {
+struct BlitCase {
+  const char* what;
+  int x, baselineY;
+};
+}  // namespace
+
+static void checkBlitMatchesReference(const reader::GlyphSource& font, const char* faceName,
+                                      int fw, int fh) {
+  // A run with ascenders, descenders, accents, a space (so the justified pen is
+  // exercised too) and one codepoint no subset carries, which is the notdef box.
+  const std::string run = "Agjy W\xC3\x89l\xC3\xA0 q1 \xE4\xB8\xAD";
+  const reader::Plane planes[] = {reader::Plane::Bw, reader::Plane::Lsb, reader::Plane::Msb,
+                                  reader::Plane::BwDithered};
+  // The clipped cases are the ones no golden can reach: a glyph hanging off each
+  // of the four edges, where the old form relied on setPixel's own bounds check
+  // and the new one clips the box before it starts. The origins are odd numbers
+  // on purpose -- a byte-wise path that only ever starts on a byte boundary is
+  // untested for the masks that make a partial byte safe, and both panel widths
+  // are multiples of 8, so nothing on the device would catch it.
+  const BlitCase cases[] = {
+      {"well inside", 37, 120},
+      {"off the left edge", -13, 120},
+      {"off the right edge", fw - 11, 120},
+      {"above the top edge", 37, 3},
+      {"below the bottom edge", 37, fh + 5},
+      {"entirely off screen", -400, 120},
+      {"straddling the last byte", fw - 1, fh - 1},
+  };
+  for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw})
+    for (const reader::Plane plane : planes)
+      for (const reader::Ink ink : {reader::Ink::Black, reader::Ink::White})
+        for (const BlitCase& c : cases) {
+          // A fractional tracking and a stretch on the gap, so the pen lands
+          // glyphs on positions a whole-pixel one never produces -- which is
+          // what puts a glyph's box at every phase of the Bayer tile and of the
+          // byte grid.
+          const reader::Tracking tr = reader::Tracking::em(21, 62);  // 1.30px, not a whole one
+          reader::Framebuffer got(fw, fh, rot), want(fw, fh, rot);
+          // The field is the ink's OPPOSITE, which is the whole point of drawing
+          // white text at all (an inverted row is filled black and drawn over).
+          // Filling it with the ink's own colour instead makes every draw a
+          // no-op and every comparison trivially true -- which is what this test
+          // did until a mutation of the rotated branch failed to fail it.
+          got.fillRect(0, 0, fw, fh, ink == reader::Ink::Black);
+          want.fillRect(0, 0, fw, fh, ink == reader::Ink::Black);
+          reader::drawTextJustified(got, font, c.x, c.baselineY, run, 37, ink, tr, plane);
+          referenceDrawRun(want, font, c.x, c.baselineY, run, ink, tr, plane, 37);
+          // std::string, not the bare pointers: doctest stringifies a
+          // `const char*` as its ADDRESS, so a failure logged "0x102d299bf
+          // 528x792 rot=0x102d29aa8" and named neither the face nor the case.
+          INFO(std::string(faceName)
+               << " " << fw << "x" << fh << " rot="
+               << std::string(rot == reader::Rotation::Ccw ? "ccw" : "none")
+               << " plane=" << static_cast<int>(plane) << " ink=" << static_cast<int>(ink)
+               << " " << std::string(c.what));
+          CHECK(sameFrame(got, want));
+        }
+}
+
+TEST_CASE("the byte-wise glyph blit draws exactly what the per-pixel form drew") {
+  // BOTH PANEL GEOMETRIES, because the rotated branch derives a physical row
+  // from the LOGICAL WIDTH and the two panels differ in it: an off-by-one there
+  // draws a frame that is right at 528x792 and sheared at 480x800, or the other
+  // way round.
+  const int geoms[][2] = {{528, 792}, {480, 800}};
+  // A 2bpp chrome face, the 1bpp one -- a different unpacking, and the only
+  // asset in the repo that still exercises it -- and the scalable body face,
+  // whose glyphs are large enough to span several destination bytes a row where
+  // a 21px chrome glyph spans two or three.
+  auto chrome = slurpFont("spacegrotesk_500_14pt.rfnt");
+  reader::Font c2;
+  REQUIRE(c2.load(chrome.data(), chrome.size()));
+  REQUIRE(c2.bpp() == 2);
+  auto mono = slurpFont("literata_18.rfnt");
+  reader::Font c1;
+  REQUIRE(c1.load(mono.data(), mono.size()));
+  REQUIRE(c1.bpp() == 1);
+  auto ttf = slurpFont("literata_body.ttf");
+  reader::ScalableFont body;
+  REQUIRE(body.init(ttf.data(), ttf.size(), 32));
+
+  for (const auto& g : geoms) {
+    checkBlitMatchesReference(c2, "spacegrotesk 2bpp", g[0], g[1]);
+    checkBlitMatchesReference(c1, "literata_18 1bpp", g[0], g[1]);
+    checkBlitMatchesReference(body, "literata body 32px", g[0], g[1]);
+  }
+}
+
+TEST_CASE("the blit is exact at every sub-byte and tile phase") {
+  // The case the panel cannot produce and a byte-wise path gets wrong: a glyph
+  // whose first column falls on each of the eight bit positions of a byte, and
+  // on each of the four phases of the Bayer tile. Stepped a pixel at a time
+  // across a 24-pixel window in both axes so every combination of the two is
+  // covered, at both rotations -- under Ccw the byte phase comes from the
+  // BASELINE and the tile phase from the column, which is the axis swap that
+  // makes the rotated branch a different piece of arithmetic rather than the
+  // same one with different names.
+  auto chrome = slurpFont("spacegrotesk_500_14pt.rfnt");
+  reader::Font font;
+  REQUIRE(font.load(chrome.data(), chrome.size()));
+  for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw})
+    for (int dx = 0; dx < 24; ++dx)
+      for (int dy = 0; dy < 24; ++dy) {
+        reader::Framebuffer got(64, 64, rot), want(64, 64, rot);
+        reader::drawText(got, font, dx, 20 + dy, "Bg", reader::Ink::Black, {},
+                         reader::Plane::BwDithered);
+        referenceDrawRun(want, font, dx, 20 + dy, "Bg", reader::Ink::Black, {},
+                         reader::Plane::BwDithered, 0);
+        INFO("rot=" << std::string(rot == reader::Rotation::Ccw ? "ccw" : "none")
+                    << " dx=" << dx << " dy=" << dy);
+        CHECK(sameFrame(got, want));
+      }
 }

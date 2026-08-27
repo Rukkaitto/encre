@@ -38,6 +38,19 @@ struct Settings {
   // roadmap. Costs ~825 ms against ~520 ms.
   bool fullOnTransition = true;
 
+  // TEE THE SERIAL LOG ONTO THE CARD. Off by default, and hand-edited into
+  // /.reader/settings.json rather than put on the Settings screen -- it is a
+  // diagnostic, not a preference, and a row for it would be a board change for
+  // something nobody but a developer wants.
+  //
+  // IT EXISTS BECAUSE THE CABLE CHANGES THE DEVICE. Serial write and flush
+  // short-circuit when no host is attached and BLOCK when one is, so every timing
+  // taken over USB is inflated by the cable -- and attaching after a sleep can
+  // reset the chip, turning the wake being investigated into a cold boot. A fault
+  // that only happens unplugged is therefore not observable over the wire at all,
+  // which is the whole reason this is here.
+  bool logToCard = false;
+
   // Clamps every field into a sane range, returning false if anything had to be
   // clamped. A file that needs clamping is a file to distrust, but clamping and
   // carrying on beats refusing to boot.
