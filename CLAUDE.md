@@ -1975,6 +1975,33 @@ the code**. It was asserted three times, propagated into another header, and fin
 into a test expectation, which is what made someone read `epub.cpp`. **A comment
 about a neighbouring layer is not evidence about it.**
 
+**AND IT REFUSES A SPINE, NOT METADATA.** `Epub::open` used to refuse a book whose
+`unique-identifier` named an id no `dc:identifier` carried, on the stated grounds that
+an unresolved identifier "breaks everything keyed on it — which is what per-book
+reading state will be". **That consumer never arrived**: reading state went to the
+card as `/.reader/state/<hash of the PATH>.json` with `bookBytes` as the identity
+check, and nothing in the firmware has ever read `identifier()`. Measured against the
+user's own library the check refused **4 of 16 books** — publisher and Calibre output
+alike, a whole `Dune` trilogy among them — and every one of them reads: the reported
+book walks 55 spine entries and 197,330 words once it is let in. The identifier is
+best-effort now and **empty means the book did not say**, the same call the spine's
+`toc` attribute already got.
+
+- **A prediction in a comment is a claim with an expiry date**, and this one was
+  restated in four places — `epub.cpp`, the header, `mkepub.py`'s docstring and a test
+  name — so nothing in the repo disagreed with it and the design it described had
+  changed underneath all four.
+- **Removing the refusal made a substitution reachable, and the guard is the fix.**
+  An absent `unique-identifier` and a `dc:identifier` with no `id` are **both the empty
+  string**, so "does this identifier carry the id the package named" answers *yes* for
+  a book that named nothing — reporting an identifier the book never designated.
+  `!uniqueIdRef.empty()` is what keeps empty honest, and it is proved by mutation
+  rather than by argument.
+- **A DIFFERENT BOOK IS STILL REFUSED, AND FOR A NEIGHBOURING REASON**: `Xml`'s
+  `kMaxAttrBytes` is 512 and Calibre writes a `user_metadata` `<meta content="…">` of
+  720–848 bytes, so the tokenizer errors and the OPF reads as malformed. Same family —
+  a book refused over metadata it does not need — and not the same fix.
+
 ### A grayscale screen is painted twice: fast, then four levels
 
 `renderTop` paints a `Fidelity::Grayscale` screen with ONE waveform and `loop()`

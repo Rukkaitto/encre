@@ -177,8 +177,13 @@ bool Epub::open(FileHandle& file, Zip& zip) {
         // than once (a subtitle, a collection), and the first is the book's.
         if (in == In::Title && title_.empty()) title_.assign(x.text());
         else if (in == In::Creator && author_.empty()) author_.assign(x.text());
-        else if (in == In::Identifier && pendingIdentifierId == uniqueIdRef &&
-                 identifierWithId.empty())
+        // AN UNNAMED IDENTIFIER MATCHES AN UNNAMED REFERENCE, so the emptiness check
+        // is load-bearing: a package with no `unique-identifier` attribute and a
+        // dc:identifier with no id are both "", and without it such a book would
+        // adopt the first identifier it happens to carry and report it as the one it
+        // designated. It designated none.
+        else if (in == In::Identifier && !uniqueIdRef.empty() &&
+                 pendingIdentifierId == uniqueIdRef && identifierWithId.empty())
           identifierWithId.assign(x.text());
         continue;
       }
@@ -187,13 +192,24 @@ bool Epub::open(FileHandle& file, Zip& zip) {
     }
   }
 
-  // 3. The identifier has to RESOLVE. It parses fine when it does not, and then
-  //    breaks everything keyed on it -- which is what per-book reading state will
-  //    be. Refused here rather than discovered when a bookmark lands on the wrong
-  //    book.
-  if (uniqueIdRef.empty()) return fail("the OPF declares no unique-identifier");
-  if (identifierWithId.empty())
-    return fail("the OPF's unique-identifier names an id no dc:identifier carries");
+  // 3. The identifier, WHERE IT RESOLVES -- and EMPTY IS NOT A FAILURE.
+  //
+  //    An OPF's `unique-identifier` names the id of the dc:identifier that is the
+  //    book's own, and real files get that wrong constantly: 4 of 16 EPUBs in one
+  //    measured library name an id nothing carries, publisher and Calibre output
+  //    alike, and every one of them reads. This was a REFUSAL until one of them was
+  //    reported from the device, on the stated grounds that an unresolved identifier
+  //    "breaks everything keyed on it -- which is what per-book reading state will
+  //    be". That consumer never arrived: reading state lives on the card under
+  //    /.reader/state, keyed on a hash of the book's PATH with its byte size as the
+  //    identity check, and nothing in the firmware reads identifier() at all. A
+  //    prediction written into a comment outlived its truth and cost a quarter of a
+  //    real shelf.
+  //
+  //    So it degrades the way the spine's `toc` attribute does below: a
+  //    cross-reference inside the OPF that does not resolve costs the book the thing
+  //    it named and nothing else. A spine itemref is the one that stays a refusal,
+  //    because a spine is a reading ORDER rather than a fact about the book.
   identifier_ = std::move(identifierWithId);
 
   // 4. The spine, resolved through the manifest. A missing item is a refusal and

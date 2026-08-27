@@ -238,7 +238,13 @@ TEST_CASE("EVERY EPUB FIXTURE OPENS OR SAYS WHY") {
       {"containerPointsNowhere",
        asBytes(epubfix::kEpubContainerPointsNowhere, epubfix::kEpubContainerPointsNowhereLen),
        false},
-      {"idMismatch", asBytes(epubfix::kEpubIdMismatch, epubfix::kEpubIdMismatchLen), false},
+      // BOTH IDENTIFIER SHAPES OPEN. An OPF whose `unique-identifier` names an id no
+      // dc:identifier carries is a book with unusable metadata, not an unreadable
+      // book -- 4 of 16 EPUBs in one real library are one of these two shapes, and
+      // every one of them reads. It was a refusal until a device report; epub.cpp
+      // step 3 carries the whole reasoning.
+      {"idMismatch", asBytes(epubfix::kEpubIdMismatch, epubfix::kEpubIdMismatchLen), true},
+      {"noUniqueId", asBytes(epubfix::kEpubNoUniqueId, epubfix::kEpubNoUniqueIdLen), true},
       {"emptySpine", asBytes(epubfix::kEpubEmptySpine, epubfix::kEpubEmptySpineLen), false},
       // The spine names a manifest id whose file is absent, and the href resolves
       // to nothing in the archive. Epub::open lets both through on purpose -- a

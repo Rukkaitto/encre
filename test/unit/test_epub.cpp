@@ -111,14 +111,38 @@ TEST_CASE("a container pointing at a path nothing is at is a refusal") {
   CHECK_FALSE(b.open());
 }
 
-TEST_CASE("an unresolvable unique-identifier is a refusal, not a warning") {
-  // It parses perfectly and then breaks everything keyed on the identifier --
-  // which is what per-book reading state will be. mkepub.py's docstring already
-  // calls this the classic silent-breakage case, so it is refused here rather
-  // than discovered when a bookmark lands on the wrong book.
+TEST_CASE("an unresolvable unique-identifier is metadata, not a reason to refuse") {
+  // THE REFUSAL THIS REPLACED WAS WRITTEN FOR A CONSUMER THAT NEVER ARRIVED. It said
+  // an unresolvable identifier "breaks everything keyed on the identifier -- which is
+  // what per-book reading state will be"; reading state ended up card-side under
+  // /.reader/state, keyed on a hash of the book's PATH with its byte size as the
+  // identity check, and nothing outside this file has ever read Epub::identifier().
+  // Measured against one real library the check refused 4 of 16 books, every one of
+  // which reads -- including a 55-chapter novel that walks 197,330 words once the id
+  // resolves.
+  //
+  // It is the call the spine's `toc` attribute already got: a cross-reference inside
+  // the OPF that does not resolve costs the book the thing it named and nothing else.
+  // A spine itemref is different, and still a refusal, because a spine is a reading
+  // ORDER -- see the test below.
   BOOK(kEpubIdMismatch);
-  CHECK_FALSE(b.open());
-  CHECK(std::strlen(b.epub.reason()) > 0);
+  REQUIRE(b.open());
+  CHECK(b.epub.identifier().empty());
+  CHECK(b.epub.title() == "Middlemarch");
+  REQUIRE(b.epub.chapters().size() == 2);
+}
+
+TEST_CASE("a book naming no unique-identifier does not adopt an unnamed one") {
+  // THE TRAP THE OLD REFUSAL WAS HIDING. An absent `unique-identifier` and a
+  // dc:identifier with no id are both the empty string, so "does this identifier
+  // carry the id the package named" answers YES for a book that named nothing --
+  // and the identifier would then be reported as the book's own. That is a
+  // substitution where empty is the honest answer, and it only became reachable
+  // when the refusal in front of it went.
+  BOOK(kEpubNoUniqueId);
+  REQUIRE(b.open());
+  CHECK(b.epub.identifier().empty());
+  REQUIRE(b.epub.chapters().size() == 2);
 }
 
 TEST_CASE("an empty spine is a refusal -- a book with no chapters is not a book") {
@@ -149,8 +173,9 @@ TEST_CASE("every truncation of a good EPUB is survivable") {
     if (!z.open(*h)) continue;
     reader::Epub e;
     if (!e.open(*h, z)) continue;
-    // If it opened, everything it claims must be internally consistent.
-    CHECK_FALSE(e.identifier().empty());
+    // If it opened, everything it claims must be internally consistent. NOT the
+    // identifier: it is best-effort metadata, so a non-empty one is not something
+    // open() promises and asserting it here would pin the fixture, not the contract.
     CHECK_FALSE(e.chapters().empty());
     for (const auto& c : e.chapters()) CHECK(z.find(c.path) != nullptr);
   }

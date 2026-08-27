@@ -194,7 +194,13 @@ def opf(*, uid_ref="bookid", uid_id="bookid", spine=("ch1", "ch2"),
     """`ncx` adds a manifest item for a table of contents, by the media type that
     makes an NCX an NCX. `spine_toc` sets the spine's `toc` attribute, which is the
     formal route to the same file and is OPTIONAL in real books -- three of the four
-    measured carry it, so both paths need a fixture."""
+    measured carry it, so both paths need a fixture.
+
+    `uid_ref=None` omits the package's `unique-identifier` attribute and `uid_id=None`
+    leaves the dc:identifier with no id at all. Both are shapes real books ship -- 4
+    of 16 EPUBs in one measured library have an identifier that does not resolve, one
+    of each shape -- and both are READABLE: see epub.cpp on why an identifier is
+    metadata rather than a reading order."""
     items = b"".join(
         b'    <item id="%s" href="%s" media-type="application/xhtml+xml"/>\n'
         % (i.encode(), h.encode()) for i, h in manifest)
@@ -203,10 +209,12 @@ def opf(*, uid_ref="bookid", uid_id="bookid", spine=("ch1", "ch2"),
                   % ncx.encode())
     refs = b"".join(b'    <itemref idref="%s"/>\n' % r.encode() for r in spine)
     spine_open = b"<spine>" if spine_toc is None else b'<spine toc="%s">' % spine_toc.encode()
+    uid_attr = b"" if uid_ref is None else b' unique-identifier="%s"' % uid_ref.encode()
+    id_attr = b"" if uid_id is None else b' id="%s"' % uid_id.encode()
     return b"""<?xml version="1.0"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="%s">
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0"%s>
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:identifier id="%s">urn:uuid:0000-1111</dc:identifier>
+    <dc:identifier%s>urn:uuid:0000-1111</dc:identifier>
     <dc:title>Middlemarch</dc:title>
     <dc:creator>George Eliot</dc:creator>
     <dc:language>en</dc:language>
@@ -215,7 +223,7 @@ def opf(*, uid_ref="bookid", uid_id="bookid", spine=("ch1", "ch2"),
 %s  </manifest>
   %s
 %s  </spine>
-</package>""" % (uid_ref.encode(), uid_id.encode(), items, spine_open, refs)
+</package>""" % (uid_attr, id_attr, items, spine_open, refs)
 
 
 CH1 = (b"<?xml version='1.0'?><html><body><h1>One</h1>"
@@ -278,12 +286,17 @@ def epub_fixtures():
     f["kEpubContainerPointsNowhere"] = (
         "container.xml names a path nothing is at",
         epub(container_path=b"OEBPS/nope.opf"))
-    # The unique-identifier must RESOLVE. mkepub.py's docstring already warns
-    # about this: it parses fine and then breaks anything keyed on the identifier,
-    # which is exactly what per-book reading state will be.
+    # AN IDENTIFIER THAT DOES NOT RESOLVE IS A READABLE BOOK, and these two are the
+    # shapes that produced that finding: 4 of 16 EPUBs in one real library refuse to
+    # resolve their own unique-identifier, and every one of them reads. The first
+    # names an id some other element carries; the second declares no id anywhere,
+    # which is the case that makes the empty-matches-empty trap in epub.cpp reachable.
     f["kEpubIdMismatch"] = (
-        "unique-identifier names an id no dc:identifier has",
+        "unique-identifier names an id no dc:identifier has -- readable",
         epub(opf_bytes=opf(uid_ref="bookid", uid_id="somethingelse")))
+    f["kEpubNoUniqueId"] = (
+        "no unique-identifier attribute and no id on the identifier -- readable",
+        epub(opf_bytes=opf(uid_ref=None, uid_id=None)))
     f["kEpubEmptySpine"] = ("a spine with no itemrefs -- a book with no chapters",
                             epub(opf_bytes=opf(spine=())))
     f["kEpubSpineRefMissing"] = (

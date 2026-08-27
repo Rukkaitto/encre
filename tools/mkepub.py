@@ -19,10 +19,13 @@ What makes an EPUB valid, and the two things that are easy to get wrong:
     no extra field. Readers identify the format by reading it at a fixed offset,
     so a deflated or reordered mimetype is the classic "my EPUB opens nowhere"
     bug. zipfile will happily do the wrong thing here.
-  * The OPF's `unique-identifier` must name a `dc:identifier` that actually
-    exists in the metadata. A mismatch parses fine and then breaks anything that
-    keys per-book state on the identifier -- which is exactly what this firmware
-    will do for reading progress.
+  * The OPF's `unique-identifier` should name a `dc:identifier` that actually
+    exists in the metadata, and every book here does. THE FIRMWARE DOES NOT REQUIRE
+    IT and must not: 4 of 16 EPUBs in one real library name an id nothing carries,
+    and all four read. This bullet used to say a mismatch "breaks anything that keys
+    per-book state on the identifier -- which is exactly what this firmware will do
+    for reading progress"; reading progress is keyed on the book's PATH and byte
+    size, and nothing reads the identifier at all. See epub.cpp step 3.
 
 Usage:
     python3 tools/mkepub.py --out ~/Desktop/epubs           # the default set
