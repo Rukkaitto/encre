@@ -11,8 +11,9 @@ namespace {
 // screen, never both" rule the menu rows on Home follow.
 //
 // WHAT RESPONDS is the second flag, and it is a statement about what exists rather
-// than about the design: Typography and Bookmarks have boards and no screens. Each
-// becomes focusable in the commit that gives it something to do.
+// than about the design: Bookmarks has a board and no screen (#3). Each becomes
+// focusable in the commit that gives it something to do, and Typography's is that
+// commit -- design/Typography.dc.html is built, so the row opens it.
 //
 // NO TRACKING COLUMN. `Close book` was the only row on any panel in this firmware that
 // the boards letter-spaced, so with it gone `ListRow::trackingEm1000` and
@@ -27,7 +28,7 @@ struct Item {
 };
 constexpr Item kItems[ReaderMenuScreen::kRowCount] = {
     {"Contents", "", true, true},
-    {"Typography", "", false, true},
+    {"Typography", "", true, true},
     // The board shows `2`, a bookmark count. Zero would be a claim about a feature that
     // cannot make one, so the row carries the board's own value and does not act.
     {"Bookmarks", "2", false, false},
@@ -88,6 +89,8 @@ Action ReaderMenuScreen::onGesture(const GestureEvent& g) {
       switch (vm_.focusedRow) {
         case kContents:
           return Action::push(ScreenId::Contents);
+        case kTypography:
+          return Action::push(ScreenId::Typography);
         case kAboutBook:
           return Action::push(ScreenId::BookDetails);
         default:

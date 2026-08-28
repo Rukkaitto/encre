@@ -22,6 +22,7 @@
 #include "reader/scalablefont.h"
 #include "reader/screen_contents.h"
 #include "reader/screen_reader.h"
+#include "reader/screen_reader_menu.h"
 #include "reader/screen_typography.h"
 #include "reader/screens.h"
 #include "reader/settings.h"
@@ -351,18 +352,20 @@ int main(int argc, char** argv) {
   // the menu over it -- and then the panel pushed on top, so the stack this renders
   // is the stack the device will have.
   //
-  // IT DOES NOT PRESS ITS WAY IN, AND THAT IS A GAP RATHER THAN A CHOICE. The plan's
-  // route is DOWN then CONFIRM on the menu, which cannot work yet: the menu's
-  // `Typography` row is `{"Typography", "", false, true}` in screen_reader_menu.cpp
-  // -- not focusable, no action -- so DOWN SKIPS it (Focus::Gate refuses an
-  // unfocusable landing) and lands on `About this book`, and CONFIRM there pushes
-  // BookDetails. A subcommand written that way would render the wrong screen and
-  // pass, which is worse than one that says what it bypasses.
+  // IT PRESSES ITS WAY IN, over DOWN then CONFIRM on the menu, which is the route the
+  // device takes. It could not before: the menu's `Typography` row was
+  // `{"Typography", "", false, true}` -- not focusable, no action -- so DOWN SKIPPED
+  // it (Focus::Gate refuses an unfocusable landing) and landed on `About this book`,
+  // where CONFIRM pushes BookDetails. So this branch pushed the ScreenId directly and
+  // said so, because a subcommand written as the two presses would have rendered the
+  // WRONG SCREEN and reported success.
   //
-  // Making the row live is its own commit with its own test. WHEN IT LANDS, this
-  // branch should become the two presses: the push below is exactly what the row
-  // will do, so the render will not move and only the navigation will start being
-  // checked -- which is the half of the value that is missing until then.
+  // The row is live now, so the presses are what runs, and the branch asserts the
+  // focus and the top of the stack either side of them. That is what makes this a
+  // NAVIGATION check again rather than a render-only one: the render did not move (it
+  // is byte-identical to the golden the direct push blessed, which is the proof the
+  // row does exactly what the push did), and what is newly covered is the row going
+  // inert again -- which nothing on the desktop would otherwise notice.
   const bool isTypography = std::strcmp(argv[1], "typography") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
@@ -453,14 +456,17 @@ int main(int argc, char** argv) {
       // 18 PT remains one press away on the device, and whether it should be the
       // DEFAULT is a separate open question (roadmap:1269).
       //
-      // PUSHED, not pressed -- see isTypography's own comment for why the menu's row
-      // cannot carry it yet, and for what this line becomes when it can.
-      if (!app.pushScreen(reader::ScreenId::Typography)) {
-        std::fprintf(stderr, "the factory refused ScreenId::Typography\n");
+      // PRESSED, not pushed -- see isTypography's own comment. DOWN from Contents
+      // reaches Typography, and CONFIRM there opens the panel.
+      app.dispatch({reader::Button::Down, reader::PressKind::Short});
+      if (static_cast<const reader::ReaderMenuScreen&>(app.top()).vm().focusedRow !=
+          reader::ReaderMenuScreen::kTypography) {
+        std::fprintf(stderr, "DOWN on the reader menu did not reach the Typography row\n");
         return 1;
       }
+      app.dispatch({reader::Button::Confirm, reader::PressKind::Short});
       if (app.top().id() != reader::ScreenId::Typography) {
-        std::fprintf(stderr, "the top of the stack is not Typography\n");
+        std::fprintf(stderr, "CONFIRM on the Typography row did not open the panel\n");
         return 1;
       }
     }
