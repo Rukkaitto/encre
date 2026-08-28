@@ -238,32 +238,89 @@ constexpr uint32_t kRefineQuietMs = 5000;
 // four seconds to reach the glass because the next page turn almost never won the
 // race against the refinement's window.)
 //
-// AND IT STAYS AT THE REFINEMENT'S NUMBER NOW THAT THE COUNT IS INTERRUPTIBLE, which
-// is the opposite of what interruptibility first suggests. The argument for putting
-// it back to 1200 ms is that abandoning is now nearly free -- one block, ~6 ms -- so
-// the reason for widening it has gone. It has not, and the reason is a cost that
-// belongs to the press AFTER the one that interrupted:
+// IT WAS THE REFINEMENT'S NUMBER AND IT IS ITS OWN AGAIN, at 2000 ms, because the
+// cost that tied them together has been paid off. What follows is the whole trade,
+// including the part the previous version of this comment had WRONG.
 //
-//   ReaderScreen::completeIndex resets `pb_` BEFORE it walks, because the walk
-//   rewinds the ChapterReader the builder reads from. An abandoned count restores
-//   `starts_`, `at_` and the page -- but not the builder, and there is no second
-//   stream to rebuild it from (that is another 32 KB inflate window against a
-//   42,152-byte floor). So the next FORWARD turn misses the page ring, which holds
-//   pages already visited and not the one ahead, and pays a full seekTo: ~376 ms on
-//   the device against ~20 ms with the stream standing.
+// The argument for keeping 5000 was a cost belonging to the abandoning press:
+// completeIndex resets `pb_` before it walks, because the walk rewinds the
+// ChapterReader the builder reads from, and there is no second stream to rebuild it
+// with (another 32 KB inflate window against a 42,152-byte floor). So a forward turn
+// after an abandon misses the page ring -- which holds pages already visited, not
+// the one ahead -- and pays a full seekTo: ~376 ms at page 38, ~1010 ms at page 99.
 //
-// So a short window does not cost the interrupting press any more; it costs the one
-// after it, once per abandon. At 1200 ms a reader who pauses to think and then turns
-// the page pays that routinely, and every abandon also throws away the walk it had
-// done. At 5000 ms the count runs when the reader has really stopped -- and a reader
-// spends ~23 s on a page, so it gets its chance -- and usually completes, which
-// leaves a live builder behind it.
+// TWO THINGS THAT ARGUMENT GOT WRONG, both found by putting the claim in a test
+// (test_reader_restream.cpp):
 //
-// WHAT WOULD ACTUALLY EARN THE SHORTER WINDOW is re-establishing the spent stream in
-// a later quiet window, so an abandon costs nothing at all. That needs a
-// needStream-only entry point on ReaderScreen and a call site here; it is the honest
-// version of this trade and it is not written yet.
-constexpr uint32_t kCountQuietMs = kRefineQuietMs;
+//   * IT IS NOT ONLY THE ABANDONED COUNT. completeIndex ends in seekTo(at_), `at_`
+//     is by definition the page the ring is most certain to hold, so the restore leg
+//     takes a cache hit -- and a hit leaves `pb_` null. A count that COMPLETES spends
+//     the stream too. So "at 5000 ms it usually completes, which leaves a live
+//     builder behind it" was false: at 5000 ms it usually completes and leaves NO
+//     builder, and the next forward turn paid the rewind anyway, on every deferred
+//     chapter, guaranteed. The long window was buying nothing.
+//   * IT IS THE INTERRUPTING PRESS, not the one after it. The queue is drained at the
+//     top of the loop, so the press that made the stop predicate answer true is the
+//     very next thing dispatched.
+//
+// ReaderScreen::restreamAtCurrentPage is the entry point that pays the cost off: it
+// re-establishes the stream in a quiet window of its own, and ABANDONING IT IS FREE
+// because it runs only when the builder is already null and so has nothing to spend.
+// See kRestreamQuietMs.
+//
+// SO THE NUMBER IS DERIVED AGAIN, AND FROM A SMALLER COST OF BEING WRONG:
+//
+//   FLOOR -- 1360 ms, the longest pause measured while the reader was still turning
+//   pages (twelve consecutive turns: median gap 72 ms, outliers 898 ms and 1360 ms).
+//   Below that the count fires into a gap the reader is about to close, is abandoned,
+//   and the abandoning press pays the rewind.
+//
+//   MARGIN -- 2000 ms is 1.47x that floor, where kRefineQuietMs uses ~3.5x. The
+//   multiplier is smaller because the cost of being wrong is smaller: the refinement
+//   is 1408 ms of UNINTERRUPTIBLE dead buttons, and this is one rewind on one press,
+//   at most once per chapter, because a chapter counted once is never counted again.
+//
+//   CEILING -- the prize. The total lands on glass at window + count + paint: at
+//   5000 that is ~6.0 s (5000 + 440 + 596, from the device's own [index] line), and
+//   at 2000 it is ~3.0 s. Half the wait for a footer that currently reads `3 / -`.
+//
+// AND IT DOES NOT RE-OPEN THE PERCENTAGE-GOES-BACKWARDS BUG, which is the other thing
+// this constant has to be checked against -- widening it 1200 -> 5000 made that one
+// worse, because the count landed later. It cannot come back, and the reason is
+// structural rather than a matter of degree: progressPercent is made of BYTES now
+// (reading_store.cpp prefers bytesIntoChapter and reads page/pageTotal only when it
+// is zero), and every chapter of every real EPUB is deflated, so the bytes are always
+// there. test_reader_restream.cpp asserts the percentage across the moment the count
+// lands, over a real archive, and it does not move. For the fallback path -- a stored
+// entry or an in-memory chapter, with no inflater to ask -- shortening moves the
+// SAME lever in the direction that made it better.
+//
+// WHAT IT STILL COSTS, stated plainly so the [index] line can be read against it: a
+// pause between 2000 ms and 2000 ms + the count's duration ends in an abandon, and
+// that press pays a rewind. `[index] counted|abandoned` is what measures how often.
+constexpr uint32_t kCountQuietMs = 2000;
+
+// PUTTING THE SPENT STREAM BACK, on a window of its own.
+//
+// Every quiet-window walk drops the live PageBuilder before it rewinds -- the count
+// and the ring warm both -- and until restreamAtCurrentPage existed neither could put
+// it back, so the next FORWARD turn paid ~376-1010 ms of seekTo on the button.
+//
+// WHY THIS ONE MAY HAVE A SHORT WINDOW WHERE THE OTHER TWO MAY NOT. Abandoning it
+// costs NOTHING: it runs only when `pb_` is already null, so there is no live builder
+// for an interrupted walk to lose. The other two each spend something real before
+// they walk, which is what buys them the refinement's long window. Here the trade is
+// one-sided -- it finishes and the next forward turn is free, or it is cut and that
+// turn pays exactly what it pays today -- so there is no case in which firing early
+// makes anything worse.
+//
+// 1200 ms, and the derivation is only the lower half of kCountQuietMs's: it has to
+// clear the 72 ms median gap between steady page turns, and the 898 ms outlier, so
+// that a reader flipping does not pay bus traffic for a builder each turn
+// re-establishes by itself. It does NOT have to clear the 1360 ms pause, because
+// being interrupted there is free -- which is precisely the difference from the two
+// windows above.
+constexpr uint32_t kRestreamQuietMs = 1200;
 static bool gRefineOwed = false;
 
 // HOW LONG THE BUTTONS MUST BE QUIET BEFORE THE READING POSITION IS WRITTEN.
@@ -4223,6 +4280,61 @@ void loop() {
     refineNow();
   }
 
+  // PUTTING BACK THE STREAM THE COUNT SPENT -- see kRestreamQuietMs.
+  //
+  // WHERE IT SITS IN THE QUIET-WINDOW ORDER, AND WHY, because a job that just takes
+  // a position rather than arguing for one makes the whole ordering accidental:
+  //
+  //   * AFTER BOTH COUNT SITES. completeIndex rewinds the stream and drops the
+  //     builder, so a restream above it is a full walk thrown away by the very next
+  //     block. BOTH, not one: there is the deferred site above and one inside
+  //     refineNow(), and this file already records what fixing only one of them
+  //     costs. Sitting below the refinement block puts this below both.
+  //     IT IS AN EFFICIENCY CONSTRAINT AND NOT A CORRECTNESS ONE, which is worth
+  //     knowing before anyone reorders these: the gate is `hasLiveStream()`, asked
+  //     afresh every iteration, so a restream that ran above a count would waste one
+  //     interruptible walk and be re-run ten milliseconds later. Wrong order, right
+  //     state.
+  //   * BEFORE THE RING WARM, because they are the SAME WALK with two gates
+  //     (ReaderScreen::rewalkToCurrentPage), and a restream that lands leaves exactly
+  //     the backward headroom a warm would have left -- so the warm below correctly
+  //     finds nothing to do and the pair costs one rewind rather than two. Put the
+  //     other way round, the warm's rewind would leave a live builder and this would
+  //     no-op, which reaches the same state; but the warm refuses page 0 and needs
+  //     spent headroom, so it is the narrower gate and must not be the one that
+  //     decides whether the stream comes back.
+  //   * ITS WINDOW IS THE SHORTEST OF THE GROUP and that is deliberate rather than
+  //     impatient: it is the only one of these jobs that loses nothing when it is
+  //     interrupted, so it is the only one that can afford to try early and often.
+  //
+  // NOT GATED ON `!gRefineOwed`, which the warm below is. The refinement is 1408 ms
+  // and cannot be interrupted; this is interruptible at one block, so making it wait
+  // for the refinement's 5 s window would cost it every chance it has -- `gRefineOwed`
+  // is set by every grayscale paint, so it is true for essentially the whole time the
+  // reader is on a page.
+  if (!gApp->dirty() && rawSamplesPending() == 0 &&
+      static_cast<uint32_t>(millis() - gLastInputMs) >= kRestreamQuietMs &&
+      gApp->top().id() == reader::ScreenId::Reader) {
+    auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
+    // ASKED HERE AS WELL AS INSIDE, so the common case -- a stream that stands, which
+    // is every ordinary page turn -- costs a pointer test and no log line at all.
+    if (!rd->hasLiveStream()) {
+      const uint32_t t = millis();
+      const bool done = rd->restreamAtCurrentPage(
+          [](void*) { return rawSamplesPending() != 0; }, nullptr);
+      // LOGGED THOUGH NOTHING IS VISIBLE, for the reason [warm] is: an idle
+      // optimisation that silently stops working looks exactly like one that is
+      // working. `done` is the whole point of the line -- an abandoned restream is
+      // free but it also did not help, and only the pair of counts says which is
+      // happening. If this reads `abandoned` most of the time, kRestreamQuietMs is
+      // too short for this reader; if it never appears at all, the stream is never
+      // being spent and the count is not deferring.
+      logf("[restream] %s page=%d in %lums\n", done ? "ready" : "abandoned",
+           rd->pageIndex(), (unsigned long)(millis() - t));
+      logFlush();
+    }
+  }
+
   // THE READER'S LAST SLOW INTERACTION, MOVED OFF THE BUTTON.
   //
   // A backward turn that misses the page ring rewinds and decodes from the chapter
@@ -4237,9 +4349,13 @@ void loop() {
   // on the glass and the refinement puts grey on it, and both are things the user
   // can see. This one is invisible by construction, so it goes behind them.
   //
-  // THE SAME WINDOW AS THE REFINEMENT, and for the reason the count's constant sets
-  // out at length: abandoning spends the live PageBuilder, so the cost of firing too
-  // early lands on the next FORWARD turn rather than on the press that interrupted.
+  // THE SAME WINDOW AS THE REFINEMENT, and it KEEPS it where the count no longer
+  // does. Abandoning this one really does spend the live PageBuilder -- it is
+  // reached with a stream standing, which is exactly what the restream above is not
+  // -- so the cost of firing too early lands on the next FORWARD turn. That is the
+  // asymmetry the two constants encode: kRestreamQuietMs is short because an
+  // interrupted restream loses nothing, and this stays long because an interrupted
+  // warm loses the stream.
   if (!gApp->dirty() && rawSamplesPending() == 0 && !gRefineOwed &&
       static_cast<uint32_t>(millis() - gLastInputMs) >= kRefineQuietMs &&
       gApp->top().id() == reader::ScreenId::Reader) {
