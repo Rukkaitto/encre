@@ -50,6 +50,7 @@
 #include "reader/layout.h"
 #include "reader/scalablefont.h"
 #include "reader/reading_store.h"
+#include "reader/progress_save_gate.h"
 #include "reader/screen_sleep.h"
 #include "reader/screen_contents.h"
 #include "reader/screen_reader_menu.h"
@@ -264,6 +265,35 @@ constexpr uint32_t kRefineQuietMs = 5000;
 // version of this trade and it is not written yet.
 constexpr uint32_t kCountQuietMs = kRefineQuietMs;
 static bool gRefineOwed = false;
+
+// HOW LONG THE BUTTONS MUST BE QUIET BEFORE THE READING POSITION IS WRITTEN.
+//
+// THE POINT OF THIS NUMBER IS THAT A PAGE TURN NEVER PAYS FOR IT. The save is two
+// small file reads and up to two small writes -- ~20-100 ms measured, on the display's
+// SPI bus -- and unlike the page count and the ring warm, abandoning it costs nothing,
+// so the temptation is to fire it almost immediately. That would be the wrong trade:
+// at 400 ms it would land after every paint during steady reading and put its whole
+// cost in front of the next press, which is precisely the "a card write on each turn
+// would be felt" objection that kept this on three edges in the first place.
+//
+// So it is sized to MISS steady turning and catch the pause that follows it. The
+// device's own figures: across twelve consecutive page turns the gap between the panel
+// going free and the next press was a median of 72 ms, with the two longest at 898 and
+// 1360 ms. 2000 ms clears all twelve, so a reader flipping through pages pays nothing
+// at all -- and an average reader spends ~23 s on a page, so in ordinary reading the
+// window opens about two seconds after every single turn.
+//
+// SHORTER THAN kCountQuietMs (5000) DELIBERATELY, because the trade is the opposite
+// one. The count and the refinement wait five seconds because being wrong costs the
+// reader a locked-up second and a half; being wrong here costs ~40 ms that the next
+// press absorbs, and being LATE costs durability, which is the whole feature.
+constexpr uint32_t kSaveQuietMs = 2000;
+
+// WHETHER THE POSITION ON SCREEN IS WORTH THE BUS. See progress_save_gate.h: it holds
+// the last point actually stored, so the quiet window cannot re-save the same page on
+// every loop iteration, and it gives up after three consecutive refusals so a
+// write-protected card cannot be hammered into routing the reader to SdMissingScreen.
+static reader::ProgressSaveGate gSaveGate;
 
 // Everything the render needs has to outlive setup(), so it lives here rather
 // than on setup()'s stack.
@@ -1561,10 +1591,28 @@ static void buildSdMissingApp() {
 // and is not built.
 // SAVE WHERE THE READER IS, to the card, if a book is open.
 //
-// Called on the three edges that change the answer: leaving the book, crossing into
-// another chapter, and going to sleep. NOT on every page turn -- a turn is ~570 ms
-// of panel and a card write on top of each one would be felt, and the three edges
-// above already bound how much reading a power cut can lose to one chapter.
+// FOUR CALLERS, AND THE FOURTH IS THE ONE THAT MAKES THIS DURABLE. Three are edges
+// that change the answer -- leaving the book, crossing into another chapter, going to
+// sleep -- and they fire unconditionally because each is a moment the reader would
+// notice losing. The fourth is loop()'s quiet window, which offers the position after
+// kSaveQuietMs of silence and gets an answer from ProgressSaveGate first.
+//
+// THIS USED TO BE THREE EDGES ONLY, on the grounds that "a turn is ~570 ms of panel
+// and a card write on top of each one would be felt". That reasoning was right about
+// the cost and wrong about where to put the work: it bounded a power cut's damage at
+// ONE CHAPTER, which on a real novel is an hour of reading. The write is not made
+// cheaper, it is made to happen when the loop is already idle -- the same answer the
+// page count, the refinement and the ring warm all reached, and the same one the card
+// log reached before them.
+//
+// IT IS NOT HIDDEN UNDER THE WAVEFORM, which was the idea this replaced. The
+// triggerDisplay/completeDisplay seam really is open for ~389 ms of otherwise idle
+// CPU, but the SD card is on the DISPLAY'S SPI bus and the SDK states the contract in
+// three separate places -- PanelDriver.h's "the caller does non-SPI CPU work in the gap
+// and issues no other bus op until displayFinish()" is the sharpest. Uc8279Driver
+// leaves a PARTIAL_IN window open across that gap for displayFinish to close, so the
+// controller is mid-sequence the whole time. The quiet window costs the reader the
+// same nothing and breaks no contract.
 //
 // A FAILURE HERE IS LOGGED AND NOTHING ELSE, which is the one hazard in this whole
 // feature. A card can be readable and refuse writes -- a physical write-protect tab
@@ -1574,9 +1622,15 @@ static void buildSdMissingApp() {
 // reader out of a book they can still perfectly well read. There is nothing to do
 // about it and nothing worth telling the user, so it goes in the log and the reader
 // keeps reading.
-static void saveReadingPosition(const char* why) {
-  if (!gReading.open || gApp == nullptr) return;
-  if (gApp->top().id() != reader::ScreenId::Reader) return;
+// RETURNS THE COMBINED OUTCOME OF BOTH RECORDS, which only the quiet-window caller
+// reads -- the three edges fire regardless and have nothing to decide. Failed if
+// either half was refused, Written if either half moved, Unchanged when the card
+// already held both. The "nothing to save" early returns answer Unchanged, and the
+// quiet-window caller additionally guards on the same conditions so it can never
+// record a point that was not actually stored.
+static reader::SaveResult saveReadingPosition(const char* why) {
+  if (!gReading.open || gApp == nullptr) return reader::SaveResult::Unchanged;
+  if (gApp->top().id() != reader::ScreenId::Reader) return reader::SaveResult::Unchanged;
   const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
 
   reader::ReadingPosition p;
@@ -1637,6 +1691,16 @@ static void saveReadingPosition(const char* why) {
   logf("[progress] %s: spine=%d block=%d line=%d %d%% -- position %s, pointer %s\n", why,
        p.spine, p.block, p.line, last.percent, outcome(a), outcome(b));
   logFlush();
+
+  // TWO RECORDS, ONE ANSWER. The gate's question is "is the card worth touching
+  // again", and it is not settled until BOTH halves are down -- so a half-landed save
+  // reports Failed and will be retried, rather than being recorded as stored because
+  // the sidecar happened to succeed before the pointer did not.
+  if (a == reader::SaveResult::Failed || b == reader::SaveResult::Failed)
+    return reader::SaveResult::Failed;
+  if (a == reader::SaveResult::Written || b == reader::SaveResult::Written)
+    return reader::SaveResult::Written;
+  return reader::SaveResult::Unchanged;
 }
 
 // WHAT OPENING THIS CHAPTER COST, AND WHICH BRANCH TOOK IT. A chapter under
@@ -4016,6 +4080,74 @@ void loop() {
          reader::screenName(gApp->top().id()), (unsigned long)gRenderMs,
          (unsigned long)gUploadMs, (unsigned long)gWaveMs);
     logFlush();
+  }
+
+  // THE READING POSITION, SAVED BECAUSE THE READER MOVED RATHER THAN BECAUSE THEY LEFT.
+  //
+  // FIRST OF THE QUIET-WINDOW JOBS, AND THE ONLY ONE THAT PROTECTS DATA. The page
+  // count, the refinement and the ring warm are a number, some grey and a latency;
+  // this is the reader's place in the book. It is also by far the cheapest of the four
+  // -- ~20-100 ms against 400 ms to 3.6 s -- so putting it in front of them costs them
+  // little and buys the guarantee that a chapter-long count cannot sit between a page
+  // turn and the record of it.
+  //
+  // GATED ON THE READER HAVING MOVED, which is the whole reason ProgressSaveGate
+  // exists. This block is reached on EVERY loop iteration once the buttons go quiet,
+  // and `savePosition` answers Unchanged by reading both sidecars back off the card
+  // first -- so without the gate an idle device would sit on a page doing two file
+  // reads per iteration, forever, on the panel's own SPI bus. Three int comparisons
+  // replace all of it.
+  //
+  // AND ON THE CARD NOT HAVING REFUSED THREE TIMES. A card can be readable and refuse
+  // writes, and `writeAll` calls noteCardGone() on a write that fails after opening,
+  // which pollCardPresence turns into an App rooted at SdMissingScreen. Saving a
+  // hundred times more often would make that a hundred times more likely, so the gate
+  // gives up for the session after kGiveUpAfterFailures -- at which point the
+  // behaviour is exactly the three edges that shipped.
+  if (!gApp->dirty() && rawSamplesPending() == 0 && gReading.open &&
+      static_cast<uint32_t>(millis() - gLastInputMs) >= kSaveQuietMs &&
+      gApp->top().id() == reader::ScreenId::Reader) {
+    // A DIFFERENT BOOK CAN SIT AT THE SAME COORDINATES. spine 0 / block 0 / line 0 is
+    // the opening page of every book on the card, so without this the first page of a
+    // newly opened book would look to the gate exactly like the page it last stored
+    // for the previous one. Tracked here rather than hooked into the open path so the
+    // whole mechanism stays inside this block.
+    static std::string gateBook;
+    if (gateBook != gReading.path) {
+      gateBook = gReading.path;
+      gSaveGate.forget();
+    }
+    const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
+    const reader::SavePoint where(rd->chapterIndex(), rd->currentCursor());
+    if (gSaveGate.wants(where, millis())) {
+      // ONE ACQUISITION FOR THE WHOLE SAVE. Each SdFileSystem call takes the guard
+      // itself and it is recursive, so this changes no locking -- it holds the bus
+      // across all four operations instead of releasing it three times in the middle
+      // of a save, which is the same rule renderTop() applies to a paint.
+      SpiBusGuard bus;
+      const reader::SaveResult r = saveReadingPosition("page");
+      if (r == reader::SaveResult::Failed) {
+        gSaveGate.noteFailed(millis());
+        // SAID OUT LOUD, AND THE GIVE-UP SAID SEPARATELY. The reader sees nothing
+        // either way, and a durability feature that has switched itself off looks
+        // exactly like one that is working -- which this file records as a defect
+        // shape several times over. saveReadingPosition has already logged WHICH half
+        // failed; this says what it means for the mechanism.
+        if (gSaveGate.givenUp())
+          logf("[progress] the card refused it %d times -- THE PER-TURN SAVE IS OFF for "
+               "the rest of this session. Reading is unaffected and so are the "
+               "leaving/chapter/sleep edges, which still try every time. A card that is "
+               "readable but write-protected is the usual cause\n",
+               gSaveGate.failures());
+        else
+          logf("[progress] the card refused it (%d of %d, retrying in %lus)\n",
+               gSaveGate.failures(), reader::ProgressSaveGate::kGiveUpAfterFailures,
+               (unsigned long)(reader::ProgressSaveGate::kRetryBackoffMs / 1000u));
+        logFlush();
+      } else {
+        gSaveGate.noteStored(where);
+      }
+    }
   }
 
   // THE FOUR-LEVEL UPGRADE, once the buttons have been quiet and nothing is owed
