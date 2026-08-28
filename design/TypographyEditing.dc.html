@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600;1,7..72,400&amp;family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+    
+  </style>
+</helmet>
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
+
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
+  <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">TYPOGRAPHY</div>
+  <div style="font-size: var(--t-value); font-weight: 700;">MIDDLEMARCH</div>
+</div>
+  <div style="margin: 16px 24px 0 24px; border: 2px solid #000000; padding: 12px 16px; height: 292px; box-sizing: border-box; overflow: hidden; font-family: Literata, Georgia, serif; font-size: 32px; line-height: 1.7; text-align: justify;">Miss Brooke had that kind of beauty which seems to be thrown into relief by poor dress.</div>
+  <div style="font-size: var(--t-meta); letter-spacing: 0.12em; padding: 8px 24px 10px 24px;">LIVE PREVIEW</div>
+  <div style="display: flex; flex-direction: column; border-top: 2px solid #000000;">
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 50px; padding: 0 24px; border-bottom: 1px solid #000000;">
+  <div style="font-size: var(--t-value); font-weight: 500;">Font</div>
+  <div style="font-size: var(--t-value); font-weight: 700;">LITERATA</div>
+</div>
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 50px; padding: 0 24px; background: #000000; color: #ffffff;">
+  <div style="font-size: var(--t-value); font-weight: 700;">Size</div>
+  <div style="font-size: var(--t-value); font-weight: 700;">&lsaquo; 18 PT &rsaquo;</div>
+</div>
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 50px; padding: 0 24px; border-bottom: 1px solid #000000;">
+  <div style="font-size: var(--t-value); font-weight: 500;">Margins</div>
+  <div style="font-size: var(--t-value); font-weight: 700;">COMFORTABLE</div>
+</div>
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 50px; padding: 0 24px; border-bottom: 1px solid #000000;">
+  <div style="font-size: var(--t-value); font-weight: 500;">Line spacing</div>
+  <div style="font-size: var(--t-value); font-weight: 700;">1.7</div>
+</div>
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 50px; padding: 0 24px;">
+  <div style="font-size: var(--t-value); font-weight: 500;">Alignment</div>
+  <div style="font-size: var(--t-value); font-weight: 700;">JUSTIFIED</div>
+</div>
+  </div>
+  <div style="margin-top: auto; padding: 0 24px 10px 24px;">
+    <div style="font-size: var(--t-meta); letter-spacing: 0.1em; line-height: 1.5;">APPLIES FROM YOUR CURRENT PAGE &mdash; THE BOOK RE-PAGINATES IN THE BACKGROUND.</div>
+  </div>
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">DONE</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">OK</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">UP</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M4 9l4 4 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">DOWN</div></div>
+</div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
