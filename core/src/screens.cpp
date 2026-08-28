@@ -459,6 +459,12 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // The root is never rebuilt: popping to Home returns the original object,
       // with its focus intact.
       return nullptr;
+    // NOT BUILDABLE YET -- there is no PeekScreen. Refused exactly as an unprimed
+    // Reader or Contents is: a refused push leaves whatever is under it standing,
+    // wrong in a way the reader can see through rather than wrong in a way they
+    // cannot. This is plumbing only; the screen itself is a later task.
+    case ScreenId::Peek:
+      return nullptr;
   }
   return nullptr;
 }

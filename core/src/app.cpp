@@ -25,6 +25,7 @@ const char* screenName(ScreenId id) {
     // A LOG LABEL, and the session record's "typography" is a storage format.
     // Two separate facts that happen to agree; this one is free to be reworded.
     case ScreenId::Typography: return "TYPOGRAPHY";
+    case ScreenId::Peek: return "PEEK";
   }
   return "?";
 }

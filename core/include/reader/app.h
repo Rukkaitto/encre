@@ -41,7 +41,12 @@ enum class ScreenId : uint8_t {
   // ReaderMenu was: the record stores a name, so an insertion could not silently
   // become another screen, but appending also leaves every existing ordinal where
   // it was.
-  Typography
+  Typography,
+  // design/Peek.dc.html -- a page of the book over the veiled page you are on. APPENDED
+  // for the reason ReaderMenu and Typography were: the session record stores a screen by
+  // NAME (session_record.h), so an insertion could not silently become another screen,
+  // but appending also leaves every existing ordinal where it was.
+  Peek
 };
 
 // A screen's name, for logs. Same reasoning as buttonName: a numeric ScreenId in
