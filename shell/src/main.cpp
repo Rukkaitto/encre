@@ -388,9 +388,16 @@ static reader::ScalableFont gBody;
 //
 // 10 KB therefore holds essentially the whole working set, and the failure mode if a
 // book exceeds it is that the arena wraps and re-rasterises: SLOWER, never dead,
-// which is the property ScalableFont's fixed budget exists to give. Against a
+// which is the property ScalableFont's bounded budget exists to give. Against a
 // measured heap floor of 45,840 bytes with a page on glass, taking 16 KB here for a
 // face that sets 3% of the text would have been the easy wrong answer.
+//
+// BOTH NUMBERS ARE NOW "AT ppem 32" RATHER THAN "ALWAYS", and neither had to change
+// to become that: ScalableFont::init scales its budget by the reading size, so what
+// these two lines state is the PROPORTION between a hot face and a cold one, which is
+// what was actually measured and is what should survive a Typography `Size` row. At
+// the shipped ppem 32 the scale is 1 and these are the same 16 KB and 10 KB as before,
+// to the byte; at the top of the ramp they cap at 24,576 and 15,360.
 static reader::ScalableFont gItalic(10u * 1024u);
 // Did SDCardManager::begin() ever return true this boot? It opens with
 // `if (initialized) return true;` and the SPI path exposes no end()/unmount(), so

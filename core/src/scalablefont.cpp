@@ -1,5 +1,7 @@
 #include "reader/scalablefont.h"
 
+#include "reader/layout.h"  // kBodyPpem, for the static_assert below
+
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -212,13 +214,76 @@ bool looksLikeSfnt(const uint8_t* d, size_t len) {
 // 1 KB, resolved lazily, cleared by init() because the advance is in PIXELS and so
 // depends on the size. `gid == kUnresolved` means "not asked yet" and `gid == 0`
 // means "this face has no glyph", which is a real answer worth caching too.
+//
+// --- AND A SECOND ONE FOR KERN PAIRS, WHICH IS THE BIGGER OF THE TWO -------------
+//
+// The gid cache above took the cmap searches out of kerning() and left the search
+// that actually costs: stbtt_GetGlyphKernAdvance BISECTS the face's legacy `kern`
+// table, which tools/ttfprep.py builds at **6,064 pairs**, so every pair in a
+// measurement is ~13 levels of pointer chasing through 36 KB of flash.
+//
+// MEASURED, and it is not a rounding error. A 56-page pagination walk over generated
+// prose (desktop, -O3, best of 20): **33.3 ms with kerning, 8.6 ms with kerning()
+// stubbed to zero** -- so the bisection was **74%** of the walk. That walk is a
+// chapter's index pass and it is also what a backward page turn's rewind does, which
+// is the one place on the reading path this file's own notes measure in seconds.
+//
+// A CACHE RATHER THAN A TABLE, because the answer is overwhelmingly zero and a table
+// of it would be mostly zeros: at ppem 32 only **6.5%** of Latin-1 pairs kern at all
+// once scaled and rounded to whole pixels, and real prose kerns **9.7%** of its
+// adjacent pairs. What makes a cache work here is the other measurement -- a
+// paragraph of prose uses ~200 DISTINCT adjacent pairs, so a few hundred slots hold
+// a chapter's whole pair alphabet the way the arena holds its glyph alphabet.
+//
+// Direct-mapped and never evicted-by-policy: a collision simply overwrites, which is
+// the same "a memo may miss, it may not lie" contract the glyph arena has.
+//
+// LATIN-1 ON BOTH SIDES, so the key fits 16 bits and 0 can mean empty (both members
+// are >= 0x20 by the guard, so a real key is never zero). A pair involving a curly
+// quote or an em dash misses the cache and bisects as before -- rare beside letters,
+// and widening the key would double the table for it.
 struct LatinCache {
   static constexpr uint16_t kUnresolved = 0xFFFF;
   uint16_t gid[256];
   int16_t advancePx[256];
 
+  // 512 slots, 1,536 bytes a face, and the number is the knee of a sweep rather than
+  // a round figure. Same 56-page walk, desktop -O3, best of 20:
+  //
+  //     no cache 33.3 ms | 128 slots 18.0 | 256 14.5 | 512 13.5 | 1024 13.7
+  //
+  // 1024 is not better -- it is slightly worse, because the table stops fitting the
+  // host's own data cache and the extra slots buy nothing: a chapter's pair alphabet
+  // is a few hundred, not a few thousand. That is the same shape as the glyph arena
+  // above, where the union and not the page is what has to fit.
+  static constexpr size_t kKernSlots = 512;
+  uint16_t kernKey[kKernSlots];
+  int8_t kernPx[kKernSlots];
+
+  // A pixel kern outside int8 cannot be stored, so it is not cached. It cannot occur
+  // on this face at any reading size (the widest pair is ~3 px at ppem 64) and the
+  // branch is here so that a face where it did occur would be SLOW rather than
+  // WRONG -- the same rule as a glyph too big for the arena.
+  static constexpr int kMaxCachedKern = 127;
+
+  static bool cacheable(char32_t l, char32_t r) {
+    return l >= 0x20 && l < 0x100 && r >= 0x20 && r < 0x100;
+  }
+  // Cheap mix, not a hash: both members are 0x20..0xFF, so the low bits of each
+  // carry all the entropy there is and the shift keeps `l` out of `r`'s way.
+  static size_t slotOf(char32_t l, char32_t r) {
+    return ((static_cast<size_t>(l) << 4) ^ static_cast<size_t>(r) ^
+            (static_cast<size_t>(l) >> 4)) &
+           (kKernSlots - 1);
+  }
+  static uint16_t keyOf(char32_t l, char32_t r) {
+    return static_cast<uint16_t>((static_cast<unsigned>(l) << 8) | static_cast<unsigned>(r));
+  }
+
   void clear() {
     for (size_t i = 0; i < 256; ++i) gid[i] = kUnresolved;
+    // The kern is in PIXELS too, so it belongs to the size exactly as the advance does.
+    for (size_t i = 0; i < kKernSlots; ++i) kernKey[i] = 0;
   }
 };
 
@@ -229,9 +294,14 @@ struct ScalableFont::Impl {
   bool fontOk = false;
   float scale = 0.0f;  // font units -> pixels, i.e. sizePx / unitsPerEm
 
-  // The arena, allocated ONCE at construction and never resized. Null if the
-  // budget was zero or the allocation failed, in which case every glyph takes
-  // the bypass path below: slower, still correct.
+  // What the caller asked for, AT kBudgetRefPpem. Kept because init() has to
+  // re-derive the arena from it every time the size changes.
+  size_t budgetAtRef = 0;
+
+  // The arena. Re-allocated when init() is given a new reading size and left alone
+  // otherwise -- see resizeArena. Null if the budget was zero or the allocation
+  // failed, in which case every glyph takes the bypass path below: slower, still
+  // correct.
   std::unique_ptr<uint8_t[]> arena;
   size_t arenaCap = 0;
   size_t head = 0;  // next write offset; wraps to 0 when a glyph will not fit
@@ -284,6 +354,35 @@ struct ScalableFont::Impl {
     for (size_t i = 0; i < entryCap; ++i) entries[i].live = false;
   }
 
+  // Re-point the arena at `want` bytes. Called only from init(), only when the
+  // reading size changed the answer.
+  //
+  // THE NEW BLOCK IS TAKEN BEFORE THE OLD ONE IS RELEASED, and that ordering is the
+  // whole safety of this function: `-fno-exceptions` turns a `new` that cannot be
+  // served into abort() with no diagnostic, so every allocation here is
+  // `new (std::nothrow)` and a null one has to leave the face exactly as it was. A
+  // grow that fails is a face that keeps the arena it had -- SLOWER at the new size,
+  // never dead, which is the same contract a budget too small to hold a glyph has.
+  //
+  // It costs `old + new` bytes for the length of the swap. That is affordable
+  // because of WHEN it happens: the only caller is init(), and the only thing that
+  // re-inits at a new size is the Typography `Size` row, which is a chrome screen
+  // with no book open and no inflater -- ~133 KB free, not the 42,152-byte floor a
+  // page on glass leaves. Nothing on the reading path reaches here at all.
+  void resizeArena(size_t want) {
+    if (want == arenaCap) return;
+    std::unique_ptr<uint8_t[]> fresh;
+    if (want > 0) {
+      fresh.reset(new (std::nothrow) uint8_t[want]);
+      if (!fresh) return;  // keep what we have; the cache is a memo, not a promise
+    }
+    arena = std::move(fresh);
+    arenaCap = arena ? want : 0;
+    // Every live entry's offset was into the block just released.
+    flush();
+    stats.capacityBytes = arenaCap;
+  }
+
   const Entry* find(char32_t cp) const {
     for (size_t i = 0; i < entryCap; ++i)
       if (entries[i].live && entries[i].cp == cp) return &entries[i];
@@ -327,17 +426,30 @@ struct ScalableFont::Impl {
   }
 };
 
+// The reference size a budget is stated at IS the reader's body size. They are two
+// constants in two headers because layout.h is the layer above this one and this
+// file must not depend on it at compile time -- so they are tied here, in the one
+// translation unit that legitimately sees both.
+static_assert(ScalableFont::kBudgetRefPpem == kBodyPpem,
+              "a budget stated at one size and scaled from another is silently wrong");
+
 ScalableFont::ScalableFont(size_t cacheBudgetBytes) : impl_(new (std::nothrow) Impl) {
   if (!impl_) return;
+  impl_->budgetAtRef = cacheBudgetBytes;
   // The arena is the caller's budget; the entry table is derived from it and is
   // reported separately (CacheStats::overheadBytes) rather than hidden, because
   // a budget that quietly cost more than it said would defeat the point of
   // having one. 48 bytes per entry is a small glyph at a reading size, so this
   // sizes the table to roughly "as many entries as the arena could hold", and
   // the cap keeps the table itself from becoming the expensive part.
+  //
+  // Sized from the CEILING rather than from the budget, so growing the arena for a
+  // larger reading size never has to grow the table too: one allocation for the
+  // table, ever, and resizeArena has exactly one block to swap. At the default this
+  // changes nothing -- 16 KB and 24 KB both land on the 128 cap.
   constexpr size_t kBytesPerEntry = 48;
   constexpr size_t kMinEntries = 8, kMaxEntries = 128;
-  size_t n = cacheBudgetBytes / kBytesPerEntry;
+  size_t n = maxCacheBytesFor(cacheBudgetBytes) / kBytesPerEntry;
   if (n < kMinEntries) n = kMinEntries;
   if (n > kMaxEntries) n = kMaxEntries;
   impl_->entries.reset(new (std::nothrow) Impl::Entry[n]);
@@ -380,6 +492,16 @@ bool ScalableFont::init(const uint8_t* ttf, size_t len, int sizePx) {
   // ascent-descent come to sizePx, which is a different and larger number, so
   // using it would draw every heading over the box the layout reserved for it.
   impl_->scale = stbtt_ScaleForMappingEmToPixels(&impl_->info, static_cast<float>(sizePx));
+
+  // THE ARENA BELONGS TO THE SIZE, and until this line it did not. A flat budget is
+  // right at one ppem and wrong at every other: the working set goes as ppem squared,
+  // so the 16 KB that holds ppem 32 with 25% spare holds ppem 41's 19,284 bytes not at
+  // all, and a Typography `Size` row is exactly a control for changing that number.
+  // Measured before this existed: at ppem 41 a second pass over the alphabet took 2
+  // cache hits out of 127 and re-rasterised the other 125, at ~3,794us a glyph on the
+  // panel. Done here rather than in the constructor because the size is not known
+  // there -- the shell's faces are statics built before setup() runs.
+  impl_->resizeArena(cacheBytesFor(sizePx, impl_->budgetAtRef));
 
   int a = 0, d = 0, g = 0;
   stbtt_GetFontVMetrics(&impl_->info, &a, &d, &g);
@@ -437,15 +559,36 @@ std::optional<int> ScalableFont::advance(char32_t cp) const {
 
 int ScalableFont::kerning(char32_t left, char32_t right) const {
   if (!ready()) return 0;
+  LatinCache& lc = impl_->latin;
+
+  // The pair cache first: stbtt_GetGlyphKernAdvance bisects 6,064 pairs, and a wrap
+  // asks for the same pairs over and over because wrapProseLead grows a line greedily
+  // and re-measures every candidate. See LatinCache -- this was 74% of a pagination
+  // walk before the cache existed.
+  const bool memoable = LatinCache::cacheable(left, right);
+  size_t slot = 0;
+  if (memoable) {
+    slot = LatinCache::slotOf(left, right);
+    if (lc.kernKey[slot] == LatinCache::keyOf(left, right)) return lc.kernPx[slot];
+  }
+
   // TWO cmap searches per PAIR, which measure() does for every character after the
   // first -- so this was two thirds of the cmap work in a wrap. A cached gid is the
   // same number the advance lookup already resolved.
   const int l = gidFor(left);
   const int r = gidFor(right);
-  if (l == 0 || r == 0) return 0;
-  const int k = stbtt_GetGlyphKernAdvance(&impl_->info, l, r);
-  if (k == 0) return 0;
-  return roundPx(static_cast<float>(k) * impl_->scale);
+  int px = 0;
+  if (l != 0 && r != 0) {
+    const int k = stbtt_GetGlyphKernAdvance(&impl_->info, l, r);
+    if (k != 0) px = roundPx(static_cast<float>(k) * impl_->scale);
+  }
+  // A miss is worth storing as much as a hit is: 90% of prose pairs kern ZERO, and
+  // those are exactly the bisections that found nothing and would be repeated.
+  if (memoable && px >= -LatinCache::kMaxCachedKern && px <= LatinCache::kMaxCachedKern) {
+    lc.kernKey[slot] = LatinCache::keyOf(left, right);
+    lc.kernPx[slot] = static_cast<int8_t>(px);
+  }
+  return px;
 }
 
 std::optional<Glyph> ScalableFont::glyph(char32_t cp) const {
