@@ -28,7 +28,10 @@ DEFAULT_CACHE = os.path.expanduser("~/.cache/encre-corpus")
 # server. One second between requests to the same host, and a User-Agent that says
 # who is calling, is the price of using them at all.
 USER_AGENT = "encre-corpus/1.0 (+https://github.com/Rukkaitto/encre)"
-POLITE_DELAY_S = 1.0
+# MEASURED, not guessed: at one second Standard Ebooks returned twenty HTTP 429s and
+# thirty-one books were skipped. It is one volunteer's server. Three seconds is the
+# price of being allowed to use it, and a discovery run is a thing you do once.
+POLITE_DELAY_S = 3.0
 
 
 def read_manifest(path=MANIFEST):
