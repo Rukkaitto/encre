@@ -298,17 +298,35 @@ Nothing to fix — the box is chrome geometry and always will be — but expect 
 question from anyone comparing the preview against the page, and do not chase it as
 a justification bug.
 
-**THE PREVIEW CANNOT PREVIEW THE MARGINS, AND THAT IS WORTH WRITING DOWN BEFORE
-SOMEBODY "FIXES" IT.** The box is CHROME geometry -- the board's 24px page
-margins less its own border and padding, 396px of measure on the X4 -- where the
-reading column is `panelW - 2 * margins`, 444px at the default. They are
-different numbers and always will be, so the box shows `Font`, `Size`,
-`Line spacing` and `Alignment` faithfully and cannot show `Margins` at all.
+**IT PREVIEWS THE MARGINS TOO, AND THIS SECTION USED TO ARGUE THAT IT COULD NOT.**
 
-Making the box track the margin setting would be worse than not trying: it would
-move the border on every step of one row, and it would still not be the reading
-measure, so it would look like a preview and be wrong by 48px. A preview that is
-honest about four of five settings beats one that appears to cover all five.
+The old argument: the box is CHROME geometry -- the board's 24px page margins less
+its own border and padding, 396px of measure on the X4 -- where the reading column
+is `panelW - 2 * margins`, 444px at the default. Different numbers, always. From
+that I concluded the box could show four of five settings and never `Margins`, and
+warned the next reader off "fixing" it.
+
+**Reported off the device (2026-08-28): "changing the margins doesn't update the
+live preview."** The reasoning was right about the numbers and wrong about the
+framing: **the box is the PAGE and its horizontal padding IS the margin.** Under
+that framing the base measure being narrower than the column is beside the point --
+what has to track the setting is the padding, and it now does.
+
+**The delta is EXACT, not scaled**, because the box and the panel are the same
+device pixels: one px of margin narrows the reading column by 2px and this padding
+by 1px each side. So `padX = 16 + (margins - kMarginSteps[0])` -- 16 at `TIGHT`, 24
+at `COMFORTABLE`, 36 at `WIDE` -- and the board depicts the default at 24.
+
+**The border does not move**, so no row moves; the property the fixed height exists
+for is untouched, and the golden change is confined to rows inside the box. At the
+DEFAULT the specimen does not even re-wrap -- the four lines survive the 16px
+narrower measure, so the change is re-justification plus an 8px shift. The re-wrap
+is real and visible at `WIDE`.
+
+It is the same argument that put `ProseAlign::Justify` in the box, and I applied it
+to `Alignment` while explicitly excluding `Margins`. **The exclusion did not survive
+contact with the panel**, and that is the part worth keeping over the conclusion:
+"this cannot be previewed" was a statement about my framing, not about the box.
 
 ## The apply path
 
