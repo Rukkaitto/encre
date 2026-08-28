@@ -231,18 +231,15 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // project has shipped that substitution twice and each time it hid the real cause.
   void setPeekDemo() { peekDemo_ = true; }
 
-  // The peeked chapter of the book the reader has open: which spine entry, and the
-  // book-wide percentage at it. The percentage is computed by the caller, because
-  // progressPercent needs the book's chapter byte layout and the shell already has it.
-  void setPeek(int spine, int percent) {
+  // The peeked chapter of the book the reader has open: which spine entry, and nothing
+  // else. It took a book-wide PERCENTAGE too, computed by the shell, and the peek held
+  // that figure for its whole life -- so the band's number stayed on the chapter the
+  // panel was opened at while its label followed the reader across a boundary. The
+  // panel derives it from the chapter it is showing now; see PeekScreen::percentHere.
+  void setPeek(int spine) {
     peekSpine_ = spine;
-    peekPercent_ = percent;
     peekPrimed_ = true;
   }
-  // PRIMED, not "spine >= 0": spine 0 is a real target -- it is the book's cover, which
-  // an NCX section header can legitimately name -- so a sentinel would refuse a valid
-  // peek. Only "nothing was primed at all" is refused.
-  void clearPeek() { peekPrimed_ = false; }
 
   // The panel's column, from Theme::peekMetrics. Separate from setReaderMetrics because
   // they are DIFFERENT COLUMNS -- that is the whole design -- and one setter for both
@@ -361,7 +358,6 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   bool peekDemo_ = false;
   bool peekPrimed_ = false;
   int peekSpine_ = 0;
-  int peekPercent_ = 0;
   PageMetrics peekMetrics_{};
   bool sleepIdle_ = false;
   bool sleepWaking_ = false;

@@ -3,6 +3,7 @@
 #include <string>
 #include <utility>
 
+#include "reader/reading_store.h"
 #include "reader/theme.h"
 
 namespace reader {
@@ -31,9 +32,8 @@ namespace reader {
 // what the reader can follow and past what they meant to look at. The Reader beneath
 // declares none for the same reason; a peek is a shorter excursion, not a laxer one.
 
-PeekScreen::PeekScreen(FileSystem& fs, OpenedBook book, int spine, int percent,
-                       const GlyphSource* body)
-    : percent_(percent) {
+PeekScreen::PeekScreen(FileSystem& fs, OpenedBook book, int spine,
+                       const GlyphSource* body) {
   declareSplitMovers();
   inner_ = std::make_unique<ReaderScreen>(fs, std::move(book), spine, body);
   syncVm();
@@ -83,6 +83,34 @@ int PeekScreen::chosenSpine() const { return inner_->chapterIndex(); }
 
 Cursor PeekScreen::chosenCursor() const { return inner_->currentCursor(); }
 
+int PeekScreen::percentHere() const {
+  // WHERE THE PANEL'S CHAPTER IS IN THE BOOK, recomputed from the chapter actually on
+  // screen rather than from the one the panel was opened at.
+  //
+  // IT WAS FIXED AT CONSTRUCTION, and a comment defended that: "the band's percent does
+  // not move -- it is the caller's figure for the CHAPTER". It cannot be defended,
+  // because PAGING OFF EITHER END OF THE PEEKED CHAPTER CROSSES INTO THE NEXT ONE and
+  // this class's own header lists that as a designed property. The label followed the
+  // crossing and the number did not, so the band read `CH. 09 · 4%` with 4% being
+  // chapter 8's start -- two halves of one composed run describing different chapters,
+  // in the ONLY positional information this panel offers (it has no page number, by
+  // design) and the number the reader decides `GO HERE` on.
+  //
+  // THE CHAPTER'S START FRACTION, not the page's. progressPercent would interpolate
+  // within the open chapter if it were handed bytes, and it is deliberately not: the
+  // panel says WHICH CHAPTER and where that chapter falls, which is a claim true at
+  // any column width -- and this column is not the reader's. A number that crept as
+  // the reader paged would be a page position, which is exactly what this panel
+  // refuses to state.
+  //
+  // AND THE IN-MEMORY CONSTRUCTOR KEEPS THE CALLER'S FIGURE, because there is no book
+  // behind it to ask -- progressPercent answers 0 for a book with no chapters, and the
+  // board's peek is 4%.
+  const OpenedBook& b = inner_->book();
+  if (b.chapterCount() <= 0) return percent_;
+  return progressPercent(b, inner_->chapterIndex(), 1, 0, 0);
+}
+
 void PeekScreen::syncVm() {
   // `CH. 01 · 4%`, composed here because the theme does no arithmetic -- and the chapter
   // is whatever the inner reader's header would have said, which is the book's own name
@@ -93,7 +121,7 @@ void PeekScreen::syncVm() {
   // and the ESP32's GCC ACCEPTS it, emitting a byte that is not U+00B7. Adjacent string
   // literals end the escape, which is why the dot is spelled on its own below and never
   // glued to what follows it.
-  vm_.where = inner_->vm().chapter + " " "\xC2\xB7" " " + std::to_string(percent_) + "%";
+  vm_.where = inner_->vm().chapter + " " "\xC2\xB7" " " + std::to_string(percentHere()) + "%";
 }
 
 Action PeekScreen::onGesture(const GestureEvent& g) {
@@ -116,9 +144,9 @@ Action PeekScreen::onGesture(const GestureEvent& g) {
     case Gesture::Prev: {
       const Action a = inner_->onGesture(g);
       if (a.kind == Action::Kind::None) return Action::none();
-      // The band's percent does not move -- it is the caller's figure for the CHAPTER --
-      // but the chapter label does, because paging off either end crosses into the next
-      // spine entry.
+      // BOTH HALVES OF THE BAND MOVE, and one of them used to not: paging off either
+      // end crosses into the next spine entry, so the label changed and the percent
+      // stayed on the chapter the panel was opened at. See percentHere().
       syncVm();
       return Action::redraw();
     }

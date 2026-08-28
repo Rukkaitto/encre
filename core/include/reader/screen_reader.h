@@ -399,6 +399,17 @@ class ReaderScreen : public Screen {
   uint32_t chapterBytes() const { return chapter_.sizeBytes(); }
   int chapterCount() const { return book_.chapterCount(); }
 
+  // THE BOOK THIS SCREEN IS READING, for the one caller that has to ask a question
+  // about the whole book rather than about the open chapter: progressPercent, which
+  // sums every chapter's uncompressedSize. The peek's band composes a percentage that
+  // has to follow the chapter it is showing, and the peek owns one of these -- so
+  // without this it would need a second copy of the spans it is already holding.
+  //
+  // EMPTY FOR THE IN-MEMORY CONSTRUCTOR, which is how a caller tells the two apart:
+  // `chapterCount() == 0` means there is no book to ask, and progressPercent answers
+  // 0 for one. A reference, so nothing is copied; it lives as long as this screen.
+  const OpenedBook& book() const { return book_; }
+
   // JUMP TO A SPINE ENTRY, for the table of contents. False leaves the screen exactly
   // where it was -- `openChapterAt` restores the previous chapter on failure, which is
   // what makes a refused jump safe rather than a blank page with a stale index.
@@ -421,13 +432,27 @@ class ReaderScreen : public Screen {
   //                              several pages into the peek before committing, so
   //                              page one is the wrong landing.
   //
-  // The page NUMBER is computed on arrival by openAtCursor counting boundaries, which
-  // is what lets the peek be honest about not having one while the commit is exact.
+  // ONE WALK, NOT TWO. It is `openChapterAt` with `startAt_` armed -- the same
+  // mechanism a restored reading position lands through -- so the target chapter is
+  // decoded ONCE, up to the cursor, with the boundaries it passes recorded on the way.
+  // It was a landing on page one followed by a second walk from the top, which on the
+  // device is ~380 ms wasted on a median chapter and ~2.3 s on a long one. The page
+  // NUMBER falls out of the boundaries that walk recorded, which is what lets the peek
+  // be honest about not having one while the commit is exact.
   //
-  // False leaves the screen exactly where it was, including the anchor: openChapterAt
-  // restores the previous chapter on failure, and the anchor is set only after the walk
-  // succeeds -- a refused jump is not a departure, and anchoring one would leave a way
-  // back to a page the reader never left.
+  // BOTH CASES GO THROUGH THE SAME CALL, cross-chapter and same-chapter alike, and
+  // that is what makes the sentence below true rather than nearly true.
+  //
+  // FALSE LEAVES THE SCREEN EXACTLY WHERE IT WAS -- the chapter, the index and its
+  // completeness, the page, the label, the view model and the anchor. That is
+  // openChapterAt's own restore, and it is why nothing here has a second copy of it.
+  // The anchor is set only after the walk succeeds: a refused jump is not a departure,
+  // and anchoring one would leave a way back to a page the reader never left.
+  //
+  // WHAT IT COSTS TO SAY THAT: a jump within the open chapter re-opens the file and
+  // re-reads its 30-byte local header, where the old two-call form rewound the handle
+  // it already had. Noise against the walk, and the alternative was a second restore
+  // path -- see the comment at the definition, which prices both halves.
   bool goToPosition(int spine, Cursor at);
 
   // --- LETTING GO SO A PEEK CAN HAVE THE HEAP -------------------------------

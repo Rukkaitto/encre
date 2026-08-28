@@ -829,10 +829,46 @@ bool ReaderScreen::goToPosition(int spine, Cursor at) {
   if (spine < 0 || spine >= book_.chapterCount()) return false;
   // CAPTURED BEFORE THE MOVE, because the anchor takes the position being LEFT.
   const AnchorPos from = here();
-  if (spine != chapterAt_) {
-    if (!openChapterAt(spine, /*atEnd=*/false)) return false;
-  }
-  if (!openAtCursor(at)) return false;
+
+  // ONE WALK, THROUGH `startAt_`, AND ONE PATH FOR BOTH CASES.
+  //
+  // This was `openChapterAt` FOLLOWED BY `openAtCursor`, and that was wrong twice over.
+  //
+  // IT WALKED THE TARGET TWICE. openChapterAt lands on page ONE -- and for a chapter at
+  // or under kEagerCountBytes it first runs buildIndex(), a whole decode -- and
+  // openAtCursor then rewound and walked the prefix again. At the device's measured
+  // 7.2 ms/KB that is ~380 ms thrown away on a median 53 KB chapter and ~2.3 s on a
+  // long one, on the press the reader is waiting on. `startAt_` is the mechanism that
+  // already exists for exactly this: walkToChapter consumes it on the first candidate
+  // and lands ON the cursor, recording the boundaries it passes, which is the same
+  // single walk a restored position takes.
+  //
+  // AND IT WAS NOT ATOMIC, though its header said it was. openAtCursor clears `starts_`,
+  // drops `pb_` and assigns `page_ = Page{}` BEFORE its first failure check, so a
+  // failure behind a successful openChapterAt left the screen on the TARGET chapter
+  // with an empty index, no page and a `vm_` still describing the old one. That is not
+  // a cosmetic wrong: `currentCursor()` then answers Cursor{} while `chapterIndex()`
+  // answers the target, so a save landing in the seconds before the shell notices the
+  // card has gone OVERWRITES the reader's real place with `spine=target, block=0`.
+  //
+  // THE SAME-CHAPTER CASE GOES THROUGH openChapterAt TOO, rather than keeping its own
+  // openAtCursor call with a restore bolted on. Two reasons, and the second is the one
+  // that decided it: openChapterAt's restore is the only one in this class that puts
+  // back the chapter, the index, its completeness, the page AND the label, and this
+  // project has already shipped that restore wrong once (paging back off the front of
+  // the book threw the count away); a second spelling of it here would be a second
+  // chance to get it wrong, tested separately from the first. What it costs is one
+  // extra openRead plus the 30-byte local-header read when the target chapter is the
+  // one already open -- noise against the walk it is wrapping, and paid only on a jump.
+  //
+  // CLEARED AFTERWARDS, unconditionally: a walk that fails before reaching the landing
+  // (a card pulled, so chapter_.begin() cannot open the file) never consumes it, and a
+  // cursor left standing would be spent by the NEXT chapter this screen opens -- a page
+  // turn landing at a stranger's offset, long after the jump that armed it.
+  startAt_ = at;
+  const bool landed = openChapterAt(spine, /*atEnd=*/false);
+  startAt_ = Cursor{};
+  if (!landed) return false;
   syncVm();
   // AFTER THE WALK, so a refused jump is not a departure -- see the header.
   anchorJumped(from);

@@ -87,15 +87,23 @@ class PeekScreen : public Screen {
   // has open, and `fs` and `book` must outlive the screen exactly as they must for a
   // ReaderScreen.
   //
-  // `percent` is the book-wide reading percentage AT THE PEEKED CHAPTER, computed by
-  // the caller: reading_store.cpp's progressPercent needs the book's chapter byte
-  // layout, and core/ has no reason to make this screen compute it twice.
-  PeekScreen(FileSystem& fs, OpenedBook book, int spine, int percent,
-             const GlyphSource* body);
+  // NO `percent` PARAMETER, AND IT USED TO TAKE ONE. The caller computed the book-wide
+  // percentage at the peeked chapter and this screen held it for its whole life -- so
+  // the band's number stayed on the chapter the panel was OPENED at while its label
+  // followed the reader across a chapter boundary. Paging off either end crosses into
+  // the next spine entry (see above, where it is listed as a designed property), so the
+  // two halves of one composed run described different chapters. The book is right here
+  // in the inner reader, so the number is derived from the chapter on screen instead --
+  // see PeekScreen::percentHere.
+  PeekScreen(FileSystem& fs, OpenedBook book, int spine, const GlyphSource* body);
 
   // A single chapter already in memory, for the simulator and the goldens, which have
   // no card -- the same pair of constructors ReaderScreen has and for the same reason.
   // There is no book behind it, so paging past either end simply stops.
+  //
+  // THIS ONE KEEPS `percent`, and that is the whole reason the field survives: with no
+  // book there are no chapter byte spans to sum, so the board's 4% cannot be derived
+  // from anything and has to be stated.
   PeekScreen(std::string_view xhtml, std::string chapter, int percent,
              const GlyphSource* body);
   ~PeekScreen() override;
@@ -172,9 +180,14 @@ class PeekScreen : public Screen {
 
  private:
   void syncVm();
+  // The band's number: the book-wide percentage at the chapter the panel is SHOWING,
+  // which is not necessarily the one it was opened at. Falls back to the constructor's
+  // figure when there is no book -- see the in-memory constructor.
+  int percentHere() const;
 
   std::unique_ptr<ReaderScreen> inner_;
   PeekViewModel vm_{};
+  // ONLY THE IN-MEMORY CONSTRUCTOR SETS THIS. Card-backed peeks derive the number.
   int percent_ = 0;
   bool committed_ = false;
 };

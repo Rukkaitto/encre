@@ -4349,11 +4349,13 @@ void loop() {
         gTheme.peekMetrics(gFrame->width(), gFrame->height(), *gFonts, gBody, gSettings, pm);
         pm.italic = &gItalic;
         gFactory.setPeekMetrics(pm);
-        // THE BOOK-WIDE PERCENTAGE AT THE PEEKED CHAPTER, computed here because
-        // progressPercent needs the book's chapter byte layout and the panel has no
-        // reason to hold a second copy of it. Page 1 of the target with no count, which
-        // is what the fallback arm of progressPercent is for.
-        gFactory.setPeek(want, reader::progressPercent(gFactory.readerBook(), want, 1, 0, 0));
+        // WHICH SPINE ENTRY, AND NOTHING ELSE. This used to compute the book-wide
+        // percentage at the peeked chapter and hand it over -- and the panel then held
+        // that one figure while its chapter label followed the reader across a boundary,
+        // because paging off either end of a peek crosses into the next spine entry. The
+        // panel owns a ReaderScreen and therefore the book's byte spans, so it derives
+        // the number from the chapter it is showing. See PeekScreen::percentHere.
+        gFactory.setPeek(want);
         // THE READER LETS GO FIRST. A live chapter peaks at 69,884 bytes with a
         // 36,956-byte single allocation against a measured 45,840-byte floor, so two do
         // not fit -- and the peek is a second one. Released BEFORE the push, because the

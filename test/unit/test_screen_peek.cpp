@@ -17,6 +17,7 @@
 #include "reader_fixture.h"
 #include "reader/screen_peek.h"
 #include "reader/screen_reader.h"
+#include "reader/reading_store.h"
 #include "reader/screens.h"
 #include "reader/theme.h"
 #include "reader/theme_quiet.h"
@@ -232,6 +233,14 @@ TEST_CASE("a refused goToPosition leaves the screen exactly where it was") {
   const Cursor wasCursor = s.currentCursor();
   const bool wasAnchored = s.anchor().isSet();
   const reader::AnchorPos wasAnchor = s.anchor().get();
+  // THE VIEW MODEL IS PART OF "WHERE IT WAS", and it was the half nothing checked.
+  // `vm_` is what the panel underneath is drawn from and what the footer reads, so a
+  // refusal that left the index empty and the view model describing the old page is
+  // a screen whose two halves disagree -- a blank reading column under a footer still
+  // reading `3 / 24`. Cheap to assert and it is the observable the device reported.
+  const std::string wasVmChapter = s.vm().chapter;
+  const int wasVmPage = s.vm().page;
+  const int wasVmTotal = s.vm().pageTotal;
 
   CHECK_FALSE(s.goToPosition(99, Cursor{4, 0}));
 
@@ -242,8 +251,14 @@ TEST_CASE("a refused goToPosition leaves the screen exactly where it was") {
   CHECK(s.currentCursor() == wasCursor);
   CHECK(s.anchor().isSet() == wasAnchored);
   CHECK(s.anchor().get() == wasAnchor);
+  CHECK(s.vm().chapter == wasVmChapter);
+  CHECK(s.vm().page == wasVmPage);
+  CHECK(s.vm().pageTotal == wasVmTotal);
 
-  // ...and the one that reaches the walk.
+  // ...and the one that reaches the walk. THE TARGET CHAPTER IS REALLY OPENED HERE --
+  // chapter_.begin() succeeds on spine 1 and it is the PAGINATION that yields nothing
+  // -- so this is the refusal that happens with the walk already standing on the
+  // target, which is the shape the atomicity claim is about.
   CHECK_FALSE(s.goToPosition(1, Cursor{}));
 
   CHECK(s.chapterIndex() == wasChapter);
@@ -253,6 +268,110 @@ TEST_CASE("a refused goToPosition leaves the screen exactly where it was") {
   CHECK(s.currentCursor() == wasCursor);
   CHECK(s.anchor().isSet() == wasAnchored);
   CHECK(s.anchor().get() == wasAnchor);
+  CHECK(s.vm().chapter == wasVmChapter);
+  CHECK(s.vm().page == wasVmPage);
+  CHECK(s.vm().pageTotal == wasVmTotal);
+}
+
+TEST_CASE("a refused goToPosition WITHIN the open chapter leaves the screen alone too") {
+  // THE HALF THE TEST ABOVE CANNOT SEE, and the half that was unprotected: a commit
+  // whose spine is the chapter already open. It used to skip openChapterAt entirely
+  // and call openAtCursor directly -- and openAtCursor clears `starts_`, drops `pb_`
+  // and assigns `page_ = Page{}` BEFORE its first failure check, so a failure there
+  // left the screen with no index, no page and a view model still describing the one
+  // that had gone.
+  //
+  // THE FAILURE IS THE REVIEWER'S OWN SCENARIO: the card pulled between the shell's
+  // reacquireChapter() and the walk. The shell logs a refusal and carries on, so the
+  // seconds before pollCardPresence reroutes are seconds in which a quiet-window save
+  // can fire -- and it would have written `block=0` over the reader's real place.
+  cardfix::CardReading r(readerfix::longChapter(40));
+  reader::ReaderScreen& s = *r.scr;
+  s.completeIndex();
+  pageForward(s, 3);
+  REQUIRE(s.pageIndex() == 3);
+  const Cursor target = s.currentCursor();
+  REQUIRE(target != Cursor{});
+
+  const int wasChapter = s.chapterIndex();
+  const int wasCount = s.pageCount();
+  const std::string wasText = readerfix::pageText(s.page());
+  const std::string wasVmChapter = s.vm().chapter;
+  const int wasVmTotal = s.vm().pageTotal;
+  REQUIRE_FALSE(wasText.empty());
+  REQUIRE(wasCount > 4);
+
+  // A JUMP FORWARD INSIDE THIS CHAPTER, to a page that is genuinely elsewhere -- so a
+  // screen that moved would be visible, rather than one that happened to stay put.
+  pageBackward(s, 3);
+  REQUIRE(s.pageIndex() == 0);
+  const Cursor home = s.currentCursor();
+  const std::string homeText = readerfix::pageText(s.page());
+  REQUIRE(homeText != wasText);
+  // TAKEN HERE, NOT ABOVE: paging raises an anchor of its own, so a snapshot from
+  // before the paging would be asserting that the JUMP did not move something the
+  // walk back already had.
+  const bool wasAnchored = s.anchor().isSet();
+  const reader::AnchorPos wasAnchor = s.anchor().get();
+
+  r.fs.setMounted(false);
+  CHECK_FALSE(s.goToPosition(0, target));
+
+  CHECK(s.chapterIndex() == wasChapter);
+  CHECK(s.pageIndex() == 0);
+  CHECK(s.pageCount() == wasCount);
+  CHECK(readerfix::pageText(s.page()) == homeText);
+  CHECK(s.currentCursor() == home);
+  CHECK(s.anchor().isSet() == wasAnchored);
+  CHECK(s.anchor().get() == wasAnchor);
+  CHECK(s.vm().chapter == wasVmChapter);
+  CHECK(s.vm().page == 1);
+  CHECK(s.vm().pageTotal == wasVmTotal);
+}
+
+TEST_CASE("goToPosition walks the target chapter ONCE") {
+  // A GREEN SUITE CANNOT TELL ONE WALK FROM TWO -- both produce the right page. This
+  // is the same instrument test_reader_restore.cpp uses for the identical claim about
+  // a restored position: `stored` counts pages LAID OUT, which is the walk's real unit
+  // of work, and `decodes` counts the rewind-and-walk-forward that seekTo is.
+  //
+  // WHAT IT WAS: openChapterAt landed on page ONE (one page laid out, one decode) and
+  // openAtCursor then rewound and walked the whole prefix again. On the device that is
+  // ~380 ms thrown away on a median 53 KB chapter and ~2.3 s on a long one, paid on
+  // the press the reader is waiting on.
+  cardfix::CardReading r(readerfix::longChapter(40), reader::kBodyPpem,
+                         reader::Settings{}.margins, Cursor{},
+                         readerfix::longChapter(40));
+  reader::ReaderScreen& s = *r.scr;
+
+  // A REAL CURSOR FROM CHAPTER 1, taken by going there: a hand-built {block, line}
+  // would be a different assertion dressed as this one.
+  REQUIRE(s.goToChapter(1));
+  pageForward(s, 4);
+  const Cursor target = s.currentCursor();
+  const int targetPage = s.pageIndex();
+  const std::string targetText = readerfix::pageText(s.page());
+  REQUIRE(targetPage == 4);
+  REQUIRE(s.pageCount() > 5);  // the chapter really does run past the target
+  REQUIRE(s.goToChapter(0));
+  REQUIRE(s.chapterIndex() == 0);
+
+  const uint32_t storedBefore = s.ringStats().stored;
+  const uint32_t decodesBefore = s.ringStats().decodes;
+
+  REQUIRE(s.goToPosition(1, target));
+
+  CHECK(s.chapterIndex() == 1);
+  CHECK(s.pageIndex() == targetPage);
+  CHECK(readerfix::pageText(s.page()) == targetText);
+  // FIVE PAGES FOR A FIVE-PAGE PREFIX, and not a sixth: the sixth is the page-one
+  // landing the old form paid for and then threw away. Measured, not predicted -- the
+  // two-call form reads 6 and 1 here.
+  CHECK(s.ringStats().stored - storedBefore == static_cast<uint32_t>(targetPage) + 1);
+  // AND NO seekTo AT ALL. `stored` alone cannot see the eager count a small chapter
+  // takes, because a counting walk lays out no lines; the decode counter can, because
+  // the page-one landing that follows one is a seekTo.
+  CHECK(s.ringStats().decodes == decodesBefore);
 }
 
 // --- THE PANEL ITSELF -----------------------------------------------------------
@@ -327,6 +446,91 @@ TEST_CASE("the peek's band names the state and where it is, and never a page num
   // emitting a byte that is not this. Adjacent literals are what end the escape, and
   // this is what says they did.
   CHECK(where.find("\xC2\xB7") != std::string::npos);
+}
+
+namespace {
+
+// A CARD-BACKED PEEK, which the band's percent needs and PeekFix cannot give: the
+// number is a fraction of the BOOK's bytes, so a peek with no book behind it has
+// nothing to derive it from and correctly keeps the caller's figure. Same two-spine
+// EPUB cardfix builds for the Reader, at the PANEL's metrics.
+struct CardPeek {
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  readerfix::Body body;
+  reader::PageMetrics m;
+  FakeFileSystem fs;
+  reader::OpenedBook ob;
+  std::unique_ptr<reader::PeekScreen> scr;
+
+  CardPeek(const std::string& ch1, const std::string& ch2, int spine) {
+    theme.peekMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
+    REQUIRE(fs.writeAll("/books/b.epub", cardfix::epubWith(ch1, ch2)));
+    const char* why = "";
+    REQUIRE_MESSAGE(reader::openBook(fs, "/books/b.epub", ob, &why), std::string(why));
+    scr = std::make_unique<reader::PeekScreen>(fs, ob, spine, &body.face);
+    scr->setMetrics(m);
+  }
+  reader::PeekScreen& s() { return *scr; }
+};
+
+// The band is one composed run, so the percent is asserted on the END of it rather
+// than with find() -- `find("5%")` is satisfied by "15%" and by "5%" alike.
+bool bandSays(const reader::PeekScreen& p, int percent) {
+  const std::string want = " " + std::to_string(percent) + "%";
+  const std::string& where = p.vm().where;
+  return where.size() >= want.size() &&
+         where.compare(where.size() - want.size(), want.size(), want) == 0;
+}
+
+}  // namespace
+
+TEST_CASE("the band's percent follows the chapter the peek is SHOWING") {
+  // PAGING OFF THE END OF A PEEKED CHAPTER CROSSES INTO THE NEXT ONE -- the class
+  // header lists that as a designed property -- and the percent used to be fixed at
+  // construction while the label followed the crossing. The band then read
+  // `CH. 02 · 0%` with 0% being chapter 1's start: two halves of one run describing
+  // different chapters, in the only positional information this panel offers, and the
+  // number the reader decides GO HERE on.
+  //
+  // A SHORT FIRST CHAPTER AND A LONG SECOND, so the two chapters' start fractions are
+  // far apart -- the percentage is a fraction of the book's BYTES, so two chapters of
+  // equal size would put the boundary at 50% and a bug that reported the wrong one of
+  // them would still have to be told from a rounding difference.
+  CardPeek p(readerfix::longChapter(2), readerfix::longChapter(40), 0);
+  const int atFirst = reader::progressPercent(p.ob, 0, 1, 0, 0);
+  const int atSecond = reader::progressPercent(p.ob, 1, 1, 0, 0);
+  REQUIRE(atFirst == 0);          // the book starts at its start
+  REQUIRE(atSecond > atFirst);    // ...and the fixture really does separate them
+
+  REQUIRE(p.s().chosenSpine() == 0);
+  const std::string wasWhere = p.s().vm().where;
+  CHECK(bandSays(p.s(), atFirst));
+
+  // PAGE OFF THE END. Bounded rather than counted: how many pages a two-paragraph
+  // chapter makes in a 368px column is a fact about the wrap, and this test is not
+  // about the wrap.
+  bool crossed = false;
+  for (int i = 0; i < 20 && !crossed; ++i) {
+    p.s().onGesture({Gesture::Next});
+    crossed = p.s().chosenSpine() == 1;
+  }
+  REQUIRE(crossed);
+
+  CHECK(bandSays(p.s(), atSecond));
+  // AND BOTH HALVES MOVED. Without this the check above would still pass if the label
+  // had frozen instead -- the defect being fixed is precisely one half moving alone.
+  CHECK(p.s().vm().where != wasWhere);
+  CHECK(p.s().vm().where.find("CH. 02") != std::string::npos);
+
+  // ...AND BACK. The crossing is symmetric, so the number has to come back with it.
+  bool returned = false;
+  for (int i = 0; i < 20 && !returned; ++i) {
+    p.s().onGesture({Gesture::Prev});
+    returned = p.s().chosenSpine() == 0;
+  }
+  REQUIRE(returned);
+  CHECK(bandSays(p.s(), atFirst));
 }
 
 TEST_CASE("the sides page inside the peek and the front row does nothing") {
@@ -562,3 +766,4 @@ TEST_CASE("the demo Peek builds and shows the board's opening") {
   // paragraph the panel has no room for.
   CHECK(readerfix::pageText(peek->page()).find("Miss Brooke") != std::string::npos);
 }
+
