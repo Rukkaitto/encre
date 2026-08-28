@@ -1,5 +1,6 @@
 #include "reader/framebuffer.h"
 
+#include "reader/physrun.h"
 #include "reader/profile.h"
 
 #include <cstring>
@@ -7,33 +8,13 @@
 namespace reader {
 namespace {
 
-// One PHYSICAL row's columns [pxLo, pxHi), as bytes: which byte the run starts
-// and ends in, and which bits of those two are inside it. The bytes between them
-// are wholly inside, which is what lets the middle be a memset.
-//
-// Hoisted out of the row loop because a fill's run is the SAME for every row it
-// touches -- a rectangle is a rectangle in whichever space it is walked -- so the
-// masks are computed once per fillRect rather than once per row. veilRect cannot
-// do that (its mask depends on the row's phase in the 3px tile) and so recomputes
-// per row; the shapes look alike and this one is deliberately cheaper.
-struct PhysRun {
-  int b0, b1;         // first and last byte of the run, inclusive
-  uint8_t firstMask;  // the bits of b0 that are inside the run
-  uint8_t lastMask;   // the bits of b1 that are inside the run
-};
-
-PhysRun physRunFor(int pxLo, int pxHi) {
-  PhysRun r;
-  r.b0 = pxLo >> 3;
-  r.b1 = (pxHi - 1) >> 3;
-  // pxLo's bit and everything to its right; pxHi's bit and everything to its
-  // left. MSB-first, so "right" is the low bits. A run that ends on a byte
-  // boundary has (pxHi & 7) == 0, where `0xFF >> 0` would keep the whole NEXT
-  // byte instead of the whole last one -- the off-by-one an edge mask is for.
-  r.firstMask = static_cast<uint8_t>(0xFFu >> (pxLo & 7));
-  r.lastMask = (pxHi & 7) != 0 ? static_cast<uint8_t>(~(0xFFu >> (pxHi & 7))) : 0xFFu;
-  return r;
-}
+// PhysRun and physRunFor now live in reader/physrun.h, shared with ditherRect --
+// three byte-wise area primitives wanted the same two edge masks and the second
+// copy is the extraction point. The run is still hoisted out of the row loop
+// here, because a fill's run is the SAME for every row it touches: a rectangle is
+// a rectangle in whichever space it is walked. veilRect cannot hoist its MASK
+// (that depends on the row's phase in the 3px tile) and so recomputes per row;
+// ditherRect hoists the run and looks up one tile byte per row.
 
 // The two edge bytes are masked down to the run rather than special-cased, so a
 // run whose origin or width is not a multiple of eight writes no pixel outside

@@ -1,6 +1,7 @@
 #include "reader/dither.h"
 
 #include "reader/framebuffer.h"
+#include "reader/physrun.h"
 #include "reader/profile.h"
 
 namespace reader {
@@ -44,6 +45,102 @@ constexpr int kClustered[4][4] = {
     {8, 3, 2, 5},
     {14, 10, 7, 15},
 };
+
+// THE SHAPE ditherRect's FAST PATH ENCODES, and the one property it cannot see
+// for itself. The tile's RANKS are NOT symmetric under transposition --
+// kClustered[0][1] is 6 where kClustered[1][0] is 4 -- but every LEVEL'S SET is,
+// and it is the sets a threshold makes, never the ranks, that decide which cells
+// ink. That is what lets the rotated branch of ditherRect reuse the same byte
+// masks as the plain one with the axes swapped, exactly as veilRect does for the
+// simpler reason that kVeilDot is symmetric outright.
+//
+// Asserted rather than commented, for the same reason veilIsRowPlusColumn is: a
+// change to kClustered that kept its density and broke this would draw the tint
+// TRANSPOSED under rotation and correctly without it -- so it would pass every
+// desktop test and every golden and be wrong only on glass, which is the one
+// class of bug nothing on this side of the wire can see.
+constexpr bool clusteredLevelsAreTransposeSymmetric() {
+  for (int level = 1; level <= 4; ++level)
+    for (int a = 0; a < 4; ++a)
+      for (int b = 0; b < 4; ++b)
+        if ((kClustered[a][b] < level * 4) != (kClustered[b][a] < level * 4)) return false;
+  return true;
+}
+static_assert(clusteredLevelsAreTransposeSymmetric(),
+              "ditherRect's rotated branch assumes every level's cell set is its own transpose");
+
+// One byte of the tint for one tile phase at one level. Bit k, MSB-first, is set
+// iff the tile inks the cell k columns along the run.
+//
+// THE MASK DOES NOT ADVANCE ALONG THE ROW, which is what makes this closer to
+// fillRect than to the veil. A byte spans eight columns and the tile is four
+// wide, and 8 % 4 == 0, so every byte of a run starts on the same tile column and
+// carries the identical mask. The veil's tile is THREE wide and 8 % 3 == 2, which
+// is why its mask advances two phases a byte and repeats every three. So the
+// dither keeps a per-ROW phase, which a fill does not have, and loses the
+// per-BYTE one, which the veil does.
+constexpr uint8_t tintByte(int phase, int level) {
+  uint8_t m = 0;
+  for (int k = 0; k < 8; ++k)
+    if (kClustered[phase][k & 3] < level * 4) m = static_cast<uint8_t>(m | (0x80u >> k));
+  return m;
+}
+
+// [level - 1][phase]. Sixteen bytes, derived from kClustered rather than written
+// out so the masks cannot drift from the pattern they are meant to be.
+struct TintTable {
+  uint8_t m[4][4];
+};
+constexpr TintTable makeTintTable() {
+  TintTable t{};
+  for (int level = 1; level <= 4; ++level)
+    for (int phase = 0; phase < 4; ++phase) t.m[level - 1][phase] = tintByte(phase, level);
+  return t;
+}
+constexpr TintTable kTint = makeTintTable();
+// Spelled out so the derivation above has something to be checked against, and
+// readable as the tile itself: level 1 is the 2x2 dot (two blank rows and two
+// rows of 0x66 = 0b01100110, the dot repeated twice per byte), level 4 is solid.
+static_assert(kTint.m[0][0] == 0x00 && kTint.m[0][1] == 0x66 && kTint.m[0][2] == 0x66 &&
+                  kTint.m[0][3] == 0x00,
+              "level 1 is not the board's 2x2 dot on a 4px pitch");
+static_assert(kTint.m[1][0] == 0x44 && kTint.m[1][1] == 0xEE && kTint.m[1][2] == 0x77 &&
+                  kTint.m[1][3] == 0x22,
+              "level 2's tile is wrong");
+static_assert(kTint.m[2][0] == 0x66 && kTint.m[2][1] == 0xFF && kTint.m[2][2] == 0xFF &&
+                  kTint.m[2][3] == 0x66,
+              "level 3's tile is wrong");
+static_assert(kTint.m[3][0] == 0xFF && kTint.m[3][1] == 0xFF && kTint.m[3][2] == 0xFF &&
+                  kTint.m[3][3] == 0xFF,
+              "level 4 is not solid");
+
+// Apply one tile byte across a PHYSICAL row's columns [pxLo, pxHi), eight at a
+// time. `white` picks whether the tile's cells become paper or ink; the cells
+// themselves are the same either way, which is the board declaring its tint twice
+// (`.dither-dots` and `.dither-dots-inv`) rather than two patterns.
+//
+// A masked OR or AND-NOT rather than a memset: a fill REPLACES a byte, so its
+// middle can be memset, and a tint only touches the cells the tile picked, so its
+// middle is a read-modify-write. The two edge bytes are masked down to the run so
+// a run whose origin or width is not a multiple of eight writes no pixel outside
+// itself.
+inline void applyTint(uint8_t& b, uint8_t m, bool white) {
+  b = white ? static_cast<uint8_t>(b | m) : static_cast<uint8_t>(b & ~m);
+}
+
+void tintPhysRun(uint8_t* row, const PhysRun& r, uint8_t tile, bool white) {
+  // Two of level 1's four rows ink nothing at all, and an OR with zero or an
+  // AND with ~0 is a write that changes nothing -- so skipping them is not an
+  // approximation, it is half the rows of the shipped level not touched.
+  if (tile == 0) return;
+  if (r.b0 == r.b1) {
+    applyTint(row[r.b0], static_cast<uint8_t>(tile & r.firstMask & r.lastMask), white);
+    return;
+  }
+  applyTint(row[r.b0], static_cast<uint8_t>(tile & r.firstMask), white);
+  for (int b = r.b0 + 1; b < r.b1; ++b) applyTint(row[b], tile, white);
+  applyTint(row[r.b1], static_cast<uint8_t>(tile & r.lastMask), white);
+}
 
 // The dispersed counterpart, for glyph and icon edge coverage. The classic
 // recursive Bayer 4x4: every rank is as far from its neighbours as the tile
@@ -160,22 +257,93 @@ void veilPhysRun(uint8_t* row, int pxLo, int pxHi, bool full) {
 int bayer4(int x, int y) { return kBayer[y & 3][x & 3]; }
 
 void ditherRect(Framebuffer& fb, int x, int y, int w, int h, int level, Ink ink) {
+  // WHAT THIS USED TO BE, and why it is worth the table above: a per-pixel loop
+  // calling setPixel, so per pixel a bounds check, a byteIndex (a multiply and a
+  // division, and under rotation a subtraction as well), a bitMask (a modulo) and
+  // a bit-addressed read-modify-write -- paid for every pixel of the rect whether
+  // the tile inked it or not. It was the LAST of the four area primitives to be
+  // converted, after veilRect, Framebuffer::fillRect and the glyph blit, and it
+  // was left until last on the strength of Home's cover placeholder being its
+  // only caller worth naming, at 15-22 us on the desktop.
+  //
+  // THAT WAS THE WRONG CALLER. The Sleep screen's `.dither-field` is a level-1
+  // tint over the WHOLE PANEL (theme_quiet.cpp's renderSleep), which is 418,176
+  // pixels on the X3 and measured 332 us of that screen's 356 us render -- 93% of
+  // it, and the same shape of finding as the veil, which was also assumed cheap
+  // until it was measured.
+  //
+  // Nothing about the OUTPUT changes. test_dither.cpp keeps the per-pixel form as
+  // its reference and asserts this produces the identical framebuffer at both
+  // panel geometries, under both rotations, at every level, in both inks, and for
+  // runs that start and end mid-byte -- the same shape of proof fillRect and the
+  // veil each have, and for the same reason: every golden in the suite was
+  // blessed against the loop this replaces, so a disagreement means the fast path
+  // is wrong.
   PhaseSpan sp(Phase::Dither);
   if (level <= 0) return;
   if (level > 4) level = 4;
-  // level 1..4 -> threshold 4, 8, 12, 16 out of 16 cells inked.
-  const int threshold = level * 4;
+  if (w <= 0 || h <= 0) return;
+  const int fw = fb.width(), fh = fb.height();
+  if (fw <= 0 || fh <= 0) return;  // inert buffer: no store to write into
+  // CLIP FIRST, which is what setPixel's own bounds check used to do one pixel at
+  // a time. The PHASE is still the absolute coordinate's, so clipping cannot move
+  // the pattern: a clipped coordinate is one that was on the frame anyway, and it
+  // keeps its own index into the tile. That is what preserves the grid across a
+  // rect with a NEGATIVE origin -- overlay geometry is derived by subtraction from
+  // a centred panel, so it happens -- where the per-pixel form relied on `& 3`
+  // giving the two's-complement answer for coordinates it then threw away.
+  //
+  // In 64-bit because x + w is the caller's arithmetic and a pathological w would
+  // otherwise overflow the addition before the comparison could reject it.
+  const long long x0 = x, y0 = y;
+  const long long x1 = x0 + w, y1 = y0 + h;
+  const int xLo = static_cast<int>(x0 > 0 ? x0 : 0);
+  const int xHi = static_cast<int>(x1 < fw ? x1 : fw);
+  const int yLo = static_cast<int>(y0 > 0 ? y0 : 0);
+  const int yHi = static_cast<int>(y1 < fh ? y1 : fh);
+  if (xLo >= xHi || yLo >= yHi) return;
+
+  // The tint's four row masks for this level. Keyed on absolute framebuffer
+  // coordinates, not on the rect's own origin, so two adjoining dithered areas
+  // share one continuous grid instead of showing a seam where their phases
+  // disagree.
+  const uint8_t* const tiles = kTint.m[level - 1];
   // The dot's colour, in the framebuffer's convention (true = paper). The CELLS
   // chosen are the same either way: the board's inverted tint is the same dot on
   // the same grid drawn in the other colour, so a focused row's cover and an
   // unfocused one's cannot drift out of phase with each other.
   const bool dot = (ink == Ink::White);
-  // Keyed on absolute framebuffer coordinates, not on the rect's own origin, so
-  // two adjoining dithered areas share one continuous grid instead of showing a
-  // seam where their phases disagree.
-  for (int yy = y; yy < y + h; ++yy)
-    for (int xx = x; xx < x + w; ++xx)
-      if (kClustered[yy & 3][xx & 3] < threshold) fb.setPixel(xx, yy, dot);
+  uint8_t* const base = fb.data();
+  const int stride = fb.physRowBytes();
+  if (fb.rotation() == Rotation::Ccw) {
+    // UNDER ROTATION A LOGICAL ROW IS A PHYSICAL COLUMN, so walking a logical row
+    // byte-wise would smear the tint diagonally across the frame -- and the device
+    // is the rotated case, so that mistake would look right on the desktop and on
+    // every golden and wrong only on glass. This is veilRect's structure and
+    // fillRect's, for their reason.
+    //
+    // A logical COLUMN is a physical row: physX = logY, physY = width - 1 - logX
+    // (framebuffer.cpp's byteIndex, and rotate90CCW before it). So the outer loop
+    // is the logical x, each value of which is one physical row whose columns are
+    // the logical y range -- the same range for every column of the rect, which is
+    // why the run is computed once and only the tile byte changes.
+    //
+    // THE PHASE COMES FROM x HERE AND FROM y BELOW, and the same table serves
+    // both. A byte's bit k is the cell kClustered[phase][k & 3] in the plain case
+    // and kClustered[k & 3][phase] in this one -- the tile indexed the other way
+    // round -- and those agree because every level's cell set is its own
+    // transpose, which is the static_assert above rather than a hope.
+    const PhysRun run = physRunFor(yLo, yHi);
+    for (int lx = xLo; lx < xHi; ++lx)
+      tintPhysRun(base + static_cast<size_t>(fw - 1 - lx) * static_cast<size_t>(stride), run,
+                  tiles[lx & 3], dot);
+  } else {
+    // Unrotated: a logical row IS a physical row, so this is the plain case.
+    const PhysRun run = physRunFor(xLo, xHi);
+    for (int ly = yLo; ly < yHi; ++ly)
+      tintPhysRun(base + static_cast<size_t>(ly) * static_cast<size_t>(stride), run,
+                  tiles[ly & 3], dot);
+  }
 }
 
 void veilRect(Framebuffer& fb, int x, int y, int w, int h) {

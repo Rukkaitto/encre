@@ -772,10 +772,47 @@ Two things it inherits from the veil and one it does not:
   cases. `test_framebuffer.cpp` keeps the per-pixel form as its reference and
   asserts byte-identity across 37 rectangles × both rotations × both colours, and
   each of its cases was proved by MUTATION rather than by passing.
-- **`ditherRect` is now the last per-pixel area primitive.** It cannot take this
-  structure directly — its mask varies per row by tile phase, as the veil's does —
-  but the veil's per-phase byte shape would fit it. Home's cover placeholder is
-  its big caller, at 15–22 µs desktop, so it is small and known rather than next.
+- **`ditherRect` WAS the last per-pixel area primitive, and it is byte-wise now
+  too — so the family is closed.** It was expected to need the veil's shape,
+  because its mask varies per row by tile phase; it needed the FILL's, and the
+  difference is one modulus. A byte is eight columns and the tint's tile is
+  **four** wide, so `8 % 4 == 0` and every byte of a row carries the identical
+  mask — the run hoists out exactly as a fill's does, and only a one-byte table
+  lookup varies per row. The veil's tile is **three** wide and `8 % 3 == 2`, which
+  is the whole reason its mask has to advance per byte. *Which* primitive a new
+  one resembles is decided by that modulus, not by whether it has a phase.
+  - **THE SIZE OF IT WAS ESTIMATED FROM THE WRONG CALLER.** This entry named
+    Home's cover placeholder, at 15–22 µs desktop — which is right (16–17 µs
+    measured) and is not the big one. `renderSleep` tints the **whole panel**
+    (`.dither-field`), 418,176 pixels, and measured **329–338 µs of Sleep's
+    362.8 µs render — 91%**. Same mistake as the veil, whose cost was also assumed
+    small until it was measured: a primitive's bill is set by its widest caller,
+    and a full-frame call does not look different from a thumbnail at the call
+    site.
+  - **IT VECTORISES, WHICH IS WHY IT BEAT THE VEIL BY AN ORDER OF MAGNITUDE.** The
+    veil managed 13.6×; this is ~14× on the whole Sleep render and **well over
+    100× on the primitive**. The middle of a run is `row[b] |= tile` with `tile`
+    constant, so clang emits `orr.16b`/`and.16b` over `q` registers — 16 bytes a
+    go — where the veil's per-byte phase advance and a per-pixel loop can emit
+    nothing of the kind. Release/-O3, `--bench 200`, three runs each: `sleep`
+    362.8 → **25.9**, `sleep_idle` 343.5 → **8.1**, `home` 59.9 → **43.6**,
+    `library` 91.5 → **73.2**, `book_details` 54.0 → **35.4**.
+  - **THE TILE'S RANKS ARE NOT TRANSPOSE-SYMMETRIC BUT EVERY LEVEL'S SET IS**, and
+    that distinction is what lets the two rotations share one mask table the way
+    the veil's outright symmetry lets it swap axes. `kClustered[0][1]` is 6 where
+    `kClustered[1][0]` is 4, so the matrix is asymmetric; but a threshold only ever
+    asks "is this cell below the level", and each of those four sets IS its own
+    transpose. It is a `static_assert` in `dither.cpp`, not a comment, because a
+    change to `kClustered` that preserved density and broke it would draw the tint
+    transposed **under rotation only** — right on every golden, wrong on glass.
+  - `test_dither.cpp` keeps the per-pixel form as its reference across 30
+    rectangles × both rotations × all four levels × both inks, and every case was
+    proved by MUTATION: forcing the unrotated branch for both rotations fails 275
+    assertions, dropping the rotation's mirror term 143, keying the rotated branch
+    on the wrong axis 153, an off-by-one row phase 320, and each of the four
+    edge-mask failures 30–370. **The two rotation mutations are the ones nothing
+    else can catch** — all 40 simulator PNGs are byte-identical across the change,
+    and every one of them is `Rotation::None`.
 
 **A READER PAGE WAS 99% GLYPH BLIT** — 213 ms of a 215 ms render, the same
 per-pixel shape in `drawRunF26`, and the biggest single render cost in the
@@ -1438,7 +1475,7 @@ case to look at if one ever appears.
   against `ditherRect`'s 1.12 ms and a full-frame `clear`'s 0.001 ms, so ~150 ms
   of every overlay repaint at this project's ~65× desktop-to-device ratio. It now
   ORs eight columns at a time into the physical store — 0.17 ms, 13.6× — which
-  makes it **the one drawing routine in `core/` that knows `Rotation` exists**:
+  made it **the FIRST drawing routine in `core/` that knows `Rotation` exists**:
   under CCW a logical row is a physical *column*, so it walks logical **columns**
   instead, and the tile is symmetric under transposition, which is what lets the
   two cases just swap axes. A byte-wise path that assumed a logical row is a
@@ -1447,6 +1484,21 @@ case to look at if one ever appears.
   and asserts byte-identity at both geometries, under both rotations, and for runs
   that start and end mid-byte — the panel widths are multiples of 8, so nothing on
   the device exercises the edge masks.
+  - **THERE ARE FOUR OF THEM NOW, and this line said "the one" for three
+    conversions after it stopped being true.** `Framebuffer::fillRect`, the glyph
+    blit in `text.cpp` and `ditherRect` each took the same structure for the same
+    reason, and each carried its own paragraph calling itself the first, second or
+    only one. They share one hazard, and it is worth stating once: **under CCW the
+    outer loop is the logical x, and getting it wrong is invisible to the whole
+    desktop** — the simulator, every golden and every comparison sheet are
+    `Rotation::None`. Only a byte-identity test run under both rotations, and
+    proved by mutation, stands between that mistake and the panel.
+  - `PhysRun`/`physRunFor` — clip a run to a first byte, a last byte and two edge
+    masks — is `reader/physrun.h`, shared by `fillRect` and `ditherRect`. It was
+    written twice before it was a header, which is this file's own second-copy
+    rule arriving one copy late again. `veilRect` still computes its own inline,
+    because its masks are interleaved with the per-byte phase advance the other
+    two do not have.
 - **`ScrollWindow` owns list movement** — a `Focus` (see Storage) plus
   first-visible, scrolling by a row rather than a page, and it CLAMPS, which is
   what lets a held button's 40-row step land on the last row instead of past it. `Theme::libraryVisibleRows` derives how many rows fit
