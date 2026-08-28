@@ -9,31 +9,36 @@ namespace reader {
 namespace {
 
 // THE BOARD'S ROWS, IN THE BOARD'S ORDER, and the order is the only thing that
-// makes this table checkable against design/Settings.dc.html by eye. Eleven items:
-// two section headers and nine rows, which FITS the panel -- so Settings draws no
+// makes this table checkable against design/Settings.dc.html by eye. Seven items:
+// two section headers and five rows, which FITS the panel -- so Settings draws no
 // rail today.
 //
-// It did have a CONNECTIONS section with a Wi-Fi row, and losing them is what
-// brought the list back inside the panel: V1 is card-transfer only, Wi-Fi having
-// been cut as too big. Phase 3's typography settings will push it over again, and
-// nothing here has to change when they do -- renderSettings reads
-// `totalRows > rows` and draws the rail and takes its gutter only then.
+// IT WAS ELEVEN. A TYPOGRAPHY section carried Font, Size, Margins, Line spacing and
+// Alignment, drawn and unreachable because the settings behind them did not exist.
+// They do now, and they are edited on their own screen -- so five rows that merely
+// DISPLAYED them became one row that OPENS it. A placeholder is right only until
+// the setting exists; after that it is a screen showing a number nobody can trust.
+// READING rather than TYPOGRAPHY so the section is a sibling of DEVICE, has room
+// for the reading settings still to come, and does not repeat the row's own word
+// directly above it.
 //
-// The placeholder strings are the BOARD'S values for rows whose settings do not
-// exist yet, kept verbatim so the screen matches the board before Phase 3's reader
-// and Phase 4's Wi-Fi arrive. They are not defaults and nothing reads them back.
-constexpr std::array<SettingsScreen::Item, 11> kItems{{
-    {"TYPOGRAPHY", SettingsScreen::Field::None, true, ""},
-    {"Font", SettingsScreen::Field::None, false, "LITERATA"},
-    {"Size", SettingsScreen::Field::None, false, "18 PT"},
-    {"Margins", SettingsScreen::Field::None, false, "COMFORTABLE"},
-    {"Line spacing", SettingsScreen::Field::None, false, "1.7"},
-    {"Alignment", SettingsScreen::Field::None, false, "JUSTIFIED"},
-    {"DEVICE", SettingsScreen::Field::None, true, ""},
-    {"Sleep after", SettingsScreen::Field::SleepAfter, false, ""},
-    {"Full refresh", SettingsScreen::Field::FullRefresh, false, ""},
-    {"Refresh on screen change", SettingsScreen::Field::OnTransition, false, ""},
-    {"Sleep screen", SettingsScreen::Field::None, false, "BOOK COVER"},
+// It also had a CONNECTIONS section with a Wi-Fi row, and losing that is what
+// brought the list back inside the panel in the first place: V1 is card-transfer
+// only, Wi-Fi having been cut as too big. Nothing here has to change when the list
+// overflows again -- renderSettings reads `totalRows > rows` and draws the rail and
+// takes its gutter only then.
+//
+// The placeholder string is the BOARD'S value for the one row whose setting does not
+// exist yet, kept verbatim so the screen matches the board. It is not a default and
+// nothing reads it back.
+constexpr std::array<SettingsScreen::Item, 7> kItems{{
+    {"READING", SettingsScreen::Field::None, true, false, ""},
+    {"Typography", SettingsScreen::Field::Typography, false, true, ""},
+    {"DEVICE", SettingsScreen::Field::None, true, false, ""},
+    {"Sleep after", SettingsScreen::Field::SleepAfter, false, true, ""},
+    {"Full refresh", SettingsScreen::Field::FullRefresh, false, true, ""},
+    {"Refresh on screen change", SettingsScreen::Field::OnTransition, false, true, ""},
+    {"Sleep screen", SettingsScreen::Field::None, false, false, "BOOK COVER"},
 }};
 
 // The values CHANGE cycles through, and they wrap: this is one button, so there is
@@ -60,7 +65,9 @@ std::string refreshLabel(int every) {
 
 SettingsScreen::SettingsScreen(const Settings& initial, SettingsSink* sink)
     : FocusScreen(static_cast<int>(kItems.size()), 0), settings_(initial), sink_(sink) {
-  // The first focusable row, not row 0: row 0 is the TYPOGRAPHY header. syncVm
+  // The first focusable row, not row 0: row 0 is the READING header. That lands on
+  // `Typography`, which is the first row with anything behind it -- the focus sat on
+  // `Sleep after` only while every row above it was inert. syncVm
   // runs unconditionally after, because a table edited down to nothing focusable
   // leaves the setFocus refused and the screen must still render readably.
   setFocus(firstFocusable());
@@ -70,7 +77,10 @@ SettingsScreen::SettingsScreen(const Settings& initial, SettingsSink* sink)
 bool SettingsScreen::focusable(int index) const {
   if (index < 0 || index >= static_cast<int>(kItems.size())) return false;
   const Item& it = kItems[static_cast<size_t>(index)];
-  return !it.isHeader && it.field != Field::None;
+  // NOT `field != None`, which used to serve here and cannot any more: `Typography`
+  // has no field and must be focusable, because it discloses a screen instead of
+  // editing a value. See Item::reachable.
+  return !it.isHeader && it.reachable;
 }
 
 int SettingsScreen::firstFocusable() const {
@@ -83,8 +93,8 @@ int SettingsScreen::firstFocusable() const {
 
 void SettingsScreen::setMetrics(int listH, int rowH, int headerH) {
   // Counted from the TOP of the list, and that is the conservative end on purpose.
-  // The top window carries the most headers -- all three sections begin within the
-  // first thirteen items -- so any window further down fits at least as many
+  // The top window carries the most headers -- both sections begin within the first
+  // three items -- so any window further down fits at least as many
   // items. A count that varied with scroll position would make the rail's
   // proportion move as the user scrolled, which reads as the list changing length.
   int used = 0, n = 0;
@@ -125,6 +135,13 @@ Action SettingsScreen::cycleFocused() {
     case Field::OnTransition:
       settings_.fullOnTransition = !settings_.fullOnTransition;
       break;
+    case Field::Typography:
+      // Handled by onGesture BEFORE we get here -- this row discloses rather than
+      // edits, so there is nothing to cycle and nothing to commit. Listed rather
+      // than swept into a `default:`: -Wswitch naming a field nobody handled is the
+      // point of this switch, and a `default:` would throw that away the day a
+      // fifth field arrives.
+      return Action::none();
     case Field::None:
       return Action::none();
   }
@@ -144,7 +161,16 @@ Action SettingsScreen::onGesture(const GestureEvent& g) {
     // is what moveFocus is for.
     case Gesture::Next: return moveFocus(+1);
     case Gesture::Prev: return moveFocus(-1);
-    case Gesture::Activate: return cycleFocused();
+    // ONE ROW HERE OPENS A SCREEN AND THE REST EDIT IN PLACE, so Activate answers
+    // the push before it can reach cycleFocused -- which has nothing to cycle for
+    // that row and says so.
+    case Gesture::Activate: {
+      const int f = focus();
+      if (f >= 0 && f < static_cast<int>(kItems.size()) &&
+          kItems[static_cast<size_t>(f)].field == Field::Typography)
+        return Action::push(ScreenId::Typography);
+      return cycleFocused();
+    }
     case Gesture::Back: return Action::pop();
     default: return Action::none();
   }
@@ -169,9 +195,15 @@ void SettingsScreen::syncVm() {
     SettingsRow row;
     row.label = it.label;
     row.isHeader = it.isHeader;
-    row.focusable = !it.isHeader && it.field != Field::None;
+    row.focusable = focusable(at);
     if (!it.isHeader) {
+      row.discloses = it.field == Field::Typography;
       switch (it.field) {
+        // A DISCLOSING ROW HAS NO VALUE. Home's menu rows state the rule -- a row
+        // states a quantity or discloses a screen, never both -- and summarising
+        // four typography settings into the right slot would break it and would not
+        // fit. The chevron is the whole content of that slot.
+        case Field::Typography: break;
         case Field::SleepAfter: row.value = sleepLabel(settings_.sleepAfterMs); break;
         case Field::FullRefresh: row.value = refreshLabel(settings_.fullRefreshEvery); break;
         case Field::OnTransition: row.value = settings_.fullOnTransition ? "ON" : "OFF"; break;
@@ -181,10 +213,21 @@ void SettingsScreen::syncVm() {
     vm_.rows.push_back(std::move(row));
   }
 
-  // CHANGE, not OPEN: nothing here pushes a screen, every focusable row edits a
-  // value in place. The board says CHANGE and this is the one screen where the
-  // confirm button's label is not about navigation.
-  vm_.hints = {"BACK", "CHANGE", "UP", "DOWN"};
+  // THE CONFIRM LABEL FOLLOWS THE FOCUSED ROW, and this is the FIRST hint bar in
+  // this firmware whose text varies within one screen.
+  //
+  // This comment used to state the premise outright -- "CHANGE, not OPEN: nothing
+  // here pushes a screen, every focusable row edits a value in place" -- and the
+  // READING row makes that false. The alternative is worse than a moving label: a
+  // Confirm labelled CHANGE that opens a screen is the misleading-button defect this
+  // project keeps recording, and it is the one thing a hint bar exists to prevent.
+  // So one slot moves as the focus moves, and the bar stays true of the button it
+  // names. The other three never move, because Back, Up and Down mean the same
+  // thing on every row.
+  const int f = focus();
+  const bool opens = f >= 0 && f < static_cast<int>(kItems.size()) &&
+                     kItems[static_cast<size_t>(f)].field == Field::Typography;
+  vm_.hints = {"BACK", opens ? "OPEN" : "CHANGE", "UP", "DOWN"};
   vm_.holds = {false, false, false, false};
   declareHints(vm_.holds);
 }

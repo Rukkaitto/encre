@@ -37,29 +37,11 @@ bool justifiable(BlockKind k) {
   return k == BlockKind::Paragraph || k == BlockKind::Blockquote;
 }
 
-// How much each ASCII space on this line stretches, or 0 for ragged.
-//
-// The gap COUNT here and the codepoint drawTextJustified stretches must be the
-// same rule, which is why both name U+0020 and nothing else.
-int stretchFor(const GlyphSource& font, std::string_view line, int availW, Tracking tracking) {
-  int gaps = 0;
-  for (const char c : line)
-    if (c == ' ') ++gaps;
-  if (gaps == 0) return 0;  // one long word: nothing to distribute across
-
-  const int naturalW = font.measure(line, tracking);
-  // Negative slack is a word wider than the column, which the wrap deliberately
-  // let overhang. Pulling the gaps tighter to compensate would compress a line
-  // that is already wrong, in a way that looks like a different bug.
-  if (naturalW >= availW) return 0;
-
-  // The ragged fallback, tested on how full the LINE is rather than on how far a
-  // gap would stretch -- see kMinJustifyFillPercent for why that distinction is
-  // the whole of it. Multiplied out rather than divided, so a narrow column needs
-  // no rounding rule of its own.
-  if (naturalW * 100 < availW * kMinJustifyFillPercent) return 0;
-  return pxToF26(availW - naturalW) / gaps;
-}
+// `stretchFor` AND `kMinJustifyFillPercent` ARE reader/text.h's NOW, not this
+// file's private helpers -- moved when drawProse's ProseAlign::Justify became the
+// second caller. stretchFor takes no PageMetrics, no Block and no cursor, so it was
+// never pagination's; drawTextJustified, whose gap rule it has to agree with, was
+// already over there.
 
 // HOW MANY BLANK ROWS GO ABOVE THIS BLOCK.
 //
@@ -254,7 +236,7 @@ void PageBuilder::drain() {
     // each side that stretched its lines to `m_.columnW` would push them 96px past
     // its own right edge -- and it would look like justification is broken rather
     // than like the inset is.
-    if (!ln.lastOfBlock && justifiable(kind_))
+    if (!ln.lastOfBlock && justifiable(kind_) && m_.justify)
       ln.extraPerGapF26 = stretchFor(*font_, text, columnWFor(kind_) - f26ToPx(xIndentF26),
                                      blockTracking_);
     ln.text.assign(text);

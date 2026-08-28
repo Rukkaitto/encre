@@ -84,6 +84,14 @@ add_test(NAME sim_delete_confirm COMMAND reader_sim delete_confirm
 # render is this screen alone, over neither of the two beneath it.
 add_test(NAME sim_book_details COMMAND reader_sim book_details
          ${CMAKE_BINARY_DIR}/sim_book_details.png --canvas 480x800)
+# The Typography panel, on the stack the device will have: Reader -> menu ->
+# Typography. Rendered at the X3, which is the geometry with the tighter preview
+# budget (246px of content area against the X4's 254), so it is the one where the
+# four-line specimen decides. It is NOT yet a check on the navigation -- the menu's
+# Typography row is inert until it is made live, and sim/main.cpp says so at the
+# flag -- so what this smoke-tests today is that the panel builds and paints.
+add_test(NAME sim_typography COMMAND reader_sim typography
+         ${CMAKE_BINARY_DIR}/sim_typography.png --canvas 528x792)
 # The SD-missing screen renders with NO --root, which is the state it exists for.
 add_test(NAME sim_sd_missing COMMAND reader_sim sd_missing ${CMAKE_BINARY_DIR}/sim_sd_missing.png)
 # ...and the storage path runs on the desktop: a HostFileSystem mounted on the

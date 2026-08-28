@@ -981,15 +981,76 @@ static SettingsVerdict settingsFailure(reader::FileSystem& fs) {
           false};
 }
 
-// Push `gSettings` into the two objects that act on it. Factored out of
+// Push `gSettings` into the two objects this function owns. Factored out of
 // loadAndApplySettings because the Settings SCREEN needs exactly this and nothing
 // else: it has already changed the struct, and re-reading the file would undo the
 // change it is trying to make.
+//
+// THREE THINGS ACT ON gSettings AND THIS PUSHES TWO. The third is the reader's
+// PageMetrics: `bodyPpem`, `margins`, `lineSpacing` and `justify` are consumed by
+// Theme::readerMetrics and by the body face, and neither is touched here.
+//
+// IT IS NOT FIXED BY RECOMPUTING HERE, and that was checked rather than assumed:
+// this function runs at boot before the font ramp exists, so it cannot call
+// readerMetrics at all.
+//
+// THE THIRD CONSUMER IS THE TYPOGRAPHY APPLY PATH, which exists now -- this
+// comment said it "belongs to" that path while there was none, and then that the
+// PageMetrics is "set once in setup()", both of which have stopped being true.
+// `applyBodyPpem` below re-rasterises the faces at the chosen size and the loop's
+// gTypographyDirty branch recomputes readerMetrics and calls
+// ReaderScreen::relayout, which re-paginates the open chapter at the reader's own
+// page. So a change made through the panel reaches an open book.
+//
+// WHAT IT STILL DOES NOT REACH IS A SETTING THAT ARRIVES FROM THE FILE rather than
+// from the panel, and that gap is unchanged: boot with no card (defaults, margins
+// 18), insert a card whose settings.json says 30, press RETRY, and gSettings is 30
+// while pages are still laid at 18, because loadAndApplySettings takes this path
+// and not the apply path.
+//
+// AND `bodyPpem` IS THE SHARPER HALF OF THE SAME GAP, on a plain boot: setup()
+// inits gBody at the CONSTANT reader::kBodyPpem, well before loadAndApplySettings
+// has read the file, so a stored size does not survive a reboot. Named here rather
+// than fixed, because the fix is a boot-order question and not a settings push.
 static void applySettings() {
   gRefresh.setCadence(gSettings.fullRefreshEvery);
   gRefresh.setFullOnTransition(gSettings.fullOnTransition);
   gIdle.setTimeout(gSettings.sleepAfterMs);
 }
+
+// RE-RASTERISE THE BODY FACES AT THE CHOSEN SIZE.
+//
+// The Typography panel's preview draws with the SAME face object the reader draws
+// with, which is what makes it a live preview rather than a second approximation of
+// one -- and it is affordable only because that panel is a full screen: for as long
+// as it stands the reader's page and metrics are stale, and nothing draws them.
+//
+// THE ARENA GROWS, AND THE PEAK IS BOTH ARENAS AT ONCE. ScalableFont::init takes the
+// new block before releasing the old, so ppem 46 costs 24,576 + 16,384 for the roman
+// transiently. Against a reading floor of 42,152 bytes that is tight, which is why
+// the caller shrinks the reader's page ring on the way INTO the panel -- see the
+// pre-dispatch block in loop().
+//
+// A FAILED init KEEPS THE ARENA IT HAD and returns false, so an out-of-memory device
+// is slower rather than dead. It is logged, because a size that silently did not take
+// is a screen that looks like it ignored a button.
+static void applyBodyPpem() {
+  const uint32_t t = millis();
+  const bool okBody = gBody.init(kFontBodySerif, kFontBodySerifSize, gSettings.bodyPpem);
+  const bool okItalic =
+      gItalic.init(kFontBodySerifItalic, kFontBodySerifItalicSize, gSettings.bodyPpem);
+  logf("[typo] body ppem=%d roman=%s italic=%s line=%d in %lums free=%u min=%u\n",
+       gSettings.bodyPpem, okBody ? "ok" : "FAILED", okItalic ? "ok" : "FAILED",
+       gBody.lineHeight(), (unsigned long)(millis() - t), (unsigned)ESP.getFreeHeap(),
+       (unsigned)ESP.getMinFreeHeap());
+  logFlush();
+}
+
+// WHETHER A COMMIT MOVED ANYTHING THE READER'S LAYOUT DEPENDS ON, consumed after the
+// pop that leaves the Typography panel. Set by the sink, because the last step may be
+// the very press being dispatched -- reading the screen before the dispatch would be
+// too early, and after the pop there is no screen left to ask.
+static bool gTypographyDirty = false;
 
 // Where the Settings screen's changes go. See reader::SettingsSink: this is the
 // one place that both APPLIES a change and persists it, which is why the interface
@@ -1003,8 +1064,23 @@ static void applySettings() {
 class ShellSettingsSink : public reader::SettingsSink {
  public:
   bool commit(const reader::Settings& s) override {
+    // THE PPEM IS THE ONE FIELD THAT COSTS SOMETHING TO APPLY, so it is asked about
+    // rather than applied blindly: a commit from the SETTINGS screen never touches
+    // typography, and re-initing at the same size would flush both glyph caches for
+    // nothing -- ~127 glyphs to re-rasterise at ~3,794 us each the next time a page
+    // is drawn.
+    const int wasPpem = gSettings.bodyPpem;
+    const int wasMargins = gSettings.margins;
+    const int wasLead = gSettings.lineSpacing;
+    const bool wasJustify = gSettings.justify;
     gSettings = s;
     applySettings();
+    if (gSettings.bodyPpem != wasPpem) applyBodyPpem();
+    // ANY of the four, not just the ppem: margins change the column, and line spacing
+    // and alignment change the layout, all without touching a face.
+    if (gSettings.bodyPpem != wasPpem || gSettings.margins != wasMargins ||
+        gSettings.lineSpacing != wasLead || gSettings.justify != wasJustify)
+      gTypographyDirty = true;
     // The factory holds a COPY, because it is what constructs the screen and the
     // screen is handed its starting values. Without this, closing Settings and
     // reopening it would show the values from before the change -- the struct
@@ -1012,9 +1088,11 @@ class ShellSettingsSink : public reader::SettingsSink {
     // the one thing still lying.
     gFactory.setSettings(gSettings);
     const bool wrote = reader::saveSettings(gSd, gSettings);
-    logf("[settings] sleepAfterMs=%lu fullRefreshEvery=%d fullOnTransition=%d -> %s\n",
+    logf("[settings] sleepAfterMs=%lu fullRefreshEvery=%d fullOnTransition=%d "
+         "ppem=%d margins=%d lead=%d justify=%d -> %s\n",
          (unsigned long)gSettings.sleepAfterMs, gSettings.fullRefreshEvery,
-         (int)gSettings.fullOnTransition,
+         (int)gSettings.fullOnTransition, gSettings.bodyPpem, gSettings.margins,
+         gSettings.lineSpacing, (int)gSettings.justify,
          wrote ? "applied and saved"
                         : "APPLIED BUT NOT SAVED (the change is live; it will not survive a "
                           "reboot)");
@@ -1036,10 +1114,14 @@ static void loadAndApplySettings() {
     logf("[boot] settings %s: %s\n", v.defaulted ? "DEFAULTED" : "CORRECTED", v.reason);
   }
   applySettings();
+  // THE FOUR TYPOGRAPHY FIELDS ARE ON THIS LINE TOO, because a device booting with a
+  // hand-edited size must say so -- and because `bodyPpem` here is what the FILE says,
+  // which is not necessarily what gBody was inited at (see applySettings).
   logf("[boot] settings in force: sleepAfterMs=%lu fullRefreshEvery=%d "
-       "fullOnTransition=%d\n",
+       "fullOnTransition=%d ppem=%d margins=%d lead=%d justify=%d\n",
        (unsigned long)gSettings.sleepAfterMs, gSettings.fullRefreshEvery,
-       (int)gSettings.fullOnTransition);
+       (int)gSettings.fullOnTransition, gSettings.bodyPpem, gSettings.margins,
+       gSettings.lineSpacing, (int)gSettings.justify);
   logFlush();
 }
 
@@ -1684,6 +1766,25 @@ static void buildSdMissingApp() {
 // appears" or "the log says why". Repainting the Library would cost a full refresh
 // to show an unchanged screen; a Push of an error screen is design/BookError.dc.html
 // and is not built.
+// THE READER ANYWHERE ON THE STACK, or null.
+//
+// Scanned rather than tracked, for the reason the book-closed check is scanned: a
+// remembered depth would be a second copy of the stack's own shape, and the stack is
+// three deep at most here. Three callers now -- the book-closed check, and both halves
+// of the Typography apply path -- which is why it is a function and not a third inline
+// walk.
+//
+// MUTABLE, because two of the three have to MOVE the screen they find: giving its page
+// ring back on the way into the panel, and re-paginating it on the way out. App::at is
+// const for the renderer's sake, so App::atMut exists for exactly this; a const_cast
+// here would do the same thing and say nothing about why it is allowed.
+static reader::ReaderScreen* readerOnStack(reader::App& app) {
+  for (int i = 0; i < app.depth(); ++i)
+    if (app.at(i).id() == reader::ScreenId::Reader)
+      return static_cast<reader::ReaderScreen*>(&app.atMut(i));
+  return nullptr;
+}
+
 // SAVE WHERE THE READER IS, to the card, if a book is open.
 //
 // FOUR CALLERS, AND THE FOURTH IS THE ONE THAT MAKES THIS DURABLE. Three are edges
@@ -1723,10 +1824,20 @@ static void buildSdMissingApp() {
 // already held both. The "nothing to save" early returns answer Unchanged, and the
 // quiet-window caller additionally guards on the same conditions so it can never
 // record a point that was not actually stored.
-static reader::SaveResult saveReadingPosition(const char* why) {
+// `from` NAMES THE READER WHEN IT IS NOT ON TOP, and null means "the top, if it is
+// one" -- which is every caller that predates the Typography panel. The four edges all
+// fire with the Reader on top; the apply path fires after a pop that lands on the
+// reader MENU, an overlay, so its Reader is one below and the top-only lookup would
+// answer Unchanged and silently store nothing. Passed in rather than broadening the
+// lookup, because broadening it would change what the existing four do on screens
+// nobody has looked at.
+static reader::SaveResult saveReadingPosition(const char* why,
+                                              const reader::ReaderScreen* from = nullptr) {
   if (!gReading.open || gApp == nullptr) return reader::SaveResult::Unchanged;
-  if (gApp->top().id() != reader::ScreenId::Reader) return reader::SaveResult::Unchanged;
-  const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
+  if (from == nullptr && gApp->top().id() != reader::ScreenId::Reader)
+    return reader::SaveResult::Unchanged;
+  const auto* rd =
+      from != nullptr ? from : static_cast<const reader::ReaderScreen*>(&gApp->top());
 
   reader::ReadingPosition p;
   p.bookPath = gReading.path;
@@ -1736,9 +1847,15 @@ static reader::SaveResult saveReadingPosition(const char* why) {
   p.line = at.line;
   p.bookBytes = gReading.bytes;
   // THE GEOMETRY THE LINE WAS MEASURED AT, which is what makes `line` reusable or
-  // not. Read from the live metrics rather than assumed, so a future type-size
-  // setting invalidates exactly the field it should.
-  p.ppem = reader::kBodyPpem;
+  // not. Read from the live metrics rather than assumed, so a type-size setting
+  // invalidates exactly the field it should.
+  //
+  // THE FACE'S OWN ppem, NOT reader::kBodyPpem, and that constant is what this line
+  // used to say -- correct for as long as nothing could change the size, and a lie
+  // from the moment the Typography panel could. A record claiming 32 for lines
+  // measured at 46 grades `Exact` and hands the reader a line index from a layout
+  // that never existed, which is the one thing fitOf is there to prevent.
+  p.ppem = gBody.ppem();
   p.columnW = gFactory.readerMetrics().columnW;
   // The percentage goes IN the sidecar, so the Library can show it per row without
   // opening every book's archive to recompute one. Computed once, just below, and
@@ -2005,7 +2122,16 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   bool haveAnchor = false;
   reader::ReadingPosition saved;
   if (reader::loadPosition(gSd, path, saved)) {
-    const reader::PositionFit fit = reader::fitOf(saved, path, bookBytes, reader::kBodyPpem,
+    // gBody.ppem(), NOT kBodyPpem, and this was the load-side twin of a save-side
+    // bug: `p.ppem` was the same constant until Phase 7's review caught it. Both
+    // directions of the constant are wrong once the size is a setting. Saved at 32
+    // and reopened while the face is at 46, the record says 32, the comparison says
+    // 32, and fitOf grades EXACT -- handing back a line index from a layout that
+    // never existed, which is a wrong page that reads as a reader bug. Saved at 46
+    // and reopened at 46 it grades RELAID and drops the exact line every time, so at
+    // any non-default size a restore could never be exact. columnW was already
+    // current, because the apply path updates the factory's metrics.
+    const reader::PositionFit fit = reader::fitOf(saved, path, bookBytes, gBody.ppem(),
                                                   gFactory.readerMetrics().columnW);
     const reader::PositionRestore r = reader::restoreFrom(saved, fit);
     static const char* kFitWord[] = {"exact", "relaid", "rebound", "unusable"};
@@ -2068,6 +2194,27 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // which row is marked, since the reader will have moved by then.
   gFactory.setContents(gReading.toc, startChapter);
   gFactory.setReaderBook(opened, startChapter, startAt);
+
+  // AND THE READER MENU'S HEADER, WHICH IS WHY SLEEPING ON THAT MENU USED TO WAKE
+  // INTO THE BOOK.
+  //
+  // The factory REFUSES an unprimed ReaderMenu -- correctly, since falling back to a
+  // demo name is how this device once showed MIDDLEMARCH over a real book -- and the
+  // only place that primed it was the pre-dispatch input handler, gated on a Confirm
+  // press with the Reader on top. The wake path never presses anything. So a record
+  // reading `home;reader;reader-menu` replayed as far as the Reader, the menu push
+  // was refused, and App::restore stopped there and kept what stood. Reported off the
+  // device as "sleeping from the typography screen resumes to the book"; it was never
+  // about Typography -- the same wake lost the reader menu and the contents, and
+  // Typography reached from SETTINGS restored fine, because Settings needs no priming.
+  //
+  // HERE because this is the one function a button press and a wake BOTH go through,
+  // which is the reason it was extracted. The percentage is the one the card's pointer
+  // holds rather than a live reading, and the Confirm-press call above still refreshes
+  // it -- a stale percent on a menu the user has not opened yet costs nothing, where a
+  // menu that cannot be built costs them the screen they slept on.
+  gFactory.setReaderMenuHeader(gReading.title.empty() ? gReading.path : gReading.title,
+                               std::to_string(saved.percent) + "%");
   // ...and the way back, or explicitly NONE. Cleared rather than left alone: the
   // factory outlives one book, so a stale anchor from the previous one would offer
   // this reader a page in a book they closed.
@@ -3293,6 +3440,27 @@ void setup() {
   // must not depend on the card for the device to behave.
   loadAndApplySettings();
 
+  // AND THE BODY FACE, WHICH loadAndApplySettings CANNOT REACH.
+  //
+  // The face was inited ~230 lines above with the CONSTANT kBodyPpem, because it
+  // has to exist before anything can measure with it and the card had not been
+  // read yet. So a persisted `bodyPpem` was applied to the SETTINGS and not to the
+  // FACE: margins, lead and justify survived a reboot because readerMetrics is
+  // computed below this point, and Size did not -- the page came back at 15 PT
+  // while both screens said 22. That is the "a setting that appears not to have
+  // taken" failure this whole feature is careful about, arriving at boot instead of
+  // at a press.
+  //
+  // Guarded on the face DISAGREEING rather than on the setting being non-default,
+  // so a card that happens to hold the default costs nothing: a re-init flushes
+  // both glyph caches, and the next page would re-rasterise its alphabet at
+  // ~3,794 us a glyph for no reason.
+  //
+  // Here rather than earlier because this is the first point gSettings is real, and
+  // before any book can be opened -- the session restore below is what would
+  // otherwise paginate a chapter with the wrong face.
+  if (gSettings.bodyPpem != gBody.ppem()) applyBodyPpem();
+
   // Write the settings file if the card has none, then point both card-liveness
   // probes at it. After loadAndApplySettings() on purpose: gSettings holds what
   // will actually be in force by now, so a fresh card gets a file that matches
@@ -3372,7 +3540,7 @@ void setup() {
   // for the reason spelled out above: libraryVisibleRows was handed the native
   // landscape height once and showed four rows instead of seven.
   reader::PageMetrics readerMetrics;
-  gTheme.readerMetrics(logicalW, logicalH, fonts, gBody, readerMetrics);
+  gTheme.readerMetrics(logicalW, logicalH, fonts, gBody, gSettings, readerMetrics);
   // The WRAP measures emphasis with this, so it has to be in the metrics the factory
   // hands the reader -- not only in the draw.
   readerMetrics.italic = &gItalic;
@@ -3988,6 +4156,26 @@ void loop() {
           }
           gFactory.setDetailsFacts(std::move(f));
         }
+        // ENTERING THE TYPOGRAPHY PANEL: give the page ring back before the faces
+        // are re-rasterised at a new size.
+        //
+        // Every page in it was laid at the CURRENT column and face, so a type change
+        // invalidates all of them -- relayout() drops them anyway. Dropping them HERE
+        // instead buys the headroom ScalableFont::init needs, because init takes the
+        // new arena before releasing the old: at ppem 46 the roman alone is 24,576
+        // bytes transient on top of the 16,384 it already holds.
+        //
+        // At kPageCacheMaxDepth the ring is ~12 KB; depth 1 is the floor
+        // setPageCacheDepth clamps to, and it drops the excess immediately rather
+        // than at the next insertion.
+        //
+        // THE DEPTH IS NOT PUT BACK HERE. The shell re-sizes it from free heap at
+        // every warmPageRing, so leaving the panel restores it on the first quiet
+        // window -- and a caller that restored a remembered number would be a second
+        // opinion about a figure that is derived from the heap.
+        if (menu->vm().focusedRow == reader::ReaderMenuScreen::kTypography) {
+          if (reader::ReaderScreen* rd = readerOnStack(*gApp)) rd->setPageCacheDepth(1);
+        }
         if (menu->vm().focusedRow == reader::ReaderMenuScreen::kContents) {
           // NO CARD WORK HERE. The contents were read when the book opened, where
           // there was heap for them -- see gReading.toc.
@@ -4055,11 +4243,10 @@ void loop() {
     // (correctly), and the device reported "opening Contents does nothing".
     //
     // Scanned rather than tracked: a depth count would be a second copy of the stack's
-    // own shape, and the stack is three deep at most here.
-    bool readerOnStack = false;
-    for (int i = 0; i < gApp->depth(); ++i)
-      if (gApp->at(i).id() == reader::ScreenId::Reader) readerOnStack = true;
-    if (gReading.open && !readerOnStack) {
+    // own shape, and the stack is three deep at most here. This WAS the scan, inline;
+    // the Typography apply path needed the same walk twice more, so it is one function
+    // now -- see readerOnStack().
+    if (gReading.open && readerOnStack(*gApp) == nullptr) {
       gReading.open = false;
       logf("[progress] book closed\n");
       logFlush();
@@ -4082,6 +4269,71 @@ void loop() {
         logf("[toc] jump to spine %d: %s in %lums\n", want, ok ? "ok" : "REFUSED",
              (unsigned long)(millis() - t));
         logFlush();
+      }
+    }
+
+    // TYPOGRAPHY APPLIED, after the pop that its BACK returns.
+    //
+    // Read BEFORE the dispatch would be too early -- the last step may be the press
+    // being dispatched -- and after the pop the screen is gone, so the flag is set by
+    // the sink and consumed here. `gSettings` is already current: the sink applied
+    // every step as it happened.
+    //
+    // ORDERING IS LOAD-BEARING: dispatch, then apply, then paint, in one loop
+    // iteration. Between the pop and this call the Reader's page and metrics describe
+    // a layout that no longer exists, and a paint in that window would draw old line
+    // positions in a new face.
+    //
+    // A READER ANYWHERE ON THE STACK, not on top, and that distinction is load-bearing
+    // twice. From SETTINGS there is no Reader at all and nothing should be
+    // re-paginated. From the reader MENU the pop lands on the menu, which is an
+    // overlay -- App::render walks down to the topmost non-overlay, paints the Reader,
+    // then paints the overlay over it -- so the Reader's stale page IS drawn on the
+    // very next frame. "On top" would never fire there and that frame would be wrong.
+    // AND NOT UNTIL THE PANEL IS GONE, which is the gate that makes the flag mean
+    // "apply this" rather than "something changed". TypographyScreen::cycleFocused
+    // commits on EVERY change press, so without this the Reader underneath would be
+    // re-paginated once per press -- a chapter crossing's walk and a card write on
+    // each one, while the screen doing the drawing is the panel and the page is not
+    // visible at all. The whole design is that the walk is paid on the press that
+    // LEAVES, where the user already expects the screen to change.
+    //
+    // Scanned rather than compared against the top, for the reason readerOnStack is:
+    // the stack's shape is the stack's to answer, and the panel being pushed only at
+    // the top is a fact about today's callers rather than a guarantee.
+    bool typographyStanding = false;
+    for (int i = 0; i < gApp->depth(); ++i)
+      if (gApp->at(i).id() == reader::ScreenId::Typography) typographyStanding = true;
+    if (gTypographyDirty && !typographyStanding) {
+      gTypographyDirty = false;
+      reader::ReaderScreen* rd = readerOnStack(*gApp);
+      reader::PageMetrics m;
+      gTheme.readerMetrics(gFrame->width(), gFrame->height(), *gFonts, gBody, gSettings, m);
+      m.italic = &gItalic;
+      // THE FACTORY LEARNS THE NEW COLUMN EITHER WAY. On the no-Reader route this is
+      // the whole job: without it the next book opened would be laid out at the old
+      // column, and the change would look as though it had not been saved.
+      gFactory.setReaderMetrics(m);
+      if (rd == nullptr) {
+        logf("[typo] no reader open; column=%dx%d ppem=%d for the next book\n", m.columnW,
+             m.columnH, gSettings.bodyPpem);
+        logFlush();
+      } else {
+        const uint32_t t = millis();
+        rd->relayout(m);
+        logf("[typo] relaid column=%dx%d ppem=%d page=%d/%d in %lums\n", m.columnW,
+             m.columnH, gSettings.bodyPpem, rd->pageIndex() + 1, rd->pageCount(),
+             (unsigned long)(millis() - t));
+        logFlush();
+        // THE POSITION IS WORTH SAVING NOW. The cursor's `line` was just dropped and
+        // the record stores the ppem and columnW the line was laid at, so writing it
+        // here means the NEXT boot's fitOf grades against the new numbers and reads
+        // Exact rather than Relaid a second time.
+        //
+        // `rd` IS PASSED EXPLICITLY, because the pop landed on the reader menu and the
+        // Reader is one below the top -- the default lookup would answer Unchanged and
+        // store nothing at all.
+        saveReadingPosition("typography", rd);
       }
     }
 

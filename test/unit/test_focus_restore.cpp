@@ -36,10 +36,18 @@ constexpr ScreenId kAllScreens[] = {
     ScreenId::Home,     ScreenId::Library,      ScreenId::ItemActions, ScreenId::DeleteConfirm,
     ScreenId::BookDetails, ScreenId::Settings,  ScreenId::Sleep,       ScreenId::Reader,
     ScreenId::ReaderMenu,  ScreenId::Contents,  ScreenId::SdMissing,
+    ScreenId::Typography,
 };
+// AND IT NAMES THE LAST MEMBER, WHICH IS THE ONLY WAY IT BITES. It named
+// SdMissing, and Typography was APPENDED after it -- so the array's length still
+// equalled SdMissing + 1 and this assert passed over a screen missing from the
+// catalogue. Every append is a screen this guard silently lets through unless the
+// name here moves with it, which is the "reports on less than it claims" shape
+// three other checks in this repo have had.
 static_assert(sizeof(kAllScreens) / sizeof(kAllScreens[0]) ==
-                  static_cast<size_t>(ScreenId::SdMissing) + 1,
-              "a ScreenId was added or removed; give it a row in kAllScreens");
+                  static_cast<size_t>(ScreenId::Typography) + 1,
+              "a ScreenId was added or removed; give it a row in kAllScreens, and"
+              " name the LAST member here");
 
 // One screen, plus whatever has to outlive it. The three screens built over a
 // Library hold a REFERENCE to it, so the Library cannot be a temporary -- and it
@@ -118,9 +126,10 @@ TEST_CASE("every screen accepts back the focus it reports") {
   // Counted, not assumed. A refactor that made every screen report a fixed focus
   // would leave the loop below passing on nothing at all, which is the failure
   // mode this project keeps hitting -- a check that reports on less than it
-  // claims. SEVEN screens can move their focus today: Home, Library, the two Library
-  // overlays, Settings, the reader menu and the contents. BookDetails, Sleep, the
-  // Reader and the SD-missing prompt have one thing on them and legitimately report 0.
+  // claims. EIGHT screens can move their focus today: Home, Library, the two Library
+  // overlays, Settings, the reader menu, the contents and Typography. BookDetails,
+  // Sleep, the Reader and the SD-missing prompt have one thing on them and
+  // legitimately report 0.
   int movable = 0;
 
   for (const ScreenId id : kAllScreens) {
@@ -144,7 +153,7 @@ TEST_CASE("every screen accepts back the focus it reports") {
     CHECK(restored->get().focus() == moved);
   }
 
-  CHECK(movable == 7);
+  CHECK(movable == 8);
 }
 
 TEST_CASE("every screen with a movable focus wraps off the end") {
@@ -175,7 +184,7 @@ TEST_CASE("every screen with a movable focus wraps off the end") {
     CHECK(wrapped);
     ++wrapping;
   }
-  CHECK(wrapping == 7);
+  CHECK(wrapping == 8);
 }
 
 TEST_CASE("restoring the focus a screen is already on is a no-op, not a failure") {

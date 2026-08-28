@@ -32,19 +32,27 @@ class SettingsSink {
 
 // design/Settings.dc.html.
 //
-// THE SCREEN DRAWS EVERY BOARD ROW AND ONLY SOME RESPOND. TYPOGRAPHY belongs to
-// Phase 3's reader and CONNECTIONS to Phase 4, so those rows have nothing behind
-// them yet -- and rather than let them be selected and do nothing when pressed,
-// FOCUS SKIPS THEM. A row that cannot be reached cannot mislead; a row that
-// focuses and then ignores CHANGE is the silent no-op this project has been bitten
-// by twice. They are drawn identically to an unfocused focusable row: no dimming,
-// because a visual difference nobody designed is worse than none.
+// THE SCREEN DRAWS EVERY BOARD ROW AND ONLY SOME RESPOND. `Sleep screen` is the
+// last one with nothing behind it -- covers are issue #11 -- and rather than let it
+// be selected and do nothing when pressed, FOCUS SKIPS IT. A row that cannot be
+// reached cannot mislead; a row that focuses and then ignores CHANGE is the silent
+// no-op this project has been bitten by twice. It is drawn identically to an
+// unfocused focusable row: no dimming, because a visual difference nobody designed
+// is worse than none.
 //
-// The list is longer than the panel -- adding the transition row is what made it
-// so -- and it will only grow, so it SCROLLS, with the same rail Library uses.
-// Section headers are items in that list: they scroll with the rows, they are
-// never focusable, and they count toward the rail's proportion. Treating them as
-// anything else would make the rail lie about how much list there is.
+// IT USED TO SKIP FIVE MORE. A TYPOGRAPHY section carried Font, Size, Margins, Line
+// spacing and Alignment, drawn and unreachable because the settings behind them did
+// not exist. They do now, and they are edited on their own screen -- so those five
+// readout rows became one `Typography` row that opens it. That is what makes this
+// screen the FIRST here whose Confirm hint varies within itself: OPEN on that row,
+// CHANGE on the four DEVICE rows. See syncVm.
+//
+// The list FITS the panel today -- seven items where eleven fit -- but it will grow
+// again, so it SCROLLS, with the same rail Library uses, taken off `totalRows >
+// rows` rather than assumed. Section headers are items in that list: they scroll
+// with the rows, they are never focusable, and they count toward the rail's
+// proportion. Treating them as anything else would make the rail lie about how much
+// list there is.
 class SettingsScreen : public FocusScreen {
  public:
   // `sink` may be null -- the simulator and the golden tests have nowhere to
@@ -74,30 +82,41 @@ class SettingsScreen : public FocusScreen {
   const SettingsViewModel& vm() const { return vm_; }
   const Settings& settings() const { return settings_; }
 
-  // Which setting a row edits. None = drawn, not reachable.
+  // Which setting a row edits, or `Typography`, which edits none and opens the
+  // screen that does.
+  //
+  // `Typography` IS NOT A SETTING AND IS STILL FOCUSABLE, which is why
+  // `field != None` can no longer serve as the focusability test -- it used to mean
+  // both "has a setting" and "can be focused", and those are two facts now. See
+  // `reachable` below.
   //
   // Public only so the row TABLE can live in the .cpp beside the code that reads
   // it -- keeping the table next to the board's order is what makes it checkable
   // by eye against design/Settings.dc.html, which is worth more than the
   // encapsulation of two descriptive types.
-  enum class Field { None, SleepAfter, FullRefresh, OnTransition };
+  enum class Field { None, Typography, SleepAfter, FullRefresh, OnTransition };
 
   struct Item {
     const char* label;
     Field field;
     bool isHeader;
-    // What an inert row shows. A board placeholder, NOT a setting: these are the
-    // values design/Settings.dc.html states, kept so the screen matches the board
-    // before the settings behind them exist. Empty for a row whose value comes
-    // from `settings_`.
+    // Whether a focus may land here. NOT derivable from `field`: a header has no
+    // field and cannot be focused, `Sleep screen` has no field and cannot be
+    // focused, and `Typography` has no field and MUST be -- it discloses a screen
+    // rather than editing a value.
+    bool reachable;
+    // What a row with no setting behind it shows. A board placeholder, NOT a
+    // setting: the value design/Settings.dc.html states, kept so the screen matches
+    // the board before the setting behind it exists. `Sleep screen` is the only one
+    // left -- covers are issue #11. Empty for a row whose value comes from
+    // `settings_`, and empty for a row that discloses instead of stating one.
     const char* placeholder;
   };
 
  private:
   Action cycleFocused();
-  // Which rows a focus may land on: not a header, and not a placeholder row
-  // whose setting does not exist yet. Consumed by FocusScreen through
-  // Focus::Gate.
+  // Which rows a focus may land on: not a header, and marked `reachable`.
+  // Consumed by FocusScreen through Focus::Gate.
   bool focusable(int index) const override;
   void syncVm() override;
   int firstFocusable() const;

@@ -47,39 +47,41 @@
        why nothing but this board had to change. -->
   <div style="display: flex; flex-direction: column; flex-grow: 1;">
 
-    <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">TYPOGRAPHY</div>
-    <!-- NOT the focused row, and that is the decision showing. Focus SKIPS rows
-         with nothing behind them, so TYPOGRAPHY cannot hold it until Phase 3's
-         reader gives these settings something to change. This board focused Font
-         before that was settled; leaving it there would have documented behaviour
-         the firmware deliberately does not have, and mismatched `make compare`
-         forever on which row is inverted. An inert row is drawn exactly like an
-         unfocused focusable one -- there is no dimming, because a visual
-         difference nobody designed is worse than no difference. -->
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
-      <div style="font-size: var(--t-value); font-weight: 500;">Font</div>
-      <div style="font-size: var(--t-value); font-weight: 700;">LITERATA</div>
-    </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
-      <div style="font-size: var(--t-value); font-weight: 500;">Size</div>
-      <div style="font-size: var(--t-value); font-weight: 700;">18 PT</div>
-    </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
-      <div style="font-size: var(--t-value); font-weight: 500;">Margins</div>
-      <div style="font-size: var(--t-value); font-weight: 700;">COMFORTABLE</div>
-    </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
-      <div style="font-size: var(--t-value); font-weight: 500;">Line spacing</div>
-      <div style="font-size: var(--t-value); font-weight: 700;">1.7</div>
-    </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px;">
-      <div style="font-size: var(--t-value); font-weight: 500;">Alignment</div>
-      <div style="font-size: var(--t-value); font-weight: 700;">JUSTIFIED</div>
+    <!-- READING, not TYPOGRAPHY, and it is one row where it was five.
+         The five rows (Font, Size, Margins, Line spacing, Alignment) were drawn
+         here and unreachable, because the settings behind them did not exist.
+         They do now, and they are edited on their own screen
+         (design/Typography.dc.html) -- which needs no open book, so Settings can
+         reach it. Five readout rows nobody could act on are the wrong answer once
+         there is a door.
+         READING rather than TYPOGRAPHY so the section is a sibling of DEVICE and
+         has room for the other reading settings that are coming (hyphenation, page
+         turn direction) -- and so the header does not repeat the row's own word. -->
+    <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">READING</div>
+    <!-- AND THE CONFIRM HINT READS `OPEN`, NOT `CHANGE`, WHILE THIS ROW IS
+         FOCUSED. screen_settings.cpp used to state the premise outright -- "CHANGE,
+         not OPEN: nothing here pushes a screen, every focusable row edits a value
+         in place" -- and this row makes it false. So the label follows the FOCUSED
+         ROW: `OPEN` here, `CHANGE` on the four DEVICE rows, which is the only way
+         the bar can be true of the button it describes. One slot changes as the
+         focus moves; a Confirm labelled CHANGE that opened a screen would be the
+         misleading-button defect this project keeps recording.
+         This board depicts the initial state, so it shows OPEN. -->
+    <!-- THE FOCUS STARTS HERE, because this is now the first row with anything
+         behind it. It moved off `Sleep after` below, which held it only because
+         every row above it was inert.
+         A CHEVRON AND NO VALUE: this row discloses a screen, and Home's menu rows
+         state the rule -- a row states a quantity or discloses a screen, never
+         both. Summarising five settings in the right slot would break it and would
+         not fit. -->
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; background: #000000; color: #ffffff; padding: 0 24px;">
+      <div style="font-size: var(--t-value); font-weight: 700;">Typography</div>
+      <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#ffffff" stroke-width="2"></path></svg>
     </div>
 
     <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px; border-top: 2px solid #000000;">DEVICE</div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; background: #000000; color: #ffffff; padding: 0 24px;">
-      <div style="font-size: var(--t-value); font-weight: 700;">Sleep after</div>
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
+      <div style="font-size: var(--t-value); font-weight: 500;">Sleep after</div>
       <div style="font-size: var(--t-value); font-weight: 700;">10 MIN</div>
     </div>
     <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
@@ -119,7 +121,7 @@
 
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
     <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">BACK</div></div>
-    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">CHANGE</div></div>
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">OPEN</div></div>
     <div style="display: flex; align-items: center; gap: 6px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">UP</div></div>
     <div style="display: flex; align-items: center; gap: 6px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M4 9l4 4 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">DOWN</div></div>
   </div>

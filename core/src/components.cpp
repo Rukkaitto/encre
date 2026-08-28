@@ -503,17 +503,40 @@ void clampProse(const GlyphSource& font, Prose& prose, int maxLines, int maxW, s
 
 int drawProse(Framebuffer& fb, const GlyphSource& font, const Prose& prose, int boxX, int boxW,
               int topF26, Ink ink, Plane plane, ProseAlign align) {
+  const int last = prose.lineCount() - 1;
   for (int i = 0; i < prose.lineCount(); ++i) {
     const std::string_view line = prose.lines[static_cast<size_t>(i)];
+    // THE FIRST LINE'S INDENT, which the WRAP MEASURED WITH (Prose::firstIndentF26
+    // carries it for exactly that reason). Zero for every caller on every board
+    // today -- the reader's indented paragraphs go through layout.cpp, not here --
+    // and honoured rather than ignored because a Prose that carries an indent is a
+    // Prose that was wrapped against a narrower first measure. A justify computed
+    // against the full box would overflow the column by exactly the indent.
+    const int indent = i == 0 ? f26ToPx(prose.firstIndentF26) : 0;
     // A centred line is centred on its OWN measured width -- which is what
     // `text-align: center` does. Not on the widest line's, and not on the
     // column's centre with a half-width offset: that spends a second division.
     // A left-aligned one needs no measurement at all.
-    const int x = align == ProseAlign::Left
-                      ? boxX
-                      : centreIn(boxX, boxW, font.measure(line, prose.tracking));
+    const int x = align == ProseAlign::Centre
+                      ? centreIn(boxX, boxW, font.measure(line, prose.tracking))
+                      : boxX + indent;
     const int baseline = baselineInF26(font, topF26 + i * prose.leadF26, prose.leadF26);
-    drawText(fb, font, x, baseline, line, ink, prose.tracking, plane);
+    // JUSTIFIED, and THE LAST LINE IS DECIDED BY INDEX rather than by stretchFor
+    // answering 0. Those are two different reasons for a ragged line: the last line
+    // of a paragraph is short by however much the paragraph ended short, and
+    // conflating the two would leave a genuinely FULL last line stretched to the
+    // margin -- which layout.cpp names as the single most recognisable way
+    // justified text can be wrong.
+    //
+    // `prose.tracking`, never a second tracking argument, and the measure is the
+    // one the line was wrapped against: same rule, same reason.
+    const int extraPerGapF26 = (align == ProseAlign::Justify && i != last)
+                                   ? stretchFor(font, line, boxW - indent, prose.tracking)
+                                   : 0;
+    if (extraPerGapF26 > 0)
+      drawTextJustified(fb, font, x, baseline, line, extraPerGapF26, ink, prose.tracking, plane);
+    else
+      drawText(fb, font, x, baseline, line, ink, prose.tracking, plane);
   }
   return prose.heightF26();
 }

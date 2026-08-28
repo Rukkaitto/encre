@@ -22,6 +22,9 @@ const char* screenName(ScreenId id) {
     case ScreenId::Sleep: return "SLEEP";
     case ScreenId::Reader: return "READER";
     case ScreenId::SdMissing: return "SD-MISSING";
+    // A LOG LABEL, and the session record's "typography" is a storage format.
+    // Two separate facts that happen to agree; this one is free to be reworded.
+    case ScreenId::Typography: return "TYPOGRAPHY";
   }
   return "?";
 }
@@ -37,11 +40,19 @@ App::App(std::unique_ptr<Screen> root, ScreenFactory& factory) : factory_(factor
   stack_.push_back(std::move(root));
 }
 
-const Screen& App::at(int index) const {
+size_t App::clampIndex(int index) const {
+  // ONE COPY OF THE BOUNDS RULE, shared by at() and atMut() -- two clamps would be two
+  // chances to disagree about an out-of-range index, and the whole point of clamping
+  // rather than asserting is that a caller bug yields a readable screen.
   if (index < 0) index = 0;
   if (index >= static_cast<int>(stack_.size())) index = static_cast<int>(stack_.size()) - 1;
-  return *stack_[static_cast<size_t>(index)];
+  return static_cast<size_t>(index);
 }
+
+const Screen& App::at(int index) const { return *stack_[clampIndex(index)]; }
+
+// See the header for why a mutable one exists. No cast: `stack_` is not const here.
+Screen& App::atMut(int index) { return *stack_[clampIndex(index)]; }
 
 Screen& App::top() { return *stack_.back(); }
 const Screen& App::top() const { return *stack_.back(); }

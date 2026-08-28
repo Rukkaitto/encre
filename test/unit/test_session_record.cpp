@@ -93,7 +93,7 @@ TEST_CASE("every screen in the catalogue has a wire name, and they are all disti
   // must be a deliberate one. This is the check that makes forgetting a row show
   // up here rather than as a screen that quietly never restores.
   std::vector<std::string> names;
-  for (int i = 0; i <= static_cast<int>(ScreenId::SdMissing); ++i) {
+  for (int i = 0; i <= static_cast<int>(ScreenId::Typography); ++i) {
     const ScreenId id = static_cast<ScreenId>(i);
     const char* n = sessionWireName(id);
     REQUIRE(n != nullptr);

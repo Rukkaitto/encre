@@ -915,3 +915,110 @@ TEST_CASE("a blockquote is set wholly in the italic, and says so as emphasis") {
     if (ln.kind == BlockKind::Paragraph) CHECK(ln.emphasis.empty());
   }
 }
+
+TEST_CASE("ragged alignment leaves every line unstretched") {
+  Body body;
+  PageMetrics m = boardMetrics();
+
+  // The same long paragraph laid twice, with `justify` the only input that
+  // differs. Comparing the two runs rather than asserting absolute numbers is
+  // what makes this a test of the FLAG: a wrap change would move both sides
+  // together. The OUTPUT is then asserted to differ in exactly one field, which
+  // is the loop at the bottom and the part a text-only comparison cannot do.
+  Document d = docOf({"Miss Brooke had that kind of beauty which seems to be thrown "
+                      "into relief by poor dress, and her hand and wrist were so "
+                      "finely formed that she could wear sleeves not less bare of "
+                      "style than those in which the Blessed Virgin appeared."});
+
+  auto layDoc = [&](const Document& doc, const PageMetrics& base, bool justify) {
+    PageMetrics mm = base;
+    mm.justify = justify;
+    reader::PageBuilder pb(body.face, mm);
+    for (size_t i = 0; i < doc.blocks.size(); ++i) pb.add(doc.blocks[i], static_cast<int>(i));
+    return pb.finish();
+  };
+  auto lay = [&](bool justify) { return layDoc(d, m, justify); };
+
+  const Page justified = lay(true);
+  const Page ragged = lay(false);
+
+  REQUIRE(justified.lines.size() == ragged.lines.size());
+  REQUIRE(justified.lines.size() > 2);  // or there is nothing to justify
+
+  // EVERY ragged line is unstretched...
+  for (const LaidLine& ln : ragged.lines) CHECK(ln.extraPerGapF26 == 0);
+  // ...and NEARLY EVERY justified line was, which is tighter than "at least one"
+  // on purpose. `stretched > 0` passes over a mutation that justifies only the
+  // first line of a paragraph, and this paragraph measures 9 lines of which 8
+  // stretch -- the 9th being paragraph-final and legitimately ragged. Allowing two
+  // keeps it from being brittle if a line ever falls under kMinJustifyFillPercent.
+  size_t stretched = 0;
+  for (const LaidLine& ln : justified.lines)
+    if (ln.extraPerGapF26 != 0) ++stretched;
+  CHECK(stretched >= justified.lines.size() - 2);
+
+  // EVERY OTHER FIELD OF THE LINE IS IDENTICAL, not just its text.
+  //
+  // The flag is applied to a FINISHED line -- the greedy wrap and the placement
+  // both ran before it is read -- so a difference in ANY field but
+  // extraPerGapF26 is the flag having reached the wrap or the placement, which is
+  // exactly what this case exists to forbid. A text-only comparison cannot see
+  // that, and the gap is not hypothetical: making `!justify` also drop the
+  // first-line paragraph indent passes the whole suite against `text` alone,
+  // while the indent IS the paragraph separator on this device (CLAUDE.md,
+  // "PARAGRAPHS ARE SEPARATED BY AN INDENT, NOT A GAP"). No golden can ever
+  // cover it either, because every golden and every simulator path passes
+  // `Settings{}` and `justify == false` is rendered nowhere.
+  auto sameButForStretch = [](const Page& a, const Page& b) {
+    REQUIRE(a.lines.size() == b.lines.size());
+    for (size_t i = 0; i < a.lines.size(); ++i) {
+      const LaidLine& r = a.lines[i];
+      const LaidLine& j = b.lines[i];
+      CHECK(r.text == j.text);
+      CHECK(r.x == j.x);  // the indent, which is where a plausible bug would land
+      CHECK(r.baselineY == j.baselineY);
+      CHECK(r.markerX == j.markerX);
+      CHECK(r.block == j.block);
+      CHECK(r.firstOfBlock == j.firstOfBlock);
+      CHECK(r.lastOfBlock == j.lastOfBlock);
+      CHECK(r.kind == j.kind);
+      CHECK(r.emphasis.size() == j.emphasis.size());
+    }
+  };
+  sameButForStretch(ragged, justified);
+
+  // AND THE DOCUMENT ABOVE CANNOT REACH THE INDENT, WHICH IS WHY THERE IS A
+  // SECOND ONE.
+  //
+  // `indentedAfter` returns false for `isFirst`, so a single paragraph at block 0
+  // is never indented and `x` is the column's left edge in both runs -- the
+  // comparison of `x` is then trivially true and the mutation above walks straight
+  // past it. An indent exists only on a paragraph FOLLOWING a paragraph, so
+  // catching a `justify` that reached the indent needs two of them. Found by
+  // running the mutation against the one-paragraph fixture and watching it pass.
+  Document two = docOf({"A first paragraph, which sets up the one after it and is "
+                        "never itself indented because nothing precedes it.",
+                        "A second paragraph, which IS indented -- a paragraph after "
+                        "a paragraph is the one case indentedAfter says yes to, and "
+                        "it is long enough to wrap so the indent sits on a first "
+                        "line with ordinary lines beneath it."});
+  const PageMetrics tall = boardMetrics(2000);
+  const Page twoJustified = layDoc(two, tall, true);
+  const Page twoRagged = layDoc(two, tall, false);
+  REQUIRE(twoJustified.lines.size() > 3);
+  // The fixture is only worth anything if the indent is really there: the second
+  // block's first line must start further right than the first block's.
+  int firstX = -1, indentedX = -1;
+  for (const LaidLine& ln : twoJustified.lines) {
+    if (ln.block == 0 && ln.firstOfBlock) firstX = ln.x;
+    if (ln.block == 1 && ln.firstOfBlock) indentedX = ln.x;
+  }
+  REQUIRE(firstX >= 0);
+  REQUIRE(indentedX > firstX);
+  sameButForStretch(twoRagged, twoJustified);
+}
+
+TEST_CASE("justify defaults to true, which is design/Reader.dc.html's own") {
+  const PageMetrics m;
+  CHECK(m.justify);
+}

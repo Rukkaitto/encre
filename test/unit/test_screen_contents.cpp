@@ -154,9 +154,15 @@ TEST_CASE("the reader menu focuses Contents, skipping the rows that do nothing")
   CHECK(m.isOverlay());
   CHECK(m.focus() == reader::ReaderMenuScreen::kContents);
   CHECK(m.onEvent(kGo).kind == Action::Kind::Push);
-  // Down from Contents skips Typography, Bookmarks and Names -- THREE inert rows in a
-  // row, which is the case a naive skip walk gets wrong -- and lands on About this
-  // book, which is live because Book details takes facts now rather than a Library row.
+  // Down from Contents reaches Typography, which is the row next to it and is live.
+  // It used to land on About this book, over THREE inert rows in a row -- the case a
+  // naive skip walk gets wrong -- and Bookmarks and Names are still that case from
+  // here, which the next press covers.
+  m.onEvent(kDown);
+  CHECK(m.focus() == reader::ReaderMenuScreen::kTypography);
+  // Down from Typography skips Bookmarks and Names -- two inert rows in a row -- and
+  // lands on About this book, which is live because Book details takes facts now
+  // rather than a Library row.
   m.onEvent(kDown);
   CHECK(m.focus() == reader::ReaderMenuScreen::kAboutBook);
   // ...and wraps back round to Contents rather than sticking. About this book is the
@@ -164,9 +170,45 @@ TEST_CASE("the reader menu focuses Contents, skipping the rows that do nothing")
   // stand in for.
   m.onEvent(kDown);
   CHECK(m.focus() == reader::ReaderMenuScreen::kContents);
-  // Up from Contents wraps the other way to the same live row, over the same three.
+  // Up from Contents wraps the other way over the same two, to the same live row.
   m.onEvent(kUp);
   CHECK(m.focus() == reader::ReaderMenuScreen::kAboutBook);
+}
+
+TEST_CASE("the menu's Typography row opens the panel") {
+  // ONE OF TWO DOORS. Settings has the other -- separate rows on separate screens
+  // pushing the same ScreenId -- and each gets its own test, because a door that
+  // opens the wrong screen or nothing is the defect both of these rows have shipped
+  // before: this one answered none() behind a comment saying the screen did not
+  // exist, and stayed that way after it did.
+  reader::ReaderMenuScreen m("Middlemarch", "6%");
+  // Contents is row 0 and is live, so one Down reaches Typography.
+  m.onEvent(kDown);
+  REQUIRE(m.focus() == reader::ReaderMenuScreen::kTypography);
+  const Action a = m.onEvent(kGo);
+  CHECK(a.kind == Action::Kind::Push);
+  CHECK(a.target == ScreenId::Typography);
+}
+
+TEST_CASE("making the Typography row live changed no row's appearance") {
+  // `ListRow::focusable` IS ABOUT INPUT, NOT APPEARANCE. An inert row is drawn exactly
+  // as an unfocused live one, which is why the reader_menu goldens do not move for
+  // this change -- a theme that dimmed on the flag would be inventing a design
+  // decision nobody made. Pinned here as well as in the goldens, because a golden
+  // says the pixels are the same and this says which field is allowed to differ.
+  const reader::ReaderMenuScreen m("Middlemarch", "6%");
+  const auto& rows = m.vm().rows;
+  REQUIRE(rows.size() == 5);
+  CHECK(rows[reader::ReaderMenuScreen::kTypography].label == "Typography");
+  // The board draws it with a chevron and no value, unchanged by going live.
+  CHECK(rows[reader::ReaderMenuScreen::kTypography].value.empty());
+  CHECK(rows[reader::ReaderMenuScreen::kTypography].discloses);
+  // TWO INERT ROWS LEFT, not three: Bookmarks (#3) and Names. Counted rather than
+  // named, so the next row to go live fails this and has to say so.
+  int inert = 0;
+  for (const auto& r : rows)
+    if (!r.focusable) ++inert;
+  CHECK(inert == 2);
 }
 
 TEST_CASE("the menu has five rows, and neither cut row is among them") {
@@ -193,6 +235,8 @@ TEST_CASE("About this book opens Book details") {
   // is no Library on the stack. Making it focusable without fixing that would have been
   // a button that works only sometimes, which nobody can learn.
   reader::ReaderMenuScreen m("Middlemarch", "6%");
+  // TWO Downs, not one: Typography sits between Contents and here and is live now.
+  m.onEvent(kDown);
   m.onEvent(kDown);
   REQUIRE(m.focus() == reader::ReaderMenuScreen::kAboutBook);
   const Action a = m.onEvent(kGo);
@@ -217,7 +261,7 @@ TEST_CASE("the menu's only way out is CLOSE, and it dismisses the panel not the 
     ++seen;
     n.onEvent(kDown);
   } while (n.focus() != first && seen < reader::ReaderMenuScreen::kRowCount);
-  CHECK(seen == 2);  // Contents and About this book
+  CHECK(seen == 3);  // Contents, Typography and About this book
 }
 
 TEST_CASE("a row states a quantity or discloses a screen, never both") {
