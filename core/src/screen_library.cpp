@@ -92,12 +92,21 @@ bool LibraryScreen::rescan() {
     for (BookEntry& e : entries) {
       LibraryItem item;
       const bool dir = e.isDir;
-      // A folder's own book count, for the board's `FOLDER - 6 BOOKS` line. One
-      // extra listing per folder, at rescan time only. It is deliberately one
-      // level deep: the board's `12 BOOKS` in the band is the 6 books beside the
-      // folder plus the 6 inside it, so that is what the design counts, and a
-      // full recursive walk of a card would be an unbounded cost on a screen
-      // that has to paint.
+      // A folder's own book count, for the board's `FOLDER - 6 BOOKS` line. It
+      // is deliberately one level deep: the board's `12 BOOKS` in the band is
+      // the 6 books beside the folder plus the 6 inside it, so that is what the
+      // design counts, and a full recursive walk of a card would be an unbounded
+      // cost on a screen that has to paint.
+      //
+      // IT USED TO BE ONE EXTRA LISTING PER FOLDER ON EVERY PUSH, and the
+      // Library is destroyed by the pop that leaves it -- so Home > Library >
+      // Back > Library paid for all of them twice, at ~2.90 ms an ENTRY, on top
+      // of Home's own count having paid for the same folders at boot. countBooks
+      // memoises on the filesystem now (reader/dir_counts.h), so a folder is
+      // walked once per card STATE rather than once per caller, and a rescan
+      // that follows a count reaches the card for nothing but its own listing.
+      // Nothing here changed: the number, and where it is not available, are
+      // exactly as before.
       item.childBooks = dir ? BookList::countBooks(*fs_, join(e.name)) : -1;
       // A PERCENTAGE IF THE BOOK HAS BEEN STARTED, `NEW` if it has not.
       //

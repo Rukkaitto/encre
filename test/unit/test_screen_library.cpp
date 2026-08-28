@@ -87,6 +87,71 @@ TEST_CASE("the Library lists a card's books and counts them the way the board do
   CHECK(lib.vm().rows[0].value.empty());
 }
 
+TEST_CASE("a second rescan asks the card for no folder counts at all") {
+  // ISSUE #33, WHICH IS #21 ONE SCREEN LATER. rescan() calls countBooks per
+  // DIRECTORY row for the board's `FOLDER - 2 BOOKS` line, and the Library is
+  // destroyed by the pop that leaves it -- so Home > Library > Back > Library
+  // paid one listing per folder every time, at ~2.90 ms an ENTRY.
+  //
+  // The count is memoised on the filesystem now, so only the /books listing
+  // itself reaches the card on the second push. That one is the DirListingCache's
+  // job on the device and the fake has no equivalent, which is why it is still
+  // counted here.
+  Ramp r;
+  reader::QuietTheme theme;
+  FakeFileSystem fs = cardWithBooks();
+  fs.writeAll("/books/Poetry/a.epub", "x");
+  fs.writeAll("/books/Essays/b.epub", "x");
+
+  const size_t before = fs.listCalls();
+  LibraryScreen first(fs, "/books");
+  // /books plus one per folder: Classics, Essays, Poetry.
+  CHECK(fs.listCalls() - before == 4);
+  const int counted = first.vm().bookCount;
+
+  const size_t second = fs.listCalls();
+  LibraryScreen again(fs, "/books");
+  CHECK(fs.listCalls() - second == 1);
+
+  // AND THE ROWS SAY THE SAME THING, which is the half that matters: a cheaper
+  // rescan that drew a different number would be worse than the cost.
+  REQUIRE(again.itemCount() == first.itemCount());
+  CHECK(again.vm().bookCount == counted);
+  for (size_t i = 0; i < again.vm().rows.size(); ++i) {
+    CAPTURE(i);
+    CHECK(again.vm().rows[i].title == first.vm().rows[i].title);
+    CHECK(again.vm().rows[i].meta == first.vm().rows[i].meta);
+  }
+}
+
+TEST_CASE("deleting a book inside a folder updates the folder's count above it") {
+  // THE STALENESS CASE THE MEMO HAS TO SURVIVE, and the one a memo owned by the
+  // Library or by the shell would get wrong: the user descends into a folder,
+  // deletes a book there, and comes back up to the row that states that folder's
+  // count. The delete goes through FileSystem::remove, which drops the memo, so
+  // the row cannot state the old number.
+  Ramp r;
+  reader::QuietTheme theme;
+  FakeFileSystem fs = cardWithBooks();
+  LibraryScreen lib(fs, "/books");
+  lib.setVisibleRows(theme.libraryVisibleRows(800, r.fonts));
+  REQUIRE(lib.vm().rows[0].title == "Classics");
+  REQUIRE(lib.vm().rows[0].meta.find("2 BOOKS") != std::string::npos);
+  const int wholeLibrary = lib.vm().bookCount;
+
+  // Confirm on a folder row descends; Back at a subdirectory comes back up.
+  REQUIRE(lib.onEvent(kConfirm).kind == Action::Kind::Redraw);
+  REQUIRE(lib.path() == "/books/Classics");
+  REQUIRE(lib.itemCount() == 2);
+  CHECK(lib.deleteFocused());
+  REQUIRE(lib.onEvent(kBack).kind == Action::Kind::Redraw);
+  REQUIRE(lib.path() == "/books");
+
+  REQUIRE(lib.vm().rows[0].title == "Classics");
+  CHECK(lib.vm().rows[0].meta.find("1 BOOK") != std::string::npos);
+  CHECK(lib.vm().bookCount == wholeLibrary - 1);
+}
+
 TEST_CASE("the Library's focus starts on the first row and wraps at both ends") {
   Ramp r;
   reader::QuietTheme theme;

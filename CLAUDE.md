@@ -604,6 +604,43 @@ file — so **~1.1 s**, paid on the critical path in two places:
   only mutation of `/books`, and every delete goes through `remove`. **V2's Wi-Fi
   transfer is the change that breaks that argument** and it needs a one-line
   invalidation beside whatever writes the file.
+- **AND THE "ONE PER FOLDER" HALF OF IT IS ITS OWN DEFECT, WHICH THE CACHED INTEGER
+  DOES NOT TOUCH.** `countLibrary` calls `BookList::countBooks` per subfolder, and
+  so does `LibraryScreen::rescan()` — for the board's `FOLDER · 6 BOOKS` line — so
+  a card with fifty folders paid fifty listings at boot and fifty more on **every**
+  Library push. Invisible on a flat card and unbounded on a foldered one; the
+  listing cache below does not help, because a six-book folder is under its minimum
+  entry count and it has two slots against fifty directories. **FIXED by memoising
+  the COUNT, not the listing** (`reader/dir_counts.h`, `DirCountCache`): the rows of
+  a subfolder are never wanted, only how many are books, so fifty folders cost
+  ~1.5 KB where fifty listings would not fit the 20 KB ceiling. A folder is now
+  walked once per card STATE rather than once per caller — the second caller and
+  every Library push after it reach the card for nothing.
+  - **It hangs off the `FileSystem`, for the same reason the listing cache does**,
+    and that is what made it reachable at all: `countLibrary` and `rescan()` share
+    no state except the `FileSystem&` they were both handed, so a memo anywhere else
+    would have needed a setter plumbed through the factory — a caller list, and this
+    file's rule is that a caller list is a function not yet written.
+    `FileSystem::dirCounts()` defaults to **null**, which means "I keep nothing" and
+    is exactly today's behaviour, so `HostFileSystem` and every test wrapper are
+    untouched and the simulator memoises nothing. **The 27-clause contract did not
+    widen** — no new behaviour clause, so `test_filesystem.cpp` and
+    `sd_selftest.cpp` are unchanged.
+  - **`SdFileSystem::forgetCardFacts()` is the invalidation, and it is one function
+    on purpose.** `listings_.clear()` already had five call sites; a second thing to
+    drop would have made it five chances to half invalidate. Every method that
+    CHANGES the card calls it, above its own refusals.
+  - **`openRead` deliberately does NOT call it**, and the distinction is worth
+    keeping: dropping the listing cache there is **eviction** (10–20 KB against the
+    45,840-byte floor a book open measures), not invalidation — opening a file
+    changes nothing — and that argument does not reach ~1.5 KB. So Home → open a
+    book → Back → Library costs no folder listings at all.
+  - **The fake memoises too**, so the desktop suite runs the path the device runs.
+    A staleness bug is a failing test rather than a device report — which is the
+    whole reason the memo sits on an object `core/` can reach.
+  - **A hit is invisible**, because a folder answered from RAM produces no
+    `[fs] list` line: `[library] … folders held=N hit=N miss=N` is what tells a memo
+    that is working from one that has quietly stopped being called.
 - **The Library's own `rescan()`**, on every push — the Library is destroyed by the
   pop that leaves it, so Home → Library → Back → Library lists twice. **FIXED by
   holding the listing, because the walk itself cannot be made cheaper** — and that
@@ -647,7 +684,10 @@ and drops this cache by construction, with no line to remember to add.
 - **20 KB ceiling, and never resident at the 42–46 KB floor**, because `openRead()`
   drops everything — and `openRead` *is* the EPUB path (`readAll` serves the small
   JSON), so nothing but opening a book reaches it. It adds to the no-book-open peak,
-  where there is ~133 KB free.
+  where there is ~133 KB free. **The folder-count memo does NOT go with it**: that
+  clear is eviction rather than invalidation, and 1.5 KB does not need evicting —
+  see `forgetCardFacts()`, which is the invalidation and which `openRead` does not
+  call.
 - **ONE BEHAVIOUR CHANGED: a cache hit never touches the bus**, so `list()` stops
   being a place a dead card is noticed. Affordable because `pollCardPresence()` was
   always the detector — operation feedback never fires in V1, which this file
@@ -746,8 +786,11 @@ it directly: median 549 ms, max 937 ms, the difference being entirely `wait`.
    quoted for two phases, and 203 entries is **~600 ms** on every Library push. Not
    the 1.1 s estimated elsewhere here: that assumed 406 entries because macOS writes
    a `._name` beside every file, and **this card has none**. Both are fixed now —
-   Home's count by `libraryCountForHome`, the listing itself by holding it; see
-   **Storage**, which also names why the walk cannot be made faster.
+   Home's count by `libraryCountForHome`, the listing itself by holding it, and the
+   one-listing-per-FOLDER underneath both by `DirCountCache`; see **Storage**, which
+   also names why the walk cannot be made faster. **Note this run's card is FLAT**,
+   so it measures none of the folder cost: the defect the memo fixes is invisible on
+   exactly the card every device measurement in this file was taken on.
 
 ### Which primitive spent the render
 

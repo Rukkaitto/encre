@@ -8,6 +8,10 @@
 
 namespace reader {
 
+// Declared, not included: only a pointer to one crosses this interface, and
+// filesystem.h is included by nearly everything in core/. See dir_counts.h.
+class DirCountCache;
+
 struct DirEntry {
   std::string name;  // leaf name, not a path
   bool isDir = false;
@@ -157,6 +161,28 @@ class FileSystem {
   // was already absent -- callers deleting a book care about the end state, not
   // about racing something else that deleted it first.
   virtual bool remove(std::string_view path) = 0;
+
+  // A PLACE TO HANG A NUMBER DERIVED FROM A DIRECTORY, or null. See
+  // reader/dir_counts.h for what it is for and why it lives here.
+  //
+  // IT IS NOT PART OF THE CONTRACT ABOVE, and adding it widened none of the 27
+  // clauses: it names no new behaviour, so test_filesystem.cpp and the card
+  // self-test that drive them are untouched. The default is null, which means "I
+  // keep nothing", and an implementation that says so behaves exactly as it did
+  // before this existed -- HostFileSystem does, because the simulator renders a
+  // screen once and a memo would only be a way to go stale.
+  //
+  // It is HERE rather than passed down to the callers that want it because it is
+  // the FileSystem that has to invalidate it: an implementation that hands one
+  // out must drop it in every method that changes the card, and this is the only
+  // handle the two callers -- Home's book count and the Library's rescan -- both
+  // already hold. A memo reached any other way would need a caller list, and a
+  // caller list maintained in prose is a function not yet written.
+  //
+  // An implementation that cannot answer for its storage RIGHT NOW must return
+  // null rather than a memo: a card that has gone is answered from the card, or
+  // not at all.
+  virtual DirCountCache* dirCounts() { return nullptr; }
 };
 
 }  // namespace reader

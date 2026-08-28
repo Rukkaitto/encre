@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "reader/dir_cache.h"
+#include "reader/dir_counts.h"
 #include "reader/filesystem.h"
 
 // THE SHARED SPI BUS.
@@ -212,6 +213,33 @@ class SdFileSystem : public reader::FileSystem {
   // is, because it is not a listing: it is an answer the layer above derives from
   // one, so this counter is what tells that layer to derive it again.
 
+  // THE FOLDER BOOK COUNTS, which are the OTHER derived view and are now held
+  // here rather than recomputed by whoever wants one.
+  //
+  // The paragraph above used to end "It is NOT held by this class the way the
+  // listing cache is, because it is not a listing: it is an answer the layer
+  // above derives from one, so this counter is what tells that layer to derive it
+  // again." That is still true of Home's single integer, which lives in
+  // libraryCountForHome(). It stopped being true of the PER-FOLDER counts that
+  // integer is made of: those are one directory listing each, wanted by two
+  // callers -- countLibrary at boot and LibraryScreen::rescan on every push --
+  // and a card with fifty folders paid fifty listings to each of them. They are
+  // memoised now, and reader/dir_counts.h has the whole argument.
+  //
+  // Held HERE for the reason the listing cache is: every way to change what is on
+  // the card is a method on this object, so the invalidation cannot be bypassed.
+  //
+  // NULL WHILE THE CARD IS NOT USABLE, which is list()'s own rule -- it checks
+  // mounted() BEFORE it consults the listing cache -- and it is the rule that
+  // keeps a probe from being answered out of RAM for a card in the user's hand.
+  // A count is an answer about a card like any other.
+  reader::DirCountCache* dirCounts() override { return mounted() ? &dirCounts_ : nullptr; }
+
+  // The same memo for a LOG line, which has to be readable whether or not the
+  // card is answering: "the counts stopped being used" and "the card went away"
+  // are different things and must not print the same.
+  const reader::DirCountCache& bookCounts() const { return dirCounts_; }
+
   // The held directory listings, for a log line. See list() for what fills them
   // and reader/dir_cache.h for why they exist at all.
   //
@@ -256,6 +284,20 @@ class SdFileSystem : public reader::FileSystem {
  private:
   friend class SdFileHandle;
 
+  // EVERYTHING THIS CLASS HAS LEARNED ABOUT WHAT IS ON THE CARD, DROPPED
+  // TOGETHER, and it is one function so that a mutator added later cannot half
+  // invalidate. Called by every method that CHANGES the card -- writeAll, mkdirs,
+  // remove -- above its own refusals, and by mount/unmount because a volume that
+  // came or went is a different card as far as anything above is concerned.
+  //
+  // openRead deliberately does NOT call it: dropping the listing cache there is
+  // EVICTION (10-20 KB against the 45,840-byte floor a book open measures), not
+  // invalidation, and the counts are ~1.5 KB, which that argument does not reach.
+  // Keeping them is what makes Home > book > Back > Library free of folder
+  // listings. If a third derived fact appears, ask which of the two it is before
+  // adding it to either site.
+  void forgetCardFacts();
+
   // True when `p` names an existing directory. Opens and closes a handle.
   bool isDirectory(const std::string& p);
   // True when `p` exists and is NOT a directory.
@@ -284,6 +326,9 @@ class SdFileSystem : public reader::FileSystem {
   // not yet written.
   reader::DirListingCache listings_{reader::DirListingCache::kDeviceMinEntries,
                                    reader::DirListingCache::kDeviceMaxBytes};
+  // The per-folder book counts, held on the same terms and dropped by the same
+  // function. ~1.5 KB full; see reader/dir_counts.h.
+  reader::DirCountCache dirCounts_;
   ProbeTarget probeTarget_ = ProbeTarget::RootDir;
   std::string probeTargetPath_;
   // Bytes the FAT scan reported at arm time. 0 means "not armed".
