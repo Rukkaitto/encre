@@ -274,6 +274,19 @@ argument, as `renderReader` takes it, because the preview is set in a
 `ScalableFont` rasterised at a runtime size and not in one of `FontSet`'s twelve
 fixed roles.
 
+**IT DOES PREVIEW THE ALIGNMENT**, and that took a shared-primitive change
+(`ProseAlign::Justify`, Task 15b) rather than the cheaper option of left-aligning
+the board. The argument is not faithfulness in the abstract: without it, `CHANGE` on
+the `Alignment` row spends a full ~520 ms repaint moving four characters of a row's
+value while the box labelled LIVE PREVIEW does not move. A preview that visibly
+ignores one of its four rows reads as a screen that does not work, which is worse
+than one that is approximate — and the board declares `text-align: justify`, so
+left-aligning it would have bent the design to fit the implementation.
+
+It applies `kMinJustifyFillPercent` exactly as the reader's page does. Justifying a
+line the page would leave ragged would make the preview tidier than the book it
+previews, which is a subtler wrong than not justifying at all.
+
 **THE PREVIEW CANNOT PREVIEW THE MARGINS, AND THAT IS WORTH WRITING DOWN BEFORE
 SOMEBODY "FIXES" IT.** The box is CHROME geometry -- the board's 24px page
 margins less its own border and padding, 396px of measure on the X4 -- where the

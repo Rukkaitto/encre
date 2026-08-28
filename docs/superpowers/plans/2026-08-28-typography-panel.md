@@ -2376,6 +2376,200 @@ Co-authored-by: Claude <claude@anthropic.com>"
 ```
 
 
+### Task 15b: the preview justifies, so the Alignment row does something
+
+**Files:**
+- Modify: `core/include/reader/text.h` + `core/src/text.cpp` — `stretchFor` and `kMinJustifyFillPercent` move here
+- Modify: `core/include/reader/layout.h` + `core/src/layout.cpp` — they lose both and call the shared one
+- Modify: `core/include/reader/components.h` + `core/src/components.cpp` — `ProseAlign::Justify`
+- Modify: `core/include/reader/viewmodel.h` — `TypographyViewModel::justify`
+- Modify: `core/src/screen_typography.cpp` — set it
+- Modify: `core/src/theme_quiet.cpp` — pass it
+- Test: `test/unit/test_components.cpp`, `test/unit/test_theme_typography.cpp`
+
+**ADDED AFTER PHASE 4, and here is why it is not scope creep.** The box is labelled
+`LIVE PREVIEW`. Without this, pressing `CHANGE` on the `Alignment` row costs a full
+~520 ms repaint in which four characters of the row's value change and the preview
+box does not move — a live preview visibly ignoring one of its four rows, which
+reads as a screen that does not work. That is worse than a preview that is
+approximate.
+
+**And `design/Typography.dc.html` says `text-align: justify`.** Left-aligning the
+board instead would be bending the design to fit an implementation limit, which is
+the one thing this project's cardinal rule forbids.
+
+- [ ] **Step 1: Move `stretchFor` and `kMinJustifyFillPercent` down a layer**
+
+Both live in `layout.cpp`/`layout.h` today. `stretchFor(font, line, availW, tracking)`
+is pure text measurement — it takes no `PageMetrics`, no `Block`, no cursor — and
+`drawTextJustified` is already in `text.h`. So the pair belongs in the text layer,
+and `layout.cpp` becomes a caller rather than the owner.
+
+Move the declaration to `text.h` beside `drawTextJustified`, keeping the existing
+comment (*"The gap COUNT here and the codepoint drawTextJustified stretches must be
+the same rule, which is why both name U+0020 and nothing else"*) — that comment is
+the reason they belong together and it now sits next to the thing it refers to.
+Move `kMinJustifyFillPercent` with it, comment and all: it is the threshold
+`stretchFor` applies, and splitting them would leave a constant in one layer
+governing a function in another.
+
+**Nothing about the behaviour changes.** `layout.cpp` calls the same function with
+the same arguments; the reader's justification is byte-identical, which the existing
+reader goldens will confirm. **If any reader golden moves, the move was not
+mechanical — stop and find out why.**
+
+- [ ] **Step 2: Write the failing test for `ProseAlign::Justify`**
+
+In `test/unit/test_components.cpp`:
+
+```cpp
+TEST_CASE("ProseAlign::Justify stretches every line but the last") {
+  ramp::Ramp ramp;
+  Body body;
+  // Long enough to wrap to at least three lines, so there is a middle line -- a
+  // two-line case cannot distinguish "all but the last" from "only the first".
+  const std::string text =
+      "Miss Brooke had that kind of beauty which seems to be thrown into relief "
+      "by poor dress, and her hand and wrist were so finely formed that she "
+      "could wear sleeves not less bare of style.";
+  reader::Prose p = reader::wrapProse(body.face, text, 396, {});
+  REQUIRE(p.lineCount() >= 3);
+
+  reader::Framebuffer justified(480, 800), ragged(480, 800);
+  justified.clear(true);
+  ragged.clear(true);
+  reader::drawProse(justified, body.face, p, 24, 396, 0, reader::Ink::Black,
+                    reader::Plane::Bw, reader::ProseAlign::Justify);
+  reader::drawProse(ragged, body.face, p, 24, 396, 0, reader::Ink::Black,
+                    reader::Plane::Bw, reader::ProseAlign::Left);
+
+  // THE FRAMES DIFFER, which is the whole point -- and this is the assertion that
+  // would have caught shipping a Justify that silently drew Left.
+  CHECK_FALSE(golden::identical(justified, ragged));
+
+  // THE LAST LINE IS RAGGED IN BOTH. `layout.cpp` states the rule: a paragraph's
+  // last line is short by however much the paragraph ended short, and stretching
+  // it to the margin is the single most recognisable way justified text can be
+  // wrong. Compared as a row band rather than by measuring runs, because the draw
+  // is what is being tested.
+  const int lastTop = reader::f26ToPx((p.lineCount() - 1) * p.leadF26);
+  CHECK(golden::rowsIdentical(justified, ragged, lastTop, 800));
+  // ...and a line ABOVE it is not.
+  CHECK_FALSE(golden::rowsIdentical(justified, ragged, 0, lastTop));
+}
+
+TEST_CASE("a line too empty to justify is left ragged") {
+  // kMinJustifyFillPercent's rule, which the preview must apply or it justifies
+  // lines the reader's own page would leave ragged -- a subtler lie than not
+  // justifying at all.
+  ramp::Ramp ramp;
+  Body body;
+  reader::Prose p = reader::wrapProse(body.face, "Short.", 396, {});
+  REQUIRE(p.lineCount() == 1);
+  reader::Framebuffer a(480, 800), b(480, 800);
+  a.clear(true);
+  b.clear(true);
+  reader::drawProse(a, body.face, p, 24, 396, 0, reader::Ink::Black, reader::Plane::Bw,
+                    reader::ProseAlign::Justify);
+  reader::drawProse(b, body.face, p, 24, 396, 0, reader::Ink::Black, reader::Plane::Bw,
+                    reader::ProseAlign::Left);
+  CHECK(golden::identical(a, b));
+}
+```
+
+**Check `golden::identical` / `rowsIdentical` exist** — grep `test/unit/golden.h`.
+If they do not, compare with `reader::diffPng`-style byte loops or add the helper
+there; do NOT weaken the assertion to a line count.
+
+- [ ] **Step 3: Run to verify it fails**
+
+```bash
+make test 2>&1 | tail -15
+```
+Expected: COMPILE failure — `ProseAlign::Justify` does not exist.
+
+- [ ] **Step 4: Implement**
+
+`components.h`, on the enum:
+
+```cpp
+enum class ProseAlign {
+  Centre,
+  Left,
+  // STRETCHED to the column, every line but the last -- design/Reader.dc.html's
+  // `text-align: justify`, which design/Typography.dc.html's preview box also
+  // declares.
+  //
+  // It applies kMinJustifyFillPercent exactly as the reader's own page does, so a
+  // line too empty to justify is left ragged here too. Justifying a line the page
+  // would leave alone is a subtler wrong than not justifying: the preview would
+  // look tidier than the book it is previewing.
+  Justify,
+};
+```
+
+In `drawProse`'s loop: for `ProseAlign::Justify`, every line except the last gets
+`stretchFor(font, line, boxW - firstIndent, prose.tracking)` and is drawn with
+`drawTextJustified`; the last line, and any line `stretchFor` answers 0 for, is
+drawn as `Left`. **The last line is decided by index, not by `stretchFor` returning
+0** — those are two different reasons for a ragged line and conflating them would
+leave a genuinely full last line stretched.
+
+- [ ] **Step 5: Wire it through**
+
+`TypographyViewModel` gains `bool justify = true;`, commented as: the preview must
+respond to the `Alignment` row or the box is a live preview that ignores it.
+`TypographyScreen::syncVm` sets it from `settings_.justify`.
+`renderTypography` passes `vm.justify ? ProseAlign::Justify : ProseAlign::Left`.
+
+**The footnote and every other `drawProse` caller are untouched** — the enum value
+is opt-in and `align` is the last parameter with a default.
+
+- [ ] **Step 6: Run, and prove it bites**
+
+```bash
+make test 2>&1 | tail -8
+```
+
+| mutation | expected |
+|---|---|
+| `Justify` falls through to `Left` in `drawProse` | the two `test_components` cases fail |
+| the last line stretched too | the last-line-band case fails |
+| `kMinJustifyFillPercent` ignored | the "too empty to justify" case fails |
+| `vm.justify` hardcoded true | the `test_theme_typography` case for RAGGED fails |
+
+**No reader golden may move at any point** — Step 1 is a pure move and Steps 4-5
+are opt-in. If one moves, stop.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add -A
+git commit -m "prose: ProseAlign::Justify, so the Alignment row changes something
+
+The box says LIVE PREVIEW. Without this, CHANGE on the Alignment row spends a
+~520 ms repaint moving four characters of a row value while the box itself does
+not move -- a live preview visibly ignoring one of its four rows, which reads
+as a screen that does not work.
+
+design/Typography.dc.html declares text-align: justify, so left-aligning the
+board instead would have bent the design to fit the implementation, which is
+the one thing this project's rule forbids.
+
+stretchFor and kMinJustifyFillPercent move from layout to the TEXT layer, where
+drawTextJustified already lives and where the comment tying the two together
+can sit next to what it refers to. stretchFor takes no PageMetrics, no Block
+and no cursor -- it was never pagination's. layout.cpp is a caller now, and the
+reader goldens are unmoved, which is what says the move was mechanical.
+
+The preview applies kMinJustifyFillPercent as the page does: justifying a line
+the page would leave ragged makes the preview tidier than the book, which is a
+subtler wrong than not justifying at all.
+
+Co-authored-by: Claude <claude@anthropic.com>"
+```
+
+
 ### Task 16: The simulator reaches it by pressing
 
 **Files:**
