@@ -220,68 +220,81 @@ TEST_CASE("no drawn line's ink leaves the preview box") {
   ramp::Ramp ramp;
   reader::QuietTheme theme;
 
-  struct Case {
-    int ppem, lead;
-  };
-  // The bottom, the default and the top of the offered ramp, at the tightest and
-  // the loosest lead -- so the count is exercised over the whole space the screen
-  // can reach rather than at one setting.
-  const Case cases[] = {{25, 1400}, {32, 1700}, {46, 2000}, {46, 1400}, {25, 2000}};
-  for (const Case& c : cases) {
-    CAPTURE(c.ppem);
-    CAPTURE(c.lead);
-    BodyAt body(c.ppem);
-    const reader::TypographyViewModel vm = vmAt(c.lead);
-    for (const auto& geo : kGeometries) {
-      CAPTURE(geo.first);
-      reader::Framebuffer fb(geo.first, geo.second);
-      theme.renderTypography(fb, ramp.fonts, &body.face, vm, reader::Plane::Bw);
-      const Box box = findBox(fb);
-      REQUIRE(box.top > 0);
-      // At least one line is always drawn -- the box is sized to hold the biggest
-      // offered face -- and the rows below the box never move, so its height is
-      // the same at every setting.
-      CHECK(specimenLines(fb, box) >= 1);
-      CHECK(box.height() == wantBoxH(geo.first));
-      // THE WHOLE BOTTOM PADDING BAND IS INK-FREE, not just the two rows against
-      // the border. Checking two was the first version of this and it could not
-      // see a slice: an overrun of a few pixels lands in the middle of the 12px
-      // padding, clear of the border and clear of the rows being checked.
-      for (int y = box.bottom - 2 - kTypoPreviewPadY + 1; y <= box.bottom - 2; ++y)
-        CHECK_FALSE(inkInside(fb, y));
-      // The TOP band is checked at two rows only, and deliberately: at a lead
-      // tighter than the face's own extent a line box is shorter than the ink in
-      // it, so the first line legitimately reaches up into the padding -- which is
-      // what Chrome does too. Only the bottom edge is a slice.
-      for (int y = box.top + 2; y < box.top + 4; ++y) CHECK_FALSE(inkInside(fb, y));
+  // EXHAUSTIVE OVER THE REACHABLE SPACE, and it was five hand-picked (ppem, lead)
+  // pairs until 1.0 and 1.2 were added. Sampling was wrong here for a reason worth
+  // keeping: the ink rule and the `floor(boxH / lead)` it replaces differ only when
+  // the box's height lands in a window ~(extent - lead)/2 px wide inside a line
+  // box, so WHICH combination bites is not something a human picks correctly. The
+  // one that does is (42, 1000), and no sample written by hand had it -- the list
+  // held 25, 32 and 46 at 1000 and every one of those agreed with floor.
+  //
+  // 5 sizes x 7 leads x 3 margins x 2 panels = 210 renders, 0.44 s. That buys the
+  // whole space instead of an argument about which corner of it matters.
+  for (const int ppem : reader::kBodyPpemSteps) {
+    CAPTURE(ppem);
+    BodyAt body(ppem);
+    for (const int lead : reader::kLineSpacingSteps) {
+      CAPTURE(lead);
+      // THE MARGINS ARE IN HERE TOO, because they change the MEASURE and so the
+      // wrap: a narrower column makes more lines, which is more of them to fit.
+      for (const int margins : reader::kMarginSteps) {
+        CAPTURE(margins);
+        reader::TypographyViewModel vm = vmAt(lead);
+        vm.margins = margins;
+        for (const auto& geo : kGeometries) {
+          CAPTURE(geo.first);
+          reader::Framebuffer fb(geo.first, geo.second);
+          theme.renderTypography(fb, ramp.fonts, &body.face, vm, reader::Plane::Bw);
+          const Box box = findBox(fb);
+          REQUIRE(box.top > 0);
+          // At least one line is always drawn -- the box is sized to hold the
+          // biggest offered face -- and the rows below the box never move, so its
+          // height is the same at every setting.
+          CHECK(specimenLines(fb, box) >= 1);
+          CHECK(box.height() == wantBoxH(geo.first));
+          // THE WHOLE BOTTOM PADDING BAND IS INK-FREE, not just the two rows
+          // against the border. Checking two was the first version of this and it
+          // could not see a slice: an overrun of a few pixels lands in the middle
+          // of the 12px padding, clear of the border and clear of the rows being
+          // checked.
+          for (int y = box.bottom - 2 - kTypoPreviewPadY + 1; y <= box.bottom - 2; ++y)
+            CHECK_FALSE(inkInside(fb, y));
+          // The TOP band is checked at two rows only, and deliberately: at a lead
+          // tighter than the face's own extent a line box is shorter than the ink
+          // in it, so the first line legitimately reaches up into the padding --
+          // which is what Chrome does too. Only the bottom edge is a slice.
+          for (int y = box.top + 2; y < box.top + 4; ++y) CHECK_FALSE(inkInside(fb, y));
+        }
+      }
     }
   }
 }
 
-TEST_CASE("a lead tighter than the face's own extent still never slices a line") {
-  // The property extended past what CHANGE can reach. Every lead on
-  // kLineSpacingSteps is LOOSER than the face's extent, so a line's ink sits inside
-  // its own line box there and `floor(boxH / lead)` gives the same answer the ink
-  // test does -- a mutation to floor passes this whole file, which is said plainly
-  // in previewLinesThatFit rather than implied away here. Below the extent the ink
-  // hangs out of its box, which is where the two rules start to differ.
+TEST_CASE("a lead tighter than the whole offered table still never slices a line") {
+  // THE PROPERTY EXTENDED PAST WHAT CHANGE CAN REACH -- and what CHANGE can reach
+  // has MOVED, so this case's whole premise was rewritten with it.
   //
-  // 1000 is NOT on kLineSpacingSteps and cannot be reached by pressing CHANGE. It
-  // is here because the theme's contract is about the lead it is HANDED, and a
-  // tighter step is one line in settings.h away.
+  // It used to say: every lead on kLineSpacingSteps is LOOSER than the face's
+  // extent, 1000 is not on the table and cannot be reached by pressing CHANGE, and
+  // a mutation to `floor(boxH / lead)` passes this whole file. All three of those
+  // sentences are now false. 1000 and 1200 ARE steps, both are tighter than the
+  // face's 48px extent at ppem 32, and the floor mutation is caught by the
+  // exhaustive case above at (ppem 42, lead 1000) on the X4 -- where floor keeps a
+  // fifth line whose ink leaves the box. THE NON-PROPERTY BECAME A PROPERTY, which
+  // is the whole reason to write down that a mutation does not bite: the note is
+  // what makes it noticeable when it starts to.
   //
-  // IT DOES NOT BITE THE floor MUTATION EITHER, and that is measured rather than
-  // hoped: the two rules disagree only when the box's height lands in a window
-  // ~(extent - lead)/2 px wide inside a line box, and neither panel's box does at
-  // this lead. Tuning a lead until it did would be a test of the implementation
-  // against itself.
+  // What is left for this case is what it was always FOR: the theme's contract is
+  // about the lead it is HANDED, not about the table, so it is checked one step
+  // BELOW the table's own floor. 800 is what 1000 used to be here.
   ramp::Ramp ramp;
   reader::QuietTheme theme;
   BodyAt body(reader::kBodyPpem);
+  REQUIRE(800 < reader::kLineSpacingSteps[0]);  // still off the bottom of the table
   for (const auto& geo : kGeometries) {
     CAPTURE(geo.first);
     reader::Framebuffer fb(geo.first, geo.second);
-    theme.renderTypography(fb, ramp.fonts, &body.face, vmAt(1000), reader::Plane::Bw);
+    theme.renderTypography(fb, ramp.fonts, &body.face, vmAt(800), reader::Plane::Bw);
     const Box box = findBox(fb);
     REQUIRE(box.top > 0);
     CHECK(box.height() == wantBoxH(geo.first));

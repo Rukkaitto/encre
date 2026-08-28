@@ -61,7 +61,33 @@ inline constexpr int kBodyPpemSteps[] = {25, 32, 38, 42, 46};
 inline constexpr int kMarginSteps[] = {10, 18, 30};
 // LINE SPACING: em x 1000, as PageMetrics::leadEm1000 is. 1700 is the board's
 // `line-height: 1.7`.
-inline constexpr int kLineSpacingSteps[] = {1400, 1550, 1700, 1850, 2000};
+//
+// THE BOTTOM TWO STEPS ARE TIGHTER THAN THE FACE'S OWN INK, AND 1.0 CAN TOUCH.
+// Measured rather than argued, so nobody has to re-derive it: the body face at
+// ppem 32 reports ascent=38 descent=-10 lineHeight=48, so its nominal ink extent
+// is 48px and a lead below that puts the extent outside its own line box.
+//
+//   lead | line box | vs the 48px extent
+//   1.00 |     32px | overflows by 16
+//   1.20 |     38px | overflows by 10
+//   1.40 |     44px | overflows by 4   <- shipped from the start, and reads fine
+//   1.55 |     49px | clear
+//
+// The nominal extent is pessimistic, because it is the FACE's worst case rather
+// than any real pair of lines: with real glyph heights (an ascender ~30px above
+// the baseline, the deepest descender 10px below) a collision needs a box under
+// ~40px. So 1.4 is clear despite overflowing nominally, which is why it has always
+// shipped without complaint, while **1.2 can touch by ~2px and 1.0 by ~8px** where
+// a descender happens to sit above an ascender.
+//
+// They are offered anyway, and that is a DELIBERATE call about reading comfort
+// rather than an oversight: a tight lead is a real typographic preference, the
+// worst case is two glyphs grazing rather than anything unreadable, and this is
+// the kind of question CLAUDE.md says is answerable only on the panel. Nothing
+// downstream breaks -- previewLinesThatFit asks about the INK precisely so a lead
+// tighter than the extent cannot slice a line, and layout.h's page walk derives
+// its line box from this number either way.
+inline constexpr int kLineSpacingSteps[] = {1000, 1200, 1400, 1550, 1700, 1850, 2000};
 
 // EVERY STEP TABLE MUST ASCEND, AND THIS IS A static_assert RATHER THAN THE
 // COMMENT IT USED TO BE. What depends on the order is the TIE RULE: snapToTable

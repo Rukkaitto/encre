@@ -19,8 +19,12 @@ namespace reader {
 // validate() to see it. So a change to either layout constant now fails the
 // BUILD instead of silently moving every reader golden.
 static_assert(Settings{}.bodyPpem == kBodyPpem && kBodyPpemSteps[1] == kBodyPpem);
+// Index 4, and it was 2 until two tighter steps were prepended. THIS ASSERT
+// EXISTS TO FAIL HERE: a step added below the default silently moves the default's
+// index, and the build stopping is what forces the number to be re-read rather
+// than the table to be edited and the pairing to be assumed.
 static_assert(Settings{}.lineSpacing == kBodyLeadEm &&
-              kLineSpacingSteps[2] == kBodyLeadEm);
+              kLineSpacingSteps[4] == kBodyLeadEm);
 
 namespace {
 

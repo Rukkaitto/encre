@@ -1409,14 +1409,11 @@ constexpr const char* kTypoFootnote = "APPLIES TO EVERY BOOK. YOUR PLACE IS KEPT
 // wrong here: the box is a window onto a fixed specimen rather than a budget, and
 // an ellipsis on a type specimen reads as content withheld.
 //
-// AND `floor(boxH / lead)` IS NOT WRONG TODAY, WHICH IS WORTH STATING PLAINLY
-// RATHER THAN CLAIMING OTHERWISE. The plan asserts that floor drops a line the
-// board draws on the X3, from a 213px content area; the board measures 246px there
-// and 254 on the X4 (its preview box is 274/282, not the plan's 241/250 -- one
-// footnote line's difference, read out of Chrome's own layout). At those heights
-// the two rules agree at EVERY size and lead this screen can reach, and a mutation
-// to floor() fails nothing in the suite. So the reason to ask about the ink is
-// structural rather than observed:
+// AND `floor(boxH / lead)` IS WRONG NOW, WHICH IT WAS NOT WHEN THIS FUNCTION WAS
+// WRITTEN. This comment used to say so plainly rather than overclaim -- the two
+// rules agreed at every size and lead the screen could reach, and a mutation to
+// floor() failed nothing in the suite, so the reason to ask about the ink was
+// structural:
 //
 //   floor keeps line i when its LINE BOX fits. A line's ink exceeds its line box
 //   by (extent - lead) / 2 whenever the lead is tighter than the face's extent,
@@ -1424,11 +1421,18 @@ constexpr const char* kTypoFootnote = "APPLIES TO EVERY BOOK. YOUR PLACE IS KEPT
 //   2px border then cuts through is the sliced line design/Reader.dc.html's column
 //   once had. Asking about the ink cannot produce it, at any lead, for any face.
 //
-// The window where the two disagree is ~(extent - lead) / 2 px wide out of each
-// line box, so a test that bit the difference would have to be tuned to it. That
-// is a test of an implementation against itself, so there is not one; what is
-// tested is the property -- no drawn line's ink leaves the box, at every reachable
-// setting and at one tighter than any of them.
+// THAT STEP WAS TAKEN. kLineSpacingSteps gained 1.0 and 1.2, both tighter than the
+// body face's 48px extent at ppem 32, and the argument above turned into an
+// observation: over the reachable space -- 5 sizes x 7 leads x 3 margins x 2 panels
+// -- the two rules now differ in 13 of 210 cases, and at **(ppem 42, lead 1000) on
+// the X4 floor draws a FIFTH line whose ink leaves the box**, which is the slice
+// itself. The other twelve are loose leads where floor is merely one line stingier.
+//
+// So the disagreement window -- ~(extent - lead) / 2 px out of each line box -- is
+// no longer too narrow for a test to land in, and test_theme_typography.cpp's
+// "no drawn line's ink leaves the preview box" walks the whole space rather than a
+// sample for exactly that reason: NO HAND-PICKED SAMPLE HAD (42, 1000). The list it
+// replaced held 25, 32 and 46 at that lead and every one of them agreed with floor.
 //
 // TWO UNITS THAT ARE EASY TO GET WRONG, and both were wrong in the first draft of
 // this function. `baselineInF26` takes 1/64 px and returns a WHOLE-PIXEL baseline

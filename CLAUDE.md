@@ -3415,18 +3415,57 @@ and the page came back at 15 while both screens said 22. `setup()` now re-inits 
 the face DISAGREES with the setting, guarded that way so a card holding the default
 costs no cache flush.
 
-**THE PREVIEW SHOWS THE FACE, THE SIZE, THE LEAD AND THE ALIGNMENT — NOT THE
-MARGINS.** The box is chrome geometry, 396px of measure on the X4 where the reading
-column is 444, so it can never be the reading measure. Two consequences worth
-knowing before "fixing" either:
+**THE PREVIEW SHOWS ALL FOUR EDITABLE ROWS, AND IT SHIPPED SHOWING THREE.** The
+spec said the box "cannot preview the margins" because the box is chrome geometry —
+396px of measure on the X4 where the reading column is 444, so it can never BE the
+reading measure — and that framing was wrong. **THE BOX IS THE PAGE AND ITS SIDE
+PADDING IS THE MARGIN**, so the padding tracks the setting and the base measure
+being narrower than the column is beside the point. Reported off the device as
+"changing the margins doesn't update the live preview", which is the argument that
+put justification in the box arriving on the one row that had been excluded from it.
 
-- **Justified text RIVERS MORE in the preview than on the page**, because the
-  measure is narrower. The roadmap records rivers at this size as inherent; the
-  preview exaggerates them.
+- **The delta is EXACT, not scaled**, because the box and the panel are the same
+  device pixels: one px of margin narrows the reading column by 2px and this
+  padding by 1px each side. `kTypoPreviewPadXBase` is 16 at the tightest step, so
+  `margins = 18` renders the board's 24px and WIDE reads 36.
+- **ONLY THE MEASURE MOVES, AND THAT IS THE HALF A TEST HAS TO CHECK.** The border
+  is placed from `kMargin` and `boxH`, neither of which reads the setting, so no row
+  below the box shifts. A fix that inset the whole box instead would keep the box's
+  HEIGHT and step every row below it on every press of one row —
+  `test_theme_typography.cpp` compares the border's inked COLUMNS between the two
+  end steps for exactly that, and it fails 166 assertions when the outline moves.
+- **Justified text RIVERS MORE in the preview than on the page** at the default and
+  wide settings, because the measure is still narrower than the column. The roadmap
+  records rivers at this size as inherent; the preview exaggerates them.
 - **The box's height is DERIVED and fixed with respect to the settings**, so the
   five rows never move and there is visible slack at large sizes. A pinned height
   was tried, was wrong by ~42px, and `flex-shrink` hid it — CLAUDE.md's first
   invariant, broken in this feature's first commit.
+
+**THE TWO TIGHTEST LEADS ARE TIGHTER THAN THE FACE'S OWN INK, AND 1.0 CAN TOUCH.**
+`kLineSpacingSteps` is seven values now — 1.0 and 1.2 were added below the shipped
+floor of 1.4 — and the measurement is in `settings.h` beside the table so nobody
+re-derives it: the body face at ppem 32 is `ascent=38 descent=-10 lineHeight=48`, so
+its nominal extent is 48px against a 32px line box at 1.0 and 38px at 1.2. The
+nominal figure is the face's worst case rather than any real pair of lines — with
+real glyph heights a collision needs a box under ~40px — so **1.4 is clear despite
+overflowing nominally, 1.2 can touch by ~2px and 1.0 by ~8px**. Offered anyway: it
+is a reading-comfort call and this glass is the only place to settle it.
+
+- **`settings.cpp`'s `kLineSpacingSteps[2] == kBodyLeadEm` assert exists to fail
+  here**, and did: the default's index moved 2 → 4. A step added below the default
+  silently re-indexes it, and the build stopping is what forces the number re-read.
+- **IT TURNED A DOCUMENTED NON-PROPERTY INTO A REAL ONE.** `previewLinesThatFit`
+  measures INK rather than line boxes, and its comment said plainly that
+  `floor(boxH / lead)` agreed with it everywhere reachable and that a mutation to
+  floor failed nothing. With these two steps the rules differ in **13 of 210**
+  reachable cases, and at **(ppem 42, lead 1000) on the X4 floor draws a fifth line
+  whose ink leaves the box** — the slice itself. **No hand-picked sample had that
+  pair**: the case list held 25, 32 and 46 at that lead and all three agreed with
+  floor, so the test walks the whole space (5 sizes × 7 leads × 3 margins × 2
+  panels, 0.44 s) instead. The floor mutation now fails 14 assertions. **Writing
+  down that a mutation does not bite is what made it noticeable when it started
+  to.**
 
 **`ProseAlign::Justify` EXISTS BECAUSE THE BOX SAYS LIVE PREVIEW.** Without it,
 `CHANGE` on the `Alignment` row spends a ~520 ms repaint moving four characters of a

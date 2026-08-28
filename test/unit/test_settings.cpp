@@ -360,6 +360,19 @@ TEST_CASE("validate snaps the typography fields to an offered value") {
     CHECK(s.margins == 30);
     CHECK(s.lineSpacing == 1850);  // 1900 is 50 from 1850 and 100 from 2000
   }
+  SUBCASE("a lead below the old bottom step snaps to one of the two new ones") {
+    // ADDED WITH 1.0 AND 1.2. Before them 1400 was the floor, so ANY tighter value
+    // snapped up to it and this whole region of the table was one answer; a test
+    // written then would have kept passing over two steps it could not reach.
+    reader::Settings s;
+    s.lineSpacing = 1100;  // between 1000 and 1200, 100 from each
+    CHECK_FALSE(s.validate());
+    CHECK(s.lineSpacing == 1200);  // ties go UP, which is what ascending() protects
+    reader::Settings t;
+    t.lineSpacing = 800;  // below the whole table now
+    CHECK_FALSE(t.validate());
+    CHECK(t.lineSpacing == 1000);  // and NOT 1400, which is what it used to be
+  }
   SUBCASE("a value already on the list is left alone and reports ok") {
     reader::Settings s;
     s.bodyPpem = 42;

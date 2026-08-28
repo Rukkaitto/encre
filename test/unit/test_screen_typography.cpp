@@ -159,7 +159,8 @@ TEST_CASE("every cycle returns to where it started, on every multi-value row") {
     int row;
     int count;
   };
-  const Case cases[] = {{1, 5}, {2, 3}, {3, 5}, {4, 2}};
+  // Line spacing is SEVEN since 1.0 and 1.2 were added below the old bottom step.
+  const Case cases[] = {{1, 5}, {2, 3}, {3, 7}, {4, 2}};
   for (const Case& c : cases) {
     CAPTURE(c.row);
     reader::TypographyScreen scr(reader::Settings{}, nullptr, nullptr);
@@ -186,6 +187,29 @@ TEST_CASE("the size cycle visits every offered step, in the table's order") {
   for (const char* w : want) {
     scr.onEvent(kConfirm);
     CHECK(scr.vm().rows[1].value == std::string(w));
+  }
+}
+
+TEST_CASE("the line spacing cycle visits every offered step, in the table's order") {
+  // ADDED WITH 1.0 AND 1.2, for the digit rather than for the order. The label is
+  // built as `em1000 / 1000` then `(em1000 / 100) % 10`, so a lead whose tenths
+  // digit is ZERO is the case that could have come out as `1.` or `1` -- which is
+  // exactly the "a bare integer reads as a count beside 1.85" failure the formatter
+  // was written to avoid, arriving from the other end of the table. 1.0 is the first
+  // step to exercise it and 2.0 was already the last.
+  //
+  // The order is worth pinning too, for the same reason the size cycle's is: this
+  // is a control the reader watches step, and a table read out of order reads as a
+  // broken button rather than as a different design.
+  reader::TypographyScreen scr(reader::Settings{}, nullptr, nullptr);
+  while (scr.focus() != 3) scr.onEvent(kDown);
+  CHECK(scr.vm().rows[3].value == "1.7");  // the default, mid-table now
+  // Wraps at 2000 -> 1000. `1.5` is 1550 truncated, which is the formatter's own
+  // rule and predates these two steps.
+  const char* want[] = {"1.8", "2.0", "1.0", "1.2", "1.4", "1.5", "1.7"};
+  for (const char* w : want) {
+    scr.onEvent(kConfirm);
+    CHECK(scr.vm().rows[3].value == std::string(w));
   }
 }
 
