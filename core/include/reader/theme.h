@@ -17,6 +17,7 @@ struct SleepViewModel;
 struct ReaderViewModel;
 struct ReaderMenuViewModel;
 struct ContentsViewModel;
+struct TypographyViewModel;
 
 // Themes own the entire presentation, layout structure included (spec 3.3).
 // The FontSet is supplied by the caller so device knowledge — which asset backs
@@ -111,6 +112,27 @@ class Theme {
   // headers, with the same rail Library uses -- see SettingsViewModel.
   virtual void renderSettings(Framebuffer& fb, const FontSet& fonts,
                               const SettingsViewModel& vm, Plane plane) = 0;
+
+  // design/Typography.dc.html.
+  //
+  // Takes the body face for the same reason renderReader does: the preview is set
+  // in a ScalableFont rasterised at a runtime size, not in one of FontSet's twelve
+  // fixed roles, and the whole point of the box is to show that size.
+  //
+  // A POINTER, AND NULL IS A SUPPORTED STATE -- exactly as renderReader's italic
+  // is, and for the same reason: a caller with no body face gets an empty preview
+  // box rather than no screen. A reference would force every such caller to invent
+  // a null face, which is a class nothing needs.
+  //
+  // THE LEAD COMES FROM THE VIEW MODEL, not from this face and not from a constant
+  // here: a face is pinned to a ppem by init() and carries no leading, so a theme
+  // that resolved 1.7 itself would draw a preview contradicting the `Line spacing`
+  // row directly beneath it on four of that row's five steps. The SIZE needs no
+  // such field, because it has already arrived as `body` -- the same asymmetry
+  // readerMetrics states about reading three typography fields and not four.
+  virtual void renderTypography(Framebuffer& fb, const FontSet& fonts,
+                                const GlyphSource* body, const TypographyViewModel& vm,
+                                Plane plane) = 0;
 
   // Reader's COLUMN, the same split as settingsMetrics: the theme owns the box
   // model, the screen owns what goes in it. The theme knows the header band's and

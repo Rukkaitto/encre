@@ -92,6 +92,8 @@ class NullTheme : public Theme {
                          Plane) override {}
   int libraryVisibleRows(int, const FontSet&) const override { return 0; }
   void renderSettings(Framebuffer&, const FontSet&, const SettingsViewModel&, Plane) override {}
+  void renderTypography(Framebuffer&, const FontSet&, const GlyphSource*,
+                        const TypographyViewModel&, Plane) override {}
   void renderSleep(Framebuffer&, const FontSet&, const SleepViewModel&, Plane) override {}
   void renderReaderMenu(Framebuffer&, const FontSet&, const ReaderMenuViewModel&,
                         Plane) override {}

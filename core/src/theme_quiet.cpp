@@ -1342,5 +1342,247 @@ void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
   drawHintBar(fb, fonts, hints, plane);
 }
 
+// --- design/Typography.dc.html ------------------------------------------------
+namespace {
+
+// Every one of these is the board's own number. Nothing here is derived by this
+// theme EXCEPT the preview box's height, which is the panel less all of them --
+// see typographyPreviewBoxH.
+constexpr int kTypoPreviewTop = 16;    // the box's `margin-top`
+constexpr int kTypoPreviewBorder = 2;  // `border: 2px`
+constexpr int kTypoPreviewPadY = 12;   // `padding: 12px 16px`
+constexpr int kTypoPreviewPadX = 16;
+constexpr int kTypoLabelPadTop = 8;  // `LIVE PREVIEW`'s `padding: 8px 24px 10px`
+constexpr int kTypoLabelPadBottom = 10;
+constexpr int kTypoLabelEm = 120;  // `letter-spacing: 0.12em`
+constexpr int kTypoRowsBorder = 2;  // the rows block's `border-top: 2px`
+// 50, NOT kSettingsRowH's 54. Two boards, two numbers -- and pinning one to the
+// other is exactly the class of defect this project records three times (the
+// header band 6px out, menu rows compounding a pixel each, the hint bar's
+// asymmetric padding). Derive from the board you are drawing.
+constexpr int kTypoRowH = 50;
+constexpr int kTypoRuleH = 1;           // `border-bottom: 1px` between rows
+constexpr int kTypoFootPadBottom = 10;  // the footnote's `padding: 0 24px 10px`
+constexpr int kTypoFootEm = 100;        // `letter-spacing: 0.1em`
+// `line-height: 1.5`, em x 1000 as wrapProse takes it -- NOT the 1/64 px unit
+// wrapProseLead takes. Handing 1500 to the latter would be a 23.4px line box on a
+// 21px face, which is tighter than the face's own extent.
+constexpr int kTypoFootLeadEm = 1500;
+// THE FOOTNOTE'S COPY. In the theme rather than the view model because it is the
+// BOARD'S text about how the screen behaves, not a fact about the current state --
+// the same call renderSdMissing makes for its paragraph.
+//
+// It does two jobs. It answers the only question a reader actually has (the place
+// IS kept: relayout lands at the top of the current block), and it states that the
+// setting is DEVICE-WIDE -- which is why the band's right slot names no book.
+//
+// PURE ASCII, and that is worth one line: the copy it replaced carried an em dash,
+// and this repo has been bitten twice by an unbounded C++ hex escape swallowing
+// the character after it (`"\xB7C"`, `"\xA0b"`). There is no escape here to get
+// wrong.
+constexpr const char* kTypoFootnote = "APPLIES TO EVERY BOOK. YOUR PLACE IS KEPT.";
+
+// HOW MANY OF A WRAP'S LINES HAVE THEIR INK INSIDE A BOX `boxH` PX TALL.
+//
+// Not `clampProse`, which takes a line budget and ellipsises the remainder -- both
+// wrong here: the box is a window onto a fixed specimen rather than a budget, and
+// an ellipsis on a type specimen reads as content withheld.
+//
+// AND `floor(boxH / lead)` IS NOT WRONG TODAY, WHICH IS WORTH STATING PLAINLY
+// RATHER THAN CLAIMING OTHERWISE. The plan asserts that floor drops a line the
+// board draws on the X3, from a 213px content area; the board measures 246px there
+// and 254 on the X4 (its preview box is 274/282, not the plan's 241/250 -- one
+// footnote line's difference, read out of Chrome's own layout). At those heights
+// the two rules agree at EVERY size and lead this screen can reach, and a mutation
+// to floor() fails nothing in the suite. So the reason to ask about the ink is
+// structural rather than observed:
+//
+//   floor keeps line i when its LINE BOX fits. A line's ink exceeds its line box
+//   by (extent - lead) / 2 whenever the lead is tighter than the face's extent,
+//   which is a lead one step in settings.h away -- and the line the box's own
+//   2px border then cuts through is the sliced line design/Reader.dc.html's column
+//   once had. Asking about the ink cannot produce it, at any lead, for any face.
+//
+// The window where the two disagree is ~(extent - lead) / 2 px wide out of each
+// line box, so a test that bit the difference would have to be tuned to it. That
+// is a test of an implementation against itself, so there is not one; what is
+// tested is the property -- no drawn line's ink leaves the box, at every reachable
+// setting and at one tighter than any of them.
+//
+// TWO UNITS THAT ARE EASY TO GET WRONG, and both were wrong in the first draft of
+// this function. `baselineInF26` takes 1/64 px and returns a WHOLE-PIXEL baseline
+// (it is what drawProse hands drawText), so the result is converted rather than
+// compared. And `descent()` is NEGATIVE and in whole pixels -- `lineHeight()` is
+// `ascent - descent + lineGap` -- so the ink's bottom edge is `baseline - descent`.
+// Adding it instead moves the edge UP by the descender, which silently keeps one
+// line too many.
+int previewLinesThatFit(const GlyphSource& face, const Prose& p, int boxH) {
+  if (p.leadF26 <= 0) return 0;
+  const int boxF26 = pxToF26(boxH);
+  int fit = 0;
+  for (int i = 0; i < p.lineCount(); ++i) {
+    // baselineInF26 is the same helper drawProse places by, so this cannot
+    // disagree with where the glyphs actually land.
+    const int baselinePx = baselineInF26(face, i * p.leadF26, p.leadF26);
+    const int inkBottomF26 = pxToF26(baselinePx - face.descent());
+    if (inkBottomF26 > boxF26) break;
+    ++fit;
+  }
+  return fit;
+}
+
+// THE PREVIEW BOX'S HEIGHT: the panel less every fixed run above and below it.
+//
+// DERIVED, NOT PINNED, which is CLAUDE.md's first invariant -- and this feature
+// has already paid for ignoring it once: the board pinned `height: 292px`,
+// computed from a footnote assumed to be two lines that rendered in three, and
+// `flex-shrink`'s default of 1 absorbed the ~42px error silently.
+//
+// MEASURED TARGETS, so a mismatch here is visible immediately rather than at the
+// comparison sheet -- and they are NOT the plan's 250/241. Read out of Chrome's
+// own layout, per element, at both of compare-design.py's frame overrides, the
+// board's box is **282px on the X4 and 274px on the X3** (254 and 246 of text
+// area), and its footnote is TWO lines. 250/241 is exactly one 31.5px footnote
+// line short of that, so it was measured while the copy still wrapped to three.
+//
+// This derives 280 and 272 -- 2px under, both accounted for: 1px is the focused
+// row's dropped rule (see below) and 1px is two half-pixel Chrome line boxes,
+// `LIVE PREVIEW` at 44.5 and the hint bar at 63.5. test_theme_typography.cpp
+// carries the same arithmetic beside the numbers it asserts.
+//
+// It is FIXED with respect to the SETTINGS, which is the point: the box does not
+// grow with the type, so the five rows below it never move.
+//
+// AND FIXED WITH RESPECT TO THE FOCUS, which is the other thing it must be. The
+// rows block is measured with every between-row rule, and the row that is FOCUSED
+// draws none (its fill runs to the next row's top edge, rowRuleFor's rule) -- so
+// the block actually drawn is a pixel shorter than the block measured here. That
+// pixel becomes slack above the bottom-anchored footnote, where a box height that
+// tracked the focus would move the whole rows block on every press.
+int typographyPreviewBoxH(const Framebuffer& fb, const FontSet& fonts, int bandH, int rowCount,
+                          const Hint hints[4]) {
+  const Font& meta = fonts[Role::Meta400];
+  const int labelH = kTypoLabelPadTop + meta.lineHeight() + kTypoLabelPadBottom;
+  // Rules BETWEEN rows only: the last row's bottom edge is the block's end, which
+  // is renderSettings' and renderLibrary's rule verbatim.
+  const int rowsH =
+      kTypoRowsBorder + rowCount * kTypoRowH + (rowCount > 0 ? (rowCount - 1) * kTypoRuleH : 0);
+  // The footnote is TWO lines at the board's measure on both panels -- and it is
+  // ASKED rather than hardcoded, because the firmware's whole-pixel advances
+  // measure ~3% wider than Chrome's and a board's measure is a number to check in
+  // both engines (SdMissing's had to go 400 -> 420 for exactly this). The previous
+  // copy was three lines, and assuming two is what cost the 42px above.
+  const Prose foot = wrapProse(meta, kTypoFootnote, fb.width() - 2 * kMargin, kTypoFootLeadEm,
+                               trackingEm(meta, kTypoFootEm));
+  const int footH = f26ToPx(foot.heightF26()) + kTypoFootPadBottom;
+  const int fixed =
+      bandH + kTypoPreviewTop + labelH + rowsH + footH + hintBarHeight(fonts, hints);
+  const int box = fb.height() - fixed;
+  return box > 0 ? box : 0;
+}
+
+}  // namespace
+
+void QuietTheme::renderTypography(Framebuffer& fb, const FontSet& fonts, const GlyphSource* body,
+                                  const TypographyViewModel& vm, Plane plane) {
+  fb.clear(true);
+
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+
+  // THE BAND'S RIGHT SLOT IS EMPTY, and that is the design: these settings are
+  // device-wide, so there is no fact about "the book you are looking at" to put
+  // there, and naming one book would contradict the footnote below.
+  //
+  // The band's HEIGHT does not change for it -- bandContentH() takes
+  // max(Label500, Value700) unconditionally -- which is deliberate and is what the
+  // board reserves a line box to match (its right slot is an `&nbsp;`): a band
+  // that shrank when a screen left the slot empty would move every row beneath it.
+  const int afterBand = drawHeaderBand(fb, fonts, vm.title, "", nullptr, plane);
+
+  const int rowCount = static_cast<int>(vm.rows.size());
+  const int boxH = typographyPreviewBoxH(fb, fonts, afterBand, rowCount, hints);
+
+  // --- The preview box --------------------------------------------------------
+  int y = afterBand + kTypoPreviewTop;
+  outlineRect(fb, kMargin, y, fb.width() - 2 * kMargin, boxH, kTypoPreviewBorder);
+  const int textW = fb.width() - 2 * kMargin - 2 * kTypoPreviewBorder - 2 * kTypoPreviewPadX;
+  const int textH = boxH - 2 * kTypoPreviewBorder - 2 * kTypoPreviewPadY;
+  // NO FACE, NO SPECIMEN -- the box is still drawn, because the box is the board's
+  // and an absent preview is not an absent screen.
+  if (body != nullptr && !vm.specimen.empty() && textW > 0 && textH > 0) {
+    // The LEAD is the setting's, resolved against the face exactly as the board's
+    // `line-height: 1.7` on `font-size: 32px` is -- which is what makes the box a
+    // preview of Line spacing as well as of Size.
+    //
+    // It is NOT justified and does NOT follow the Alignment setting. The box is
+    // chrome geometry and cannot preview the reading measure at all (it is the
+    // board's 24px page margins less its own border and padding, where the column
+    // is `panelW - 2 * margins`), so its job is the FACE, the SIZE and the LEAD.
+    Prose p = wrapProse(*body, vm.specimen, textW, vm.leadEm1000);
+    p.lines.resize(static_cast<size_t>(previewLinesThatFit(*body, p, textH)));
+    drawProse(fb, *body, p, kMargin + kTypoPreviewBorder + kTypoPreviewPadX,
+              textW, pxToF26(y + kTypoPreviewBorder + kTypoPreviewPadY), Ink::Black, plane,
+              ProseAlign::Left);
+  }
+  y += boxH;
+
+  // --- `LIVE PREVIEW` ---------------------------------------------------------
+  const Font& meta = fonts[Role::Meta400];
+  const Tracking labelTrack = trackingEm(meta, kTypoLabelEm);
+  y += kTypoLabelPadTop;
+  drawText(fb, meta, kMargin, baselineIn(meta, y, meta.lineHeight()), "LIVE PREVIEW", Ink::Black,
+           labelTrack, plane);
+  y += meta.lineHeight() + kTypoLabelPadBottom;
+
+  // --- The rows ---------------------------------------------------------------
+  fb.fillRect(0, y, fb.width(), kTypoRowsBorder, false);
+  y += kTypoRowsBorder;
+
+  const Font& label = fonts[Role::Value500];
+  const Font& labelFocused = fonts[Role::Value700];
+  const Font& value = fonts[Role::Value700];
+  for (int i = 0; i < rowCount; ++i) {
+    const ListRow& row = vm.rows[static_cast<size_t>(i)];
+    const bool focused = (i == vm.focusedRow);
+    // AN UNFOCUSABLE ROW IS DRAWN EXACTLY AS AN UNFOCUSED FOCUSABLE ONE.
+    // `row.focusable` is deliberately not read here -- the flag is about input, and
+    // a theme that dimmed on it would be inventing a design decision. Settings'
+    // render makes the same point in the same words.
+    if (focused) fb.fillRect(0, y, fb.width(), kTypoRowH, false);
+    const Ink ink = focused ? Ink::White : Ink::Black;
+    const Font& lf = focused ? labelFocused : label;
+
+    const int rightEdge = fb.width() - kMargin;
+    const int valueW = row.value.empty() ? 0 : value.measure(row.value);
+    // The label truncates and the value keeps its width -- the Library band's
+    // rule: the value is the state and the label is what it names.
+    const int labelMaxW = rightEdge - kMargin - (valueW > 0 ? valueW + kSettingsLabelGap : 0);
+    drawTextElided(fb, lf, kMargin, baselineIn(lf, y, kTypoRowH), row.label, labelMaxW, ink, {},
+                   plane);
+    if (valueW > 0)
+      drawText(fb, value, rightEdge - valueW, baselineIn(value, y, kTypoRowH), row.value, ink, {},
+               plane);
+
+    y += kTypoRowH;
+    // A rule BETWEEN rows only, and none under the focused row whose fill runs to
+    // the next row's top edge. rowRuleFor is the shared spelling of both.
+    if (rowRuleFor(i, rowCount, focused)) {
+      fb.fillRect(0, y, fb.width(), kTypoRuleH, false);
+      y += kTypoRuleH;
+    }
+  }
+
+  // --- The footnote, bottom-anchored above the hint bar (`margin-top: auto`) ---
+  const Tracking footTrack = trackingEm(meta, kTypoFootEm);
+  const Prose foot = wrapProse(meta, kTypoFootnote, fb.width() - 2 * kMargin, kTypoFootLeadEm,
+                               footTrack);
+  const int footTop =
+      fb.height() - hintBarHeight(fonts, hints) - kTypoFootPadBottom - f26ToPx(foot.heightF26());
+  drawProse(fb, meta, foot, kMargin, fb.width() - 2 * kMargin, pxToF26(footTop), Ink::Black,
+            plane, ProseAlign::Left);
+
+  drawHintBar(fb, fonts, hints, plane);
+}
 
 }  // namespace reader
