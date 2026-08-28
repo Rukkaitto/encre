@@ -455,6 +455,28 @@ because they are the mechanism that stops this feature adding a screen that
 reports a focus and drops it. They fail until Typography is added, which is the
 test doing its job rather than an obstacle.
 
+**MEASURED (2026-08-28), design against firmware, both geometries:**
+
+| screen | X4 | X3 |
+|---|--:|--:|
+| `typography` | 6.46% | 4.22% |
+| `settings` | **1.57%** | **1.44%** |
+
+Against this project's ~5.4%/6.4% average for 1-bit chrome. `settings` IMPROVED
+from 2.23%/2.05%, because the five typography rows went with it -- including the
+`Size` row whose right-aligned value was ~412 pixels of a 55px band mismatched
+either way. It now sits near `home_empty`'s 1.34%/1.23%, among the closest panels
+on the sheet.
+
+`typography`'s X4 sits 2.2pp above its X3 for one identified reason, and it is not
+structural -- box top, footnote wrap and row pitch are identical on both sides at
+both geometries. At the X3's 444px measure both engines break the specimen at the
+same words; at the X4's 396px they do not, because the firmware's whole-pixel
+advances measure ~3% wider and that tips the greedy wrap. **Justification then
+amplifies it: one different word on a line offsets every word on that line.** Same
+family as `SdMissing.dc.html`'s `max-width` going 400 -> 420. The lever, if it is
+ever worth pulling, is the board's copy or its measure -- not the firmware.
+
 **`make compare` on the board**, with the percentage read rather than the word
 `ok`: `ok` means the simulator produced a frame, not that the frame matches. A
 merge changed `ReaderMenu.dc.html` under its screen and the sheet said `ok` at
