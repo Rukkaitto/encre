@@ -762,8 +762,23 @@ TEST_CASE("the demo Peek builds and shows the board's opening") {
   CHECK(peek->page().lines.size() <= static_cast<size_t>(reader::kPeekLines));
   // AND IT IS THE BOARD'S OWN SENTENCE. Checked on the text rather than only on the
   // line count, because a peek built from the READER's demo chapter would also fit --
-  // demoReaderXhtml opens with this same first sentence and then carries a second
-  // paragraph the panel has no room for.
-  CHECK(readerfix::pageText(peek->page()).find("Miss Brooke") != std::string::npos);
+  // and "Miss Brooke", which this used to assert, IS THAT CHAPTER'S OPENING TOO. The
+  // two literals are byte-identical for 194 characters and diverge at `bare of style.`
+  // against `bare of style than those in which the Blessed Virgin...`, so the only
+  // thing that tells them apart on an eight-line panel is where the specimen STOPS:
+  // rendered side by side the pages differ in their last line alone,
+  // `less bare of style.` against `less bare of style than`.
+  //
+  // WHICH IS ALSO THE POINT OF THE BOARD'S SHORTER TEXT. demoPeekXhtml is the reading
+  // board's sentence truncated to what the panel holds, so `make compare` measures the
+  // panel rather than where a longer specimen happened to break -- and a peek built
+  // from the reader's chapter would be cut off mid-clause instead.
+  const std::string text = readerfix::pageText(peek->page());
+  CHECK(text.find("Miss Brooke") != std::string::npos);
+  CHECK(text.find("bare of style.") != std::string::npos);
+  REQUIRE_FALSE(peek->page().lines.empty());
+  REQUIRE_FALSE(peek->page().lines.back().text.empty());
+  CHECK(peek->page().lines.back().text.back() == '.');
 }
+
 

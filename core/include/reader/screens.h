@@ -236,6 +236,14 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // that figure for its whole life -- so the band's number stayed on the chapter the
   // panel was opened at while its label followed the reader across a boundary. The
   // panel derives it from the chapter it is showing now; see PeekScreen::percentHere.
+  //
+  // `peekPrimed_` IS ITS OWN FLAG rather than "spine >= 0": spine 0 is a real target --
+  // it is the book's cover, which an NCX section header can legitimately name -- so a
+  // sentinel would refuse a valid peek. Only "nothing was primed at all" is refused.
+  //
+  // THERE IS NO clearPeek(). One was written and had no caller anywhere, tests
+  // included: this runs on every press that opens a panel, so nothing can go stale,
+  // and an unused setter is a second way to reach a state only one path should own.
   void setPeek(int spine) {
     peekSpine_ = spine;
     peekPrimed_ = true;

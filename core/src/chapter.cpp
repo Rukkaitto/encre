@@ -76,11 +76,28 @@ void ChapterReader::release() {
   // header for why it is not a unique_ptr like its neighbours.
   inflater_.release();
   bufSrc_.reset();
+  // THE ONE LINK IN THAT CHAIN THE ORDER ABOVE DID NOT ACCOUNT FOR. `entry_` is a
+  // VALUE member, so nothing destroys it here -- and it holds a RAW `FileHandle*` into
+  // `file_` (zip.h), which the next line frees. Reset before its owner, exactly as
+  // every unique_ptr above is, so the raw pointer cannot outlive what it points at.
+  //
+  // Not dereferenceable today -- next() gates on `blocks_ == nullptr` and startStream()
+  // re-points it before any read -- which is precisely why it is worth being explicit:
+  // a dangling pointer that nothing reads is a dangling pointer until somebody adds a
+  // reader, and this order is what the comment above claims to state in full.
+  entry_ = EntrySource{};
   file_.reset();
   // `where_`, `fromBuffer_`, `buffer_` and `dataOffset_` are deliberately NOT cleared
-  // -- see the header. They are what begin() and rewind() need to put this back, and
-  // dataOffset_ is what keeps a reacquire from going back to the card for a header it
-  // has already read.
+  // -- see the header. They are what begin() and rewind() need to put this back.
+  //
+  // AND `dataOffset_` IS FOR THE REWIND, NOT FOR THE REACQUIRE. This said it was what
+  // "keeps a reacquire from going back to the card for a header it has already read",
+  // and it is not: ReaderScreen::reacquireChapter goes through reopenChapter, which
+  // calls begin(), and begin() re-opens the file and re-runs Zip::locateData
+  // unconditionally -- overwriting this field with the value it already held. The
+  // claim holds for rewind(), which calls startStream() directly and reads the cached
+  // offset. So what survives a release buys a rewind its 30-byte read and buys the
+  // reacquire nothing.
 }
 
 bool ChapterReader::startStream() {
