@@ -9,16 +9,18 @@
 namespace reader {
 
 class FileSystem;
+struct ProgressEntry;
 
 // One row the Library holds: what the filesystem knows (BookEntry) plus the
 // display fields nothing can derive from a filename.
 //
-// `author` and `progress` are the Phase 3 seam. An author needs the EPUB's zip
-// container and its OPF; a real percentage needs `/.reader/state/`, which has
-// nothing to record until the Reader exists. So on the device today the author
-// is blank and every book reads NEW -- and the simulator's sample content sets
-// both to the board's own values, which is what keeps `make compare` and the
-// goldens testing the RENDERING rather than a parser that does not exist yet.
+// `author` is still the Phase 3 seam: it lives in the EPUB's OPF, so learning it
+// per row would be ~100 ms an archive open and ~20 s for a 203-book library, and
+// it is blank on a card today. `progress` is NOT -- it comes from
+// `/.reader/state/`, which the Reader has been filling since progress persistence
+// landed. The simulator's sample content sets both to the board's own values,
+// which is what keeps `make compare` and the goldens testing the RENDERING rather
+// than a parser that does not exist yet.
 //
 // `childBooks` is a folder's own count, for the board's `FOLDER - 6 BOOKS` line,
 // and -1 when it was not looked up. It costs one extra directory listing per
@@ -164,6 +166,28 @@ class LibraryScreen : public FocusScreen {
   // way and a screen showing the previous card's books would be worse.
   bool rescan();
 
+  // RE-READS ONLY WHAT READING PROGRESS SAYS, over the rows already here: each
+  // row's percentage-or-NEW and the two fields Book details reads from the same
+  // entry. False when there is no filesystem, or the index could not be read at
+  // all -- in which case the rows are left EXACTLY as they were, because "the card
+  // did not answer" is not the same as "nothing has been started".
+  //
+  // WHY THIS EXISTS: the Reader is pushed ON TOP of the Library, so the pop that
+  // leaves a book hands back this same screen with the rows it was built with --
+  // and a book just read to 31% still read NEW. That was reported off the device.
+  //
+  // WHY NOT rescan(): the set of books cannot change while the firmware runs (V1
+  // transfers by card, so putting a book there means the card is in a computer),
+  // and the save that made this stale has just dropped the listing cache -- so a
+  // rescan would pay a fresh `/books` listing, ~600 ms on a 203-book card, plus one
+  // listing per folder for the counts, on the critical path of a Back. The only
+  // directory that changed is `/.reader/state`.
+  //
+  // IT MOVES NEITHER THE FOCUS NOR THE WINDOW, which is what makes it safe on that
+  // press: it re-derives values over `items_` and never touches the list itself. A
+  // rescan would be entitled to move both.
+  bool refreshProgress();
+
   // Removes the focused item's file and rescans. Files only: a folder is not
   // deletable here, because FileSystem::remove is files-only by contract and
   // recursively deleting a directory the user pointed at once is not a V1
@@ -173,6 +197,13 @@ class LibraryScreen : public FocusScreen {
   bool deleteFocused();
 
  private:
+  // WHAT THE CARD SAYS ABOUT ONE ROW'S PROGRESS: its value, and Book details'
+  // Progress and Current chapter. ONE SPELLING, because two callers derive it --
+  // rescan() when the directory is read and refreshProgress() when a book has been
+  // read while this screen stood underneath the Reader. A second copy of
+  // `to_string(percent) + "%"` is how a row and the details screen drift into
+  // disagreeing about one number.
+  void applyProgress(LibraryItem& item, const std::vector<ProgressEntry>& started) const;
   bool descend();
   bool ascend();
   // Rebuilds the view-model from `items_` and the window. One place, called
