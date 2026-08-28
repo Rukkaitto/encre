@@ -48,7 +48,20 @@
 </div>
     <div style="display: flex; justify-content: space-between; align-items: center; height: 50px; padding: 0 24px; background: #000000; color: #ffffff;">
   <div style="font-size: var(--t-value); font-weight: 700;">Size</div>
-  <div style="font-size: var(--t-value); font-weight: 700;">18 PT</div>
+  <!-- 15 PT, NOT 18, AND THE BOARD USED TO CONTRADICT ITSELF HERE. Its preview is
+       set at `font-size: 32px`, which is 15 PT at this project's 150-DPI
+       convention, while this row said 18 -- the inconsistency roadmap:1269 spotted
+       and deferred to the panel ("the Typography board states Size 18 PT... the
+       boards currently render book text at 32px").
+       Resolved toward the PREVIEW's pixels, and toward the shipped default, because
+       of what the other answer looks like: at ppem 38 a 64.6px line box means only
+       three of the specimen's lines fit the fixed box, so it is cut off
+       mid-sentence with ~60px of empty box below it. At 32px the sentence completes
+       in four lines and the box fills.
+       This does NOT decide roadmap:1269. That question is whether the DEFAULT
+       should be 18 PT, it is still open, it is still answerable only on glass, and
+       18 PT is still one press away on the device. -->
+  <div style="font-size: var(--t-value); font-weight: 700;">15 PT</div>
 </div>
     <div style="display: flex; justify-content: space-between; align-items: center; height: 50px; padding: 0 24px; border-bottom: 1px solid #000000;">
   <div style="font-size: var(--t-value); font-weight: 500;">Margins</div>
