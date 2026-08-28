@@ -1666,6 +1666,7 @@ worth knowing before changing it:
 | Sleep / nothing open | `SleepIdle.dc.html` | The badge alone. Same screen with its card removed. |
 | Reader | `Reader.dc.html` | The only screen whose content is the BOOK's. `Fidelity::Grayscale`, the only one. |
 | Typography | `Typography.dc.html` | Two doors, and it needs nothing from the book. `CHANGE` cycles in place; `Font` is drawn and unreachable. |
+| Peek | `Peek.dc.html` | The only overlay over a `Grayscale` screen. Its column is NOT the reading column, which is why it shows no page number. |
 | SD missing | `SdMissing.dc.html` | RETRY restarts the device when the card was lost after a mount. |
 
 **SETTINGS IS SEVEN ITEMS NOW, AND THE PARAGRAPH BELOW DESCRIBES WHAT IT WAS.**
@@ -3344,6 +3345,112 @@ behind "ReaderMenu is not built", which was true when written. The actions overl
 Library row is" — and Confirm on a Library row opens a book, so that row had become a
 dead button on a shipped screen while its test kept pinning the placeholder. Both are
 live, and both tests now assert the action.
+
+## The peek
+
+`Peek.dc.html`. Contents shipped **jumping straight to a chapter** — safe, because
+`goToChapter` sets the return anchor — and the peek is the panel of that chapter's text
+over the page you are on, with `GO HERE` to commit and `CLOSE` to leave your page
+untouched. It answers the one question a list of chapter names cannot: *is this the
+chapter I meant*. Chapter selection is the first caller; Bookmarks (#3) and Names are
+the second and third.
+
+**IT OWNS A HEADLESS `ReaderScreen`.** The panel is inset, so its column is ~368px
+against the reading page's 444 — which is both why it **cannot show a page number**
+("page 53" of a re-wrapped column is not page 53 of the book, so the band says chapter
+and percent, which are true at any width) and why it **cannot reuse the Reader's
+already-laid `page_`**, whose lines were measured against the wider column and would
+overflow the panel. So it needs its own pagination, and the two alternatives are both
+worse: a bespoke pager is a second copy of open/advance/seek — the three routines this
+project has spent the most effort on, each carrying rules a copy would have to re-earn —
+and extracting a `ChapterPager` is a large refactor of the most performance-critical
+code here for a screen that wants a fraction of it. **What owning a Reader buys is the
+one property that matters: the cursor the peek commits is by construction the one the
+Reader restores.** Both sides are `currentCursor` over the same document, so there is no
+second spelling of a page position free to disagree with the first — which is exactly
+how a "go here" lands a page off.
+
+**THE READER BENEATH RELEASES ITS CHAPTER**, because two live chapters do not fit:
+69,884 bytes peak with a 36,956-byte single allocation, against a measured 45,840-byte
+floor. It is affordable because `ReaderScreen::render` reads only `page_` and `vm_`, so
+the veiled page underneath draws with the chapter gone and **no decode at all**.
+
+**THE 36,956 BYTES ARE NOT BEHIND A `unique_ptr`, AND THIS PROJECT'S OWN NOTE SAID THEY
+WERE.** The roadmap's line was that all of `ChapterReader` is behind `unique_ptr`, so
+releasing it is resetting pointers. Four of the five are; **`inflater_` is a value
+member**, and the window lives behind its private `Scratch* s_` (`inflate_stream.h:166`,
+"the one allocation"), freed by `~Inflater` and by nothing else — `inflated_` is only the
+~40-byte `InflateSource` wrapper. So the obvious release frees a `BlockReader`, a
+wrapper, a buffer view and a file handle, and keeps **every byte the feature exists to
+give back**. And **neither obvious observation point can see it**: `held()` reads
+`blocks_` and `bytesRead()` gates on the `InflateSource` pointer, so both go false
+either way. `inflateWindowHeld()` is what bites, and its fixture has to be **DEFLATED**
+or every assertion is `0 == 0` — the same shape as the in-memory book that made
+`chapterBytesRead()` report 0 forever.
+
+**`CLOSE` PAYS NO `seekTo`, AND THE DESIGN SPEC SAID IT SHOULD.** The spec budgeted "one
+`seekTo` — 33.9 ms desktop", which is this file's own ratio trap: **a rewind costs what
+page you are ON**, and the device measured ~376 ms at page 38, ~1010 ms at page 99 and
+~3 s deep in a long chapter. On `CLOSE` that would cost more than committing the jump
+does. Nothing visible was disturbed, so the only thing a close spends is the **live
+builder** — and `pb_ == nullptr` is precisely the state `restreamAtCurrentPage` already
+repairs in a quiet window.
+
+**THERE IS NO GATE ON THE IDLE JOBS, AND THAT WAS CHECKED RATHER THAN ASSUMED.** All
+three — `completeIndex`, `restreamAtCurrentPage`, `warmPageRing` — plus `refineNow`'s own
+count and the quiet-window save are gated on `gApp->top().id() == ScreenId::Reader`, so a
+peek on top stops them **by construction**. `readerOnStack`'s three callers are the
+book-closed check, the ring shrink and the Typography apply, and the last is unreachable
+while a peek is up because the pop that opened it took the menu with it. **A save while
+released is safe for a reason worth stating**: `chapterBytesRead()` is `pageBytes_`, a
+plain member, where `ChapterReader::bytesRead()` would answer 0 with `inflated_` gone and
+push `progressPercent` onto its page/pageTotal fallback — the exact shape of the
+percentage-going-backwards bug.
+
+**IT IS NOT RESTORABLE ACROSS A WAKE.** The factory refuses an unprimed `Peek`, so
+`App::restore` stops early and leaves the Reader standing — a refused push is wrong in a
+way the reader can see through. Persisting a peeked cursor would be a card write for a
+breadcrumb the anchor's own design declined to pay for.
+
+**EIGHT LINES, AND THE NUMBER IS THE DESIGN.** Content-sizing ran to eleven and filled
+the glass to within 48px of the top, which reads as a bordered full screen rather than a
+modal. The panel's **height is a result** of the line count, as `headerBandHeight()` and
+`hintBarHeight()` are results; a pinned height cut the last line in half **lengthwise**,
+which `PageBuilder` cannot even do — it lays out whole lines.
+
+**THE LINE BOX IS `ppem × lead`, NOT `lineHeight × lead`.** `PageBuilder` uses
+`Tracking::em(font.ppem(), leadEm1000)` (`layout.cpp:71`), which is what `line-height:
+1.7` on `font-size: 32px` means and what the board's measured 54.4px box is. Against
+`lineHeight()` it is 48 × 1.7 = 82px, and the panel then reserves room for **twelve**
+lines while claiming eight. **And it rounds UP**: the exact column height at the default
+is 435.25px, and 435 holds seven. Derived against the board: band 70 against 70, panel
+546 against 544, veil 127 against 128.
+
+**`kPeekLines` IS DEFENDED BY THE TWO GOLDENS AND BY NOTHING ELSE.** Measured: changing
+it 8 → 7 fails both golden subcases and **no other test in the repo**.
+`columnH / lineH == kPeekLines` cannot bite, because `columnH` is *derived* from
+`kPeekLines` and both sides move together. Worth knowing before anyone deletes a
+"redundant" golden.
+
+**`Up` AND `Down` ARE DEAD SLOTS ON PURPOSE.** `Up` already means "return to where I was"
+on the screen underneath, and one button with two meanings across a single press is worse
+than an unbound one — so the **side** buttons page in the peek exactly as they do while
+reading. A four-label bar also left only ~4px of slack at 480 wide, against faces that
+measure ~3% wider than Chrome's.
+
+**ITS BAND IS ITS OWN, NOT `drawPanelCaption`.** The caption's value is `Meta400` at 21px
+on 21px of padding, where this board says `--t-value` (25px) at weight 700 on 18px — so
+reusing it draws the band ~6px too tall, which is the header-band defect this project has
+already paid for once.
+
+**MEASURED AGAINST ITS BOARD AT 4.20% (X4) / 4.22% (X3).** Compare that against the other
+**grayscale** screens and not against `reader_menu`'s ~3% — the peek declares
+`Fidelity::Grayscale`, so a threshold-at-128 count over four levels inflates the figure,
+and a healthy grayscale screen chased against a 1-bit one is how a healthy screen gets
+chased as a regression. In the same tree `reader` reads 5.24%/6.29% and `reader_menu`
+2.98%/3.49%, against the 5.34%/6.38% and 3.10%/3.60% recorded elsewhere in this file — a
+consistent ~0.1pp, so these are the same instrument. The peek is the closest grayscale
+panel on the sheet, which is what a panel with less prose in it should be.
 
 ## The typography panel
 
