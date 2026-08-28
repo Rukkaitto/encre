@@ -207,6 +207,18 @@ argument, as `renderReader` takes it, because the preview is set in a
 `ScalableFont` rasterised at a runtime size and not in one of `FontSet`'s twelve
 fixed roles.
 
+**THE PREVIEW CANNOT PREVIEW THE MARGINS, AND THAT IS WORTH WRITING DOWN BEFORE
+SOMEBODY "FIXES" IT.** The box is CHROME geometry -- the board's 24px page
+margins less its own border and padding, 396px of measure on the X4 -- where the
+reading column is `panelW - 2 * margins`, 444px at the default. They are
+different numbers and always will be, so the box shows `Font`, `Size`,
+`Line spacing` and `Alignment` faithfully and cannot show `Margins` at all.
+
+Making the box track the margin setting would be worse than not trying: it would
+move the border on every step of one row, and it would still not be the reading
+measure, so it would look like a preview and be wrong by 48px. A preview that is
+honest about four of five settings beats one that appears to cover all five.
+
 ## The apply path
 
 `DONE` answers `Action::popTo(ScreenId::Reader)`.
