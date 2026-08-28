@@ -39,17 +39,21 @@
        firmware's bandContentH() takes unconditionally. -->
   <div style="font-size: var(--t-value); font-weight: 700;">&nbsp;</div>
 </div>
-  <div style="margin: 16px 24px 0 24px; border: 2px solid #000000; padding: 12px 24px; flex: 1; min-height: 0; box-sizing: border-box; overflow: hidden; font-family: Literata, Georgia, serif; font-size: 32px; line-height: 1.7; text-align: justify;">Miss Brooke had that kind of beauty which seems to be thrown into relief by poor dress.</div>
+  <div style="margin: 16px 24px 0 24px; border: 2px solid #000000; padding: 12px 18px; flex: 1; min-height: 0; box-sizing: border-box; overflow: hidden; font-family: Literata, Georgia, serif; font-size: 32px; line-height: 1.7; text-align: justify;">Miss Brooke had that kind of beauty which seems to be thrown into relief by poor dress.</div>
   <!-- THE HORIZONTAL PADDING IS THE MARGIN SETTING, and it was 16px until the panel
        reached a device. The spec said this box "cannot preview the margins" because
        it is chrome geometry -- 396px of measure where the reading column is 444 --
        and that was the wrong framing. THE BOX IS THE PAGE AND ITS PADDING IS THE
        MARGIN, so the padding tracks the setting; the border stays put, so no row
        moves.
-       The delta is EXACT rather than scaled, because the box and the panel are the
-       same device pixels: one px of margin narrows the reading column by 2px and
-       this padding by 1px each side. 24px depicts the default (margins 18) against
-       a 16px base at the tightest step (10), so TIGHT reads 16 and WIDE reads 36.
+       THE PADDING IS THE MARGIN, LITERALLY -- 18px here IS `margins = 18`, so TIGHT
+       reads 10 and WIDE reads 30. It was `16 + (margins - 10)` for one commit, which
+       put 24px of padding against the book's 18px of margin: reported off the device
+       as "the margins in the preview are bigger than in the book", and they were, by
+       6px a side. The base was invented to preserve this board's original 16px
+       padding, which is exactly the kind of number the box model should compute --
+       and the box and the panel being the same device pixels is what makes the
+       mapping an identity rather than a scale.
        Reported off the device as "changing the margins doesn't update the live
        preview", which is the same argument that put justification in the box: a
        LIVE PREVIEW that visibly ignores one of its rows reads as broken. -->

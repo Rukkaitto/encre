@@ -2122,7 +2122,16 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   bool haveAnchor = false;
   reader::ReadingPosition saved;
   if (reader::loadPosition(gSd, path, saved)) {
-    const reader::PositionFit fit = reader::fitOf(saved, path, bookBytes, reader::kBodyPpem,
+    // gBody.ppem(), NOT kBodyPpem, and this was the load-side twin of a save-side
+    // bug: `p.ppem` was the same constant until Phase 7's review caught it. Both
+    // directions of the constant are wrong once the size is a setting. Saved at 32
+    // and reopened while the face is at 46, the record says 32, the comparison says
+    // 32, and fitOf grades EXACT -- handing back a line index from a layout that
+    // never existed, which is a wrong page that reads as a reader bug. Saved at 46
+    // and reopened at 46 it grades RELAID and drops the exact line every time, so at
+    // any non-default size a restore could never be exact. columnW was already
+    // current, because the apply path updates the factory's metrics.
+    const reader::PositionFit fit = reader::fitOf(saved, path, bookBytes, gBody.ppem(),
                                                   gFactory.readerMetrics().columnW);
     const reader::PositionRestore r = reader::restoreFrom(saved, fit);
     static const char* kFitWord[] = {"exact", "relaid", "rebound", "unusable"};
@@ -2185,6 +2194,27 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // which row is marked, since the reader will have moved by then.
   gFactory.setContents(gReading.toc, startChapter);
   gFactory.setReaderBook(opened, startChapter, startAt);
+
+  // AND THE READER MENU'S HEADER, WHICH IS WHY SLEEPING ON THAT MENU USED TO WAKE
+  // INTO THE BOOK.
+  //
+  // The factory REFUSES an unprimed ReaderMenu -- correctly, since falling back to a
+  // demo name is how this device once showed MIDDLEMARCH over a real book -- and the
+  // only place that primed it was the pre-dispatch input handler, gated on a Confirm
+  // press with the Reader on top. The wake path never presses anything. So a record
+  // reading `home;reader;reader-menu` replayed as far as the Reader, the menu push
+  // was refused, and App::restore stopped there and kept what stood. Reported off the
+  // device as "sleeping from the typography screen resumes to the book"; it was never
+  // about Typography -- the same wake lost the reader menu and the contents, and
+  // Typography reached from SETTINGS restored fine, because Settings needs no priming.
+  //
+  // HERE because this is the one function a button press and a wake BOTH go through,
+  // which is the reason it was extracted. The percentage is the one the card's pointer
+  // holds rather than a live reading, and the Confirm-press call above still refreshes
+  // it -- a stale percent on a menu the user has not opened yet costs nothing, where a
+  // menu that cannot be built costs them the screen they slept on.
+  gFactory.setReaderMenuHeader(gReading.title.empty() ? gReading.path : gReading.title,
+                               std::to_string(saved.percent) + "%");
   // ...and the way back, or explicitly NONE. Cleared rather than left alone: the
   // factory outlives one book, so a stale anchor from the previous one would offer
   // this reader a page in a book they closed.

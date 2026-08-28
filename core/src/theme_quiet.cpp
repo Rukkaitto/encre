@@ -1372,7 +1372,11 @@ constexpr int kTypoPreviewPadY = 12;   // `padding: 12px 24px`
 // 24px is what `margins = 18` renders (16 + 18 - 10) and the three offered steps
 // read 16, 24 and 36. See renderTypography, which does the arithmetic and states
 // why the delta is exact.
-constexpr int kTypoPreviewPadXBase = 16;
+// NO HORIZONTAL PADDING CONSTANT: the preview's is the MARGIN SETTING itself, read
+// from the view model. design/Typography.dc.html states 18px, which IS `margins = 18`.
+// A `16 + (margins - kMarginSteps[0])` base shipped for one commit and put 24px of
+// padding against the book's 18px of margin -- reported off the device as the
+// preview's margins being bigger than the book's, and they were, by 6px a side.
 constexpr int kTypoLabelPadTop = 8;  // `LIVE PREVIEW`'s `padding: 8px 24px 10px`
 constexpr int kTypoLabelPadBottom = 10;
 constexpr int kTypoLabelEm = 120;  // `letter-spacing: 0.12em`
@@ -1547,7 +1551,11 @@ void QuietTheme::renderTypography(Framebuffer& fb, const FontSet& fonts, const G
   // validate() SNAPS it onto kMarginSteps rather than range-clamping, so the only
   // values that arrive are the table's. textW is checked against 0 below anyway,
   // because the view model is public and a test may build one by hand.
-  const int padX = kTypoPreviewPadXBase + (vm.margins - kMarginSteps[0]);
+  // THE PADDING IS THE MARGIN, and the mapping is an IDENTITY rather than a scale
+  // because the box and the panel are the same device pixels. So the whitespace
+  // inside the box's border matches the whitespace beside the reader's column,
+  // setting for setting, which is what "live preview" has to mean for this row.
+  const int padX = vm.margins;
   const int textW = fb.width() - 2 * kMargin - 2 * kTypoPreviewBorder - 2 * padX;
   const int textH = boxH - 2 * kTypoPreviewBorder - 2 * kTypoPreviewPadY;
   // NO FACE, NO SPECIMEN -- the box is still drawn, because the box is the board's

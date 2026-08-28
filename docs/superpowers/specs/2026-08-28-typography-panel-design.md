@@ -312,10 +312,19 @@ framing: **the box is the PAGE and its horizontal padding IS the margin.** Under
 that framing the base measure being narrower than the column is beside the point --
 what has to track the setting is the padding, and it now does.
 
-**The delta is EXACT, not scaled**, because the box and the panel are the same
-device pixels: one px of margin narrows the reading column by 2px and this padding
-by 1px each side. So `padX = 16 + (margins - kMarginSteps[0])` -- 16 at `TIGHT`, 24
-at `COMFORTABLE`, 36 at `WIDE` -- and the board depicts the default at 24.
+**`padX = margins`. AN IDENTITY, NOT A SCALE AND NOT AN OFFSET**, because the box
+and the panel are the same device pixels -- so 18px of padding is 18px of margin,
+and the whitespace inside the border matches the whitespace beside the reader's
+column setting for setting. `TIGHT` reads 10, `COMFORTABLE` 18, `WIDE` 30, and the
+board states 18.
+
+**It shipped as `16 + (margins - kMarginSteps[0])` for one commit**, which put 24px
+of padding against the book's 18px of margin: reported off the device as *"the
+margins in the preview are bigger than in the book"*, and they were, by 6px a side.
+The base existed only to preserve the board's original 16px padding -- a number the
+box model should compute, preserved for no reason. Fixing it also took the X4's
+design-vs-firmware mismatch from 6.46% to **4.71%**, because the narrower measure
+brings the two engines' wraps closer.
 
 **The border does not move**, so no row moves; the property the fixed height exists
 for is untouched, and the golden change is confined to rows inside the box. At the
