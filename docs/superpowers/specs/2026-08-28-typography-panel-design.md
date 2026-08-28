@@ -100,9 +100,9 @@ needed (five rows fit) -- but `FocusScreen` gives it a window with
 firmware. Confirm (`EDIT`) enters edit mode on the focused row. Back (`DONE`)
 leaves the panel.
 
-**Edit.** The focused row draws `< VALUE >`. Up/Down step the value, **clamping**
-rather than wrapping. Confirm (`OK`) returns to browse. Back (`DONE`) still
-leaves the panel.
+**Edit.** The focused row draws `< VALUE >`. Up/Down step the value, **wrapping**
+off either end. Confirm (`OK`) returns to browse. Back (`DONE`) still leaves the
+panel.
 
 Hints, and only the Confirm slot differs:
 
@@ -121,21 +121,34 @@ mode in one mode and the screen in the other would be the second-door problem
 that got `Close book` deleted: one action reachable two ways, each needing its own
 correctness argument.
 
-**CLAMPING, NOT WRAPPING, AND THAT IS A DELIBERATE EXCEPTION.** Every list in
-this firmware wraps, and `Focus::setWrapping(false)` exists with nothing using
-it. A value stepper is not a list: the chevrons state where the ends are, so a
-wrap would contradict what is drawn on the row. `Focus::move(delta, held)`
-already clamps for a held button for the neighbouring reason.
+**THE VALUES WRAP, LIKE EVERY OTHER LIST IN THIS FIRMWARE**, and this screen is
+where that costs nothing. The recorded hazard is not wrapping itself -- CLAUDE.md
+settles that a wrap is the only thing a press at the end can do, so it can never
+read as a dead button -- it is **auto-repeat**: "a wrap belongs to a press and a
+hold rests at the end", which is why `Focus::move(delta, held)` clamps for a held
+button.
 
-### A chevron is drawn per side, only where a step exists
+**This screen declares no repeat**, as Settings does not, so a held Up cannot
+race through the values -- and it must not, because every step re-inits the body
+face. One step per press, and the sharp edge on wrapping never arises.
 
-One rule, three jobs: it marks the ends of `Size`, `Margins` and `Line spacing`;
-it makes `Alignment`'s two values read as a pair; and it is what makes the `Font`
-row honest -- `LITERATA` in edit mode draws no chevron at all, which is the true
-picture of a setting with one value.
+So `setWrapping(false)` stays unused, and a value stepper is one more list rather
+than an exception with its own rule.
 
-`Font` is focusable and enters edit mode. It is a row that shows you there is
-nowhere to go rather than a row you cannot reach.
+### Both chevrons, or neither
+
+With the values wrapping there is always a step in both directions, so a
+multi-value row in edit mode draws both chevrons. `design/Typography.dc.html`
+draws a pair already, and it is still wrong on two counts -- it draws them on
+`Font`, which has one value, and on a board that depicts BROWSE mode, where no
+row shows any. Both are fixed under Board work below.
+
+**Neither is drawn for a row with one value.** `Font` in edit mode reads
+`LITERATA` with no chevrons at all: it is focusable, it enters edit mode, and it
+shows you there is nowhere to go rather than being a row you cannot reach. That
+is the one place the chevrons carry information beyond "this is the edit mode",
+and it is the reason they are computed from the value count rather than hardcoded
+into the theme.
 
 ### The values
 
@@ -160,9 +173,10 @@ reading floor. Past 46 the cache does what it is built to do, wrap and
 re-rasterise, at ~3,794 us a glyph; that is not a size to offer.
 
 **A value from a hand-edited file that is not in a list** is clamped by
-`validate()` to the nearest offered value, so the steppers can always reach it --
-the same hazard `cycleFocused` handles by landing on index 0's successor, solved
-one layer earlier because clamping has a right answer here and cycling did not.
+`validate()` to the nearest offered value before the screen ever sees it. Same
+hazard `cycleFocused` handles by landing on index 0's successor, solved one layer
+earlier: a file is where a stray value comes from, so the file is where it should
+be corrected -- and then the stepper only ever indexes a list it is on.
 
 ### Alignment is one line in layout.cpp
 
@@ -287,7 +301,7 @@ mutation on a line the input never reaches).
 
 | file | what it pins |
 |---|---|
-| `test_screen_typography.cpp` (new) | the mode machine, both hint sets, clamping at both ends, per-side chevron availability, `Font`'s absent chevrons, focus wrapping in browse and NOT in edit |
+| `test_screen_typography.cpp` (new) | the mode machine, both hint sets, values wrapping off BOTH ends of every multi-value row, `Font`'s absent chevrons and its no-op step, focus wrapping in browse and NOT moving in edit, and that no gesture carries more than one step |
 | `test_settings.cpp` | the four fields round-trip, each clamp, and a file with none of them loading with defaults under version 1 |
 | `test_layout.cpp` | `justify=false` leaves `extraPerGapF26` at 0 on every line; a lead change and a margin change each move page boundaries |
 | `test_focus_restore.cpp` | its two counts go 7 -> 8, and `kAllScreens` gains a row (its `static_assert` fails until it does) |
