@@ -53,6 +53,7 @@
 #include "reader/progress_save_gate.h"
 #include "reader/screen_sleep.h"
 #include "reader/screen_contents.h"
+#include "reader/screen_peek.h"
 #include "reader/screen_reader_menu.h"
 #include "reader/toc.h"
 #include "reader/screens.h"
@@ -570,7 +571,24 @@ static bool gLibraryStale = false;
 
 // The spine Contents chose, or -1. Held for exactly one dispatch: the choice is made
 // while Contents is on top and acted on once the pop has put the Reader back.
+//
+// IT NO LONGER JUMPS THE READER. The pop that Contents' GO returns opens a PEEK over
+// the page instead -- the same capture, a different thing done with it -- because a
+// contents list cannot answer "is this the chapter I meant?" and being wrong about a
+// chapter used to cost the walk there and the walk back.
 static int gPendingSpine = -1;
+
+// A PEEK IS ON THE STACK, so the Reader's chapter has been released and has to be taken
+// back when the panel goes. Tracked rather than inferred from the stack, because the pop
+// that removes the peek is what makes the answer needed and the stack no longer says a
+// peek was ever there.
+static bool gPeekOpen = false;
+// WHAT THE PEEK CHOSE, taken while it is still on top -- the dispatch pops it, and after
+// that there is no screen left to ask. Three values rather than a pointer, because the
+// screen is gone by the time they are used.
+static bool gPeekCommitted = false;
+static int gPeekSpine = 0;
+static reader::Cursor gPeekCursor{};
 
 // --- ONE LINE PER INTERACTION ------------------------------------------------
 //
@@ -4199,11 +4217,66 @@ void loop() {
     // pops it, and after that there is no screen left to ask.
     if (ev.button == reader::Button::Confirm && gApp->top().id() == reader::ScreenId::Contents)
       gPendingSpine = static_cast<const reader::ContentsScreen*>(&gApp->top())->chosenSpine();
+    // WHICH BUTTON LEFT THE PEEK, taken while it is still on top. `committed()` cannot
+    // serve HERE: it is set BY the dispatch, and after the dispatch the screen is gone.
+    // So the spine and cursor come off the screen and the intent comes off the BUTTON --
+    // the same shape the Typography apply path uses, where a flag is set by the press
+    // and consumed after the pop.
+    //
+    // A SIDE BUTTON PAGES AND DOES NOT POP, so this runs again on the next press with
+    // the cursor of whatever page the panel then shows, and `committed` is re-cleared
+    // by anything that is not Confirm. The peek stays on top, so the branch that
+    // consumes these is not reached until something really does pop it.
+    if (gPeekOpen && gApp->top().id() == reader::ScreenId::Peek) {
+      const auto* pk = static_cast<const reader::PeekScreen*>(&gApp->top());
+      gPeekSpine = pk->chosenSpine();
+      gPeekCursor = pk->chosenCursor();
+      gPeekCommitted = (ev.button == reader::Button::Confirm);
+    }
     const uint32_t beforeDispatch = millis();
     gAct.preMs += beforeDispatch - eventStart;
     gApp->dispatch(ev);
     const uint32_t afterDispatch = millis();
     gAct.dispMs += afterDispatch - beforeDispatch;
+    // THE PEEK CLOSED OR COMMITTED, and both answer Pop -- so this runs after the
+    // dispatch that removed it, and gPeekCommitted (set from the BUTTON, above) is the
+    // difference.
+    //
+    // FIRST OF THE POST-DISPATCH BLOCKS, AND AHEAD OF THE CROSSING DETECTOR BELOW ON
+    // PURPOSE. A commit changes the Reader's chapter, and that detector is the one
+    // place on the device that instruments a chapter change -- mark(), the [chapter]
+    // line and the crossing save edge. Below it, a commit would be the single chapter
+    // change that gets none of the three on the press that caused it, and would then
+    // be attributed to whatever press came next. The old Contents jump sat below and
+    // had exactly that wart; moving this above it costs nothing and closes it, with no
+    // second copy of the instrumentation.
+    if (gPeekOpen && gApp->top().id() == reader::ScreenId::Reader) {
+      gPeekOpen = false;
+      auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
+      const uint32_t t = millis();
+      // TAKEN BACK BEFORE ANYTHING ELSE, because the commit below walks the chapter and
+      // cannot without a stream.
+      const bool back = rd->reacquireChapter();
+      if (gPeekCommitted) {
+        // GO HERE. goToPosition and not goToChapter: the reader may have paged several
+        // pages into the panel, and page one would be right on the first page and wrong
+        // everywhere after it. The anchor is set to WHERE THE READER WAS -- the departure
+        // point, not the destination -- by goToPosition itself.
+        const bool ok = back && rd->goToPosition(gPeekSpine, gPeekCursor);
+        logf("[peek] GO HERE spine=%d block=%d line=%d: %s in %lums\n", gPeekSpine,
+             gPeekCursor.block, gPeekCursor.line, ok ? "ok" : "REFUSED",
+             (unsigned long)(millis() - t));
+      } else {
+        // CLOSE. NO seekTo, which is where this departs from the 08-24 spec: a rewind
+        // costs what page you are ON -- ~1010 ms at page 99 and ~3 s deep in a chapter --
+        // so on CLOSE it would cost more than committing. The page was never disturbed,
+        // and the live builder is what restreamAtCurrentPage repairs in a quiet window.
+        logf("[peek] CLOSE, reader %s in %lums\n", back ? "restored" : "NOT RESTORED",
+             (unsigned long)(millis() - t));
+      }
+      gPeekCommitted = false;
+      logFlush();
+    }
     // Between the dispatch and the mask refresh below, so the refresh sees
     // whatever screen the retry left on top -- on success that is a brand new App
     // rooted at Home, whose holds are not the SD-missing screen's.
@@ -4252,22 +4325,57 @@ void loop() {
       logFlush();
     }
     // A CHOSEN CHAPTER, acted on AFTER the pop that Contents' GO returns. The screen
-    // cannot jump the Reader itself: the Reader is already on the stack under it, and
-    // pushing a second one would leave the first below with its own position -- so
-    // Contents answers popTo(Reader) and names the chapter, and this moves it.
+    // cannot open the panel itself: the Reader is already on the stack under it, and a
+    // screen that reached down into the stack would be a second thing that knows how a
+    // Reader is shaped -- so Contents answers popTo(Reader) and names the chapter, and
+    // this opens the peek over it.
     //
     // Read BEFORE the dispatch would be too early (the choice is made by the press) and
     // reading it after the pop is too late (the screen is gone), so the spine is taken
     // off the Contents screen while it is still on top, just above.
+    //
+    // IT USED TO JUMP HERE, with goToChapter. The jump was safe -- goToChapter sets the
+    // return anchor -- and the peek is what makes being WRONG about a chapter cheap.
     if (gPendingSpine >= 0 && gApp->top().id() == reader::ScreenId::Reader) {
       auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
       const int want = gPendingSpine;
       gPendingSpine = -1;
       if (want != rd->chapterIndex()) {
         const uint32_t t = millis();
-        const bool ok = rd->goToChapter(want);
-        logf("[toc] jump to spine %d: %s in %lums\n", want, ok ? "ok" : "REFUSED",
-             (unsigned long)(millis() - t));
+        // THE PANEL'S COLUMN, which is not the reading column -- that is the whole
+        // design. Recomputed here rather than held, because the reader's own typography
+        // may have changed since the book opened and peekMetrics reads two of its fields.
+        reader::PageMetrics pm;
+        gTheme.peekMetrics(gFrame->width(), gFrame->height(), *gFonts, gBody, gSettings, pm);
+        pm.italic = &gItalic;
+        gFactory.setPeekMetrics(pm);
+        // THE BOOK-WIDE PERCENTAGE AT THE PEEKED CHAPTER, computed here because
+        // progressPercent needs the book's chapter byte layout and the panel has no
+        // reason to hold a second copy of it. Page 1 of the target with no count, which
+        // is what the fallback arm of progressPercent is for.
+        gFactory.setPeek(want, reader::progressPercent(gFactory.readerBook(), want, 1, 0, 0));
+        // THE READER LETS GO FIRST. A live chapter peaks at 69,884 bytes with a
+        // 36,956-byte single allocation against a measured 45,840-byte floor, so two do
+        // not fit -- and the peek is a second one. Released BEFORE the push, because the
+        // push is what allocates the second chapter.
+        //
+        // Its page, index, cursor and anchor all survive, which is what lets App::render
+        // draw the veiled page underneath with no decode at all.
+        rd->releaseChapter();
+        if (gApp->pushScreen(reader::ScreenId::Peek)) {
+          gPeekOpen = true;
+          gPeekCommitted = false;
+          logf("[peek] open spine=%d in %lums (heap %u)\n", want,
+               (unsigned long)(millis() - t), (unsigned)ESP.getFreeHeap());
+        } else {
+          // REFUSED, so put the Reader back and leave it standing. The reader is on their
+          // own page with the chapter list gone -- nothing lost but the list, the page
+          // untouched and the anchor unmoved. The only reachable cause is the card going,
+          // which pollCardPresence owns.
+          const bool back = rd->reacquireChapter();
+          logf("[peek] REFUSED spine=%d, reader %s\n", want,
+               back ? "restored" : "COULD NOT BE RESTORED");
+        }
         logFlush();
       }
     }
