@@ -254,7 +254,7 @@ void PageBuilder::drain() {
     // each side that stretched its lines to `m_.columnW` would push them 96px past
     // its own right edge -- and it would look like justification is broken rather
     // than like the inset is.
-    if (!ln.lastOfBlock && justifiable(kind_))
+    if (!ln.lastOfBlock && justifiable(kind_) && m_.justify)
       ln.extraPerGapF26 = stretchFor(*font_, text, columnWFor(kind_) - f26ToPx(xIndentF26),
                                      blockTracking_);
     ln.text.assign(text);

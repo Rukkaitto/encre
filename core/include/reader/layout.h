@@ -116,6 +116,20 @@ struct PageMetrics {
   int leadEm1000 = kBodyLeadEm;
   int indentEm1000 = kBodyIndentEm;
   Tracking tracking{};
+  // WHETHER BODY LINES ARE STRETCHED TO THE MARGIN. design/Reader.dc.html says
+  // `text-align: justify`, so true is the board's own and the default.
+  //
+  // NOT kMinJustifyFillPercent's job. That constant answers "is this line full
+  // enough that stretching it will not open a corridor"; this answers "does this
+  // reader want stretch at all". Folding them together would mean expressing a
+  // user preference as a threshold, and 0 or 100 would each be a number that
+  // happens to work rather than the question being asked.
+  //
+  // IT MOVES NO LINE BREAK. The greedy wrap runs first and justification is
+  // applied to the finished line, which is why reading_position.h grades an
+  // alignment change as leaving `line` intact where a size or column change
+  // does not.
+  bool justify = true;
   // The face emphasised runs are measured with. NULL IS A SUPPORTED STATE, not an
   // oversight: it means emphasis is measured -- and drawn -- as roman, which is
   // what every caller with no second face gets, and what the firmware did before

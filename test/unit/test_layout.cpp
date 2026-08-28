@@ -915,3 +915,51 @@ TEST_CASE("a blockquote is set wholly in the italic, and says so as emphasis") {
     if (ln.kind == BlockKind::Paragraph) CHECK(ln.emphasis.empty());
   }
 }
+
+TEST_CASE("ragged alignment leaves every line unstretched") {
+  Body body;
+  PageMetrics m = boardMetrics();
+
+  // The same long paragraph laid twice, differing only in `justify`. Comparing
+  // the two runs rather than asserting absolute numbers is what makes this a
+  // test of the FLAG: a wrap change would move both sides together.
+  Document d = docOf({"Miss Brooke had that kind of beauty which seems to be thrown "
+                      "into relief by poor dress, and her hand and wrist were so "
+                      "finely formed that she could wear sleeves not less bare of "
+                      "style than those in which the Blessed Virgin appeared."});
+
+  auto lay = [&](bool justify) {
+    PageMetrics mm = m;
+    mm.justify = justify;
+    reader::PageBuilder pb(body.face, mm);
+    for (size_t i = 0; i < d.blocks.size(); ++i) pb.add(d.blocks[i], static_cast<int>(i));
+    return pb.finish();
+  };
+
+  const Page justified = lay(true);
+  const Page ragged = lay(false);
+
+  REQUIRE(justified.lines.size() == ragged.lines.size());
+  REQUIRE(justified.lines.size() > 2);  // or there is nothing to justify
+
+  // EVERY ragged line is unstretched...
+  for (const LaidLine& ln : ragged.lines) CHECK(ln.extraPerGapF26 == 0);
+  // ...and at least one justified line WAS stretched, or the comparison is
+  // vacuous and would pass over a paragraph too short to justify.
+  int stretched = 0;
+  for (const LaidLine& ln : justified.lines)
+    if (ln.extraPerGapF26 != 0) ++stretched;
+  CHECK(stretched > 0);
+
+  // THE WRAP IS IDENTICAL. Justification is applied AFTER the greedy wrap, so
+  // turning it off must not move a single break -- which is also why a saved
+  // position's `line` legitimately survives an alignment change while it does
+  // not survive a size or margin change (reading_position.h grades exactly that).
+  for (size_t i = 0; i < ragged.lines.size(); ++i)
+    CHECK(ragged.lines[i].text == justified.lines[i].text);
+}
+
+TEST_CASE("justify defaults to true, which is design/Reader.dc.html's own") {
+  const PageMetrics m;
+  CHECK(m.justify);
+}
