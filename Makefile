@@ -155,6 +155,12 @@ BULK_N ?= 200
 zips:
 	$(PYTHON) tools/mkzip.py --out test/unit/zip_fixtures.h
 
+# The named-entity table for the XML tokenizer, generated from Python's own HTML 4
+# list -- the same relationship iconc.py has with icons_data.h. Regenerate and commit;
+# nothing in the build runs this.
+entities:
+	$(PYTHON) tools/entities.py --out core/src/entity_table.h
+
 epubs-bulk:
 	$(PYTHON) tools/mkepub.py --out $(EPUB_OUT) --bulk $(BULK_N)
 # ...and PUT THEM ON THE CARD, which generating them does not do. The card lives
