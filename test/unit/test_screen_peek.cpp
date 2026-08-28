@@ -17,6 +17,7 @@
 #include "reader_fixture.h"
 #include "reader/screen_peek.h"
 #include "reader/screen_reader.h"
+#include "reader/screens.h"
 #include "reader/theme.h"
 #include "reader/theme_quiet.h"
 
@@ -461,4 +462,103 @@ TEST_CASE("the peek's page is NOT the reader's page, because the column is narro
   // count, so a page laid at the reading column's height would run out through the
   // border.
   CHECK(peek.page().lines.size() <= static_cast<size_t>(reader::kPeekLines));
+}
+
+// --- WHAT THE FACTORY WILL AND WILL NOT BUILD -----------------------------------
+
+namespace {
+
+// A factory with the panel's column and a body face, and nothing else primed. The
+// three cases below differ by exactly which of those they withhold, so the fixture
+// hands the pieces over rather than the finished state.
+struct FactoryFix {
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  readerfix::Body body;
+  reader::DemoScreenFactory factory;
+
+  void withBody() { factory.setReaderBody(&body.face); }
+  void withMetrics() {
+    reader::PageMetrics m;
+    theme.peekMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
+    factory.setPeekMetrics(m);
+    // AND THE READING COLUMN TOO, WHICH IS NOT PADDING. The factory on a device holds
+    // both, and the bug the two setters exist to prevent is the peek being handed the
+    // READER's measure -- so a fixture that left readerMetrics_ default would let
+    // `setMetrics(readerMetrics_)` fail only because an unset column paginates to
+    // nothing. That is a mutation biting for the wrong reason, which this project's
+    // rule says tells you about the INPUT before it tells you about the test. With a
+    // real reading column set, the ceiling below cannot see the swap at all and the
+    // left edge can.
+    reader::PageMetrics rm;
+    theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, rm);
+    factory.setReaderMetrics(rm);
+    peekLeft = m.columnLeft;
+  }
+  int peekLeft = 0;
+};
+
+}  // namespace
+
+TEST_CASE("the factory refuses a Peek nothing primed") {
+  // AND THAT REFUSAL IS WHAT MAKES A PEEK UNRESTORABLE ACROSS A WAKE, which is the
+  // intended behaviour rather than a limitation: App::restore pushes the record's stack
+  // through this factory, so a Peek in a record stops the restore short and leaves the
+  // READER standing -- "a restore that stops early keeps what already stands".
+  // Rebuilding one would need a peeked cursor nothing persists, and the return anchor's
+  // own design already declined to pay a card write for that breadcrumb.
+  //
+  // THE ALTERNATIVE IS THE DEFECT THIS PROJECT HAS SHIPPED TWICE. A Reader falling
+  // through to the demo woke the device into Middlemarch; Contents falling back to
+  // demoContents() showed one book's reader another book's chapters, and hid the
+  // allocation failure that caused it. A refused push is wrong in a way the reader can
+  // see through.
+  FactoryFix f;
+  f.withBody();
+  f.withMetrics();
+  CHECK(f.factory.create(reader::ScreenId::Peek) == nullptr);
+}
+
+TEST_CASE("the factory refuses a Peek with no body face") {
+  // THE READER'S RULE VERBATIM. A panel that rendered nothing is indistinguishable from
+  // a chapter that failed to open, and the caller can act on a refused push where it
+  // cannot act on an empty one. Asked for and still refused, so this is the face and
+  // not the priming.
+  FactoryFix f;
+  f.withMetrics();
+  f.factory.setPeekDemo();
+  CHECK(f.factory.create(reader::ScreenId::Peek) == nullptr);
+}
+
+TEST_CASE("the demo Peek builds and shows the board's opening") {
+  FactoryFix f;
+  f.withBody();
+  f.withMetrics();
+  f.factory.setPeekDemo();
+
+  std::unique_ptr<reader::Screen> s = f.factory.create(reader::ScreenId::Peek);
+  REQUIRE(s != nullptr);
+  CHECK(s->id() == reader::ScreenId::Peek);
+  CHECK(s->isOverlay());
+
+  auto* peek = static_cast<reader::PeekScreen*>(s.get());
+  REQUIRE_FALSE(peek->page().lines.empty());
+  // THE LINES ARE INSIDE THE PANEL, and this is what says the factory handed over the
+  // PEEK's column and not the reading page's. Measured at 480x800: the peek's column is
+  // left=56 w=368 against the page's left=18 w=444, so a peek built at the wrong
+  // metrics draws its text on the page's own left edge -- 38px outside its border.
+  //
+  // THE LINE-COUNT CEILING BELOW CANNOT MAKE THIS CHECK, and that was proved by
+  // mutation rather than assumed: `setMetrics(readerMetrics_)` lays this two-sentence
+  // specimen in SEVEN lines at the reading measure, under the panel's eight, so the
+  // ceiling passes over exactly the swap it looks like it is guarding. It is kept as
+  // the bound it really is -- the panel's height is a result of kPeekLines -- and the
+  // left edge is what carries the claim.
+  for (const reader::LaidLine& ln : peek->page().lines) CHECK(ln.x >= f.peekLeft);
+  CHECK(peek->page().lines.size() <= static_cast<size_t>(reader::kPeekLines));
+  // AND IT IS THE BOARD'S OWN SENTENCE. Checked on the text rather than only on the
+  // line count, because a peek built from the READER's demo chapter would also fit --
+  // demoReaderXhtml opens with this same first sentence and then carries a second
+  // paragraph the panel has no room for.
+  CHECK(readerfix::pageText(peek->page()).find("Miss Brooke") != std::string::npos);
 }

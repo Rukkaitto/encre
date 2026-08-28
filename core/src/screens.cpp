@@ -155,6 +155,24 @@ std::string_view demoReaderXhtml() {
       "</body></html>";
 }
 
+// design/Peek.dc.html's own peeked text -- Middlemarch's opening, which is the board's
+// story: the reader is at CH. 07, 34%, has met a name they cannot place, and has peeked
+// back to CH. 01, 4%, to read the sentence that introduced her.
+//
+// THE BOARD'S TWO SENTENCES AND NOT demoReaderXhtml'S, although the first sentence is
+// shared: the peek's panel is eight line boxes, and the reading board's second
+// paragraph would page straight off the bottom of it. The board states exactly what
+// fits, which is what makes `make compare` a measurement of the panel rather than of
+// where a longer specimen happened to break.
+std::string demoPeekXhtml() {
+  return
+      "<html><body>"
+      "<p>Miss Brooke had that kind of beauty which seems to be thrown into relief by "
+      "poor dress. Her hand and wrist were so finely formed that she could wear "
+      "sleeves not less bare of style.</p>"
+      "</body></html>";
+}
+
 // THE STYLED BOARDS' OWN CONTENT, so `make compare` measures the STYLING rather than
 // the difference between two sets of sample prose. Each is the board's text verbatim,
 // as XHTML -- which means it goes through the same tokenizer and block builder a card
@@ -459,12 +477,35 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // The root is never rebuilt: popping to Home returns the original object,
       // with its focus intact.
       return nullptr;
-    // NOT BUILDABLE YET -- there is no PeekScreen. Refused exactly as an unprimed
-    // Reader or Contents is: a refused push leaves whatever is under it standing,
-    // wrong in a way the reader can see through rather than wrong in a way they
-    // cannot. This is plumbing only; the screen itself is a later task.
-    case ScreenId::Peek:
-      return nullptr;
+    case ScreenId::Peek: {
+      // REFUSED without a body face, as the Reader is: a panel that rendered nothing is
+      // indistinguishable from a chapter that failed to open, and the caller can act on
+      // a refused push.
+      if (readerBody_ == nullptr) return nullptr;
+      std::unique_ptr<PeekScreen> scr;
+      if (peekPrimed_ && !readerBook_.path.empty() && fs_ != nullptr) {
+        scr = std::make_unique<PeekScreen>(*fs_, readerBook_, peekSpine_, peekPercent_,
+                                           readerBody_);
+        // The chapter names, so the band says the chapter's NAME where the contents
+        // supply one. Empty for a book with no contents, which falls back to `CH. NN`.
+        scr->setChapterNames(contentsToc_);
+      } else if (peekDemo_) {
+        scr = std::make_unique<PeekScreen>(demoPeekXhtml(), "CH. 01", 4, readerBody_);
+      } else {
+        // NOTHING PRIMED AND NO DEMO ASKED FOR: refused. This is the session-restore
+        // path, and it is why a peek is not restorable across a wake -- App::restore
+        // stops short and leaves the Reader standing, which is right: a peek is a
+        // transient excursion, and rebuilding one would need a peeked cursor nothing
+        // persists.
+        return nullptr;
+      }
+      // BEFORE setMetrics, for renderReader's reason: setMetrics lays the page out and
+      // the wrap measures emphasis with this face, so a face arriving after would leave
+      // the first page measured roman and drawn in two.
+      scr->setItalic(readerItalic_);
+      scr->setMetrics(peekMetrics_);
+      return scr;
+    }
   }
   return nullptr;
 }
