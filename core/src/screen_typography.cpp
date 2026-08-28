@@ -189,6 +189,10 @@ void TypographyScreen::syncVm() {
   // Size. The theme cannot derive it: a face is pinned to a ppem by init() and
   // carries no leading.
   vm_.leadEm1000 = settings_.lineSpacing;
+  // AND SO IS THE ALIGNMENT, for the same reason: the box says LIVE PREVIEW, so it
+  // has to answer the `Alignment` row as well as the two above it. Four of the five
+  // rows show in the box now; `Margins` is the one that cannot (see kSpecimen).
+  vm_.justify = settings_.justify;
   vm_.focusedRow = focus();
 
   vm_.rows.clear();

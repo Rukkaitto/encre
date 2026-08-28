@@ -66,43 +66,12 @@ inline constexpr int kListHangEm = 1200;
 // a conventional list mark in set prose besides.
 inline constexpr const char* kListMarker = "\u2013";
 
-// How full a line must be, as a percentage of its column, before it is justified
-// at all. Below this it is set ragged.
-//
-// THE TEST IS THE LINE, NOT THE GAP, and getting that round the wrong way is
-// instructive. This started as a cap on how far one gap could stretch -- three
-// times the space's own width -- on the reasoning that justification's failure
-// case is a corridor of white between two words. The failure case is real: our
-// own fixtures contain "pneumonoultramicroscopicsilicovolcanoconiosis", which is
-// wider than the 444px column, so the greedy wrap puts it alone on a line and
-// leaves the line before it holding two words and 330px of slack.
-//
-// But a per-gap cap cannot tell that line from ordinary prose, because the number
-// of gaps is what converts slack into stretch. Measured on
-// design/Reader.dc.html's own two paragraphs, the cap refused "necklace, and the
-// two of" -- 367px of text in a 444px column, a perfectly ordinary line -- because
-// its 77px of slack fell across only four gaps, 19.25px each against an 18px cap.
-// It refused it BY ONE PIXEL, and set it ragged directly beneath a line it had
-// justified at 15.25px. A ragged line sitting between two justified ones is
-// exactly what the cap existed to avoid, arrived at from the other direction.
-//
-// A line that is 83% full is prose. A line that is 23% full is the corridor. So
-// the question is how much of the line is TEXT, which is the thing actually
-// visible, and it needs no reference to the gap count at all.
-//
-// 60% is where "more text than space" stops being true. Measured over the same
-// 6,800 pages of tools/mkepub.py output: the per-gap cap set 18% of all lines
-// ragged and the fill test sets 3.4%, taking justified lines from 71% to 86%. The
-// lines that remain ragged are almost all paragraph-final, which is where ragged
-// belongs.
-//
-// The price is admitted rather than hidden: a line at the threshold has 40% of its
-// column as slack, and across four gaps that is a gap five or six times the space's
-// own width -- a visible river. That is the trade a wrap with no hyphenation
-// dictionary has to make, and it is made in this direction because an occasional
-// wide gap reads as loose typesetting while a ragged line mid-paragraph reads as
-// the feature being broken.
-inline constexpr int kMinJustifyFillPercent = 60;
+// `kMinJustifyFillPercent` -- how full a line must be before it is justified at
+// all -- IS reader/text.h's, with `stretchFor`, which is the function that applies
+// it. It was here while pagination was the only caller; the Typography preview's
+// ProseAlign::Justify is the second, and a constant in one layer governing a
+// function in another is two places to read one decision. It is still in scope
+// here: this header includes reader/components.h, which includes reader/text.h.
 
 struct PageMetrics {
   // The column in FRAMEBUFFER coordinates, so a LaidLine's x and baselineY are

@@ -1515,15 +1515,29 @@ void QuietTheme::renderTypography(Framebuffer& fb, const FontSet& fonts, const G
     // `line-height: 1.7` on `font-size: 32px` is -- which is what makes the box a
     // preview of Line spacing as well as of Size.
     //
-    // It is NOT justified and does NOT follow the Alignment setting. The box is
-    // chrome geometry and cannot preview the reading measure at all (it is the
-    // board's 24px page margins less its own border and padding, where the column
-    // is `panelW - 2 * margins`), so its job is the FACE, the SIZE and the LEAD.
+    // AND THE ALIGNMENT IS THE SETTING'S TOO, which is what makes the box answer
+    // four of the five rows. It cannot preview the reading MEASURE -- the box is
+    // chrome geometry, the board's 24px page margins less its own border and
+    // padding, where the column is `panelW - 2 * margins` -- so `Margins` never
+    // shows here and the other four do.
+    //
+    // ProseAlign::Justify applies kMinJustifyFillPercent exactly as the reader's
+    // page does, through the same stretchFor: justifying a line the page would
+    // leave ragged would make the preview tidier than the book it previews, which
+    // is a subtler wrong than not justifying at all.
     Prose p = wrapProse(*body, vm.specimen, textW, vm.leadEm1000);
     p.lines.resize(static_cast<size_t>(previewLinesThatFit(*body, p, textH)));
+    // THE CLAMP ABOVE MOVES WHICH LINE IS LAST, and the direction it errs in is the
+    // safe one. drawProse reads "last" as the last line it is GIVEN, so a specimen
+    // the box cut short has its bottom drawn line set ragged where Chrome would
+    // justify it and clip the rest. That is one line looser than the board, never
+    // tighter -- and it does not arise in the state the board draws, where all four
+    // lines fit and the fourth is the sentence's own last. The error that must never
+    // happen is the opposite one, a genuinely full last line stretched to the
+    // margin, and deciding by index is what forecloses it.
     drawProse(fb, *body, p, kMargin + kTypoPreviewBorder + kTypoPreviewPadX,
               textW, pxToF26(y + kTypoPreviewBorder + kTypoPreviewPadY), Ink::Black, plane,
-              ProseAlign::Left);
+              vm.justify ? ProseAlign::Justify : ProseAlign::Left);
   }
   y += boxH;
 

@@ -610,7 +610,25 @@ void clampProse(const GlyphSource& font, Prose& prose, int maxLines, int maxW, s
 // How a wrapped run sits in its column. The boards want both: a full-screen
 // prompt's paragraph is `text-align: center` and an overlay caption's wrapped
 // label is a plain left-aligned block.
-enum class ProseAlign { Centre, Left };
+enum class ProseAlign {
+  Centre,
+  Left,
+  // STRETCHED to the column, every line but the last -- design/Reader.dc.html's
+  // `text-align: justify`, which design/Typography.dc.html's preview box also
+  // declares.
+  //
+  // It applies kMinJustifyFillPercent exactly as the reader's own page does, so a
+  // line too empty to justify is left ragged here too. Justifying a line the page
+  // would leave alone is a subtler wrong than not justifying: the preview would
+  // look tidier than the book it is previewing.
+  //
+  // THE READER'S PAGE DOES NOT COME THROUGH HERE. layout.cpp lays the page out
+  // line by line and stretches each one itself; this is the option a CHROME
+  // paragraph needs, and today the Typography preview is its only caller. Both go
+  // through the same stretchFor and the same drawTextJustified, which is what
+  // keeps the preview a preview.
+  Justify,
+};
 
 // Draws every line in the column [boxX, boxX + boxW), the first line box
 // starting at `topF26`. Returns the height consumed, in 1/64 px, so a caller

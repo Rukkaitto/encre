@@ -317,6 +317,44 @@ TEST_CASE("a bigger face or a looser lead holds fewer lines") {
   }
 }
 
+TEST_CASE("the preview follows the Alignment row, and RAGGED is not JUSTIFIED") {
+  // THE BOX SAYS `LIVE PREVIEW`. Without this the `Alignment` row spends a ~520 ms
+  // repaint changing four characters of its own value while the box does not move,
+  // which is a preview visibly ignoring one of its four rows.
+  //
+  // Two frames against each other rather than a golden, because that is the only
+  // question a drawing OPTION can be tested by: a golden blessed from the render
+  // that ignored the flag passes forever.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  BodyAt body(reader::kBodyPpem);
+
+  for (const auto& geo : kGeometries) {
+    CAPTURE(geo.first);
+    reader::TypographyViewModel just = vmAt(1700);
+    just.justify = true;
+    reader::TypographyViewModel rag = vmAt(1700);
+    rag.justify = false;
+    rag.rows[4].value = "RAGGED";  // what the screen's own label would say
+
+    reader::Framebuffer a(geo.first, geo.second), b(geo.first, geo.second);
+    theme.renderTypography(a, ramp.fonts, &body.face, just, reader::Plane::Bw);
+    theme.renderTypography(b, ramp.fonts, &body.face, rag, reader::Plane::Bw);
+    CHECK_FALSE(golden::identical(a, b));
+
+    // AND THE DIFFERENCE IS IN THE PREVIEW BOX, not merely in the row value that
+    // was also changed -- otherwise this would pass with a preview that ignores the
+    // flag entirely, which is exactly the defect it exists to catch.
+    const Box box = findBox(a);
+    REQUIRE(box.top > 0);
+    CHECK_FALSE(golden::rowsIdentical(a, b, box.top, box.bottom + 1));
+
+    // The box still holds the same four whole lines: alignment sets a line, it does
+    // not move a break, so the clamp cannot change with it.
+    CHECK(specimenLines(a, box) == specimenLines(b, findBox(b)));
+  }
+}
+
 TEST_CASE("a null body face draws the box and no specimen") {
   // A supported state, not an oversight: the tests and a Settings-only build have
   // no body face, and an absent preview is not an absent screen.

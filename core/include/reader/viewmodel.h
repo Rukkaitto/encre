@@ -371,6 +371,16 @@ struct TypographyViewModel {
   // init(), so the face this screen is handed IS the chosen ppem -- the same
   // reason Theme::readerMetrics reads three typography fields and not four.
   int leadEm1000 = 1700;
+  // WHETHER THE PREVIEW IS STRETCHED TO ITS BOX, from Settings::justify -- and it
+  // is here for the same reason the lead is: the box is labelled `LIVE PREVIEW`, and
+  // without this field pressing CHANGE on the `Alignment` row spends a ~520 ms
+  // repaint moving four characters of a row value while the box itself does not
+  // move. A preview visibly ignoring one of its four rows reads as a screen that
+  // does not work.
+  //
+  // `true` is design/Typography.dc.html's own `text-align: justify` and
+  // Settings::justify's default, so a view model built by hand previews the board.
+  bool justify = true;
   std::vector<ListRow> rows;
   int focusedRow = 0;
   std::array<std::string, 4> hints{};
