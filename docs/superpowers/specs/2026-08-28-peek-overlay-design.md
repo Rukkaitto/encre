@@ -129,11 +129,40 @@ Two live chapters do not fit: a chapter peaks at **69,884 bytes** with a
 **36,956-byte** single allocation, against a measured heap floor of **45,840**. So
 the Reader beneath **releases its chapter while the peek is up**.
 
-`ReaderScreen` gains `releaseChapter()` / `reacquireChapter()`. The release resets
-`ChapterReader`'s four `unique_ptr`s (`file_`, `bufSrc_`, `inflated_`, `blocks_`)
-and keeps `chapterAt_`, `at_`, `starts_`, `page_` and `spans_` — a few KB. It is
-safe because **`ReaderScreen::render` reads only `page_` and `vm_`**: the veiled
-page draws with the chapter gone and no decode at all.
+`ReaderScreen` gains `releaseChapter()` / `reacquireChapter()`. The release drops
+`ChapterReader`'s stream and keeps `chapterAt_`, `at_`, `starts_`, `page_` and
+`spans_` — a few KB. It is safe because **`ReaderScreen::render` reads only `page_`
+and `vm_`**: the veiled page draws with the chapter gone and no decode at all.
+
+### The 36,956 bytes are NOT behind a `unique_ptr`, and this spec said they were
+
+An earlier draft of this section said the release "resets `ChapterReader`'s four
+`unique_ptr`s (`file_`, `bufSrc_`, `inflated_`, `blocks_`)", on the roadmap's own
+line that all of `ChapterReader` is behind `unique_ptr` so releasing it is resetting
+pointers. **Four of the five are. `inflater_` is a value member**
+(`chapter.h`), and the whole 36,956 bytes live behind *its* private
+`Scratch* s_` — `inflate_stream.h:166`, commented "the one allocation" — freed by
+`~Inflater` and by nothing else. `inflated_` is only the ~40-byte `InflateSource`
+wrapper around it.
+
+So resetting those four pointers frees a `BlockReader`, a wrapper, a buffer view and
+a file handle, and **keeps every byte this feature exists to give back**. The release
+therefore calls a new `Inflater::release()`, and `ChapterReader` exposes
+`inflateWindowHeld()` beside `held()`.
+
+**TWO OBSERVATION POINTS, BECAUSE NEITHER OF THE OBVIOUS ONES CAN SEE THE WINDOW.**
+`held()` reads `blocks_`; `bytesRead()` gates on the `InflateSource` pointer. Both go
+false when the four pointers are reset, so a release that freed nothing would satisfy
+both — and the version of this design that shipped in the plan would have passed its
+own tests while the peek allocated its second chapter on top of the first. Proved by
+mutation rather than argued: skipping `inflater_.release()` fails
+`inflateWindowHeld()` twice and leaves `bytesRead() == 0` passing.
+
+**The fixture has to be DEFLATED for any of it to mean anything.** A stored entry has
+no inflater at all, so both observation points answer "released" before the release
+and every assertion is `0 == 0` — the shape this file records twice elsewhere. The
+test asserts its own premise (`REQUIRE(book.locate(0).deflated)`) rather than
+assuming it.
 
 **One live chapter at any moment, so the floor never moves.**
 
