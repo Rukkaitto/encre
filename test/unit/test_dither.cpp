@@ -452,3 +452,204 @@ TEST_CASE("a white tint leaves an ink ground alone outside its rect") {
     for (int x = 0; x < 32; ++x)
       if (x < 8 || x >= 24 || y < 8 || y >= 24) CHECK_FALSE(fb.getPixel(x, y));
 }
+
+// --- the tint's byte-wise fast path -----------------------------------------
+//
+// ditherRect was the LAST per-pixel area primitive, after veilRect and
+// Framebuffer::fillRect had each been converted: a setPixel per pixel, so a
+// bounds check, a byteIndex (a multiply and a division, and under rotation a
+// subtraction too), a bitMask (a modulo) and a bit-addressed read-modify-write,
+// for every pixel of the rect whether the tile inked it or not. The Sleep screen
+// dithers the WHOLE FRAME (`.dither-field`, theme_quiet.cpp), which is 418,176
+// pixels on the X3 and measured 332 us of that screen's 356 us render.
+//
+// It now writes the tile eight columns at a time straight into the physical
+// store. That is PURE OPTIMISATION: every case above, and the Home, Library,
+// Book-details and Sleep goldens, pin the output it must keep producing.
+//
+// The reference below is that per-pixel loop, kept here for the reason
+// test_framebuffer.cpp keeps fillRect's and the block above keeps the veil's: it
+// IS the specification, because it is the code every golden in the suite was
+// blessed against. Any disagreement means the fast path is wrong, never the
+// reference.
+//
+// The comparison is over data() rather than over pixels, because the fast path
+// writes bytes: a mapping that is right per pixel but lays the bytes out
+// differently is still a wrong frame from the panel driver's point of view. And
+// it runs under Rotation::Ccw as well as Rotation::None, because CCW is how the
+// device paints -- a byte-wise path that assumed a logical row is a physical row
+// would pass every desktop test and every golden and smear the tint diagonally
+// on glass.
+
+namespace {
+
+// The reference's OWN copy of the matrix, so that changing dither.cpp's is a
+// disagreement rather than a change to both sides of the comparison at once.
+constexpr int kClusteredRef[4][4] = {
+    {12, 6, 11, 13},
+    {4, 0, 1, 9},
+    {8, 3, 2, 5},
+    {14, 10, 7, 15},
+};
+
+void ditherRectReference(reader::Framebuffer& fb, int x, int y, int w, int h, int level,
+                         reader::Ink ink) {
+  if (level <= 0) return;
+  if (level > 4) level = 4;
+  const int threshold = level * 4;
+  const bool dot = (ink == reader::Ink::White);
+  // `yy & 3` on a NEGATIVE coordinate is the two's-complement answer (-1 & 3 ==
+  // 3), not a C remainder, and that is the phase the fast path has to reproduce
+  // for a rect with a negative origin. Copied verbatim from the shipped loop
+  // rather than tidied, because tidying it is exactly how a reference stops
+  // being one.
+  for (int yy = y; yy < y + h; ++yy)
+    for (int xx = x; xx < x + w; ++xx)
+      if (kClusteredRef[yy & 3][xx & 3] < threshold) fb.setPixel(xx, yy, dot);
+}
+
+struct TintCase {
+  int fw, fh, x, y, w, h;
+  const char* what;
+};
+
+void checkTintMatchesReference(const TintCase& c, reader::Rotation rot, int level,
+                               reader::Ink ink) {
+  reader::Framebuffer fast(c.fw, c.fh, rot), ref(c.fw, c.fh, rot);
+  const uint32_t seed =
+      static_cast<uint32_t>(c.fw * 7919 + c.fh * 104729 + c.x * 31 + c.w * 17 + level * 3 +
+                            (ink == reader::Ink::White ? 1 : 0));
+  fillPseudoRandom(fast, seed);
+  fillPseudoRandom(ref, seed);
+  reader::ditherRect(fast, c.x, c.y, c.w, c.h, level, ink);
+  ditherRectReference(ref, c.x, c.y, c.w, c.h, level, ink);
+
+  REQUIRE(fast.sizeBytes() == ref.sizeBytes());
+  int diffs = 0, first = -1;
+  for (int i = 0; i < ref.sizeBytes(); ++i)
+    if (fast.data()[i] != ref.data()[i]) {
+      if (diffs == 0) first = i;
+      ++diffs;
+    }
+  const char* rn = rot == reader::Rotation::Ccw ? "Ccw" : "None";
+  const char* in = ink == reader::Ink::White ? "White" : "Black";
+  CHECK_MESSAGE(diffs == 0, c.what << " rot=" << rn << " level=" << level << " ink=" << in << ": "
+                                   << diffs << " of " << ref.sizeBytes()
+                                   << " bytes differ, first at offset " << first);
+}
+
+const TintCase kTintCases[] = {
+    // The two panels, full frame: what Sleep's `.dither-field` actually asks for.
+    {528, 792, 0, 0, 528, 792, "X3 full frame"},
+    {480, 800, 0, 0, 480, 800, "X4 full frame"},
+    // The cover placeholder's own box, at Home's size and at Book details'.
+    {528, 792, 40, 120, 112, 168, "Home's cover placeholder"},
+    {528, 792, 40, 120, 120, 180, "Book details' cover placeholder"},
+    // Origins and widths that are not multiples of 8, which is where a byte-wise
+    // path's edge masks are the whole of the correctness. Both panel widths are
+    // multiples of 8, so nothing on the device exercises this.
+    {528, 792, 1, 0, 526, 792, "X3 inset by one pixel"},
+    {528, 792, 7, 3, 513, 785, "X3 ragged origin and width"},
+    {528, 792, 3, 0, 5, 792, "a five-pixel column inside one byte"},
+    {528, 792, 6, 0, 4, 10, "a run straddling one byte boundary"},
+    {64, 64, 0, 0, 64, 64, "aligned 64x64"},
+    {64, 64, 5, 5, 54, 54, "inset 64x64"},
+    // Every phase of the 4px grid on BOTH axes, so no row of the tile and no
+    // column of it is missed. Four each, because the tile is 4x4 and a byte is
+    // eight columns -- 8 % 4 == 0, so a byte's mask is the same for every byte of
+    // a row, which is the property the fast path is built on.
+    {48, 48, 0, 0, 48, 48, "phase (0,0)"},
+    {48, 48, 1, 1, 46, 46, "phase (1,1)"},
+    {48, 48, 2, 2, 44, 44, "phase (2,2)"},
+    {48, 48, 3, 3, 42, 42, "phase (3,3)"},
+    // ...and the phases crossed, so an implementation that used one axis's phase
+    // for both is caught. This is the case the tile's asymmetry lives in.
+    {48, 48, 1, 2, 40, 40, "phase (1,2), the axes disagreeing"},
+    {48, 48, 2, 1, 40, 40, "phase (2,1), the other way round"},
+    {48, 48, 0, 3, 40, 40, "phase (0,3)"},
+    {48, 48, 3, 0, 40, 40, "phase (3,0)"},
+    // Negative origins: the pattern is keyed on absolute coordinates, so clipping
+    // must not re-phase it, and `& 3` on a negative is the two's-complement answer.
+    {36, 36, -4, -4, 8, 8, "negative origin"},
+    {36, 36, -7, -5, 20, 20, "negative origin, odd offsets"},
+    {36, 36, -3, -1, 12, 12, "negative origin, both phases nonzero"},
+    // Off the far edge, so the clip has to shorten the run rather than write past
+    // the row.
+    {36, 36, 30, 30, 20, 20, "overhanging the far edge"},
+    // Degenerate: nothing drawn, nothing walked off.
+    {36, 36, 4, 4, 0, 8, "zero width"},
+    {36, 36, 4, 4, 8, 0, "zero height"},
+    {36, 36, 4, 4, -5, -5, "negative extent"},
+    {36, 36, 100, 100, 8, 8, "wholly off-screen"},
+    // Frames whose own dimensions are not multiples of 8, in both axes, which
+    // under rotation is where the stride comes from the other one.
+    {13, 21, 0, 0, 13, 21, "ragged frame 13x21"},
+    {21, 13, 0, 0, 21, 13, "ragged frame 21x13"},
+    {1, 1, 0, 0, 1, 1, "single pixel"},
+    {1, 800, 0, 0, 1, 800, "single column"},
+    {800, 1, 0, 0, 800, 1, "single row"},
+};
+
+}  // namespace
+
+TEST_CASE("the byte-wise tint is byte-identical to the per-pixel one") {
+  // Every case at every level and in both inks, under both rotations. The level
+  // is what picks the tile's mask and the ink is what decides whether the mask is
+  // ORed in or masked out, so neither is a variation on one code path -- they are
+  // the two halves of it.
+  for (const TintCase& c : kTintCases)
+    for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw})
+      for (int level = 1; level <= 4; ++level)
+        for (const reader::Ink ink : {reader::Ink::Black, reader::Ink::White})
+          checkTintMatchesReference(c, rot, level, ink);
+}
+
+TEST_CASE("an out-of-range level is clamped the way the per-pixel form clamped it") {
+  // level <= 0 draws nothing and level > 4 is level 4. Pinned against the
+  // reference rather than described, because a table indexed by level is exactly
+  // the shape that reads one entry off the end for level 5.
+  const TintCase c = {64, 48, 3, 5, 55, 39, "clamped level"};
+  for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw})
+    for (const int level : {-3, -1, 0, 5, 9, 1000})
+      for (const reader::Ink ink : {reader::Ink::Black, reader::Ink::White})
+        checkTintMatchesReference(c, rot, level, ink);
+}
+
+TEST_CASE("the byte-wise tint writes nothing outside the rect it was given") {
+  // The fast path indexes raw bytes, so an off-by-one in an edge mask corrupts a
+  // neighbour rather than failing a pattern check. Tint a rect inset by one pixel
+  // on every side and require the border ring is untouched -- one pixel is inside
+  // the first and last byte of every row, so the masks are doing the work rather
+  // than the byte arithmetic.
+  //
+  // Checked in BOTH inks against the ground that would hide it: a black tint on
+  // an ink ground and a white tint on a paper ground each change nothing outside
+  // themselves for free, so the grounds are the other way round.
+  for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw}) {
+    reader::Framebuffer black(64, 48, rot);
+    black.clear(true);  // paper, so stray ink shows
+    reader::ditherRect(black, 1, 1, 62, 46, 3, reader::Ink::Black);
+    for (int x = 0; x < 64; ++x) {
+      CHECK(black.getPixel(x, 0));
+      CHECK(black.getPixel(x, 47));
+    }
+    for (int y = 0; y < 48; ++y) {
+      CHECK(black.getPixel(0, y));
+      CHECK(black.getPixel(63, y));
+    }
+    CHECK(inkCount(black, 1, 1, 62, 46) > 0);  // ...and it did draw something
+
+    reader::Framebuffer white(64, 48, rot);
+    white.clear(false);  // ink, so stray paper shows
+    reader::ditherRect(white, 1, 1, 62, 46, 3, reader::Ink::White);
+    for (int x = 0; x < 64; ++x) {
+      CHECK_FALSE(white.getPixel(x, 0));
+      CHECK_FALSE(white.getPixel(x, 47));
+    }
+    for (int y = 0; y < 48; ++y) {
+      CHECK_FALSE(white.getPixel(0, y));
+      CHECK_FALSE(white.getPixel(63, y));
+    }
+    CHECK(inkCount(white, 1, 1, 62, 46) < 62 * 46);
+  }
+}

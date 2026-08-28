@@ -27,6 +27,18 @@ class Framebuffer;
 // a different pattern -- see veilRect. (A white-inked ditherRect is not that
 // veil either: the grid is 4px against the veil's 3px, which is the whole
 // measurement the comment below turns on.)
+//
+// Written eight columns at a time straight into the framebuffer's physical
+// store, so this is one of the four routines in core/ that know the rotation
+// exists -- with fillRect, the glyph blit and veilRect. It reads like the veil
+// (a tile with a phase) and is built like a FILL: a byte is eight columns and
+// this tile is four wide, so every byte of a row carries the same mask and the
+// run hoists out of the loop. The veil's tile is three wide, which is why its
+// mask cannot. See dither.cpp for the measurement -- Sleep tints the whole panel,
+// which was 91% of that screen's render -- and for what the rotated case has to
+// do differently. It is pure optimisation: test_dither.cpp keeps the per-pixel
+// form as its reference and asserts byte-identity under both rotations, at every
+// level, in both inks.
 void ditherRect(Framebuffer& fb, int x, int y, int w, int h, int level,
                 Ink ink = Ink::Black);
 
@@ -58,9 +70,9 @@ void ditherRect(Framebuffer& fb, int x, int y, int w, int h, int level,
 // do not bleach each other's veils away.
 //
 // Written eight columns at a time straight into the framebuffer's physical
-// store, which is why this is the one drawing routine in core/ that knows the
-// rotation exists: an overlay veils the WHOLE frame, so it was the most
-// expensive thing on an overlay repaint by a wide margin. See dither.cpp for the
+// store, which is why this was the FIRST drawing routine in core/ to know the
+// rotation exists -- there are four now: an overlay veils the WHOLE frame, so it
+// was the most expensive thing on an overlay repaint by a wide margin. See dither.cpp for the
 // measurement and for what the rotated case has to do differently. It is pure
 // optimisation -- test_dither.cpp keeps the per-pixel form as its reference and
 // asserts byte-identity under both rotations.
