@@ -106,7 +106,6 @@ FLOW_SCREENS = [
     ("book_error",      "BookError.dc.html",      "Book error"),
     ("typography",      "Typography.dc.html",     "Typography"),
     ("contents",        "Contents.dc.html",       "Contents"),
-    ("goto_page",       "GoToPage.dc.html",       "Go to page"),
     # Peek and return (3D). `peek` is the overlay -- book text over the veiled page
     # you are on -- and `reader_anchored` is the Reader with somewhere to go back to,
     # its own board so that Reader.dc.html stays pinned as the no-anchor common case.
@@ -359,6 +358,28 @@ def main():
             # A typo used to render zero screens and report "0/0 implemented",
             # which reads like a pass.
             raise SystemExit(f"--only names no such screen: {', '.join(sorted(missing))}")
+
+    # A BOARD NAMED IN THIS LIST AND ABSENT FROM DISK IS A HARD ERROR, for exactly
+    # the reason `--only` errors on an id it does not recognise. The render loop used
+    # to print one line and `continue`, which dropped the screen from `rows`
+    # ENTIRELY -- so the DENOMINATOR shrank and the sheet still reported a confident
+    # "N/M screens implemented". Deleting a board therefore made the ratio look
+    # BETTER while the check covered less, and `--only goto_page` against a deleted
+    # board exited 0 reporting "0/0 screens implemented" -- the same quiet pass the
+    # --only guard above was written to close, reached through a second door.
+    # (That is how it shipped: GoToPage.dc.html was deleted with the reader menu's
+    # `Go to page...` row on 2026-08-24 and this list kept naming it for four days.)
+    # A check that reports on less than it claims is worse than no check, because it
+    # is trusted. Checked up front rather than in the loop so it fails in a second
+    # instead of after two minutes of rendering.
+    absent = [(sid, board) for sid, board, _ in screens
+              if not (ROOT / "design" / board).exists()]
+    if absent:
+        raise SystemExit(
+            "design board missing for %d screen(s) -- restore the board, or remove "
+            "the row from compare-design.py:\n%s"
+            % (len(absent),
+               "\n".join(f"  {sid}: design/{board}" for sid, board in absent)))
     if not pathlib.Path(CHROME).exists():
         raise SystemExit(f"Chrome not found at {CHROME}")
 
@@ -370,9 +391,6 @@ def main():
         tmp = pathlib.Path(tmp)
         for sid, board, label in screens:
             bpath = ROOT / "design" / board
-            if not bpath.exists():
-                print(f"  {label}: design board missing ({board}) - skipped")
-                continue
 
             geom_entries = []
             any_impl = False

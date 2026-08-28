@@ -24,7 +24,7 @@ make sim        # render Home to build/home.png
 make firmware   # build for the ESP32-C3
 make fonts      # regenerate the .rfnt type ramp and embedded headers
 make icons      # regenerate icon bitmaps from the design boards' SVG
-make compare    # design-vs-firmware contact sheet, all 28 boards (~2.5 min)
+make compare    # design-vs-firmware contact sheet, all 32 boards (~2.8 min)
 ```
 
 ```
@@ -71,7 +71,15 @@ stop meaning anything.
 and skipped four of the six implemented screens — while CLAUDE.md called it the
 check that keeps the design honest. `--only <flow screen>` matched nothing at all,
 silently. The default is now every board, and `--only` errors on an id it does not
-recognise rather than reporting `0/0`. **A check that reports on less than it
+recognise rather than reporting `0/0`. **A board NAMED in the list and absent
+from disk is a hard error too, and that was a second door to the same quiet
+pass** — the loop printed one line and `continue`d, which dropped the screen
+from the sheet entirely rather than counting it as not-implemented, so
+**deleting a board shrank the denominator and made the ratio look BETTER**,
+and `--only` on that id was back to exiting 0 with `0/0`. A row outlived its
+deleted board by four days that way (the reader menu's cut page-number row).
+The list is checked against the disk up front now, so it fails in a second
+instead of after three minutes. **A check that reports on less than it
 claims is worse than no check, because it is trusted** — the same shape as the
 card probe that was answered from cache and kept reporting success.
 
