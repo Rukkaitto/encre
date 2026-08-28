@@ -86,12 +86,53 @@ TEST_CASE("numeric character references decode, decimal and hex") {
   CHECK(x.text() == "a\xE2\x80\x94" "b\xE2\x80\x94" "c\xC3\xA9");
 }
 
-TEST_CASE("an unknown entity is malformed, not passed through") {
-  // Passing it through would put a literal "&nbsp;" in a paragraph, which reads
-  // as a rendering bug and is really a parsing one.
-  CHECK_FALSE(parses("<p>a&nbsp;b</p>"));
-  CHECK_FALSE(parses("<p>a&#;b</p>"));
-  CHECK_FALSE(parses("<p>a&b</p>"));
+TEST_CASE("the HTML 4 named entities decode, in text and in attributes") {
+  // MEASURED, not chosen: seven distinct named entities appear across sixteen real
+  // books -- rsquo, nbsp, mdash, ndash, ldquo, rdquo, lsquo, 50,245 occurrences --
+  // and every one is HTML 4 punctuation. The table is all 252 because the whole set
+  // costs 1,416 bytes of names and typing a subset invites a second pass.
+  Xml x("<p title='a&nbsp;b'>x&rsquo;y &mdash; &ndash; &ldquo;q&rdquo;</p>");
+  REQUIRE(x.next() == Node::StartTag);
+  CHECK(x.attr("title") == "a\xC2\xA0" "b");
+  REQUIRE(x.next() == Node::Text);
+  CHECK(x.text() == "x\xE2\x80\x99" "y \xE2\x80\x94 \xE2\x80\x93 \xE2\x80\x9C" "q\xE2\x80\x9D");
+}
+
+TEST_CASE("an entity we still do not know passes through as its own text") {
+  // THE RULE THIS REVERSES is in decodeEntity's own header: an unknown entity meant
+  // "we are wrong about the file, not that the file is being casual". Half of that
+  // is right and the table above is the half that acts on it. The other half was
+  // measured and is false: `Dark Plagueis` lost 177 of its 183 chapters this way,
+  // because erroring here truncates the chapter at that byte.
+  //
+  // A visible wrong beats an invisible one, which is the call css.h already makes
+  // for over-matched italics: a literal "&unknown;" on the page is a typographic
+  // error you can see and report, where a silently discarded chapter is not.
+  Xml x("<p>Tom &unknown; Jerry</p>");
+  REQUIRE(x.next() == Node::StartTag);
+  REQUIRE(x.next() == Node::Text);
+  CHECK(x.text() == "Tom &unknown; Jerry");
+}
+
+TEST_CASE("a bare ampersand survives, because real books contain them") {
+  // Not an entity at all: no ';' before the run ends. Today this errors and takes
+  // the chapter with it.
+  Xml x("<p>Tom & Jerry</p>");
+  REQUIRE(x.next() == Node::StartTag);
+  REQUIRE(x.next() == Node::Text);
+  CHECK(x.text() == "Tom & Jerry");
+}
+
+TEST_CASE("a malformed numeric reference passes through rather than truncating") {
+  // `&#;` and `&#zz;` terminate, so they reach the numeric branch and fail to parse
+  // there -- which was the same chapter-ending error by another route. Every exit
+  // from decodeEntity that is not a decoded character is now text.
+  CHECK(parses("<p>a&#;b</p>"));
+  CHECK(parses("<p>a&#zz;b</p>"));
+  Xml x("<p>a&#;b</p>");
+  REQUIRE(x.next() == Node::StartTag);
+  REQUIRE(x.next() == Node::Text);
+  CHECK(x.text() == "a&#;b");
 }
 
 TEST_CASE("a namespace prefix is stripped, because EPUB's decorate a known vocabulary") {
