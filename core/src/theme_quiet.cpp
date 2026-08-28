@@ -1259,9 +1259,9 @@ void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
   int y = listTop;
 
   const int rows = static_cast<int>(vm.rows.size());
-  // ALWAYS overflowing in practice -- the list is 13 items and about 11 fit -- but
-  // asked rather than assumed, so a future build that trims the list does not draw
-  // a rail beside a list that fits.
+  // NOT overflowing in practice -- the list is seven items and about eleven fit --
+  // but asked rather than assumed, so the day the reading settings still to come
+  // push it over, the screen starts scrolling with nothing here changing.
   const bool overflowing = vm.totalRows > rows;
   const int inset = overflowing ? kListGutterW : 0;
 
@@ -1274,7 +1274,7 @@ void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
     const SettingsRow& row = vm.rows[static_cast<size_t>(i)];
     if (row.isHeader) {
       // A section's 2px rule, EXCEPT on the first item in the window -- the board
-      // gives DEVICE and CONNECTIONS a `border-top` and gives TYPOGRAPHY none,
+      // gives DEVICE a `border-top` and gives READING none,
       // because the first section sits directly under the header band's own 2px
       // border and a second rule doubles it into a 4px slab. Drawing it
       // unconditionally is exactly what this did, and it read as a stray separator
@@ -1302,14 +1302,30 @@ void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
 
     const int rightEdge = fb.width() - inset - kMargin;
     const int valueW = row.value.empty() ? 0 : value.measure(row.value);
+    // A ROW STATES A QUANTITY OR DISCLOSES A SCREEN, NEVER BOTH -- Home's menu rows
+    // and drawPanelRow both state the rule, and the READING row is where this screen
+    // first needed the disclosing half of it. They occupy the same right slot, so
+    // the label's budget reserves whichever one this row has rather than their sum.
+    const int trailingW = row.discloses ? icons::kChevron.w : valueW;
     // The label truncates and the value keeps its width, the same rule the
     // Library band states: the value is the state and the label is what it names.
-    const int labelMaxW = rightEdge - kMargin - (valueW > 0 ? valueW + kSettingsLabelGap : 0);
+    const int labelMaxW =
+        rightEdge - kMargin - (trailingW > 0 ? trailingW + kSettingsLabelGap : 0);
     drawTextElided(fb, lf, kMargin, baselineIn(lf, y, kSettingsRowH), row.label, labelMaxW, ink,
                    {}, plane);
-    if (valueW > 0)
+    // EXCLUSIVE, not two independent ifs: vm.rows already guarantees a disclosing
+    // row's value is empty, but writing the branch this way means a future table
+    // that broke that guarantee draws one mark or the other rather than a chevron
+    // stamped over a value. `ink` follows the focus for both -- the chevron is WHITE
+    // on the inverted row, which is exactly the row it is most likely to be on, and
+    // a black one there would be invisible.
+    if (row.discloses) {
+      const Icon& chev = icons::kChevron;
+      drawIcon(fb, chev, rightEdge - chev.w, iconTopIn(y, kSettingsRowH, chev.h), ink, plane);
+    } else if (valueW > 0) {
       drawText(fb, value, rightEdge - valueW, baselineIn(value, y, kSettingsRowH), row.value, ink,
                {}, plane);
+    }
 
     y += kSettingsRowH;
     // TWO reasons a row draws no rule, and both are the board's.
@@ -1318,7 +1334,7 @@ void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
     // drawBookRow implements.
     //
     // And the LAST ROW OF A SECTION has none, because the next section's 2px
-    // `border-top` is the line between them: `Alignment` on the board carries no
+    // `border-top` is the line between them: `Typography` on the board carries no
     // `border-bottom` for exactly that reason. Drawing one anyway made a 3px slab
     // where the board draws 2, and -- because it also advanced `y` -- pushed every
     // row below the DEVICE header down by a pixel. That is the compounding kind:
