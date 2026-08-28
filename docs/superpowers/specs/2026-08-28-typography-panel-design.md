@@ -368,8 +368,11 @@ into the design HTML first -- including when the board is what is wrong.
    Middlemarch's full opening sentence; the focus sits on `Size`, not `Font`.
    Measured: the box is 250px on the X4 and 241px on the X3, so 222px and 213px
    of text area, holding four whole lines of specimen at the default setting.
-2. **`design/Settings.dc.html`** -- the `Size` row's value `18 PT` -> `15 PT`,
-   which is ppem 32 truncated. The other four already state the defaults.
+2. **`design/Settings.dc.html`** -- the five inert TYPOGRAPHY rows become a
+   `READING` section with one disclosing `Typography` row; the focus moves onto it
+   from `Sleep after`; the Confirm hint reads `OPEN`. (Its `Size` value went
+   `18 PT` -> `15 PT` first, before the row it was on was deleted -- so that fix
+   survives only in the history.)
 3. **NO SECOND BOARD.** `TypographyEditing.dc.html` was written and then deleted
    with the edit mode; `tools/compare-design.py` gained its entry and lost it
    again. There is one state, so there is one board.
@@ -395,8 +398,15 @@ mutation on a line the input never reaches).
 | `test_settings.cpp` | the four fields round-trip, each clamp, and a file with none of them loading with defaults under version 1 |
 | `test_layout.cpp` | `justify=false` leaves `extraPerGapF26` at 0 on every line; a lead change and a margin change each move page boundaries |
 | `test_focus_restore.cpp` | its two counts go 7 -> 8, and `kAllScreens` gains a row (its `static_assert` fails until it does) |
-| `test_screen_settings.cpp` | the five TYPOGRAPHY rows show `settings_`, not placeholders, and are still unfocusable |
+| `test_screen_settings.cpp` | the `READING` row pushes `ScreenId::Typography`, the focus starts on it, the Confirm hint is `OPEN` there and `CHANGE` on a `DEVICE` row, and the five old rows are gone |
 | a re-pagination case | apply new metrics at a cursor and land on the page holding that block, checked for every page of a chapter -- the walk-stops-a-boundary-early bug is right at page 1 and wrong after it |
+
+**Both entry points are tested, and neither is a golden.** The reader menu's row
+and Settings' row each get a unit test asserting the pushed `ScreenId`, because a
+door that opens the wrong screen -- or nothing -- is the defect both of those rows
+have shipped before. The GOLDEN reaches Typography through the reader menu only:
+one route is enough to pin the pixels, and it is the route that also exercises the
+menu's row.
 
 **`test_focus_restore.cpp`'s counts are the check that matters most here**,
 because they are the mechanism that stops this feature adding a screen that
@@ -429,6 +439,16 @@ and stops there. What needs eyes on the panel:
   ever been able to test that claim.
 - **ppem 46 with a book open.** The arena grow's transient peak against the
   reading floor, and `[body]`/`[italic]` are the lines that report it.
-- **The re-paginate on DONE**, timed: `[i]` will carry it as `post=`, and it is a
-  chapter re-index, so it should read like a chapter crossing and not like a page
-  turn.
+- **The re-paginate on the way out**, timed: `[i]` will carry it as `post=`, and
+  it is a chapter re-index, so it should read like a chapter crossing and not like
+  a page turn.
+- **The Confirm hint changing as the focus moves on Settings.** This is the first
+  hint bar here whose text varies within a screen, and a one-word change inside a
+  full ~520 ms repaint may read as a flicker or may go unnoticed entirely. Only
+  the panel can say. Move the focus between `Typography` and `Sleep after` and
+  watch the bar; if it reads badly, the fallback is one neutral word for both,
+  decided on the board first.
+- **Back out of the panel from BOTH doors.** From the reader menu it must land on
+  the page with the new layout and no stale frame under the veil; from Settings it
+  must land back on Settings. Those are two different code paths through one
+  `pop()`, and the desktop cannot see either frame.
