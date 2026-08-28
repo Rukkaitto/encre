@@ -171,7 +171,10 @@ TEST_CASE("malformed input is a clean Error with an offset, never an abort") {
   const char* cases[] = {
       "<p", "<>", "</>", "<p></", "<p attr>", "<p attr=>",
       "<p attr='unterminated>", "<!-- unterminated", "<![CDATA[oops",
-      "<?pi unterminated", "<p>&#xZZ;</p>",
+      "<?pi unterminated",
+      // `<p>&#xZZ;</p>` WAS HERE and is no longer an error: a numeric reference that
+      // does not parse is passed through as its own text, because erroring ended the
+      // chapter. It is asserted as text above instead.
   };
   for (const char* c : cases) {
     Xml x(c);

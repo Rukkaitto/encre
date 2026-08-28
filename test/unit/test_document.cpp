@@ -102,9 +102,13 @@ TEST_CASE("a nested block closes the one it is inside") {
 // --- Refusals ---------------------------------------------------------------
 
 TEST_CASE("malformed markup is a refusal with a reason") {
+  // THIS TEST'S CASE USED TO BE `&nbsp;`, and an entity the tokenizer does not know
+  // is no longer malformed -- it is text. Erroring on one truncated the chapter at
+  // that byte, silently, which cost `Dark Plagueis` 177 of its 183 chapters. An
+  // unterminated comment is still genuinely malformed, and is what this asserts now.
   reader::Document d;
   const char* why = "";
-  CHECK_FALSE(reader::buildDocument("<p>a&nbsp;b</p>", d, &why));
+  CHECK_FALSE(reader::buildDocument("<p>a<!-- unterminated</p>", d, &why));
   CHECK(std::strlen(why) > 0);
 }
 
