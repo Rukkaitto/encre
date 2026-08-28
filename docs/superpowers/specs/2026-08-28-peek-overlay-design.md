@@ -271,6 +271,28 @@ New theme surface: `Theme::peekMetrics(...)` returning the panel's `PageMetrics`
 and `renderPeek(...)`. **No new icons** — `CLOSE` is `kBack` and `GO HERE` is `kDot`,
 both shipped.
 
+**THE LINE BOX IS `ppem × lead`, NOT `lineHeight × lead`.** `PageBuilder`'s
+constructor is `leadF26_ = Tracking::em(font.ppem(), m.leadEm1000)`
+(`layout.cpp:71`) — resolved against the face's PIXEL SIZE, which is what
+`line-height: 1.7` on `font-size: 32px` means and what the board's measured 54.4px
+line box is. Resolving it against `lineHeight()` gives 48 × 1.7 = 82px, so the panel
+would reserve room for **twelve** lines while claiming eight. **And it rounds UP**:
+`PageBuilder` fits `pxToF26(columnH) / leadF26` lines, so a column a quarter-pixel
+short of eight boxes holds **seven** — the exact height at the default is 435.25px,
+and 435 is a line short.
+
+Derived against the board's own render, which is the check that it is right: band
+**70px** against the board's measured 70, panel **546** against 544, veil above
+**127** against 128, clearance to the hint bar **63** against 65.
+
+**And `kPeekLines` cannot be tested through `columnH / lineH`** — `columnH` is derived
+from `kPeekLines`, so both sides of that equality move together and it holds for any
+value. It is kept as a round trip through the real `PageBuilder`, and the assertions
+that actually answer to the number are the board's own claims: the panel does not
+reach the hint bar, and the clearance below it is at least the bar's own height,
+which is the "modal, not a bordered full screen" argument with a non-arbitrary
+threshold.
+
 ## Verification
 
 **The issue's named risk first.** `veilRect` **across all three grayscale planes**,
