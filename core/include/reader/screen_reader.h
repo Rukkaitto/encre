@@ -173,10 +173,54 @@ class ReaderScreen : public Screen {
   // the warm at the next block rather than seconds later.
   //
   // THE ONE COST OF ABANDONING is the live builder, which the rewind spends and
-  // cannot rebuild -- so the next FORWARD turn pays a seekTo. That is the identical
-  // trade completeIndex makes, and it is why both are gated on a long quiet window
-  // rather than a short one.
+  // cannot rebuild HERE -- so the next FORWARD turn pays a seekTo unless a later
+  // quiet window has put it back. That is what restreamAtCurrentPage below is for,
+  // and it is why this one still wants a long window where that one does not.
   bool warmPageRing(StopFn stop = nullptr, void* ctx = nullptr);
+
+  // IS THERE A STREAM POSITIONED AFTER THE PAGE ON SCREEN. A forward turn with one
+  // is ~20 ms; without one it is a full rewind, ~376 ms at page 38 and ~1010 ms at
+  // page 99. It is the shell's gate for the restream below, and it is how a test
+  // observes the property directly rather than inferring it from a decode count.
+  bool hasLiveStream() const { return pb_ != nullptr; }
+
+  // PUT BACK THE STREAM A QUIET-WINDOW WALK SPENT, ALSO IN A QUIET WINDOW.
+  //
+  // Three things rewind the ChapterReader the builder reads from, so all three drop
+  // it: completeIndex, warmPageRing, and a backward turn's seekTo. Until this
+  // existed none of them could put it back, and the next FORWARD turn paid the
+  // rewind -- on the press, where the user is waiting.
+  //
+  // AND IT IS NOT ONLY THE ABANDONED COUNT THAT DOES THIS, which is what the shell's
+  // kCountQuietMs comment had wrong. completeIndex ends in seekTo(at_); `at_` is by
+  // definition the page the ring is most certain to hold, so the restore leg takes
+  // the cache hit -- and a hit leaves `pb_` null, deliberately, because nothing was
+  // decoded. So a count that COMPLETES spends the stream too, and that is the common
+  // path: every deferred chapter, every time its total lands.
+  //
+  // WHY THIS DOES NOT MERELY MOVE THE COST. The rewind is the same length either
+  // way. What changes is that ABANDONING THIS ONE IS FREE, and it is the only one of
+  // the three of which that is true: it runs only when `pb_` is ALREADY null, so it
+  // has no live builder to spend and an interrupted walk leaves exactly the state it
+  // found -- builder still null, ring unchanged or richer, nothing visible moved. So
+  // the trade is one-sided rather than balanced:
+  //
+  //   * it finishes  -> the next forward turn is free;
+  //   * it is cut    -> the next forward turn pays what it pays today.
+  //
+  // There is no third case, which is what lets it run on a SHORT window where
+  // completeIndex and warmPageRing need a long one. Both of those spend something
+  // real before they walk; this one cannot.
+  //
+  // It is the same walk warmPageRing makes -- one private rewalk with two gates,
+  // not two copies of it -- so a restream that lands also leaves the backward
+  // headroom a warm would have left, and the warm after it correctly finds nothing
+  // to do.
+  //
+  // Returns false when the stream already stands (a live builder beats
+  // re-establishing one and must never be thrown away for this), when there is no
+  // page to walk to, or when the walk was abandoned or failed.
+  bool restreamAtCurrentPage(StopFn stop = nullptr, void* ctx = nullptr);
 
   // COUNT A CHAPTER'S PAGES BEFORE THE FIRST PAINT IF IT IS THIS SMALL, and defer
   // otherwise. THE NUMBER IS MEASURED ON THE PANEL, and the first version of it was
@@ -431,6 +475,19 @@ class ReaderScreen : public Screen {
   // null, read advance()'s false as "the chapter ended", and turn to the next chapter
   // in the middle of this one.
   bool seekTo(int p, bool needStream = false);
+  // THE WALK BOTH IDLE JOBS MAKE, once. warmPageRing and restreamAtCurrentPage want
+  // the identical rewind -- decode from `pageCacheDepth_` pages back up to the page
+  // on screen, caching every page passed, and leave the builder live one page past
+  // it -- and differ only in the gate that decides whether it is worth making. Two
+  // copies of it would be two chances to get the CCW-of-lifetimes wrong: the builder
+  // installed one page off is a reader that skips or repeats a page, which both
+  // callers' tests would have to catch separately.
+  //
+  // INVISIBLE ON EVERY PATH. `page_`, `at_`, `starts_`, `indexComplete_` and
+  // `pageBytes_` are untouched whether it lands, is abandoned or fails -- the last
+  // of those especially, because the reading percentage is made of it and a drift
+  // there is a saved position that lies about where the reader was.
+  bool rewalkToCurrentPage(StopFn stop, void* ctx);
   // Shows page `p` from the ring, or false if it is not there. Sets `page_` and `at_`
   // and leaves no live builder.
   bool showCached(int p);

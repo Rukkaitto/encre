@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "reader/dir_counts.h"
 #include "reader/filesystem.h"
 
 namespace reader {
@@ -83,7 +84,30 @@ std::string_view BookEntry::title() const {
 size_t gLastScanDropped = 0;
 
 int BookList::countBooks(FileSystem& fs, std::string_view path) {
+  // ASKED FOR ONCE PER CARD STATE, NOT ONCE PER CALLER. Two callers want this
+  // same number for the same folder -- Home's LIBRARY row through countLibrary
+  // at boot, and the Library's rescan() through its `FOLDER - 6 BOOKS` row on
+  // every push -- and a folder's listing is ~2.90 ms an ENTRY that no amount of
+  // work on our side makes cheaper (reader/dir_cache.h has the SdFat reasoning).
+  // So the saving has to be FEWER walks, and the memo is where they go.
+  //
+  // WHAT INVALIDATES IT: every mutating method of the FileSystem this was asked
+  // for, before it touches anything. Nothing can bypass that, because there is no
+  // way to change what is on the card except through this object -- which is why
+  // the memo hangs off it rather than off either caller. dir_counts.h has the
+  // full argument, including why it beats the removals() key Home's own cached
+  // integer uses and what V2's Wi-Fi transfer does to that one.
+  //
+  // A null memo is the ordinary case for HostFileSystem and for any wrapper that
+  // has not thought about it, and it means exactly today's behaviour.
+  DirCountCache* memo = fs.dirCounts();
+  int remembered = 0;
+  if (memo != nullptr && memo->lookup(path, remembered)) return remembered;
+
   std::vector<DirEntry> raw;
+  // A FAILURE IS NOT REMEMBERED. -1 is "could not look", not a count, and holding
+  // it would make one bad read permanent for the rest of the session -- where the
+  // card coming back is exactly the case the SD-missing screen's RETRY exists for.
   if (!fs.list(path, raw)) return -1;
   int n = 0;
   // Files only, and the same isBook/isHidden rules the listing itself uses -- a
@@ -91,6 +115,7 @@ int BookList::countBooks(FileSystem& fs, std::string_view path) {
   // Subdirectories are not counted and not walked: see the header.
   for (const DirEntry& e : raw)
     if (!e.isDir && isBook(e.name)) ++n;
+  if (memo != nullptr) memo->remember(path, n);
   return n;
 }
 

@@ -50,6 +50,7 @@
 #include "reader/layout.h"
 #include "reader/scalablefont.h"
 #include "reader/reading_store.h"
+#include "reader/progress_save_gate.h"
 #include "reader/screen_sleep.h"
 #include "reader/screen_contents.h"
 #include "reader/screen_reader_menu.h"
@@ -237,33 +238,119 @@ constexpr uint32_t kRefineQuietMs = 5000;
 // four seconds to reach the glass because the next page turn almost never won the
 // race against the refinement's window.)
 //
-// AND IT STAYS AT THE REFINEMENT'S NUMBER NOW THAT THE COUNT IS INTERRUPTIBLE, which
-// is the opposite of what interruptibility first suggests. The argument for putting
-// it back to 1200 ms is that abandoning is now nearly free -- one block, ~6 ms -- so
-// the reason for widening it has gone. It has not, and the reason is a cost that
-// belongs to the press AFTER the one that interrupted:
+// IT WAS THE REFINEMENT'S NUMBER AND IT IS ITS OWN AGAIN, at 2000 ms, because the
+// cost that tied them together has been paid off. What follows is the whole trade,
+// including the part the previous version of this comment had WRONG.
 //
-//   ReaderScreen::completeIndex resets `pb_` BEFORE it walks, because the walk
-//   rewinds the ChapterReader the builder reads from. An abandoned count restores
-//   `starts_`, `at_` and the page -- but not the builder, and there is no second
-//   stream to rebuild it from (that is another 32 KB inflate window against a
-//   42,152-byte floor). So the next FORWARD turn misses the page ring, which holds
-//   pages already visited and not the one ahead, and pays a full seekTo: ~376 ms on
-//   the device against ~20 ms with the stream standing.
+// The argument for keeping 5000 was a cost belonging to the abandoning press:
+// completeIndex resets `pb_` before it walks, because the walk rewinds the
+// ChapterReader the builder reads from, and there is no second stream to rebuild it
+// with (another 32 KB inflate window against a 42,152-byte floor). So a forward turn
+// after an abandon misses the page ring -- which holds pages already visited, not
+// the one ahead -- and pays a full seekTo: ~376 ms at page 38, ~1010 ms at page 99.
 //
-// So a short window does not cost the interrupting press any more; it costs the one
-// after it, once per abandon. At 1200 ms a reader who pauses to think and then turns
-// the page pays that routinely, and every abandon also throws away the walk it had
-// done. At 5000 ms the count runs when the reader has really stopped -- and a reader
-// spends ~23 s on a page, so it gets its chance -- and usually completes, which
-// leaves a live builder behind it.
+// TWO THINGS THAT ARGUMENT GOT WRONG, both found by putting the claim in a test
+// (test_reader_restream.cpp):
 //
-// WHAT WOULD ACTUALLY EARN THE SHORTER WINDOW is re-establishing the spent stream in
-// a later quiet window, so an abandon costs nothing at all. That needs a
-// needStream-only entry point on ReaderScreen and a call site here; it is the honest
-// version of this trade and it is not written yet.
-constexpr uint32_t kCountQuietMs = kRefineQuietMs;
+//   * IT IS NOT ONLY THE ABANDONED COUNT. completeIndex ends in seekTo(at_), `at_`
+//     is by definition the page the ring is most certain to hold, so the restore leg
+//     takes a cache hit -- and a hit leaves `pb_` null. A count that COMPLETES spends
+//     the stream too. So "at 5000 ms it usually completes, which leaves a live
+//     builder behind it" was false: at 5000 ms it usually completes and leaves NO
+//     builder, and the next forward turn paid the rewind anyway, on every deferred
+//     chapter, guaranteed. The long window was buying nothing.
+//   * IT IS THE INTERRUPTING PRESS, not the one after it. The queue is drained at the
+//     top of the loop, so the press that made the stop predicate answer true is the
+//     very next thing dispatched.
+//
+// ReaderScreen::restreamAtCurrentPage is the entry point that pays the cost off: it
+// re-establishes the stream in a quiet window of its own, and ABANDONING IT IS FREE
+// because it runs only when the builder is already null and so has nothing to spend.
+// See kRestreamQuietMs.
+//
+// SO THE NUMBER IS DERIVED AGAIN, AND FROM A SMALLER COST OF BEING WRONG:
+//
+//   FLOOR -- 1360 ms, the longest pause measured while the reader was still turning
+//   pages (twelve consecutive turns: median gap 72 ms, outliers 898 ms and 1360 ms).
+//   Below that the count fires into a gap the reader is about to close, is abandoned,
+//   and the abandoning press pays the rewind.
+//
+//   MARGIN -- 2000 ms is 1.47x that floor, where kRefineQuietMs uses ~3.5x. The
+//   multiplier is smaller because the cost of being wrong is smaller: the refinement
+//   is 1408 ms of UNINTERRUPTIBLE dead buttons, and this is one rewind on one press,
+//   at most once per chapter, because a chapter counted once is never counted again.
+//
+//   CEILING -- the prize. The total lands on glass at window + count + paint: at
+//   5000 that is ~6.0 s (5000 + 440 + 596, from the device's own [index] line), and
+//   at 2000 it is ~3.0 s. Half the wait for a footer that currently reads `3 / -`.
+//
+// AND IT DOES NOT RE-OPEN THE PERCENTAGE-GOES-BACKWARDS BUG, which is the other thing
+// this constant has to be checked against -- widening it 1200 -> 5000 made that one
+// worse, because the count landed later. It cannot come back, and the reason is
+// structural rather than a matter of degree: progressPercent is made of BYTES now
+// (reading_store.cpp prefers bytesIntoChapter and reads page/pageTotal only when it
+// is zero), and every chapter of every real EPUB is deflated, so the bytes are always
+// there. test_reader_restream.cpp asserts the percentage across the moment the count
+// lands, over a real archive, and it does not move. For the fallback path -- a stored
+// entry or an in-memory chapter, with no inflater to ask -- shortening moves the
+// SAME lever in the direction that made it better.
+//
+// WHAT IT STILL COSTS, stated plainly so the [index] line can be read against it: a
+// pause between 2000 ms and 2000 ms + the count's duration ends in an abandon, and
+// that press pays a rewind. `[index] counted|abandoned` is what measures how often.
+constexpr uint32_t kCountQuietMs = 2000;
+
+// PUTTING THE SPENT STREAM BACK, on a window of its own.
+//
+// Every quiet-window walk drops the live PageBuilder before it rewinds -- the count
+// and the ring warm both -- and until restreamAtCurrentPage existed neither could put
+// it back, so the next FORWARD turn paid ~376-1010 ms of seekTo on the button.
+//
+// WHY THIS ONE MAY HAVE A SHORT WINDOW WHERE THE OTHER TWO MAY NOT. Abandoning it
+// costs NOTHING: it runs only when `pb_` is already null, so there is no live builder
+// for an interrupted walk to lose. The other two each spend something real before
+// they walk, which is what buys them the refinement's long window. Here the trade is
+// one-sided -- it finishes and the next forward turn is free, or it is cut and that
+// turn pays exactly what it pays today -- so there is no case in which firing early
+// makes anything worse.
+//
+// 1200 ms, and the derivation is only the lower half of kCountQuietMs's: it has to
+// clear the 72 ms median gap between steady page turns, and the 898 ms outlier, so
+// that a reader flipping does not pay bus traffic for a builder each turn
+// re-establishes by itself. It does NOT have to clear the 1360 ms pause, because
+// being interrupted there is free -- which is precisely the difference from the two
+// windows above.
+constexpr uint32_t kRestreamQuietMs = 1200;
 static bool gRefineOwed = false;
+
+// HOW LONG THE BUTTONS MUST BE QUIET BEFORE THE READING POSITION IS WRITTEN.
+//
+// THE POINT OF THIS NUMBER IS THAT A PAGE TURN NEVER PAYS FOR IT. The save is two
+// small file reads and up to two small writes -- ~20-100 ms measured, on the display's
+// SPI bus -- and unlike the page count and the ring warm, abandoning it costs nothing,
+// so the temptation is to fire it almost immediately. That would be the wrong trade:
+// at 400 ms it would land after every paint during steady reading and put its whole
+// cost in front of the next press, which is precisely the "a card write on each turn
+// would be felt" objection that kept this on three edges in the first place.
+//
+// So it is sized to MISS steady turning and catch the pause that follows it. The
+// device's own figures: across twelve consecutive page turns the gap between the panel
+// going free and the next press was a median of 72 ms, with the two longest at 898 and
+// 1360 ms. 2000 ms clears all twelve, so a reader flipping through pages pays nothing
+// at all -- and an average reader spends ~23 s on a page, so in ordinary reading the
+// window opens about two seconds after every single turn.
+//
+// SHORTER THAN kCountQuietMs (5000) DELIBERATELY, because the trade is the opposite
+// one. The count and the refinement wait five seconds because being wrong costs the
+// reader a locked-up second and a half; being wrong here costs ~40 ms that the next
+// press absorbs, and being LATE costs durability, which is the whole feature.
+constexpr uint32_t kSaveQuietMs = 2000;
+
+// WHETHER THE POSITION ON SCREEN IS WORTH THE BUS. See progress_save_gate.h: it holds
+// the last point actually stored, so the quiet window cannot re-save the same page on
+// every loop iteration, and it gives up after three consecutive refusals so a
+// write-protected card cannot be hammered into routing the reader to SdMissingScreen.
+static reader::ProgressSaveGate gSaveGate;
 
 // Everything the render needs has to outlive setup(), so it lives here rather
 // than on setup()'s stack.
@@ -388,9 +475,16 @@ static reader::ScalableFont gBody;
 //
 // 10 KB therefore holds essentially the whole working set, and the failure mode if a
 // book exceeds it is that the arena wraps and re-rasterises: SLOWER, never dead,
-// which is the property ScalableFont's fixed budget exists to give. Against a
+// which is the property ScalableFont's bounded budget exists to give. Against a
 // measured heap floor of 45,840 bytes with a page on glass, taking 16 KB here for a
 // face that sets 3% of the text would have been the easy wrong answer.
+//
+// BOTH NUMBERS ARE NOW "AT ppem 32" RATHER THAN "ALWAYS", and neither had to change
+// to become that: ScalableFont::init scales its budget by the reading size, so what
+// these two lines state is the PROPORTION between a hot face and a cold one, which is
+// what was actually measured and is what should survive a Typography `Size` row. At
+// the shipped ppem 32 the scale is 1 and these are the same 16 KB and 10 KB as before,
+// to the byte; at the top of the ramp they cap at 24,576 and 15,360.
 static reader::ScalableFont gItalic(10u * 1024u);
 // Did SDCardManager::begin() ever return true this boot? It opens with
 // `if (initialized) return true;` and the SPI path exposes no end()/unmount(), so
@@ -1217,8 +1311,23 @@ static int libraryCountForHome() {
   // The cost, once, where it is paid. A second of listing that shows up on a
   // navigation the user thinks is instant is exactly the kind of thing that has
   // to be in the log rather than inferred from a device feeling slow.
-  logf("[library] counted %d book(s) in %s in %lums\n", gLibraryCount,
-       reader::kBooksRoot, (unsigned long)(millis() - t0));
+  //
+  // AND WHAT THE FOLDER MEMO DID, because a hit is otherwise INVISIBLE: a folder
+  // answered from RAM produces no `[fs] list` line at all, so success and "the
+  // count stopped being called" print identically. The counters are cumulative
+  // over the session and this is the one line that prints them, so they also
+  // cover the Library's own rescan -- a Library push between two of these lines
+  // shows up as `hit=` having grown by one per folder, which is the whole point.
+  // `held=` is how many folders are remembered RIGHT NOW, so it alone falls back
+  // to zero when an invalidation fires, and it stopping short of the folders on
+  // the card means the ceiling in dir_counts.h was reached.
+  //
+  // At boot the honest reading is `held=N hit=0 miss=N`: the first walk cannot be
+  // avoided, and this line is where you see that it will not be paid again.
+  const reader::DirCountCache& counts = gSd.bookCounts();
+  logf("[library] counted %d book(s) in %s in %lums | folders held=%u hit=%u miss=%u\n",
+       gLibraryCount, reader::kBooksRoot, (unsigned long)(millis() - t0),
+       (unsigned)counts.held(), (unsigned)counts.hits(), (unsigned)counts.misses());
   logFlush();
   return gLibraryCount;
 }
@@ -1561,10 +1670,28 @@ static void buildSdMissingApp() {
 // and is not built.
 // SAVE WHERE THE READER IS, to the card, if a book is open.
 //
-// Called on the three edges that change the answer: leaving the book, crossing into
-// another chapter, and going to sleep. NOT on every page turn -- a turn is ~570 ms
-// of panel and a card write on top of each one would be felt, and the three edges
-// above already bound how much reading a power cut can lose to one chapter.
+// FOUR CALLERS, AND THE FOURTH IS THE ONE THAT MAKES THIS DURABLE. Three are edges
+// that change the answer -- leaving the book, crossing into another chapter, going to
+// sleep -- and they fire unconditionally because each is a moment the reader would
+// notice losing. The fourth is loop()'s quiet window, which offers the position after
+// kSaveQuietMs of silence and gets an answer from ProgressSaveGate first.
+//
+// THIS USED TO BE THREE EDGES ONLY, on the grounds that "a turn is ~570 ms of panel
+// and a card write on top of each one would be felt". That reasoning was right about
+// the cost and wrong about where to put the work: it bounded a power cut's damage at
+// ONE CHAPTER, which on a real novel is an hour of reading. The write is not made
+// cheaper, it is made to happen when the loop is already idle -- the same answer the
+// page count, the refinement and the ring warm all reached, and the same one the card
+// log reached before them.
+//
+// IT IS NOT HIDDEN UNDER THE WAVEFORM, which was the idea this replaced. The
+// triggerDisplay/completeDisplay seam really is open for ~389 ms of otherwise idle
+// CPU, but the SD card is on the DISPLAY'S SPI bus and the SDK states the contract in
+// three separate places -- PanelDriver.h's "the caller does non-SPI CPU work in the gap
+// and issues no other bus op until displayFinish()" is the sharpest. Uc8279Driver
+// leaves a PARTIAL_IN window open across that gap for displayFinish to close, so the
+// controller is mid-sequence the whole time. The quiet window costs the reader the
+// same nothing and breaks no contract.
 //
 // A FAILURE HERE IS LOGGED AND NOTHING ELSE, which is the one hazard in this whole
 // feature. A card can be readable and refuse writes -- a physical write-protect tab
@@ -1574,9 +1701,15 @@ static void buildSdMissingApp() {
 // reader out of a book they can still perfectly well read. There is nothing to do
 // about it and nothing worth telling the user, so it goes in the log and the reader
 // keeps reading.
-static void saveReadingPosition(const char* why) {
-  if (!gReading.open || gApp == nullptr) return;
-  if (gApp->top().id() != reader::ScreenId::Reader) return;
+// RETURNS THE COMBINED OUTCOME OF BOTH RECORDS, which only the quiet-window caller
+// reads -- the three edges fire regardless and have nothing to decide. Failed if
+// either half was refused, Written if either half moved, Unchanged when the card
+// already held both. The "nothing to save" early returns answer Unchanged, and the
+// quiet-window caller additionally guards on the same conditions so it can never
+// record a point that was not actually stored.
+static reader::SaveResult saveReadingPosition(const char* why) {
+  if (!gReading.open || gApp == nullptr) return reader::SaveResult::Unchanged;
+  if (gApp->top().id() != reader::ScreenId::Reader) return reader::SaveResult::Unchanged;
   const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
 
   reader::ReadingPosition p;
@@ -1637,6 +1770,16 @@ static void saveReadingPosition(const char* why) {
   logf("[progress] %s: spine=%d block=%d line=%d %d%% -- position %s, pointer %s\n", why,
        p.spine, p.block, p.line, last.percent, outcome(a), outcome(b));
   logFlush();
+
+  // TWO RECORDS, ONE ANSWER. The gate's question is "is the card worth touching
+  // again", and it is not settled until BOTH halves are down -- so a half-landed save
+  // reports Failed and will be retried, rather than being recorded as stored because
+  // the sidecar happened to succeed before the pointer did not.
+  if (a == reader::SaveResult::Failed || b == reader::SaveResult::Failed)
+    return reader::SaveResult::Failed;
+  if (a == reader::SaveResult::Written || b == reader::SaveResult::Written)
+    return reader::SaveResult::Written;
+  return reader::SaveResult::Unchanged;
 }
 
 // WHAT OPENING THIS CHAPTER COST, AND WHICH BRANCH TOOK IT. A chapter under
@@ -4018,6 +4161,74 @@ void loop() {
     logFlush();
   }
 
+  // THE READING POSITION, SAVED BECAUSE THE READER MOVED RATHER THAN BECAUSE THEY LEFT.
+  //
+  // FIRST OF THE QUIET-WINDOW JOBS, AND THE ONLY ONE THAT PROTECTS DATA. The page
+  // count, the refinement and the ring warm are a number, some grey and a latency;
+  // this is the reader's place in the book. It is also by far the cheapest of the four
+  // -- ~20-100 ms against 400 ms to 3.6 s -- so putting it in front of them costs them
+  // little and buys the guarantee that a chapter-long count cannot sit between a page
+  // turn and the record of it.
+  //
+  // GATED ON THE READER HAVING MOVED, which is the whole reason ProgressSaveGate
+  // exists. This block is reached on EVERY loop iteration once the buttons go quiet,
+  // and `savePosition` answers Unchanged by reading both sidecars back off the card
+  // first -- so without the gate an idle device would sit on a page doing two file
+  // reads per iteration, forever, on the panel's own SPI bus. Three int comparisons
+  // replace all of it.
+  //
+  // AND ON THE CARD NOT HAVING REFUSED THREE TIMES. A card can be readable and refuse
+  // writes, and `writeAll` calls noteCardGone() on a write that fails after opening,
+  // which pollCardPresence turns into an App rooted at SdMissingScreen. Saving a
+  // hundred times more often would make that a hundred times more likely, so the gate
+  // gives up for the session after kGiveUpAfterFailures -- at which point the
+  // behaviour is exactly the three edges that shipped.
+  if (!gApp->dirty() && rawSamplesPending() == 0 && gReading.open &&
+      static_cast<uint32_t>(millis() - gLastInputMs) >= kSaveQuietMs &&
+      gApp->top().id() == reader::ScreenId::Reader) {
+    // A DIFFERENT BOOK CAN SIT AT THE SAME COORDINATES. spine 0 / block 0 / line 0 is
+    // the opening page of every book on the card, so without this the first page of a
+    // newly opened book would look to the gate exactly like the page it last stored
+    // for the previous one. Tracked here rather than hooked into the open path so the
+    // whole mechanism stays inside this block.
+    static std::string gateBook;
+    if (gateBook != gReading.path) {
+      gateBook = gReading.path;
+      gSaveGate.forget();
+    }
+    const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
+    const reader::SavePoint where(rd->chapterIndex(), rd->currentCursor());
+    if (gSaveGate.wants(where, millis())) {
+      // ONE ACQUISITION FOR THE WHOLE SAVE. Each SdFileSystem call takes the guard
+      // itself and it is recursive, so this changes no locking -- it holds the bus
+      // across all four operations instead of releasing it three times in the middle
+      // of a save, which is the same rule renderTop() applies to a paint.
+      SpiBusGuard bus;
+      const reader::SaveResult r = saveReadingPosition("page");
+      if (r == reader::SaveResult::Failed) {
+        gSaveGate.noteFailed(millis());
+        // SAID OUT LOUD, AND THE GIVE-UP SAID SEPARATELY. The reader sees nothing
+        // either way, and a durability feature that has switched itself off looks
+        // exactly like one that is working -- which this file records as a defect
+        // shape several times over. saveReadingPosition has already logged WHICH half
+        // failed; this says what it means for the mechanism.
+        if (gSaveGate.givenUp())
+          logf("[progress] the card refused it %d times -- THE PER-TURN SAVE IS OFF for "
+               "the rest of this session. Reading is unaffected and so are the "
+               "leaving/chapter/sleep edges, which still try every time. A card that is "
+               "readable but write-protected is the usual cause\n",
+               gSaveGate.failures());
+        else
+          logf("[progress] the card refused it (%d of %d, retrying in %lus)\n",
+               gSaveGate.failures(), reader::ProgressSaveGate::kGiveUpAfterFailures,
+               (unsigned long)(reader::ProgressSaveGate::kRetryBackoffMs / 1000u));
+        logFlush();
+      } else {
+        gSaveGate.noteStored(where);
+      }
+    }
+  }
+
   // THE FOUR-LEVEL UPGRADE, once the buttons have been quiet and nothing is owed
   // to the panel. Placed here rather than after a dispatch because the whole point
   // is that it must NOT happen while the reader is still turning pages: a paint
@@ -4076,6 +4287,61 @@ void loop() {
     refineNow();
   }
 
+  // PUTTING BACK THE STREAM THE COUNT SPENT -- see kRestreamQuietMs.
+  //
+  // WHERE IT SITS IN THE QUIET-WINDOW ORDER, AND WHY, because a job that just takes
+  // a position rather than arguing for one makes the whole ordering accidental:
+  //
+  //   * AFTER BOTH COUNT SITES. completeIndex rewinds the stream and drops the
+  //     builder, so a restream above it is a full walk thrown away by the very next
+  //     block. BOTH, not one: there is the deferred site above and one inside
+  //     refineNow(), and this file already records what fixing only one of them
+  //     costs. Sitting below the refinement block puts this below both.
+  //     IT IS AN EFFICIENCY CONSTRAINT AND NOT A CORRECTNESS ONE, which is worth
+  //     knowing before anyone reorders these: the gate is `hasLiveStream()`, asked
+  //     afresh every iteration, so a restream that ran above a count would waste one
+  //     interruptible walk and be re-run ten milliseconds later. Wrong order, right
+  //     state.
+  //   * BEFORE THE RING WARM, because they are the SAME WALK with two gates
+  //     (ReaderScreen::rewalkToCurrentPage), and a restream that lands leaves exactly
+  //     the backward headroom a warm would have left -- so the warm below correctly
+  //     finds nothing to do and the pair costs one rewind rather than two. Put the
+  //     other way round, the warm's rewind would leave a live builder and this would
+  //     no-op, which reaches the same state; but the warm refuses page 0 and needs
+  //     spent headroom, so it is the narrower gate and must not be the one that
+  //     decides whether the stream comes back.
+  //   * ITS WINDOW IS THE SHORTEST OF THE GROUP and that is deliberate rather than
+  //     impatient: it is the only one of these jobs that loses nothing when it is
+  //     interrupted, so it is the only one that can afford to try early and often.
+  //
+  // NOT GATED ON `!gRefineOwed`, which the warm below is. The refinement is 1408 ms
+  // and cannot be interrupted; this is interruptible at one block, so making it wait
+  // for the refinement's 5 s window would cost it every chance it has -- `gRefineOwed`
+  // is set by every grayscale paint, so it is true for essentially the whole time the
+  // reader is on a page.
+  if (!gApp->dirty() && rawSamplesPending() == 0 &&
+      static_cast<uint32_t>(millis() - gLastInputMs) >= kRestreamQuietMs &&
+      gApp->top().id() == reader::ScreenId::Reader) {
+    auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
+    // ASKED HERE AS WELL AS INSIDE, so the common case -- a stream that stands, which
+    // is every ordinary page turn -- costs a pointer test and no log line at all.
+    if (!rd->hasLiveStream()) {
+      const uint32_t t = millis();
+      const bool done = rd->restreamAtCurrentPage(
+          [](void*) { return rawSamplesPending() != 0; }, nullptr);
+      // LOGGED THOUGH NOTHING IS VISIBLE, for the reason [warm] is: an idle
+      // optimisation that silently stops working looks exactly like one that is
+      // working. `done` is the whole point of the line -- an abandoned restream is
+      // free but it also did not help, and only the pair of counts says which is
+      // happening. If this reads `abandoned` most of the time, kRestreamQuietMs is
+      // too short for this reader; if it never appears at all, the stream is never
+      // being spent and the count is not deferring.
+      logf("[restream] %s page=%d in %lums\n", done ? "ready" : "abandoned",
+           rd->pageIndex(), (unsigned long)(millis() - t));
+      logFlush();
+    }
+  }
+
   // THE READER'S LAST SLOW INTERACTION, MOVED OFF THE BUTTON.
   //
   // A backward turn that misses the page ring rewinds and decodes from the chapter
@@ -4090,9 +4356,13 @@ void loop() {
   // on the glass and the refinement puts grey on it, and both are things the user
   // can see. This one is invisible by construction, so it goes behind them.
   //
-  // THE SAME WINDOW AS THE REFINEMENT, and for the reason the count's constant sets
-  // out at length: abandoning spends the live PageBuilder, so the cost of firing too
-  // early lands on the next FORWARD turn rather than on the press that interrupted.
+  // THE SAME WINDOW AS THE REFINEMENT, and it KEEPS it where the count no longer
+  // does. Abandoning this one really does spend the live PageBuilder -- it is
+  // reached with a stream standing, which is exactly what the restream above is not
+  // -- so the cost of firing too early lands on the next FORWARD turn. That is the
+  // asymmetry the two constants encode: kRestreamQuietMs is short because an
+  // interrupted restream loses nothing, and this stays long because an interrupted
+  // warm loses the stream.
   if (!gApp->dirty() && rawSamplesPending() == 0 && !gRefineOwed &&
       static_cast<uint32_t>(millis() - gLastInputMs) >= kRefineQuietMs &&
       gApp->top().id() == reader::ScreenId::Reader) {

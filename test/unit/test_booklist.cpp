@@ -410,6 +410,134 @@ TEST_CASE("countLibrary survives a folder it cannot look inside") {
   CHECK(BookList::countLibrary(fs, "/books") == 1);
 }
 
+// --- A folder is walked once per card state, not once per caller -------------
+//
+// THE DEFECT, which is one shape wearing two issue numbers (#21 and #33). A
+// folder's book count comes from listing it, and TWO callers want the same
+// number for the same folder: Home's LIBRARY row at boot (countLibrary, which
+// calls countBooks once per subfolder) and the Library's own rescan (which calls
+// countBooks once per subfolder for the board's `FOLDER - 6 BOOKS` line). Each
+// walk is ~2.9 ms an ENTRY on the user's card and the walk itself cannot be made
+// cheaper -- reader/dir_cache.h has the SdFat reasoning -- so a card with fifty
+// folders paid fifty listings at boot and fifty more on every Library push.
+//
+// The fix is FEWER listings, not faster ones: countBooks consults the memo the
+// filesystem offers. These pin the arithmetic. They are worth reading together
+// with the invalidation cases below them, because a count held past a change to
+// the card is strictly worse than the cost it saves.
+
+TEST_CASE("a folder is listed once for the count, however many callers ask") {
+  FakeFileSystem fs;
+  fs.writeAll("/books/loose.epub", "x");
+  for (const char* dir : {"Classics", "Poetry", "Science Fiction"})
+    for (int i = 0; i < 2; ++i)
+      fs.writeAll(std::string("/books/") + dir + "/b" + std::to_string(i) + ".epub", "x");
+
+  const size_t first = fs.listCalls();
+  CHECK(BookList::countLibrary(fs, "/books") == 7);
+  // /books plus one per folder. This is the walk that cannot be avoided: the
+  // number does not exist until every folder has been looked in once.
+  CHECK(fs.listCalls() - first == 4);
+
+  // The SECOND caller -- the Library's rescan, or Home rebuilding after a Back --
+  // wants the same three folder counts, and asks the card for none of them.
+  const size_t second = fs.listCalls();
+  CHECK(BookList::countLibrary(fs, "/books") == 7);
+  // Exactly one: /books itself. The root's own listing is NOT memoised here,
+  // because it is not a count -- on the device it is served by SdFileSystem's
+  // listing cache, which is a different mechanism with a different ceiling, and
+  // the fake deliberately has no equivalent so this number stays honest about
+  // what THIS change bought.
+  CHECK(fs.listCalls() - second == 1);
+
+  // And the same for the count on its own, which is what LibraryScreen::rescan
+  // calls per folder row.
+  const size_t third = fs.listCalls();
+  CHECK(BookList::countBooks(fs, "/books/Poetry") == 2);
+  CHECK(fs.listCalls() == third);
+}
+
+TEST_CASE("a remembered count does not survive a change to the card") {
+  // THE INVALIDATION, AND IT IS THE FILESYSTEM'S RATHER THAN THE COUNTER'S. Every
+  // way to change what is on the card is a method on the FileSystem, so each of
+  // them drops the memo before it touches anything and there is no mutation path
+  // that can miss it. That is the same argument the listing cache rests on, and
+  // it is strictly stronger than keying on a count of removals.
+  FakeFileSystem fs;
+  fs.writeAll("/books/Classics/a.epub", "x");
+  CHECK(BookList::countBooks(fs, "/books/Classics") == 1);
+
+  // A book arrives. V1 cannot do this from the device, but V2's Wi-Fi transfer
+  // can, and it writes through here -- so it drops the memo by construction
+  // rather than needing a line added beside it.
+  fs.writeAll("/books/Classics/b.epub", "x");
+  CHECK(BookList::countBooks(fs, "/books/Classics") == 2);
+
+  // A book is deleted, which is the mutation V1 really has: the Library's
+  // long-press Delete, one directory down from the row that shows the count.
+  fs.remove("/books/Classics/b.epub");
+  CHECK(BookList::countBooks(fs, "/books/Classics") == 1);
+
+  // And a folder appearing changes its parent's count, not its own.
+  CHECK(BookList::countLibrary(fs, "/books") == 1);
+  fs.writeAll("/books/Poetry/c.epub", "x");
+  CHECK(BookList::countLibrary(fs, "/books") == 2);
+}
+
+TEST_CASE("a count is not answered out of RAM for a card that has gone") {
+  // The probe defect this project has already shipped once: an answer served
+  // from a cache reported a card that was in the user's hand as present. A
+  // derived count is an answer about a card like any other.
+  FakeFileSystem fs;
+  fs.writeAll("/books/Classics/a.epub", "x");
+  CHECK(BookList::countLibrary(fs, "/books") == 1);
+  fs.setMounted(false);
+  CHECK(BookList::countBooks(fs, "/books/Classics") == -1);
+  CHECK(BookList::countLibrary(fs, "/books") == -1);
+  fs.setMounted(true);
+  CHECK(BookList::countLibrary(fs, "/books") == 1);
+}
+
+TEST_CASE("a folder that could not be listed is not remembered as anything") {
+  // -1 is "could not look", not a count, and remembering it would make one
+  // failed read permanent for the rest of the session. The listing is retried
+  // every time until it answers.
+  class SometimesBad : public FakeFileSystem {
+   public:
+    bool broken = true;
+    bool list(std::string_view path, std::vector<DirEntry>& out) override {
+      if (broken && path == "/books/bad") {
+        FakeFileSystem::list(path, out);  // still counts as a walk
+        return false;
+      }
+      return FakeFileSystem::list(path, out);
+    }
+  };
+  SometimesBad fs;
+  fs.writeAll("/books/bad/a.epub", "x");
+  CHECK(BookList::countBooks(fs, "/books/bad") == -1);
+  CHECK(BookList::countBooks(fs, "/books/bad") == -1);
+  fs.broken = false;
+  CHECK(BookList::countBooks(fs, "/books/bad") == 1);
+}
+
+TEST_CASE("the memo holds a bounded number of folders and refuses the rest") {
+  // A refusal is a MISS, which costs exactly what the card costs today. The
+  // ceiling is what keeps a pathological card from turning a 1 KB memo into a
+  // heap the reader's 32 KB inflate window cannot fit beside.
+  FakeFileSystem fs;
+  const size_t over = reader::DirCountCache::kMaxEntries + 8;
+  for (size_t i = 0; i < over; ++i)
+    fs.writeAll("/books/f" + std::to_string(i) + "/a.epub", "x");
+  CHECK(BookList::countLibrary(fs, "/books") == static_cast<int>(over));
+  CHECK(fs.dirCounts()->held() == reader::DirCountCache::kMaxEntries);
+  // Still the right answer on the second pass, because a miss re-reads.
+  CHECK(BookList::countLibrary(fs, "/books") == static_cast<int>(over));
+  // And the folders it DID keep are the same ones, so the subset that hits is
+  // stable rather than thrashing: refusing is not eviction.
+  CHECK(fs.dirCounts()->hits() >= reader::DirCountCache::kMaxEntries);
+}
+
 // --- The title is a view, and the override is the Phase 3 seam ---------------
 //
 // BookEntry used to carry a second std::string per book, heap-allocated on every

@@ -249,10 +249,38 @@ move measured end to end on the X3**, against one waveform for either one-pass
 path. No screen declares it today. It is kept, not deprecated, because it is the
 only way to put continuous tone on this glass — Phase 3's question about book
 covers and images — and because the sequence was expensive to get right; the
-comments in `paintGray()` were each earned by breaking the panel. **Windowed
-grayscale is not the escape hatch**: rotation is CCW, so a portrait row band
-becomes a full-height landscape column band and every gate line is driven
-anyway.
+comments in `paintGray()` were each earned by breaking the panel.
+
+**WINDOWED GRAYSCALE IS NOT THE ESCAPE HATCH, AND IT IS NOT THE ESCAPE HATCH FOR
+THE READER EITHER** — re-asked for page turns as #17 and closed again on stronger
+grounds than the first time (`docs/notes/strip-grayscale-verdict.md` has the
+working). **The SDK's strip API windows the RAM WRITE ONLY**: `displayGray` opens
+with `grayWindowIn()`, whose own comment says it "resets PTL to full after any
+per-strip `writeGrayscalePlaneStrip` windows" (`Uc8279Driver.cpp:300`), and
+`grayWindowIn` writes a hardcoded full-panel PTL (`:70`). **So no strip path can
+buy waveform time**, and the waveform is 889 ms of the refinement's 1408. It also
+reaches only **2 of the 6** full-plane writes `paintGray` issues — `GrayPlane` is
+`Lsb`/`Msb` (`PanelDriver.h:132`), and the base's and cleanup's DTM1/DTM2 pairs go
+through `sendPlaneFlipped`, which has no windowed form. Ceiling **3.4 ms of
+1408**, in a pass that runs 5 s after the user stopped pressing.
+
+**The geometry argument that used to stand here was about the wrong API, and it
+does not rescue the reader either.** `byteIndex` maps `physY = width_ - 1 - x`
+(`framebuffer.cpp:110`), so the gate axis the strip API windows **is the canvas's
+x axis** — a strip is a vertical slice of the portrait page. That is a real
+difference from chrome, where a focus move is a row band lying on the source axis
+the API cannot window at all. It differs in the wrong direction: a page turn
+changes the full height of a **492px text column on a 528px canvas**, 93.2% of the
+gates, so there is nothing to exclude. The "every gate line is driven anyway"
+half is still true and now has a proper home — it is why windowing
+`preconditionGrayscale`, the one call that really does window a refresh, is also
+worth at most 25 ms.
+
+**`strip=1` on the boot line means the driver has a windowed plane write, not a
+windowed refresh**, and reading it as the latter is what kept this question open.
+The SDK's own `docs/xteink-x3-uc8279-support.md:51` says `supportsStripGrayscale()`
+is false here, which is stale — `Uc8279Driver.h:58` returns true. Neither line is
+the authority; the driver body is.
 
 **Rules, fills and dither** have coverage 0 or 3, so they are identical in every
 pass — `Bw`, `BwDithered` and all three grayscale planes. That is what makes a
@@ -576,6 +604,43 @@ file — so **~1.1 s**, paid on the critical path in two places:
   only mutation of `/books`, and every delete goes through `remove`. **V2's Wi-Fi
   transfer is the change that breaks that argument** and it needs a one-line
   invalidation beside whatever writes the file.
+- **AND THE "ONE PER FOLDER" HALF OF IT IS ITS OWN DEFECT, WHICH THE CACHED INTEGER
+  DOES NOT TOUCH.** `countLibrary` calls `BookList::countBooks` per subfolder, and
+  so does `LibraryScreen::rescan()` — for the board's `FOLDER · 6 BOOKS` line — so
+  a card with fifty folders paid fifty listings at boot and fifty more on **every**
+  Library push. Invisible on a flat card and unbounded on a foldered one; the
+  listing cache below does not help, because a six-book folder is under its minimum
+  entry count and it has two slots against fifty directories. **FIXED by memoising
+  the COUNT, not the listing** (`reader/dir_counts.h`, `DirCountCache`): the rows of
+  a subfolder are never wanted, only how many are books, so fifty folders cost
+  ~1.5 KB where fifty listings would not fit the 20 KB ceiling. A folder is now
+  walked once per card STATE rather than once per caller — the second caller and
+  every Library push after it reach the card for nothing.
+  - **It hangs off the `FileSystem`, for the same reason the listing cache does**,
+    and that is what made it reachable at all: `countLibrary` and `rescan()` share
+    no state except the `FileSystem&` they were both handed, so a memo anywhere else
+    would have needed a setter plumbed through the factory — a caller list, and this
+    file's rule is that a caller list is a function not yet written.
+    `FileSystem::dirCounts()` defaults to **null**, which means "I keep nothing" and
+    is exactly today's behaviour, so `HostFileSystem` and every test wrapper are
+    untouched and the simulator memoises nothing. **The 27-clause contract did not
+    widen** — no new behaviour clause, so `test_filesystem.cpp` and
+    `sd_selftest.cpp` are unchanged.
+  - **`SdFileSystem::forgetCardFacts()` is the invalidation, and it is one function
+    on purpose.** `listings_.clear()` already had five call sites; a second thing to
+    drop would have made it five chances to half invalidate. Every method that
+    CHANGES the card calls it, above its own refusals.
+  - **`openRead` deliberately does NOT call it**, and the distinction is worth
+    keeping: dropping the listing cache there is **eviction** (10–20 KB against the
+    45,840-byte floor a book open measures), not invalidation — opening a file
+    changes nothing — and that argument does not reach ~1.5 KB. So Home → open a
+    book → Back → Library costs no folder listings at all.
+  - **The fake memoises too**, so the desktop suite runs the path the device runs.
+    A staleness bug is a failing test rather than a device report — which is the
+    whole reason the memo sits on an object `core/` can reach.
+  - **A hit is invisible**, because a folder answered from RAM produces no
+    `[fs] list` line: `[library] … folders held=N hit=N miss=N` is what tells a memo
+    that is working from one that has quietly stopped being called.
 - **The Library's own `rescan()`**, on every push — the Library is destroyed by the
   pop that leaves it, so Home → Library → Back → Library lists twice. **FIXED by
   holding the listing, because the walk itself cannot be made cheaper** — and that
@@ -619,7 +684,10 @@ and drops this cache by construction, with no line to remember to add.
 - **20 KB ceiling, and never resident at the 42–46 KB floor**, because `openRead()`
   drops everything — and `openRead` *is* the EPUB path (`readAll` serves the small
   JSON), so nothing but opening a book reaches it. It adds to the no-book-open peak,
-  where there is ~133 KB free.
+  where there is ~133 KB free. **The folder-count memo does NOT go with it**: that
+  clear is eviction rather than invalidation, and 1.5 KB does not need evicting —
+  see `forgetCardFacts()`, which is the invalidation and which `openRead` does not
+  call.
 - **ONE BEHAVIOUR CHANGED: a cache hit never touches the bus**, so `list()` stops
   being a place a dead card is noticed. Affordable because `pollCardPresence()` was
   always the detector — operation feedback never fires in V1, which this file
@@ -718,8 +786,11 @@ it directly: median 549 ms, max 937 ms, the difference being entirely `wait`.
    quoted for two phases, and 203 entries is **~600 ms** on every Library push. Not
    the 1.1 s estimated elsewhere here: that assumed 406 entries because macOS writes
    a `._name` beside every file, and **this card has none**. Both are fixed now —
-   Home's count by `libraryCountForHome`, the listing itself by holding it; see
-   **Storage**, which also names why the walk cannot be made faster.
+   Home's count by `libraryCountForHome`, the listing itself by holding it, and the
+   one-listing-per-FOLDER underneath both by `DirCountCache`; see **Storage**, which
+   also names why the walk cannot be made faster. **Note this run's card is FLAT**,
+   so it measures none of the folder cost: the defect the memo fixes is invisible on
+   exactly the card every device measurement in this file was taken on.
 
 ### Which primitive spent the render
 
@@ -772,10 +843,47 @@ Two things it inherits from the veil and one it does not:
   cases. `test_framebuffer.cpp` keeps the per-pixel form as its reference and
   asserts byte-identity across 37 rectangles × both rotations × both colours, and
   each of its cases was proved by MUTATION rather than by passing.
-- **`ditherRect` is now the last per-pixel area primitive.** It cannot take this
-  structure directly — its mask varies per row by tile phase, as the veil's does —
-  but the veil's per-phase byte shape would fit it. Home's cover placeholder is
-  its big caller, at 15–22 µs desktop, so it is small and known rather than next.
+- **`ditherRect` WAS the last per-pixel area primitive, and it is byte-wise now
+  too — so the family is closed.** It was expected to need the veil's shape,
+  because its mask varies per row by tile phase; it needed the FILL's, and the
+  difference is one modulus. A byte is eight columns and the tint's tile is
+  **four** wide, so `8 % 4 == 0` and every byte of a row carries the identical
+  mask — the run hoists out exactly as a fill's does, and only a one-byte table
+  lookup varies per row. The veil's tile is **three** wide and `8 % 3 == 2`, which
+  is the whole reason its mask has to advance per byte. *Which* primitive a new
+  one resembles is decided by that modulus, not by whether it has a phase.
+  - **THE SIZE OF IT WAS ESTIMATED FROM THE WRONG CALLER.** This entry named
+    Home's cover placeholder, at 15–22 µs desktop — which is right (16–17 µs
+    measured) and is not the big one. `renderSleep` tints the **whole panel**
+    (`.dither-field`), 418,176 pixels, and measured **329–338 µs of Sleep's
+    362.8 µs render — 91%**. Same mistake as the veil, whose cost was also assumed
+    small until it was measured: a primitive's bill is set by its widest caller,
+    and a full-frame call does not look different from a thumbnail at the call
+    site.
+  - **IT VECTORISES, WHICH IS WHY IT BEAT THE VEIL BY AN ORDER OF MAGNITUDE.** The
+    veil managed 13.6×; this is ~14× on the whole Sleep render and **well over
+    100× on the primitive**. The middle of a run is `row[b] |= tile` with `tile`
+    constant, so clang emits `orr.16b`/`and.16b` over `q` registers — 16 bytes a
+    go — where the veil's per-byte phase advance and a per-pixel loop can emit
+    nothing of the kind. Release/-O3, `--bench 200`, three runs each: `sleep`
+    362.8 → **25.9**, `sleep_idle` 343.5 → **8.1**, `home` 59.9 → **43.6**,
+    `library` 91.5 → **73.2**, `book_details` 54.0 → **35.4**.
+  - **THE TILE'S RANKS ARE NOT TRANSPOSE-SYMMETRIC BUT EVERY LEVEL'S SET IS**, and
+    that distinction is what lets the two rotations share one mask table the way
+    the veil's outright symmetry lets it swap axes. `kClustered[0][1]` is 6 where
+    `kClustered[1][0]` is 4, so the matrix is asymmetric; but a threshold only ever
+    asks "is this cell below the level", and each of those four sets IS its own
+    transpose. It is a `static_assert` in `dither.cpp`, not a comment, because a
+    change to `kClustered` that preserved density and broke it would draw the tint
+    transposed **under rotation only** — right on every golden, wrong on glass.
+  - `test_dither.cpp` keeps the per-pixel form as its reference across 30
+    rectangles × both rotations × all four levels × both inks, and every case was
+    proved by MUTATION: forcing the unrotated branch for both rotations fails 275
+    assertions, dropping the rotation's mirror term 143, keying the rotated branch
+    on the wrong axis 153, an off-by-one row phase 320, and each of the four
+    edge-mask failures 30–370. **The two rotation mutations are the ones nothing
+    else can catch** — all 40 simulator PNGs are byte-identical across the change,
+    and every one of them is `Rotation::None`.
 
 **A READER PAGE WAS 99% GLYPH BLIT** — 213 ms of a 215 ms render, the same
 per-pixel shape in `drawRunF26`, and the biggest single render cost in the
@@ -1438,7 +1546,7 @@ case to look at if one ever appears.
   against `ditherRect`'s 1.12 ms and a full-frame `clear`'s 0.001 ms, so ~150 ms
   of every overlay repaint at this project's ~65× desktop-to-device ratio. It now
   ORs eight columns at a time into the physical store — 0.17 ms, 13.6× — which
-  makes it **the one drawing routine in `core/` that knows `Rotation` exists**:
+  made it **the FIRST drawing routine in `core/` that knows `Rotation` exists**:
   under CCW a logical row is a physical *column*, so it walks logical **columns**
   instead, and the tile is symmetric under transposition, which is what lets the
   two cases just swap axes. A byte-wise path that assumed a logical row is a
@@ -1447,6 +1555,21 @@ case to look at if one ever appears.
   and asserts byte-identity at both geometries, under both rotations, and for runs
   that start and end mid-byte — the panel widths are multiples of 8, so nothing on
   the device exercises the edge masks.
+  - **THERE ARE FOUR OF THEM NOW, and this line said "the one" for three
+    conversions after it stopped being true.** `Framebuffer::fillRect`, the glyph
+    blit in `text.cpp` and `ditherRect` each took the same structure for the same
+    reason, and each carried its own paragraph calling itself the first, second or
+    only one. They share one hazard, and it is worth stating once: **under CCW the
+    outer loop is the logical x, and getting it wrong is invisible to the whole
+    desktop** — the simulator, every golden and every comparison sheet are
+    `Rotation::None`. Only a byte-identity test run under both rotations, and
+    proved by mutation, stands between that mistake and the panel.
+  - `PhysRun`/`physRunFor` — clip a run to a first byte, a last byte and two edge
+    masks — is `reader/physrun.h`, shared by `fillRect` and `ditherRect`. It was
+    written twice before it was a header, which is this file's own second-copy
+    rule arriving one copy late again. `veilRect` still computes its own inline,
+    because its masks are interleaved with the per-byte phase advance the other
+    two do not have.
 - **`ScrollWindow` owns list movement** — a `Focus` (see Storage) plus
   first-visible, scrolling by a row rather than a page, and it CLAMPS, which is
   what lets a held button's 40-row step land on the last row instead of past it. `Theme::libraryVisibleRows` derives how many rows fit
@@ -1830,9 +1953,46 @@ the page on glass byte-identical — invisible to everything but the builder.
   `chapter_.next()` and `pb.add()` cannot be stopped half way.
 - **The one thing it does not restore is the live `PageBuilder`**, because the walk
   rewinds the `ChapterReader` the builder reads from and there is no second stream to
-  rebuild it with (another 32 KB window against a 42 KB floor). So an abandon costs
-  the NEXT FORWARD turn a full `seekTo` — which is why `kCountQuietMs` stays long;
-  see the constant, which carries the whole argument.
+  rebuild it with (another 32 KB window against a 42 KB floor). So the next FORWARD
+  turn pays a full `seekTo` — **and this is NOT only the abandoned count's doing,
+  which is what the argument for the long window got wrong.** `completeIndex` ends in
+  `seekTo(at_)`; `at_` is by definition the page the ring is most certain to hold, so
+  the restore leg takes a cache hit — and a hit leaves `pb_` null deliberately,
+  because nothing was decoded. **A count that COMPLETES spends the stream too**, so
+  every deferred chapter cost one forward turn a rewind whatever the window was. The
+  long window was buying nothing. (Also off by one press: the queue drains at the top
+  of `loop()`, so the press that interrupted the count IS the next thing dispatched.)
+- **`ReaderScreen::restreamAtCurrentPage` PUTS IT BACK, and abandoning THAT is free.**
+  It is the same walk `warmPageRing` makes — one private `rewalkToCurrentPage` with
+  two gates, not two copies — and it runs **only when `pb_` is already null**, so it
+  has no live builder to spend: an interrupted restream leaves exactly the state it
+  found. That makes the trade one-sided rather than balanced — it finishes and the
+  next forward turn is free, or it is cut and that turn pays what it pays today — and
+  **that, not the walk being cheap, is what lets it have a short window** where
+  `completeIndex` and `warmPageRing` cannot. `hasLiveStream()` is the gate the shell
+  asks first, so an ordinary page turn costs a pointer test and no log line.
+  `[restream] ready|abandoned page=N` is what tells a working idle job from a silent
+  one.
+- **So `kCountQuietMs` IS ITS OWN NUMBER AGAIN, at 2000 ms**, having been
+  `kRefineQuietMs` while the two shared a cost. The derivation is in the constant:
+  the floor is the **1360 ms** longest pause measured while still turning pages, the
+  margin is 1.47× rather than the refinement's ~3.5× because the cost of being wrong
+  is now one rewind on one press at most once per chapter rather than 1408 ms of
+  uninterruptible dead buttons, and the prize is the total landing on glass at ~3.0 s
+  instead of ~6.0 s. **It cannot re-open the percentage-going-backwards bug**, which
+  is the other thing this constant has to be checked against: `progressPercent` is
+  made of BYTES now and reads `page`/`pageTotal` only where there is no inflater to
+  ask, so for a real deflated chapter the count's timing does not enter it —
+  `test_reader_restream.cpp` asserts the percentage across the moment the count lands
+  and it does not move. On the byte-less fallback path, shortening moves the same
+  lever in the direction that made it better.
+- **The invisibility property is asserted over a CARD-BACKED book, and it had to be.**
+  `ChapterReader::bytesRead()` is `inflated_ ? produced() : 0`, so the in-memory
+  fixture reports **0 forever** and `CHECK(chapterBytesRead() == was)` over it is
+  `0 == 0` — it passed with a mutant that zeroed the field, which is how the hole was
+  found. `test_reader_restream.cpp` builds a real EPUB in memory for that one
+  assertion; the trick that makes it cheap is that **DEFLATE has a stored-block mode**,
+  so a valid method-8 entry needs a framer and no compressor.
 - **There are TWO count sites**, the deferred one in `loop()` and one inside
   `refineNow()`. Fixing one and not the other would have brought the freeze back on
   whichever path the reader happened to take.
@@ -1925,8 +2085,14 @@ larger:
 
 **WHAT DID NOT IMPROVE: the draw.** A page turn's `render` stayed at 125–165 ms on
 the device, unchanged by the advance cache — the coverage blit dominates it and
-`kerning`'s cmap searches were noise beside it. If a page turn has to get faster than
-~570 ms, the blit is the target and the metrics are not.
+`kerning`'s cmap searches were noise beside it. ~~If a page turn has to get faster than
+~570 ms, the blit is the target and the metrics are not.~~ **Both halves of that
+sentence are now spent, in opposite directions.** The blit was the target, it was taken
+(byte-wise now, a page render 215 → ~25–41 ms), and a page turn is ~92% panel — there
+is no page-turn work left worth doing. And "the metrics are not" was right about the
+DRAW and wrong about everything else: `kerning`'s *kern-table* bisection, which this
+sentence never separated from its cmap searches, was **73% of a pagination walk**. See
+**The glyph cache**, which now carries the measurement and the fix.
 
 **The neutrality of counting mode is asserted, not assumed**: a probe indexed all 92
 chapters both ways and got 7,968 pages each, 0 chapters differing. An index that
@@ -2134,16 +2300,59 @@ feature: a card can be readable and refuse writes (a physical write-protect tab)
 failed save would throw the reader out of a book they can still read. The shell logs
 it and carries on.
 
-**THREE SAVE EDGES, NOT EVERY PAGE TURN**: leaving the book with Back, crossing a
-chapter, and sleeping. There were FOUR: the reader menu's `Close book` popped the Reader
+**THREE EDGES PLUS A QUIET WINDOW**: leaving the book with Back, crossing a
+chapter, and sleeping — each fired unconditionally, because each is a moment the reader
+would notice losing. There were FOUR: the reader menu's `Close book` popped the Reader
 from underneath an overlay, which the `leaving` save — fired on Back with the Reader ON
 TOP — could not see, so it carried its own `closing` edge. **That row was cut
 (2026-08-24) and its edge with it**: Back from the page is the one way out of a book
-again. A turn is ~570 ms of panel and a card write on each one would be felt; a
-chapter is also the most a power cut can cost. **Leaving is saved BEFORE the
+again. **Leaving is saved BEFORE the
 dispatch** — Back pops the Reader and once popped there is no screen left to ask where
 the reader was. Back is the only way out (`Gesture::Back` → `Action::pop()`), so this
 is one save on the way out rather than a save per event.
+
+**IT WAS THREE EDGES ONLY, AND THAT COST A CHAPTER OF READING TO A FLAT BATTERY.** The
+reason recorded here was "a turn is ~570 ms of panel and a card write on each one would
+be felt", which was right about the cost and wrong about where to put the work: it
+bounded a power cut's damage at one chapter, which on a real novel is an hour. The write
+is not made cheaper — it is made to happen when the loop is already idle, which is the
+answer the page count, the refinement, the ring warm and the card log all reached
+before it. `kSaveQuietMs` is **2000 ms**, sized from the device's own twelve-turn
+measurement (median 72 ms between turns, longest 898 and 1360) so that **steady page
+turning never pays for it at all** and an ordinary reader, who spends ~23 s on a page,
+saves about two seconds after every turn.
+
+**IT IS NOT HIDDEN UNDER THE WAVEFORM, and that idea does not work here.** The
+`triggerDisplay`/`completeDisplay` seam really does leave ~389 ms of idle CPU, and
+`EpdBus` really does balance CS per operation — so the bus is electrically free in the
+gap, which is **not** what CLAUDE.md used to say ("the driver keeps the display's CS
+asserted across them" is true of the BUSY waits inside a call, not of this seam). It is
+still forbidden: the SDK states the contract in three places, `PanelDriver.h`'s "the
+caller does non-SPI CPU work in the gap and issues no other bus op until
+`displayFinish()`" being the sharpest, and `Uc8279Driver::displayStart` leaves a
+`PARTIAL_IN` window open for `displayFinish` to close, so the controller is mid-sequence
+throughout. **The quiet window costs the reader the same nothing and breaks no
+contract**, so there was never anything to buy by taking the risk.
+
+**`ProgressSaveGate` (`core/include/reader/progress_save_gate.h`) IS WHAT MAKES THE
+FOURTH CALLER SAFE**, and it is in `core/` because both of its jobs are exactly the kind
+`shell/` has no harness to check:
+
+- **Has the reader moved.** The quiet window is reached on every loop iteration once
+  the buttons go quiet, and `savePosition` reaches its `Unchanged` answer by **reading
+  both sidecars back off the card first** (`writeIfChanged`) — so an ungated save would
+  be two file reads per iteration, forever, on the panel's own SPI bus. Three int
+  comparisons replace all of it, and the card is never touched.
+- **Has the card earned another attempt.** This is the hazard the feature turns on. A
+  card can be readable and refuse writes, and `writeAll` calls `noteCardGone()` on a
+  write that fails after opening, which `pollCardPresence` turns into an App rooted at
+  `SdMissingScreen` — so a failing save can throw the reader out of a book they can
+  still read. Saving ~100× more often would make that ~100× more likely. The gate backs
+  off 30 s after a failure and **gives up for the session after three**, at which point
+  the behaviour is exactly the three edges that shipped. `forget()` clears the stored
+  point on a book change but deliberately **not** the failure count: giving up is a fact
+  about the card, not the book, and re-arming per book would hand a read-only card three
+  fresh attempts every time one is opened.
 
 **RESTORING COSTS A WALK TO THE READER'S PAGE, NOT A COUNT OF THE CHAPTER.**
 `ReaderScreen::openAtCursor` walks page boundaries to the page holding the cursor and
@@ -2505,7 +2714,20 @@ is the property the other three tests rest on and it is asserted first.
   default of 3 is the floor, so a heap under pressure keeps the shipped behaviour.
 - **Abandoning costs the next FORWARD turn**, because the warm spends the live
   builder and cannot rebuild it -- the identical trade `completeIndex` makes, and why
-  both wait for the refinement's window rather than a short one.
+  **this one still waits for the refinement's window** where the count no longer does.
+  The asymmetry is the whole reason there are now three constants and not one: a warm
+  is reached with a stream STANDING, so an interrupted warm loses it; a restream is
+  reached only with `pb_` already null, so an interrupted restream loses nothing.
+  `kRestreamQuietMs` is 1200 ms for exactly that reason and `kRefineQuietMs` stays
+  5000.
+- **`restreamAtCurrentPage` IS THIS WALK WITH A DIFFERENT GATE**, sharing the private
+  `rewalkToCurrentPage` rather than copying it -- the second copy is the extraction
+  point, and a builder installed one page off is a reader that skips or repeats a
+  page, which two copies would each have to be tested for separately. The shell runs
+  the restream FIRST: a landed restream leaves the headroom a warm would have left,
+  so the pair costs one rewind rather than two and the warm below correctly finds
+  nothing to do. The gates differ in one more place -- a warm refuses page 0 (nothing
+  behind it to cache) and a restream accepts it (the cheapest walk there is).
 - **It is LOGGED although nothing is visible**, precisely because nothing is: an idle
   optimisation that silently stops working looks exactly like one that is working.
   `[warm] ready|abandoned depth=N headroom A->B` is what tells them apart.
@@ -2655,13 +2877,80 @@ so a page that introduces a capital the last one did not advances the write poin
 and on wrap it overwrites whatever is oldest, `e` included. Printable ASCII plus the
 32 accents and marks every `fontc.py` subset carries, on the shipped face:
 
-| ppem | 29 | 32 | 36 | 41 | 48 |
-|---|---|---|---|---|---|
-| bytes | 10,378 | **12,292** | 15,359 | 19,284 | 25,854 |
+| ppem | 16 | 24 | 29 | 32 | 36 | 41 | 45 | 48 | 64 |
+|---|---|---|---|---|---|---|---|---|---|
+| bytes | 3,728 | 7,292 | 10,378 | **12,292** | 15,359 | 19,284 | 23,046 | 25,854 | 44,866 |
 
-Bytes go as ppem², so the old 8 KB held the set at **no** reading size. 16 KB holds
-ppem 32 with 25% spare. **A body-size setting must revisit this** — the budget is a
-constructor argument precisely so the caller can size it from the chosen ppem.
+Bytes go as ppem², so the old 8 KB held the set at **no** reading size, and 16 KB
+holds ppem 32 with 25% spare and **ppem 41 not at all**.
+
+**THE BUDGET IS NOW STATED AT ppem 32 AND DERIVED EVERYWHERE ELSE**, which is what
+unblocks the Typography `Size` row. This section used to end "a body-size setting must
+revisit this — the budget is a constructor argument precisely so the caller can size it
+from the chosen ppem", and that was a deferral rather than a mechanism: the two callers
+are `static` globals in `shell/src/main.cpp` built **before `setup()` runs**, so the
+chosen ppem does not exist at the moment the constructor is called and no caller could
+have obeyed it. `init()` is where the size arrives, so `init()` is where the arena is
+sized — `ScalableFont::cacheBytesFor(ppem, budget)`.
+
+- **The curve is `u(p) = 39p² + 300p`, and the linear term is not noise.** A glyph's
+  row stride rounds up to a whole byte, which is a cost per GLYPH-ROW rather than per
+  pixel, so it scales with the height and not the area. Fitted to the table above it is
+  good to 1.5% everywhere; ppem² alone is 9% out at 48, in the expensive direction.
+- **It scales the caller's budget rather than replacing it**, so the *margin* is the
+  caller's decision, stated once. At ppem 32 `cacheBytesFor` returns exactly 16,384 —
+  the shipped number to the byte, which is what makes this change invisible to every
+  golden and every board measurement.
+- **The ceiling is RELATIVE (150%), because the device has TWO of these faces.** An
+  absolute cap cannot keep the roman's 16 KB and the italic's measured-cold 10 KB in
+  proportion. Roman → 24,576 B, italic → 15,360 B, so the pair's worst case is 39,936
+  against today's 26,624: **+13,312 B, and only at the top of the ramp**. Against the
+  42,152-byte floor (a book opened through the Library) that leaves ~28.8 KB, and
+  against 45,840 (through Home's CONTINUE) ~32.5 KB. Below ppem 32 it gives memory
+  *back* — the pair is 22,303 B at ppem 29.
+- **Thrash-free to ppem ~46**, which is 22pt at 150 DPI. Past it the arena stops
+  holding the union and the cache does what it is built to do: wrap and re-rasterise.
+- **`wraps` is the instrument, not a timing.** At ppem 41 with the old flat 16 KB, a
+  second pass over the alphabet took **2 cache hits out of 127** and re-rasterised the
+  other 125, at ~3,794 µs a glyph on the panel. `test_scalablefont.cpp` asserts the
+  second pass rasterises *nothing*, at every step of the ramp.
+- **A grow that cannot be allocated keeps the arena it had.** The new block is taken
+  before the old one is released, so a failed `new` is slower and never dead — and the
+  only thing that re-inits at a new size is a Settings screen with no book open, where
+  the heap is ~133 KB rather than the reading floor.
+
+**AND THE PAIR KERN CACHE IS THE OTHER HALF, WHICH TURNED OUT TO BE THE BIGGER ONE.**
+`stbtt_GetGlyphKernAdvance` bisects the face's 6,064-pair legacy `kern` table, and
+`wrapProseLead` grows every line greedily and re-measures each candidate — so the same
+pairs are bisected over and over. Measured on a 56-page pagination walk (desktop, -O3,
+best of 20, three runs):
+
+| | ms | µs/page |
+|---|--:|--:|
+| before | 31.7–32.0 | 566–571 |
+| **512-slot pair cache** | **13.8–14.0** | **247–249** |
+| `kerning()` removed entirely (the ceiling) | 8.6–8.7 | 153–156 |
+
+So the bisection was **73% of a pagination walk** and the cache recovers **77%** of
+what removing kerning altogether would. 512 slots is the knee of a sweep — 128:18.0,
+256:14.5, 512:13.5, 1024:13.7 ms — and 1024 is *worse*, because a chapter's pair
+alphabet is a few hundred, not a few thousand. 1,536 B a face.
+
+- **It caches its ZEROES, and that is most of the value.** Only **6.5%** of Latin-1
+  pairs kern at all once scaled and rounded to whole pixels, and real prose kerns
+  **9.7%** of its adjacent pairs — so ~90% of the bisections were finding nothing and
+  being repeated.
+- **A kern is in PIXELS, so `init()` drops it**, exactly as it drops the advance cache.
+  A cached kern outliving its ppem is text that is uniformly, subtly mis-spaced with no
+  glyph wrong — invisible to every golden.
+- **IT DOES NOTHING FOR THE RENDER**, measured: `reader_sim reader --bench 200` is
+  118–128 µs/pass either way. `drawText` walks a string once, so there is nothing to
+  amortise. This is a layout win and it should not be quoted as a page-turn win.
+
+**AND THE FIRST RUN OF A FRESHLY BUILT BINARY IS STILL THE SLOWEST BY A WIDE MARGIN** —
+the render bench above read 209.6 µs on its first invocation and 118.7 on its third.
+This file already records that trap; it reappeared inside the measurement taken to
+check the trap had not been fallen into.
 
 ### The stack, which is the budget nothing was watching
 
@@ -3070,11 +3359,29 @@ passed — `shell/` has no harness, so nothing on the desktop touches that loop.
      the full grayscale sequence per turn. Dithered-first already took that win: our
      turn is ~570 ms, ~478 of it waveform. A perfect render overlap saves the ~92 ms
      render pass and no more -- 16% of a turn, against physics for the rest.
-  **WHAT IS AVAILABLE** and needs no RAM: `displayStart`/`displayFinish` deferral, which
-  both our drivers support. The loop blocks ~520 ms per turn doing nothing, and the
-  position save is currently restricted to THREE edges only because "a card write on
-  each one would be felt". Hidden under the waveform it could run every turn -- a
-  durability change rather than a speed one, and the honest version of this task.
+  **AND THE ONE THING THAT LOOKED AVAILABLE IS NOT** (investigated 2026-08-28). This
+  bullet used to propose hiding the position save under the waveform: "`displayStart`/
+  `displayFinish` deferral, which both our drivers support. The loop blocks ~520 ms per
+  turn doing nothing... Hidden under the waveform it could run every turn." **The
+  deferral is real and the card write is not allowed in it.** The SD card is on the
+  DISPLAY'S bus, and the SDK states the contract in three independent places --
+  `PanelDriver.h:70` "the caller does non-SPI CPU work in the gap and issues no other
+  bus op until `displayFinish()`", plus `FreeInkDisplay.h:187` and `Uc8253X3Driver.h:57`.
+  `Uc8279Driver::displayStart` also leaves a `PARTIAL_IN` window open for
+  `displayFinish` to close, and that function's own comment says the DTM1 sync "MUST
+  happen while still inside" it.
+  **One correction that came out of reading the bus rather than the summary:** every
+  `EpdBus` operation is CS-balanced (`beginTransaction` / CS LOW / transfer / CS HIGH /
+  `endTransaction`), and `beginTxn()` even drives the co-resident device's CS high --
+  so the bus is electrically FREE at this seam. CLAUDE.md's reason for `renderTop()`
+  holding `SpiBusGuard` across the whole paint ("the driver keeps the display's CS
+  asserted across them") describes the BUSY waits *inside* a driver call, not the gap
+  between two. The guard is still right; the stated mechanism was not.
+  **It was moot anyway.** The save was moved into `loop()`'s quiet window instead, which
+  costs the reader the same nothing, breaks no contract, and reuses the pattern the page
+  count, the refinement, the ring warm and the card log all already use. See **Reading
+  progress lives on the card**. What is still genuinely available in the gap is
+  **non-SPI CPU work only** -- and there is little of it left worth moving.
 - **EVERY BUILT SCREEN HAS A GOLDEN NOW** (2026-08-24). Seven of the seventeen did not:
   `reader_menu`, `contents`, `reader_chapter_open`, `reader_list`, `settings`,
   `home_empty`, `library_scrolled` -- checked by unit tests and by `make compare` and by

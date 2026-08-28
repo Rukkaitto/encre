@@ -530,22 +530,49 @@ int ReaderScreen::backwardHeadroom() const {
 
 bool ReaderScreen::warmPageRing(StopFn stop, void* ctx) {
   if (body_ == nullptr || !chapter_.ok()) return false;
+  // PAGE 0 IS REFUSED HERE and accepted by restreamAtCurrentPage, which is the one
+  // place the two gates genuinely differ: there is nothing behind the first page for
+  // a warm to cache, but re-establishing a stream at it is both valid and the
+  // cheapest walk there is.
   if (at_ < 1 || at_ >= static_cast<int>(starts_.size())) return false;
   // NOTHING TO DO while there is still headroom to spend. Without this the warm
   // would re-run every quiet window, paying a full rewind to cache pages it already
   // holds -- battery and panel-bus traffic for no change at all.
   if (backwardHeadroom() >= pageCacheDepth_ - 1) return false;
 
-  const int p = at_;
-  const int from = p >= pageCacheDepth_ ? p - (pageCacheDepth_ - 1) : 0;
   // Already as far back as the chapter goes, and already held.
-  if (from == 0 && backwardHeadroom() >= p) return false;
+  if (at_ < pageCacheDepth_ && backwardHeadroom() >= at_) return false;
+
+  return rewalkToCurrentPage(stop, ctx);
+}
+
+bool ReaderScreen::restreamAtCurrentPage(StopFn stop, void* ctx) {
+  if (body_ == nullptr || !chapter_.ok()) return false;
+  // A LIVE BUILDER BEATS RE-ESTABLISHING ONE, ~20 ms against ~376, so this must
+  // never throw one away to make a "fresh" one. It is also what makes abandoning
+  // free: with nothing live there is nothing an interrupted walk can lose.
+  if (pb_ != nullptr) return false;
+  // The range is rewalkToCurrentPage's own precondition and is checked there. Stating
+  // it twice is how a guard goes stale -- this file records a case where a
+  // replacement left the old condition standing two lines above the new one.
+  return rewalkToCurrentPage(stop, ctx);
+}
+
+bool ReaderScreen::rewalkToCurrentPage(StopFn stop, void* ctx) {
+  const int p = at_;
+  if (p < 0 || p >= static_cast<int>(starts_.size())) return false;
+  const int from = p >= pageCacheDepth_ ? p - (pageCacheDepth_ - 1) : 0;
 
   if (!chapter_.rewind()) return false;
   resetMarkupHints();
   // SPENT BEFORE THE WALK, exactly as completeIndex spends it: the rewind moves the
   // stream the live builder reads from, so a builder left standing would point at a
   // position that no longer exists.
+  //
+  // AND THIS LINE IS WHY THE TWO CALLERS NEED DIFFERENT QUIET WINDOWS. Reached from
+  // warmPageRing it really does spend something, so an abandon costs the next
+  // forward turn. Reached from restreamAtCurrentPage it is a no-op by that caller's
+  // gate -- `pb_` is already null -- so an abandon costs nothing at all.
   pb_.reset();
   std::unique_ptr<PageBuilder> pb(new (std::nothrow) PageBuilder(*body_, metrics_));
   if (pb == nullptr || !pb->viable()) return false;

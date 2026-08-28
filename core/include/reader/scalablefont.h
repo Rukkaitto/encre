@@ -45,13 +45,22 @@ namespace reader {
 // --- The cache is bounded, and eviction is a status not a crash ---------------
 //
 // The device build is `-fno-exceptions`, so a container that cannot allocate
-// calls abort() with no diagnostic and no serial line. The cache therefore
-// takes a byte budget AT CONSTRUCTION, allocates exactly that once, and evicts
-// within it -- it never grows to fit. A full cache degrades to *slower*, never
-// to *dead*.
+// calls abort() with no diagnostic and no serial line. The cache therefore takes a
+// byte budget AT CONSTRUCTION and evicts within it -- it never grows to FIT A PAGE.
+// A full cache degrades to *slower*, never to *dead*.
 //
-// It is a constructor argument rather than a constant so 3C can tune it against
-// measured page-render times instead of a guess made now.
+// IT DOES RE-ALLOCATE ON A SIZE CHANGE, and this paragraph used to say otherwise
+// ("allocates exactly that once", "changing the reading size cannot fragment the
+// heap"). That was true and it was the defect: the working set goes as ppem squared,
+// so one fixed number is right at one reading size and wrong at every other, and
+// design/Settings.dc.html's `Size` row is a control for exactly that number. The
+// budget is now stated AT kBudgetRefPpem and init() re-derives the arena from the
+// ppem it is given -- see cacheBytesFor. A grow that cannot be served keeps the
+// arena it had, which is the same "slower, never dead" contract.
+//
+// It is a constructor argument rather than a constant so a caller can state its own
+// proportion: the shell's italic is told 10 KB rather than 16 because it sets 3% of
+// the text, and that proportion is then carried across the whole size ramp.
 class ScalableFont : public GlyphSource {
  public:
   // The transfer curve on coverage before it is quantised to 0..3, and the same
@@ -128,8 +137,9 @@ class ScalableFont : public GlyphSource {
   // printable ASCII plus the 32 accented and punctuation codepoints fontc.py puts
   // in every subset:
   //
-  //     ppem 29: 10,378 B      ppem 36: 15,359 B      ppem 48: 25,854 B
-  //     ppem 32: 12,292 B      ppem 41: 19,284 B
+  //     ppem 16:  3,728 B      ppem 32: 12,292 B      ppem 45: 23,046 B
+  //     ppem 24:  7,292 B      ppem 36: 15,359 B      ppem 48: 25,854 B
+  //     ppem 29: 10,378 B      ppem 41: 19,284 B      ppem 64: 44,866 B
   //
   // Bytes go as ppem squared, so 8 KB does not hold the set at ANY reading size --
   // not even the 29px it was chosen at. 16 KB holds ppem 32 with 25% spare, which
@@ -138,12 +148,79 @@ class ScalableFont : public GlyphSource {
   // on the pages that thrash, which is the one cost the whole advance()/glyph()
   // split exists to avoid.
   //
-  // A BODY SIZE SETTING MUST REVISIT THIS. design/Settings.dc.html has a `Size`
-  // row; at 41px the set is 19,284 B and this budget thrashes. The table above is
-  // the data for that decision, and the budget is a constructor argument precisely
-  // so the caller can size it from the chosen ppem rather than from this default.
+  // AND THE BUDGET IS STATED AT THIS SIZE, NOT AT EVERY SIZE. It used to be a flat
+  // number, which made it right at ppem 32 and at nothing else -- design/Settings.dc.html's
+  // `Size` row changes exactly the number the table above is indexed by, and at 41px
+  // the set is 19,284 B against a 16 KB arena. See cacheBytesFor: init() scales this
+  // by the ppem it is given, so the caller states its budget once, at the reference
+  // size, and the class carries the caller's chosen MARGIN across the ramp.
   static constexpr size_t kDefaultCacheBytes = 16 * 1024;
 
+  // The reference size a stated budget is stated AT. reader::kBodyPpem is the same
+  // number (design/Reader.dc.html's `font-size: 32px`) and cannot be named here:
+  // layout.h includes nothing from this file's direction and this file must not
+  // acquire a dependency on the layout layer to hold one constant. A static_assert
+  // in scalablefont.cpp ties the two together, so they cannot drift.
+  static constexpr int kBudgetRefPpem = 32;
+
+  // --- How far a stated budget may grow before the heap says no ------------------
+  //
+  // The curve below is unbounded and the heap is not: at ppem 64 a 16 KB budget asks
+  // for 59 KB, against a measured floor of 42,152 free bytes with a book open through
+  // the Library and 45,840 through Home. Under -fno-exceptions a `new` that cannot be
+  // served is abort() with no diagnostic, and it arrives as "opening a book goes back
+  // to Home" -- so the ceiling is not a nicety.
+  //
+  // RELATIVE TO THE STATED BUDGET, not absolute, because the device has TWO of these
+  // faces and only a relative cap keeps their proportion. At 150%:
+  //
+  //     roman   16 KB -> 24,576 B ceiling, which holds the union to ppem ~46
+  //     italic  10 KB -> 15,360 B ceiling, which holds ITS working set to ppem ~40
+  //
+  // so the pair's worst case is 39,936 B against today's 26,624 -- +13,312 B, leaving
+  // ~28.8 KB free at the tight floor, and only if the reader actually picks the top of
+  // the ramp. At the shipped ppem 32 the scale is exactly 1 and nothing moves at all.
+  //
+  // ppem ~46 is 22pt at this project's 150 DPI. Past it the arena stops holding the
+  // union and the cache does what it is built to do: wrap, re-rasterise, stay correct.
+  static constexpr unsigned kMaxCacheScalePercent = 150;
+
+  // What `budgetAtRefPpem` becomes at `ppem`.
+  //
+  // THE UNION GOES AS ppem SQUARED PLUS A TERM LINEAR IN ppem, and the linear one is
+  // not noise: each glyph's row stride rounds up to a whole byte, which is a cost per
+  // GLYPH per ROW rather than per pixel, so it scales with the height and not with the
+  // area. Fitting ppem^2 alone gets ppem 48 wrong by 9%, in the expensive direction.
+  //
+  //     u(p) = 39*p*p + 300*p          (9.75*p^2 + 75*p, x4 to stay integral)
+  //
+  // against the measured table above: 16 -> -1.4%, 29 -> -0.8%, 32 -> exact by
+  // construction, 36 -> +0.2%, 41 -> +0.1%, 48 -> -1.1%. So the RATIO u(p)/u(32) is
+  // good to ~1.5% and the caller's margin at ppem 32 is what is carried, not replaced.
+  //
+  // Integer throughout -- core/ does no floating point it can avoid on a part with no
+  // FPU -- and widened to 64 bits for the multiply, because size_t is 32 bits on the
+  // device and a 1 MB test budget times u(64) is 1.9e11.
+  static constexpr size_t cacheBytesFor(int ppem,
+                                        size_t budgetAtRefPpem = kDefaultCacheBytes) {
+    if (budgetAtRefPpem == 0 || ppem <= 0) return 0;
+    const auto u = [](unsigned long long p) { return 39ull * p * p + 300ull * p; };
+    const unsigned long long want =
+        static_cast<unsigned long long>(budgetAtRefPpem) * u(static_cast<unsigned>(ppem)) /
+        u(kBudgetRefPpem);
+    const unsigned long long cap = maxCacheBytesFor(budgetAtRefPpem);
+    return static_cast<size_t>(want < cap ? want : cap);
+  }
+
+  // The ceiling cacheBytesFor will not exceed. Exposed because a caller sizing its own
+  // budget against free heap needs the worst case, not the current one.
+  static constexpr size_t maxCacheBytesFor(size_t budgetAtRefPpem) {
+    return static_cast<size_t>(static_cast<unsigned long long>(budgetAtRefPpem) *
+                               kMaxCacheScalePercent / 100);
+  }
+
+  // `cacheBudgetBytes` is the arena AT kBudgetRefPpem; init() resizes to
+  // cacheBytesFor(sizePx, cacheBudgetBytes).
   explicit ScalableFont(size_t cacheBudgetBytes = kDefaultCacheBytes);
   ~ScalableFont() override;
   ScalableFont(const ScalableFont&) = delete;

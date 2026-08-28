@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "reader/dir_counts.h"
 #include "reader/filesystem.h"
 
 // A read handle over a COPY of the body.
@@ -72,6 +73,13 @@ class FakeFileSystem : public reader::FileSystem {
 
   size_t fileCount() const { return files_.size(); }
 
+  // HOW MANY TIMES THE CARD WAS WALKED. The device's listing costs ~2.9 ms an
+  // ENTRY and the walk itself cannot be made cheaper (reader/dir_cache.h has the
+  // SdFat reasoning), so the only thing a desktop test can assert about that cost
+  // is the number of walks. Without this, a change that removes a listing and a
+  // change that removes nothing look identical from up here.
+  size_t listCalls() const { return listCalls_; }
+
   // The stored body, or nullptr. Lets a test assert on the bytes written without
   // going back through readAll.
   const std::string* peek(std::string_view path) const {
@@ -83,6 +91,18 @@ class FakeFileSystem : public reader::FileSystem {
 
   bool mounted() const override { return mounted_; }
 
+  // THE FAKE MEMOISES TOO, AND IT HAS TO. The device's SdFileSystem answers this
+  // and the desktop's HostFileSystem does not, so if the fake declined as well,
+  // the only path the shipped firmware takes would be the one path nothing on the
+  // desktop ever exercises -- and shell/ has no harness. Every countBooks test in
+  // the suite therefore runs through the memo, which is what makes a staleness
+  // bug a failing test rather than a device report.
+  //
+  // Null while the card is out, exactly as list() refuses then: a derived fact is
+  // still an answer about a card, and answering one out of RAM for a card that is
+  // in the user's hand is the defect the SD probe already shipped once.
+  reader::DirCountCache* dirCounts() override { return mounted_ ? &dirCounts_ : nullptr; }
+
   bool exists(std::string_view path) override {
     if (!mounted_) return false;
     const std::string p = normalise(path);
@@ -90,6 +110,7 @@ class FakeFileSystem : public reader::FileSystem {
   }
 
   bool list(std::string_view path, std::vector<reader::DirEntry>& out) override {
+    ++listCalls_;
     if (!mounted_) return false;
     const std::string dir = normalise(path);
     if (dirs_.count(dir) == 0) return false;
@@ -127,6 +148,11 @@ class FakeFileSystem : public reader::FileSystem {
   }
 
   bool writeAll(std::string_view path, std::string_view data) override {
+    // Every mutator drops the derived counts, above its own refusals and before
+    // it touches anything -- the rule SdFileSystem's listing cache follows, for
+    // the reason given there: deciding which refusals are "safe" is how an
+    // invalidation ends up with a hole in it.
+    dirCounts_.clear();
     if (!mounted_ || failWrites_) return false;
     const std::string p = normalise(path);
     if (p == "/" || dirs_.count(p) != 0) return false;
@@ -136,11 +162,13 @@ class FakeFileSystem : public reader::FileSystem {
   }
 
   bool mkdirs(std::string_view path) override {
+    dirCounts_.clear();
     if (!mounted_) return false;
     return makeDirs(normalise(path));
   }
 
   bool remove(std::string_view path) override {
+    dirCounts_.clear();
     if (!mounted_) return false;
     const std::string p = normalise(path);
     if (dirs_.count(p) != 0) return false;  // files only
@@ -191,4 +219,6 @@ class FakeFileSystem : public reader::FileSystem {
   std::set<std::string> dirs_{"/"};
   bool mounted_ = true;
   bool failWrites_ = false;
+  size_t listCalls_ = 0;
+  reader::DirCountCache dirCounts_;
 };
