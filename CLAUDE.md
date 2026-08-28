@@ -2135,16 +2135,59 @@ feature: a card can be readable and refuse writes (a physical write-protect tab)
 failed save would throw the reader out of a book they can still read. The shell logs
 it and carries on.
 
-**THREE SAVE EDGES, NOT EVERY PAGE TURN**: leaving the book with Back, crossing a
-chapter, and sleeping. There were FOUR: the reader menu's `Close book` popped the Reader
+**THREE EDGES PLUS A QUIET WINDOW**: leaving the book with Back, crossing a
+chapter, and sleeping — each fired unconditionally, because each is a moment the reader
+would notice losing. There were FOUR: the reader menu's `Close book` popped the Reader
 from underneath an overlay, which the `leaving` save — fired on Back with the Reader ON
 TOP — could not see, so it carried its own `closing` edge. **That row was cut
 (2026-08-24) and its edge with it**: Back from the page is the one way out of a book
-again. A turn is ~570 ms of panel and a card write on each one would be felt; a
-chapter is also the most a power cut can cost. **Leaving is saved BEFORE the
+again. **Leaving is saved BEFORE the
 dispatch** — Back pops the Reader and once popped there is no screen left to ask where
 the reader was. Back is the only way out (`Gesture::Back` → `Action::pop()`), so this
 is one save on the way out rather than a save per event.
+
+**IT WAS THREE EDGES ONLY, AND THAT COST A CHAPTER OF READING TO A FLAT BATTERY.** The
+reason recorded here was "a turn is ~570 ms of panel and a card write on each one would
+be felt", which was right about the cost and wrong about where to put the work: it
+bounded a power cut's damage at one chapter, which on a real novel is an hour. The write
+is not made cheaper — it is made to happen when the loop is already idle, which is the
+answer the page count, the refinement, the ring warm and the card log all reached
+before it. `kSaveQuietMs` is **2000 ms**, sized from the device's own twelve-turn
+measurement (median 72 ms between turns, longest 898 and 1360) so that **steady page
+turning never pays for it at all** and an ordinary reader, who spends ~23 s on a page,
+saves about two seconds after every turn.
+
+**IT IS NOT HIDDEN UNDER THE WAVEFORM, and that idea does not work here.** The
+`triggerDisplay`/`completeDisplay` seam really does leave ~389 ms of idle CPU, and
+`EpdBus` really does balance CS per operation — so the bus is electrically free in the
+gap, which is **not** what CLAUDE.md used to say ("the driver keeps the display's CS
+asserted across them" is true of the BUSY waits inside a call, not of this seam). It is
+still forbidden: the SDK states the contract in three places, `PanelDriver.h`'s "the
+caller does non-SPI CPU work in the gap and issues no other bus op until
+`displayFinish()`" being the sharpest, and `Uc8279Driver::displayStart` leaves a
+`PARTIAL_IN` window open for `displayFinish` to close, so the controller is mid-sequence
+throughout. **The quiet window costs the reader the same nothing and breaks no
+contract**, so there was never anything to buy by taking the risk.
+
+**`ProgressSaveGate` (`core/include/reader/progress_save_gate.h`) IS WHAT MAKES THE
+FOURTH CALLER SAFE**, and it is in `core/` because both of its jobs are exactly the kind
+`shell/` has no harness to check:
+
+- **Has the reader moved.** The quiet window is reached on every loop iteration once
+  the buttons go quiet, and `savePosition` reaches its `Unchanged` answer by **reading
+  both sidecars back off the card first** (`writeIfChanged`) — so an ungated save would
+  be two file reads per iteration, forever, on the panel's own SPI bus. Three int
+  comparisons replace all of it, and the card is never touched.
+- **Has the card earned another attempt.** This is the hazard the feature turns on. A
+  card can be readable and refuse writes, and `writeAll` calls `noteCardGone()` on a
+  write that fails after opening, which `pollCardPresence` turns into an App rooted at
+  `SdMissingScreen` — so a failing save can throw the reader out of a book they can
+  still read. Saving ~100× more often would make that ~100× more likely. The gate backs
+  off 30 s after a failure and **gives up for the session after three**, at which point
+  the behaviour is exactly the three edges that shipped. `forget()` clears the stored
+  point on a book change but deliberately **not** the failure count: giving up is a fact
+  about the card, not the book, and re-arming per book would hand a read-only card three
+  fresh attempts every time one is opened.
 
 **RESTORING COSTS A WALK TO THE READER'S PAGE, NOT A COUNT OF THE CHAPTER.**
 `ReaderScreen::openAtCursor` walks page boundaries to the page holding the cursor and
@@ -3042,11 +3085,29 @@ passed — `shell/` has no harness, so nothing on the desktop touches that loop.
      the full grayscale sequence per turn. Dithered-first already took that win: our
      turn is ~570 ms, ~478 of it waveform. A perfect render overlap saves the ~92 ms
      render pass and no more -- 16% of a turn, against physics for the rest.
-  **WHAT IS AVAILABLE** and needs no RAM: `displayStart`/`displayFinish` deferral, which
-  both our drivers support. The loop blocks ~520 ms per turn doing nothing, and the
-  position save is currently restricted to THREE edges only because "a card write on
-  each one would be felt". Hidden under the waveform it could run every turn -- a
-  durability change rather than a speed one, and the honest version of this task.
+  **AND THE ONE THING THAT LOOKED AVAILABLE IS NOT** (investigated 2026-08-28). This
+  bullet used to propose hiding the position save under the waveform: "`displayStart`/
+  `displayFinish` deferral, which both our drivers support. The loop blocks ~520 ms per
+  turn doing nothing... Hidden under the waveform it could run every turn." **The
+  deferral is real and the card write is not allowed in it.** The SD card is on the
+  DISPLAY'S bus, and the SDK states the contract in three independent places --
+  `PanelDriver.h:70` "the caller does non-SPI CPU work in the gap and issues no other
+  bus op until `displayFinish()`", plus `FreeInkDisplay.h:187` and `Uc8253X3Driver.h:57`.
+  `Uc8279Driver::displayStart` also leaves a `PARTIAL_IN` window open for
+  `displayFinish` to close, and that function's own comment says the DTM1 sync "MUST
+  happen while still inside" it.
+  **One correction that came out of reading the bus rather than the summary:** every
+  `EpdBus` operation is CS-balanced (`beginTransaction` / CS LOW / transfer / CS HIGH /
+  `endTransaction`), and `beginTxn()` even drives the co-resident device's CS high --
+  so the bus is electrically FREE at this seam. CLAUDE.md's reason for `renderTop()`
+  holding `SpiBusGuard` across the whole paint ("the driver keeps the display's CS
+  asserted across them") describes the BUSY waits *inside* a driver call, not the gap
+  between two. The guard is still right; the stated mechanism was not.
+  **It was moot anyway.** The save was moved into `loop()`'s quiet window instead, which
+  costs the reader the same nothing, breaks no contract, and reuses the pattern the page
+  count, the refinement, the ring warm and the card log all already use. See **Reading
+  progress lives on the card**. What is still genuinely available in the gap is
+  **non-SPI CPU work only** -- and there is little of it left worth moving.
 - **EVERY BUILT SCREEN HAS A GOLDEN NOW** (2026-08-24). Seven of the seventeen did not:
   `reader_menu`, `contents`, `reader_chapter_open`, `reader_list`, `settings`,
   `home_empty`, `library_scrolled` -- checked by unit tests and by `make compare` and by
