@@ -2539,6 +2539,35 @@ released the moment its last line is laid, so **nothing needs a block window**. 
 tests had recovered a block boundary by comparing `text.data()` pointers; `LaidLine`
 carries `block` and `lastOfBlock` now, which the page index needs anyway.
 
+**AN ENTITY IT CANNOT DECODE IS TEXT, NOT AN ERROR, AND THAT REVERSED A WRITTEN RULE.**
+`decodeEntity` knew the five XML built-ins and numeric references, and errored on
+everything else — on the stated grounds that a literal `&nbsp;` in a paragraph "reads as
+a rendering bug and is really a parsing one". The first half of that was right and is now
+answered by a **generated 252-name HTML 4 table** (`tools/entities.py` →
+`core/src/entity_table.h`, from Python's own `html.entities`). The second half was
+measured and was false, because **erroring never reported anything**: `document.cpp` stops
+on `Node::Error`, `ChapterReader::next()` then returns false, and that is
+indistinguishable from the chapter ending. `Dark Plagueis` lost **177 of its 183
+chapters** that way — 3,214 bytes of a three-megabyte novel — and read as a book that
+opens and is empty.
+
+- **Every exit that is not a decoded character is now text.** Three ways to fail — the
+  reference never terminates (`Tom & Jerry`), the name is in no table, the numeric form
+  does not parse (`&#zz;`) — and all three emit the bytes the document held. The only
+  remaining `false` is "the output buffer cannot hold them", which both callers make
+  unreachable by reserving `kMaxEntityBytes + 2` where they reserved 4.
+- **A visible wrong beats an invisible one**, which is the call `css.h` already makes for
+  over-matched italics. A stray `&unknown;` on the page is a typographic error a reader
+  can see and report; a discarded chapter is not.
+- **Seven names carry it**: `rsquo` `nbsp` `mdash` `ndash` `ldquo` `rdquo` `lsquo`, every
+  distinct named entity across sixteen real books, 50,245 occurrences. The table is all
+  252 because the set costs 1,416 bytes of names and typing a subset invites a second
+  pass.
+- **Two tests in other files pinned the old rule** and had to change with it —
+  `test_document.cpp`'s only malformed-markup case *was* `&nbsp;`, and `test_xml.cpp`
+  listed `&#xZZ;` among inputs that must error. A rule stated in one place is enforced in
+  three.
+
 **`xml.h` DOES NOT VALIDATE NESTING, ON PURPOSE.** `<p>unclosed` tokenizes without
 complaint. The document builder keeps a stack to know which block it is in, so it
 notices an unclosed tag at `Eof` for free; a second stack in the parser would be a
@@ -3061,6 +3090,12 @@ passed — `shell/` has no harness, so nothing on the desktop touches that loop.
   like a passing test: I patched `rowRuleFor` in components.cpp where it lives in
   theme_quiet.cpp, so "0 failures" meant "nothing was changed", not "the goldens are
   blind". Check the mutation landed before believing what it tells you.
+  **TWO MORE WAYS A MUTATION LIES, both hit in one session:** it can land on a line the
+  input never reaches — breaking the unknown-name path proved nothing about `&nbsp;`,
+  which the table *finds* — and a restore can fail to rebuild, because `cp` and the
+  previous compile inside the same second leave make thinking the object is current, so
+  the fixed source tests as though it were still mutated. `touch` the file, or check
+  `git diff` against the binary's behaviour before believing either result.
 - **A SCRIPTED REPLACE WITH NO COUNT REWROTE A FUNCTION INTO A CALL TO ITSELF**, and
   it reached the device as a stack-protection fault. Rewriting the call sites
   `anchor_.jumped(from, here())` into `anchorJumped(from)` used `s.replace(a, b)`
