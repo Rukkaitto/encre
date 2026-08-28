@@ -3410,6 +3410,27 @@ void setup() {
   // must not depend on the card for the device to behave.
   loadAndApplySettings();
 
+  // AND THE BODY FACE, WHICH loadAndApplySettings CANNOT REACH.
+  //
+  // The face was inited ~230 lines above with the CONSTANT kBodyPpem, because it
+  // has to exist before anything can measure with it and the card had not been
+  // read yet. So a persisted `bodyPpem` was applied to the SETTINGS and not to the
+  // FACE: margins, lead and justify survived a reboot because readerMetrics is
+  // computed below this point, and Size did not -- the page came back at 15 PT
+  // while both screens said 22. That is the "a setting that appears not to have
+  // taken" failure this whole feature is careful about, arriving at boot instead of
+  // at a press.
+  //
+  // Guarded on the face DISAGREEING rather than on the setting being non-default,
+  // so a card that happens to hold the default costs nothing: a re-init flushes
+  // both glyph caches, and the next page would re-rasterise its alphabet at
+  // ~3,794 us a glyph for no reason.
+  //
+  // Here rather than earlier because this is the first point gSettings is real, and
+  // before any book can be opened -- the session restore below is what would
+  // otherwise paginate a chapter with the wrong face.
+  if (gSettings.bodyPpem != gBody.ppem()) applyBodyPpem();
+
   // Write the settings file if the card has none, then point both card-liveness
   // probes at it. After loadAndApplySettings() on purpose: gSettings holds what
   // will actually be in force by now, so a fresh card gets a file that matches
