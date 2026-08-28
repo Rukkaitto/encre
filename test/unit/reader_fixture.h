@@ -21,11 +21,21 @@ namespace readerfix {
 
 // The body face at the board's `font-size: 32px`, with its bytes beside it: a
 // ScalableFont borrows the buffer it was initialised from and never copies it.
+//
+// THE ppem IS A PARAMETER, defaulted to the reading default so every caller is
+// untouched -- AND NO CALLER PASSES ONE TODAY, which is worth stating rather than
+// leaving to be discovered. It was added for a Typography golden at ppem 38, and
+// that golden is at the default now because the BOARD moved to 15 PT; the parameter
+// is kept because the reason for it survives the number. A ScalableFont is pinned
+// to one pixel size by init(), so any screen previewing or rendering at a
+// non-default size needs a face built at it, and a fixture that can only make one
+// size forces a local copy of itself -- which test_theme_typography.cpp's `BodyAt`
+// already is.
 struct Body {
   std::vector<uint8_t> bytes = golden::slurp(std::string(ASSETS_DIR) + "/built/literata_body.ttf");
   reader::ScalableFont face;
-  Body() {
-    REQUIRE(face.init(bytes.data(), bytes.size(), reader::kBodyPpem));
+  explicit Body(int ppem = reader::kBodyPpem) {
+    REQUIRE(face.init(bytes.data(), bytes.size(), ppem));
     REQUIRE(face.ready());
   }
 };
@@ -36,8 +46,8 @@ struct Italic {
   std::vector<uint8_t> bytes =
       golden::slurp(std::string(ASSETS_DIR) + "/built/literata_italic.ttf");
   reader::ScalableFont face;
-  Italic() {
-    REQUIRE(face.init(bytes.data(), bytes.size(), reader::kBodyPpem));
+  explicit Italic(int ppem = reader::kBodyPpem) {
+    REQUIRE(face.init(bytes.data(), bytes.size(), ppem));
     REQUIRE(face.ready());
   }
 };

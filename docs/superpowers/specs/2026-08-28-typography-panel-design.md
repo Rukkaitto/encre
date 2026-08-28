@@ -287,6 +287,17 @@ It applies `kMinJustifyFillPercent` exactly as the reader's page does. Justifyin
 line the page would leave ragged would make the preview tidier than the book it
 previews, which is a subtler wrong than not justifying at all.
 
+**AND BECAUSE THE BOX IS NARROWER THAN THE COLUMN, JUSTIFIED TEXT RIVERS MORE IN
+THE PREVIEW THAN IT WILL ON THE PAGE.** Seen on the blessed golden: 396px of
+preview measure against the X4's 444px reading column, so the same sentence takes
+four words to a line instead of five and the word gaps open visibly. The roadmap
+records rivers at this size and measure as inherent to a narrow panel; the preview
+makes them look worse than the book does.
+
+Nothing to fix — the box is chrome geometry and always will be — but expect the
+question from anyone comparing the preview against the page, and do not chase it as
+a justification bug.
+
 **THE PREVIEW CANNOT PREVIEW THE MARGINS, AND THAT IS WORTH WRITING DOWN BEFORE
 SOMEBODY "FIXES" IT.** The box is CHROME geometry -- the board's 24px page
 margins less its own border and padding, 396px of measure on the X4 -- where the

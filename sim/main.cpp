@@ -439,31 +439,20 @@ int main(int argc, char** argv) {
       return 1;
     }
     if (isTypography) {
-      // THE BOARD'S OWN VALUES, not a fresh device's -- design/Typography.dc.html
-      // states `18 PT`, which is ppem 38. The same call primeForJourney makes for
-      // Settings, and for the same reason: the board draws a CONFIGURED state.
+      // THE DEFAULT SETTINGS, WHICH ARE NOW THE BOARD'S TOO. This branch overrode
+      // bodyPpem to 38 and re-inited the face at it, because the board's Size row
+      // said `18 PT` while its preview was set at `font-size: 32px` -- and the
+      // firmware cannot render both. The BOARD was the thing that disagreed with
+      // itself, and it is the board that changed: at ppem 38 the fixed box holds
+      // three of the specimen's four lines, so the preview cut off mid-sentence at
+      // "seems to be thrown" with ~85px of empty box under it, which is the worst
+      // state the screen can produce and the one this render would have pinned.
       //
-      // BEFORE the push, because the factory hands the screen its starting values at
-      // construction -- a setSettings after it would leave the screen showing the
-      // defaults with the right values sitting in the factory.
-      reader::Settings shown;
-      shown.bodyPpem = 38;
-      factory.setSettings(shown);
-      // THE PREVIEW SHOWS THE SIZE, so the face has to be AT it: a specimen drawn at
-      // 32 under a row reading `18 PT` is a screen disagreeing with itself. The shell
-      // does this in its sink; here it is one call, on the same ScalableFont the
-      // factory already holds a pointer to -- init() re-pins the object in place, so
-      // the pointer stays good and its glyph cache is dropped, which is what
-      // scalablefont.h requires when the ppem changes.
+      // So there is nothing to prime: `reader::Settings{}` is what the factory
+      // already holds and kBodyPpem is what the face above is already inited at.
+      // 18 PT remains one press away on the device, and whether it should be the
+      // DEFAULT is a separate open question (roadmap:1269).
       //
-      // IT LEAVES THE READER'S METRICS STALE, and that is harmless for exactly the
-      // reason the shell's apply path relies on: Typography is not an overlay, so
-      // App::render walks down only as far as Typography itself and the page beneath
-      // is never drawn while the panel stands.
-      if (!body.init(bodyTtf.data(), bodyTtf.size(), 38)) {
-        std::fprintf(stderr, "body face failed to re-init at ppem 38\n");
-        return 1;
-      }
       // PUSHED, not pressed -- see isTypography's own comment for why the menu's row
       // cannot carry it yet, and for what this line becomes when it can.
       if (!app.pushScreen(reader::ScreenId::Typography)) {

@@ -28,6 +28,7 @@
 #include "reader/screen_contents.h"
 #include "reader/screen_home.h"
 #include "reader/screen_reader.h"
+#include "reader/screen_typography.h"
 #include "reader/components.h"
 #include "reader/screens.h"
 #include "reader/settings.h"
@@ -275,4 +276,74 @@ TEST_CASE("QuietTheme renders Home with an empty card to golden") {
 
   SUBCASE("X4 480x800") { renderOne(480, 800, "home_empty"); }
   SUBCASE("X3 528x792") { renderOne(528, 792, "home_empty_x3"); }
+}
+
+
+// --- The Typography panel ------------------------------------------------------
+//
+// design/Typography.dc.html.
+//
+// THE SAME STACK THE SIMULATOR BUILDS -- Reader, the menu over it, the panel on
+// top -- and PUSHED rather than pressed, for the reason sim/main.cpp states at its
+// own flag: the menu's `Typography` row is not focusable and has no action, so a
+// DOWN,CONFIRM route lands on `About this book` and pushes BookDetails. When that
+// row goes live this should become the two presses; the push is exactly what the
+// row will do, so the frame will not move.
+//
+// THE DEFAULT SIZE, WHICH IS THE BOARD'S. This was written at ppem 38, the board's
+// then-`18 PT`, on the reasoning that a preview must be drawn at the size the row
+// above it names -- which is right, and is why the disagreement had to be resolved
+// somewhere. The board is what changed: its Size row states `15 PT` now, matching
+// the `font-size: 32px` its preview was always set at. At 38 the fixed box holds
+// three of the specimen's four lines, so the render cut off mid-sentence at "seems
+// to be thrown" with ~85px of empty box beneath -- the worst state the screen can
+// produce, and the one a golden blessed then would have pinned forever.
+//
+// The golden and the SIMULATOR must hold the same state, or the comparison sheet
+// and the golden defend two different screens. Both are at the default now, and
+// neither names a size.
+TEST_CASE("QuietTheme renders the Typography panel to golden") {
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+  Italic italic;
+
+  auto renderOne = [&](int w, int h, const std::string& name) {
+    reader::PageMetrics m;
+    theme.readerMetrics(w, h, ramp.fonts, body.face, reader::Settings{}, m);
+    m.italic = &italic.face;
+
+    reader::DemoScreenFactory factory;
+    factory.setReaderBody(&body.face);
+    factory.setReaderItalic(&italic.face);
+    factory.setReaderMetrics(m);
+    factory.setReaderDemo();
+    factory.setContentsDemo();
+    // NOTHING TO PRIME: the factory's own `Settings{}` is the state being drawn, and
+    // the face above is already at kBodyPpem. A setSettings here would be a second
+    // spelling of the default -- and it would have to come BEFORE the push either
+    // way, because the factory hands the screen its starting values at construction.
+
+    std::unique_ptr<reader::Screen> page = factory.create(reader::ScreenId::Reader);
+    REQUIRE(page != nullptr);
+    static_cast<reader::ReaderScreen*>(page.get())->completeIndex();
+    reader::App app(std::move(page), factory);
+    REQUIRE(app.pushScreen(reader::ScreenId::ReaderMenu));
+    REQUIRE(app.pushScreen(reader::ScreenId::Typography));
+    REQUIRE(app.top().id() == reader::ScreenId::Typography);
+    reader::Framebuffer fb(w, h);
+    app.render(fb, ramp.fonts, theme, reader::Plane::Bw);
+    golden::checkGolden(fb, name);
+  };
+
+  SUBCASE("X4 480x800") { renderOne(480, 800, "typography"); }
+  SUBCASE("X3 528x792") { renderOne(528, 792, "typography_x3"); }
+}
+
+TEST_CASE("the Typography panel declares the fidelity its goldens are drawn at") {
+  // ASSERTED BEFORE THE PLANE IS NAMED, the way Home's goldens assert Mono: a
+  // change to the shipped path must FAIL a test rather than leave two goldens
+  // quietly pinning a path nothing paints.
+  reader::TypographyScreen scr(reader::Settings{}, nullptr, nullptr);
+  CHECK(scr.fidelity() == reader::Fidelity::Mono);
 }
