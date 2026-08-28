@@ -249,10 +249,38 @@ move measured end to end on the X3**, against one waveform for either one-pass
 path. No screen declares it today. It is kept, not deprecated, because it is the
 only way to put continuous tone on this glass — Phase 3's question about book
 covers and images — and because the sequence was expensive to get right; the
-comments in `paintGray()` were each earned by breaking the panel. **Windowed
-grayscale is not the escape hatch**: rotation is CCW, so a portrait row band
-becomes a full-height landscape column band and every gate line is driven
-anyway.
+comments in `paintGray()` were each earned by breaking the panel.
+
+**WINDOWED GRAYSCALE IS NOT THE ESCAPE HATCH, AND IT IS NOT THE ESCAPE HATCH FOR
+THE READER EITHER** — re-asked for page turns as #17 and closed again on stronger
+grounds than the first time (`docs/notes/strip-grayscale-verdict.md` has the
+working). **The SDK's strip API windows the RAM WRITE ONLY**: `displayGray` opens
+with `grayWindowIn()`, whose own comment says it "resets PTL to full after any
+per-strip `writeGrayscalePlaneStrip` windows" (`Uc8279Driver.cpp:300`), and
+`grayWindowIn` writes a hardcoded full-panel PTL (`:70`). **So no strip path can
+buy waveform time**, and the waveform is 889 ms of the refinement's 1408. It also
+reaches only **2 of the 6** full-plane writes `paintGray` issues — `GrayPlane` is
+`Lsb`/`Msb` (`PanelDriver.h:132`), and the base's and cleanup's DTM1/DTM2 pairs go
+through `sendPlaneFlipped`, which has no windowed form. Ceiling **3.4 ms of
+1408**, in a pass that runs 5 s after the user stopped pressing.
+
+**The geometry argument that used to stand here was about the wrong API, and it
+does not rescue the reader either.** `byteIndex` maps `physY = width_ - 1 - x`
+(`framebuffer.cpp:110`), so the gate axis the strip API windows **is the canvas's
+x axis** — a strip is a vertical slice of the portrait page. That is a real
+difference from chrome, where a focus move is a row band lying on the source axis
+the API cannot window at all. It differs in the wrong direction: a page turn
+changes the full height of a **492px text column on a 528px canvas**, 93.2% of the
+gates, so there is nothing to exclude. The "every gate line is driven anyway"
+half is still true and now has a proper home — it is why windowing
+`preconditionGrayscale`, the one call that really does window a refresh, is also
+worth at most 25 ms.
+
+**`strip=1` on the boot line means the driver has a windowed plane write, not a
+windowed refresh**, and reading it as the latter is what kept this question open.
+The SDK's own `docs/xteink-x3-uc8279-support.md:51` says `supportsStripGrayscale()`
+is false here, which is stale — `Uc8279Driver.h:58` returns true. Neither line is
+the authority; the driver body is.
 
 **Rules, fills and dither** have coverage 0 or 3, so they are identical in every
 pass — `Bw`, `BwDithered` and all three grayscale planes. That is what makes a
