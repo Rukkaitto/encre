@@ -15,6 +15,7 @@
 // The specimen here is filler rather than the board's sentence on purpose: whether
 // four lines FIT is a fact about the box and the lead, and tying it to the copy
 // would make a wording change look like a layout regression.
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -123,9 +124,14 @@ int specimenLines(const reader::Framebuffer& fb, const Box& box) {
   return bands;
 }
 
-// design/Typography.dc.html's `padding: 12px 16px` on the preview box. Named here
-// because the ink-free band below is derived from it rather than from a 12.
+// design/Typography.dc.html's `padding: 12px 24px` on the preview box -- the
+// VERTICAL half, which no setting moves. Named here because the ink-free band below
+// is derived from it rather than from a 12. The HORIZONTAL half is the Margins
+// setting now and is deliberately not restated here: the margin case below asks
+// which pixels moved rather than where the padding is, so it cannot fall out of
+// step with the theme's arithmetic.
 constexpr int kTypoPreviewPadY = 12;
+constexpr int kTypoPreviewBorder = 2;  // its `border: 2px`
 
 const std::pair<int, int> kGeometries[] = {{480, 800}, {528, 792}};
 
@@ -352,6 +358,70 @@ TEST_CASE("the preview follows the Alignment row, and RAGGED is not JUSTIFIED") 
     // The box still holds the same four whole lines: alignment sets a line, it does
     // not move a break, so the clamp cannot change with it.
     CHECK(specimenLines(a, box) == specimenLines(b, findBox(b)));
+  }
+}
+
+TEST_CASE("the preview follows the Margins row, and the border does not move") {
+  // THE ROW THIS SCREEN SHIPPED IGNORING. Reported off the device as "changing the
+  // margins doesn't update the live preview" -- the same defect the Alignment case
+  // above exists for, on the row the spec had explicitly excluded.
+  //
+  // TWO HALVES, AND THE SECOND IS THE ONE THAT BITES. That the wrap moves is easy;
+  // that the BORDER does not is the property a fix which tracked the setting with
+  // the outline instead of the padding would break, and it would break it
+  // invisibly -- the box would still be one box, and every row under it would step
+  // on every press of one row. So the box is FOUND in each frame and its edges
+  // compared, rather than its height alone: a border drawn 8px narrower has the
+  // same height and is a different box.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  BodyAt body(reader::kBodyPpem);
+
+  // The ends of kMarginSteps: 10 draws the board's old 16px of padding and 30 draws
+  // 36, so the measure differs by 40px -- more than enough for the wrap to move on
+  // either panel.
+  const int tightest = reader::kMarginSteps[0];
+  const int widest = reader::kMarginSteps[std::size(reader::kMarginSteps) - 1];
+
+  for (const auto& geo : kGeometries) {
+    CAPTURE(geo.first);
+    reader::TypographyViewModel tight = vmAt(1700);
+    tight.margins = tightest;
+    tight.specimen = reader::TypographyScreen::kSpecimen;
+    reader::TypographyViewModel wide = vmAt(1700);
+    wide.margins = widest;
+    wide.specimen = reader::TypographyScreen::kSpecimen;
+
+    reader::Framebuffer a(geo.first, geo.second), b(geo.first, geo.second);
+    theme.renderTypography(a, ramp.fonts, &body.face, tight, reader::Plane::Bw);
+    theme.renderTypography(b, ramp.fonts, &body.face, wide, reader::Plane::Bw);
+
+    // THE WRAP MOVED. Asserted inside the box rather than over the whole frame, so
+    // it cannot pass on some other pixel having changed -- the row values are
+    // identical in these two models, but a future field would not be.
+    const Box boxA = findBox(a);
+    const Box boxB = findBox(b);
+    REQUIRE(boxA.top > 0);
+    CHECK_FALSE(golden::rowsIdentical(a, b, boxA.top, boxA.bottom + 1));
+
+    // AND THE BORDER DID NOT. Same top row, same bottom row, and the same inked
+    // columns on the top border -- which is what says the outline is where it was
+    // and only the measure inside it changed.
+    CHECK(boxA.top == boxB.top);
+    CHECK(boxA.bottom == boxB.bottom);
+    CHECK(boxA.height() == wantBoxH(geo.first));
+    CHECK(boxB.height() == wantBoxH(geo.first));
+    for (int y = boxA.top; y < boxA.top + kTypoPreviewBorder; ++y)
+      for (int x = 0; x < a.width(); ++x) CHECK(a.getPixel(x, y) == b.getPixel(x, y));
+    // The rows block, LIVE PREVIEW, the footnote and the hint bar are all below the
+    // box, and none of them may move: that is the whole reason the padding carries
+    // this setting and the border does not.
+    CHECK(golden::rowsIdentical(a, b, boxA.bottom + 1, a.height()));
+
+    // No line is sliced at the narrower measure either -- the wrap got longer, so
+    // the clamp has to hold at both.
+    for (int y = boxB.bottom - 2 - kTypoPreviewPadY + 1; y <= boxB.bottom - 2; ++y)
+      CHECK_FALSE(inkInside(b, y));
   }
 }
 

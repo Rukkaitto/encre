@@ -1366,8 +1366,13 @@ namespace {
 // see typographyPreviewBoxH.
 constexpr int kTypoPreviewTop = 16;    // the box's `margin-top`
 constexpr int kTypoPreviewBorder = 2;  // `border: 2px`
-constexpr int kTypoPreviewPadY = 12;   // `padding: 12px 16px`
-constexpr int kTypoPreviewPadX = 16;
+constexpr int kTypoPreviewPadY = 12;   // `padding: 12px 24px`
+// THE HORIZONTAL PADDING'S BASE, NOT THE PADDING. The drawn padding is this plus
+// however far the margin setting sits above the tightest step, so the board's own
+// 24px is what `margins = 18` renders (16 + 18 - 10) and the three offered steps
+// read 16, 24 and 36. See renderTypography, which does the arithmetic and states
+// why the delta is exact.
+constexpr int kTypoPreviewPadXBase = 16;
 constexpr int kTypoLabelPadTop = 8;  // `LIVE PREVIEW`'s `padding: 8px 24px 10px`
 constexpr int kTypoLabelPadBottom = 10;
 constexpr int kTypoLabelEm = 120;  // `letter-spacing: 0.12em`
@@ -1522,7 +1527,24 @@ void QuietTheme::renderTypography(Framebuffer& fb, const FontSet& fonts, const G
   // --- The preview box --------------------------------------------------------
   int y = afterBand + kTypoPreviewTop;
   outlineRect(fb, kMargin, y, fb.width() - 2 * kMargin, boxH, kTypoPreviewBorder);
-  const int textW = fb.width() - 2 * kMargin - 2 * kTypoPreviewBorder - 2 * kTypoPreviewPadX;
+  // THE PADDING IS THE MARGIN SETTING, AND THE DELTA IS EXACT RATHER THAN SCALED.
+  // The box and the panel are the same device pixels, so there is nothing to scale:
+  // one px of margin narrows the reading column by 2px (`panelW - 2 * margins`) and
+  // narrows this measure by 2px as well, 1px of padding each side. The base is the
+  // tightest step, so `margins = 10` draws the board's old 16px, the default 18
+  // draws its current 24, and 30 draws 36.
+  //
+  // ONLY THE MEASURE MOVES. The border is placed from kMargin and boxH, neither of
+  // which reads this, so no row below the box shifts -- which is the property the
+  // derived-and-fixed box height exists for, and it would be lost if the setting
+  // reached the outline instead.
+  //
+  // `margins` is TRUSTED AS A GEOMETRY here for the reason readerMetrics states:
+  // validate() SNAPS it onto kMarginSteps rather than range-clamping, so the only
+  // values that arrive are the table's. textW is checked against 0 below anyway,
+  // because the view model is public and a test may build one by hand.
+  const int padX = kTypoPreviewPadXBase + (vm.margins - kMarginSteps[0]);
+  const int textW = fb.width() - 2 * kMargin - 2 * kTypoPreviewBorder - 2 * padX;
   const int textH = boxH - 2 * kTypoPreviewBorder - 2 * kTypoPreviewPadY;
   // NO FACE, NO SPECIMEN -- the box is still drawn, because the box is the board's
   // and an absent preview is not an absent screen.
@@ -1531,11 +1553,8 @@ void QuietTheme::renderTypography(Framebuffer& fb, const FontSet& fonts, const G
     // `line-height: 1.7` on `font-size: 32px` is -- which is what makes the box a
     // preview of Line spacing as well as of Size.
     //
-    // AND THE ALIGNMENT IS THE SETTING'S TOO, which is what makes the box answer
-    // four of the five rows. It cannot preview the reading MEASURE -- the box is
-    // chrome geometry, the board's 24px page margins less its own border and
-    // padding, where the column is `panelW - 2 * margins` -- so `Margins` never
-    // shows here and the other four do.
+    // AND THE ALIGNMENT IS THE SETTING'S TOO. With the padding above, that is all
+    // four editable rows answered in the box.
     //
     // ProseAlign::Justify applies kMinJustifyFillPercent exactly as the reader's
     // page does, through the same stretchFor: justifying a line the page would
@@ -1551,7 +1570,7 @@ void QuietTheme::renderTypography(Framebuffer& fb, const FontSet& fonts, const G
     // lines fit and the fourth is the sentence's own last. The error that must never
     // happen is the opposite one, a genuinely full last line stretched to the
     // margin, and deciding by index is what forecloses it.
-    drawProse(fb, *body, p, kMargin + kTypoPreviewBorder + kTypoPreviewPadX,
+    drawProse(fb, *body, p, kMargin + kTypoPreviewBorder + padX,
               textW, pxToF26(y + kTypoPreviewBorder + kTypoPreviewPadY), Ink::Black, plane,
               vm.justify ? ProseAlign::Justify : ProseAlign::Left);
   }

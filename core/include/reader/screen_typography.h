@@ -72,12 +72,17 @@ class TypographyScreen : public FocusScreen {
   // the default size. It wraps to four lines in Chrome at both geometries, which
   // is the count the preview box is sized around.
   //
-  // AND IT CANNOT PREVIEW THE MARGINS. The box is CHROME geometry -- the board's
-  // 24px page margins less its own border and padding -- where the reading column
-  // is `panelW - 2 * margins`. Different numbers, always. Four of the five
-  // settings show here faithfully and `Margins` never will; making the box track
-  // it would move the border on every step and still be wrong by 48px, which is
-  // worse than not trying.
+  // AND IT PREVIEWS THE MARGINS TOO, WHICH THIS COMMENT ONCE DENIED. It said the
+  // box "cannot preview the margins" because the box is chrome geometry -- the
+  // board's 24px page margins less its own border and padding -- where the reading
+  // column is `panelW - 2 * margins`, so the two measures never agree. Both facts
+  // are still true and the conclusion drawn from them was wrong: THE BOX IS THE
+  // PAGE AND ITS SIDE PADDING IS THE MARGIN, so the padding tracks the setting and
+  // the base measure being narrower than the column is beside the point. The
+  // BORDER does not move, so nothing about the fixed box height changes.
+  //
+  // Reported off the device as "changing the margins doesn't update the live
+  // preview". All four editable rows show in the box now.
   static constexpr const char* kSpecimen =
       "Miss Brooke had that kind of beauty which seems to be thrown into relief "
       "by poor dress.";

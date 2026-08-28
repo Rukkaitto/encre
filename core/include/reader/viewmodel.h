@@ -360,6 +360,21 @@ struct TypographyViewModel {
   // The preview's copy. A FIXED specimen, not the book's text: see
   // screen_typography.h, which owns the string and the reason.
   std::string specimen;
+  // THE PREVIEW'S SIDE PADDING, as Settings::margins is -- and it is here for the
+  // same reason the two fields below it are: the theme is handed this model and a
+  // face and nothing else, so without this field the box could not answer the
+  // `Margins` row. Reported off the device as "changing the margins doesn't update
+  // the live preview", which is the Alignment argument arriving a second time.
+  //
+  // THE BOX IS THE PAGE AND ITS PADDING IS THE MARGIN. The spec said the box
+  // "cannot preview the margins" because it is chrome geometry -- 396px of measure
+  // where the reading column is 444 -- and that was the wrong framing: the base
+  // measure being narrower than the column does not stop the padding tracking the
+  // setting. design/Typography.dc.html carries the decision.
+  //
+  // 18 is Settings::margins' own default and design/Reader.dc.html's column
+  // padding, so a view model built by hand previews the board.
+  int margins = 18;
   // THE PREVIEW'S LINE BOX, em x 1000, as PageMetrics::leadEm1000 is -- and it is
   // here because the preview has to SHOW the Line spacing setting, which the theme
   // has no other way to learn. renderTypography is handed the body face and this

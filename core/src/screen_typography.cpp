@@ -190,9 +190,12 @@ void TypographyScreen::syncVm() {
   // carries no leading.
   vm_.leadEm1000 = settings_.lineSpacing;
   // AND SO IS THE ALIGNMENT, for the same reason: the box says LIVE PREVIEW, so it
-  // has to answer the `Alignment` row as well as the two above it. Four of the five
-  // rows show in the box now; `Margins` is the one that cannot (see kSpecimen).
+  // has to answer the `Alignment` row as well as the two above it.
   vm_.justify = settings_.justify;
+  // AND SO ARE THE MARGINS, which is the row this screen shipped ignoring. The box
+  // is the PAGE, so its side padding is the margin -- see viewmodel.h and
+  // design/Typography.dc.html. All four editable rows show in the box now.
+  vm_.margins = settings_.margins;
   vm_.focusedRow = focus();
 
   vm_.rows.clear();
