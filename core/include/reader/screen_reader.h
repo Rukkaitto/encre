@@ -611,6 +611,13 @@ class ReaderScreen : public Screen {
   uint32_t pageBytes_ = 0;
 
  public:
+  // THE FACES, so a screen that draws this one's page can draw it with them. The peek
+  // is the caller: it renders the inner reader's page into its own panel, and a panel
+  // drawn with a different face from the one the page was MEASURED with is the
+  // measure/draw disagreement StyledFace exists to prevent.
+  const GlyphSource* body() const { return body_; }
+  const GlyphSource* italic() const { return italic_; }
+
   // WHETHER AN ITALIC FACE IS INSTALLED AT ALL. drawTextStyled falls back to the
   // roman when this is null, silently and correctly -- so a book whose emphasis is
   // not rendering has two completely different explanations and they look identical

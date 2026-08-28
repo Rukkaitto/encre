@@ -1,0 +1,147 @@
+#include "reader/screen_peek.h"
+
+#include <string>
+#include <utility>
+
+#include "reader/theme.h"
+
+namespace reader {
+
+// --- WHAT THE PEEK DECLARES, AND THE TWO THINGS IT DOES NOT -------------------
+//
+// Stated once here rather than twice at the two constructors, which differ only in
+// where the text comes from: a screen whose INPUT depended on that would be a screen
+// the goldens test differently from the device.
+//
+// THE SIDES PAGE AND THE FRONT ROW DOES NOT, which is what `declareSplitMovers` buys
+// and is the Reader's own arrangement -- the peek sits over the reading page and the
+// buttons that turn a page there turn a page here. Folding the pairs together would
+// make Up and Down page as well, and Up on the page underneath already means "return to
+// where I was": one button with two meanings across a single press.
+//
+// NO declareHints, AND THE ABSENCE IS THE POINT. `holds` is one field driving two
+// things -- the hint bar's hollow ring and the long-press binding -- so a screen that
+// promises no hold must bind none. PeekViewModel::holds is all false; declaring it here
+// would be the same fact spelled twice, and this project's rule is that the declaration
+// lives where the view model is built. There is nothing to declare.
+//
+// NO declareRepeat EITHER, and that one is a decision rather than an omission. Every
+// page of this panel costs a decode -- an advance on a live stream at best, a rewind
+// proportional to the page index at worst -- so a held side button would run away from
+// what the reader can follow and past what they meant to look at. The Reader beneath
+// declares none for the same reason; a peek is a shorter excursion, not a laxer one.
+
+PeekScreen::PeekScreen(FileSystem& fs, OpenedBook book, int spine, int percent,
+                       const GlyphSource* body)
+    : percent_(percent) {
+  declareSplitMovers();
+  inner_ = std::make_unique<ReaderScreen>(fs, std::move(book), spine, body);
+  syncVm();
+}
+
+PeekScreen::PeekScreen(std::string_view xhtml, std::string chapter, int percent,
+                       const GlyphSource* body)
+    : percent_(percent) {
+  declareSplitMovers();
+  // THE BOOK TITLE IS EMPTY BECAUSE THE BAND DOES NOT NAME A BOOK. The Reader's header
+  // does; this panel says `PEEK` and where you are looking, and the reader already knows
+  // which book they are in -- it is on the glass behind the veil.
+  inner_ = std::make_unique<ReaderScreen>(xhtml, std::string(), std::move(chapter), body);
+  syncVm();
+}
+
+PeekScreen::~PeekScreen() = default;
+
+void PeekScreen::setMetrics(const PageMetrics& m) {
+  // ONE PAGE OF RING, AND IT BELONGS HERE RATHER THAN IN THE SHELL. The default depth of
+  // 3 is sized for a reader who will be turning pages for an hour; a peek is a short
+  // excursion of a few presses, and the heap it is spending is the READER's -- the page
+  // ring under the veil, the book's spans, and whatever the panel's own chapter needs.
+  // Three pages at ~1,500 bytes each is 4.5 KB of a floor this design is already close
+  // to. Depth 1 holds the page on screen and nothing else, which is what a backward turn
+  // in a peek has to pay for.
+  inner_->setPageCacheDepth(1);
+  inner_->setMetrics(m);
+  // See the header: the panel's height is a result of its line count, so the render has
+  // to be given the same lead the metrics were built from.
+  vm_.leadEm1000 = m.leadEm1000;
+  syncVm();
+}
+
+void PeekScreen::setItalic(const GlyphSource* italic) { inner_->setItalic(italic); }
+
+void PeekScreen::setChapterNames(std::vector<TocEntry> toc) {
+  inner_->setChapterNames(std::move(toc));
+  // The label the band draws comes from the inner reader's own view model, so it only
+  // becomes the book's name for the chapter once the names have arrived.
+  syncVm();
+}
+
+const Page& PeekScreen::page() const { return inner_->page(); }
+
+int PeekScreen::chosenSpine() const { return inner_->chapterIndex(); }
+
+Cursor PeekScreen::chosenCursor() const { return inner_->currentCursor(); }
+
+void PeekScreen::syncVm() {
+  // `CH. 01 · 4%`, composed here because the theme does no arithmetic -- and the chapter
+  // is whatever the inner reader's header would have said, which is the book's own name
+  // for it where its contents supply one and the `CH. NN` position where they do not.
+  //
+  // THE MIDDLE DOT IS A TRAP THIS PROJECT HAS ALREADY PAID FOR ONCE. A C++ hex escape is
+  // UNBOUNDED, so "\xC2\xB7CH." parses `\xB7C` as ONE escape: clang rejects it outright
+  // and the ESP32's GCC ACCEPTS it, emitting a byte that is not U+00B7. Adjacent string
+  // literals end the escape, which is why the dot is spelled on its own below and never
+  // glued to what follows it.
+  vm_.where = inner_->vm().chapter + " " "\xC2\xB7" " " + std::to_string(percent_) + "%";
+}
+
+Action PeekScreen::onGesture(const GestureEvent& g) {
+  switch (g.what) {
+    // CLOSE. The reader's page was never disturbed -- the Reader underneath still holds
+    // the page it was on, released stream and all -- so leaving costs nothing to undo.
+    case Gesture::Back:
+      return Action::pop();
+    // GO HERE. A Pop like Back's, because this screen cannot move the Reader: it is on
+    // the stack UNDERNEATH, and a screen returns one Action. The flag is what the shell
+    // reads while this is still on top, before the dispatch pops it away.
+    case Gesture::Activate:
+      committed_ = true;
+      return Action::pop();
+    // THE SIDE BUTTONS PAGE, inside the panel, over the peeked chapter -- which is the
+    // inner reader's whole job. Its answer is forwarded rather than re-derived: `None`
+    // means it could not turn (the end of the book, or a chapter that would not open),
+    // and repainting an identical panel would cost ~1.4 s of grayscale for nothing.
+    case Gesture::Next:
+    case Gesture::Prev: {
+      const Action a = inner_->onGesture(g);
+      if (a.kind == Action::Kind::None) return Action::none();
+      // The band's percent does not move -- it is the caller's figure for the CHAPTER --
+      // but the chapter label does, because paging off either end crosses into the next
+      // spine entry.
+      syncVm();
+      return Action::redraw();
+    }
+    // EVERYTHING ELSE, AND THAT INCLUDES THE FRONT ROW. `declareSplitMovers` keeps the
+    // pairs apart, so the front row's movers arrive as AltPrev/AltNext -- and they are
+    // dead here on purpose: the bar's last two slots are empty, and a bar that promises
+    // nothing must not do something. See PeekViewModel::hints.
+    default:
+      return Action::none();
+  }
+}
+
+void PeekScreen::render(Framebuffer& fb, const FontSet& fonts, Theme& theme,
+                        Plane plane) const {
+  // THE FACES ARE THE INNER READER'S, because the page being drawn is the page IT
+  // measured. Drawing a laid-out line with a face other than the one it was measured
+  // against is the measure/draw disagreement StyledFace exists to prevent.
+  const GlyphSource* body = inner_->body();
+  // No face, no text: the screen is constructed before setMetrics and a caller with no
+  // body face at all is a readable empty panel rather than an abort. Same call
+  // ReaderScreen::render makes.
+  if (body == nullptr) return;
+  theme.renderPeek(fb, fonts, *body, inner_->italic(), vm_, inner_->page(), plane);
+}
+
+}  // namespace reader

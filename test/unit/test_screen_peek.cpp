@@ -1,16 +1,24 @@
-// THE READER'S HALF OF THE PEEK: letting go of a chapter, taking it back, and
-// jumping to a cursor rather than to page one.
+// THE PEEK, BOTH HALVES OF IT.
 //
-// PeekScreen's own cases join this file in a later task. These come first because the
-// peek cannot be built without them.
+// First the READER's: letting go of a chapter, taking it back, and jumping to a cursor
+// rather than to page one. Those come first in this file because the peek cannot be
+// built without them.
+//
+// Then the PANEL's, from `--- THE PANEL ITSELF ---` down: what it declares, what its
+// band says, what its four buttons do, and the one property everything else rests on --
+// that its page is not the Reader's, because its column is narrower.
 #include <cstdint>
 #include <memory>
 #include <string>
 
 #include "card_book_fixture.h"
 #include "doctest.h"
+#include "ramp.h"
 #include "reader_fixture.h"
+#include "reader/screen_peek.h"
 #include "reader/screen_reader.h"
+#include "reader/theme.h"
+#include "reader/theme_quiet.h"
 
 using reader::Cursor;
 using reader::Gesture;
@@ -244,4 +252,213 @@ TEST_CASE("a refused goToPosition leaves the screen exactly where it was") {
   CHECK(s.currentCursor() == wasCursor);
   CHECK(s.anchor().isSet() == wasAnchored);
   CHECK(s.anchor().get() == wasAnchor);
+}
+
+// --- THE PANEL ITSELF -----------------------------------------------------------
+
+namespace {
+
+// A PEEK OVER AN IN-MEMORY CHAPTER, at the panel's own metrics rather than the page's.
+// The distinction is the whole feature: peekMetrics places a ~368px column inside the
+// inset panel where readerMetrics places the reading page's 444px one, so a fixture
+// that reached for the wrong one would build a screen that agrees with the Reader --
+// which is precisely the state case 7 exists to refuse.
+struct PeekFix {
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  readerfix::Body body;
+  reader::PageMetrics m;
+  std::unique_ptr<reader::PeekScreen> scr;
+
+  explicit PeekFix(int percent = 4, int w = 480, int h = 800) {
+    theme.peekMetrics(w, h, ramp.fonts, body.face, reader::Settings{}, m);
+    scr = std::make_unique<reader::PeekScreen>(readerfix::longChapter(40), "CH. 01",
+                                               percent, &body.face);
+    scr->setMetrics(m);
+  }
+  reader::PeekScreen& s() { return *scr; }
+  std::string text() { return readerfix::pageText(scr->page()); }
+};
+
+}  // namespace
+
+TEST_CASE("the peek is an overlay, declares Grayscale, and promises two buttons") {
+  PeekFix p;
+  CHECK(p.s().id() == reader::ScreenId::Peek);
+  // A PANEL OVER THE PAGE, not a screen instead of it -- App::render paints the Reader
+  // underneath and this draws its veil over it.
+  CHECK(p.s().isOverlay());
+  // BODY TEXT AT READING SIZE, so the Reader's reason applies verbatim. It is the one
+  // overlay that does not declare Mono, and it costs the partial repaint for it.
+  CHECK(p.s().fidelity() == reader::Fidelity::Grayscale);
+
+  CHECK(p.s().vm().hints[0] == "CLOSE");
+  CHECK(p.s().vm().hints[1] == "GO HERE");
+  // EMPTY, NOT ABSENT. An empty hint slot is 36px wide (kHintEmptySlotW) and the bar
+  // divides its leftover around it -- measuring one as zero is not "drawing nothing",
+  // it is drawing the other two in the wrong places.
+  CHECK(p.s().vm().hints[2] == "");
+  CHECK(p.s().vm().hints[3] == "");
+
+  // NO HOLD PROMISED AND THEREFORE NONE BOUND -- one field drives the ring and the
+  // binding, so these cannot disagree.
+  CHECK(p.s().longPressable() == 0);
+  // AND NO AUTO-REPEAT: every page of this panel costs a decode, so a held side button
+  // would run away from what the reader can follow.
+  CHECK(p.s().autoRepeat() == 0);
+}
+
+TEST_CASE("the peek's band names the state and where it is, and never a page number") {
+  PeekFix p(7);
+  // NAMES THE STATE. `CH. 01 · 7%` alone would read as the Reader's own header, and
+  // this panel has to be unmistakably not that.
+  CHECK(p.s().vm().title == "PEEK");
+
+  const std::string where = p.s().vm().where;
+  CHECK(where.find("CH. 01") != std::string::npos);
+  CHECK(where.find("7%") != std::string::npos);
+  // THE ASSERTION WORTH MAKING. The panel is inset, so its column re-wraps, so "page 53"
+  // in here is not page 53 of the book -- a page number would be a claim about the book
+  // that is false. Chapter and percent are true at any column width.
+  CHECK(where.find('/') == std::string::npos);
+  // AND THE DOT IS THE REAL U+00B7. A C++ hex escape is unbounded, so "\xC2\xB7CH."
+  // parses `\xB7C` as one escape -- clang rejects it and the ESP32's GCC accepts it,
+  // emitting a byte that is not this. Adjacent literals are what end the escape, and
+  // this is what says they did.
+  CHECK(where.find("\xC2\xB7") != std::string::npos);
+}
+
+TEST_CASE("the sides page inside the peek and the front row does nothing") {
+  PeekFix p;
+  const std::string first = p.text();
+  REQUIRE_FALSE(first.empty());
+
+  reader::Action a = p.s().onGesture({Gesture::Next});
+  CHECK(a.kind == reader::Action::Kind::Redraw);
+  const std::string second = p.text();
+  CHECK(second != first);
+
+  a = p.s().onGesture({Gesture::Prev});
+  CHECK(a.kind == reader::Action::Kind::Redraw);
+  CHECK(p.text() == first);
+
+  // THE FRONT ROW IS DEAD, and it has to be asserted through onEvent rather than
+  // through onGesture. `declareSplitMovers()` governs gestureFor and NOTHING ELSE, so
+  // a case that hands AltNext straight to onGesture asserts only that the switch has no
+  // branch for it -- true with the declaration removed, which is a mutation that does
+  // not bite. `Button::Up`/`Down` ARE the front row (the shell's mapping is crossed --
+  // read it rather than the names), and without the split they fold into Prev/Next and
+  // page. So this is the half only the declaration can satisfy.
+  a = p.s().onEvent({reader::Button::Down, reader::PressKind::Short});
+  CHECK(a.kind == reader::Action::Kind::None);
+  CHECK(p.text() == first);
+  a = p.s().onEvent({reader::Button::Up, reader::PressKind::Short});
+  CHECK(a.kind == reader::Action::Kind::None);
+  CHECK(p.text() == first);
+
+  // ...and the sides, through the same door, which is what the split leaves paging.
+  a = p.s().onEvent({reader::Button::Right, reader::PressKind::Short});
+  CHECK(a.kind == reader::Action::Kind::Redraw);
+  CHECK(p.text() == second);
+  a = p.s().onEvent({reader::Button::Left, reader::PressKind::Short});
+  CHECK(a.kind == reader::Action::Kind::Redraw);
+  CHECK(p.text() == first);
+
+  // The gestures themselves, for completeness: the screen ignores the alternate pair
+  // even when one reaches it directly. Weaker than the two above and kept because it is
+  // the property the switch states.
+  a = p.s().onGesture({Gesture::AltNext});
+  CHECK(a.kind == reader::Action::Kind::None);
+  CHECK(p.text() == first);
+  a = p.s().onGesture({Gesture::AltPrev});
+  CHECK(a.kind == reader::Action::Kind::None);
+  CHECK(p.text() == first);
+}
+
+TEST_CASE("Back closes the peek and Activate commits it") {
+  // BOTH ANSWER Pop, and the flag is the entire difference -- the peek cannot move the
+  // Reader, which is on the stack underneath it.
+  {
+    PeekFix p;
+    CHECK_FALSE(p.s().committed());
+    const reader::Action a = p.s().onGesture({Gesture::Back});
+    CHECK(a.kind == reader::Action::Kind::Pop);
+    CHECK_FALSE(p.s().committed());
+  }
+  {
+    PeekFix p;
+    CHECK_FALSE(p.s().committed());
+    const reader::Action a = p.s().onGesture({Gesture::Activate});
+    CHECK(a.kind == reader::Action::Kind::Pop);
+    CHECK(p.s().committed());
+  }
+}
+
+TEST_CASE("the committed cursor is the page the peek was showing") {
+  // NOT PAGE ONE. The reader may have paged several pages into the peek before pressing
+  // GO HERE, so the cursor that travels is the one under the panel at that moment --
+  // which is why the assertion is against a cursor taken by GOING there rather than a
+  // hand-built one.
+  PeekFix p;
+  p.s().onGesture({Gesture::Next});
+  p.s().onGesture({Gesture::Next});
+
+  const Cursor showing = p.s().chosenCursor();
+  const int spine = p.s().chosenSpine();
+  // PAGE ONE WOULD BE RIGHT ON THE FIRST PAGE AND WRONG EVERYWHERE AFTER IT, so the
+  // assertion has to stand somewhere Cursor{} is not the answer.
+  REQUIRE(showing != Cursor{});
+
+  const reader::Action a = p.s().onGesture({Gesture::Activate});
+  REQUIRE(a.kind == reader::Action::Kind::Pop);
+  CHECK(p.s().committed());
+  // COMMITTING MOVES NOTHING HERE. The screen is read while it is still on top and the
+  // shell does the jump; a commit that disturbed its own position would hand over a
+  // cursor for a page it was no longer showing.
+  CHECK(p.s().chosenCursor() == showing);
+  CHECK(p.s().chosenSpine() == spine);
+}
+
+TEST_CASE("a peek that was closed rather than committed reports no commit") {
+  // CLOSE LEAVES THE READER'S PAGE UNTOUCHED, and this is the half of that the peek
+  // itself can state: whatever paging happened inside the panel, nothing asked for it.
+  PeekFix p;
+  p.s().onGesture({Gesture::Next});
+  p.s().onGesture({Gesture::Next});
+  REQUIRE(p.s().chosenCursor() != Cursor{});
+
+  const reader::Action a = p.s().onGesture({Gesture::Back});
+  CHECK(a.kind == reader::Action::Kind::Pop);
+  CHECK_FALSE(p.s().committed());
+}
+
+TEST_CASE("the peek's page is NOT the reader's page, because the column is narrower") {
+  // THE FACT THE WHOLE DESIGN RESTS ON. A peek that reused the Reader's already-laid
+  // page would look almost right -- same text, same face -- and would overflow the
+  // panel, because those lines were measured against a 444px column and this one is
+  // ~368. It is also why the band can never show a page number.
+  const std::string ch = readerfix::longChapter(40);
+
+  readerfix::Reading r(ch);
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  readerfix::Body body;
+  reader::PageMetrics pm;
+  theme.peekMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, pm);
+  reader::PeekScreen peek(ch, "CH. 01", 4, &body.face);
+  peek.setMetrics(pm);
+
+  REQUIRE_FALSE(readerfix::pageText(r.scr->page()).empty());
+  REQUIRE_FALSE(readerfix::pageText(peek.page()).empty());
+  // DIFFERENT WRAP, so different text on page one. The two columns differ by ~76px,
+  // which is two or three words a line.
+  CHECK(readerfix::pageText(peek.page()) != readerfix::pageText(r.scr->page()));
+
+  // AND THE LINES ARE INSIDE THE PANEL, not on the page's own left edge.
+  for (const reader::LaidLine& ln : peek.page().lines) CHECK(ln.x >= pm.columnLeft);
+
+  // THE PANEL HOLDS kPeekLines LINE BOXES AND NO MORE. Its HEIGHT is a result of that
+  // count, so a page laid at the reading column's height would run out through the
+  // border.
+  CHECK(peek.page().lines.size() <= static_cast<size_t>(reader::kPeekLines));
 }
