@@ -4239,7 +4239,21 @@ void loop() {
     // overlay -- App::render walks down to the topmost non-overlay, paints the Reader,
     // then paints the overlay over it -- so the Reader's stale page IS drawn on the
     // very next frame. "On top" would never fire there and that frame would be wrong.
-    if (gTypographyDirty) {
+    // AND NOT UNTIL THE PANEL IS GONE, which is the gate that makes the flag mean
+    // "apply this" rather than "something changed". TypographyScreen::cycleFocused
+    // commits on EVERY change press, so without this the Reader underneath would be
+    // re-paginated once per press -- a chapter crossing's walk and a card write on
+    // each one, while the screen doing the drawing is the panel and the page is not
+    // visible at all. The whole design is that the walk is paid on the press that
+    // LEAVES, where the user already expects the screen to change.
+    //
+    // Scanned rather than compared against the top, for the reason readerOnStack is:
+    // the stack's shape is the stack's to answer, and the panel being pushed only at
+    // the top is a fact about today's callers rather than a guarantee.
+    bool typographyStanding = false;
+    for (int i = 0; i < gApp->depth(); ++i)
+      if (gApp->at(i).id() == reader::ScreenId::Typography) typographyStanding = true;
+    if (gTypographyDirty && !typographyStanding) {
       gTypographyDirty = false;
       reader::ReaderScreen* rd = readerOnStack(*gApp);
       reader::PageMetrics m;
