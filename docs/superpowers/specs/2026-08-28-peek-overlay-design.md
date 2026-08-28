@@ -184,12 +184,35 @@ the anchor. The page number the reader arrives on is *computed* by `openAtCursor
 counting boundaries, which is why the peek can be honest about not having one and
 the commit can still be exact.
 
-### The third gate
+### Nothing else touches the released chapter, and that was checked rather than assumed
 
-While the Reader's chapter is released, **all three idle jobs must decline** —
-`readerOnStack` finds the Reader *under* the peek, so without a gate a restream
-would walk a released stream. `hasChapter()` is the gate, asked by the shell beside
-the gates already there.
+An earlier draft of this section said the three idle jobs "must decline" because
+`readerOnStack` finds the Reader *under* the peek. **That is wrong about the
+mechanism.** All three — `completeIndex`, `restreamAtCurrentPage`, `warmPageRing` —
+are gated on `gApp->top().id() == ScreenId::Reader`, not on `readerOnStack`, so a
+peek on top stops all three by construction and no new gate is needed.
+`readerOnStack` has three callers and none of them is an idle job: the book-closed
+check, which reads nothing; the page-ring shrink; and the Typography apply, which is
+unreachable while a peek is up because the pop that opened the peek took the menu
+with it.
+
+**A save while released is also safe, and for a reason worth stating** because the
+obvious reading of it is alarming. `saveReadingPosition` reads `chapterIndex()`,
+`currentCursor()`, `vm()`, `anchor()` and `chapterBytesRead()` — and
+`chapterBytesRead()` returns `pageBytes_`, a plain member of the screen, **not**
+`ChapterReader::bytesRead()`, which would answer 0 with `inflated_` released and
+would push `progressPercent` onto its page/pageTotal fallback. That is the exact
+shape of the percentage-going-backwards bug. It cannot happen here because every
+field a save reads is retained state. In practice no save fires anyway: with the
+peek on top, `saveReadingPosition`'s own `top().id()` guard answers `Unchanged`,
+including on the sleep edge — correct, since the Reader has not moved.
+
+So there is **no new gate**, and `ReaderScreen::hasChapter()` exists as an
+*observation point* rather than a guard: it is what lets the release test assert the
+release happened, which is the claim the whole memory design rests on. The two
+paragraphs above are recorded because "no gate needed" is a claim that could
+silently stop being true — if an idle job is ever re-gated on `readerOnStack`, it
+needs `hasChapter()` in front of it.
 
 ## Failure
 
