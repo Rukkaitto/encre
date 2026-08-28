@@ -341,4 +341,40 @@ struct SettingsViewModel {
   std::array<bool, 4> holds{};
 };
 
+// design/Typography.dc.html.
+//
+// ONE STATE, ONE BOARD, ONE MODEL. An earlier design had a browse mode and an
+// edit mode with a second board; the hint bar could not tell them apart (`DONE`
+// and `OK` are synonyms) so the mode went, and with it a per-row editing flag and
+// a chevron-availability flag that used to live here.
+//
+// It reuses ListRow for the rows, because a label and a right-aligned value is
+// exactly ListRow's shape and this would be its fourth copy.
+//
+// THERE IS NO BOOK TITLE. The band's right slot is empty: these settings are
+// device-wide, and naming one book would contradict the footnote directly below
+// it. The slot is still RESERVED on the board -- a band's height must not vary by
+// screen -- but nothing here supplies its content.
+struct TypographyViewModel {
+  std::string title;  // "TYPOGRAPHY"
+  // The preview's copy. A FIXED specimen, not the book's text: see
+  // screen_typography.h, which owns the string and the reason.
+  std::string specimen;
+  // THE PREVIEW'S LINE BOX, em x 1000, as PageMetrics::leadEm1000 is -- and it is
+  // here because the preview has to SHOW the Line spacing setting, which the theme
+  // has no other way to learn. renderTypography is handed the body face and this
+  // model and nothing else, and a face carries its ppem but not its leading, so a
+  // theme that resolved the lead itself would have to pin 1.7 and the preview
+  // would then contradict the row directly under it on four of the five steps.
+  //
+  // The SIZE needs no such field: a ScalableFont is pinned to a pixel size by
+  // init(), so the face this screen is handed IS the chosen ppem -- the same
+  // reason Theme::readerMetrics reads three typography fields and not four.
+  int leadEm1000 = 1700;
+  std::vector<ListRow> rows;
+  int focusedRow = 0;
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
 }  // namespace reader
