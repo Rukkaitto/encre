@@ -182,7 +182,7 @@ struct CardReading {
   std::unique_ptr<reader::ReaderScreen> scr;
 
   explicit CardReading(const std::string& ch1) {
-    theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+    theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
     REQUIRE(fs.writeAll("/books/b.epub", epubWith(ch1)));
     const char* why = "";
     REQUIRE_MESSAGE(reader::openBook(fs, "/books/b.epub", ob, &why), std::string(why));

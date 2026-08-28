@@ -1,0 +1,70 @@
+// Theme::readerMetrics: the reader's BOX MODEL, and the three typography
+// settings that move it.
+//
+// The box model is the theme's (spec 3.3) and the content is the screen's, so
+// this file asserts numbers rather than pixels -- the goldens next door assert
+// the pixels. What it exists to pin is that the DEFAULTS are the board's own
+// (480 less 18px each side is design/Reader.dc.html's 444) and that a margin
+// change moves the column's WIDTH and never its HEIGHT.
+#include "doctest.h"
+#include "ramp.h"
+#include "reader_fixture.h"
+#include "reader/layout.h"
+#include "reader/settings.h"
+#include "reader/theme_quiet.h"
+
+namespace {
+using readerfix::Body;
+}  // namespace
+
+TEST_CASE("readerMetrics follows the typography settings") {
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  Body body;
+
+  reader::Settings s;  // the defaults
+  reader::PageMetrics base;
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, s, base);
+
+  // THE DEFAULTS ARE THE BOARD'S. 480 less 18px each side is 444, which is the
+  // number design/Reader.dc.html states and every reader golden is laid at.
+  CHECK(base.columnLeft == 18);
+  CHECK(base.columnW == 444);
+  CHECK(base.leadEm1000 == reader::kBodyLeadEm);
+  CHECK(base.justify);
+
+  SUBCASE("wider margins narrow the column from both sides") {
+    s.margins = 30;
+    reader::PageMetrics m;
+    theme.readerMetrics(480, 800, ramp.fonts, body.face, s, m);
+    CHECK(m.columnLeft == 30);
+    CHECK(m.columnW == 480 - 2 * 30);
+  }
+  SUBCASE("tighter margins widen it") {
+    s.margins = 10;
+    reader::PageMetrics m;
+    theme.readerMetrics(480, 800, ramp.fonts, body.face, s, m);
+    CHECK(m.columnLeft == 10);
+    CHECK(m.columnW == 480 - 2 * 10);
+  }
+  SUBCASE("line spacing and alignment pass straight through") {
+    s.lineSpacing = 2000;
+    s.justify = false;
+    reader::PageMetrics m;
+    theme.readerMetrics(480, 800, ramp.fonts, body.face, s, m);
+    CHECK(m.leadEm1000 == 2000);
+    CHECK_FALSE(m.justify);
+  }
+  SUBCASE("the column's HEIGHT does not depend on the margins") {
+    // The band and the footer are full-bleed on the board -- their padding is
+    // kReadPadX but their HEIGHT is type -- so a margin change must not move the
+    // column's top or shorten it. Getting this wrong loses a line of every page
+    // at one margin setting and nothing at another, which is the hardest kind of
+    // layout bug to attribute.
+    s.margins = 30;
+    reader::PageMetrics m;
+    theme.readerMetrics(480, 800, ramp.fonts, body.face, s, m);
+    CHECK(m.columnTop == base.columnTop);
+    CHECK(m.columnH == base.columnH);
+  }
+}

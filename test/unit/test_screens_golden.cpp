@@ -85,7 +85,7 @@ TEST_CASE("QuietTheme renders the reader menu over its page, to golden") {
 
   auto renderOne = [&](int w, int h, const std::string& name) {
     reader::PageMetrics m;
-    theme.readerMetrics(w, h, ramp.fonts, body.face, m);
+    theme.readerMetrics(w, h, ramp.fonts, body.face, reader::Settings{}, m);
     m.italic = &italic.face;
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body.face);

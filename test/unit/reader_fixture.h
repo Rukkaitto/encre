@@ -85,7 +85,7 @@ struct Reading {
   // setMetrics, because setMetrics is the landing.
   explicit Reading(const std::string& xhtml, bool settled = true, int w = 480, int h = 800,
                    reader::Cursor startAt = reader::Cursor{}) {
-    theme.readerMetrics(w, h, ramp.fonts, body.face, m);
+    theme.readerMetrics(w, h, ramp.fonts, body.face, reader::Settings{}, m);
     scr = std::make_unique<reader::ReaderScreen>(xhtml, "Middlemarch", "CH. 01", &body.face);
     if (startAt != reader::Cursor{}) scr->restoreAt(startAt);
     scr->setMetrics(m);

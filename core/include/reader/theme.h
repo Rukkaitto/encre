@@ -1,5 +1,6 @@
 #pragma once
 #include "reader/layout.h"
+#include "reader/settings.h"
 #include "reader/text.h"
 
 namespace reader {
@@ -119,8 +120,20 @@ class Theme {
   // Takes the body face as well as the ramp: the column's height is a whole
   // number of the BODY face's line boxes, and the body face is a ScalableFont
   // rasterised at a runtime size, not one of FontSet's eleven fixed roles.
+  //
+  // AND TAKES THE SETTINGS, because three of them are box-model numbers now --
+  // margins, line spacing and alignment (design/Typography.dc.html). The struct
+  // rather than three ints: three loose ints at a call site are three chances to
+  // pass them in the wrong order, and both the shell and the Typography screen
+  // already hold this struct.
+  //
+  // NO DEFAULT ARGUMENT, deliberately. A defaulted Settings would let a caller
+  // that should have been updated compile and silently lay the page out at the
+  // defaults -- which on this device is a book that ignores the reader's own
+  // settings, and looks like the settings not being saved.
   virtual void readerMetrics(int panelW, int panelH, const FontSet& fonts,
-                             const GlyphSource& body, PageMetrics& out) const = 0;
+                             const GlyphSource& body, const Settings& settings,
+                             PageMetrics& out) const = 0;
 
   // design/Reader.dc.html.
   //

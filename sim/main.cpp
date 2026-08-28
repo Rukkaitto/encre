@@ -400,7 +400,7 @@ int main(int argc, char** argv) {
     // nothing on the desktop can catch because every other path here goes through
     // App::render.
     reader::PageMetrics m;
-    theme.readerMetrics(w, h, fonts, body, m);
+    theme.readerMetrics(w, h, fonts, body, reader::Settings{}, m);
     m.italic = &italic;
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body);
@@ -455,7 +455,7 @@ int main(int argc, char** argv) {
     // BlockKind: a heading, an italic inset blockquote, prose with inline emphasis,
     // and a hanging-indent list.
     reader::PageMetrics m;
-    theme.readerMetrics(w, h, fonts, body, m);
+    theme.readerMetrics(w, h, fonts, body, reader::Settings{}, m);
     m.italic = &italic;
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body);
@@ -481,7 +481,7 @@ int main(int argc, char** argv) {
   if (isAnchored) {
     // The same path as `reader`, with two presses on the end.
     reader::PageMetrics m;
-    theme.readerMetrics(w, h, fonts, body, m);
+    theme.readerMetrics(w, h, fonts, body, reader::Settings{}, m);
     m.italic = &italic;
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body);
@@ -517,7 +517,7 @@ int main(int argc, char** argv) {
     // Fidelity::Grayscale, so renderToPng renders three planes and composes them:
     // this is the first screen in the project whose golden is not a 1-bit frame.
     reader::PageMetrics m;
-    theme.readerMetrics(w, h, fonts, body, m);
+    theme.readerMetrics(w, h, fonts, body, reader::Settings{}, m);
     m.italic = &italic;
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body);

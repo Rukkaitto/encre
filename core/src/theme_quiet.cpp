@@ -965,7 +965,8 @@ constexpr std::string_view kEmDash = "\xE2\x80\x94";
 }  // namespace
 
 void QuietTheme::readerMetrics(int panelW, int panelH, const FontSet& fonts,
-                               const GlyphSource& body, PageMetrics& out) const {
+                               const GlyphSource& body, const Settings& settings,
+                               PageMetrics& out) const {
   // Both bands are one line of --t-meta plus their padding. The header's two runs
   // are `align-items: baseline` and the same size, so the row is one line high;
   // the footer's tallest child is its text, not the 5px bar.
@@ -973,12 +974,18 @@ void QuietTheme::readerMetrics(int panelW, int panelH, const FontSet& fonts,
   const int headerH = meta.lineHeight() + kReadHeaderPadBottom;
   const int footerH = kReadFooterPadTop + meta.lineHeight() + kReadFooterPadBottom;
 
-  out.columnLeft = kReadPadX;
+  // THE MARGIN IS THE SETTING NOW, and kReadPadX is its default -- see
+  // Settings::margins, whose middle step is this constant. The band and the
+  // footer keep kReadPadX for their own padding: they are full-bleed runs whose
+  // HEIGHT is type, so a margin change must not move the column's top or shorten
+  // it, and renderReader is what draws them.
+  out.columnLeft = settings.margins;
   out.columnTop = kReadPadTop + headerH;
-  out.columnW = panelW - 2 * kReadPadX;
+  out.columnW = panelW - 2 * settings.margins;
   out.columnH = panelH - kReadPadTop - headerH - footerH;
-  out.leadEm1000 = kBodyLeadEm;
+  out.leadEm1000 = settings.lineSpacing;
   out.indentEm1000 = kBodyIndentEm;
+  out.justify = settings.justify;
   // The body face's own tracking is the face's: the board sets no letter-spacing
   // on the reading column, and a book's text is the one run on this device that
   // must not be tracked -- the chrome's wide spacing is a chrome mannerism.

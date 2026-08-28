@@ -3372,7 +3372,7 @@ void setup() {
   // for the reason spelled out above: libraryVisibleRows was handed the native
   // landscape height once and showed four rows instead of seven.
   reader::PageMetrics readerMetrics;
-  gTheme.readerMetrics(logicalW, logicalH, fonts, gBody, readerMetrics);
+  gTheme.readerMetrics(logicalW, logicalH, fonts, gBody, gSettings, readerMetrics);
   // The WRAP measures emphasis with this, so it has to be in the metrics the factory
   // hands the reader -- not only in the draw.
   readerMetrics.italic = &gItalic;
