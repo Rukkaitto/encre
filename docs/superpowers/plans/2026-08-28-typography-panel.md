@@ -106,11 +106,19 @@ have said the design is good.
 
 Three changes, each with its own reason:
 
-1. **The preview box gets a fixed height.** Content-sized, the box grows with the
-   type and every row below it moves on every press. Fixed, the rows never move.
-   The height is the panel less the fixed runs; on the X4 that leaves **264px of
-   text area**, so the box is `height: 292px` (264 + 2×2px border + 2×12px
-   padding) with `box-sizing: border-box` and `overflow: hidden`.
+1. **The preview box stops being content-sized.** Content-sized, the box grows
+   with the type and every row below it moves on every press; filling the leftover
+   instead, the rows never move.
+   **`flex: 1; min-height: 0; box-sizing: border-box; overflow: hidden` — NOT a
+   pinned height.** A pinned one was tried and was wrong by ~42px, because it was
+   computed from a footnote assumed to be two lines that the board renders in
+   three; `flex-shrink`'s default of 1 then absorbed the error silently, so the
+   board looked correct while stating a number it was not drawing. Pinning a height
+   the board computes is CLAUDE.md's first invariant and it has caused three
+   defects here already.
+   **The measured result, which the firmware has to derive:** the box is 250px on
+   the X4 and 241px on the X3 (outer, borders included), so 222px and 213px of text
+   area.
 2. **The focused row loses its chevrons.** This board depicts BROWSE mode, where
    Up/Down move the focus and no value is being stepped. Chevrons belong to the
    edit state, which is Task 2's board.
@@ -137,21 +145,26 @@ p = pathlib.Path("design/Typography.dc.html")
 src = p.read_text()
 edits = []
 
-# 1 + 3: the preview box gets a fixed height and the full sentence.
+# 1 + 3: the preview box fills the leftover, and the full sentence.
 edits.append((
   '<div style="margin: 16px 24px 0 24px; border: 2px solid #000000; padding: 12px 16px; font-family: Literata, Georgia, serif; font-size: 32px; line-height: 1.7; text-align: justify;">Miss Brooke had that kind of beauty which seems to be thrown into relief.</div>',
-  # THE BOX IS FIXED, NOT CONTENT-SIZED. Content-sized it grows with the type and
-  # walks all five rows down the panel on every press; on e-ink that reads as the
-  # whole screen jumping. 292px is the panel less every fixed run (band, LIVE
-  # PREVIEW label, five rows, footnote, hint bar) -- 264px of text plus this box's
-  # own 4px of border and 24px of padding. The firmware DERIVES the same number
-  # from the same runs rather than reading this one; see typographyPreviewBoxH in
-  # core/src/theme_quiet.cpp.
+  # THE BOX FILLS THE LEFTOVER; IT IS NOT CONTENT-SIZED AND IT IS NOT PINNED.
+  # Content-sized it grows with the type and walks all five rows down the panel on
+  # every press; on e-ink that reads as the whole screen jumping. So it takes the
+  # panel less every fixed run (band, LIVE PREVIEW label, five rows, footnote, hint
+  # bar) -- which measures 250px on the X4 and 241px on the X3, and which the
+  # firmware DERIVES from the same runs rather than reading a number off this file.
+  # See typographyPreviewBoxH in core/src/theme_quiet.cpp.
+  #
+  # A PINNED HEIGHT WAS TRIED AND WAS WRONG BY ~42px, computed from a footnote
+  # assumed to be two lines that this board renders in three -- and flex-shrink's
+  # default of 1 absorbed the error, so the board looked right while stating a
+  # number it was not drawing. That is CLAUDE.md's first invariant.
   #
   # AND IT CANNOT PREVIEW THE MARGINS. This box is chrome geometry -- 396px of
   # measure -- where the reading column is panelW - 2*margins, 444px by default.
   # Four of the five settings show here faithfully; Margins never will.
-  '<div style="margin: 16px 24px 0 24px; border: 2px solid #000000; padding: 12px 16px; height: 292px; box-sizing: border-box; overflow: hidden; font-family: Literata, Georgia, serif; font-size: 32px; line-height: 1.7; text-align: justify;">Miss Brooke had that kind of beauty which seems to be thrown into relief by poor dress.</div>'))
+  '<div style="margin: 16px 24px 0 24px; border: 2px solid #000000; padding: 12px 16px; flex: 1; min-height: 0; box-sizing: border-box; overflow: hidden; font-family: Literata, Georgia, serif; font-size: 32px; line-height: 1.7; text-align: justify;">Miss Brooke had that kind of beauty which seems to be thrown into relief by poor dress.</div>'))
 
 # 2: the focused row is BROWSE mode, so no chevrons.
 edits.append((
@@ -185,9 +198,9 @@ git add design/Typography.dc.html
 git commit -m "design: Typography's preview box is fixed, and its board is the browse state
 
 Content-sized, the box grows with the type and walks all five rows down the
-panel on every press. Fixed at 292px -- the panel less every other run -- the
-rows never move, which is the scroll-rail gutter trade again: a reflow you see
-every time loses to a fixed cost you see once.
+panel on every press. Filling the leftover instead -- flex: 1, never a pinned
+number -- the rows never move, which is the scroll-rail gutter trade again: a
+reflow you see every time loses to a fixed cost you see once.
 
 The chevrons go with it. They belong to the edit state, which is its own
 board, and drawing them here promised a step on a browse-mode row.
@@ -2323,10 +2336,12 @@ int typographyPreviewBoxH(const Framebuffer& fb, const FontSet& fonts, int bandH
   // is renderSettings' and renderLibrary's rule verbatim.
   const int rowsH = kTypoRowsBorder + rowCount * kTypoRowH +
                     (rowCount > 0 ? (rowCount - 1) * kTypoRuleH : 0);
-  // The footnote is two lines at the board's measure on both panels -- but ASKED
-  // rather than assumed, because the firmware's whole-pixel advances measure ~3%
-  // wider than Chrome's and a board's max-width is a number to check in both
-  // engines (SdMissing's had to go 400 -> 420 for exactly this).
+  // The footnote is THREE lines at the board's measure, on both panels -- measured,
+  // not assumed: it was assumed to be two when this box's height was first
+  // computed, and that error was ~42px. It is still ASKED here rather than
+  // hardcoded, because the firmware's whole-pixel advances measure ~3% wider than
+  // Chrome's and a board's measure is a number to check in both engines
+  // (SdMissing's had to go 400 -> 420 for exactly this).
   const Prose foot = wrapProseLead(meta, kTypoFootnote, fb.width() - 2 * kMargin,
                                    kTypoFootLeadEm, trackingEm(meta, kTypoFootEm));
   const int footH = foot.height + kTypoFootPadBottom;
@@ -2363,8 +2378,20 @@ void QuietTheme::renderTypography(Framebuffer& fb, const FontSet& fonts,
   // --- The preview box ---------------------------------------------------------
   int y = afterBand + kTypoPreviewTop;
   outlineRect(fb, kMargin, y, fb.width() - 2 * kMargin, boxH, kTypoPreviewBorder, plane);
-  // AS MANY LINES AS FIT, and whole lines only: a clipped half-line reads as a
-  // rendering fault, which is the defect Reader.dc.html's own column had.
+  // AS MANY LINES AS FIT -- AND "FIT" MEANS THE INK FITS, NOT THE LINE BOX.
+  //
+  // MEASURED ON THE BOARD, and it decides a whole line: at the default setting the
+  // X3's content area is 213px and four line boxes are 217.6px, so a clamp on the
+  // LINE BOX drops the fourth line -- while Chrome draws it, because its ink ends
+  // 10px clear of the edge and only the empty leading below the descenders
+  // overflows. A line-box clamp therefore renders one line FEWER than the board on
+  // the X3 and the same as the board on the X4, which is a whole line of mismatch
+  // on one geometry only: the hardest kind to attribute.
+  //
+  // So the rule is: draw a line whose box STARTS inside the content area and whose
+  // INK (baseline + descent) also ends inside it. A clipped half-line still reads
+  // as a rendering fault -- the defect Reader.dc.html's own column had -- and this
+  // rule cannot produce one, because it is the ink it measures.
   const int textW = fb.width() - 2 * kMargin - 2 * kTypoPreviewBorder - 2 * kTypoPreviewPadX;
   const int textH = boxH - 2 * kTypoPreviewBorder - 2 * kTypoPreviewPadY;
   // NO FACE, NO SPECIMEN -- the box is still drawn, because the box is the board's
@@ -2811,7 +2838,9 @@ Expected: both typography boards now report a percentage. This project averages
 
 **If either is above ~8%, stop and find the structural mismatch** before
 proceeding. The likely candidates, in order: the preview box's derived height
-disagreeing with the board's 292px; the footnote wrapping to three firmware lines
+disagreeing with the board's measured 250px/241px, or clamping on the line box
+where the board clamps on the ink (that one costs a whole line on the X3 alone);
+the footnote wrapping to four firmware lines where Chrome takes three
 where Chrome takes two (SdMissing's `max-width` needed 400 → 420 for exactly
 this — the firmware's whole-pixel advances measure ~3% wider); `kTypoRowH`.
 
