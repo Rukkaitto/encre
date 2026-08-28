@@ -128,9 +128,11 @@ Three changes, each with its own reason:
    board looked correct while stating a number it was not drawing. Pinning a height
    the board computes is CLAUDE.md's first invariant and it has caused three
    defects here already.
-   **The measured result, which the firmware has to derive:** the box is 250px on
-   the X4 and 241px on the X3 (outer, borders included), so 222px and 213px of text
-   area.
+   **The measured result:** at the time of this task the box was 250px on the X4
+   and 241px on the X3. **Both numbers are now stale** -- the footnote later
+   shortened from three lines to two and `flex: 1` gave the freed 31.5px to the
+   box, so it is **282/274** outer and **254/246** of text area. Task 15 carries the
+   current figures.
 2. **The focused row loses its chevrons.** This board depicts BROWSE mode, where
    Up/Down move the focus and no value is being stepped. Chevrons belong to the
    edit state, which is Task 2's board.
@@ -164,7 +166,7 @@ edits.append((
   # Content-sized it grows with the type and walks all five rows down the panel on
   # every press; on e-ink that reads as the whole screen jumping. So it takes the
   # panel less every fixed run (band, LIVE PREVIEW label, five rows, footnote, hint
-  # bar) -- which measures 250px on the X4 and 241px on the X3, and which the
+  # bar) -- 282px on the X4 and 274px on the X3 once the footnote became two lines,
   # firmware DERIVES from the same runs rather than reading a number off this file.
   # See typographyPreviewBoxH in core/src/theme_quiet.cpp.
   #
@@ -334,10 +336,12 @@ came out of looking at the pixels.
   defect Task 3 fixed**, which is a real limit on this project's headline check.
 - [x] **The pinned preview height was wrong by ~42px** and `flex-shrink` hid it.
   Fixed to `flex: 1`; renders byte-identically, which is the proof. Measured: the
-  box is 250px on the X4, 241px on the X3.
+  box was 250/241 when this was written and is 282/274 now -- see Task 15.
 - [x] **The clamp rule had to be defined in terms of INK, not the line box** — on
-  the X3 four line boxes are 217.6px in a 213px content area, and Chrome draws the
-  fourth line because its ink ends 10px clear. A line-box clamp would render one
+  the X3's content area is 246px, where four line boxes are 217.6px -- so a
+  `floor` and an ink test AGREE there, and the asymmetry this rule was written for
+  does not exist at the board's real geometry. The ink form is kept because it can
+  never slice a line at any lead the ramp may gain; see Task 15. A line-box clamp would render one
   line fewer than the board on one geometry only.
 - [x] **The two-mode design was rejected** on the rendered hint bar, and the
   footnote's copy was replaced. See the spec.
@@ -2126,7 +2130,7 @@ In the same anonymous namespace:
 // has already paid for ignoring it once: the board pinned `height: 292px`,
 // computed from a footnote assumed to be two lines that rendered in three, and
 // `flex-shrink`'s default of 1 absorbed the ~42px error silently. The board
-// renders 250px on the X4 and 241px on the X3.
+// renders 282px on the X4 and 274px on the X3 (254/246 of text area).
 //
 // MEASURED TARGETS, so a mismatch here is visible immediately rather than at the
 // comparison sheet: 250/241 outer, 222/213 of text area.
@@ -2301,8 +2305,9 @@ all. Put this in `theme_quiet.cpp`'s anonymous namespace beside
 //
 // AND NOT `floor(boxH / lead)`, which is the obvious answer and drops a line the
 // board draws. Chrome keeps a line whose line-box TOP is inside the box and clips
-// what hangs below, so the X3's 213px content area takes ceil(213 / 54.4) = 4
-// lines at the default setting. The firmware has no clip, so it asks whether the
+// what hangs below, so the X3's 246px content area takes 4 lines at the default
+// setting -- which floor(246 / 54.4) also gives, so the two AGREE at the board's
+// real geometry and no test can separate them. The firmware has no clip, so it asks whether the
 // INK fits -- which lands on the same 4, because that fourth box overruns by 4.6px
 // while its ink ends 10px clear. Measured on the rendered board, both geometries.
 //
@@ -2457,7 +2462,7 @@ that `setReaderBody(&body)` is called before the push.
 # The Typography panel, reached the way the device reaches it: Reader -> menu ->
 # Typography. A smoke test on the navigation as much as on the render -- the
 # menu's row has to be live for this to arrive anywhere. Rendered at the X3, which
-# is the geometry with the tighter preview budget (213px against the X4's 222).
+# is the geometry with the tighter preview budget (246px against the X4's 254).
 add_test(NAME sim_typography COMMAND reader_sim typography
          ${CMAKE_BINARY_DIR}/sim_typography.png --canvas 528x792)
 ```
@@ -2634,9 +2639,10 @@ assert Mono.
 
 Proved by mutation, one at a time, with the counts recorded. The one that
 matters: replacing previewLinesThatFit with floor(boxH / lead) fails the X3
-golden and NOT the X4, because four line boxes are 217.6px in the X3's 213px
-content area while the ink ends 10px clear. That asymmetry is the whole reason
-the helper measures ink, and it is now a failing test rather than a paragraph.
+golden -- EXCEPT that at the board's real 246px content area the two agree, so
+this mutation fails NOTHING. Say so rather than implying coverage: the ink form is
+kept because it cannot slice a line at a lead the ramp may later gain, not because
+a test distinguishes it today.
 
 Co-authored-by: Claude <claude@anthropic.com>"
 ```
@@ -2700,7 +2706,7 @@ proceeding. The likely candidates, in order:
    line count before anything else; it is the largest single block of pixels on
    the screen.
 2. **The preview box's derived height** disagreeing with the board's measured
-   250px (X4) / 241px (X3).
+   282px (X4) / 274px (X3), 254/246 of text area.
 3. **The footnote wrapping to three firmware lines where Chrome takes two** — the
    firmware's whole-pixel advances measure ~3% wider, and SdMissing's `max-width`
    needed 400 → 420 for exactly this.

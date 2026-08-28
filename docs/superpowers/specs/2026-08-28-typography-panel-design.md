@@ -253,8 +253,10 @@ all".
 
 ## The preview box
 
-A fixed specimen string in `core/`, next to the screen. The band still names the
-book, as `ReaderMenu.dc.html`'s band does -- it says which book you return to.
+A fixed specimen string in `core/`, next to the screen. **The band names no book**
+-- see *Two entry points* above; an earlier draft of this section said it did, and
+that sentence survived the change that emptied the slot. The board is the
+authority and its right slot holds an `&nbsp;`.
 
 **THE BOX'S HEIGHT IS FIXED, NOT CONTENT-SIZED.** It takes the panel less its
 fixed runs -- band, `LIVE PREVIEW` label, five rows, footnote, hint bar -- so as
@@ -377,8 +379,13 @@ into the design HTML first -- including when the board is what is wrong.
    `flex-shrink` hid it); the hint bar is `BACK / CHANGE / UP / DOWN`; the
    footnote is `APPLIES TO EVERY BOOK. YOUR PLACE IS KEPT.`; the specimen is
    Middlemarch's full opening sentence; the focus sits on `Size`, not `Font`.
-   Measured: the box is 250px on the X4 and 241px on the X3, so 222px and 213px
-   of text area, holding four whole lines of specimen at the default setting.
+   Measured: the box is **282px on the X4 and 274px on the X3**, so 254px and
+   246px of text area, holding four whole lines of specimen at the default setting
+   at both geometries. These replace 250/241/222/213, measured at the checkpoint
+   BEFORE the footnote shortened from three lines to two -- `flex: 1` gave the
+   freed 31.5px to the box. The firmware derives 280/272; the 2px is the focused
+   row's dropped rule (which it must not measure, or the box's height would depend
+   on which row has the focus) plus two half-pixel Chrome line boxes.
 2. **`design/Settings.dc.html`** -- the five inert TYPOGRAPHY rows become a
    `READING` section with one disclosing `Typography` row; the focus moves onto it
    from `Sleep after`; the Confirm hint reads `OPEN`. (Its `Size` value went
