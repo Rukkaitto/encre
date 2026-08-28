@@ -13,10 +13,9 @@ namespace {
 // U+00B7, as every board's meta line spells it.
 const char* const kMiddot = " \xC2\xB7 ";
 
-// Until per-book state exists there is exactly one thing a book's right-hand
-// value can honestly say. The board shows percentages and DONE beside it, and
-// the view-model carries whatever it is given, so Phase 3 fills this in without
-// touching the theme.
+// What a book that has never been opened says in the value slot the board gives
+// percentages to. NEW rather than a blank or `0%`: a book at 0% HAS been opened,
+// and the board draws the two differently.
 const char* const kNewBook = "NEW";
 
 // The last segment of a path, which is the name of the directory being listed.
@@ -91,7 +90,10 @@ bool LibraryScreen::rescan() {
     items_.reserve(entries.size());
     for (BookEntry& e : entries) {
       LibraryItem item;
-      const bool dir = e.isDir;
+      // MOVED IN FIRST, so the two lines below address the row through `item` rather
+      // than through a `BookEntry` that is about to be moved from. applyProgress is
+      // shared with refreshProgress(), which has only the item.
+      item.entry = std::move(e);
       // A folder's own book count, for the board's `FOLDER - 6 BOOKS` line. It
       // is deliberately one level deep: the board's `12 BOOKS` in the band is
       // the 6 books beside the folder plus the 6 inside it, so that is what the
@@ -107,32 +109,16 @@ bool LibraryScreen::rescan() {
       // that follows a count reaches the card for nothing but its own listing.
       // Nothing here changed: the number, and where it is not available, are
       // exactly as before.
-      item.childBooks = dir ? BookList::countBooks(*fs_, join(e.name)) : -1;
-      // A PERCENTAGE IF THE BOOK HAS BEEN STARTED, `NEW` if it has not.
-      //
-      // design/Library.dc.html gives rows both forms, and this header used to say
-      // "on the device today the author is blank and every book reads NEW" because a
-      // percentage needed `/.reader/state/` and there was nothing in it. There is
-      // now.
+      item.childBooks =
+          item.entry.isDir ? BookList::countBooks(*fs_, join(item.entry.name)) : -1;
+      // A PERCENTAGE IF THE BOOK HAS BEEN STARTED, `NEW` if it has not -- derived by
+      // applyProgress, which refreshProgress() shares so the two cannot spell one
+      // number two ways.
       //
       // The index is read ONCE per rescan, above -- one listing plus one read per
       // book STARTED. Asking each row for its own sidecar would be one open per book
       // on the card, most of them misses.
-      // ONE LOOKUP FOR BOTH ROWS. The Library's own row wants a percentage and Book
-      // details wants a percentage AND the chapter name, and they come out of the same
-      // entry -- two scans for one answer would be two scans.
-      const ProgressEntry* seen = dir ? nullptr : progressFor(started, join(e.name));
-      item.progress = dir ? "" : (seen != nullptr ? std::to_string(seen->percent) + "%"
-                                                  : kNewBook);
-      if (seen != nullptr) {
-        // BOOK DETAILS' OWN RUNS, which are not the row's. Its Progress row is the
-        // percentage without the page count the board used to ask for, and its "Current
-        // story" is the chapter name the sidecar carries -- so both cost the listing the
-        // percentages already cost rather than an archive open per book.
-        item.details.progress = std::to_string(seen->percent) + "%";
-        item.details.chapter = seen->chapter;
-      }
-      item.entry = std::move(e);
+      applyProgress(item, started);
       items_.push_back(std::move(item));
     }
   }
@@ -143,6 +129,54 @@ bool LibraryScreen::rescan() {
   if (wasFocus < 0) window().setFocus(0);
   syncVm();
   return ok;
+}
+
+void LibraryScreen::applyProgress(LibraryItem& item,
+                                  const std::vector<ProgressEntry>& started) const {
+  // A folder discloses rather than stating a value -- the board gives it a chevron,
+  // and a percentage in that slot would be two facts in one field.
+  if (item.entry.isDir) {
+    item.progress.clear();
+    item.details.progress.clear();
+    item.details.chapter.clear();
+    return;
+  }
+  // ONE LOOKUP FOR BOTH ROWS. The Library's own row wants a percentage and Book
+  // details wants a percentage AND the chapter name, and they come out of the same
+  // entry -- two scans for one answer would be two scans.
+  const ProgressEntry* seen = progressFor(started, join(item.entry.name));
+  if (seen == nullptr) {
+    item.progress = kNewBook;
+    // CLEARED, NOT LEFT ALONE. This runs a second time over rows that already carry
+    // values, so a book whose sidecar has gone must lose the one it had rather than
+    // keep stating a position the card no longer holds.
+    item.details.progress.clear();
+    item.details.chapter.clear();
+    return;
+  }
+  // BOOK DETAILS' OWN RUNS, which are not the row's. Its Progress row is the
+  // percentage without the page count the board used to ask for, and its "Current
+  // chapter" is the chapter name the sidecar carries -- so both cost the listing the
+  // percentages already cost rather than an archive open per book.
+  const std::string pct = std::to_string(seen->percent) + "%";
+  item.progress = pct;
+  item.details.progress = pct;
+  item.details.chapter = seen->chapter;
+  // `author` is deliberately untouched: it is not in the sidecar, and a refresh that
+  // blanked it would cost Book details the one field an archive open paid for.
+}
+
+bool LibraryScreen::refreshProgress() {
+  if (fs_ == nullptr) return false;  // sample content: there is no card to re-read
+  std::vector<ProgressEntry> started;
+  // THE ROWS ARE LEFT ALONE ON A FAILURE, which is the whole reason this is not
+  // `loadProgressIndex(...); for (...)`. An unreadable index means the card did not
+  // answer, and re-deriving from an empty one would turn every started book back into
+  // NEW -- exactly the wrong answer, loudly.
+  if (!loadProgressIndex(*fs_, started)) return false;
+  for (LibraryItem& item : items_) applyProgress(item, started);
+  syncVm();
+  return true;
 }
 
 void LibraryScreen::setVisibleRows(int n) {

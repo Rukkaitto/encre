@@ -552,6 +552,22 @@ static struct {
 // saved. Nothing else on the device moves that block.
 static bool gHomeStale = false;
 
+// THE SAME FACT, FOR THE OTHER SCREEN THAT DRAWS IT. The Library gives every row a
+// percentage or NEW, and it is built ONCE -- when it is pushed. The Reader is pushed
+// ON TOP of it, so the pop that leaves a book hands back that same screen with the
+// rows it was born with: a book just read to 31% still read NEW, which is what was
+// reported off the device.
+//
+// TWO FLAGS AND NOT ONE, because they are consumed at different moments and each
+// clears its own: Home rebuilds when it is the root and on top, the Library refreshes
+// when IT is on top. Sharing one would let whichever screen was reached first clear it
+// for the other -- Library, Back, Home would leave Home stale.
+//
+// Set in the one function that changes reading progress, and consumed in loop() after
+// the dispatch, which is what makes the pop that reveals the Library the press that
+// refreshes it.
+static bool gLibraryStale = false;
+
 // The spine Contents chose, or -1. Held for exactly one dispatch: the choice is made
 // while Contents is on top and acted on once the pop has put the Reader back.
 static int gPendingSpine = -1;
@@ -1767,6 +1783,9 @@ static reader::SaveResult saveReadingPosition(const char* why) {
   // Home now has something different to say, whether or not the card took the write:
   // the pointer in hand is newer than the one Home was built from either way.
   gHomeStale = true;
+  // ...and so does the Library's row for this book, whether or not the card took the
+  // write: the percentage in hand is newer than the one those rows were built from.
+  gLibraryStale = true;
   logf("[progress] %s: spine=%d block=%d line=%d %d%% -- position %s, pointer %s\n", why,
        p.spine, p.block, p.line, last.percent, outcome(a), outcome(b));
   logFlush();
@@ -4086,6 +4105,42 @@ void loop() {
       gHomeStale = false;
       logf("[progress] Home rebuilt with the current reading position\n");
       logFlush();
+    }
+
+    // BACK ON THE LIBRARY AFTER READING: re-derive the rows' percentages, so the book
+    // just closed stops saying NEW. AFTER the dispatch for the same reason Home's
+    // rebuild is -- the pop is what put the Library back on top, and this asks what is
+    // on top to decide whether to do anything.
+    //
+    // Gated on the Library being ON TOP rather than done as soon as the flag is set,
+    // and that is the whole of what keeps it off the reader's critical path: the
+    // position also saves on chapter crossings and in a 2 s quiet window WHILE READING,
+    // and card work there is exactly what the quiet window exists to avoid. The Reader
+    // is on top for all of those, so the first iteration that can consume this is the
+    // pop out of the book.
+    //
+    // It refreshes rather than rescans: only `/.reader/state` changed, and the save has
+    // just dropped the listing cache, so a rescan would pay a fresh `/books` listing --
+    // ~600 ms on a 203-book card -- plus one per folder for the counts. See
+    // LibraryScreen::refreshProgress.
+    //
+    // ON THE CRITICAL PATH DELIBERATELY, because the row has to be right the moment it
+    // is painted, and the paint is this same press. Timed into the log for the reason
+    // `ser=` and `[log] wrote` are: an instrument that hides its cost lets you
+    // attribute it to the device.
+    if (gLibraryStale && gApp->top().id() == reader::ScreenId::Library) {
+      reader::LibraryScreen* lib = gFactory.library();
+      // A null pointer here means no Library to refresh, so the flag is LEFT SET rather
+      // than cleared: it costs a pointer test an iteration and it still fires for the
+      // next Library, where clearing would lose the refresh outright.
+      if (lib != nullptr) {
+        const uint32_t t = millis();
+        const bool ok = lib->refreshProgress();
+        gLibraryStale = false;
+        logf("[progress] Library rows re-read: %s in %lums\n", ok ? "ok" : "REFUSED",
+             (unsigned long)(millis() - t));
+        logFlush();
+      }
     }
     if (gApp->retryRequested()) handleRetry();
     // Same placement and the same reason: the mask refresh below must see whatever

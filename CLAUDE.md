@@ -2447,6 +2447,32 @@ Reader exists". It does now. Two things had to change together:
   record is skipped individually, so a save cut by a power loss costs one book its
   percentage and nothing else.
 
+**AND THE LIBRARY IS BUILT ONCE, WHICH IS THE SAME BUG HOME HAD.** The rows are
+derived when the screen is pushed, and the Reader is pushed ON TOP of the Library — so
+the pop that leaves a book hands back that same instance with the rows it was born
+with, and a book just read to 31% still said `NEW`. Reported off the device, exactly as
+Home's "after reading a book, going Home still said NOTHING OPEN YET" was. Two screens
+draw reading progress and both had to be told it moved: `saveReadingPosition` sets
+`gHomeStale` and `gLibraryStale` together, and each is consumed when ITS screen is
+reachable — sharing one flag would let Library, Back, Home clear it before Home used it.
+
+- **The Library's is consumed when the Library is ON TOP**, which is what keeps it off
+  the reader's critical path: the position also saves on chapter crossings and in the
+  2 s quiet window WHILE READING, and the Reader is on top for all of those. The first
+  iteration that can consume it is the pop out of the book.
+- **It REFRESHES rather than rescans**, and the difference is ~600 ms. Only
+  `/.reader/state` changed — a book cannot ARRIVE while the firmware runs, the same
+  premise `libraryCountForHome`'s cache key rests on — and the save has just called
+  `forgetCardFacts()`, so a `rescan()` would pay a fresh `/books` listing plus one per
+  folder for the counts, on the critical path of a Back.
+  `LibraryScreen::refreshProgress()` re-derives over the rows already there and moves
+  neither the focus nor the window.
+- **`applyProgress` is the one spelling of the derivation**, shared by both callers —
+  the second copy is the extraction point, and `to_string(percent) + "%"` appears in
+  the row's value AND in Book details' Progress row.
+- **A failure leaves the rows alone.** An unreadable index means the card did not
+  answer; re-deriving from an empty one would turn every started book back into `NEW`.
+
 **BOOK DETAILS' ROWS COME FROM THE SAME INDEX**, and this is why the sidecar carries
 derived data at all. Its `Progress` row is the percentage and its `Current story` is the
 chapter name, both read from the one listing the Library already does — where deriving

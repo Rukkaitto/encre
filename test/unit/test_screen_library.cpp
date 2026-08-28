@@ -742,3 +742,135 @@ TEST_CASE("a book in a subfolder is matched by its full path, not its name") {
   inner.setVisibleRows(8);
   CHECK(valueOf(inner, "Dubliners") == "48%");
 }
+
+
+// --- Progress that changed while this screen was standing ---------------------
+//
+// THE REPORTED BUG: "start reading a book from the library and go back, and the row
+// still says NEW". The Reader is pushed ON TOP of the Library, so the pop that leaves
+// the book hands back the very same screen -- with the rows it was built with, before
+// the book had ever been opened. The save on the way out lands on the card and nothing
+// re-reads it.
+//
+// Deliberately NOT rescan(): the set of books cannot change while the firmware runs
+// (V1 transfers by card), and the save has just dropped the listing cache, so a rescan
+// would pay a fresh `/books` listing -- ~600 ms on a 203-book card -- plus one listing
+// per folder, on the critical path of a Back. Only `/.reader/state` has changed.
+
+TEST_CASE("a book read while the Library stood under the Reader stops reading NEW") {
+  FakeFileSystem fs = cardWithBooks();
+  LibraryScreen lib(fs, "/books");
+  lib.setVisibleRows(8);
+  REQUIRE(valueOf(lib, "Middlemarch") == "NEW");
+
+  // The reader opens it, reads, and saveReadingPosition("leaving") writes the sidecar
+  // while this screen sits underneath the Reader.
+  reader::ReadingPosition p;
+  p.bookPath = "/books/Middlemarch.epub";
+  p.spine = 4;
+  p.percent = 31;
+  p.chapter = "MISS BROOKE";
+  p.bookBytes = 1;
+  p.ppem = 32;
+  p.columnW = 492;
+  REQUIRE(reader::savePosition(fs, p) == reader::SaveResult::Written);
+
+  REQUIRE(lib.refreshProgress());
+  CHECK(valueOf(lib, "Middlemarch") == "31%");
+  // The book nobody opened is untouched -- or the case is asserting that every row
+  // changed, which a bug that blanked the lot would also satisfy.
+  CHECK(valueOf(lib, "Walden") == "NEW");
+}
+
+TEST_CASE("refreshing progress moves neither the focus nor the window") {
+  // This runs on the press that returns to the Library, so anything it disturbs is a
+  // selection the user did not touch. It re-derives values over the rows that are
+  // already there; it does not re-read the directory.
+  Ramp r;
+  reader::QuietTheme theme;
+  FakeFileSystem fs = cardWithManyBooks(200);
+  LibraryScreen lib(fs, "/books");
+  lib.setVisibleRows(theme.libraryVisibleRows(800, r.fonts));
+  for (int i = 0; i < 40; ++i) lib.onEvent(kDown);
+
+  const int focus = lib.focus();
+  const int first = lib.vm().firstRow;
+  REQUIRE(focus == 40);
+  REQUIRE(first > 0);
+
+  REQUIRE(lib.refreshProgress());
+  CHECK(lib.focus() == focus);
+  CHECK(lib.vm().firstRow == first);
+  CHECK(lib.itemCount() == 200);
+}
+
+TEST_CASE("refreshing progress refreshes Book details' fields, not just the row") {
+  // The details screen reads its Progress and Current chapter rows off this same item
+  // -- one lookup for both, so one refresh has to serve both or the two disagree about
+  // one number.
+  FakeFileSystem fs = cardWithBooks();
+  LibraryScreen lib(fs, "/books");
+  lib.setVisibleRows(8);
+
+  reader::ReadingPosition p;
+  p.bookPath = "/books/Middlemarch.epub";
+  p.percent = 31;
+  p.chapter = "MISS BROOKE";
+  p.bookBytes = 1;
+  p.ppem = 32;
+  p.columnW = 492;
+  REQUIRE(reader::savePosition(fs, p) == reader::SaveResult::Written);
+  REQUIRE(lib.refreshProgress());
+
+  const reader::LibraryItem* item = nullptr;
+  for (int i = 0; i < lib.itemCount(); ++i) {
+    lib.setFocus(i);
+    if (lib.focusedItem()->entry.name == "Middlemarch.epub") item = lib.focusedItem();
+  }
+  REQUIRE(item != nullptr);
+  CHECK(item->details.progress == "31%");
+  CHECK(item->details.chapter == "MISS BROOKE");
+}
+
+TEST_CASE("a book whose sidecar has gone reads NEW again") {
+  // The fields are re-derived, not merged: a refresh writes what the card says now,
+  // including when what it says is nothing. Leaving the old value would make a row
+  // state a position that no longer exists.
+  FakeFileSystem fs = cardWithBooks();
+  reader::ReadingPosition p;
+  p.bookPath = "/books/Middlemarch.epub";
+  p.percent = 31;
+  p.chapter = "MISS BROOKE";
+  p.bookBytes = 1;
+  p.ppem = 32;
+  p.columnW = 492;
+  REQUIRE(reader::savePosition(fs, p) == reader::SaveResult::Written);
+
+  LibraryScreen lib(fs, "/books");
+  lib.setVisibleRows(8);
+  REQUIRE(valueOf(lib, "Middlemarch") == "31%");
+
+  REQUIRE(fs.remove(reader::statePathFor("/books/Middlemarch.epub")));
+  REQUIRE(lib.refreshProgress());
+  CHECK(valueOf(lib, "Middlemarch") == "NEW");
+
+  const reader::LibraryItem* item = nullptr;
+  for (int i = 0; i < lib.itemCount(); ++i) {
+    lib.setFocus(i);
+    if (lib.focusedItem()->entry.name == "Middlemarch.epub") item = lib.focusedItem();
+  }
+  REQUIRE(item != nullptr);
+  CHECK(item->details.progress.empty());
+  CHECK(item->details.chapter.empty());
+}
+
+TEST_CASE("a sample-content Library has no card to re-read") {
+  // The goldens and the comparison sheet build one of these. There is no filesystem,
+  // so a refresh refuses rather than blanking the board's own values -- which is
+  // rescan()'s rule on the same screen.
+  LibraryScreen lib(reader::demoLibraryItems());
+  lib.setVisibleRows(8);
+  const std::string was = lib.vm().rows[0].value;
+  CHECK_FALSE(lib.refreshProgress());
+  CHECK(lib.vm().rows[0].value == was);
+}
