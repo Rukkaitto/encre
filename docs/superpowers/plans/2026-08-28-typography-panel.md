@@ -473,7 +473,11 @@ In `core/include/reader/settings.h`, after `kFullRefreshEveryMax`:
 // moves because of this feature is a bug in it.
 //
 // SIZE: ppem, labelled in points as the chrome ramp is (pt = ppem * 72 / 150,
-// truncated). 27->12, 32->15, 38->18, 42->20, 46->22, all clean.
+// rounded -- and 25->12, 32->15, 38->18, 42->20, 46->22 come out the same
+// truncated, which is the point of 25 rather than 27: 27 is 12.96 pt, so it
+// labelled as "12 PT" while being nearer 13, and under the chrome ramp's own
+// convention 12 PT is ppem 25. Both formulas now agree on all five, so the
+// choice between them cannot drift into a wrong label.
 //
 //   * 32 is the default because design/Reader.dc.html says `font-size: 32px`.
 //   * 38 is on the list because 18 PT is the Typography board's own stated
@@ -483,7 +487,7 @@ In `core/include/reader/settings.h`, after `kFullRefreshEveryMax`:
 //   * 46 is the top because the glyph cache is thrash-free to ppem ~46 (see
 //     CLAUDE.md, The glyph cache). Past it the arena stops holding the
 //     alphabet's union and every page re-rasterises at ~3,794 us a glyph.
-inline constexpr int kBodyPpemSteps[] = {27, 32, 38, 42, 46};
+inline constexpr int kBodyPpemSteps[] = {25, 32, 38, 42, 46};
 // MARGINS: the reader column's side padding in px. 18 is design/Reader.dc.html's
 // own, which is why it is the middle step and carries the board's own label.
 inline constexpr int kMarginSteps[] = {10, 18, 30};
@@ -1640,8 +1644,8 @@ extraction point", not "extract in advance of one".
 `typographySizeLabel` truncates: `pt = ppem * 72 / 150`, exactly as `sleepLabel`
 truncates minutes, because the row describes a size the user is looking at and
 rounding up would name a size the panel is not showing. Every offered ppem
-truncates cleanly (27->12, 32->15, 38->18, 42->20, 46->22), which is part of why
-those five were chosen. `typographyLeadLabel` emits `2.0` rather than `2`, because
+gives the same label as rounding it (25->12, 32->15, 38->18, 42->20, 46->22),
+which is why 25 and not 27 -- see the step table's own comment. `typographyLeadLabel` emits `2.0` rather than `2`, because
 a bare integer reads as a count beside `1.85` rather than as a ratio. The margin
 labels are a parallel array to `kMarginSteps` with a `static_assert` on the
 lengths, so a step added without a label fails to compile.
@@ -1735,7 +1739,7 @@ TEST_CASE("the size cycle visits every offered step, in the table's order") {
   // would read as a broken control rather than as a different design.
   reader::TypographyScreen scr(reader::Settings{}, nullptr, nullptr);
   REQUIRE(scr.focus() == 1);
-  const char* want[] = {"18 PT", "20 PT", "22 PT", "12 PT", "15 PT"};
+  const char* want[] = {"18 PT", "20 PT", "22 PT", "12 PT", "15 PT"};  // wraps at 46 -> 25
   for (const char* w : want) {
     scr.onEvent(kConfirm);
     CHECK(scr.vm().rows[1].value == std::string(w));

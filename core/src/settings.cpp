@@ -97,7 +97,12 @@ void readBool(const JsonObject& o, const char* key, bool& field, bool& ok) {
 // caller hands it, so the wrong answer would have been persisted.
 template <std::size_t N>
 bool snapToTable(int& field, const int (&table)[N]) {
-  int best;
+  // INITIALISED, although the sentinel below always overwrites it on the first
+  // iteration and `N >= 1` is guaranteed by the array-reference signature. The
+  // redundant store costs nothing the optimiser keeps, and it is not worth the
+  // invariant: this is -fno-exceptions embedded code, so a future edit that
+  // reordered the loop would read an uninitialised int with no diagnostic at all.
+  int best = table[0];
   long long bestDist = -1;
   for (const int candidate : table) {
     const long long d = static_cast<long long>(candidate) - field;

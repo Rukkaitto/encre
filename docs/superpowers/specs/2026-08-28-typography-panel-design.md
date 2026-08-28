@@ -209,13 +209,24 @@ one more list rather than an exception with its own rule.
 | Row | Steps | Default | Label form |
 |---|---|---|---|
 | Font | Literata (unreachable) | -- | `LITERATA` |
-| Size | ppem 27, 32, **38**, 42, 46 | 32 | `12 PT` .. `22 PT` |
+| Size | ppem 25, 32, **38**, 42, 46 | 32 | `12 PT` .. `22 PT` |
 | Margins | 10, 18, 30 px | 18 | `TIGHT`, `COMFORTABLE`, `WIDE` |
 | Line spacing | 1400, 1550, 1700, 1850, 2000 | 1700 | `1.4` .. `2.0` |
 | Alignment | justify true / false | true | `JUSTIFIED`, `RAGGED` |
 
-**The PT label truncates**, as `sleepLabel` truncates minutes: `pt = ppem * 72 /
-150`, so 27 -> 12, 32 -> 15, 38 -> 18, 42 -> 20, 46 -> 22. All five are clean.
+**The PT label is `pt = ppem * 72 / 150`**: 25 -> 12, 32 -> 15, 38 -> 18,
+42 -> 20, 46 -> 22.
+
+**TRUNCATION AND ROUNDING AGREE ON ALL FIVE, WHICH IS WHY 25 AND NOT 27.** The
+first draft had 27, and 27 is 12.96 pt -- truncated to "12 PT" it was nearly a
+full point out, and under CLAUDE.md's own convention (`ppem = pt * 150 / 72`,
+rounded, as the chrome ramp is built) "12 PT" is ppem 25. Truncation is right for
+`sleepLabel`, which describes an elapsed timer where rounding a hand-edited 90 s up
+to "2 MIN" would lie; a type size is a fixed fact and wants the nearest point.
+25 x 72 / 150 is 12.0 exactly, so both formulas give the same five labels and the
+question cannot drift. The three load-bearing steps were untouched by the change:
+32 is today's default, 38 is the board's stated `18 PT`, 46 is the cache ceiling.
+27 was arbitrary.
 
 **ppem 38 is on the list because 18 PT is the board's own stated value**, which
 is what makes the roadmap question above answerable rather than merely raised.
