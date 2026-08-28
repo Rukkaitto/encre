@@ -126,6 +126,39 @@ void ReaderScreen::setMetrics(const PageMetrics& m) {
   syncVm();
 }
 
+void ReaderScreen::relayout(const PageMetrics& m) {
+  // WHERE THEY ARE, taken BEFORE anything is disturbed -- and the LINE dropped here
+  // rather than by the walk, so the one place that decides how much of a cursor
+  // survives a re-layout is this line. See the header, and reading_position.h's
+  // `Relaid`, which grades the same change the same way.
+  const Cursor want{currentCursor().block, 0};
+
+  metrics_ = m;
+  dropPageRing();
+
+  if (fs_ != nullptr && !book_.path.empty()) {
+    // Re-open the chapter at the new metrics, then walk to the block. openChapterAt
+    // rebuilds the index and leaves the stream live at page one; openAtCursor then
+    // walks forward, which is the same single walk a restore takes.
+    //
+    // A FAILED RE-OPEN LEAVES THE PREVIOUS CHAPTER STANDING, which is openChapterAt's
+    // own contract -- it puts back the chapter, the page and the index it moved out --
+    // so this returns rather than walking into a screen that has nothing open.
+    if (!openChapterAt(chapterAt_, false)) return;
+    openAtCursor(want);
+    syncVm();
+    return;
+  }
+
+  // THE IN-MEMORY CHAPTER, through the same landing the card path takes -- two paths
+  // that paginated differently would mean the goldens and the simulator testing
+  // something the device does not do, and this project has been bitten by a desktop
+  // path that diverged from the device's before. setMetrics consumes `startAt_` and
+  // clears it before landing, so nothing stale can survive this.
+  startAt_ = want;
+  setMetrics(m);
+}
+
 void ReaderScreen::setChapterNames(std::vector<TocEntry> toc) {
   names_ = std::move(toc);
   updateChapterLabel();  // whatever is open now gets its name immediately
