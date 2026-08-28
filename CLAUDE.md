@@ -2789,6 +2789,10 @@ opens and is empty.
   `test_document.cpp`'s only malformed-markup case *was* `&nbsp;`, and `test_xml.cpp`
   listed `&#xZZ;` among inputs that must error. A rule stated in one place is enforced in
   three.
+- **CONFIRMED ON GLASS (2026-08-28)**: `Dark Plagueis` opens and reads on the X3. Both
+  this and the identifier fix were desktop-measured first, and desktop evidence has been
+  wrong about this panel three times — so the distinction is worth keeping: everything
+  above is now a fact about the device, not about the simulator.
 
 **`xml.h` DOES NOT VALIDATE NESTING, ON PURPOSE.** `<p>unclosed` tokenizes without
 complaint. The document builder keeps a stack to know which block it is in, so it
