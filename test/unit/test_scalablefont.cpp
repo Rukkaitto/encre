@@ -61,6 +61,39 @@ constexpr const char* kSpecimen =
     "\xE2\x80\x9C AVAST, To Wander Typographically! \xE2\x80\x9D "
     "caf\xC3\xA9, na\xC3\xAFve, 0123456789.";
 
+// THE WORKING SET the arena has to survive: printable ASCII plus the accented and
+// punctuation codepoints tools/fontc.py puts in every subset. Not "a page" -- a page
+// is 36 glyphs and fits twice over at any budget -- but the UNION across pages,
+// because the arena is a ring and a page that introduces a capital the last one did
+// not advances the write pointer.
+//
+// One copy, shared by the budget test and the no-thrash test, on this project's own
+// rule that the second copy is the extraction point: two lists of codepoints
+// claiming to be the same set would be two tests measuring different sets.
+constexpr char32_t kExtendedSet[] = {
+    0xE0, 0xE1,   0xE2,   0xE4,   0xE7,   0xE8,   0xE9,   0xEA,   0xEB,   0xEE, 0xEF,
+    0xF1, 0xF4,   0xF6,   0xF9,   0xFB,   0xFC,   0xC0,   0xC7,   0xC9,   0xD6, 0xDC,
+    0x2018, 0x2019, 0x201C, 0x201D, 0x2013, 0x2014, 0x2026, 0xA0, 0xAB, 0xBB, 0xFFFD};
+
+// Draw the whole set through glyph(), reporting how many the face had and how many
+// bytes of bitmap they came to.
+struct UnionWalk {
+  int glyphs = 0;
+  size_t bytes = 0;
+};
+UnionWalk walkUnion(const ScalableFont& face) {
+  UnionWalk w;
+  const auto add = [&](char32_t cp) {
+    const std::optional<Glyph> g = face.glyph(cp);
+    if (!g) return;
+    w.bytes += static_cast<size_t>(g->stride) * g->bitmapH;
+    ++w.glyphs;
+  };
+  for (char32_t cp = 0x20; cp < 0x7F; ++cp) add(cp);
+  for (const char32_t cp : kExtendedSet) add(cp);
+  return w;
+}
+
 }  // namespace
 
 TEST_CASE("THE DEFAULT CACHE HOLDS THE WHOLE WORKING SET AT THE READING SIZE") {
@@ -75,28 +108,157 @@ TEST_CASE("THE DEFAULT CACHE HOLDS THE WHOLE WORKING SET AT THE READING SIZE") {
   // the bitmaps fails this instead of quietly thrashing on the pages that use a
   // capital the previous page did not.
   Body b(reader::kBodyPpem, 1u << 20);  // a big cache, to measure with
-  size_t bytes = 0;
-  int glyphs = 0;
-  const char32_t kExtended[] = {
-      0xE0, 0xE1, 0xE2, 0xE4, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB, 0xEE, 0xEF, 0xF1, 0xF4, 0xF6,
-      0xF9, 0xFB, 0xFC, 0xC0, 0xC7, 0xC9, 0xD6, 0xDC, 0x2018, 0x2019, 0x201C, 0x201D,
-      0x2013, 0x2014, 0x2026, 0xA0, 0xAB, 0xBB, 0xFFFD};
-  const auto add = [&](char32_t cp) {
-    const std::optional<reader::Glyph> g = b.face.glyph(cp);
-    if (!g) return;
-    bytes += static_cast<size_t>(g->stride) * g->bitmapH;
-    ++glyphs;
-  };
-  for (char32_t cp = 0x20; cp < 0x7F; ++cp) add(cp);
-  for (const char32_t cp : kExtended) add(cp);
-
-  CAPTURE(glyphs);
+  const UnionWalk w = walkUnion(b.face);
+  const size_t bytes = w.bytes;
+  CAPTURE(w.glyphs);
   CAPTURE(bytes);
-  CHECK(glyphs > 100);  // the set is really being walked
+  CHECK(w.glyphs > 100);  // the set is really being walked
   CHECK(bytes <= ScalableFont::kDefaultCacheBytes);
   // And with margin, so one more accented codepoint in a subset does not put it
   // over: the point is a budget that cannot thrash, not one that just fits.
   CHECK(bytes * 100 <= ScalableFont::kDefaultCacheBytes * 85);
+}
+
+TEST_CASE("THE ARENA FOLLOWS THE READING SIZE, SO NO READING SIZE THRASHES") {
+  // Issue #15. The budget above is right at ppem 32 and at nothing else: the union
+  // goes as ppem squared, so 16 KB holds ppem 32 with 25% spare and holds ppem 41's
+  // 19,284 bytes not at all. The Typography `Size` row changes exactly that number,
+  // and a size the arena cannot hold re-rasterises the whole alphabet on every page
+  // that reuses it -- at ~3,794us a glyph on the device.
+  //
+  // `wraps` IS THE INSTRUMENT, not a timing. A thrash is not "slow", it is the ring's
+  // write pointer going round while the set is still live, and that is a counter the
+  // cache already keeps. A timing here would measure the desktop, which rasterises
+  // ~65x faster than the panel and would report the defect as noise.
+  std::vector<uint8_t> ttf = bodyTtf();
+  // Every step of a plausible Size ramp. 29..41 is 14pt..20pt at this project's
+  // 150 DPI, which is the range design/Settings.dc.html's `18 PT` sits in the middle
+  // of; 45 is the top the cap is meant to still cover.
+  for (const int ppem : {16, 24, 29, 32, 36, 41, 45}) {
+    CAPTURE(ppem);
+    ScalableFont face;  // the DEFAULT budget -- what the shell and the simulator use
+    REQUIRE(face.init(ttf.data(), ttf.size(), ppem));
+    face.resetCacheStats();
+
+    // Two passes over the union: the first is a reader working through a chapter,
+    // the second is the page that comes back to a glyph the first one used.
+    const UnionWalk first = walkUnion(face);
+    const ScalableFont::CacheStats cold = face.cacheStats();
+    const UnionWalk second = walkUnion(face);
+    const ScalableFont::CacheStats s = face.cacheStats();
+    REQUIRE(first.glyphs > 100);
+    REQUIRE(second.glyphs == first.glyphs);
+
+    CAPTURE(s.capacityBytes);
+    CAPTURE(first.bytes);
+    CAPTURE(s.rasterisations);
+    // The arena really is sized for this ppem and not for 32.
+    CHECK(s.capacityBytes >= first.bytes);
+    // ...and the ring never went round, so nothing hot was overwritten.
+    CHECK(s.wraps == 0);
+    CHECK(s.evictions == 0);
+    CHECK(s.bypasses == 0);
+    // THE STRONGEST FORM: the second pass rasterised NOTHING and every glyph of it
+    // came out of the cache. Stated as a delta rather than as a total because two of
+    // the set (the space and U+00A0) have metrics and no ink, so they are cached
+    // without ever being rasterised -- a total would be pinning that count instead of
+    // pinning the thrash. At ppem 41 with a 16 KB arena this delta was 125 of 127.
+    CHECK(s.rasterisations == cold.rasterisations);
+    CHECK(s.hits - cold.hits == static_cast<unsigned long>(second.glyphs));
+  }
+}
+
+TEST_CASE("cacheBytesFor scales a stated budget by the reading size") {
+  // The derivation itself, checked against the measured table rather than against
+  // itself. These are the bytes assets/built/literata_body.ttf's union really comes
+  // to -- the same numbers CLAUDE.md's table carries and walkUnion() reproduces.
+  struct Point {
+    int ppem;
+    size_t unionBytes;
+  };
+  constexpr Point kMeasured[] = {{16, 3728},  {24, 7292},  {29, 10378}, {32, 12292},
+                                 {36, 15359}, {41, 19284}, {45, 23046}, {48, 25854}};
+
+  // At the size the reader ships at, the derivation must be the shipped number to
+  // the byte -- otherwise this change moves the shipping behaviour, which it must
+  // not: every golden and every board measurement was taken at ppem 32.
+  CHECK(ScalableFont::cacheBytesFor(reader::kBodyPpem) == ScalableFont::kDefaultCacheBytes);
+
+  // WHERE THE CEILING STARTS TO BITE, stated rather than left to be discovered.
+  // kMaxCacheScalePercent is 150, so the curve is followed while it asks for no more
+  // than 1.5x the stated budget, which is ppem 40 for the default.
+  const size_t ceiling = ScalableFont::maxCacheBytesFor(ScalableFont::kDefaultCacheBytes);
+  CHECK(ScalableFont::cacheBytesFor(39) < ceiling);
+  CHECK(ScalableFont::cacheBytesFor(40) == ceiling);
+
+  size_t previous = 0;
+  for (const Point& p : kMeasured) {
+    CAPTURE(p.ppem);
+    const size_t got = ScalableFont::cacheBytesFor(p.ppem);
+    CAPTURE(got);
+    CAPTURE(p.unionBytes);
+    CHECK(got >= previous);  // monotonic: a bigger size never asks for a smaller arena
+    previous = got;
+
+    if (got == ceiling) {
+      // Past the ceiling the promise is different and weaker, and 48 is where it
+      // finally fails: the ceiling is the heap's answer, not the curve's, and a size
+      // it cannot hold degrades to wrapping rather than to anything worse. This is
+      // the limit to quote when someone asks how large the Size row may go.
+      CHECK((p.ppem <= 45) == (ceiling >= p.unionBytes));
+      continue;
+    }
+    // Below it, the curve holds the set with the SAME margin the shipped budget has
+    // at ppem 32 -- rather than a margin that grows with the size, which is what a
+    // fit on ppem^2 alone gives: 42% spare at ppem 48, 11 KB of a 42,152-byte floor
+    // spent on nothing.
+    CHECK(got >= p.unionBytes);
+    CHECK(got * 100 <= p.unionBytes * 140);
+    CHECK(got * 100 >= p.unionBytes * 120);
+  }
+
+  // A stated budget scales with it, keeping whatever proportion the caller chose.
+  // That is what carries the italic's measured "it is cold, 10 KB is its working
+  // set" reasoning to every size without the shell restating it.
+  CHECK(ScalableFont::cacheBytesFor(reader::kBodyPpem, 10u * 1024u) == 10u * 1024u);
+  CHECK(ScalableFont::cacheBytesFor(41, 10u * 1024u) >
+        ScalableFont::cacheBytesFor(32, 10u * 1024u));
+  // A budget of zero stays zero at every size: "no cache" is a real request.
+  CHECK(ScalableFont::cacheBytesFor(64, 0) == 0);
+}
+
+TEST_CASE("a stated budget is a budget AT THE BODY SIZE, and its ceiling is stated too") {
+  std::vector<uint8_t> ttf = bodyTtf();
+
+  // Stated budget, honoured to the byte at the size it was stated for.
+  {
+    ScalableFont face(4096);
+    REQUIRE(face.init(ttf.data(), ttf.size(), reader::kBodyPpem));
+    CHECK(face.cacheStats().capacityBytes == 4096);
+  }
+  // ...and scaled, not ignored, at another size.
+  {
+    ScalableFont face(4096);
+    REQUIRE(face.init(ttf.data(), ttf.size(), 16));
+    CHECK(face.cacheStats().capacityBytes < 4096);
+    CHECK(face.cacheStats().capacityBytes > 0);
+    CHECK(face.glyph(U'a').has_value());  // and it still draws
+  }
+  // THE CEILING IS WHAT KEEPS THE HEAP SAFE. Without it a 64px heading asks for
+  // 59 KB against a measured 42,152-byte floor, and under -fno-exceptions a failed
+  // `new` is abort() with no diagnostic. It is relative to the stated budget, so a
+  // face told it is cold stays proportionally cold.
+  {
+    ScalableFont face(16u * 1024u);
+    REQUIRE(face.init(ttf.data(), ttf.size(), 64));
+    CHECK(face.cacheStats().capacityBytes ==
+          ScalableFont::maxCacheBytesFor(16u * 1024u));
+    CHECK(face.cacheStats().capacityBytes <=
+          16u * 1024u * ScalableFont::kMaxCacheScalePercent / 100);
+    // Over the ceiling it degrades to SLOWER, never to dead -- the property the
+    // whole bounded-cache design exists to give.
+    CHECK(face.glyph(U'W').has_value());
+  }
 }
 
 TEST_CASE("ScalableFont metrics match stb_truetype's own for a known face and size") {
@@ -472,6 +634,90 @@ TEST_CASE("the shipped face kerns, and stb is what reads it") {
   const int pair = b.face.measure("AV");
   CHECK(pair == sum + b.face.kerning(U'A', U'V'));
   CHECK(pair < sum);
+}
+
+// --- The kern pair cache: a memo may miss, it may NOT lie ----------------------
+//
+// stbtt_GetGlyphKernAdvance bisects the face's 6,064-pair legacy table, and a wrap
+// asks it for the same pairs over and over because wrapProseLead grows every line
+// greedily and re-measures each candidate. Measured on a 56-page pagination walk
+// (desktop, -O3, best of 20): 33.3 ms with the bisection, 8.6 ms with kerning()
+// stubbed to zero, 13.4 ms with the cache -- so the bisection was 74% of the walk and
+// the cache recovers 80% of what removing kerning entirely would.
+//
+// The cache is DIRECT-MAPPED, so a collision silently overwrites. That is fine for a
+// memo and fatal if the key check is wrong, and the difference is invisible to the
+// goldens: a wrong kern moves a line by a pixel or two, which no golden of a screen
+// that happens not to contain that pair can see. So it is checked against stb.
+TEST_CASE("every kern the cache answers is the kern stb computes") {
+  std::vector<uint8_t> bytes = bodyTtf();
+  stbtt_fontinfo info;
+  REQUIRE(stbtt_InitFont(&info, bytes.data(), stbtt_GetFontOffsetForIndex(bytes.data(), 0)));
+
+  for (const int ppem : {29, 32, 64}) {
+    CAPTURE(ppem);
+    ScalableFont face;
+    REQUIRE(face.init(bytes.data(), bytes.size(), ppem));
+    const float scale = stbtt_ScaleForMappingEmToPixels(&info, static_cast<float>(ppem));
+
+    // EVERY Latin-1 pair, which is 50,176 of them against 512 slots -- so the table
+    // is overwritten about a hundred times over and a key check that did not check
+    // cannot survive it. Twice, so the second sweep reads what the first wrote.
+    int nonZero = 0;
+    for (int pass = 0; pass < 2; ++pass)
+      for (int l = 0x20; l < 0x100; ++l)
+        for (int r = 0x20; r < 0x100; ++r) {
+          const int units = stbtt_GetCodepointKernAdvance(&info, l, r);
+          const float exact = static_cast<float>(units) * scale;
+          const int expect = exact >= 0.0f ? static_cast<int>(exact + 0.5f)
+                                           : -static_cast<int>(-exact + 0.5f);
+          const int got = face.kerning(static_cast<char32_t>(l), static_cast<char32_t>(r));
+          if (got != expect) {
+            CAPTURE(l);
+            CAPTURE(r);
+            CAPTURE(pass);
+            REQUIRE(got == expect);
+          }
+          if (pass == 1 && expect != 0) ++nonZero;
+        }
+    // The sweep is not vacuous: pairs really do kern at this size. Only ~6.5% of
+    // Latin-1 pairs do once scaled and rounded to whole pixels, which is why the
+    // cache stores its ZEROES as well -- those are the bisections that found nothing.
+    CAPTURE(nonZero);
+    CHECK(nonZero > 500);
+  }
+}
+
+TEST_CASE("A KERN IS IN PIXELS, SO RE-INITING AT A NEW SIZE MUST DROP IT") {
+  // The identical hazard the advance cache carries and states, on the identical
+  // trigger: the Typography `Size` row. A cached kern that outlived its ppem would
+  // set every pair at the OLD size's adjustment -- text that is subtly, uniformly
+  // mis-spaced, with no glyph wrong and no test but this one able to see it.
+  std::vector<uint8_t> bytes = bodyTtf();
+  ScalableFont face;
+  REQUIRE(face.init(bytes.data(), bytes.size(), 64));
+
+  // ONE pair, and nothing after it, which is the whole point of how this is written.
+  // The first version of this test filled all 50,176 Latin-1 pairs through a 512-slot
+  // table before re-initing -- so the slot holding (A,V) had been overwritten a
+  // hundred times, the lookup missed for an unrelated reason, and the answer came out
+  // right on a cache that had NOT been cleared. The mutation passed. A test of an
+  // invalidation must leave the entry it is invalidating in place.
+  const int wide = face.kerning(U'A', U'V');
+  REQUIRE(wide < 0);  // a real adjustment, so there is something to go stale
+
+  REQUIRE(face.init(bytes.data(), bytes.size(), 16));
+  const int narrow = face.kerning(U'A', U'V');
+  CAPTURE(wide);
+  CAPTURE(narrow);
+  CHECK(narrow > wide);  // strictly less tucked at a quarter the size
+  // And the pen agrees with it, which is the thing a reader would actually see.
+  CHECK(face.measure("AV") == face.measure("A") + face.measure("V") + narrow);
+
+  // The same in the other direction, so this cannot pass by the cache simply never
+  // being written: back up to 64 and the wide adjustment must come back.
+  REQUIRE(face.init(bytes.data(), bytes.size(), 64));
+  CHECK(face.kerning(U'A', U'V') == wide);
 }
 
 TEST_CASE("the prepared TTF renders identically to the variable font it came from") {

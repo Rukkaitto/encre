@@ -2085,8 +2085,14 @@ larger:
 
 **WHAT DID NOT IMPROVE: the draw.** A page turn's `render` stayed at 125–165 ms on
 the device, unchanged by the advance cache — the coverage blit dominates it and
-`kerning`'s cmap searches were noise beside it. If a page turn has to get faster than
-~570 ms, the blit is the target and the metrics are not.
+`kerning`'s cmap searches were noise beside it. ~~If a page turn has to get faster than
+~570 ms, the blit is the target and the metrics are not.~~ **Both halves of that
+sentence are now spent, in opposite directions.** The blit was the target, it was taken
+(byte-wise now, a page render 215 → ~25–41 ms), and a page turn is ~92% panel — there
+is no page-turn work left worth doing. And "the metrics are not" was right about the
+DRAW and wrong about everything else: `kerning`'s *kern-table* bisection, which this
+sentence never separated from its cmap searches, was **73% of a pagination walk**. See
+**The glyph cache**, which now carries the measurement and the fix.
 
 **The neutrality of counting mode is asserted, not assumed**: a probe indexed all 92
 chapters both ways and got 7,968 pages each, 0 chapters differing. An index that
@@ -2815,13 +2821,80 @@ so a page that introduces a capital the last one did not advances the write poin
 and on wrap it overwrites whatever is oldest, `e` included. Printable ASCII plus the
 32 accents and marks every `fontc.py` subset carries, on the shipped face:
 
-| ppem | 29 | 32 | 36 | 41 | 48 |
-|---|---|---|---|---|---|
-| bytes | 10,378 | **12,292** | 15,359 | 19,284 | 25,854 |
+| ppem | 16 | 24 | 29 | 32 | 36 | 41 | 45 | 48 | 64 |
+|---|---|---|---|---|---|---|---|---|---|
+| bytes | 3,728 | 7,292 | 10,378 | **12,292** | 15,359 | 19,284 | 23,046 | 25,854 | 44,866 |
 
-Bytes go as ppem², so the old 8 KB held the set at **no** reading size. 16 KB holds
-ppem 32 with 25% spare. **A body-size setting must revisit this** — the budget is a
-constructor argument precisely so the caller can size it from the chosen ppem.
+Bytes go as ppem², so the old 8 KB held the set at **no** reading size, and 16 KB
+holds ppem 32 with 25% spare and **ppem 41 not at all**.
+
+**THE BUDGET IS NOW STATED AT ppem 32 AND DERIVED EVERYWHERE ELSE**, which is what
+unblocks the Typography `Size` row. This section used to end "a body-size setting must
+revisit this — the budget is a constructor argument precisely so the caller can size it
+from the chosen ppem", and that was a deferral rather than a mechanism: the two callers
+are `static` globals in `shell/src/main.cpp` built **before `setup()` runs**, so the
+chosen ppem does not exist at the moment the constructor is called and no caller could
+have obeyed it. `init()` is where the size arrives, so `init()` is where the arena is
+sized — `ScalableFont::cacheBytesFor(ppem, budget)`.
+
+- **The curve is `u(p) = 39p² + 300p`, and the linear term is not noise.** A glyph's
+  row stride rounds up to a whole byte, which is a cost per GLYPH-ROW rather than per
+  pixel, so it scales with the height and not the area. Fitted to the table above it is
+  good to 1.5% everywhere; ppem² alone is 9% out at 48, in the expensive direction.
+- **It scales the caller's budget rather than replacing it**, so the *margin* is the
+  caller's decision, stated once. At ppem 32 `cacheBytesFor` returns exactly 16,384 —
+  the shipped number to the byte, which is what makes this change invisible to every
+  golden and every board measurement.
+- **The ceiling is RELATIVE (150%), because the device has TWO of these faces.** An
+  absolute cap cannot keep the roman's 16 KB and the italic's measured-cold 10 KB in
+  proportion. Roman → 24,576 B, italic → 15,360 B, so the pair's worst case is 39,936
+  against today's 26,624: **+13,312 B, and only at the top of the ramp**. Against the
+  42,152-byte floor (a book opened through the Library) that leaves ~28.8 KB, and
+  against 45,840 (through Home's CONTINUE) ~32.5 KB. Below ppem 32 it gives memory
+  *back* — the pair is 22,303 B at ppem 29.
+- **Thrash-free to ppem ~46**, which is 22pt at 150 DPI. Past it the arena stops
+  holding the union and the cache does what it is built to do: wrap and re-rasterise.
+- **`wraps` is the instrument, not a timing.** At ppem 41 with the old flat 16 KB, a
+  second pass over the alphabet took **2 cache hits out of 127** and re-rasterised the
+  other 125, at ~3,794 µs a glyph on the panel. `test_scalablefont.cpp` asserts the
+  second pass rasterises *nothing*, at every step of the ramp.
+- **A grow that cannot be allocated keeps the arena it had.** The new block is taken
+  before the old one is released, so a failed `new` is slower and never dead — and the
+  only thing that re-inits at a new size is a Settings screen with no book open, where
+  the heap is ~133 KB rather than the reading floor.
+
+**AND THE PAIR KERN CACHE IS THE OTHER HALF, WHICH TURNED OUT TO BE THE BIGGER ONE.**
+`stbtt_GetGlyphKernAdvance` bisects the face's 6,064-pair legacy `kern` table, and
+`wrapProseLead` grows every line greedily and re-measures each candidate — so the same
+pairs are bisected over and over. Measured on a 56-page pagination walk (desktop, -O3,
+best of 20, three runs):
+
+| | ms | µs/page |
+|---|--:|--:|
+| before | 31.7–32.0 | 566–571 |
+| **512-slot pair cache** | **13.8–14.0** | **247–249** |
+| `kerning()` removed entirely (the ceiling) | 8.6–8.7 | 153–156 |
+
+So the bisection was **73% of a pagination walk** and the cache recovers **77%** of
+what removing kerning altogether would. 512 slots is the knee of a sweep — 128:18.0,
+256:14.5, 512:13.5, 1024:13.7 ms — and 1024 is *worse*, because a chapter's pair
+alphabet is a few hundred, not a few thousand. 1,536 B a face.
+
+- **It caches its ZEROES, and that is most of the value.** Only **6.5%** of Latin-1
+  pairs kern at all once scaled and rounded to whole pixels, and real prose kerns
+  **9.7%** of its adjacent pairs — so ~90% of the bisections were finding nothing and
+  being repeated.
+- **A kern is in PIXELS, so `init()` drops it**, exactly as it drops the advance cache.
+  A cached kern outliving its ppem is text that is uniformly, subtly mis-spaced with no
+  glyph wrong — invisible to every golden.
+- **IT DOES NOTHING FOR THE RENDER**, measured: `reader_sim reader --bench 200` is
+  118–128 µs/pass either way. `drawText` walks a string once, so there is nothing to
+  amortise. This is a layout win and it should not be quoted as a page-turn win.
+
+**AND THE FIRST RUN OF A FRESHLY BUILT BINARY IS STILL THE SLOWEST BY A WIDE MARGIN** —
+the render bench above read 209.6 µs on its first invocation and 118.7 on its third.
+This file already records that trap; it reappeared inside the measurement taken to
+check the trap had not been fallen into.
 
 ### The stack, which is the budget nothing was watching
 
