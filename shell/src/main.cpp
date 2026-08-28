@@ -4123,6 +4123,50 @@ void loop() {
     }
   }
 
+  // ONE GATE, TWO USERS, AND IT IS LITERALLY ONE EXPRESSION. Both of the calls
+  // below are SPI traffic on the display's shared bus taken in an idle window, and
+  // the card log's flush is specified as running "under the same gate the
+  // card-presence poll uses" -- so it reads the same local rather than carrying a
+  // second copy of the condition that can drift away from this one.
+  const bool quiet = !gApp->dirty() && rawSamplesPending() == 0;
+
+  // THE CARD LOG'S IDLE FLUSH. This is the call kLogFlushAtBytes was declared for
+  // and did not have: the tee filled the 4 KB buffer, logTee then began counting
+  // into gLogDropped, and the log grew a HOLE -- which is the one thing the design
+  // note above says a diagnostic must never do, because a gap in the log is
+  // indistinguishable from the device having gone quiet. Only the sleep path ever
+  // wrote the card, so a device that was being used and had not yet slept lost
+  // everything past the first 4 KB.
+  //
+  // THE THRESHOLD IS THE TRIGGER, NOT THE CEILING. Flushing at three quarters
+  // leaves a kilobyte of headroom to carry the log across the gap between crossing
+  // the threshold and the next quiet window, so the lines a burst drops are the
+  // ones that would have overflowed anyway rather than the newest ones. It is also
+  // what rate-limits this: a flush empties the buffer, so the next one cannot
+  // happen until another 3 KB has been logged, and the ~40 ms card write can never
+  // become the per-line cost the buffer exists to avoid.
+  //
+  // BEFORE the poll rather than after it, although either order is correct for the
+  // bus: the poll can find the card gone and rebuild the App, and a 40 ms write
+  // must not be sitting in front of the SD-missing screen that discovery owes the
+  // user. It deliberately does NOT ask whether the card is believed present, for
+  // appendToCard's own reason -- the reason we think it has gone is exactly the
+  // kind of thing worth having in the log.
+  //
+  // AND IT REPORTS ITS OWN WEIGHT, for the reason `ser=` exists: an instrument
+  // that hides its cost lets you attribute it to the device. gLogLen is read
+  // BEFORE the flush, which zeroes it.
+  if (quiet && gLogLen >= kLogFlushAtBytes) {
+    // Recursive, and appendToCard takes one of its own -- same reason the poll
+    // takes one below: the write and the line reporting it are one atomic use of
+    // the bus rather than two that could straddle a paint.
+    SpiBusGuard bus;
+    const unsigned buffered = static_cast<unsigned>(gLogLen);
+    const uint32_t took = flushLogToCard();
+    logf("[log] wrote %uB in %lums\n", buffered, (unsigned long)took);
+    logFlush();
+  }
+
   // AFTER the paint block and only with nothing owed to the panel. The poll is
   // SPI traffic on the display's bus (see pollCardPresence), so a frame the user
   // is waiting for goes out first; and if the poll does find the card gone, the
@@ -4141,7 +4185,7 @@ void loop() {
   // Deferring a probe costs at most one poll interval of detection latency on a
   // card that was pulled WHILE the user was pressing buttons -- and the press they
   // are making will hit the card itself soon enough.
-  if (!gApp->dirty() && rawSamplesPending() == 0) pollCardPresence(millis());
+  if (quiet) pollCardPresence(millis());
 
   static uint32_t beat = 0;
   if (++beat % 200 == 0) {
