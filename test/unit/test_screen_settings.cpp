@@ -364,9 +364,10 @@ TEST_CASE("CHANGE on a device row still cycles, and OPEN does not") {
 
   REQUIRE(focusedLabel(scr) == "Typography");
   scr.onEvent(kChange);
-  CHECK(scr.settings().sleepAfterMs == before.sleepAfterMs);
-  CHECK(scr.settings().fullRefreshEvery == before.fullRefreshEvery);
-  CHECK(scr.settings().fullOnTransition == before.fullOnTransition);
+  // THE WHOLE STRUCT, not the three device fields: `Settings` has a defaulted
+  // operator== (settings.h), so this also covers the four typography fields a
+  // field-by-field comparison would silently let a disclosing row change.
+  CHECK(scr.settings() == before);
   // And nothing was persisted either -- a push that also committed would write the
   // file on every visit to the panel.
   CHECK(sink.commits == 0);
