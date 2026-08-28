@@ -68,7 +68,7 @@ first. It carries the reasoning; this plan carries the steps.
 | `core/src/layout.cpp` | Gate justification on it |
 | `core/include/reader/viewmodel.h` | `TypographyViewModel` (no book title, no editing state) |
 | `core/include/reader/theme.h` | `renderTypography`, and `readerMetrics` taking the `Settings` |
-| `core/include/reader/components.h` + `.cpp` | `clampProseInk`, a sibling of `clampProse` |
+| (no components.h change) | the preview's line count is a file-local helper in `theme_quiet.cpp` |
 | `core/src/theme_quiet.cpp` | `renderTypography`, a file-local `typographyPreviewBoxH`, and `readerMetrics` reading the settings |
 | `core/include/reader/theme_quiet.h` | The two overrides |
 | `core/include/reader/app.h` | `ScreenId::Typography` |
@@ -2198,14 +2198,16 @@ void QuietTheme::renderTypography(Framebuffer& fb, const FontSet& fonts,
     Prose p = wrapProseLead(*body, vm.specimen, textW, /*leadEm1000=*/0, {});
     // AS MANY LINES AS FIT -- AND "FIT" MEANS THE INK FITS, NOT THE LINE BOX.
     //
-    // MEASURED ON THE BOARD, and it decides a whole line: at the default setting
-    // the X3's content area is 213px and four line boxes are 217.6px, so a clamp
-    // on the LINE BOX drops the fourth line -- while Chrome draws it, because its
-    // ink ends 10px clear of the edge and only the empty leading below the
-    // descenders overflows. A line-box clamp therefore renders one line FEWER than
-    // the board on the X3 and the same as the board on the X4: a whole line of
-    // mismatch on one geometry only, which is the hardest kind to attribute.
-    clampProseInk(p, textH, *body);
+    // MEASURED ON THE BOARD, and it decides a whole line. Chrome draws a line whose
+    // line-box TOP is inside the box and clips whatever hangs below, so at the
+    // default setting the X3 gets ceil(213 / 54.4) = 4 lines where floor() gives 3.
+    // The firmware cannot clip, so it asks the narrower question -- does the INK
+    // fit -- which agrees with Chrome exactly when agreeing is safe: on the X3 the
+    // fourth line's box overruns the content area by 4.6px while its ink ends 10px
+    // clear. A floor() on the line box would render one line FEWER than the board
+    // on the X3 and the same as the board on the X4: a whole line of mismatch on
+    // one geometry only, which is the hardest kind to attribute.
+    p.lines.resize(static_cast<size_t>(previewLinesThatFit(*body, p, textH)));
     drawProse(fb, *body, kMargin + kTypoPreviewBorder + kTypoPreviewPadX,
               y + kTypoPreviewBorder + kTypoPreviewPadY, p, Ink::Black, {}, plane);
   }
@@ -2269,39 +2271,67 @@ void QuietTheme::renderTypography(Framebuffer& fb, const FontSet& fonts,
 }
 ```
 
-- [ ] **Step 5: `clampProseInk` does not exist — write it, or use what does**
+- [ ] **Step 5: `previewLinesThatFit` — a file-local helper, NOT a new primitive**
 
-`components.h` has `clampProse`, which clamps on the LINE BOX. Check it:
+**DO NOT use `clampProse` and DO NOT add a sibling to it.** Read its real contract
+first:
 
 ```bash
-grep -n "clampProse" -B 8 -A 20 core/include/reader/components.h
+grep -n "void clampProse" -B 22 core/include/reader/components.h
 ```
 
-**If it clamps on the line box, add a sibling** rather than changing it — Home's
-title budget depends on the existing behaviour and re-blessing four Home goldens
-to serve this screen would be the tail wagging the dog:
+`clampProse(font, prose, maxLines, maxW, tail)` takes a LINE COUNT, not a pixel
+height, and it **elides the overflow into the last line with an ellipsis** —
+`-webkit-line-clamp`'s behaviour, which Book details and the overlay panels want
+for a filename. It is the wrong tool twice over here: the preview's box is not a
+line budget, and an ellipsis on a type specimen would imply the reader is being
+denied something, where in fact the specimen is only a sample.
+
+`Prose::lines` is a public `std::vector<std::string_view>` and `Prose::leadF26` is
+the line box in 1/64 px, so the whole job is a `resize` and needs no primitive at
+all. Put this in `theme_quiet.cpp`'s anonymous namespace beside
+`typographyPreviewBoxH`:
 
 ```cpp
-// CLAMP A WRAP TO A BOX BY ITS INK, not by its line boxes.
+// HOW MANY OF A WRAP'S LINES HAVE THEIR INK INSIDE A BOX `boxH` PX TALL.
 //
-// `clampProse` drops a line whose LINE BOX overflows, which is right where the
-// caller is budgeting space it will then fill (Home's title). The Typography
-// preview is the other case: the box is a fixed window onto as much of a fixed
-// specimen as happens to fit, and Chrome draws a line whose leading overflows
-// while its ink does not. Measured, and it decides a whole line: on the X3 four
-// line boxes are 217.6px in a 213px box and the fourth line's ink ends 10px clear.
+// Not `clampProse`, which takes a line budget and ellipsises the remainder -- both
+// wrong here: the box is a window onto a fixed specimen rather than a budget, and
+// an ellipsis on a type specimen reads as content withheld.
 //
-// Keeps a line whose ink bottom (baseline + descent) is inside `boxH`. Never keeps
-// one whose ink would overflow, so it cannot produce the sliced line
-// design/Reader.dc.html's own column once had.
-void clampProseInk(Prose& p, int boxH, const GlyphSource& face);
+// AND NOT `floor(boxH / lead)`, which is the obvious answer and drops a line the
+// board draws. Chrome keeps a line whose line-box TOP is inside the box and clips
+// what hangs below, so the X3's 213px content area takes ceil(213 / 54.4) = 4
+// lines at the default setting. The firmware has no clip, so it asks whether the
+// INK fits -- which lands on the same 4, because that fourth box overruns by 4.6px
+// while its ink ends 10px clear. Measured on the rendered board, both geometries.
+//
+// Never keeps a line whose ink would overflow, so it cannot produce the sliced
+// line design/Reader.dc.html's own column once had.
+int previewLinesThatFit(const GlyphSource& face, const Prose& p, int boxH) {
+  if (p.leadF26 <= 0) return 0;
+  const int boxF26 = pxToF26(boxH);
+  int fit = 0;
+  for (int i = 0; i < p.lineCount(); ++i) {
+    // The ink's bottom edge within line i: the baseline the draw will use, plus
+    // the face's descent. baselineInF26 is the same helper drawProse places by,
+    // so this cannot disagree with where the glyphs actually land.
+    const int top = i * p.leadF26;
+    const int inkBottom = baselineInF26(face, top, p.leadF26) + pxToF26(face.descent());
+    if (inkBottom > boxF26) break;
+    ++fit;
+  }
+  return fit;
+}
 ```
 
-Implement it in `components.cpp` beside `clampProse`, and give it its own test in
-`test_components.cpp` covering: a wrap that fits whole, one whose last line box
-overflows but whose ink does not (KEPT), and one whose ink overflows (DROPPED).
-**The middle case is the one that exists on the device**, so if only one case is
-written, write that one.
+**Check `baselineInF26`'s and `descent()`'s real signatures before writing this** —
+`descent()` may already be in 1/64 px, or may be signed the other way, and getting
+its sign wrong silently keeps one line too many. Grep both and say which you found.
+
+Give it a test in the new `test_theme_reader_metrics.cpp` (or a sibling): at the
+default setting it must return **4 at both geometries**, and at `lineSpacing = 2000`
+with `bodyPpem = 46` it must return fewer and never a count whose ink overflows.
 
 - [ ] **Step 6: Build**
 
@@ -2327,11 +2357,12 @@ The preview box's height is DERIVED, with the board's measured 250/241 as the
 target -- a pinned 292 was tried first and was wrong by 42px, which
 flex-shrink hid.
 
-clampProseInk is a SIBLING of clampProse, not a change to it. clampProse
-clamps on the line box, which is right for Home's title budget; this box is a
-fixed window onto a fixed specimen, and Chrome draws a line whose leading
-overflows while its ink does not. On the X3 that is the difference between
-four lines and three -- a whole line of mismatch on one geometry only.
+The preview's line count is a file-local helper, not a new primitive and NOT
+clampProse -- which takes a line budget and ellipsises the remainder, both
+wrong for a window onto a fixed specimen. floor(boxH / lead) is the obvious
+answer and drops a line the board draws: Chrome keeps a line whose box top is
+inside and clips the overhang, so the X3 takes 4 where floor gives 3. Asking
+whether the INK fits lands on the same 4 and can never slice a line.
 
 The band's right slot is empty and its height is unchanged, which is what the
 board reserves a line box to match.
@@ -2548,8 +2579,8 @@ This is the review, not a formality. An icon has passed review twice in this rep
 while reading as the letters "OC". For each, write down:
 
 - **Four whole lines of specimen, no sliced last line.** This is the case
-  `clampProseInk` exists for, and the X3 is where it decides — a line-box clamp
-  would show three here.
+  `previewLinesThatFit` exists for, and the X3 is where it decides — a
+  `floor(boxH / lead)` would show three here.
 - The specimen is visibly LARGER than the reader's default (38 against 32).
 - `Size` is the inverted row; `Font` is plain and undimmed.
 - The band's right slot is EMPTY, and the band's rule sits where every other
@@ -2578,7 +2609,7 @@ this repo already:
 
 | mutation | expected failures |
 |---|---|
-| `clampProseInk` → `clampProse` (line-box clamp) | **exactly 1**, `typography_x3`, and NOT the X4 — that asymmetry is the whole reason the sibling exists |
+| `previewLinesThatFit` → `floor(boxH / p.leadF26 / 64)` | **exactly 1**, `typography_x3`, and NOT the X4 — that asymmetry is the whole reason the helper measures ink |
 | `kTypoRowH` 50 → 54 | both |
 | the footnote's `footTop` computed from `y` instead of the panel bottom | both |
 | `drawHeaderBand`'s value changed from `""` to `vm.title` | both |
@@ -2602,10 +2633,10 @@ The fidelity is asserted before the plane is named, the way Home's goldens
 assert Mono.
 
 Proved by mutation, one at a time, with the counts recorded. The one that
-matters: swapping clampProseInk for clampProse fails the X3 golden and NOT the
-X4, because four line boxes are 217.6px in the X3's 213px content area while
-the ink ends 10px clear. That asymmetry is the whole reason the sibling clamp
-exists, and it is now a failing test rather than a paragraph.
+matters: replacing previewLinesThatFit with floor(boxH / lead) fails the X3
+golden and NOT the X4, because four line boxes are 217.6px in the X3's 213px
+content area while the ink ends 10px clear. That asymmetry is the whole reason
+the helper measures ink, and it is now a failing test rather than a paragraph.
 
 Co-authored-by: Claude <claude@anthropic.com>"
 ```
@@ -3631,8 +3662,10 @@ is not derivable from the code:
   height must not vary by screen — the hint-bar reasoning — and `bandContentH`
   takes `max(Label500, Value700)` unconditionally, so the board holds the line box
   to match. Removing the div outright shrank the board's band by 2px.
-- **`clampProseInk` is a sibling of `clampProse`, not a change to it**, and the
-  reason is one whole line on one geometry only.
+- **The preview's line count measures INK, not line boxes**, and the reason is
+  one whole line on one geometry only. It is a file-local helper rather than a
+  `components.h` primitive, and explicitly NOT `clampProse` — which takes a line
+  budget and ellipsises the remainder, both wrong for a window onto a specimen.
 - **ppem 38 is on the list because 18 PT is the board's own value**, and that is
   what makes roadmap:1269 answerable on the panel. **State plainly that this does
   NOT answer it.**
