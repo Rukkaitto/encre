@@ -105,6 +105,10 @@ FLOW_SCREENS = [
     ("book_details",    "BookDetails.dc.html",    "Book details"),
     ("book_error",      "BookError.dc.html",      "Book error"),
     ("typography",      "Typography.dc.html",     "Typography"),
+    # THE EDIT STATE, its own board for the reason every other state board is:
+    # a flag on `typography` would leave the goldens and this sheet unable to name
+    # it. It is what pins the chevrons and the second hint set.
+    ("typography_editing", "TypographyEditing.dc.html", "Typography / editing"),
     ("contents",        "Contents.dc.html",       "Contents"),
     ("goto_page",       "GoToPage.dc.html",       "Go to page"),
     # Peek and return (3D). `peek` is the overlay -- book text over the veiled page
