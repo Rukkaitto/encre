@@ -987,24 +987,70 @@ static SettingsVerdict settingsFailure(reader::FileSystem& fs) {
 // change it is trying to make.
 //
 // THREE THINGS ACT ON gSettings AND THIS PUSHES TWO. The third is the reader's
-// PageMetrics: `margins`, `lineSpacing` and `justify` are consumed by
-// Theme::readerMetrics, whose only producer is setup(). So a change to any of
-// those three does NOT reach an open book, and the divergence is reachable today
-// with no Typography screen in the build -- boot with no card (defaults, margins
-// 18), insert a card whose hand-edited settings.json says 30, press RETRY, and
-// gSettings and the factory's copy are both 30 while pages are still laid at 18.
+// PageMetrics: `bodyPpem`, `margins`, `lineSpacing` and `justify` are consumed by
+// Theme::readerMetrics and by the body face, and neither is touched here.
 //
 // IT IS NOT FIXED BY RECOMPUTING HERE, and that was checked rather than assumed:
 // this function runs at boot before the font ramp exists, so it cannot call
-// readerMetrics at all. It is also not the whole job -- a live margin or size
-// change has to re-paginate the open chapter and re-grade the saved position
-// against the new measure (reading_position.h) -- which is why the recompute
-// belongs to the Typography apply path and not to a settings push.
+// readerMetrics at all.
+//
+// THE THIRD CONSUMER IS THE TYPOGRAPHY APPLY PATH, which exists now -- this
+// comment said it "belongs to" that path while there was none, and then that the
+// PageMetrics is "set once in setup()", both of which have stopped being true.
+// `applyBodyPpem` below re-rasterises the faces at the chosen size and the loop's
+// gTypographyDirty branch recomputes readerMetrics and calls
+// ReaderScreen::relayout, which re-paginates the open chapter at the reader's own
+// page. So a change made through the panel reaches an open book.
+//
+// WHAT IT STILL DOES NOT REACH IS A SETTING THAT ARRIVES FROM THE FILE rather than
+// from the panel, and that gap is unchanged: boot with no card (defaults, margins
+// 18), insert a card whose settings.json says 30, press RETRY, and gSettings is 30
+// while pages are still laid at 18, because loadAndApplySettings takes this path
+// and not the apply path.
+//
+// AND `bodyPpem` IS THE SHARPER HALF OF THE SAME GAP, on a plain boot: setup()
+// inits gBody at the CONSTANT reader::kBodyPpem, well before loadAndApplySettings
+// has read the file, so a stored size does not survive a reboot. Named here rather
+// than fixed, because the fix is a boot-order question and not a settings push.
 static void applySettings() {
   gRefresh.setCadence(gSettings.fullRefreshEvery);
   gRefresh.setFullOnTransition(gSettings.fullOnTransition);
   gIdle.setTimeout(gSettings.sleepAfterMs);
 }
+
+// RE-RASTERISE THE BODY FACES AT THE CHOSEN SIZE.
+//
+// The Typography panel's preview draws with the SAME face object the reader draws
+// with, which is what makes it a live preview rather than a second approximation of
+// one -- and it is affordable only because that panel is a full screen: for as long
+// as it stands the reader's page and metrics are stale, and nothing draws them.
+//
+// THE ARENA GROWS, AND THE PEAK IS BOTH ARENAS AT ONCE. ScalableFont::init takes the
+// new block before releasing the old, so ppem 46 costs 24,576 + 16,384 for the roman
+// transiently. Against a reading floor of 42,152 bytes that is tight, which is why
+// the caller shrinks the reader's page ring on the way INTO the panel -- see the
+// pre-dispatch block in loop().
+//
+// A FAILED init KEEPS THE ARENA IT HAD and returns false, so an out-of-memory device
+// is slower rather than dead. It is logged, because a size that silently did not take
+// is a screen that looks like it ignored a button.
+static void applyBodyPpem() {
+  const uint32_t t = millis();
+  const bool okBody = gBody.init(kFontBodySerif, kFontBodySerifSize, gSettings.bodyPpem);
+  const bool okItalic =
+      gItalic.init(kFontBodySerifItalic, kFontBodySerifItalicSize, gSettings.bodyPpem);
+  logf("[typo] body ppem=%d roman=%s italic=%s line=%d in %lums free=%u min=%u\n",
+       gSettings.bodyPpem, okBody ? "ok" : "FAILED", okItalic ? "ok" : "FAILED",
+       gBody.lineHeight(), (unsigned long)(millis() - t), (unsigned)ESP.getFreeHeap(),
+       (unsigned)ESP.getMinFreeHeap());
+  logFlush();
+}
+
+// WHETHER A COMMIT MOVED ANYTHING THE READER'S LAYOUT DEPENDS ON, consumed after the
+// pop that leaves the Typography panel. Set by the sink, because the last step may be
+// the very press being dispatched -- reading the screen before the dispatch would be
+// too early, and after the pop there is no screen left to ask.
+static bool gTypographyDirty = false;
 
 // Where the Settings screen's changes go. See reader::SettingsSink: this is the
 // one place that both APPLIES a change and persists it, which is why the interface
@@ -1018,8 +1064,23 @@ static void applySettings() {
 class ShellSettingsSink : public reader::SettingsSink {
  public:
   bool commit(const reader::Settings& s) override {
+    // THE PPEM IS THE ONE FIELD THAT COSTS SOMETHING TO APPLY, so it is asked about
+    // rather than applied blindly: a commit from the SETTINGS screen never touches
+    // typography, and re-initing at the same size would flush both glyph caches for
+    // nothing -- ~127 glyphs to re-rasterise at ~3,794 us each the next time a page
+    // is drawn.
+    const int wasPpem = gSettings.bodyPpem;
+    const int wasMargins = gSettings.margins;
+    const int wasLead = gSettings.lineSpacing;
+    const bool wasJustify = gSettings.justify;
     gSettings = s;
     applySettings();
+    if (gSettings.bodyPpem != wasPpem) applyBodyPpem();
+    // ANY of the four, not just the ppem: margins change the column, and line spacing
+    // and alignment change the layout, all without touching a face.
+    if (gSettings.bodyPpem != wasPpem || gSettings.margins != wasMargins ||
+        gSettings.lineSpacing != wasLead || gSettings.justify != wasJustify)
+      gTypographyDirty = true;
     // The factory holds a COPY, because it is what constructs the screen and the
     // screen is handed its starting values. Without this, closing Settings and
     // reopening it would show the values from before the change -- the struct
@@ -1027,9 +1088,11 @@ class ShellSettingsSink : public reader::SettingsSink {
     // the one thing still lying.
     gFactory.setSettings(gSettings);
     const bool wrote = reader::saveSettings(gSd, gSettings);
-    logf("[settings] sleepAfterMs=%lu fullRefreshEvery=%d fullOnTransition=%d -> %s\n",
+    logf("[settings] sleepAfterMs=%lu fullRefreshEvery=%d fullOnTransition=%d "
+         "ppem=%d margins=%d lead=%d justify=%d -> %s\n",
          (unsigned long)gSettings.sleepAfterMs, gSettings.fullRefreshEvery,
-         (int)gSettings.fullOnTransition,
+         (int)gSettings.fullOnTransition, gSettings.bodyPpem, gSettings.margins,
+         gSettings.lineSpacing, (int)gSettings.justify,
          wrote ? "applied and saved"
                         : "APPLIED BUT NOT SAVED (the change is live; it will not survive a "
                           "reboot)");
@@ -1051,10 +1114,14 @@ static void loadAndApplySettings() {
     logf("[boot] settings %s: %s\n", v.defaulted ? "DEFAULTED" : "CORRECTED", v.reason);
   }
   applySettings();
+  // THE FOUR TYPOGRAPHY FIELDS ARE ON THIS LINE TOO, because a device booting with a
+  // hand-edited size must say so -- and because `bodyPpem` here is what the FILE says,
+  // which is not necessarily what gBody was inited at (see applySettings).
   logf("[boot] settings in force: sleepAfterMs=%lu fullRefreshEvery=%d "
-       "fullOnTransition=%d\n",
+       "fullOnTransition=%d ppem=%d margins=%d lead=%d justify=%d\n",
        (unsigned long)gSettings.sleepAfterMs, gSettings.fullRefreshEvery,
-       (int)gSettings.fullOnTransition);
+       (int)gSettings.fullOnTransition, gSettings.bodyPpem, gSettings.margins,
+       gSettings.lineSpacing, (int)gSettings.justify);
   logFlush();
 }
 
