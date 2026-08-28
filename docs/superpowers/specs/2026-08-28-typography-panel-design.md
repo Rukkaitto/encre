@@ -26,7 +26,41 @@ device.
 - **Not hyphenation, widows or orphans** (#18). `RAGGED` is a new alignment
   value, not a new line breaker.
 - **Not a second body face.** One is vendored, so the `Font` row has one value.
-- **Not a Settings entry point.** Settings' TYPOGRAPHY rows stay unfocusable.
+- **Not a per-book setting.** These are device-wide, which is why the panel's band
+  names no book and its footnote says so.
+
+## Two entry points
+
+**The reader's menu**, `Typography` row, and **Settings**, a `READING` section with
+one disclosing `Typography` row.
+
+Settings was NOT an entry point in the first version of this design, and the reason
+it could become one is worth recording: the panel originally needed an open book,
+because its band named the book and the preview was going to show the book's own
+text. Neither survived review -- the band names no book (the settings are
+device-wide, so naming one contradicted the footnote) and the specimen is fixed. So
+the panel needs nothing from the book, and the restriction was a leftover rather
+than a requirement.
+
+**Settings' five inert TYPOGRAPHY rows became one door.** They were a readout
+nobody could act on; once a screen edits these settings, five rows that display
+them are the wrong answer. `READING` rather than `TYPOGRAPHY` so the section is a
+sibling of `DEVICE`, has room for the reading settings still to come, and does not
+repeat the row's own word directly above it. Settings goes from eleven items to
+seven.
+
+**Two consequences, both real:**
+
+- **The focus starts on the `Typography` row.** It sat on `Sleep after` only
+  because every row above it was inert.
+- **The Confirm hint reads `OPEN` on that row and `CHANGE` on the four `DEVICE`
+  rows.** `screen_settings.cpp` states the premise outright -- *"CHANGE, not OPEN:
+  nothing here pushes a screen, every focusable row edits a value in place"* -- and
+  this row makes it false. So **the label follows the focused row**, which is the
+  first hint bar in this firmware whose text varies within a screen. One slot
+  changes as the focus moves; the alternative is a Confirm labelled `CHANGE` that
+  opens a screen, which is the misleading-button defect this project keeps
+  recording.
 
 ## Where the state lives
 
@@ -241,13 +275,24 @@ honest about four of five settings beats one that appears to cover all five.
 
 ## The apply path
 
-`DONE` answers `Action::popTo(ScreenId::Reader)`.
+`BACK` answers a plain `Action::pop()`, and **the shell applies whenever a Reader
+is ANYWHERE on the stack** rather than when one is on top.
 
-**The Contents pattern verbatim**, and for the same reason: the panel cannot push
-a Reader, because one is already underneath the menu it was opened from, and a
-second would leave the first below it with its own position. So the shell reads
-what it needs while Typography is still on top -- the dispatch pops it, and after
-that there is no screen left to ask -- and acts once the Reader is back.
+**It was `popTo(ScreenId::Reader)`, and that broke the moment Settings became an
+entry point:** from Settings there is no Reader on the stack, and `popTo` stops at
+the root (`app.h`), so `BACK` would have dumped the user on Home and lost Settings.
+
+**The stack test is what the reader-menu route needed anyway**, which is the part
+worth keeping. Popping the panel lands on the reader MENU, and the menu is an
+overlay -- `App::render` walks down to the topmost non-overlay, paints the Reader,
+then paints the overlay above it. So the Reader's stale page **is drawn**, under
+the veil, on the very next paint. Keying the apply on "on top" would have left that
+frame wrong; keying it on "on the stack" fixes the metrics before the paint
+happens.
+
+From Settings there is no Reader, so nothing is re-paginated -- and nothing needs to
+be. The settings are already applied and persisted, and `gFactory.setReaderMetrics`
+is updated so the next book opened uses the new column.
 
 The shell, in order:
 
@@ -286,19 +331,28 @@ old line positions in a new face.
   primed from `last.json` at the saved ppem -- which `fitOf` grades against the
   new one and lands at the block.
 
-## Settings' TYPOGRAPHY rows
+## Settings' READING section
 
-**They read the real values and stay unfocusable.** The rows are drawn, focus
-skips them exactly as it does today, and their values come from `settings_`
-instead of `Item::placeholder`.
+One row, `Typography`, disclosing the panel. A chevron and no value, because Home's
+menu rows state the rule: a row states a quantity or discloses a screen, never
+both -- and summarising four settings in the right slot would break it and would
+not fit.
 
-A placeholder is right only while nothing exists behind the row. Once a setting
-genuinely exists, a placeholder is a screen displaying a stale number -- the
-defect class this repo keeps recording, and one the user can now create in three
-button presses. Four of the five placeholders already equal the defaults; only
-`18 PT` is wrong, and it is wrong by 3 PT.
+**This replaced "the five rows read the real values".** That was the answer while
+Settings was not an entry point: a placeholder is right only until the setting
+exists, and once it does a placeholder is a screen displaying a stale number. With
+a door, the readout is redundant -- the panel shows the values, and it is one press
+away.
 
-The `Font` row keeps a constant, because there is no field to read.
+**AND IT REMOVES AN EXTRACTION.** The five-readout design meant two screens
+formatting the same values, which by this project's own rule made the second copy
+the extraction point -- so the plan had `typographySizeLabel` and friends moving
+into `settings.h`. With the readout gone there is **one** caller, so the formatters
+stay private to `screen_typography.cpp`. The rule is "the second copy is the
+extraction point", not "extract in advance of one".
+
+`renderSettings` gains two things it did not have: a chevron for a `discloses` row,
+and a Confirm hint label taken from the focused row.
 
 ## Board work, first
 
