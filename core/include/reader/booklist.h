@@ -105,6 +105,13 @@ class BookList {
   // -1 rather than 0 for an unreadable directory, because "no books in it" and
   // "could not look" draw differently -- the row shows a bare `FOLDER` for the
   // second, which is honest, where a 0 would be a claim.
+  //
+  // ONE LISTING PER FOLDER PER CARD STATE, NOT PER CALLER. The answer is memoised
+  // on the FileSystem it was asked for, when that filesystem offers somewhere to
+  // put it, and every mutating method of that object drops the memo before it
+  // touches anything -- so there is no way to change the card that leaves a stale
+  // count behind. A -1 is never remembered. reader/dir_counts.h has the whole
+  // argument, including why the memo lives there rather than in either caller.
   static int countBooks(FileSystem& fs, std::string_view path);
 
   // The number a LIBRARY BAND shows for `path`: the books in it plus the books

@@ -65,14 +65,30 @@ SpiBusGuard::~SpiBusGuard() {
   if (m) xSemaphoreGiveRecursive(m);
 }
 
+// EVERYTHING DERIVED FROM WHAT IS ON THE CARD, DROPPED TOGETHER.
+//
+// One function rather than two clears at five sites, for the reason CLAUDE.md
+// records against the Library pointer: a caller list maintained in prose is a
+// function not yet written, and this one already had five callers before there
+// was a second thing to drop. A mutator added later cannot half invalidate.
+//
+// It is called ABOVE each mutator's own refusals, deliberately: reasoning about
+// which refusals are safe is how an invalidation ends up with a hole in it, and
+// the cost of being wrong the cheap way is one re-listing.
+void SdFileSystem::forgetCardFacts() {
+  listings_.clear();
+  dirCounts_.clear();
+}
+
 void SdFileSystem::noteCardGone(const char* where) {
   if (!live_) return;
   live_ = false;
   // Give the held listing back. Correctness does not depend on this -- list()
-  // checks mounted() BEFORE it consults the cache, so a dead card can never be
-  // answered out of RAM -- but there is no reason to hold ~10 KB describing a
-  // directory nobody can reach.
-  listings_.clear();
+  // checks mounted() BEFORE it consults the cache, and dirCounts() answers null
+  // once mounted() is false, so a dead card can never be answered out of RAM --
+  // but there is no reason to hold ~10 KB describing a directory nobody can
+  // reach, and the card that comes back may not be this one.
+  forgetCardFacts();
   Serial.printf("[sd] card stopped answering during %s; storage is now unmounted\n", where);
   Serial.flush();
 }
@@ -81,7 +97,7 @@ bool SdFileSystem::mount() {
   SpiBusGuard bus;  // begin() drives the display's CS line; see sd_fs.h
   // A mount is a new volume as far as anything above is concerned, so nothing
   // learned before it may survive it.
-  listings_.clear();
+  forgetCardFacts();
   live_ = SdMan.begin();
   Serial.printf("[sd] mount %s\n", live_ ? "ok" : "FAILED (no card, or it would not mount)");
   Serial.flush();
@@ -612,6 +628,14 @@ std::unique_ptr<reader::FileHandle> SdFileSystem::openRead(std::string_view path
   // stand-in for work that happens when NO book is open, and it is gone before
   // the expensive case begins. Re-listing after a book is closed costs the
   // 590 ms once, on a navigation that is already paying for a save.
+  //
+  // NOT forgetCardFacts(), AND THE DISTINCTION IS THE POINT. This is EVICTION,
+  // not invalidation: opening a file changes nothing about what is on the card,
+  // so nothing held here has become wrong -- it has only become expensive at the
+  // wrong moment. The whole argument above is 10-20 KB against a 45,840-byte
+  // floor, and it does not reach the ~1.5 KB of folder counts, which therefore
+  // survive a book open. That is what makes Home > open a book > Back > Library
+  // cost no folder listings at all. See forgetCardFacts().
   listings_.clear();
   if (!mounted()) return nullptr;
   const std::string p = normalise(path);
@@ -639,7 +663,7 @@ bool SdFileSystem::writeAll(std::string_view path, std::string_view data) {
   // for Home's cached book count is "a book cannot ARRIVE while the firmware
   // runs, because transfer is card-only", and it says in as many words that
   // Wi-Fi transfer is the change that breaks it. A transfer writes through here.
-  listings_.clear();
+  forgetCardFacts();
   if (!mounted()) return false;
   const std::string p = normalise(path);
   if (p == "/") return false;
@@ -691,7 +715,7 @@ bool SdFileSystem::mkdirs(std::string_view path) {
   // well, which costs a re-listing on a mkdirs that did nothing -- the cheap
   // side of the trade, and writeAll calls this so it happens twice on a write.
   // The mutex is recursive and clear() is a few stores; that is the whole cost.
-  listings_.clear();
+  forgetCardFacts();
   if (!mounted()) return false;
   const std::string p = normalise(path);
   if (p.empty() || p == "/") return true;  // the root is the mount, and it exists
@@ -735,7 +759,7 @@ bool SdFileSystem::remove(std::string_view path) {
   // this particular call is the one that changed the card -- and reasoning about
   // which refusals are "safe" is how an invalidation ends up with a hole in it.
   ++removals_;
-  listings_.clear();
+  forgetCardFacts();
   if (!mounted()) return false;
   const std::string p = normalise(path);
   if (p == "/") return false;

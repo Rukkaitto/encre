@@ -1217,8 +1217,23 @@ static int libraryCountForHome() {
   // The cost, once, where it is paid. A second of listing that shows up on a
   // navigation the user thinks is instant is exactly the kind of thing that has
   // to be in the log rather than inferred from a device feeling slow.
-  logf("[library] counted %d book(s) in %s in %lums\n", gLibraryCount,
-       reader::kBooksRoot, (unsigned long)(millis() - t0));
+  //
+  // AND WHAT THE FOLDER MEMO DID, because a hit is otherwise INVISIBLE: a folder
+  // answered from RAM produces no `[fs] list` line at all, so success and "the
+  // count stopped being called" print identically. The counters are cumulative
+  // over the session and this is the one line that prints them, so they also
+  // cover the Library's own rescan -- a Library push between two of these lines
+  // shows up as `hit=` having grown by one per folder, which is the whole point.
+  // `held=` is how many folders are remembered RIGHT NOW, so it alone falls back
+  // to zero when an invalidation fires, and it stopping short of the folders on
+  // the card means the ceiling in dir_counts.h was reached.
+  //
+  // At boot the honest reading is `held=N hit=0 miss=N`: the first walk cannot be
+  // avoided, and this line is where you see that it will not be paid again.
+  const reader::DirCountCache& counts = gSd.bookCounts();
+  logf("[library] counted %d book(s) in %s in %lums | folders held=%u hit=%u miss=%u\n",
+       gLibraryCount, reader::kBooksRoot, (unsigned long)(millis() - t0),
+       (unsigned)counts.held(), (unsigned)counts.hits(), (unsigned)counts.misses());
   logFlush();
   return gLibraryCount;
 }
