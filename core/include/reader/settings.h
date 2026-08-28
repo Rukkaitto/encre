@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
 
+#include "reader/layout.h"  // kBodyPpem, kBodyLeadEm
+
 namespace reader {
 class FileSystem;
 
@@ -27,6 +29,35 @@ inline constexpr uint32_t kSleepAfterMsMax = 60u * 60u * 1000u;
 // rather than a preference.
 inline constexpr int kFullRefreshEveryMax = 255;
 
+// --- THE TYPOGRAPHY STEPS ----------------------------------------------------
+//
+// Public for the reason kSleepAfterMsMin is: the Typography screen has to know
+// what it is allowed to offer, and a second copy of these numbers would drift
+// from these ones. Ascending, which validate() and the stepper both rely on.
+//
+// EVERY DEFAULT BELOW IS TODAY'S BEHAVIOUR TO THE PIXEL. That is what keeps
+// every reader, sleep and book-details golden where it is -- a golden that
+// moves because of this feature is a bug in it.
+//
+// SIZE: ppem, labelled in points as the chrome ramp is (pt = ppem * 72 / 150,
+// truncated). 27->12, 32->15, 38->18, 42->20, 46->22, all clean.
+//
+//   * 32 is the default because design/Reader.dc.html says `font-size: 32px`.
+//   * 38 is on the list because 18 PT is the Typography board's own stated
+//     value, and roadmap:1269 has held "is the reader under-sized by its own
+//     spec" open since 2A-2 with the instruction to decide it ON THE PANEL.
+//     This does not decide it; it makes it decidable by pressing a button.
+//   * 46 is the top because the glyph cache is thrash-free to ppem ~46 (see
+//     CLAUDE.md, The glyph cache). Past it the arena stops holding the
+//     alphabet's union and every page re-rasterises at ~3,794 us a glyph.
+inline constexpr int kBodyPpemSteps[] = {27, 32, 38, 42, 46};
+// MARGINS: the reader column's side padding in px. 18 is design/Reader.dc.html's
+// own, which is why it is the middle step and carries the board's own label.
+inline constexpr int kMarginSteps[] = {10, 18, 30};
+// LINE SPACING: em x 1000, as PageMetrics::leadEm1000 is. 1700 is the board's
+// `line-height: 1.7`.
+inline constexpr int kLineSpacingSteps[] = {1400, 1550, 1700, 1850, 2000};
+
 // Every knob the shell hardcoded through 2B. Defaults here are the values that
 // were compiled in, so behaviour is unchanged until a user changes something.
 struct Settings {
@@ -50,6 +81,21 @@ struct Settings {
   // that only happens unplugged is therefore not observable over the wire at all,
   // which is the whole reason this is here.
   bool logToCard = false;
+
+  // --- Typography (design/Typography.dc.html) --------------------------------
+  //
+  // Four fields, no `font`: one body face is vendored, so a font field's only
+  // value would be its default -- a second spelling of a constant, which this
+  // project has a rule about. The row reads a constant instead.
+  //
+  // kSettingsVersion is NOT bumped. An added field takes its default from an
+  // older file, which is the rule stated at the top of this header, and this is
+  // the case it was written for: a card carrying today's file loads and behaves
+  // identically.
+  int bodyPpem = kBodyPpem;
+  int margins = 18;
+  int lineSpacing = kBodyLeadEm;
+  bool justify = true;
 
   // Clamps every field into a sane range, returning false if anything had to be
   // clamped. A file that needs clamping is a file to distrust, but clamping and

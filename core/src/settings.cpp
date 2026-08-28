@@ -1,5 +1,6 @@
 #include "reader/settings.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -52,6 +53,32 @@ void readBool(const JsonObject& o, const char* key, bool& field, bool& ok) {
   if (presentAsAnything(o, key)) ok = false;
 }
 
+// SNAPS to the nearest value in an ascending table, returning false when the
+// value was not already on it. Ties go UP: a value exactly between two steps has
+// no better answer, and rounding up is the direction that never leaves a reader
+// with type smaller than they asked for.
+//
+// A RANGE CLAMP WOULD NOT DO. The Typography screen steps through the table by
+// index, so a value in range but off the table is a value the stepper can never
+// leave -- the same trap cycleFocused handles by landing on index 0's successor,
+// solved one layer earlier because a nearest-value answer exists here.
+template <size_t N>
+bool snapToTable(int& field, const int (&table)[N]) {
+  int best = table[0];
+  int bestDist = -1;
+  for (const int candidate : table) {
+    const int d = candidate > field ? candidate - field : field - candidate;
+    // `<=` rather than `<`, over an ASCENDING table, is what makes a tie go up.
+    if (bestDist < 0 || d <= bestDist) {
+      bestDist = d;
+      best = candidate;
+    }
+  }
+  if (best == field) return true;
+  field = best;
+  return false;
+}
+
 }  // namespace
 
 bool Settings::validate() {
@@ -74,6 +101,10 @@ bool Settings::validate() {
     fullRefreshEvery = kFullRefreshEveryMax;
     ok = false;
   }
+  if (!snapToTable(bodyPpem, kBodyPpemSteps)) ok = false;
+  if (!snapToTable(margins, kMarginSteps)) ok = false;
+  if (!snapToTable(lineSpacing, kLineSpacingSteps)) ok = false;
+  // `justify` is a bool: there is no invalid value to snap.
   return ok;
 }
 

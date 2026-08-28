@@ -295,3 +295,82 @@ TEST_CASE("a saved file is always valid, so a bad in-memory Settings cannot pois
   CHECK(in.sleepAfterMs == kSleepAfterMsMin);
   CHECK(in.fullRefreshEvery == 0);
 }
+
+
+TEST_CASE("the typography fields default to today's behaviour") {
+  // THE PROPERTY THE WHOLE FEATURE RESTS ON. Every reader golden is pinned at
+  // these values, so a default that moved would re-bless nine goldens and
+  // silently change what every book looks like.
+  const reader::Settings s;
+  CHECK(s.bodyPpem == reader::kBodyPpem);   // 32
+  CHECK(s.margins == 18);
+  CHECK(s.lineSpacing == reader::kBodyLeadEm);  // 1700
+  CHECK(s.justify);
+}
+
+TEST_CASE("validate snaps the typography fields to an offered value") {
+  // SNAPPED, not range-clamped. The stepper indexes a list, so a value that is
+  // in range but not ON the list would be a value the user could never leave.
+  SUBCASE("a size between two steps snaps") {
+    reader::Settings s;
+    s.bodyPpem = 35;  // between 32 and 38
+    CHECK_FALSE(s.validate());
+    CHECK(s.bodyPpem == 38);  // nearest; ties go up
+  }
+  SUBCASE("a size below the smallest step") {
+    reader::Settings s;
+    s.bodyPpem = 4;
+    CHECK_FALSE(s.validate());
+    CHECK(s.bodyPpem == 27);
+  }
+  SUBCASE("a size above the largest step") {
+    reader::Settings s;
+    s.bodyPpem = 200;
+    CHECK_FALSE(s.validate());
+    CHECK(s.bodyPpem == 46);
+  }
+  SUBCASE("margins and line spacing snap the same way") {
+    reader::Settings s;
+    s.margins = 25;       // between 18 and 30
+    s.lineSpacing = 1900; // between 1850 and 2000
+    CHECK_FALSE(s.validate());
+    CHECK(s.margins == 30);
+    CHECK(s.lineSpacing == 1850);  // 1900 is 50 from 1850 and 100 from 2000
+  }
+  SUBCASE("a value already on the list is left alone and reports ok") {
+    reader::Settings s;
+    s.bodyPpem = 42;
+    s.margins = 10;
+    s.lineSpacing = 1400;
+    s.justify = false;
+    CHECK(s.validate());
+    CHECK(s.bodyPpem == 42);
+    CHECK(s.margins == 10);
+    CHECK(s.lineSpacing == 1400);
+    CHECK_FALSE(s.justify);
+  }
+}
+
+TEST_CASE("every offered typography value survives validate") {
+  // The screen may only offer values validate accepts, or a step would be
+  // undone by the save that follows it. Asserted over the whole table rather
+  // than sampled, because one bad entry is one row the user cannot select.
+  for (const int p : reader::kBodyPpemSteps) {
+    reader::Settings s;
+    s.bodyPpem = p;
+    CHECK(s.validate());
+    CHECK(s.bodyPpem == p);
+  }
+  for (const int m : reader::kMarginSteps) {
+    reader::Settings s;
+    s.margins = m;
+    CHECK(s.validate());
+    CHECK(s.margins == m);
+  }
+  for (const int l : reader::kLineSpacingSteps) {
+    reader::Settings s;
+    s.lineSpacing = l;
+    CHECK(s.validate());
+    CHECK(s.lineSpacing == l);
+  }
+}
