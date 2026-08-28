@@ -338,6 +338,21 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       scr->setMetrics(settingsListH_, settingsRowH_, settingsHeaderH_);
       return scr;
     }
+    case ScreenId::Typography:
+      // The SAME settings copy and the SAME sink the Settings screen gets: the
+      // typography fields live in `Settings`, so there is nothing extra to plumb.
+      //
+      // AND NOTHING TO SUBSTITUTE, which is what removes the hazard the Reader and
+      // Contents cases both have. The band's right slot is empty because these
+      // settings are device-wide, so there is no book title to fall back to -- the
+      // earlier design passed menuTitle_ here and that is gone with it.
+      //
+      // `readerBody_` is the same face the Reader draws with, which is what makes
+      // the preview a live preview rather than a second approximation of one. IT
+      // MAY BE NULL and this case does NOT refuse for it: the theme draws an empty
+      // preview box, which is a degradation and not a failure, and refusing would
+      // make the panel unreachable from Settings on a device with no book open.
+      return std::make_unique<TypographyScreen>(settings_, settingsSink_, readerBody_);
     case ScreenId::ReaderMenu:
       // THE DEMO HAS TO BE ASKED FOR. This fell back to the board's own name whenever
       // nothing set one, and the device then showed `MIDDLEMARCH` in the header over a

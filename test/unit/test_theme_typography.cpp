@@ -25,6 +25,7 @@
 #include "reader/framebuffer.h"
 #include "reader/layout.h"
 #include "reader/scalablefont.h"
+#include "reader/screen_typography.h"
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
 
@@ -156,6 +157,29 @@ constexpr int kBoxH_X3 = 272;
 int wantBoxH(int panelW) { return panelW == 480 ? kBoxH_X4 : kBoxH_X3; }
 
 }  // namespace
+
+TEST_CASE("the board's own specimen wraps to the board's four lines") {
+  // THE COPY, not filler -- the one case in this file that is about the specimen
+  // rather than about the box. design/Typography.dc.html wraps this sentence to
+  // exactly FOUR lines in Chrome at both frame sizes (measured per line rect: the
+  // fourth is 168px of 396 on the X4 and 90px of 444 on the X3), and the firmware's
+  // whole-pixel advances measure ~3% wider -- which is the margin a board's copy
+  // has to be checked in BOTH engines for. SdMissing's paragraph needed its
+  // max-width taken 400 -> 420 for exactly this.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  BodyAt body(reader::kBodyPpem);
+  reader::TypographyViewModel vm = vmAt(1700);
+  vm.specimen = reader::TypographyScreen::kSpecimen;
+  for (const auto& geo : kGeometries) {
+    CAPTURE(geo.first);
+    reader::Framebuffer fb(geo.first, geo.second);
+    theme.renderTypography(fb, ramp.fonts, &body.face, vm, reader::Plane::Bw);
+    const Box box = findBox(fb);
+    REQUIRE(box.top > 0);
+    CHECK(specimenLines(fb, box) == 4);
+  }
+}
 
 TEST_CASE("the preview box holds four whole lines at the default setting") {
   ramp::Ramp ramp;
