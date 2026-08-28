@@ -90,71 +90,91 @@ is a storage format rather than a log label, so the two strings are separate
 facts that happen to agree.
 
 `FocusScreen` is the base, so `focus()`/`setFocus()` come in as a pair and cannot
-be adopted by halves. Five rows, all focusable, no `ScrollWindow` behaviour
-needed (five rows fit) -- but `FocusScreen` gives it a window with
-`visibleRows == count`, which behaves as a bare `Focus`.
+be adopted by halves. Five rows, **four of them focusable** (`Font` is not -- see
+below), no `ScrollWindow` behaviour needed (five rows fit) -- but `FocusScreen`
+gives it a window with `visibleRows == count`, which behaves as a bare `Focus`,
+and `Focus::Gate` is what skips the unreachable row, exactly as it does for
+Settings' section headers.
 
-### Two modes
+### One mode, one word per button
 
-**Browse.** Up/Down move the focus, wrapping like every other list in the
-firmware. Confirm (`EDIT`) enters edit mode on the focused row. Back (`DONE`)
-leaves the panel.
+Up/Down move the focus, wrapping like every other list. Confirm (`CHANGE`)
+**cycles the focused row's value forward in place**, wrapping. Back (`BACK`)
+leaves for the Reader.
 
-**Edit.** The focused row draws `< VALUE >`. Up/Down step the value, **wrapping**
-off either end. Confirm (`OK`) returns to browse. Back (`DONE`) still leaves the
-panel.
+Hints are `BACK / CHANGE / UP / DOWN`, and they never change.
 
-Hints, and only the Confirm slot differs:
+**THIS REPLACED A TWO-MODE DESIGN, AND THE REASON IS WORTH KEEPING.** The first
+version had a browse mode and an edit mode: Confirm entered edit on a row, Up/Down
+then stepped its value between `‹ ›` chevrons, and Confirm left edit again. Its
+hint bar read `DONE / EDIT / UP / DOWN` browsing and `DONE / OK / UP / DOWN`
+editing, and **that was reported as confusing off the rendered board** — correctly.
+`DONE` and `OK` are synonyms in English, so the bar offered two words for
+"finished" and nothing said that one finished the ROW and the other left the
+SCREEN. Rewording it to `BACK / DONE` would have narrowed the ambiguity without
+removing it; dropping the mode means it cannot exist.
 
-| mode | Back | Confirm | Up | Down |
-|---|---|---|---|---|
-| browse | `DONE` | `EDIT` | `UP` | `DOWN` |
-| edit | `DONE` | `OK` | `UP` | `DOWN` |
+Three things fell out of the change, and none of them was the point of it:
 
-Two slots changing would be a harder diff to read on this glass than the
-chevrons already are, and the chevrons are what actually announce the mode.
+- **The chevrons went**, and with them a mismatch nobody had named: `‹ ›` is a
+  HORIZONTAL marker and the buttons that stepped it were the vertical Up/Down
+  pair. On this device a horizontal marker points at the two SIDE buttons.
+- **`design/TypographyEditing.dc.html` was deleted.** There is no second state
+  left to board, so there is no second state to keep in step.
+- **It is the mechanism Settings already uses.** That screen cycles five sleep
+  values and three refresh cadences on `CHANGE`, and the argument written into
+  `screen_settings.cpp` transfers unchanged: "this is one button, so there is no
+  way back except round. Five sleep steps and three cadences keeps a full cycle
+  short enough to be usable on a panel that costs ~520 ms a repaint." Two screens
+  editing a value list two different ways would have been two mechanisms for one
+  job.
 
-**THERE IS NO CANCEL, AND THAT IS WHAT MAKES BACK UNAMBIGUOUS.** Every step
-commits immediately, as Settings' `CHANGE` does, so there is nothing for a cancel
-to undo -- and Back means the same thing in both modes. A Back that left edit
-mode in one mode and the screen in the other would be the second-door problem
-that got `Close book` deleted: one action reachable two ways, each needing its own
-correctness argument.
+**WHAT IT COSTS is one direction.** The longest list here is five, so any value is
+at most four presses from any other — the same worst case Settings accepted. The
+alternative was a second mode whose two exits could not be told apart.
 
-**THE VALUES WRAP, LIKE EVERY OTHER LIST IN THIS FIRMWARE**, and this screen is
-where that costs nothing. The recorded hazard is not wrapping itself -- CLAUDE.md
-settles that a wrap is the only thing a press at the end can do, so it can never
-read as a dead button -- it is **auto-repeat**: "a wrap belongs to a press and a
-hold rests at the end", which is why `Focus::move(delta, held)` clamps for a held
-button.
+### The Font row is drawn and unreachable
 
-**This screen declares no repeat**, as Settings does not, so a held Up cannot
-race through the values -- and it must not, because every step re-inits the body
-face. One step per press, and the sharp edge on wrapping never arises.
+`Font` has one value while one body face is vendored, so `CHANGE` on it would do
+nothing visible.
 
-So `setWrapping(false)` stays unused, and a value stepper is one more list rather
-than an exception with its own rule.
+**It was kept live in the two-mode design**, on the grounds that a row entering
+edit mode with NO chevrons was an honest picture of a setting with nowhere to
+step. That justification died with the chevrons: a `CHANGE` that produces an
+identical frame is the silent no-op this project has been bitten by twice.
 
-### Both chevrons, or neither
+So **the focus skips it**, which is Settings' own rule for a row with nothing
+behind it, and the focus starts on `Size`. It is drawn **exactly** as any
+unfocused row — no dimming, because `focusable` is about input and a visual
+difference nobody designed is worse than none. The board moves its inversion to
+`Size` to match.
 
-With the values wrapping there is always a step in both directions, so a
-multi-value row in edit mode draws both chevrons. `design/Typography.dc.html`
-draws a pair already, and it is still wrong on two counts -- it draws them on
-`Font`, which has one value, and on a board that depicts BROWSE mode, where no
-row shows any. Both are fixed under Board work below.
+The row stays rather than being cut, because it states a true fact the reader
+wants: the book is set in Literata. It becomes focusable in the commit that
+vendors a second face, and that is one line.
 
-**Neither is drawn for a row with one value.** `Font` in edit mode reads
-`LITERATA` with no chevrons at all: it is focusable, it enters edit mode, and it
-shows you there is nowhere to go rather than being a row you cannot reach. That
-is the one place the chevrons carry information beyond "this is the edit mode",
-and it is the reason they are computed from the value count rather than hardcoded
-into the theme.
+### The values wrap
+
+Every list in this firmware wraps, and the recorded hazard is not the wrap —
+CLAUDE.md settles that a wrap is the only thing a press at the end can do, so it
+can never read as a dead button. The hazard is **auto-repeat**: "a wrap belongs to
+a press and a hold rests at the end", which is why `Focus::move(delta, held)`
+clamps for a held button.
+
+**This screen declares no repeat**, as Settings does not, and it must not — every
+size step re-inits the body face, so a held Up would race through the sizes
+re-rasterising the alphabet on each one. One step per press, and the sharp edge on
+wrapping never arises.
+
+So `setWrapping(false)` stays unused, and both the focus and the value cycle are
+one more list rather than an exception with its own rule.
+
 
 ### The values
 
 | Row | Steps | Default | Label form |
 |---|---|---|---|
-| Font | Literata | -- | `LITERATA` |
+| Font | Literata (unreachable) | -- | `LITERATA` |
 | Size | ppem 27, 32, **38**, 42, 46 | 32 | `12 PT` .. `22 PT` |
 | Margins | 10, 18, 30 px | 18 | `TIGHT`, `COMFORTABLE`, `WIDE` |
 | Line spacing | 1400, 1550, 1700, 1850, 2000 | 1700 | `1.4` .. `2.0` |
@@ -285,25 +305,29 @@ The `Font` row keeps a constant, because there is no field to read.
 `make compare` is what keeps design and firmware honest, and a UI change goes
 into the design HTML first -- including when the board is what is wrong.
 
-1. **`design/Typography.dc.html`** -- the preview box gets a fixed height; the
-   focused row loses its chevrons, because this board depicts BROWSE mode.
-2. **`design/TypographyEditing.dc.html`** (new) -- the same screen editing
-   `Size`, `< 18 PT >`, hints `DONE / OK / UP / DOWN`. A second state of one
-   screen, as `LibraryScrolled.dc.html` is of `Library.dc.html`, and the state
-   that pins the chevrons and the second hint set.
-3. **`design/Settings.dc.html`** -- the `Size` row's value `18 PT` -> `15 PT`,
+**DONE, and reviewed on the rendered boards (2026-08-28).**
+
+1. **`design/Typography.dc.html`** -- the preview box **derives** its height
+   (`flex: 1`, never a pinned number: a pinned one was wrong by ~42px and
+   `flex-shrink` hid it); the hint bar is `BACK / CHANGE / UP / DOWN`; the
+   footnote is `APPLIES TO EVERY BOOK. YOUR PLACE IS KEPT.`; the specimen is
+   Middlemarch's full opening sentence; the focus sits on `Size`, not `Font`.
+   Measured: the box is 250px on the X4 and 241px on the X3, so 222px and 213px
+   of text area, holding four whole lines of specimen at the default setting.
+2. **`design/Settings.dc.html`** -- the `Size` row's value `18 PT` -> `15 PT`,
    which is ppem 32 truncated. The other four already state the defaults.
-4. **`tools/compare-design.py`** -- add `typography_editing`. `typography` is
-   already in the list at line 107.
-5. **Republish the design canvas** (`design/canvas.json`) -- one new board.
+3. **NO SECOND BOARD.** `TypographyEditing.dc.html` was written and then deleted
+   with the edit mode; `tools/compare-design.py` gained its entry and lost it
+   again. There is one state, so there is one board.
+4. **Republish the design canvas** (`design/canvas.json`) -- one changed board.
    Issue #34 already says the canvas is behind; this adds to it rather than
-   fixing it.
+   fixing it. **Not done here.**
 
 ## Testing
 
-**Goldens, both states, both geometries** -- `typography` and
-`typography_editing` at 480x800 and 528x792. Every built screen has a golden and
-these are built screens.
+**Goldens at both geometries** -- `typography` at 480x800 and 528x792. Two, not
+four: there is one state now. Every built screen has a golden and this is a built
+screen.
 
 **Proved by mutation, not by passing.** Each golden and each new test case is
 checked by breaking the code it defends and confirming the failure count -- and
@@ -313,7 +337,7 @@ mutation on a line the input never reaches).
 
 | file | what it pins |
 |---|---|
-| `test_screen_typography.cpp` (new) | the mode machine, both hint sets, values wrapping off BOTH ends of every multi-value row, `Font`'s absent chevrons and its no-op step, focus wrapping in browse and NOT moving in edit, and that no gesture carries more than one step |
+| `test_screen_typography.cpp` (new) | the five rows in the board's order, the values in the board's forms, `CHANGE` cycling each multi-value row through its whole table and back, the focus wrapping and SKIPPING `Font`, the focus starting on `Size`, the one hint set, a commit carrying the value the row shows, a refused write still showing it, and that no gesture carries more than one step |
 | `test_settings.cpp` | the four fields round-trip, each clamp, and a file with none of them loading with defaults under version 1 |
 | `test_layout.cpp` | `justify=false` leaves `extraPerGapF26` at 0 on every line; a lead change and a margin change each move page boundaries |
 | `test_focus_restore.cpp` | its two counts go 7 -> 8, and `kAllScreens` gains a row (its `static_assert` fails until it does) |
@@ -325,7 +349,7 @@ because they are the mechanism that stops this feature adding a screen that
 reports a focus and drops it. They fail until Typography is added, which is the
 test doing its job rather than an obstacle.
 
-**`make compare` on both boards**, with the percentage read rather than the word
+**`make compare` on the board**, with the percentage read rather than the word
 `ok`: `ok` means the simulator produced a frame, not that the frame matches. A
 merge changed `ReaderMenu.dc.html` under its screen and the sheet said `ok` at
 13.02%.
