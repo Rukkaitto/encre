@@ -1830,9 +1830,46 @@ the page on glass byte-identical — invisible to everything but the builder.
   `chapter_.next()` and `pb.add()` cannot be stopped half way.
 - **The one thing it does not restore is the live `PageBuilder`**, because the walk
   rewinds the `ChapterReader` the builder reads from and there is no second stream to
-  rebuild it with (another 32 KB window against a 42 KB floor). So an abandon costs
-  the NEXT FORWARD turn a full `seekTo` — which is why `kCountQuietMs` stays long;
-  see the constant, which carries the whole argument.
+  rebuild it with (another 32 KB window against a 42 KB floor). So the next FORWARD
+  turn pays a full `seekTo` — **and this is NOT only the abandoned count's doing,
+  which is what the argument for the long window got wrong.** `completeIndex` ends in
+  `seekTo(at_)`; `at_` is by definition the page the ring is most certain to hold, so
+  the restore leg takes a cache hit — and a hit leaves `pb_` null deliberately,
+  because nothing was decoded. **A count that COMPLETES spends the stream too**, so
+  every deferred chapter cost one forward turn a rewind whatever the window was. The
+  long window was buying nothing. (Also off by one press: the queue drains at the top
+  of `loop()`, so the press that interrupted the count IS the next thing dispatched.)
+- **`ReaderScreen::restreamAtCurrentPage` PUTS IT BACK, and abandoning THAT is free.**
+  It is the same walk `warmPageRing` makes — one private `rewalkToCurrentPage` with
+  two gates, not two copies — and it runs **only when `pb_` is already null**, so it
+  has no live builder to spend: an interrupted restream leaves exactly the state it
+  found. That makes the trade one-sided rather than balanced — it finishes and the
+  next forward turn is free, or it is cut and that turn pays what it pays today — and
+  **that, not the walk being cheap, is what lets it have a short window** where
+  `completeIndex` and `warmPageRing` cannot. `hasLiveStream()` is the gate the shell
+  asks first, so an ordinary page turn costs a pointer test and no log line.
+  `[restream] ready|abandoned page=N` is what tells a working idle job from a silent
+  one.
+- **So `kCountQuietMs` IS ITS OWN NUMBER AGAIN, at 2000 ms**, having been
+  `kRefineQuietMs` while the two shared a cost. The derivation is in the constant:
+  the floor is the **1360 ms** longest pause measured while still turning pages, the
+  margin is 1.47× rather than the refinement's ~3.5× because the cost of being wrong
+  is now one rewind on one press at most once per chapter rather than 1408 ms of
+  uninterruptible dead buttons, and the prize is the total landing on glass at ~3.0 s
+  instead of ~6.0 s. **It cannot re-open the percentage-going-backwards bug**, which
+  is the other thing this constant has to be checked against: `progressPercent` is
+  made of BYTES now and reads `page`/`pageTotal` only where there is no inflater to
+  ask, so for a real deflated chapter the count's timing does not enter it —
+  `test_reader_restream.cpp` asserts the percentage across the moment the count lands
+  and it does not move. On the byte-less fallback path, shortening moves the same
+  lever in the direction that made it better.
+- **The invisibility property is asserted over a CARD-BACKED book, and it had to be.**
+  `ChapterReader::bytesRead()` is `inflated_ ? produced() : 0`, so the in-memory
+  fixture reports **0 forever** and `CHECK(chapterBytesRead() == was)` over it is
+  `0 == 0` — it passed with a mutant that zeroed the field, which is how the hole was
+  found. `test_reader_restream.cpp` builds a real EPUB in memory for that one
+  assertion; the trick that makes it cheap is that **DEFLATE has a stored-block mode**,
+  so a valid method-8 entry needs a framer and no compressor.
 - **There are TWO count sites**, the deferred one in `loop()` and one inside
   `refineNow()`. Fixing one and not the other would have brought the freeze back on
   whichever path the reader happened to take.
@@ -2478,7 +2515,20 @@ is the property the other three tests rest on and it is asserted first.
   default of 3 is the floor, so a heap under pressure keeps the shipped behaviour.
 - **Abandoning costs the next FORWARD turn**, because the warm spends the live
   builder and cannot rebuild it -- the identical trade `completeIndex` makes, and why
-  both wait for the refinement's window rather than a short one.
+  **this one still waits for the refinement's window** where the count no longer does.
+  The asymmetry is the whole reason there are now three constants and not one: a warm
+  is reached with a stream STANDING, so an interrupted warm loses it; a restream is
+  reached only with `pb_` already null, so an interrupted restream loses nothing.
+  `kRestreamQuietMs` is 1200 ms for exactly that reason and `kRefineQuietMs` stays
+  5000.
+- **`restreamAtCurrentPage` IS THIS WALK WITH A DIFFERENT GATE**, sharing the private
+  `rewalkToCurrentPage` rather than copying it -- the second copy is the extraction
+  point, and a builder installed one page off is a reader that skips or repeats a
+  page, which two copies would each have to be tested for separately. The shell runs
+  the restream FIRST: a landed restream leaves the headroom a warm would have left,
+  so the pair costs one rewind rather than two and the warm below correctly finds
+  nothing to do. The gates differ in one more place -- a warm refuses page 0 (nothing
+  behind it to cache) and a restream accepts it (the cheapest walk there is).
 - **It is LOGGED although nothing is visible**, precisely because nothing is: an idle
   optimisation that silently stops working looks exactly like one that is working.
   `[warm] ready|abandoned depth=N headroom A->B` is what tells them apart.
