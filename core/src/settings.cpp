@@ -2,13 +2,26 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
 #include <string>
 
 #include "reader/filesystem.h"
 #include "reader/json.h"
+#include "reader/layout.h"
 
 namespace reader {
+
+// THE TYPOGRAPHY DEFAULTS ARE LAYOUT'S CONSTANTS, ASSERTED HERE RATHER THAN IN
+// THE HEADER so settings.h stays a leaf (including layout.h there cost 74,022
+// preprocessed lines against 896, for two integers). Each line asserts two
+// facts: the
+// struct's default equals layout.h's constant, AND that value is on its step
+// table -- a default off its own table would be snapped away by the first
+// validate() to see it. So a change to either layout constant now fails the
+// BUILD instead of silently moving every reader golden.
+static_assert(Settings{}.bodyPpem == kBodyPpem && kBodyPpemSteps[1] == kBodyPpem);
+static_assert(Settings{}.lineSpacing == kBodyLeadEm &&
+              kLineSpacingSteps[2] == kBodyLeadEm);
+
 namespace {
 
 // JsonObject has no "is this key present?" -- a getter answers "present AND of
@@ -44,6 +57,19 @@ void readClampedInt(const JsonObject& o, const char* key, int& field, int lo, in
   }
 }
 
+// The same read, bounded by a STEP TABLE's own ends. It exists because the
+// bounds were hand-spelled at three call sites, which reintroduced exactly the
+// mis-pairing hazard snapToTable's signature removes: pairing kMarginSteps[0]
+// with kBodyPpemSteps' end would be completely invisible, since for any value
+// that fits an int the bounds here change nothing that validate() does not then
+// redo. Deriving both ends from the one table argument makes the pairing
+// unwritable.
+template <std::size_t N>
+void readSteppedInt(const JsonObject& o, const char* key, int& field,
+                    const int (&table)[N], bool& ok) {
+  readClampedInt(o, key, field, table[0], table[N - 1], ok);
+}
+
 void readBool(const JsonObject& o, const char* key, bool& field, bool& ok) {
   bool v = false;
   if (o.getBool(key, v)) {
@@ -63,15 +89,24 @@ void readBool(const JsonObject& o, const char* key, bool& field, bool& ok) {
 // index, so a value in range but off the table is a value the stepper can never
 // leave -- the same trap cycleFocused handles by landing on index 0's successor,
 // solved one layer earlier because a nearest-value answer exists here.
-template <size_t N>
+// THE DISTANCE IS `long long` BECAUSE `candidate - field` OVERFLOWS. With
+// field == INT_MIN, `25 - INT_MIN` is signed overflow (UBSan says so) and the
+// wrapped result made INT_MIN snap to 46 -- the largest step, where the nearest
+// is obviously the smallest. The card path is shielded by readSteppedInt's
+// int64 clamp; the in-memory path is not, and saveSettings validates whatever a
+// caller hands it, so the wrong answer would have been persisted.
+template <std::size_t N>
 bool snapToTable(int& field, const int (&table)[N]) {
-  int best = table[0];
-  int bestDist = -1;
+  int best;
+  long long bestDist = -1;
   for (const int candidate : table) {
-    const int d = candidate > field ? candidate - field : field - candidate;
+    const long long d = static_cast<long long>(candidate) - field;
+    const long long dist = d < 0 ? -d : d;
     // `<=` rather than `<`, over an ASCENDING table, is what makes a tie go up.
-    if (bestDist < 0 || d <= bestDist) {
-      bestDist = d;
+    // settings.h static_asserts the ascent, because this line is the only thing
+    // that depends on it and no test can see the order change.
+    if (bestDist < 0 || dist <= bestDist) {
+      bestDist = dist;
       best = candidate;
     }
   }
@@ -153,17 +188,18 @@ bool loadSettings(FileSystem& fs, Settings& out) {
   readBool(o, "fullOnTransition", parsed.fullOnTransition, ok);
   readBool(o, "logToCard", parsed.logToCard, ok);
 
-  // The table's ends as the range; validate() below does the snapping to an
-  // actual step. Two layers rather than one because readClampedInt is shared
-  // and knows nothing about tables, and because `ok` has to be cleared either
-  // way -- a value that was out of range and a value that was merely off the
-  // table both mean CORRECTED in the boot log.
-  readClampedInt(o, "bodyPpem", parsed.bodyPpem, kBodyPpemSteps[0],
-                 kBodyPpemSteps[std::size(kBodyPpemSteps) - 1], ok);
-  readClampedInt(o, "margins", parsed.margins, kMarginSteps[0],
-                 kMarginSteps[std::size(kMarginSteps) - 1], ok);
-  readClampedInt(o, "lineSpacing", parsed.lineSpacing, kLineSpacingSteps[0],
-                 kLineSpacingSteps[std::size(kLineSpacingSteps) - 1], ok);
+  // THE TABLE'S ENDS AS A RANGE, AND THE REASON IS THE NARROWING GUARD -- not,
+  // as this comment first claimed, that `ok` needs clearing either way.
+  // validate() below already clears `ok` for both cases, and sweeping every
+  // value from -5 to 250 through both paths found ZERO disagreements. What this
+  // layer alone contributes is readClampedInt's refusal to narrow an int64 by
+  // cast: `bodyPpem: 4294967328` would otherwise truncate to a perfectly
+  // plausible 32 and be accepted in silence, where clamping to the table's top
+  // step is an obvious absurdity the boot log reports as CORRECTED. The snap
+  // onto an actual step is validate()'s, just below.
+  readSteppedInt(o, "bodyPpem", parsed.bodyPpem, kBodyPpemSteps, ok);
+  readSteppedInt(o, "margins", parsed.margins, kMarginSteps, ok);
+  readSteppedInt(o, "lineSpacing", parsed.lineSpacing, kLineSpacingSteps, ok);
   readBool(o, "justify", parsed.justify, ok);
 
   if (!parsed.validate()) ok = false;

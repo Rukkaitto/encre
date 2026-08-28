@@ -1,7 +1,6 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
-
-#include "reader/layout.h"  // kBodyPpem, kBodyLeadEm
 
 namespace reader {
 class FileSystem;
@@ -33,14 +32,20 @@ inline constexpr int kFullRefreshEveryMax = 255;
 //
 // Public for the reason kSleepAfterMsMin is: the Typography screen has to know
 // what it is allowed to offer, and a second copy of these numbers would drift
-// from these ones. Ascending, which validate() and the stepper both rely on.
+// from these ones.
 //
 // EVERY DEFAULT BELOW IS TODAY'S BEHAVIOUR TO THE PIXEL. That is what keeps
 // every reader, sleep and book-details golden where it is -- a golden that
 // moves because of this feature is a bug in it.
 //
-// SIZE: ppem, labelled in points as the chrome ramp is (pt = ppem * 72 / 150,
-// truncated). 27->12, 32->15, 38->18, 42->20, 46->22, all clean.
+// SIZE: ppem, labelled in points at 150 DPI as the chrome ramp is
+// (pt = ppem * 72 / 150). 25->12, 32->15, 38->18, 42->20, 46->22, and
+// TRUNCATION AND ROUNDING AGREE ON ALL FIVE -- which is the reason 25 is the
+// bottom step rather than 27. CLAUDE.md's convention is `ppem = pt * 150 / 72`
+// rounded, under which "12 PT" is ppem 25 and 25 * 72 / 150 is exactly 12.0;
+// 27 is really 12.96pt and only labels as 12 by truncating almost a whole point
+// away. With this table the formula's ambiguity does not arise, so it cannot
+// drift later into a label that is a point out.
 //
 //   * 32 is the default because design/Reader.dc.html says `font-size: 32px`.
 //   * 38 is on the list because 18 PT is the Typography board's own stated
@@ -50,13 +55,32 @@ inline constexpr int kFullRefreshEveryMax = 255;
 //   * 46 is the top because the glyph cache is thrash-free to ppem ~46 (see
 //     CLAUDE.md, The glyph cache). Past it the arena stops holding the
 //     alphabet's union and every page re-rasterises at ~3,794 us a glyph.
-inline constexpr int kBodyPpemSteps[] = {27, 32, 38, 42, 46};
+inline constexpr int kBodyPpemSteps[] = {25, 32, 38, 42, 46};
 // MARGINS: the reader column's side padding in px. 18 is design/Reader.dc.html's
 // own, which is why it is the middle step and carries the board's own label.
 inline constexpr int kMarginSteps[] = {10, 18, 30};
 // LINE SPACING: em x 1000, as PageMetrics::leadEm1000 is. 1700 is the board's
 // `line-height: 1.7`.
 inline constexpr int kLineSpacingSteps[] = {1400, 1550, 1700, 1850, 2000};
+
+// EVERY STEP TABLE MUST ASCEND, AND THIS IS A static_assert RATHER THAN THE
+// COMMENT IT USED TO BE. What depends on the order is the TIE RULE: snapToTable
+// picks the LAST candidate at equal distance, which is the larger one only while
+// the table ascends. So a reorder that preserves the SET -- {32, 25, 38, 42, 46}
+// -- silently reverses "ties go up", and a mutation confirmed that no test in the
+// suite can see it. Same precedent as kClustered's transpose assert in
+// dither.cpp: a change that preserves the thing the tests check and breaks the
+// thing they cannot has to fail the build instead.
+template <std::size_t N>
+constexpr bool ascending(const int (&table)[N]) {
+  for (std::size_t i = 1; i < N; ++i) {
+    if (table[i] <= table[i - 1]) return false;
+  }
+  return true;
+}
+static_assert(ascending(kBodyPpemSteps));
+static_assert(ascending(kMarginSteps));
+static_assert(ascending(kLineSpacingSteps));
 
 // Every knob the shell hardcoded through 2B. Defaults here are the values that
 // were compiled in, so behaviour is unchanged until a user changes something.
@@ -92,13 +116,25 @@ struct Settings {
   // older file, which is the rule stated at the top of this header, and this is
   // the case it was written for: a card carrying today's file loads and behaves
   // identically.
-  int bodyPpem = kBodyPpem;
+  // The two numbers are layout.h's kBodyPpem and kBodyLeadEm, written as
+  // LITERALS so this header stays a leaf -- including layout.h here cost 74,022
+  // preprocessed lines against 896 for the leaf, for two integers. They are
+  // spelled out three lines above in the step tables anyway, so a literal here
+  // removes a coupling rather than adding one, and settings.cpp static_asserts
+  // that all four spellings agree: a change to either layout constant fails the
+  // BUILD rather than silently moving every reader golden.
+  int bodyPpem = 32;
   int margins = 18;
-  int lineSpacing = kBodyLeadEm;
+  int lineSpacing = 1700;
   bool justify = true;
 
-  // Clamps every field into a sane range, returning false if anything had to be
-  // clamped. A file that needs clamping is a file to distrust, but clamping and
+  // Corrects every field, returning false if anything had to be corrected --
+  // and there are TWO corrections, not one. The ranged fields (sleepAfterMs,
+  // fullRefreshEvery) are CLAMPED into a range. The typography fields are
+  // SNAPPED onto their step tables above, which is a different operation and
+  // deliberately not a range clamp: the Typography screen steps a table by
+  // index, so a value in range but off the table is one the user could never
+  // leave. A file that needs either is a file to distrust, but correcting it and
   // carrying on beats refusing to boot.
   bool validate();
 

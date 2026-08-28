@@ -16,8 +16,14 @@ void plant(FakeFileSystem& fs, const std::string& text) {
   REQUIRE(fs.writeAll(kSettingsPath, text));
 }
 
-// Defaults, spelled out. If one of these changes the behaviour of a device with
-// no settings file changes with it, which is worth a failing test.
+// The whole struct by ==, plus the three values worth naming. BOTH HALVES DO A
+// JOB, and they are not the same job: `s == Settings{}` covers every field and
+// catches one that FAILED TO DEFAULT, but it compares against those same
+// defaults, so it cannot see a default VALUE that changed -- both sides move
+// together and it still passes. Only a spelled-out literal catches that, which
+// is why the list exists and why it is literals rather than the constants the
+// struct is built from. The typography defaults are pinned the same way, in
+// their own case below.
 void checkIsDefaults(const Settings& s) {
   CHECK(s == Settings{});
   CHECK(s.sleepAfterMs == 5u * 60u * 1000u);
@@ -282,6 +288,19 @@ TEST_CASE("a number too large for the field is clamped, not wrapped") {
   CHECK_FALSE(loadSettings(fs, t));
   CHECK(t.sleepAfterMs == kSleepAfterMsMin);  // a negative is not 4 billion ms
   CHECK(t.fullRefreshEvery == 0);
+
+  // THE TYPOGRAPHY FIELDS TOO, WHICH IS THE ONLY THING readSteppedInt'S LAYER
+  // CONTRIBUTES that validate() does not. Both numbers are 2^32 plus a value
+  // that is ON the table, so a cast to int would truncate them to exactly their
+  // own default and be accepted in silence -- 4294967328 -> 32 and 4294968696 ->
+  // 1400. Clamping to the table's top step instead is what makes the file
+  // report CORRECTED.
+  plant(fs, "{\"version\":1,\"bodyPpem\":4294967328,"
+            "\"lineSpacing\":4294968696}");
+  Settings u;
+  CHECK_FALSE(loadSettings(fs, u));
+  CHECK(u.bodyPpem == 46);
+  CHECK(u.lineSpacing == 2000);
 }
 
 TEST_CASE("a saved file is always valid, so a bad in-memory Settings cannot poison it") {
@@ -296,15 +315,19 @@ TEST_CASE("a saved file is always valid, so a bad in-memory Settings cannot pois
   CHECK(in.fullRefreshEvery == 0);
 }
 
-
 TEST_CASE("the typography fields default to today's behaviour") {
   // THE PROPERTY THE WHOLE FEATURE RESTS ON. Every reader golden is pinned at
   // these values, so a default that moved would re-bless nine goldens and
   // silently change what every book looks like.
+  // LITERALS, NOT reader::kBodyPpem. Written against the constant this read
+  // `kBodyPpem == kBodyPpem` and could not fail: moving layout.h's kBodyPpem
+  // 32->38 and kBodyLeadEm 1700->1850 passed the whole suite, which is the
+  // opposite of what the comment above claims. settings.cpp's static_asserts are
+  // what tie these to layout.h now; these say what the numbers are.
   const reader::Settings s;
-  CHECK(s.bodyPpem == reader::kBodyPpem);   // 32
-  CHECK(s.margins == 18);
-  CHECK(s.lineSpacing == reader::kBodyLeadEm);  // 1700
+  CHECK(s.bodyPpem == 32);        // design/Reader.dc.html `font-size: 32px`
+  CHECK(s.margins == 18);         // its `padding` either side of the column
+  CHECK(s.lineSpacing == 1700);   // its `line-height: 1.7`
   CHECK(s.justify);
 }
 
@@ -321,7 +344,7 @@ TEST_CASE("validate snaps the typography fields to an offered value") {
     reader::Settings s;
     s.bodyPpem = 4;
     CHECK_FALSE(s.validate());
-    CHECK(s.bodyPpem == 27);
+    CHECK(s.bodyPpem == 25);
   }
   SUBCASE("a size above the largest step") {
     reader::Settings s;
@@ -404,9 +427,9 @@ TEST_CASE("a settings file from before typography loads with the defaults") {
             "\"sleepAfterMs\":300000}");
   reader::Settings s;
   CHECK(reader::loadSettings(fs, s));  // TRUE: an absent field is not a failure
-  CHECK(s.bodyPpem == reader::kBodyPpem);
+  CHECK(s.bodyPpem == 32);  // literals, for the reason the defaults case gives
   CHECK(s.margins == 18);
-  CHECK(s.lineSpacing == reader::kBodyLeadEm);
+  CHECK(s.lineSpacing == 1700);
   CHECK(s.justify);
 }
 
