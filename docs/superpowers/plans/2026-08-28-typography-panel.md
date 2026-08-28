@@ -11,9 +11,10 @@ the reader was on.
 `TypographyScreen` in `core/` holding a `Settings` copy and a `SettingsSink*`,
 the same pair `SettingsScreen` holds. **One mode:** Up/Down move the focus,
 `CHANGE` cycles the focused value in place and wraps — Settings' own mechanism.
-`BACK` answers `popTo(ScreenId::Reader)`, the Contents pattern verbatim, and the
-shell re-inits the body faces, recomputes `Theme::readerMetrics` and
-re-paginates at the current block cursor.
+`BACK` answers a plain `pop()`, and the shell re-inits the body faces,
+recomputes `Theme::readerMetrics` and re-paginates at the current block cursor
+whenever a Reader is anywhere on the stack. **Two entry points:** the reader's menu
+and a `READING` row in Settings.
 
 **Tech Stack:** C++20 (`-fno-exceptions`, no RTTI on device), doctest, CMake,
 Chrome-rendered `.dc.html` design boards, Python asset/compare tooling.
@@ -75,7 +76,7 @@ first. It carries the reasoning; this plan carries the steps.
 | `core/src/session_record.cpp` | `"typography"` |
 | `core/include/reader/screens.h` + `core/src/screens.cpp` | The factory case |
 | `core/src/screen_reader_menu.cpp` | The `Typography` row goes live |
-| `core/src/screen_settings.cpp` | The five TYPOGRAPHY rows read `settings_` |
+| `core/src/screen_settings.cpp` | Five rows become a `READING` door; the Confirm hint follows the focus |
 | `sim/main.cpp` | the `typography` subcommand |
 | `CMakeLists.txt` | Two `add_test` smoke entries |
 | `test/unit/test_screens_golden.cpp` | Two goldens × two geometries |
@@ -1566,18 +1567,16 @@ Action TypographyScreen::onGesture(const GestureEvent& g) {
     case Gesture::Prev: return moveFocus(-1);
     case Gesture::Next: return moveFocus(+1);
     case Gesture::Activate: return cycleFocused();
-    // POPS TO THE READER, not one screen back, and this is the Contents pattern
-    // verbatim. The panel is pushed from the reader MENU, so a plain pop would land
-    // back on the menu and the type change would not be visible until that was
-    // dismissed too -- a setting that appears not to have taken.
+    // A PLAIN POP, and it was popTo(ScreenId::Reader) until Settings became a
+    // second door. From Settings there is no Reader on the stack and popTo stops at
+    // the root (app.h), so it would have dumped the user on Home and lost Settings.
     //
-    // It cannot re-paginate the Reader itself: one is already on the stack under
-    // the menu, and core/ has no faces to re-rasterise. So it names where to land
-    // and the shell does the work -- see the apply path in shell/src/main.cpp.
-    //
-    // popTo STOPS AT THE ROOT if no Reader is on the stack (app.h states it), which
-    // is a safe answer for a panel only reachable from a book.
-    case Gesture::Back: return Action::popTo(ScreenId::Reader);
+    // The panel cannot re-paginate the Reader itself in either case: core/ has no
+    // faces to re-rasterise. The shell does it, keyed on a Reader being ANYWHERE on
+    // the stack rather than on top -- which the reader-menu route needs anyway,
+    // because popping here lands on the MENU and the menu is an overlay, so
+    // App::render paints the stale page beneath it on the very next frame.
+    case Gesture::Back: return Action::pop();
     default: return Action::none();
   }
 }
@@ -1630,10 +1629,22 @@ void TypographyScreen::render(Framebuffer& fb, const FontSet& fonts, Theme& them
 }  // namespace reader
 ```
 
-**The four `typography*Label` functions are Task 19's extraction.** If you are
-executing in order they do not exist yet: write them in `settings.h`/`settings.cpp`
-now (Task 19 Step 3 has their declarations and the reasoning), because both this
-screen and Settings need them and the second copy is the extraction point.
+**The four `typography*Label` functions are LOCAL to this file** -- put them in the
+anonymous namespace above, beside `kItems`.
+
+An earlier draft extracted them into `settings.h`, because Settings was going to
+read the same five values out. It does not any more: its five rows became one door
+(Task 19), so there is exactly ONE caller. The rule is "the second copy is the
+extraction point", not "extract in advance of one".
+
+`typographySizeLabel` truncates: `pt = ppem * 72 / 150`, exactly as `sleepLabel`
+truncates minutes, because the row describes a size the user is looking at and
+rounding up would name a size the panel is not showing. Every offered ppem
+truncates cleanly (27->12, 32->15, 38->18, 42->20, 46->22), which is part of why
+those five were chosen. `typographyLeadLabel` emits `2.0` rather than `2`, because
+a bare integer reads as a count beside `1.85` rather than as a ratio. The margin
+labels are a parallel array to `kMarginSteps` with a `static_assert` on the
+lengths, so a step added without a label fails to compile.
 
 **`ScreenId::Typography` is Task 13.** Do it now if the build blocks you.
 
@@ -2683,144 +2694,128 @@ headline tool, and it is not this feature's to fix.
 
 # PHASE 6 — SETTINGS STOPS SHOWING PLACEHOLDERS
 
-### Task 19: The five TYPOGRAPHY rows read the real settings
+### Task 19: Settings' READING section, and a door
 
 **Files:**
-- Modify: `core/include/reader/screen_settings.h` — the `Field` enum and its docs
-- Modify: `core/src/screen_settings.cpp` — the table and `syncVm`
+- Modify: `core/include/reader/screen_settings.h` — the `Field` enum, the `Item` struct
+- Modify: `core/src/screen_settings.cpp` — the table, `focusable`, `onGesture`, `syncVm`
+- Modify: `core/src/theme_quiet.cpp` — `renderSettings` draws a chevron
 - Test: `test/unit/test_screen_settings.cpp`
+- Re-bless: `test/golden/settings.png`, `settings_x3.png`
 
-**They stay UNFOCUSABLE.** Settings is not an entry point to the panel; the rows
-are a readout. What changes is that they read `settings_` instead of a placeholder
-string, because a placeholder is right only while nothing exists behind the row —
-and once a setting exists, a placeholder is a screen displaying a stale number.
+**THIS REPLACED "the five rows read the real settings".** That was right while
+Settings was not an entry point: a placeholder is right only until the setting
+exists. With a door, five rows that display the values are redundant — the panel
+shows them, one press away.
 
-`Sleep screen` keeps its placeholder: nothing exists behind it.
-
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 ```cpp
-TEST_CASE("Settings' typography rows read the settings, not placeholders") {
-  reader::Settings s;
-  s.bodyPpem = 46;
-  s.margins = 10;
-  s.lineSpacing = 1400;
-  s.justify = false;
-  reader::SettingsScreen scr(s, nullptr);
+TEST_CASE("Settings' READING row opens the Typography panel") {
+  reader::SettingsScreen scr(reader::Settings{}, nullptr);
   scr.setMetrics(2000, 54, 40);  // a window tall enough for every row
-
   const reader::SettingsViewModel& vm = scr.vm();
-  REQUIRE(vm.rows.size() >= 6);
-  CHECK(vm.rows[0].label == "TYPOGRAPHY");
-  CHECK(vm.rows[1].value == "LITERATA");
-  CHECK(vm.rows[2].value == "22 PT");       // 46 * 72 / 150 = 22.08
-  CHECK(vm.rows[3].value == "TIGHT");
-  CHECK(vm.rows[4].value == "1.4");
-  CHECK(vm.rows[5].value == "RAGGED");
+
+  REQUIRE(vm.rows.size() == 7);
+  CHECK(vm.rows[0].label == "READING");
+  CHECK(vm.rows[0].isHeader);
+  CHECK(vm.rows[1].label == "Typography");
+  // A CHEVRON AND NO VALUE: Home's menu rows state the rule -- a row states a
+  // quantity or discloses a screen, never both.
+  CHECK(vm.rows[1].discloses);
+  CHECK(vm.rows[1].value.empty());
+  CHECK(vm.rows[2].label == "DEVICE");
+
+  // THE FOCUS STARTS HERE. It sat on `Sleep after` only because every row above it
+  // was inert.
+  CHECK(vm.rows[static_cast<size_t>(vm.focusedRow)].label == "Typography");
+
+  const reader::Action a = scr.onEvent({reader::Button::Confirm, reader::PressKind::Short});
+  CHECK(a.kind == reader::Action::Kind::Push);
+  CHECK(a.target == reader::ScreenId::Typography);
 }
 
-TEST_CASE("Settings' typography rows are still unreachable") {
-  // A READOUT, not an entry point. The panel is reached from the reader's menu,
-  // where the band can name the book and the preview means something.
+TEST_CASE("the five old typography rows are gone") {
+  // They were a readout nobody could act on. Asserted by absence, because a row
+  // left behind would be drawn and unreachable forever and nothing else would
+  // notice.
   reader::SettingsScreen scr(reader::Settings{}, nullptr);
   scr.setMetrics(2000, 54, 40);
   for (const reader::SettingsRow& r : scr.vm().rows) {
-    if (r.label == "Font" || r.label == "Size" || r.label == "Margins" ||
-        r.label == "Line spacing" || r.label == "Alignment")
-      CHECK_FALSE(r.focusable);
+    CHECK(r.label != "Font");
+    CHECK(r.label != "Size");
+    CHECK(r.label != "Margins");
+    CHECK(r.label != "Line spacing");
+    CHECK(r.label != "Alignment");
+    CHECK(r.label != "TYPOGRAPHY");
   }
-  // ...and the focus still starts on the first DEVICE row.
-  CHECK(scr.vm().rows[static_cast<size_t>(scr.vm().focusedRow)].label == "Sleep after");
 }
 
-TEST_CASE("Settings and Typography spell a value the same way") {
-  // ONE FACT, ONE SPELLING. Two screens show these five values and a second
-  // formatter would be the place they drift -- which is the whole reason
-  // typographyValueFor exists rather than each screen having a switch.
-  reader::Settings s;
-  s.bodyPpem = 38;
-  s.margins = 30;
-  s.lineSpacing = 1850;
-  s.justify = true;
-  reader::SettingsScreen a(s, nullptr);
-  a.setMetrics(2000, 54, 40);
-  reader::TypographyScreen b(s, nullptr, nullptr);
-  CHECK(a.vm().rows[2].value == b.vm().rows[1].value);  // Size
-  CHECK(a.vm().rows[3].value == b.vm().rows[2].value);  // Margins
-  CHECK(a.vm().rows[4].value == b.vm().rows[3].value);  // Line spacing
-  CHECK(a.vm().rows[5].value == b.vm().rows[4].value);  // Alignment
+TEST_CASE("the Confirm hint follows the focused row") {
+  // THE FIRST HINT BAR HERE WHOSE TEXT VARIES WITHIN A SCREEN, and it has to:
+  // screen_settings.cpp used to state the premise outright -- "CHANGE, not OPEN:
+  // nothing here pushes a screen" -- and the READING row makes it false.
+  reader::SettingsScreen scr(reader::Settings{}, nullptr);
+  scr.setMetrics(2000, 54, 40);
+  REQUIRE(scr.vm().rows[static_cast<size_t>(scr.vm().focusedRow)].label == "Typography");
+  CHECK(scr.vm().hints[1] == "OPEN");
+
+  // Down to the first DEVICE row, which cycles a value in place.
+  scr.onEvent({reader::Button::Down, reader::PressKind::Short});
+  REQUIRE(scr.vm().rows[static_cast<size_t>(scr.vm().focusedRow)].label == "Sleep after");
+  CHECK(scr.vm().hints[1] == "CHANGE");
+  // The other three slots never move.
+  CHECK(scr.vm().hints[0] == "BACK");
+  CHECK(scr.vm().hints[2] == "UP");
+  CHECK(scr.vm().hints[3] == "DOWN");
+}
+
+TEST_CASE("CHANGE on a device row still cycles, and OPEN does not") {
+  // The two behaviours must not have leaked into each other: a disclosing row that
+  // cycled a value, or a value row that pushed a screen, would each be a control
+  // doing something other than what its hint says.
+  reader::SettingsScreen scr(reader::Settings{}, nullptr);
+  scr.setMetrics(2000, 54, 40);
+  const reader::Settings before = scr.settings();
+  scr.onEvent({reader::Button::Confirm, reader::PressKind::Short});  // on Typography
+  CHECK(scr.settings() == before);                                   // nothing changed
+
+  scr.onEvent({reader::Button::Down, reader::PressKind::Short});     // Sleep after
+  const reader::Action a = scr.onEvent({reader::Button::Confirm, reader::PressKind::Short});
+  CHECK(a.kind == reader::Action::Kind::Redraw);                     // not Push
+  CHECK(scr.settings().sleepAfterMs != before.sleepAfterMs);
 }
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
 ```bash
-make test 2>&1 | tail -15
+make test 2>&1 | tail -20
 ```
-Expected: FAIL — `rows[2].value` is `"18 PT"`, the board placeholder.
+Expected: FAIL — 11 rows, not 7; `rows[0].label` is `"TYPOGRAPHY"`.
 
-- [ ] **Step 3: Extract the formatter, then use it from both screens**
+- [ ] **Step 3: Change the enum and the Item struct**
 
-**The third test above will not pass without an extraction**, and that is
-deliberate: two screens now show these five values, and the second copy is the
-extraction point rather than the fifth.
-
-Move `sizeLabel`, `leadLabel`, `kMarginLabels` and the margin lookup out of
-`screen_typography.cpp`'s anonymous namespace into a shared home. Put them in
-**`core/include/reader/settings.h`** beside the step tables they index — the
-tables are already public there for exactly this reason, and a new header for four
-formatters would be a file with no other purpose:
+`core/include/reader/screen_settings.h`. **`field != None` used to mean both "has a
+setting" and "can be focused"; those are two facts now**, because a disclosing row
+has no setting and is focusable:
 
 ```cpp
-// HOW A TYPOGRAPHY VALUE IS SPELLED, once. Two screens show these -- the
-// Typography panel edits them and Settings reads them out -- and a second
-// formatter is where the two would drift. Declared here beside the tables they
-// index rather than in a header of their own, because these ARE those tables'
-// labels.
-//
-// Sizes are POINTS, truncated: pt = ppem * 72 / 150, exactly as the chrome ramp
-// is sized and as sleepLabel truncates minutes. The row describes a size the user
-// is looking at, so rounding up would name a size the panel is not showing.
-std::string typographySizeLabel(int ppem);
-std::string typographyMarginLabel(int margins);
-std::string typographyLeadLabel(int em1000);
-std::string typographyAlignLabel(bool justify);
-```
-
-Define them in `core/src/settings.cpp` (which already owns the tables' snapping,
-so the labels and the tables live in one translation unit and a step added without
-a label fails the `static_assert` there rather than in a screen).
-
-`settings.h` needs `#include <string>`.
-
-Then have BOTH screens call them. `screen_typography.cpp` loses its local
-`sizeLabel`/`leadLabel`/`kMarginLabels`; move that `static_assert` to
-`settings.cpp` with the labels.
-
-- [ ] **Step 4: Change the Settings table**
-
-`screen_settings.cpp`'s `kItems` — the five rows get real `Field`s, and the enum
-grows. **They stay unfocusable**, so `focusable()` can no longer be
-`field != Field::None`:
-
-```cpp
-  // WHICH SETTING A ROW SHOWS, and separately whether it can be reached.
+  // Which setting a row edits, or Typography, which edits none and opens the screen
+  // that does.
   //
-  // The typography rows READ a real setting and are still not focusable: the
-  // panel that edits them is the reader's (design/Typography.dc.html), where the
-  // band can name the book and a preview means something. So `field` and
-  // `reachable` are two facts now, where `field != None` used to serve as both --
-  // and conflating them again would either make these rows editable here or send
-  // them back to placeholders.
-  enum class Field {
-    None, SleepAfter, FullRefresh, OnTransition,
-    Font, Size, Margins, LineSpacing, Alignment
-  };
+  // `Typography` IS NOT A SETTING and is still focusable, which is why
+  // `field != None` can no longer serve as the focusability test -- see
+  // `reachable` below.
+  enum class Field { None, Typography, SleepAfter, FullRefresh, OnTransition };
 
   struct Item {
     const char* label;
     Field field;
     bool isHeader;
+    // Whether a focus may land here. Not derivable from `field`: a header has no
+    // field and cannot be focused, `Sleep screen` has no field and cannot be
+    // focused, and `Typography` has no field and MUST be.
     bool reachable;
     // What a row with no setting behind it shows. `Sleep screen` is the only one
     // left: covers are issue #11.
@@ -2828,16 +2823,26 @@ grows. **They stay unfocusable**, so `focusable()` can no longer be
   };
 ```
 
-The table:
+- [ ] **Step 4: Change the table**
+
+`core/src/screen_settings.cpp`. Seven items where there were eleven, and the
+board's order:
 
 ```cpp
-constexpr std::array<SettingsScreen::Item, 11> kItems{{
-    {"TYPOGRAPHY", SettingsScreen::Field::None, true, false, ""},
-    {"Font", SettingsScreen::Field::Font, false, false, ""},
-    {"Size", SettingsScreen::Field::Size, false, false, ""},
-    {"Margins", SettingsScreen::Field::Margins, false, false, ""},
-    {"Line spacing", SettingsScreen::Field::LineSpacing, false, false, ""},
-    {"Alignment", SettingsScreen::Field::Alignment, false, false, ""},
+// THE BOARD'S ROWS, IN THE BOARD'S ORDER, and the order is the only thing that
+// makes this table checkable against design/Settings.dc.html by eye. Seven items:
+// two section headers and five rows, which fits the panel -- so Settings still
+// draws no rail.
+//
+// IT WAS ELEVEN. A TYPOGRAPHY section carried Font, Size, Margins, Line spacing
+// and Alignment, drawn and unreachable because the settings behind them did not
+// exist. They do now, and they are edited on their own screen -- so five rows that
+// merely displayed them became one row that opens it. READING rather than
+// TYPOGRAPHY so the section is a sibling of DEVICE and does not repeat the row's
+// own word.
+constexpr std::array<SettingsScreen::Item, 7> kItems{{
+    {"READING", SettingsScreen::Field::None, true, false, ""},
+    {"Typography", SettingsScreen::Field::Typography, false, true, ""},
     {"DEVICE", SettingsScreen::Field::None, true, false, ""},
     {"Sleep after", SettingsScreen::Field::SleepAfter, false, true, ""},
     {"Full refresh", SettingsScreen::Field::FullRefresh, false, true, ""},
@@ -2848,74 +2853,158 @@ constexpr std::array<SettingsScreen::Item, 11> kItems{{
 
 `focusable()` becomes `return !it.isHeader && it.reachable;`.
 
-`syncVm`'s switch gains the five cases:
+- [ ] **Step 5: The gesture, and the hint**
+
+`cycleFocused` gains a `Field::Typography` case that must NOT cycle anything:
 
 ```cpp
-        case Field::Font: row.value = "LITERATA"; break;
-        case Field::Size: row.value = typographySizeLabel(settings_.bodyPpem); break;
-        case Field::Margins: row.value = typographyMarginLabel(settings_.margins); break;
-        case Field::LineSpacing:
-          row.value = typographyLeadLabel(settings_.lineSpacing);
-          break;
-        case Field::Alignment:
-          row.value = typographyAlignLabel(settings_.justify);
-          break;
+    case Field::Typography:
+      // Handled by onGesture before we get here -- this row discloses rather than
+      // edits. Listed so the switch stays exhaustive: -Wswitch is what names a
+      // field nobody handled, and a `default:` would throw that away.
+      return Action::none();
 ```
 
-`cycleFocused`'s switch also needs the five cases — they are unreachable (the
-rows cannot be focused), so they `return Action::none()` with a comment saying so,
-exactly as `Field::None` already does. **Do not add a `default:`**; the whole
-value of the switch is that `-Wswitch` names a field nobody handled.
+`onGesture`'s `Activate` branch answers the push before reaching `cycleFocused`:
 
-- [ ] **Step 5: Run**
+```cpp
+    case Gesture::Activate: {
+      const int f = focus();
+      if (f >= 0 && f < static_cast<int>(kItems.size()) &&
+          kItems[static_cast<size_t>(f)].field == Field::Typography)
+        return Action::push(ScreenId::Typography);
+      return cycleFocused();
+    }
+```
+
+`syncVm` sets the row's `discloses` and the hint:
+
+```cpp
+    if (!it.isHeader) {
+      row.discloses = it.field == Field::Typography;
+      switch (it.field) {
+        // A DISCLOSING ROW HAS NO VALUE. Home's menu rows state the rule: a row
+        // states a quantity or discloses a screen, never both -- and summarising
+        // four typography settings in the right slot would break it and would not
+        // fit.
+        case Field::Typography: break;
+        case Field::SleepAfter: row.value = sleepLabel(settings_.sleepAfterMs); break;
+        ...
+      }
+    }
+```
+
+...and the hint bar, replacing the constant `"CHANGE"`:
+
+```cpp
+  // THE CONFIRM LABEL FOLLOWS THE FOCUSED ROW, and this is the first hint bar in
+  // this firmware whose text varies within a screen.
+  //
+  // This screen's own comment used to state the premise: "CHANGE, not OPEN: nothing
+  // here pushes a screen, every focusable row edits a value in place." The READING
+  // row makes that false, and a Confirm labelled CHANGE that opens a screen is the
+  // misleading-button defect this project keeps recording. One slot changes as the
+  // focus moves; that is the price of a bar that is true of the button it names.
+  const int f = focus();
+  const bool opens = f >= 0 && f < static_cast<int>(kItems.size()) &&
+                     kItems[static_cast<size_t>(f)].field == Field::Typography;
+  vm_.hints = {"BACK", opens ? "OPEN" : "CHANGE", "UP", "DOWN"};
+```
+
+**Note the Back slot is `BACK`, which is what the board says** — check it rather
+than trusting this line, because the old table may have said something else.
+
+- [ ] **Step 6: renderSettings draws a chevron**
+
+It ignores `discloses` today. Add it, reusing `kChevron` — the same mark
+`drawPanelRow` uses, right-aligned where a value would be:
+
+```cpp
+    // A DISCLOSING ROW DRAWS A CHEVRON WHERE A VALUE WOULD GO, and never both:
+    // vm.rows guarantees the value is empty for such a row, but this branch is
+    // exclusive anyway so a future table cannot draw a chevron over a value.
+    if (row.discloses) {
+      drawIcon(fb, kChevron, rightEdge - kChevron.w,
+               y + (kSettingsRowH - kChevron.h) / 2, ink, plane);
+    } else if (valueW > 0) {
+      drawText(fb, value, rightEdge - valueW, baselineIn(value, y, kSettingsRowH),
+               row.value, ink, {}, plane);
+    }
+```
+
+Check `drawIcon`'s real signature and whether it takes an `Ink` — the chevron is
+white on the focused row and black elsewhere, and getting that wrong makes it
+invisible on the row it is most likely to be on.
+
+- [ ] **Step 7: Run, and re-bless the two Settings goldens**
 
 ```bash
 make test 2>&1 | tail -20
 ```
-Expected: all pass. **The `settings` and `settings_x3` goldens WILL move** —
-`18 PT` became `15 PT`, which is one glyph. Inspect the candidates and confirm
-the change is confined to that row's value:
+Expected: the `settings` and `settings_x3` goldens FAIL. They must: the screen lost
+four rows and a section, gained a chevron, and moved its focus.
+
+**Inspect both candidates and say what you see** before blessing:
+- Seven items, `READING` / `Typography ›` / `DEVICE` / four rows.
+- The chevron is VISIBLE on the focused (inverted) row — i.e. drawn white.
+- The hint bar reads `BACK / OPEN / UP / DOWN`.
+- The `DEVICE` header keeps its 2px rule (it is no longer the first item, so the
+  positional rule still gives it one).
 
 ```bash
-make test 2>&1 | grep -A 6 "settings"
+cp build/settings_candidate.png test/golden/settings.png
+cp build/settings_x3_candidate.png test/golden/settings_x3.png
+make test 2>&1 | tail -8
 ```
 
-Then bless, and state in the commit that the diff is confined to the `Size` row.
+- [ ] **Step 8: Prove the new tests bite**
 
-- [ ] **Step 6: Commit**
+| mutation | expected |
+|---|---|
+| `onGesture`'s Typography branch removed | the push test fails |
+| `opens` forced false | the hint test fails, and both goldens |
+| `row.discloses` forced false | both goldens (no chevron) |
+| `reachable` set false on the Typography row | the focus test fails |
+
+- [ ] **Step 9: Commit**
 
 ```bash
-git add core/include/reader/settings.h core/src/settings.cpp \
-        core/include/reader/screen_settings.h core/src/screen_settings.cpp \
-        core/include/reader/screen_typography.h core/src/screen_typography.cpp \
-        test/unit/test_screen_settings.cpp test/golden/settings*.png
-git commit -m "settings: the typography rows read the setting, and stay unreachable
+git add core/include/reader/screen_settings.h core/src/screen_settings.cpp \
+        core/src/theme_quiet.cpp test/unit/test_screen_settings.cpp \
+        test/golden/settings*.png
+git commit -m "settings: a READING section with a door, where five inert rows were
 
-A placeholder is right only while nothing exists behind the row. Once the
-setting exists a placeholder is a screen showing a stale number, and this one
-was stale by 3 PT.
+The five typography rows were a readout nobody could act on. There is a screen
+that edits those settings now and it needs no open book, so Settings can reach
+it -- and once there is a door, rows that merely display the values are
+redundant.
 
-`field != None` used to mean both 'has a setting' and 'can be focused'. Those
-are two facts now: these rows have a setting and are still not focusable,
-because the panel that edits them is the reader's, where the band can name the
-book. Conflating them again would either make them editable here or send them
-back to placeholders.
+\`field != None\` used to mean both 'has a setting' and 'can be focused'. Those
+are two facts now, because the Typography row has no setting and must be
+focusable, so \`reachable\` is its own field.
 
-The value formatters moved to settings.h beside the tables they index -- two
-screens show these five values, so the SECOND copy is the extraction point,
-and a test asserts the two screens spell them identically rather than
-trusting it.
+THE CONFIRM HINT FOLLOWS THE FOCUSED ROW. This screen's own comment stated the
+premise -- 'CHANGE, not OPEN: nothing here pushes a screen, every focusable row
+edits a value in place' -- and the READING row makes it false. It is the first
+hint bar here whose text varies within a screen; the alternative is a Confirm
+labelled CHANGE that opens a screen.
 
-The settings goldens moved by one glyph, confined to the Size row's value.
+renderSettings draws a chevron for a disclosing row, which it had no reason to
+until now. The two goldens are re-blessed: four rows and a section gone, a
+chevron added, the focus moved.
 
 Co-authored-by: Claude <claude@anthropic.com>"
 ```
 
----
 
 # PHASE 7 — WIRING
 
 ### Task 20: The reader menu's Typography row goes live
+
+**One of TWO doors.** Task 19 gives Settings the other. They are separate rows on
+separate screens pushing the same `ScreenId`, and each gets its own test — a door
+that opens the wrong screen, or nothing, is the defect both of these rows have
+shipped before.
 
 **Files:**
 - Modify: `core/src/screen_reader_menu.cpp`
@@ -3320,10 +3409,16 @@ Co-authored-by: Claude <claude@anthropic.com>"
 - Modify: `core/include/reader/app.h` — a non-const stack accessor, if there is
   not one already
 
-`TypographyScreen::onGesture` already answers `Action::popTo(ScreenId::Reader)`
-from Task 11, and `popTo` stops at the root when its target is not on the stack
-(`app.h:70`), so there is nothing to change in `core/` here. This task is the
-shell's half.
+`TypographyScreen::onGesture` answers a plain `Action::pop()` from Task 11, so
+there is nothing to change in `core/` here. This task is the shell's half, and the
+condition it turns on is **"a Reader is anywhere on the stack"**, not "the Reader
+is on top".
+
+**That distinction is load-bearing twice.** From Settings there is no Reader at all
+and nothing should be re-paginated. From the reader menu the pop lands on the MENU,
+which is an overlay -- `App::render` walks down to the topmost non-overlay, paints
+the Reader, then paints the overlay over it -- so the Reader's stale page IS drawn
+on the next frame. "On top" would never fire there and the frame would be wrong.
 
 - [ ] **Step 1: Shrink the page ring on the way IN**
 
@@ -3357,11 +3452,41 @@ add:
     }
 ```
 
-**`App::at` returns a const reference**, so this needs a non-const accessor rather
-than a `const_cast`. Add `Screen& atMut(int)` to `App` — or better, reuse whatever
-the existing `gPendingSpine` path uses to get a mutable `ReaderScreen*` (it uses
-`&gApp->top()` after the pop, which is non-const). **Read `app.h` and pick the
-existing mechanism; do not add a `const_cast`.**
+**`App::at` returns a const reference**, and BOTH halves of this task need a
+mutable `ReaderScreen*` off the stack — this step to shrink the ring, and Step 2 to
+relayout. `gPendingSpine`'s existing path cannot serve either: it uses
+`&gApp->top()`, which is non-const but only ever the TOP screen, and the Reader is
+underneath in both cases here.
+
+So **add one accessor to `App`** and use it in both places:
+
+```cpp
+  // The stack, mutably, by index. `at()` is const because a renderer must not
+  // move a screen it is drawing; this exists for the shell, which legitimately
+  // has to reach a screen BELOW the top -- the Typography panel's apply path
+  // re-paginates the Reader under the menu it was dismissed from.
+  //
+  // A const_cast at the call site would do the same thing and say nothing about
+  // why it is allowed, which is the difference worth one method.
+  Screen& atMut(int index);
+```
+
+Then a small shell helper, so neither caller repeats the walk or the cast:
+
+```cpp
+// The Reader anywhere on the stack, or null. Scanned rather than tracked, for the
+// reason the book-closed check is scanned: a remembered depth would be a second
+// copy of the stack's own shape, and the stack is three deep at most here.
+static reader::ReaderScreen* readerOnStack(reader::App& app) {
+  for (int i = 0; i < app.depth(); ++i)
+    if (app.at(i).id() == reader::ScreenId::Reader)
+      return static_cast<reader::ReaderScreen*>(&app.atMut(i));
+  return nullptr;
+}
+```
+
+**Use `readerOnStack(*gApp)` in this step and in Step 2**, in place of the walk
+each would otherwise write for itself.
 
 - [ ] **Step 2: Apply after the pop**
 
@@ -3380,9 +3505,14 @@ reason), add:
     // iteration. Between the pop and this call the Reader's page and metrics
     // describe a layout that no longer exists, and a paint in that window would
     // draw old line positions in a new face.
-    if (gTypographyDirty && gApp->top().id() == reader::ScreenId::Reader) {
+    // A READER ANYWHERE ON THE STACK, not on top. Two reasons, and both are real:
+    // from Settings there is no Reader at all and nothing should be re-paginated;
+    // from the reader menu the pop lands on the MENU, which is an overlay, so
+    // App::render paints the Reader beneath it on the very next frame -- and "on
+    // top" would never fire there, leaving that frame drawn from stale metrics.
+    reader::ReaderScreen* rd = readerOnStack(*gApp);
+    if (gTypographyDirty && rd != nullptr) {
       gTypographyDirty = false;
-      auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
       reader::PageMetrics m;
       gTheme.readerMetrics(gFrame->width(), gFrame->height(), *gFonts, gBody, gSettings, m);
       m.italic = &gItalic;
@@ -3398,6 +3528,20 @@ reason), add:
       // here means the NEXT boot's fitOf grades against the new numbers and reads
       // Exact rather than Relaid a second time.
       saveReadingPosition("typography");
+    } else if (gTypographyDirty) {
+      // NO READER ON THE STACK -- the Settings route. Nothing to re-paginate, and
+      // nothing that needs it: the settings are applied and persisted already. But
+      // the FACTORY still has to learn the new column, or the next book opened
+      // would be laid out at the old one and the change would look like it had not
+      // been saved.
+      gTypographyDirty = false;
+      reader::PageMetrics m;
+      gTheme.readerMetrics(gFrame->width(), gFrame->height(), *gFonts, gBody, gSettings, m);
+      m.italic = &gItalic;
+      gFactory.setReaderMetrics(m);
+      logf("[typo] no reader open; column=%dx%d ppem=%d for the next book\n", m.columnW,
+           m.columnH, gSettings.bodyPpem);
+      logFlush();
     }
 ```
 
@@ -3610,8 +3754,9 @@ Run after writing, kept here because they are corrections a reader needs:
 **1. Signatures are consistent as written.** `TypographyScreen`'s constructor
 takes four arguments from Task 11 onward; `Theme::renderTypography` takes the body
 face as a POINTER with null supported, as `renderReader` takes its italic;
-`Action`'s target field is `target`; `Back` answers `popTo(ScreenId::Reader)` from
-Task 11 and Task 23 changes nothing in `core/`. The preview height is
+`Action`'s target field is `target`; `Back` answers a plain `pop()` from Task 11
+and Task 23 changes nothing in `core/`; the `typography*Label` helpers are local to
+`screen_typography.cpp` and are never extracted. The preview height is
 `typographyPreviewBoxH`, a file-local helper in `theme_quiet.cpp` — **not** on
 `Theme`, because no screen ever asks how tall the box is.
 
