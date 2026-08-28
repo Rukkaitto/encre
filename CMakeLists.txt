@@ -49,6 +49,14 @@ target_link_libraries(name_probe PRIVATE reader_core)
 target_compile_options(name_probe PRIVATE ${READER_WARNINGS})
 target_compile_definitions(name_probe PRIVATE READER_DESKTOP=1)
 
+# The CORPUS probe: every book in tools/corpus.manifest through the real open path,
+# as JSONL. Not a test -- it needs real books, same as name_probe, and the repo's
+# generated EPUBs are 1,400-word stubs where nothing interesting fails.
+add_executable(corpus_probe ${CMAKE_SOURCE_DIR}/tools/corpus_probe.cpp)
+target_link_libraries(corpus_probe PRIVATE reader_core)
+target_compile_options(corpus_probe PRIVATE ${READER_WARNINGS})
+target_compile_definitions(corpus_probe PRIVATE READER_DESKTOP=1)
+
 add_executable(reader_sim ${CMAKE_SOURCE_DIR}/sim/main.cpp)
 target_link_libraries(reader_sim PRIVATE reader_core)
 target_compile_options(reader_sim PRIVATE ${READER_WARNINGS})

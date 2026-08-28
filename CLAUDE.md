@@ -1975,6 +1975,33 @@ the code**. It was asserted three times, propagated into another header, and fin
 into a test expectation, which is what made someone read `epub.cpp`. **A comment
 about a neighbouring layer is not evidence about it.**
 
+**AND IT REFUSES A SPINE, NOT METADATA.** `Epub::open` used to refuse a book whose
+`unique-identifier` named an id no `dc:identifier` carried, on the stated grounds that
+an unresolved identifier "breaks everything keyed on it — which is what per-book
+reading state will be". **That consumer never arrived**: reading state went to the
+card as `/.reader/state/<hash of the PATH>.json` with `bookBytes` as the identity
+check, and nothing in the firmware has ever read `identifier()`. Measured against the
+user's own library the check refused **4 of 16 books** — publisher and Calibre output
+alike, a whole `Dune` trilogy among them — and every one of them reads: the reported
+book walks 55 spine entries and 197,330 words once it is let in. The identifier is
+best-effort now and **empty means the book did not say**, the same call the spine's
+`toc` attribute already got.
+
+- **A prediction in a comment is a claim with an expiry date**, and this one was
+  restated in four places — `epub.cpp`, the header, `mkepub.py`'s docstring and a test
+  name — so nothing in the repo disagreed with it and the design it described had
+  changed underneath all four.
+- **Removing the refusal made a substitution reachable, and the guard is the fix.**
+  An absent `unique-identifier` and a `dc:identifier` with no `id` are **both the empty
+  string**, so "does this identifier carry the id the package named" answers *yes* for
+  a book that named nothing — reporting an identifier the book never designated.
+  `!uniqueIdRef.empty()` is what keeps empty honest, and it is proved by mutation
+  rather than by argument.
+- **A DIFFERENT BOOK IS STILL REFUSED, AND FOR A NEIGHBOURING REASON**: `Xml`'s
+  `kMaxAttrBytes` is 512 and Calibre writes a `user_metadata` `<meta content="…">` of
+  720–848 bytes, so the tokenizer errors and the OPF reads as malformed. Same family —
+  a book refused over metadata it does not need — and not the same fix.
+
 ### A grayscale screen is painted twice: fast, then four levels
 
 `renderTop` paints a `Fidelity::Grayscale` screen with ONE waveform and `loop()`
@@ -2512,6 +2539,35 @@ released the moment its last line is laid, so **nothing needs a block window**. 
 tests had recovered a block boundary by comparing `text.data()` pointers; `LaidLine`
 carries `block` and `lastOfBlock` now, which the page index needs anyway.
 
+**AN ENTITY IT CANNOT DECODE IS TEXT, NOT AN ERROR, AND THAT REVERSED A WRITTEN RULE.**
+`decodeEntity` knew the five XML built-ins and numeric references, and errored on
+everything else — on the stated grounds that a literal `&nbsp;` in a paragraph "reads as
+a rendering bug and is really a parsing one". The first half of that was right and is now
+answered by a **generated 252-name HTML 4 table** (`tools/entities.py` →
+`core/src/entity_table.h`, from Python's own `html.entities`). The second half was
+measured and was false, because **erroring never reported anything**: `document.cpp` stops
+on `Node::Error`, `ChapterReader::next()` then returns false, and that is
+indistinguishable from the chapter ending. `Dark Plagueis` lost **177 of its 183
+chapters** that way — 3,214 bytes of a three-megabyte novel — and read as a book that
+opens and is empty.
+
+- **Every exit that is not a decoded character is now text.** Three ways to fail — the
+  reference never terminates (`Tom & Jerry`), the name is in no table, the numeric form
+  does not parse (`&#zz;`) — and all three emit the bytes the document held. The only
+  remaining `false` is "the output buffer cannot hold them", which both callers make
+  unreachable by reserving `kMaxEntityBytes + 2` where they reserved 4.
+- **A visible wrong beats an invisible one**, which is the call `css.h` already makes for
+  over-matched italics. A stray `&unknown;` on the page is a typographic error a reader
+  can see and report; a discarded chapter is not.
+- **Seven names carry it**: `rsquo` `nbsp` `mdash` `ndash` `ldquo` `rdquo` `lsquo`, every
+  distinct named entity across sixteen real books, 50,245 occurrences. The table is all
+  252 because the set costs 1,416 bytes of names and typing a subset invites a second
+  pass.
+- **Two tests in other files pinned the old rule** and had to change with it —
+  `test_document.cpp`'s only malformed-markup case *was* `&nbsp;`, and `test_xml.cpp`
+  listed `&#xZZ;` among inputs that must error. A rule stated in one place is enforced in
+  three.
+
 **`xml.h` DOES NOT VALIDATE NESTING, ON PURPOSE.** `<p>unclosed` tokenizes without
 complaint. The document builder keeps a stack to know which block it is in, so it
 notices an unclosed tag at `Eof` for free; a second stack in the parser would be a
@@ -3034,6 +3090,12 @@ passed — `shell/` has no harness, so nothing on the desktop touches that loop.
   like a passing test: I patched `rowRuleFor` in components.cpp where it lives in
   theme_quiet.cpp, so "0 failures" meant "nothing was changed", not "the goldens are
   blind". Check the mutation landed before believing what it tells you.
+  **TWO MORE WAYS A MUTATION LIES, both hit in one session:** it can land on a line the
+  input never reaches — breaking the unknown-name path proved nothing about `&nbsp;`,
+  which the table *finds* — and a restore can fail to rebuild, because `cp` and the
+  previous compile inside the same second leave make thinking the object is current, so
+  the fixed source tests as though it were still mutated. `touch` the file, or check
+  `git diff` against the binary's behaviour before believing either result.
 - **A SCRIPTED REPLACE WITH NO COUNT REWROTE A FUNCTION INTO A CALL TO ITSELF**, and
   it reached the device as a stack-protection fault. Rewriting the call sites
   `anchor_.jumped(from, here())` into `anchorJumped(from)` used `s.replace(a, b)`

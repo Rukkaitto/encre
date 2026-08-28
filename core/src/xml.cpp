@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include "entity_table.h"
+
 namespace reader {
 namespace {
 
@@ -152,69 +154,108 @@ bool Xml::parseName(char* out, size_t& outLen) {
 
 // Positioned on '&'. Decodes one reference into `out`, or fails.
 //
-// AN UNTERMINATED OR UNKNOWN ENTITY IS MALFORMED, not passed through. A literal
-// "&nbsp;" surviving into a paragraph reads as a rendering bug and is really a
-// parsing one, and the file is well-formed XML by specification -- so an entity we
-// do not know means we are wrong about the file, not that the file is being casual.
+// AN UNKNOWN ENTITY IS PASSED THROUGH, AND THAT REVERSES WHAT THIS SAID.
+//
+// It said a literal "&nbsp;" reaching a paragraph "reads as a rendering bug and is
+// really a parsing one", and that an unknown entity means "we are wrong about the
+// file, not that the file is being casual". The first half was right and the table
+// below is what acts on it -- 252 names, generated, so `&nbsp;` and `&rsquo;` are no
+// longer unknown.
+//
+// The second half was measured and is false. Erroring here does not REPORT anything:
+// document.cpp stops on Node::Error and ChapterReader::next() then returns false,
+// which is INDISTINGUISHABLE from the chapter ending. Across sixteen real books that
+// cost `Dark Plagueis` 177 of its 183 chapters -- a book that opens, and is empty.
+//
+// So a visible wrong beats an invisible one, which is the call css.h already makes
+// for over-matched italics. A stray "&unknown;" on the page is a typographic error a
+// reader can see and report; a discarded chapter is not.
+//
+// EVERY EXIT THAT IS NOT A DECODED CHARACTER IS NOW TEXT. There are three ways to
+// fail -- the reference never terminates, the name is not in the table, the numeric
+// form does not parse -- and all three emit the bytes the document actually held.
+// The only remaining `false` is "the output buffer cannot hold them", which the
+// callers make unreachable by reserving kMaxEntityBytes + 2.
 bool Xml::decodeEntity(char* out, size_t cap, size_t& outLen) {
   char ref[kMaxEntityBytes];
   size_t refLen = 0;
   bump(1);  // '&'
+  bool terminated = false;
   for (;;) {
-    if (ensure(1) < 1) return false;  // the source ended inside a reference
+    if (ensure(1) < 1) break;  // the source ended inside a reference
     const char c = at(0);
-    bump(1);
-    if (c == ';') break;
-    if (refLen >= sizeof(ref)) return false;  // longer than any entity we accept
+    if (c == ';') {
+      bump(1);
+      terminated = true;
+      break;
+    }
+    // A reference holds name characters or a numeric form. Anything else -- a space,
+    // a '<' -- means this '&' was never a reference at all, which is what "Tom &
+    // Jerry" is, and real books are full of them. The character is NOT consumed, so
+    // it is read as ordinary text next.
+    if (!isNameChar(c) && c != '#') break;
+    if (refLen >= sizeof(ref)) break;  // longer than any entity we accept
     ref[refLen++] = c;
+    bump(1);
   }
-  if (refLen == 0 || cap < 4) return false;
+
+  // What the document held, for any of the three failures: '&', the reference, and
+  // the ';' if there was one.
+  const size_t rawLen = refLen + (terminated ? 2 : 1);
+  if (rawLen > cap) return false;
+  const auto passThrough = [&]() {
+    out[0] = '&';
+    std::memcpy(out + 1, ref, refLen);
+    if (terminated) out[refLen + 1] = ';';
+    outLen = rawLen;
+    return true;
+  };
+
+  if (!terminated || refLen == 0) return passThrough();
 
   const std::string_view r(ref, refLen);
-  if (r == "amp") {
-    out[0] = '&';
-    outLen = 1;
-    return true;
+  if (r == "amp") { out[0] = '&'; outLen = 1; return true; }
+  if (r == "lt") { out[0] = '<'; outLen = 1; return true; }
+  if (r == "gt") { out[0] = '>'; outLen = 1; return true; }
+  if (r == "quot") { out[0] = '"'; outLen = 1; return true; }
+  if (r == "apos") { out[0] = '\''; outLen = 1; return true; }
+
+  if (r[0] != '#') {
+    // The generated HTML 4 table, binary-searched. std::lower_bound would need
+    // <algorithm> for four lines that are clearer written out.
+    size_t lo = 0, hi = kNamedEntityCount;
+    while (lo < hi) {
+      const size_t mid = lo + (hi - lo) / 2;
+      const int cmp = r.compare(kNamedEntities[mid].name);
+      if (cmp == 0) {
+        if (cap < 4) return false;
+        outLen = appendUtf8(kNamedEntities[mid].cp, out);
+        return true;
+      }
+      if (cmp < 0) hi = mid;
+      else lo = mid + 1;
+    }
+    return passThrough();
   }
-  if (r == "lt") {
-    out[0] = '<';
-    outLen = 1;
-    return true;
-  }
-  if (r == "gt") {
-    out[0] = '>';
-    outLen = 1;
-    return true;
-  }
-  if (r == "quot") {
-    out[0] = '"';
-    outLen = 1;
-    return true;
-  }
-  if (r == "apos") {
-    out[0] = '\'';
-    outLen = 1;
-    return true;
-  }
-  if (r[0] != '#') return false;
 
   const bool hex = refLen > 1 && (r[1] == 'x' || r[1] == 'X');
   const std::string_view digits = r.substr(hex ? 2 : 1);
-  if (digits.empty()) return false;
+  if (digits.empty()) return passThrough();
   uint32_t cp = 0;
   for (const char c : digits) {
     int v;
     if (c >= '0' && c <= '9') v = c - '0';
     else if (hex && c >= 'a' && c <= 'f') v = c - 'a' + 10;
     else if (hex && c >= 'A' && c <= 'F') v = c - 'A' + 10;
-    else return false;
+    else return passThrough();
     cp = cp * static_cast<uint32_t>(hex ? 16 : 10) + static_cast<uint32_t>(v);
-    if (cp > 0x10FFFF) return false;  // past the last code point there is
+    if (cp > 0x10FFFF) return passThrough();  // past the last code point there is
   }
   // Surrogates are not characters, and a file naming one is describing something
   // that cannot be encoded as UTF-8.
-  if (cp >= 0xD800 && cp <= 0xDFFF) return false;
-  if (cp == 0) return false;
+  if (cp >= 0xD800 && cp <= 0xDFFF) return passThrough();
+  if (cp == 0) return passThrough();
+  if (cap < 4) return false;
   outLen = appendUtf8(cp, out);
   return true;
 }
@@ -244,7 +285,9 @@ Xml::Node Xml::next() {
       while (ensure(1) >= 1 && at(0) != '<') {
         // Stop with room for the longest single decoded character, so a reference
         // is never split across two nodes.
-        if (textLen_ + 4 > kTextBytes) break;
+        // kMaxEntityBytes + 2 because a passthrough writes '&' + the reference
+        // + ';', which is longer than any character it could have decoded to.
+        if (textLen_ + kMaxEntityBytes + 2 > kTextBytes) break;
         if (at(0) == '&') {
           size_t n = 0;
           if (!decodeEntity(textBuf_ + textLen_, kTextBytes - textLen_, n))
@@ -374,7 +417,7 @@ Xml::Node Xml::next() {
           bump(1);
           break;
         }
-        if (attrUsed_ + 4 > kMaxAttrBytes)
+        if (attrUsed_ + kMaxEntityBytes + 2 > kMaxAttrBytes)
           return fail("an element carries more attribute bytes than we will hold");
         if (at(0) == '&') {
           size_t n = 0;

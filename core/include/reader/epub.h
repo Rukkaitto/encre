@@ -36,8 +36,11 @@ class Epub {
 
   const std::string& title() const { return title_; }
   const std::string& author() const { return author_; }
-  // The `unique-identifier`'s resolved value. Non-empty on success, because a
-  // book whose identifier does not resolve is refused -- see open().
+  // The `unique-identifier`'s resolved value, or EMPTY when the OPF names an id no
+  // dc:identifier carries -- which real books do often enough that refusing them
+  // cost a quarter of one measured library. Empty is "the book did not say", and is
+  // honestly different from any value it could have said; see open() for why this is
+  // metadata rather than a reason to refuse a book, and why nothing is keyed on it.
   const std::string& identifier() const { return identifier_; }
 
   const std::vector<Chapter>& chapters() const { return chapters_; }
