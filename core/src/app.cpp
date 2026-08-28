@@ -22,6 +22,9 @@ const char* screenName(ScreenId id) {
     case ScreenId::Sleep: return "SLEEP";
     case ScreenId::Reader: return "READER";
     case ScreenId::SdMissing: return "SD-MISSING";
+    // A LOG LABEL, and the session record's "typography" is a storage format.
+    // Two separate facts that happen to agree; this one is free to be reworded.
+    case ScreenId::Typography: return "TYPOGRAPHY";
   }
   return "?";
 }

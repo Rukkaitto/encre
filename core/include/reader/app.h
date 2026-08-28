@@ -35,7 +35,12 @@ enum class ScreenId : uint8_t {
   // appending also leaves every existing ordinal where it was.
   ReaderMenu,
   Contents,
-  SdMissing
+  SdMissing,
+  // design/Typography.dc.html -- the reader's type panel. APPENDED for the reason
+  // ReaderMenu was: the record stores a name, so an insertion could not silently
+  // become another screen, but appending also leaves every existing ordinal where
+  // it was.
+  Typography
 };
 
 // A screen's name, for logs. Same reasoning as buttonName: a numeric ScreenId in
