@@ -22,6 +22,7 @@
 #include "reader/scalablefont.h"
 #include "reader/screen_contents.h"
 #include "reader/screen_reader.h"
+#include "reader/screen_peek.h"
 #include "reader/screen_reader_menu.h"
 #include "reader/screen_typography.h"
 #include "reader/screens.h"
@@ -367,11 +368,22 @@ int main(int argc, char** argv) {
   // row does exactly what the push did), and what is newly covered is the row going
   // inert again -- which nothing on the desktop would otherwise notice.
   const bool isTypography = std::strcmp(argv[1], "typography") == 0;
+  // design/Peek.dc.html. THE SAME JOURNEY AS `reader_menu` -- an App rooted at the
+  // Reader with the panel pushed over it -- because App::render walks down to the
+  // topmost non-overlay, paints it, veils it and paints each overlay above. Rendering
+  // top().render alone is the mistake that paints a panel floating on white, and
+  // nothing on the desktop can catch it: every other path here goes through
+  // App::render.
+  //
+  // NO READER MENU UNDERNEATH, unlike its two siblings in this branch. On the device a
+  // peek is reached from Contents, and the pop that opens it takes the menu AND
+  // Contents off -- so the stack the board draws is Reader + Peek and nothing else.
+  const bool isPeek = std::strcmp(argv[1], "peek") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
       !isHomeUnopened && !isLibraryScrolled && !isReader && !isSleepIdle &&
       !isReaderMenu && !isContents && !isChapterOpen && !isReaderList && !isAnchored &&
-      !isSleepWaking && !isLibraryOpening && !isTypography) {
+      !isSleepWaking && !isLibraryOpening && !isTypography && !isPeek) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
@@ -379,7 +391,7 @@ int main(int argc, char** argv) {
                  "'library_scrolled', 'reader', 'reader_anchored', "
                  "'reader_chapter_open', 'reader_list', "
                  "'reader_menu', 'contents', 'typography', 'sleep_waking', "
-                 "'library_opening' or 'app')\n",
+                 "'library_opening', 'peek' or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -401,7 +413,7 @@ int main(int argc, char** argv) {
   std::vector<uint8_t> italicTtf;
   reader::ScalableFont italic;
   if (isReader || isReaderMenu || isChapterOpen || isReaderList || isAnchored ||
-      isTypography) {
+      isTypography || isPeek) {
     bodyTtf = slurp(std::string(ASSETS_DIR) + "/built/literata_body.ttf");
     if (!body.init(bodyTtf.data(), bodyTtf.size(), reader::kBodyPpem)) {
       std::fprintf(stderr, "body face failed to load\n");
@@ -414,7 +426,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  if (isReaderMenu || isTypography) {
+  if (isReaderMenu || isTypography || isPeek) {
     // AN OVERLAY NEEDS ITS PARENT, so this goes through an App rooted at the Reader
     // rather than rendering one screen: App::render walks down to the topmost
     // non-overlay, paints it, then paints each overlay above -- and rendering
@@ -437,9 +449,29 @@ int main(int argc, char** argv) {
     }
     static_cast<reader::ReaderScreen*>(page.get())->completeIndex();
     reader::App app(std::move(page), factory);
-    if (!app.pushScreen(reader::ScreenId::ReaderMenu)) {
-      std::fprintf(stderr, "the factory refused ScreenId::ReaderMenu\n");
-      return 1;
+    // NO READER MENU UNDERNEATH A PEEK -- see isPeek's own comment above. The other
+    // two subcommands in this branch reach their overlay through the menu; a peek is
+    // reached from Contents on the device, and the pop that opens it takes both the
+    // menu and Contents off, so the stack here is Reader + Peek only.
+    if (!isPeek) {
+      if (!app.pushScreen(reader::ScreenId::ReaderMenu)) {
+        std::fprintf(stderr, "the factory refused ScreenId::ReaderMenu\n");
+        return 1;
+      }
+    }
+    if (isPeek) {
+      // THE PANEL'S OWN COLUMN, which is the whole design: inset, so narrower, so its
+      // text re-wraps -- and re-wrapped text paginates differently, which is why the
+      // panel shows chapter and percent rather than a page number.
+      reader::PageMetrics pm;
+      theme.peekMetrics(w, h, fonts, body, reader::Settings{}, pm);
+      pm.italic = &italic;
+      factory.setPeekMetrics(pm);
+      factory.setPeekDemo();
+      if (!app.pushScreen(reader::ScreenId::Peek)) {
+        std::fprintf(stderr, "the factory refused ScreenId::Peek\n");
+        return 1;
+      }
     }
     if (isTypography) {
       // THE DEFAULT SETTINGS, WHICH ARE NOW THE BOARD'S TOO. This branch overrode
@@ -478,6 +510,12 @@ int main(int argc, char** argv) {
       const auto& t = static_cast<const reader::TypographyScreen&>(app.top());
       std::printf("wrote %s (%dx%d) typography, focus %d, %s, ppem %d\n", argv[2], w, h, t.focus(),
                   t.vm().justify ? "justified" : "ragged", t.settings().bodyPpem);
+      return 0;
+    }
+    if (isPeek) {
+      const auto& p = static_cast<const reader::PeekScreen&>(app.top());
+      std::printf("wrote %s (%dx%d) peek over the page, %s, %d lines\n", argv[2], w, h,
+                  p.vm().where.c_str(), static_cast<int>(p.page().lines.size()));
       return 0;
     }
     std::printf("wrote %s (%dx%d) reader menu over the page\n", argv[2], w, h);
