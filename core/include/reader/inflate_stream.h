@@ -96,6 +96,19 @@ class Inflater {
   bool begin(ByteSource& src);
   bool ready() const { return s_ != nullptr; }
 
+  // GIVE THE WINDOW BACK. The destructor is otherwise the only way to, which is what
+  // makes this necessary rather than tidy: an Inflater is a VALUE member of
+  // ChapterReader, so a reader that resets every unique_ptr it owns still holds this
+  // object's ~37 KB -- and that block is the whole reason the peek's Reader lets go of
+  // its stream at all (see ChapterReader::release).
+  //
+  // Idempotent, and the opposite of begin(): a released decoder allocates again on the
+  // next begin(), which is exactly what it already does the first time. It is left
+  // Failed rather than BlockHeader so a next() on a released decoder refuses instead
+  // of walking into a null window -- begin() sets every scalar it needs, so nothing
+  // here has to be restored for it.
+  void release();
+
   // The next run of decompressed bytes, or an empty view when there are none: ask
   // done() and error() to tell the two apart. Empty with done() false and no
   // error means the input ended cleanly at a block boundary but the stream never

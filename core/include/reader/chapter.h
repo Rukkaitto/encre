@@ -66,6 +66,45 @@ class ChapterReader {
   // backward page turn costs.
   bool rewind();
 
+  // --- LET GO OF THE STREAM, KEEP WHAT IT WAS OPENED FROM --------------------
+  //
+  // FOR THE PEEK, and it is what makes the peek possible at all: a live chapter peaks
+  // at 69,884 bytes with a 36,956-byte single allocation (the inflate window and its
+  // tables) against a measured 45,840-byte heap floor, so TWO live chapters leave
+  // single-digit kilobytes on a part where a failed allocation is abort() with no
+  // diagnostic. The Reader beneath a peek therefore lets go while the panel is up and
+  // takes its stream back when the panel closes.
+  //
+  // THE OBVIOUS VERSION OF THAT IS WRONG, AND IT IS WORTH KNOWING WHY. Four of the
+  // five things released here are unique_ptrs -- file_, bufSrc_, inflated_, blocks_ --
+  // so it reads as a design where letting go is resetting pointers and nothing new had
+  // to be invented. `inflater_` is not one of them: it is a VALUE member, and the
+  // 36,956 bytes this whole feature is about live behind ITS pointer, freed by its
+  // destructor and by nothing else. Resetting only the unique_ptrs frees the
+  // BlockReader, a ~40-byte InflateSource wrapper and a file handle, and keeps every
+  // byte the peek needs. `Inflater::release()` exists for that and is the load-bearing
+  // line below.
+  //
+  // `where_` IS KEPT, which is the whole difference between this and destroying the
+  // object: begin() has to be callable again with the same location, and a release
+  // that lost it would produce a reader that opens and yields nothing --
+  // indistinguishable from a chapter that ended. Idempotent, because the shell
+  // reacquires on two different paths and a double release must not be a crash.
+  void release();
+
+  // Whether a stream is established. False after release() and before the first
+  // begin(). It exists as an OBSERVATION POINT rather than as a guard: nothing in the
+  // shell branches on it, and the peek's release test is what needs it.
+  bool held() const { return blocks_ != nullptr; }
+
+  // Whether the inflate window is allocated -- the 36,956-byte block release() exists
+  // to give back. DISTINCT FROM held(), and it has to be: held() reads blocks_, so a
+  // release that dropped the block reader and kept the window would satisfy it and
+  // free nothing, and from outside this class nothing else can tell those apart.
+  // bytesRead() cannot: it gates on the InflateSource pointer, which is dropped either
+  // way. An observation point, like held(); nothing branches on it.
+  bool inflateWindowHeld() const { return inflater_.ready(); }
+
   // The next block. False means the chapter ended (`ok()`) or was refused.
   bool next(Block& out);
 

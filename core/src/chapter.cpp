@@ -63,6 +63,26 @@ bool ChapterReader::rewind() {
   return startStream();
 }
 
+void ChapterReader::release() {
+  // ORDER IS INNERMOST FIRST, because blocks_ reads through inflated_ which reads
+  // through inflater_/bufSrc_/file_. Destroying an owner before its user would leave a
+  // live object reading freed memory for as long as the reset expression took, which
+  // is not observable today and is the kind of ordering that stops being safe
+  // silently.
+  blocks_.reset();
+  inflated_.reset();
+  // THE LINE THE FEATURE IS FOR. The four resets around it free a block reader, a
+  // ~40-byte wrapper, a buffer view and a file handle; this frees the ~37 KB. See the
+  // header for why it is not a unique_ptr like its neighbours.
+  inflater_.release();
+  bufSrc_.reset();
+  file_.reset();
+  // `where_`, `fromBuffer_`, `buffer_` and `dataOffset_` are deliberately NOT cleared
+  // -- see the header. They are what begin() and rewind() need to put this back, and
+  // dataOffset_ is what keeps a reacquire from going back to the card for a header it
+  // has already read.
+}
+
 bool ChapterReader::startStream() {
   ByteSource* bytes = nullptr;
 
