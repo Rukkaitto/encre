@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <string>
 
 #include "reader/filesystem.h"
@@ -152,6 +153,19 @@ bool loadSettings(FileSystem& fs, Settings& out) {
   readBool(o, "fullOnTransition", parsed.fullOnTransition, ok);
   readBool(o, "logToCard", parsed.logToCard, ok);
 
+  // The table's ends as the range; validate() below does the snapping to an
+  // actual step. Two layers rather than one because readClampedInt is shared
+  // and knows nothing about tables, and because `ok` has to be cleared either
+  // way -- a value that was out of range and a value that was merely off the
+  // table both mean CORRECTED in the boot log.
+  readClampedInt(o, "bodyPpem", parsed.bodyPpem, kBodyPpemSteps[0],
+                 kBodyPpemSteps[std::size(kBodyPpemSteps) - 1], ok);
+  readClampedInt(o, "margins", parsed.margins, kMarginSteps[0],
+                 kMarginSteps[std::size(kMarginSteps) - 1], ok);
+  readClampedInt(o, "lineSpacing", parsed.lineSpacing, kLineSpacingSteps[0],
+                 kLineSpacingSteps[std::size(kLineSpacingSteps) - 1], ok);
+  readBool(o, "justify", parsed.justify, ok);
+
   if (!parsed.validate()) ok = false;
 
   out = parsed;
@@ -168,6 +182,10 @@ bool saveSettings(FileSystem& fs, const Settings& in) {
   o.setInt("fullRefreshEvery", valid.fullRefreshEvery);
   o.setBool("fullOnTransition", valid.fullOnTransition);
   o.setBool("logToCard", valid.logToCard);
+  o.setInt("bodyPpem", valid.bodyPpem);
+  o.setInt("margins", valid.margins);
+  o.setInt("lineSpacing", valid.lineSpacing);
+  o.setBool("justify", valid.justify);
   // writeAll creates /.reader on the way past, so there is no mkdirs here.
   return fs.writeAll(kSettingsPath, o.dump());
 }

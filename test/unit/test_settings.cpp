@@ -374,3 +374,49 @@ TEST_CASE("every offered typography value survives validate") {
     CHECK(s.lineSpacing == l);
   }
 }
+
+TEST_CASE("the typography fields survive a save/load round trip") {
+  FakeFileSystem fs;
+  reader::Settings out;
+  out.bodyPpem = 46;
+  out.margins = 10;
+  out.lineSpacing = 2000;
+  out.justify = false;
+  REQUIRE(reader::saveSettings(fs, out));
+
+  reader::Settings back;
+  CHECK(reader::loadSettings(fs, back));
+  CHECK(back.bodyPpem == 46);
+  CHECK(back.margins == 10);
+  CHECK(back.lineSpacing == 2000);
+  CHECK_FALSE(back.justify);
+  // The whole struct, so a field that round-tripped by accident of its default
+  // cannot pass: this is the fixed-point property saveSettings documents.
+  CHECK(back == out);
+}
+
+TEST_CASE("a settings file from before typography loads with the defaults") {
+  // THE BACK-COMPAT CASE, and the reason kSettingsVersion did not move. This is
+  // byte-for-byte a file today's firmware writes.
+  FakeFileSystem fs;
+  plant(fs, "{\"version\":1,\"fullOnTransition\":true,"
+            "\"fullRefreshEvery\":0,\"logToCard\":false,"
+            "\"sleepAfterMs\":300000}");
+  reader::Settings s;
+  CHECK(reader::loadSettings(fs, s));  // TRUE: an absent field is not a failure
+  CHECK(s.bodyPpem == reader::kBodyPpem);
+  CHECK(s.margins == 18);
+  CHECK(s.lineSpacing == reader::kBodyLeadEm);
+  CHECK(s.justify);
+}
+
+TEST_CASE("an off-table size in a hand-edited file is corrected and reported") {
+  FakeFileSystem fs;
+  plant(fs, "{\"version\":1,\"bodyPpem\":35,\"sleepAfterMs\":300000}");
+  reader::Settings s;
+  CHECK_FALSE(reader::loadSettings(fs, s));  // CORRECTED, not DEFAULTED
+  CHECK(s.bodyPpem == 38);
+  // ...and the rest of the file still loaded, which is the whole reason a bad
+  // value clamps instead of failing the load.
+  CHECK(s.sleepAfterMs == 300000u);
+}
