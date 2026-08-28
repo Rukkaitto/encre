@@ -92,12 +92,15 @@ class NullTheme : public Theme {
                          Plane) override {}
   int libraryVisibleRows(int, const FontSet&) const override { return 0; }
   void renderSettings(Framebuffer&, const FontSet&, const SettingsViewModel&, Plane) override {}
+  void renderTypography(Framebuffer&, const FontSet&, const GlyphSource*,
+                        const TypographyViewModel&, Plane) override {}
   void renderSleep(Framebuffer&, const FontSet&, const SleepViewModel&, Plane) override {}
   void renderReaderMenu(Framebuffer&, const FontSet&, const ReaderMenuViewModel&,
                         Plane) override {}
   void renderContents(Framebuffer&, const FontSet&, const ContentsViewModel&, Plane) override {}
   int contentsVisibleRows(int, const FontSet&) override { return 8; }
-  void readerMetrics(int, int, const FontSet&, const GlyphSource&, PageMetrics&) const override {}
+  void readerMetrics(int, int, const FontSet&, const GlyphSource&, const Settings&,
+                     PageMetrics&) const override {}
   void renderReader(Framebuffer&, const FontSet&, const GlyphSource&, const GlyphSource*,
                     const ReaderViewModel&, const Page&, Plane) override {}
   void settingsMetrics(int, const FontSet&, int& listH, int& rowH, int& headerH) const override {

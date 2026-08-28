@@ -321,6 +321,35 @@ class ReaderScreen : public Screen {
   // first page, so it is the expensive call: one decode of the chapter.
   void setMetrics(const PageMetrics& m);
 
+  // RE-PAGINATE AT THE PAGE THE READER IS ON, for a type or column change.
+  //
+  // setMetrics cannot serve: on the card path it re-opens the chapter and lands on
+  // PAGE ONE, which is not what a reader who changed their type size asked for. This
+  // captures where they are first, applies the metrics, and walks back to it.
+  //
+  // IT LANDS AT THE TOP OF THE BLOCK, dropping the cursor's LINE. A line index is a
+  // line within a block at one ppem and one column width, so after a re-layout it
+  // names a layout that no longer exists -- reading_position.h grades exactly this as
+  // `Relaid` and zeroes the same field for the same reason. Landing on line 9 of a
+  // block that now has four lines is a wrong page that looks like a rendering bug.
+  //
+  // The page ring goes, because every page in it was measured against the old column
+  // and face. So does the index, which is rebuilt by the walk -- so the total returns
+  // to UNKNOWN and the footer draws its em dash until the deferred count lands, which
+  // is what design/Typography.dc.html's footnote promises when it says the book
+  // re-paginates in the background.
+  //
+  // THE FACE IS THE CALLER'S TO RE-INIT, and it is not an argument here: `metrics_`
+  // carries no ppem, the line height comes from the GlyphSource this screen was
+  // handed, and a ScalableFont is pinned to one pixel size by init(). So the shell
+  // re-inits the face in place and then calls this -- two halves of one press, and
+  // this is the half that has to know where the reader was.
+  //
+  // COSTS ONE WALK to the reader's page, which is a chapter crossing's cost rather
+  // than a page turn's. That is the honest price and it is paid on the press that
+  // LEAVES the panel, where the user is already expecting the screen to change.
+  void relayout(const PageMetrics& m);
+
   const ReaderViewModel& vm() const { return vm_; }
   const Page& page() const { return page_; }
   // PAGES KNOWN, not pages total: the index grows as the chapter is read, so this

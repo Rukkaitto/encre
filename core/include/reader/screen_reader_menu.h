@@ -20,7 +20,7 @@ namespace reader {
 // those frames, which is the trade: it is under a veil and the menu is chrome, where
 // the page is the one thing on this device that wanted four levels.
 //
-// FOUR OF ITS SEVEN ROWS ARE NOT BUILT and are drawn anyway, with the focus skipping
+// TWO OF ITS FIVE ROWS ARE NOT BUILT and are drawn anyway, with the focus skipping
 // them -- Settings' rule, and its reasoning verbatim: a row that cannot be reached
 // cannot mislead, where a row that focuses and then ignores SELECT is the silent no-op
 // this project has been bitten by twice. An inert row is drawn EXACTLY as an unfocused

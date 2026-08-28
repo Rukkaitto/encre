@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "doctest.h"
+#include "golden.h"
 #include "home_vm.h"
 #include "ramp.h"
 #include "rfnt_builder.h"
@@ -1545,6 +1546,165 @@ TEST_CASE("a wrapped caption is left-aligned, a paragraph is centred") {
   };
   const int lead = reader::f26ToPx(p.leadF26);
   CHECK(firstInkX(left, 0, lead) < firstInkX(centred, 0, lead));
+}
+
+// --- ProseAlign::Justify ---------------------------------------------------------
+//
+// design/Typography.dc.html's preview box declares `text-align: justify`, and its
+// `Alignment` row is what it previews.
+
+TEST_CASE("ProseAlign::Justify stretches every line but the last") {
+  Ramp f;
+  const reader::Font& body = f.fonts[reader::Role::Body400];
+  // Long enough to wrap to at least three lines, so there is a MIDDLE line -- a
+  // two-line case cannot distinguish "all but the last" from "only the first".
+  const std::string text =
+      "Miss Brooke had that kind of beauty which seems to be thrown into relief "
+      "by poor dress, and her hand and wrist were so finely formed that she "
+      "could wear sleeves not less bare of style.";
+  const int boxW = 396;
+  const reader::Prose p = reader::wrapProse(body, text, boxW, reader::kProseLeadEm);
+  REQUIRE(p.lineCount() >= 3);
+
+  reader::Framebuffer justified(480, 800), ragged(480, 800);
+  justified.clear(true);
+  ragged.clear(true);
+  reader::drawProse(justified, body, p, 24, boxW, 0, reader::Ink::Black, reader::Plane::Bw,
+                    reader::ProseAlign::Justify);
+  reader::drawProse(ragged, body, p, 24, boxW, 0, reader::Ink::Black, reader::Plane::Bw,
+                    reader::ProseAlign::Left);
+
+  // THE FRAMES DIFFER, which is the whole point -- and this is the assertion that
+  // would have caught shipping a Justify that silently drew Left. A drawing option
+  // that does nothing passes every golden it has, because the golden was blessed
+  // from the render that ignored it.
+  CHECK_FALSE(golden::identical(justified, ragged));
+
+  // THE LAST LINE IS RAGGED IN BOTH. layout.cpp states the rule: a paragraph's last
+  // line is short by however much the paragraph ended short, and stretching it to
+  // the margin is the single most recognisable way justified text can be wrong.
+  // Compared as a ROW BAND rather than by measuring runs, because the draw is what
+  // is being tested.
+  const int lastTop = reader::f26ToPx((p.lineCount() - 1) * p.leadF26);
+  CHECK(golden::rowsIdentical(justified, ragged, lastTop, 800));
+  // ...and a line ABOVE it is not.
+  CHECK_FALSE(golden::rowsIdentical(justified, ragged, 0, lastTop));
+
+  // AND THE STRETCH STAYS INSIDE THE COLUMN, which is what makes it justification
+  // rather than an overhang: a stretched line ends at the box's right edge, never
+  // past it.
+  for (int y = 0; y < lastTop; ++y)
+    for (int x = 24 + boxW; x < 480; ++x)
+      REQUIRE(justified.getPixel(x, y));
+}
+
+TEST_CASE("the last line is decided by index, not by the fill threshold") {
+  // THE TWO REASONS A LINE IS RAGGED ARE DIFFERENT, and the case above cannot tell
+  // them apart: this paragraph's own final line is short, so it is under
+  // kMinJustifyFillPercent as well as being last, and a Justify that stretched
+  // every line INCLUDING the last would draw it identically anyway. Mutating
+  // `i != last` away failed nothing, which is how the hole was found.
+  //
+  // So the last line here is a FULL one, reached by clamping the wrap -- which is
+  // exactly what the Typography preview does when the box cuts the specimen short.
+  // Now the only thing keeping it ragged is its index.
+  Ramp f;
+  const reader::Font& body = f.fonts[reader::Role::Body400];
+  const std::string text =
+      "Miss Brooke had that kind of beauty which seems to be thrown into relief "
+      "by poor dress, and her hand and wrist were so finely formed that she "
+      "could wear sleeves not less bare of style.";
+  const int boxW = 396;
+  reader::Prose p = reader::wrapProse(body, text, boxW, reader::kProseLeadEm);
+  REQUIRE(p.lineCount() >= 3);
+  p.lines.resize(2);
+  // ASSERTED, not assumed: the new last line has to be full enough that stretchFor
+  // would answer non-zero for it, or this is the previous case again.
+  REQUIRE(body.measure(p.lines[1], p.tracking) * 100 >= boxW * reader::kMinJustifyFillPercent);
+
+  reader::Framebuffer justified(480, 800), ragged(480, 800);
+  justified.clear(true);
+  ragged.clear(true);
+  reader::drawProse(justified, body, p, 24, boxW, 0, reader::Ink::Black, reader::Plane::Bw,
+                    reader::ProseAlign::Justify);
+  reader::drawProse(ragged, body, p, 24, boxW, 0, reader::Ink::Black, reader::Plane::Bw,
+                    reader::ProseAlign::Left);
+
+  const int lead = reader::f26ToPx(p.leadF26);
+  // The first line is stretched...
+  CHECK_FALSE(golden::rowsIdentical(justified, ragged, 0, lead));
+  // ...and the last is not, although stretchFor would happily have stretched it.
+  CHECK(golden::rowsIdentical(justified, ragged, lead, 800));
+}
+
+TEST_CASE("a line too empty to justify is left ragged") {
+  // kMinJustifyFillPercent's rule, which the preview must apply or it justifies
+  // lines the reader's own page would leave ragged -- a subtler lie than not
+  // justifying at all.
+  //
+  // THE FIXTURE IS THE CONSTANT'S OWN EXAMPLE: a word wider than the column is put
+  // alone on a line by the greedy wrap, which leaves the line BEFORE it holding two
+  // words and most of the column as slack. A single short line would prove nothing
+  // here, because a single line is also the LAST line and would be ragged for that
+  // reason instead -- two different rules with one visible outcome.
+  Ramp f;
+  const reader::Font& body = f.fonts[reader::Role::Body400];
+  const std::string text =
+      "Two words pneumonoultramicroscopicsilicovolcanoconiosis and then enough "
+      "ordinary prose after it to fill a line right out to the measure.";
+  const int boxW = 300;
+  const reader::Prose p = reader::wrapProse(body, text, boxW, reader::kProseLeadEm);
+  REQUIRE(p.lineCount() >= 3);
+  // THE SETUP IS ASSERTED RATHER THAN ASSUMED. This case is only about the
+  // threshold while line 0 really is under it, so a wrap change has to fail HERE
+  // rather than quietly turn the test into a test of nothing.
+  REQUIRE(body.measure(p.lines[0], p.tracking) * 100 < boxW * reader::kMinJustifyFillPercent);
+
+  reader::Framebuffer justified(480, 800), ragged(480, 800);
+  justified.clear(true);
+  ragged.clear(true);
+  reader::drawProse(justified, body, p, 24, boxW, 0, reader::Ink::Black, reader::Plane::Bw,
+                    reader::ProseAlign::Justify);
+  reader::drawProse(ragged, body, p, 24, boxW, 0, reader::Ink::Black, reader::Plane::Bw,
+                    reader::ProseAlign::Left);
+  // The corridor line is untouched...
+  const int lead = reader::f26ToPx(p.leadF26);
+  CHECK(golden::rowsIdentical(justified, ragged, 0, lead));
+  // ...while a line that IS full enough got stretched, so the threshold is being
+  // applied per line rather than to the paragraph.
+  CHECK_FALSE(golden::identical(justified, ragged));
+}
+
+TEST_CASE("a justified first line honours the indent the wrap measured with") {
+  // Prose::firstIndentF26 is `text-indent`, and the wrap MEASURED the first line
+  // against a column narrower by exactly it. A stretch computed against the full
+  // box would push that line past the right edge by the indent -- the overhang the
+  // Prose carries the field to prevent. No board sends an indented Prose through
+  // drawProse today; this keeps the handling a stated fact rather than an
+  // assumption.
+  Ramp f;
+  const reader::Font& body = f.fonts[reader::Role::Body400];
+  const std::string text =
+      "Miss Brooke had that kind of beauty which seems to be thrown into relief "
+      "by poor dress, and her hand and wrist were so finely formed.";
+  const int boxW = 300;
+  const int indent = 40;
+  const reader::Prose p = reader::wrapProseLead(body, text, boxW, reader::pxToF26(45), {},
+                                                reader::WordBreak::Normal,
+                                                reader::pxToF26(indent));
+  REQUIRE(p.lineCount() >= 3);
+
+  reader::Framebuffer fb(480, 800);
+  fb.clear(true);
+  reader::drawProse(fb, body, p, 24, boxW, 0, reader::Ink::Black, reader::Plane::Bw,
+                    reader::ProseAlign::Justify);
+  const int lead = reader::f26ToPx(p.leadF26);
+  // Nothing in the first line's band reaches the column's right edge...
+  for (int y = 0; y < lead; ++y)
+    for (int x = 24 + boxW; x < 480; ++x) REQUIRE(fb.getPixel(x, y));
+  // ...and nothing reaches into the indent on the left either.
+  for (int y = 0; y < lead; ++y)
+    for (int x = 0; x < 24 + indent; ++x) REQUIRE(fb.getPixel(x, y));
 }
 
 TEST_CASE("a panel row is 72 plus its rule, and its weight follows the focus") {

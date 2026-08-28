@@ -340,6 +340,26 @@ int drawTextJustified(Framebuffer& fb, const GlyphSource& font, int x, int basel
   return drawRun(fb, font, x, baselineY, utf8, ink, tracking, plane, extraPerGapF26);
 }
 
+int stretchFor(const GlyphSource& font, std::string_view line, int availW, Tracking tracking) {
+  int gaps = 0;
+  for (const char c : line)
+    if (c == ' ') ++gaps;
+  if (gaps == 0) return 0;  // one long word: nothing to distribute across
+
+  const int naturalW = font.measure(line, tracking);
+  // Negative slack is a word wider than the column, which the wrap deliberately
+  // let overhang. Pulling the gaps tighter to compensate would compress a line
+  // that is already wrong, in a way that looks like a different bug.
+  if (naturalW >= availW) return 0;
+
+  // The ragged fallback, tested on how full the LINE is rather than on how far a
+  // gap would stretch -- see kMinJustifyFillPercent for why that distinction is
+  // the whole of it. Multiplied out rather than divided, so a narrow column needs
+  // no rounding rule of its own.
+  if (naturalW * 100 < availW * kMinJustifyFillPercent) return 0;
+  return pxToF26(availW - naturalW) / gaps;
+}
+
 std::string elideToWidth(const GlyphSource& font, std::string_view utf8, int maxW, Tracking tracking) {
   if (font.measure(utf8, tracking) <= maxW) return std::string(utf8);
   const int ellipsisW = font.measure(kEllipsis, tracking);

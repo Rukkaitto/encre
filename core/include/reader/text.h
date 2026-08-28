@@ -127,6 +127,67 @@ int drawTextJustified(Framebuffer& fb, const GlyphSource& font, int x, int basel
                       std::string_view utf8, int extraPerGapF26, Ink ink = Ink::Black,
                       Tracking tracking = {}, Plane plane = Plane::Bw);
 
+// How full a line must be, as a percentage of its column, before it is justified
+// at all. Below this it is set ragged.
+//
+// THE TEST IS THE LINE, NOT THE GAP, and getting that round the wrong way is
+// instructive. This started as a cap on how far one gap could stretch -- three
+// times the space's own width -- on the reasoning that justification's failure
+// case is a corridor of white between two words. The failure case is real: our
+// own fixtures contain "pneumonoultramicroscopicsilicovolcanoconiosis", which is
+// wider than the 444px column, so the greedy wrap puts it alone on a line and
+// leaves the line before it holding two words and 330px of slack.
+//
+// But a per-gap cap cannot tell that line from ordinary prose, because the number
+// of gaps is what converts slack into stretch. Measured on
+// design/Reader.dc.html's own two paragraphs, the cap refused "necklace, and the
+// two of" -- 367px of text in a 444px column, a perfectly ordinary line -- because
+// its 77px of slack fell across only four gaps, 19.25px each against an 18px cap.
+// It refused it BY ONE PIXEL, and set it ragged directly beneath a line it had
+// justified at 15.25px. A ragged line sitting between two justified ones is
+// exactly what the cap existed to avoid, arrived at from the other direction.
+//
+// A line that is 83% full is prose. A line that is 23% full is the corridor. So
+// the question is how much of the line is TEXT, which is the thing actually
+// visible, and it needs no reference to the gap count at all.
+//
+// 60% is where "more text than space" stops being true. Measured over the same
+// 6,800 pages of tools/mkepub.py output: the per-gap cap set 18% of all lines
+// ragged and the fill test sets 3.4%, taking justified lines from 71% to 86%. The
+// lines that remain ragged are almost all paragraph-final, which is where ragged
+// belongs.
+//
+// The price is admitted rather than hidden: a line at the threshold has 40% of its
+// column as slack, and across four gaps that is a gap five or six times the space's
+// own width -- a visible river. That is the trade a wrap with no hyphenation
+// dictionary has to make, and it is made in this direction because an occasional
+// wide gap reads as loose typesetting while a ragged line mid-paragraph reads as
+// the feature being broken.
+//
+// IT LIVES HERE, WITH THE FUNCTION THAT APPLIES IT. Both were reader/layout's
+// until the Typography preview needed the same rule: a constant in one layer
+// governing a function in another is two places to read one decision.
+inline constexpr int kMinJustifyFillPercent = 60;
+
+// How much each ASCII space on this line stretches, or 0 for ragged.
+//
+// The gap COUNT here and the codepoint drawTextJustified stretches must be the
+// same rule, which is why both name U+0020 and nothing else -- and that comment is
+// the reason the pair belongs in ONE layer. It was reader/layout's private helper
+// while pagination was its only caller; it takes no PageMetrics, no Block and no
+// cursor, so it was never pagination's, and drawProse's ProseAlign::Justify is the
+// second caller that proved it.
+//
+// `availW` is the measure the line was WRAPPED against, which is not always the box
+// it is drawn in: a blockquote is inset and a first line may be indented, and a
+// stretch computed against the wider box overflows by exactly the difference.
+//
+// `tracking` HAS NO DEFAULT, deliberately: it must be the tracking the line was
+// measured with, and a defaulted `{}` is a way for a caller to space a line it had
+// measured unspaced -- which is the drift Prose::tracking and LaidLine::tracking
+// both exist to prevent.
+int stretchFor(const GlyphSource& font, std::string_view line, int availW, Tracking tracking);
+
 // --- A run that has to fit -----------------------------------------------------
 //
 // drawText draws from a left edge with no right edge, which is right for every

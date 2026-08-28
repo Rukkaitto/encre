@@ -25,6 +25,7 @@ make firmware   # build for the ESP32-C3
 make fonts      # regenerate the .rfnt type ramp and embedded headers
 make icons      # regenerate icon bitmaps from the design boards' SVG
 make compare    # design-vs-firmware contact sheet, all 32 boards (~2.8 min)
+                # ...and it prints `ok`, NOT a percentage -- see #41
 ```
 
 ```
@@ -1124,7 +1125,14 @@ and encoding it in a `core/` header is how a change over there leaves a screen
 silently one-way. `test/unit/test_focus_restore.cpp` walks **every** `ScreenId`
 and asserts the round trip, `static_assert`s its own catalogue against the enum
 so an added screen cannot slip past, and **counts** the screens whose focus can
-move (five) so it cannot quietly end up testing nothing. **The rule is structural
+move (**eight** — this line said five, and the test has said seven since the reader
+menu and the contents landed) so it cannot quietly end up testing nothing. **There
+are TWO such counts**, `movable` and `wrapping`, and this line only ever mentioned
+one. **And the `static_assert` beside them let a screen through**: it compared
+against `ScreenId::SdMissing + 1`, a NAMED member rather than the last one, so
+appending `Typography` satisfied it unchanged and the guard that exists to force a
+new screen into `kAllScreens` said nothing. Caught only because the hand-maintained
+counts failed for an unrelated reason; #42 is the fix. **The rule is structural
 now**: `focus()` and `setFocus()` are `final` on `FocusScreen`, so a derived
 screen cannot take one half without the other — the test checks a property the
 type system also enforces, and a sixth focused screen gets the whole contract by
@@ -1348,7 +1356,12 @@ U+00C0..U+00DE is `C3 80`..`C3 9E`, so the second byte drops by 0x20 exactly as 
 ASCII letter's only byte does. One subtraction.
 
 **It is safe because of what the fonts carry**: `fontc.py`'s `CODEPOINTS` is
-`0x20..0x7E` plus **all** of `0xA0..0xFF`, so every accented capital has a real glyph.
+`0x20..0x7E` plus **all** of `0xA0..0xFF` — **and eight punctuation codepoints plus
+U+FFFD** that this line used to omit: `0x2013 0x2014 0x2018 0x2019 0x201C 0x201D
+0x2026 0x2039 0x203A`. The understatement cost real work: the Typography panel's
+`‹ ›` were planned as a `make fonts` pass and a flash cost that did not exist,
+because U+2039 and U+203A were already there. So every accented capital has a real
+glyph, and so do the quotes, the dashes, the ellipsis and the guillemets.
 That is the load-bearing fact — a correct mapping onto a glyph the subset lacked would
 render as a **notdef box**, which is worse than a lowercase letter.
 
@@ -1384,6 +1397,12 @@ case to look at if one ever appears.
   found on one screen and belonged in `components.cpp` / `text.cpp` /
   `dither.cpp` / a generator. Special-casing a screen means the next screen
   inherits the bug.
+- **...AND NOT THE FIRST, EITHER.** The Typography panel's value formatters were
+  extracted into `settings.h` while Settings was going to read the same five values
+  out; Settings became a single disclosing row instead, leaving one caller, and the
+  extraction was undone. "The second copy is the extraction point" is not "extract
+  in advance of one" — a shared home for a single caller is a header edge bought for
+  nothing.
 - **THE SECOND COPY IS THE EXTRACTION POINT, NOT THE FIFTH** — a rule this
   project retrofitted across two whole passes (`FocusScreen` and the
   shared-primitives sweep) instead of following from the start, and the cost of
@@ -1646,9 +1665,19 @@ worth knowing before changing it:
 | Sleep | `Sleep.dc.html` | Painted directly, never pushed — a push would make the wake restore into it. |
 | Sleep / nothing open | `SleepIdle.dc.html` | The badge alone. Same screen with its card removed. |
 | Reader | `Reader.dc.html` | The only screen whose content is the BOOK's. `Fidelity::Grayscale`, the only one. |
+| Typography | `Typography.dc.html` | Two doors, and it needs nothing from the book. `CHANGE` cycles in place; `Font` is drawn and unreachable. |
 | SD missing | `SdMissing.dc.html` | RETRY restarts the device when the card was lost after a mount. |
 
-**SETTINGS DRAWS EVERY BOARD ROW AND ONLY THE DEVICE ONES RESPOND.** TYPOGRAPHY
+**SETTINGS IS SEVEN ITEMS NOW, AND THE PARAGRAPH BELOW DESCRIBES WHAT IT WAS.**
+Its five inert TYPOGRAPHY rows became one disclosing `Typography` row in a `READING`
+section once a screen existed to edit them — see **The typography panel**. What
+survives of the paragraph below: `Sleep screen` is still drawn and unreachable
+(issue #11), the focus still skips what cannot act, an inert row is still drawn
+exactly as an unfocused focusable one, and the theme still reports a box model
+rather than a row count. What is gone: the five rows, the placeholder values, and
+the claim that no row here pushes a screen.
+
+**SETTINGS DREW EVERY BOARD ROW AND ONLY THE DEVICE ONES RESPONDED.** TYPOGRAPHY
 belongs to Phase 3's reader; its five rows carry the board's own placeholder values
 so the screen matches the board before the settings behind them exist. The `Size`
 row is the one that will cost something to wire: see the glyph-cache table below,
@@ -3316,6 +3345,164 @@ Library row is" — and Confirm on a Library row opens a book, so that row had b
 dead button on a shipped screen while its test kept pinning the placeholder. Both are
 live, and both tests now assert the action.
 
+## The typography panel
+
+`Typography.dc.html`. Five rows over four `Settings` fields — `bodyPpem`,
+`margins`, `lineSpacing`, `justify` — a live specimen, and a re-pagination of the
+open chapter on the way out. **`kSettingsVersion` did NOT move**: an added field
+takes its default from an older file, and every default here is the pre-feature
+behaviour to the pixel, which is what keeps every reader golden where it is.
+
+**ONE MODE, AND `CHANGE` CYCLES IN PLACE.** Up/Down move the focus, Confirm cycles
+the focused value forward and wraps, Back pops. A TWO-MODE design was built first
+and rejected off the rendered board: it read `DONE / EDIT / UP / DOWN` browsing and
+`DONE / OK / UP / DOWN` editing, and **`DONE` and `OK` are synonyms** — two words
+for "finished", nothing to say that one finished the ROW and the other left the
+SCREEN. Cycling in place is Settings' own mechanism and its argument transfers
+unchanged; what it costs is one direction, at most four presses over a five-value
+list. Deleting the mode also deleted a second board, two view-model fields, and a
+`‹ ›` marker whose axis contradicted the vertical buttons that stepped it.
+
+**FOCUSABILITY IS DERIVED, NOT TABULATED**: a row is focusable iff its field has
+more than one value. So `Font` is unreachable while one body face is vendored and
+becomes reachable the moment a second lands, with no line to remember — which is
+what replaced the chevron affordance that used to make a one-value row honest.
+
+**THE VALUES AND THE FOCUS BOTH WRAP, and this screen is where that is free.** The
+recorded hazard was never the wrap; it is AUTO-REPEAT — "a wrap belongs to a press
+and a hold rests at the end". This screen declares no repeat, and must not: every
+size step re-rasterises the body face.
+
+**TWO ENTRY POINTS, and the panel needs nothing from the book.** The reader menu's
+`Typography` row, and Settings' `READING` section — one disclosing row where five
+inert readout rows used to be. Settings could become a door only because the panel
+stopped needing an open book: its band names no book (the settings are device-wide,
+so naming one contradicted the footnote) and its specimen is fixed.
+
+**THE BAND'S RIGHT SLOT IS EMPTY AND STILL RESERVED ON THE BOARD.** Removing the
+div outright shrank Chrome's band by 2px, because Chrome sizes a flex row by its
+children while `bandContentH` takes `max(Label500, Value700)` unconditionally — and
+a 2px band pushes every row below it out of alignment. **A band's height must not
+vary by screen**, for the same reason the hint bar is always one line, so the board
+holds the line box with an `&nbsp;`.
+
+**SETTINGS' CONFIRM HINT FOLLOWS THE FOCUSED ROW** — `OPEN` on the `Typography`
+row, `CHANGE` on the four `DEVICE` rows. It is **the first hint bar in this
+firmware whose text varies within a screen**, and it has to: `screen_settings.cpp`
+stated the premise outright ("CHANGE, not OPEN: nothing here pushes a screen") and
+the new row makes it false. One slot changes as the focus moves; the alternative is
+a Confirm labelled `CHANGE` that opens a screen.
+
+**THE APPLY IS KEYED ON A READER BEING ANYWHERE ON THE STACK, NOT ON TOP**, and
+that is load-bearing twice. From Settings there is no Reader and nothing should be
+re-paginated. From the reader menu the pop lands on the MENU, which is an overlay —
+`App::render` walks down to the topmost non-overlay, paints the Reader, then paints
+the overlay over it — so **the Reader's stale page IS drawn on the very next
+frame**. "On top" would never fire there. `Back` is a plain `pop()` for the same
+reason `popTo(Reader)` was wrong: Settings' stack has no Reader and `popTo` stops at
+the root.
+
+**`ReaderScreen::relayout` LANDS AT THE TOP OF THE BLOCK**, dropping the cursor's
+line, in one place. `setMetrics` cannot serve — it re-opens the chapter at PAGE ONE,
+which is not what a reader who changed their type size asked for. And `fitOf` had
+already graded this before the feature existed: it keys on `(ppem, columnW)`, so a
+size or margin change reads `Relaid` and zeroes the same field, while line spacing
+and alignment change neither and `line` legitimately survives them.
+
+**THE PAGE RING IS GIVEN BACK ON THE WAY IN**, before any face re-init, because
+`ScalableFont::init` takes the new arena BEFORE releasing the old: at ppem 46 the
+roman alone is 24,576 bytes transient on top of the 16,384 it holds, against a
+42,152-byte reading floor.
+
+**A PERSISTED `Size` NEEDS A SECOND APPLY AT BOOT.** The body face is inited ~230
+lines before `loadAndApplySettings()` runs, with the constant `kBodyPpem`, because
+it must exist before anything can measure with it. So the setting reached the
+SETTINGS and never the FACE: margins, lead and justify survived a reboot (
+`readerMetrics` is computed after the load) and Size did not — set 22 PT, reboot,
+and the page came back at 15 while both screens said 22. `setup()` now re-inits when
+the face DISAGREES with the setting, guarded that way so a card holding the default
+costs no cache flush.
+
+**THE PREVIEW SHOWS ALL FOUR EDITABLE ROWS, AND IT SHIPPED SHOWING THREE.** The
+spec said the box "cannot preview the margins" because the box is chrome geometry —
+396px of measure on the X4 where the reading column is 444, so it can never BE the
+reading measure — and that framing was wrong. **THE BOX IS THE PAGE AND ITS SIDE
+PADDING IS THE MARGIN**, so the padding tracks the setting and the base measure
+being narrower than the column is beside the point. Reported off the device as
+"changing the margins doesn't update the live preview", which is the argument that
+put justification in the box arriving on the one row that had been excluded from it.
+
+- **The delta is EXACT, not scaled**, because the box and the panel are the same
+  device pixels: one px of margin narrows the reading column by 2px and this
+  padding by 1px each side. `kTypoPreviewPadXBase` is 16 at the tightest step, so
+  `margins = 18` renders the board's 24px and WIDE reads 36.
+- **ONLY THE MEASURE MOVES, AND THAT IS THE HALF A TEST HAS TO CHECK.** The border
+  is placed from `kMargin` and `boxH`, neither of which reads the setting, so no row
+  below the box shifts. A fix that inset the whole box instead would keep the box's
+  HEIGHT and step every row below it on every press of one row —
+  `test_theme_typography.cpp` compares the border's inked COLUMNS between the two
+  end steps for exactly that, and it fails 166 assertions when the outline moves.
+- **Justified text RIVERS MORE in the preview than on the page** at the default and
+  wide settings, because the measure is still narrower than the column. The roadmap
+  records rivers at this size as inherent; the preview exaggerates them.
+- **The box's height is DERIVED and fixed with respect to the settings**, so the
+  five rows never move and there is visible slack at large sizes. A pinned height
+  was tried, was wrong by ~42px, and `flex-shrink` hid it — CLAUDE.md's first
+  invariant, broken in this feature's first commit.
+
+**THE TWO TIGHTEST LEADS ARE TIGHTER THAN THE FACE'S OWN INK, AND 1.0 CAN TOUCH.**
+`kLineSpacingSteps` is seven values now — 1.0 and 1.2 were added below the shipped
+floor of 1.4 — and the measurement is in `settings.h` beside the table so nobody
+re-derives it: the body face at ppem 32 is `ascent=38 descent=-10 lineHeight=48`, so
+its nominal extent is 48px against a 32px line box at 1.0 and 38px at 1.2. The
+nominal figure is the face's worst case rather than any real pair of lines — with
+real glyph heights a collision needs a box under ~40px — so **1.4 is clear despite
+overflowing nominally, 1.2 can touch by ~2px and 1.0 by ~8px**. Offered anyway: it
+is a reading-comfort call and this glass is the only place to settle it.
+
+- **`settings.cpp`'s `kLineSpacingSteps[2] == kBodyLeadEm` assert exists to fail
+  here**, and did: the default's index moved 2 → 4. A step added below the default
+  silently re-indexes it, and the build stopping is what forces the number re-read.
+- **IT TURNED A DOCUMENTED NON-PROPERTY INTO A REAL ONE.** `previewLinesThatFit`
+  measures INK rather than line boxes, and its comment said plainly that
+  `floor(boxH / lead)` agreed with it everywhere reachable and that a mutation to
+  floor failed nothing. With these two steps the rules differ in **13 of 210**
+  reachable cases, and at **(ppem 42, lead 1000) on the X4 floor draws a fifth line
+  whose ink leaves the box** — the slice itself. **No hand-picked sample had that
+  pair**: the case list held 25, 32 and 46 at that lead and all three agreed with
+  floor, so the test walks the whole space (5 sizes × 7 leads × 3 margins × 2
+  panels, 0.44 s) instead. The floor mutation now fails 14 assertions. **Writing
+  down that a mutation does not bite is what made it noticeable when it started
+  to.**
+
+**`ProseAlign::Justify` EXISTS BECAUSE THE BOX SAYS LIVE PREVIEW.** Without it,
+`CHANGE` on the `Alignment` row spends a ~520 ms repaint moving four characters of a
+row value while the box does not move — a live preview visibly ignoring one of its
+four rows. `stretchFor` and `kMinJustifyFillPercent` moved from `layout` down to the
+TEXT layer with it, where `drawTextJustified` already lived; `stretchFor` takes no
+`PageMetrics`, no `Block` and no cursor, so it was never pagination's.
+
+**ppem 38 IS `18 PT`, AND `roadmap:1269` IS STILL OPEN.** That entry asks whether the
+reader is under-sized by its own spec, having spotted that the board stated `18 PT`
+while rendering book text at 32px. Implementing the screen forced the contradiction —
+the firmware cannot render both — and it was resolved toward the preview's pixels and
+the shipped default, because at ppem 38 the specimen is cut off mid-sentence with
+~85px of empty box beneath it. **The board now says `15 PT` and the question is
+unchanged**: it is about the DEFAULT, it is answerable only on the panel, and 18 PT
+is one press away on the device.
+
+**THE GLYPH CACHE LEVER IS SPENT.** `ScalableFont::cacheBytesFor` was written so a
+caller could size the arena from the chosen ppem, and until now had none. The Size
+row is that caller, and the pair's worst case is 39,936 bytes at ppem 46 against
+26,624 today.
+
+**WHAT THE DESKTOP CANNOT SEE HERE**, and it is most of the shell: that the faces
+re-init without OOM at ppem 46 against the reading floor, that the ring shrink buys
+the headroom `init` needs, that the apply fires exactly once per panel visit, that
+the frame after the pop shows the re-paginated page under the veil, and what
+`relayout` costs on a card-backed book — the desktop does no SD reads and no real
+inflate, and this file's ~135× ratio warning applies to that walk.
+
 ## Editing this repo with scripts
 
 Most edits here are made by heredoc Python over the source. Three separate failures in
@@ -3441,6 +3628,21 @@ passed — `shell/` has no harness, so nothing on the desktop touches that loop.
   previous compile inside the same second leave make thinking the object is current, so
   the fixed source tests as though it were still mutated. `touch` the file, or check
   `git diff` against the binary's behaviour before believing either result.
+  **AND A THIRD WAY, which is the sharpest because the mutation was written by a
+  REVIEWER to prove a hole existed** (2026-08-28). A review of the Typography work
+  made `!justify` also drop the paragraph indent and reported that it passed all
+  638,823 assertions — true, and it proved nothing: `indentedAfter` returns false
+  for `isFirst`, the test's document was ONE paragraph, so the mutated branch could
+  never differ. The prescribed fix — "compare more fields" — was then a fix to the
+  ASSERTION when the hole was in the FIXTURE: `CHECK(r.x == j.x)` was comparing
+  `18 == 18`, correct and unable to reach the line it was added to defend. What
+  closed it was a second document whose second paragraph IS indented, plus a
+  `REQUIRE` in front asserting the fixture still reaches the indent. **A mutation
+  that fails nothing tells you about your INPUT before it tells you about your
+  test**, and the same session produced two more instances: a ring-eviction
+  mutation invisible because the walk refilled the ring, and a last-line
+  justification mutation invisible because the specimen's last line was under the
+  fill threshold anyway.
 - **A SCRIPTED REPLACE WITH NO COUNT REWROTE A FUNCTION INTO A CALL TO ITSELF**, and
   it reached the device as a stack-protection fault. Rewriting the call sites
   `anchor_.jumped(from, here())` into `anchorJumped(from)` used `s.replace(a, b)`
@@ -3619,6 +3821,13 @@ reachable, not counted. Promoting a draft is
 `convertProjectV2DraftIssueItemToIssue` and **the reverse does not exist**, so
 promote when the work starts and not before.
 
+**`Todo` was missing from this table until 2026-08-28, and it is the entry door for
+every non-UI card** — so anyone following this section for a `Kind = Tooling` card
+hit a missing id. `Kind`, `Source` and `Phase` were undocumented entirely. `Phase`'s
+meaning is still unrecorded: it is not clear whether it names the phase that spawned
+a card or the phase that will close it, so the four cards filed on 2026-08-28 leave
+it empty.
+
 **Two API limits worth not rediscovering:**
 
 - **Grouping and a board's column field are UI-only.** `createProjectV2View`
@@ -3636,7 +3845,10 @@ ever go stale:
 | | id |
 |---|---|
 | project | `PVT_kwHOAkvc3c4BhZ5g` |
-| `Status` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwC4` — `Needs a board` `75d83950`, `Boarded` `7ae6b024`, `Building` `000256fb`, `On glass` `5012a8f7`, `Done` `ae97917c` |
+| `Status` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwC4` — **`Todo` `ddab514e`**, `Needs a board` `75d83950`, `Boarded` `7ae6b024`, `Building` `000256fb`, `On glass` `5012a8f7`, `Done` `ae97917c` |
+| `Kind` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUU` — `Screen` `fe704ca2`, `Engine` `e45425d2`, `Fidelity` `067a44e5`, `Perf` `3906b97c`, `Hardware` `8952abc2`, `Tooling` `09fcefaa`, `Docs` `ac2492c0` |
+| `Source` | `PVTF_lAHOAkvc3c4BhZ5gzhgVwX8` (text) |
+| `Phase` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgV6lo` — `1` `1af00faf`, `2A` `70d666b6`, `2A-2` `10dd1639`, `2B` `891e6f65`, `2C` `226e8a24`, `3A` `726ae204`, `3B` `e13f494d`, `3C` `edb93849`, `3C+` `40a66d57`, `3D` `8f1728ee`, `3E` `f7ea731c`, `4` `e7a6573a`, `5` `f00b8560` |
 | `Release` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUQ` — `V1` `245a6600`, `V2` `5696d63f`, `Someday` `ebc1c1c1` |
 
 Moving one card is `gh project item-edit --id <item> --project-id <project>

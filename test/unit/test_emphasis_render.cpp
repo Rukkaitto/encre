@@ -51,7 +51,7 @@ TEST_CASE("emphasis survives the wrap wherever the word falls") {
 
   for (auto geo : {std::pair<int,int>{480,800}, std::pair<int,int>{528,792}}) {
     reader::PageMetrics m;
-    theme.readerMetrics(geo.first, geo.second, ramp.fonts, body.face, m);
+    theme.readerMetrics(geo.first, geo.second, ramp.fonts, body.face, reader::Settings{}, m);
     int lost = 0;
     std::string lostAt;
     for (int w = 0; w < 60; ++w) {
@@ -81,7 +81,7 @@ TEST_CASE("the italic face reaches the glass, and its absence is silent") {
   readerfix::Italic italic;
   reader::QuietTheme theme;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
 
   auto renderWith = [&](const reader::GlyphSource* ital) {
     auto scr = std::make_unique<reader::ReaderScreen>(doc, "T", "CH. 01", &body.face);
@@ -115,7 +115,7 @@ TEST_CASE("the markup hints tell the three shapes of italic apart") {
   readerfix::Body body;
   reader::PageMetrics m;
   reader::QuietTheme theme;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
 
   auto hintsFor = [&](const std::string& doc) {
     reader::resetMarkupHints();
@@ -163,7 +163,7 @@ TEST_CASE("a class the stylesheet italicises is an emphasis run") {
   readerfix::Italic italic;
   reader::QuietTheme theme;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
 
   const std::string doc =
       "<html><body><p>il avait <span class=\"lattes-i\">faim</span> ce soir</p></body></html>";
@@ -192,7 +192,7 @@ TEST_CASE("a class-italic run covers exactly its own text") {
   readerfix::Italic italic;
   reader::QuietTheme theme;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
 
   auto scr = std::make_unique<reader::ReaderScreen>(
       "<html><body><p>aa <span class=\"i\">bb</span> cc</p></body></html>", "T", "CH. 01",
@@ -216,7 +216,7 @@ TEST_CASE("the close is matched by the ELEMENT, not by its name") {
   readerfix::Italic italic;
   reader::QuietTheme theme;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
 
   auto scr = std::make_unique<reader::ReaderScreen>(
       "<html><body><p>a <span class=\"i\">b <span>c</span> d</span> e</p></body></html>", "T",

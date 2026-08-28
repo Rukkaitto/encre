@@ -22,7 +22,7 @@ namespace {
 constexpr const char* kNames[] = {
     "home", "library", "item-actions", "delete-confirm",
     "book-details", "settings", "sleep", "reader", "reader-menu",
-    "contents", "sd-missing",
+    "contents", "sd-missing", "typography",
 };
 
 // Clamped so the encoded length is bounded. -1 is the floor rather than 0 because
@@ -32,7 +32,7 @@ constexpr int kFocusMax = 32767;
 
 bool decodeName(const char* start, size_t len, ScreenId& out) {
   if (len == 0) return false;
-  for (int i = 0; i <= static_cast<int>(ScreenId::SdMissing); ++i) {
+  for (int i = 0; i <= static_cast<int>(ScreenId::Typography); ++i) {
     const char* n = kNames[i];
     if (std::strlen(n) == len && std::strncmp(n, start, len) == 0) {
       out = static_cast<ScreenId>(i);
@@ -90,6 +90,11 @@ const char* sessionWireName(ScreenId id) {
     case ScreenId::ReaderMenu: return kNames[8];
     case ScreenId::Contents: return kNames[9];
     case ScreenId::SdMissing: return kNames[10];
+    // NAMEABLE AND GENUINELY RESTORABLE, unlike the two above it: the panel needs
+    // nothing from a book -- its band names none and its specimen is fixed -- so the
+    // factory builds it from the settings it already holds, and its focus is a row
+    // index that `focus` carries exactly.
+    case ScreenId::Typography: return kNames[11];
   }
   return kNames[0];
 }

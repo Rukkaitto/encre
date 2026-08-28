@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -35,7 +36,12 @@ enum class ScreenId : uint8_t {
   // appending also leaves every existing ordinal where it was.
   ReaderMenu,
   Contents,
-  SdMissing
+  SdMissing,
+  // design/Typography.dc.html -- the reader's type panel. APPENDED for the reason
+  // ReaderMenu was: the record stores a name, so an insertion could not silently
+  // become another screen, but appending also leaves every existing ordinal where
+  // it was.
+  Typography
 };
 
 // A screen's name, for logs. Same reasoning as buttonName: a numeric ScreenId in
@@ -308,6 +314,18 @@ class App {
   // Bounds-checked to the top rather than asserting: an out-of-range index is a caller
   // bug, and returning the top is a readable screen where a crash is a dead device.
   const Screen& at(int index) const;
+
+  // The stack, MUTABLY, by index. `at()` is const because a renderer must not move a
+  // screen it is drawing; this exists for the shell, which legitimately has to reach
+  // a screen BELOW the top -- the Typography panel's apply path re-paginates the
+  // Reader under the menu it was dismissed from, and gives its page ring back on the
+  // way in.
+  //
+  // A const_cast at the call site would do the same thing and say nothing about why
+  // it is allowed, which is the difference worth one method. Same bounds rule as
+  // `at()`, so the two cannot disagree about an out-of-range index.
+  Screen& atMut(int index);
+
   int depth() const { return static_cast<int>(stack_.size()); }
 
   // Paints the stack: the topmost non-overlay screen, then every overlay above
@@ -481,6 +499,9 @@ class App {
   ButtonMask autoRepeat() const { return top().autoRepeat(); }
 
  private:
+  // The bounds rule at() and atMut() share. See its body.
+  size_t clampIndex(int index) const;
+
   // WHAT THE LAST FULL PAINT PUT WHERE, so canRenderTopOnly can check its own
   // precondition instead of trusting the caller with it.
   //

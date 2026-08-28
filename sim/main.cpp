@@ -22,6 +22,8 @@
 #include "reader/scalablefont.h"
 #include "reader/screen_contents.h"
 #include "reader/screen_reader.h"
+#include "reader/screen_reader_menu.h"
+#include "reader/screen_typography.h"
 #include "reader/screens.h"
 #include "reader/settings.h"
 #include "reader/theme_quiet.h"
@@ -346,19 +348,38 @@ int main(int argc, char** argv) {
   // pin the same pixels while proving nothing about the rule that produces them.
   const bool isAnchored = std::strcmp(argv[1], "reader_anchored") == 0;
   const bool isReaderList = std::strcmp(argv[1], "reader_list") == 0;
+  // design/Typography.dc.html. The SAME journey as `reader_menu` -- the Reader, then
+  // the menu over it -- and then the panel pushed on top, so the stack this renders
+  // is the stack the device will have.
+  //
+  // IT PRESSES ITS WAY IN, over DOWN then CONFIRM on the menu, which is the route the
+  // device takes. It could not before: the menu's `Typography` row was
+  // `{"Typography", "", false, true}` -- not focusable, no action -- so DOWN SKIPPED
+  // it (Focus::Gate refuses an unfocusable landing) and landed on `About this book`,
+  // where CONFIRM pushes BookDetails. So this branch pushed the ScreenId directly and
+  // said so, because a subcommand written as the two presses would have rendered the
+  // WRONG SCREEN and reported success.
+  //
+  // The row is live now, so the presses are what runs, and the branch asserts the
+  // focus and the top of the stack either side of them. That is what makes this a
+  // NAVIGATION check again rather than a render-only one: the render did not move (it
+  // is byte-identical to the golden the direct push blessed, which is the proof the
+  // row does exactly what the push did), and what is newly covered is the row going
+  // inert again -- which nothing on the desktop would otherwise notice.
+  const bool isTypography = std::strcmp(argv[1], "typography") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
       !isHomeUnopened && !isLibraryScrolled && !isReader && !isSleepIdle &&
       !isReaderMenu && !isContents && !isChapterOpen && !isReaderList && !isAnchored &&
-      !isSleepWaking && !isLibraryOpening) {
+      !isSleepWaking && !isLibraryOpening && !isTypography) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
                  "'sleep', 'sleep_idle', 'home_empty', 'home_unopened', "
                  "'library_scrolled', 'reader', 'reader_anchored', "
                  "'reader_chapter_open', 'reader_list', "
-                 "'reader_menu', 'contents', 'sleep_waking', 'library_opening' "
-                 "or 'app')\n",
+                 "'reader_menu', 'contents', 'typography', 'sleep_waking', "
+                 "'library_opening' or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -379,7 +400,8 @@ int main(int argc, char** argv) {
   // for the same reason the roman's does.
   std::vector<uint8_t> italicTtf;
   reader::ScalableFont italic;
-  if (isReader || isReaderMenu || isChapterOpen || isReaderList || isAnchored) {
+  if (isReader || isReaderMenu || isChapterOpen || isReaderList || isAnchored ||
+      isTypography) {
     bodyTtf = slurp(std::string(ASSETS_DIR) + "/built/literata_body.ttf");
     if (!body.init(bodyTtf.data(), bodyTtf.size(), reader::kBodyPpem)) {
       std::fprintf(stderr, "body face failed to load\n");
@@ -392,7 +414,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  if (isReaderMenu) {
+  if (isReaderMenu || isTypography) {
     // AN OVERLAY NEEDS ITS PARENT, so this goes through an App rooted at the Reader
     // rather than rendering one screen: App::render walks down to the topmost
     // non-overlay, paints it, then paints each overlay above -- and rendering
@@ -400,7 +422,7 @@ int main(int argc, char** argv) {
     // nothing on the desktop can catch because every other path here goes through
     // App::render.
     reader::PageMetrics m;
-    theme.readerMetrics(w, h, fonts, body, m);
+    theme.readerMetrics(w, h, fonts, body, reader::Settings{}, m);
     m.italic = &italic;
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body);
@@ -419,10 +441,45 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "the factory refused ScreenId::ReaderMenu\n");
       return 1;
     }
+    if (isTypography) {
+      // THE DEFAULT SETTINGS, WHICH ARE NOW THE BOARD'S TOO. This branch overrode
+      // bodyPpem to 38 and re-inited the face at it, because the board's Size row
+      // said `18 PT` while its preview was set at `font-size: 32px` -- and the
+      // firmware cannot render both. The BOARD was the thing that disagreed with
+      // itself, and it is the board that changed: at ppem 38 the fixed box holds
+      // three of the specimen's four lines, so the preview cut off mid-sentence at
+      // "seems to be thrown" with ~85px of empty box under it, which is the worst
+      // state the screen can produce and the one this render would have pinned.
+      //
+      // So there is nothing to prime: `reader::Settings{}` is what the factory
+      // already holds and kBodyPpem is what the face above is already inited at.
+      // 18 PT remains one press away on the device, and whether it should be the
+      // DEFAULT is a separate open question (roadmap:1269).
+      //
+      // PRESSED, not pushed -- see isTypography's own comment. DOWN from Contents
+      // reaches Typography, and CONFIRM there opens the panel.
+      app.dispatch({reader::Button::Down, reader::PressKind::Short});
+      if (static_cast<const reader::ReaderMenuScreen&>(app.top()).vm().focusedRow !=
+          reader::ReaderMenuScreen::kTypography) {
+        std::fprintf(stderr, "DOWN on the reader menu did not reach the Typography row\n");
+        return 1;
+      }
+      app.dispatch({reader::Button::Confirm, reader::PressKind::Short});
+      if (app.top().id() != reader::ScreenId::Typography) {
+        std::fprintf(stderr, "CONFIRM on the Typography row did not open the panel\n");
+        return 1;
+      }
+    }
     if (!renderPassesToPng(
             [&](reader::Framebuffer& fb, reader::Plane pl) { app.render(fb, fonts, theme, pl); },
             app.top().fidelity(), w, h, argv[2]))
       return 1;
+    if (isTypography) {
+      const auto& t = static_cast<const reader::TypographyScreen&>(app.top());
+      std::printf("wrote %s (%dx%d) typography, focus %d, %s, ppem %d\n", argv[2], w, h, t.focus(),
+                  t.vm().justify ? "justified" : "ragged", t.settings().bodyPpem);
+      return 0;
+    }
     std::printf("wrote %s (%dx%d) reader menu over the page\n", argv[2], w, h);
     return 0;
   }
@@ -455,7 +512,7 @@ int main(int argc, char** argv) {
     // BlockKind: a heading, an italic inset blockquote, prose with inline emphasis,
     // and a hanging-indent list.
     reader::PageMetrics m;
-    theme.readerMetrics(w, h, fonts, body, m);
+    theme.readerMetrics(w, h, fonts, body, reader::Settings{}, m);
     m.italic = &italic;
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body);
@@ -481,7 +538,7 @@ int main(int argc, char** argv) {
   if (isAnchored) {
     // The same path as `reader`, with two presses on the end.
     reader::PageMetrics m;
-    theme.readerMetrics(w, h, fonts, body, m);
+    theme.readerMetrics(w, h, fonts, body, reader::Settings{}, m);
     m.italic = &italic;
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body);
@@ -517,7 +574,7 @@ int main(int argc, char** argv) {
     // Fidelity::Grayscale, so renderToPng renders three planes and composes them:
     // this is the first screen in the project whose golden is not a 1-bit frame.
     reader::PageMetrics m;
-    theme.readerMetrics(w, h, fonts, body, m);
+    theme.readerMetrics(w, h, fonts, body, reader::Settings{}, m);
     m.italic = &italic;
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body);

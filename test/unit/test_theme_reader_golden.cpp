@@ -62,7 +62,7 @@ TEST_CASE("QuietTheme renders Reader to golden on both panel geometries") {
     // ReaderScreen through the real factory, so this golden is laid out by exactly
     // the arithmetic the device runs -- not by a column this file chose.
     reader::PageMetrics m;
-    theme.readerMetrics(w, h, ramp.fonts, body.face, m);
+    theme.readerMetrics(w, h, ramp.fonts, body.face, reader::Settings{}, m);
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body.face);
     factory.setReaderMetrics(m);
@@ -103,7 +103,7 @@ TEST_CASE("A PAGE TURN MOVES THE PAGE, AND THE ENDS DO NOT WRAP") {
   reader::QuietTheme theme;
   Body body;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
 
   reader::DemoScreenFactory factory;
   factory.setReaderBody(&body.face);
@@ -142,7 +142,7 @@ TEST_CASE("every page's lines are inside the column the theme reported") {
   Body body;
   for (const auto geo : {std::pair<int, int>{480, 800}, std::pair<int, int>{528, 792}}) {
     reader::PageMetrics m;
-    theme.readerMetrics(geo.first, geo.second, ramp.fonts, body.face, m);
+    theme.readerMetrics(geo.first, geo.second, ramp.fonts, body.face, reader::Settings{}, m);
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body.face);
     factory.setReaderMetrics(m);
@@ -279,7 +279,7 @@ TEST_CASE("a chapter streamed from a card reads the same as one from memory") {
   reader::QuietTheme theme;
   Body body;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
 
   FakeFileSystem fs;
   REQUIRE(fs.writeAll("/books/b.epub",
@@ -322,7 +322,7 @@ TEST_CASE("PAGING OFF THE END OF A CHAPTER OPENS THE NEXT ONE") {
   reader::QuietTheme theme;
   Body body;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
 
   FakeFileSystem fs;
   REQUIRE(fs.writeAll("/books/b.epub",
@@ -377,7 +377,7 @@ TEST_CASE("A CHAPTER THAT PAGINATES TO NOTHING IS SKIPPED, not shown blank") {
   reader::QuietTheme theme;
   Body body;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
 
   // The in-memory constructor is the one place a textless chapter can be handed
   // over directly, and it must not pretend to have a page.
@@ -404,7 +404,7 @@ TEST_CASE("A REFUSED CHAPTER TURN LEAVES THE SCREEN WHERE IT WAS") {
   reader::QuietTheme theme;
   Body body;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
 
   FakeFileSystem fs;
   REQUIRE(fs.writeAll("/books/b.epub",
@@ -454,7 +454,7 @@ TEST_CASE("THE FACTORY REFUSES A READER IT HAS NO BOOK FOR") {
   reader::QuietTheme theme;
   Body body;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
 
   reader::DemoScreenFactory bare;
   bare.setReaderBody(&body.face);
@@ -588,7 +588,7 @@ TEST_CASE("QuietTheme renders the styled reader specimens to golden") {
   auto renderOne = [&](int w, int h, reader::DemoScreenFactory::ReaderStyleDemo which,
                        const std::string& name) {
     reader::PageMetrics m;
-    theme.readerMetrics(w, h, ramp.fonts, body.face, m);
+    theme.readerMetrics(w, h, ramp.fonts, body.face, reader::Settings{}, m);
     // THE ITALIC GOES IN THE METRICS, not only in the draw: the WRAP measures
     // emphasis with it, and the two faces differ in width by 6%-9%. A golden blessed
     // with it missing here would pin a page measured roman and drawn in two faces.
@@ -636,7 +636,7 @@ TEST_CASE("PAGING BACK N AND RETURNING LANDS EXACTLY WHERE YOU LEFT, for every p
   reader::QuietTheme theme;
   Body body;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
 
   const reader::InputEvent side_fwd{reader::Button::Right, reader::PressKind::Short};
   const reader::InputEvent side_back{reader::Button::Left, reader::PressKind::Short};
@@ -692,7 +692,7 @@ TEST_CASE("the front row does NOTHING when there is no anchor, and pages nothing
   reader::QuietTheme theme;
   Body body;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
   reader::ReaderScreen rd(longChapter(12), "Middlemarch", "CH. 01", &body.face);
   rd.setMetrics(m);
   rd.completeIndex();
@@ -714,7 +714,7 @@ TEST_CASE("the sides page and the front row does not, which is the split") {
   reader::QuietTheme theme;
   Body body;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
   reader::ReaderScreen rd(longChapter(12), "Middlemarch", "CH. 01", &body.face);
   rd.setMetrics(m);
   rd.completeIndex();
@@ -745,7 +745,7 @@ TEST_CASE("QuietTheme renders the Reader WITH a way back, to golden") {
 
   auto renderOne = [&](int w, int h, const std::string& name) {
     reader::PageMetrics m;
-    theme.readerMetrics(w, h, ramp.fonts, body.face, m);
+    theme.readerMetrics(w, h, ramp.fonts, body.face, reader::Settings{}, m);
     m.italic = &italic.face;
     reader::DemoScreenFactory factory;
     factory.setReaderBody(&body.face);
@@ -783,7 +783,7 @@ TEST_CASE("READING BACK UP TO THE ANCHOR WITHDRAWS IT, without pressing anything
   reader::QuietTheme theme;
   Body body;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
   reader::ReaderScreen rd(longChapter(30), "Middlemarch", "CH. 01", &body.face);
   rd.setMetrics(m);
   rd.completeIndex();
@@ -823,7 +823,7 @@ TEST_CASE("paging BACKWARD across a chapter boundary anchors, and forward spends
   reader::QuietTheme theme;
   Body body;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
   FakeFileSystem fs;
   REQUIRE(fs.writeAll("/books/b.epub",
                       std::string_view(reinterpret_cast<const char*>(epubfix::kEpubGood),
@@ -875,7 +875,7 @@ TEST_CASE("the way-back field sits where UP sits on a hint bar, not in the centr
   reader::QuietTheme theme;
   Body body;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
   reader::ReaderScreen rd(longChapter(30), "Middlemarch", "CH. 01", &body.face);
   rd.setMetrics(m);
   rd.completeIndex();
@@ -923,7 +923,7 @@ TEST_CASE("a cross-chapter way back is BOUNDED -- CH. NN, never a chapter's name
   reader::QuietTheme theme;
   Body body;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
   FakeFileSystem fs;
   REQUIRE(fs.writeAll("/books/b.epub",
                       std::string_view(reinterpret_cast<const char*>(epubfix::kEpubGood),
@@ -970,7 +970,7 @@ TEST_CASE("A JUMP TO A CHAPTER SETS THE ANCHOR TO WHERE THE READER WAS") {
   reader::QuietTheme theme;
   Body body;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
   FakeFileSystem fs;
   REQUIRE(fs.writeAll("/books/b.epub",
                       std::string_view(reinterpret_cast<const char*>(epubfix::kEpubGood),
@@ -1014,7 +1014,7 @@ TEST_CASE("a jump to the chapter already open changes nothing, anchor included")
   reader::QuietTheme theme;
   Body body;
   reader::PageMetrics m;
-  theme.readerMetrics(480, 800, ramp.fonts, body.face, m);
+  theme.readerMetrics(480, 800, ramp.fonts, body.face, reader::Settings{}, m);
   FakeFileSystem fs;
   REQUIRE(fs.writeAll("/books/b.epub",
                       std::string_view(reinterpret_cast<const char*>(epubfix::kEpubGood),

@@ -67,6 +67,17 @@ struct ReadingPosition {
   uint32_t bookBytes = 0;
   int ppem = 0;     // the body size `line` was laid at
   int columnW = 0;  // the column width likewise
+  // AND TWO TYPOGRAPHY SETTINGS ARE DELIBERATELY *NOT* FIT INPUTS: alignment and
+  // line spacing. Neither moves a line BREAK -- justification is applied to a
+  // finished line (layout.h) and the lead only sets how far down the next baseline
+  // goes -- so `line` survives a change to either and recording them here would
+  // throw away a usable position for nothing. Stated because the silence was
+  // previously accidental: adding `justify` to fitOf on the instinct that
+  // "alignment is layout" would fail no test.
+  //
+  // What DOES belong here is anything that changes the measure a line was wrapped
+  // at, which is exactly the two fields above -- `bodyPpem` arrives as `ppem` and
+  // `margins` as `columnW`.
 
   // HOW FAR THROUGH THE BOOK, 0..100, stored rather than derived.
   //

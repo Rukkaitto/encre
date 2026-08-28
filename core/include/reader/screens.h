@@ -5,6 +5,7 @@
 
 #include "reader/app.h"
 #include "reader/screen_settings.h"
+#include "reader/screen_typography.h"
 #include "reader/screen_book_details.h"
 #include "reader/screen_library.h"
 #include "reader/book.h"

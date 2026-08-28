@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 
 namespace reader {
@@ -27,6 +28,86 @@ inline constexpr uint32_t kSleepAfterMsMax = 60u * 60u * 1000u;
 // rather than a preference.
 inline constexpr int kFullRefreshEveryMax = 255;
 
+// --- THE TYPOGRAPHY STEPS ----------------------------------------------------
+//
+// Public for the reason kSleepAfterMsMin is: the Typography screen has to know
+// what it is allowed to offer, and a second copy of these numbers would drift
+// from these ones.
+//
+// EVERY DEFAULT BELOW IS TODAY'S BEHAVIOUR TO THE PIXEL. That is what keeps
+// every reader, sleep and book-details golden where it is -- a golden that
+// moves because of this feature is a bug in it.
+//
+// SIZE: ppem, labelled in points at 150 DPI as the chrome ramp is
+// (pt = ppem * 72 / 150). 25->12, 32->15, 38->18, 42->20, 46->22, and
+// TRUNCATION AND ROUNDING AGREE ON ALL FIVE -- which is the reason 25 is the
+// bottom step rather than 27. CLAUDE.md's convention is `ppem = pt * 150 / 72`
+// rounded, under which "12 PT" is ppem 25 and 25 * 72 / 150 is exactly 12.0;
+// 27 is really 12.96pt and only labels as 12 by truncating almost a whole point
+// away. With this table the formula's ambiguity does not arise, so it cannot
+// drift later into a label that is a point out.
+//
+//   * 32 is the default because design/Reader.dc.html says `font-size: 32px`.
+//   * 38 is on the list because 18 PT is the Typography board's own stated
+//     value, and roadmap:1269 has held "is the reader under-sized by its own
+//     spec" open since 2A-2 with the instruction to decide it ON THE PANEL.
+//     This does not decide it; it makes it decidable by pressing a button.
+//   * 46 is the top because the glyph cache is thrash-free to ppem ~46 (see
+//     CLAUDE.md, The glyph cache). Past it the arena stops holding the
+//     alphabet's union and every page re-rasterises at ~3,794 us a glyph.
+inline constexpr int kBodyPpemSteps[] = {25, 32, 38, 42, 46};
+// MARGINS: the reader column's side padding in px. 18 is design/Reader.dc.html's
+// own, which is why it is the middle step and carries the board's own label.
+inline constexpr int kMarginSteps[] = {10, 18, 30};
+// LINE SPACING: em x 1000, as PageMetrics::leadEm1000 is. 1700 is the board's
+// `line-height: 1.7`.
+//
+// THE BOTTOM TWO STEPS ARE TIGHTER THAN THE FACE'S OWN INK, AND 1.0 CAN TOUCH.
+// Measured rather than argued, so nobody has to re-derive it: the body face at
+// ppem 32 reports ascent=38 descent=-10 lineHeight=48, so its nominal ink extent
+// is 48px and a lead below that puts the extent outside its own line box.
+//
+//   lead | line box | vs the 48px extent
+//   1.00 |     32px | overflows by 16
+//   1.20 |     38px | overflows by 10
+//   1.40 |     44px | overflows by 4   <- shipped from the start, and reads fine
+//   1.55 |     49px | clear
+//
+// The nominal extent is pessimistic, because it is the FACE's worst case rather
+// than any real pair of lines: with real glyph heights (an ascender ~30px above
+// the baseline, the deepest descender 10px below) a collision needs a box under
+// ~40px. So 1.4 is clear despite overflowing nominally, which is why it has always
+// shipped without complaint, while **1.2 can touch by ~2px and 1.0 by ~8px** where
+// a descender happens to sit above an ascender.
+//
+// They are offered anyway, and that is a DELIBERATE call about reading comfort
+// rather than an oversight: a tight lead is a real typographic preference, the
+// worst case is two glyphs grazing rather than anything unreadable, and this is
+// the kind of question CLAUDE.md says is answerable only on the panel. Nothing
+// downstream breaks -- previewLinesThatFit asks about the INK precisely so a lead
+// tighter than the extent cannot slice a line, and layout.h's page walk derives
+// its line box from this number either way.
+inline constexpr int kLineSpacingSteps[] = {1000, 1200, 1400, 1550, 1700, 1850, 2000};
+
+// EVERY STEP TABLE MUST ASCEND, AND THIS IS A static_assert RATHER THAN THE
+// COMMENT IT USED TO BE. What depends on the order is the TIE RULE: snapToTable
+// picks the LAST candidate at equal distance, which is the larger one only while
+// the table ascends. So a reorder that preserves the SET -- {32, 25, 38, 42, 46}
+// -- silently reverses "ties go up", and a mutation confirmed that no test in the
+// suite can see it. Same precedent as kClustered's transpose assert in
+// dither.cpp: a change that preserves the thing the tests check and breaks the
+// thing they cannot has to fail the build instead.
+template <std::size_t N>
+constexpr bool ascending(const int (&table)[N]) {
+  for (std::size_t i = 1; i < N; ++i) {
+    if (table[i] <= table[i - 1]) return false;
+  }
+  return true;
+}
+static_assert(ascending(kBodyPpemSteps));
+static_assert(ascending(kMarginSteps));
+static_assert(ascending(kLineSpacingSteps));
+
 // Every knob the shell hardcoded through 2B. Defaults here are the values that
 // were compiled in, so behaviour is unchanged until a user changes something.
 struct Settings {
@@ -51,8 +132,35 @@ struct Settings {
   // which is the whole reason this is here.
   bool logToCard = false;
 
-  // Clamps every field into a sane range, returning false if anything had to be
-  // clamped. A file that needs clamping is a file to distrust, but clamping and
+  // --- Typography (design/Typography.dc.html) --------------------------------
+  //
+  // Four fields, no `font`: one body face is vendored, so a font field's only
+  // value would be its default -- a second spelling of a constant, which this
+  // project has a rule about. The row reads a constant instead.
+  //
+  // kSettingsVersion is NOT bumped. An added field takes its default from an
+  // older file, which is the rule stated at the top of this header, and this is
+  // the case it was written for: a card carrying today's file loads and behaves
+  // identically.
+  // The two numbers are layout.h's kBodyPpem and kBodyLeadEm, written as
+  // LITERALS so this header stays a leaf -- including layout.h here cost 74,022
+  // preprocessed lines against 896 for the leaf, for two integers. They are
+  // spelled out three lines above in the step tables anyway, so a literal here
+  // removes a coupling rather than adding one, and settings.cpp static_asserts
+  // that all four spellings agree: a change to either layout constant fails the
+  // BUILD rather than silently moving every reader golden.
+  int bodyPpem = 32;
+  int margins = 18;
+  int lineSpacing = 1700;
+  bool justify = true;
+
+  // Corrects every field, returning false if anything had to be corrected --
+  // and there are TWO corrections, not one. The ranged fields (sleepAfterMs,
+  // fullRefreshEvery) are CLAMPED into a range. The typography fields are
+  // SNAPPED onto their step tables above, which is a different operation and
+  // deliberately not a range clamp: the Typography screen steps a table by
+  // index, so a value in range but off the table is one the user could never
+  // leave. A file that needs either is a file to distrust, but correcting it and
   // carrying on beats refusing to boot.
   bool validate();
 
