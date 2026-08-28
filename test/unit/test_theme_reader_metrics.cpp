@@ -27,11 +27,26 @@ TEST_CASE("readerMetrics follows the typography settings") {
   theme.readerMetrics(480, 800, ramp.fonts, body.face, s, base);
 
   // THE DEFAULTS ARE THE BOARD'S. 480 less 18px each side is 444, which is the
-  // number design/Reader.dc.html states and every reader golden is laid at.
+  // number design/Reader.dc.html states and every reader golden is laid at. These
+  // two are LITERALS deliberately: they pin the board's own numbers, which is a
+  // claim worth stating in one place.
   CHECK(base.columnLeft == 18);
   CHECK(base.columnW == 444);
-  CHECK(base.leadEm1000 == reader::kBodyLeadEm);
-  CHECK(base.justify);
+  // AND THESE TWO ARE ASSERTED AGAINST THE INPUT rather than against the layout
+  // constants they happen to equal, so they state the PASS-THROUGH instead of the
+  // coincidence -- `settings.cpp` static_asserts lineSpacing's default equal to
+  // kBodyLeadEm, so `base.leadEm1000 == kBodyLeadEm` would be a claim about that
+  // assert and not about this function.
+  //
+  // THEY STILL CANNOT BITE HERE, AND THAT IS STRUCTURAL RATHER THAN A GAP: at the
+  // DEFAULT input an implementation that reads the settings and one that ignores
+  // them are equal by construction, which is exactly what "every default is
+  // today's behaviour to the pixel" means and is why no golden moved. A mutation
+  // replacing the body with the old hardcoded constants fails six assertions, all
+  // of them in the SUBCASES below -- so the subcases are where the bite is, and
+  // this block's job is to name the board's numbers.
+  CHECK(base.leadEm1000 == s.lineSpacing);
+  CHECK(base.justify == s.justify);
 
   SUBCASE("wider margins narrow the column from both sides") {
     s.margins = 30;

@@ -981,10 +981,25 @@ static SettingsVerdict settingsFailure(reader::FileSystem& fs) {
           false};
 }
 
-// Push `gSettings` into the two objects that act on it. Factored out of
+// Push `gSettings` into the two objects this function owns. Factored out of
 // loadAndApplySettings because the Settings SCREEN needs exactly this and nothing
 // else: it has already changed the struct, and re-reading the file would undo the
 // change it is trying to make.
+//
+// THREE THINGS ACT ON gSettings AND THIS PUSHES TWO. The third is the reader's
+// PageMetrics: `margins`, `lineSpacing` and `justify` are consumed by
+// Theme::readerMetrics, whose only producer is setup(). So a change to any of
+// those three does NOT reach an open book, and the divergence is reachable today
+// with no Typography screen in the build -- boot with no card (defaults, margins
+// 18), insert a card whose hand-edited settings.json says 30, press RETRY, and
+// gSettings and the factory's copy are both 30 while pages are still laid at 18.
+//
+// IT IS NOT FIXED BY RECOMPUTING HERE, and that was checked rather than assumed:
+// this function runs at boot before the font ramp exists, so it cannot call
+// readerMetrics at all. It is also not the whole job -- a live margin or size
+// change has to re-paginate the open chapter and re-grade the saved position
+// against the new measure (reading_position.h) -- which is why the recompute
+// belongs to the Typography apply path and not to a settings push.
 static void applySettings() {
   gRefresh.setCadence(gSettings.fullRefreshEvery);
   gRefresh.setFullOnTransition(gSettings.fullOnTransition);

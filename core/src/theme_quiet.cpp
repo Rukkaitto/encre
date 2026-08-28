@@ -975,10 +975,34 @@ void QuietTheme::readerMetrics(int panelW, int panelH, const FontSet& fonts,
   const int footerH = kReadFooterPadTop + meta.lineHeight() + kReadFooterPadBottom;
 
   // THE MARGIN IS THE SETTING NOW, and kReadPadX is its default -- see
-  // Settings::margins, whose middle step is this constant. The band and the
-  // footer keep kReadPadX for their own padding: they are full-bleed runs whose
-  // HEIGHT is type, so a margin change must not move the column's top or shorten
-  // it, and renderReader is what draws them.
+  // Settings::margins, whose middle step is this constant. Three separate claims
+  // sit on that, and each needs its own reason rather than one "so" spanning all
+  // of them.
+  //
+  // VERTICALLY, NOTHING MOVES. The band and the footer are full-bleed runs whose
+  // HEIGHT is type -- one line of --t-meta plus padding, computed above -- so a
+  // margin is not an input to either, and columnTop and columnH are therefore
+  // independent of it. Asserted in test_theme_reader_metrics.cpp, because getting
+  // it wrong costs a line of every page at one margin setting and nothing at
+  // another, which is the hardest kind of layout bug to attribute.
+  //
+  // HORIZONTALLY, THE COLUMN MOVES AND THE CHROME DOES NOT, and that is a
+  // DECISION the board does not state. renderReader draws the band's title and
+  // the footer's percentage at kReadPadX unconditionally: they are chrome and keep
+  // chrome's padding, where the column is the reading MEASURE and is the thing the
+  // reader is being given control of. So at `margins = 30` the text sits 12px
+  // inside the band's runs and at `margins = 10` it sits 8px outside them. Tying
+  // the chrome to the setting instead would make the header band move on every
+  // press of one row, which is the reflow the scroll-rail gutter decision already
+  // refused once.
+  //
+  // AND `margins` IS TRUSTED AS A GEOMETRY HERE, which it may be because
+  // Settings::validate SNAPS it onto kMarginSteps rather than clamping it to a
+  // range -- so the only values that reach this line are 10, 18 and 30, and
+  // columnW cannot go non-positive. This is the point where an integer becomes a
+  // geometry, and a hand-built `margins = 400` on a 480px panel would hand the
+  // wrap a columnW of -320. No caller bypasses loadSettings, which is what makes
+  // that a precondition rather than a bug.
   out.columnLeft = settings.margins;
   out.columnTop = kReadPadTop + headerH;
   out.columnW = panelW - 2 * settings.margins;

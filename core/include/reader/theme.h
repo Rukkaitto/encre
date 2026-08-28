@@ -121,11 +121,24 @@ class Theme {
   // number of the BODY face's line boxes, and the body face is a ScalableFont
   // rasterised at a runtime size, not one of FontSet's eleven fixed roles.
   //
-  // AND TAKES THE SETTINGS, because three of them are box-model numbers now --
-  // margins, line spacing and alignment (design/Typography.dc.html). The struct
-  // rather than three ints: three loose ints at a call site are three chances to
-  // pass them in the wrong order, and both the shell and the Typography screen
-  // already hold this struct.
+  // AND TAKES THE SETTINGS, because three of them reach the column
+  // (design/Typography.dc.html) -- but not as three of the same thing, and the
+  // distinction is this codebase's own `1-7 OF 12` rule about two units in one
+  // expression. `margins` and `lineSpacing` are BOX MODEL: they set where the
+  // column is and how far apart its baselines are. `justify` is not box model at
+  // all -- it is how a FINISHED line is set, moving no break and no box (see
+  // PageMetrics::justify) -- and it travels here only because it travels in this
+  // struct.
+  //
+  // The struct rather than three ints: three loose ints at a call site are three
+  // chances to pass them in the wrong order, and both the shell and the Typography
+  // screen already hold this struct.
+  //
+  // THE FOURTH TYPOGRAPHY FIELD IS ABSENT ON PURPOSE. `bodyPpem` is not read here
+  // because it has already arrived, as `body` -- a ScalableFont is pinned to a
+  // pixel size by init(), so the face this is handed IS the chosen ppem and
+  // reading the field as well would be a second spelling of it, free to disagree.
+  // Four typography fields against three reads is a decision, not a gap.
   //
   // NO DEFAULT ARGUMENT, deliberately. A defaulted Settings would let a caller
   // that should have been updated compile and silently lay the page out at the

@@ -126,9 +126,12 @@ struct PageMetrics {
   // happens to work rather than the question being asked.
   //
   // IT MOVES NO LINE BREAK. The greedy wrap runs first and justification is
-  // applied to the finished line, which is why reading_position.h grades an
-  // alignment change as leaving `line` intact where a size or column change
-  // does not.
+  // applied to the finished line, so turning this off changes how a line is SET
+  // and never where it ends. That is what lets reading_position.h leave alignment
+  // out of `fitOf` -- but nothing over there records the dependency, so what
+  // actually enforces it is the ragged case in test_layout.cpp: it compares every
+  // field of every line across the two settings and is the only thing in the
+  // suite that catches a `justify` which has reached the wrap or the placement.
   bool justify = true;
   // The face emphasised runs are measured with. NULL IS A SUPPORTED STATE, not an
   // oversight: it means emphasis is measured -- and drawn -- as roman, which is
