@@ -801,9 +801,15 @@ bool ReaderScreen::advance() {
   // KEYED OFF `starts_` RATHER THAN OFF `thisStart`, though the two are equal by
   // construction here: seekTo looks the page up by `starts_[p]`, so a store keyed any
   // other way would be a second spelling of the key, free to disagree with the first.
-  if (at_ >= 0 && at_ < static_cast<int>(starts_.size()))
-    pageBytes_ = chapter_.bytesRead();
+  // BRACED, AND IT WAS NOT. The guard bounds `starts_[at_]` and nothing else needed
+  // it -- `pageBytes_` is already assigned above, and the second assignment inside was
+  // a duplicate. Without the braces `cachePage` indexed `starts_` OUTSIDE the range the
+  // guard exists to check, which is reachable: the push a few lines up is itself gated
+  // on `at_ < kMaxPages`, so a chapter that runs past 4096 pages leaves `at_ ==
+  // starts_.size()` and reads one off the end.
+  if (at_ >= 0 && at_ < static_cast<int>(starts_.size())) {
     cachePage(chapterAt_, starts_[static_cast<size_t>(at_)], page_, pageBytes_);
+  }
   return true;
 }
 
@@ -833,7 +839,17 @@ bool ReaderScreen::goToPosition(int spine, Cursor at) {
   return true;
 }
 
-void ReaderScreen::releaseChapter() { chapter_.release(); }
+void ReaderScreen::releaseChapter() {
+  chapter_.release();
+  // AND THE BUILDER GOES WITH IT, so that hasLiveStream() cannot answer true for a
+  // Reader whose stream is gone. `pb_` does not point INTO the chapter -- a PageBuilder
+  // holds a face and metrics -- so this is not a dangling pointer, it is a LIE: the
+  // shell's restream job is gated on exactly that field, and a released Reader claiming
+  // a live stream would suppress the repair it needs. Unreachable today, because input
+  // comes from the top screen alone and a peek is what is on top; kept because
+  // "unreachable" is a fact about the shell, and this is core/.
+  pb_.reset();
+}
 
 bool ReaderScreen::reacquireChapter() {
   if (chapter_.held()) return true;
