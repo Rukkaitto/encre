@@ -103,6 +103,10 @@ class NullTheme : public Theme {
                      PageMetrics&) const override {}
   void renderReader(Framebuffer&, const FontSet&, const GlyphSource&, const GlyphSource*,
                     const ReaderViewModel&, const Page&, Plane) override {}
+  void peekMetrics(int, int, const FontSet&, const GlyphSource&, const Settings&,
+                   PageMetrics&) const override {}
+  void renderPeek(Framebuffer&, const FontSet&, const GlyphSource&, const GlyphSource*,
+                  const PeekViewModel&, const Page&, Plane) override {}
   void settingsMetrics(int, const FontSet&, int& listH, int& rowH, int& headerH) const override {
     listH = 0;
     rowH = 1;

@@ -18,6 +18,23 @@ struct ReaderViewModel;
 struct ReaderMenuViewModel;
 struct ContentsViewModel;
 struct TypographyViewModel;
+struct PeekViewModel;
+
+// HOW MANY LINES OF BOOK TEXT A PEEK SHOWS, and the number IS the design rather than
+// a consequence of one.
+//
+// design/Peek.dc.html: content-sizing alone ran to ELEVEN lines and the panel then
+// filled the glass to within 48px of the top, which reads as a bordered full screen
+// rather than as a modal -- precisely the full-width alternative the board rejects,
+// arrived at by accident instead of chosen. A pinned HEIGHT was worse still: it cut
+// the last line in half lengthwise, which the firmware cannot even do, since
+// PageBuilder lays out whole lines.
+//
+// So the firmware picks the line count and the panel's height is a RESULT, exactly as
+// headerBandHeight() and hintBarHeight() are results. Eight lines is about 180
+// characters -- one or two sentences, which is the whole answer to "who is this
+// again?".
+inline constexpr int kPeekLines = 8;
 
 // Themes own the entire presentation, layout structure included (spec 3.3).
 // The FontSet is supplied by the caller so device knowledge — which asset backs
@@ -185,5 +202,25 @@ class Theme {
                             const GlyphSource* italic, const ReaderViewModel& vm,
                             const Page& page, Plane plane) = 0;
 
+  // THE PEEK'S COLUMN, which is the reading column's sibling and not a variant of it.
+  //
+  // design/Peek.dc.html: an inset panel, 2px border, 20px padding, over the veiled
+  // page. The measure is therefore the PANEL's box rather than the page's, which is
+  // the whole reason the panel cannot show a page number -- a narrower column
+  // re-wraps, and re-wrapped text paginates differently.
+  //
+  // TAKES THE SETTINGS FOR TWO OF FOUR FIELDS, and `margins` is one it does NOT read:
+  // a margin is the reading page's box model and the panel's box is its own, so there
+  // is nothing for it to apply to. `bodyPpem` is absent for readerMetrics' reason --
+  // it has already arrived as `body`. Four fields, two reads.
+  virtual void peekMetrics(int panelW, int panelH, const FontSet& fonts,
+                           const GlyphSource& body, const Settings& settings,
+                           PageMetrics& out) const = 0;
+
+  // design/Peek.dc.html. Takes the page for renderReader's reason: it is already
+  // positioned, in framebuffer coordinates, by reader/layout.h.
+  virtual void renderPeek(Framebuffer& fb, const FontSet& fonts, const GlyphSource& body,
+                          const GlyphSource* italic, const PeekViewModel& vm,
+                          const Page& page, Plane plane) = 0;
 };
 }  // namespace reader

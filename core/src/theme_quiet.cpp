@@ -1646,4 +1646,183 @@ void QuietTheme::renderTypography(Framebuffer& fb, const FontSet& fonts, const G
   drawHintBar(fb, fonts, hints, plane);
 }
 
+// --- The peek ----------------------------------------------------------------
+//
+// design/Peek.dc.html. Book text over the veiled page, for looking somewhere else
+// without going there. An overlay, so App::render has already painted the Reader
+// underneath and this draws in front of it.
+namespace {
+
+// THE PANEL WIDTH IS THE CONSTANT, NOT THE VEIL MARGIN. The board is authored at
+// 480 wide with `left: 34px; width: 412px`, symmetric about the frame -- and the
+// intent it states is 34px of veil either side. Only one of the two can be pinned:
+// pinning 34 would make the panel 460 on the X3, which changes its MEASURE, and the
+// peek's text would then wrap differently on the two panels for no reason the design
+// states. Pinning the width is the same call kActionsPanelW and kConfirmPanelW make,
+// and for the same reason -- the two geometries are within ~2% of the same PPI, so a
+// panel should be the same physical size on both and what adapts is where it sits.
+constexpr int kPeekPanelW = 412;
+
+// The band's `padding: 18px 20px` and its `border-bottom: 2px`, then the body's
+// `padding: 16px 20px 20px 20px`. The side padding is one number because the board
+// states one.
+constexpr int kPeekPadX = 20;
+constexpr int kPeekBandPadY = 18;
+constexpr int kPeekBandRuleH = 2;
+constexpr int kPeekBodyPadTop = 16;
+constexpr int kPeekBodyPadBottom = 20;
+// `PEEK`, at the band label's own 0.22em -- the same tracking the Library's band and
+// the panels' captions carry. The value beside it is untracked, as the board sets it.
+constexpr int kPeekLabelEm = 220;
+// The band's `gap: 7px`, between the label and the value. It is what keeps the
+// value's first character off the label's last when the value fills its room.
+constexpr int kPeekBandGap = 7;
+
+// THE PANEL'S BOX, DERIVED ONCE AND USED TWICE.
+//
+// peekMetrics places the column and renderPeek draws the border and the band around
+// it, and the height is a RESULT of the line count rather than a number either of
+// them could look up -- so a render that recomputed it would draw the border in the
+// wrong place the moment a reader changed their line spacing. Two spellings of one
+// geometry is this project's first invariant, and this is the one function that
+// forecloses it.
+struct PeekBox {
+  int x = 0, y = 0, w = 0, h = 0;  // the panel, in frame coordinates
+  int bandH = 0;                   // its band, including the rule
+  int columnLeft = 0, columnTop = 0, columnW = 0, columnH = 0;
+};
+
+PeekBox peekBox(int panelW, int panelH, const FontSet& fonts, const GlyphSource& body,
+                int leadEm1000) {
+  PeekBox b;
+  // The band is `align-items: center` with two runs of different sizes, so its line
+  // box is the TALLER of the two faces -- taking the label's would clip the value,
+  // which is the bigger of them on today's ramp (25px against 23px).
+  const Font& label = fonts[Role::Label500];
+  const Font& value = fonts[Role::Value700];
+  const int bandLineH =
+      value.lineHeight() > label.lineHeight() ? value.lineHeight() : label.lineHeight();
+  b.bandH = bandLineH + 2 * kPeekBandPadY + kPeekBandRuleH;
+
+  // THE LINE BOX IS PageBuilder'S, IN ITS OWN UNIT. `leadF26_` there is
+  // `Tracking::em(font.ppem(), leadEm1000)` -- resolved against the face's PIXEL SIZE,
+  // which is what `line-height: 1.7` on `font-size: 32px` means and what the board's
+  // measured 54.4px line box is. Resolving it against `lineHeight()` instead would be
+  // a different number entirely (48 * 1.7, not 32 * 1.7) and would reserve room for
+  // twelve lines while claiming eight.
+  //
+  // AND IT ROUNDS UP, which is not fussiness: PageBuilder fits
+  // `pxToF26(columnH) / leadF26` lines, so a column a quarter of a pixel short of
+  // eight boxes holds SEVEN. At the default ppem 32 and 1.7 the exact height is
+  // 435.25px, and 435 is a line short.
+  const int leadF26 = Tracking::em(body.ppem(), leadEm1000).f26();
+  b.columnH = leadF26 > 0 ? (kPeekLines * leadF26 + 63) / 64 : 0;
+  b.h = 2 * kPanelBorder + b.bandH + kPeekBodyPadTop + b.columnH + kPeekBodyPadBottom;
+
+  b.w = kPeekPanelW;
+  b.x = panelLeft(panelW, kPeekPanelW);
+  // `top: 50%; transform: translateY(-50%)` -- centred on the SCREEN, as the actions
+  // panel is. The hint bar is drawn over the veil afterwards and the panel does not
+  // reach it.
+  b.y = centreIn(0, panelH, b.h);
+
+  b.columnLeft = b.x + kPanelBorder + kPeekPadX;
+  b.columnW = panelContentW(kPeekPanelW) - 2 * kPeekPadX;
+  b.columnTop = b.y + kPanelBorder + b.bandH + kPeekBodyPadTop;
+  return b;
+}
+
+}  // namespace
+
+void QuietTheme::peekMetrics(int panelW, int panelH, const FontSet& fonts,
+                             const GlyphSource& body, const Settings& settings,
+                             PageMetrics& out) const {
+  const PeekBox b = peekBox(panelW, panelH, fonts, body, settings.lineSpacing);
+  out.columnLeft = b.columnLeft;
+  out.columnTop = b.columnTop;
+  out.columnW = b.columnW;
+  out.columnH = b.columnH;
+  out.leadEm1000 = settings.lineSpacing;
+  out.indentEm1000 = kBodyIndentEm;
+  out.justify = settings.justify;
+  // The body face's own tracking, as the reading column has: a book's text is the one
+  // run on this device that must not be tracked.
+  out.tracking = {};
+  // `settings.margins` IS DELIBERATELY UNREAD, and the omission is stated rather than
+  // silent. A margin is the reading PAGE's box model -- readerMetrics spends it on
+  // columnLeft and columnW -- and this panel's box is its own, inset from the veil by
+  // a width the design fixes. There is nothing here for it to apply to. `bodyPpem` is
+  // absent for readerMetrics' reason: it has already arrived as `body`. Four
+  // typography fields, two reads.
+}
+
+void QuietTheme::renderPeek(Framebuffer& fb, const FontSet& fonts, const GlyphSource& body,
+                            const GlyphSource* italic, const PeekViewModel& vm,
+                            const Page& page, Plane plane) {
+  // NO fb.clear(): App::render has already painted the Reader, and this screen's whole
+  // job is to be in front of it.
+  veilRect(fb, 0, 0, fb.width(), fb.height());
+
+  // THE SAME BOX peekMetrics PLACED THE COLUMN IN, which is why the view model carries
+  // the lead: the panel's height is a result of its line count, so recomputing it with
+  // the default would put the border a line away from its own text.
+  const PeekBox b = peekBox(fb.width(), fb.height(), fonts, body, vm.leadEm1000);
+  drawPanel(fb, b.x, b.y, b.w, b.h);
+
+  // --- The band: `PEEK` left, the chapter and percent right --------------------
+  //
+  // ITS OWN BAND, NOT drawPanelCaption, and the difference is measured rather than
+  // stylistic: that caption sets its value in Meta400 (21px) on 21px of padding where
+  // this board says --t-value at weight 700 on 18px. Reusing it would draw the band
+  // ~6px too tall, which is the header-band defect this project has already paid for.
+  const Font& label = fonts[Role::Label500];
+  const Font& value = fonts[Role::Value700];
+  const int contentW = panelContentW(kPeekPanelW);
+  // THE BAND'S RUNS SIT IN THE COLUMN THE BOX ALREADY PLACED. The band's `padding:
+  // 18px 20px` and the body's `20px` are one number on the board, so the label, the
+  // value and the text below them share one left edge and one measure -- read off the
+  // box rather than re-derived, which is the whole reason peekBox exists.
+  const int textLeft = b.columnLeft;
+  const int colW = b.columnW;
+  const int textRight = textLeft + colW;
+  const int bandLineH = b.bandH - 2 * kPeekBandPadY - kPeekBandRuleH;
+  const int bandTextTop = b.y + kPanelBorder + kPeekBandPadY;
+
+  const Tracking labelTrack = trackingEm(label, kPeekLabelEm);
+  const std::string title = upperLatin1(vm.title);
+  drawText(fb, label, textLeft, baselineIn(label, bandTextTop, bandLineH), title, Ink::Black,
+           labelTrack, plane);
+
+  // ELIDED TO WHAT THE LABEL LEAVES. `PEEK` is fixed and the value is not: a real
+  // chapter name runs long -- `PREMIÈRE PARTIE : À LIRE AVANT L'ACHAT` is one from a
+  // book on the user's own card -- and a run allowed to overflow reaches back over the
+  // label rather than off the panel, because it is right-aligned.
+  const int room = colW - label.measure(title, labelTrack) - kPeekBandGap;
+  const std::string where = elideToWidth(value, vm.where, room, {});
+  drawText(fb, value, textRight - value.measure(where, {}),
+           baselineIn(value, bandTextTop, bandLineH), where, Ink::Black, {}, plane);
+
+  fb.fillRect(b.x + kPanelBorder, bandTextTop + bandLineH + kPeekBandPadY, contentW,
+              kPeekBandRuleH, false);
+
+  // --- The peeked text ---------------------------------------------------------
+  //
+  // Already positioned by reader/layout.h, in these coordinates, exactly as the
+  // Reader's page is -- so this is renderReader's loop and not a second one. The
+  // marker is drawn in the roman whatever the line is set in, for its reason there.
+  const StyledFace face{&body, italic, nullptr};
+  for (const LaidLine& ln : page.lines) {
+    if (ln.markerX >= 0)
+      drawText(fb, body, ln.markerX, ln.baselineY, kListMarker, Ink::Black, {}, plane);
+    drawTextStyled(fb, face, ln.x, ln.baselineY, ln.text, ln.emphasis, ln.extraPerGapF26,
+                   Ink::Black, ln.tracking, plane);
+  }
+
+  // The peek's OWN bar: the Reader beneath has none at all, so this is the only place
+  // the peek can say what it responds to.
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+  drawOverlayHintBar(fb, fonts, hints, plane);
+}
+
 }  // namespace reader
