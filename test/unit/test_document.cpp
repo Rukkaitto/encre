@@ -1,7 +1,9 @@
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "doctest.h"
+#include "reader/chapter.h"
 #include "reader/document.h"
 
 namespace {
@@ -110,6 +112,27 @@ TEST_CASE("malformed markup is a refusal with a reason") {
   const char* why = "";
   CHECK_FALSE(reader::buildDocument("<p>a<!-- unterminated</p>", d, &why));
   CHECK(std::strlen(why) > 0);
+}
+
+TEST_CASE("a named entity does not truncate the blocks after it") {
+  // THE TEST THAT WOULD HAVE CAUGHT `Dark Plagueis`, which lost 177 of its 183
+  // chapters: BlockReader stops on Node::Error, ChapterReader::next() then returns
+  // false, and a caller cannot tell that from the chapter ending. Every block after
+  // the first entity was discarded, and the book opened looking empty rather than
+  // broken.
+  //
+  // The tokenizer tests prove the bytes; this proves the thing that was lost.
+  reader::ChapterReader cr;
+  REQUIRE(cr.beginBuffer(
+      "<html><body><p>One</p><p>Two&nbsp;three</p><p>Four</p></body></html>"));
+  std::vector<std::string> texts;
+  reader::Block b;
+  while (cr.next(b)) texts.push_back(b.text);
+  REQUIRE(texts.size() == 3);
+  CHECK(texts[0] == "One");
+  CHECK(texts[1] == "Two\xC2\xA0" "three");
+  CHECK(texts[2] == "Four");
+  CHECK(cr.ok());
 }
 
 TEST_CASE("AN UNCLOSED TAG IS CAUGHT HERE, which xml.h leaves to this layer") {
