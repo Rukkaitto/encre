@@ -819,6 +819,36 @@ bool ReaderScreen::goToChapter(int spine) {
   return true;
 }
 
+bool ReaderScreen::goToPosition(int spine, Cursor at) {
+  if (spine < 0 || spine >= book_.chapterCount()) return false;
+  // CAPTURED BEFORE THE MOVE, because the anchor takes the position being LEFT.
+  const AnchorPos from = here();
+  if (spine != chapterAt_) {
+    if (!openChapterAt(spine, /*atEnd=*/false)) return false;
+  }
+  if (!openAtCursor(at)) return false;
+  syncVm();
+  // AFTER THE WALK, so a refused jump is not a departure -- see the header.
+  anchorJumped(from);
+  return true;
+}
+
+void ReaderScreen::releaseChapter() { chapter_.release(); }
+
+bool ReaderScreen::reacquireChapter() {
+  if (chapter_.held()) return true;
+  // reopenChapter is exactly this job and already existed for it: "re-establishes a
+  // chapter's stream without touching the index or the page". NO seekTo follows --
+  // see the header.
+  if (!reopenChapter(chapterAt_)) return false;
+  // EXPLICIT, not incidental. The builder is null because nothing was decoded, and
+  // that is the state restreamAtCurrentPage exists to repair; leaving it to fall out
+  // of reopenChapter's implementation would make CLOSE's cost depend on a detail of a
+  // private method.
+  pb_.reset();
+  return true;
+}
+
 // Landing on an anchor. A jump in mechanism and NOT in the anchor's sense -- the
 // anchor has already been spent by `follow()`, so this must not re-set it.
 bool ReaderScreen::goToAnchor(const AnchorPos& to) {

@@ -409,6 +409,68 @@ class ReaderScreen : public Screen {
   // from the contents lands on the first thing with text rather than on a blank page.
   bool goToChapter(int spine);
 
+  // --- JUMP TO A POSITION, NOT TO A CHAPTER ---------------------------------
+  //
+  // WHAT `GO HERE` COMMITS. The three jumps this screen has are deliberately distinct:
+  //
+  //   goToChapter(spine)      -- page ONE of a spine entry. A chapter picked from a
+  //                              list asked for its beginning. Sets the anchor.
+  //   goToAnchor(pos)         -- a cursor, and NOT a jump in the anchor's sense: the
+  //                              anchor has already been spent by follow().
+  //   goToPosition(spine, at) -- a cursor, AND a jump. The reader may have paged
+  //                              several pages into the peek before committing, so
+  //                              page one is the wrong landing.
+  //
+  // The page NUMBER is computed on arrival by openAtCursor counting boundaries, which
+  // is what lets the peek be honest about not having one while the commit is exact.
+  //
+  // False leaves the screen exactly where it was, including the anchor: openChapterAt
+  // restores the previous chapter on failure, and the anchor is set only after the walk
+  // succeeds -- a refused jump is not a departure, and anchoring one would leave a way
+  // back to a page the reader never left.
+  bool goToPosition(int spine, Cursor at);
+
+  // --- LETTING GO SO A PEEK CAN HAVE THE HEAP -------------------------------
+  //
+  // A live chapter peaks at 69,884 bytes with a 36,956-byte single allocation, against
+  // a measured 45,840-byte heap floor, so TWO live chapters do not fit -- and a peek
+  // is a second live chapter. This is how there is only ever one: the Reader beneath a
+  // peek releases its stream while the panel is up.
+  //
+  // WHAT SURVIVES IS EVERYTHING THE PAINT AND A SAVE READ: page_ (with owned LaidLine
+  // text), at_, starts_, chapterAt_, pageBytes_, vm_, anchor_ and the book's spans.
+  // ReaderScreen::render reads only page_ and vm_, so App::render draws the veiled page
+  // underneath with no decode at all -- which is the property the whole design rests
+  // on. A save is safe for a related reason worth stating: chapterBytesRead() is
+  // pageBytes_, a plain member, NOT ChapterReader::bytesRead(), which would answer 0
+  // with the inflater gone and push progressPercent onto its page/pageTotal fallback --
+  // the exact shape of the percentage-going-backwards bug this project shipped once.
+  void releaseChapter();
+
+  // TAKE THE STREAM BACK, AND PAY NO seekTo FOR IT.
+  //
+  // The design spec budgeted closing a peek at "one seekTo -- 33.9 ms desktop for the
+  // worst page in a real book", which is this project's own ratio trap: a seekTo
+  // rewinds and decodes forward, so it costs WHAT PAGE YOU ARE ON, and the device
+  // measured ~376 ms at page 38, ~1010 ms at page 99 and ~3 s deep in a long chapter.
+  // On CLOSE that would make discarding a peek cost more than committing one.
+  //
+  // It is not needed. Nothing visible was disturbed, so the page is already correct;
+  // what a seekTo would restore is the live PageBuilder, and `pb_ == nullptr` is an
+  // already-handled state whose repair has a home -- restreamAtCurrentPage, in a quiet
+  // window, where abandoning it is free. So this re-establishes the stream at the
+  // chapter's start and stops, leaving hasLiveStream() false on purpose.
+  //
+  // False when the chapter cannot be reopened -- a card pulled while the peek was up.
+  // The caller is the shell, which has pollCardPresence for that case.
+  bool reacquireChapter();
+
+  // Whether a stream is established. An OBSERVATION POINT, not a guard: no caller
+  // branches on it. The three quiet-window jobs are each gated on the Reader being on
+  // TOP of the stack, so a peek over it stops them by construction -- see
+  // docs/superpowers/specs/2026-08-28-peek-overlay-design.md.
+  bool hasChapter() const { return chapter_.held(); }
+
   // Whether the chapter's page count is still unknown. The shell completes it inside
   // the refinement; see the class comment.
   bool indexPending() const;
