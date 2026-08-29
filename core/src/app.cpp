@@ -121,6 +121,10 @@ void App::clearDirty() {
   transition_ = false;
 }
 
+void App::requestRepaint() {
+  dirty_ = true;
+}
+
 void App::render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const {
   // Walk down from the top to the first screen that is not an overlay -- the
   // parent the overlays are floating over -- then paint upward from there.

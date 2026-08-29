@@ -455,6 +455,20 @@ class App {
   // restored screen still has to be painted.
   bool pushScreen(ScreenId id);
 
+  // SOMETHING OUTSIDE THE INPUT PATH CHANGED WHAT THE TOP SCREEN DRAWS.
+  //
+  // Every other route to dirty_ is a dispatch or construction, because until now
+  // every reason to repaint was a press. The battery is the first fact that moves
+  // on its own: the shell polls the gauge and a plug-in has to reach the glass
+  // without a button being touched.
+  //
+  // It does NOT set transition_. A transition means a screen changed, and that is
+  // what kFullOnTransition spends the 693 ms GC waveform on; this is the same
+  // screen with one mark different and takes the 389 ms DU. Nor can it reach the
+  // partial-overlay path: canRenderTopOnly refuses any non-overlay outright, and
+  // Home is not one.
+  void requestRepaint();
+
   // Something on screen changed and needs painting.
   bool dirty() const { return dirty_; }
   // ...and the change was a screen change rather than a change within one. What
