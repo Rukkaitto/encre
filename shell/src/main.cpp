@@ -4349,16 +4349,58 @@ static reader::CoverSource* sleepCoverForPaint() {
 // never disagree about what counts as a usable cover.
 static bool coverCacheUsable() { return sleepCoverForPaint() != nullptr; }
 
+// Stops the sleep decode on a genuinely NEW press. See the block below for why a
+// bare rawSamplesPending() cannot serve here and what it cost.
+static bool sleepDecodeShouldStop(void*) {
+  bool pressed = false;
+  RawSample s{};
+  // Drain whatever is queued: the release edge of the press that asked for this
+  // sleep is in here, and it is not a reason to stop.
+  while (popRawSample(s)) {
+    if (s.down) pressed = true;
+  }
+  return pressed;
+}
+
 // DECODE THE LAST-READ BOOK'S COVER INTO THE CACHE.
 //
 // It reads the book itself: openBook is a central-directory parse and an OPF
 // inflate, ~32 KB transient, which is why this is not done on every sleep but only
 // when coverCacheUsable() says there is nothing to paint.
 //
-// THE STOP PREDICATE IS rawSamplesPending(), so a button press abandons the decode
-// and the device gets out of the way. An abandoned decode leaves `complete = 0`
-// and is simply re-attempted at the next sleep -- there is no half-usable state to
-// reason about.
+// THE STOP PREDICATE IS sleepDecodeShouldStop(), NOT rawSamplesPending(), AND THE
+// DIFFERENCE IS THE WHOLE FEATURE.
+//
+// It was rawSamplesPending(), copied from the four idle jobs in loop(), and it
+// abandoned EVERY decode a power press ever started -- which is every decode a
+// user starts. Measured on the X3: `[cover] Abandoned in 353ms`, `paint2=0ms`,
+// the cache never committed, and the sleep screen therefore identical to the one
+// that shipped. The feature looked unimplemented.
+//
+// The mechanism is that rawSamplesPending() means "is there NEW input" ONLY where
+// something drains the queue. loop() drains it at the top of every iteration --
+// waitForRawSample's own comment says "the loop's own drain at the top of the next
+// iteration is what owns these" -- so the four idle jobs read it correctly.
+// sleepNow() is [[noreturn]] and never returns to loop(), so NOTHING drains it.
+// POWER fires Short on the DOWN edge (that is how this sleep was triggered) and
+// the input task queues the matching RELEASE while the first paint blocks for its
+// ~774 ms waveform. That release then sits in the queue for the rest of sleepNow,
+// and a bare count cannot tell it from a new press.
+//
+// So this predicate DRAINS and looks at what it drained, and only a DOWN edge --
+// a genuinely new press -- stops the decode. Consuming is correct here and
+// nowhere else, for the same reason the bug existed: there is no loop left to own
+// these samples. Nothing downstream reads them either; deepSleepUntilPowerButton()
+// waits on the GPIO, not on this queue.
+//
+// KEEPING IT INTERRUPTIBLE AT ALL IS DELIBERATE. The panel already shows the sleep
+// screen, so the decode is invisible -- but the power button cannot WAKE the device
+// until deepSleepUntilPowerButton() is reached, so an uninterruptible decode would
+// leave a reader pressing power at a dead device for up to seven seconds. A new
+// press means "I want it back"; abandoning gets there in milliseconds.
+//
+// An abandoned decode leaves `complete = 0` and is simply re-attempted at the next
+// sleep -- there is no half-usable state to reason about.
 //
 // ONE `[cover]` LINE PER ATTEMPT, WHATEVER HAPPENS, AND IT CARRIES THE TIME.
 // The verdict and the elapsed milliseconds were two separate lines while this was
@@ -4398,7 +4440,7 @@ static reader::CoverResult decodeCoverToCache() {
   reader::CoverReport rep;
   const reader::CoverResult r = reader::decodeCover(
       gSd, opened, gFrame->width(), gFrame->height(), gSettings.coverFit, sink,
-      [](void*) { return rawSamplesPending() != 0; }, nullptr, &rep);
+      sleepDecodeShouldStop, nullptr, &rep);
   logf("[cover] %s in %lums src=%dx%d /%d box=%d,%d %dx%d%s%s\n",
        reader::coverResultName(r), (unsigned long)(millis() - t0), rep.sourceWidth,
        rep.sourceHeight, rep.scaleDivisor, rep.dstX, rep.dstY, rep.dstW, rep.dstH,
