@@ -68,6 +68,7 @@ struct JpegDecoder::Impl {
   size_t workspace = 0;
   bool sinkStopped = false;
   bool aborted = false;
+  bool oom = false;
   const char* reason = nullptr;
 
   // The decode proper. decode() owns the allocations and frees them whichever way
@@ -87,12 +88,21 @@ struct JpegDecoder::Impl {
     workspace = 0;
     sinkStopped = false;
     aborted = false;
+    oom = false;
     reason = nullptr;
   }
 
   bool fail(const char* why) {
     if (reason == nullptr) reason = why;
     return false;
+  }
+
+  // A REFUSAL THAT IS A SHORTFALL RATHER THAN A FILE. Separate from fail() and
+  // used at exactly the two sites where a nothrow new answered null, so the flag
+  // means what its name says and a caller can act on it -- see outOfMemory().
+  bool failOom(const char* why) {
+    oom = true;
+    return fail(why);
   }
 
   // Push the band in hand to the sink. The only way this answers false is the
@@ -247,7 +257,7 @@ bool JpegDecoder::Impl::run(int atLeastW, int atLeastH) {
   // cannot happen -- reads as a black stripe every time rather than as whatever
   // the heap last held.
   band = new (std::nothrow) uint8_t[bandBytes]();
-  if (band == nullptr) return fail("no memory for a row band of this cover");
+  if (band == nullptr) return failOom("no memory for a row band of this cover");
   workspace = kPoolBytes + bandBytes;
 
   if (!sink->begin(outW, outH)) {
@@ -313,8 +323,9 @@ bool JpegDecoder::decode(ByteSource& src, ImageRowSink& sink, int atLeastW, int 
   // this project has twice had reported to it as "opening a book goes back to
   // Home". Every allocation on this path is nothrow and answered.
   im.pool = new (std::nothrow) uint8_t[kPoolBytes];
-  const bool ok = im.pool != nullptr ? im.run(atLeastW, atLeastH)
-                                     : im.fail("no memory for the JPEG decoder's tables");
+  const bool ok = im.pool != nullptr
+                      ? im.run(atLeastW, atLeastH)
+                      : im.failOom("no memory for the JPEG decoder's tables");
 
   // NOTHING IS HELD BETWEEN DECODES. The band is the largest single allocation in
   // this class and a JpegDecoder outlives the picture it decoded by as long as
@@ -333,6 +344,9 @@ int JpegDecoder::sourceWidth() const { return impl_ ? impl_->srcW : 0; }
 int JpegDecoder::sourceHeight() const { return impl_ ? impl_->srcH : 0; }
 int JpegDecoder::scaleDivisor() const { return impl_ ? (1 << impl_->shift) : 1; }
 bool JpegDecoder::aborted() const { return impl_ && impl_->aborted; }
+// A NULL IMPL IS ITSELF THE CASE THIS REPORTS: the constructor's own allocation
+// failed, so there was never a decoder rather than never a picture.
+bool JpegDecoder::outOfMemory() const { return impl_ == nullptr || impl_->oom; }
 const char* JpegDecoder::reason() const { return impl_ ? impl_->reason : "no memory for a JPEG decoder"; }
 size_t JpegDecoder::workspaceBytes() const { return impl_ ? impl_->workspace : 0; }
 

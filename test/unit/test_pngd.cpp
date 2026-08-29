@@ -65,6 +65,7 @@ void checkAgainstStb(const char* fixture, size_t grain = 4096) {
   REQUIRE(dec.decode(src, sink));
   CHECK(dec.reason() == nullptr);
   CHECK_FALSE(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   CHECK(sink.begins == 1);
   CHECK(sink.width == want.width);
   CHECK(sink.height == want.height);
@@ -147,6 +148,7 @@ TEST_CASE("a sink that says stop aborts the decode") {
   // An abort is not a refusal, and the caller has to be able to tell them
   // apart: a refusal is permanent for this book, an abort is not.
   CHECK(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   CHECK(dec.reason() == nullptr);
   CHECK(sink.rows == 20);
   CHECK(sink.rows < sink.height);
@@ -160,6 +162,7 @@ TEST_CASE("a sink that refuses to begin stops before any row") {
   reader::PngDecoder dec;
   CHECK_FALSE(dec.decode(src, sink));
   CHECK(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   CHECK(sink.begins == 1);
   CHECK(sink.rows == 0);
 }
@@ -196,6 +199,7 @@ void checkRefused(const std::string& bytes, const char* mentions) {
   CHECK_FALSE(dec.decode(src, sink));
   // Not an abort: the sink never asked for anything.
   CHECK_FALSE(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   CHECK(sink.rows == 0);
   CHECK(sink.begins == 0);
   REQUIRE(dec.reason() != nullptr);
@@ -216,6 +220,7 @@ void checkRefusedAfterHeader(const std::string& bytes, const char* mentions) {
   reader::PngDecoder dec;
   CHECK_FALSE(dec.decode(src, sink));
   CHECK_FALSE(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   CHECK(sink.begins == 1);
   CHECK(sink.rows < sink.height);
   REQUIRE(dec.reason() != nullptr);
@@ -283,6 +288,7 @@ TEST_CASE("PngDecoder refuses a truncated PNG rather than reporting success") {
   reader::PngDecoder dec;
   CHECK_FALSE(dec.decode(src, sink));
   CHECK_FALSE(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   REQUIRE(dec.reason() != nullptr);
   // WHAT THE SINK KEEPS WHEN THIS ANSWERS FALSE: every row it was already
   // given, and no more. The same contract JpegDecoder states, and the reason
@@ -305,6 +311,7 @@ TEST_CASE("a PNG whose compressed data is corrupt is refused, not half-drawn as 
   reader::PngDecoder dec;
   CHECK_FALSE(dec.decode(src, sink));
   CHECK_FALSE(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   REQUIRE(dec.reason() != nullptr);
   CHECK(sink.rows < sink.height);
 }
@@ -329,6 +336,7 @@ TEST_CASE("a PngDecoder can be used again, and keeps nothing from the last time"
   REQUIRE(dec.decode(s2, k2));
   CHECK(dec.reason() == nullptr);
   CHECK_FALSE(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   CHECK(k2.px == want.pixels);
 
   // ...and an abort must not survive either.
@@ -337,11 +345,13 @@ TEST_CASE("a PngDecoder can be used again, and keeps nothing from the last time"
   k3.stopAfter = 5;
   CHECK_FALSE(dec.decode(s3, k3));
   CHECK(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
 
   grainsrc::Grained s4(good, 4096);
   CollectingSink k4;
   REQUIRE(dec.decode(s4, k4));
   CHECK_FALSE(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   CHECK(k4.px == want.pixels);
 }
 
@@ -380,6 +390,7 @@ TEST_CASE("a sink that refuses the picture is not charged for the inflate window
   reader::PngDecoder dec;
   CHECK_FALSE(dec.decode(src, sink));
   CHECK(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   CHECK(sink.begins == 1);
   CHECK(dec.workspaceBytes() == 2u * 1600 * 3 + 1600);
   CHECK(dec.workspaceBytes() < reader::Inflater::kHeapBytes);
@@ -643,6 +654,7 @@ TEST_CASE("a chunk length the spec does not allow is refused, not walked") {
   reader::PngDecoder dec;
   CHECK_FALSE(dec.decode(src, sink));
   CHECK_FALSE(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   REQUIRE(dec.reason() != nullptr);
   CHECK(sink.begins == 0);
   // Refusing the header takes a handful of reads; walking the declared length
@@ -677,6 +689,7 @@ TEST_CASE("bytes after IEND are not part of the image, however much they look li
   reader::PngDecoder dec;
   CHECK_FALSE(dec.decode(src, sink));
   CHECK_FALSE(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   REQUIRE(dec.reason() != nullptr);
   CHECK(sink.rows < sink.height);
 }
@@ -703,6 +716,42 @@ TEST_CASE("a malformed zlib header is refused before a byte is inflated") {
   }
   SUBCASE("a preset dictionary, which PNG forbids and this decoder was never given") {
     checkRefused(tinyGreyPng(8, 5, rampRaw(8, 5), 0x78BB), "preset dictionary");
+  }
+}
+
+TEST_CASE("outOfMemory is false for every refusal that is about the FILE") {
+  // Same property as jpegd's, and it matters more here: pngd asks its sink BEFORE
+  // taking its 37 KB window, so a PNG that fails for want of that window is one
+  // the sink has already been told about -- and without this flag cover.cpp had no
+  // way to tell it from a truncated file, and called it a card fault.
+  CollectingSink sink;
+  reader::PngDecoder dec;
+
+  SUBCASE("interlaced") {
+    const std::string bytes = withIhdrByte(12, 1);   // interlace method -> Adam7
+    grainsrc::Grained src(bytes, 4096);
+    CHECK_FALSE(dec.decode(src, sink));
+    CHECK_FALSE(dec.outOfMemory());
+    CHECK(dec.reason() != nullptr);
+  }
+  SUBCASE("not a PNG at all") {
+    const std::string bytes = "certainly not a PNG";
+    grainsrc::Grained src(bytes, 4096);
+    CHECK_FALSE(dec.decode(src, sink));
+    CHECK_FALSE(dec.outOfMemory());
+  }
+  SUBCASE("truncated") {
+    std::string bytes = imgfix::loadFixture("truecolour.png");
+    bytes.resize(bytes.size() / 4);
+    grainsrc::Grained src(bytes, 4096);
+    CHECK_FALSE(dec.decode(src, sink));
+    CHECK_FALSE(dec.outOfMemory());
+  }
+  SUBCASE("a decode that succeeds") {
+    const std::string bytes = imgfix::loadFixture("grey8.png");
+    grainsrc::Grained src(bytes, 4096);
+    CHECK(dec.decode(src, sink));
+    CHECK_FALSE(dec.outOfMemory());
   }
 }
 

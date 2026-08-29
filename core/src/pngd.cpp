@@ -133,6 +133,7 @@ struct PngDecoder::Impl {
   // JDR_INTR apart; here the sink's false return is the only thing that sets
   // `aborted`, so a second flag would have no reader.
   bool aborted = false;
+  bool oom = false;
   const char* reason = nullptr;
 
   void reset() {
@@ -145,6 +146,7 @@ struct PngDecoder::Impl {
     idatDone = false;
     workspace = 0;
     aborted = false;
+    oom = false;
     reason = nullptr;
   }
 
@@ -157,6 +159,14 @@ struct PngDecoder::Impl {
   bool fail(const char* why) {
     if (reason == nullptr) reason = why;
     return false;
+  }
+
+  // A REFUSAL THAT IS A SHORTFALL RATHER THAN A FILE. Separate from fail() and
+  // used at exactly the two sites where an allocation answered null, so the flag
+  // means what its name says and a caller can act on it -- see outOfMemory().
+  bool failOom(const char* why) {
+    oom = true;
+    return fail(why);
   }
 
   bool skipBytes(uint32_t n) {
@@ -321,7 +331,7 @@ bool PngDecoder::Impl::readHeader() {
   // reads the row above, so before that test nothing reached this at all.
   // Poisoning the block with 0xAA fails that test and nothing else.
   rows = new (std::nothrow) uint8_t[need]();
-  if (rows == nullptr) return fail("no memory for the rows of a cover this wide");
+  if (rows == nullptr) return failOom("no memory for the rows of a cover this wide");
   cur = rows;
   prev = rows + stride;
   grey = rows + 2 * stride;
@@ -421,7 +431,7 @@ bool PngDecoder::Impl::run() {
     return false;
   }
 
-  if (!inf.begin(idat)) return fail("no memory for the PNG's inflate window");
+  if (!inf.begin(idat)) return failOom("no memory for the PNG's inflate window");
   workspace += Inflater::kHeapBytes;
 
   for (int y = 0; y < height; ++y) {
@@ -479,6 +489,9 @@ bool PngDecoder::decode(ByteSource& src, ImageRowSink& sink) {
 }
 
 bool PngDecoder::aborted() const { return impl_ && impl_->aborted; }
+// A NULL IMPL IS ITSELF THE CASE THIS REPORTS: the constructor's own allocation
+// failed, so there was never a decoder rather than never a picture.
+bool PngDecoder::outOfMemory() const { return impl_ == nullptr || impl_->oom; }
 const char* PngDecoder::reason() const {
   return impl_ ? impl_->reason : "no memory for a PNG decoder";
 }

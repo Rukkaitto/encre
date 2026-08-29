@@ -323,6 +323,7 @@ TEST_CASE("a sink that says stop aborts the decode") {
   reader::JpegDecoder dec;
   CHECK_FALSE(dec.decode(src, sink));
   CHECK(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   CHECK(sink.rows == 40);
   CHECK(sink.rows < sink.height);
   // An abort is not a failure of the file, so it must not read as one: it is the
@@ -339,6 +340,7 @@ TEST_CASE("a sink that refuses to begin stops before any row") {
   reader::JpegDecoder dec;
   CHECK_FALSE(dec.decode(src, sink));
   CHECK(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   CHECK(sink.rows == 0);
 }
 
@@ -350,6 +352,7 @@ TEST_CASE("JpegDecoder refuses a progressive JPEG rather than mis-decoding it") 
   reader::JpegDecoder dec;
   CHECK_FALSE(dec.decode(src, sink));
   CHECK_FALSE(dec.aborted());  // refused, not interrupted -- a different outcome
+  CHECK_FALSE(dec.outOfMemory());
   CHECK(sink.rows == 0);
   CHECK(sink.begins == 0);
   // A refusal must SAY something -- every refusal on this path ends up in a log
@@ -367,6 +370,7 @@ TEST_CASE("JpegDecoder refuses bytes that are not a JPEG at all") {
   reader::JpegDecoder dec;
   CHECK_FALSE(dec.decode(src, sink));
   CHECK_FALSE(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   CHECK(sink.rows == 0);
   REQUIRE(dec.reason() != nullptr);
 }
@@ -380,6 +384,7 @@ TEST_CASE("JpegDecoder refuses a truncated JPEG rather than reporting success") 
   reader::JpegDecoder dec;
   CHECK_FALSE(dec.decode(src, sink));
   CHECK_FALSE(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   REQUIRE(dec.reason() != nullptr);
   // The rows it DID produce were real -- a truncation is a short read, not a
   // corrupt one -- so the caller gets a partial picture and a false, and it is
@@ -405,6 +410,7 @@ TEST_CASE("a JpegDecoder can be used again, and keeps nothing from the last time
   REQUIRE(dec.decode(s2, r2));
   CHECK(dec.reason() == nullptr);
   CHECK_FALSE(dec.aborted());
+  CHECK_FALSE(dec.outOfMemory());
   CHECK(r2.rows == 1000);
 
   // ...and the other way round, which is the half that catches a `reason` only
@@ -414,6 +420,43 @@ TEST_CASE("a JpegDecoder can be used again, and keeps nothing from the last time
   CHECK_FALSE(dec.decode(s3, r3));
   CHECK(dec.reason() != nullptr);
   CHECK(r3.rows == 0);
+}
+
+TEST_CASE("outOfMemory is false for every refusal that is about the FILE") {
+  // THE FLAG IS ACTED ON, so what it must not do is fire for a bad file: cover.cpp
+  // asks it before it asks anything else about a refusal, and a decoder that set it
+  // on an ordinary failure would report a progressive JPEG as a device too small.
+  // The other direction -- a real shortfall -- cannot be provoked from a test here,
+  // and test_cover.cpp says why at length.
+  CollectingSink sink;
+  reader::JpegDecoder dec;
+
+  SUBCASE("progressive") {
+    const std::string bytes = imgfix::loadFixture("progressive.jpg");
+    grainsrc::Grained src(bytes, 4096);
+    CHECK_FALSE(dec.decode(src, sink));
+    CHECK_FALSE(dec.outOfMemory());
+    CHECK(dec.reason() != nullptr);
+  }
+  SUBCASE("not a JPEG at all") {
+    const std::string bytes = "certainly not a JPEG";
+    grainsrc::Grained src(bytes, 4096);
+    CHECK_FALSE(dec.decode(src, sink));
+    CHECK_FALSE(dec.outOfMemory());
+  }
+  SUBCASE("truncated") {
+    std::string bytes = imgfix::loadFixture("baseline.jpg");
+    bytes.resize(bytes.size() / 4);
+    grainsrc::Grained src(bytes, 4096);
+    CHECK_FALSE(dec.decode(src, sink));
+    CHECK_FALSE(dec.outOfMemory());
+  }
+  SUBCASE("a decode that succeeds") {
+    const std::string bytes = imgfix::loadFixture("tiny_444.jpg");
+    grainsrc::Grained src(bytes, 4096);
+    CHECK(dec.decode(src, sink));
+    CHECK_FALSE(dec.outOfMemory());
+  }
 }
 
 TEST_CASE("JpegDecoder reports the heap a decode holds") {

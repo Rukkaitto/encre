@@ -23,6 +23,11 @@ namespace {
 // leave a part-written file for work that was nearly free.
 constexpr int kStopEveryRows = 8;
 
+// THE LARGEST PANEL THIS WILL ENTERTAIN. The X4 is 480 wide and the X3 528, so
+// this is four orders of magnitude of headroom -- it exists to keep
+// `(panelW + 7) / 8` inside a signed int, not to express a policy.
+constexpr int kMaxPanel = 1 << 20;
+
 constexpr size_t kSniffBytes = 8;
 constexpr uint8_t kPngSignature[kSniffBytes] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
 
@@ -248,8 +253,14 @@ CoverResult decodeCover(FileSystem& fs, const OpenedBook& book, int panelW, int 
   // no name for one, so it borrows the nearest and the reason carries the truth;
   // what matters is refusing HERE, before the card is touched and before
   // CoverFitter is handed a geometry it would report as OutOfMemory.
-  if (panelW <= 0 || panelH <= 0)
-    return refuse(CoverResult::Unsupported, "the panel has no pixels");
+  //
+  // AND THE UPPER BOUND IS NOT TIDINESS: `(panelW + 7) / 8` below is signed
+  // arithmetic, so a panel near INT_MAX is undefined behaviour before it is
+  // anything else. kMaxPanel is four orders of magnitude above the widest panel
+  // this firmware drives (800), so nothing real is near it and the overflow is
+  // unreachable rather than merely unlikely.
+  if (panelW <= 0 || panelH <= 0 || panelW > kMaxPanel || panelH > kMaxPanel)
+    return refuse(CoverResult::Unsupported, "the panel is not a panel this can draw");
 
   const ChapterLocation where = book.locateCover();
   if (where.bookPath.empty() || where.compressedSize == 0)
@@ -299,6 +310,7 @@ CoverResult decodeCover(FileSystem& fs, const OpenedBook& book, int panelW, int 
   PlaneAdapter adapter(sink, panelW, panelH, fit, stop, stopCtx);
 
   bool ok = false;
+  bool decoderOom = false;
   const char* decoderReason = nullptr;
   if (format == Format::Jpeg) {
     JpegDecoder dec;
@@ -312,6 +324,7 @@ CoverResult decodeCover(FileSystem& fs, const OpenedBook& book, int panelW, int 
     // BOX instead -- which is not known until begin() -- would buy nothing.
     ok = dec.decode(src, adapter, panelW, panelH);
     decoderReason = dec.reason();
+    decoderOom = dec.outOfMemory();
     // FROM THE DECODER, NOT FROM THE ADAPTER: the adapter is handed the SCALED
     // dimensions, and what a corpus probe wants to know is what the file said.
     rep.sourceWidth = dec.sourceWidth();
@@ -326,6 +339,7 @@ CoverResult decodeCover(FileSystem& fs, const OpenedBook& book, int panelW, int 
     PngDecoder dec;
     ok = dec.decode(src, adapter);
     decoderReason = dec.reason();
+    decoderOom = dec.outOfMemory();
     rep.sourceWidth = adapter.width();
     rep.sourceHeight = adapter.height();
     rep.scaleDivisor = 1;
@@ -353,20 +367,57 @@ CoverResult decodeCover(FileSystem& fs, const OpenedBook& book, int panelW, int 
   // only the adapter knows which of its own returns was the false.
   if (adapter.stopped())
     return refuse(CoverResult::Abandoned, nullptr);  // nothing was wrong; nothing to say
+  // WHICH OF THIS FUNCTION'S FIVE OutOfMemory SITES A TEST CAN REACH, written down
+  // rather than left to be rediscovered. They are: the zip's inflate window above,
+  // CoverFitter::begin, the paper row, and each decoder's own (below). FOUR OF THE
+  // FIVE ARE ALLOCATION FAILURES and none is reachable from a desktop test --
+  // `FileSystem` has no heap injection and nothing else here is behind a seam, so
+  // provoking one means asking the host for a block big enough to fail, which on a
+  // 64-bit machine with overcommit is either served or fatal rather than refused.
+  //
+  // THE FIFTH IS REACHABLE, and it is this one: CoverFitter::begin answers the same
+  // false for a geometry whose worst accumulator cell could exceed uint32 as it does
+  // for a block it could not take, and that guard trips on declared dimensions
+  // alone -- so a PNG whose IHDR says 5000x5000 fitted to a 1x1 panel reaches it for
+  // the cost of a 15 KB row block. test_cover.cpp takes that route. Both causes are
+  // a capacity refusal rather than a fault in the file, which is why one result
+  // serves them; the reason below deliberately says "fit", not "allocate".
   if (adapter.outOfMemory())
-    return refuse(CoverResult::OutOfMemory, "no memory to fit this cover to the panel");
+    return refuse(CoverResult::OutOfMemory, "this cover cannot be fitted to this panel");
   if (adapter.sinkRefused())
     return refuse(CoverResult::ReadFailed, "the cover's plane rows could not be written");
   if (adapter.fitFailed())
     return refuse(CoverResult::Unsupported, "the cover decoded to more rows than it declares");
-  // A decoder that failed with nothing to say is one whose own construction could
-  // not allocate -- both are pimpls that answer a null reason in that state.
-  if (decoderReason == nullptr)
-    return refuse(CoverResult::OutOfMemory, "no memory for the cover decoder");
+  // AND A SHORTFALL INSIDE THE DECODER IS STILL A SHORTFALL. This is asked before
+  // the declared/undeclared split below, because that split answers a question
+  // about the FILE and a decoder that ran out of memory is not telling you one:
+  //
+  //   * pngd asks its sink BEFORE taking its 37 KB window, deliberately (a Task 3
+  //     decision, so that a sink which cannot allocate is refused first) -- so the
+  //     deflated PNG that genuinely does not fit is DECLARED when it fails, and
+  //     without this line it reported ReadFailed. A card fault, for the one shape
+  //     in the corpus whose only problem is that this device is too small.
+  //   * jpegd's row band fails the other way round, before begin(), and reported
+  //     Unsupported -- "not an image we read", for an image we read perfectly well
+  //     on a panel with room.
+  //
+  // One question asked once fixes both, and it is the same shape as the abandoned
+  // check above: what stopped the decode is not always what is wrong with the file.
+  //
+  // THIS LINE IS NOT REACHED BY ANY TEST, and mutating it away fails nothing --
+  // written down rather than left to be rediscovered. Both decoder-side sites are
+  // real allocation failures, and provoking one means asking a 64-bit host for a
+  // block big enough to be refused, which it either serves (overcommit) or dies
+  // on. What IS pinned is the other half, in both decoders' own suites: every
+  // refusal that is about the FILE leaves outOfMemory() false, so the flag cannot
+  // start firing for a progressive JPEG or an interlaced PNG. Setting `oom` in
+  // fail() instead of failOom() fails 8 assertions in test_jpegd and 20 in
+  // test_pngd.
+  if (decoderOom)
+    return refuse(CoverResult::OutOfMemory, decoderReason);
   // AND THE LAST SPLIT IS "DID THE PICTURE EVER DECLARE ITSELF". A refusal before
   // begin() is a format we do not read; one after it is a fault in bytes that
-  // parsed. See cover.h for the case this gets wrong and why the reason is handed
-  // back rather than the enum being widened.
+  // parsed.
   return refuse(adapter.declared() ? CoverResult::ReadFailed : CoverResult::Unsupported,
                 decoderReason);
 }

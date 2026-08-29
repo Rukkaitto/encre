@@ -84,6 +84,23 @@ class PngDecoder {
   // sentence, for a log line.
   const char* reason() const;
 
+  // WHETHER THE LAST decode() STOPPED FOR WANT OF MEMORY, as opposed to for
+  // anything the file did. Set at the allocation sites and nowhere else, so a
+  // caller can report a shortfall as one wherever in the pipeline it happened --
+  // which for a cover means the difference between "this book's cover
+  // cannot be shown on this device" and "the card is faulty". The deflated PNG
+  // this header calls out -- two 37 KB windows against the reading floor -- is
+  // the shape that makes the distinction real rather than theoretical.
+  //
+  // TRUE FOR A DECODER THAT COULD NOT BE CONSTRUCTED EITHER, which is the case
+  // reason() already words separately: there was never a decoder rather than
+  // never a picture, and both are the same answer to "was there memory".
+  //
+  // INDEPENDENT OF aborted(): a refusal is one or the other or neither, never
+  // both, and a caller that asks only aborted() sees a shortfall as an ordinary
+  // failure -- which is exactly the wrong word for a log line.
+  bool outOfMemory() const;
+
   // The inflate window and tables, plus the row block -- two filter rows for the
   // unfilter and one grey row for the sink, in one allocation.
   //

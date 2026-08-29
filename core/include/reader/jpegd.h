@@ -74,6 +74,21 @@ class JpegDecoder {
   // Null until something fails. A sentence, for a log line.
   const char* reason() const;
 
+  // WHETHER THE LAST decode() STOPPED FOR WANT OF MEMORY, as opposed to for
+  // anything the file did. Set at the allocation sites and nowhere else, so a
+  // caller can report a shortfall as one wherever in the pipeline it happened --
+  // which for a cover means the difference between "this book's cover
+  // cannot be shown on this device" and "the card is faulty".
+  //
+  // TRUE FOR A DECODER THAT COULD NOT BE CONSTRUCTED EITHER, which is the case
+  // reason() already words separately: there was never a decoder rather than
+  // never a picture, and both are the same answer to "was there memory".
+  //
+  // INDEPENDENT OF aborted(): a refusal is one or the other or neither, never
+  // both, and a caller that asks only aborted() sees a shortfall as an ordinary
+  // failure -- which is exactly the wrong word for a log line.
+  bool outOfMemory() const;
+
   // Heap held during a decode: TJpgDec's pool plus the MCU band buffer.
   //
   // REPORTED RATHER THAN DOCUMENTED, so the figure in the spec's budget cannot

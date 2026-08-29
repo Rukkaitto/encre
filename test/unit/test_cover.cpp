@@ -54,12 +54,14 @@ struct VectorSink : reader::CoverPlaneSink {
     return acceptFinish;
   }
 
-  // A row of the accumulated MSB plane. Empty if that row was never pushed.
-  const uint8_t* msbRow(int y) const {
-    return static_cast<size_t>((y + 1) * bytes) <= msb.size()
-               ? msb.data() + static_cast<size_t>(y) * bytes
+  // A row of one accumulated plane. Null if that row was never pushed.
+  static const uint8_t* rowOf(const std::vector<uint8_t>& plane, int y, int bytes) {
+    return static_cast<size_t>((y + 1) * bytes) <= plane.size()
+               ? plane.data() + static_cast<size_t>(y) * bytes
                : nullptr;
   }
+  const uint8_t* msbRow(int y) const { return rowOf(msb, y, bytes); }
+  const uint8_t* lsbRow(int y) const { return rowOf(lsb, y, bytes); }
 };
 
 // PAPER IS 0xFF IN BOTH PLANES and ink is a CLEARED bit -- framebuffer.h's
@@ -72,12 +74,32 @@ bool anyInk(const std::vector<uint8_t>& plane) {
   return false;
 }
 
+// BOTH PLANES, and reading only one is a hole this had: paper in the MSB and ink
+// in the LSB is coverage level 1 or 2 -- a GREY band instead of a white one, on a
+// screen that stays on the glass for hours. It is the property the whole-panel
+// decision rests on, so it is the one that must not be half-checked.
 bool rowIsPaper(const VectorSink& s, int y) {
-  const uint8_t* r = s.msbRow(y);
-  if (r == nullptr) return false;
+  const uint8_t* m = s.msbRow(y);
+  const uint8_t* l = s.lsbRow(y);
+  if (m == nullptr || l == nullptr) return false;
   for (int i = 0; i < s.bytes; ++i)
-    if (r[i] != 0xFFu) return false;
+    if (m[i] != 0xFFu || l[i] != 0xFFu) return false;
   return true;
+}
+
+// A PNG WITH ITS DECLARED SIZE REWRITTEN, signature intact and the IHDR's CRC left
+// wrong -- which pngd.h says outright it does not verify, so what refuses a file on
+// this path can only be the field itself. The dimensions reach ImageRowSink::begin
+// before a single scanline is inflated, which is what makes an absurd geometry
+// cheap to present.
+std::string withDeclaredSize(const char* fixture, uint32_t w, uint32_t h) {
+  std::string b = imgfix::loadFixture(fixture);
+  REQUIRE(b.size() > 24);
+  for (int i = 0; i < 4; ++i) {
+    b[16 + i] = static_cast<char>((w >> (8 * (3 - i))) & 0xFF);
+    b[20 + i] = static_cast<char>((h >> (8 * (3 - i))) & 0xFF);
+  }
+  return b;
 }
 
 void putBook(FakeFileSystem& fs, const std::string& bytes) {
@@ -506,6 +528,46 @@ TEST_CASE("a nonsense panel is refused before the card is touched") {
   CHECK(rep.reason != nullptr);
   CHECK(sink.begins == 0);
   CHECK(sink.finishes == 1);
+}
+
+TEST_CASE("a geometry the fitter cannot sum is OutOfMemory, not a broken file") {
+  // THE ONE OutOfMemory SITE A TEST CAN REACH -- cover.cpp names the other four and
+  // says why they cannot be. CoverFitter::begin refuses a geometry whose worst
+  // accumulator cell could exceed uint32, and it decides that from the DECLARED
+  // dimensions, so 5000x5000 fitted to a 1x1 panel trips it having inflated
+  // nothing: 5000 source pixels into each of one destination row's one column,
+  // 25,000,000 samples against a limit of 16,843,009.
+  FakeFileSystem fs;
+  putBook(fs, epubbuild::withCoverImage(withDeclaredSize("grey8.png", 5000, 5000)));
+
+  VectorSink sink;
+  reader::CoverReport rep;
+  CHECK(reader::decodeCover(fs, openIt(fs), 1, 1, reader::CoverFit::Whole, sink, nullptr,
+                            nullptr, &rep) == reader::CoverResult::OutOfMemory);
+  CHECK(rep.reason != nullptr);
+  // THE PICTURE DECLARED ITSELF and it is still not a ReadFailed: what could not be
+  // done was ours, not the card's. That is the whole point of asking our own flags
+  // before the declared/undeclared split.
+  CHECK(rep.sourceWidth == 5000);
+  CHECK(rep.sourceHeight == 5000);
+  // And the sink was never begun, because the fitter is asked first -- so nothing
+  // opened a file for a cover that was never going to be fitted.
+  CHECK(sink.begins == 0);
+  CHECK(sink.finishes == 1);
+  CHECK_FALSE(sink.finishedOk);
+}
+
+TEST_CASE("a panel too large to address is refused, not overflowed") {
+  // `(panelW + 7) / 8` is signed arithmetic, so a panel near INT_MAX is undefined
+  // behaviour before it is anything else.
+  FakeFileSystem fs;
+  putBook(fs, epubbuild::withCoverImage(imgfix::loadFixture("tiny_444.jpg")));
+  VectorSink sink;
+  reader::CoverReport rep;
+  CHECK(reader::decodeCover(fs, openIt(fs), 2147483647, 800, reader::CoverFit::Fill, sink,
+                            nullptr, nullptr, &rep) == reader::CoverResult::Unsupported);
+  CHECK(rep.reason != nullptr);
+  CHECK(sink.begins == 0);
 }
 
 TEST_CASE("every result has a name") {

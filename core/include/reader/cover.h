@@ -77,16 +77,24 @@ const char* coverResultName(CoverResult r);
 //
 // THE REASON IS HERE BECAUSE THE SIX RESULTS CANNOT CARRY THE WHOLE TRUTH. The
 // result is what a caller branches on and what tools/covers.py counts; the reason
-// is the sentence from whichever layer refused. In particular an allocation
-// failure INSIDE a decoder -- TJpgDec's band, the PNG's own inflate window -- is
-// not distinguished from a bad file: decodeCover reports OutOfMemory for the
-// allocations it makes itself, and otherwise splits on whether the picture ever
-// declared its dimensions (Unsupported if it did not, ReadFailed if it did). The
-// alternatives were matching on the decoders' reason strings, which is one
-// sentence spelled in two files, and arithmetic on another header's
-// workspaceBytes() bookkeeping, which a wide enough PNG defeats. Every non-Ok
-// answer falls back the same way, so what the split costs is a word in a log and
-// the reason is what corrects it.
+// is the sentence from whichever layer refused -- which of the four PNG colour
+// types, which axis of the IHDR, where the entry ran out.
+//
+// A SHORTFALL IS REPORTED AS ONE WHEREVER IT HAPPENS, and it took a change in
+// both decoders to make that true. This paragraph used to say the opposite -- that
+// an allocation failure inside a decoder "is not distinguished from a bad file" --
+// and the consequence was precise and wrong: pngd asks its sink BEFORE taking its
+// 37 KB window, so the deflated PNG that genuinely does not fit was DECLARED when
+// it failed and came back ReadFailed, a card fault for the one corpus shape whose
+// only problem is that this device is too small. TJpgDec's row band failed the
+// other side of the same line and came back Unsupported. Both decoders now carry
+// `outOfMemory()` beside `aborted()`, set at their nothrow sites and nowhere else,
+// and decodeCover asks it before it asks anything about the file.
+//
+// WHAT IS LEFT OF THE OLD SPLIT is honest: a decode that failed for a reason that
+// is neither a shortfall nor a button splits on whether the picture ever declared
+// its dimensions -- Unsupported if it did not, ReadFailed if it did. That is a
+// question about the file, asked only where the answer is about the file.
 //
 // AND THE SCALE IS HERE BECAUSE NOTHING ELSE CAN SEE IT. `scaleDivisor` is the
 // one lever this pipeline has that changes no output geometry at all -- a cover
@@ -137,9 +145,14 @@ struct CoverReport {
 // workspace rather than this comment asserting a number: TJpgDec emits MCU
 // RECTANGLES, so a row is not complete until its whole band has arrived and one
 // band must be held. Ask JpegDecoder::workspaceBytes() rather than trusting this.
-// It is bounded here rather than unbounded because of the `atLeast` request: the
-// band is `mcuHeight * outputWidth`, and asking only for the panel keeps the
-// output width inside [panelW, 2*panelW) whatever the cover's real size.
+// It is BOUNDED rather than unbounded because of the `atLeast` request -- but not
+// by the figure this line first quoted. The band is `mcuHeight * outputWidth`, and
+// the scale search requires BOTH axes to clear the request (jpegd.cpp), so when
+// HEIGHT is the binding axis the output width is bounded by
+// `2 * panelH * (srcW / srcH)` and not by `2 * panelW`. Height usually IS binding
+// here: reader/cover_fit.h's census says a cover is almost always relatively wider
+// than the X4, so the aspect is what holds the real figures down, and the squarest
+// corpus cover already reaches 1.83x panelW. Ask workspaceBytes().
 //
 // THE FIGURES ARE THE DESKTOP'S ALLOCATOR, so the ESP32's per-block overhead is
 // on top and the std::string/std::vector sizes are not exactly the firmware's.
