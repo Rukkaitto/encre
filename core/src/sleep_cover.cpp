@@ -2,7 +2,28 @@
 
 #include <cstring>
 
+// FOR THE TWO ASSERTS BELOW ONLY. sleep_cover.h deliberately does not include this
+// -- it is a leaf over <cstddef>/<cstdint>/<string> and a header the shell reads a
+// file with should not drag the framebuffer in. The obligation is still real, so it
+// is discharged here, in the one translation unit that owns the wire format.
+#include "reader/framebuffer.h"
+
 namespace reader {
+
+// THE ROTATION CODES ARE PART OF THE FILE FORMAT, because the header stores the
+// enumerator's VALUE rather than a name. Insert an enumerator before Ccw and every
+// cache file on every card silently describes a different rotation -- and nothing
+// would refuse them, because a freshly written file would still match the new value
+// and an old one would still hold 1. There is no runtime check that can catch that;
+// a build failure is the only place to catch it at all.
+//
+// If these ever have to change, kSleepCoverVersion changes with them.
+static_assert(static_cast<int>(Rotation::None) == 0,
+              "sleep.cover stores Rotation's value; None must stay 0 or every cached "
+              "cover is reinterpreted");
+static_assert(static_cast<int>(Rotation::Ccw) == 1,
+              "sleep.cover stores Rotation's value; Ccw must stay 1 or every cached "
+              "cover is reinterpreted");
 namespace {
 
 // FIXED-WIDTH LITTLE-ENDIAN, BYTE AT A TIME, and neither half of that is
