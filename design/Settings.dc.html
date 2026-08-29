@@ -79,6 +79,50 @@
       <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#ffffff" stroke-width="2"></path></svg>
     </div>
 
+    <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px; border-top: 2px solid #000000;">SLEEP SCREEN</div>
+    <!-- `Shows`, NOT `Sleep screen`. The board already states the rule that names
+         this row: READING was chosen over TYPOGRAPHY so a section does not repeat
+         the row's own word directly above it. Under this header it reads as a
+         sentence -- sleep screen, shows, cover + details.
+
+         The value cycles COVER -> COVER + DETAILS -> DETAILS and wraps. COVER draws
+         the cover full-bleed and NO BADGE: a full-bleed cover is not a screen the
+         device can otherwise be in, so it is unambiguous by itself, where a Library
+         or a half-read page is not. Every fallback puts the badge back.
+
+         `COVER + DETAILS` is the widest value this section states. Measured on the
+         480-wide X4 -- the narrower panel, so the one that fails first -- it clears
+         its label by 154px, against 113px for `Full refresh` + `EVERY 15 PAGES` and
+         85px for `Refresh on screen change` + `ON`. Note the GAP is the measure
+         here, not the ink extent: `space-between` pins every row to both margins,
+         so all six rows span 24..455 whatever they say. -->
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
+      <div style="font-size: var(--t-value); font-weight: 500;">Shows</div>
+      <div style="font-size: var(--t-value); font-weight: 700;">COVER + DETAILS</div>
+    </div>
+    <!-- FILL crops to the panel, WHOLE letterboxes and tints the bands with the
+         same level-1 clustered dither Sleep.dc.html uses as its field -- white
+         bands read as unpainted glass.
+
+         Deliberately NOT `FILL` / `FIT`: one letter apart is bad at 25px on this
+         glass.
+
+         The row is focusable only while `Shows` shows a cover, DERIVED rather than
+         tabulated -- Typography's own precedent, where `Font` is unreachable while
+         one body face is vendored.
+
+         Measured: 163 of 224 corpus covers are 2:3, and the X3 is 2:3 exactly, so
+         this is a no-op for 73% of books on that panel. It earns itself on the X4
+         (10% median loss) and on the tail -- the squarest corpus cover is 877x973
+         and FILL cuts its title off at both edges.
+
+         No `border-bottom`: last row of SLEEP SCREEN, and DEVICE's own `border-top`
+         is the line between them. -->
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px;">
+      <div style="font-size: var(--t-value); font-weight: 500;">Cover fit</div>
+      <div style="font-size: var(--t-value); font-weight: 700;">FILL</div>
+    </div>
+
     <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px; border-top: 2px solid #000000;">DEVICE</div>
     <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
       <div style="font-size: var(--t-value); font-weight: 500;">Sleep after</div>
@@ -104,17 +148,22 @@
          ~300px of the X4's 480, leaving the value's ~30px and the 48px of padding
          comfortably -- the pair to beat is `Full refresh` + `EVERY 15 PAGES`, which
          is wider overall. -->
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
+    <!-- No `border-bottom`, and it LOST one when the inert `Sleep screen` row below
+         it was cut. That row drew `BOOK COVER` with nothing behind it (issue #11);
+         the setting is real now and lives in SLEEP SCREEN above, as two rows that
+         act.
+
+         This row is therefore the last row of DEVICE *and* the last drawn row, so
+         the rule reaches it twice over. If a section is ever added below DEVICE,
+         this stays as it is -- that section's own `border-top` becomes the line
+         between them, exactly as SLEEP SCREEN's is for `Typography` and DEVICE's is
+         for `Cover fit`. Giving it one makes a 3px slab where the board elsewhere
+         draws 2, and it also advances `y`, which is what once put every row below a
+         header a pixel low -- the reported symptom being the doubled line at the
+         top, the smaller of the two defects. -->
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px;">
       <div style="font-size: var(--t-value); font-weight: 500;">Refresh on screen change</div>
       <div style="font-size: var(--t-value); font-weight: 700;">ON</div>
-    </div>
-    <!-- No `border-bottom`: this is the last row of DEVICE and CONNECTIONS' own
-         `border-top` is the line between them. Giving it one made a 3px slab where
-         the board elsewhere draws 2 -- `Alignment`, the last row of TYPOGRAPHY,
-         has none for the same reason. -->
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px;">
-      <div style="font-size: var(--t-value); font-weight: 500;">Sleep screen</div>
-      <div style="font-size: var(--t-value); font-weight: 700;">BOOK COVER</div>
     </div>
 
   </div>
