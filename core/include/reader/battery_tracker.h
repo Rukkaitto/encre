@@ -47,6 +47,11 @@ class BatteryTracker {
   }
 
   int percent() const { return havePercent_ ? percent_ : kUnknownPercent; }
+  // false means "not charging" OR "never told", and unlike percent() there is no
+  // third answer to give the caller: the only thing ever drawn is the mark's
+  // presence or absence, so a device whose board has no charge-status line at
+  // all (chargingKnown never true) must render identically to one that read a
+  // known "not charging". There is nothing for a sentinel to buy here.
   bool charging() const { return haveCharging_ && charging_; }
 
  private:

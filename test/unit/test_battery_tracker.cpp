@@ -66,3 +66,14 @@ TEST_CASE("a percent-only reading does not disturb charging, and vice versa") {
   CHECK(t.percent() == 50);
   CHECK(t.charging() == true);
 }
+
+TEST_CASE("a charging-only reading does not disturb percent") {
+  BatteryTracker t;
+  t.update(good(64, false), 0);
+  BatteryReading chargingOnly;
+  chargingOnly.chargingKnown = true;
+  chargingOnly.charging = true;
+  t.update(chargingOnly, 1000);
+  CHECK(t.percent() == 64);
+  CHECK(t.charging() == true);
+}
