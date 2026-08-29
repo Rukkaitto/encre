@@ -352,6 +352,25 @@ TEST_CASE("openBook records where the cover is, by both OPF routes") {
   // which is a different length.
 }
 
+TEST_CASE("withCoverImage puts the caller's own bytes where the cover is") {
+  // The fixture Task 6's decoder needs: the same book carrying REAL image bytes. It
+  // is exercised here rather than left for its first consumer, because an untested
+  // fixture is a fixture whose failures arrive inside somebody else's test.
+  //
+  // The bytes are deliberately a different length from kFakeCoverBytes, so a build
+  // that ignored the argument and stored the default would be caught.
+  const std::string bytes(4321, '\xAB');
+  FakeFileSystem fs;
+  put(fs, epubbuild::withCoverImage(bytes));
+  OpenedBook book;
+  const char* why = "";
+  REQUIRE_MESSAGE(reader::openBook(fs, "/books/book.epub", book, &why), std::string(why));
+  REQUIRE(book.cover.readable());
+  CHECK(book.cover.uncompressedSize == bytes.size());
+  CHECK(book.cover.compressedSize == bytes.size());  // stored, so the two agree
+  CHECK_FALSE(book.cover.deflated);
+}
+
 TEST_CASE("the cover's href resolves against the OPF's directory, as a spine href does") {
   // The fixture puts the cover at OEBPS/images/cover.jpg and the OPF says
   // `images/cover.jpg`. An implementation that took the href as an archive path
@@ -392,6 +411,50 @@ TEST_CASE("a book with no cover opens normally and says it has none") {
   // an index out of range -- so a decoder refuses it without a special case.
   CHECK(book.locateCover().compressedSize == 0);
   CHECK(book.locateCover().bookPath.empty());
+}
+
+TEST_CASE("where a book states both cover routes, the manifest's declaration wins") {
+  // Same precedence the spine's `toc` attribute gets over the NCX's media type: the
+  // formal statement over the conventional one. `properties="cover-image"` is EPUB 3
+  // saying which item IS the cover; `<meta name="cover">` is a convention that
+  // predates any spec saying so, and real books point it at the cover PAGE.
+  FakeFileSystem fs;
+  put(fs, epubbuild::withBothCoverRoutesDisagreeing());
+  OpenedBook book;
+  const char* why = "";
+  REQUIRE_MESSAGE(reader::openBook(fs, "/books/book.epub", book, &why), std::string(why));
+  REQUIRE(book.cover.readable());
+  // The image is stored and the decoy chapter is deflated, so this is the whole
+  // question in one field.
+  CHECK_FALSE(book.cover.deflated);
+  CHECK(book.cover.uncompressedSize == std::strlen(epubbuild::kFakeCoverBytes));
+}
+
+TEST_CASE("a cover the archive does not hold costs the book its cover and nothing else") {
+  // Where this differs from a chapter, and the difference is the point: Epub::open
+  // validates every SPINE entry against the archive and refuses the whole book if one
+  // is missing, because a spine is a reading ORDER and a book quietly missing a
+  // chapter is one the reader cannot tell is broken. A cover is metadata.
+  //
+  // TWO WAYS TO DECLARE ONE THAT IS NOT THERE, and both must open: the manifest names
+  // an item the zip lacks, and `<meta name="cover">` names an id the manifest lacks.
+  // Neither reaches an assertion in any other case here -- a mutation that made the
+  // first a refusal failed NOTHING until this case existed.
+  const char* why = "";
+
+  FakeFileSystem absent;
+  put(absent, epubbuild::withCoverDeclaredButAbsent());
+  OpenedBook a;
+  REQUIRE_MESSAGE(reader::openBook(absent, "/books/book.epub", a, &why), std::string(why));
+  CHECK(a.chapterCount() == 2);
+  CHECK_FALSE(a.cover.readable());
+
+  FakeFileSystem dangling;
+  put(dangling, epubbuild::withCoverIdUnresolved());
+  OpenedBook d;
+  REQUIRE_MESSAGE(reader::openBook(dangling, "/books/book.epub", d, &why), std::string(why));
+  CHECK(d.chapterCount() == 2);
+  CHECK_FALSE(d.cover.readable());
 }
 
 TEST_CASE("an EPUB 3 properties list is matched token by token, never as a substring") {

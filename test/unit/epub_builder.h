@@ -205,6 +205,40 @@ inline std::string withCoverPropertiesLookalike() {
                           true);
 }
 
+// BOTH ROUTES, DISAGREEING. Real books carry this: `<meta name="cover">` pointing at
+// the cover PAGE while `properties="cover-image"` sits on the image. Without a
+// fixture where the two name different entries, "the manifest's declaration wins" is
+// a claim in a comment that no test can reach.
+//
+// The decoy is a real archive entry and DEFLATED, where the image is stored -- so the
+// storage method alone says which route won, and a wrong answer cannot hide behind
+// an entry that happens to be missing.
+inline std::string withBothCoverRoutesDisagreeing() {
+  return detail::assemble(
+      "<meta name=\"cover\" content=\"cover-page\"/>",
+      "<item id=\"cover-page\" href=\"ch2.xhtml\" media-type=\"application/xhtml+xml\"/>" +
+          detail::coverItem("cover-image"),
+      kFakeCoverBytes, true);
+}
+
+// A manifest that DECLARES a cover the archive does not hold. Every other fixture
+// here has both halves, so without this the "a missing cover entry is not a refusal"
+// clause in book.cpp is a claim no test can reach -- a mutation making it a refusal
+// failed nothing, which is what put this fixture here.
+inline std::string withCoverDeclaredButAbsent() {
+  return detail::assemble("<meta name=\"cover\" content=\"cover-img\"/>",
+                          detail::coverItem(""), "", false);
+}
+
+// `<meta name="cover">` naming an id no manifest item carries. Real OPFs get this
+// wrong the same way they get `unique-identifier` wrong, and the same call applies:
+// a cross-reference inside the OPF that does not resolve costs the book the thing it
+// named and nothing else.
+inline std::string withCoverIdUnresolved() {
+  return detail::assemble("<meta name=\"cover\" content=\"no-such-item\"/>", "", "",
+                          false);
+}
+
 // The same book carrying REAL image bytes, stored, declared the EPUB 2 way. For a
 // caller that is going to decode what comes back.
 inline std::string withCoverImage(const std::string& bytes) {
