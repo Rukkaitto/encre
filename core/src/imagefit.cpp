@@ -179,9 +179,15 @@ bool CoverFitter::begin(int srcW, int srcH, int panelW, int panelH, CoverFit fit
   // backwards. `clang++ -std=c++20 -E`: <memory> is 38,447 preprocessed lines
   // and <vector> is 72,845, so the alternative is HALF the weight, not more.
   // The probe is here for the -fno-exceptions reason above and for no other.
-  const size_t need = sizeof(uint32_t) * static_cast<size_t>(b.dstW) +
-                      sizeof(uint16_t) * static_cast<size_t>(b.dstW) +
-                      sizeof(int16_t) * static_cast<size_t>(b.dstW) +
+  //
+  // THE SIZES ARE DERIVED FROM THE CONTAINERS, NOT RESTATED. This asked for a
+  // uint16_t's worth of `count_` for one commit after that vector was widened to
+  // uint32_t -- so it under-asked by 2 * dstW bytes, in the one direction a probe
+  // must never be wrong. Spelling the element types by hand is a second copy of a
+  // fact the declarations already carry, which is exactly what drifted.
+  const size_t need = sizeof(decltype(acc_)::value_type) * static_cast<size_t>(b.dstW) +
+                      sizeof(decltype(count_)::value_type) * static_cast<size_t>(b.dstW) +
+                      sizeof(decltype(err_)::value_type) * static_cast<size_t>(b.dstW) +
                       2u * static_cast<size_t>(planeBytes);
   {
     std::unique_ptr<uint8_t[]> probe(new (std::nothrow) uint8_t[need]);

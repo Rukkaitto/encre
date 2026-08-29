@@ -255,8 +255,21 @@ Peak, worst realistic case (a deflated JPEG):
 | two 1-bit plane row buffers | 132 |
 | **total** | **~54–62 KB** |
 
-Against ~87 KB free at sleep once the reader's chapter is released. The deflated-PNG
-case needs two windows, ≈ 88 KB, and may refuse.
+**MEASURED 2026-08-29, once `decodeCover` existed to measure** — live bytes across one
+call, nothing held afterwards:
+
+| case | peak | largest block |
+|---|--:|--:|
+| stored JPEG, 480×800 | 26,596 | 11,840 (the MCU band) |
+| **deflated JPEG, 480×800** | **63,560** | 36,956 (the zip window) |
+| stored PNG, 528×792 | 58,730 | 36,956 |
+| **deflated PNG, 528×792** | **95,686** | 36,956 × 2 |
+
+So the estimate above was right in shape and ~1.6 KB low. The deflated JPEG — the
+**majority** case, since 59% of JPEG covers are deflated — is 63.6 KB against ~87 KB
+free, about three quarters of the headroom. **The deflated PNG does not fit**, which
+confirms the stated limit rather than contradicting it: it is 1 of 225 corpus books
+and it answers `OutOfMemory` and falls back to the card.
 
 **CORRECTED 2026-08-29, from reading the vendored source rather than its summary.**
 This table first omitted the band buffer and read ~45 KB. `jd_decomp` emits **MCU
