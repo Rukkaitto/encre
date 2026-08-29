@@ -2334,7 +2334,9 @@ Four candidates land in `build/`. **Open each and say what you see** before bles
 make test 2>&1 | grep -i "sleep" | head
 ```
 
-Expected: `sleep_480x800`, `sleep_528x792`, `sleep_idle_*` all still pass **unchanged**. This is the check that proves the default changes nothing without a cover. If any moved, something reads `shows` where it should not.
+Expected: `sleep_quiet`, `sleep_quiet_x3`, `sleep_idle`, `sleep_idle_x3`, `sleep_waking*` all still pass **unchanged**. This is the check that proves the default changes nothing without a cover. If any moved, something reads `shows` where it should not.
+
+**This plan called them `sleep_480x800`/`sleep_528x792` and no such files exist.** The repo's convention is `<name>` and `<name>_x3` across all 54 goldens, and the shipped Sleep pair is `sleep_quiet*`. The new goldens follow the convention, not this plan: `sleep_cover`, `sleep_cover_x3`, `sleep_cover_details`, `sleep_cover_details_x3`.
 
 - [ ] **Step 7: Commit**
 
