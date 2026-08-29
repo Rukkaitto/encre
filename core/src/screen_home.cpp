@@ -74,4 +74,9 @@ void HomeScreen::render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Pla
   theme.renderHome(fb, fonts, vm_, plane);
 }
 
+void HomeScreen::setBattery(int percent, bool charging) {
+  vm_.batteryPercent = percent;
+  vm_.batteryCharging = charging;
+}
+
 }  // namespace reader
