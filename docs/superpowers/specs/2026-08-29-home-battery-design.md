@@ -164,21 +164,40 @@ at the top, used by both draw sites — the header band and the `nothingToContin
 strip. There are exactly two, and this project's rule is that a choice made in two
 places is a choice that will eventually be made differently in the two places.
 
-### One fix in the primitive, not in the screen
+### `drawHeaderBand` needs NO change — CORRECTED 2026-08-29
 
-`drawHeaderBand` computes
+**An earlier draft of this spec specified a fix here and the fix was wrong.** It is
+recorded rather than deleted, because the wrong version is the one an inattentive
+reader will re-derive.
+
+The claim was that `drawHeaderBand`'s
 
 ```
-const int groupW = vw + (mark ? kBandGap + mark->w : 0);
+const int groupW = vw + (mark ? kBandGap + mark->w : 0);   // components.cpp:101
 ```
 
-(`core/src/components.cpp:101`). With an **empty value** that reserves a 7px gap for a
-number that is not there and pushes the battery 7px off the right margin. The gap
-becomes conditional on the value being non-empty.
+reserves a 7px gap for a number that is not there when the value is empty, and so
+pushes the battery 7px off the right margin. **The first half is true and the second
+is false.** The icon draws at `groupX + vw + kBandGap` (`:126`), so the phantom gap in
+`groupW` **cancels against the same gap** in the icon's own x. Worked at 480 wide,
+`kMargin` 24, `kBandGap` 7, `kBattery.w` 38:
 
-This belongs in `components.cpp` and not in `renderHome`: *every* band with a mark and
-no value has it today, and CLAUDE.md's invariant is that fixing a shared defect on one
-screen means the next screen inherits the bug.
+| | `groupW` | `groupX` | icon right edge | `labelMaxW` |
+|---|--:|--:|--:|--:|
+| value `64%` (vw 52) | 97 | 359 | **456** ✓ | 328 |
+| empty value (vw 0), as shipped | 45 | 411 | **456** ✓ | 380 |
+| empty value, with the proposed "fix" | 38 | 418 | **463** ✗ | 387 |
+
+**The proposed fix introduces the bug it was written to remove.** Correcting it
+properly needs *two* edits — `groupW` and the icon's x — and buys `labelMaxW` 380 →
+387, which is 7px of extra elision budget for a label that on Home is the literal
+`NOW READING` and never elides at all.
+
+**So nothing changes here.** Widening a primitive that eight boards share, to gain
+7px on a label that cannot use it, is risk bought for nothing — and the near miss is
+the argument: a one-line edit to a shared primitive, reasoned about rather than
+computed, was one review away from putting the battery over the margin on every
+screen that draws a band.
 
 ### `App::requestRepaint()`
 
@@ -325,7 +344,6 @@ because a desktop pass is not evidence about this panel:
   inside `kUnlatchMs`; the dwell resetting on any charging sample; the session cap.
 - Core render tests — the blank state draws no number and keeps the icon's right edge
   on `kMargin`; charging swaps the mark; `setBattery` mirrors into the vm.
-- `drawHeaderBand`'s empty-value gap, at both geometries.
 - Goldens for `home_charging` at 480×800 and 528×792.
 - `make compare` gains the row; the four existing Home boards must not move.
 
