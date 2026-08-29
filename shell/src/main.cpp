@@ -1413,6 +1413,11 @@ static void armCardProbes(const char* why) {
 
 static reader::SleepViewModel sleepVmFromCard(std::string note);
 
+// Declared here for setup()'s wake paint, which has to know whether the glass is
+// holding a COVER before it may assert anything about the panel's baseline. Both
+// definitions are far below, beside the sleep path they were written for.
+static reader::CoverSource* sleepCoverForPaint();
+
 // --- WHAT THE CARD'S POINTER SAYS ---------------------------------------------
 //
 // `/.reader/last.json` read, checked and shaped, once. Home's reading column and
@@ -4011,37 +4016,84 @@ void setup() {
       // The budget is already handled AFTER setup's first paint (see
       // skipInitialResync below, "the panel now holds a frame we just wrote"). This
       // is the same assertion made one paint earlier, and on a wake it is a
-      // DIFFERENT and weaker claim, which is the part to understand before touching
-      // it:
+      // DIFFERENT and weaker claim -- WHICH HOLDS ONLY WHEN THE GLASS IS HOLDING
+      // THE CARD SCREEN, and that is the whole of the branch below:
       //
       //   * The glass holds the SLEEP SCREEN -- e-ink keeps its image with no power.
       //   * The CONTROLLER's DTM1 baseline does not survive; after the reset it is
-      //     whatever the RAM powered up as. skipInitialResync asserts it is valid,
-      //     so the DU below diffs against that.
+      //     whatever the RAM powered up as. skipInitialResync asserts it is valid
+      //     (_oldPlaneValid = true, _initialFullsRemaining = 0), so the DU below
+      //     diffs against that.
       //   * CLAUDE.md records this exact call producing "a split second of noisy
       //     banding on every wake" -- but that was a differential onto a WHOLE NEW
-      //     SCREEN. Here the frame being painted is the sleep screen with one line
-      //     changed, so almost every pixel the garbage baseline calls unchanged
-      //     really is unchanged, and keeping what the glass holds is correct.
+      //     SCREEN. With no cover, the frame being painted is the sleep screen with
+      //     one line changed, so almost every pixel the garbage baseline calls
+      //     unchanged really is unchanged, and keeping what the glass holds is
+      //     correct.
       //
-      // IF THAT IS WRONG ON GLASS the symptom is specific and worth naming: the
-      // WAKING line faint, banded, or absent, with the rest of the card intact. The
-      // fallback is one line -- move skipInitialResync() to AFTER the paint and drop
-      // requestResync(). The wake then flashes once, here, instead of once at Home,
-      // which is still better than the two it started with.
-      display.skipInitialResync();
+      // AND WITH A COVER ON THE GLASS THAT LAST BULLET IS SIMPLY FALSE. The sleep
+      // path paints a four-level PHOTOGRAPH over the whole panel; this paint has no
+      // CoverSource and draws the dither field and the card, so nearly every pixel
+      // differs. Asserting a valid baseline there is asserting something known to be
+      // untrue, and what it buys -- a DU -- is the one refresh that cannot survive
+      // being wrong about it: the cover would stay on the glass under the card until
+      // Home's paint cleared it.
+      //
+      // HANDING THIS PAINT THE COVER TO MAKE THE PREMISE TRUE AGAIN DOES NOT WORK,
+      // and it is the obvious move, so: this is a single Fast DU, so it would render
+      // a ONE-BIT threshold of a FOUR-LEVEL picture -- an enormous diff in a
+      // different way -- and SleepScreen::fidelity() would answer Grayscale for a
+      // path that paints one pass.
+      //
+      // SO THE COVER CASE TAKES THE FALLBACK THIS BLOCK ALREADY NAMED: assert
+      // nothing, let the paint below be the honest clear, and move
+      // skipInitialResync() to AFTER it, where the claim is true because we have
+      // just written the frame ourselves. requestResync() goes with it -- its whole
+      // job was to force a GC at Home over a baseline we had admitted we did not
+      // know, and after a real clear here we DO know it.
+      //
+      // WHAT IT COSTS: the wake's one allowed flash moves from Home to here, and on
+      // a card with `fullOnTransition` left on, Home's own transition GC makes that
+      // two. That is the honest price of a photograph on the glass, and it replaces
+      // a mangled intermediate frame with a clean one.
+      //
+      // THE TEST IS "WOULD A COVER BE PAINTED NOW", which is the same question the
+      // sleep asked, asked of the same cache and the same setting. It can be wrong
+      // only if the card changed while the device slept -- and then this falls back
+      // to exactly today's shipped behaviour, so the no-cover path is untouched in
+      // every case including that one.
+      //
+      // IF THE NO-COVER BRANCH IS WRONG ON GLASS the symptom is specific and worth
+      // naming: the WAKING line faint, banded, or absent, with the rest of the card
+      // intact. Its fallback is to take the cover branch unconditionally.
+      const bool coverOnGlass = sleepCoverForPaint() != nullptr;
+      if (!coverOnGlass) display.skipInitialResync();
       const reader::SleepViewModel vm = sleepVmFromCard(reader::kStatusWaking);
       reader::SleepScreen scr(vm);
       gFrame->clear(true);
       scr.render(*gFrame, *gFonts, gTheme, reader::Plane::Bw);
       gFrameContentsUnknown = true;
-      // FAST, so this is a DU and the badge's words change without a flash.
+      // FAST is what this ASKS for, and it is what it gets only in the no-cover
+      // case: a DU, so the badge's words change without a flash. In the cover case
+      // nothing has asserted a baseline, so displayStart sees !_oldPlaneValid,
+      // seeds DTM1 white and takes the GC regardless of the mode -- which is the
+      // clean clear a panel holding a photograph needs.
       showOnePass(reader::RefreshMode::Fast);
-      // ...and the NEXT paint is the strong one. Home is a whole new screen over a
-      // baseline we have just admitted we do not know, so it takes the GC -- which
-      // is both the honest refresh and the one that clears anything the DU above got
-      // wrong. This is the flash a screen change is allowed to have.
-      display.requestResync();
+      if (coverOnGlass) {
+        // NOW it is true: the panel holds a frame we just wrote, and the boot
+        // clear budget has been spent on the paint that needed it.
+        display.skipInitialResync();
+      } else {
+        // ...and the NEXT paint is the strong one. Home is a whole new screen over a
+        // baseline we have just admitted we do not know, so it takes the GC -- which
+        // is both the honest refresh and the one that clears anything the DU above got
+        // wrong. This is the flash a screen change is allowed to have.
+        display.requestResync();
+      }
+      logf("[power] waking paint: %s\n",
+           coverOnGlass ? "a cover is on the glass -- clean clear, no baseline asserted"
+                        : "the card screen is on the glass -- DU over it");
+      logFlush();
       mark("waking-painted");
     }
     // The root is Home, built from the shared catalogue. Nothing rebuilds it, so
@@ -4752,7 +4804,29 @@ static void paintStatusBar(const char* label) {
   logFlush();
 }
 
+// WHAT A SLEEP PAINT COST, split the way [i] splits an interaction, because a
+// sleep is no longer one waveform and nobody should have to instrument it again to
+// find that out. With a cover the panel does THREE waveforms and this renders FOUR
+// passes; without one it is the single ~825 ms it always was, and `paint=` is which.
+//
+// `panel=` is total less render, so it carries the log's own cost as well as the
+// waveform's -- which is what `ser=` is for. Unplugged it reads ~0 and the rest of
+// the line is the device's own, exactly as CLAUDE.md's `ser=` rule says.
+static void logSleepPaintCost(const char* how, int passes, uint32_t renderMs,
+                              uint32_t t0, uint32_t log0) {
+  const uint32_t total = millis() - t0;
+  logf("[power] sleep paint=%s passes=%d render=%lums panel=%lums total=%lums ser=%lums\n",
+       how, passes, (unsigned long)renderMs, (unsigned long)(total - renderMs),
+       (unsigned long)total, (unsigned long)(gLogMs - log0));
+  logFlush();
+}
+
 static void paintSleepScreen() {
+  const uint32_t t0 = millis();
+  const uint32_t log0 = gLogMs;
+  uint32_t renderMs = 0;
+  int passes = 0;
+
   const reader::SleepViewModel vm =
       sleepVmFromCard(std::string("ASLEEP") + "\xC2\xB7" + "PRESS POWER TO WAKE");
 
@@ -4790,12 +4864,16 @@ static void paintSleepScreen() {
     // decode, every sleep with `Shows` on DETAILS, and every sleep with nothing
     // open (sleepVmFromCard forces DETAILS there; SleepIdle is the badge alone and
     // has no cover to show).
+    const uint32_t r0 = millis();
     gFrame->clear(true);
     scr.render(*gFrame, *gFonts, gTheme, reader::Plane::Bw);
     gFrameContentsUnknown = true;
+    renderMs += millis() - r0;
+    ++passes;
     // FULL, not fast: this is the last thing the panel is asked to do for hours and a
     // differential update would leave the previous screen's residue under it.
     showOnePass(reader::RefreshMode::Full);
+    logSleepPaintCost("mono", passes, renderMs, t0, log0);
     mark("sleep-painted");
     return;
   }
@@ -4816,13 +4894,16 @@ static void paintSleepScreen() {
   // pass before the planes, the Bw re-render instead of a fourth frame -- and none
   // of the reasoning is restated here on purpose: two copies of it would drift, and
   // paintGray() is where it lives.
-  const auto renderSleepPlane = [&scr](reader::Plane plane) {
+  const auto renderSleepPlane = [&scr, &renderMs, &passes](reader::Plane plane) {
+    const uint32_t r0 = millis();
     gFrame->clear(true);
     scr.render(*gFrame, *gFonts, gTheme, plane);
     // App's partial-repaint record now describes a frame App did not write, and it
     // cannot see that: its check compares the Framebuffer's ADDRESS, which has not
     // moved. Set per pass rather than once, because each pass rewrites the frame.
     gFrameContentsUnknown = true;
+    renderMs += millis() - r0;
+    ++passes;
   };
 
   // 1. The B/W base frame the panel paints first.
@@ -4882,6 +4963,7 @@ static void paintSleepScreen() {
   display.displayGrayBuffer();
   renderSleepPlane(reader::Plane::Bw);
   display.cleanupGrayscaleBuffers(gFrame->data());
+  logSleepPaintCost("gray", passes, renderMs, t0, log0);
   mark("sleep-painted");
 }
 
@@ -4907,8 +4989,17 @@ static void paintSleepScreen() {
   // THE READING POSITION GOES DOWN WITH THE DEVICE. Deep sleep is a chip reset, so
   // nothing in RAM survives it -- and a reader who closes the cover mid-page expects
   // that page back.
+  // THE PHASE CLOCKS. A sleep used to be one waveform and is now up to five things,
+  // so it gets the same treatment an interaction gets: one line at the end that adds
+  // up, rather than a reader summing `[stage]` timestamps by hand. See the
+  // `[power] sleep cost` line below.
+  const uint32_t tSleep0 = millis();
+  const uint32_t logSleep0 = gLogMs;
+
   saveReadingPosition("sleep");
+  const uint32_t tSaved = millis();
   paintSleepScreen();
+  const uint32_t tPaint1 = millis();
 
   // CAPTURED BEFORE ANYTHING CAN RELEASE THE App, and the log line below is the
   // reason. screenName returns a string literal, so this outlives the stack it was
@@ -4933,7 +5024,17 @@ static void paintSleepScreen() {
   // a human needs, so a decode that hangs and takes a reset must leave NO flag: an
   // unflagged boot starts cold, which is the correct answer for a sleep that never
   // completed, where a flagged one would resume from a sleep that did not happen.
-  if (coverWanted() && !coverCacheUsable()) {
+  //
+  // THE PROBE IS HOISTED OUT OF THE `if` SO IT CAN BE TIMED. It is two openReads and
+  // a header parse -- the same pair the paint above already did -- and it is paid on
+  // EVERY sleep that wants a cover, hit or miss, so it is a number worth having
+  // rather than a shrug.
+  const bool decodeNeeded = coverWanted() && !coverCacheUsable();
+  const uint32_t tProbed = millis();
+  uint32_t decodeMs = 0;
+  uint32_t paint2Ms = 0;
+
+  if (decodeNeeded) {
     // RELEASE THE WHOLE App, NOT JUST THE CHAPTER -- and the margin is why.
     //
     // ReaderScreen::releaseChapter() already exists, built for the peek, and it
@@ -4959,16 +5060,41 @@ static void paintSleepScreen() {
     // carried -- sleep is the only moment in this firmware where freeing
     // everything is free -- finally spent.
     gApp.reset();
+    const uint32_t d0 = millis();
     const reader::CoverResult r = decodeCoverToCache();
+    decodeMs = millis() - d0;
     // The verdict, the reason and the elapsed time are one `[cover]` line inside
     // decodeCoverToCache. Printing it again here would be the same fact twice.
-    if (r == reader::CoverResult::Ok) paintSleepScreen();
+    if (r == reader::CoverResult::Ok) {
+      const uint32_t p0 = millis();
+      paintSleepScreen();
+      paint2Ms = millis() - p0;
+    }
     // reacquireChapter() is deliberately NOT called, and neither is anything that
     // would rebuild the App. There is nothing to come back to: the next statement
     // is deepSleep(), and the wake after it is a chip reset that runs setup() from
     // the top and restores the stack from the session record.
   }
 
+  // WHAT THIS SLEEP COST, in one line that adds up.
+  //
+  // The shape a reader should expect, and why each case is what it is:
+  //   * DETAILS, or nothing open      -- paint1 only, ~825 ms, probe=0 decode=0.
+  //   * a cover wanted, cache warm    -- paint1 is the GRAY paint (three waveforms
+  //                                      plus four render passes), decode=0.
+  //   * a cover wanted, cache cold    -- paint1 MONO, then probe, then decode, then
+  //                                      paint2 GRAY. This is the expensive one, and
+  //                                      it happens once per book.
+  // `[power] sleep paint=` above breaks each paint into render and panel, and
+  // `[cover] … in Nms` names what the decode was doing. `ser=` is how much of the
+  // total was this device talking to a USB host: unplugged it reads ~0 and every
+  // other number on the line is the device's own.
+  logf("[power] sleep cost save=%lums paint1=%lums probe=%lums decode=%lums "
+       "paint2=%lums total=%lums ser=%lums\n",
+       (unsigned long)(tSaved - tSleep0), (unsigned long)(tPaint1 - tSaved),
+       (unsigned long)(tProbed - tPaint1), (unsigned long)decodeMs,
+       (unsigned long)paint2Ms, (unsigned long)(millis() - tSleep0),
+       (unsigned long)(gLogMs - logSleep0));
   logf("[power] sleeping from screen=%s; the record should name it on wake. Wake with "
        "the power button\n",
        sleptFrom);
