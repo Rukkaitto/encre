@@ -3370,6 +3370,20 @@ Reader restores.** Both sides are `currentCursor` over the same document, so the
 second spelling of a page position free to disagree with the first — which is exactly
 how a "go here" lands a page off.
 
+**THAT IS TRUE OF THE BLOCK AND FALSE OF THE LINE, and the paragraph above said it
+without the qualification** until the device produced
+`[peek] GO HERE spine=54 block=1 line=7: ok`. A `Cursor`'s line is a line *within a
+block at one ppem and one column width* — `reading_position.h` grades exactly that as
+`Relaid` and zeroes the field — and the peek's column is ~368px against the page's 444.
+So the two sides really are one spelling of a *block* and two spellings of a *line*.
+
+It looked right in the run that found it because a 17-line reading page swallows the
+difference: the peek's page 2 started at `(1, 7)`, which at the reading measure still
+falls on page 1. The error is sub-page for small offsets and grows with the line index,
+so **committing from deep inside a long chapter is where it lands a page off** — which
+is the case the peek exists for. Issue #48; no data loss, and the landing is always in
+the right chapter and the right block.
+
 **THE READER BENEATH RELEASES ITS CHAPTER**, because two live chapters do not fit:
 69,884 bytes peak with a 36,956-byte single allocation, against a measured 45,840-byte
 floor. It is affordable because `ReaderScreen::render` reads only `page_` and `vm_`, so
