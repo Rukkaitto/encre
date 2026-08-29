@@ -89,9 +89,21 @@ def cover_entry(z):
             items[i.group(1)] = (h.group(1), pr.group(1) if pr else "")
 
     href = None
-    m = re.search(r'<meta\b[^>]*name="cover"[^>]*content="([^"]+)"', x)
-    if m and m.group(1) in items:
-        href = items[m.group(1)][0]
+    # ATTRIBUTE ORDER IS NOT PART OF XML, and a regex that demands one is a bug
+    # waiting for a file that writes them the other way round. Calibre writes
+    # `<meta content="cover-image" name="cover"/>` -- content FIRST -- and an
+    # earlier version of this function required name first, so it missed that
+    # book's meta route entirely and was rescued only by properties=. A book with
+    # reversed attributes AND no properties would have been reported as having no
+    # cover at all. core/src/epub.cpp is immune because it asks x.attr("name")
+    # rather than matching a pattern; this is the tool catching up with it.
+    for mm in re.finditer(r"<meta\b[^>]*?/?>", x):
+        tag = mm.group(0)
+        n = re.search(r'\bname="([^"]*)"', tag)
+        c = re.search(r'\bcontent="([^"]*)"', tag)
+        if n and c and n.group(1) == "cover" and c.group(1) in items:
+            href = items[c.group(1)][0]
+            break
     if href is None:
         for _, (h, pr) in items.items():
             # A space-separated token list, so a substring test would accept
