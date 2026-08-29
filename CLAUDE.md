@@ -3839,6 +3839,14 @@ passed — `shell/` has no harness, so nothing on the desktop touches that loop.
   mutation invisible because the walk refilled the ring, and a last-line
   justification mutation invisible because the specimen's last line was under the
   fill threshold anyway.
+  **AND A FOURTH, WHICH DESTROYS THE WORK RATHER THAN LYING ABOUT IT: `git checkout`
+  TO UNDO A MUTATION IN A FILE YOU HAVE NOT COMMITTED.** It reverts the file to HEAD,
+  which is the mutation *and the change being tested* — so the next run reports
+  numbers for code that no longer exists, and reports them as a pass. Caught during
+  the anchor rewrite only because the following build behaved impossibly. **COMMIT
+  BEFORE YOU MUTATE**, and restore with a `cp` of a backup taken before the edit, never
+  with `git checkout`. The three ways above make a mutation lie about the TEST; this
+  one makes it lie about the SOURCE, and it is the only one that also loses work.
 - **A SCRIPTED REPLACE WITH NO COUNT REWROTE A FUNCTION INTO A CALL TO ITSELF**, and
   it reached the device as a stack-protection fault. Rewriting the call sites
   `anchor_.jumped(from, here())` into `anchorJumped(from)` used `s.replace(a, b)`
