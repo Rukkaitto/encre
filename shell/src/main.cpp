@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <BatteryMonitor.h>
 #include <BoardConfig.h>
 #include <EInkDisplay.h>
 #include <InputManager.h>
@@ -32,6 +33,7 @@
 #include "font_value700.h"
 #include "input_task.h"
 #include "reader/app.h"
+#include "reader/battery_tracker.h"
 #include "reader/booklist.h"
 #include "reader/font_manifest.h"
 #include "reader/fontset.h"
@@ -397,6 +399,11 @@ static IdleWalkStuck gWarmStuck;
 // press absorbs, and being LATE costs durability, which is the whole feature.
 constexpr uint32_t kSaveQuietMs = 2000;
 
+// Fast enough that plugging in feels immediate, and affordable because the read is
+// I2C and never touches the display's bus. It is gated on Home being on glass, so
+// it does not run while reading.
+static constexpr uint32_t kBatteryPollMs = 2000;
+
 // WHETHER THE POSITION ON SCREEN IS WORTH THE BUS. See progress_save_gate.h: it holds
 // the last point actually stored, so the quiet window cannot re-save the same page on
 // every loop iteration, and it gives up after three consecutive refusals so a
@@ -455,6 +462,34 @@ static reader::Settings gSettings;
 // because these are alive long before the card is mounted.
 static reader::RefreshPolicy gRefresh(gSettings.fullRefreshEvery, gSettings.fullOnTransition);
 static reader::IdleTimer gIdle(gSettings.sleepAfterMs);
+// THE BATTERY. The monitor picks its backend at RUNTIME from the active board
+// profile, which is what lets one C3 binary serve both models: X3 reads a BQ27220
+// fuel gauge over I2C, X4 reads an ADC divider. So this must not be constructed
+// before detectAndSelectBoard() has run -- it is, but it reads nothing until a
+// method is called, and the first call is on the first Home paint.
+static BatteryMonitor gBatteryMonitor;
+static reader::BatteryTracker gBattery;
+// Whether the active board can observe charging at all. Set from the FIRST
+// reading, and it is what keeps the 2 s poll off an X4: that profile declares no
+// gauge and no charge-status pin, so isCharging() is false there for ever and a
+// poll could never see a change. Battery spent for nothing on a device built to
+// sit idle.
+static bool gChargingObservable = false;
+static bool gBatteryEverRead = false;
+// How many times the 2 s poll has actually run. The poll's only other trace is
+// the one-shot [battery] boot line and an occasional "-> repainting Home", so
+// without this a disarmed poll, a poll pinned by kMaxGrantsPerSession and a
+// poll quietly working are all silent in the same way -- reported on [alive]
+// below for the same reason the listing cache's hit=/miss= is.
+static uint32_t gBatteryPolls = 0;
+// When the cadence last had a reason to reset -- file scope because BOTH the
+// paint-time read (renderTop) and the periodic poll (loop) stamp it, so a Home
+// paint counts as a read for cadence purposes too. Without that a boot in
+// particular leaves this at 0, and the periodic poll fires on the very next
+// quiet iteration to re-read what the boot paint just read a moment earlier --
+// harmless (the tracker will not double-fire a request), but an avoidable I2C
+// transaction.
+static uint32_t gLastBatteryPollMs = 0;
 static InputManager gInput;
 // The card. One instance: SDCardManager is a singleton underneath, so a second
 // SdFileSystem would address the same volume with its own idea of whether it is
@@ -2904,7 +2939,91 @@ static void paintDithered(reader::RefreshMode mode) {
   mark("dithered-displayed");
 }
 
+// ONE READING, from ONE call. readStatus() reports percentage, millivolts and
+// charging each with its own `Known` flag, and those flags are the whole point:
+// BatteryMonitor's unchecked accessors answer a FAILED read with 0, so "0%" and
+// "the gauge did not answer" are the same value out of that API.
+//
+// Not readPercentageChecked() + isCharging(), which is one I2C transaction cheaper:
+// those are two calls that can observe two different instants, and isCharging()
+// DISCARDS the known flag that gChargingObservable needs. One call site that
+// cannot disagree with itself is worth ~150 us.
+static reader::BatteryReading readBattery() {
+  const BatteryMonitor::Status s = gBatteryMonitor.readStatus();
+  reader::BatteryReading r;
+  r.percentKnown = s.percentageKnown;
+  r.percent = static_cast<int>(s.percentage);
+  r.chargingKnown = s.chargingKnown;
+  r.charging = s.charging;
+  // STICKY, NOT FIRST-SAMPLE. readStatus() reads SoC and charging as two
+  // independent I2C transactions, so the charging half can fail on its own --
+  // and deciding this from one sample would let a single glitch at the first
+  // Home paint disable the plug-in poll for the rest of the session, on a
+  // device that supports it perfectly well. On an X4 no reading ever reports
+  // chargingKnown, so this stays false there, which is the whole point of the
+  // gate. On an X3 it arms itself at the first reading that succeeds -- and the
+  // paint-time read runs on every Home paint regardless of this flag, so it
+  // is self-healing rather than needing a retry of its own.
+  if (r.chargingKnown) gChargingObservable = true;
+  if (!gBatteryEverRead) {
+    gBatteryEverRead = true;
+    logf("[battery] %s pct=%s charging=%s (%s backend)\n",
+         s.supported ? "supported" : "UNSUPPORTED",
+         s.percentageKnown ? String(s.percentage).c_str() : "unknown",
+         s.chargingKnown ? (s.charging ? "yes" : "no") : "unknown",
+         BoardConfig::ACTIVE.batteryGauge.gaugeAddr != 0 ? "I2C gauge" : "ADC");
+    logFlush();
+  }
+  return r;
+}
+
+// HOME IS THE SCREEN ABOUT TO BE PAINTED. One predicate, because two sites ask it
+// -- the paint-time read and the 2 s poll -- and a poll that thought Home was
+// showing while the paint site did not would repaint a screen with no battery on it.
+//
+// top() is sufficient and App::render's walk is not needed: nothing is ever pushed
+// as an overlay over Home. There are exactly four overlays -- ItemActions and
+// DeleteConfirm on the Library, ReaderMenu and Peek on the Reader -- and Home
+// reaches neither parent without being pushed off the top first. If that changes,
+// this becomes "the topmost non-overlay is Home", in one place.
+static bool homeOnGlass() {
+  return gApp && gApp->top().id() == reader::ScreenId::Home;
+}
+
+// Take a reading and hand it to the screen. Returns whether the tracker asked for
+// a repaint, which only the POLL acts on.
+static bool refreshBatteryOnHome() {
+  if (!homeOnGlass()) return false;
+  gBattery.update(readBattery(), millis());
+  static_cast<reader::HomeScreen&>(gApp->top())
+      .setBattery(gBattery.percent(), gBattery.charging());
+  return gBattery.takeRepaintRequest();
+}
+
 static void renderTop() {
+  // BEFORE the SpiBusGuard below, and deliberately: this is I2C on the sensor bus
+  // and has nothing to do with the display's SPI, so keeping the two visibly apart
+  // is worth a line. Three transactions, ~450 us at 400 kHz, against a 439 ms
+  // panel. What it buys is that the number on the glass was measured when the
+  // glass was painted -- no timer, no staleness to reason about.
+  //
+  // The repaint request is TAKEN AND DISCARDED. An edge seen here -- in either
+  // direction, since a confirmed unplug grants one too -- is already being
+  // satisfied by the paint that is about to happen; leaving the request standing
+  // would fire a second refresh at the next poll, immediately after it.
+  //
+  // UNTRACKED IN [i] ON PURPOSE, STATED RATHER THAN SILENT. This runs before t0
+  // below, so its ~450 us is counted in `total` and attributable to no named
+  // stage -- it lands in the gap between `post` (already accumulated before
+  // renderTop was called) and `render` (timed from t0). Under 0.2% of a paint,
+  // not worth restructuring for; the [i] line exists to eliminate exactly this
+  // kind of unattributed gap, so it should be named rather than left quiet.
+  (void)refreshBatteryOnHome();
+  // Also resets the poll's own cadence timer, so a Home paint counts as a read
+  // for that purpose too -- see gLastBatteryPollMs's own comment for why a boot
+  // that skipped this would have the periodic poll immediately re-read what the
+  // paint just read.
+  gLastBatteryPollMs = millis();
   // EVERY PAINT, not just the first. The frame is the driver's, and the driver
   // can take it back (bindFrameToDriver says how and why). Nothing lends it
   // today, so this is a pointer comparison that always agrees -- it is here so
@@ -4951,11 +5070,14 @@ void loop() {
     }
   }
 
-  // ONE GATE, TWO USERS, AND IT IS LITERALLY ONE EXPRESSION. Both of the calls
-  // below are SPI traffic on the display's shared bus taken in an idle window, and
-  // the card log's flush is specified as running "under the same gate the
-  // card-presence poll uses" -- so it reads the same local rather than carrying a
-  // second copy of the condition that can drift away from this one.
+  // ONE GATE, AND IT IS LITERALLY ONE EXPRESSION -- deliberately not naming how
+  // many things read it below, because that count has already gone stale once
+  // (the card log's flush, then pollCardPresence, then the battery poll) and
+  // will again. What matters is that each of them reads THIS local rather than
+  // carrying its own copy of the condition that can drift away from it. The
+  // card log's flush is specified as running "under the same gate the
+  // card-presence poll uses", and the battery poll below follows the same rule
+  // for a different bus.
   const bool quiet = !gApp->dirty() && rawSamplesPending() == 0;
 
   // THE CARD LOG'S IDLE FLUSH. This is the call kLogFlushAtBytes was declared for
@@ -5015,6 +5137,45 @@ void loop() {
   // are making will hit the card itself soon enough.
   if (quiet) pollCardPresence(millis());
 
+  // PLUGGING IN SHOULD SHOW THE BOLT WITHOUT A BUTTON BEING PRESSED, and nothing
+  // else will make that happen: e-ink holds its image, no input arrives, and
+  // Home's view model is otherwise only rebuilt at boot, on a wake and on a Back
+  // out of a book.
+  //
+  // Same gate as pollCardPresence -- after the paint block, nothing owed to the
+  // panel -- but for a different reason: this needs no SpiBusGuard, because it is
+  // I2C on the sensor bus and cannot race a refresh. What the gate buys is only
+  // that a repaint it asks for does not jump a frame the user is waiting for.
+  //
+  // UNPLUGGING HAS TO REACH THE GLASS TOO, and the first version of this did not.
+  // It fired on a rising edge only, on the stated grounds that a stale bolt would
+  // be corrected by the next Home paint -- which assumed a button press that never
+  // came. Reported off the device: the bolt appeared on plug-in and then stayed
+  // for ever. A mark claiming the device is charging when it is not is the same
+  // class of lie as a 0% for a gauge that did not answer.
+  //
+  // Skipped entirely where charging cannot be observed, which is every X4.
+  // BatteryTracker owns everything that makes this safe: an edge in either
+  // direction, a first reading that seeds without firing, a latch that clears only
+  // after 60 s of continuous not-charging, and three grants a session. The dwell is
+  // what stops a device sitting at 100% on the charger -- where the gauge's
+  // Current() sign dithers around zero -- repainting the panel all night, and it is
+  // also what tells a real unplug from that dither, which is why CLEARING the bolt
+  // rides the same timer rather than a second constant.
+  if (quiet && gChargingObservable && homeOnGlass() &&
+      static_cast<uint32_t>(millis() - gLastBatteryPollMs) >= kBatteryPollMs) {
+    gLastBatteryPollMs = millis();
+    ++gBatteryPolls;
+    if (refreshBatteryOnHome()) {
+      gApp->markDirty();
+      // WHICH EDGE, because both grant a repaint now and a line that says only
+      // "charging" would misreport half of them -- on glass this is the one
+      // record of what the panel was asked to do and why.
+      logf("[battery] charging=%d -> repainting Home\n", gBattery.charging() ? 1 : 0);
+      logFlush();
+    }
+  }
+
   static uint32_t beat = 0;
   if (++beat % 200 == 0) {
     // minHeap is the HIGH-WATER mark, and it is the number Phase 3 actually needs:
@@ -5027,13 +5188,24 @@ void loop() {
     // faster" and "it stopped being called" look identical, and this file records
     // that shape as a defect three times over. hits/misses is what tells a cache
     // that is working from one that is merely quiet.
+    // BATTERY, ON THE SAME LINE AND FOR THE SAME REASON AS listings= ABOVE. The
+    // poll's only other trace is the one-shot [battery] boot line and an
+    // occasional "-> repainting Home", so a disarmed poll, one pinned by
+    // kMaxGrantsPerSession and one quietly seeing no change all look identical
+    // otherwise -- indistinguishable from "I plugged in and nothing happened."
+    // observable/pct/charging are read straight off gChargingObservable/gBattery
+    // rather than re-derived, so this can never disagree with what setBattery()
+    // just handed the screen.
     logf("[alive] last-stage=%s heap=%u minHeap=%u screen=%s depth=%d "
-         "dropped=%lu/%lu listings=%u slots/%uB hit=%u miss=%u\n",
+         "dropped=%lu/%lu listings=%u slots/%uB hit=%u miss=%u "
+         "battery observable=%d pct=%d charging=%d polls=%lu\n",
          stage, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
          reader::screenName(gApp->top().id()), gApp->depth(),
          (unsigned long)rawSamplesDropped(), (unsigned long)gPresses.dropped(),
          (unsigned)gSd.listings().slotsHeld(), (unsigned)gSd.listings().residentBytes(),
-         (unsigned)gSd.listings().hits(), (unsigned)gSd.listings().misses());
+         (unsigned)gSd.listings().hits(), (unsigned)gSd.listings().misses(),
+         (int)gChargingObservable, gBattery.percent(), (int)gBattery.charging(),
+         (unsigned long)gBatteryPolls);
     // WHAT THE CARD LOG HAS COST AND WHAT IT HAS LOST, on the heartbeat rather than
     // per flush. `dropped` non-zero means the buffer overran between two idle
     // windows and the log has a HOLE in it -- which must never be mistaken for the

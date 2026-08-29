@@ -33,6 +33,16 @@ class HomeScreen : public FocusScreen {
   // the base class is what keeps that reachable.
   const HomeViewModel& vm() const { return vm_; }
 
+  // THE BATTERY MOVES AFTER THE VIEW MODEL IS BUILT, which no other Home field
+  // does: Home's vm is constructed once and only rebuilt at boot, on a wake, and
+  // on a Back out of a book, while the charge changes continuously and the shell
+  // re-reads it before every Home paint. Same shape and same reason as
+  // LibraryScreen::refreshProgress().
+  //
+  // It deliberately does NOT touch the focus. It runs on the paint path, so
+  // moving a selection here would move one the user never touched.
+  void setBattery(int percent, bool charging);
+
  private:
   void syncVm() override;
 

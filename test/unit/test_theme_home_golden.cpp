@@ -1,5 +1,7 @@
+#include <cstring>
 #include <fstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "doctest.h"
@@ -127,4 +129,129 @@ TEST_CASE("Home's action block carries the long arrow, not the row chevron") {
     CHECK(x1 <= right - 20);
     CHECK(x1 >= right - 20 - 3);
   }
+}
+
+TEST_CASE("the charging battery is the same box as the idle one") {
+  // The band's height is derived from the mark (headerBandHeight takes it), and
+  // the number's position is derived from the mark's width. If the two states
+  // differed in either, swapping them would move the band and every row under
+  // it -- which is the header-band defect this project has already paid for once.
+  CHECK(reader::icons::kBatteryCharging.w == reader::icons::kBattery.w);
+  CHECK(reader::icons::kBatteryCharging.h == reader::icons::kBattery.h);
+  // Not the same BYTES, though: that would mean the bolt never reached the
+  // asset. Comparing `.rows` itself is a pointer comparison and can never be
+  // equal whatever the two arrays hold, so this compares the CONTENTS.
+  const int stride = (reader::icons::kBatteryCharging.w * reader::icons::kBatteryCharging.bpp + 7) / 8;
+  CHECK(std::memcmp(reader::icons::kBatteryCharging.rows, reader::icons::kBattery.rows,
+                     static_cast<size_t>(stride) * reader::icons::kBatteryCharging.h) != 0);
+}
+
+namespace {
+// Ink in a rectangle. getPixel reports WHITE, so ink is its negation.
+int inkIn(const reader::Framebuffer& fb, int x0, int y0, int w, int h) {
+  int n = 0;
+  for (int y = y0; y < y0 + h; ++y)
+    for (int x = x0; x < x0 + w; ++x)
+      if (!fb.getPixel(x, y)) ++n;
+  return n;
+}
+}  // namespace
+
+TEST_CASE("an unknown charge draws the mark alone, with the mark still on the margin") {
+  Ramp ramp;
+  reader::QuietTheme theme;
+  auto renderOne = [&](int w, int h, int percent) {
+    reader::Framebuffer fb(w, h);
+    reader::HomeViewModel vm = sampleHome();
+    vm.batteryPercent = percent;
+    theme.renderHome(fb, ramp.fonts, vm, reader::Plane::Bw);
+    return fb;
+  };
+  for (const auto geom : {std::pair<int, int>{480, 800}, std::pair<int, int>{528, 792}}) {
+    const int w = geom.first, h = geom.second;
+    const reader::Framebuffer known = renderOne(w, h, 87);
+    const reader::Framebuffer unknown = renderOne(w, h, -1);
+
+    const int iconLeft = w - reader::kMargin - reader::icons::kBattery.w;
+    // headerBandHeight() includes the band's own trailing rule (kBandRuleH), a
+    // full-width fillRect drawn identically whatever the charge string is. A
+    // window that reaches it picks up that rule's ink in EVERY case, known or
+    // not -- so the content-only checks below stop short of it.
+    const int bandH = reader::headerBandHeight(ramp.fonts, &reader::icons::kBattery) -
+                       reader::kBandRuleH;
+
+    // The mark itself is drawn in BOTH, in the same place: the number going away
+    // must not move it off the margin.
+    CHECK(inkIn(known, iconLeft, 0, reader::icons::kBattery.w, bandH) > 0);
+    CHECK(inkIn(unknown, iconLeft, 0, reader::icons::kBattery.w, bandH) ==
+          inkIn(known, iconLeft, 0, reader::icons::kBattery.w, bandH));
+
+    // The 20 columns where the number's last glyph would land: inked when the
+    // charge is known, blank when it is not.
+    const int numberX = iconLeft - reader::kBandGap - 20;
+    CHECK(inkIn(known, numberX, 0, 20, bandH) > 0);
+    CHECK(inkIn(unknown, numberX, 0, 20, bandH) == 0);
+
+    // BOTH AXES ARE INDEPENDENT, so "no percentage but charging" is reachable:
+    // BatteryTracker records percentKnown and chargingKnown separately, and a
+    // gauge really can answer one and fail the other. Bolt, and still no digits.
+    reader::HomeViewModel vm = sampleHome();
+    vm.batteryPercent = -1;
+    vm.batteryCharging = true;
+    reader::Framebuffer both(w, h);
+    theme.renderHome(both, ramp.fonts, vm, reader::Plane::Bw);
+    CHECK(inkIn(both, numberX, 0, 20, bandH) == 0);
+    // The mark is the CHARGING one: its columns differ from the idle render's.
+    int differing = 0;
+    for (int y = 0; y < bandH; ++y)
+      for (int x = iconLeft; x < iconLeft + reader::icons::kBattery.w; ++x)
+        if (both.getPixel(x, y) != unknown.getPixel(x, y)) ++differing;
+    CHECK(differing > 0);
+  }
+}
+
+TEST_CASE("charging swaps the mark and nothing else") {
+  Ramp ramp;
+  reader::QuietTheme theme;
+  auto renderOne = [&](bool charging) {
+    reader::Framebuffer fb(480, 800);
+    reader::HomeViewModel vm = sampleHome();
+    vm.batteryCharging = charging;
+    theme.renderHome(fb, ramp.fonts, vm, reader::Plane::Bw);
+    return fb;
+  };
+  const reader::Framebuffer idle = renderOne(false);
+  const reader::Framebuffer charging = renderOne(true);
+
+  const int iconLeft = 480 - reader::kMargin - reader::icons::kBattery.w;
+  int differing = 0, differingOutsideMark = 0;
+  for (int y = 0; y < 800; ++y)
+    for (int x = 0; x < 480; ++x)
+      if (idle.getPixel(x, y) != charging.getPixel(x, y)) {
+        ++differing;
+        if (x < iconLeft || x >= iconLeft + reader::icons::kBattery.w) ++differingOutsideMark;
+      }
+  // The bolt is a real, visible difference...
+  CHECK(differing > 0);
+  // ...and it is confined to the mark's own columns. If anything outside them
+  // moved, the two marks are not the same box and the band has shifted.
+  CHECK(differingOutsideMark == 0);
+}
+
+// design/HomeCharging.dc.html, pixel-exact at both geometries. The charging mark
+// is the one thing here nothing else pins: the unit tests above assert the two
+// marks share a box and that the swap is confined to the mark's columns, which is
+// structure -- this is what says the bolt actually renders as a bolt.
+TEST_CASE("QuietTheme renders Home charging to golden on both geometries") {
+  Ramp ramp;
+  reader::QuietTheme theme;
+  auto renderOne = [&](int w, int h, const std::string& name) {
+    reader::Framebuffer fb(w, h);
+    reader::HomeViewModel vm = sampleHome();
+    vm.batteryCharging = true;
+    theme.renderHome(fb, ramp.fonts, vm, reader::Plane::Bw);
+    golden::checkGolden(fb, name);
+  };
+  SUBCASE("X4 480x800") { renderOne(480, 800, "home_charging"); }
+  SUBCASE("X3 528x792") { renderOne(528, 792, "home_charging_x3"); }
 }

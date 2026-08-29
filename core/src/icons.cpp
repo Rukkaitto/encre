@@ -59,6 +59,7 @@ const Icon kBook{data::kBookW, data::kBookH, 2, data::kBookBits};
 const Icon kBookLarge{data::kBookLargeW, data::kBookLargeH, 2, data::kBookLargeBits};
 const Icon kFolder{data::kFolderW, data::kFolderH, 2, data::kFolderBits};
 const Icon kBattery{data::kBatteryW, data::kBatteryH, 2, data::kBatteryBits};
+const Icon kBatteryCharging{data::kBatteryChargingW, data::kBatteryChargingH, 2, data::kBatteryChargingBits};
 const Icon kSdCard{data::kSdCardW, data::kSdCardH, 2, data::kSdCardBits};
 }  // namespace icons
 

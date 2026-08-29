@@ -363,3 +363,34 @@ TEST_CASE("UP moves an ordinary Home the other way") {
   h.onEvent(kUp);
   CHECK(s.focus() == 1);  // wraps up to SETTINGS
 }
+
+TEST_CASE("setBattery mirrors into the view model") {
+  HomeScreen h = makeHome();
+  // The default is unknown, not flat: a view model nobody has told about the
+  // battery must not claim one.
+  CHECK(h.vm().batteryPercent == -1);
+  CHECK(h.vm().batteryCharging == false);
+  h.setBattery(64, true);
+  CHECK(h.vm().batteryPercent == 64);
+  CHECK(h.vm().batteryCharging == true);
+  h.setBattery(-1, false);
+  CHECK(h.vm().batteryPercent == -1);
+  CHECK(h.vm().batteryCharging == false);
+}
+
+TEST_CASE("setBattery does not disturb the focus") {
+  // It is called from the shell's paint path, on every Home paint. Moving a
+  // selection here would move one the user never touched.
+  //
+  // TWO presses, not one: makeHome()'s ring starts at -1 (CONTINUE), and one
+  // Down lands on row 0 -- which is also setFocus's own reset value, so a
+  // setBattery that accidentally reset the focus to 0 would have left `was`
+  // unchanged and the assertion would not have noticed. A second Down moves
+  // focus to row 1, which the accidental reset actually disturbs.
+  HomeScreen h = makeHome();
+  REQUIRE(h.onEvent(kDown).kind == Action::Kind::Redraw);
+  REQUIRE(h.onEvent(kDown).kind == Action::Kind::Redraw);
+  const int was = h.focus();
+  h.setBattery(11, false);
+  CHECK(h.focus() == was);
+}

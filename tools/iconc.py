@@ -156,6 +156,22 @@ ICONS = {
         "source": "design/Main.dc.html",
         "match": '<rect x="19.5"',
     },
+    # THE SAME MARK WITH A BOLT KNOCKED OUT, and a second entry rather than a
+    # variant for the reason book_large is one: these are pre-rendered bitmaps,
+    # so two states are two assets. The match keys on the bolt's own path,
+    # because that is the part that says WHICH mark this is -- the terminal nub
+    # (`<rect x="19.5"`) is on BOTH batteries and identifies neither, the same
+    # shortcut sdcard and hold both carry comments rejecting. `source` is then a
+    # second line of defence (it has to be a board holding exactly one battery),
+    # not the only one. The fallback the board documents -- dropping the fill
+    # and making the bolt black instead of white -- changes `fill`, not `d`, so
+    # this match survives it.
+    "battery_charging": {
+        "symbol": "kBatteryCharging",
+        "note": "the header band's charge cell, bolt knocked out: charging",
+        "source": "design/HomeCharging.dc.html",
+        "match": "M11.4 2",
+    },
     # The only mark in the set that is neither a button nor a row ornament: it is
     # the subject of a full-screen prompt, drawn at 84x105 where every other mark
     # here is 21-46px. The match keys on the card's own outline -- the notched

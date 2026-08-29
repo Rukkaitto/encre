@@ -338,6 +338,11 @@ int main(int argc, char** argv) {
   const bool isContents = std::strcmp(argv[1], "contents") == 0;
   const bool isHomeEmpty = std::strcmp(argv[1], "home_empty") == 0;
   const bool isHomeUnopened = std::strcmp(argv[1], "home_unopened") == 0;
+  // design/HomeCharging.dc.html. Home with the cable in: the SAME view model as
+  // `home`, with one flag set, because that is the only thing that differs on
+  // the device. A second demo view-model would be a second place for the board's
+  // content to live and to drift.
+  const bool isHomeCharging = std::strcmp(argv[1], "home_charging") == 0;
   const bool isLibraryScrolled = std::strcmp(argv[1], "library_scrolled") == 0;
   const bool isReader = std::strcmp(argv[1], "reader") == 0;
   // The two styled specimens, each its own subcommand for the reason every other
@@ -381,13 +386,13 @@ int main(int argc, char** argv) {
   const bool isPeek = std::strcmp(argv[1], "peek") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
-      !isHomeUnopened && !isLibraryScrolled && !isReader && !isSleepIdle &&
+      !isHomeUnopened && !isHomeCharging && !isLibraryScrolled && !isReader && !isSleepIdle &&
       !isReaderMenu && !isContents && !isChapterOpen && !isReaderList && !isAnchored &&
       !isSleepWaking && !isLibraryOpening && !isTypography && !isPeek) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
-                 "'sleep', 'sleep_idle', 'home_empty', 'home_unopened', "
+                 "'sleep', 'sleep_idle', 'home_empty', 'home_unopened', 'home_charging', "
                  "'library_scrolled', 'reader', 'reader_anchored', "
                  "'reader_chapter_open', 'reader_list', "
                  "'reader_menu', 'contents', 'typography', 'sleep_waking', "
@@ -709,12 +714,12 @@ int main(int argc, char** argv) {
   // navigation: they are Home with nothing to continue, so there is no journey that
   // reaches either -- the card is what decides, and on the desktop that is a choice
   // of view model.
+  reader::HomeViewModel homeVm = isHomeEmpty      ? reader::demoHomeEmptyVm()
+                                 : isHomeUnopened ? reader::demoHomeUnopenedVm()
+                                                  : reader::demoHomeVm();
+  if (isHomeCharging) homeVm.batteryCharging = true;
   reader::App app(
-      std::make_unique<reader::HomeScreen>(
-          isHomeEmpty      ? reader::demoHomeEmptyVm()
-          : isHomeUnopened ? reader::demoHomeUnopenedVm()
-                           : reader::demoHomeVm(),
-          reader::demoHomeTargets()),
+      std::make_unique<reader::HomeScreen>(std::move(homeVm), reader::demoHomeTargets()),
       factory);
 
   if (isLibraryScrolled) {
