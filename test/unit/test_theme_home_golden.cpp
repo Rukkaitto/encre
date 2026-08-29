@@ -1,3 +1,4 @@
+#include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -136,6 +137,10 @@ TEST_CASE("the charging battery is the same box as the idle one") {
   // it -- which is the header-band defect this project has already paid for once.
   CHECK(reader::icons::kBatteryCharging.w == reader::icons::kBattery.w);
   CHECK(reader::icons::kBatteryCharging.h == reader::icons::kBattery.h);
-  // Not the same BYTES, though: that would mean the bolt never reached the asset.
-  CHECK(reader::icons::kBatteryCharging.rows != reader::icons::kBattery.rows);
+  // Not the same BYTES, though: that would mean the bolt never reached the
+  // asset. Comparing `.rows` itself is a pointer comparison and can never be
+  // equal whatever the two arrays hold, so this compares the CONTENTS.
+  const int stride = (reader::icons::kBatteryCharging.w * reader::icons::kBatteryCharging.bpp + 7) / 8;
+  CHECK(std::memcmp(reader::icons::kBatteryCharging.rows, reader::icons::kBattery.rows,
+                     static_cast<size_t>(stride) * reader::icons::kBatteryCharging.h) != 0);
 }

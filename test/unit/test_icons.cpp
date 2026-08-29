@@ -19,7 +19,8 @@ const Named kAll[] = {{"kBack", &reader::icons::kBack},
                       {"kChevron", &reader::icons::kChevron},
                       {"kBook", &reader::icons::kBook},
                       {"kFolder", &reader::icons::kFolder},
-                      {"kBattery", &reader::icons::kBattery}};
+                      {"kBattery", &reader::icons::kBattery},
+                      {"kBatteryCharging", &reader::icons::kBatteryCharging}};
 
 // Big enough for the largest icon (kFolder, 46x39) plus the 8px offset every
 // case draws at, with room left over to catch a stray pixel on every side.

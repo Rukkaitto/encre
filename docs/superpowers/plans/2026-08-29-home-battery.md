@@ -775,7 +775,7 @@ EOF
 **Files:**
 - Modify: `tools/iconc.py`
 - Regenerated: `core/src/icons_data.h` (hand-edit `core/src/icons.cpp`, which is the naming layer rather than the generator's `--out` target)
-- Modify: `core/include/reader/icons.h`
+- Modify: `core/include/reader/icons.h`, `test/unit/test_icons.cpp`, `test/unit/test_theme_home_golden.cpp`
 
 - [ ] **Step 1: Add the generator entry**
 
@@ -784,24 +784,37 @@ In `tools/iconc.py`'s `ICONS` dict, immediately after the `"battery"` entry:
 ```python
     # THE SAME MARK WITH A BOLT KNOCKED OUT, and a second entry rather than a
     # variant for the reason book_large is one: these are pre-rendered bitmaps,
-    # so two states are two assets. The matcher keys on the terminal nub, which
-    # BOTH batteries carry -- so `source` is what tells them apart, and it has
-    # to be a board that holds exactly one of them.
+    # so two states are two assets. The match keys on the bolt's own path,
+    # because that is the part that says WHICH mark this is -- the terminal nub
+    # (`<rect x="19.5"`) is on BOTH batteries and identifies neither, the same
+    # shortcut sdcard and hold both carry comments rejecting. `source` is then a
+    # second line of defence (it has to be a board holding exactly one battery),
+    # not the only one. The fallback the board documents -- dropping the fill
+    # and making the bolt black instead of white -- changes `fill`, not `d`, so
+    # this match survives it.
     "battery_charging": {
         "symbol": "kBatteryCharging",
         "note": "the header band's charge cell, bolt knocked out: charging",
         "source": "design/HomeCharging.dc.html",
-        "match": '<rect x="19.5"',
+        "match": "M11.4 2",
     },
 ```
+
+**A prior draft of this entry matched `<rect x="19.5"`, the terminal nub.** That
+resolves only because `source` happens to pick the right file — it does not
+identify which mark inside that file is the intended one, which is exactly the
+shortcut `iconc.py`'s own header warns against ("prefer the part of the mark
+that identifies WHICH mark it is over the part a designer is likely to
+retune"). The bolt's path data is unique to this board and survives the
+documented fallback (a fill-colour swap touches `fill`, not `d`); use that.
 
 - [ ] **Step 2: Regenerate and read what it printed**
 
 ```bash
-cd /Users/lucasgoudin/dev/encre/.claude/worktrees/github-project-capabilities-781bf2 && make icons 2>&1 | tail -20
+make icons 2>&1 | tail -20
 ```
 
-Expected: a line for `battery_charging` reporting `38x21` and `viewBox '0 0 22 12'` sourced from `design/HomeCharging.dc.html`. **If it instead reports 2 matching `<svg>` elements, the bolt was added to `Main.dc.html` rather than to the new board** — that is the ambiguity the separate board exists to avoid.
+Expected: a line for `battery_charging` reporting `38x21` and `viewBox '0 0 22 12'` sourced from `design/HomeCharging.dc.html`. **If it instead reports more than one matching `<svg>` element, something in the board — often its own explanatory comment — quotes the match string verbatim**, the same trap Task 3 already produced once with the terminal-nub match.
 
 - [ ] **Step 3: Check the regeneration touched only what it should**
 
@@ -820,9 +833,46 @@ extern const Icon kBattery;  // the header band's charge cell
 extern const Icon kBatteryCharging;  // ...with a bolt knocked out: charging
 ```
 
-- [ ] **Step 5: Build and confirm the two marks share a box**
+- [ ] **Step 5: Put it through the icon regression suite**
 
-Add to `test/unit/test_theme_home_golden.cpp`:
+`test/unit/test_icons.cpp`'s `kAll` list drives "every icon draws something
+inside its own box and nothing outside", "every icon's ink is centred in its
+own box", "every icon carries anti-aliased coverage, not a hard mask" and the
+plane-containment check — the checks that historically caught a wrong-scale or
+wrong-pick generator output (the `kFolder` 44-vs-46px case is pinned
+elsewhere in that file). `kBattery` is in the list and `kBatteryCharging`
+shares its box, so the same exclusion that keeps `kBookLarge`/`kSdCard` out
+(oversized for the 80x80 test canvas) does not apply here.
+
+Add it beside `kBattery`:
+
+```cpp
+const Named kAll[] = {{"kBack", &reader::icons::kBack},
+                      {"kForward", &reader::icons::kForward},
+                      {"kDot", &reader::icons::kDot},
+                      {"kHold", &reader::icons::kHold},
+                      {"kUp", &reader::icons::kUp},
+                      {"kDown", &reader::icons::kDown},
+                      {"kChevron", &reader::icons::kChevron},
+                      {"kBook", &reader::icons::kBook},
+                      {"kFolder", &reader::icons::kFolder},
+                      {"kBattery", &reader::icons::kBattery},
+                      {"kBatteryCharging", &reader::icons::kBatteryCharging}};
+```
+
+```bash
+cd /Users/lucasgoudin/dev/encre/.claude/worktrees/github-project-capabilities-781bf2 && cmake --build build -j && ./build/unit_tests 2>&1 | tail -5
+```
+
+Expected: pass, unmodified. **If it does not — for instance if the bolt shifts
+the ink centroid enough to fail the centring check — stop and report rather
+than loosening the check; that would be a real finding about the mark**, not
+a reason to widen its tolerance.
+
+- [ ] **Step 6: Build and confirm the two marks share a box and differ in content**
+
+Add to `test/unit/test_theme_home_golden.cpp` (needs `#include <cstring>` at
+the top, beside the existing includes):
 
 ```cpp
 TEST_CASE("the charging battery is the same box as the idle one") {
@@ -832,10 +882,20 @@ TEST_CASE("the charging battery is the same box as the idle one") {
   // it -- which is the header-band defect this project has already paid for once.
   CHECK(reader::icons::kBatteryCharging.w == reader::icons::kBattery.w);
   CHECK(reader::icons::kBatteryCharging.h == reader::icons::kBattery.h);
-  // Not the same BYTES, though: that would mean the bolt never reached the asset.
-  CHECK(reader::icons::kBatteryCharging.rows != reader::icons::kBattery.rows);
+  // Not the same BYTES, though: that would mean the bolt never reached the
+  // asset. Comparing `.rows` itself is a pointer comparison and can never be
+  // equal whatever the two arrays hold, so this compares the CONTENTS.
+  const int stride = (reader::icons::kBatteryCharging.w * reader::icons::kBatteryCharging.bpp + 7) / 8;
+  CHECK(std::memcmp(reader::icons::kBatteryCharging.rows, reader::icons::kBattery.rows,
+                     static_cast<size_t>(stride) * reader::icons::kBatteryCharging.h) != 0);
 }
 ```
+
+**A prior draft of this test compared `.rows` directly** (`!=` on the two
+pointers) rather than their contents, which can never be false whatever the two
+arrays hold — it would pass even if the generator silently emitted the idle
+mark's bytes for both symbols. Compare the memory `memcmp` covers, not the
+addresses.
 
 ```bash
 cd /Users/lucasgoudin/dev/encre/.claude/worktrees/github-project-capabilities-781bf2 && make test 2>&1 | tail -5
@@ -843,26 +903,44 @@ cd /Users/lucasgoudin/dev/encre/.claude/worktrees/github-project-capabilities-78
 
 Expected: pass. Every existing golden must still pass — no golden draws `kBatteryCharging` yet, so any golden failure here means `make icons` changed a mark that was already in use.
 
-- [ ] **Step 6: Commit**
+**Then prove the memcmp bites.** Commit first (the ground rules above apply
+here too). In `core/src/icons_data.h`, temporarily replace
+`kBatteryChargingBits`'s 21 rows with a byte-for-byte copy of `kBatteryBits`'s
+21 rows — the same shape as "the generator silently produced the idle mark for
+both symbols" — rebuild and confirm the new `TEST_CASE` now fails on the
+`memcmp` line specifically (the `w`/`h` checks still pass, since the mutation
+only touches the bitmap). Restore with
+`git checkout core/src/icons_data.h && touch core/src/icons_data.h`, then
+re-run `make icons` to be certain the restored file is genuine generator
+output rather than a hand-restored copy, and confirm `git diff` is empty.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 cd /Users/lucasgoudin/dev/encre/.claude/worktrees/github-project-capabilities-781bf2
-git add tools/iconc.py core/include/reader/icons.h core/src/icons_data.h core/src/icons.cpp test/unit/test_theme_home_golden.cpp
+git add tools/iconc.py core/include/reader/icons.h core/src/icons_data.h core/src/icons.cpp test/unit/test_icons.cpp test/unit/test_theme_home_golden.cpp
 git diff --cached --stat
 git commit -m "$(cat <<'EOF'
 feat(icons): kBatteryCharging, generated from HomeCharging.dc.html
 
 A second asset rather than a variant, for the reason kBookLarge is one:
 these are pre-rendered bitmaps, so two states of a mark are two assets.
-The matcher keys on the terminal nub, which both batteries carry, so
-`source` is what tells them apart -- which is why it had to be a board
-holding exactly one of them.
+The match keys on the bolt's own path, because that is the part that
+identifies WHICH mark this is -- the terminal nub is on both batteries
+and identifies neither, the same shortcut sdcard and hold both carry
+comments rejecting. `source` is then a second line of defence, not the
+only one.
 
-A test asserts the two marks share a box and differ in their bytes. The
-box matters because headerBandHeight() derives the band's height from the
-mark and the number's x from its width: two marks of different sizes would
-move the band and every row under it as the charge state changed, which is
-the header-band defect this project has already paid for once.
+Added to test_icons.cpp's kAll, so the mark gets the same inside-its-box,
+centred-ink and anti-aliased-coverage checks every other mark does.
+
+A test asserts the two marks share a box and differ in content, checked
+with memcmp rather than by comparing the two `.rows` pointers -- a pointer
+comparison can never be equal whatever the two arrays hold. The box
+matters because headerBandHeight() derives the band's height from the
+mark and the number's x from its width: two marks of different sizes
+would move the band and every row under it as the charge state changed,
+which is the header-band defect this project has already paid for once.
 
 Refs #46
 
@@ -872,7 +950,6 @@ EOF
 ```
 
 ---
-
 ## Task 5: The view model, `setBattery`, and `renderHome`
 
 **Files:**
