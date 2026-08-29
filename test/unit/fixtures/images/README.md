@@ -76,3 +76,17 @@ boundaries, filter bytes, chroma subsampling) in a way synthetic bytes cannot
 reliably stand in for, so this fixture set answers the question directly instead:
 confirmed public domain, from each cover's own embedded rights metadata, checked
 against the source book rather than inferred from which corpus folder it sat in.
+
+**There is deliberately NO grayscale (1-component) JPEG here, and that is a
+measurement rather than an oversight.** A 1-component JPEG takes a distinct
+branch in TJpgDec's `mcu_load`, so it is a fair thing to ask for. Across the
+225-book corpus, **185 of 185 JPEG covers are 3-component and none is
+grayscale** -- so the branch has no caller in any real book this project has
+seen, and adding a fixture for it would be building ahead of one.
+
+What that leaves untested is narrower than it first looks: a 1-component JPEG is
+`msx = msy = 1`, and that band geometry -- an 8-row band, the case where
+`bandRows` differs from the 4:2:0 default -- is already covered by
+`tiny_444.jpg`. So `jpegd.cpp`'s own logic is exercised; only vendored code
+downstream of it differs. Re-measure before adding one: the command is in the
+commit that added this paragraph.
