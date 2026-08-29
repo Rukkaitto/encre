@@ -41,6 +41,48 @@ panel-size PNGs for overlaying in a design tool.
 CMake uses `file(GLOB ...)`: **re-run `cmake -S . -B build` after adding or
 removing a source file**, or it is silently ignored.
 
+## CI
+
+`.github/workflows/ci.yml`, three jobs on every PR and on pushes to `main`,
+cancelling a ref's own earlier run. `test` is `make test` on a bare checkout --
+no submodule and no Python, because every generated asset is committed.
+`firmware` is the only thing anywhere that compiles `shell/`; it checks out
+submodules (an empty `freeink-sdk/` fails with `PackageException: not a
+directory`, which names neither the submodule nor the fix) and caches the ~1 GB
+toolchain.
+
+**THE `compare` JOB IS A NARROW GATE AND IS NOT A FIDELITY CHECK.** It fails on
+two things: a board named in `compare-design.py` and absent from disk, and a
+screen the SIMULATOR KNOWS that will not render. It does **not** measure how
+close the render is -- the sheet still prints `ok` rather than a percentage,
+which is #41. A board with no screen behind it stays fine; that is nine of the
+32.
+
+**Wiring it at all needed the script to be able to fail.** `render_sim` returned
+a bare `None` for both "the simulator has never heard of this id" and "the
+simulator knows it and crashed", so a broken subcommand printed
+`firmware not implemented` and the run exited **0** -- the same
+reports-on-less-than-it-claims shape as the card probe answered from cache and
+the `make compare` default that skipped four screens. It returns a status now,
+and `--require-implemented` fails on the second. The flag is **off by default**,
+so comparing mid-implementation is unaffected; CI passes it. Proved by mutation:
+breaking `home` in the simulator takes the gate to exit 1 naming both
+geometries, while `--only boot` (a real board with no screen) stays green.
+
+`$CHROME` overrides the board rasteriser's path, which was hardcoded to macOS
+and cannot exist on a Linux runner, and `$CHROME_FLAGS` carries a runner's
+`--no-sandbox` -- set by the workflow that knows it is one rather than by
+sniffing `$CI` in the script, so a developer's Chrome keeps its sandbox.
+
+**A GOLDEN IS NEVER RE-BLESSED TO MAKE CI GREEN.** A failing golden uploads its
+`build/<name>_candidate.png` as an artifact precisely so the pixels can be
+looked at, which is the only way to tell an intended change from a regression.
+**The goldens were blessed on macOS/clang and this job is Linux/gcc**, and that
+has not been observed yet: layout accumulates in fixed point and should be
+bit-identical, but `stb_truetype`'s rasteriser is float. If the first run
+reddens on goldens alone, the candidates are the evidence and the fix is to move
+the job to `macos-latest`, not to bless anything.
+
 ## What V1 is, and is not
 
 **V1 IS CARD TRANSFER ONLY. Wi-Fi is cut.** It was too big, and cutting it took
