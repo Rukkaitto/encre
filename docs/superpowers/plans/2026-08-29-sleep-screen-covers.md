@@ -2435,6 +2435,20 @@ Take `SpiBusGuard` for the whole write — this is the display's bus.
 
 - [ ] **Step 2: Write the `CoverSource` over the card**
 
+**ASK `sleepCoverUsable` BEFORE CONSTRUCTING THE SCREEN, and pass null when the answer
+is no.** This is a real constraint, not a nicety, and Task 13 wrote it into
+`CoverSource::loadPlane`'s contract: fidelity is decided **once**, then the three passes
+each ask `loadPlane` separately. A source that succeeds for `Msb` and fails for `Lsb`
+composes a frame with the cover in one plane and the dither field in the other. Validating
+the header up front is what keeps that theoretical — after it, the only remaining failure
+is the card physically leaving mid-paint, at which point the sleep screen has lost more
+than its cover.
+
+It is also why a source that *will* refuse must never be handed over: the screen would
+declare `Grayscale` and then fall back, spending three waveforms to draw a one-waveform
+screen.
+
+
 `loadPlane` opens `/.reader/sleep.cover` through `gSd.openRead`, parses the header, checks `sleepCoverUsable` against the current book and the frame's geometry, seeks to the requested plane and reads `fb.sizeBytes()` into `fb.data()`. `Plane::Bw` and `Plane::Msb` read plane 0; `Plane::Lsb` reads plane 1.
 
 - [ ] **Step 3: Build**
