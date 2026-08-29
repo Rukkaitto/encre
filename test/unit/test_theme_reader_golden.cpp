@@ -680,7 +680,13 @@ TEST_CASE("PAGING BACK N AND RETURNING LANDS EXACTLY WHERE YOU LEFT, for every p
     rd.onEvent(front_left);
     CHECK(rd.vm().page == from + 1);
     CHECK(pageText(rd.page()) == left);          // the same page, not merely the same number
-    CHECK(rd.vm().anchorLabel.empty());   // spent, so the promise is withdrawn
+    CHECK(rd.vm().anchorLabel.empty());   // withdrawn: the reader is standing on the mark
+
+    // NOT CLEARED, THOUGH, and that is the difference the high-water rule turns on.
+    // One turn back and the same promise is made again, with no rule to make it --
+    // where the old `follow()` spent the anchor and the reader had to create a new one.
+    rd.onEvent(side_back);
+    CHECK(rd.vm().anchorLabel == promise);
   }
 }
 
@@ -957,15 +963,18 @@ TEST_CASE("a cross-chapter way back is BOUNDED -- CH. NN, never a chapter's name
   CHECK(rd.vm().chapter.find("PARTIE") != std::string::npos);
 }
 
-TEST_CASE("A JUMP TO A CHAPTER SETS THE ANCHOR TO WHERE THE READER WAS") {
+TEST_CASE("A JUMP CARRIES THE MARK FORWARD, AND A JUMP BACK LEAVES IT AHEAD") {
   // THE PATH THAT SHIPPED INFINITE RECURSION. `anchorJumped` had been rewritten into a
   // call to itself by a scripted edit whose pattern matched the helper's own body, and
   // 873 tests passed over it because NOTHING EXERCISED goToChapter -- the jump, which
   // is what Contents does. It took a stack-protection fault on the device to find.
   //
   // So this drives the jump, which is the only thing that would have caught it, and it
-  // also pins the rule the jump exists for: the anchor names the DEPARTURE, so a
-  // reader who jumps away has a way back to what they were reading.
+  // also pins what a jump now does to the mark: nothing of its own. It lands through
+  // syncVm like every other movement, so a jump FORWARD raises the mark to the
+  // destination and promises nothing, and a jump BACK leaves it standing ahead -- which
+  // is the way back. Under the old departure rule the forward case set the mark BEHIND
+  // the reader and the next page turn cleared it; see return_anchor.h for the numbers.
   ramp::Ramp ramp;
   reader::QuietTheme theme;
   Body body;
@@ -985,31 +994,49 @@ TEST_CASE("A JUMP TO A CHAPTER SETS THE ANCHOR TO WHERE THE READER WAS") {
   const int from = rd.chapterIndex();
   REQUIRE(rd.vm().anchorLabel.empty());
 
-  // Jump forward. It must return, not recurse, and it must leave a way back.
+  // Jump forward. It must return, not recurse -- and the mark comes with it, so there
+  // is nothing to promise and no field.
   REQUIRE(rd.goToChapter(ob.chapterCount() - 1));
-  CHECK(rd.chapterIndex() == ob.chapterCount() - 1);
+  const int far = rd.chapterIndex();
+  CHECK(far == ob.chapterCount() - 1);
   REQUIRE(rd.anchor().isSet());
-  CHECK(rd.anchor().get().spine == from);          // the DEPARTURE, not the destination
-  REQUIRE_FALSE(rd.vm().anchorLabel.empty());      // and the footer says so
+  CHECK(rd.anchor().get().spine == far);        // the DESTINATION, not the departure
+  CHECK_FALSE(rd.anchor().aheadOf(rd.here()));
+  CHECK(rd.vm().anchorLabel.empty());           // and the footer promises nothing
 
-  // A SECOND JUMP OVERWRITES IT, which is the rule that needs the two cases: a pure
-  // high-water rule would find this anchor behind the reader and clear it as
-  // satisfied, throwing away the breadcrumb they wanted.
-  const int mid = rd.chapterIndex();
+  // AND THE PAGE TURN THAT USED TO CLEAR IT. Under the old rule the anchor was set to
+  // the chapter left behind and the first forward turn read that as "you have read
+  // back up to it" -- measured, set=1 then set=0. It must survive here.
+  rd.onEvent({reader::Button::Right, reader::PressKind::Short});
+  REQUIRE(rd.anchor().isSet());
+  CHECK(rd.anchor().get().spine == far);
+
+  // NOW JUMP BACK. Nothing lowers the mark, so it stands in the far chapter and the
+  // footer says so -- this is the way back.
   REQUIRE(rd.goToChapter(from));
   CHECK(rd.chapterIndex() == from);
   REQUIRE(rd.anchor().isSet());
-  CHECK(rd.anchor().get().spine == mid);
+  CHECK(rd.anchor().get().spine == far);
+  CHECK(rd.anchor().aheadOf(rd.here()));
+  REQUIRE_FALSE(rd.vm().anchorLabel.empty());
 
-  // And following it lands back and withdraws the promise.
+  // And following it lands back and withdraws the promise -- because arriving is not
+  // ahead of anything, not because anything was spent.
   rd.onEvent({reader::Button::Up, reader::PressKind::Short});
-  CHECK(rd.chapterIndex() == mid);
+  CHECK(rd.chapterIndex() == far);
   CHECK(rd.vm().anchorLabel.empty());
+  CHECK(rd.anchor().isSet());                   // still there; it was never spent
+  // ...which is observable rather than a claim about a private field: page away and
+  // the promise is made again, where a mark cleared by the return would be gone.
+  rd.onEvent({reader::Button::Left, reader::PressKind::Short});
+  CHECK(rd.anchor().aheadOf(rd.here()));
+  CHECK_FALSE(rd.vm().anchorLabel.empty());
 }
 
-TEST_CASE("a jump to the chapter already open changes nothing, anchor included") {
-  // goToChapter answers true early for its own spine. That must not raise an anchor
-  // pointing at the page the reader is standing on -- a promise to go nowhere.
+TEST_CASE("a jump to the chapter already open changes nothing, the mark included") {
+  // goToChapter answers true early for its own spine. That must not leave a promise to
+  // go nowhere -- the mark is at the reader's own page, so `aheadOf` is the question,
+  // not `isSet`: under the high-water rule a mark is set from the first landing.
   ramp::Ramp ramp;
   reader::QuietTheme theme;
   Body body;
@@ -1027,6 +1054,6 @@ TEST_CASE("a jump to the chapter already open changes nothing, anchor included")
   const int here = rd.chapterIndex();
   REQUIRE(rd.goToChapter(here));
   CHECK(rd.chapterIndex() == here);
-  CHECK_FALSE(rd.anchor().isSet());
+  CHECK_FALSE(rd.anchor().aheadOf(rd.here()));
   CHECK(rd.vm().anchorLabel.empty());
 }

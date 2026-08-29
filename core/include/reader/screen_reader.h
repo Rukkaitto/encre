@@ -285,13 +285,17 @@ class ReaderScreen : public Screen {
   // MUST BE SET BEFORE THE BOOK IS OPENED. It goes into `metrics_`, which the page
   // builder reads at `add()` time, so a face arriving after the first page was laid
   // would measure that page roman and draw it italic.
-  // The anchor, for the shell to persist and for a test to inspect. Const access
-  // only: every transition belongs to a movement, and a caller that could set it
-  // directly is a second place that decides the rule.
+  // The anchor -- the high-water mark of this reading -- for the shell to persist and
+  // for a test to inspect. Const access only: the one transition belongs to a
+  // movement, and a caller that could raise it directly is a second place that decides
+  // the rule. Ask `anchor().aheadOf(here())` for "is there a way back"; `isSet()` is
+  // for persistence and says only that a mark exists.
   const ReturnAnchor& anchor() const { return anchor_; }
   // A RESTORED anchor, from the sidecar. Not a transition -- the record already holds
-  // the result of one -- so this is the one path that sets it without a movement, and
-  // the only reason `anchor_` is not otherwise writable from outside.
+  // a mark -- so this is the one path that sets it without a movement, and the only
+  // reason `anchor_` is not otherwise writable from outside. It runs BEFORE the
+  // landing (the factory calls it ahead of setMetrics), so a record behind where the
+  // book reopens is raised by the landing's own note().
   void restoreAnchor(const AnchorPos& a) {
     anchor_.set(a);
     syncAnchorLabel();
@@ -425,12 +429,16 @@ class ReaderScreen : public Screen {
   // WHAT `GO HERE` COMMITS. The three jumps this screen has are deliberately distinct:
   //
   //   goToChapter(spine)      -- page ONE of a spine entry. A chapter picked from a
-  //                              list asked for its beginning. Sets the anchor.
-  //   goToAnchor(pos)         -- a cursor, and NOT a jump in the anchor's sense: the
-  //                              anchor has already been spent by follow().
-  //   goToPosition(spine, at) -- a cursor, AND a jump. The reader may have paged
-  //                              several pages into the peek before committing, so
-  //                              page one is the wrong landing.
+  //                              list asked for its beginning.
+  //   goToAnchor(pos)         -- a cursor: back to the high-water mark.
+  //   goToPosition(spine, at) -- a cursor. The reader may have paged several pages
+  //                              into the peek before committing, so page one is the
+  //                              wrong landing.
+  //
+  // NONE OF THE THREE TOUCHES THE ANCHOR, and that is the collapse: each lands through
+  // syncVm(), which raises the mark if the landing is further through the book than
+  // anything before it. A jump forward therefore raises it and a jump back does not,
+  // with no case for either.
   //
   // ONE WALK, NOT TWO. It is `openChapterAt` with `startAt_` armed -- the same
   // mechanism a restored reading position lands through -- so the target chapter is
@@ -446,8 +454,8 @@ class ReaderScreen : public Screen {
   // FALSE LEAVES THE SCREEN EXACTLY WHERE IT WAS -- the chapter, the index and its
   // completeness, the page, the label, the view model and the anchor. That is
   // openChapterAt's own restore, and it is why nothing here has a second copy of it.
-  // The anchor is set only after the walk succeeds: a refused jump is not a departure,
-  // and anchoring one would leave a way back to a page the reader never left.
+  // The anchor rides that for free: the mark is raised by the landing's syncVm(), and
+  // a refused walk never reaches one.
   //
   // WHAT IT COSTS TO SAY THAT: a jump within the open chapter re-opens the file and
   // re-reads its 30-byte local header, where the old two-call form rewound the handle
@@ -684,17 +692,12 @@ class ReaderScreen : public Screen {
   }
 
  private:
-  // WHERE THE READER WAS BEFORE THEY STOPPED READING LINEARLY. The rule is in
-  // return_anchor.h and is tested without a book; this screen only tells it which
-  // of the three movements just happened.
+  // THE FURTHEST THIS READING HAS REACHED. The rule is in return_anchor.h and is
+  // tested without a book; this screen only tells it where the reading position ended
+  // up, from syncVm() and from nowhere else -- see the note at that definition.
   ReturnAnchor anchor_;
   bool goToAnchor(const AnchorPos& to);
   void syncAnchorLabel();
-  // Each applies one transition and re-syncs the footer label -- see the note in
-  // screen_reader.cpp for the ordering bug that made that one call rather than four.
-  void anchorPagedForward(const AnchorPos& from);
-  void anchorPagedBackward(const AnchorPos& from);
-  void anchorJumped(const AnchorPos& from);
   PageMetrics metrics_{};
 
   // One cursor per page, in order -- but only as far as has been READ, unless

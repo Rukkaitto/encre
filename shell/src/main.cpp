@@ -1958,7 +1958,14 @@ static reader::SaveResult saveReadingPosition(const char* why,
   // anchor to a power cut costs a shortcut and nothing else -- the reader is still
   // sitting on a real page -- so it does not justify a write on an edge that does not
   // already take one.
-  if (rd->anchor().isSet()) {
+  //
+  // WRITTEN ONLY WHILE THE MARK IS AHEAD, not merely while one is stored. Under the
+  // high-water rule the mark is raised to wherever the reader stands, so `isSet()` is
+  // true almost always and would put three keys in every record to say "the way back
+  // is the page you are on". Gated this way, a reader at their furthest point writes a
+  // record byte-identical to one from before anchors existed -- which is the property
+  // reading_position.h's absent-rather-than--1 rule is there to give.
+  if (rd->anchor().aheadOf(rd->here())) {
     const reader::AnchorPos a = rd->anchor().get();
     p.anchorSpine = a.spine;
     p.anchorBlock = a.block;
@@ -4338,8 +4345,11 @@ void loop() {
       if (gPeekCommitted) {
         // GO HERE. goToPosition and not goToChapter: the reader may have paged several
         // pages into the panel, and page one would be right on the first page and wrong
-        // everywhere after it. The anchor is set to WHERE THE READER WAS -- the departure
-        // point, not the destination -- by goToPosition itself.
+        // everywhere after it. The return anchor is a HIGH-WATER MARK now, so a commit
+        // FORWARD carries it to the destination and leaves no way back, while one
+        // BACKWARD leaves it standing where the reader was -- see return_anchor.h, which
+        // prices that against the way back the old departure rule nominally offered and
+        // measurably kept for one press.
         const bool ok = back && rd->goToPosition(gPeekSpine, gPeekCursor);
         logf("[peek] GO HERE spine=%d block=%d line=%d: %s in %lums\n", gPeekSpine,
              gPeekCursor.block, gPeekCursor.line, ok ? "ok" : "REFUSED",

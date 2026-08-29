@@ -816,19 +816,15 @@ bool ReaderScreen::advance() {
 bool ReaderScreen::goToChapter(int spine) {
   if (spine < 0 || spine >= book_.chapterCount()) return false;
   if (spine == chapterAt_) return true;  // already there; a jump to here is a no-op
-  // A JUMP OVERWRITES THE ANCHOR UNCONDITIONALLY, with the position being LEFT.
-  // Captured before the move for that reason -- and this is the call that makes
-  // Contents safe, which shipped without it and took the reader's place with it.
-  const AnchorPos from = here();
-  if (!openChapterAt(spine, /*atEnd=*/false)) return false;
-  anchorJumped(from);
-  return true;
+  // NOTHING ABOUT THE ANCHOR HERE. openChapterAt lands through syncVm(), which raises
+  // the high-water mark if this chapter is further on than anything reached before --
+  // so a jump forward carries the mark with it and a jump back leaves it standing
+  // ahead, which is exactly the way back Contents needs.
+  return openChapterAt(spine, /*atEnd=*/false);
 }
 
 bool ReaderScreen::goToPosition(int spine, Cursor at) {
   if (spine < 0 || spine >= book_.chapterCount()) return false;
-  // CAPTURED BEFORE THE MOVE, because the anchor takes the position being LEFT.
-  const AnchorPos from = here();
 
   // ONE WALK, THROUGH `startAt_`, AND ONE PATH FOR BOTH CASES.
   //
@@ -869,9 +865,10 @@ bool ReaderScreen::goToPosition(int spine, Cursor at) {
   const bool landed = openChapterAt(spine, /*atEnd=*/false);
   startAt_ = Cursor{};
   if (!landed) return false;
+  // AND THE MARK IS RAISED BY THIS, not by a case of its own: a commit that lands
+  // further on than the reader has ever been carries the mark forward, and one that
+  // lands behind leaves it standing where it was. A refused walk never gets here.
   syncVm();
-  // AFTER THE WALK, so a refused jump is not a departure -- see the header.
-  anchorJumped(from);
   return true;
 }
 
@@ -901,8 +898,9 @@ bool ReaderScreen::reacquireChapter() {
   return true;
 }
 
-// Landing on an anchor. A jump in mechanism and NOT in the anchor's sense -- the
-// anchor has already been spent by `follow()`, so this must not re-set it.
+// Landing on the high-water mark. It goes through syncVm like every other movement,
+// which raises the mark to `to` -- a no-op, since `to` IS the mark. Arriving is what
+// withdraws the promise, and it needs no case of its own to do it.
 bool ReaderScreen::goToAnchor(const AnchorPos& to) {
   if (to.spine != chapterAt_) {
     if (!openChapterAt(to.spine, /*atEnd=*/false)) return false;
@@ -969,47 +967,36 @@ void ReaderScreen::syncVm() {
   // board's 53 of 890 is 5.955%, shown as 6%, so the number is the position reached
   // and not the position started from. Unknown while the total is.
   vm_.progressPercent = vm_.pageTotal == 0 ? 0 : (vm_.page * 100 + vm_.pageTotal / 2) / vm_.pageTotal;
-  syncAnchorLabel();
-}
-
-// THE THREE TRANSITIONS GO THROUGH HERE, and the reason is an ordering bug this
-// caught: `openChapterAt` calls `syncVm()` itself, so on the chapter-crossing paths
-// the footer label was computed BEFORE the anchor was set and came out empty -- an
-// anchor that existed and did not draw, which is the dead-button defect wearing the
-// other face. Every transition now re-syncs the label immediately after, in one
-// place, rather than at each of the four call sites where one can be missed.
-void ReaderScreen::anchorPagedForward(const AnchorPos& from) {
-  anchor_.pagedForward(from, here());
-  syncAnchorLabel();
-}
-
-void ReaderScreen::anchorPagedBackward(const AnchorPos& from) {
-  anchor_.pagedBackward(from, here());
-  syncAnchorLabel();
-}
-
-// A NOTE ON THE SHAPE OF THESE THREE, because one of them shipped as infinite
-// recursion and took the device down with a stack-protection fault.
-//
-// The bug: a scripted edit rewrote the call sites `anchor_.jumped(from, here())` into
-// `anchorJumped(from)` with a replace that had NO COUNT -- and this helper's own body
-// was character-for-character one of those call sites, because it used the same
-// parameter name `from`. So it replaced itself with a call to itself. Its two siblings
-// escaped only because their call sites happened to say `fromNext` and `fromPrev`.
-//
-// NO TEST CAUGHT IT. 873 passed over a function that could only ever recurse, because
-// nothing exercised `goToChapter` -- the jump, which is the Contents path. That gap is
-// closed now; the shape is kept as a reminder that a replacement matching more than
-// you meant is this project's most productive source of defects.
-void ReaderScreen::anchorJumped(const AnchorPos& from) {
-  anchor_.jumped(from, here());
+  // THE ONE PLACE THE HIGH-WATER MARK IS RAISED, and syncVm is the right home for a
+  // checked reason rather than a convenient one: every movement of the reading
+  // position in this class ends in a syncVm -- the two constructors, setMetrics,
+  // relayout, walkToChapter's landing, openChapterAt's restore-on-failure,
+  // openAtCursor, goToPosition, goToAnchor, completeIndex and each of the three
+  // branches of onGesture -- and nothing else moves `at_`, `chapterAt_` or `page_`.
+  // (warmPageRing, restreamAtCurrentPage and rewalkToCurrentPage are the ones that
+  // look like they might; all three leave the page and the index exactly as found,
+  // which is the property their own tests assert first.)
+  //
+  // So the alternative was a call at each of those sites, which is the shape the three
+  // transitions had -- four call sites for the jump alone, one of which was missed for
+  // a whole phase and made the footer label compute BEFORE the anchor was set. One
+  // call cannot be missed.
+  //
+  // IT IS BEFORE syncAnchorLabel, for that same ordering reason: the label is derived
+  // from the mark, so the mark must be current when it is built.
+  anchor_.note(here());
   syncAnchorLabel();
 }
 
 // The footer's third field, or empty when there is nowhere to go.
 void ReaderScreen::syncAnchorLabel() {
   vm_.anchorLabel.clear();
-  if (!anchor_.isSet()) return;
+  // AHEAD, NOT MERELY SET. The mark is raised to wherever the reader stands, so it is
+  // set almost always and a field keyed on that would promise the page under the
+  // reader's feet. `aheadOf` is the same predicate Gesture::AltPrev asks, deliberately:
+  // the field IS the promise, and a promise the button will not keep is the dead-button
+  // defect this project has shipped twice.
+  if (!anchor_.aheadOf(here())) return;
   const AnchorPos a = anchor_.get();
   if (a.spine == chapterAt_) {
     // SAME CHAPTER, so the page is a lookup and nothing is decoded. The anchor's
@@ -1072,51 +1059,42 @@ Action ReaderScreen::onGesture(const GestureEvent& g) {
       // check: advancing the stream is ~20 ms on the device against ~376 ms to
       // re-establish it, so the ring must never be preferred to a stream that stands.
       if (pb_ == nullptr) {
-        const AnchorPos fromCached = here();
         if (showCached(at_ + 1)) {
-          anchorPagedForward(fromCached);
           syncVm();
           return Action::redraw();
         }
         if (!seekTo(at_, /*needStream=*/true)) return Action::none();
       }
-      const AnchorPos fromNext = here();
       if (advance()) {
-        // FORWARD NEVER RAISES AN ANCHOR, it only spends one -- reading back up to
-        // where you were ends the excursion. The transition runs AFTER the move
-        // because it compares against where the reader arrived.
-        anchorPagedForward(fromNext);
+        // syncVm RAISES THE MARK, which is all forward paging has ever needed to do to
+        // it. A reader who turned back and then read on arrives at the mark and the
+        // footer field withdraws itself -- no "arriving satisfies it" rule, because
+        // arriving is not ahead of anything.
         syncVm();
         return Action::redraw();
       }
       // OFF THE END OF THE CHAPTER IS THE NEXT CHAPTER, which is what makes this a
-      // reader rather than a chapter viewer.
+      // reader rather than a chapter viewer. openChapterAt lands through syncVm, so
+      // the crossing raises the mark exactly as an ordinary turn does -- there is no
+      // longer a paging-versus-jumping distinction for it to get wrong.
       if (!openChapterAt(chapterAt_ + 1, false)) return Action::none();
-      // OFF THE END OF A CHAPTER IS STILL PAGING FORWARD, not a jump. A jump would
-      // overwrite the anchor with the position being left, so a reader who paged
-      // back and then read on through a chapter boundary would find their anchor
-      // silently moved to the boundary.
-      anchorPagedForward(fromNext);
       return Action::redraw();
     }
     case Gesture::Prev: {
       // Where the page index earns itself: the stream only goes forward, so an
       // earlier page means rewinding and decoding to its recorded cursor. Without
       // the index there would be no cursor to decode TO.
-      const AnchorPos fromPrev = here();
       if (at_ <= 0) {
         // And back off the top is the PREVIOUS chapter's LAST page, so paging
         // backwards through a book is continuous rather than stopping at each
         // chapter's start.
         if (!openChapterAt(chapterAt_ - 1, true)) return Action::none();
-        anchorPagedBackward(fromPrev);
         return Action::redraw();
       }
       if (!seekTo(at_ - 1)) return Action::none();
-      // PAGING BACK IS HOW A READER LOSES THEIR PLACE, far more often than by
-      // jumping -- so this is the transition that makes the anchor appear during
-      // ordinary reading. It sets only if unset; one already standing holds still.
-      anchorPagedBackward(fromPrev);
+      // PAGING BACK IS WHAT MAKES THE FIELD APPEAR, and it does so by moving the READER
+      // rather than by moving the mark: syncVm's note() cannot lower it, so the mark
+      // stays at the furthest page and is now ahead of where the reader stands.
       syncVm();
       return Action::redraw();
     }
@@ -1132,13 +1110,17 @@ Action ReaderScreen::onGesture(const GestureEvent& g) {
     // other screen has them, all four movement buttons page and there is no free
     // binding at all. See Gesture::AltPrev.
     case Gesture::AltPrev: {
-      AnchorPos target{};
-      // NOTHING WHEN THERE IS NO ANCHOR, and the footer draws no field then. The
+      // NOTHING WHEN THE MARK IS NOT AHEAD, and the footer draws no field then. The
       // absence of the promise is the absence of the affordance -- this project has
-      // shipped a dead button twice, so the two are wired to the same fact rather
-      // than to two agreeing conditions.
-      if (!anchor_.follow(&target)) return Action::none();
-      if (!goToAnchor(target)) return Action::none();
+      // shipped a dead button twice, so the two ask the SAME predicate rather than two
+      // conditions that agree today.
+      //
+      // AND IT DOES NOT SPEND THE MARK. There is nothing to spend: goToAnchor lands ON
+      // it, so it stops being ahead and the field withdraws itself -- and it comes back
+      // the moment the reader pages away, with no rule to make that happen. That is
+      // what replaced `follow()`, which existed only to do the clearing.
+      if (!anchor_.aheadOf(here())) return Action::none();
+      if (!goToAnchor(anchor_.get())) return Action::none();
       return Action::redraw();
     }
     default:

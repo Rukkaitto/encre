@@ -154,9 +154,9 @@ TEST_CASE("a reacquired Reader can be paged again, forward and back") {
 
 // --- JUMPING TO A POSITION ------------------------------------------------------
 
-TEST_CASE("goToPosition lands on the page containing a cursor and anchors the departure") {
+TEST_CASE("goToPosition lands on the page containing a cursor, and the mark travels with it") {
   Peeking p;
-  // WHERE THE READER IS BEFORE THE PEEK, and what the anchor must come to hold.
+  // WHERE THE READER IS BEFORE THE PEEK.
   const reader::AnchorPos departure = p.s().here();
   REQUIRE(p.s().pageIndex() == 0);
 
@@ -183,17 +183,29 @@ TEST_CASE("goToPosition lands on the page containing a cursor and anchors the de
   CHECK(p.s().pageIndex() == targetPage);
   CHECK(p.s().currentCursor() == target);
   CHECK(readerfix::pageText(p.s().page()) == targetText);
-  // THE DEPARTURE, not the arrival. Paging back set an anchor of its own on the way
-  // here; a jump overwrites it unconditionally, which is the rule that keeps a commit
-  // from chapter 2 into chapter 8 from clearing the one breadcrumb the reader wanted.
+  // THE HIGH-WATER MARK, which the forward paging above already put on the target page
+  // -- so committing FORWARD lands ON it and promises nothing. That is the cost
+  // return_anchor.h states outright: a forward commit leaves no way back, where the old
+  // departure rule nominally offered one and measurably kept it for a single press.
   CHECK(p.s().anchor().isSet());
-  CHECK(p.s().anchor().get() == departure);
+  CHECK(p.s().anchor().get() == p.s().here());
+  CHECK_FALSE(p.s().anchor().aheadOf(p.s().here()));
+  CHECK(departure < p.s().anchor().get());  // and the mark really did move on
+
+  // AND THE BACKWARD COMMIT IS THE ONE THAT LEAVES A WAY BACK, which is the case the
+  // whole rule turns on: nothing lowers the mark, so it stands where the reader was.
+  const reader::AnchorPos furthest = p.s().anchor().get();
+  REQUIRE(p.s().goToPosition(0, Cursor{}));
+  CHECK(p.s().pageIndex() == 0);
+  CHECK(p.s().anchor().get() == furthest);
+  CHECK(p.s().anchor().aheadOf(p.s().here()));
 }
 
-TEST_CASE("goToPosition across a chapter boundary anchors and lands") {
+TEST_CASE("goToPosition across a chapter boundary lands, and the mark crosses with it") {
   // THE CASE A PAGE-NUMBER SCHEME WOULD FAIL. `at_` indexes the CURRENT chapter's
   // `starts_`, so "page 3" means nothing once the spine entry has changed -- which is
-  // the whole reason the anchor is a (spine, block, line) triple.
+  // the whole reason the mark is a (spine, block, line) triple, and the reason the
+  // comparison below can be made at all.
   Peeking p;
   pageForward(p.s(), 2);
   const reader::AnchorPos departure = p.s().here();
@@ -204,8 +216,17 @@ TEST_CASE("goToPosition across a chapter boundary anchors and lands") {
   CHECK(p.s().chapterIndex() == 1);
   CHECK(p.s().pageIndex() == 0);
   CHECK(p.s().anchor().isSet());
-  CHECK(p.s().anchor().get() == departure);
-  CHECK(p.s().anchor().get().spine == 0);
+  // FORWARD ACROSS A BOUNDARY, so the mark comes too and nothing is promised.
+  CHECK(p.s().anchor().get().spine == 1);
+  CHECK(p.s().anchor().get() == p.s().here());
+  CHECK_FALSE(p.s().anchor().aheadOf(p.s().here()));
+
+  // ...and jumping BACK into chapter 0 leaves it standing in chapter 1, which is the
+  // way back a reader who overshot actually wants.
+  REQUIRE(p.s().goToPosition(0, Cursor{}));
+  CHECK(p.s().chapterIndex() == 0);
+  CHECK(p.s().anchor().get().spine == 1);
+  CHECK(p.s().anchor().aheadOf(p.s().here()));
 }
 
 TEST_CASE("a refused goToPosition leaves the screen exactly where it was") {
