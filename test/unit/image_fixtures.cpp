@@ -3,6 +3,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "doctest.h"
 // png.cpp already defines STB_IMAGE_IMPLEMENTATION for the desktop build, so this
 // translation unit takes the header only -- two implementations would be a
 // duplicate-symbol link error.
@@ -27,7 +28,10 @@ Oracle decodeWithStb(const std::string& bytes) {
 std::string loadFixture(const char* name) {
   std::string path = std::string(TEST_FIXTURE_DIR) + "/images/" + name;
   std::ifstream in(path, std::ios::binary);
-  if (!in) return {};
+  // golden::slurp (golden.h) fails exactly this loudly for exactly this reason: a
+  // missing fixture must not read back as an empty image, which is indistinguishable
+  // from every decoder under test agreeing to refuse it.
+  REQUIRE_MESSAGE(in.good(), "cannot read " << path);
   std::ostringstream ss;
   ss << in.rdbuf();
   return ss.str();
