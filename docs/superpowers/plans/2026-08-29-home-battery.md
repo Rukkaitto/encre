@@ -612,8 +612,10 @@ BOLT = ('<path d="M11.4 2 L5.4 7.1 L8.1 7.1 L7.4 10 L13.4 4.9 L10.7 4.9 Z" '
         'fill="#ffffff"></path>')
 CHARGING = IDLE.replace("</svg>", BOLT + "</svg>")
 
-NOTE = """
-  <!-- HOME, CHARGING. design/Main.dc.html with one thing different: the battery's
+# NOTE has no leading blank line: Main.dc.html already has exactly one blank
+# line between the div's opening tag and the header band, and a leading "\n"
+# here would double it into two -- caught by review, not by any assert.
+NOTE = """  <!-- HOME, CHARGING. design/Main.dc.html with one thing different: the battery's
        solid fill carries a KNOCKED-OUT bolt. The number, the gap and the mark's
        38x21 box are Main's exactly, so nothing in the band moves between the two
        states -- which is the whole reason this treatment was chosen.
@@ -621,9 +623,17 @@ NOTE = """
        IT IS A BOARD RATHER THAN A COMMENT ON MAIN, and tools/iconc.py is what
        forces that: its `battery` entry matches `<rect x="19.5"` -- the terminal
        nub -- and a second battery on Main would make that match ambiguous, which
-       iconc.py reports as `2 <svg> elements ... contain` and exits on. `source` is
-       what disambiguates the two, exactly as it already does for kBook and
-       kBookLarge, which are the same path at two sizes on two boards.
+       iconc.py detects and exits on. `source` is what disambiguates the two,
+       exactly as it already does for kBook and kBookLarge, which are the same
+       path at two sizes on two boards.
+
+       AND THIS COMMENT MUST NOT CONTAIN AN SVG OPENING TAG, which the first
+       version of it did -- it quoted iconc.py's own error message. The generator
+       finds marks with a raw-text regex, so a literal opening tag in prose starts
+       a match that runs on to the REAL mark's closing tag. The hit count stays
+       one, so the ambiguity guard never fires, and extraction fails instead on a
+       tag that has no width -- a long way from the cause. Describe the error, do
+       not quote it.
 
        THE BOLT IS WHITE-INSIDE-BLACK AT ROUGHLY 24x14 DEVICE PIXELS, which is the
        size this glass serves worst -- CLAUDE.md records thin diagonals coming out
@@ -631,6 +641,7 @@ NOTE = """
        to drop the `rect x="2"` fill and make the bolt black instead: same box,
        same board, one `make icons` run. -->
 """
+assert "<svg" not in NOTE, "the comment must not contain a literal svg opening tag"
 s = s.replace(IDLE, CHARGING, 1)
 assert CHARGING in s
 
@@ -647,6 +658,28 @@ grep -c 'fill="#ffffff"' design/HomeCharging.dc.html
 ```
 
 Expected: `wrote design/HomeCharging.dc.html (NNNN bytes)` and a `grep -c` of `1`.
+
+**Then verify the comment cannot hijack `iconc.py`'s matcher.** The ambiguity
+guard counts matches, and a hijacked match still counts as one — this is the
+check the guard itself cannot make:
+
+```bash
+cd /Users/lucasgoudin/dev/encre/.claude/worktrees/github-project-capabilities-781bf2 && python3 - <<'PY'
+import re, pathlib
+SVG_RE = re.compile(r"<svg\b[^>]*>.*?</svg>", re.DOTALL)
+for f in ("design/Main.dc.html", "design/HomeCharging.dc.html"):
+    text = pathlib.Path(f).read_text()
+    hits = [m for m in SVG_RE.finditer(text) if '<rect x="19.5"' in m.group(0)]
+    assert len(hits) == 1, f"{f}: {len(hits)} battery matches, want exactly 1"
+    head = hits[0].group(0)[:hits[0].group(0).index(">") + 1]
+    for attr in ("width", "height", "viewBox"):
+        assert f'{attr}="' in head, f"{f}: matched tag has no {attr}: {head[:70]}"
+    print(f"{f}: ok -> {head[:60]}")
+PY
+```
+
+Expected: both boards print `ok`, each showing a matched opening tag that
+carries `width`, `height` and `viewBox`.
 
 - [ ] **Step 2: Render the board and look at it**
 

@@ -28,7 +28,6 @@
 </helmet>
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
 
-
   <!-- HOME, CHARGING. design/Main.dc.html with one thing different: the battery's
        solid fill carries a KNOCKED-OUT bolt. The number, the gap and the mark's
        38x21 box are Main's exactly, so nothing in the band moves between the two
@@ -37,9 +36,17 @@
        IT IS A BOARD RATHER THAN A COMMENT ON MAIN, and tools/iconc.py is what
        forces that: its `battery` entry matches `<rect x="19.5"` -- the terminal
        nub -- and a second battery on Main would make that match ambiguous, which
-       iconc.py reports as `2 <svg> elements ... contain` and exits on. `source` is
-       what disambiguates the two, exactly as it already does for kBook and
-       kBookLarge, which are the same path at two sizes on two boards.
+       iconc.py detects and exits on. `source` is what disambiguates the two,
+       exactly as it already does for kBook and kBookLarge, which are the same
+       path at two sizes on two boards.
+
+       AND THIS COMMENT MUST NOT CONTAIN AN SVG OPENING TAG, which the first
+       version of it did -- it quoted iconc.py's own error message. The generator
+       finds marks with a raw-text regex, so a literal opening tag in prose starts
+       a match that runs on to the REAL mark's closing tag. The hit count stays
+       one, so the ambiguity guard never fires, and extraction fails instead on a
+       tag that has no width -- a long way from the cause. Describe the error, do
+       not quote it.
 
        THE BOLT IS WHITE-INSIDE-BLACK AT ROUGHLY 24x14 DEVICE PIXELS, which is the
        size this glass serves worst -- CLAUDE.md records thin diagonals coming out
