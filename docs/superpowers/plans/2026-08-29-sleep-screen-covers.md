@@ -2389,13 +2389,13 @@ Add to `FLOW_SCREENS`:
 - [ ] **Step 3: Run the comparison**
 
 ```bash
-make compare COMPARE_ARGS="--only sleep_cover sleep_cover_details"
+make compare COMPARE_ARGS="--only sleep_cover,sleep_cover_details"
 ```
 
 Expected: both render. **`ok` means the simulator produced a frame, NOT that it matches** — CLAUDE.md records a board drifting 3.02% → 13.02% while the sheet said `ok` the whole time. Export and measure:
 
 ```bash
-make compare COMPARE_ARGS="--only sleep_cover sleep_cover_details --export build/overlay"
+make compare COMPARE_ARGS="--only sleep_cover,sleep_cover_details --export build/overlay"
 ```
 
 Compare like with like: these are **grayscale** screens, so a threshold-at-128 count inflates the figure. Judge them against `reader` (5.34%/6.38%) and `peek` (3.99%/4.02%), **not** against `reader_menu`'s ~3%.
