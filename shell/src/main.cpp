@@ -324,6 +324,56 @@ constexpr uint32_t kCountQuietMs = 2000;
 constexpr uint32_t kRestreamQuietMs = 1200;
 static bool gRefineOwed = false;
 
+// WHERE AN IDLE WALK GAVE UP FOR GOOD, SO IT IS NOT ASKED AGAIN THERE (#45).
+//
+// Both of the quiet-window walks below -- restreamAtCurrentPage and warmPageRing --
+// answer `false` for TWO REASONS THAT LOOK IDENTICAL AT THE CALL SITE, and only one
+// of them should stop the job being retried:
+//
+//   * "A BUTTON ARRIVED AND I GAVE UP." Both take a stop predicate answered from
+//     rawSamplesPending(), and being cut short is the whole design of an
+//     interruptible idle job. That failure MUST stay retryable: the next quiet
+//     window is exactly when it should run.
+//   * "THIS POSITION CAN NEVER SUCCEED." ReaderScreen::rewalkToCurrentPage only
+//     accepts a page the PageBuilder has FILLED, and the trailing partial page comes
+//     from finish(), which that walk never calls -- so on the last page of any
+//     chapter, and on the only page of a one-page chapter, it returns false however
+//     long it is left alone. The shell's gate is `!hasLiveStream()`, which is still
+//     true afterwards, so with no memory of the failure the job re-runs on EVERY
+//     loop iteration: the device measured ~6 ms of inflate every ~13 ms, forever, on
+//     a reader left sitting on a 239-byte cover chapter. warmPageRing joins it at
+//     page 0 for the same reason -- it refuses page 0, so its headroom gate never
+//     stops being true.
+//
+// THE SHELL CAN TELL THEM APART WITHOUT TOUCHING core/: ask rawSamplesPending()
+// IMMEDIATELY AFTER THE CALL. An empty queue means nothing interrupted the walk, so
+// the `false` is the walk's own answer about this position and not a press. That is
+// the same instrument the predicate itself reads, one call later.
+//
+// A POSITION, NOT A FLAG, and that distinction is the whole safety of it. A bare
+// bool could never be cleared correctly: the reader pages away and back, and the
+// page that could not restream at the end of chapter 4 says nothing about page 12 of
+// chapter 5. Keyed on (chapter, page), a memo taken anywhere else simply does not
+// match, so it can only ever suppress the exact position that earned it -- and the
+// first move off that page makes the job live again with no line to remember. It is
+// also FORGOTTEN WHEN THE BOOK CLOSES, for the reason gLastChapter is: page 0 of the
+// next book is a different page 0.
+struct IdleWalkStuck {
+  int chapter = -1;
+  int page = -1;
+  bool at(int ch, int pg) const { return chapter == ch && page == pg; }
+  void note(int ch, int pg) {
+    chapter = ch;
+    page = pg;
+  }
+  void forget() {
+    chapter = -1;
+    page = -1;
+  }
+};
+static IdleWalkStuck gRestreamStuck;
+static IdleWalkStuck gWarmStuck;
+
 // HOW LONG THE BUTTONS MUST BE QUIET BEFORE THE READING POSITION IS WRITTEN.
 //
 // THE POINT OF THIS NUMBER IS THAT A PAGE TURN NEVER PAYS FOR IT. The save is two
@@ -4360,6 +4410,11 @@ void loop() {
       // otherwise, so opening a second book at the same spine index the first was left
       // on would suppress the next real crossing and its save edge. See gLastChapter.
       gLastChapter = -1;
+      // ...and so do the idle walks, for exactly the same reason wearing the same
+      // sign: page 0 of chapter 0 is a position both books have, and the one that
+      // could not restream is not the one that is about to be opened (#45).
+      gRestreamStuck.forget();
+      gWarmStuck.forget();
       logf("[progress] book closed\n");
       logFlush();
     }
@@ -4781,10 +4836,22 @@ void loop() {
     auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
     // ASKED HERE AS WELL AS INSIDE, so the common case -- a stream that stands, which
     // is every ordinary page turn -- costs a pointer test and no log line at all.
-    if (!rd->hasLiveStream()) {
+    // ...AND NOT WHERE THE WALK HAS ALREADY SAID IT CANNOT (#45 -- see IdleWalkStuck).
+    // `hasLiveStream()` alone is a gate with no memory, so the last page of a chapter
+    // re-ran this every iteration for as long as the reader sat there.
+    if (!rd->hasLiveStream() && !gRestreamStuck.at(rd->chapterIndex(), rd->pageIndex())) {
       const uint32_t t = millis();
       const bool done = rd->restreamAtCurrentPage(
           [](void*) { return rawSamplesPending() != 0; }, nullptr);
+      // AN EMPTY QUEUE AFTER THE CALL MEANS NOTHING INTERRUPTED IT, so a `false` here
+      // is the walk's answer about this page rather than a press taking the loop
+      // back. Asked immediately, before anything else can enqueue.
+      const bool structural = !done && rawSamplesPending() == 0;
+      if (structural) {
+        gRestreamStuck.note(rd->chapterIndex(), rd->pageIndex());
+      } else if (done) {
+        gRestreamStuck.forget();
+      }
       // LOGGED THOUGH NOTHING IS VISIBLE, for the reason [warm] is: an idle
       // optimisation that silently stops working looks exactly like one that is
       // working. `done` is the whole point of the line -- an abandoned restream is
@@ -4792,8 +4859,15 @@ void loop() {
       // happening. If this reads `abandoned` most of the time, kRestreamQuietMs is
       // too short for this reader; if it never appears at all, the stream is never
       // being spent and the count is not deferring.
-      logf("[restream] %s page=%d in %lums\n", done ? "ready" : "abandoned",
-           rd->pageIndex(), (unsigned long)(millis() - t));
+      //
+      // THE SUPPRESSED RETRIES PRINT NOTHING -- a line every 13 ms is the same spin
+      // wearing a different hat, and on a card log it is what erases the history a
+      // diagnostic session is collecting. But the FIRST failure at a position still
+      // says so, and says that it is the last one: silence with no explanation is
+      // exactly the shape this line exists to prevent.
+      logf("[restream] %s page=%d in %lums%s\n", done ? "ready" : "abandoned",
+           rd->pageIndex(), (unsigned long)(millis() - t),
+           structural ? " (structural -- not retried at this page)" : "");
       logFlush();
     }
   }
@@ -4834,17 +4908,35 @@ void loop() {
     // that shipped rather than getting something worse.
     const int affordable = static_cast<int>(ESP.getFreeHeap() / 8u / 1536u);
     rd->setPageCacheDepth(affordable);
-    if (rd->backwardHeadroom() < rd->pageCacheDepth() - 1) {
+    // THE SAME MEMORY THE RESTREAM ABOVE HAS, and for a sharper reason (#45): this
+    // job REFUSES page 0 outright, so on page 0 the headroom gate below can never
+    // stop being true and the walk is re-run for as long as the reader sits there.
+    // On the device it interleaved 1:1 with the restream's own spin, forever.
+    if (rd->backwardHeadroom() < rd->pageCacheDepth() - 1 &&
+        !gWarmStuck.at(rd->chapterIndex(), rd->pageIndex())) {
       const uint32_t t = millis();
       const int was = rd->backwardHeadroom();
       const bool done = rd->warmPageRing([](void*) { return rawSamplesPending() != 0; }, nullptr);
+      // AN EMPTY QUEUE AFTER THE CALL MEANS NOTHING INTERRUPTED IT -- see
+      // IdleWalkStuck for why the two meanings of `false` must not share a fate. An
+      // interrupted warm is the expensive one of the pair (it spends the live
+      // builder), which is all the more reason it must stay retryable.
+      const bool structural = !done && rawSamplesPending() == 0;
+      if (structural) {
+        gWarmStuck.note(rd->chapterIndex(), rd->pageIndex());
+      } else if (done) {
+        gWarmStuck.forget();
+      }
       // LOGGED EVEN THOUGH NOTHING IS VISIBLE -- especially because nothing is
       // visible. An idle optimisation that silently stops working looks exactly like
       // one that is working, which this file records as a defect shape three times
-      // over. depth/headroom is what says whether the ring is actually deeper.
-      logf("[warm] %s depth=%d headroom %d->%d in %lums (heap %u)\n",
+      // over. depth/headroom is what says whether the ring is actually deeper. The
+      // suppressed retries are silent and the first refusal at a position says that
+      // it is the last one, for the reason [restream] does.
+      logf("[warm] %s depth=%d headroom %d->%d in %lums (heap %u)%s\n",
            done ? "ready" : "abandoned", rd->pageCacheDepth(), was, rd->backwardHeadroom(),
-           (unsigned long)(millis() - t), (unsigned)ESP.getFreeHeap());
+           (unsigned long)(millis() - t), (unsigned)ESP.getFreeHeap(),
+           structural ? " (structural -- not retried at this page)" : "");
       logFlush();
     }
   }
