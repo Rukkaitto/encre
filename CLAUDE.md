@@ -2008,6 +2008,26 @@ it 7px PAST the margin on every screen that draws a band. The only real effect i
 `NOW READING` and never elides. Left alone deliberately; see
 `docs/superpowers/specs/2026-08-29-home-battery-design.md`.
 
+**`BatteryMonitor`'s CONSTRUCTOR CAPTURES THE BOARD PROFILE BEFORE THE PROBE HAS
+RUN, and it is harmless for a reason worth writing down rather than re-deriving.**
+`gBatteryMonitor` is a file-scope static, so it is constructed before `setup()` and
+therefore before `detectAndSelectBoard()` -- and its constructor copies `_adcPin`,
+`_dividerMultiplier` and `_chargeStatusPin` out of `BoardConfig::ACTIVE`, which at
+that moment is still the compile-time default. Two independent things keep it from
+biting: `readStatus()` tests `ACTIVE.batteryGauge.gaugeAddr` **live** rather than
+from a cached member, so a real X3 takes the gauge branch and never consults those
+members at all; and the X4's own ADC values happen to equal the default's. **The
+second of those is a coincidence, not a design**, so a profile whose `batteryAdc`
+differs from the default's would need this object built after the probe instead.
+
+**A PLUG-IN REPAINT CAN BE PRE-EMPTED BY AN ALREADY-DUE SLEEP.** `gIdle` is checked
+earlier in `loop()` than the dirty-driven paint, and plugging in does not count as
+activity -- so an edge detected in the last seconds before the idle timeout can set
+`markDirty()` and then have `sleepNow()` (which is `[[noreturn]]` and bypasses `App`)
+fire first. Harmless and self-healing: deep sleep is a chip reset, the flag goes with
+RAM, and the first Home paint after the wake reads the gauge fresh. Worth knowing
+only because it looks like the latch failing when it is the timer winning.
+
 ## The reader
 
 Six layers, each one ignorant of the next. The boundary is the point: every one of
