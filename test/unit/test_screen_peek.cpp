@@ -743,6 +743,59 @@ TEST_CASE("a peek page in the body of a chapter fills every line box its panel h
   }
 }
 
+TEST_CASE("the peek's line count follows the reader's typography, through real pagination") {
+  // THE DERIVED COUNT AGAINST WHAT PageBuilder ACTUALLY LAYS, at the corners of both
+  // settings ramps rather than only at the default. The case above pins the equality
+  // and the walk in test_theme_peek_metrics.cpp pins the arithmetic; neither of them
+  // runs the layout engine at a non-default ppem, and "8" is the one count where a
+  // theme that ignored its arguments would still be right.
+  //
+  // 17 LINES AT ppem 25 / lead 1.000 AND 4 AT ppem 46 / lead 2.000, in a box that does
+  // not move -- which is the feature in one assertion. Under the old rule these were 8
+  // and 8, in panels of 310px and 846px.
+  //
+  // THE EXPECTED COUNTS ARE SPELLED OUT rather than compared against the theme's own
+  // answer, because the theme's answer is what is under test here. They are the four
+  // corners of the box: 436px of column over a `ppem * lead` line box. Note 25/2.000
+  // lands on EIGHT -- the same count as the default, by coincidence of 25 * 2.0 being
+  // near 32 * 1.7 -- which is why a `n != 8` guard was wrong here and this table is not.
+  struct Corner {
+    int ppem, lead, lines;
+  };
+  const Corner corners[] = {{25, 1000, 17}, {25, 2000, 8}, {46, 1000, 9}, {46, 2000, 4}};
+  for (const auto& c : corners) {
+    for (const auto geo : {std::pair<int, int>{480, 800}, std::pair<int, int>{528, 792}}) {
+      const int ppem = c.ppem, lead = c.lead;
+      CAPTURE(ppem);
+      CAPTURE(lead);
+      CAPTURE(geo.first);
+
+      ramp::Ramp ramp;
+      reader::QuietTheme theme;
+      readerfix::Body body(ppem);
+      reader::Settings s;
+      s.bodyPpem = ppem;
+      s.lineSpacing = lead;
+      reader::PageMetrics m;
+      theme.peekMetrics(geo.first, geo.second, ramp.fonts, body.face, s, m);
+
+      reader::PeekScreen peek(readerfix::longChapter(40), "CH. 01", 4, &body.face);
+      peek.setMetrics(m);
+      // NOT PAGE ONE, for the reason the case above gives: `longChapter` opens with a
+      // heading, and a block boundary spends a line box that produces no LaidLine.
+      const std::string first = readerfix::pageText(peek.page());
+      peek.onGesture({Gesture::Next});
+      REQUIRE(readerfix::pageText(peek.page()) != first);
+
+      const int n = theme.peekVisibleLines(ramp.fonts, body.face, s);
+      // THE THEME'S ANSWER AGAINST THE TABLE, so the equality below cannot be satisfied
+      // by a theme and a layout that are wrong together.
+      CHECK(n == c.lines);
+      CHECK(static_cast<int>(peek.page().lines.size()) == n);
+    }
+  }
+}
+
 // --- WHAT THE FACTORY WILL AND WILL NOT BUILD -----------------------------------
 
 namespace {
