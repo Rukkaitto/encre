@@ -78,7 +78,14 @@ target_compile_definitions(corpus_probe PRIVATE READER_DESKTOP=1)
 add_executable(reader_sim ${CMAKE_SOURCE_DIR}/sim/main.cpp)
 target_link_libraries(reader_sim PRIVATE reader_core)
 target_compile_options(reader_sim PRIVATE ${READER_WARNINGS})
-target_compile_definitions(reader_sim PRIVATE ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+# DESIGN_DIR, because two sleep subcommands render the board's OWN cover image
+# (design/assets/sleep-cover-<W>x<H>.png) rather than a picture of their own -- see
+# sim/main.cpp's BoardCover. It is the design tree and not the assets tree because
+# that is where the boards that display it live, and generated-from-one-source is
+# the rule those files exist to keep.
+target_compile_definitions(reader_sim PRIVATE
+  ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
+  DESIGN_DIR="${CMAKE_SOURCE_DIR}/design")
 add_test(NAME sim_home COMMAND reader_sim home ${CMAKE_BINARY_DIR}/sim_home.png)
 # The scripted-input path, as a smoke test: Home -> Settings -> Input Monitor,
 # with a held Confirm logged there. Catches a broken factory or key parser

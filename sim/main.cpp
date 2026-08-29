@@ -18,6 +18,7 @@
 #include "reader/framebuffer.h"
 #include "reader/host_fs.h"
 #include "reader/png.h"
+#include "reader/pngd.h"
 #include "reader/profile.h"
 #include "reader/screen_home.h"
 #include "reader/screen_library.h"
@@ -27,11 +28,13 @@
 #include "reader/screen_reader.h"
 #include "reader/screen_peek.h"
 #include "reader/screen_reader_menu.h"
+#include "reader/screen_sleep.h"
 #include "reader/screen_typography.h"
 #include "reader/screens.h"
 #include "reader/settings.h"
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
+#include "reader/xml.h"  // BufferSource -- the ByteSource over bytes already in RAM
 
 static std::vector<uint8_t> slurp(const std::string& p) {
   std::ifstream f(p, std::ios::binary);
@@ -443,6 +446,141 @@ static int runCover(int argc, char** argv) {
   return 0;
 }
 
+// --- The board's own cover, as a CoverSource -------------------------------------
+//
+// design/SleepCover.dc.html and design/SleepCoverDetails.dc.html put
+// `design/assets/sleep-cover-<W>x<H>.png` behind the sleep screen, and this reads
+// THAT FILE so the firmware column of the comparison sheet is the same picture the
+// design column is. Anything else measures two rasterisers against each other:
+// `make compare` renders the board in Chrome and CHROME CANNOT FLOYD-STEINBERG,
+// which is the whole reason the asset is generated and committed rather than
+// authored (design/assets/README.md).
+//
+// SO IT DECODES AND DOES NOT RE-FIT. The asset is already this simulator's own
+// `cover` output at panel size -- running the source JPEG through CoverFitter again
+// here would dither a second time and could only differ from the file the board
+// shows. It is also why this reaches for the committed PNG rather than a corpus
+// book: the corpus is not in the repo and a machine with no cache would render a
+// blank firmware panel against a full-bleed board.
+//
+// IT IS NOT THE GOLDEN'S SOURCE, AND THE TWO SHOULD NOT BE UNIFIED.
+// test_theme_sleep_cover_golden.cpp SYNTHESISES its planes from arithmetic, so that
+// a golden does not depend on a PNG decoder -- the decoder is itself under test in
+// this feature. A comparison sheet has the opposite requirement: it must hold the
+// board's exact bytes. Two purposes, two sources, both right.
+struct BoardCover : reader::CoverSource {
+  int w = 0, h = 0, rowBytes = 0;
+  // Framebuffer-packed plane rows, top row first: bit `0x80 >> (x & 7)`, and paper
+  // is a SET bit. Same store shape SimCoverSink above builds.
+  std::vector<uint8_t> msb, lsb;
+
+  // Bw inks where coverage >= 2, which is exactly "MSB set" -- so the base pass and
+  // the Msb pass read the SAME plane. Honouring that here is what makes this the
+  // same shape as the shell's real source; see reader/screen_sleep.h.
+  bool loadPlane(reader::Plane plane, reader::Framebuffer& fb) override {
+    if (fb.width() != w || fb.height() != h) return false;
+    const std::vector<uint8_t>& src = (plane == reader::Plane::Lsb) ? lsb : msb;
+    if (src.size() != static_cast<size_t>(rowBytes) * static_cast<size_t>(h)) return false;
+    // NOT a memcpy into fb.data(): the planes are LOGICAL raster rows and the shell
+    // binds Rotation::Ccw, under which a logical row is a physical COLUMN.
+    // writePackedRow is the one function that knows that, and going through it here
+    // means the simulator drives the path the device drives.
+    for (int y = 0; y < h; ++y)
+      fb.writePackedRow(y, src.data() + static_cast<size_t>(y) * static_cast<size_t>(rowBytes));
+    return true;
+  }
+};
+
+// Unpacks the four-level PNG back into the two bit-planes that composed it.
+//
+// The file is written by writeGrayPng, which maps `(msb << 1) | lsb` through
+// `kRamp = {0xFF, 0xAA, 0x55, 0x00}` -- so this inverts exactly that. A byte that
+// is NOT one of those four is REFUSED rather than rounded to the nearest: the only
+// way one can appear is that the asset stopped being this pipeline's own output,
+// which is the fact worth reporting and the one a nearest-level match would hide.
+struct BoardCoverSink : reader::ImageRowSink {
+  BoardCover* out = nullptr;
+  int y = 0;
+  const char* refusal = nullptr;
+
+  bool begin(int width, int height) override {
+    if (width != out->w || height != out->h) {
+      refusal = "the asset is not this panel's size";
+      return false;
+    }
+    out->rowBytes = (out->w + 7) / 8;
+    const size_t plane = static_cast<size_t>(out->rowBytes) * static_cast<size_t>(out->h);
+    out->msb.assign(plane, 0xFFu);  // all paper; a set level bit CLEARS its bit
+    out->lsb.assign(plane, 0xFFu);
+    return true;
+  }
+
+  bool row(const uint8_t* px) override {
+    if (y >= out->h) {
+      refusal = "more rows than the header declared";
+      return false;
+    }
+    const size_t at = static_cast<size_t>(y) * static_cast<size_t>(out->rowBytes);
+    for (int x = 0; x < out->w; ++x) {
+      int level = -1;
+      for (int l = 0; l < 4; ++l)
+        if (px[x] == kGrayRamp[l]) level = l;
+      if (level < 0) {
+        refusal = "a grey the four-level ramp does not contain";
+        return false;
+      }
+      const uint8_t bit = static_cast<uint8_t>(0x80u >> (x & 7));
+      const size_t byte = at + static_cast<size_t>(x >> 3);
+      if ((level & 2) != 0) out->msb[byte] = static_cast<uint8_t>(out->msb[byte] & ~bit);
+      if ((level & 1) != 0) out->lsb[byte] = static_cast<uint8_t>(out->lsb[byte] & ~bit);
+    }
+    ++y;
+    return true;
+  }
+
+  // png.cpp's own table, and the only place the two files have to agree. It is
+  // named rather than inlined so the inversion above reads as the inverse of
+  // composeGray rather than as four magic numbers.
+  static constexpr uint8_t kGrayRamp[4] = {0xFFu, 0xAAu, 0x55u, 0x00u};
+};
+
+// Reads design/assets/sleep-cover-<w>x<h>.png through a HostFileSystem rooted at
+// design/, and decodes it with the firmware's own PngDecoder -- the same decoder the
+// device would use, rather than the desktop's stb, so the simulator has no second
+// image path of its own.
+static bool loadBoardCover(BoardCover& out, int w, int h) {
+  out.w = w;
+  out.h = h;
+  char name[64];
+  std::snprintf(name, sizeof(name), "/assets/sleep-cover-%dx%d.png", w, h);
+
+  reader::HostFileSystem fs(DESIGN_DIR);
+  std::string bytes;
+  if (!fs.readAll(name, bytes)) {
+    // NAMED, because there is exactly one way to fix it and it is not obvious from
+    // a blank panel: the pair is committed, so a missing file means this geometry
+    // has no asset rather than that the machine is missing a corpus.
+    std::fprintf(stderr, "sleep cover: no %s under %s\n", name, DESIGN_DIR);
+    return false;
+  }
+
+  reader::BufferSource src(bytes);
+  BoardCoverSink sink;
+  sink.out = &out;
+  reader::PngDecoder dec;
+  if (!dec.decode(src, sink)) {
+    std::fprintf(stderr, "sleep cover: %s did not decode: %s\n", name,
+                 sink.refusal != nullptr ? sink.refusal
+                                         : (dec.reason() != nullptr ? dec.reason() : "unknown"));
+    return false;
+  }
+  if (sink.y != h) {
+    std::fprintf(stderr, "sleep cover: %s gave %d of %d rows\n", name, sink.y, h);
+    return false;
+  }
+  return true;
+}
+
 int main(int argc, char** argv) {
   if (argc < 3) {
     std::fprintf(stderr, "usage: reader_sim home|sd_missing|app OUT.png [--canvas WxH] "
@@ -510,6 +648,12 @@ int main(int argc, char** argv) {
   const bool isSleep = std::strcmp(argv[1], "sleep") == 0;
   const bool isSleepIdle = std::strcmp(argv[1], "sleep_idle") == 0;
   const bool isSleepWaking = std::strcmp(argv[1], "sleep_waking") == 0;
+  // design/SleepCover.dc.html and design/SleepCoverDetails.dc.html: the two modes
+  // that put the book's own cover on the glass. Their own subcommands rather than a
+  // flag on `sleep`, for the reason every other state board has one -- a flag could
+  // not be named by the comparison sheet or by a golden.
+  const bool isSleepCover = std::strcmp(argv[1], "sleep_cover") == 0;
+  const bool isSleepCoverDetails = std::strcmp(argv[1], "sleep_cover_details") == 0;
   // design/LibraryOpening.dc.html. The SAME journey as `library` -- it is the same
   // screen, with the status line drawn over its hint bar the way the shell draws it
   // over a finished frame. Rendering it any other way would compare a board against
@@ -564,7 +708,8 @@ int main(int argc, char** argv) {
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
       !isHomeUnopened && !isLibraryScrolled && !isReader && !isSleepIdle &&
       !isReaderMenu && !isContents && !isChapterOpen && !isReaderList && !isAnchored &&
-      !isSleepWaking && !isLibraryOpening && !isTypography && !isPeek) {
+      !isSleepWaking && !isLibraryOpening && !isTypography && !isPeek && !isSleepCover &&
+      !isSleepCoverDetails) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
@@ -572,6 +717,7 @@ int main(int argc, char** argv) {
                  "'library_scrolled', 'reader', 'reader_anchored', "
                  "'reader_chapter_open', 'reader_list', "
                  "'reader_menu', 'contents', 'typography', 'sleep_waking', "
+                 "'sleep_cover', 'sleep_cover_details', "
                  "'library_opening', 'peek' or 'app')\n",
                  argv[1]);
     return 3;
@@ -700,6 +846,46 @@ int main(int argc, char** argv) {
       return 0;
     }
     std::printf("wrote %s (%dx%d) reader menu over the page\n", argv[2], w, h);
+    return 0;
+  }
+
+  if (isSleepCover || isSleepCoverDetails) {
+    // NOT THROUGH THE App, AND NOT THROUGH THE FACTORY, and both halves of that are
+    // the device's own shape rather than a shortcut.
+    //
+    // The shell paints the sleep screen with `paintSleepScreen`, which bypasses
+    // `App` entirely -- pushing it would make the next wake RESTORE INTO IT, so
+    // "press power" would give back "asleep, press power to wake". Sleep is a screen
+    // nothing navigates to.
+    //
+    // And the factory has no CoverSource to hand over, correctly: it is the
+    // NAVIGATION catalogue, so a screen nothing can navigate to has no business
+    // teaching it about a cover cache. The three sleep subcommands above still go
+    // through it because they need only a demo view model, which is exactly what it
+    // is for.
+    //
+    // THE CARD'S COPY IS demoSleepVm()'s, WHICH IS design/Sleep.dc.html'S. Both
+    // boards say so in as many words: SleepCoverDetails is "Sleep.dc.html with its
+    // background replaced, and nothing else", so anything the card differs by is a
+    // defect. Spelling it out here would be a second copy of the board's own words
+    // and a place for the two to drift.
+    BoardCover cover;
+    if (!loadBoardCover(cover, w, h)) return 1;
+
+    reader::SleepViewModel vm = reader::demoSleepVm();
+    vm.shows = isSleepCover ? reader::SleepShows::Cover : reader::SleepShows::CoverAndDetails;
+    reader::SleepScreen scr(std::move(vm), &cover);
+    // A COVER IS THE ONE THING ON THIS DEVICE THAT NEEDS FOUR LEVELS, so this is the
+    // only sleep render that takes the three-pass path -- asserted rather than
+    // assumed, because a Mono render of these two boards would be a plausible-looking
+    // sheet measuring the wrong pipeline. See SleepScreen::fidelity.
+    if (scr.fidelity() != reader::Fidelity::Grayscale) {
+      std::fprintf(stderr, "the cover sleep screen did not ask for Grayscale\n");
+      return 1;
+    }
+    if (!renderToPng(scr, fonts, theme, w, h, argv[2])) return 1;
+    std::printf("wrote %s (%dx%d) sleep, %s, over design/assets/sleep-cover-%dx%d.png\n", argv[2],
+                w, h, isSleepCover ? "the cover alone" : "the cover behind the card", w, h);
     return 0;
   }
 
