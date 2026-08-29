@@ -34,6 +34,7 @@ WHAT IT ENFORCES, and what it deliberately does not:
   person merging did not choose it.
 """
 import argparse
+import pathlib
 import re
 import subprocess
 import sys
@@ -84,7 +85,11 @@ def commits_in(rev_range):
     if not rev_range:
         return []
     # %P is the parent list; a merge has two, and is exempt.
-    out = git("log", "--format=%H\x1f%s\x1f%P", rev_range)
+    # split() so a range can be several tokens: the pre-push hook passes
+    # "<sha> --not --remotes=origin", which is "the commits this push actually
+    # adds" and is immune to a stale origin/main -- where a plain
+    # origin/main..HEAD would drag in already-merged history and fail on it.
+    out = git("log", "--format=%H\x1f%s\x1f%P", *rev_range.split())
     rows = []
     for line in out.split("\n"):
         if not line.strip():
@@ -97,26 +102,54 @@ def commits_in(rev_range):
     return rows
 
 
-def check_commits(rows):
+def check_subject(subject, label, allow_fixup=False):
+    """[] if this one subject conforms, else a list of complaints.
+
+    allow_fixup is the commit-msg hook's: `git commit --fixup` writes a
+    `fixup!` subject and that is a LEGITIMATE local state -- rejecting it there
+    would break the workflow whose whole point is to be squashed later. It stays
+    rejected on push and in CI, which are the moments it must not survive.
+    """
+    if subject.startswith(("fixup!", "squash!", "amend!")):
+        if allow_fixup:
+            return []
+        return ["%s %r is a fixup and must be squashed before merging"
+                % (label, subject)]
+    if SUBJECT_RE.match(subject):
+        return []
+    return ["%s %r\n"
+            "    expected <type>(<optional scope>): <subject>\n"
+            "    types: %s\n"
+            "    the house style writes the subsystem as the type; it is a\n"
+            "    SCOPE -- `peek:` becomes `feat(peek):` or `docs(peek):`"
+            % (label, subject, ", ".join(TYPES))]
+
+
+def check_commits(rows, allow_fixup=False):
     """[] if every non-merge subject conforms, else a list of complaints."""
     problems = []
     for sha, subject, parent_count in rows:
         if parent_count > 1:
             continue  # a merge commit's subject is git's, not the author's
-        if subject.startswith(("fixup!", "squash!", "amend!")):
-            problems.append(
-                "%s %r is a fixup and must be squashed before merging"
-                % (sha[:8], subject))
-            continue
-        if not SUBJECT_RE.match(subject):
-            problems.append(
-                "%s %r\n"
-                "    expected <type>(<optional scope>): <subject>\n"
-                "    types: %s\n"
-                "    the house style writes the subsystem as the type; it is a\n"
-                "    SCOPE -- `peek:` becomes `feat(peek):` or `docs(peek):`"
-                % (sha[:8], subject, ", ".join(TYPES)))
+        problems += check_subject(subject, sha[:8], allow_fixup)
     return problems
+
+
+def subject_of_message_file(path):
+    """The subject line of a commit message file, or None if there is none.
+
+    Comment lines are git's (`#`), and `git commit -v` appends a whole diff
+    below a scissors line -- so the subject is the first line that is neither
+    blank nor a comment, not simply line one.
+    """
+    text = pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
+    for line in text.splitlines():
+        if line.startswith("#"):
+            continue
+        if not line.strip():
+            continue
+        return line.rstrip()
+    return None
 
 
 def main():
@@ -131,6 +164,13 @@ def main():
                     help="check commits only")
     ap.add_argument("--skip-commits", action="store_true",
                     help="check the branch name only")
+    ap.add_argument("--message-file",
+                    help="validate the subject in this commit message file and "
+                         "nothing else -- the commit-msg hook's argument.")
+    ap.add_argument("--allow-fixup", action="store_true",
+                    help="accept fixup!/squash! subjects. For the commit-msg "
+                         "hook only: `git commit --fixup` is a legitimate local "
+                         "state, and stays rejected on push and in CI.")
     ap.add_argument("--require-commits", action="store_true",
                     help="fail if the range selects NO commits. CI passes this: "
                          "an empty range there means the base or head ref was "
@@ -141,6 +181,24 @@ def main():
     args = ap.parse_args()
 
     problems = []
+
+    # --message-file is its own mode: one pending subject, no branch, no range.
+    if args.message_file:
+        subject = subject_of_message_file(args.message_file)
+        if subject is None:
+            print("note: empty commit message; git will abort on its own")
+            return 0
+        problems = [("commit", p) for p in
+                    check_subject(subject, "the message you just wrote",
+                                  allow_fixup=args.allow_fixup)]
+        if problems:
+            print(f"\n{len(problems)} convention problem(s):\n", file=sys.stderr)
+            for kind, msg in problems:
+                print(f"  [{kind}] {msg}\n", file=sys.stderr)
+            print("  fix it with:  git commit --amend", file=sys.stderr)
+            return 1
+        print("conventions ok")
+        return 0
 
     if not args.skip_branch:
         branch = args.branch or git("rev-parse", "--abbrev-ref", "HEAD")
