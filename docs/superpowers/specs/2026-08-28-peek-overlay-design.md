@@ -271,17 +271,29 @@ is the behaviour the Reader already has and is right here too.
 
 ## The board
 
-`design/Peek.dc.html` exists and is approved; **nothing about it changes.** Two
-things it states that the implementation must derive rather than pin, because they
-are the invariant this project breaks most often:
+`design/Peek.dc.html` exists and is approved; **nothing about it changes** — which
+held until 2026-08-29, when the board gained an explicit `height: 546px` and the
+second bullet below was reversed. Two things it states that the implementation must
+derive rather than pin, because they are the invariant this project breaks most
+often:
 
 - **34px of veil either side is the intent; 412 is not a number to keep.** The board
   is authored at 480 and centred both ways so one board serves both panels; the
   firmware derives the panel width from the canvas.
-- **The panel's height is a RESULT of its line count**, the way `headerBandHeight()`
-  and `hintBarHeight()` are results. Eight lines is the design — content-sizing alone
-  ran to eleven and read as a bordered full screen rather than a modal — so the
-  firmware picks the line count and the height follows.
+- ~~**The panel's height is a RESULT of its line count**, the way
+  `headerBandHeight()` and `hintBarHeight()` are results. Eight lines is the design —
+  content-sizing alone ran to eleven and read as a bordered full screen rather than a
+  modal — so the firmware picks the line count and the height follows.~~
+  **REVERSED 2026-08-29, AND THE BOARD CHANGED WITH IT.** The panel's height is
+  `kPeekPanelH = 546` and the LINE COUNT is the result — `floor(columnH / lineBox)`,
+  whole lines, leftover as slack. The reasoning above was wrong in one step: a pinned
+  height cuts a line in half only if the count is not floored, and `PageBuilder`
+  floors it already. Shipping it that way cost two defects, both measured — a panel
+  ~310px tall on a device set to a small ppem (reported off the glass as "a lot
+  shorter" than the simulator), and an **846px panel on an 800px screen** at the top of
+  both settings ramps, where `centreIn` returns a negative origin. 546 is what this
+  spec's own derivation produced at the default, to the pixel, so neither golden moved.
+  CLAUDE.md's "The peek" carries the working.
 
 New theme surface: `Theme::peekMetrics(...)` returning the panel's `PageMetrics`,
 and `renderPeek(...)`. **No new icons** — `CLOSE` is `kBack` and `GO HERE` is `kDot`,
@@ -301,13 +313,17 @@ Derived against the board's own render, which is the check that it is right: ban
 **70px** against the board's measured 70, panel **546** against 544, veil above
 **127** against 128, clearance to the hint bar **63** against 65.
 
-**And `kPeekLines` cannot be tested through `columnH / lineH`** — `columnH` is derived
-from `kPeekLines`, so both sides of that equality move together and it holds for any
-value. It is kept as a round trip through the real `PageBuilder`, and the assertions
-that actually answer to the number are the board's own claims: the panel does not
-reach the hint bar, and the clearance below it is at least the bar's own height,
-which is the "modal, not a bordered full screen" argument with a non-arbitrary
-threshold.
+~~**And `kPeekLines` cannot be tested through `columnH / lineH`** — `columnH` is
+derived from `kPeekLines`, so both sides of that equality move together and it holds
+for any value.~~ **SPENT WITH THE INVERSION.** `columnH` is now derived from the fixed
+panel and the count from `columnH`, so the direction of that round trip reversed; and
+the transcription it warned about is gone, because `reader::rowsThatFit` in `layout.h`
+is the one spelling `PageBuilder` and `Theme::peekVisibleLines` both call. What answers
+to the geometry is unchanged and is now asserted across BOTH settings ramps rather than
+at the default alone: the panel does not reach the hint bar, its top inset is at least
+the bar's own height (the "modal, not a bordered full screen" argument with a
+non-arbitrary threshold), and — new — its box does not move at any of the 35 settings
+combinations, at either geometry.
 
 ## Verification
 

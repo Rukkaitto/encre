@@ -3501,25 +3501,79 @@ percentage-going-backwards bug.
 way the reader can see through. Persisting a peeked cursor would be a card write for a
 breadcrumb the anchor's own design declined to pay for.
 
-**EIGHT LINES, AND THE NUMBER IS THE DESIGN.** Content-sizing ran to eleven and filled
-the glass to within 48px of the top, which reads as a bordered full screen rather than a
-modal. The panel's **height is a result** of the line count, as `headerBandHeight()` and
-`hintBarHeight()` are results; a pinned height cut the last line in half **lengthwise**,
-which `PageBuilder` cannot even do — it lays out whole lines.
+**THE BOX IS THE CONSTANT AND THE LINE COUNT IS THE RESULT, and it shipped the other way
+round.** `kPeekPanelH` is **546px** — the panel is that tall on every device at every
+setting — and the count is `floor(columnH / lineBox)`, whole lines, leftover as slack at
+the foot of the panel. That is `design/Typography.dc.html`'s preview box's own rule ("the
+box's height is DERIVED and fixed with respect to the settings … visible slack at large
+sizes"), arrived at one screen later.
+
+**The board argued the inverse for a phase and the argument does not hold.** It ran: a
+pinned height "cut the last line in half lengthwise", therefore the panel must be sized by
+its text — so `kPeekLines = 8` was the input and the height was `110 + ceil(8 × lineBox)`.
+The premise is true and the step to the conclusion is missing: **a pinned height only cuts
+a line in half if the count is not floored**, and `PageBuilder` floors it already. It was a
+number that happened to be right at the default, not a rule.
+
+**TWO THINGS IT COST, BOTH MEASURED (2026-08-29):**
+
+- **ON GLASS THE PANEL WAS "A LOT SHORTER" THAN THE SIMULATOR SHOWS.** Reported by a
+  reader at a smaller ppem and a tighter lead — 17 lines in their reading column where the
+  default fits 12. Eight of *their* line boxes is ~310px against 546: a small box adrift in
+  a lot of veil, on a screen whose whole job is to read as a modal. **No board and no
+  golden could show it**, because nothing renders the reader at non-default typography
+  (#40) — which is why the defect reached a device.
+- **AT THE TOP OF BOTH RAMPS THE PANEL WAS TALLER THAN THE GLASS.** `kBodyPpemSteps` tops
+  out at 46 and `kLineSpacingSteps` at 2000, so the widest line box is **92px**, eight of
+  them a **736px** column and an **846px** panel — against 800 (X4) and 792 (X3).
+  `centreIn(0, 800, 846)` is **−23**, so the panel began 23px above the top of the glass
+  and ran 23px past the bottom, with its border off the screen at both ends. Confirmed by
+  walking the real ramps before anything was changed, and again by restoring the old rule
+  as a mutation: `e.top > 0` and `e.bottom < h` both fail at both geometries.
+
+**546 IS WHAT THE OLD DERIVATION PRODUCED AT THE DEFAULT, TO THE PIXEL**, which is what
+makes this a re-derivation and not a redesign: 4px of border, a 70px band, 16 above the
+text and 20 below leaves **436** of column, and 436 holds eight 54.4px boxes. **Neither
+peek golden moved.** The board's `height: 546px` is also 2px *more* than Chrome's
+content-derived 544, so stating the firmware's own number closed a disagreement rather
+than documenting it — design-vs-firmware went **4.20%/4.22% → 3.99%/4.02%**.
+
+**Derived counts, measured at both geometries:** 17 at ppem 25 / lead 1.000, **8** at the
+default 32 / 1.700, 9 at 46 / 1.000, 4 at 46 / 2.000. Note **ppem 25 at 2.000 is also 8**,
+by coincidence — a `count != 8` guard written to prove the count moves failed there, which
+is this file's rule about a mutation telling you about your input first.
+
+**THE COUNT IS A QUERY, NOT A CONSTANT** — `Theme::peekVisibleLines`, beside
+`libraryVisibleRows` and `contentsVisibleRows`, for their reason: it depends on the type
+ramp *and* on the reader's settings, so nothing can hold it. **It takes no panel size, and
+the absence is the statement**: the box is fixed, so the count cannot depend on which glass
+it is drawn on.
 
 **THE LINE BOX IS `ppem × lead`, NOT `lineHeight × lead`.** `PageBuilder` uses
-`Tracking::em(font.ppem(), leadEm1000)` (`layout.cpp:71`), which is what `line-height:
-1.7` on `font-size: 32px` means and what the board's measured 54.4px box is. Against
-`lineHeight()` it is 48 × 1.7 = 82px, and the panel then reserves room for **twelve**
-lines while claiming eight. **And it rounds UP**: the exact column height at the default
-is 435.25px, and 435 holds seven. Derived against the board: band 70 against 70, panel
-546 against 544, veil 127 against 128.
+`Tracking::em(font.ppem(), leadEm1000)`, which is what `line-height: 1.7` on
+`font-size: 32px` means and what the board's measured 54.4px box is. Against `lineHeight()`
+it is 48 × 1.7 = 82px, and the panel would reserve room for **twelve** lines while claiming
+eight. **And it floors in f26, not in whole pixels**: a column a quarter of a pixel short
+of eight boxes holds SEVEN.
 
-**`kPeekLines` IS DEFENDED BY THE TWO GOLDENS AND BY NOTHING ELSE.** Measured: changing
-it 8 → 7 fails both golden subcases and **no other test in the repo**.
-`columnH / lineH == kPeekLines` cannot bite, because `columnH` is *derived* from
-`kPeekLines` and both sides move together. Worth knowing before anyone deletes a
-"redundant" golden.
+**`rowsThatFit` IS THAT ARITHMETIC, ONCE, IN `layout.h`** — called by `PageBuilder`'s
+constructor and by the theme alike. `test_theme_peek_metrics.cpp` used to carry it
+TRANSCRIBED and said so in its own comment ("change the derivation and this file stays
+green while the panel paginates to seven"); the second copy was the extraction point.
+
+**`PeekViewModel::leadEm1000` WENT WITH THE CHANGE.** It existed only so `renderPeek` could
+recompute a height that depended on the lead. With the box fixed, **neither `peekMetrics`
+nor `renderPeek` reads any typography at all**, so `peekBox` no longer takes a lead and the
+field had no other reader — the `ListRow::trackingEm1000` shape, caught this time before it
+outlived its producer.
+
+**THE GOLDEN TEST'S TOP-OF-COLUMN CHECK WAS ONLY EVER RUN WHERE IT COULD NOT FAIL.** Its
+comment said the face-extent-exceeds-the-lead hazard "is not the hazard this screen has";
+extending the walk to the ramp corners found it. `settings.h` records the two tightest
+`kLineSpacingSteps` as deliberately tighter than the face's own ink, and at **ppem 46 /
+lead 1.000 the first line's nominal top is 12px above the column** — inside the panel, but
+outside the column it was asserted against. The bound is split now, and the body's 16px of
+top padding is what it must stay inside.
 
 **`Up` AND `Down` ARE DEAD SLOTS ON PURPOSE.** `Up` already means "return to where I was"
 on the screen underneath, and one button with two meanings across a single press is worse
@@ -3532,7 +3586,12 @@ on 21px of padding, where this board says `--t-value` (25px) at weight 700 on 18
 reusing it draws the band ~6px too tall, which is the header-band defect this project has
 already paid for once.
 
-**MEASURED AGAINST ITS BOARD AT 4.20% (X4) / 4.22% (X3).** Compare that against the other
+**MEASURED AGAINST ITS BOARD AT 3.99% (X4) / 4.02% (X3)**, having been 4.20%/4.22% until
+the board stated its own height (see above — Chrome derived 544 from the content where the
+firmware derives 546, and the 2px was the band's rounding). **The sheet prints no number
+(#41)**, so both figures are a threshold-at-128 count over the bare panel PNGs
+`--export` writes; the method reproduces the older pair exactly on the pre-change board,
+which is what makes the two comparable. Compare it against the other
 **grayscale** screens and not against `reader_menu`'s ~3% — the peek declares
 `Fidelity::Grayscale`, so a threshold-at-128 count over four levels inflates the figure,
 and a healthy grayscale screen chased against a 1-bit one is how a healthy screen gets
