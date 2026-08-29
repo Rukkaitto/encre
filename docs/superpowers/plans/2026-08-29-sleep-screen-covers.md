@@ -2590,8 +2590,14 @@ Pass `rawSamplesPending()` as `decodeCover`'s `stop`, so any button press abando
 - [ ] **Step 2b: VERIFY THE RELEASE ON GLASS, because the desktop cannot**
 
 The `App` release is the change the gate forced, and its whole value is a heap figure
-no desktop test can produce. Re-run the probe build **after** Stage 2 lands and confirm
-from a real sleep — not from boot — that a deflated JPEG decodes with the book opened
+no desktop test can produce. **This needs the ORDINARY build, not the probe build** —
+Task 17 put `[cover] … in Nms` on the real decode path and added a `[power] sleep cost`
+line, so a real sleep now reports itself and the boot-time probe has nothing left to add.
+(An earlier version of this step said to re-run the probe; that was written before those
+lines existed and would have measured the wrong thing — boot has ~86 KB more headroom
+than sleep, which is the entire point.)
+
+Confirm from a **real sleep** that a deflated JPEG decodes with the book opened
 **through the Library** on a large card. That is the ~6 KB case; if it still refuses,
 the release did not free what it was supposed to and `[cover]` will say `OutOfMemory`.
 
