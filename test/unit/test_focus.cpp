@@ -9,6 +9,10 @@
 //
 // This is that rule as an object, so a screen states its RANGE and gets the
 // behaviour, and a change to the behaviour -- wrapping, say -- happens once.
+// <initializer_list> for the range-for over a braced list below. libc++ satisfies this transitively and libstdc++ does
+// not, so it compiled on macOS and failed on the first Linux build.
+#include <initializer_list>
+
 #include "doctest.h"
 #include "reader/focus.h"
 

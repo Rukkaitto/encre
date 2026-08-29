@@ -1,4 +1,4 @@
-.PHONY: test sim firmware fonts icons compare epubs epubs-bulk card-add card-remove zips
+.PHONY: test sim firmware fonts icons compare epubs epubs-bulk card-add card-remove zips conventions hooks
 # PlatformIO installs outside PATH by default; allow an override: make firmware PIO=/path/to/pio
 #
 # Invoked through its MODULE entry point rather than the `pio` launcher script.
@@ -13,6 +13,21 @@ PYTHON ?= python3
 
 test:
 	cmake -S . -B build && cmake --build build -j && ctest --test-dir build --output-on-failure
+# Branch name and commit subjects, the same check CI runs on a PR. Runnable here
+# because a convention enforced only by CI is one you are told about after
+# pushing, which is the worst moment to be asked to rewrite a commit message.
+# Defaults to the current branch and origin/main..HEAD.
+conventions:
+	$(PYTHON) tools/check_conventions.py
+# Install the commit-msg and pre-push hooks. One `git config` -- the hooks
+# themselves are tracked in .githooks/, so they are reviewed like any other code
+# and cannot drift per clone. The config lives in the common .git/config, so this
+# covers every worktree at once. Both hooks run the same tools/check_conventions.py
+# that CI runs, and both are bypassable with --no-verify by design: this is a fast
+# local mirror of the gate, not a second source of truth.
+hooks:
+	git config core.hooksPath .githooks
+	@echo "hooks installed: commit-msg, pre-push  (undo: git config --unset core.hooksPath)"
 sim:
 	cmake -S . -B build && cmake --build build -j --target reader_sim && ./build/reader_sim home build/home.png
 firmware:

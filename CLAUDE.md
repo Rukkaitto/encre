@@ -41,6 +41,125 @@ panel-size PNGs for overlaying in a design tool.
 CMake uses `file(GLOB ...)`: **re-run `cmake -S . -B build` after adding or
 removing a source file**, or it is silently ignored.
 
+## CI
+
+`.github/workflows/ci.yml`, three jobs on every PR and on pushes to `main`,
+cancelling a ref's own earlier run. `test` is `make test` on a bare checkout --
+no submodule and no Python, because every generated asset is committed.
+`firmware` is the only thing anywhere that compiles `shell/`; it checks out
+submodules (an empty `freeink-sdk/` fails with `PackageException: not a
+directory`, which names neither the submodule nor the fix) and caches the ~1 GB
+toolchain.
+
+**THE `compare` JOB IS A NARROW GATE AND IS NOT A FIDELITY CHECK.** It fails on
+two things: a board named in `compare-design.py` and absent from disk, and a
+screen the SIMULATOR KNOWS that will not render. It does **not** measure how
+close the render is -- the sheet still prints `ok` rather than a percentage,
+which is #41. A board with no screen behind it stays fine; that is nine of the
+32.
+
+**Wiring it at all needed the script to be able to fail.** `render_sim` returned
+a bare `None` for both "the simulator has never heard of this id" and "the
+simulator knows it and crashed", so a broken subcommand printed
+`firmware not implemented` and the run exited **0** -- the same
+reports-on-less-than-it-claims shape as the card probe answered from cache and
+the `make compare` default that skipped four screens. It returns a status now,
+and `--require-implemented` fails on the second. The flag is **off by default**,
+so comparing mid-implementation is unaffected; CI passes it. Proved by mutation:
+breaking `home` in the simulator takes the gate to exit 1 naming both
+geometries, while `--only boot` (a real board with no screen) stays green.
+
+`$CHROME` overrides the board rasteriser's path, which was hardcoded to macOS
+and cannot exist on a Linux runner, and `$CHROME_FLAGS` carries a runner's
+`--no-sandbox` -- set by the workflow that knows it is one rather than by
+sniffing `$CI` in the script, so a developer's Chrome keeps its sandbox.
+
+**BRANCH NAMES AND COMMIT SUBJECTS ARE ENFORCED ON PRs**, by
+`tools/check_conventions.py` -- runnable as `make conventions`, which is the
+point: a convention enforced only by CI is one you are told about after pushing,
+which is the worst moment to be asked to rewrite a commit message.
+
+**Commit subjects are Conventional Commits with the ELEVEN STANDARD TYPES**
+(`feat fix docs style refactor perf test build ci chore revert`) and a free-form
+scope. **The house style writes the SUBSYSTEM as the type** -- `peek:`,
+`design:`, `reader:`, `shell:` -- and that is a scope wearing a type's clothes:
+`feat(peek):` says the same thing, validates against a stock config, and carries
+the one bit the bare area name never did. Measured when this landed: **358 of
+main's 513 subjects already passed**, and of the 155 that did not, **128 failed
+that one way** and the remaining **27 were merge commits**, which are exempt
+because git wrote their subject. **History is not re-litigated** -- the check
+runs on the commits a PR adds.
+
+The scope vocabulary is deliberately **not** restricted (a list of allowed
+scopes needs a line per subsystem and conflicts every time a screen lands), and
+subject **length** is not enforced (Conventional Commits says nothing about it
+and this project writes long explanatory subjects on purpose).
+
+**Branch names take git-flow's vocabulary plus `claude/`.** `feature` `bugfix`
+`hotfix` `release` `support` `chore` `docs` `ci` `refactor` `test` `perf`, then
+`/<lowercase-slug>`. **`claude/` is in the list because Claude Code NAMES ITS
+OWN BRANCHES**, so a pattern without it rejects every agent branch -- including
+the one that added the check -- and buys a rename before every PR rather than
+any clarity. **There is no `develop` branch and this does not invent one**: full
+git flow is a change to how the project is developed, not a CI check.
+
+**THE SAME CHECK RUNS AS TWO GIT HOOKS**, tracked in `.githooks/` and installed
+by `make hooks` (one `git config core.hooksPath`, which lives in the common
+`.git/config` and so covers every worktree at once). `commit-msg` validates the
+subject you just wrote, when the fix is `git commit --amend` rather than an
+interactive rebase; `pre-push` validates the branch name and every commit the
+push would add. Both run `tools/check_conventions.py`, so they cannot drift from
+the gate they mirror, and both are bypassable with `--no-verify` **by design** --
+they are a fast local mirror, not a second source of truth.
+
+**`commit-msg` ALLOWS `fixup!` AND PUSH AND CI DO NOT.** `git commit --fixup`
+writes one, and it is a legitimate local state whose whole purpose is to be
+squashed later; rejecting it at commit time would break the workflow. It stays
+rejected at the two moments it must not survive. The hook is also skipped for a
+merge, a revert and a cherry-pick, whose messages git wrote.
+
+**`pre-push` TAKES ITS RANGE FROM GIT'S STDIN, NOT FROM `origin/main..HEAD`.**
+git hands the hook the remote sha it negotiated for each ref, live; a
+remote-tracking ref can be STALE, and a stale one drags already-merged history
+into the range -- where **128 of main's commits predate this rule** and would
+fail it. For a branch the remote does not have yet that sha is all zeros, and
+the fallback is "commits on no branch of this remote".
+
+**AND NONE OF IT IS BLOCKING ON GITHUB TODAY.** Branch protection answers
+`403: Upgrade to GitHub Pro or make this repository public`, so the check cannot
+be made a required status check: a violation shows a red X on the PR and the
+merge button still works. **The hooks are currently the only thing that stops
+anything**, which is why they exist rather than being belt-and-braces.
+
+**AN EMPTY COMMIT RANGE IS AN ERROR IN CI** (`--require-commits`), because a
+wrong base ref would otherwise check nothing and pass -- the
+reports-on-less-than-it-claims shape again. It is only a note locally, where a
+branch with no commits yet is an ordinary state.
+
+**CI'S FIRST RUN FOUND A REAL PORTABILITY BUG, AND IT WAS NOT THE GOLDENS.**
+`test_scalablefont.cpp` called `std::memcmp` without including `<cstring>`:
+libc++ pulls it in transitively and libstdc++ does not, so the file had compiled
+on macOS for months and **failed on the first Linux build**. A
+transitively-satisfied include is a bug only the other toolchain can see, which
+is the whole argument for building somewhere other than the machine that wrote
+the code. Note the build died before `ctest` ran, so **the goldens-under-gcc
+question is still open** -- it has not been answered, only postponed.
+
+**A `\x1f`-SEPARATED `git log` MUST NOT BE `.strip()`ed.** Python counts `\x1f`
+as whitespace, so a bare `.strip()` ate the trailing empty field of the last
+line -- the ROOT commit, the only one with no parents -- and the parse crashed
+on it. Found by running the checker over the real 513-commit history rather than
+over its fixtures, every one of which had a parent.
+
+**A GOLDEN IS NEVER RE-BLESSED TO MAKE CI GREEN.** A failing golden uploads its
+`build/<name>_candidate.png` as an artifact precisely so the pixels can be
+looked at, which is the only way to tell an intended change from a regression.
+**The goldens were blessed on macOS/clang and this job is Linux/gcc**, and that
+has not been observed yet: layout accumulates in fixed point and should be
+bit-identical, but `stb_truetype`'s rasteriser is float. If the first run
+reddens on goldens alone, the candidates are the evidence and the fix is to move
+the job to `macos-latest`, not to bless anything.
+
 ## What V1 is, and is not
 
 **V1 IS CARD TRANSFER ONLY. Wi-Fi is cut.** It was too big, and cutting it took
@@ -3045,9 +3164,17 @@ Three things worth keeping:
   "`shell/` has no test harness" has been to move logic where a fake can reach it;
   a stack is not movable, so it is MEASURED instead. `test_inflate.cpp` runs the
   inflate on a pthread with a stack it owns, fills it with a pattern and counts what
-  survives — FreeRTOS's own high-water technique. It reports **7,348 bytes** and
-  asserts a 10 KB ceiling, so a vendored-library bump that grows the appetite fails
-  on the desktop rather than panicking the device.
+  survives — FreeRTOS's own high-water technique. It reports **7,348 bytes** under
+  clang and asserts a 10 KB ceiling there, so a vendored-library bump that grows the appetite fails
+  on the desktop rather than panicking the device. **THE CEILING IS PER HOST
+  COMPILER AND CANNOT BE ONE NUMBER** (`test/unit/stack_ceiling.h`): the same
+  chain measures **12,212** under x86-64 gcc, and the streaming decoder 3,072
+  against 6,824, so the clang-calibrated ceilings failed the first Linux CI run
+  with nothing regressed. Raising one number to cover both was refused — it would
+  need clang's appetite to **more than double** before tripping, and clang is
+  where nearly all work here happens. **Neither host figure is the device's**:
+  the device is gcc-shaped but 32-bit, and its real number is the `[stack]`
+  serial line.
 
 The `[stack]` serial line reports `uxTaskGetStackHighWaterMark` after an open — the
 worst case since boot, inflate included.
