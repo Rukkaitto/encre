@@ -1626,7 +1626,8 @@ case to look at if one ever appears.
   - **This governs every scrollable list**, and today that is Library alone.
     Settings scrolled for about an hour: adding its `Refresh on screen change` row
     pushed it past the panel, and then Wi-Fi was cut from V1 and CONNECTIONS went
-    with it — eleven items where twelve fit. Phase 3's typography settings will
+    with it — eleven items where twelve fit, and the SLEEP SCREEN section has
+    since taken it back to nine. Phase 3's typography settings will
     push it over again and it will start scrolling **without any code change**,
     because `renderSettings` reads `totalRows > rows` rather than assuming. Contents
     and Bookmarks are Phase 3's and will want it too.
@@ -1661,7 +1662,7 @@ worth knowing before changing it:
 | Library / scrolled | `LibraryScrolled.dc.html` | Reached by pressing PAST the focused row and back — arriving from above windows it differently. |
 | Item actions, Delete confirm | their own boards | Overlays; a focus move repaints the overlay alone. |
 | Book details | `BookDetails.dc.html` | Not an overlay, despite covering the Library. Its title **wraps**; everywhere else elides. |
-| Settings | `Settings.dc.html` | Draws nine rows and only three respond. |
+| Settings | `Settings.dc.html` | Nine items, three sections, and every drawn row responds. |
 | Sleep | `Sleep.dc.html` | Painted directly, never pushed — a push would make the wake restore into it. |
 | Sleep / nothing open | `SleepIdle.dc.html` | The badge alone. Same screen with its card removed. |
 | Reader | `Reader.dc.html` | The only screen whose content is the BOOK's. `Fidelity::Grayscale`, the only one. |
@@ -1669,14 +1670,45 @@ worth knowing before changing it:
 | Peek | `Peek.dc.html` | The only overlay over a `Grayscale` screen. Its column is NOT the reading column, which is why it shows no page number. |
 | SD missing | `SdMissing.dc.html` | RETRY restarts the device when the card was lost after a mount. |
 
-**SETTINGS IS SEVEN ITEMS NOW, AND THE PARAGRAPH BELOW DESCRIBES WHAT IT WAS.**
-Its five inert TYPOGRAPHY rows became one disclosing `Typography` row in a `READING`
-section once a screen existed to edit them — see **The typography panel**. What
-survives of the paragraph below: `Sleep screen` is still drawn and unreachable
-(issue #11), the focus still skips what cannot act, an inert row is still drawn
-exactly as an unfocused focusable one, and the theme still reports a box model
-rather than a row count. What is gone: the five rows, the placeholder values, and
-the claim that no row here pushes a screen.
+**SETTINGS IS NINE ITEMS NOW — THREE SECTIONS AND SIX ROWS — AND NOTHING ON IT IS
+INERT BY DEFAULT.** Its five inert TYPOGRAPHY rows became one disclosing
+`Typography` row in a `READING` section once a screen existed to edit them (see
+**The typography panel**), and a `SLEEP SCREEN` section then replaced the last row
+that was drawn with nothing behind it: `Sleep screen` / `BOOK COVER` was **issue
+#11**, and it is now `Shows` (COVER / COVER + DETAILS / DETAILS) and `Cover fit`
+(FILL / WHOLE), two rows that act.
+
+What survives of the paragraph below: the focus still skips what cannot act, an
+inert row is still drawn exactly as an unfocused focusable one, and the theme still
+reports a box model rather than a row count. What is gone: the five rows, **every
+placeholder** — `SettingsScreen::Item::placeholder` was removed outright rather
+than left with no writer, and a test asserts every drawn row either discloses a
+screen or states a value from `settings_` — and the claim that no row here pushes a
+screen.
+
+**AND THE ONE REMAINING UNREACHABLE ROW IS DERIVED, NOT TABULATED.** `Cover fit`
+is unreachable while `Shows` reads DETAILS, because a fit is meaningless with no
+cover on the glass — `focusable()` asks `settings_`, which is Typography's own
+precedent (`Font` is unreachable while one body face is vendored and becomes
+reachable the moment a second lands, with no line to remember). The gate is
+consulted per landing, so cycling `Shows` changes the answer with nothing to
+invalidate.
+
+**`kSettingsVersion` DID NOT MOVE**, for the third time and for the reason at the
+top of `settings.h`: an added field takes its default from an older file, and both
+defaults are today's behaviour. `CoverFit` comes from `core/include/reader/cover_fit.h`
+— a leaf that includes nothing, written so `settings.h` can reach the enum without
+including `imagefit.h`: measured, `settings.h` is **895 preprocessed lines**, the
+include costs **9**, and `imagefit.h` would have cost **72,962** (it needs
+`<vector>`), which is exactly the coupling `settings.h` already refuses at
+`bodyPpem`.
+
+**THE LAST-ROW-OF-A-SECTION RULE IS DEFENDED BY A PIXEL FOR THE FIRST TIME.**
+`renderSettings` suppresses a row's `border-bottom` when the next item is a header,
+and until this section existed the only section boundary on the screen was
+`Typography` → `DEVICE` — where the row is FOCUSED, so `rowRuleFor` had already
+suppressed it and the golden could not see the `nextIsHeader` term at all. Deleting
+that term now fails both Settings goldens; before, it failed nothing.
 
 **SETTINGS DREW EVERY BOARD ROW AND ONLY THE DEVICE ONES RESPONDED.** TYPOGRAPHY
 belongs to Phase 3's reader; its five rows carry the board's own placeholder values

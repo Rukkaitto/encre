@@ -52,6 +52,17 @@ std::string focusedLabel(const SettingsScreen& scr) {
   return scr.vm().rows[static_cast<size_t>(f)].label;
 }
 
+// Presses DOWN until `label` is focused. A COUNT OF PRESSES WOULD BE A SECOND
+// COPY OF THE ITEM TABLE: every case below used to spell one, so inserting the
+// SLEEP SCREEN section moved eight hand-maintained numbers at once and a wrong
+// one lands on a neighbouring row that cycles a different field. The walk is
+// bounded so a label that is not reachable fails here rather than looping.
+// Which rows a walk STEPS OVER is asserted by its own case above, not here.
+void focusTo(SettingsScreen& scr, const std::string& label) {
+  for (int i = 0; i < 40 && focusedLabel(scr) != label; ++i) scr.onEvent(kDown);
+  REQUIRE(focusedLabel(scr) == label);
+}
+
 std::string valueOf(const SettingsScreen& scr, const std::string& label) {
   for (const auto& row : scr.vm().rows)
     if (row.label == label) return row.value;
@@ -68,21 +79,25 @@ TEST_CASE("focus starts on the first reachable row, not on row 0") {
   CHECK(focusedLabel(scr) == "Typography");
 }
 
-TEST_CASE("focus skips headers and inert rows in both directions") {
+TEST_CASE("focus skips headers in both directions") {
   SettingsScreen scr = sized(Settings{}, nullptr);
   REQUIRE(focusedLabel(scr) == "Typography");
 
-  // The DEVICE header sits between `Typography` and `Sleep after` and is stepped
-  // straight over.
+  // The SLEEP SCREEN header sits between `Typography` and `Shows`, and the DEVICE
+  // header between `Cover fit` and `Sleep after`. Both are stepped straight over.
+  scr.onEvent(kDown);
+  CHECK(focusedLabel(scr) == "Shows");
+  scr.onEvent(kDown);
+  CHECK(focusedLabel(scr) == "Cover fit");
   scr.onEvent(kDown);
   CHECK(focusedLabel(scr) == "Sleep after");
   scr.onEvent(kDown);
   CHECK(focusedLabel(scr) == "Full refresh");
   scr.onEvent(kDown);
   CHECK(focusedLabel(scr) == "Refresh on screen change");
-  // `Sleep screen` follows and is not focusable, so DOWN from here must not land
-  // on it -- it wraps past it to the first focusable row instead. (It used to stop
-  // here, which made Settings the one list in the firmware that did not roll over.)
+  // The last row of the list, so DOWN wraps to the first focusable row. (It used
+  // to stop here, which made Settings the one list in the firmware that did not
+  // roll over.)
   scr.onEvent(kDown);
   CHECK(focusedLabel(scr) == "Typography");
 
@@ -92,6 +107,10 @@ TEST_CASE("focus skips headers and inert rows in both directions") {
   CHECK(focusedLabel(scr) == "Full refresh");
   scr.onEvent(kUp);
   CHECK(focusedLabel(scr) == "Sleep after");
+  scr.onEvent(kUp);
+  CHECK(focusedLabel(scr) == "Cover fit");
+  scr.onEvent(kUp);
+  CHECK(focusedLabel(scr) == "Shows");
   scr.onEvent(kUp);
   CHECK(focusedLabel(scr) == "Typography");
   // And UP from the first focusable row wraps to the last rather than climbing
@@ -121,9 +140,8 @@ TEST_CASE("CHANGE cycles the focused setting and commits it") {
   Settings s;
   s.sleepAfterMs = 5u * 60u * 1000u;
   SettingsScreen scr = sized(s, &sink);
-  // Down off `Typography`, which opens a screen rather than cycling a value.
-  scr.onEvent(kDown);
-  REQUIRE(focusedLabel(scr) == "Sleep after");
+  // Off `Typography`, which opens a screen rather than cycling a value.
+  focusTo(scr, "Sleep after");
   REQUIRE(valueOf(scr, "Sleep after") == "5 MIN");
 
   scr.onEvent(kChange);
@@ -141,7 +159,7 @@ TEST_CASE("the cycle wraps, because one button has no way back") {
   Settings s;
   s.sleepAfterMs = 30u * 60u * 1000u;  // the last step
   SettingsScreen scr = sized(s, &sink);
-  scr.onEvent(kDown);  // off `Typography`, onto `Sleep after`
+  focusTo(scr, "Sleep after");
   scr.onEvent(kChange);
   CHECK(valueOf(scr, "Sleep after") == "1 MIN");
 }
@@ -152,9 +170,7 @@ TEST_CASE("the refresh cadence reads NEVER at zero, not EVERY 0 PAGES") {
   s.fullRefreshEvery = 0;
   SettingsScreen scr = sized(s, &sink);
   CHECK(valueOf(scr, "Full refresh") == "NEVER");
-  scr.onEvent(kDown);
-  scr.onEvent(kDown);
-  REQUIRE(focusedLabel(scr) == "Full refresh");
+  focusTo(scr, "Full refresh");
   scr.onEvent(kChange);
   CHECK(valueOf(scr, "Full refresh") == "EVERY 5 PAGES");
 }
@@ -164,10 +180,7 @@ TEST_CASE("the transition toggle is ON/OFF and round-trips") {
   Settings s;
   s.fullOnTransition = true;
   SettingsScreen scr = sized(s, &sink);
-  scr.onEvent(kDown);
-  scr.onEvent(kDown);
-  scr.onEvent(kDown);
-  REQUIRE(focusedLabel(scr) == "Refresh on screen change");
+  focusTo(scr, "Refresh on screen change");
   CHECK(valueOf(scr, "Refresh on screen change") == "ON");
   scr.onEvent(kChange);
   CHECK(valueOf(scr, "Refresh on screen change") == "OFF");
@@ -186,9 +199,7 @@ TEST_CASE("a REFUSED commit still shows the new value") {
   Settings s;
   s.fullOnTransition = true;
   SettingsScreen scr = sized(s, &sink);
-  scr.onEvent(kDown);
-  scr.onEvent(kDown);
-  scr.onEvent(kDown);
+  focusTo(scr, "Refresh on screen change");
   scr.onEvent(kChange);
   CHECK(valueOf(scr, "Refresh on screen change") == "OFF");
   CHECK(scr.settings().fullOnTransition == false);
@@ -197,7 +208,7 @@ TEST_CASE("a REFUSED commit still shows the new value") {
 TEST_CASE("CHANGE on a screen with no sink still edits, for the simulator") {
   SettingsScreen scr = sized(Settings{}, nullptr);
   const std::string before = valueOf(scr, "Sleep after");
-  scr.onEvent(kDown);  // off `Typography`, onto `Sleep after`
+  focusTo(scr, "Sleep after");
   scr.onEvent(kChange);
   CHECK(valueOf(scr, "Sleep after") != before);
 }
@@ -211,7 +222,7 @@ TEST_CASE("a hand-edited value outside the cycle is escapable") {
   s.sleepAfterMs = 7u * 60u * 1000u;
   SettingsScreen scr = sized(s, &sink);
   REQUIRE(valueOf(scr, "Sleep after") == "7 MIN");
-  scr.onEvent(kDown);  // off `Typography`, onto `Sleep after`
+  focusTo(scr, "Sleep after");
   scr.onEvent(kChange);
   CHECK(valueOf(scr, "Sleep after") != "7 MIN");
 }
@@ -222,10 +233,39 @@ TEST_CASE("setFocus refuses a header or an inert row") {
   SettingsScreen scr = sized(Settings{}, nullptr);
   const int wasFocus = scr.focus();
   CHECK_FALSE(scr.setFocus(0));  // READING
-  CHECK_FALSE(scr.setFocus(2));  // DEVICE
-  CHECK_FALSE(scr.setFocus(6));  // Sleep screen, inert
-  CHECK_FALSE(scr.setFocus(999));
+  CHECK_FALSE(scr.setFocus(2));  // SLEEP SCREEN
+  CHECK_FALSE(scr.setFocus(5));  // DEVICE
   CHECK(scr.focus() == wasFocus);
+}
+
+TEST_CASE("setFocus CLAMPS an out-of-range index rather than refusing it") {
+  // This case used to be one line inside the one above, asserting that
+  // setFocus(999) was refused -- and it passed for an ACCIDENTAL reason: `set()`
+  // clamps (a record naming row 400 of a three-row list means "as far down as you
+  // can go"), and the last item then happened to be the inert `Sleep screen`, so
+  // the clamp landed somewhere the gate refused. The last item is `Refresh on
+  // screen change` now, which is focusable, so the clamp lands and the restore
+  // succeeds -- which is what `set()` has always been specified to do.
+  SettingsScreen scr = sized(Settings{}, nullptr);
+  CHECK(scr.setFocus(999));
+  CHECK(focusedLabel(scr) == "Refresh on screen change");
+}
+
+TEST_CASE("setFocus refuses Cover fit while it is inert, and accepts it when it is not") {
+  // The restore path, and the one row whose focusability is DERIVED. A session
+  // record naming row 4 must not put the focus somewhere the user cannot move off
+  // in one press -- the whole reason setFocus consults the gate.
+  Settings s;
+  s.sleepShows = reader::SleepShows::Details;
+  SettingsScreen hidden = sized(s, nullptr);
+  const int was = hidden.focus();
+  CHECK_FALSE(hidden.setFocus(4));
+  CHECK(hidden.focus() == was);
+
+  s.sleepShows = reader::SleepShows::Cover;
+  SettingsScreen shown = sized(s, nullptr);
+  CHECK(shown.setFocus(4));
+  CHECK(focusedLabel(shown) == "Cover fit");
 }
 
 TEST_CASE("setFocus accepts a focusable row, and says whether anything moved") {
@@ -239,22 +279,28 @@ TEST_CASE("setFocus accepts a focusable row, and says whether anything moved") {
   CHECK_FALSE(scr.setFocus(scr.focus()));
   CHECK(focusedLabel(scr) == "Typography");
 
-  REQUIRE(scr.setFocus(4));
+  REQUIRE(scr.setFocus(6));
   REQUIRE(focusedLabel(scr) != "Typography");
   CHECK(scr.setFocus(1));
   CHECK(focusedLabel(scr) == "Typography");
 }
 
 TEST_CASE("the list FITS the panel, so no rail is drawn") {
-  // Seven items, all visible, where there were eleven. It briefly did not fit --
-  // adding the transition row pushed it over and made it a scrolling list -- and
-  // then Wi-Fi was cut from V1 and CONNECTIONS went with it; the five typography
-  // readout rows becoming one door took four more. The reading settings still to
-  // come will push it over again, and this assertion is what will notice:
+  // NINE items, all visible, where there were seven and before that eleven. It
+  // briefly did not fit -- adding the transition row pushed it over and made it a
+  // scrolling list -- and then Wi-Fi was cut from V1 and CONNECTIONS went with it;
+  // the five typography readout rows becoming one door took four more, and the
+  // SLEEP SCREEN section has now put two back. The reading settings still to come
+  // will push it over again, and this assertion is what will notice:
   // renderSettings draws the rail and takes its gutter off `totalRows > rows`, so
   // the day this flips, the screen starts scrolling without anything else changing.
+  //
+  // setMetrics counts from the TOP, which is the conservative end -- and there are
+  // THREE headers in the first six items now, so the window it counts is the
+  // tallest one the list has. `rows.size() == totalRows` is what says every item
+  // still fits.
   SettingsScreen scr = sized(Settings{}, nullptr);
-  CHECK(scr.vm().totalRows == 7);
+  CHECK(scr.vm().totalRows == 9);
   CHECK(static_cast<int>(scr.vm().rows.size()) == scr.vm().totalRows);
 }
 
@@ -267,17 +313,32 @@ TEST_CASE("section headers are rows in the list, not decoration around it") {
       CHECK(row.value.empty());
       CHECK_FALSE(row.focusable);
     }
-  CHECK(headers == 2);  // READING and DEVICE, and no CONNECTIONS any more
+  CHECK(headers == 3);  // READING, SLEEP SCREEN and DEVICE -- no CONNECTIONS
+}
+
+TEST_CASE("with the defaults, no row is drawn inert") {
+  // `Sleep screen` / `BOOK COVER` was the last row here with nothing behind it
+  // (issue #11) and it is gone -- the setting is real now and lives in SLEEP
+  // SCREEN as two rows that act. So on a default card every drawn row responds.
+  SettingsScreen scr = sized(Settings{}, nullptr);
+  for (const auto& row : scr.vm().rows)
+    if (!row.isHeader) CHECK(row.focusable);
 }
 
 TEST_CASE("an inert row is marked unfocusable but is otherwise an ordinary row") {
   // The flag is about INPUT. It carries a label and a value exactly as a focusable
   // row does, so a theme has nothing to dim even if it wanted to.
-  SettingsScreen scr = sized(Settings{}, nullptr);
+  //
+  // `Cover fit` is the only row that can be inert now, and only while `Shows`
+  // shows no cover -- so this case has to ASK for that state rather than find it.
+  Settings s;
+  s.sleepShows = reader::SleepShows::Details;
+  SettingsScreen scr = sized(s, nullptr);
   bool sawInert = false;
   for (const auto& row : scr.vm().rows) {
     if (row.isHeader || row.focusable) continue;
     sawInert = true;
+    CHECK(row.label == "Cover fit");
     CHECK_FALSE(row.label.empty());
     CHECK_FALSE(row.value.empty());
   }
@@ -292,7 +353,7 @@ TEST_CASE("Settings' READING row opens the Typography panel") {
   // displayed the values are redundant.
   SettingsScreen scr = sized(Settings{}, nullptr);
 
-  REQUIRE(scr.vm().rows.size() == 7);
+  REQUIRE(scr.vm().rows.size() == 9);
   CHECK(scr.vm().rows[0].label == "READING");
   CHECK(scr.vm().rows[0].isHeader);
   CHECK(scr.vm().rows[1].label == "Typography");
@@ -301,7 +362,7 @@ TEST_CASE("Settings' READING row opens the Typography panel") {
   CHECK(scr.vm().rows[1].discloses);
   CHECK(scr.vm().rows[1].value.empty());
   CHECK(scr.vm().rows[1].focusable);
-  CHECK(scr.vm().rows[2].label == "DEVICE");
+  CHECK(scr.vm().rows[2].label == "SLEEP SCREEN");
 
   // THE FOCUS STARTS HERE. It sat on `Sleep after` only because every row above it
   // was inert.
@@ -337,14 +398,12 @@ TEST_CASE("the Confirm hint follows the focused row") {
   CHECK(scr.vm().hints[1] == "OPEN");
 
   // Down to the first DEVICE row, which cycles a value in place.
-  scr.onEvent(kDown);
-  REQUIRE(focusedLabel(scr) == "Sleep after");
+  focusTo(scr, "Sleep after");
   CHECK(scr.vm().hints[1] == "CHANGE");
 
   // And back, because a label that only ever moved one way would pass a one-press
   // test and leave the bar wrong for the rest of the session.
-  scr.onEvent(kUp);
-  REQUIRE(focusedLabel(scr) == "Typography");
+  focusTo(scr, "Typography");
   CHECK(scr.vm().hints[1] == "OPEN");
 
   // The other three slots never move: Back, Up and Down mean the same thing on
@@ -372,10 +431,150 @@ TEST_CASE("CHANGE on a device row still cycles, and OPEN does not") {
   // file on every visit to the panel.
   CHECK(sink.commits == 0);
 
-  scr.onEvent(kDown);
-  REQUIRE(focusedLabel(scr) == "Sleep after");
+  focusTo(scr, "Sleep after");
   const reader::Action a = scr.onEvent(kChange);
   CHECK(a.kind == reader::Action::Kind::Redraw);  // not Push
   CHECK(scr.settings().sleepAfterMs != before.sleepAfterMs);
   CHECK(sink.commits == 1);
+}
+
+// --- The SLEEP SCREEN section (design/Settings.dc.html) -----------------------
+
+TEST_CASE("the SLEEP SCREEN section is drawn where the board puts it") {
+  SettingsScreen scr = sized(Settings{}, nullptr);
+  REQUIRE(scr.vm().rows.size() == 9);
+  CHECK(scr.vm().rows[2].label == "SLEEP SCREEN");
+  CHECK(scr.vm().rows[2].isHeader);
+  CHECK(scr.vm().rows[3].label == "Shows");
+  CHECK(scr.vm().rows[4].label == "Cover fit");
+  CHECK(scr.vm().rows[5].label == "DEVICE");
+  CHECK(scr.vm().rows[5].isHeader);
+  // Neither row discloses: both cycle a value in place, so neither draws a
+  // chevron and both state a value. Home's rule -- a row states a quantity or
+  // discloses a screen, never both.
+  CHECK_FALSE(scr.vm().rows[3].discloses);
+  CHECK_FALSE(scr.vm().rows[4].discloses);
+  CHECK(scr.vm().rows[3].value == "COVER + DETAILS");
+  CHECK(scr.vm().rows[4].value == "FILL");
+}
+
+TEST_CASE("Shows cycles three ways and wraps") {
+  RecordingSink sink;
+  SettingsScreen scr = sized(Settings{}, &sink);
+  focusTo(scr, "Shows");
+  const int at = scr.focus();
+  REQUIRE(valueOf(scr, "Shows") == "COVER + DETAILS");
+
+  scr.onEvent(kChange);
+  CHECK(scr.settings().sleepShows == reader::SleepShows::Details);
+  CHECK(valueOf(scr, "Shows") == "DETAILS");
+  scr.onEvent(kChange);
+  CHECK(scr.settings().sleepShows == reader::SleepShows::Cover);
+  CHECK(valueOf(scr, "Shows") == "COVER");
+  scr.onEvent(kChange);
+  CHECK(scr.settings().sleepShows == reader::SleepShows::CoverAndDetails);  // wrapped
+  CHECK(valueOf(scr, "Shows") == "COVER + DETAILS");
+  CHECK(scr.focus() == at);  // cycling never moves the focus
+  CHECK(sink.commits == 3);
+}
+
+TEST_CASE("Cover fit cycles two ways and wraps") {
+  RecordingSink sink;
+  SettingsScreen scr = sized(Settings{}, &sink);
+  focusTo(scr, "Cover fit");
+  REQUIRE(valueOf(scr, "Cover fit") == "FILL");
+  scr.onEvent(kChange);
+  CHECK(scr.settings().coverFit == reader::CoverFit::Whole);
+  CHECK(valueOf(scr, "Cover fit") == "WHOLE");
+  scr.onEvent(kChange);
+  CHECK(scr.settings().coverFit == reader::CoverFit::Fill);
+  CHECK(valueOf(scr, "Cover fit") == "FILL");
+}
+
+TEST_CASE("Cover fit is focusable only while Shows shows a cover") {
+  // DERIVED, not tabulated -- Typography's precedent, where `Font` is unreachable
+  // while one body face is vendored. A row that cannot act must not be selectable,
+  // which is this screen's standing rule.
+  for (const reader::SleepShows shows :
+       {reader::SleepShows::Cover, reader::SleepShows::CoverAndDetails}) {
+    Settings s;
+    s.sleepShows = shows;
+    SettingsScreen scr = sized(s, nullptr);
+    bool reached = false;
+    for (int i = 0; i < 40; ++i) {
+      scr.onEvent(kDown);
+      if (focusedLabel(scr) == "Cover fit") reached = true;
+    }
+    CHECK(reached);
+  }
+
+  Settings s;
+  s.sleepShows = reader::SleepShows::Details;
+  SettingsScreen hidden = sized(s, nullptr);
+  bool landed = false;
+  for (int i = 0; i < 40; ++i) {
+    hidden.onEvent(kDown);
+    if (focusedLabel(hidden) == "Cover fit") landed = true;
+  }
+  CHECK_FALSE(landed);
+  // Still DRAWN, and still stating its value: the flag is about input, and an
+  // inert row is drawn exactly as an unfocused focusable one.
+  CHECK(valueOf(hidden, "Cover fit") == "FILL");
+}
+
+TEST_CASE("turning the cover off under the focus does not leave it stranded") {
+  // `Shows` is the row ABOVE `Cover fit`, so a user can only reach this by being
+  // on `Cover fit`, going up, and cycling to DETAILS. The focus is then on `Shows`
+  // and the row below has gone inert -- which must not make DOWN land on it.
+  SettingsScreen scr = sized(Settings{}, nullptr);
+  focusTo(scr, "Shows");
+  scr.onEvent(kChange);  // -> DETAILS
+  REQUIRE(scr.settings().sleepShows == reader::SleepShows::Details);
+  CHECK(focusedLabel(scr) == "Shows");
+  scr.onEvent(kDown);
+  CHECK(focusedLabel(scr) == "Sleep after");
+}
+
+TEST_CASE("the SLEEP SCREEN rows say CHANGE, not OPEN") {
+  // One row on this screen discloses and the rest edit in place. Both new rows
+  // edit, so the Confirm slot must read CHANGE on each -- and Activate must
+  // answer a redraw rather than a push.
+  //
+  // `Cover fit` FIRST, and the order is load-bearing: cycling `Shows` reaches
+  // DETAILS, which makes `Cover fit` inert -- so walking to it afterwards is a
+  // walk to a row that is no longer there. The first draft of this case did
+  // exactly that and failed, which is the behaviour working rather than a bug.
+  SettingsScreen scr = sized(Settings{}, nullptr);
+  focusTo(scr, "Cover fit");
+  CHECK(scr.vm().hints[1] == "CHANGE");
+  CHECK(scr.onEvent(kChange).kind == reader::Action::Kind::Redraw);
+  focusTo(scr, "Shows");
+  CHECK(scr.vm().hints[1] == "CHANGE");
+  CHECK(scr.onEvent(kChange).kind == reader::Action::Kind::Redraw);
+}
+
+TEST_CASE("no row carries a placeholder any more") {
+  // `Sleep screen` was the last row with a board placeholder and nothing behind
+  // it -- the row CLAUDE.md ties to issue #11 by number. Item::placeholder is
+  // removed outright, and this asserts the field is dead rather than assuming it,
+  // exactly as ListRow::trackingEm1000 is handled: every drawn row either
+  // discloses a screen or states a value that comes from `settings_`.
+  //
+  // Walked over every reachable state of the one setting that changes which rows
+  // are inert, because an inert row is precisely where a placeholder used to live.
+  for (const reader::SleepShows shows :
+       {reader::SleepShows::Cover, reader::SleepShows::CoverAndDetails,
+        reader::SleepShows::Details}) {
+    Settings s;
+    s.sleepShows = shows;
+    SettingsScreen scr = sized(s, nullptr);
+    for (const reader::SettingsRow& r : scr.vm().rows) {
+      if (r.isHeader) continue;
+      if (r.discloses) {
+        CHECK(r.value.empty());
+      } else {
+        CHECK_FALSE(r.value.empty());
+      }
+    }
+  }
 }
