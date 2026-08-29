@@ -1,6 +1,10 @@
 // The two cover sleep screens, at four grey levels, at both panel geometries.
 //
-// THE FIRST CALLER checkGoldenGray HAS EVER HAD. It composes the Lsb and Msb
+// NOT checkGoldenGray's FIRST CALLER, whatever this comment said before: the Reader
+// golden took that on 2026-08-22 and the peek's on 2026-08-29, and CLAUDE.md's
+// "nothing uses it today" outlived all three. `git log -S"checkGoldenGray(lsb, msb"`
+// settles it in one command. What IS true is the rest of this paragraph, and it is
+// the part worth keeping. It composes the Lsb and Msb
 // planes into one level per pixel exactly as the panel combines them, which is the
 // only way a four-level screen can be pinned at all -- and it is also the only
 // thing in this repo that pins imagefit.cpp's PACKING. test_imagefit.cpp says so

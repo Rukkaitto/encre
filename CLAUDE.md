@@ -255,10 +255,27 @@ onto a valid B/W baseline afterwards:
 
 **It costs three panel waveforms: 367 + 366 + 156 ms, and 1363 ms for a focus
 move measured end to end on the X3**, against one waveform for either one-pass
-path. No screen declares it today. It is kept, not deprecated, because it is the
-only way to put continuous tone on this glass — Phase 3's question about book
-covers and images — and because the sequence was expensive to get right; the
-comments in `paintGray()` were each earned by breaking the panel.
+path.
+
+**TWO SCREENS DECLARE IT NOW, AND THIS LINE SAID "NO SCREEN DECLARES IT TODAY"
+THROUGH BOTH OF THEM.** The Reader falsified it in Phase 3 and nobody came back
+here; the sleep screen falsified it again with covers. It was kept on the argument
+that it is "the only way to put continuous tone on this glass — Phase 3's question
+about book covers and images", and **that question is now answered in the
+affirmative by the thing it was reserved for**: a book cover is a photograph, and a
+photograph is the one thing on this device that needs four levels. The sequence was
+also expensive to get right, and the comments in `paintGray()` were each earned by
+breaking the panel — that half of the reason never expired.
+
+**`SleepScreen`'s IS DECIDED PER PAINT, WHICH IS THE FIRST DYNAMIC `fidelity()` IN
+THE FIRMWARE.** It answers `Grayscale` only when there is actually a cover to paint
+— `cover_ != nullptr && vm_.shows != SleepShows::Details` — so `DETAILS` mode stays
+on today's single ~825 ms waveform and is pixel-identical to the screen that
+shipped. **It is decided from the SOURCE and never from the load**, because the
+shell has to know which sequence to paint before any pass runs: a screen that
+declared `Grayscale` and then fell back would spend three waveforms drawing a
+one-waveform screen. That is also why the shell hands over a **null** source rather
+than a source it knows will refuse.
 
 **WINDOWED GRAYSCALE IS NOT THE ESCAPE HATCH, AND IT IS NOT THE ESCAPE HATCH FOR
 THE READER EITHER** — re-asked for page turns as #17 and closed again on stronger
@@ -1665,7 +1682,9 @@ worth knowing before changing it:
 | Settings | `Settings.dc.html` | Nine items, three sections, and every drawn row responds. |
 | Sleep | `Sleep.dc.html` | Painted directly, never pushed — a push would make the wake restore into it. |
 | Sleep / nothing open | `SleepIdle.dc.html` | The badge alone. Same screen with its card removed. |
-| Reader | `Reader.dc.html` | The only screen whose content is the BOOK's. `Fidelity::Grayscale`, the only one. |
+| Sleep / cover | `SleepCover.dc.html` | The cover full-bleed, and **the one screen that drops the badge**. `Grayscale`, decided per paint. |
+| Sleep / cover + details | `SleepCoverDetails.dc.html` | The same cover with the reading card and the badge over it. Keeps both. |
+| Reader | `Reader.dc.html` | The only screen whose content is the BOOK's — but no longer the only `Fidelity::Grayscale` one. |
 | Typography | `Typography.dc.html` | Two doors, and it needs nothing from the book. `CHANGE` cycles in place; `Font` is drawn and unreachable. |
 | Peek | `Peek.dc.html` | The only overlay over a `Grayscale` screen. Its column is NOT the reading column, which is why it shows no page number. |
 | SD missing | `SdMissing.dc.html` | RETRY restarts the device when the card was lost after a mount. |
@@ -1777,7 +1796,11 @@ there is a trap for the next person to paint something after it.
 
 It costs one **FULL** waveform (~825 ms) on every sleep — full rather than fast because
 this is the last thing the panel does for hours and a differential update would leave
-the previous screen's residue under it.
+the previous screen's residue under it. **WITH A COVER ON IT THAT IS NO LONGER THE
+WHOLE BILL**: a cover makes the screen `Grayscale`, which is three waveforms, and a
+cover the cache does not already hold costs a decode of seconds between two paints.
+See **Covers**, which prices all three shapes; `[power] sleep cost` is the one line
+that adds them up.
 
 **ASLEEP WITH NOTHING OPEN IS ITS OWN BOARD** (`SleepIdle.dc.html`): the card *is* the
 reading state, and the device sleeps from Home or the Library as often as from a book.
@@ -1786,7 +1809,9 @@ reading; painting nothing at all is worse, because e-ink holds its last image an
 Library left on the glass gives no clue the device is asleep rather than frozen — which
 is the entire reason this screen exists. So the **badge is the load-bearing half and it
 stays**, drawn by the same tail in both states so the two cannot disagree about where
-it sits; the card is the half with something to say only sometimes. One screen with and
+it sits; the card is the half with something to say only sometimes. **`SleepCover`
+OVERRIDES THAT RULE AND IT IS THE ONLY THING THAT MAY** — see **Covers**, which
+records why the override cannot be generalised. One screen with and
 without its content, not two screens. `SleepViewModel::nothingToContinue` is spelled
 exactly as `HomeViewModel`'s, because it is the same fact and one rule should have one
 spelling. Measured against its board at **0.27%**, the closest panel on the sheet.
@@ -1826,6 +1851,301 @@ only from the stub's first row and no board ever listed it. **What was given up:
 classification is now verified only by `test_input.cpp` on the desktop**, and
 `shell/` is where four bugs have hidden. If held-scroll or press classification
 needs eyes on glass again, it comes back as a board row, not a hidden gesture.
+
+## Covers
+
+The sleep screen can hold the open book's cover (#11). `SleepCover.dc.html` is the
+cover alone, `SleepCoverDetails.dc.html` is the cover with the reading card and the
+badge over it, and `Sleep.dc.html` is the card on paper that shipped and is still the
+default. Settings' `SLEEP SCREEN` section picks between them — `Shows`
+(COVER / COVER + DETAILS / DETAILS) and `Cover fit` (FILL / WHOLE).
+
+**IT IS DESKTOP-VERIFIED AND DEVICE-TIMED, AND THE PANEL HAS NOT YET SEEN A COVER.**
+Every number below is a corpus measurement, a desktop render, or a boot-time probe on
+the X3 — nothing here is a fact about the glass. The two questions the feature
+actually turns on are both still open and both are `On glass`: whether four grey
+levels of a photograph read as a picture or as noise, and whether a full-bleed cover
+reads as *asleep* with no badge on it. This project has been wrong about this panel
+from desktop evidence three times.
+
+### A cover is universal, and it can never be held
+
+225 real EPUBs from `~/.cache/encre-corpus`, parsed for the cover their OPF declares
+(`<meta name="cover">` first, `properties="cover-image"` second):
+
+| | |
+|---|---|
+| books declaring a cover | **225 / 225** |
+| median cover | **1400 × 2100 = 2.94 MP** |
+| largest | 3133 × 5000 = 15.66 MP |
+| median compressed bytes | 246 KB (max 1.36 MB) |
+
+2.94 MP decoded to 8-bit grey is **2.9 MB**, against 133 KB free with no book open,
+76,476 B reading through Home's CONTINUE, and **42,152 B reading through the
+Library** — on a part with **no PSRAM**. The decoded image is **22× larger than
+everything the device has**, so this was never a tuning problem and no amount of care
+with a one-shot decoder reaches it.
+
+**So every layer streams and downscales, exactly as the reader's six do.** JPEG one
+MCU row at a time (`jpegd.h`, over vendored TJpgDec); PNG one scanline at a time over
+our own `inflate_stream.h` (`pngd.h`); box-filtered straight down into a panel-sized
+destination (`imagefit.h`); `cover.h` drives the chain. **The output is PLANES, not an
+image** — the picture never exists anywhere in one piece.
+
+**TJpgDec is vendored and the PNG decoder is ours, and the asymmetry is deliberate.**
+JPEG's edge cases are numerous and a wrong upsample is a *subtly wrong picture* rather
+than a failure, which is the worst kind of bug to own; PNG is DEFLATE plus per-row
+unfiltering and **we already own the hard half**, so vendoring a second decoder to get
+~200 lines of unfiltering would buy nothing.
+
+### Two planes serve three passes
+
+`Plane::Bw` inks where coverage ≥ 2, which is **exactly "MSB set"** — so the grayscale
+base pass and the `Msb` pass ask for the *same* plane. That identity is what makes
+four levels affordable at the 42,152-byte reading floor: the cache is two planes'
+worth of bytes rather than three, and **each pass is one blit straight onto the frame,
+so painting a cover costs no extra RAM at all**. Holding a 2 bpp image of a 480×800
+panel would be 96 KB, which does not exist.
+
+`CoverSource` (`screen_sleep.h`) is an interface rather than a buffer for that reason,
+the same shape as `SettingsSink` and for the same reason — `core/` never learns what a
+filesystem is. An implementation that answered `Bw` with anything other than its `Msb`
+plane would give a base pass that disagrees with the refinement painted over it.
+
+**A `false` FROM `loadPlane` DOES NOT PROMISE THE FRAME IS UNTOUCHED**, and pretending
+otherwise would be a contract no streaming implementation can keep — it finds out the
+card is gone half way down the picture. What makes that safe is the *caller*:
+`renderSleep` clears and draws the dither field whenever the load refuses, so a
+partial write is overwritten rather than shown.
+
+### The cache holds LOGICAL rows, and a `memcpy` would pass the whole desktop suite
+
+**IT IS NOT A `memcpy` INTO `data()`, AND THAT IS THE HALF THAT IS ONLY WRONG ON THE
+DEVICE.** The cache holds **logical raster rows**, because a streaming row-major
+downscale can emit nothing else — `imagefit.h` produces destination row *n* and then
+destination row *n+1*, and it has no picture left to transpose. The shell binds
+`Rotation::Ccw`, under which **one logical row is a physical COLUMN**. So the blit
+goes row by row through `Framebuffer::writePackedRow`, which is **the one function in
+this feature that knows `Rotation` exists**.
+
+**Under `Rotation::None` that reduces to the `memcpy` and the difference is
+invisible** — and `Rotation::None` is the entire simulator and every golden. So the
+wrong version passes `make test`, passes every golden at both geometries, passes
+`make compare`, and smears diagonally on glass. **This is the fifth time this project
+has met that hazard**: `veilRect`, `Framebuffer::fillRect`, the glyph blit in
+`text.cpp` and `ditherRect` each took the same structure for the same reason and each
+carries the same warning. Nothing on the desktop stands between that mistake and the
+panel except a test written to run under both rotations.
+
+### A software 64-bit division, found by reading the assembly
+
+The obvious spelling of `CoverFitter::addRow`'s column map (`imagefit.cpp`) is
+`(int)((long long)j * dstW / srcW)`, one per source pixel. On x86-64 that is a
+hardware `idiv` and **benchmarks at 3.19 ms a cover against 3.19 for the form that
+shipped — no difference at all**. **RV32IMC HAS NO 64-BIT DIVIDER.** Compiled with the
+project's own toolchain (`riscv32-esp-elf-g++ -Os`) that line emitted `mulh`/`mul` and
+a **`call __divdi3` inside the per-pixel loop body** — a libgcc shift-subtract routine,
+~100–200 cycles, run once for every source pixel. A median cover cropped to the X4 is
+~2.65 M source pixels: **1.7–3.3 s at 160 MHz, in one line**.
+
+It is stepped instead, carrying the remainder, and **bit-identical rather than
+approximate**: `dstW <= srcW` means the quotient advances by 0 or 1 per pixel, so the
+carry reproduces the floor exactly. Verified across **113,388 assertions — not one
+output bit moved**, which is the standard a "faster and equivalent" claim has to meet
+here. The *row* map keeps its divide, because it runs once per source ROW; a CFG cycle
+analysis put **0 of the surviving `__divdi3` calls in a loop body**, which is the check
+worth repeating rather than the count.
+
+**THE HABIT IS THE POINT, NOT THE INCIDENT.** This is the desktop-to-device ratio trap
+in its sharpest form yet: the ratio here is not 37× or 135×, **it is infinite, because
+the desktop cost is zero**. A desktop benchmark cannot see an instruction the target
+does not have. **When a hot loop is about to run millions of times on the device,
+cross-compile it and read the assembly** — `riscv32-esp-elf-g++ -Os -S`, then grep for
+`call`. A `call` in a leaf arithmetic loop is a compiler-emitted software routine and
+is always worth a look; `__divdi3`, `__udivdi3`, `__moddi3` and the soft-float family
+are what to expect on a part with no FPU and a 32-bit divider.
+
+### Sleep releases the whole `App`, not just the chapter
+
+`ReaderScreen::releaseChapter()` already existed, built for the peek, and it frees the
+right **36,956 bytes** — and it is **not enough**. Measured on the X3, a deflated JPEG
+peaks at **81,088 bytes**, which is **17.5 KB ABOVE the desktop's 63,560 for the same
+work**. Releasing only the chapter leaves:
+
+| the book was opened via | free at sleep | margin over an 81 KB peak |
+|---|--:|--:|
+| Home → CONTINUE | ~121 KB | ~40 KB |
+| **the Library, 203 books** | **~87 KB** | **~6 KB** |
+
+**Six kilobytes, on the commonest way to open a book** — the Library's 203 entries sit
+resident under the Reader at ~59 KB. **And the failure would have been SILENT**:
+`decodeCover` answers `OutOfMemory`, the screen falls back to the reading card, nothing
+looks broken, and it reads as *"covers don't work for some books"* rather than as a
+defect anybody reports. Releasing the `App` returns that ~59 KB and takes the margin to
+**~65 KB**.
+
+**NOTHING NEEDS THE `App` AFTER THE FIRST SLEEP PAINT**, and each half was checked
+rather than assumed: `saveWhereWeAre` wrote the session record at *navigation* time and
+not here; `saveReadingPosition` ran while the stack was still standing;
+`paintSleepScreen` bypasses `App` by design, because pushing `SleepScreen` would make
+the next wake restore *into* it; and the next statement is a chip reset. So **sleep is
+the only moment in this firmware where freeing everything is free** — a sentence the
+spec carried from the start and the plan under-implemented.
+
+**AND THE HEAP IS WHAT THE GATE ACTUALLY CAUGHT.** Every measured case peaked **17–25 KB
+above its desktop figure**, and the cause is neither speed nor a missing instruction —
+it is simply **a different allocator**. **A desktop heap figure is not a device heap
+figure**, and this one under-predicted in the dangerous direction. That is the ratio
+trap in a third disguise, after time-on-the-card and `__divdi3`.
+
+**`inflater_` IS A VALUE MEMBER, AND THIS FILE ALREADY RECORDED THAT TRAP UNDER THE
+PEEK.** An "obvious" release that drops the `BlockReader`, the `InflateSource` wrapper,
+the buffer view and the file handle frees **none** of the 36,956 bytes, because the
+window lives behind `Inflater`'s private `Scratch*` and is freed only by `~Inflater`.
+`inflateWindowHeld()` is the observation point; `held()` and `bytesRead()` both go
+false either way and can see nothing.
+
+**One incidental correction the probe produced and this file has not absorbed:** the
+device reported **173 KB free at boot**, where this file documents ~133 KB at four
+older sites (the listing cache's ceiling argument, the CSS sheet cap, the Typography
+re-init and the ToC's archive re-open) — and at the head of this section, which
+inherited the same figure. All five are *arguments from headroom* and a larger number
+only makes them safer, so none was rewritten on the strength of one reading — but
+**the next person to size something against ~133 KB should re-measure rather than
+inherit it**, and a second reading is enough to correct all five at once.
+
+### The badge rule, and the rule it overrides
+
+**ONE PREDICATE, ASKED ONCE, DRIVES BOTH THE CARD AND THE BADGE** —
+`covered && vm.shows == SleepShows::Cover`. `SleepCover.dc.html` is
+`SleepCoverDetails` with the card and the badge taken away, so they go together or not
+at all. Two conditions spelled separately would drift, and **this project has shipped a
+dead button twice from exactly that shape**.
+
+**THE BADGE HALF OVERRIDES A RULE THIS FILE STATES OUTRIGHT** — the badge "is the
+load-bearing half and it stays", because e-ink holds its last image and a screen left
+on the glass gives no clue the device is asleep rather than frozen. It may go **here**
+because a full-bleed book cover is **not a screen the device can otherwise be in**, so
+it is unambiguous by itself.
+
+**THAT REASON IS FALSE THE MOMENT NO COVER IS ON THE GLASS, WHICH IS WHY `covered` IS
+IN THE EXPRESSION AND NOT JUST `vm.shows`.** Every fallback — no source, a source that
+refused, a mode that never asked — puts the badge back. **The override does not
+generalise and must not be copied**: it is licensed by one property of one screen, and
+a future screen that wants to drop the badge has to earn the same property rather than
+cite this precedent.
+
+**AND THE BADGE COLLIDES IN `COVER + DETAILS`, WHICH IS AN OPEN ON-GLASS QUESTION.** It
+sits at `bottom: 34px` and a Standard Ebooks cover carries its title band exactly
+there, so the cover's author line is sliced by an opaque white box. Most covers set
+type low, so this is the common case rather than an unlucky one — and **it is the
+strongest argument the boards make for why `COVER` drops the badge at all**. **Do not
+move the badge to fix it**: its position is `Sleep.dc.html`'s, and a badge that moved
+by mode would be two spellings of one thing.
+
+### `make compare` cannot compare a dithered photograph
+
+**Chrome cannot Floyd–Steinberg.** A board showing a cover the browser dithered its own
+way would measure the two rasterisers against each other and say nothing about the
+firmware. So **the board's cover is generated by our own pipeline and committed** —
+`design/assets/sleep-cover-480x800.png` and `sleep-cover-528x792.png` — and both the
+board and the golden read that one file. The simulator *decodes* it and deliberately
+does **not** re-fit it: running the source through `CoverFitter` again would dither a
+second time and could only differ from the file the board shows. `sleep_cover`
+therefore measures **0.00% / 0.00%**, which is the correct answer and not a suspicious
+one: the two columns hold the same bytes. `sleep_cover_details` is **3.48% / 3.18%**,
+against `sleep`'s 3.29% / 3.02% for the same card on paper.
+
+**`render_board` HAD TO LEARN TO SERVE `design/assets`, AND THE DEMONSTRATION IS THE
+POINT.** It wrote only `index.html` into a temp dir and served that, so a relative
+`src="assets/..."` 404s. **Measured with the serving removed, `sleep_cover` goes from
+0.00% to 82.97% mismatched while the sheet prints `ok` at every step** — the exact
+drift this file records under the reader's menu: **the percentage is the check, the
+word is not.** A symlink rather than a copy (263 KB × 60 renders would be ~16 MB of
+temporary files), and **its absence is a hard error rather than a skip**, for the same
+reason a named board missing from disk is.
+
+**Inlining the PNG as a data URI was rejected**, and it is the obvious fix: it would
+make the markup a **second copy** of a file whose entire purpose is that the board and
+the firmware read the same bytes.
+
+### What a cover costs on the device
+
+Four corpus books spanning the cases, decoded at boot by the (now removed)
+`ENCRE_COVER_PROBE`, panel 528×792:
+
+| cover | zip | source | scale | decode | heap SPENT | `heapMin` |
+|---|---|---|--:|--:|--:|--:|
+| JPEG | deflated | 1400×2100 | 1/2 | **3,074 ms** | 81,088 | 91,660 |
+| JPEG | stored | 1424×2048 | 1/2 | **2,987 ms** | 81,560 | 91,660 |
+| PNG | stored | 1600×2400 | 1/1 | **6,919 ms** | 81,796 | 91,660 |
+| PNG | deflated | 601×918 | 1/1 | **6,648 ms** | 120,248 | 52,744 |
+
+**THE SPENT COLUMN IS `heapBefore − heapMin`, NOT `heapMin`, and they are trivially
+swappable** — the `[cover]` line reports both and the spec's table reports the
+difference. Quoting 91,660 as "the peak" would say the decode cost nothing.
+
+**PNG IS 2.2× SLOWER THAN JPEG ON A SMALLER IMAGE**, which is the asymmetry the gate
+was deliberately split to see: `decodeCover` passes the panel size to TJpgDec as
+`atLeast`, so **a JPEG gets free IDCT halving before the box filter ever sees it** — up
+to 64× fewer pixels through the filter and the diffusion — and **PNG has no scaled
+inflate**, so it walks every source pixel. **A single number would have been a JPEG
+number**, and JPEG is 81% of covers, so the 17% that is PNG is the half nobody would
+have looked at.
+
+**THE DEFLATED PNG DECODED, AND THE SPEC'S DESKTOP TEXT SAYS IT CANNOT.** Written from
+a desktop measurement, the spec states outright that it "does not fit on the device"
+and answers `OutOfMemory`; the probe decoded it `Ok` at 120,248 bytes. **Both can be
+true, because this probe ran at BOOT** — ~173 KB free — **and a cover is decoded at
+SLEEP**, out of whatever a session left behind. The stated limit therefore still says
+**"may refuse"**, and that word is deliberate: this is the case where the headroom is
+larger than modelled and therefore wrong in the *safe* direction, which is a thing to
+say out loud rather than quietly enjoy. **Do not upgrade "may" to either "does" or
+"works" until a real sleep has been measured.**
+
+The three shapes a sleep can take, and `[power] sleep cost` is the line that adds them
+up: `DETAILS` or nothing open is one MONO paint, ~825 ms; a cover with the cache warm
+is one GRAY paint, three waveforms and four render passes; a cover with the cache cold
+is a MONO paint, then the probe, then the decode, then a second GRAY paint — **the
+expensive one, and the first sleep of a new book is always it.**
+
+### Stated limits
+
+| limit | incidence |
+|---|---|
+| progressive JPEG refused | 2 / 225 — **but 2 of the user's own 16** |
+| deflated PNG may refuse on heap | 1 / 225 |
+| interlaced or palette PNG refused | 0 / 225 observed |
+| one cached cover; alternating books re-decode | by design |
+| X4 crops ~10% of a 2:3 cover's **width** at `FILL` | default, reversible in Settings |
+| first sleep of a new book shows the card for a few seconds | by design |
+
+**WHAT THE CORPUS ACTUALLY YIELDS, run through the built pipeline: `Ok` for 222**,
+`Unsupported` for 2 (both progressive JPEGs), and `NoCover` / `ReadFailed` /
+`OutOfMemory` / `Abandoned` all **zero**. **The denominator is 224 and not 225**, and
+the distinction is load-bearing: one book never reaches a decoder at all, because
+`openBook` refuses it over a Calibre `user_metadata` `<meta content="…">` of 849 bytes
+against `Xml::kMaxAttrBytes`'s 512. **That belongs to the EPUB refusal rate, not to
+cover support — "222 of 225" would double-count it.**
+
+**Every one falls back to `DETAILS` with the badge shown, and logs the reason.** That
+is the whole reason `CoverResult` distinguishes `NoCover` / `Unsupported` /
+`ReadFailed` / `OutOfMemory` / `Abandoned` rather than answering a bool: a refusal that
+cannot say which of the five it was is indistinguishable from a decoder that does not
+work, and this file has paid for that shape more than once.
+
+**PROGRESSIVE JPEG MATTERS MORE THAN 2/225 SUGGESTS.** It is **12.5% of the user's own
+library**, and no small streaming decoder handles it. It is a **stated refusal**, not
+an oversight — and the corpus is the wrong instrument for how often a real reader meets
+it.
+
+**THE CROP IS AN AXIS QUESTION AND THE PLAN HAD IT TRANSPOSED.** The X4 is 3:5 = 0.600
+and a 2:3 cover is 0.667, so a cover is **relatively wider** than the panel: `FILL`
+crops its **width** and `WHOLE` leaves bands **above and below**. 160 of 225 covers are
+2:3 to within half a percent, so **on the X3 (528×792, 2:3 exactly) `FILL` loses
+nothing for 71% of books and the setting is a no-op there**. What earns the setting is
+the tail: the squarest corpus cover is 877×973, and `FILL` cuts its title off at both
+edges, keeping 584 of 877 columns — a **33.4% loss**.
 
 ## The reader
 
@@ -4045,7 +4365,18 @@ Home's four goldens are two-level renders of `Plane::Bw`, via
 golden tests assert that fidelity before naming the plane, so a change to the
 shipped path fails the test rather than leaving the goldens quietly pinning a path
 nothing paints. `golden::checkGoldenGray` composes two planes into a 4-level image
-and is for a screen on the grayscale path; nothing uses it today.
+for a screen on the grayscale path, and **this line said "nothing uses it today"
+through THREE separate screens acquiring it**: the Reader on 2026-08-22, then the
+peek and the sleep covers on 2026-08-29. It is `test_theme_reader_golden.cpp`,
+`test_theme_peek_golden.cpp` and `test_theme_sleep_cover_golden.cpp` today.
+
+**TWO OF THOSE THREE FILES EACH CALL THEMSELVES ITS FIRST CALLER IN A COMMENT**, and
+the later one is simply wrong — `git log -S"checkGoldenGray(lsb, msb"` settles it in
+one command and is the check to run before writing "the first" about anything here.
+The pattern is this file's own: a note that says *nothing uses this yet* is true when
+written and is nobody's job to revisit, so the next author reads it, believes it, and
+writes the same sentence again. **"Nothing uses it today" is a claim with an expiry
+date and no owner** — prefer naming the callers, which goes stale loudly.
 
 **The check that made the last two re-blesses trustworthy** was not a visual one:
 compose `Plane::Lsb` and `Plane::Msb` into the 4-level coverage map (that map's
