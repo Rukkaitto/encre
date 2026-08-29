@@ -8,10 +8,19 @@
 #include <esp_system.h>
 #include <Preferences.h>  // esp_restart(), for the RETRY-after-a-pull branch
 #include <XteinkDetect.h>
+// THE COVER CACHE'S WRITER GOES STRAIGHT TO SdFat, and these two are the whole
+// reason: 104 KB cannot go through reader::FileSystem::writeAll, which takes a
+// whole buffer, and that contract has no write handle. `appendToCard` is a shell
+// free function over SdMan for exactly the same reason -- see sd_fs.h, which
+// argues it at length. Nothing else in this file needs them.
+#include <SDCardManager.h>
+#include <SdFat.h>
 
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <memory>
+#include <new>
 #include <optional>
 #include <string>
 #include <vector>
@@ -33,6 +42,7 @@
 #include "input_task.h"
 #include "reader/app.h"
 #include "reader/booklist.h"
+#include "reader/cover.h"
 #include "reader/font_manifest.h"
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
@@ -52,6 +62,7 @@
 #include "reader/reading_store.h"
 #include "reader/progress_save_gate.h"
 #include "reader/screen_sleep.h"
+#include "reader/sleep_cover.h"
 #include "reader/screen_contents.h"
 #include "reader/screen_peek.h"
 #include "reader/screen_reader_menu.h"
@@ -4191,6 +4202,445 @@ void setup() {
   gCrumbs.firstPaintMs = millis();
   mark("first-paint-complete");
   saveCrumbs();
+}
+
+// --- THE CACHED COVER: WRITING IT, AND READING IT BACK ------------------------
+//
+// design/SleepCover.dc.html puts the book's own cover behind the sleep screen.
+// Decoding one costs seconds and, measured on the X3, up to ~81 KB of heap -- so
+// it is done ONCE per book and kept at /.reader/sleep.cover, a header and two bit
+// planes that reader/sleep_cover.h describes and that nothing in core/ knows how
+// to reach.
+//
+// NOTHING ON THE DESKTOP COMPILES ANY OF THIS. The simulator has its own sink and
+// its own CoverSource (sim/main.cpp), the goldens synthesise their planes from
+// arithmetic, and shell/ has no harness -- so everything below is an argument
+// until it is on glass.
+
+namespace {
+
+// HOW MUCH OF EACH PLANE IS HELD BEFORE IT GOES TO THE CARD. This is a BUS number
+// rather than a memory one, and without it the write is unusably slow.
+//
+// The decoder hands over one destination row of BOTH planes at a time (cover.h)
+// and the file holds the two planes CONTIGUOUSLY (sleep_cover.h), so the writer
+// has to alternate between two regions a whole plane -- ~52 KB -- apart. SdFat
+// here has exactly ONE 512-byte sector cache (FsCache holds a single
+// m_buffer[512], and USE_SEPARATE_FAT_CACHE is gated on __arm__, so it is off on
+// this RISC-V part) -- the same geometry the card probe's whole design rests on.
+// So a 66-byte write to one region EVICTS the other region's sector: unbatched,
+// 792 rows would cost ~1,600 sector write-then-read pairs on top of the ~200 the
+// data itself needs.
+//
+// 1 KB a plane is 15 rows on the X3, which takes that to ~53 evictions a plane.
+// ~2 KB of heap, taken at decode time and given straight back -- not a static
+// buffer, which would come off the 42,152-byte reading floor for something that
+// runs once per sleep.
+constexpr int kCoverBatchBytes = 1024;
+
+// THE COVER CACHE'S WRITER, over SdFat directly rather than through
+// reader::FileSystem.
+//
+// ATOMICITY WITHOUT A RENAME. The header goes down with `complete = 0`, the plane
+// rows stream, and only then is the header rewritten with `complete = 1`. So an
+// abandoned decode, a refusal or a flat battery leaves a file that
+// sleepCoverUsable declines, and the next sleep simply tries again.
+//
+// THE WHOLE HEADER IS REWRITTEN, not the four bytes of the flag, and that is
+// deliberate: encodeSleepCoverHeader stays the ONE spelling of the wire format.
+// Seeking to the flag would put a hand-computed field offset in this file, which
+// a field added to the struct would silently invalidate -- and sleep_cover.h
+// already records a tripwire being added because a derived-LOOKING constant was
+// not derived.
+//
+// WHY THERE IS A FILLER PASS: SdFat REFUSES a seek past the end of a file
+// (FatFile::seekSet, `if (pos > m_fileSize) goto fail`), so the first LSB row --
+// which belongs one whole plane further in than anything written so far -- has
+// nowhere to go until the bytes in front of it exist. One plane of filler is
+// enough: after it the MSB batches seek BACK into ground that exists and the LSB
+// batches land exactly at the end of the file, which is an ordinary append. The
+// cost is one extra 52 KB sequential write, against holding a whole plane in RAM
+// (52,272 bytes, which is most of the budget this feature has) or writing the two
+// planes to two files and concatenating them (52 KB read plus 52 KB write, two
+// files, and the same eviction problem while both are open).
+class CardCoverSink : public reader::CoverPlaneSink {
+ public:
+  CardCoverSink(const std::string& bookPath, uint32_t bookBytes, int rotation)
+      : bookPath_(bookPath) {
+    header_.rotation = rotation;
+    header_.bookBytes = bookBytes;
+  }
+  ~CardCoverSink() override { closeFile(); }
+
+  CardCoverSink(const CardCoverSink&) = delete;
+  CardCoverSink& operator=(const CardCoverSink&) = delete;
+
+  bool begin(int panelW, int panelH, int planeRowBytes, int rows) override {
+    if (planeRowBytes <= 0 || rows <= 0) return false;
+    rowBytes_ = planeRowBytes;
+    rowsExpected_ = rows;
+    const size_t planeBytes =
+        static_cast<size_t>(planeRowBytes) * static_cast<size_t>(rows);
+
+    header_.panelW = panelW;
+    header_.panelH = panelH;
+    header_.planeBytes = static_cast<int32_t>(planeBytes);
+    header_.complete = 0;
+    // A PATH THAT DOES NOT FIT IS A REFUSAL HERE, not a file written and never
+    // read. setSleepCoverBookPath stores EMPTY rather than truncating -- two books
+    // sharing their first 127 bytes would otherwise each accept the other's
+    // picture -- and sleepCoverUsable never matches empty, so the 104 KB would be
+    // work nothing could ever use.
+    if (!reader::setSleepCoverBookPath(header_, bookPath_)) {
+      logf("[cover] the path will not fit the cache header: %s\n", bookPath_.c_str());
+      return false;
+    }
+    // THE CACHE HAS TO BE THE SHAPE OF THE FRAME IT WILL BE READ INTO, or
+    // sleepCoverUsable refuses it forever. The two derivations differ -- cover.cpp
+    // sizes a plane as ceil(panelW / 8) * panelH and Framebuffer sizes its store
+    // as ceil(physWidth / 8) * physHeight -- and they agree only because both
+    // panels are multiples of 8. Cheaper to find that out here than after a decode
+    // and 104 KB of card writes.
+    if (gFrame && header_.planeBytes != gFrame->sizeBytes()) {
+      logf("[cover] a %d-byte plane is not the frame's %d bytes; not caching\n",
+           static_cast<int>(header_.planeBytes), gFrame->sizeBytes());
+      return false;
+    }
+
+    rowsPerBatch_ = kCoverBatchBytes / rowBytes_;
+    if (rowsPerBatch_ < 1) rowsPerBatch_ = 1;
+    batchBytes_ = static_cast<size_t>(rowsPerBatch_) * static_cast<size_t>(rowBytes_);
+    // nothrow, because -fno-exceptions makes a failed `new` an abort() with no
+    // diagnostic -- this project has lost a boot to exactly that.
+    batch_.reset(new (std::nothrow) uint8_t[2 * batchBytes_]);
+    if (batch_ == nullptr) {
+      logf("[cover] no memory for the cache's %u-byte row batch\n",
+           static_cast<unsigned>(2 * batchBytes_));
+      return false;
+    }
+
+    // /.reader exists on any card that has booted -- the settings file and the
+    // reading state both live there -- so this is insurance rather than a step.
+    // The parent is derived from the one path constant rather than spelled again.
+    const char* const path = reader::kSleepCoverPath;
+    const char* const slash = std::strrchr(path, '/');
+    if (slash != nullptr && slash != path)
+      gSd.mkdirs(std::string(path, static_cast<size_t>(slash - path)));
+
+    file_ = SdMan.open(path, O_WRONLY | O_CREAT | O_TRUNC);
+    if (!file_) {
+      logf("[cover] cannot open %s to write\n", path);
+      return false;
+    }
+    open_ = true;
+
+    uint8_t raw[reader::kSleepCoverHeaderBytes];
+    reader::encodeSleepCoverHeader(header_, raw);
+    if (file_.write(raw, sizeof(raw)) != sizeof(raw)) return false;
+
+    // The filler. 0xFF is paper, so a file cut off inside it is at least
+    // paper-shaped -- though nothing will ever read it, because `complete` stays 0
+    // until finish() says otherwise.
+    std::memset(batch_.get(), 0xFF, 2 * batchBytes_);
+    const size_t chunk = 2 * batchBytes_;
+    for (size_t left = planeBytes; left > 0;) {
+      const size_t n = left < chunk ? left : chunk;
+      if (file_.write(batch_.get(), n) != n) return false;
+      left -= n;
+    }
+
+    msbOff_ = reader::kSleepCoverHeaderBytes;
+    lsbOff_ = reader::kSleepCoverHeaderBytes + planeBytes;
+    return true;
+  }
+
+  bool row(const uint8_t* msb, const uint8_t* lsb) override {
+    if (!open_ || batch_ == nullptr || msb == nullptr || lsb == nullptr) return false;
+    // MORE ROWS THAN begin() DECLARED would run off the end of the plane regions
+    // the file was sized for. cover.h promises exactly `rows` of them; this is
+    // what makes that a check rather than a belief.
+    if (rowsSeen_ >= rowsExpected_) return false;
+    const size_t at = static_cast<size_t>(pending_) * static_cast<size_t>(rowBytes_);
+    // A PAPER ROW PASSES THE SAME POINTER TWICE (cover.h), so these are two copies
+    // of one row rather than a pair to compare.
+    std::memcpy(batch_.get() + at, msb, static_cast<size_t>(rowBytes_));
+    std::memcpy(batch_.get() + batchBytes_ + at, lsb, static_cast<size_t>(rowBytes_));
+    ++pending_;
+    ++rowsSeen_;
+    if (pending_ >= rowsPerBatch_) return flushBatch();
+    return true;
+  }
+
+  bool finish(bool ok) override {
+    // ALWAYS CALLED, EVEN WHEN begin() WAS NOT (cover.h) -- a book with no cover, a
+    // span that is not an image, a card that would not open. `open_` is what tells
+    // those from a real write.
+    bool good = ok && open_;
+    // A SHORT DECODE IS NOT A GOOD FILE. cover.h promises `rows` calls unless
+    // something refused, so a decode that stopped early with ok = true is a bug
+    // upstream, and the one file the user stares at for hours is the wrong place
+    // to be lenient about it.
+    if (good && rowsSeen_ != rowsExpected_) {
+      logf("[cover] the cache got %d of %d rows; not committing\n", rowsSeen_, rowsExpected_);
+      good = false;
+    }
+    if (good) good = flushBatch();
+    if (good) {
+      // THE COMMIT. Sync the planes FIRST, so `complete` cannot reach the card
+      // ahead of the bytes it vouches for, then rewrite the whole header with the
+      // flag set and sync again.
+      header_.complete = 1;
+      uint8_t raw[reader::kSleepCoverHeaderBytes];
+      reader::encodeSleepCoverHeader(header_, raw);
+      good = file_.sync() && file_.seekSet(0) &&
+             file_.write(raw, sizeof(raw)) == sizeof(raw) && file_.sync();
+    }
+    // NOTHING IS REMOVED ON FAILURE, and that is what the flag is for: the file
+    // still says complete = 0, sleepCoverUsable refuses it, and the next sleep
+    // opens it O_TRUNC and tries again. A remove would be a second failure path
+    // guarding a state the first one already covers.
+    closeFile();
+    if (!good) logf("[cover] the cache was NOT committed\n");
+    return good;
+  }
+
+ private:
+  bool flushBatch() {
+    if (pending_ == 0) return true;
+    const size_t n = static_cast<size_t>(pending_) * static_cast<size_t>(rowBytes_);
+    if (!file_.seekSet(msbOff_)) return false;
+    if (file_.write(batch_.get(), n) != n) return false;
+    msbOff_ += n;
+    // The LSB region is written strictly forward and always lands exactly at the
+    // end of the file, so this seek reaches an append rather than a rewrite. That
+    // is the property the single plane of filler in begin() buys.
+    if (!file_.seekSet(lsbOff_)) return false;
+    if (file_.write(batch_.get() + batchBytes_, n) != n) return false;
+    lsbOff_ += n;
+    pending_ = 0;
+    return !file_.getWriteError();
+  }
+
+  void closeFile() {
+    if (open_) {
+      file_.close();
+      open_ = false;
+    }
+    batch_.reset();
+  }
+
+  // ONE GUARD FOR THE WHOLE WRITE, held for this object's lifetime -- the only
+  // place in this firmware that holds one that long. sd_fs.h argues the opposite
+  // for a FileHandle and is right there: a reader holds a book open for MINUTES
+  // across many paints, and renderTop() would block behind it, which reads as a
+  // display fault. This is the other shape -- seconds, on the loop task, with
+  // nothing left to paint until it is finished. It is declared first so it is
+  // taken before anything below it touches the card, and the SD card is on the
+  // DISPLAY'S own bus, which is what makes it necessary at all.
+  SpiBusGuard bus_;
+  std::string bookPath_;
+  reader::SleepCoverHeader header_;
+  FsFile file_;
+  std::unique_ptr<uint8_t[]> batch_;
+  size_t batchBytes_ = 0;
+  // Where the next batch of each plane goes. Byte offsets into the file, not row
+  // numbers: one of them seeks backwards into ground the filler laid and the
+  // other appends, and only bytes say that.
+  size_t msbOff_ = 0, lsbOff_ = 0;
+  int rowBytes_ = 0, rowsExpected_ = 0, rowsSeen_ = 0;
+  int rowsPerBatch_ = 0, pending_ = 0;
+  bool open_ = false;
+};
+
+// THE COVER CACHE'S READER.
+//
+// ONE OPEN AND ONE PASS PER PLANE, holding nothing: a resident plane is 52,272
+// bytes, which is more than this whole feature's budget. That is what
+// CoverSource exists to make possible -- see reader/screen_sleep.h.
+//
+// IT IS NOT A memcpy INTO fb.data(), AND THAT IS THE HALF ONLY THE PANEL CAN SEE.
+// The file holds LOGICAL raster rows -- a streaming row-major downscale can emit
+// nothing else (imagefit.h) -- and this shell binds Rotation::Ccw, under which one
+// logical ROW is a physical COLUMN. Framebuffer::writePackedRow is the one
+// function in this feature that knows that. A memcpy would be right in the
+// simulator, right in every golden and right in every desktop test there is, and
+// would smear diagonally on glass -- which is what CLAUDE.md records happening to
+// the veil, fillRect, the glyph blit and ditherRect in turn.
+//
+// TWO PLANES SERVE THREE PASSES: Plane::Bw inks where coverage >= 2, which is
+// exactly "MSB set", so the base pass and the Msb pass read the SAME plane. A
+// source that answered Bw with anything else would give a base pass that
+// disagrees with the refinement drawn over it.
+class CardCoverSource : public reader::CoverSource {
+ public:
+  // WHICH BOOK THIS IS A PICTURE OF. Not optional and not derivable here: a cover
+  // is not a subtle wrong when it is the wrong book's.
+  void setBook(const std::string& path, uint32_t bytes) {
+    bookPath_ = path;
+    bookBytes_ = bytes;
+  }
+
+  bool loadPlane(reader::Plane plane, reader::Framebuffer& fb) override;
+
+ private:
+  std::string bookPath_;
+  uint32_t bookBytes_ = 0;
+};
+
+// The header off an already-open handle. Two callers -- the paint's gate opens the
+// file for this alone, loadPlane needs the handle open for the planes anyway -- so
+// the parse lives here once rather than being spelled at both.
+bool readSleepCoverHeader(reader::FileHandle& f, reader::SleepCoverHeader& out) {
+  uint8_t raw[reader::kSleepCoverHeaderBytes];
+  if (!f.seek(0)) return false;
+  if (f.read(raw, sizeof(raw)) != sizeof(raw)) return false;
+  return reader::decodeSleepCoverHeader(raw, sizeof(raw), out);
+}
+
+bool CardCoverSource::loadPlane(reader::Plane plane, reader::Framebuffer& fb) {
+  // One row of one plane: 60 bytes on the X4, 66 on the X3. On the stack, which
+  // has 16 KB (SET_LOOP_TASK_STACK_SIZE). The cap is CHECKED rather than assumed,
+  // because every length below is derived from a number that came off a card.
+  uint8_t rowBuf[128];
+  const int rowBytes = (fb.width() + 7) / 8;
+  if (rowBytes <= 0 || rowBytes > static_cast<int>(sizeof(rowBuf))) return false;
+
+  std::unique_ptr<reader::FileHandle> f = gSd.openRead(reader::kSleepCoverPath);
+  if (f == nullptr) return false;
+  reader::SleepCoverHeader h;
+  if (!readSleepCoverHeader(*f, h)) return false;
+  // ASKED AGAIN, although the shell asked it before the screen was built. It is
+  // one predicate and it is free here -- the header is already in hand -- and this
+  // is the call that stands between a card that changed under us and a write into
+  // the driver's own framebuffer.
+  if (!reader::sleepCoverUsable(h, bookPath_, bookBytes_, fb.width(), fb.height(),
+                                static_cast<int>(fb.rotation()), fb.sizeBytes()))
+    return false;
+  // sleepCoverUsable has pinned the plane's SIZE to this frame's; this pins its
+  // SHAPE, which is what decides how far each read goes. Both panels are multiples
+  // of 8 so the two derivations agree -- a panel that was not would land here
+  // rather than on a sheared picture.
+  if (static_cast<int64_t>(rowBytes) * fb.height() != h.planeBytes) return false;
+
+  // Bw and Msb are plane 0, Lsb is plane 1. See the class comment: Bw inks where
+  // coverage >= 2, which is exactly "MSB set". BwDithered cannot reach here -- the
+  // screen declares Grayscale whenever it has a cover -- and takes the MSB with
+  // everything else rather than being a fourth case with nothing to answer.
+  const size_t planeIndex = (plane == reader::Plane::Lsb) ? 1u : 0u;
+  const size_t start =
+      reader::kSleepCoverHeaderBytes + planeIndex * static_cast<size_t>(h.planeBytes);
+  if (!f->seek(static_cast<uint32_t>(start))) return false;
+  for (int y = 0; y < fb.height(); ++y) {
+    // A FALSE HERE LEAVES THE FRAME PART-WRITTEN, which the contract allows and
+    // renderSleep is built for: it clears and draws the dither field whenever this
+    // answers false, so a partial picture is overwritten rather than shown.
+    if (f->read(rowBuf, static_cast<size_t>(rowBytes)) != static_cast<size_t>(rowBytes))
+      return false;
+    fb.writePackedRow(y, rowBuf);
+  }
+  return true;
+}
+
+}  // namespace
+
+// NOT OWNED BY THE SCREEN AND IT MUST OUTLIVE IT (screen_sleep.h), so it lives
+// here rather than on paintSleepScreen's stack.
+static CardCoverSource gCoverSource;
+
+// WHICH BOOK THE SLEEP SCREEN IS ABOUT, and how big it is.
+//
+// FROM last.json, which is what the sleep CARD is drawn from (sleepVmFromCard), so
+// the picture and the words cannot end up naming two different books. Not from
+// gReading: the device sleeps from Home and from the Library as often as from a
+// page, and there is no book open on either.
+//
+// THE SIZE IS READ OFF THE FILE rather than remembered, because it is the cache's
+// identity check and last.json does not carry it. One open, which also answers the
+// question sleepVmFromCard asks with exists(): is this book still on the card.
+static bool sleepCoverBook(std::string& path, uint32_t& bytes) {
+  if (!gStorageUsable) return false;
+  reader::LastRead last;
+  if (!reader::loadLastRead(gSd, last) || last.bookPath.empty()) return false;
+  std::unique_ptr<reader::FileHandle> f = gSd.openRead(last.bookPath);
+  if (f == nullptr) return false;
+  path = last.bookPath;
+  bytes = f->size();
+  return true;
+}
+
+// Whether the setting asks for a picture at all. design/Settings.dc.html's `Shows`
+// row, and SleepShows::Details is the shipped screen with no cover in it.
+static bool coverWanted() { return gSettings.sleepShows != reader::SleepShows::Details; }
+
+// THE COVER TO HAND SleepScreen, OR NULL -- AND THE HEADER IS VALIDATED HERE,
+// BEFORE THE SCREEN IS CONSTRUCTED.
+//
+// THAT ORDER IS THE CONSTRAINT, not a nicety. Fidelity is decided ONCE, from
+// whether the screen has a source at all, and the three grayscale passes then each
+// ask loadPlane separately -- so a source that succeeded for Msb and failed for
+// Lsb would compose a frame with the cover in one plane and the dither field in
+// the other. Validating up front is what keeps that theoretical: after it the only
+// remaining failure is the card physically leaving mid-paint, at which point the
+// sleep screen has lost more than its cover.
+//
+// It is also why a source that WILL refuse must never be handed over. SleepScreen
+// declares Fidelity::Grayscale on the strength of holding one, so a source that
+// then fell back would spend three waveforms -- ~1041 ms of panel -- drawing a
+// screen one waveform could have drawn.
+static reader::CoverSource* sleepCoverForPaint() {
+  if (!coverWanted() || !gStorageUsable || !gFrame) return nullptr;
+  std::string path;
+  uint32_t bytes = 0;
+  if (!sleepCoverBook(path, bytes)) return nullptr;
+  std::unique_ptr<reader::FileHandle> f = gSd.openRead(reader::kSleepCoverPath);
+  if (f == nullptr) return nullptr;
+  reader::SleepCoverHeader h;
+  if (!readSleepCoverHeader(*f, h)) return nullptr;
+  if (!reader::sleepCoverUsable(h, path, bytes, gFrame->width(), gFrame->height(),
+                                static_cast<int>(gFrame->rotation()), gFrame->sizeBytes()))
+    return nullptr;
+  gCoverSource.setBook(path, bytes);
+  return &gCoverSource;
+}
+
+// Whether a paint could use the cache right now, which is the sleep path's "do I
+// need to decode". ONE spelling, the same call the paint makes, so the two can
+// never disagree about what counts as a usable cover.
+static bool coverCacheUsable() { return sleepCoverForPaint() != nullptr; }
+
+// DECODE THE LAST-READ BOOK'S COVER INTO THE CACHE.
+//
+// It reads the book itself: openBook is a central-directory parse and an OPF
+// inflate, ~32 KB transient, which is why this is not done on every sleep but only
+// when coverCacheUsable() says there is nothing to paint.
+//
+// THE STOP PREDICATE IS rawSamplesPending(), so a button press abandons the decode
+// and the device gets out of the way. An abandoned decode leaves `complete = 0`
+// and is simply re-attempted at the next sleep -- there is no half-usable state to
+// reason about.
+static reader::CoverResult decodeCoverToCache() {
+  if (!gStorageUsable || !gFrame) return reader::CoverResult::ReadFailed;
+  std::string path;
+  uint32_t bytes = 0;
+  if (!sleepCoverBook(path, bytes)) return reader::CoverResult::NoCover;
+
+  reader::OpenedBook opened;
+  const char* why = nullptr;
+  if (!reader::openBook(gSd, path, opened, &why)) {
+    logf("[cover] %s will not open: %s\n", path.c_str(), why != nullptr ? why : "?");
+    return reader::CoverResult::ReadFailed;
+  }
+
+  CardCoverSink sink(path, bytes, static_cast<int>(gFrame->rotation()));
+  reader::CoverReport rep;
+  const reader::CoverResult r = reader::decodeCover(
+      gSd, opened, gFrame->width(), gFrame->height(), gSettings.coverFit, sink,
+      [](void*) { return rawSamplesPending() != 0; }, nullptr, &rep);
+  logf("[cover] %s src=%dx%d /%d box=%d,%d %dx%d%s%s\n", reader::coverResultName(r),
+       rep.sourceWidth, rep.sourceHeight, rep.scaleDivisor, rep.dstX, rep.dstY, rep.dstW,
+       rep.dstH, rep.reason != nullptr ? ": " : "", rep.reason != nullptr ? rep.reason : "");
+  logFlush();
+  return r;
 }
 
 // THE SLEEP SCREEN, PAINTED WITHOUT BEING PUSHED -- and that is the whole trap this
