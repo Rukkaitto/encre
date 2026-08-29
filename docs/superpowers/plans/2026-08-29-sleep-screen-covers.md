@@ -2358,6 +2358,23 @@ git commit -m "Sleep: the cover behind the card, at four grey levels (#11)"
 
 Both build a `SleepViewModel` with the right `shows` and a `CoverSource` backed by the committed `design/assets/sleep-cover-<W>x<H>.png` decoded through `HostFileSystem` — so the simulator renders **the same pixels the board displays**, which is what makes the comparison meaningful.
 
+- [ ] **Step 1b: TEACH `render_board` TO SERVE THE BOARD'S ASSETS — registering the screen is not enough**
+
+`tools/compare-design.py:169` writes the extracted markup into a `TemporaryDirectory`
+holding **only `index.html`** and serves that directory, so a board with
+`src="assets/sleep-cover-…png"` gets a 404. Task 12 proved it both ways: rendered as-is
+the frame is blank with a broken-image glyph; with `design/assets` copied into the temp
+dir it renders correctly at both geometries.
+
+It fails **loudly** — a blank frame against a full-bleed cover is an enormous mismatch,
+not a quiet pass — so this cannot slip through unnoticed. But **do not "fix" it by
+inlining the PNG as a data URI**: the whole point of the generated asset is that the
+board and the golden read the *same file*, and a base64 copy in the markup is a second
+copy of it, which is the rule this project retrofitted twice.
+
+Copy (or symlink) `design/assets` into the temp dir beside `index.html`. Both boards
+carry a `NOTE FOR WHOEVER REGISTERS THIS SCREEN` block pointing here.
+
 - [ ] **Step 2: Register both boards in `tools/compare-design.py`**
 
 Add to `FLOW_SCREENS`:
@@ -2584,6 +2601,14 @@ Ask the user to confirm each, since the desktop can answer none of them:
 
 1. **Does a four-level cover read as a photograph or as noise?** This is the decision that was taken on the simulator and deferred to the panel.
 2. **Does `COVER` mode without a badge read as *asleep*?** This is the rule the design overrides.
+2b. **Does the badge collide badly with the cover's own type in `COVER + DETAILS`?** Task 12
+   found it does on the board: the badge sits at `bottom: 34px` and a Standard Ebooks cover
+   carries its title band right there, so the cover's author line is sliced through by an
+   opaque white box. Most covers set type low, so this is the common case rather than an
+   unlucky one. **It is also the strongest argument the boards make for why `COVER` drops the
+   badge** — which the user may simply prefer once they see both on glass. Do not move the
+   badge to fix it: its position is `Sleep.dc.html`'s and a badge that moves by mode is two
+   spellings of one thing.
 3. **What does the decode actually cost**, from the `[cover]` line, and does the two-paint refinement read as deliberate or as a glitch?
 4. **Does the first sleep of a new book end with the cover on the glass?**
 5. **Does a button press during the decode get the device to sleep promptly?**
