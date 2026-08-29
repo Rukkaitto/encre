@@ -237,3 +237,21 @@ TEST_CASE("charging swaps the mark and nothing else") {
   // moved, the two marks are not the same box and the band has shifted.
   CHECK(differingOutsideMark == 0);
 }
+
+// design/HomeCharging.dc.html, pixel-exact at both geometries. The charging mark
+// is the one thing here nothing else pins: the unit tests above assert the two
+// marks share a box and that the swap is confined to the mark's columns, which is
+// structure -- this is what says the bolt actually renders as a bolt.
+TEST_CASE("QuietTheme renders Home charging to golden on both geometries") {
+  Ramp ramp;
+  reader::QuietTheme theme;
+  auto renderOne = [&](int w, int h, const std::string& name) {
+    reader::Framebuffer fb(w, h);
+    reader::HomeViewModel vm = sampleHome();
+    vm.batteryCharging = true;
+    theme.renderHome(fb, ramp.fonts, vm, reader::Plane::Bw);
+    golden::checkGolden(fb, name);
+  };
+  SUBCASE("X4 480x800") { renderOne(480, 800, "home_charging"); }
+  SUBCASE("X3 528x792") { renderOne(528, 792, "home_charging_x3"); }
+}
