@@ -160,6 +160,64 @@ def rebake(data, quality):
     return out.getvalue()
 
 
+# WHAT A COVER COSTS THE DEVICE, and it is NOT what you would guess.
+#
+# The cost tracks the cover's COMPRESSED SIZE -- how much entropy-coded data the
+# Huffman decoder has to chew -- and barely tracks its pixel count. TJpgDec's
+# scale divisor reduces the IDCT only; every MCU is still entropy-decoded at full
+# resolution, so asking for a smaller output buys nothing here.
+#
+# Measured on an X3, three real covers:
+#
+#     156 KB, 1.23 MP, scale 1/1  ->  3,443 ms
+#     159 KB, 2.94 MP, scale 1/2  ->  3,074 ms
+#   1,325 KB, 3.41 MP, scale 1/2  -> 12,733 ms
+#
+# The first two are the same size in BYTES and 2.4x apart in PIXELS, and they cost
+# the same. The third is 8x the bytes and costs 4x. So: bytes, not pixels.
+#
+# THREE POINTS IS NOT A CURVE. This is a rule of thumb for flagging outliers, not
+# a model to quote -- and the corpus median cover is 246 KB with p90 at 436 KB, so
+# anything past about half a megabyte is already unusual.
+DECODE_BASE_MS = 1800.0
+DECODE_MS_PER_KB = 8.3
+SLOW_MS = 6000
+
+
+def estimate_ms(nbytes):
+    return DECODE_BASE_MS + DECODE_MS_PER_KB * (nbytes / 1024.0)
+
+
+def shrink(data, max_px, max_kb, quality):
+    """Re-encode a cover down to a cap. Returns bytes, or None if already fine."""
+    from PIL import Image
+    import io
+    im = Image.open(io.BytesIO(data))
+    im.load()
+    if im.mode not in ("RGB", "L"):
+        im = im.convert("RGB")
+
+    too_big_px = max_px and max(im.size) > max_px
+    too_big_kb = max_kb and len(data) > max_kb * 1024
+    if not (too_big_px or too_big_kb):
+        return None
+
+    if too_big_px:
+        im.thumbnail((max_px, max_px), Image.LANCZOS)
+
+    # Step the quality down until it fits, rather than picking one and hoping.
+    # A cover that will not come under the cap at q60 is left at q60 rather than
+    # ground into mush -- the point is a faster decode, not a smaller number.
+    q = quality
+    while True:
+        out = io.BytesIO()
+        im.save(out, "JPEG", quality=q, progressive=False, optimize=True)
+        b = out.getvalue()
+        if not max_kb or len(b) <= max_kb * 1024 or q <= 60:
+            return b
+        q -= 5
+
+
 def rewrite(src, dst, cover_path, new_bytes):
     """Copy the book, replacing one entry, preserving everything else.
 
@@ -204,6 +262,11 @@ def main():
     ap.add_argument("--quality", type=int, default=95, help="JPEG quality, default 95")
     ap.add_argument("--sim", default=DEFAULT_SIM,
                     help="reader_sim to verify with; '' to skip verification")
+    ap.add_argument("--max-px", type=int, default=0, metavar="N",
+                    help="also shrink covers whose long edge exceeds N (try 1600). "
+                         "Off by default: it re-encodes covers that are not broken")
+    ap.add_argument("--max-kb", type=int, default=0, metavar="N",
+                    help="also shrink covers larger than N KB (try 400)")
     a = ap.parse_args()
 
     books = []
@@ -219,7 +282,8 @@ def main():
     if a.out:
         os.makedirs(os.path.expanduser(a.out), exist_ok=True)
 
-    counts = {"skip": 0, "rebaked": 0, "failed": 0, "no cover": 0, "unreadable": 0}
+    counts = {"skip": 0, "rebaked": 0, "failed": 0, "no cover": 0, "unreadable": 0,
+              "slow": 0}
     failures = []
 
     for p in books:
@@ -238,18 +302,35 @@ def main():
             continue
 
         kind, w, h = jpeg_kind(data)
-        if kind != "progressive":
+        est = estimate_ms(len(data))
+        oversized = bool(a.max_px and max(w, h) > a.max_px) or \
+                    bool(a.max_kb and len(data) > a.max_kb * 1024)
+
+        if kind != "progressive" and not oversized:
             counts["skip"] += 1
+            # SAY SO EVEN WHEN NOT ACTING. A cover this device will take ten
+            # seconds over is worth knowing about whether or not the caller asked
+            # for shrinking, because the symptom -- the reading card sitting there
+            # for an age before the picture arrives -- looks like a hang, not like
+            # a big file.
+            if est >= SLOW_MS and kind is not None:
+                counts["slow"] += 1
+                print("  SLOW     %-46s %dx%d %5d KB  ~%.1fs on device%s"
+                      % (name[:46], w, h, len(data) // 1024, est / 1000.0,
+                         "" if (a.max_px or a.max_kb) else "   (--max-px 1600 fixes it)"))
             continue
 
+        why = "progressive" if kind == "progressive" else "oversized"
         if not a.out:
             counts["rebaked"] += 1
-            print("  would rebake  %-58s %dx%d" % (name[:58], w, h))
+            print("  would fix  %-42s %dx%d %5d KB  %s  ~%.1fs"
+                  % (name[:42], w, h, len(data) // 1024, why, est / 1000.0))
             continue
 
         dst = os.path.join(os.path.expanduser(a.out), name)
         try:
-            new_bytes = rebake(data, a.quality)
+            new_bytes = shrink(data, a.max_px, a.max_kb, a.quality) if oversized \
+                        else rebake(data, a.quality)
             rewrite(p, dst, entry, new_bytes)
         except Exception as e:
             counts["failed"] += 1
@@ -268,15 +349,18 @@ def main():
             continue
 
         counts["rebaked"] += 1
-        delta = os.path.getsize(dst) - os.path.getsize(p)
-        print("  rebaked  %-52s %dx%d  %+d KB%s"
-              % (name[:52], w, h, delta // 1024,
+        print("  fixed  %-40s %s  %5d -> %-5d KB  ~%.1fs -> ~%.1fs%s"
+              % (name[:40], why, len(data) // 1024, len(new_bytes) // 1024,
+                 est / 1000.0, estimate_ms(len(new_bytes)) / 1000.0,
                  "" if ok else "  (UNVERIFIED)"))
 
     print()
-    print("%d book(s): %d rebaked, %d already fine, %d without a cover, %d failed, %d unreadable"
+    print("%d book(s): %d fixed, %d already fine, %d without a cover, %d failed, %d unreadable"
           % (len(books), counts["rebaked"], counts["skip"], counts["no cover"],
              counts["failed"], counts["unreadable"]))
+    if counts["slow"]:
+        print("%d cover(s) will take over %.0fs on the device and were left alone."
+              % (counts["slow"], SLOW_MS / 1000.0))
     if not a.out:
         print("DRY RUN -- nothing was written. Pass --out DIR to produce copies.")
     else:

@@ -563,6 +563,41 @@ symptom to look for is the card's text ghosted under the picture.
 
 Every one falls back to `DETAILS` with the badge shown, and logs the reason.
 
+### What a decode actually costs is the cover's BYTES, not its pixels
+
+Reported from the device: a book whose cover took **12,733 ms**, four times the gate's
+figure, with the reading card sitting on the glass for all of it. Three real covers,
+measured on the X3:
+
+| cover | source | scale | device |
+|---|---|--:|--:|
+| 156 KB | 881 × 1400 (1.23 MP) | 1/1 | 3,443 ms |
+| 159 KB | 1400 × 2100 (2.94 MP) | 1/2 | 3,074 ms |
+| **1,325 KB** | 1490 × 2287 (3.41 MP) | 1/2 | **12,733 ms** |
+
+**The first two are the same size in BYTES and 2.4× apart in PIXELS, and they cost the
+same.** The third is 8× the bytes and costs 4×. So the driver is entropy-coded data
+volume, and **TJpgDec's scale divisor does not help**: it reduces the IDCT, while every
+MCU is still Huffman-decoded at full resolution. Asking for a smaller output buys nothing.
+
+**The gate under-sampled this, and that is a methodology finding rather than bad luck.**
+Its four books were picked *near the corpus median* to be representative, so both JPEGs it
+timed were ~155 KB. The corpus median is 246 KB and p90 is 436 KB — the gate never timed
+anything past p90, and the case that hurts is a 1.3 MB outlier. **Picking representative
+samples is exactly how a tail cost stays invisible.**
+
+The remedy is desktop-side and belongs with the tool: capping a cover's long edge at
+1600 px takes that book from ~12.8 s to ~4.6 s with no visible difference, because
+1042 × 1600 is still twice the panel in each axis feeding a four-level 528 × 792 screen.
+Across the user's own library, **five covers were over six seconds**; after the cap, none
+are.
+
+`JD_FASTDECODE 1` remains untried on the device and its dismissal is worth re-reading
+before anyone relies on it: it rests partly on a **desktop** measurement (21.65 ms against
+22.05 ms) of an optimisation whose entire purpose is 32-bit MCUs. That is the same shape
+as the `__divdi3` division that x86-64 hid completely. It also needs a `BYTECLIP` patch to
+`tjpgd.c`'s monochrome arms to be correct at all, which is why it was not taken.
+
 ### Progressive JPEG is out of reach on the device, and has a desktop answer
 
 **The corpus understated this badly.** 2 of 225 reads as a tail case; across the user's
