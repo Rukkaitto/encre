@@ -135,10 +135,21 @@ A cover is that question. **Sleep is also the one screen where the cost is free*
 three waveforms and a rebase, ~1363 ms against ~825 ms, on a panel about to sit idle
 for hours with nobody waiting on the next press.
 
-**It will be the first screen in the firmware to declare `Grayscale`**, and
-`golden::checkGoldenGray` — which exists and has never had a caller — finally gets
-one. Fidelity is **dynamic**: `Grayscale` only when a cover is actually painted,
-`Mono` otherwise, so `DETAILS` keeps today's single waveform and today's exact pixels.
+**BOTH HALVES OF WHAT THIS PARAGRAPH ORIGINALLY CLAIMED WERE FALSE WHEN WRITTEN**, and
+the correction is more interesting than the claim. It said the sleep screen would be the
+first to declare `Grayscale`, and that `golden::checkGoldenGray` "has never had a caller".
+Neither is true: **`ReaderScreen` and `PeekScreen` both declare `Grayscale`**, and the
+Reader golden has called `checkGoldenGray` since the Reader landed, the Peek golden since
+the peek did. Both errors came from CLAUDE.md's own stale lines — "No screen declares it
+today" and "nothing uses it today" — copied into this spec, then into the implementation
+plan, then into a task prompt, and very nearly into a test comment asserting first-caller
+status. **An inherited note is a claim with an expiry date**, and these had expired twice
+over before anyone repeated them. Both CLAUDE.md lines are corrected now.
+
+What *is* true is narrower and is the part that matters: **`SleepScreen::fidelity()` is the
+first NON-CONSTANT one in the firmware.** Every other override returns a literal; this one
+answers `Grayscale` only when a cover is actually painted and `Mono` otherwise, which is
+what keeps `DETAILS` on today's single waveform and today's exact pixels.
 
 ## Fitting a cover to a panel that is not its shape
 

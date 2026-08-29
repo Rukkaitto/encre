@@ -2160,7 +2160,10 @@ Create `test/unit/test_theme_sleep_cover_golden.cpp`:
 ```cpp
 // The two cover sleep screens, at four grey levels, at both panel geometries.
 //
-// THE FIRST CALLER checkGoldenGray HAS EVER HAD. It composes the Lsb and Msb
+// A THIRD CALLER FOR checkGoldenGray -- and THIS PLAN SAID "THE FIRST", WRONGLY.
+// The Reader golden has called it since the Reader landed and the Peek golden since
+// the peek did; the claim was copied from a CLAUDE.md line that had been stale for
+// two features. Do not write "first caller" here. It composes the Lsb and Msb
 // planes into one level per pixel exactly as the panel combines them, which is the
 // only way a four-level screen can be pinned at all.
 #include <string>
