@@ -554,7 +554,7 @@ symptom to look for is the card's text ghosted under the picture.
 
 | limit | incidence |
 |---|---|
-| progressive JPEG refused | 2 / 225 — but 2 of the user's own 16 |
+| progressive JPEG refused | 2 / 225 in the corpus — but **about 1 in 10 of the user's own books** |
 | deflated PNG may refuse on heap | 1 / 225 |
 | interlaced or palette PNG refused | 0 / 225 observed |
 | one cached cover; alternating books re-decode | by design |
@@ -562,6 +562,29 @@ symptom to look for is the card's text ghosted under the picture.
 | first sleep of a new book shows the card for a few seconds | by design |
 
 Every one falls back to `DETAILS` with the badge shown, and logs the reason.
+
+### Progressive JPEG is out of reach on the device, and has a desktop answer
+
+**The corpus understated this badly.** 2 of 225 reads as a tail case; across the user's
+own library it is **roughly one book in ten** — 1 of 12 in `~/Downloads` plus 2 of the 16
+sampled earlier. Anna's Archive and Calibre-processed files often re-encode covers
+progressively where Standard Ebooks and Gutenberg do not, so a limit that looks negligible
+in a public-domain corpus is visible on a real card. *Dune, tome 5* is the book that
+surfaced it.
+
+**It cannot be fixed in the decoder.** Progressive JPEG needs every DCT coefficient
+resident, because later scans refine earlier ones — there is no streaming form. That cover
+is 1440×2200 at 4:2:0: 4,757,760 coefficients, **9.5 MB against ~158 KB free — 60× short**.
+The obvious escape fails too: a progressive file's first scan *is* a 1/8-scale image, but
+that is 180×275 against a 528×792 panel and the fitter never upscales.
+
+**So the fix is `tools/rebake_covers.py`**, which re-encodes progressive covers to baseline
+into **copies**, never in place, and proves each one with `reader_sim cover` — the
+firmware's own decoder — rather than trusting the re-encoder that just wrote the bytes. An
+output it cannot verify is deleted rather than left looking finished. It preserves entry
+order and per-entry compression, so `mimetype` stays first and stored and the result is
+still a valid EPUB; measured on *Dune, tome 5*, exactly one of 67 entries changed and the
+book still opens and paginates.
 
 ## What a cover costs on the device — MEASURED 2026-08-29, X3
 
