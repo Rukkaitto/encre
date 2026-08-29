@@ -63,6 +63,19 @@ bool Inflater::begin(ByteSource& src) {
   return true;
 }
 
+void Inflater::release() {
+  delete s_;
+  s_ = nullptr;
+  // The source is somebody else's object and this one may outlive it now that it has
+  // no reason to be read from.
+  src_ = nullptr;
+  state_ = State::Failed;
+  error_ = "the inflate window was released";
+  // `totalOut_` is deliberately left alone: begin() zeroes it, and nothing may read it
+  // through a released decoder -- ChapterReader::bytesRead() gates on its own
+  // InflateSource pointer, which it drops alongside this call.
+}
+
 bool Inflater::refill() {
   if (inAt_ < inLen_) return true;
   if (inputEnded_) return false;

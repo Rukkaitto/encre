@@ -128,7 +128,18 @@ inline std::string buildZip(const std::vector<ZipEntry>& entries) {
   return out;
 }
 
-inline std::string epubWith(const std::string& ch1) {
+// The second spine entry's default text. Named rather than inlined because a caller
+// that overrides it is making a point about spine entry 1, and the default is what it
+// is being contrasted with.
+inline const char* kDefaultCh2 = "<html><body><p>Two.</p></body></html>";
+
+// `ch2` IS A PARAMETER SO A SPINE ENTRY CAN PAGINATE TO NOTHING. Three of a real
+// book's 92 entries do -- a cover and two title pages, each an `<img>` and nothing
+// document.h models -- and walkToChapter's answer is to SKIP them in whichever
+// direction it was going. So an empty LAST entry is the only way to make a jump to an
+// in-range spine entry fail, which is the one refusal that gets past goToPosition's
+// bounds check and therefore the only one that can observe where the anchor is set.
+inline std::string epubWith(const std::string& ch1, const std::string& ch2 = kDefaultCh2) {
   const std::string container =
       "<?xml version=\"1.0\"?>"
       "<container version=\"1.0\" "
@@ -153,7 +164,7 @@ inline std::string epubWith(const std::string& ch1) {
       {"META-INF/container.xml", container, true},
       {"OEBPS/content.opf", opf, true},
       {"OEBPS/ch1.xhtml", ch1, true},
-      {"OEBPS/ch2.xhtml", "<html><body><p>Two.</p></body></html>", true},
+      {"OEBPS/ch2.xhtml", ch2, true},
   });
 }
 
@@ -183,12 +194,13 @@ struct CardReading {
   // predates them changed.
   explicit CardReading(const std::string& ch1, int ppem = reader::kBodyPpem,
                        int margins = reader::Settings{}.margins,
-                       reader::Cursor startAt = reader::Cursor{})
+                       reader::Cursor startAt = reader::Cursor{},
+                       const std::string& ch2 = kDefaultCh2)
       : body(ppem) {
     reader::Settings s;
     s.margins = margins;
     theme.readerMetrics(480, 800, ramp.fonts, body.face, s, m);
-    REQUIRE(fs.writeAll("/books/b.epub", epubWith(ch1)));
+    REQUIRE(fs.writeAll("/books/b.epub", epubWith(ch1, ch2)));
     const char* why = "";
     REQUIRE_MESSAGE(reader::openBook(fs, "/books/b.epub", ob, &why), std::string(why));
     scr = std::make_unique<reader::ReaderScreen>(fs, ob, 0, &body.face);

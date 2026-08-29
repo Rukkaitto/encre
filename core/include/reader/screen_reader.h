@@ -285,13 +285,17 @@ class ReaderScreen : public Screen {
   // MUST BE SET BEFORE THE BOOK IS OPENED. It goes into `metrics_`, which the page
   // builder reads at `add()` time, so a face arriving after the first page was laid
   // would measure that page roman and draw it italic.
-  // The anchor, for the shell to persist and for a test to inspect. Const access
-  // only: every transition belongs to a movement, and a caller that could set it
-  // directly is a second place that decides the rule.
+  // The anchor -- the high-water mark of this reading -- for the shell to persist and
+  // for a test to inspect. Const access only: the one transition belongs to a
+  // movement, and a caller that could raise it directly is a second place that decides
+  // the rule. Ask `anchor().aheadOf(here())` for "is there a way back"; `isSet()` is
+  // for persistence and says only that a mark exists.
   const ReturnAnchor& anchor() const { return anchor_; }
   // A RESTORED anchor, from the sidecar. Not a transition -- the record already holds
-  // the result of one -- so this is the one path that sets it without a movement, and
-  // the only reason `anchor_` is not otherwise writable from outside.
+  // a mark -- so this is the one path that sets it without a movement, and the only
+  // reason `anchor_` is not otherwise writable from outside. It runs BEFORE the
+  // landing (the factory calls it ahead of setMetrics), so a record behind where the
+  // book reopens is raised by the landing's own note().
   void restoreAnchor(const AnchorPos& a) {
     anchor_.set(a);
     syncAnchorLabel();
@@ -399,6 +403,17 @@ class ReaderScreen : public Screen {
   uint32_t chapterBytes() const { return chapter_.sizeBytes(); }
   int chapterCount() const { return book_.chapterCount(); }
 
+  // THE BOOK THIS SCREEN IS READING, for the one caller that has to ask a question
+  // about the whole book rather than about the open chapter: progressPercent, which
+  // sums every chapter's uncompressedSize. The peek's band composes a percentage that
+  // has to follow the chapter it is showing, and the peek owns one of these -- so
+  // without this it would need a second copy of the spans it is already holding.
+  //
+  // EMPTY FOR THE IN-MEMORY CONSTRUCTOR, which is how a caller tells the two apart:
+  // `chapterCount() == 0` means there is no book to ask, and progressPercent answers
+  // 0 for one. A reference, so nothing is copied; it lives as long as this screen.
+  const OpenedBook& book() const { return book_; }
+
   // JUMP TO A SPINE ENTRY, for the table of contents. False leaves the screen exactly
   // where it was -- `openChapterAt` restores the previous chapter on failure, which is
   // what makes a refused jump safe rather than a blank page with a stale index.
@@ -408,6 +423,86 @@ class ReaderScreen : public Screen {
   // nothing is openChapterAt's own behaviour and is right here too -- a cover selected
   // from the contents lands on the first thing with text rather than on a blank page.
   bool goToChapter(int spine);
+
+  // --- JUMP TO A POSITION, NOT TO A CHAPTER ---------------------------------
+  //
+  // WHAT `GO HERE` COMMITS. The three jumps this screen has are deliberately distinct:
+  //
+  //   goToChapter(spine)      -- page ONE of a spine entry. A chapter picked from a
+  //                              list asked for its beginning.
+  //   goToAnchor(pos)         -- a cursor: back to the high-water mark.
+  //   goToPosition(spine, at) -- a cursor. The reader may have paged several pages
+  //                              into the peek before committing, so page one is the
+  //                              wrong landing.
+  //
+  // NONE OF THE THREE TOUCHES THE ANCHOR, and that is the collapse: each lands through
+  // syncVm(), which raises the mark if the landing is further through the book than
+  // anything before it. A jump forward therefore raises it and a jump back does not,
+  // with no case for either.
+  //
+  // ONE WALK, NOT TWO. It is `openChapterAt` with `startAt_` armed -- the same
+  // mechanism a restored reading position lands through -- so the target chapter is
+  // decoded ONCE, up to the cursor, with the boundaries it passes recorded on the way.
+  // It was a landing on page one followed by a second walk from the top, which on the
+  // device is ~380 ms wasted on a median chapter and ~2.3 s on a long one. The page
+  // NUMBER falls out of the boundaries that walk recorded, which is what lets the peek
+  // be honest about not having one while the commit is exact.
+  //
+  // BOTH CASES GO THROUGH THE SAME CALL, cross-chapter and same-chapter alike, and
+  // that is what makes the sentence below true rather than nearly true.
+  //
+  // FALSE LEAVES THE SCREEN EXACTLY WHERE IT WAS -- the chapter, the index and its
+  // completeness, the page, the label, the view model and the anchor. That is
+  // openChapterAt's own restore, and it is why nothing here has a second copy of it.
+  // The anchor rides that for free: the mark is raised by the landing's syncVm(), and
+  // a refused walk never reaches one.
+  //
+  // WHAT IT COSTS TO SAY THAT: a jump within the open chapter re-opens the file and
+  // re-reads its 30-byte local header, where the old two-call form rewound the handle
+  // it already had. Noise against the walk, and the alternative was a second restore
+  // path -- see the comment at the definition, which prices both halves.
+  bool goToPosition(int spine, Cursor at);
+
+  // --- LETTING GO SO A PEEK CAN HAVE THE HEAP -------------------------------
+  //
+  // A live chapter peaks at 69,884 bytes with a 36,956-byte single allocation, against
+  // a measured 45,840-byte heap floor, so TWO live chapters do not fit -- and a peek
+  // is a second live chapter. This is how there is only ever one: the Reader beneath a
+  // peek releases its stream while the panel is up.
+  //
+  // WHAT SURVIVES IS EVERYTHING THE PAINT AND A SAVE READ: page_ (with owned LaidLine
+  // text), at_, starts_, chapterAt_, pageBytes_, vm_, anchor_ and the book's spans.
+  // ReaderScreen::render reads only page_ and vm_, so App::render draws the veiled page
+  // underneath with no decode at all -- which is the property the whole design rests
+  // on. A save is safe for a related reason worth stating: chapterBytesRead() is
+  // pageBytes_, a plain member, NOT ChapterReader::bytesRead(), which would answer 0
+  // with the inflater gone and push progressPercent onto its page/pageTotal fallback --
+  // the exact shape of the percentage-going-backwards bug this project shipped once.
+  void releaseChapter();
+
+  // TAKE THE STREAM BACK, AND PAY NO seekTo FOR IT.
+  //
+  // The design spec budgeted closing a peek at "one seekTo -- 33.9 ms desktop for the
+  // worst page in a real book", which is this project's own ratio trap: a seekTo
+  // rewinds and decodes forward, so it costs WHAT PAGE YOU ARE ON, and the device
+  // measured ~376 ms at page 38, ~1010 ms at page 99 and ~3 s deep in a long chapter.
+  // On CLOSE that would make discarding a peek cost more than committing one.
+  //
+  // It is not needed. Nothing visible was disturbed, so the page is already correct;
+  // what a seekTo would restore is the live PageBuilder, and `pb_ == nullptr` is an
+  // already-handled state whose repair has a home -- restreamAtCurrentPage, in a quiet
+  // window, where abandoning it is free. So this re-establishes the stream at the
+  // chapter's start and stops, leaving hasLiveStream() false on purpose.
+  //
+  // False when the chapter cannot be reopened -- a card pulled while the peek was up.
+  // The caller is the shell, which has pollCardPresence for that case.
+  bool reacquireChapter();
+
+  // Whether a stream is established. An OBSERVATION POINT, not a guard: no caller
+  // branches on it. The three quiet-window jobs are each gated on the Reader being on
+  // TOP of the stack, so a peek over it stops them by construction -- see
+  // docs/superpowers/specs/2026-08-28-peek-overlay-design.md.
+  bool hasChapter() const { return chapter_.held(); }
 
   // Whether the chapter's page count is still unknown. The shell completes it inside
   // the refinement; see the class comment.
@@ -549,6 +644,13 @@ class ReaderScreen : public Screen {
   uint32_t pageBytes_ = 0;
 
  public:
+  // THE FACES, so a screen that draws this one's page can draw it with them. The peek
+  // is the caller: it renders the inner reader's page into its own panel, and a panel
+  // drawn with a different face from the one the page was MEASURED with is the
+  // measure/draw disagreement StyledFace exists to prevent.
+  const GlyphSource* body() const { return body_; }
+  const GlyphSource* italic() const { return italic_; }
+
   // WHETHER AN ITALIC FACE IS INSTALLED AT ALL. drawTextStyled falls back to the
   // roman when this is null, silently and correctly -- so a book whose emphasis is
   // not rendering has two completely different explanations and they look identical
@@ -590,17 +692,12 @@ class ReaderScreen : public Screen {
   }
 
  private:
-  // WHERE THE READER WAS BEFORE THEY STOPPED READING LINEARLY. The rule is in
-  // return_anchor.h and is tested without a book; this screen only tells it which
-  // of the three movements just happened.
+  // THE FURTHEST THIS READING HAS REACHED. The rule is in return_anchor.h and is
+  // tested without a book; this screen only tells it where the reading position ended
+  // up, from syncVm() and from nowhere else -- see the note at that definition.
   ReturnAnchor anchor_;
   bool goToAnchor(const AnchorPos& to);
   void syncAnchorLabel();
-  // Each applies one transition and re-syncs the footer label -- see the note in
-  // screen_reader.cpp for the ordering bug that made that one call rather than four.
-  void anchorPagedForward(const AnchorPos& from);
-  void anchorPagedBackward(const AnchorPos& from);
-  void anchorJumped(const AnchorPos& from);
   PageMetrics metrics_{};
 
   // One cursor per page, in order -- but only as far as has been READ, unless

@@ -9,6 +9,7 @@
 #include "reader/screen_book_details.h"
 #include "reader/screen_library.h"
 #include "reader/book.h"
+#include "reader/screen_peek.h"
 #include "reader/screen_reader.h"
 #include "reader/viewmodel.h"
 
@@ -45,6 +46,22 @@ std::vector<TocEntry> demoContents();
 int demoContentsSpine();
 // design/SleepIdle.dc.html: asleep with nothing open, so the badge without the card.
 SleepViewModel demoSleepIdleVm();
+
+// design/Peek.dc.html's own peeked text -- Middlemarch's opening, which is the board's
+// story: the reader is at CH. 07, 34%, has met a name they cannot place, and has peeked
+// back to CH. 01, 4%, to read the sentence that introduced her.
+//
+// DECLARED HERE WHERE demoReaderXhtml IS NOT, and the asymmetry is worth a line: that
+// one has no declaration at all, because nothing outside screens.cpp has ever wanted
+// it. This one is declared so a test can assert the demo peek shows the BOARD'S text
+// rather than only that it shows some.
+//
+// A `std::string` by value, where demoReaderXhtml returns a view of a literal. Safe
+// because ChapterReader::beginBuffer COPIES ("the bytes are copied, so the caller need
+// not keep them"), which is what makes the temporary at the call site legal -- the
+// notdef-box lifetime bug this project shipped once was exactly a view outliving its
+// temporary, so the reason is written down rather than assumed.
+std::string demoPeekXhtml();
 
 // design/Library.dc.html's own seven rows, with the authors and percentages the
 // board draws. The device fills the same fields from the card -- filenames, blank
@@ -209,6 +226,35 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // written down for exactly this, one screen earlier.
   void setContentsDemo() { contentsDemo_ = true; }
 
+  // THE BOARD'S OWN PEEK, ASKED FOR. Same rule as setReaderDemo and setContentsDemo:
+  // the factory refuses a Peek nothing primed rather than substituting, because this
+  // project has shipped that substitution twice and each time it hid the real cause.
+  void setPeekDemo() { peekDemo_ = true; }
+
+  // The peeked chapter of the book the reader has open: which spine entry, and nothing
+  // else. It took a book-wide PERCENTAGE too, computed by the shell, and the peek held
+  // that figure for its whole life -- so the band's number stayed on the chapter the
+  // panel was opened at while its label followed the reader across a boundary. The
+  // panel derives it from the chapter it is showing now; see PeekScreen::percentHere.
+  //
+  // `peekPrimed_` IS ITS OWN FLAG rather than "spine >= 0": spine 0 is a real target --
+  // it is the book's cover, which an NCX section header can legitimately name -- so a
+  // sentinel would refuse a valid peek. Only "nothing was primed at all" is refused.
+  //
+  // THERE IS NO clearPeek(). One was written and had no caller anywhere, tests
+  // included: this runs on every press that opens a panel, so nothing can go stale,
+  // and an unused setter is a second way to reach a state only one path should own.
+  void setPeek(int spine) {
+    peekSpine_ = spine;
+    peekPrimed_ = true;
+  }
+
+  // The panel's column, from Theme::peekMetrics. Separate from setReaderMetrics because
+  // they are DIFFERENT COLUMNS -- that is the whole design -- and one setter for both
+  // would be an invitation to hand the peek the reading measure, which is the bug the
+  // "peek's page is not the reader's page" test exists to catch.
+  void setPeekMetrics(const PageMetrics& m) { peekMetrics_ = m; }
+
   // THE AUTHOR FOR BOOK DETAILS, read by the shell from the one book that screen shows.
   //
   // It cannot come from the Library's scan: the author lives in the OPF, so learning it
@@ -317,6 +363,10 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   PageMetrics readerMetrics_{};
   OpenedBook readerBook_{};
   bool readerDemo_ = false;
+  bool peekDemo_ = false;
+  bool peekPrimed_ = false;
+  int peekSpine_ = 0;
+  PageMetrics peekMetrics_{};
   bool sleepIdle_ = false;
   bool sleepWaking_ = false;
   bool contentsDemo_ = false;

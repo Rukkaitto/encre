@@ -22,7 +22,7 @@ namespace {
 constexpr const char* kNames[] = {
     "home", "library", "item-actions", "delete-confirm",
     "book-details", "settings", "sleep", "reader", "reader-menu",
-    "contents", "sd-missing", "typography",
+    "contents", "sd-missing", "typography", "peek",
 };
 
 // Clamped so the encoded length is bounded. -1 is the floor rather than 0 because
@@ -32,7 +32,7 @@ constexpr int kFocusMax = 32767;
 
 bool decodeName(const char* start, size_t len, ScreenId& out) {
   if (len == 0) return false;
-  for (int i = 0; i <= static_cast<int>(ScreenId::Typography); ++i) {
+  for (int i = 0; i <= static_cast<int>(ScreenId::Peek); ++i) {
     const char* n = kNames[i];
     if (std::strlen(n) == len && std::strncmp(n, start, len) == 0) {
       out = static_cast<ScreenId>(i);
@@ -95,6 +95,12 @@ const char* sessionWireName(ScreenId id) {
     // factory builds it from the settings it already holds, and its focus is a row
     // index that `focus` carries exactly.
     case ScreenId::Typography: return kNames[11];
+    // NAMEABLE, and never actually restored: the factory refuses an unprimed peek
+    // exactly as it refuses an unprimed Reader or Contents, so App::restore stops
+    // short and leaves whatever is under it standing. It needs a name so this
+    // switch stays exhaustive and a record naming it cannot decode as something
+    // else.
+    case ScreenId::Peek: return kNames[12];
   }
   return kNames[0];
 }

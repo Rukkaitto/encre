@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "reader/layout.h"  // kBodyLeadEm
+
 namespace reader {
 
 struct MenuEntry {
@@ -258,6 +260,48 @@ struct ReaderViewModel {
   // device: a footer that changed height would reflow the text column and
   // re-paginate the chapter mid-read.
   std::string anchorLabel;
+};
+
+// design/Peek.dc.html -- book text over the veiled page, for looking somewhere else
+// without going there.
+//
+// TWO RUNS AND NO PAGE NUMBER, and the absence is the design. The panel is inset, so
+// its column is narrower, so its text re-wraps -- and re-wrapped text paginates
+// differently, which means "page 53" inside the peek is not page 53 of the book. It
+// says chapter and percent instead, which are true at any column width. Committing is
+// still exact: openAtCursor lands on the page CONTAINING a cursor and counts
+// boundaries to name it, so the cursor is what travels and the number is computed on
+// arrival.
+struct PeekViewModel {
+  // `PEEK`. Names the STATE, because `CH. 01 · 4%` alone would read as the Reader's
+  // own header and this panel has to be unmistakably not that.
+  std::string title = "PEEK";
+  // `CH. 01 · 4%`, already composed -- the theme does no arithmetic. The chapter is
+  // the book's own name for it where its contents supply one and the `CH. NN`
+  // position where they do not, exactly as the Reader's header falls back.
+  std::string where;
+  // NO LEAD HERE, AND THE ABSENCE IS THE DESIGN CHANGE. This model carried a
+  // `leadEm1000` so renderPeek could recompute the panel's box from the same line
+  // height peekMetrics did -- necessary while the HEIGHT was a result of the line
+  // count, because a render that assumed the default lead drew the border a line away
+  // from its own text. The box is fixed now (theme.h's kPeekPanelH), so neither
+  // function has a lead to disagree about and the field had no other reader. What
+  // varies with the reader's typography is how many lines FIT, which is a question for
+  // Theme::peekVisibleLines and never for a view model.
+  //
+  // CLOSE / GO HERE / — / —, in the boards' hardware order (Back, Confirm, Up, Down).
+  // The last two are EMPTY, not absent: an empty slot is 36px wide (kHintEmptySlotW),
+  // and measuring it as zero is not "drawing nothing", it is drawing the other two in
+  // the wrong places.
+  //
+  // UP AND DOWN ARE DEAD ON PURPOSE. `Up` already means "return to where I was" on the
+  // screen underneath (design/ReaderAnchored.dc.html), and one button with two meanings
+  // across a single press is worse than an unbound one -- so the side buttons page in
+  // the peek exactly as they do while reading. The four-label bar also did not fit:
+  // measured at 480 wide it left ~4px of slack against faces that measure ~3% wider
+  // than Chrome.
+  std::array<std::string, 4> hints{{"CLOSE", "GO HERE", "", ""}};
+  std::array<bool, 4> holds{{false, false, false, false}};
 };
 
 // A ROW IN A LIST THAT INTERLEAVES SECTION HEADERS WITH ITEMS, and where some items

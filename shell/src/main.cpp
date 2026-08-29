@@ -53,6 +53,7 @@
 #include "reader/progress_save_gate.h"
 #include "reader/screen_sleep.h"
 #include "reader/screen_contents.h"
+#include "reader/screen_peek.h"
 #include "reader/screen_reader_menu.h"
 #include "reader/toc.h"
 #include "reader/screens.h"
@@ -323,6 +324,56 @@ constexpr uint32_t kCountQuietMs = 2000;
 constexpr uint32_t kRestreamQuietMs = 1200;
 static bool gRefineOwed = false;
 
+// WHERE AN IDLE WALK GAVE UP FOR GOOD, SO IT IS NOT ASKED AGAIN THERE (#45).
+//
+// Both of the quiet-window walks below -- restreamAtCurrentPage and warmPageRing --
+// answer `false` for TWO REASONS THAT LOOK IDENTICAL AT THE CALL SITE, and only one
+// of them should stop the job being retried:
+//
+//   * "A BUTTON ARRIVED AND I GAVE UP." Both take a stop predicate answered from
+//     rawSamplesPending(), and being cut short is the whole design of an
+//     interruptible idle job. That failure MUST stay retryable: the next quiet
+//     window is exactly when it should run.
+//   * "THIS POSITION CAN NEVER SUCCEED." ReaderScreen::rewalkToCurrentPage only
+//     accepts a page the PageBuilder has FILLED, and the trailing partial page comes
+//     from finish(), which that walk never calls -- so on the last page of any
+//     chapter, and on the only page of a one-page chapter, it returns false however
+//     long it is left alone. The shell's gate is `!hasLiveStream()`, which is still
+//     true afterwards, so with no memory of the failure the job re-runs on EVERY
+//     loop iteration: the device measured ~6 ms of inflate every ~13 ms, forever, on
+//     a reader left sitting on a 239-byte cover chapter. warmPageRing joins it at
+//     page 0 for the same reason -- it refuses page 0, so its headroom gate never
+//     stops being true.
+//
+// THE SHELL CAN TELL THEM APART WITHOUT TOUCHING core/: ask rawSamplesPending()
+// IMMEDIATELY AFTER THE CALL. An empty queue means nothing interrupted the walk, so
+// the `false` is the walk's own answer about this position and not a press. That is
+// the same instrument the predicate itself reads, one call later.
+//
+// A POSITION, NOT A FLAG, and that distinction is the whole safety of it. A bare
+// bool could never be cleared correctly: the reader pages away and back, and the
+// page that could not restream at the end of chapter 4 says nothing about page 12 of
+// chapter 5. Keyed on (chapter, page), a memo taken anywhere else simply does not
+// match, so it can only ever suppress the exact position that earned it -- and the
+// first move off that page makes the job live again with no line to remember. It is
+// also FORGOTTEN WHEN THE BOOK CLOSES, for the reason gLastChapter is: page 0 of the
+// next book is a different page 0.
+struct IdleWalkStuck {
+  int chapter = -1;
+  int page = -1;
+  bool at(int ch, int pg) const { return chapter == ch && page == pg; }
+  void note(int ch, int pg) {
+    chapter = ch;
+    page = pg;
+  }
+  void forget() {
+    chapter = -1;
+    page = -1;
+  }
+};
+static IdleWalkStuck gRestreamStuck;
+static IdleWalkStuck gWarmStuck;
+
 // HOW LONG THE BUTTONS MUST BE QUIET BEFORE THE READING POSITION IS WRITTEN.
 //
 // THE POINT OF THIS NUMBER IS THAT A PAGE TURN NEVER PAYS FOR IT. The save is two
@@ -570,7 +621,44 @@ static bool gLibraryStale = false;
 
 // The spine Contents chose, or -1. Held for exactly one dispatch: the choice is made
 // while Contents is on top and acted on once the pop has put the Reader back.
+//
+// IT NO LONGER JUMPS THE READER. The pop that Contents' GO returns opens a PEEK over
+// the page instead -- the same capture, a different thing done with it -- because a
+// contents list cannot answer "is this the chapter I meant?" and being wrong about a
+// chapter used to cost the walk there and the walk back.
 static int gPendingSpine = -1;
+
+// A PEEK IS ON THE STACK, so the Reader's chapter has been released and has to be taken
+// back when the panel goes. Tracked rather than inferred from the stack, because the pop
+// that removes the peek is what makes the answer needed and the stack no longer says a
+// peek was ever there.
+static bool gPeekOpen = false;
+// WHICH CHAPTER THE CROSSING DETECTOR LAST SAW, and -1 for "no book open".
+//
+// IT WAS A FUNCTION-LOCAL STATIC INSIDE loop() AND IT COULD NEVER BE INITIALISED,
+// which the device showed: opening a peek logged `[chapter] spine=55 ... in 0ms` and
+// ran a save for a chapter that had not changed. The detector is gated on the Reader
+// being on TOP, and `handleOpen()` -- which pushes the Reader -- runs BELOW it in the
+// same iteration. So on the press that opens a book the detector looks while Home is
+// still on top, the static stays -1, and the FIRST later press that leaves the Reader
+// on top fires a crossing for the chapter the reader is already in. A plain page turn
+// did it too; the peek is only where it was noticed.
+//
+// It costs two sidecar reads and a stray log line rather than a wrong screen, which is
+// why it survived. Recorded at file scope now and SET BY openBookAt, which is the one
+// function a button press and a wake both go through and the moment the chapter
+// becomes known -- so the detector fires on crossings and nothing else.
+//
+// RESET WHEN THE BOOK CLOSES, because it outlives one book otherwise: opening a second
+// book at the same spine index as the first was left on would suppress the next real
+// crossing, which is the same defect wearing the opposite sign.
+static int gLastChapter = -1;
+// WHAT THE PEEK CHOSE, taken while it is still on top -- the dispatch pops it, and after
+// that there is no screen left to ask. Three values rather than a pointer, because the
+// screen is gone by the time they are used.
+static bool gPeekCommitted = false;
+static int gPeekSpine = 0;
+static reader::Cursor gPeekCursor{};
 
 // --- ONE LINE PER INTERACTION ------------------------------------------------
 //
@@ -1870,7 +1958,14 @@ static reader::SaveResult saveReadingPosition(const char* why,
   // anchor to a power cut costs a shortcut and nothing else -- the reader is still
   // sitting on a real page -- so it does not justify a write on an edge that does not
   // already take one.
-  if (rd->anchor().isSet()) {
+  //
+  // WRITTEN ONLY WHILE THE MARK IS AHEAD, not merely while one is stored. Under the
+  // high-water rule the mark is raised to wherever the reader stands, so `isSet()` is
+  // true almost always and would put three keys in every record to say "the way back
+  // is the page you are on". Gated this way, a reader at their furthest point writes a
+  // record byte-identical to one from before anchors existed -- which is the property
+  // reading_position.h's absent-rather-than--1 rule is there to give.
+  if (rd->anchor().aheadOf(rd->here())) {
     const reader::AnchorPos a = rd->anchor().get();
     p.anchorSpine = a.spine;
     p.anchorBlock = a.block;
@@ -2240,6 +2335,14 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
     readerWhy = rd->error();
     logChapterOpen(rd, millis() - t0);
   }
+  // THE CROSSING DETECTOR'S STARTING POINT -- see gLastChapter. Taken from the SCREEN
+  // where there is one, because `startChapter` is what was ASKED for and openChapterAt
+  // skips a spine entry that paginates to nothing: three of a real book's 92 are a
+  // cover and two title pages, so the two differ on exactly the opens where it matters.
+  // On the wake path there is no screen yet (App::restore does the pushing), and the
+  // requested chapter is the best that is known.
+  gLastChapter = pushed ? static_cast<const reader::ReaderScreen*>(&gApp->top())->chapterIndex()
+                        : startChapter;
   // THE STACK HIGH-WATER MARK, because a stack is the one budget this firmware had
   // no instrument for -- and the first thing to exhaust it did so on the very first
   // book. uxTaskGetStackHighWaterMark reports the SMALLEST free space the task has
@@ -4199,11 +4302,69 @@ void loop() {
     // pops it, and after that there is no screen left to ask.
     if (ev.button == reader::Button::Confirm && gApp->top().id() == reader::ScreenId::Contents)
       gPendingSpine = static_cast<const reader::ContentsScreen*>(&gApp->top())->chosenSpine();
+    // WHICH BUTTON LEFT THE PEEK, taken while it is still on top. `committed()` cannot
+    // serve HERE: it is set BY the dispatch, and after the dispatch the screen is gone.
+    // So the spine and cursor come off the screen and the intent comes off the BUTTON --
+    // the same shape the Typography apply path uses, where a flag is set by the press
+    // and consumed after the pop.
+    //
+    // A SIDE BUTTON PAGES AND DOES NOT POP, so this runs again on the next press with
+    // the cursor of whatever page the panel then shows, and `committed` is re-cleared
+    // by anything that is not Confirm. The peek stays on top, so the branch that
+    // consumes these is not reached until something really does pop it.
+    if (gPeekOpen && gApp->top().id() == reader::ScreenId::Peek) {
+      const auto* pk = static_cast<const reader::PeekScreen*>(&gApp->top());
+      gPeekSpine = pk->chosenSpine();
+      gPeekCursor = pk->chosenCursor();
+      gPeekCommitted = (ev.button == reader::Button::Confirm);
+    }
     const uint32_t beforeDispatch = millis();
     gAct.preMs += beforeDispatch - eventStart;
     gApp->dispatch(ev);
     const uint32_t afterDispatch = millis();
     gAct.dispMs += afterDispatch - beforeDispatch;
+    // THE PEEK CLOSED OR COMMITTED, and both answer Pop -- so this runs after the
+    // dispatch that removed it, and gPeekCommitted (set from the BUTTON, above) is the
+    // difference.
+    //
+    // FIRST OF THE POST-DISPATCH BLOCKS, AND AHEAD OF THE CROSSING DETECTOR BELOW ON
+    // PURPOSE. A commit changes the Reader's chapter, and that detector is the one
+    // place on the device that instruments a chapter change -- mark(), the [chapter]
+    // line and the crossing save edge. Below it, a commit would be the single chapter
+    // change that gets none of the three on the press that caused it, and would then
+    // be attributed to whatever press came next. The old Contents jump sat below and
+    // had exactly that wart; moving this above it costs nothing and closes it, with no
+    // second copy of the instrumentation.
+    if (gPeekOpen && gApp->top().id() == reader::ScreenId::Reader) {
+      gPeekOpen = false;
+      auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
+      const uint32_t t = millis();
+      // TAKEN BACK BEFORE ANYTHING ELSE, because the commit below walks the chapter and
+      // cannot without a stream.
+      const bool back = rd->reacquireChapter();
+      if (gPeekCommitted) {
+        // GO HERE. goToPosition and not goToChapter: the reader may have paged several
+        // pages into the panel, and page one would be right on the first page and wrong
+        // everywhere after it. The return anchor is a HIGH-WATER MARK now, so a commit
+        // FORWARD carries it to the destination and leaves no way back, while one
+        // BACKWARD leaves it standing where the reader was -- see return_anchor.h, which
+        // prices that against the way back the old departure rule nominally offered and
+        // measurably kept for one press.
+        const bool ok = back && rd->goToPosition(gPeekSpine, gPeekCursor);
+        logf("[peek] GO HERE spine=%d block=%d line=%d: %s in %lums\n", gPeekSpine,
+             gPeekCursor.block, gPeekCursor.line, ok ? "ok" : "REFUSED",
+             (unsigned long)(millis() - t));
+      } else {
+        // CLOSE. NO seekTo, which is where this departs from the 08-24 spec: a rewind
+        // costs what page you are ON -- ~1010 ms at page 99 and ~3 s deep in a chapter --
+        // so on CLOSE it would cost more than committing. The page was never disturbed,
+        // and the live builder is what restreamAtCurrentPage repairs in a quiet window.
+        logf("[peek] CLOSE, reader %s in %lums\n", back ? "restored" : "NOT RESTORED",
+             (unsigned long)(millis() - t));
+      }
+      gPeekCommitted = false;
+      logFlush();
+    }
     // Between the dispatch and the mask refresh below, so the refresh sees
     // whatever screen the retry left on top -- on success that is a brand new App
     // rooted at Home, whose holds are not the SD-missing screen's.
@@ -4215,9 +4376,9 @@ void loop() {
     // wants a stage line of its own rather than another round trip to find out.
     if (gApp->top().id() == reader::ScreenId::Reader) {
       const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
-      static int lastChapter = -1;
-      if (rd->chapterIndex() != lastChapter) {
-        lastChapter = rd->chapterIndex();
+      const int was = gLastChapter;
+      if (rd->chapterIndex() != was) {
+        gLastChapter = rd->chapterIndex();
         mark("chapter-opened");
         // WHICH BRANCH, AND WHAT IT COST. A small chapter is counted before its
         // first paint and a big one is not, and the eager side had no line -- so a
@@ -4228,7 +4389,14 @@ void loop() {
         // A CROSSING IS ONE OF THE THREE SAVE EDGES. It is also the coarsest unit a
         // power cut can cost the reader, which is what makes saving per page turn
         // unnecessary rather than merely expensive.
-        if (lastChapter >= 0) saveReadingPosition("chapter");
+        // THE PREVIOUS VALUE, not the one just stored. As written this tested the
+        // chapter it had assigned a line above, which is an index and so always >= 0 --
+        // a guard that could not refuse. It reads the departure now, so it means what
+        // it says: a crossing FROM somewhere is a save edge, and the first observation
+        // of a book is not. openBookAt records the opening chapter, so this cannot be
+        // negative any more, and the test is kept because that is a fact about the open
+        // path rather than about this one.
+        if (was >= 0) saveReadingPosition("chapter");
       }
     }
     // LEAVING THE BOOK, which is the edge the user actually reported: going back to
@@ -4248,26 +4416,72 @@ void loop() {
     // now -- see readerOnStack().
     if (gReading.open && readerOnStack(*gApp) == nullptr) {
       gReading.open = false;
+      // ...and the crossing detector forgets where it was. It outlives one book
+      // otherwise, so opening a second book at the same spine index the first was left
+      // on would suppress the next real crossing and its save edge. See gLastChapter.
+      gLastChapter = -1;
+      // ...and so do the idle walks, for exactly the same reason wearing the same
+      // sign: page 0 of chapter 0 is a position both books have, and the one that
+      // could not restream is not the one that is about to be opened (#45).
+      gRestreamStuck.forget();
+      gWarmStuck.forget();
       logf("[progress] book closed\n");
       logFlush();
     }
     // A CHOSEN CHAPTER, acted on AFTER the pop that Contents' GO returns. The screen
-    // cannot jump the Reader itself: the Reader is already on the stack under it, and
-    // pushing a second one would leave the first below with its own position -- so
-    // Contents answers popTo(Reader) and names the chapter, and this moves it.
+    // cannot open the panel itself: the Reader is already on the stack under it, and a
+    // screen that reached down into the stack would be a second thing that knows how a
+    // Reader is shaped -- so Contents answers popTo(Reader) and names the chapter, and
+    // this opens the peek over it.
     //
     // Read BEFORE the dispatch would be too early (the choice is made by the press) and
     // reading it after the pop is too late (the screen is gone), so the spine is taken
     // off the Contents screen while it is still on top, just above.
+    //
+    // IT USED TO JUMP HERE, with goToChapter. The jump was safe -- goToChapter sets the
+    // return anchor -- and the peek is what makes being WRONG about a chapter cheap.
     if (gPendingSpine >= 0 && gApp->top().id() == reader::ScreenId::Reader) {
       auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
       const int want = gPendingSpine;
       gPendingSpine = -1;
       if (want != rd->chapterIndex()) {
         const uint32_t t = millis();
-        const bool ok = rd->goToChapter(want);
-        logf("[toc] jump to spine %d: %s in %lums\n", want, ok ? "ok" : "REFUSED",
-             (unsigned long)(millis() - t));
+        // THE PANEL'S COLUMN, which is not the reading column -- that is the whole
+        // design. Recomputed here rather than held, because the reader's own typography
+        // may have changed since the book opened and peekMetrics reads two of its fields.
+        reader::PageMetrics pm;
+        gTheme.peekMetrics(gFrame->width(), gFrame->height(), *gFonts, gBody, gSettings, pm);
+        pm.italic = &gItalic;
+        gFactory.setPeekMetrics(pm);
+        // WHICH SPINE ENTRY, AND NOTHING ELSE. This used to compute the book-wide
+        // percentage at the peeked chapter and hand it over -- and the panel then held
+        // that one figure while its chapter label followed the reader across a boundary,
+        // because paging off either end of a peek crosses into the next spine entry. The
+        // panel owns a ReaderScreen and therefore the book's byte spans, so it derives
+        // the number from the chapter it is showing. See PeekScreen::percentHere.
+        gFactory.setPeek(want);
+        // THE READER LETS GO FIRST. A live chapter peaks at 69,884 bytes with a
+        // 36,956-byte single allocation against a measured 45,840-byte floor, so two do
+        // not fit -- and the peek is a second one. Released BEFORE the push, because the
+        // push is what allocates the second chapter.
+        //
+        // Its page, index, cursor and anchor all survive, which is what lets App::render
+        // draw the veiled page underneath with no decode at all.
+        rd->releaseChapter();
+        if (gApp->pushScreen(reader::ScreenId::Peek)) {
+          gPeekOpen = true;
+          gPeekCommitted = false;
+          logf("[peek] open spine=%d in %lums (heap %u)\n", want,
+               (unsigned long)(millis() - t), (unsigned)ESP.getFreeHeap());
+        } else {
+          // REFUSED, so put the Reader back and leave it standing. The reader is on their
+          // own page with the chapter list gone -- nothing lost but the list, the page
+          // untouched and the anchor unmoved. The only reachable cause is the card going,
+          // which pollCardPresence owns.
+          const bool back = rd->reacquireChapter();
+          logf("[peek] REFUSED spine=%d, reader %s\n", want,
+               back ? "restored" : "COULD NOT BE RESTORED");
+        }
         logFlush();
       }
     }
@@ -4632,10 +4846,22 @@ void loop() {
     auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
     // ASKED HERE AS WELL AS INSIDE, so the common case -- a stream that stands, which
     // is every ordinary page turn -- costs a pointer test and no log line at all.
-    if (!rd->hasLiveStream()) {
+    // ...AND NOT WHERE THE WALK HAS ALREADY SAID IT CANNOT (#45 -- see IdleWalkStuck).
+    // `hasLiveStream()` alone is a gate with no memory, so the last page of a chapter
+    // re-ran this every iteration for as long as the reader sat there.
+    if (!rd->hasLiveStream() && !gRestreamStuck.at(rd->chapterIndex(), rd->pageIndex())) {
       const uint32_t t = millis();
       const bool done = rd->restreamAtCurrentPage(
           [](void*) { return rawSamplesPending() != 0; }, nullptr);
+      // AN EMPTY QUEUE AFTER THE CALL MEANS NOTHING INTERRUPTED IT, so a `false` here
+      // is the walk's answer about this page rather than a press taking the loop
+      // back. Asked immediately, before anything else can enqueue.
+      const bool structural = !done && rawSamplesPending() == 0;
+      if (structural) {
+        gRestreamStuck.note(rd->chapterIndex(), rd->pageIndex());
+      } else if (done) {
+        gRestreamStuck.forget();
+      }
       // LOGGED THOUGH NOTHING IS VISIBLE, for the reason [warm] is: an idle
       // optimisation that silently stops working looks exactly like one that is
       // working. `done` is the whole point of the line -- an abandoned restream is
@@ -4643,8 +4869,15 @@ void loop() {
       // happening. If this reads `abandoned` most of the time, kRestreamQuietMs is
       // too short for this reader; if it never appears at all, the stream is never
       // being spent and the count is not deferring.
-      logf("[restream] %s page=%d in %lums\n", done ? "ready" : "abandoned",
-           rd->pageIndex(), (unsigned long)(millis() - t));
+      //
+      // THE SUPPRESSED RETRIES PRINT NOTHING -- a line every 13 ms is the same spin
+      // wearing a different hat, and on a card log it is what erases the history a
+      // diagnostic session is collecting. But the FIRST failure at a position still
+      // says so, and says that it is the last one: silence with no explanation is
+      // exactly the shape this line exists to prevent.
+      logf("[restream] %s page=%d in %lums%s\n", done ? "ready" : "abandoned",
+           rd->pageIndex(), (unsigned long)(millis() - t),
+           structural ? " (structural -- not retried at this page)" : "");
       logFlush();
     }
   }
@@ -4685,17 +4918,35 @@ void loop() {
     // that shipped rather than getting something worse.
     const int affordable = static_cast<int>(ESP.getFreeHeap() / 8u / 1536u);
     rd->setPageCacheDepth(affordable);
-    if (rd->backwardHeadroom() < rd->pageCacheDepth() - 1) {
+    // THE SAME MEMORY THE RESTREAM ABOVE HAS, and for a sharper reason (#45): this
+    // job REFUSES page 0 outright, so on page 0 the headroom gate below can never
+    // stop being true and the walk is re-run for as long as the reader sits there.
+    // On the device it interleaved 1:1 with the restream's own spin, forever.
+    if (rd->backwardHeadroom() < rd->pageCacheDepth() - 1 &&
+        !gWarmStuck.at(rd->chapterIndex(), rd->pageIndex())) {
       const uint32_t t = millis();
       const int was = rd->backwardHeadroom();
       const bool done = rd->warmPageRing([](void*) { return rawSamplesPending() != 0; }, nullptr);
+      // AN EMPTY QUEUE AFTER THE CALL MEANS NOTHING INTERRUPTED IT -- see
+      // IdleWalkStuck for why the two meanings of `false` must not share a fate. An
+      // interrupted warm is the expensive one of the pair (it spends the live
+      // builder), which is all the more reason it must stay retryable.
+      const bool structural = !done && rawSamplesPending() == 0;
+      if (structural) {
+        gWarmStuck.note(rd->chapterIndex(), rd->pageIndex());
+      } else if (done) {
+        gWarmStuck.forget();
+      }
       // LOGGED EVEN THOUGH NOTHING IS VISIBLE -- especially because nothing is
       // visible. An idle optimisation that silently stops working looks exactly like
       // one that is working, which this file records as a defect shape three times
-      // over. depth/headroom is what says whether the ring is actually deeper.
-      logf("[warm] %s depth=%d headroom %d->%d in %lums (heap %u)\n",
+      // over. depth/headroom is what says whether the ring is actually deeper. The
+      // suppressed retries are silent and the first refusal at a position says that
+      // it is the last one, for the reason [restream] does.
+      logf("[warm] %s depth=%d headroom %d->%d in %lums (heap %u)%s\n",
            done ? "ready" : "abandoned", rd->pageCacheDepth(), was, rd->backwardHeadroom(),
-           (unsigned long)(millis() - t), (unsigned)ESP.getFreeHeap());
+           (unsigned long)(millis() - t), (unsigned)ESP.getFreeHeap(),
+           structural ? " (structural -- not retried at this page)" : "");
       logFlush();
     }
   }

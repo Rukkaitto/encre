@@ -21,9 +21,11 @@
 #include "reader/app.h"
 #include "reader/screen_home.h"
 #include "golden.h"
+#include "ramp.h"
 #include "reader/layout.h"
 #include "reader/scalablefont.h"
 #include "reader/screens.h"
+#include "reader/theme_quiet.h"
 
 using namespace reader;
 
@@ -36,7 +38,7 @@ constexpr ScreenId kAllScreens[] = {
     ScreenId::Home,     ScreenId::Library,      ScreenId::ItemActions, ScreenId::DeleteConfirm,
     ScreenId::BookDetails, ScreenId::Settings,  ScreenId::Sleep,       ScreenId::Reader,
     ScreenId::ReaderMenu,  ScreenId::Contents,  ScreenId::SdMissing,
-    ScreenId::Typography,
+    ScreenId::Typography,  ScreenId::Peek,
 };
 // AND IT NAMES THE LAST MEMBER, WHICH IS THE ONLY WAY IT BITES. It named
 // SdMissing, and Typography was APPENDED after it -- so the array's length still
@@ -45,7 +47,7 @@ constexpr ScreenId kAllScreens[] = {
 // name here moves with it, which is the "reports on less than it claims" shape
 // three other checks in this repo have had.
 static_assert(sizeof(kAllScreens) / sizeof(kAllScreens[0]) ==
-                  static_cast<size_t>(ScreenId::Typography) + 1,
+                  static_cast<size_t>(ScreenId::Peek) + 1,
               "a ScreenId was added or removed; give it a row in kAllScreens, and"
               " name the LAST member here");
 
@@ -57,11 +59,20 @@ struct Standalone {
   DemoScreenFactory factory;
   std::unique_ptr<Screen> parent;
   std::unique_ptr<Screen> screen;
-  // Reader is the one screen the factory refuses without a body face, and a face
-  // is a TTF plus a rasteriser rather than a value -- so it is held here, beside
-  // the Library the overlays hold a reference to, for the same lifetime reason.
+  // Reader and Peek are the two screens the factory refuses without a body face,
+  // and a face is a TTF plus a rasteriser rather than a value -- so it is held
+  // here, beside the Library the overlays hold a reference to, for the same
+  // lifetime reason.
   std::vector<uint8_t> ttf;
   ScalableFont body;
+  // THE PEEK'S COLUMN COMES FROM THE THEME, not from four numbers written out here
+  // as the Reader's are. Its panel is inset and its height is a fixed box the theme
+  // owns (kPeekPanelH), so a hand-built PageMetrics would be a second, disagreeing
+  // spelling of the geometry -- and a peek built at the reading measure is exactly
+  // the state test_screen_peek.cpp's last case exists to refuse. Held by pointer so
+  // the other twelve screens do not each load the twelve-file ramp for nothing.
+  std::unique_ptr<ramp::Ramp> ramp;
+  QuietTheme theme;
 
   Screen& get() const { return *screen; }
 };
@@ -88,14 +99,16 @@ std::unique_ptr<Standalone> build(ScreenId id) {
   // book came to show Middlemarch's chapters on the device. A fixture that did not ask
   // would get a null screen, which is the refusal working.
   b->factory.setContentsDemo();
-  if (id == ScreenId::Reader) {
-    // GIVEN a body face rather than skipped. Excluding Reader from the loop would
-    // have been a screen this file claims to cover and does not -- and Reader is a
-    // Screen with no movable focus, which is exactly the case the `movable` count
+  if (id == ScreenId::Reader || id == ScreenId::Peek) {
+    // GIVEN a body face rather than skipped. Excluding either from the loop would
+    // have been a screen this file claims to cover and does not -- and both are
+    // Screens with no movable focus, which is exactly the case the `movable` count
     // below exists to keep honest.
     b->ttf = golden::slurp(std::string(ASSETS_DIR) + "/built/literata_body.ttf");
     REQUIRE(b->body.init(b->ttf.data(), b->ttf.size(), reader::kBodyPpem));
     b->factory.setReaderBody(&b->body);
+  }
+  if (id == ScreenId::Reader) {
     PageMetrics m;
     m.columnLeft = 18;
     m.columnTop = 100;
@@ -103,6 +116,16 @@ std::unique_ptr<Standalone> build(ScreenId id) {
     m.columnH = 600;
     b->factory.setReaderMetrics(m);
     b->factory.setReaderDemo();
+  }
+  if (id == ScreenId::Peek) {
+    // AND THE DEMO ASKED FOR, as Contents and the Reader are: an unprimed Peek is
+    // refused, which is what makes one unrestorable across a wake. A fixture that
+    // did not ask would get a null screen, and that is the refusal working.
+    b->ramp = std::make_unique<ramp::Ramp>();
+    PageMetrics m;
+    b->theme.peekMetrics(480, 800, b->ramp->fonts, b->body, Settings{}, m);
+    b->factory.setPeekMetrics(m);
+    b->factory.setPeekDemo();
   }
   if (id == ScreenId::Home) {
     // The factory refuses Home on purpose -- the root is never rebuilt -- so the
@@ -128,8 +151,8 @@ TEST_CASE("every screen accepts back the focus it reports") {
   // mode this project keeps hitting -- a check that reports on less than it
   // claims. EIGHT screens can move their focus today: Home, Library, the two Library
   // overlays, Settings, the reader menu, the contents and Typography. BookDetails,
-  // Sleep, the Reader and the SD-missing prompt have one thing on them and
-  // legitimately report 0.
+  // Sleep, the Reader, the Peek and the SD-missing prompt have one thing on them and
+  // legitimately report 0 -- the Peek has no selection at all, only a page.
   int movable = 0;
 
   for (const ScreenId id : kAllScreens) {

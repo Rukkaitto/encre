@@ -109,6 +109,33 @@ struct PageMetrics {
   const GlyphSource* italic = nullptr;
 };
 
+// HOW MANY WHOLE LINE BOXES A COLUMN THIS TALL HOLDS -- PageBuilder's `rows_`, and
+// the one place that arithmetic is written.
+//
+// It is a free function because it acquired a SECOND caller: the peek's panel is a
+// fixed box and its line count is derived from it (theme.h's kPeekPanelH), which is
+// the inverse of what shipped, so the theme has to ask the same question layout
+// answers for itself. The second copy is the extraction point, and this project has
+// paid for learning that late more than once -- test_theme_peek_metrics.cpp used to
+// carry a TRANSCRIBED copy of the rule and said so in its own comment ("change the
+// derivation and this file stays green while the panel paginates to seven").
+//
+// THE LINE BOX IS `ppem x lead`, NOT `lineHeight() x lead`. `Tracking::em` resolves
+// against the face's PIXEL SIZE, which is what `line-height: 1.7` on
+// `font-size: 32px` means and what the boards' measured 54.4px box is. Against
+// lineHeight() it would be 48 * 1.7, and a column reserved that way holds room for
+// twelve lines while claiming eight.
+//
+// AND IT FLOORS, in f26 rather than in whole pixels: a column a quarter of a pixel
+// short of eight boxes holds SEVEN, and whole-pixel arithmetic on either side cannot
+// see that. Zero is a legitimate answer -- a column that cannot hold one line box --
+// and callers must check it rather than loop (see PageBuilder::viable).
+inline int rowsThatFit(int columnH, int ppem, int leadEm1000) {
+  const int leadF26 = Tracking::em(ppem, leadEm1000).f26();
+  if (leadF26 <= 0 || columnH <= 0) return 0;
+  return pxToF26(columnH) / leadF26;
+}
+
 // Where a page begins: a block, and a line within that block's wrap.
 //
 // The line index is meaningful only for the (font, columnW) that produced it. That

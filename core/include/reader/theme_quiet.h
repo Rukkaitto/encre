@@ -43,7 +43,13 @@ class QuietTheme : public Theme {
   void renderReader(Framebuffer& fb, const FontSet& fonts, const GlyphSource& body,
                     const GlyphSource* italic, const ReaderViewModel& vm, const Page& page,
                     Plane plane) override;
-
+  void peekMetrics(int panelW, int panelH, const FontSet& fonts, const GlyphSource& body,
+                   const Settings& settings, PageMetrics& out) const override;
+  int peekVisibleLines(const FontSet& fonts, const GlyphSource& body,
+                       const Settings& settings) const override;
+  void renderPeek(Framebuffer& fb, const FontSet& fonts, const GlyphSource& body,
+                  const GlyphSource* italic, const PeekViewModel& vm, const Page& page,
+                  Plane plane) override;
 };
 
 }  // namespace reader

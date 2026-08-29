@@ -93,7 +93,7 @@ TEST_CASE("every screen in the catalogue has a wire name, and they are all disti
   // must be a deliberate one. This is the check that makes forgetting a row show
   // up here rather than as a screen that quietly never restores.
   std::vector<std::string> names;
-  for (int i = 0; i <= static_cast<int>(ScreenId::Typography); ++i) {
+  for (int i = 0; i <= static_cast<int>(ScreenId::Peek); ++i) {
     const ScreenId id = static_cast<ScreenId>(i);
     const char* n = sessionWireName(id);
     REQUIRE(n != nullptr);
@@ -103,4 +103,25 @@ TEST_CASE("every screen in the catalogue has a wire name, and they are all disti
   }
   for (size_t a = 0; a < names.size(); ++a)
     for (size_t b = a + 1; b < names.size(); ++b) CHECK(names[a] != names[b]);
+}
+
+TEST_CASE("Peek round-trips through the record's screen NAME") {
+  // A NAME AND NOT AN ORDINAL, which is why appending a ScreenId is safe at all:
+  // 2C-2 inserted three screens into the middle of the enum and a stored ordinal
+  // silently became a different screen.
+  //
+  // A PEEK IS NEVER RESTORED IN PRACTICE -- the factory refuses an unprimed one, so
+  // App::restore stops short and leaves the Reader standing, which is the existing
+  // "a restore that stops early keeps what already stands" behaviour. It still has to
+  // round-trip, because a record naming a screen this build cannot MAP is a different
+  // failure from one naming a screen it cannot BUILD, and only the second is intended.
+  const std::vector<StackEntry> in{
+      {ScreenId::Home, -1}, {ScreenId::Reader, 0}, {ScreenId::Peek, 0}};
+  const std::string wire = encodeSessionStack(in);
+  CHECK(wire.find("peek") != std::string::npos);
+
+  std::vector<StackEntry> out;
+  REQUIRE(decodeSessionStack(wire.c_str(), out));
+  REQUIRE(out.size() == in.size());
+  CHECK(out[2].screen == ScreenId::Peek);
 }
