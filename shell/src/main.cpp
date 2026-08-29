@@ -3007,9 +3007,10 @@ static void renderTop() {
   // panel. What it buys is that the number on the glass was measured when the
   // glass was painted -- no timer, no staleness to reason about.
   //
-  // The repaint request is TAKEN AND DISCARDED. A rising edge seen here is already
-  // being satisfied by the paint that is about to happen; leaving the request
-  // standing would fire a second refresh at the next poll, immediately after it.
+  // The repaint request is TAKEN AND DISCARDED. An edge seen here -- in either
+  // direction, since a confirmed unplug grants one too -- is already being
+  // satisfied by the paint that is about to happen; leaving the request standing
+  // would fire a second refresh at the next poll, immediately after it.
   //
   // UNTRACKED IN [i] ON PURPOSE, STATED RATHER THAN SILENT. This runs before t0
   // below, so its ~450 us is counted in `total` and attributable to no named
@@ -5146,19 +5147,31 @@ void loop() {
   // I2C on the sensor bus and cannot race a refresh. What the gate buys is only
   // that a repaint it asks for does not jump a frame the user is waiting for.
   //
+  // UNPLUGGING HAS TO REACH THE GLASS TOO, and the first version of this did not.
+  // It fired on a rising edge only, on the stated grounds that a stale bolt would
+  // be corrected by the next Home paint -- which assumed a button press that never
+  // came. Reported off the device: the bolt appeared on plug-in and then stayed
+  // for ever. A mark claiming the device is charging when it is not is the same
+  // class of lie as a 0% for a gauge that did not answer.
+  //
   // Skipped entirely where charging cannot be observed, which is every X4.
-  // BatteryTracker owns everything that makes this safe: rising edges only, a
-  // first reading that seeds without firing, a latch that clears only after 60 s
-  // of continuous not-charging, and three grants a session. The dwell is what
-  // stops a device sitting at 100% on the charger -- where the gauge's Current()
-  // sign dithers around zero -- repainting the panel all night.
+  // BatteryTracker owns everything that makes this safe: an edge in either
+  // direction, a first reading that seeds without firing, a latch that clears only
+  // after 60 s of continuous not-charging, and three grants a session. The dwell is
+  // what stops a device sitting at 100% on the charger -- where the gauge's
+  // Current() sign dithers around zero -- repainting the panel all night, and it is
+  // also what tells a real unplug from that dither, which is why CLEARING the bolt
+  // rides the same timer rather than a second constant.
   if (quiet && gChargingObservable && homeOnGlass() &&
       static_cast<uint32_t>(millis() - gLastBatteryPollMs) >= kBatteryPollMs) {
     gLastBatteryPollMs = millis();
     ++gBatteryPolls;
     if (refreshBatteryOnHome()) {
       gApp->markDirty();
-      logf("[battery] charging -> repainting Home\n");
+      // WHICH EDGE, because both grant a repaint now and a line that says only
+      // "charging" would misreport half of them -- on glass this is the one
+      // record of what the panel was asked to do and why.
+      logf("[battery] charging=%d -> repainting Home\n", gBattery.charging() ? 1 : 0);
       logFlush();
     }
   }
