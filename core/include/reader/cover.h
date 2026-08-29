@@ -73,6 +73,44 @@ enum class CoverResult {
 
 const char* coverResultName(CoverResult r);
 
+// WHAT A DECODE SAW, for a log line and for a corpus probe.
+//
+// THE REASON IS HERE BECAUSE THE SIX RESULTS CANNOT CARRY THE WHOLE TRUTH. The
+// result is what a caller branches on and what tools/covers.py counts; the reason
+// is the sentence from whichever layer refused. In particular an allocation
+// failure INSIDE a decoder -- TJpgDec's band, the PNG's own inflate window -- is
+// not distinguished from a bad file: decodeCover reports OutOfMemory for the
+// allocations it makes itself, and otherwise splits on whether the picture ever
+// declared its dimensions (Unsupported if it did not, ReadFailed if it did). The
+// alternatives were matching on the decoders' reason strings, which is one
+// sentence spelled in two files, and arithmetic on another header's
+// workspaceBytes() bookkeeping, which a wide enough PNG defeats. Every non-Ok
+// answer falls back the same way, so what the split costs is a word in a log and
+// the reason is what corrects it.
+//
+// AND THE SCALE IS HERE BECAUSE NOTHING ELSE CAN SEE IT. `scaleDivisor` is the
+// one lever this pipeline has that changes no output geometry at all -- a cover
+// decoded at 1/1 and at 1/2 both fill the same box with slightly different greys
+// -- so a request that quietly asked for too little would be invisible to a test
+// that looked only at the planes. It is reported for the corpus probe and pinned
+// by a test for that reason.
+struct CoverReport {
+  // Null when there is nothing to say: an Ok decode, and an abandoned one -- the
+  // file was fine and the user pressed a button.
+  const char* reason = nullptr;
+  // What the FILE said, before any scaling. 0 if it never got that far, which is
+  // every refusal before the headers parsed.
+  int sourceWidth = 0, sourceHeight = 0;
+  // 1, 2, 4 or 8 -- the divisor the JPEG's IDCT scaling chose. Always 1 for a
+  // PNG, which has no such lever (pngd.h states the absence as the point).
+  int scaleDivisor = 1;
+  // WHERE THE COVER LANDED on the panel, and therefore how much of it is band.
+  // Zero until the source's dimensions are known. Four ints rather than a FitBox
+  // so this header stays clear of imagefit.h and its <vector>, for the reason
+  // reader/cover_fit.h exists.
+  int dstX = 0, dstY = 0, dstW = 0, dstH = 0;
+};
+
 // DECODE `book`'s COVER INTO `sink`, STREAMING, HOLDING NEITHER IMAGE NOR PLANE.
 //
 // Peak heap, worst realistic case (a deflated JPEG -- 59% of corpus JPEG covers
@@ -95,24 +133,10 @@ const char* coverResultName(CoverResult r);
 // mispointer that costs nothing -- so what decides which decoder runs is the
 // BYTES: a JPEG SOI or the eight-byte PNG signature, and neither is Unsupported.
 //
-// WHY THE RESULT AND THE REASON ARE BOTH HANDED BACK. The result is what the
-// caller branches on and what tools/covers.py counts; `*reason` is a sentence for
-// a log line, from whichever layer refused, and it exists because the six results
-// cannot carry the whole truth. In particular an allocation failure INSIDE a
-// decoder -- TJpgDec's band, the PNG's own inflate window -- is not distinguished
-// from a bad file here: this function reports OutOfMemory for the allocations it
-// makes itself and otherwise splits on whether the picture ever declared its
-// dimensions (Unsupported if it did not, ReadFailed if it did). The alternatives
-// were matching on the decoders' reason strings, which is one spelling of a
-// sentence in two files, and probing workspaceBytes(), which is arithmetic on
-// another header's bookkeeping that a wide-enough PNG defeats. The reason string
-// carries what the enum cannot, and every non-Ok answer falls back the same way.
-//
-// Null `reason` is allowed and null `*reason` is possible -- an abandoned decode
-// has nothing to say, because nothing was wrong.
+// `report` is optional and its fields are filled as far as the decode got.
 CoverResult decodeCover(FileSystem& fs, const OpenedBook& book, int panelW, int panelH,
                         CoverFit fit, CoverPlaneSink& sink,
                         CoverStopFn stop = nullptr, void* stopCtx = nullptr,
-                        const char** reason = nullptr);
+                        CoverReport* report = nullptr);
 
 }  // namespace reader

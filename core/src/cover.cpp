@@ -97,6 +97,8 @@ class PlaneAdapter : public ImageRowSink {
     // "this is a format we do not read" from "this file is broken". A decoder
     // reaches here only after its headers parsed.
     declared_ = true;
+    width_ = width;
+    height_ = height;
 
     // THE FITTER FIRST, THE SINK SECOND, and the order is deliberate: the fitter
     // is the allocation that can fail on device, and a sink that opens a file
@@ -152,6 +154,11 @@ class PlaneAdapter : public ImageRowSink {
   bool pad() { return pushPaper(panelH_ - written_); }
 
   bool declared() const { return declared_; }
+  // WHAT THE DECODER HANDED OVER, which for a JPEG is already scaled -- the file's
+  // own dimensions come from JpegDecoder, which is the only layer that knows them.
+  int width() const { return width_; }
+  int height() const { return height_; }
+  const FitBox& box() const { return fitter_.box(); }
   bool stopped() const { return stopped_; }
   bool outOfMemory() const { return oom_; }
   bool sinkRefused() const { return sinkRefused_; }
@@ -178,6 +185,7 @@ class PlaneAdapter : public ImageRowSink {
   CoverFit fit_ = CoverFit::Fill;
   CoverStopFn stop_ = nullptr;
   void* ctx_ = nullptr;
+  int width_ = 0, height_ = 0;   // as handed over, which for a JPEG is after scaling
   int srcRows_ = 0;   // source rows offered, which is what the stop predicate paces on
   int written_ = 0;   // rows pushed to the sink, letterbox included
   bool declared_ = false, stopped_ = false, oom_ = false;
@@ -200,13 +208,19 @@ const char* coverResultName(CoverResult r) {
 
 CoverResult decodeCover(FileSystem& fs, const OpenedBook& book, int panelW, int panelH,
                         CoverFit fit, CoverPlaneSink& sink, CoverStopFn stop, void* stopCtx,
-                        const char** reason) {
+                        CoverReport* report) {
+  // A LOCAL REPORT ALWAYS, COPIED OUT ONCE. Every branch below fills the fields it
+  // knows and one line at the end hands them over, so a caller that passed null
+  // and a caller that did not take the same path -- and no refusal can forget to
+  // say what it saw.
+  CoverReport rep;
   // EVERY REFUSAL GOES THROUGH ONE PLACE, so `finish` cannot be forgotten on one
   // of them -- and it is called even when `begin` was not, which cover.h states
   // as the contract: it is the sink's one guaranteed call, so a stale file from
   // another book is dropped on the way past.
   auto refuse = [&](CoverResult r, const char* why) -> CoverResult {
-    if (reason != nullptr) *reason = why;
+    rep.reason = why;
+    if (report != nullptr) *report = rep;
     sink.finish(false);
     return r;
   };
@@ -276,23 +290,39 @@ CoverResult decodeCover(FileSystem& fs, const OpenedBook& book, int panelW, int 
     // BOX instead -- which is not known until begin() -- would buy nothing.
     ok = dec.decode(src, adapter, panelW, panelH);
     decoderReason = dec.reason();
+    // FROM THE DECODER, NOT FROM THE ADAPTER: the adapter is handed the SCALED
+    // dimensions, and what a corpus probe wants to know is what the file said.
+    rep.sourceWidth = dec.sourceWidth();
+    rep.sourceHeight = dec.sourceHeight();
+    rep.scaleDivisor = dec.scaleDivisor();
   } else {
     // PNG has no such lever: every scanline must be inflated and unfiltered
     // whatever the caller wants of it, because the next row's unfilter reads this
-    // one. pngd.h states the absence as the point.
+    // one. pngd.h states the absence as the point -- and says so by not offering
+    // the dimensions either, since with no scaling they are exactly what the sink
+    // was handed.
     PngDecoder dec;
     ok = dec.decode(src, adapter);
     decoderReason = dec.reason();
+    rep.sourceWidth = adapter.width();
+    rep.sourceHeight = adapter.height();
+    rep.scaleDivisor = 1;
   }
+  const FitBox& box = adapter.box();
+  rep.dstX = box.dstX;
+  rep.dstY = box.dstY;
+  rep.dstW = box.dstW;
+  rep.dstH = box.dstH;
 
   if (ok) {
     if (!adapter.pad())
       return refuse(CoverResult::ReadFailed, "the cover's plane rows could not be written");
     if (!sink.finish(true)) {
-      if (reason != nullptr) *reason = "the cover could not be committed";
+      rep.reason = "the cover could not be committed";
+      if (report != nullptr) *report = rep;
       return CoverResult::ReadFailed;
     }
-    if (reason != nullptr) *reason = nullptr;
+    if (report != nullptr) *report = rep;
     return CoverResult::Ok;
   }
 
@@ -314,8 +344,8 @@ CoverResult decodeCover(FileSystem& fs, const OpenedBook& book, int panelW, int 
     return refuse(CoverResult::OutOfMemory, "no memory for the cover decoder");
   // AND THE LAST SPLIT IS "DID THE PICTURE EVER DECLARE ITSELF". A refusal before
   // begin() is a format we do not read; one after it is a fault in bytes that
-  // parsed. See cover.h for the case this gets wrong and why the reason string is
-  // handed back rather than the enum being widened.
+  // parsed. See cover.h for the case this gets wrong and why the reason is handed
+  // back rather than the enum being widened.
   return refuse(adapter.declared() ? CoverResult::ReadFailed : CoverResult::Unsupported,
                 decoderReason);
 }
