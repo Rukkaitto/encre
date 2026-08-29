@@ -30,6 +30,18 @@ These are CLAUDE.md's, and this feature touches every one of them:
 - **Prove every new test by mutation** — break the code it defends and confirm the count of failures. **`git commit` BEFORE mutating**, and restore with `cp` from a backup, **never `git checkout`** (that reverts the change under test as well as the mutation).
 - **Check `git diff --stat` before every commit.** A large accidental deletion is one line in a diff stat and invisible in a script's success message.
 - **A green desktop suite is not evidence for `shell/`.** Tasks 15, 17 and 18 touch `shell/src/main.cpp`, which nothing on the desktop compiles.
+- **CROSS-COMPILE AND READ THE ASSEMBLY FOR ANY PER-PIXEL LOOP IN THIS PATH.** Task 4 shipped a review round with a **software 64-bit division per source pixel** — the obvious `(long long)j * dstW / srcW` — which x86-64 answers with a hardware `idiv` at no measurable cost and **RV32IMC answers with a libgcc `__divdi3` call**. At ~2.65 M pixels for a median cover that is 1.7–3.3 s at 160 MHz *in one line*, and no desktop benchmark can see it: the two forms measured 3.19 vs 3.19 ms. This is CLAUDE.md's ratio trap in a new disguise — not "the desktop is N× faster" but "the desktop has an instruction the device does not."
+
+  The check is cheap, so run it on every task that adds a loop over pixels:
+
+  ```bash
+  ~/.platformio/packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-g++ \
+    -std=gnu++2a -Os -fno-exceptions -Icore/include -Ithird_party \
+    -S -o /tmp/x.s core/src/<file>.cpp
+  grep -n "call.*__divdi3\|call.*__udivdi3\|call.*__moddi3" /tmp/x.s
+  ```
+
+  A hit is not automatically wrong — once per row or once per image is fine. **A hit inside the loop body is the defect**, so find the label the backward branch targets and check whether the call is inside it. As of Task 4's fix, `jpegd.cpp`, `pngd.cpp` and vendored `tjpgd.c` are all at zero.
 
 ## File structure
 
