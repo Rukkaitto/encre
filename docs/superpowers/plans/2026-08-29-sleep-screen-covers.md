@@ -1756,6 +1756,17 @@ PLATFORMIO_BUILD_FLAGS="-DENCRE_COVER_PROBE=1" make firmware
 
 **Flashing must be run by the user** — the permission classifier blocks it from an agent. Give them the upload command and ask for the `[cover]` lines. If `freeink-sdk/` is empty in this worktree, `git submodule update --init` first.
 
+- [ ] **Step 2b: MEASURE A JPEG COVER AND A PNG COVER SEPARATELY — they are not comparable**
+
+`decodeCover` passes the panel size to `JpegDecoder::decode` as `atLeast`, so TJpgDec's
+free IDCT scaling shrinks a JPEG **before `CoverFitter` ever sees it** — up to 64× fewer
+pixels through the box filter and the diffusion. **PNG has no equivalent**: there is no
+scaled inflate, so a PNG cover walks every source pixel of a 1600×2400 image.
+
+So a single number is not an answer to this gate. Put a **median JPEG** and a **PNG** cover
+on the card and report both. If only one is measured it will be the JPEG — 81% of covers —
+and the PNG path, which is 17% of a real library, will be the one nobody looked at.
+
 - [ ] **Step 3: Record the numbers in the spec**
 
 Add a short section to `docs/superpowers/specs/2026-08-29-sleep-screen-covers-design.md` replacing "The number this design turns on, and does not yet have" with what was measured, for at least a median-sized JPEG cover and one PNG.
