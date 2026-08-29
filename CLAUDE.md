@@ -3164,9 +3164,17 @@ Three things worth keeping:
   "`shell/` has no test harness" has been to move logic where a fake can reach it;
   a stack is not movable, so it is MEASURED instead. `test_inflate.cpp` runs the
   inflate on a pthread with a stack it owns, fills it with a pattern and counts what
-  survives — FreeRTOS's own high-water technique. It reports **7,348 bytes** and
-  asserts a 10 KB ceiling, so a vendored-library bump that grows the appetite fails
-  on the desktop rather than panicking the device.
+  survives — FreeRTOS's own high-water technique. It reports **7,348 bytes** under
+  clang and asserts a 10 KB ceiling there, so a vendored-library bump that grows the appetite fails
+  on the desktop rather than panicking the device. **THE CEILING IS PER HOST
+  COMPILER AND CANNOT BE ONE NUMBER** (`test/unit/stack_ceiling.h`): the same
+  chain measures **12,212** under x86-64 gcc, and the streaming decoder 3,072
+  against 6,824, so the clang-calibrated ceilings failed the first Linux CI run
+  with nothing regressed. Raising one number to cover both was refused — it would
+  need clang's appetite to **more than double** before tripping, and clang is
+  where nearly all work here happens. **Neither host figure is the device's**:
+  the device is gcc-shaped but 32-bit, and its real number is the `[stack]`
+  serial line.
 
 The `[stack]` serial line reports `uxTaskGetStackHighWaterMark` after an open — the
 worst case since boot, inflate included.
