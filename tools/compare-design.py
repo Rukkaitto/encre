@@ -126,6 +126,7 @@ V2_SCREENS = [
 FLOW_SCREENS = [
     ("home_empty",      "HomeEmpty.dc.html",      "Home / empty"),
     ("home_unopened",   "HomeUnopened.dc.html",   "Home / nothing open"),
+    ("home_charging",   "HomeCharging.dc.html",   "Home / charging"),
     ("home_missing",    "HomeMissing.dc.html",    "Home / missing book"),
     ("sleep_idle",      "SleepIdle.dc.html",      "Sleep / nothing open"),
     # THE LOADING STATE, and it is two boards rather than one because the mechanism
