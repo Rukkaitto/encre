@@ -28,6 +28,16 @@ commits the jump; `CLOSE` puts you back on your page, which never moved.
 The anchor is what made the jump *safe*. The peek is what makes it *cheap to be
 wrong about* — you can look at a chapter without spending a jump on it.
 
+**CORRECTION (2026-08-29): the anchor is a HIGH-WATER MARK now**, not a record of where
+you left. It is the most advanced position the reading position has reached, it only
+ever rises, and the footer field and `Up` appear only while it is *ahead* of the reader.
+So a jump BACKWARD is what leaves a way back — the mark stays where you were — and a
+jump FORWARD carries the mark with it and leaves none. The old departure rule nominally
+offered one there and measurably kept it for a single page turn; see
+`2026-08-24-peek-and-return-design.md`'s superseded banner and
+`core/include/reader/return_anchor.h`. **That makes the peek MORE of the answer, not
+less**: looking is now the only way to be wrong about a chapter for free.
+
 ## The flow, and the one thing that does not change
 
 **`ContentsScreen` is untouched.** Its `Activate` still answers
@@ -120,8 +130,10 @@ Two properties fall out of it rather than being arranged:
   on it. So the peek never runs a deferred count for a total it does not display.
 
 **The inner reader has its own `ReturnAnchor` and it is discarded with it.** Paging
-around inside the peek moves nothing the reader can come back to; the *outer*
-Reader's anchor is touched by exactly one thing, which is `GO HERE`.
+around inside the peek moves nothing the reader can come back to; the *outer* Reader's
+mark is touched by exactly one thing, which is `GO HERE`. Under the high-water rule that
+is a property rather than a policy: "reached" means the *reading position* has been
+there, and a peek is looking rather than being.
 
 ## The memory dance
 
@@ -199,17 +211,21 @@ which is the common path already.
 
 ### `GO HERE` does pay a walk, and should
 
-Reacquire, `openChapterAt(spine)`, `openAtCursor(cursor)`, then `anchorJumped(from)`
-with the Reader's **pre-departure** position — the departure point, not the
-destination, overwriting any anchor already standing.
+Reacquire, `openChapterAt(spine)`, `openAtCursor(cursor)`. **CORRECTED 2026-08-29:**
+this said "then `anchorJumped(from)` with the Reader's pre-departure position — the
+departure point, not the destination, overwriting any anchor already standing".
+`anchorJumped` no longer exists and nothing here touches the anchor. `goToPosition`
+lands through `syncVm()`, which raises the high-water mark if the landing is further
+through the book than anything reached before — so a forward commit carries the mark and
+a backward one leaves it standing ahead, with no case for either.
 
 That is a chapter crossing's cost, paid on a press where the user has asked the
 screen to change, which is where this project already puts a walk (the typography
 apply takes the same trade).
 
 It needs one new public entry point on `ReaderScreen`: a **cursor-granular jump**,
-where `goToChapter` lands on page one and `goToAnchor` deliberately does not touch
-the anchor. The page number the reader arrives on is *computed* by `openAtCursor`
+where `goToChapter` lands on page one and `goToAnchor` lands on the mark itself (which
+raises it to a position it already holds, so arriving is what withdraws the promise). The page number the reader arrives on is *computed* by `openAtCursor`
 counting boundaries, which is why the peek can be honest about not having one and
 the commit can still be exact.
 
@@ -313,8 +329,11 @@ Then:
   `hasLiveStream()` false — the two halves of "nothing visible changed and the
   restream has something to do".
 - **`GO HERE` lands exactly**: peek at cursor C, commit, and the Reader's
-  `currentCursor()` is C while the anchor is the departure point. Checked across a
-  chapter boundary, since that is the case a page-number-based scheme would fail.
+  `currentCursor()` is C. Checked across a chapter boundary, since that is the case a
+  page-number-based scheme would fail. **CORRECTED 2026-08-29:** this also said "while
+  the anchor is the departure point". It is the high-water mark, so a forward commit
+  leaves it at the arrival and a backward one leaves it ahead; `test_screen_peek.cpp`
+  asserts both directions.
 - **The peek's page is not the Reader's page.** The narrower column re-wraps, so a
   test that the two disagree is what pins the panel to its own pagination rather
   than to a copy of the Reader's.
@@ -338,5 +357,7 @@ third callers and neither is blocked by anything here.
 panel is inset, so its pagination is not the book's. `CH. 01 · 4%` is true at any
 column width.
 
-**It does not change the anchor's rules.** They shipped with #2 and `GO HERE` is an
-ordinary jump under them.
+**It did not change the anchor's rules.** They shipped with #2 and `GO HERE` was an
+ordinary jump under them. **The rules themselves changed on 2026-08-29** — one
+high-water transition in place of three — and `GO HERE` is still an ordinary movement
+under the new one, which is the point of having only one.

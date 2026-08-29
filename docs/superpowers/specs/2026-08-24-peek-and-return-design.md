@@ -51,7 +51,44 @@ committing is explicit and reversible.**
 
 ## The return anchor
 
-### The rule
+> ### SUPERSEDED 2026-08-29 — the three transitions below became ONE
+>
+> **What was decided here** is recorded verbatim under "The rule as approved" and is
+> what shipped: an anchor set only to a **departure** point, with four transitions over
+> three movements.
+>
+> **What the device showed.** A reader in chapter 1 jumps to chapter 36. `jumped` set
+> the anchor to chapter 1 — *behind* them — and `pagedForward`'s "cleared if this
+> reaches or passes it" cleared it on the very first page turn. Running the real class:
+>
+> ```
+> after forward jump ch1->ch36: set=1 spine=0
+> after ONE forward page turn:  set=0 spine=0
+> ```
+>
+> So the anchor never advanced to where the reader was, and a forward jump bought a way
+> back that survived exactly one press. The paragraph below that argues "a jump
+> overwrites unconditionally, and that is why the rule needs two cases" was defending
+> the one case it could not serve.
+>
+> **What replaced it.** The anchor is a **high-water mark**: the most advanced position
+> the reading position has reached. One transition, `note(here)`, raises it and nothing
+> lowers it. The footer field and `Up` are gated on the mark being **ahead** of the
+> reader, so at the furthest point nothing is promised and no field is drawn. Following
+> it does not clear it — you arrive AT it, so it stops being ahead by itself. Cleared
+> only when the book changes.
+>
+> **What that costs**, stated because this section argued the opposite: committing a
+> peek FORWARD now leaves no way back. Per the measurement above the old rule offered
+> one for a single press, so almost nothing real is lost — and the BACKWARD commit,
+> which is the case that matters, works by construction because nothing lowers the mark.
+>
+> Everything below "THE ANCHOR IS A PAGE" is unchanged and still governs: the triple,
+> the lexicographic comparison, the persistence, the footer field, the `Up` binding.
+> `core/include/reader/return_anchor.h` and CLAUDE.md's "The return anchor" carry the
+> new rule.
+
+### The rule as approved (SUPERSEDED — see above)
 
 The anchor is **where you were before you stopped reading linearly**. It is a single
 optional value, and exactly four transitions touch it:
@@ -71,7 +108,7 @@ of the current excursion rather than the last thing they did.
 Commit a peek from chapter 2 into chapter 8 and a pure high-water rule would find
 the anchor *behind* the reader and clear it, throwing away the one breadcrumb they
 wanted. Distinguishing a departure from a drift is not a special case; it is the
-whole distinction.
+whole distinction. **This is the paragraph the measurement above refutes.**
 
 ### THE ANCHOR IS A PAGE — and the comparison still has to work across chapters
 
@@ -215,7 +252,8 @@ and hint bar as the only signals that anything is different.
 ### Buttons
 
 Sides turn pages within the peek. `Back` closes and discards. `Confirm` commits:
-the Reader re-seeks to the peeked cursor, and **the anchor is set to where the
+the Reader re-seeks to the peeked cursor, and (AS APPROVED — superseded, see the
+banner above) **the anchor is set to where the
 Reader was** — the departure point, not the destination — overwriting any anchor
 already standing. Hint bar `CLOSE` / `GO HERE` / — / — in the boards' hardware order
 (Back, Confirm, Up, Down), the last two as `kHintEmptySlotW` dead slots.
