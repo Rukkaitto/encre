@@ -1019,7 +1019,13 @@ TEST_CASE("an unknown charge draws the mark alone, with the mark still on the ma
     const reader::Framebuffer unknown = renderOne(w, h, -1);
 
     const int iconLeft = w - reader::kMargin - reader::icons::kBattery.w;
-    const int bandH = reader::headerBandHeight(ramp.fonts, &reader::icons::kBattery);
+    // LESS THE BAND'S OWN RULE. headerBandHeight() includes kBandRuleH, and
+    // drawHeaderBand paints that rule FULL WIDTH at `bandH - kBandRuleH`
+    // regardless of the charge string -- so a window over the whole band always
+    // picks up 2 rows x 20 columns = 40 pixels of rule in BOTH renders, and the
+    // "no ink" assertion below could never hold. Content only.
+    const int bandH = reader::headerBandHeight(ramp.fonts, &reader::icons::kBattery) -
+                      reader::kBandRuleH;
 
     // The mark itself is drawn in BOTH, in the same place: the number going away
     // must not move it off the margin.
