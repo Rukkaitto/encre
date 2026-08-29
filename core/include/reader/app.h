@@ -455,20 +455,6 @@ class App {
   // restored screen still has to be painted.
   bool pushScreen(ScreenId id);
 
-  // SOMETHING OUTSIDE THE INPUT PATH CHANGED WHAT THE TOP SCREEN DRAWS.
-  //
-  // Every other route to dirty_ is a dispatch or construction, because until now
-  // every reason to repaint was a press. The battery is the first fact that moves
-  // on its own: the shell polls the gauge and a plug-in has to reach the glass
-  // without a button being touched.
-  //
-  // It does NOT set transition_. A transition means a screen changed, and that is
-  // what kFullOnTransition spends the 693 ms GC waveform on; this is the same
-  // screen with one mark different and takes the 389 ms DU. Nor can it reach the
-  // partial-overlay path: canRenderTopOnly refuses any non-overlay outright, and
-  // Home is not one.
-  void requestRepaint();
-
   // Something on screen changed and needs painting.
   bool dirty() const { return dirty_; }
   // ...and the change was a screen change rather than a change within one. What
@@ -479,6 +465,36 @@ class App {
   // and it contradicted the reasoning recorded in CLAUDE.md under Runtime.)
   bool transition() const { return transition_; }
   void clearDirty();
+
+  // SOMETHING OUTSIDE THE INPUT PATH CHANGED WHAT THE TOP SCREEN DRAWS.
+  //
+  // Every other route to dirty_ is a dispatch or construction, because until now
+  // every reason to repaint was a press. The battery is the first fact that moves
+  // on its own: the shell polls the gauge and a plug-in has to reach the glass
+  // without a button being touched. It is the third member of the dirty/clearDirty
+  // pair, not a pull latch like sleepRequested/retryRequested/openRequested below
+  // -- there is nothing to notice and act on, it sets the same dirty_ the shell
+  // already polls every loop.
+  //
+  // It does NOT set transition_. A transition means a screen changed, and that is
+  // what kFullOnTransition spends the 693 ms GC waveform on; this is the same
+  // screen with one mark different and takes the 389 ms DU.
+  //
+  // IT ALSO INVALIDATES THE PARTIAL-REPAINT RECORD, and that is not incidental.
+  // canRenderTopOnly's clauses were all written assuming dirty_ only ever turns
+  // true for a reason the TOP screen knows about -- a dispatch changes the top
+  // screen's own state, a push or pop also sets transition_. This is the first
+  // route that dirties the app for a reason unrelated to whatever is on top, and
+  // with an overlay up every other clause still passes: the frame is unchanged,
+  // the top is unchanged, the footprint is unchanged. Without this, renderTopOnly
+  // would repaint only the overlay's own pixels and leave whatever markDirty was
+  // actually called for stale on glass, with dirty_ cleared and nothing left to
+  // correct it -- ItemActions and DeleteConfirm both carry non-zero footprints,
+  // so this was reachable, not theoretical. Resetting painted_ forces the next
+  // paint through App::render, full stack, whatever is on top -- an API a future
+  // caller cannot misuse, rather than a comment saying not to. For Home this
+  // changes nothing: a non-overlay was never eligible for the partial path.
+  void markDirty();
 
   bool sleepRequested() const { return sleep_; }
   void clearSleepRequest() { sleep_ = false; }

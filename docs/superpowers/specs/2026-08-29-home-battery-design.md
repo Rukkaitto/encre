@@ -199,7 +199,7 @@ the argument: a one-line edit to a shared primitive, reasoned about rather than
 computed, was one review away from putting the battery over the margin on every
 screen that draws a band.
 
-### `App::requestRepaint()`
+### `App::markDirty()`
 
 `dirty_ = true` **without** setting transition, so the repaint takes the FAST ~439 ms
 path and not the 693 ms GC. A charge state appearing is not a screen change and must
@@ -306,7 +306,7 @@ reporting on.
     deliberately, since exact accounting does not matter for a safety net.
 - **Poll every 2 s while `homeOnGlass()`**, behind `pollCardPresence`'s existing gate
   (after the paint block, `!gApp->dirty()`). On a granted request, `setBattery` then
-  `App::requestRepaint()`.
+  `App::markDirty()`.
   - **Skipped entirely when the first reading reported `chargingKnown == false`**,
     which is every X4. A poll that can never observe a change is battery spent for
     nothing on a device built to sit idle.

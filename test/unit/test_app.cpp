@@ -283,6 +283,22 @@ TEST_CASE("a redraw is dirty but is not a transition") {
   CHECK_FALSE(app.transition());
 }
 
+TEST_CASE("markDirty dirties the app without making it a transition") {
+  FakeFactory f;
+  App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::none()), f);
+  app.clearDirty();
+  REQUIRE_FALSE(app.dirty());
+  app.markDirty();
+  CHECK(app.dirty());
+  // NOT a transition. A charge state appearing is not a screen change, and
+  // kFullOnTransition would spend the 693 ms GC waveform on it instead of the
+  // 389 ms DU -- a flash the user did not ask for.
+  CHECK_FALSE(app.transition());
+  // And it must not move the stack or the focus.
+  CHECK(app.depth() == 1);
+  CHECK(app.top().id() == ScreenId::Home);
+}
+
 TEST_CASE("an action of None leaves the screen clean") {
   FakeFactory f;
   App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::none()), f);
@@ -664,6 +680,25 @@ TEST_CASE("a push not yet painted stays a transition through a later redraw") {
   static_cast<FakeScreen&>(fx.app.top()).setNext(Action::redraw());
   fx.app.dispatch(kConfirm);  // ...then a redraw on the new top
   CHECK(fx.app.transition());
+  CHECK_FALSE(fx.t.paintTop(fx.app));
+}
+
+TEST_CASE("markDirty invalidates the partial-repaint record, even over an overlay") {
+  // PartialFixture is the one state a partial repaint is legal in: an overlay on
+  // top, a frame this App has already painted in full, dirty from a plain
+  // Redraw. Every clause canRenderTopOnly checks was written assuming dirty_ only
+  // ever turns true for a reason the TOP screen knows about -- so with an overlay
+  // up, markDirty's dirty_ = true alone would satisfy every one of them: the
+  // frame, the top, the depth and the footprint are all still what they were.
+  // renderTopOnly would then repaint the overlay's own pixels and leave whatever
+  // markDirty was actually called for stale on glass, with dirty_ cleared and
+  // nothing left to correct it. ItemActions and DeleteConfirm both carry
+  // non-zero footprints, so this is reachable on real screens, not theoretical.
+  PartialFixture fx;
+  REQUIRE(fx.app.canRenderTopOnly(fx.t.fb, Plane::Bw));
+  fx.app.markDirty();
+  CHECK(fx.app.dirty());
+  CHECK_FALSE(fx.app.canRenderTopOnly(fx.t.fb, Plane::Bw));
   CHECK_FALSE(fx.t.paintTop(fx.app));
 }
 
