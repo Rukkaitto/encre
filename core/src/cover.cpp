@@ -121,6 +121,11 @@ class PlaneAdapter : public ImageRowSink {
       oom_ = true;
       return false;
     }
+    // NOT AN INDEPENDENT DERIVATION -- imagefit.h STATES it ("plane rows come out
+    // (panelW + 7) / 8 bytes"), and the paper row has to be exactly as long as the
+    // fitter's or a sink reading `planeRowBytes` from one of them runs off the end
+    // of the other. There is no accessor to ask for instead; the contract is the
+    // shared fact, and the two are pinned together by a test.
     planeBytes_ = (panelW_ + 7) / 8;
     paper_.reset(new (std::nothrow) uint8_t[static_cast<size_t>(planeBytes_)]);
     if (paper_ == nullptr) {
