@@ -1,0 +1,149 @@
+# Encre CI. Three jobs, in parallel, on every PR and on main.
+#
+# What each one is FOR, since two of them exist to cover a specific blind spot
+# rather than to be thorough:
+#
+#   test      the fast loop -- `make test`, which is unit tests, goldens and the
+#             simulator smoke tests.
+#   firmware  the only thing here that compiles shell/. The desktop cannot: a
+#             scripted edit once deleted `gApp->dispatch(ev)` from the loop, so
+#             every button on every screen did nothing, and the firmware built
+#             and all 803 desktop tests passed.
+#   compare   the design boards against the simulator's renders. A NARROW gate --
+#             see the note on the job.
+#
+# Deliberately absent: -Werror (CMakeLists.txt states why -- a newer compiler
+# must not be able to break the build), a format job (there is no .clang-format,
+# so gating on style would mean choosing one as a side effect), and anything
+# that flashes (flashing is the user's, and `On glass` -> `Done` needs device
+# evidence CI cannot produce).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A force-push supersedes its own earlier run rather than queueing behind it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests and goldens
+    runs-on: ubuntu-latest
+    steps:
+      # No submodules: `make test` never touches freeink-sdk, and every generated
+      # asset is committed (assets/built/*.rfnt, the body TTFs, icons_data.h,
+      # entity_table.h), so a bare checkout builds.
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      # A failing golden writes build/<name>_candidate.png, and this project's
+      # rule for judging one is to LOOK at the pixels. Without the artifact a red
+      # run says "golden_home failed" and cannot be acted on without reproducing
+      # it locally.
+      #
+      # A golden is NEVER re-blessed to make this job green. That rule is in
+      # CLAUDE.md and CI does not change it: a failure is either an intended
+      # visual change or a regression, and both need a human at the image.
+      - name: Upload golden candidates
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-candidates
+          path: build/*_candidate.png
+          if-no-files-found: ignore
+
+  firmware:
+    name: Firmware (ESP32-C3)
+    runs-on: ubuntu-latest
+    steps:
+      # A fresh worktree has an EMPTY freeink-sdk/, and `pio run` then fails with
+      # `PackageException: not a directory`, which names neither the submodule
+      # nor the fix.
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The toolchain is ~1 GB. Cold ~8-10 min, warm ~3.
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini', 'partitions.csv') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      # Not `make firmware`: that resolves PIO through ~/.platformio/penv, which
+      # is the local install layout and not this runner's.
+      #
+      # If this step fails with "Failed to install Python dependencies into
+      # penv", it is a PyPI hiccup and not a code change -- the platform's own
+      # penv_setup.py runs `uv pip install --upgrade` on every build that has a
+      # network. Re-run the job.
+      - name: Build
+        run: pio run -e xteink
+
+  compare:
+    name: Design vs firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Pillow
+        run: pip install pillow
+
+      - id: chrome
+        uses: browser-actions/setup-chrome@v1
+
+      # WHAT THIS GATE MEANS, because it is narrower than the job name suggests:
+      # it fails when a screen the SIMULATOR KNOWS will not render, and when a
+      # board named in compare-design.py is missing from disk. It does NOT
+      # measure fidelity -- the sheet still prints `ok` rather than a mismatch
+      # percentage, which is issue #41 and is open. A board with no screen behind
+      # it is fine and stays fine; that is a third of the list.
+      #
+      # Without --require-implemented this job would be green-always: a crashed
+      # subcommand makes the sheet print "not implemented" and the run exit 0,
+      # which is the shape this repo has been bitten by three times.
+      - name: Compare
+        env:
+          CHROME: ${{ steps.chrome.outputs.chrome-path }}
+          CHROME_FLAGS: --no-sandbox
+        run: make compare COMPARE_ARGS="--require-implemented"
+
+      # Uploaded pass or fail: when it is red the sheet is the evidence, and when
+      # it is green it is the only rendered look at all 30-odd boards beside their
+      # implementations.
+      - name: Upload contact sheet
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: design-vs-firmware
+          path: build/design-vs-firmware.png
+          if-no-files-found: ignore
