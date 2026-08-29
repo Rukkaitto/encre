@@ -1983,7 +1983,7 @@ In `core/include/reader/settings.h`, above `validate()`:
   CoverFit coverFit = CoverFit::Fill;
 ```
 
-And, near the top of the header, `SleepShows`. **`CoverFit` stays in `imagefit.h` and `settings.h` includes it** — that direction, not the reverse: `CoverFit` is imaging vocabulary and belongs with the code that implements it, and `imagefit.h` includes only `<cstdint>` and `<vector>`, so `settings.h` stays cheap. This header's own `bodyPpem` comment records what the alternative costs — including `layout.h` here was 74,022 preprocessed lines against 896 — so the test is what an include DRAGS IN, and `imagefit.h` drags in nothing:
+And, near the top of the header, `SleepShows`. **`CoverFit` comes from `core/include/reader/cover_fit.h`, a leaf that includes nothing** — not from `imagefit.h`, and this is a correction: an earlier draft said `settings.h` should include `imagefit.h` directly, on the assumption that it was cheap. Measured, it is not — `imagefit.h` is **72,949** preprocessed lines because of `<vector>`, against `settings.h`'s **895**, and `settings.h:146` already refuses `layout.h` at 73,976 for exactly this reason. Including it would have undone the decision that header's own comment exists to defend. `cover_fit.h` holds the enum alone, so `settings.h` stays a leaf and the imaging layer does not become a dependency of the settings layer:
 
 ```cpp
 // WHAT THE SLEEP SCREEN SHOWS. The order is the cycle's order and it wraps.
