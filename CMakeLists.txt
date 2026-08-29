@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(ereader LANGUAGES CXX)
+project(ereader LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -8,12 +8,29 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # a newer compiler must not be able to break the build.
 if(MSVC)
   set(READER_WARNINGS /W4)
+  set(READER_NO_WARNINGS /w)
 else()
   set(READER_WARNINGS -Wall -Wextra)
+  set(READER_NO_WARNINGS -w)
 endif()
 
 file(GLOB READER_CORE_SOURCES ${CMAKE_SOURCE_DIR}/core/src/*.cpp)
-add_library(reader_core STATIC ${READER_CORE_SOURCES})
+# TJpgDec is the one vendored SOURCE file in third_party rather than a vendored
+# header, so it is named here instead of arriving through the glob above -- and
+# it is C, which is why this project declares a C language at all. It cannot be
+# compiled as C++: it assigns alloc_pool's void* straight to typed pointers
+# throughout, which is legal C and an error in C++.
+#
+# It ships in BOTH builds, unlike png.cpp and host_fs.cpp, so it is a srcFilter
+# exclusion nowhere. The firmware reaches it through a lib_deps entry on
+# third_party itself -- see platformio.ini, which records why the obvious
+# build_src_filter route does not work and fails silently.
+set(TJPGD_SOURCE ${CMAKE_SOURCE_DIR}/third_party/tjpgd.c)
+# Vendored, so it is not held to first-party warnings. A source-level option is
+# appended after the target's, so this wins over READER_WARNINGS below without
+# turning them off for anything else.
+set_source_files_properties(${TJPGD_SOURCE} PROPERTIES COMPILE_OPTIONS "${READER_NO_WARNINGS}")
+add_library(reader_core STATIC ${READER_CORE_SOURCES} ${TJPGD_SOURCE})
 target_include_directories(reader_core PUBLIC ${CMAKE_SOURCE_DIR}/core/include)
 # stb (desktop PNG I/O only; png.cpp is excluded from the firmware build).
 target_include_directories(reader_core SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/third_party)

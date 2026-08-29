@@ -1,0 +1,9 @@
+{
+  "name": "TJpgDec",
+  "version": "0.3.0",
+  "build": {
+    "srcDir": ".",
+    "includeDir": ".",
+    "srcFilter": ["-<*>", "+<tjpgd.c>"]
+  }
+}
