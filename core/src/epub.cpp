@@ -202,7 +202,11 @@ bool Epub::open(FileHandle& file, Zip& zip) {
           // `<meta name="cover">` is a convention that predates any spec saying so.
           // Same precedence the NCX already uses -- the formal statement over the
           // conventional one.
-          if (hasToken(x.attr("properties"), "cover-image")) coverPath_ = resolved;
+          // FIRST WINS, spelled as the NCX line above spells it. A manifest with two
+          // cover-image items is malformed either way; what matters is that the two
+          // noted-in-passing fields next to each other do not answer that differently.
+          if (coverPath_.empty() && hasToken(x.attr("properties"), "cover-image"))
+            coverPath_ = resolved;
           manifest.emplace_back(std::string(x.attr("id")), std::move(resolved));
         } else if (tag == "meta" && x.attr("name") == "cover") {
           // EPUB 2'S ROUTE, and the one the corpus overwhelmingly uses: a bare
