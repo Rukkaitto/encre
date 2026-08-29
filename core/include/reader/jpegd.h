@@ -3,33 +3,10 @@
 #include <cstdint>
 #include <memory>
 
+#include "reader/image_sink.h"      // ImageRowSink -- one sink shape for every decoder
 #include "reader/inflate_stream.h"  // ByteSource
 
 namespace reader {
-
-// WHERE DECODED IMAGE ROWS GO.
-//
-// A sink, because the decoder cannot hand rows back on request: TJpgDec's
-// jd_decomp() decodes the whole image in ONE call and pushes MCU rectangles
-// through a callback, so there is no point at which a caller could ask for the
-// next row. Everything downstream (CoverFitter, the plane sink) is push for the
-// same reason, and the whole pipeline is one direction from the archive to the
-// glass.
-class ImageRowSink {
- public:
-  virtual ~ImageRowSink() = default;
-  // Once, before any row, with the OUTPUT dimensions after any scaling. False
-  // stops the decode before a single row is produced, which is the cheapest
-  // refusal a sink that cannot use these dimensions can make.
-  virtual bool begin(int width, int height) = 0;
-  // One row of `width` bytes of grey, 0 = black, in top-to-bottom order. Return
-  // false to stop the decode -- this is the interruption path, and for JPEG it is
-  // TJpgDec's own (outfunc returning 0 aborts with JDR_INTR).
-  //
-  // The pointer is borrowed until the call returns: it is into the decoder's own
-  // MCU band buffer, which the next band overwrites.
-  virtual bool row(const uint8_t* px) = 0;
-};
 
 // BASELINE JPEG, PUSHED ONE ROW AT A TIME.
 //
