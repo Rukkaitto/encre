@@ -95,6 +95,14 @@ class PngDecoder {
   // REPORTED RATHER THAN DOCUMENTED, so the figure in the spec's budget cannot
   // drift from the object. Valid once decode() has read IHDR and sized the rows;
   // 0 before, and 0 after a refusal that never got that far.
+  //
+  // A SINK REFUSAL IS A THIRD CASE, and it is the one worth knowing: the sink is
+  // asked BEFORE the inflate window is taken, so a begin() that answers false is
+  // charged the row block alone and this reports a non-zero figure that
+  // deliberately excludes the window. That ordering is what makes a refusal the
+  // cheap thing image_sink.h advertises it to be, and it is asserted rather than
+  // arranged -- a test pins the refused figure below Inflater::kHeapBytes, so
+  // putting the window back in front of the sink fails.
   size_t workspaceBytes() const;
 
   // THE PICTURE'S DIMENSIONS ARE NOT REPORTED HERE, and that is deliberate:

@@ -363,6 +363,28 @@ TEST_CASE("PngDecoder reports the heap a decode holds") {
   CHECK(dec.workspaceBytes() == 48256);
 }
 
+// THE 37 KB WINDOW IS NOT TAKEN UNTIL THE SINK HAS SAID IT WANTS THE PICTURE,
+// and workspaceBytes() is what makes that observable rather than merely the
+// order two statements happen to be in. image_sink.h advertises a false from
+// begin() as the cheapest refusal a sink can make -- and the realistic reason
+// CoverFitter::begin says false on device is that it CANNOT ALLOCATE, which is
+// exactly the moment 37,056 bytes must not have just been taken out from under
+// it. The row block (11,200 B) IS already taken, deliberately: moving the ask
+// above it would put the zlib-header refusals after begin() for a tenth of the
+// saving.
+TEST_CASE("a sink that refuses the picture is not charged for the inflate window") {
+  const std::string bytes = imgfix::loadFixture("truecolour.png");
+  grainsrc::Grained src(bytes, 4096);
+  CollectingSink sink;
+  sink.acceptBegin = false;
+  reader::PngDecoder dec;
+  CHECK_FALSE(dec.decode(src, sink));
+  CHECK(dec.aborted());
+  CHECK(sink.begins == 1);
+  CHECK(dec.workspaceBytes() == 2u * 1600 * 3 + 1600);
+  CHECK(dec.workspaceBytes() < reader::Inflater::kHeapBytes);
+}
+
 // A PNG BUILT HERE, BECAUSE THREE OF THIS DECODER'S REFUSALS HAVE NO FIXTURE
 // AND CANNOT HAVE ONE: a filter byte above 4, a malformed zlib header and a
 // preset-dictionary request are all things no encoder will produce, so a
@@ -402,10 +424,18 @@ void putChunk(std::string& s, const char* type, const std::string& payload) {
   putBe32(s, crc32Of(reinterpret_cast<const uint8_t*>(body.data()), body.size()));
 }
 
-// `raw` is h rows of (1 filter byte + w grey bytes). `zlibHeader` is the two
-// bytes of RFC 1950 wrapper, so a test can hand over a broken one.
-std::string tinyGreyPng(int w, int h, const std::string& raw,
-                        uint16_t zlibHeader = 0x7801) {
+std::string tinyIhdr(int w, int h) {
+  std::string ihdr;
+  putBe32(ihdr, static_cast<uint32_t>(w));
+  putBe32(ihdr, static_cast<uint32_t>(h));
+  const char tail[5] = {8, 0, 0, 0, 0};  // depth, colour 0, comp, filter, interlace
+  ihdr.append(tail, 5);
+  return ihdr;
+}
+
+// `raw` is h rows of (1 filter byte + w grey bytes), wrapped as RFC 1950.
+// `zlibHeader` is the two-byte wrapper, so a test can hand over a broken one.
+std::string zlibWrap(const std::string& raw, uint16_t zlibHeader) {
   std::string z;
   z.push_back(static_cast<char>(zlibHeader >> 8));
   z.push_back(static_cast<char>(zlibHeader & 0xFF));
@@ -423,16 +453,14 @@ std::string tinyGreyPng(int w, int h, const std::string& raw,
     b = (b + a) % 65521;
   }
   putBe32(z, (b << 16) | a);
+  return z;
+}
 
-  std::string ihdr;
-  putBe32(ihdr, static_cast<uint32_t>(w));
-  putBe32(ihdr, static_cast<uint32_t>(h));
-  const char tail[5] = {8, 0, 0, 0, 0};  // depth, colour 0, comp, filter, interlace
-  ihdr.append(tail, 5);
-
+std::string tinyGreyPng(int w, int h, const std::string& raw,
+                        uint16_t zlibHeader = 0x7801) {
   std::string out("\x89PNG\r\n\x1a\n", 8);
-  putChunk(out, "IHDR", ihdr);
-  putChunk(out, "IDAT", z);
+  putChunk(out, "IHDR", tinyIhdr(w, h));
+  putChunk(out, "IDAT", zlibWrap(raw, zlibHeader));
   putChunk(out, "IEND", std::string());
   return out;
 }
@@ -447,6 +475,32 @@ std::string rampRaw(int w, int h, uint8_t firstFilter = 0) {
   }
   return raw;
 }
+
+// A chunk header that LIES about its length, with no payload behind it. There
+// is no way to write a 2 GB chunk into a test, and no need to: what the decoder
+// must do is refuse the header, not read what follows it.
+void putLyingChunkHeader(std::string& s, const char* type, uint32_t len) {
+  putBe32(s, len);
+  s.append(type, 4);
+}
+
+// Counts what the decoder asks of the source. A refusal and a two-billion-byte
+// skip reach the SAME outcome -- both end with "the PNG has no image data" --
+// so the only observable difference between having the length guard and not
+// having it is how much work happens first. That is the property, so that is
+// what is asserted.
+class Counting : public reader::ByteSource {
+ public:
+  explicit Counting(reader::ByteSource& inner) : in_(&inner) {}
+  size_t read(void* dst, size_t bytes) override {
+    ++reads;
+    return in_->read(dst, bytes);
+  }
+  long reads = 0;
+
+ private:
+  reader::ByteSource* in_;
+};
 
 }  // namespace
 
@@ -529,6 +583,104 @@ TEST_CASE("a row filter the spec does not define is refused, not treated as Paet
   }
 }
 
+// A ZERO-LENGTH IDAT IS LEGAL PNG AND REAL ENCODERS EMIT IT, so its handling
+// was a claim with nothing exercising it -- the shape this file's own header
+// says is what this project keeps finding at the bottom of a defect. Three of
+// them here: one before any data, one between two chunks that carry data, and
+// one after the last, which is the position that also makes the walk step over
+// a CRC with nothing in hand.
+TEST_CASE("a zero-length IDAT is stepped over, not read as the end of the data") {
+  const std::string raw = rampRaw(8, 5);
+  const std::string z = zlibWrap(raw, 0x7801);
+  REQUIRE(z.size() > 8);
+
+  std::string bytes("\x89PNG\r\n\x1a\n", 8);
+  putChunk(bytes, "IHDR", tinyIhdr(8, 5));
+  putChunk(bytes, "IDAT", std::string());
+  putChunk(bytes, "IDAT", z.substr(0, 4));
+  putChunk(bytes, "IDAT", std::string());
+  putChunk(bytes, "IDAT", z.substr(4));
+  putChunk(bytes, "IDAT", std::string());
+  putChunk(bytes, "IEND", std::string());
+
+  // stb_image reads it too, which is what says the file is legal rather than
+  // something only this decoder tolerates.
+  const imgfix::Oracle want = imgfix::decodeWithStb(bytes);
+  REQUIRE_MESSAGE(!want.pixels.empty(), "stb_image refused a file with empty IDATs");
+
+  grainsrc::Grained src(bytes, 1);
+  CollectingSink sink;
+  reader::PngDecoder dec;
+  REQUIRE(dec.decode(src, sink));
+  CHECK(sink.rows == 5);
+  CHECK(sink.px == want.pixels);
+}
+
+// A chunk length with the high bit set is malformed by the spec. WITHOUT THE
+// GUARD THE FILE IS STILL REFUSED -- skipBytes walks 2 GB in 64-byte reads and
+// hits the end of the input -- so the outcome is identical and only the WORK
+// differs: 33 million reads against none. On a device that is a multi-second
+// spin on the panel's own SPI bus, which is the whole reason the clause exists,
+// so the read count is what this asserts.
+TEST_CASE("a chunk length the spec does not allow is refused, not walked") {
+  std::string bytes("\x89PNG\r\n\x1a\n", 8);
+  putChunk(bytes, "IHDR", tinyIhdr(8, 5));
+  putLyingChunkHeader(bytes, "junk", 0x80000000u);
+  putChunk(bytes, "IDAT", zlibWrap(rampRaw(8, 5), 0x7801));
+  putChunk(bytes, "IEND", std::string());
+
+  // A MEGABYTE OF TAIL, AND THE FIRST VERSION OF THIS TEST HAD NONE -- so
+  // skipBytes hit the end of a 300-byte file after five reads and the mutation
+  // that deletes the guard failed nothing. skipBytes walks only as far as the
+  // SOURCE goes, so the size of the input is what decides whether the spin this
+  // guard prevents can happen at all. A mutation that fails nothing tells you
+  // about your input before it tells you about your test.
+  bytes.append(1u << 20, '\0');
+
+  grainsrc::Grained inner(bytes, 4096);
+  Counting src(inner);
+  CollectingSink sink;
+  reader::PngDecoder dec;
+  CHECK_FALSE(dec.decode(src, sink));
+  CHECK_FALSE(dec.aborted());
+  REQUIRE(dec.reason() != nullptr);
+  CHECK(sink.begins == 0);
+  // Refusing the header takes a handful of reads; walking the declared length
+  // takes 1 MB / 64 = 16,384 of them, and on the device it would be 33.5 million
+  // over the panel's own SPI bus. Two orders of magnitude of daylight either
+  // side -- a guard against a spin, not a budget anybody should tune.
+  CAPTURE(src.reads);
+  CHECK(src.reads < 1000);
+}
+
+// IEND ENDS THE IMAGE, AND WHAT FOLLOWS IT IS NOT PART OF IT. PNG allows
+// trailing data and real files carry it -- polyglots, appended archives, a card
+// that wrote past the file. The case where it shows is a zlib stream the IDATs
+// do not finish: the walk is still hungry when it reaches IEND, and if it read
+// on it would find whatever came next and DECODE SUCCESSFULLY from bytes the
+// image does not contain. So this asserts a refusal where the alternative is a
+// plausible picture, which is the sharpest form this property has.
+TEST_CASE("bytes after IEND are not part of the image, however much they look like IDAT") {
+  const std::string z = zlibWrap(rampRaw(8, 5), 0x7801);
+  REQUIRE(z.size() > 10);
+  const size_t half = z.size() / 2;
+
+  std::string bytes("\x89PNG\r\n\x1a\n", 8);
+  putChunk(bytes, "IHDR", tinyIhdr(8, 5));
+  putChunk(bytes, "IDAT", z.substr(0, half));
+  putChunk(bytes, "IEND", std::string());
+  // A perfectly well-formed IDAT holding the rest of the stream -- past the end.
+  putChunk(bytes, "IDAT", z.substr(half));
+
+  grainsrc::Grained src(bytes, 1);
+  CollectingSink sink;
+  reader::PngDecoder dec;
+  CHECK_FALSE(dec.decode(src, sink));
+  CHECK_FALSE(dec.aborted());
+  REQUIRE(dec.reason() != nullptr);
+  CHECK(sink.rows < sink.height);
+}
+
 TEST_CASE("a malformed zlib header is refused before a byte is inflated") {
   // The check digit: RFC 1950 requires (CMF << 8 | FLG) % 31 == 0, and 0x7800
   // is 0x7801 with it wrong.
@@ -536,8 +688,18 @@ TEST_CASE("a malformed zlib header is refused before a byte is inflated") {
     checkRefused(tinyGreyPng(8, 5, rampRaw(8, 5), 0x7800), "malformed header");
   }
   SUBCASE("a compression method that is not deflate") {
-    // CM 7 rather than 8, with a check digit that still adds up.
-    checkRefused(tinyGreyPng(8, 5, rampRaw(8, 5), 0x771A), "deflate");
+    // 0x7709: CM 7 rather than 8, and a check digit that DOES add up
+    // (0x7709 % 31 == 0). The first version of this used 0x771A, whose check
+    // digit is 17 -- so it reached the CM clause only because readZlibHeader
+    // happens to test CM before the digit, and swapping those two (validating a
+    // header before reading its fields is the more natural order) broke it.
+    // A refusal test that passes by clause ORDER tests the order, not the clause.
+    checkRefused(tinyGreyPng(8, 5, rampRaw(8, 5), 0x7709), "deflate");
+  }
+  SUBCASE("a window larger than this decoder has") {
+    // CINFO 8 is a 64 KB window; the Inflater's is 32 KB and not tunable, so a
+    // longer match would silently corrupt every stream that used one.
+    checkRefused(tinyGreyPng(8, 5, rampRaw(8, 5), 0x881C), "window");
   }
   SUBCASE("a preset dictionary, which PNG forbids and this decoder was never given") {
     checkRefused(tinyGreyPng(8, 5, rampRaw(8, 5), 0x78BB), "preset dictionary");

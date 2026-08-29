@@ -175,3 +175,12 @@ image was reached by nothing at all. An encoder will not fix that: filtering row
 `test_pngd.cpp` builds a PNG in the test instead (DEFLATE's stored-block mode
 needs no compressor, the same trick `test_reader_restream.cpp` uses for a real
 method-8 zip entry) and sets that first byte to Up, Average and Paeth in turn.
+
+**The same builder covers four more things no committed file can carry**, all
+of them chunk layouts or headers an encoder will never emit: a zero-length IDAT
+among real ones (legal PNG, and stb_image is asked to confirm the file is legal
+rather than merely tolerated), a well-formed IDAT sitting *after* IEND, a chunk
+header declaring a length the spec forbids, and the three broken zlib wrappers.
+So the fixtures on disk are what a real encoder produces and the builder is what
+a damaged or unusual card produces -- which is the line to keep when adding to
+either.

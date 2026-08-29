@@ -1,3 +1,9 @@
+// NOT core/src/png.cpp, WHICH IS ONE LETTER AWAY AND THE OPPOSITE BUILD.
+// png.cpp is the desktop-only golden writer and differ (stb, <filesystem>-free
+// but READER_DESKTOP-guarded); THIS file is the device decoder and ships in the
+// firmware. core/library.json excludes `png.cpp` by exact name -- PlatformIO's
+// srcFilter is fnmatch and the pattern carries no wildcard, so `pngd.cpp` is not
+// caught by it. Confirmed by building for the ESP32-C3.
 #include "reader/pngd.h"
 
 #include <cstring>
@@ -16,6 +22,31 @@ constexpr uint32_t kMaxChunkLen = 0x7FFFFFFFu;
 // The nullptr-buffer form of skipping. 64 bytes of frame, on a device whose loop
 // task has 16 KB and where a 6,608-byte frame has already panicked it once.
 constexpr size_t kSkipChunk = 64;
+
+// FILL `n` BYTES OR SAY THE SOURCE ENDED, over any ByteSource.
+//
+// A SHORT READ IS NOT THE END OF THE INPUT: the contract says 0 means ended and
+// anything else is a partial answer, so every fixed-size read has to loop. The
+// grain-1 tests are what prove it and every real card produces short reads at a
+// sector boundary. This was three copies -- the chunk walk over the file, the
+// scanline reads over the inflater, and the zlib wrapper over the IDAT stream --
+// TWO OF WHICH CARRIED A PARAGRAPH STATING THIS SAME RULE, which is this
+// project's own signature for a primitive not yet extracted.
+//
+// It reaches all three because they are all ByteSources: `src` is the file,
+// `InflateSource` is the decompressed stream, and `IdatSource` is the
+// concatenated IDAT payloads. Note InflateSource happens to fill a request
+// completely today; this rests on the interface rather than on that.
+bool fillFrom(ByteSource& s, void* dst, size_t n) {
+  auto* p = static_cast<uint8_t*>(dst);
+  size_t got = 0;
+  while (got < n) {
+    const size_t k = s.read(p + got, n - got);
+    if (k == 0) return false;
+    got += k;
+  }
+  return true;
+}
 
 uint32_t be32(const uint8_t* p) {
   return (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) |
@@ -117,24 +148,15 @@ struct PngDecoder::Impl {
     reason = nullptr;
   }
 
+  // decode() frees the row block on every path, so this is not a live leak --
+  // it is what stops the invariant resting on ONE function. reset() does not
+  // clear the pointer either, so `~PngDecoder() = default` would leak silently
+  // the day decode() grows a path that does not reach its own cleanup.
+  ~Impl() { delete[] rows; }
+
   bool fail(const char* why) {
     if (reason == nullptr) reason = why;
     return false;
-  }
-
-  // A SHORT READ IS NOT THE END OF THE INPUT. The ByteSource contract says 0
-  // means ended and anything else is a partial answer, so every fixed-size read
-  // in a chunk walk has to loop -- the grain-1 tests are the case that proves it,
-  // and every real card produces short reads at a sector boundary.
-  bool readExact(void* dst, size_t n) {
-    auto* p = static_cast<uint8_t*>(dst);
-    size_t got = 0;
-    while (got < n) {
-      const size_t k = src->read(p + got, n - got);
-      if (k == 0) return false;
-      got += k;
-    }
-    return true;
   }
 
   bool skipBytes(uint32_t n) {
@@ -148,8 +170,15 @@ struct PngDecoder::Impl {
     return true;
   }
 
-  // Step to the next IDAT chunk with bytes in it. False for IEND, for the end of
+  // Step to the next IDAT chunk WITH BYTES IN IT. False for IEND, for the end of
   // the input, or for a length the spec does not allow.
+  //
+  // "WITH BYTES IN IT" IS THE POSTCONDITION AND readIdat RESTS ON IT. A
+  // zero-length IDAT is legal PNG and real encoders emit them, so the `continue`
+  // below is what makes this true. readIdat used to ALSO loop on the same
+  // condition -- two guards for one thing, each making the other unnecessary,
+  // which is why deleting either failed no test. One of them is the contract and
+  // the other was a second spelling of it.
   bool advanceToIdat() {
     for (;;) {
       if (inChunk) {
@@ -157,7 +186,7 @@ struct PngDecoder::Impl {
         inChunk = false;
       }
       uint8_t hdr[8];
-      if (!readExact(hdr, sizeof hdr)) return false;
+      if (!fillFrom(*src, hdr, sizeof hdr)) return false;
       const uint32_t len = be32(hdr);
       if (len > kMaxChunkLen) return false;
       if (typeIs(hdr + 4, "IEND")) return false;
@@ -173,7 +202,9 @@ struct PngDecoder::Impl {
 
   size_t readIdat(void* dst, size_t want) {
     if (want == 0) return 0;
-    while (idatLeft == 0) {
+    // ONE `if`, NOT A LOOP: advanceToIdat answers true only with bytes in hand,
+    // so there is nothing to go round for. See its postcondition.
+    if (idatLeft == 0) {
       if (idatDone || !advanceToIdat()) {
         idatDone = true;
         return 0;
@@ -182,23 +213,14 @@ struct PngDecoder::Impl {
     const size_t n = want < idatLeft ? want : idatLeft;
     const size_t got = src->read(dst, n);
     idatLeft -= static_cast<uint32_t>(got);
-    if (got == 0) idatDone = true;  // the input ended inside a chunk
+    // The input ended inside a chunk. DELETING THIS LATCH FAILS NO TEST and
+    // cannot: without it the next call finds idatLeft still non-zero, reads 0
+    // again and answers 0 again, so the outcome is identical and only one read
+    // per call is saved. It is kept because that read is a poke at a card on the
+    // panel's own SPI bus; it is written down because a clause no test reaches
+    // should say so rather than look like coverage.
+    if (got == 0) idatDone = true;
     return got;
-  }
-
-  // Fill `n` bytes from the decompressed stream. InflateSource happens to fill a
-  // request completely today, but the ByteSource contract it implements permits
-  // a short answer -- so this loops for the same reason readExact does, rather
-  // than resting on the stronger behaviour of one implementation.
-  bool inflateExact(void* dst, size_t n) {
-    auto* p = static_cast<uint8_t*>(dst);
-    size_t got = 0;
-    while (got < n) {
-      const size_t k = zs.read(p + got, n - got);
-      if (k == 0) return false;
-      got += k;
-    }
-    return true;
   }
 
   // TWO REASONS, TOLD APART BY THE INFLATER. A stream that ENDED is a truncated
@@ -225,16 +247,16 @@ struct PngDecoder::Impl {
 // line is the only way a user ever learns why a cover did not appear.
 bool PngDecoder::Impl::readHeader() {
   uint8_t sig[8];
-  if (!readExact(sig, sizeof sig) || std::memcmp(sig, kSignature, sizeof sig) != 0) {
+  if (!fillFrom(*src, sig, sizeof sig) || std::memcmp(sig, kSignature, sizeof sig) != 0) {
     return fail("the cover is not a PNG");
   }
   uint8_t hdr[8];
-  if (!readExact(hdr, sizeof hdr)) return fail("the PNG ends before its header does");
+  if (!fillFrom(*src, hdr, sizeof hdr)) return fail("the PNG ends before its header does");
   if (be32(hdr) != 13 || !typeIs(hdr + 4, "IHDR")) {
     return fail("the PNG does not begin with an image header");
   }
   uint8_t ih[13];
-  if (!readExact(ih, sizeof ih)) return fail("the PNG ends before its header does");
+  if (!fillFrom(*src, ih, sizeof ih)) return fail("the PNG ends before its header does");
   if (!skipBytes(4)) return fail("the PNG ends before its header does");  // IHDR's CRC
 
   const uint32_t w = be32(ih), h = be32(ih + 4);
@@ -268,6 +290,14 @@ bool PngDecoder::Impl::readHeader() {
   // THERE IS NO ARBITRARY CAP: what refuses an image too wide to hold is the
   // allocation failing, which is the honest answer and the one that also
   // accounts for the heap actually free at the time.
+  //
+  // NO TEST REACHES THE REFUSAL BELOW, and that is written down rather than left
+  // to be rediscovered -- the same note jpegd.cpp carries for its band-count
+  // check. On the desktop `size_t` IS `uint64_t`, so the round trip is exact by
+  // construction and the branch cannot be taken at all; it exists for the 32-bit
+  // C3, where 2^31 * 4 does not fit a size_t and the multiply would otherwise
+  // wrap to a small allocation and a heap overrun. Deleting it fails nothing on
+  // the host, by construction rather than for want of a fixture.
   const uint64_t strideU = static_cast<uint64_t>(w) * static_cast<uint64_t>(channels);
   const uint64_t needU = 2u * strideU + static_cast<uint64_t>(w);
   const size_t need = static_cast<size_t>(needU);
@@ -295,7 +325,11 @@ bool PngDecoder::Impl::readHeader() {
   cur = rows;
   prev = rows + stride;
   grey = rows + 2 * stride;
-  workspace = Inflater::kHeapBytes + need;
+  // THE ROW BLOCK ONLY. pngd.h promises 0 after a refusal that never sized the
+  // rows, and the window's term is added by run() once inf.begin() has actually
+  // taken it -- a figure that counted 37 KB the decoder had not allocated would
+  // be exactly the drift workspaceBytes() exists to prevent.
+  workspace = need;
   return true;
 }
 
@@ -305,12 +339,7 @@ bool PngDecoder::Impl::readHeader() {
 // after the last scanline, several bytes short of it.
 bool PngDecoder::Impl::readZlibHeader() {
   uint8_t z[2];
-  size_t got = 0;
-  while (got < 2) {
-    const size_t k = readIdat(z + got, 2 - got);
-    if (k == 0) return fail("the PNG has no image data");
-    got += k;
-  }
+  if (!fillFrom(idat, z, sizeof z)) return fail("the PNG has no image data");
   const unsigned cmf = z[0], flg = z[1];
   if ((cmf & 0x0F) != 8) return fail("the PNG's image data is not deflate-compressed");
   if ((cmf >> 4) > 7) return fail("the PNG's image data asks for a window this decoder does not have");
@@ -373,8 +402,17 @@ bool PngDecoder::Impl::run() {
   if (!readHeader()) return false;
   if (!readZlibHeader()) return false;
 
-  if (!inf.begin(idat)) return fail("no memory for the PNG's inflate window");
-
+  // THE SINK IS ASKED BEFORE THE 37 KB WINDOW IS TAKEN, and the order is
+  // load-bearing rather than incidental. image_sink.h advertises a false from
+  // begin() as "the cheapest refusal a sink that cannot use these dimensions can
+  // make" -- and the realistic reason CoverFitter::begin says false on device is
+  // that it CANNOT ALLOCATE, which is precisely the moment 37,056 bytes must not
+  // have just been taken out from under it. Nothing forces the other order here,
+  // unlike jpegd.cpp where the band cannot be sized before the SOF is read.
+  //
+  // The row block IS already taken (~11 KB): moving the ask above it would put
+  // the zlib-header refusals after begin() too, and those legitimately report
+  // "the sink heard nothing". A tenth of the saving for a worse contract.
   if (!sink->begin(width, height)) {
     // The same outcome as a sink that stops mid-picture, and it has to be: a
     // caller cannot be asked to tell "you refused" from "the file is bad" by
@@ -383,9 +421,12 @@ bool PngDecoder::Impl::run() {
     return false;
   }
 
+  if (!inf.begin(idat)) return fail("no memory for the PNG's inflate window");
+  workspace += Inflater::kHeapBytes;
+
   for (int y = 0; y < height; ++y) {
     uint8_t filter = 0;
-    if (!inflateExact(&filter, 1)) {
+    if (!fillFrom(zs, &filter, 1)) {
       return fail(streamEndReason());
     }
     // CHECKED BEFORE THE ROW IS READ. `unfilter`'s default arm is Paeth and
@@ -393,7 +434,7 @@ bool PngDecoder::Impl::run() {
     // names a filter the spec does not define is refused without pulling
     // another `stride` bytes through the inflater first.
     if (filter > 4) return fail("the PNG uses a row filter that does not exist");
-    if (!inflateExact(cur, stride)) {
+    if (!fillFrom(zs, cur, stride)) {
       return fail(streamEndReason());
     }
     unfilter(filter);
