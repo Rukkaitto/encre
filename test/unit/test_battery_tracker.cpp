@@ -186,3 +186,25 @@ TEST_CASE("a failed reading neither arms nor fires the latch") {
   t.update(good(64, true), 2000);
   CHECK(t.takeRepaintRequest() == true);
 }
+
+TEST_CASE("a boot onto the dither's low side costs at most one grant") {
+  // The first-reading seed only covers a first sample that reads CHARGING. A
+  // boot that lands on the not-charging side of a dithering signal is
+  // indistinguishable from a real plug-in, and must not be closed off: the
+  // "not-charging to charging" case above is the same shape and is the feature's
+  // whole point. The session cap is what bounds it.
+  BatteryTracker t;
+  t.update(good(100, false), 0);
+  t.update(good(100, true), 2000);
+  CHECK(t.takeRepaintRequest() == true);
+  int extra = 0;
+  uint32_t now = 2000;
+  const bool pattern[10] = {false, false, true, false, false,
+                            false, true,  true, false, true};
+  for (int i = 0; i < 200; ++i) {
+    now += 2000;
+    t.update(good(100, pattern[i % 10]), now);
+    if (t.takeRepaintRequest()) ++extra;
+  }
+  CHECK(extra == 0);
+}

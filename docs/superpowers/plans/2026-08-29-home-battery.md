@@ -494,7 +494,15 @@ And the members:
   uint32_t notChargingSinceMs_ = 0;
 ```
 
-Note the ordering inside `update()`: `charging_` has **already** been assigned from `r.charging` by the line above, so the edge test reads the *new* state against `sawNotCharging_`, which still describes the old one.
+**Superseded by code review.** This step originally left `charging_` assigned in a
+separately-guarded `if (r.chargingKnown)` block ahead of the edge test, with a note
+here warning that the edge test read `charging_` *after* it had already been
+mutated -- a trap for any future edit inserted between the two blocks. The review
+confirmed the split bought nothing (merging the blocks and testing `r.charging`
+directly compiles and passes the suite unchanged), so the blocks are merged into
+one and the edge test reads `r.charging` rather than `charging_`. A hazard that
+needs a warning is better removed than documented; there is nothing left here to
+note.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 

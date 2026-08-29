@@ -62,21 +62,32 @@ class BatteryTracker {
       havePercent_ = true;
     }
     if (r.chargingKnown) {
-      charging_ = r.charging;
-      haveCharging_ = true;
-    }
-    if (r.chargingKnown) {
-      // A rising edge only, and only from a KNOWN previous state. Seeding on the
-      // first reading is what stops a boot with the cable already in adding a
-      // refresh to a boot that is already painting Home.
-      if (charging_ && sawNotCharging_ && !latched_ && grants_ < kMaxGrantsPerSession) {
+      // A rising edge only, and only from a KNOWN previous not-charging state --
+      // tested against r.charging directly, in the same block that will go on to
+      // set charging_, so nothing here depends on charging_ having been mutated
+      // first. A first-ever sample that reads CHARGING cannot fire this, because
+      // sawNotCharging_ starts false: that is what stops a boot with the cable
+      // already in from adding a refresh to a boot that is already painting Home.
+      //
+      // It does NOT cover a boot that lands on the NOT-charging side of a
+      // dithering signal instead: the very next sample reading charging is then
+      // indistinguishable from a real plug-in and grants exactly as one would.
+      // That is left open deliberately -- closing it breaks the feature's
+      // primary case, "not-charging to charging asks for exactly one repaint" --
+      // and kMaxGrantsPerSession is what bounds the cost. See "a boot onto the
+      // dither's low side costs at most one grant" below.
+      if (r.charging && sawNotCharging_ && !latched_ && grants_ < kMaxGrantsPerSession) {
         latched_ = true;
         ++grants_;
         repaintWanted_ = true;
       }
+      charging_ = r.charging;
+      haveCharging_ = true;
       if (charging_) {
+        // Only sawNotCharging_ resets here -- notChargingSinceMs_ needs no reset
+        // of its own, because the next not-charging sample always re-stamps it
+        // through the !sawNotCharging_ arm below before it can ever be read.
         sawNotCharging_ = false;
-        notChargingSinceMs_ = nowMs;
       } else {
         // The dwell is measured from the FIRST not-charging sample in an unbroken
         // run, so any charging sample above resets it.
