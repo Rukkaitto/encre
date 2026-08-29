@@ -188,4 +188,86 @@ void Framebuffer::fillRect(int x, int y, int w, int h, bool white) {
   }
 }
 
+// THE ONE FUNCTION IN THE COVER FEATURE THAT KNOWS ROTATION EXISTS, and the fifth
+// routine in core/ to have to. The cache file holds LOGICAL raster rows, because a
+// streaming row-major downscale can only produce those (imagefit.h argues it at
+// length), and the device's frame is Rotation::Ccw. So this is a strided scatter,
+// not a memcpy, and the desktop cannot tell the difference: the simulator, every
+// golden and tools/compare-design.py are all Rotation::None, where the two
+// branches agree. A version that always memcpy'd would pass the whole suite and
+// smear diagonally on glass -- the veil, fillRect, the glyph blit and ditherRect
+// have each already been that bug once.
+//
+// WHY IT IS NOT BATCHED ACROSS EIGHT ROWS, with the arithmetic, so the next person
+// to see the opportunity does not have to re-derive it. Under Ccw the destination
+// bit position is 0x80 >> (y % 8), so eight consecutive logical rows really do
+// share one byte column, and composing them before storing would turn eight
+// read-modify-writes into one store -- worth maybe 40% of the loop, since the bit
+// extraction from the source stays either way. On the X3 the whole scatter is
+// 418,176 pixels a plane; call it ~30 ms, so the saving is ~12 ms of a paint whose
+// waveform alone is 389 ms, once per sleep. What it costs is the shape of the
+// interface: the caller streams one row at a time off a card, so batching means
+// either an eight-row signature (which the reader would have to buffer FOR) or
+// hidden state inside Framebuffer with a flush the caller must remember -- and a
+// caller obligation maintained in prose is exactly the defect CLAUDE.md's
+// second-copy rule is about. Eight ms is not worth buying one, and the number
+// above is an estimate rather than a measurement, which is the other reason to
+// leave it: this project's rule is to measure the thing rather than argue about it.
+void Framebuffer::writePackedRow(int y, const uint8_t* row) {
+  if (row == nullptr) return;
+  if (y < 0 || y >= height_) return;
+  // An inert buffer -- a non-positive geometry, or a refused view -- has no store.
+  // This is the ONLY bounds check in the function: everything below indexes raw
+  // bytes, which is what makes it fast and what makes this line load-bearing.
+  if (width_ <= 0 || rowBytes_ <= 0) return;
+  uint8_t* const base = data();
+  if (base == nullptr) return;
+  // WIDTH AND STRIDE INTO LOCALS BEFORE THE LOOP, and it is not tidiness: the
+  // loop stores through a uint8_t*, which aliases every object there is, so a
+  // compiler that reads width_ from `this` inside the loop cannot prove the store
+  // did not change it -- and gcc does exactly that, reloading it per pixel. Both
+  // are positive, checked above, so `& 7` below is `% 8` without the bias
+  // correction a signed remainder would otherwise need.
+  const int w = width_;
+  const int stride = rowBytes_;
+
+  if (rot_ != Rotation::Ccw) {
+    // Unrotated: a logical row IS a physical row, so the whole bytes are a copy.
+    uint8_t* const dst = base + static_cast<size_t>(y) * static_cast<size_t>(stride);
+    const int full = w >> 3;
+    if (full > 0) std::memcpy(dst, row, static_cast<size_t>(full));
+    // ...and the last byte is masked rather than copied whole, so that a width
+    // that is not a multiple of eight leaves the store's slack bits exactly as it
+    // found them. That is what keeps this byte-identical to the per-pixel setPixel
+    // loop the tests hold it to -- a whole copy would import the CALLER's slack
+    // bits, which are undefined by the contract above. Both panels are multiples
+    // of 8, so only a test reaches this.
+    const int rem = w & 7;
+    if (rem != 0) {
+      const uint8_t m = static_cast<uint8_t>(0xFFu << (8 - rem));
+      dst[full] = static_cast<uint8_t>((dst[full] & ~m) | (row[full] & m));
+    }
+    return;
+  }
+
+  // Ccw: ONE LOGICAL ROW IS ONE PHYSICAL COLUMN. physX = y and physY = width - 1 - x
+  // (byteIndex above, and rotate90CCW before it), so the byte column and the bit
+  // within it are FIXED for the whole row -- they depend on y alone -- and what
+  // varies is which physical row each pixel lands in. x = 0 is the LAST physical
+  // row, so the offset walks backwards one stride at a time.
+  const int byteCol = y >> 3;                                     // y >= 0, so no
+  const uint8_t mask = static_cast<uint8_t>(0x80u >> (y & 7));    // signed-division bias
+  const uint8_t keep = static_cast<uint8_t>(~mask);
+  const size_t step = static_cast<size_t>(stride);
+  // The offset is kept as an unsigned INDEX rather than a pointer: after the last
+  // iteration it wraps, which is defined for an unsigned integer and would be
+  // undefined for a pointer walked before the start of the object.
+  size_t off = static_cast<size_t>(w - 1) * step + static_cast<size_t>(byteCol);
+  for (int x = 0; x < w; ++x, off -= step) {
+    const bool white = (row[x >> 3] & static_cast<uint8_t>(0x80u >> (x & 7))) != 0;
+    uint8_t& b = base[off];
+    b = white ? static_cast<uint8_t>(b | mask) : static_cast<uint8_t>(b & keep);
+  }
+}
+
 }  // namespace reader
