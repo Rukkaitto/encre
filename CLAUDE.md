@@ -3501,6 +3501,24 @@ percentage-going-backwards bug.
 way the reader can see through. Persisting a peeked cursor would be a card write for a
 breadcrumb the anchor's own design declined to pay for.
 
+**RE-ASKED ON GLASS AND CONFIRMED (2026-08-29), so it does not need arguing again.** It
+was reported as a defect — "sleeping in the peek takes us back to the book" — and it is
+not one: a peek is a transient *am I sure?*, and waking onto your own page is the calmer
+default. **The reason given above is weaker than the decision, and that is worth knowing
+if it is ever revisited**: the session record already stores the entry (`home:0;library:2;
+reader:0;peek:0`), and that trailing `0` is a focus slot the peek has no use for, so the
+peeked SPINE could ride there for no new card write at all. The cost was never the
+storage; only the peeked *page within the panel* would need one. So the honest statement
+is that a peek should not come back, not that it cannot.
+
+**AND THE REPORT WAS RIGHT ABOUT THE MECHANISM even though it was wrong about this
+screen** — see #49. Being restorable is per-screen tribal knowledge: one hand-written
+`namesReader` scan on the wake path primes the book, and the reader menu and Contents are
+primed only because `openBookAt` passes them on the way. Three screens have shipped
+un-restorable by accident and this one is un-restorable on purpose, and **from the outside
+those are indistinguishable** — the restore stops early and the reader lands somewhere
+they did not expect. That is what makes the question keep coming back.
+
 **THE BOX IS THE CONSTANT AND THE LINE COUNT IS THE RESULT, and it shipped the other way
 round.** `kPeekPanelH` is **546px** — the panel is that tall on every device at every
 setting — and the count is `floor(columnH / lineBox)`, whole lines, leftover as slack at
