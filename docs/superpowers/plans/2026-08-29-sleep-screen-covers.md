@@ -2500,6 +2500,32 @@ git commit -m "shell: the sleep view model carries the mode, and nothing-open fo
 **Files:**
 - Modify: `shell/src/main.cpp` (`sleepNow`)
 
+- [ ] **Step 0: TEACH `paintSleepScreen` TO PAINT A COVER AT ALL — the decode is worthless without this**
+
+Task 15 built the writer and the reader; **nothing yet paints one.** `paintSleepScreen`
+still does `SleepScreen scr(vm);` with no `CoverSource` and a single
+`scr.render(..., Plane::Bw)` followed by `showOnePass(RefreshMode::Full)`. Insert only the
+decode, as the snippet below once did, and the cache is written on every sleep and **never
+seen** — a feature that looks implemented, passes every test, and does nothing.
+
+Three things it needs:
+
+1. **Pass `sleepCoverForPaint()`** into the `SleepScreen` constructor. That helper already
+   validates the header and answers null when there is no usable cover, which is the
+   constraint Task 13's `CoverSource` contract rests on — fidelity is decided once, and a
+   source that would refuse mid-sequence must never be handed over.
+2. **Branch on `scr.fidelity()`.** `Mono` keeps today's exact path — one `Bw` render and one
+   FULL waveform. `Grayscale` needs the three-plane sequence plus the rebase.
+3. **`paintGray()` CANNOT BE REUSED**, and this is the trap. It goes through `paintPlane()`
+   → `gApp->render()`, and this task deliberately calls `gApp.reset()` before the second
+   paint. The sleep screen is painted **without being pushed** — that is why it bypasses
+   `App` at all, since pushing it would make the next wake restore *into* it. So the
+   grayscale sequence here renders straight off `scr`, the same way the existing single pass
+   does.
+
+Do this first and confirm a `Mono` sleep is byte-identical to today before adding the
+decode, so that if something moves you know which change moved it.
+
 - [ ] **Step 1: Insert the decode between the two paints**
 
 ```cpp
