@@ -408,7 +408,16 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // for its values either way.
     {
       SleepViewModel vm = sleepIdle_ ? demoSleepIdleVm() : demoSleepVm();
-      if (sleepWaking_) vm.note = kStatusWaking;
+      // BOTH FIELDS, because they are two halves of one fact and the shell sets
+      // both too: the note is what the screen SAYS, `waking` is which screen this
+      // IS -- and only the second reaches the badge rule that COVER mode would
+      // otherwise silence (SleepViewModel::waking). The demo catalogue holds no
+      // CoverSource, so `covered` is false here and this moves no golden; it is
+      // set anyway so the two builders of a waking view model cannot drift.
+      if (sleepWaking_) {
+        vm.note = kStatusWaking;
+        vm.waking = true;
+      }
       return std::make_unique<SleepScreen>(std::move(vm));
     }
     case ScreenId::Reader: {

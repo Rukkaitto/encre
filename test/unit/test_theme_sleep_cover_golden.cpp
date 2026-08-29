@@ -19,6 +19,7 @@
 #include "doctest.h"
 #include "golden.h"
 #include "ramp.h"
+#include "reader/components.h"  // kStatusWaking
 #include "reader/framebuffer.h"
 #include "reader/imagefit.h"
 #include "reader/screen_sleep.h"
@@ -289,6 +290,85 @@ TEST_CASE("COVER draws the cover and NOTHING else; every fallback puts the badge
   const reader::Framebuffer noSource =
       renderSleepTo(w, h, reader::SleepShows::Cover, nullptr, reader::Plane::Bw, ramp, theme);
   CHECK(golden::identical(noSource, details));
+}
+
+TEST_CASE("a WAKING cover screen keeps the badge and still drops the card") {
+  // THE WAKE'S OWN RULE, AND IT IS THE ONE EXCEPTION TO `coverOnly`. A sleeping
+  // COVER screen may drop the badge because a full-bleed cover is not a screen
+  // this device can otherwise be in -- the picture says "asleep" unaided. A
+  // WAKING screen is making a different claim, and the cover is byte-identical
+  // in both states, so without the badge a COVER-mode wake would paint something
+  // indistinguishable from the sleep it is waking from.
+  //
+  // ASSERTED BY FRAME IDENTITY, not by counting ink, for this file's own reason:
+  // the badge is a white box with a 1px outline, so over a dark cover it REMOVES
+  // far more ink than it adds and the obvious inequality points the wrong way.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  const int w = 480, h = 800;
+
+  FakeCover ref = coverFor(w, h);
+  const reader::Framebuffer plain = bareCover(ref, w, h);
+
+  auto renderWaking = [&](reader::SleepShows shows, FakeCover* cov) {
+    reader::Framebuffer fb(w, h);
+    reader::SleepViewModel vm = sampleWithCover(shows);
+    vm.note = reader::kStatusWaking;
+    vm.waking = true;
+    reader::SleepScreen(vm, cov).render(fb, ramp.fonts, theme, reader::Plane::Msb);
+    return fb;
+  };
+
+  // The badge's own band -- design/Sleep.dc.html puts it 34px off the bottom and
+  // it is one line of --t-meta in an 8/18 padded box with a 1px border, so it is
+  // inside the bottom 90 rows and clear of the last 20. The SAME band the
+  // sleeping case above asserts is untouched.
+  FakeCover c1 = coverFor(w, h);
+  const reader::Framebuffer waking = renderWaking(reader::SleepShows::Cover, &c1);
+  CHECK_FALSE(golden::rowsIdentical(waking, plain, h - 90, h - 20));
+  CHECK_FALSE(golden::identical(waking, plain));
+
+  // ...and the CARD is still gone, which is the half `waking` must NOT reach: a
+  // waking COVER screen is the cover and the words, never the cover and the
+  // reading card. The card is centred, so rows around the middle are the cover's.
+  CHECK(golden::rowsIdentical(waking, plain, h / 2 - 120, h / 2 + 120));
+
+  // The sleeping screen it differs from, so this case cannot pass by the badge
+  // having been drawn all along. Same source, same mode, `waking` the only
+  // difference -- and dropping `&& !vm.waking` from theme_quiet.cpp makes these
+  // two frames equal, which is what fails here.
+  FakeCover c2 = coverFor(w, h);
+  const reader::Framebuffer asleep =
+      renderSleepTo(w, h, reader::SleepShows::Cover, &c2, reader::Plane::Msb, ramp, theme);
+  CHECK(golden::identical(asleep, plain));
+  CHECK_FALSE(golden::identical(waking, asleep));
+
+  // COVER + DETAILS is unaffected by the flag: it never suppressed anything, so a
+  // waking one is the card and the badge over the cover exactly as a sleeping one
+  // is, with only the note's words different.
+  FakeCover c3 = coverFor(w, h);
+  FakeCover c4 = coverFor(w, h);
+  reader::Framebuffer bothWaking = renderWaking(reader::SleepShows::CoverAndDetails, &c3);
+  reader::Framebuffer bothAsleep(w, h);
+  {
+    reader::SleepViewModel vm = sampleWithCover(reader::SleepShows::CoverAndDetails);
+    vm.note = reader::kStatusWaking;  // same words, so only `waking` can differ
+    reader::SleepScreen(vm, &c4).render(bothAsleep, ramp.fonts, theme, reader::Plane::Msb);
+  }
+  CHECK(golden::identical(bothWaking, bothAsleep));
+
+  // AND WITH NO COVER THE FLAG DOES NOTHING AT ALL, which is what keeps the
+  // sleep_waking goldens where they are: `coverOnly` is already false, so the
+  // badge was never at risk and there is nothing for `waking` to put back.
+  reader::Framebuffer noCoverWaking = renderWaking(reader::SleepShows::Cover, nullptr);
+  reader::Framebuffer noCoverAsleep(w, h);
+  {
+    reader::SleepViewModel vm = sampleWithCover(reader::SleepShows::Cover);
+    vm.note = reader::kStatusWaking;
+    reader::SleepScreen(vm, nullptr).render(noCoverAsleep, ramp.fonts, theme,
+                                           reader::Plane::Msb);
+  }
+  CHECK(golden::identical(noCoverWaking, noCoverAsleep));
 }
 
 TEST_CASE("COVER + DETAILS is the plain Sleep screen with its BACKGROUND replaced") {

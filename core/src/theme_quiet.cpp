@@ -922,7 +922,17 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   // The badge, measured from the BOTTOM as the board positions it -- and OUTSIDE the
   // branch above, because both states draw it in the same place. That is what makes
   // SleepIdle one screen with its content removed rather than a second screen.
-  if (coverOnly) return;
+  //
+  // `!vm.waking` IS THE ONE EXCEPTION TO `coverOnly`, AND IT IS NOT A SECOND
+  // CONDITION FOR THE CARD. The predicate above may drop the badge because a
+  // full-bleed cover is not a screen this device can otherwise be in -- the
+  // picture says "asleep" unaided. A WAKING screen is making a different claim,
+  // and the cover is byte-identical in both states, so without these words a
+  // COVER-mode wake would paint something indistinguishable from the sleep it is
+  // waking from. The card stays suppressed by `coverOnly` alone: waking shows the
+  // cover and the words, never the cover and the reading card. See
+  // SleepViewModel::waking, which carries the whole of this reasoning.
+  if (coverOnly && !vm.waking) return;
   const int noteW = note.measure(vm.note, trackingEm(note, kSleepNoteEm));
   const int badgeW = noteW + 2 * (kSleepBadgeBorder + kSleepBadgePadX);
   const int badgeH = note.lineHeight() + 2 * (kSleepBadgeBorder + kSleepBadgePadY);

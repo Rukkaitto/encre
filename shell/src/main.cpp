@@ -3721,18 +3721,11 @@ void setup() {
       //     correct.
       //
       // AND WITH A COVER ON THE GLASS THAT LAST BULLET IS SIMPLY FALSE. The sleep
-      // path paints a four-level PHOTOGRAPH over the whole panel; this paint has no
-      // CoverSource and draws the dither field and the card, so nearly every pixel
-      // differs. Asserting a valid baseline there is asserting something known to be
+      // path paints a four-level PHOTOGRAPH over the whole panel, and whatever this
+      // paints is a ONE-PASS frame, so nearly every pixel differs whichever way it
+      // goes. Asserting a valid baseline there is asserting something known to be
       // untrue, and what it buys -- a DU -- is the one refresh that cannot survive
-      // being wrong about it: the cover would stay on the glass under the card until
-      // Home's paint cleared it.
-      //
-      // HANDING THIS PAINT THE COVER TO MAKE THE PREMISE TRUE AGAIN DOES NOT WORK,
-      // and it is the obvious move, so: this is a single Fast DU, so it would render
-      // a ONE-BIT threshold of a FOUR-LEVEL picture -- an enormous diff in a
-      // different way -- and SleepScreen::fidelity() would answer Grayscale for a
-      // path that paints one pass.
+      // being wrong about it.
       //
       // SO THE COVER CASE TAKES THE FALLBACK THIS BLOCK ALREADY NAMED: assert
       // nothing, let the paint below be the honest clear, and move
@@ -3740,6 +3733,30 @@ void setup() {
       // just written the frame ourselves. requestResync() goes with it -- its whole
       // job was to force a GC at Home over a baseline we had admitted we did not
       // know, and after a real clear here we DO know it.
+      //
+      // WHAT THIS PAINT DRAWS OVER A COVER IS THE COVER, and that reverses what
+      // this block used to say. It read "handing this paint the cover does not
+      // work", on two grounds, and the DEVICE settled both against it -- a wake
+      // replaced a photograph with the dithered card, which reads as the book
+      // having been closed. The grounds, and what is actually true:
+      //
+      //   * "it would be a one-bit threshold of a four-level picture". It is, and
+      //     that is the affordable rendition rather than a wrong one: renderSleep
+      //     draws the cover from Plane::Bw, which IS the Msb plane (screen_sleep.h),
+      //     so one pass gives the same picture at two levels for one waveform. The
+      //     alternative is the full grayscale sequence -- ~2.4 s, slower than the
+      //     restore this screen exists to cover for, and there is no windowed
+      //     refresh on this panel to repaint the badge box alone: PanelDriver.h's
+      //     displayWindow default DISCARDS the window and calls display(), and
+      //     Uc8279Driver does not override it.
+      //   * "fidelity() would answer Grayscale for a path that paints one pass".
+      //     True and inert here: nothing on this path CONSULTS fidelity(). It is
+      //     read by renderTop() for an App-owned screen and by paintSleepScreen for
+      //     the sleep sequence, and this paint is neither -- it renders Plane::Bw
+      //     and calls showOnePass itself, exactly as it did with no cover.
+      //
+      // IF THE ONE-BIT RENDITION READS BADLY ON GLASS, kWakePaintsCoverAsMono below
+      // is the one-line way out. This is the half nobody has seen yet.
       //
       // WHAT IT COSTS: the wake's one allowed flash moves from Home to here, and on
       // a card with `fullOnTransition` left on, Home's own transition GC makes that
@@ -3754,36 +3771,99 @@ void setup() {
       //
       // IF THE NO-COVER BRANCH IS WRONG ON GLASS the symptom is specific and worth
       // naming: the WAKING line faint, banded, or absent, with the rest of the card
-      // intact. Its fallback is to take the cover branch unconditionally.
-      const bool coverOnGlass = sleepCoverForPaint() != nullptr;
-      if (!coverOnGlass) display.skipInitialResync();
-      const reader::SleepViewModel vm = sleepVmFromCard(reader::kStatusWaking);
-      reader::SleepScreen scr(vm);
-      gFrame->clear(true);
-      scr.render(*gFrame, *gFonts, gTheme, reader::Plane::Bw);
-      gFrameContentsUnknown = true;
-      // FAST is what this ASKS for, and it is what it gets only in the no-cover
-      // case: a DU, so the badge's words change without a flash. In the cover case
-      // nothing has asserted a baseline, so displayStart sees !_oldPlaneValid,
-      // seeds DTM1 white and takes the GC regardless of the mode -- which is the
-      // clean clear a panel holding a photograph needs.
-      showOnePass(reader::RefreshMode::Fast);
-      if (coverOnGlass) {
-        // NOW it is true: the panel holds a frame we just wrote, and the boot
-        // clear budget has been spent on the paint that needed it.
-        display.skipInitialResync();
+      // intact. Its fallback is to stop asserting a baseline at all -- drop the
+      // `if (!coverOnGlass)` below and let every wake take the clean clear.
+
+      // THE ONE-LINE WAY OUT FOR THE OTHER HALF, AND WHAT IT SWITCHES BETWEEN.
+      //
+      //   true  (shipped): a cover on the glass is REPAINTED in one bit with the
+      //         waking badge over it. The picture stays, the words appear, and it
+      //         costs one waveform -- the same wake cost as the no-cover case.
+      //   false:           a cover on the glass is NOT REPAINTED AT ALL. The whole
+      //         block below is skipped and the four-level photograph the sleep left
+      //         there simply stays until the restored screen paints over it. The
+      //         waking message is given up, and so is the flash: the resync
+      //         handling goes with it, so Home takes the GC as it does today.
+      //
+      // FLIP IT IF THE ONE-BIT COVER READS BADLY -- and that is a real risk nobody
+      // has checked, because the MSB of a Floyd-Steinberg image is a threshold
+      // THROUGH a dithered picture, not a threshold of the original. The symptoms
+      // to flip on: the cover coming back as coarse blotches or bands where the
+      // sleep screen showed tone, a recognisable face or title going illegible, or
+      // the wake reading as a visible DEGRADING of the picture rather than as the
+      // same picture with words on it. Those are all "the rendition is wrong", and
+      // a photograph left alone beats a photograph made worse.
+      //
+      // Do NOT flip it for a slow or flashy wake: that is the resync branch above,
+      // whose own fallback is named there.
+      constexpr bool kWakePaintsCoverAsMono = true;
+
+      // ONE CALL, AND THE POINTER IS BOTH THE DECISION AND THE PICTURE. This used
+      // to ask only whether a cover WOULD be painted; it now also paints it, and
+      // asking twice would be two card reads and two chances to disagree.
+      //
+      // Everything it reads is live by here, and it was checked rather than
+      // assumed: bindFrameToDriver("boot") gave gFrame, loadAndApplySettings() set
+      // gSettings.sleepShows, and gStorageUsable took `storage` -- all three
+      // earlier in this same setup(), in that order. It refuses on any of them
+      // being missing rather than assuming them, so a reordering degrades to
+      // today's no-cover behaviour instead of misbehaving.
+      reader::CoverSource* const cover = sleepCoverForPaint();
+      const bool coverOnGlass = cover != nullptr;
+      if (coverOnGlass && !kWakePaintsCoverAsMono) {
+        // Leave the glass exactly as the sleep left it. No paint, so no baseline
+        // claim either way -- Home is the next thing the panel does, over a
+        // baseline nobody has asserted, which is the GC it would have taken anyway.
+        logf("[power] waking paint: skipped -- a cover is on the glass and it is kept\n");
+        logFlush();
+        mark("waking-skipped");
       } else {
-        // ...and the NEXT paint is the strong one. Home is a whole new screen over a
-        // baseline we have just admitted we do not know, so it takes the GC -- which
-        // is both the honest refresh and the one that clears anything the DU above got
-        // wrong. This is the flash a screen change is allowed to have.
-        display.requestResync();
+        if (!coverOnGlass) display.skipInitialResync();
+        reader::SleepViewModel vm = sleepVmFromCard(reader::kStatusWaking);
+        // WHICH SCREEN THIS IS, and it is the note's other half. COVER mode drops the
+        // badge for a sleeping screen because a full-bleed cover says "asleep" by
+        // itself; it cannot say "waking", so this puts the badge back -- and only the
+        // badge. See SleepViewModel::waking. Without it a COVER-mode wake would paint
+        // the cover with no message at all, which is the whole point of the paint.
+        vm.waking = true;
+        reader::SleepScreen scr(vm, cover);
+        // THE SHARED-BUS INVARIANT, and it is new on this path: with a cover the
+        // RENDER ITSELF reads the card, one packed row at a time, while the panel's
+        // CS is in play. Same guard paintSleepScreen and renderTop take, same reason.
+        SpiBusGuard bus;
+        gFrame->clear(true);
+        // ONE PASS, Plane::Bw, cover included -- which is the Msb plane, so this is
+        // the sleep screen's own picture at two levels rather than a different image.
+        scr.render(*gFrame, *gFonts, gTheme, reader::Plane::Bw);
+        gFrameContentsUnknown = true;
+        // FAST is what this ASKS for, and it is what it gets only in the no-cover
+        // case: a DU, so the badge's words change without a flash. In the cover case
+        // nothing has asserted a baseline, so displayStart sees !_oldPlaneValid,
+        // seeds DTM1 white and takes the GC regardless of the mode -- which is the
+        // clean clear a panel holding a photograph needs.
+        showOnePass(reader::RefreshMode::Fast);
+        if (coverOnGlass) {
+          // NOW it is true: the panel holds a frame we just wrote, and the boot
+          // clear budget has been spent on the paint that needed it.
+          display.skipInitialResync();
+        } else {
+          // ...and the NEXT paint is the strong one. Home is a whole new screen over a
+          // baseline we have just admitted we do not know, so it takes the GC -- which
+          // is both the honest refresh and the one that clears anything the DU above got
+          // wrong. This is the flash a screen change is allowed to have.
+          display.requestResync();
+        }
+        // NAMES THE COVER, because "the cover did not survive the wake" has two
+        // explanations that look identical on glass -- no usable cache to paint
+        // from, or a cache this paint refused -- and paintSleepScreen's own line
+        // makes the same distinction at the other end of the sleep.
+        logf("[power] waking paint: %s\n",
+             coverOnGlass
+                 ? "a cover is on the glass -- repainted in one bit, no baseline asserted"
+                 : "the card screen is on the glass -- DU over it");
+        logFlush();
+        mark("waking-painted");
       }
-      logf("[power] waking paint: %s\n",
-           coverOnGlass ? "a cover is on the glass -- clean clear, no baseline asserted"
-                        : "the card screen is on the glass -- DU over it");
-      logFlush();
-      mark("waking-painted");
     }
     // The root is Home, built from the shared catalogue. Nothing rebuilds it, so
     // popping back to Home returns this object with its focus intact.
