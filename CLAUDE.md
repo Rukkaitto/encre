@@ -1966,13 +1966,39 @@ the gauge's own SDA. So the shell polls `isCharging()` every 2 s while Home is o
 glass. The hazard is that the X3 has no charger IC, so `isCharging()` is
 `(int16_t)Current() > 0` -- **a bare sign test with no deadband** -- and plugged in at
 full charge is ~0 mA with a dithering sign, which is the state a device spends all
-night in. `BatteryTracker` answers it four ways: rising edges only (so unplugging is
-free, and the stale bolt is corrected by the next paint), a first reading that seeds
-without firing (so booting on the cable adds no refresh), a latch that clears only
-after **60 s of CONTINUOUS** not-charging (so a dither can never accumulate enough to
-re-arm it), and **three grants per session** as a backstop. It is in `core/` for
-`ProgressSaveGate`'s reason -- a latch with a dwell timer and a session cap, and
-`shell/` has no harness.
+night in. `BatteryTracker` answers it four ways: a rising edge (a plug-in), a first
+reading that seeds without firing (so booting on the cable adds no refresh), a latch
+that clears only after **60 s of CONTINUOUS** not-charging (so a dither can never
+accumulate enough to re-arm it), and **three grants per session** as a backstop. It
+is in `core/` for `ProgressSaveGate`'s reason -- a latch with a dwell timer and a
+session cap, and `shell/` has no harness.
+
+**UNPLUGGING NOW SPENDS A REFRESH TOO, AND IT DID NOT AT FIRST.** The original
+design fired on the rising edge only and left the falling edge free, on the stated
+argument that "the stale bolt is corrected by the next Home paint" -- which assumes
+a button press. Reported from an X3: the bolt appears correctly within ~2 s of
+plugging in and then **stays on glass indefinitely after unplugging**, because a
+reader sitting on Home reading nothing presses nothing, and nothing else repaints
+it. A false "charging" claim is the same defect class this project already refuses
+for an unread gauge (`-1`, not `0%`) and a book with no reading position (no demo
+substitute) -- a false claim is worse than an absent one, and this was one.
+
+The fix fires the repaint at the moment the **60 s dwell confirms the unplug**,
+rather than on the bare falling edge -- a plain falling edge would reintroduce
+exactly the flicker the latch exists to prevent, since the dithering sign trips it
+every few seconds at full charge. It needs no new constant: the dwell was already
+computed to decide whether to clear `latched_` and was simply not acted on. So
+`latched_` clearing and the clearing repaint are now the same event, gated the same
+way the rising edge always was.
+
+**THE GRANT BUDGET IS SHARED BY BOTH EDGES, NOT ONE EACH.** `latched_` clears
+UNCONDITIONALLY -- it tracks reality, and must not stay true just because the
+session ran out of repaint budget, or the next real plug-in would be wrongly
+refused as "already latched". Only the repaint itself is gated on
+`grants_ < kMaxGrantsPerSession`, from the same counter the rising edge spends, so
+**a full plug/unplug cycle can now cost up to two grants instead of one**. Accepted
+deliberately: three grants was already a backstop against a hardware quirk this
+project cannot bench-test, not a promise of exactly one refresh per cycle.
 
 **The poll needs no `SpiBusGuard`**, and that is what makes 2 s affordable: it is I2C
 on the sensor bus and cannot race a panel refresh. It is gated on

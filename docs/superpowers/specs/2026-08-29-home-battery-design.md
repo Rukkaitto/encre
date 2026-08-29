@@ -236,7 +236,7 @@ class BatteryTracker {
   void update(const BatteryReading& r, uint32_t nowMs);
   int  percent() const;         // -1 = never read
   bool charging() const;        // false until a chargingKnown reading arrives
-  bool takeRepaintRequest();    // true once per granted rising edge
+  bool takeRepaintRequest();    // true once per granted edge -- see below
 };
 ```
 
@@ -244,9 +244,8 @@ Behaviour, each clause doing a specific job:
 
 - **`percent()` is last-good.** A successful read replaces it; a failed read leaves it.
   `-1` only until the first success. `charging()` is last-known on the same rule.
-- **The repaint request fires on a rising edge only** — known-not-charging → charging.
-  Unplugging never spends a refresh; the stale bolt is corrected by the next Home
-  paint, which is the same guarantee the no-polling option would have given.
+- **The repaint request fires on a rising edge, and — see "The falling edge also
+  repaints now" below — on a CONFIRMED falling edge too.**
 - **A first reading seeds without firing.** Booting with the cable in must not add a
   refresh to a boot that is already painting Home. The edge requires a prior *known*
   not-charging state.
@@ -258,7 +257,42 @@ Behaviour, each clause doing a specific job:
 - **`kMaxGrantsPerSession` grants, then it stops asking.** `ProgressSaveGate`'s own
   idiom, and here it converts a hardware risk that cannot be characterised without a
   bench into a bounded one: at most three extra panel refreshes, ever, per awake
-  session.
+  session — **or, since the falling edge started spending grants too, up to three
+  refreshes however they split between the two edges.**
+
+### The falling edge also repaints now — CORRECTED 2026-08-29
+
+**This spec originally said the opposite, and it shipped that way first.** The
+bullet above read:
+
+> The repaint request fires on a rising edge only — known-not-charging → charging.
+> Unplugging never spends a refresh; the stale bolt is corrected by the next Home
+> paint, which is the same guarantee the no-polling option would have given.
+
+That assumed a button press would supply the "next Home paint." Reported from an
+X3 after this shipped: the bolt appears correctly within ~2 s of plugging in and
+then **stays on glass indefinitely after unplugging**, because a reader sitting on
+Home reading nothing presses nothing, and nothing else repaints it. A stale
+"charging" claim is the same defect class this project already refuses for an
+unread gauge (`-1`, not `0%`) and a book with no reading position — a false claim
+is worse than an absent one, and the original design produced one.
+
+**The fix fires the repaint at the moment the dwell CONFIRMS the unplug**, not on
+the bare falling edge itself. A plain falling edge would reintroduce exactly the
+flicker the latch exists to prevent — the dithering sign trips it every few
+seconds at full charge — so it needed the same anti-flap protection the rising
+edge already has. It needs **no new constant**: `kUnlatchMs` was already being
+computed to decide whether to clear `latched_`, and the clearing was simply not
+acted on. `latched_ = false` and the clearing repaint are now the same event.
+
+**`latched_` clears UNCONDITIONALLY; only the repaint is grant-gated.** The latch
+tracks reality and must not stay true just because the session ran out of repaint
+budget, or the next real plug-in would be wrongly refused as "already latched."
+The repaint itself is gated on and spends from the same `grants_ < 
+kMaxGrantsPerSession` budget the rising edge already used, so **a full plug/unplug
+cycle can now cost up to two grants instead of one** — accepted, since the cap was
+already a backstop against a hardware quirk this project cannot bench-test, not a
+promise of exactly one refresh per cycle.
 
 **Why the anti-flap machinery is needed at all.** On the X3 there is no charger IC
 (`chargerAddr == 0`), so charging is `(int16_t)Current() > 0` — **a bare sign test
