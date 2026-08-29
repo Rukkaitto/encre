@@ -37,7 +37,8 @@ target_compile_options(unit_tests PRIVATE ${READER_WARNINGS})
 target_compile_definitions(unit_tests PRIVATE
   ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
   GOLDEN_DIR="${CMAKE_SOURCE_DIR}/test/golden"
-  BUILD_DIR="${CMAKE_BINARY_DIR}")
+  BUILD_DIR="${CMAKE_BINARY_DIR}"
+  TEST_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/test/unit/fixtures")
 add_test(NAME unit COMMAND unit_tests)
 
 # The NAMES probe (3E): does a capitalisation-and-frequency heuristic yield a list
