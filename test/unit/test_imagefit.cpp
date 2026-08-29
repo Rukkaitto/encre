@@ -119,7 +119,7 @@ Planes streamed(const std::vector<uint8_t>& src, int sw, int sh, int pw, int ph,
     if (!emitted) continue;
     out.msb.insert(out.msb.end(), f.msbRow(), f.msbRow() + out.bytes);
     out.lsb.insert(out.lsb.end(), f.lsbRow(), f.lsbRow() + out.bytes);
-    CHECK(f.emittedRow() == out.rows);
+    CHECK(f.lastEmittedRow() == out.rows);
     ++out.rows;
   }
   CHECK(f.rowsEmitted() == out.rows);
@@ -191,8 +191,9 @@ TEST_CASE("fitCover crops for Fill and letterboxes for Whole") {
   CHECK(whole.dstX == 0);
   CHECK(whole.dstY == 40);  // centred, so there is a band above and below
 
-  // The squarest corpus cover, on the X4: Fill cuts its title off at both
-  // edges. 973 * 480 / 800 = 583.8 -> 584 of 877 columns, a 33.4% loss.
+  // The squarest cover in the corpus (see the census in reader/cover_fit.h),
+  // on the X4: Fill cuts its title off at both edges. 973 * 480 / 800 = 583.8
+  // -> 584 of 877 columns.
   const reader::FitBox sq = reader::fitCover(877, 973, 480, 800, reader::CoverFit::Fill);
   CHECK(sq.srcW == 584);
   CHECK(sq.srcH == 973);
@@ -202,7 +203,7 @@ TEST_CASE("fitCover crops for Fill and letterboxes for Whole") {
 TEST_CASE("Fill centres a HEIGHT crop at 0.4, not at 0.5") {
   // The only case the 0.4 exists for, and the one the panels reach least often:
   // a source relatively TALLER than the panel, so Fill crops rows rather than
-  // columns. 2 of 225 corpus covers on the X4, 18 of 225 on the X3.
+  // columns. How rare, per panel, is in the census in reader/cover_fit.h.
   //
   // 1000x2000 is 0.500 against the X4's 0.600, so the width binds and the crop
   // keeps 1000 * 800/480 = 1666.67 -> 1667 rows of 2000. 333 rows go, and 0.4
@@ -218,10 +219,11 @@ TEST_CASE("Fill centres a HEIGHT crop at 0.4, not at 0.5") {
 }
 
 TEST_CASE("fitCover never upscales, and Fill degrades to Whole-at-1:1") {
-  // 3 of 225 corpus covers are smaller than the X4 panel in some axis; the
-  // smallest is 400x662. A box filter cannot enlarge, and CoverFitter's one
-  // -source-row-to-one-destination-row streaming cannot either, so the box is
-  // clamped to the source rectangle and centred.
+  // A few corpus covers are smaller than a panel in some axis, the smallest of
+  // them 400x662 -- the counts are in the census in reader/cover_fit.h, and
+  // 400x662 is used here because it is that smallest one. A box filter cannot
+  // enlarge, and CoverFitter's one-source-row-to-one-destination-row streaming
+  // cannot either, so the box is clamped to the source rectangle and centred.
   const reader::FitBox small = reader::fitCover(400, 662, 480, 800, reader::CoverFit::Fill);
   CHECK(small.dstW <= 480);
   CHECK(small.dstH <= 800);
@@ -238,8 +240,8 @@ TEST_CASE("fitCover never upscales, and Fill degrades to Whole-at-1:1") {
   CHECK(smallWhole.dstX == 40);
   CHECK(smallWhole.dstY == 69);
 
-  // And the fitter serves it rather than refusing: a small cover is 1.3% of the
-  // corpus and a refusal there is a book with no cover at all.
+  // And the fitter serves it rather than refusing: a refusal here is a book
+  // with no cover at all.
   const std::vector<uint8_t> px = ramp(400, 662);
   reader::CoverFitter f;
   REQUIRE(f.begin(400, 662, 480, 800, reader::CoverFit::Whole));
@@ -467,6 +469,52 @@ TEST_CASE("no destination column is left without a source pixel") {
   }
 }
 
+TEST_CASE("a cell that takes more than 65535 samples still averages correctly") {
+  // WHY count_ IS uint32_t AND WAS uint16_t. A cell takes about
+  // (srcW / dstW) * (srcH / dstH) samples. A JPEG cannot make that overflow 16
+  // bits -- its dimensions are 16-bit -- but PNG's IHDR width is 31 bits and
+  // pngd.cpp deliberately imposes no cap, so the wrap is reachable off a real
+  // card.
+  //
+  // A 1x1 destination is the cheapest way to reach it: every source pixel lands
+  // in one cell, so 300x300 is 90,000 samples where uint16_t holds 65,535. It
+  // wrapped to 24,464, which made the mean 735 instead of 200 -- clamped to the
+  // lightest level, so a mid-grey field came out as PAPER. That is the failure
+  // this case pins, and it is a wrong PICTURE rather than a crash, which is why
+  // no other test here noticed.
+  const int side = 300;
+  const std::vector<uint8_t> flat(static_cast<size_t>(side) * side, 200);
+  reader::CoverFitter f;
+  REQUIRE(f.begin(side, side, 1, 1, reader::CoverFit::Fill));
+  REQUIRE(f.box().dstW == 1);
+  REQUIRE(f.box().dstH == 1);
+  REQUIRE(f.box().srcW == side);
+  REQUIRE(f.box().srcH == side);
+
+  bool emitted = false;
+  for (int y = 0; y < side; ++y)
+    REQUIRE(f.addRow(flat.data() + static_cast<size_t>(y) * side, emitted));
+  REQUIRE(emitted);
+  REQUIRE(f.rowsEmitted() == 1);
+  // Grey 200 quantises to 170, which is level 1: lsb inked, msb paper.
+  CHECK((f.msbRow()[0] & 0x80u) != 0);
+  CHECK((f.lsbRow()[0] & 0x80u) == 0);
+}
+
+TEST_CASE("a ratio that could overflow the accumulator is refused, not wrapped") {
+  // acc_ is uint32_t and a sample is at most 255, so a cell may take at most
+  // (2^32 - 1) / 255 = 16,843,009 of them. begin() refuses beyond that rather
+  // than summing modulo 2^32, which would be a wrong mean and therefore a wrong
+  // picture. 5000x5000 into 1x1 is 25 M samples in the single cell.
+  reader::CoverFitter f;
+  CHECK_FALSE(f.begin(5000, 5000, 1, 1, reader::CoverFit::Fill));
+  // Just inside is served: 4000x4000 is 16.0 M.
+  CHECK(f.begin(4000, 4000, 1, 1, reader::CoverFit::Fill));
+  // And nothing shaped like a cover is anywhere near -- 1400x2100 into 480x800
+  // is 3 x 3 = 9 samples a cell.
+  CHECK(f.begin(1400, 2100, 480, 800, reader::CoverFit::Fill));
+}
+
 TEST_CASE("CoverFitter refuses a geometry it cannot serve, and never aborts") {
   reader::CoverFitter f;
   bool emitted = true;
@@ -474,7 +522,7 @@ TEST_CASE("CoverFitter refuses a geometry it cannot serve, and never aborts") {
   CHECK_FALSE(f.addRow(nullptr, emitted));
   CHECK_FALSE(emitted);
   CHECK(f.rowsEmitted() == 0);
-  CHECK(f.emittedRow() == -1);
+  CHECK(f.lastEmittedRow() == -1);
 
   CHECK_FALSE(f.begin(0, 100, 480, 800, reader::CoverFit::Fill));
   CHECK_FALSE(f.begin(100, 0, 480, 800, reader::CoverFit::Fill));

@@ -54,7 +54,8 @@ FitBox fitCover(int srcW, int srcH, int panelW, int panelH, CoverFit fit) {
     b.dstH = panelH;
     if (srcSpread > panelSpread) {
       // The source is relatively WIDER, so the height fits and the width is cut.
-      // This is 223 of 225 corpus covers on the X4 and 207 on the X3.
+      // This is the overwhelmingly common case on both panels; the census in
+      // reader/cover_fit.h has the split.
       b.srcW = clampInt(mulDivRound(sh, pw, ph), 1, srcW);
       b.srcX = (srcW - b.srcW) / 2;
     } else if (srcSpread < panelSpread) {
@@ -67,7 +68,8 @@ FitBox fitCover(int srcW, int srcH, int panelW, int panelH, CoverFit fit) {
       b.srcY = static_cast<int>((lost * 4 + 5) / 10);
     }
     // An exactly-matching aspect crops neither, which is the X3 with a 2:3
-    // cover -- 160 of 225 books, where this whole setting is a no-op.
+    // cover -- most of the corpus, where this whole setting is a no-op. The
+    // count is in the census in reader/cover_fit.h.
   } else {
     // CONTAIN: the source is whole and the DESTINATION gives way, leaving bands
     // for the caller to tint.
@@ -82,14 +84,25 @@ FitBox fitCover(int srcW, int srcH, int panelW, int panelH, CoverFit fit) {
 
   // NEVER UPSCALE, and the header says why it is a hard property rather than a
   // preference: a box filter cannot enlarge, and CoverFitter's one-source-row-
-  // to-one-destination-row streaming cannot either. Measured, 3 of 225 corpus
-  // covers reach this on the X4 and 4 on the X3; the smallest is 400x662.
+  // to-one-destination-row streaming cannot either. How few covers reach this
+  // is in the census in reader/cover_fit.h.
   if (b.dstW > b.srcW || b.dstH > b.srcH) {
     b.dstW = b.srcW;
     b.dstH = b.srcH;
   }
   // Centred last, so it is stated once for every branch above. A Fill that was
   // not clamped lands at (0, 0) by construction, since dstW == panelW there.
+  //
+  // THIS ROUNDS DOWN AND text.h's centreIn ROUNDS UP, deliberately, and the
+  // next person to place something against box().dstX needs to know before they
+  // reach for the shared one. centreIn is `(slack + 1) / 2` because the boards
+  // are rasterised by Chrome and Chrome rounds a half-pixel offset up; matching
+  // it is what keeps a centred label on the pixel the board put it on. This is
+  // not chrome -- it is where a photograph lands -- so there is no board to
+  // agree with, and plain halving is the unsurprising answer. They differ by a
+  // pixel whenever the slack is odd, which is about two combinations in five,
+  // so a caption centred with centreIn over a box placed with this will sit a
+  // pixel off unless it is centred on box().dstX + box().dstW / 2 instead.
   b.dstX = (panelW - b.dstW) / 2;
   b.dstY = (panelH - b.dstH) / 2;
   return b;
@@ -112,6 +125,43 @@ bool CoverFitter::begin(int srcW, int srcH, int panelW, int panelH, CoverFit fit
   // fitCover guarantees this; asserting it here is what lets addRow below say
   // "a source row completes at most one destination row" without a loop.
   if (b.dstW > b.srcW || b.dstH > b.srcH) return false;
+  // AND THIS ONE IS MEMORY SAFETY, NOT CORRECTNESS, which is why it is a guard
+  // and not a comment. emitRow() writes bit `0x80 >> ((dstX + c) & 7)` into
+  // byte `(dstX + c) >> 3` of a (panelW + 7) / 8 buffer, so what keeps it in
+  // bounds is exactly this -- and until now that was argued four rounding
+  // branches deep inside fitCover and swept by a test, which is evidence about
+  // today's fitCover rather than a guarantee about tomorrow's.
+  //
+  // DELETING IT FAILS NOTHING, and that is written down rather than left to be
+  // rediscovered -- the THIRD such guard in this file, after `: 255` in
+  // emitRow() and the `dstRow_ >= dstH` early-out in addRow(). It cannot fire
+  // while fitCover clamps dstW to at most panelW and centres with a
+  // non-negative slack, which the 294-shape sweep in test_imagefit.cpp checks
+  // directly. There is no way to make it bite without injecting a bad FitBox,
+  // and begin() computes its own. It is here so that a rounding slip in
+  // fitCover becomes a refused cover instead of a write past the end of a
+  // plane row.
+  if (b.dstX < 0 || b.dstX + b.dstW > panelW) return false;
+  // THE ACCUMULATOR'S RANGE, refused rather than wrapped. A cell takes at most
+  // ceil(srcW / dstW) * ceil(srcH / dstH) samples of at most 255 each, and acc_
+  // is uint32_t, so a geometry whose worst cell could exceed that is refused
+  // here instead of silently summing modulo 2^32. Nothing shaped like a book
+  // cover comes near it -- 1400x2100 into 480x800 is 9 samples a cell -- and
+  // PNG's 31-bit dimensions with no cap upstream are what make it reachable at
+  // all. See the members' note in the header for the JPEG/PNG asymmetry.
+  //
+  // The ceilings are `(a - 1) / b + 1` rather than `(a + b - 1) / b` so both
+  // stay in 32 bits: every value here is at least 1, so no addition can
+  // overflow, and RV32IMC HAS a 32-bit divider. The obvious spelling promoted
+  // to long long and put two `__divdi3` calls into begin() -- once per cover
+  // rather than per pixel, so it cost nothing measurable, but adding them back
+  // in the change that removes them from addRow is not a thing to do by
+  // accident. Only the PRODUCT needs 64 bits.
+  {
+    const int perCol = (b.srcW - 1) / b.dstW + 1;
+    const int perRow = (b.srcH - 1) / b.dstH + 1;
+    if (static_cast<long long>(perCol) * perRow > 16843009LL) return false;  // (2^32 - 1) / 255
+  }
 
   const int planeBytes = (panelW + 7) / 8;
   // A NOTHROW PRE-FLIGHT, because the members are std::vector and a resize that
@@ -173,10 +223,41 @@ bool CoverFitter::addRow(const uint8_t* src, bool& emitted) {
   // The box filter: every source pixel is added to the one destination cell it
   // lands in. `dstW <= srcW` (fitCover's clamp) makes the map onto 0..dstW-1
   // surjective, so no destination column can end up with an empty accumulator.
+  //
+  // THE COLUMN IS STEPPED, NOT DIVIDED, AND THAT IS A DEVICE FACT NO DESKTOP
+  // MEASUREMENT CAN SEE. The obvious spelling of this map is
+  //
+  //     const int dc = static_cast<int>(static_cast<long long>(j) * dstW / srcW);
+  //
+  // and on x86-64 it is one hardware `idiv`, benchmarked at 3.19 ms a cover
+  // against 3.19 for the form below -- no difference at all. RV32IMC HAS NO
+  // 64-BIT DIVIDER. Compiled with the project's own toolchain
+  // (riscv32-esp-elf-g++ -Os) that line emitted `mulh`/`mul` and a
+  // `call __divdi3` INSIDE the per-pixel loop body -- a libgcc shift-subtract
+  // routine, ~100-200 cycles, run once for every source pixel. A median cover
+  // cropped to the X4 is ~2.65 M source pixels, so 1.7-3.3 s at 160 MHz in that
+  // one call.
+  //
+  // This is the project's desktop-to-device ratio trap in a new place, and the
+  // sharpest version of it yet: the ratio here is not 37x or 135x, it is
+  // infinite, because the desktop cost is zero. `kEagerCountBytes` has the
+  // same note for the same reason.
+  //
+  // The step is bit-identical rather than approximate. `dstW <= srcW` means
+  // `j * dstW / srcW` advances by 0 or 1 per pixel, so carrying the remainder
+  // reproduces the floor exactly -- `rem` is `(j * dstW) % srcW` by
+  // construction. Verified over the whole test suite: not one output bit moved.
+  //
+  // The row map below keeps the divide. It runs once per source ROW.
+  int dc = 0, rem = 0;
   for (int j = 0; j < box_.srcW; ++j) {
-    const int dc = static_cast<int>(static_cast<long long>(j) * box_.dstW / box_.srcW);
     acc_[static_cast<size_t>(dc)] += row[j];
     count_[static_cast<size_t>(dc)] += 1u;
+    rem += box_.dstW;
+    if (rem >= box_.srcW) {
+      rem -= box_.srcW;
+      ++dc;
+    }
   }
 
   // A destination row is finished when the NEXT source row would land past it,
@@ -213,6 +294,16 @@ void CoverFitter::emitRow() {
   //             term waits one iteration.
   // The 3/16 goes to err_[c-1], which was reset one iteration ago and is
   // therefore already the next row's -- no delay needed.
+  //
+  // AT BOTH ENDS OF A ROW THE OVERHANGING TERMS ARE DROPPED, and that is the
+  // right answer rather than an omission. Both scalars are re-initialised per
+  // row, so the last column's 7/16 and 1/16 fall off the right edge; the
+  // `c > 0` guard eats the first column's 3/16 off the left. Folding them back
+  // instead -- adding them to the last or first column of the same row -- would
+  // put a whole row's accumulated slack into one edge column, which reads as a
+  // seam running down the side of the cover. The reference implementation in
+  // test_imagefit.cpp drops them with the identical `x + 1 < dstW` and `x > 0`
+  // guards, so the two agree by construction and not by coincidence.
   //
   // int16_t IS ENOUGH, and it is a fixed point rather than an estimate. Let M
   // bound |e| over a row. Only 15/16 of an error leaves a pixel, split 9/16

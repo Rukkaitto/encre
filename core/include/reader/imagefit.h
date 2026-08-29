@@ -23,9 +23,9 @@ struct FitBox {
 // VERTICAL CENTRING FOR Fill IS AT 0.4 RATHER THAN 0.5, because a cover's title
 // band sits low and an evenly centred crop eats it from the bottom. It applies
 // only when Fill crops the HEIGHT, which is to say only when the source is
-// relatively TALLER than the panel: 2 of 225 corpus covers on the X4 (0.600)
-// and 18 of 225 on the X3 (0.667). A minority case, kept because it is one
-// subtraction and because those are exactly the covers a symmetric crop hurts.
+// relatively TALLER than the panel -- a minority of the corpus, counted in the
+// census in reader/cover_fit.h. Kept because it is one subtraction and because
+// those are exactly the covers a symmetric crop hurts.
 //
 // IT NEVER UPSCALES, and that is a property CoverFitter depends on rather than
 // a taste. A box filter cannot enlarge -- it would be nearest-neighbour
@@ -33,8 +33,8 @@ struct FitBox {
 // destination row, so a destination taller than its source would need a single
 // addRow() to complete several rows, which the interface below cannot express.
 // So a source rectangle smaller than the panel keeps its own size, centred, and
-// Fill degrades to Whole-at-1:1. Measured: that is 3 of 225 corpus covers on
-// the X4 and 4 of 225 on the X3 -- the smallest is 400x662.
+// Fill degrades to Whole-at-1:1. How rare that is, and how small the smallest
+// corpus cover is, are in the census in reader/cover_fit.h.
 FitBox fitCover(int srcW, int srcH, int panelW, int panelH, CoverFit fit);
 
 // TURNS SOURCE ROWS INTO TWO 1-BIT PLANE ROWS, IN ORDER, HOLDING NEITHER IMAGE.
@@ -111,7 +111,13 @@ class CoverFitter {
   const uint8_t* lsbRow() const { return lsb_.empty() ? nullptr : lsb_.data(); }
   // Which destination row was just emitted, RELATIVE to box().dstY: 0 is the
   // first row of the cover, not the first row of the panel. -1 before any.
-  int emittedRow() const { return dstRow_ - 1; }
+  //
+  // NOT `emittedRow()`, which is what this was called: beside `rowsEmitted()`
+  // the two differed only in word order, one is an INDEX and the other a COUNT,
+  // and they are always exactly one apart -- so transposing them at a call site
+  // is an off-by-one the compiler cannot see. The names carry the distinction
+  // now.
+  int lastEmittedRow() const { return dstRow_ - 1; }
 
   // Destination rows emitted so far. Equal to box().dstH when the source is
   // spent.
@@ -124,8 +130,23 @@ class CoverFitter {
   int planeBytes_ = 0;
   int srcH_ = 0;
   int srcRow_ = 0, dstRow_ = 0;
-  std::vector<uint32_t> acc_;    // per destination column: summed grey
-  std::vector<uint16_t> count_;  // per destination column: source pixels summed
+  // PER DESTINATION COLUMN: the summed grey, and how many source pixels went
+  // into it. The widths are bounded rather than assumed, which err_'s note
+  // below already was and these two were not.
+  //
+  // `count_` HOLDS ROUGHLY (srcW / dstW) * (srcH / dstH), and it was uint16_t.
+  // A JPEG cannot overflow that -- its dimensions are 16-bit, so the worst is
+  // about 6.6 K -- but PNG's IHDR width is 31 bits and pngd.cpp caps it
+  // DELIBERATELY NOWHERE ("there is no arbitrary cap: what refuses an image too
+  // wide to hold is the allocation failing"). So a 2,000,000 x 100 PNG fitted
+  // Whole gives a 480 x 1 box and 416,600 samples a cell: a silent wrap, and
+  // then a wrong mean or a white stripe. uint32_t holds 4.29e9 of them.
+  //
+  // `acc_` is then bounded by count_ * 255, and begin() REFUSES a geometry
+  // whose worst cell could exceed that -- see the guard there, which is what
+  // keeps this a stated bound instead of a hope.
+  std::vector<uint32_t> acc_;
+  std::vector<uint32_t> count_;
   std::vector<int16_t> err_;     // the carried Floyd-Steinberg error row
   std::vector<uint8_t> msb_, lsb_;
 };
