@@ -134,7 +134,8 @@ namespace detail {
 // `metaExtra` goes inside <metadata>, `itemExtra` inside <manifest>. Everything else
 // is one book, so the fixtures differ only where they mean to.
 inline std::string assemble(const std::string& metaExtra, const std::string& itemExtra,
-                            std::string_view coverBytes, bool withCoverEntry) {
+                            std::string_view coverBytes, bool withCoverEntry,
+                            bool deflateCover = false) {
   const std::string container =
       "<?xml version=\"1.0\"?>"
       "<container version=\"1.0\" "
@@ -166,7 +167,7 @@ inline std::string assemble(const std::string& metaExtra, const std::string& ite
       {"OEBPS/ch2.xhtml", "<html><body><p>Two.</p></body></html>", true},
   };
   if (withCoverEntry)
-    entries.push_back({std::string(kCoverEntry), std::string(coverBytes), false});
+    entries.push_back({std::string(kCoverEntry), std::string(coverBytes), deflateCover});
   return buildZip(entries);
 }
 
@@ -276,6 +277,22 @@ inline std::string withCoverIdUnresolved() {
 inline std::string withCoverImage(const std::string& bytes) {
   return detail::assemble("<meta name=\"cover\" content=\"cover-img\"/>",
                           detail::coverItem(""), bytes, true);
+}
+
+// THE SAME BOOK WITH THE COVER DEFLATED, method 8, which is the MAJORITY CASE FOR
+// JPEG: 59% of the corpus's JPEG covers are compressed inside the zip, against 38
+// of 39 PNGs stored. So the stored fixture above is the common shape for one
+// format and the rare one for the other, and a decoder driven only through it
+// would never once put the zip's inflater under the image decoder -- which is the
+// path that holds TWO windows on device and the only one that can run out of
+// memory.
+//
+// The entry is stored-block DEFLATE (see storedDeflate above), so it is a valid
+// method-8 entry with no compressor: what this exercises is the inflate PATH, not
+// a Huffman table.
+inline std::string withDeflatedCoverImage(const std::string& bytes) {
+  return detail::assemble("<meta name=\"cover\" content=\"cover-img\"/>",
+                          detail::coverItem(""), bytes, true, true);
 }
 
 }  // namespace epubbuild
