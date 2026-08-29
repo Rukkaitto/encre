@@ -90,6 +90,24 @@ screen's threshold-at-128 count is not comparable to a 1-bit screen's, so one
 number cannot gate both. That is its own piece of work and this design does not
 claim to have done it.
 
+## Added after the original design: conventions
+
+A fourth job, `conventions`, on PRs only. Conventional Commits with the eleven
+standard types and a free-form scope, checked on **every commit a PR adds**
+(all three merge methods are enabled here, so commits really do reach `main`
+and validating only the PR title would leave a hole). Branch names take
+git-flow's vocabulary **plus `claude/`**, because Claude Code names its own
+branches and a pattern without it rejects every agent branch.
+
+**There is no `develop` branch and this does not invent one.** Full git flow is
+a change to how the project is developed, not a CI check.
+
+`tools/check_conventions.py` is the one implementation, run by CI, by
+`make conventions`, and by two hooks in `.githooks/` that `make hooks` installs.
+**Branch protection is unavailable on this repo** (`403: Upgrade to GitHub Pro
+or make this repository public`), so the CI job cannot be a required status
+check and the hooks are what actually stop anything today.
+
 ## What is deliberately not here
 
 - **No `-Werror`.** CMakeLists.txt states the reason: a newer compiler must not
