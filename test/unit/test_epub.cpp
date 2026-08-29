@@ -1,7 +1,9 @@
 #include <cstring>
+#include <memory>
 #include <string>
 
 #include "doctest.h"
+#include "epub_builder.h"
 #include "epub_fixtures.h"
 #include "fake_fs.h"
 #include "reader/epub.h"
@@ -179,4 +181,41 @@ TEST_CASE("every truncation of a good EPUB is survivable") {
     CHECK_FALSE(e.chapters().empty());
     for (const auto& c : e.chapters()) CHECK(z.find(c.path) != nullptr);
   }
+}
+
+TEST_CASE("a second open() over the same Epub keeps nothing from the first book") {
+  // fail("") IS THE RESET, and it is what open() begins with -- so this covers the
+  // success path too, not only a refusal.
+  //
+  // It cleared the metadata and the chapters and NOT the three fields noted during
+  // the OPF walk, so an Epub reused over a second book reported the FIRST book's NCX
+  // and stylesheets. Nothing in the firmware reuses one today -- openBook builds a
+  // local -- which is exactly why this needs a test rather than a caller: it can
+  // regress with nothing to notice, and adding a cover field that behaved either way
+  // would have made the inconsistency structural.
+  FakeFileSystem fs;
+  REQUIRE(fs.writeAll("/rich.epub", epubbuild::withEverythingNoted()));
+  REQUIRE(fs.writeAll("/plain.epub", epubbuild::minimalEpub()));
+
+  reader::Epub epub;  // ONE Epub, opened twice. That is the whole test.
+
+  std::unique_ptr<reader::FileHandle> rich = fs.openRead("/rich.epub");
+  REQUIRE(rich != nullptr);
+  reader::Zip zr;
+  REQUIRE(zr.open(*rich));
+  REQUIRE(epub.open(*rich, zr));
+  REQUIRE(epub.tocPath() == "OEBPS/toc.ncx");
+  REQUIRE(epub.cssPaths().size() == 1);
+  REQUIRE(epub.coverPath() == "OEBPS/images/cover.jpg");
+
+  std::unique_ptr<reader::FileHandle> plain = fs.openRead("/plain.epub");
+  REQUIRE(plain != nullptr);
+  reader::Zip zp;
+  REQUIRE(zp.open(*plain));
+  REQUIRE(epub.open(*plain, zp));
+  // The second book declares none of the three. Every one of these was the first
+  // book's answer before fail() cleared them.
+  CHECK(epub.tocPath().empty());
+  CHECK(epub.cssPaths().empty());
+  CHECK(epub.coverPath().empty());
 }

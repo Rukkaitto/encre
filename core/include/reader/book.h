@@ -91,30 +91,31 @@ struct OpenedBook {
   // Where chapter `i` is, for a ChapterReader. An unreadable or out-of-range index
   // yields a location with no size, which ChapterReader refuses.
   ChapterLocation locate(int i) const {
+    if (i < 0 || i >= chapterCount()) return ChapterLocation{};
+    return locationOf(chapters[static_cast<size_t>(i)]);
+  }
+
+  // Where the cover is, for a decoder. A book with no cover yields a location with no
+  // size and no path -- which every consumer already treats as "there is nothing
+  // here", so nothing needs a special case for the commonest reason a cover does not
+  // appear.
+  ChapterLocation locateCover() const { return locationOf(cover); }
+
+ private:
+  // "REFUSES THE SAME WAY" WAS A CLAIM A COMMENT MADE, and it is one function now.
+  // locate() and locateCover() were the same five-field fill with the same
+  // readable() gate written twice, which is this project's own second-copy rule
+  // arriving one copy late again -- and the failure mode is precise: a span that
+  // reported a path with no size, or a size with no path, would be refused by some
+  // consumers and not others.
+  ChapterLocation locationOf(const ChapterSpan& c) const {
     ChapterLocation out;
-    if (i < 0 || i >= chapterCount()) return out;
-    const ChapterSpan& c = chapters[static_cast<size_t>(i)];
     if (!c.readable()) return out;
     out.bookPath = path;
     out.localHeaderOffset = c.localHeaderOffset;
     out.uncompressedSize = c.uncompressedSize;
     out.compressedSize = c.compressedSize;
     out.deflated = c.deflated;
-    return out;
-  }
-
-  // Where the cover is, for a decoder. Mirrors locate() and refuses the same way: a
-  // book with no cover yields a location with no size and no path, which every
-  // consumer already treats as "there is nothing here" -- so a caller needs no
-  // special case for the commonest reason a cover does not appear.
-  ChapterLocation locateCover() const {
-    ChapterLocation out;
-    if (!cover.readable()) return out;
-    out.bookPath = path;
-    out.localHeaderOffset = cover.localHeaderOffset;
-    out.uncompressedSize = cover.uncompressedSize;
-    out.compressedSize = cover.compressedSize;
-    out.deflated = cover.deflated;
     return out;
   }
 };

@@ -61,9 +61,17 @@ class Epub {
   //
   // TWO ROUTES, BOTH IN THE WILD. `<meta name="cover" content="id">` is the EPUB 2
   // convention -- in no spec, and overwhelmingly the common one -- and an item with
-  // `properties="cover-image"` is EPUB 3's. The manifest's own declaration wins where
-  // a book carries both, the same precedence the spine's `toc` attribute gets over
-  // the NCX media type.
+  // `properties="cover-image"` is EPUB 3's.
+  //
+  // THE MANIFEST'S OWN DECLARATION WINS where a book carries both, because
+  // `cover-image` is NORMATIVE where `<meta name="cover">` is a bare convention that
+  // real books often point at the cover PAGE rather than the image.
+  //
+  // NOT the precedence the NCX uses -- that is the MIRROR of this one, and saying so
+  // here was wrong three times over. There the pointer-by-id (the spine's `toc`
+  // attribute) beats the property on the item (its media type); here the property on
+  // the item beats the pointer-by-id. Both calls are right and neither is evidence
+  // for the other.
   //
   // Resolved against the OPF's directory by the SAME resolveHref a spine href goes
   // through, so `images/cover.jpg` in `OEBPS/content.opf` is `OEBPS/images/cover.jpg`.

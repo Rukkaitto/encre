@@ -20,6 +20,7 @@
 // the NLEN complement, so a mis-framed block fails loudly rather than silently.
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace epubbuild {
@@ -121,18 +122,19 @@ inline std::string buildZip(const std::vector<ZipEntry>& entries) {
 // AND IT IS STORED, method 0, as a real EPUB's JPEG is: an already-compressed image
 // gains nothing from DEFLATE, and storing it here means `deflated == false` reaches
 // the span rather than being a value no fixture ever produces.
-inline const char* kCoverEntry = "OEBPS/images/cover.jpg";
+inline constexpr std::string_view kCoverEntry = "OEBPS/images/cover.jpg";
 
 // Not a JPEG. The fixtures that use it are about WHERE the cover is, and nothing on
 // this path decodes it -- withCoverImage() is for a caller with real bytes.
-inline const char* kFakeCoverBytes = "not really a jpeg, but bytes all the same";
+inline constexpr std::string_view kFakeCoverBytes =
+    "not really a jpeg, but bytes all the same";
 
 namespace detail {
 
 // `metaExtra` goes inside <metadata>, `itemExtra` inside <manifest>. Everything else
 // is one book, so the fixtures differ only where they mean to.
 inline std::string assemble(const std::string& metaExtra, const std::string& itemExtra,
-                            const std::string& coverBytes, bool withCoverEntry) {
+                            std::string_view coverBytes, bool withCoverEntry) {
   const std::string container =
       "<?xml version=\"1.0\"?>"
       "<container version=\"1.0\" "
@@ -163,7 +165,8 @@ inline std::string assemble(const std::string& metaExtra, const std::string& ite
       {"OEBPS/ch1.xhtml", "<html><body><p>One.</p></body></html>", true},
       {"OEBPS/ch2.xhtml", "<html><body><p>Two.</p></body></html>", true},
   };
-  if (withCoverEntry) entries.push_back({kCoverEntry, coverBytes, false});
+  if (withCoverEntry)
+    entries.push_back({std::string(kCoverEntry), std::string(coverBytes), false});
   return buildZip(entries);
 }
 
@@ -197,6 +200,18 @@ inline std::string withCoverProperties() {
                           true);
 }
 
+// The same list separated by a NEWLINE rather than a space. An XML attribute value
+// may hold any of the four whitespace characters, and xml.cpp copies attribute bytes
+// raw -- it does no attribute-value normalisation -- so a tokenizer that split on
+// ' ' alone would see one token, `svg\ncover-image`, and declare no cover.
+//
+// It exists because narrowing hasToken's whitespace set to space-only failed ZERO
+// assertions while every other cover fixture used a plain space.
+inline std::string withCoverPropertiesNewlineSeparated() {
+  return detail::assemble("", detail::coverItem("svg\ncover-image"), kFakeCoverBytes,
+                          true);
+}
+
 // A book whose only `cover-image` is a SUBSTRING of some other property. This is the
 // fixture that makes the token walk load-bearing: a `find()` matches it, and the book
 // declares no cover at all.
@@ -218,6 +233,23 @@ inline std::string withBothCoverRoutesDisagreeing() {
       "<meta name=\"cover\" content=\"cover-page\"/>",
       "<item id=\"cover-page\" href=\"ch2.xhtml\" media-type=\"application/xhtml+xml\"/>" +
           detail::coverItem("cover-image"),
+      kFakeCoverBytes, true);
+}
+
+// EVERY FIELD Epub NOTES DURING THE OPF WALK, all three at once: an NCX, a
+// stylesheet and a cover. Its opposite number is minimalEpub(), which declares none
+// of them -- the pair is what proves open() RESETS rather than accumulates.
+//
+// The NCX and the CSS are manifest-only, with no archive entry, and that is correct
+// rather than lazy: Epub::open validates the SPINE against the archive and nothing
+// else, so it notes both paths without reading either. Whoever reads them later
+// (loadToc, collectItalicClasses) opens the archive itself.
+inline std::string withEverythingNoted() {
+  return detail::assemble(
+      "<meta name=\"cover\" content=\"cover-img\"/>",
+      "<item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>"
+      "<item id=\"css\" href=\"style.css\" media-type=\"text/css\"/>" +
+          detail::coverItem(""),
       kFakeCoverBytes, true);
 }
 

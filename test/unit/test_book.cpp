@@ -326,7 +326,7 @@ TEST_CASE("openBook records where the cover is, by both OPF routes") {
   // `compressedSize > 0` -- which any entry in the archive satisfies. What says the
   // span points at the COVER and not at chapter one is its length and its storage
   // method: the fixture stores the image (method 0) as a real EPUB stores a JPEG.
-  const size_t coverLen = std::strlen(epubbuild::kFakeCoverBytes);
+  const size_t coverLen = epubbuild::kFakeCoverBytes.size();
 
   FakeFileSystem fs;
   put(fs, epubbuild::withCoverMetaTag());
@@ -414,10 +414,13 @@ TEST_CASE("a book with no cover opens normally and says it has none") {
 }
 
 TEST_CASE("where a book states both cover routes, the manifest's declaration wins") {
-  // Same precedence the spine's `toc` attribute gets over the NCX's media type: the
-  // formal statement over the conventional one. `properties="cover-image"` is EPUB 3
-  // saying which item IS the cover; `<meta name="cover">` is a convention that
-  // predates any spec saying so, and real books point it at the cover PAGE.
+  // `properties="cover-image"` is EPUB 3 saying NORMATIVELY which item IS the cover.
+  // `<meta name="cover">` is a convention that predates any spec saying so, and real
+  // books point it at the cover PAGE -- which is exactly the disagreement below.
+  //
+  // Deliberately NOT justified by the NCX's precedence, which is the mirror of this
+  // one: there the pointer-by-id wins over the property on the item, and here the
+  // property wins over the pointer-by-id.
   FakeFileSystem fs;
   put(fs, epubbuild::withBothCoverRoutesDisagreeing());
   OpenedBook book;
@@ -427,7 +430,7 @@ TEST_CASE("where a book states both cover routes, the manifest's declaration win
   // The image is stored and the decoy chapter is deflated, so this is the whole
   // question in one field.
   CHECK_FALSE(book.cover.deflated);
-  CHECK(book.cover.uncompressedSize == std::strlen(epubbuild::kFakeCoverBytes));
+  CHECK(book.cover.uncompressedSize == epubbuild::kFakeCoverBytes.size());
 }
 
 TEST_CASE("a cover the archive does not hold costs the book its cover and nothing else") {
@@ -461,10 +464,22 @@ TEST_CASE("an EPUB 3 properties list is matched token by token, never as a subst
   // `properties` is a SPACE-SEPARATED SET, so `not-cover-image` contains the token
   // this code looks for and declares none of it. A find() over the attribute passes
   // every other test in this file and adopts this book's image as its cover.
+  const char* why = "";
+
   FakeFileSystem fs;
   put(fs, epubbuild::withCoverPropertiesLookalike());
   OpenedBook book;
-  const char* why = "";
   REQUIRE_MESSAGE(reader::openBook(fs, "/books/book.epub", book, &why), std::string(why));
   CHECK_FALSE(book.cover.readable());
+
+  // ...AND THE SEPARATOR IS NOT ALWAYS A SPACE. All four XML whitespace characters
+  // may separate the tokens, and xml.cpp copies attribute bytes raw with no
+  // attribute-value normalisation, so a newline really does reach this code. Splitting
+  // on ' ' alone sees `svg\ncover-image` -- one token, and no cover.
+  FakeFileSystem nl;
+  put(nl, epubbuild::withCoverPropertiesNewlineSeparated());
+  OpenedBook wrapped;
+  REQUIRE_MESSAGE(reader::openBook(nl, "/books/book.epub", wrapped, &why), std::string(why));
+  CHECK(wrapped.cover.readable());
+  CHECK(wrapped.cover.uncompressedSize == epubbuild::kFakeCoverBytes.size());
 }

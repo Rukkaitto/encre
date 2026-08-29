@@ -198,10 +198,14 @@ bool Epub::open(FileHandle& file, Zip& zip) {
           // the device -- for a fact this walk already has in its hand.
           //
           // EPUB 3's ROUTE, and it wins over the EPUB 2 one resolved below: this is
-          // the manifest declaring which of its items IS the cover, where
-          // `<meta name="cover">` is a convention that predates any spec saying so.
-          // Same precedence the NCX already uses -- the formal statement over the
-          // conventional one.
+          // the manifest declaring which of its items IS the cover, and it is
+          // NORMATIVE, where `<meta name="cover">` is a convention that predates any
+          // spec saying so and that real books often point at the cover PAGE.
+          //
+          // THE OPPOSITE WAY ROUND FROM THE NCX ABOVE, which is worth stating because
+          // the two sit ten lines apart and the analogy reads as obvious and is
+          // inverted: the NCX lets the pointer-by-id (the spine's `toc`) beat the
+          // property on the item (its media type). Here the property wins.
           // FIRST WINS, spelled as the NCX line above spells it. A manifest with two
           // cover-image items is malformed either way; what matters is that the two
           // noted-in-passing fields next to each other do not answer that differently.
