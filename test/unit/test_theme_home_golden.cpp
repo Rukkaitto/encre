@@ -191,6 +191,22 @@ TEST_CASE("an unknown charge draws the mark alone, with the mark still on the ma
     const int numberX = iconLeft - reader::kBandGap - 20;
     CHECK(inkIn(known, numberX, 0, 20, bandH) > 0);
     CHECK(inkIn(unknown, numberX, 0, 20, bandH) == 0);
+
+    // BOTH AXES ARE INDEPENDENT, so "no percentage but charging" is reachable:
+    // BatteryTracker records percentKnown and chargingKnown separately, and a
+    // gauge really can answer one and fail the other. Bolt, and still no digits.
+    reader::HomeViewModel vm = sampleHome();
+    vm.batteryPercent = -1;
+    vm.batteryCharging = true;
+    reader::Framebuffer both(w, h);
+    theme.renderHome(both, ramp.fonts, vm, reader::Plane::Bw);
+    CHECK(inkIn(both, numberX, 0, 20, bandH) == 0);
+    // The mark is the CHARGING one: its columns differ from the idle render's.
+    int differing = 0;
+    for (int y = 0; y < bandH; ++y)
+      for (int x = iconLeft; x < iconLeft + reader::icons::kBattery.w; ++x)
+        if (both.getPixel(x, y) != unknown.getPixel(x, y)) ++differing;
+    CHECK(differing > 0);
   }
 }
 
