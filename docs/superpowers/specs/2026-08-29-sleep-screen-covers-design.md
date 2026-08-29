@@ -502,18 +502,60 @@ this project has been wrong by 8× that way once already.
 
 Every one falls back to `DETAILS` with the badge shown, and logs the reason.
 
-## The number this design turns on, and does not yet have
+## What a cover costs on the device — MEASURED 2026-08-29, X3
 
-**How long a 2.9 MP baseline JPEG takes to decode and downscale on a 160 MHz C3 with
-no FPU.** The estimate is 2–5 s and it is an estimate. This project's own rule is
-that a number deciding a design gets measured, and it has been burned twice by
-applying a *render* ratio to work that is SD-bound and inflate-bound — `kEagerCountBytes`
-was set 8× wrong that way.
+This section replaces "the number this design turns on, and does not yet have". Four
+corpus books spanning the cases, decoded at boot by `ENCRE_COVER_PROBE`, panel 528×792:
 
-**Measure it first.** If it lands far above the estimate the second paint arrives
-uncomfortably late and the approach is worth revisiting — most likely toward the
-rejected book-open path, which pays the same cost somewhere the user is already
-waiting.
+| cover | zip | source | scale | decode | peak heap |
+|---|---|---|--:|--:|--:|
+| JPEG | deflated | 1400×2100 | 1/2 | **3,074 ms** | 81,088 |
+| JPEG | stored | 1424×2048 | 1/2 | **2,987 ms** | 81,560 |
+| PNG | stored | 1600×2400 | 1/1 | **6,919 ms** | 81,796 |
+| PNG | deflated | 601×918 | 1/1 | **6,648 ms** | 120,248 |
+
+**The decision: PROCEED.** JPEG is ~3.0 s and is 81% of covers; PNG is 6.6–6.9 s, inside
+the "proceed but the cover lands late" band; nothing approaches the 15 s that would have
+sent this back to the book-open path.
+
+**PNG is 2.2× slower than JPEG on a SMALLER image**, which is the asymmetry the gate was
+split to see: JPEG gets TJpgDec's free IDCT halving, PNG has no scaled inflate and walks
+every source pixel. A single number would have been a JPEG number.
+
+### The heap is what the gate actually caught
+
+**Every case peaked 17–25 KB ABOVE its desktop measurement** — 81,088 against 63,560 for
+the deflated JPEG. That is this project's ratio trap in a third disguise: not "the desktop
+is faster", not "the desktop has an instruction the device lacks", but simply a different
+allocator. **A desktop heap figure is not a device heap figure, and this one under-predicted
+in the dangerous direction.**
+
+Against that, releasing only the chapter at sleep — which is what the implementation plan
+originally said — leaves:
+
+| the book was opened via | free at sleep | margin over an 81 KB peak |
+|---|--:|--:|
+| Home → CONTINUE | ~121 KB | ~40 KB |
+| **the Library, 203 books** | **~87 KB** | **~6 KB** |
+
+Six kilobytes, on the commonest way to open a book. And the failure would have been
+**silent**: `decodeCover` answers `OutOfMemory`, the sleep screen falls back to the reading
+card, and nothing looks broken — it would have read as "covers don't work for some books"
+and never been reported as a defect.
+
+**So the sleep path releases the whole `App`, not just the chapter.** This section's own
+sentence already said it — *sleep is the only moment in this firmware where freeing
+everything is free* — and the plan under-implemented it. After the first sleep paint
+nothing needs the `App`: the session record was written at navigation time, not here;
+`paintSleepScreen` bypasses `App` by design; and the next statement is a chip reset.
+Dropping it returns the Library's ~59 KB and takes the margin to **~65 KB**.
+
+It may also make the deflated PNG work rather than refuse — 120 KB against ~146 KB —
+which would narrow the stated limit rather than widen it. Not claimed until measured.
+
+**One incidental correction:** the device reported **173 KB free at boot**, where CLAUDE.md
+documents ~133 KB.
+
 
 ## Board card
 

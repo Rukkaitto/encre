@@ -2492,7 +2492,27 @@ git commit -m "shell: the sleep view model carries the mode, and nothing-open fo
     // get. Inflater::release() is the load-bearing call and
     // ChapterReader::inflateWindowHeld() is the only observation point that can see
     // the difference: held() and bytesRead() both go false either way.
-    if (reader::ReaderScreen* rs = readerOnStack()) rs->releaseChapter();
+    // RELEASE THE WHOLE APP, NOT JUST THE CHAPTER -- and the gate is why.
+    //
+    // Measured on the X3: a deflated JPEG peaks at 81,088 bytes, 17.5 KB ABOVE the
+    // desktop's 63,560 for the same work. Releasing only the chapter leaves ~87 KB
+    // when the book was opened through the LIBRARY (203 books, ~59 KB, resident
+    // under the Reader) -- a margin of about SIX kilobytes on the commonest way to
+    // open a book. And the failure would be silent: decodeCover answers OutOfMemory,
+    // the screen falls back to the reading card, and it reads as "covers don't work
+    // for some books" rather than as a defect anybody reports.
+    //
+    // Nothing needs the App after the first sleep paint. saveWhereWeAre wrote the
+    // session record at NAVIGATION time, not here; paintSleepScreen bypasses App by
+    // design (pushing SleepScreen would make the next wake restore INTO it); and the
+    // next statement is a chip reset. So this is the sentence the spec always
+    // carried -- sleep is the only moment where freeing everything is free -- finally
+    // spent. ~65 KB of margin instead of 6.
+    //
+    // Capture the screen NAME first: the log line below reads it, and by then there
+    // is no stack to ask.
+    const char* sleptFrom = reader::screenName(gApp->top().id());
+    gApp.reset();
     const reader::CoverResult r = decodeCoverToCache();
     logf("[cover] %s in %lums\n", reader::coverResultName(r), (unsigned long)elapsed);
     logFlush();
@@ -2507,6 +2527,18 @@ git commit -m "shell: the sleep view model carries the mode, and nothing-open fo
 - [ ] **Step 2: Wire the stop predicate**
 
 Pass `rawSamplesPending()` as `decodeCover`'s `stop`, so any button press abandons the decode and the device sleeps at once. An abandoned decode leaves `complete = 0` and is simply re-attempted next sleep.
+
+- [ ] **Step 2b: VERIFY THE RELEASE ON GLASS, because the desktop cannot**
+
+The `App` release is the change the gate forced, and its whole value is a heap figure
+no desktop test can produce. Re-run the probe build **after** Stage 2 lands and confirm
+from a real sleep — not from boot — that a deflated JPEG decodes with the book opened
+**through the Library** on a large card. That is the ~6 KB case; if it still refuses,
+the release did not free what it was supposed to and `[cover]` will say `OutOfMemory`.
+
+Also re-check the **deflated PNG**: at ~146 KB free its 120 KB peak should now fit, which
+would narrow the stated limit. **Do not claim that in the spec until it is measured** —
+the current text says "may", deliberately.
 
 - [ ] **Step 3: Check the ordering against `markSleeping`**
 
