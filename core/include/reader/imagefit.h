@@ -2,36 +2,14 @@
 #include <cstdint>
 #include <vector>
 
-namespace reader {
+// CoverFit LIVES IN ITS OWN LEAF, and that header says why at length: the
+// Settings screen has to name a fit, and settings.h is a leaf that already
+// refuses layout.h over exactly this cost. `<vector>` below is 72,845
+// preprocessed lines on its own, so a settings header reaching through this one
+// for an enum would undo that.
+#include "reader/cover_fit.h"
 
-// HOW A COVER IS FITTED TO A PANEL.
-//
-// Fill crops to the panel; Whole letterboxes and the caller tints the bands.
-//
-// THE MEASUREMENT BEHIND OFFERING BOTH, re-taken over the 225-book corpus while
-// writing this (tools/covers.py is Task 7's version of the same walk):
-//
-//   * 160 of 225 covers are 2:3 to within half a percent, so on the X3
-//     (528x792, 2:3 exactly) Fill loses NOTHING for 71% of books and the
-//     setting is a no-op there.
-//   * The aspects run 0.558 to 0.901, median 0.667. Only TWO are narrower than
-//     the X4's 0.600, so on the X4 a cover is almost always WIDER than the
-//     panel and Fill crops its WIDTH: the median 2:3 cover keeps 1260 of its
-//     1400 columns, a 10.0% loss.
-//   * The tail is what earns the setting -- the squarest corpus cover is
-//     877x973 and Fill cuts its title off at both edges, keeping 584 of 877
-//     columns: a 33.4% loss.
-//
-// THE PLAN'S OWN NUMBERS WERE RIGHT AND ITS AXES WERE NOT, and it is worth
-// recording which. It said the median 2:3 cover "loses 10.0% of its height" on
-// the X4 and that Whole leaves bands at the sides there. Both are the other
-// axis: the X4 is 3:5 = 0.600 and a 2:3 cover is 0.667, so the cover is
-// RELATIVELY WIDER than the panel -- Fill therefore crops width and Whole
-// leaves bands above and below. (10.0% is correct either way by coincidence of
-// these two ratios: 0.600 / 0.667 = 0.9, so Fill drops a tenth of the width and
-// Whole leaves a tenth of the height as band.) The test file records the
-// arithmetic; the assertions in the plan asserted the transpose.
-enum class CoverFit { Fill, Whole };
+namespace reader {
 
 // The rectangle the cover occupies inside the panel, and which source rectangle
 // maps onto it. Whole leaves bands; Fill leaves none and crops the source.
@@ -143,7 +121,7 @@ class CoverFitter {
   void emitRow();
 
   FitBox box_;
-  int panelW_ = 0, panelH_ = 0, planeBytes_ = 0;
+  int planeBytes_ = 0;
   int srcH_ = 0;
   int srcRow_ = 0, dstRow_ = 0;
   std::vector<uint32_t> acc_;    // per destination column: summed grey

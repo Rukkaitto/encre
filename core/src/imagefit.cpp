@@ -97,7 +97,7 @@ FitBox fitCover(int srcW, int srcH, int panelW, int panelH, CoverFit fit) {
 
 bool CoverFitter::begin(int srcW, int srcH, int panelW, int panelH, CoverFit fit) {
   box_ = FitBox{};
-  panelW_ = panelH_ = planeBytes_ = 0;
+  planeBytes_ = 0;
   srcH_ = 0;
   srcRow_ = dstRow_ = 0;
   acc_.clear();
@@ -120,8 +120,15 @@ bool CoverFitter::begin(int srcW, int srcH, int panelW, int panelH, CoverFit fit
   // the sum, taken and released immediately before the resizes, is not a proof
   // (an allocator could fail the second request having served the first) but it
   // turns a certain abort into a vanishingly unlikely one at a cost of ~4.3 KB
-  // held for the length of this function. The alternative is raw arrays in the
-  // header, which costs it <memory> and its status as a cheap leaf.
+  // held for the length of this function.
+  //
+  // THE VECTORS STAY BECAUSE NOTHING DEPENDS ON THIS HEADER BEING CHEAP -- the
+  // one thing that would have, the Settings screen, reaches CoverFit through
+  // reader/cover_fit.h instead. An earlier version of this comment justified
+  // them by saying raw arrays would cost the header <memory>; measured, that is
+  // backwards. `clang++ -std=c++20 -E`: <memory> is 38,447 preprocessed lines
+  // and <vector> is 72,845, so the alternative is HALF the weight, not more.
+  // The probe is here for the -fno-exceptions reason above and for no other.
   const size_t need = sizeof(uint32_t) * static_cast<size_t>(b.dstW) +
                       sizeof(uint16_t) * static_cast<size_t>(b.dstW) +
                       sizeof(int16_t) * static_cast<size_t>(b.dstW) +
@@ -132,8 +139,6 @@ bool CoverFitter::begin(int srcW, int srcH, int panelW, int panelH, CoverFit fit
   }
 
   box_ = b;
-  panelW_ = panelW;
-  panelH_ = panelH;
   planeBytes_ = planeBytes;
   srcH_ = srcH;
   acc_.assign(static_cast<size_t>(b.dstW), 0u);

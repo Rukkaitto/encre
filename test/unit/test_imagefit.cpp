@@ -250,18 +250,134 @@ TEST_CASE("fitCover never upscales, and Fill degrades to Whole-at-1:1") {
   CHECK(f.rowsEmitted() == 662);
 }
 
-TEST_CASE("every emitted level is 0..3 and the two planes agree on it") {
+namespace {
+
+// Read one destination row's levels back out of the two planes, exactly as
+// png.cpp's composeGray does it: an INKED plane counts 1, and the level is
+// (msb << 1) | lsb.
+void readLevels(const reader::CoverFitter& f, std::vector<int>& out) {
+  const reader::FitBox& b = f.box();
+  out.clear();
+  for (int x = 0; x < b.dstW; ++x) {
+    const int px = b.dstX + x;
+    const uint8_t bit = static_cast<uint8_t>(0x80u >> (px & 7));
+    const int m = (f.msbRow()[px >> 3] & bit) ? 0 : 1;
+    const int l = (f.lsbRow()[px >> 3] & bit) ? 0 : 1;
+    out.push_back((m << 1) | l);
+  }
+}
+
+// How far the fitted picture's mean tone sits from the source's, in grey units
+// of 255. A level L is grey 255 - 85L, so the two are directly comparable.
+double toneDrift(const std::vector<uint8_t>& px, int sw, int sh, int pw, int ph) {
+  reader::CoverFitter f;
+  REQUIRE(f.begin(sw, sh, pw, ph, reader::CoverFit::Fill));
+  const reader::FitBox b = f.box();
+  std::vector<int> levels;
+  long long ink = 0;
+  for (int y = 0; y < sh; ++y) {
+    bool emitted = false;
+    REQUIRE(f.addRow(px.data() + static_cast<size_t>(y) * sw, emitted));
+    if (!emitted) continue;
+    readLevels(f, levels);
+    for (int lv : levels) ink += lv;
+  }
+  long long srcSum = 0, srcN = 0;
+  for (int y = b.srcY; y < b.srcY + b.srcH; ++y)
+    for (int x = b.srcX; x < b.srcX + b.srcW; ++x) {
+      srcSum += px[static_cast<size_t>(y) * sw + x];
+      ++srcN;
+    }
+  const double outMean =
+      255.0 - 85.0 * (static_cast<double>(ink) /
+                      static_cast<double>(static_cast<long long>(b.dstW) * b.dstH));
+  return outMean - static_cast<double>(srcSum) / static_cast<double>(srcN);
+}
+
+}  // namespace
+
+TEST_CASE("the diffusion reaches all four levels") {
+  // THIS CASE WAS NAMED "every emitted level is 0..3 and the two planes agree on
+  // it" AND ASSERTED NEITHER -- it checked two row counts. The property in its
+  // name also cannot fail: a level is read back out of two bits, so it is in
+  // 0..3 by construction and one bit from each plane cannot disagree with
+  // itself. That is the "reports on less than it claims" shape CLAUDE.md records
+  // three times. What CAN fail is that the four levels are all USED: an
+  // implementation that thresholded instead of diffusing, or that clamped an
+  // index a step short, still draws a plausible gradient -- and is still
+  // byte-identical to a reference that made the same mistake.
   const std::vector<uint8_t> px = ramp(1400, 2100);
   reader::CoverFitter f;
   REQUIRE(f.begin(1400, 2100, 480, 800, reader::CoverFit::Fill));
+  long long seen[4] = {0, 0, 0, 0};
+  std::vector<int> levels;
   int rows = 0;
   for (int y = 0; y < 2100; ++y) {
     bool emitted = false;
     REQUIRE(f.addRow(px.data() + static_cast<size_t>(y) * 1400, emitted));
-    if (emitted) ++rows;
+    if (!emitted) continue;
+    ++rows;
+    readLevels(f, levels);
+    for (int lv : levels) ++seen[lv];
   }
   CHECK(rows == 800);
   CHECK(f.rowsEmitted() == 800);
+  for (int level = 0; level < 4; ++level) {
+    CAPTURE(level);
+    CHECK(seen[level] > 0);
+  }
+}
+
+TEST_CASE("no flat grey drifts more than one twenty-eighth of a level") {
+  // WHAT ERROR DIFFUSION IS FOR, and the one property that separates it from
+  // thresholding: the fitted picture must carry the SAME MEAN TONE as the
+  // source. A dropped term is a systematic bias, and a bias is invisible to
+  // every other test here -- the whole-image reference shares the arithmetic, so
+  // it agrees with a wrong implementation, and a picture with a bias still looks
+  // like a picture.
+  //
+  // A RAMP DOES NOT DISCRIMINATE, WHICH IS WHY THIS SWEEPS. Written first
+  // against the 1400x2100 ramp above, the drift was 0.14 correct and 0.18, -0.11
+  // and -0.11 under three different dropped terms -- a symmetric gradient's
+  // errors cancel whatever you do to them, so every mutation passed. A FLAT
+  // field near an extreme is where a lost term becomes a one-sided bias, because
+  // the quantiser clamps there and the error stops cancelling.
+  //
+  // AND THE BOUND IS SWEPT, NOT SAMPLED. Five hand-picked greys gave a worst of
+  // 1.72 and would have set the tolerance at 2.0; the full 256 say the worst
+  // legitimate drift is exactly 3.00, at grey 3, where every error term truncates
+  // toward zero before it can accumulate. A tolerance of 2.0 would have been a
+  // test that passed on its author's samples -- the trap CLAUDE.md records for
+  // previewLinesThatFit, which is also why that one walks its whole space.
+  //
+  // Measured, worst |drift| over all 256 flat fields:
+  //
+  //     correct                     3.00      drop the 3/16 term    10.00
+  //     drop the 1/16 term          5.00      drop the 5/16 term    15.00
+  //     drop the 7/16 term         20.00      reset the error row   24.00
+  //
+  // So 4.0 separates them with a third of a level of margin either side, and it
+  // is geometry-independent: 3.00 at grey 3 on 48x80, 96x160 and 480x800 alike.
+  // The small geometry is what the suite can afford 256 times.
+  //
+  // The box filter's rounding is NOT in that table because it does not move this
+  // number (3.00 either way) -- it is the reference comparison that catches it,
+  // with 32 assertions.
+  double worst = 0.0;
+  int worstAt = 0;
+  for (int grey = 0; grey <= 255; ++grey) {
+    const std::vector<uint8_t> flat(static_cast<size_t>(160) * 240,
+                                    static_cast<uint8_t>(grey));
+    double d = toneDrift(flat, 160, 240, 48, 80);
+    if (d < 0) d = -d;
+    if (d > worst) {
+      worst = d;
+      worstAt = grey;
+    }
+  }
+  CAPTURE(worstAt);
+  CAPTURE(worst);
+  CHECK(worst < 4.0);
 }
 
 TEST_CASE("a fit box is inside its panel and inside its source, for every shape") {
