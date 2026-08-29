@@ -49,12 +49,38 @@ struct SleepCoverHeader {
   int32_t planeBytes = 0;  // Framebuffer::sizeBytes() -- ONE plane
   uint32_t bookBytes = 0;  // the EPUB's size, the identity check
   int32_t complete = 0;    // written last; 0 means do not trust what follows
-  char bookPath[128] = {}; // NUL-padded; a longer path stores empty and never matches
+  // NUL-PADDED, AND ALWAYS TERMINATED -- an invariant sleepCoverUsable rests on,
+  // because it compares a std::string against this as a C string. Every route in
+  // maintains it: the default above zeroes all 128, setSleepCoverBookPath refuses
+  // anything that would not leave room for the terminator, and decode forces the
+  // last byte to NUL whatever the card said. A longer path stores EMPTY, and empty
+  // matches nothing.
+  char bookPath[128] = {};
 };
 
 // Fixed-size little-endian encoding, so the file does not depend on the compiler's
-// padding. 160 bytes.
-inline constexpr size_t kSleepCoverHeaderBytes = 160;
+// padding. 160 bytes: eight 32-bit fields, then the path.
+inline constexpr size_t kSleepCoverHeaderBytes =
+    8 * sizeof(uint32_t) + sizeof(SleepCoverHeader::bookPath);
+
+// TWO TRIPWIRES, AND THE FIRST ONE ALONE WAS NOT ENOUGH -- which was found by
+// mutation rather than by argument. Writing the constant as an expression over the
+// fields LOOKS derived and is only half of it: adding `int32_t extra` to the struct
+// changes neither `sizeof(bookPath)` nor the hand-written `8`, so the encoder would
+// silently keep writing 160 bytes of a 164-byte struct and the new field would
+// never reach the card. The mutation that proved that failed nothing at all.
+//
+// So the guard that bites is on the STRUCT's own size. It is deliberately not a
+// claim that the wire format equals the compiler's layout -- the whole point of
+// encoding byte at a time is that it does not. It is a claim that nobody adds,
+// removes or resizes a field without being made to look at encodeSleepCoverHeader,
+// kSleepCoverVersion and this line. Every member is a 32-bit scalar or a char
+// array, so 160 holds on any ABI this firmware is built for; an exotic one would
+// fail loudly here rather than write a subtly wrong file.
+static_assert(sizeof(SleepCoverHeader) == 160,
+              "a field changed: update encodeSleepCoverHeader, decodeSleepCoverHeader and "
+              "kSleepCoverHeaderBytes together, and bump kSleepCoverVersion");
+static_assert(kSleepCoverHeaderBytes == 160, "the wire format is 160 bytes and files exist");
 
 void encodeSleepCoverHeader(const SleepCoverHeader& h, uint8_t* out);
 
