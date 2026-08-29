@@ -607,11 +607,38 @@ progressively where Standard Ebooks and Gutenberg do not, so a limit that looks 
 in a public-domain corpus is visible on a real card. *Dune, tome 5* is the book that
 surfaced it.
 
-**It cannot be fixed in the decoder.** Progressive JPEG needs every DCT coefficient
-resident, because later scans refine earlier ones — there is no streaming form. That cover
-is 1440×2200 at 4:2:0: 4,757,760 coefficients, **9.5 MB against ~158 KB free — 60× short**.
-The obvious escape fails too: a progressive file's first scan *is* a 1/8-scale image, but
-that is 180×275 against a 528×792 panel and the fitter never upscales.
+**CORRECTED 2026-08-29 AFTER READING CROSSPOINT. What follows was wrong, and wrong in
+the worst way: it stated a DESIGN CHOICE as a physical limit.**
+
+The original text said progressive "cannot be fixed in the decoder", that no small
+streaming decoder handles it, and that the 1/8 DC-scan escape "does not rescue it either:
+180×275 against a 528×792 panel and the fitter never upscales."
+
+The arithmetic is right and the conclusion is not. **CrossPoint decodes progressive
+covers, on the same ESP32-C3 with no PSRAM**, and does it precisely the dismissed way —
+`JpegToBmpConverter.cpp:541`:
+
+```cpp
+const bool progressiveDecode = (jpeg->getJPEGType() == JPEG_MODE_PROGRESSIVE);
+// JPEGDEC forces progressive streams to JPEG_SCALE_EIGHTH in DecodeJPEG
+const int decodedSrcWidth  = progressiveDecode ? ((srcWidth  + 7) >> 3) : srcWidth;
+```
+
+They take the 1/8 image and **upscale it**. "The fitter never upscales" is `fitCover`'s
+policy, chosen in Task 4 so a small cover is centred rather than blown up — it is ours to
+change, not a property of the format. And "no small streaming decoder handles it" is
+simply false: JPEGDEC does, and CrossPoint carries two patches
+(`scripts/jpegdec_patches/`) for wild-pointer and DC-write bugs in `JPEGDecodeMCU_P` that
+surface at `EIGHT_BIT_GRAYSCALE` on 3-component progressive — i.e. exactly our case.
+
+**What remains true:** full-resolution progressive really is out of reach — 4,757,760
+coefficients, 9.5 MB against ~158 KB. The choice is not *whether* it is decodable but
+whether a **1/8 image upscaled 2.9×** is a cover worth showing. That is a taste question
+about a soft picture, and it belongs to whoever owns the design, not to a paragraph
+asserting physics.
+
+**The refusal stands for now and the tool remains the sharper answer** — a rebaked cover
+is full resolution where a 1/8 upscale is not. But the limit should be stated as a choice.
 
 **So the fix is `tools/rebake_covers.py`**, which re-encodes progressive covers to baseline
 into **copies**, never in place, and proves each one with `reader_sim cover` — the
