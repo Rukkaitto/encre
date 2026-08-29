@@ -513,3 +513,74 @@ TEST_CASE("shrinking the depth gives the heap back at once") {
   // At most one page below the current one can still be held.
   CHECK(r.scr->backwardHeadroom() <= 1);
 }
+
+// --- PAST THE PAGE CAP, THE INDEX IS NOT A PLACE TO LOOK ---------------------
+//
+// `starts_` stops growing at kMaxPages and `at_` does not, so a chapter long enough
+// to reach the cap is the one state where the two disagree -- and advance()'s store
+// subscripts `starts_[at_]`. It shipped with the bounds check written and UNBRACED,
+// so the check covered a redundant assignment and the subscript ran unguarded: an
+// out-of-bounds read on every page past the cap, feeding whatever it found to the
+// ring as a key.
+//
+// THE CAP IS REACHED THROUGH THE BLOCK CAP, which is what sizes this fixture:
+// document.h stops at kMaxBlocks (4096) blocks, so short paragraphs run out of
+// BLOCKS at ~2,389 pages and can never reach the page cap at all. Each paragraph
+// therefore has to span several pages by itself.
+namespace {
+
+std::string chapterPastThePageCap() {
+  std::string d = "<html><body>";
+  for (int i = 0; i < 700; ++i) {
+    d += "<p>Paragraph " + std::to_string(i) + ".";
+    for (int s = 0; s < 12; ++s)
+      d += " Sentence " + std::to_string(s) +
+           " of a paragraph long enough to span several pages by itself, which is what"
+           " a cap of four thousand blocks forces on any chapter that means to reach"
+           " the four-thousand-page cap sitting above it.";
+    d += "</p>";
+  }
+  return d + "</body></html>";
+}
+
+}  // namespace
+
+TEST_CASE("reading past the page cap indexes nothing and caches nothing") {
+  Reading r(chapterPastThePageCap(), /*settled=*/false);
+
+  // Forward until `at_` catches the index up. While pages are still being indexed
+  // the two move together (`pageIndex() + 1 == pageCount()`); the first turn that
+  // leaves them equal is the first page the index has no slot for.
+  int turns = 0;
+  while (r.scr->pageIndex() < r.scr->pageCount() && turns < 8000) {
+    r.scr->onGesture({reader::Gesture::Next});
+    ++turns;
+  }
+  // THE FIXTURE HAS TO REACH THE CASE, and a chapter that merely ran out of pages
+  // would leave the loop by the same door. Asserted before anything is concluded:
+  // this project has twice written a test whose input could not reach the line it
+  // was defending.
+  REQUIRE(r.scr->pageCount() == 4096);
+  REQUIRE(r.scr->pageIndex() == 4096);
+  REQUIRE_FALSE(r.scr->page().lines.empty());
+
+  // Every page up to the cap was stored; the page past it is not storable, because
+  // showCached() looks a page up by `starts_[p]` and refuses any p the index does
+  // not hold -- so a slot keyed past the cap could never be hit and would only
+  // evict one that can.
+  const uint32_t storedAtTheCap = r.scr->ringStats().stored;
+
+  // ...and reading on past it keeps working: real pages, each different from the
+  // last, with the index and the ring both standing still.
+  std::string prev = pageText(r.scr->page());
+  for (int i = 0; i < 8; ++i) {
+    r.scr->onGesture({reader::Gesture::Next});
+    CHECK(r.scr->pageIndex() == 4096 + i + 1);
+    CHECK(r.scr->pageCount() == 4096);
+    const std::string now = pageText(r.scr->page());
+    CHECK_FALSE(now.empty());
+    CHECK(now != prev);
+    prev = now;
+  }
+  CHECK(r.scr->ringStats().stored == storedAtTheCap);
+}

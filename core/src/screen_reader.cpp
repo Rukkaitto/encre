@@ -801,9 +801,18 @@ bool ReaderScreen::advance() {
   // KEYED OFF `starts_` RATHER THAN OFF `thisStart`, though the two are equal by
   // construction here: seekTo looks the page up by `starts_[p]`, so a store keyed any
   // other way would be a second spelling of the key, free to disagree with the first.
-  if (at_ >= 0 && at_ < static_cast<int>(starts_.size()))
-    pageBytes_ = chapter_.bytesRead();
+  //
+  // AND THE GUARD IS THE BOUNDS CHECK, so it has to cover the call it was written
+  // for: the `starts_.push_back` above is itself gated on `at_ < kMaxPages`, so a
+  // chapter that reaches page kMaxPages leaves `at_ == starts_.size()` and the
+  // subscript below out of range. It shipped UNBRACED, covering only a redundant
+  // second assignment of `pageBytes_` -- so the check read as present and was not.
+  // Not caching that page is right rather than merely safe: `showCached` looks a
+  // page up by `starts_[p]` and refuses any p past the index, so a slot keyed
+  // outside it could never be hit and would only evict one that can.
+  if (at_ >= 0 && at_ < static_cast<int>(starts_.size())) {
     cachePage(chapterAt_, starts_[static_cast<size_t>(at_)], page_, pageBytes_);
+  }
   return true;
 }
 
