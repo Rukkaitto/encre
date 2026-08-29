@@ -74,6 +74,46 @@ and cannot exist on a Linux runner, and `$CHROME_FLAGS` carries a runner's
 `--no-sandbox` -- set by the workflow that knows it is one rather than by
 sniffing `$CI` in the script, so a developer's Chrome keeps its sandbox.
 
+**BRANCH NAMES AND COMMIT SUBJECTS ARE ENFORCED ON PRs**, by
+`tools/check_conventions.py` -- runnable as `make conventions`, which is the
+point: a convention enforced only by CI is one you are told about after pushing,
+which is the worst moment to be asked to rewrite a commit message.
+
+**Commit subjects are Conventional Commits with the ELEVEN STANDARD TYPES**
+(`feat fix docs style refactor perf test build ci chore revert`) and a free-form
+scope. **The house style writes the SUBSYSTEM as the type** -- `peek:`,
+`design:`, `reader:`, `shell:` -- and that is a scope wearing a type's clothes:
+`feat(peek):` says the same thing, validates against a stock config, and carries
+the one bit the bare area name never did. Measured when this landed: **358 of
+main's 513 subjects already passed**, and of the 155 that did not, **128 failed
+that one way** and the remaining **27 were merge commits**, which are exempt
+because git wrote their subject. **History is not re-litigated** -- the check
+runs on the commits a PR adds.
+
+The scope vocabulary is deliberately **not** restricted (a list of allowed
+scopes needs a line per subsystem and conflicts every time a screen lands), and
+subject **length** is not enforced (Conventional Commits says nothing about it
+and this project writes long explanatory subjects on purpose).
+
+**Branch names take git-flow's vocabulary plus `claude/`.** `feature` `bugfix`
+`hotfix` `release` `support` `chore` `docs` `ci` `refactor` `test` `perf`, then
+`/<lowercase-slug>`. **`claude/` is in the list because Claude Code NAMES ITS
+OWN BRANCHES**, so a pattern without it rejects every agent branch -- including
+the one that added the check -- and buys a rename before every PR rather than
+any clarity. **There is no `develop` branch and this does not invent one**: full
+git flow is a change to how the project is developed, not a CI check.
+
+**AN EMPTY COMMIT RANGE IS AN ERROR IN CI** (`--require-commits`), because a
+wrong base ref would otherwise check nothing and pass -- the
+reports-on-less-than-it-claims shape again. It is only a note locally, where a
+branch with no commits yet is an ordinary state.
+
+**A `\x1f`-SEPARATED `git log` MUST NOT BE `.strip()`ed.** Python counts `\x1f`
+as whitespace, so a bare `.strip()` ate the trailing empty field of the last
+line -- the ROOT commit, the only one with no parents -- and the parse crashed
+on it. Found by running the checker over the real 513-commit history rather than
+over its fixtures, every one of which had a parent.
+
 **A GOLDEN IS NEVER RE-BLESSED TO MAKE CI GREEN.** A failing golden uploads its
 `build/<name>_candidate.png` as an artifact precisely so the pixels can be
 looked at, which is the only way to tell an intended change from a regression.
