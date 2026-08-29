@@ -1777,6 +1777,20 @@ So a single number is not an answer to this gate. Put a **median JPEG** and a **
 on the card and report both. If only one is measured it will be the JPEG — 81% of covers —
 and the PNG path, which is 17% of a real library, will be the one nobody looked at.
 
+**Four books from the corpus that span the cases**, picked nearest the 1400×2100 median:
+
+| case | book | cover | file |
+|---|---|---|---|
+| JPEG deflated — *the majority*, 59% of JPEG covers | *The Rescue* | 1400×2100 | `030bdda8969df031.epub` |
+| JPEG stored | *The Book of Mormon* | 1424×2048 | `ff6389c9f9a4c4c8.epub` |
+| PNG stored — 38 of 39 PNGs | *Big Dummy's Guide* | 1600×2400 | `1929dda32a16ff6b.epub` |
+| PNG deflated — **expected to refuse** on device | *Neuromancien* | 601×918 | `b76b4d9597650aa1.epub` |
+
+They are in `~/.cache/encre-corpus/*/`. The fourth is the interesting one: it is the 1-of-225
+that needs two 32 KB windows, and it should answer `OutOfMemory` and fall back to the card.
+**If it decodes instead, the heap headroom is larger than measured and the budget is wrong in
+the safe direction — say so rather than quietly enjoying it.**
+
 - [ ] **Step 3: Record the numbers in the spec**
 
 Add a short section to `docs/superpowers/specs/2026-08-29-sleep-screen-covers-design.md` replacing "The number this design turns on, and does not yet have" with what was measured, for at least a median-sized JPEG cover and one PNG.
