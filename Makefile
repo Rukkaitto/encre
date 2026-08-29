@@ -1,4 +1,4 @@
-.PHONY: test sim firmware fonts icons compare epubs epubs-bulk card-add card-remove zips
+.PHONY: test sim firmware fonts icons compare epubs epubs-bulk card-add card-remove zips conventions
 # PlatformIO installs outside PATH by default; allow an override: make firmware PIO=/path/to/pio
 #
 # Invoked through its MODULE entry point rather than the `pio` launcher script.
@@ -13,6 +13,12 @@ PYTHON ?= python3
 
 test:
 	cmake -S . -B build && cmake --build build -j && ctest --test-dir build --output-on-failure
+# Branch name and commit subjects, the same check CI runs on a PR. Runnable here
+# because a convention enforced only by CI is one you are told about after
+# pushing, which is the worst moment to be asked to rewrite a commit message.
+# Defaults to the current branch and origin/main..HEAD.
+conventions:
+	$(PYTHON) tools/check_conventions.py
 sim:
 	cmake -S . -B build && cmake --build build -j --target reader_sim && ./build/reader_sim home build/home.png
 firmware:

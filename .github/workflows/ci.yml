@@ -11,6 +11,9 @@
 #             and all 803 desktop tests passed.
 #   compare   the design boards against the simulator's renders. A NARROW gate --
 #             see the note on the job.
+#   conventions  branch name and commit subjects, on PRs only. Runnable locally
+#             as `make conventions`, which is the point -- a convention you only
+#             learn about after pushing is one you learn about too late.
 #
 # Deliberately absent: -Werror (CMakeLists.txt states why -- a newer compiler
 # must not be able to break the build), a format job (there is no .clang-format,
@@ -33,6 +36,35 @@ permissions:
   contents: read
 
 jobs:
+  # Branch name and commit subjects. PRs only: there is no PR branch to name on a
+  # push to main, and main's own 513 commits are history rather than something to
+  # re-litigate -- 128 of them predate this rule and are left exactly as they are.
+  conventions:
+    name: Commits and branch name
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      # fetch-depth: 0 so the base commit is present; the range is empty without
+      # it, and an empty range must not read as a pass.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Through the environment rather than interpolated into the run line: a
+      # branch name is attacker-controlled on a fork PR, and `${{ }}` inside
+      # `run:` is textual substitution, so a name containing shell metacharacters
+      # would execute.
+      - name: Check conventions
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 tools/check_conventions.py \
+            --branch "$HEAD_REF" \
+            --range "$BASE_SHA..$HEAD_SHA" \
+            --require-commits
+
   test:
     name: Tests and goldens
     runs-on: ubuntu-latest
