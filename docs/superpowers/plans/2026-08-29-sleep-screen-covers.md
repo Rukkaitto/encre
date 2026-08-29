@@ -245,7 +245,7 @@ git commit -m "test: a ByteSource fixture and the stb_image oracle for the cover
 
 ---
 
-## Task 2: `jpegd.h` — baseline JPEG over a `ByteSource`
+## Task 2: `jpegd.h` — baseline JPEG, pushed a row at a time
 
 **Files:**
 - Create: `third_party/tjpgd.h`, `third_party/tjpgd.c`, `third_party/tjpgdcnf.h`
@@ -254,23 +254,50 @@ git commit -m "test: a ByteSource fixture and the stb_image oracle for the cover
 
 **Why vendored rather than written:** the reasons this project wrote its own DEFLATE — stb's one-shot API and 6,608-byte single stack frame — do not apply to TJpgDec, which already has the memory model wanted here (~3.5 KB workspace, an MCU output callback, free ½/¼/⅛ IDCT scaling). JPEG's edge cases are numerous and a wrong upsample is a *subtly wrong picture* rather than a crash, which is the hardest defect for this project's tests to catch.
 
-- [ ] **Step 1: Vendor TJpgDec**
+### THE INTERFACE IS PUSH, NOT PULL, AND THIS IS FORCED BY THE LIBRARY
 
-Fetch TJpgDec R0.03 from <http://elm-chan.org/fsw/tjpgd/>. Place `tjpgd.h`, `tjpgd.c` and `tjpgdcnf.h` in `third_party/`.
-
-**Keep the copyright header intact** — it carries a retain-the-notice condition, and `third_party/stb_truetype.h` is kept the same way. Add a short note at the top of `tjpgd.c` in this repo's style saying where it came from, which release, and that it is unmodified.
-
-Configure `tjpgdcnf.h`:
+**Read this before writing any code.** An earlier draft of this plan specified a `nextRow(&row)` pull interface. That cannot be built over TJpgDec without inverting control, and the reason is in its API:
 
 ```c
-#define JD_SZBUF     512   /* input buffer; the ByteSource refills it */
-#define JD_FORMAT    2     /* 2 = 8-bit grayscale output -- the panel is grey */
-#define JD_USE_SCALE 1     /* 1/2, 1/4, 1/8 out of the IDCT, which is why this is cheap */
-#define JD_TBLCLIP   1
-#define JD_FASTDECODE 1    /* 0 is smallest, 2 needs a bigger workspace; 1 is the middle */
+JRESULT jd_prepare(JDEC*, size_t (*infunc)(JDEC*,uint8_t*,size_t), void* pool, size_t sz_pool, void* dev);
+JRESULT jd_decomp (JDEC*, int (*outfunc)(JDEC*,void*,JRECT*), uint8_t scale);
 ```
 
-`JD_FORMAT 2` matters: it makes TJpgDec emit grey directly, so we never allocate an RGB intermediate.
+`jd_decomp` **decodes the whole image in one call** and pushes results through `outfunc`. It does not return until the image is finished or aborted, so there is no point at which a caller can ask for "the next row".
+
+Two consequences, both load-bearing:
+
+1. **The decoder takes a sink.** `decode(src, sink)` calls back per output row. `cover.cpp` supplies a sink that feeds `CoverFitter`, so the whole pipeline is push from the archive to the plane rows.
+2. **`outfunc` receives RECTANGLES, not rows.** TJpgDec emits MCU by MCU — typically 16×16 for 4:2:0, which is 177 of the 185 corpus JPEG covers — left to right across a band, then the next band. So a row is not complete until its whole band has arrived, and **`jpegd` must buffer one MCU band**: `mcuHeight * outputWidth` bytes. At the scales this actually uses (output ≥ panel and under 2× panel) that is **8.4–16.9 KB**, which is real and must be counted in the budget. It is why `JpegDecoder::workspaceBytes()` exists.
+
+**The stop predicate comes free:** `outfunc` returning 0 aborts `jd_decomp` with `JDR_INTR`. That is the abort path, not an exception and not a flag checked later.
+
+- [ ] **Step 1: Vendor TJpgDec**
+
+```bash
+cd /tmp && curl -sSL -o tjpgd3.zip https://elm-chan.org/fsw/tjpgd/arc/tjpgd3.zip
+shasum -a 256 tjpgd3.zip
+# expect: 052fe3efbc9a8be29f31597ad009c5b51a4f6905878eb28569e0ab3d46d0c013
+mkdir -p tj && unzip -q -o tjpgd3.zip -d tj
+cd - && cp /tmp/tj/src/tjpgd.c /tmp/tj/src/tjpgd.h /tmp/tj/src/tjpgdcnf.h third_party/
+```
+
+This is **TJpgDec R0.03 (C)ChaN, 2021**. Its licence is: *"No restriction on use... Redistributions of source code must retain the above copyright notice."* **Keep the copyright header intact**, exactly as `third_party/stb_truetype.h` is kept. Add a short note in this repo's style at the top of `tjpgd.c` recording the release, the URL, the sha256 above, and that it is unmodified apart from that note.
+
+Configure `third_party/tjpgdcnf.h` — the stock values are wrong for us in two places:
+
+```c
+#define JD_SZBUF      512  /* input buffer; the ByteSource refills it. Stock value. */
+#define JD_FORMAT     2    /* CHANGED from 0. 2 = 8-bit grayscale straight out of the
+                              decoder, so we never allocate an RGB intermediate --
+                              the panel is grey and the fitter wants grey. */
+#define JD_USE_SCALE  1    /* Stock. The free 1/2, 1/4, 1/8 out of the IDCT, which is
+                              what makes a 2.94 MP cover affordable at all. */
+#define JD_TBLCLIP    1    /* Stock. ~1 KB of flash for faster saturation. */
+#define JD_FASTDECODE 1    /* CHANGED from 0. 1 uses the 32-bit barrel shifter, which
+                              the RISC-V C3 has. 2 wants 6 << HUFF_BIT bytes of extra
+                              RAM and this path has none to spare. */
+```
 
 - [ ] **Step 2: Write the failing test**
 
@@ -282,6 +309,7 @@ Create `test/unit/test_jpegd.cpp`:
 // TWO GRAINS, and grain 1 is the load-bearing one: TJpgDec pulls through our
 // ByteSource, so a source that satisfies every read hides every refill bug there
 // is. test_inflate_stream.cpp found exactly that class of defect this way.
+#include <string>
 #include <vector>
 
 #include "doctest.h"
@@ -290,22 +318,20 @@ Create `test/unit/test_jpegd.cpp`:
 
 namespace {
 
-// Decodes the whole image into one buffer, which a TEST may do and the FIRMWARE
-// may not -- reader::JpegDecoder hands out one row at a time precisely so the
-// device never holds this.
-std::vector<uint8_t> decodeAll(const std::string& bytes, size_t grain, int& w, int& h) {
-  imgfix::StringSource src(bytes, grain);
-  reader::JpegDecoder dec;
-  std::vector<uint8_t> out;
-  REQUIRE(dec.begin(src));
-  w = dec.width();
-  h = dec.height();
-  out.reserve(static_cast<size_t>(w) * h);
-  const uint8_t* row = nullptr;
-  while (dec.nextRow(&row)) out.insert(out.end(), row, row + w);
-  CHECK(dec.done());
-  return out;
-}
+// Accumulates every row. A TEST may hold the whole image; the FIRMWARE may not,
+// which is exactly why the decoder pushes rows instead of returning a buffer.
+struct CollectingSink : reader::ImageRowSink {
+  int width = 0, height = 0, rows = 0;
+  int stopAfter = -1;  // -1 never stops
+  std::vector<uint8_t> px;
+
+  bool begin(int w, int h) override { width = w; height = h; return true; }
+  bool row(const uint8_t* p) override {
+    px.insert(px.end(), p, p + width);
+    ++rows;
+    return stopAfter < 0 || rows < stopAfter;
+  }
+};
 
 }  // namespace
 
@@ -316,11 +342,14 @@ TEST_CASE("JpegDecoder matches stb_image on a real baseline cover") {
   const imgfix::Oracle want = imgfix::decodeWithStb(bytes);
   REQUIRE(!want.pixels.empty());
 
-  int w = 0, h = 0;
-  const std::vector<uint8_t> got = decodeAll(bytes, 4096, w, h);
-  REQUIRE(w == want.width);
-  REQUIRE(h == want.height);
-  REQUIRE(got.size() == want.pixels.size());
+  imgfix::StringSource src(bytes, 4096);
+  CollectingSink sink;
+  reader::JpegDecoder dec;
+  REQUIRE(dec.decode(src, sink));           // full scale: no atLeast given
+  REQUIRE(sink.width == want.width);
+  REQUIRE(sink.height == want.height);
+  REQUIRE(sink.rows == want.height);
+  REQUIRE(sink.px.size() == want.pixels.size());
 
   // NOT byte-identical, and it must not be asserted as such: TJpgDec and stb use
   // different IDCT rounding and different YCbCr->grey coefficients. What is
@@ -328,34 +357,74 @@ TEST_CASE("JpegDecoder matches stb_image on a real baseline cover") {
   // transposed block or an off-by-one row -- the defects that actually happen --
   // while tolerating arithmetic that is legitimately not bit-equal.
   long worst = 0, sum = 0;
-  for (size_t i = 0; i < got.size(); ++i) {
-    const long d = std::abs(static_cast<long>(got[i]) - static_cast<long>(want.pixels[i]));
+  for (size_t i = 0; i < sink.px.size(); ++i) {
+    const long d = std::abs(static_cast<long>(sink.px[i]) -
+                            static_cast<long>(want.pixels[i]));
     if (d > worst) worst = d;
     sum += d;
   }
-  const double mean = static_cast<double>(sum) / static_cast<double>(got.size());
   CHECK(worst <= 24);
-  CHECK(mean <= 2.0);
+  CHECK(static_cast<double>(sum) / static_cast<double>(sink.px.size()) <= 2.0);
 }
 
 TEST_CASE("JpegDecoder is unaffected by how the source chunks its bytes") {
   const std::string bytes = imgfix::loadFixture("baseline.jpg");
   REQUIRE(!bytes.empty());
 
-  int w1 = 0, h1 = 0, w2 = 0, h2 = 0;
-  const std::vector<uint8_t> big = decodeAll(bytes, 4096, w1, h1);
-  const std::vector<uint8_t> one = decodeAll(bytes, 1, w2, h2);
-  CHECK(w1 == w2);
-  CHECK(h1 == h2);
-  CHECK(big == one);
+  imgfix::StringSource big(bytes, 4096);
+  imgfix::StringSource one(bytes, 1);
+  CollectingSink a, b;
+  reader::JpegDecoder d1, d2;
+  REQUIRE(d1.decode(big, a));
+  REQUIRE(d2.decode(one, b));
+  CHECK(a.width == b.width);
+  CHECK(a.rows == b.rows);
+  CHECK(a.px == b.px);
+}
+
+TEST_CASE("JpegDecoder scales down but never below what the caller asked for") {
+  // The free IDCT scaling is what makes a 2.94 MP cover affordable. A cover is
+  // ~1400x2100 and a panel ~480x800, so 1/2 is chosen: 700x1050, a quarter of the
+  // work and still above the panel. Scaling to 1/4 would be 350x525 -- BELOW the
+  // panel, and upscaling a cover is not something this pipeline does.
+  const std::string bytes = imgfix::loadFixture("baseline.jpg");
+  REQUIRE(!bytes.empty());
+
+  imgfix::StringSource src(bytes);
+  CollectingSink sink;
+  reader::JpegDecoder dec;
+  REQUIRE(dec.decode(src, sink, 480, 800));
+  CHECK(sink.width >= 480);
+  CHECK(sink.height >= 800);
+  // And it really did scale, rather than ignoring the hint.
+  const imgfix::Oracle full = imgfix::decodeWithStb(bytes);
+  CHECK(sink.width < full.width);
+}
+
+TEST_CASE("a sink that says stop aborts the decode") {
+  // This is the interruption path the shell uses to get out of the way of a button
+  // press, and it is TJpgDec's own: outfunc returning 0 aborts with JDR_INTR.
+  const std::string bytes = imgfix::loadFixture("baseline.jpg");
+  REQUIRE(!bytes.empty());
+
+  imgfix::StringSource src(bytes);
+  CollectingSink sink;
+  sink.stopAfter = 40;
+  reader::JpegDecoder dec;
+  CHECK_FALSE(dec.decode(src, sink));
+  CHECK(dec.aborted());
+  CHECK(sink.rows < sink.height);
 }
 
 TEST_CASE("JpegDecoder refuses a progressive JPEG rather than mis-decoding it") {
   const std::string bytes = imgfix::loadFixture("progressive.jpg");
   REQUIRE(!bytes.empty());
   imgfix::StringSource src(bytes);
+  CollectingSink sink;
   reader::JpegDecoder dec;
-  CHECK_FALSE(dec.begin(src));
+  CHECK_FALSE(dec.decode(src, sink));
+  CHECK_FALSE(dec.aborted());   // refused, not interrupted -- a different outcome
+  CHECK(sink.rows == 0);
   // A refusal must SAY something -- every refusal on this path ends up in a log
   // line the user's card can be diagnosed from.
   CHECK(dec.reason() != nullptr);
@@ -383,27 +452,40 @@ Expected: a compile error — `reader/jpegd.h` does not exist.
 
 namespace reader {
 
-// BASELINE JPEG, DECODED ONE ROW AT A TIME.
+// WHERE DECODED IMAGE ROWS GO.
+//
+// A sink, because the decoder cannot hand rows back on request: TJpgDec's
+// jd_decomp() decodes the whole image in ONE call and pushes MCU rectangles
+// through a callback, so there is no point at which a caller could ask for the
+// next row. Everything downstream (CoverFitter, the plane sink) is push for the
+// same reason, and the whole pipeline is one direction from the archive to the
+// card.
+class ImageRowSink {
+ public:
+  virtual ~ImageRowSink() = default;
+  // Once, before any row, with the OUTPUT dimensions after any scaling.
+  virtual bool begin(int width, int height) = 0;
+  // One row of `width` bytes of grey, 0 = black, in top-to-bottom order. Return
+  // false to stop the decode -- this is the interruption path, and for JPEG it is
+  // TJpgDec's own (outfunc returning 0 aborts with JDR_INTR).
+  virtual bool row(const uint8_t* px) = 0;
+};
+
+// BASELINE JPEG, PUSHED ONE ROW AT A TIME.
 //
 // A cover is 2.94 MP at the corpus median, which is 2.9 MB decoded to 8-bit grey
 // against a 42 KB reading floor and no PSRAM -- so the whole picture is never in
-// memory at any instant, and this hands out one row and forgets it. Everything
-// above it (imagefit.h) is written to consume rows in order for that reason.
+// memory at any instant.
 //
-// WRAPS TJpgDec, VENDORED. The reasons this project wrote its own DEFLATE -- stb's
-// one-shot API and its 6,608-byte single stack frame -- do not apply: TJpgDec
-// already has the memory model wanted here. What this class adds is a ByteSource
-// front end, a row-at-a-time interface instead of a callback, and a refusal that
-// carries a reason.
+// WRAPS TJpgDec R0.03, VENDORED. The reasons this project wrote its own DEFLATE --
+// stb's one-shot API and its 6,608-byte single stack frame -- do not apply:
+// TJpgDec already has the memory model wanted here. What this class adds is a
+// ByteSource front end, rows instead of MCU rectangles, and a refusal that carries
+// a reason.
 //
 // PROGRESSIVE JPEG IS REFUSED, not approximated. Measured: 2 of 225 corpus books,
 // but 2 of the user's own 16. A refusal falls back to the reading card and logs
 // why; a mis-decode would put garbage on the glass for hours.
-//
-// SCALE IS CHOSEN BY THE CALLER through begin()'s `atLeast` pair: TJpgDec can halve
-// out of the IDCT for free, so a 1400x2100 cover decoded at 1/2 is 700x1050 -- a
-// quarter of the work and still comfortably above any panel. Never scales below the
-// requested size.
 class JpegDecoder {
  public:
   JpegDecoder();
@@ -411,33 +493,38 @@ class JpegDecoder {
   JpegDecoder(const JpegDecoder&) = delete;
   JpegDecoder& operator=(const JpegDecoder&) = delete;
 
-  // Reads the headers. False with reason() set for a truncated file, a progressive
-  // or arithmetic-coded stream, an unsupported component count, or a workspace
-  // that could not be allocated -- never an abort: this is bytes off a card.
+  // Decode `src` into `sink`. False for a refusal (reason() says why) OR for an
+  // abort the sink asked for -- ask aborted() which, because they mean different
+  // things to the caller: a refusal is permanent for this book, an abort is not.
   //
-  // `atLeastW`/`atLeastH` are the smallest output the caller can use. Pass 0 for
-  // both to decode at full scale.
-  bool begin(ByteSource& src, int atLeastW = 0, int atLeastH = 0);
+  // `atLeastW`/`atLeastH` are the smallest output the caller can use; TJpgDec
+  // halves out of the IDCT for free, so a 1400x2100 cover asked for 480x800 is
+  // decoded at 1/2 -- a quarter of the work. Never scales BELOW the request. 0 for
+  // both means full scale.
+  bool decode(ByteSource& src, ImageRowSink& sink, int atLeastW = 0, int atLeastH = 0);
 
-  // The OUTPUT dimensions, after any scaling begin() chose. Valid after begin().
-  int width() const;
-  int height() const;
-  // What the file itself said, before scaling. For logs and for the fit maths.
+  // What the file said, before scaling. Valid once decode() has read the headers,
+  // including on a refusal that happened after them.
   int sourceWidth() const;
   int sourceHeight() const;
+  // 1, 2, 4 or 8 -- the divisor decode() chose.
+  int scaleDivisor() const;
 
-  // The next output row, `width()` bytes, 0 = black. The pointer is owned by the
-  // decoder and is valid until the next call. False at the end of the image or on
-  // an error -- ask done() which.
-  bool nextRow(const uint8_t** row);
-
-  bool done() const;
+  // Whether the last decode() stopped because the SINK said so, as opposed to
+  // failing. Never both.
+  bool aborted() const;
   // Null until something fails. A sentence, for a log line.
   const char* reason() const;
 
-  // The heap this holds while decoding, for the budget in the spec. Reported
-  // rather than documented, so the figure cannot drift from the object.
-  static size_t workspaceBytes();
+  // Heap held during a decode: TJpgDec's pool plus the MCU band buffer.
+  //
+  // REPORTED RATHER THAN DOCUMENTED, so the figure in the spec's budget cannot
+  // drift from the object. The band is the part that surprises: TJpgDec emits
+  // rectangles, typically 16x16 at 4:2:0, so a row is not complete until its whole
+  // band has arrived and one band must be held -- mcuHeight * outputWidth, which
+  // is 8.4-16.9 KB at the scales this actually uses. Valid after decode() has read
+  // the headers; 0 before.
+  size_t workspaceBytes() const;
 
  private:
   struct Impl;
@@ -449,12 +536,14 @@ class JpegDecoder {
 
 - [ ] **Step 5: Write `core/src/jpegd.cpp`**
 
-Implement `Impl` holding the TJpgDec `JDEC`, its work pool, the `ByteSource*`, and a one-MCU-row output buffer. Key points, each of which is a real trap:
+`Impl` holds the `JDEC`, the TJpgDec work pool, the MCU band buffer, the `ByteSource*`, the `ImageRowSink*`, and the abort/reason state. Traps, each of which is real:
 
-- **The input callback** is TJpgDec's `jd_input`; when `buff` is null it is a *skip*, not a read, so consume from the source and discard rather than returning 0.
-- **The output callback** receives an MCU block, not a row. Buffer one MCU row (8 or 16 lines at `width()`) and let `nextRow` walk it, refilling by calling `jd_decomp` for the next MCU row band. TJpgDec drives the whole image in one `jd_decomp` call, so **either** run it to completion into a caller-supplied row sink **or** use its rectangle callback to emit rows as they arrive. Prefer the latter shape: `nextRow` pumps until a row is available.
-- **Allocate the work pool with `new (std::nothrow)`** and answer `begin() == false` on failure. `-fno-exceptions` makes a throwing `new` an `abort()` with no diagnostic — CLAUDE.md records this reaching the device twice as "opening a book goes back to Home".
-- **Choose the scale in `begin`**: the largest of 1, 2, 4, 8 such that `sourceWidth()/n >= atLeastW && sourceHeight()/n >= atLeastH`.
+- **The input callback is `size_t infunc(JDEC*, uint8_t* buff, size_t nbyte)`, and `buff == nullptr` means SKIP, not read.** Consume `nbyte` from the source and discard; returning 0 there makes TJpgDec think the stream ended.
+- **`jd_prepare` reports progressive and arithmetic streams as `JDR_FMT3`** ("not supported"). Map every `JRESULT` to a distinct `reason()` sentence rather than one generic string — the log line is how a user's card gets diagnosed.
+- **Allocate the pool and the band with `new (std::nothrow)`** and answer `false`. `-fno-exceptions` makes a throwing `new` an `abort()` with no diagnostic; CLAUDE.md records that reaching the device twice as "opening a book goes back to Home".
+- **The band buffer cannot be sized before `jd_prepare`**, because it needs `jd->msx`/`msy` (the sampling factors) and the chosen scale. Allocate it between `jd_prepare` and `jd_decomp`.
+- **`outfunc` writes its rect into the band at `(rect->left, rect->top % bandHeight)`**, and when the band's last rectangle has arrived, emits each of its rows to the sink. **The bottom band is short** — TJpgDec clips rectangles at the right and bottom edges — so emit `min(bandHeight, height - bandTop)` rows.
+- **Choose the scale in `decode`**, after `jd_prepare` has given you `jd->width`/`jd->height`: the largest divisor in {1,2,4,8} such that `width/n >= atLeastW && height/n >= atLeastH`. With both 0, use 1.
 - **`JD_FORMAT 2` gives grey directly** — do not add an RGB path.
 
 - [ ] **Step 6: Run the tests to verify they pass**
@@ -463,7 +552,7 @@ Implement `Impl` holding the TJpgDec `JDEC`, its work pool, the `ByteSource*`, a
 cmake -S . -B build && make test 2>&1 | tail -20
 ```
 
-Expected: PASS, including all three `JpegDecoder` cases.
+Expected: PASS, all five `JpegDecoder` cases.
 
 - [ ] **Step 7: Prove the tests bite (mutation)**
 
@@ -471,11 +560,13 @@ Expected: PASS, including all three `JpegDecoder` cases.
 git add -A && git commit -m "wip: jpegd before mutation" && cp core/src/jpegd.cpp /tmp/jpegd.bak
 ```
 
-Mutate one at a time, rebuild, record the failure count, then `cp /tmp/jpegd.bak core/src/jpegd.cpp && touch core/src/jpegd.cpp`:
+Mutate one at a time, rebuild, record the failure count, then restore with `cp /tmp/jpegd.bak core/src/jpegd.cpp && touch core/src/jpegd.cpp`:
 
-1. Drop the progressive check in `begin` → the refusal test must fail.
-2. Emit rows one line off (skip the first output line) → the oracle comparison must fail.
+1. Drop the progressive refusal → the refusal test must fail.
+2. Emit band rows bottom-to-top within the band → the oracle comparison must fail.
 3. Return 0 from the input callback on a skip request → the grain-1 test must fail.
+4. Ignore the sink's false return in `outfunc` → the abort test must fail.
+5. Always use divisor 1 → the scaling test must fail.
 
 **If a mutation fails nothing, it is telling you about your INPUT before it tells you about your test.** Fix the fixture, not the assertion.
 
@@ -485,10 +576,11 @@ Mutate one at a time, rebuild, record the failure count, then `cp /tmp/jpegd.bak
 git add third_party/tjpgd.h third_party/tjpgd.c third_party/tjpgdcnf.h \
         core/include/reader/jpegd.h core/src/jpegd.cpp test/unit/test_jpegd.cpp
 git diff --cached --stat
-git commit -m "core: baseline JPEG decoded a row at a time, over a ByteSource"
+git commit -m "core: baseline JPEG pushed a row at a time, over a ByteSource"
 ```
 
 ---
+
 
 ## Task 3: `pngd.h` — PNG over our own `inflate_stream.h`
 
@@ -498,6 +590,8 @@ git commit -m "core: baseline JPEG decoded a row at a time, over a ByteSource"
 
 **Why ours rather than a second vendored decoder:** a PNG is DEFLATE plus per-row unfiltering, and we already own the hard half. Measured: every one of the 39 corpus PNGs is colour type 2, bit depth 8, non-interlaced.
 
+**Same push interface as `JpegDecoder`, and deliberately so.** PNG *could* be pull — scanlines come out in order — but `cover.cpp` must drive both formats through one code path, and two shapes would mean two drivers and two chances to get the fitter's feeding wrong. `ImageRowSink` is defined in `jpegd.h` and reused here.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `test/unit/test_pngd.cpp`:
@@ -506,8 +600,9 @@ Create `test/unit/test_pngd.cpp`:
 // PNG, against stb_image over a real cover.
 //
 // Unlike JPEG this one IS byte-exact: PNG is lossless and the only arithmetic is
-// the grey weighting, which is fixed below to stb's own coefficients precisely so
-// this assertion can be an equality rather than a tolerance.
+// the grey weighting, which is fixed to stb's own coefficients precisely so this
+// assertion can be an equality rather than a tolerance.
+#include <string>
 #include <vector>
 
 #include "doctest.h"
@@ -516,18 +611,18 @@ Create `test/unit/test_pngd.cpp`:
 
 namespace {
 
-std::vector<uint8_t> decodeAll(const std::string& bytes, size_t grain, int& w, int& h) {
-  imgfix::StringSource src(bytes, grain);
-  reader::PngDecoder dec;
-  std::vector<uint8_t> out;
-  REQUIRE(dec.begin(src));
-  w = dec.width();
-  h = dec.height();
-  const uint8_t* row = nullptr;
-  while (dec.nextRow(&row)) out.insert(out.end(), row, row + w);
-  CHECK(dec.done());
-  return out;
-}
+struct CollectingSink : reader::ImageRowSink {
+  int width = 0, height = 0, rows = 0;
+  int stopAfter = -1;
+  std::vector<uint8_t> px;
+
+  bool begin(int w, int h) override { width = w; height = h; return true; }
+  bool row(const uint8_t* p) override {
+    px.insert(px.end(), p, p + width);
+    ++rows;
+    return stopAfter < 0 || rows < stopAfter;
+  }
+};
 
 }  // namespace
 
@@ -538,19 +633,40 @@ TEST_CASE("PngDecoder matches stb_image byte for byte on a real cover") {
   const imgfix::Oracle want = imgfix::decodeWithStb(bytes);
   REQUIRE(!want.pixels.empty());
 
-  int w = 0, h = 0;
-  const std::vector<uint8_t> got = decodeAll(bytes, 4096, w, h);
-  CHECK(w == want.width);
-  CHECK(h == want.height);
-  CHECK(got == want.pixels);
+  imgfix::StringSource src(bytes, 4096);
+  CollectingSink sink;
+  reader::PngDecoder dec;
+  REQUIRE(dec.decode(src, sink));
+  CHECK(sink.width == want.width);
+  CHECK(sink.height == want.height);
+  CHECK(sink.rows == want.height);
+  CHECK(sink.px == want.pixels);
 }
 
 TEST_CASE("PngDecoder is unaffected by how the source chunks its bytes") {
   const std::string bytes = imgfix::loadFixture("truecolour.png");
   REQUIRE(!bytes.empty());
-  int w1 = 0, h1 = 0, w2 = 0, h2 = 0;
-  CHECK(decodeAll(bytes, 4096, w1, h1) == decodeAll(bytes, 1, w2, h2));
-  CHECK(w1 == w2);
+
+  imgfix::StringSource big(bytes, 4096);
+  imgfix::StringSource one(bytes, 1);
+  CollectingSink a, b;
+  reader::PngDecoder d1, d2;
+  REQUIRE(d1.decode(big, a));
+  REQUIRE(d2.decode(one, b));
+  CHECK(a.px == b.px);
+  CHECK(a.rows == b.rows);
+}
+
+TEST_CASE("a sink that says stop aborts the decode") {
+  const std::string bytes = imgfix::loadFixture("truecolour.png");
+  REQUIRE(!bytes.empty());
+  imgfix::StringSource src(bytes);
+  CollectingSink sink;
+  sink.stopAfter = 20;
+  reader::PngDecoder dec;
+  CHECK_FALSE(dec.decode(src, sink));
+  CHECK(dec.aborted());
+  CHECK(sink.rows < sink.height);
 }
 
 TEST_CASE("PngDecoder refuses what it does not implement, with a reason") {
@@ -558,11 +674,26 @@ TEST_CASE("PngDecoder refuses what it does not implement, with a reason") {
   // produced a seventh of the picture would be worse than one that declines.
   std::string bytes = imgfix::loadFixture("truecolour.png");
   REQUIRE(bytes.size() > 32);
-  bytes[28] = 1;  // IHDR interlace method -- now Adam7, and the CRC is now wrong too
+  bytes[28] = 1;  // IHDR interlace method -- now Adam7
 
   imgfix::StringSource src(bytes);
+  CollectingSink sink;
   reader::PngDecoder dec;
-  CHECK_FALSE(dec.begin(src));
+  CHECK_FALSE(dec.decode(src, sink));
+  CHECK_FALSE(dec.aborted());
+  CHECK(sink.rows == 0);
+  CHECK(dec.reason() != nullptr);
+}
+
+TEST_CASE("a palette PNG is refused, not rendered as noise") {
+  std::string bytes = imgfix::loadFixture("truecolour.png");
+  REQUIRE(bytes.size() > 32);
+  bytes[25] = 3;  // IHDR colour type -- palette, which we do not implement
+
+  imgfix::StringSource src(bytes);
+  CollectingSink sink;
+  reader::PngDecoder dec;
+  CHECK_FALSE(dec.decode(src, sink));
   CHECK(dec.reason() != nullptr);
 }
 ```
@@ -584,10 +715,11 @@ Expected: compile error, `reader/pngd.h` missing.
 #include <memory>
 
 #include "reader/inflate_stream.h"
+#include "reader/jpegd.h"  // ImageRowSink -- one sink shape for both formats
 
 namespace reader {
 
-// PNG, DECODED ONE SCANLINE AT A TIME, over this project's own Inflater.
+// PNG, PUSHED ONE SCANLINE AT A TIME, over this project's own Inflater.
 //
 // WHY OURS AND NOT A SECOND VENDORED DECODER: a PNG is DEFLATE plus per-row
 // unfiltering, and inflate_stream.h is already the hard half -- bounded memory, a
@@ -595,17 +727,21 @@ namespace reader {
 // of unfiltering would be the worse trade, which is the mirror of jpegd.h's
 // argument for vendoring THERE.
 //
+// THE PUSH INTERFACE IS NOT FORCED HERE THE WAY IT IS FOR JPEG -- scanlines come
+// out in order and a pull form would be natural. It is push anyway so cover.cpp
+// drives both formats through ONE path: two shapes would be two drivers feeding
+// the fitter, and two chances to get that feeding wrong.
+//
 // WHAT IT SUPPORTS, AND THE MEASUREMENT BEHIND IT: colour types 0/2/4/6 at bit
 // depth 8, non-interlaced. All 39 PNG covers across 225 corpus books are colour
-// type 2, bit depth 8, non-interlaced -- 0 are interlaced and 0 are palette. Types
-// 0/4/6 come free with the same unfilter and are accepted; PALETTE (3), bit depths
-// other than 8, and INTERLACED are REFUSED with a reason rather than approximated.
+// type 2, bit depth 8, non-interlaced -- 0 interlaced, 0 palette. Types 0/4/6 come
+// free with the same unfilter and are accepted; PALETTE (3), bit depths other than
+// 8, and INTERLACED are REFUSED with a reason rather than approximated.
 //
 // A NOTE ON HEAP, because it decides where this may run: an Inflater is 36,956
 // bytes. 38 of the 39 corpus PNGs are STORED inside the zip (method 0), so the
 // common case needs exactly this one window. The single deflated PNG needs the
-// zip's window too and may refuse at the reading floor -- a stated limit, not a
-// bug.
+// zip's window too and may refuse at the reading floor -- a stated limit.
 class PngDecoder {
  public:
   PngDecoder();
@@ -613,19 +749,16 @@ class PngDecoder {
   PngDecoder(const PngDecoder&) = delete;
   PngDecoder& operator=(const PngDecoder&) = delete;
 
-  // Reads through IHDR. False with reason() set for a bad signature, a refused
-  // variant, a truncated file, or an inflate window that could not be allocated.
-  bool begin(ByteSource& src);
+  // False for a refusal (reason() says why) OR for an abort the sink asked for --
+  // ask aborted() which. Same contract as JpegDecoder::decode, deliberately.
+  bool decode(ByteSource& src, ImageRowSink& sink);
 
-  int width() const;
-  int height() const;
-
-  // The next scanline, `width()` bytes of grey, 0 = black. Owned by the decoder,
-  // valid until the next call.
-  bool nextRow(const uint8_t** row);
-
-  bool done() const;
+  bool aborted() const;
   const char* reason() const;
+
+  // The inflate window plus the two row buffers. Reported, not documented, so the
+  // spec's budget cannot drift from the object.
+  size_t workspaceBytes() const;
 
   // Grey from RGB with stb_image's own coefficients, so test_pngd.cpp can assert
   // EQUALITY against the oracle rather than a tolerance. Stated here because the
@@ -646,11 +779,11 @@ class PngDecoder {
 
 Implementation notes, each earned:
 
-- **Chunk walk:** signature, then IHDR, then stream IDAT payloads into an `Inflater` through a `ByteSource` adapter that concatenates consecutive IDATs and stops at IEND. Ancillary chunks are skipped by length.
+- **Chunk walk:** signature, IHDR, then stream the IDAT payloads into an `Inflater` through a `ByteSource` adapter that concatenates consecutive IDATs and stops at IEND. Skip ancillary chunks by length.
 - **Two row buffers**, current and previous, each `width * channels` bytes — the unfilter needs the row above. Worst corpus PNG is 1600 wide × 4 channels = 6,400 B a row, 12,800 B for the pair.
-- **Filters 0–4** (None/Sub/Up/Average/Paeth) per PNG spec, applied on the raw channel bytes *before* grey conversion.
-- **`new (std::nothrow)`** for both row buffers and answer `false`. Never `abort()`.
-- **Do not verify CRCs.** Stated deliberately: a CRC failure on a cover should cost the cover, not the book, and we already refuse on structural nonsense. The interlace test above mutates IHDR without fixing the CRC and must still be refused *by the interlace check*, which is what proves the refusal is structural rather than incidental.
+- **Filters 0–4** (None/Sub/Up/Average/Paeth) per the PNG spec, applied to the raw channel bytes *before* grey conversion.
+- **`new (std::nothrow)`** for both row buffers and the inflater, answering `false`. Never `abort()`.
+- **Do not verify CRCs.** Stated deliberately: a CRC failure on a cover should cost the cover, not the book, and structural nonsense is already refused. The two mutation tests above change IHDR bytes *without* fixing the CRC and must still be refused **by the interlace and colour-type checks**, which is what proves those refusals are structural rather than incidental.
 
 - [ ] **Step 5: Run to verify it passes**
 
@@ -667,8 +800,9 @@ git add -A && git commit -m "wip: pngd before mutation" && cp core/src/pngd.cpp 
 ```
 
 1. Replace the Paeth predictor with `a` (left) → byte-exactness must fail. **If it does not, your fixture has no Paeth rows** — pick a different corpus PNG rather than weakening the assertion.
-2. Drop the interlace refusal → the refusal test must fail.
-3. Reuse one row buffer for both current and previous → the Up/Average/Paeth rows must fail.
+2. Drop the interlace refusal → that refusal test must fail.
+3. Reuse one row buffer for current and previous → the Up/Average/Paeth rows must fail.
+4. Ignore the sink's false return → the abort test must fail.
 
 Restore with `cp /tmp/pngd.bak core/src/pngd.cpp && touch core/src/pngd.cpp` each time.
 
@@ -681,6 +815,7 @@ git commit -m "core: PNG scanlines over our own inflate_stream, refusing what it
 ```
 
 ---
+
 
 ## Task 4: `imagefit.h` — streaming downscale and diffuse to four levels
 
@@ -1118,8 +1253,14 @@ const char* coverResultName(CoverResult r);
 //
 // Peak heap, worst realistic case (a deflated JPEG -- 59% of corpus JPEG covers
 // are deflated inside the zip): the zip inflater's 36,956 bytes, TJpgDec's ~3,500,
-// a destination accumulator and an error row at ~2,112 each, and two plane rows.
-// About 45 KB, against ~87 KB free at sleep once the reader's chapter is released.
+// ITS MCU BAND BUFFER at 8.4-16.9 KB, a destination accumulator and an error row
+// at ~2,112 each, and two plane rows. About 54-62 KB, against ~87 KB free at sleep
+// once the reader's chapter is released.
+//
+// THE BAND IS THE PART THAT SURPRISES, and it is why JpegDecoder reports its own
+// workspace rather than this comment asserting a number: TJpgDec emits MCU
+// RECTANGLES, so a row is not complete until its whole band has arrived and one
+// band must be held. Ask JpegDecoder::workspaceBytes() rather than trusting this.
 //
 // A DEFLATED PNG NEEDS TWO WINDOWS and may answer OutOfMemory. That is 1 of 225
 // corpus books, and the caller falls back to the reading card.
@@ -1247,10 +1388,13 @@ Expected: compile error, `reader/cover.h` missing.
 
 - [ ] **Step 4: Write `core/src/cover.cpp`**
 
-Sequence: `locateCover()` → open the file through `fs.openRead` → `Zip::locateData` → an `EntrySource` over the compressed bytes → wrap in `InflateSource` **only if `deflated`** → sniff the first two bytes for the JPEG SOI or PNG signature → drive `JpegDecoder` or `PngDecoder` → feed every source row to `CoverFitter` → push each emitted row pair to the sink.
+Sequence: `locateCover()` → open the file through `fs.openRead` → `Zip::locateData` → an `EntrySource` over the compressed bytes → wrap in `InflateSource` **only if `deflated`** → sniff the first bytes for the JPEG SOI or the PNG signature → drive `JpegDecoder` or `PngDecoder` with an internal `ImageRowSink` → that sink feeds `CoverFitter` → each emitted plane row pair goes to `CoverPlaneSink`.
 
-- Pass `box().dstW`/`dstH` as `JpegDecoder::begin`'s `atLeast` pair, so the free IDCT scaling is used.
-- Call `stop` **every 8 source rows**, not every row: `completeIndex` checks per block and this is the same trade at a comparable granularity. A source row is well under a millisecond.
+**The private `ImageRowSink` is where this task's work actually is.** It is the adapter between the two push interfaces: `begin(w, h)` sizes the `CoverFitter`, and each `row()` calls `CoverFitter::addRow` and forwards any emitted plane row pair to the `CoverPlaneSink`.
+
+- **Pass `box().dstW`/`dstH` as `JpegDecoder::decode`'s `atLeast` pair**, so the free IDCT scaling is used. Note the ordering problem this creates and solve it in this order: the fit box needs the SOURCE dimensions, which are not known until the decoder has read the headers — so the `ImageRowSink::begin` callback is where `fitCover` is called and `CoverFitter::begin` happens, **not** before the decode starts. The `atLeast` pair passed to `decode` is just the panel size, which is known up front.
+- **The stop predicate rides the sink's return value.** `ImageRowSink::row` answers `false` when `stop(stopCtx)` says so, which for JPEG aborts `jd_decomp` through TJpgDec's own `JDR_INTR` path and for PNG stops the scanline loop. There is no second interruption mechanism. Call `stop` **every 8 source rows**, not every row: `completeIndex` checks per block and this is the same trade at a comparable granularity.
+- **Distinguish an abort from a failure** using the decoder's `aborted()`, and map to `CoverResult::Abandoned` vs `Unsupported`/`ReadFailed`. Reporting an abandoned decode as a failure would make the shell log a card fault that did not happen.
 - `sink.finish(false)` on **every** non-`Ok` path, including `Abandoned`.
 
 - [ ] **Step 5: Run to verify it passes**

@@ -241,13 +241,24 @@ Peak, worst realistic case (a deflated JPEG):
 |---|--:|
 | zip entry inflater (`Inflater::Scratch`) | 36,956 |
 | TJpgDec workspace | ~3,500 |
+| **TJpgDec MCU band buffer** | **8,400–16,900** |
 | destination row accumulator (528 × 4) | 2,112 |
 | Floyd–Steinberg error row | 2,112 |
 | two 1-bit plane row buffers | 132 |
-| **total** | **~45 KB** |
+| **total** | **~54–62 KB** |
 
 Against ~87 KB free at sleep once the reader's chapter is released. The deflated-PNG
 case needs two windows, ≈ 88 KB, and may refuse.
+
+**CORRECTED 2026-08-29, from reading the vendored source rather than its summary.**
+This table first omitted the band buffer and read ~45 KB. `jd_decomp` emits **MCU
+rectangles**, typically 16×16 at 4:2:0 (177 of the 185 corpus JPEG covers), so a row
+is not complete until its whole band has arrived and one band — `mcuHeight ×
+outputWidth` — must be held. That also settles the decoder's shape: `jd_decomp`
+decodes the whole image in one call, so a pull interface would need control
+inversion and **both decoders push rows into a sink instead**. The margin against
+~87 KB is now ~25 KB rather than ~42 KB, which is still comfortable but is no longer
+something to spend without checking.
 
 **Painting costs no extra RAM at all**, which is what makes four levels affordable at
 the 42,152-byte reading floor: each pass reads one plane straight into
