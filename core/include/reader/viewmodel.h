@@ -280,12 +280,15 @@ struct PeekViewModel {
   // the book's own name for it where its contents supply one and the `CH. NN`
   // position where they do not, exactly as the Reader's header falls back.
   std::string where;
-  // THE LINE BOX THE PANEL'S TEXT IS SET ON, carried so the render computes the panel's
-  // box from the same line height the metrics did. The panel's HEIGHT is a result of
-  // its line count, so a render that assumed the default lead would draw the border in
-  // the wrong place the moment a reader changed their line spacing -- two spellings of
-  // one geometry, which is this project's first invariant.
-  int leadEm1000 = kBodyLeadEm;
+  // NO LEAD HERE, AND THE ABSENCE IS THE DESIGN CHANGE. This model carried a
+  // `leadEm1000` so renderPeek could recompute the panel's box from the same line
+  // height peekMetrics did -- necessary while the HEIGHT was a result of the line
+  // count, because a render that assumed the default lead drew the border a line away
+  // from its own text. The box is fixed now (theme.h's kPeekPanelH), so neither
+  // function has a lead to disagree about and the field had no other reader. What
+  // varies with the reader's typography is how many lines FIT, which is a question for
+  // Theme::peekVisibleLines and never for a view model.
+  //
   // CLOSE / GO HERE / — / —, in the boards' hardware order (Back, Confirm, Up, Down).
   // The last two are EMPTY, not absent: an empty slot is 36px wide (kHintEmptySlotW),
   // and measuring it as zero is not "drawing nothing", it is drawing the other two in

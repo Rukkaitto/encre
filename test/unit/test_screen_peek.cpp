@@ -419,6 +419,12 @@ struct PeekFix {
   }
   reader::PeekScreen& s() { return *scr; }
   std::string text() { return readerfix::pageText(scr->page()); }
+  // WHAT THE BOX DERIVED, asked of the theme rather than read off a constant: the
+  // panel's height is fixed and its line count follows from the type ramp and the
+  // reader's lead, so there is no number a test can pin instead.
+  int lines() const {
+    return theme.peekVisibleLines(ramp.fonts, body.face, reader::Settings{});
+  }
 };
 
 }  // namespace
@@ -702,26 +708,26 @@ TEST_CASE("the peek's page is NOT the reader's page, because the column is narro
   // AND THE LINES ARE INSIDE THE PANEL, not on the page's own left edge.
   for (const reader::LaidLine& ln : peek.page().lines) CHECK(ln.x >= pm.columnLeft);
 
-  // THE PANEL HOLDS kPeekLines LINE BOXES AND NO MORE. Its HEIGHT is a result of that
-  // count, so a page laid at the reading column's height would run out through the
-  // border.
+  // THE PANEL HOLDS WHAT ITS BOX HOLDS AND NO MORE. The height is FIXED
+  // (kPeekPanelH) and the count is what fits whole inside it, so a page laid at the
+  // reading column's height would run out through the border.
   //
   // A CEILING AND NOT AN EQUALITY *HERE*, and the reason is the heading: this page
   // opens with one, and a block boundary costs a blank line box that carries no
   // LaidLine -- so a full eight boxes come back as seven lines. The equality lives on
   // the next case, over a page with no heading in it.
-  CHECK(peek.page().lines.size() <= static_cast<size_t>(reader::kPeekLines));
+  CHECK(peek.page().lines.size() <=
+        static_cast<size_t>(theme.peekVisibleLines(ramp.fonts, body.face, reader::Settings{})));
 }
 
-TEST_CASE("a peek page in the body of a chapter fills all kPeekLines line boxes") {
-  // EIGHT LINES IS THE DESIGN, AND NOTHING RAN IT THROUGH THE LAYOUT ENGINE. Every
-  // check on this panel's line count was `<=` -- here, in the demo case below, and in
-  // test_theme_peek_golden.cpp -- and a ceiling is satisfied by seven. What made that
-  // worth more than tidiness is test_theme_peek_metrics.cpp, whose `linesIn()` helper
-  // is PageBuilder's `rows_ = pxToF26(columnH) / leadF26_` TRANSCRIBED: it checks
-  // peekMetrics against a copy of the rule rather than against PageBuilder, so a change
-  // to the derivation would leave that file green while the panel paginated to seven.
-  // This is the assertion that goes through the real engine.
+TEST_CASE("a peek page in the body of a chapter fills every line box its panel holds") {
+  // THE COUNT IS THE DESIGN'S RESULT, AND NOTHING RAN IT THROUGH THE LAYOUT ENGINE.
+  // Every check on this panel's line count was `<=` -- here, in the demo case below,
+  // and in test_theme_peek_golden.cpp -- and a ceiling is satisfied by seven. What
+  // made that worth more than tidiness is that test_theme_peek_metrics.cpp used to
+  // carry PageBuilder's `rows_` TRANSCRIBED, checking peekMetrics against a copy of
+  // the rule rather than against PageBuilder. (That copy is gone: both sides call
+  // rowsThatFit now.) This is still the assertion that goes through the real engine.
   //
   // NOT PAGE ONE. `longChapter` opens with `<h1>Chapter One</h1>`, and a block boundary
   // spends a line box that produces no LaidLine, so page one is seven lines over eight
@@ -733,7 +739,7 @@ TEST_CASE("a peek page in the body of a chapter fills all kPeekLines line boxes"
     const std::string first = p.text();
     p.s().onGesture({Gesture::Next});
     REQUIRE(p.text() != first);  // it really did turn
-    CHECK(p.s().page().lines.size() == static_cast<size_t>(reader::kPeekLines));
+    CHECK(p.s().page().lines.size() == static_cast<size_t>(p.lines()));
   }
 }
 
@@ -769,6 +775,9 @@ struct FactoryFix {
     peekLeft = m.columnLeft;
   }
   int peekLeft = 0;
+  int lines() const {
+    return theme.peekVisibleLines(ramp.fonts, body.face, reader::Settings{});
+  }
 };
 
 }  // namespace
@@ -825,13 +834,14 @@ TEST_CASE("the demo Peek builds and shows the board's opening") {
   // mutation rather than assumed: `setMetrics(readerMetrics_)` lays this two-sentence
   // specimen in SEVEN lines at the reading measure, under the panel's eight, so the
   // ceiling passes over exactly the swap it looks like it is guarding. It is kept as
-  // the bound it really is -- the panel's height is a result of kPeekLines -- and the
-  // left edge is what carries the claim.
+  // the bound it really is -- the panel's line count is a result of its fixed box --
+  // and the left edge is what carries the claim.
   for (const reader::LaidLine& ln : peek->page().lines) CHECK(ln.x >= f.peekLeft);
   // Still a ceiling here, and deliberately: the case above -- "a peek page in the body
-  // of a chapter fills all kPeekLines line boxes" -- is where the count is pinned to
-  // the number, over real pagination rather than over a specimen authored to fit.
-  CHECK(peek->page().lines.size() <= static_cast<size_t>(reader::kPeekLines));
+  // of a chapter fills every line box its panel holds" -- is where the count is pinned
+  // to what the box derived, over real pagination rather than over a specimen authored
+  // to fit.
+  CHECK(peek->page().lines.size() <= static_cast<size_t>(f.lines()));
   // AND IT IS THE BOARD'S OWN SENTENCE. Checked on the text rather than only on the
   // line count, because a peek built from the READER's demo chapter would also fit --
   // and "Miss Brooke", which this used to assert, IS THAT CHAPTER'S OPENING TOO. The

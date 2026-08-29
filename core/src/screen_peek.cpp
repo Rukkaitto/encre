@@ -62,9 +62,9 @@ void PeekScreen::setMetrics(const PageMetrics& m) {
   // in a peek has to pay for.
   inner_->setPageCacheDepth(1);
   inner_->setMetrics(m);
-  // See the header: the panel's height is a result of its line count, so the render has
-  // to be given the same lead the metrics were built from.
-  vm_.leadEm1000 = m.leadEm1000;
+  // NO LEAD IS MIRRORED INTO THE VIEW MODEL, and it used to be. The panel's box is
+  // fixed (theme.h's kPeekPanelH), so renderPeek needs no typography to place the
+  // border -- it is the COLUMN this lead sizes, and PageBuilder already has it.
   syncVm();
 }
 

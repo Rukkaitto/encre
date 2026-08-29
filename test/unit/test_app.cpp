@@ -105,6 +105,9 @@ class NullTheme : public Theme {
                     const ReaderViewModel&, const Page&, Plane) override {}
   void peekMetrics(int, int, const FontSet&, const GlyphSource&, const Settings&,
                    PageMetrics&) const override {}
+  int peekVisibleLines(const FontSet&, const GlyphSource&, const Settings&) const override {
+    return 8;
+  }
   void renderPeek(Framebuffer&, const FontSet&, const GlyphSource&, const GlyphSource*,
                   const PeekViewModel&, const Page&, Plane) override {}
   void settingsMetrics(int, const FontSet&, int& listH, int& rowH, int& headerH) const override {

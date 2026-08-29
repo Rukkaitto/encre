@@ -1680,50 +1680,88 @@ constexpr int kPeekBandGap = 7;
 
 // THE PANEL'S BOX, DERIVED ONCE AND USED TWICE.
 //
-// peekMetrics places the column and renderPeek draws the border and the band around
-// it, and the height is a RESULT of the line count rather than a number either of
-// them could look up -- so a render that recomputed it would draw the border in the
-// wrong place the moment a reader changed their line spacing. Two spellings of one
+// peekMetrics places the column, renderPeek draws the border and the band around it,
+// and peekVisibleLines answers how many lines fit inside it. Two spellings of one
 // geometry is this project's first invariant, and this is the one function that
 // forecloses it.
+// AND IT NO LONGER DEPENDS ON THE READER'S TYPE AT ALL, which is the inversion stated
+// as a signature: the old form took a `leadEm1000` because the height was derived from
+// the line count, so a render that assumed the default lead drew the border in the
+// wrong place. With the box fixed there is nothing here for a lead to move -- the
+// COUNT is what moves, and that is peekLineCount's, asked separately by whoever needs
+// it. PeekViewModel carried the lead solely to feed this and no longer does.
 struct PeekBox {
   int x = 0, y = 0, w = 0, h = 0;  // the panel, in frame coordinates
   int bandH = 0;                   // its band, including the rule
   int columnLeft = 0, columnTop = 0, columnW = 0, columnH = 0;
 };
 
-PeekBox peekBox(int panelW, int panelH, const FontSet& fonts, const GlyphSource& body,
-                int leadEm1000) {
-  PeekBox b;
-  // The band is `align-items: center` with two runs of different sizes, so its line
-  // box is the TALLER of the two faces -- taking the label's would clip the value,
-  // which is the bigger of them on today's ramp (25px against 23px).
+// THE BAND'S HEIGHT, which is what makes the column a derivation rather than a
+// literal: the panel is 546 and the band is a RESULT of the type ramp, so 436 of
+// column is `546 - 110` only for as long as Value700 is 25px.
+//
+// It is `align-items: center` with two runs of different sizes, so its line box is
+// the TALLER of the two faces -- taking the label's would clip the value, which is
+// the bigger of them on today's ramp (25px against 23px).
+int peekBandH(const FontSet& fonts) {
   const Font& label = fonts[Role::Label500];
   const Font& value = fonts[Role::Value700];
   const int bandLineH =
       value.lineHeight() > label.lineHeight() ? value.lineHeight() : label.lineHeight();
-  b.bandH = bandLineH + 2 * kPeekBandPadY + kPeekBandRuleH;
+  return bandLineH + 2 * kPeekBandPadY + kPeekBandRuleH;
+}
 
-  // THE LINE BOX IS PageBuilder'S, IN ITS OWN UNIT. `leadF26_` there is
-  // `Tracking::em(font.ppem(), leadEm1000)` -- resolved against the face's PIXEL SIZE,
-  // which is what `line-height: 1.7` on `font-size: 32px` means and what the board's
-  // measured 54.4px line box is. Resolving it against `lineHeight()` instead would be
-  // a different number entirely (48 * 1.7, not 32 * 1.7) and would reserve room for
-  // twelve lines while claiming eight.
-  //
-  // AND IT ROUNDS UP, which is not fussiness: PageBuilder fits
-  // `pxToF26(columnH) / leadF26` lines, so a column a quarter of a pixel short of
-  // eight boxes holds SEVEN. At the default ppem 32 and 1.7 the exact height is
-  // 435.25px, and 435 is a line short.
-  const int leadF26 = Tracking::em(body.ppem(), leadEm1000).f26();
-  b.columnH = leadF26 > 0 ? (kPeekLines * leadF26 + 63) / 64 : 0;
-  b.h = 2 * kPanelBorder + b.bandH + kPeekBodyPadTop + b.columnH + kPeekBodyPadBottom;
+// The fixed panel less the border, the band and the body's own padding.
+int peekColumnH(const FontSet& fonts) {
+  return kPeekPanelH - (2 * kPanelBorder + peekBandH(fonts) + kPeekBodyPadTop +
+                        kPeekBodyPadBottom);
+}
+
+// HOW MANY WHOLE LINES THAT COLUMN HOLDS. rowsThatFit is PageBuilder's own rule, so
+// this cannot claim a line the pagination will not lay -- which is the failure mode
+// the derivation had to be shared to foreclose.
+//
+// THE CLAMP TO 1 IS DEAD CODE ON THE SHIPPED RAMPS, and saying so is the point of
+// having it: the widest line box either ramp can ask for is 46 * 2.000 = 92px against
+// a 436px column, 4.7x of headroom. It exists because zero is not a count a panel can
+// be built on -- a peek that reported none would draw an empty box with a band over
+// it, indistinguishable from a book that failed to open -- and because a negative one
+// is unreachable only for as long as kPeekPanelH stays above the band plus the
+// padding. If it ever FIRES, the panel is reporting a line PageBuilder will refuse to
+// lay, and the fix is the box and not this line.
+//
+// The static_assert below is half a proof and the ramp walk in
+// test_theme_peek_metrics.cpp is the other half: a face's lineHeight() is a runtime
+// fact, so this cannot see the band, and the test asserts a count of at least one at
+// all 35 combinations with the real ramp loaded.
+static_assert(kBodyPpemSteps[sizeof(kBodyPpemSteps) / sizeof(int) - 1] *
+                      kLineSpacingSteps[sizeof(kLineSpacingSteps) / sizeof(int) - 1] / 1000 <
+                  kPeekPanelH - (2 * kPanelBorder + kPeekBodyPadTop + kPeekBodyPadBottom),
+              "the widest line box on the settings ramps must fit the peek's panel");
+
+int peekLineCount(const FontSet& fonts, const GlyphSource& body, int leadEm1000) {
+  const int n = rowsThatFit(peekColumnH(fonts), body.ppem(), leadEm1000);
+  return n > 0 ? n : 1;
+}
+
+PeekBox peekBox(int panelW, int panelH, const FontSet& fonts) {
+  PeekBox b;
+  b.bandH = peekBandH(fonts);
+
+  // THE BOX IS THE CONSTANT AND THE COUNT IS THE RESULT -- see kPeekPanelH, which
+  // carries the two measurements that inverted this. The leftover between the last
+  // whole line box and the foot of the column is SLACK, exactly as Typography's
+  // preview box carries slack at large sizes.
+  b.h = kPeekPanelH;
+  b.columnH = peekColumnH(fonts);
 
   b.w = kPeekPanelW;
   b.x = panelLeft(panelW, kPeekPanelW);
   // `top: 50%; transform: translateY(-50%)` -- centred on the SCREEN, as the actions
   // panel is. The hint bar is drawn over the veil afterwards and the panel does not
-  // reach it.
+  // reach it. A FIXED HEIGHT IS WHAT MAKES THAT TRUE BY CONSTRUCTION: 546 against 800
+  // and 792 leaves 127px / 123px either side, where the derived height reached 846 at
+  // the top of the ramp and centreIn handed back a negative origin.
   b.y = centreIn(0, panelH, b.h);
 
   b.columnLeft = b.x + kPanelBorder + kPeekPadX;
@@ -1737,7 +1775,7 @@ PeekBox peekBox(int panelW, int panelH, const FontSet& fonts, const GlyphSource&
 void QuietTheme::peekMetrics(int panelW, int panelH, const FontSet& fonts,
                              const GlyphSource& body, const Settings& settings,
                              PageMetrics& out) const {
-  const PeekBox b = peekBox(panelW, panelH, fonts, body, settings.lineSpacing);
+  const PeekBox b = peekBox(panelW, panelH, fonts);
   out.columnLeft = b.columnLeft;
   out.columnTop = b.columnTop;
   out.columnW = b.columnW;
@@ -1756,6 +1794,11 @@ void QuietTheme::peekMetrics(int panelW, int panelH, const FontSet& fonts,
   // typography fields, two reads.
 }
 
+int QuietTheme::peekVisibleLines(const FontSet& fonts, const GlyphSource& body,
+                                 const Settings& settings) const {
+  return peekLineCount(fonts, body, settings.lineSpacing);
+}
+
 void QuietTheme::renderPeek(Framebuffer& fb, const FontSet& fonts, const GlyphSource& body,
                             const GlyphSource* italic, const PeekViewModel& vm,
                             const Page& page, Plane plane) {
@@ -1763,10 +1806,11 @@ void QuietTheme::renderPeek(Framebuffer& fb, const FontSet& fonts, const GlyphSo
   // job is to be in front of it.
   veilRect(fb, 0, 0, fb.width(), fb.height());
 
-  // THE SAME BOX peekMetrics PLACED THE COLUMN IN, which is why the view model carries
-  // the lead: the panel's height is a result of its line count, so recomputing it with
-  // the default would put the border a line away from its own text.
-  const PeekBox b = peekBox(fb.width(), fb.height(), fonts, body, vm.leadEm1000);
+  // THE SAME BOX peekMetrics PLACED THE COLUMN IN, and it takes no typography to
+  // compute -- kPeekPanelH is fixed, so the two callers cannot disagree about a lead
+  // because neither of them has one. Before the box was pinned this took vm.leadEm1000,
+  // and the view model carried that field for no other reader.
+  const PeekBox b = peekBox(fb.width(), fb.height(), fonts);
   drawPanel(fb, b.x, b.y, b.w, b.h);
 
   // --- The band: `PEEK` left, the chapter and percent right --------------------

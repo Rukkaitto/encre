@@ -26,6 +26,7 @@
 #include "reader/settings.h"
 #include "reader/theme.h"
 #include "reader/theme_quiet.h"
+#include "reader/tracking.h"
 #include "reader/viewmodel.h"
 
 namespace {
@@ -120,33 +121,53 @@ TEST_CASE("the peek's panel holds whole lines and does not reach the hint bar") 
   // page boundary.
   //
   // THE FIRST OF THE TWO CHECKS BELOW IS NEARLY A ROUND TRIP AND IS LABELLED AS ONE.
-  // `columnH` is `ceil(kPeekLines * lead)` and PageBuilder fits `columnH / lead` boxes
-  // into it, so text laid by the metrics cannot leave the column the metrics reported
+  // `columnH` is the fixed panel less its band and padding, and PageBuilder fits
+  // `columnH / lead` boxes into it -- the same rowsThatFit the theme derives its own
+  // count with -- so text laid by the metrics cannot leave the column it reported
   // whatever the face's descent is -- it bites only if the FACE's nominal extent
-  // exceeds the LEAD, which is a real hazard (settings.h records that at
-  // `lineSpacing = 1000` the face's 48px extent overflows a 32px box by ~8px) and is
-  // not the hazard this screen has. It is kept because it is the board's literal
-  // sentence and costs two lines; it is not what defends the claim.
+  // exceeds the LEAD.
+  //
+  // AND THIS SCREEN DOES REACH THAT CASE, which the comment here used to deny ("not the
+  // hazard this screen has") on the strength of a walk that only ever ran at the
+  // default lead. settings.h records the two tightest steps of kLineSpacingSteps as
+  // deliberately tighter than the face's own ink, and walking the ramp below found it:
+  // at ppem 46 and lead 1.000 the first line's nominal top is 12px above the column.
+  // The bound is split accordingly at the assertion, which is the honest form of a
+  // check that was only ever exercised where it could not fail.
   //
   // WHAT DEFENDS IT IS THE SECOND: the text placed by peekMetrics against the border
-  // drawn by renderPeek, in PIXELS. Those are two functions computing one box, which
-  // is this project's first invariant and the reason PeekViewModel carries the lead at
-  // all -- and it is checked AT A NON-DEFAULT LINE SPACING, because at the default the
-  // two agree by accident of both reaching for the same constant. Deleting the
-  // `vm.leadEm1000` the render is given fails it; see the report.
+  // drawn by renderPeek, in PIXELS. Those are two functions computing one box, which is
+  // this project's first invariant.
+  //
+  // IT USED TO BE THE READER'S LEAD THAT COULD MAKE THEM DISAGREE, and it no longer
+  // can: the panel is a fixed box now (theme.h's kPeekPanelH), so neither function
+  // takes a lead and PeekViewModel no longer carries one. The mutation this comment
+  // named -- "deleting the `vm.leadEm1000` the render is given fails it" -- is not
+  // writable any more, because the field it deleted does not exist. What replaces it is
+  // WIDER coverage rather than a sharper single case: the walk below runs the real
+  // pagination at both ENDS of both typography ramps, where the derived line count is
+  // 17 and 4 rather than 8, and asserts the ink stays inside a panel that did not move.
   ramp::Ramp ramp;
   reader::QuietTheme theme;
-  Body body;
 
-  // Two leads: the shipped default, and the step table's widest -- which moves the
-  // panel's height by 76px and is what makes the two boxes able to disagree.
-  for (const int lead : {reader::Settings{}.lineSpacing, 2000}) {
+  // The default, then the four corners of (kBodyPpemSteps x kLineSpacingSteps) -- the
+  // extremes are what the old derivation could not survive, and they are where a page
+  // laid against the wrong box would overflow by the most.
+  const std::pair<int, int> settingsUnderTest[] = {
+      {reader::Settings{}.bodyPpem, reader::Settings{}.lineSpacing},
+      {25, 1000}, {25, 2000}, {46, 1000}, {46, 2000},
+  };
+  for (const auto& ps : settingsUnderTest) {
     for (const auto geo : {std::pair<int, int>{480, 800}, std::pair<int, int>{528, 792}}) {
       const int w = geo.first, h = geo.second;
+      const int ppem = ps.first, lead = ps.second;
       CAPTURE(w);
+      CAPTURE(ppem);
       CAPTURE(lead);
       reader::Settings s;
+      s.bodyPpem = ppem;
       s.lineSpacing = lead;
+      Body body(ppem);
       reader::PageMetrics rm, pm;
       theme.readerMetrics(w, h, ramp.fonts, body.face, s, rm);
       theme.peekMetrics(w, h, ramp.fonts, body.face, s, pm);
@@ -174,7 +195,8 @@ TEST_CASE("the peek's panel holds whole lines and does not reach the hint bar") 
       // test_screen_peek.cpp, over a page in the body of a real chapter -- every check
       // on this panel's line count was `<=` until then, and a ceiling is satisfied by
       // seven.
-      CHECK(static_cast<int>(p.lines.size()) <= reader::kPeekLines);
+      CHECK(static_cast<int>(p.lines.size()) <=
+            theme.peekVisibleLines(ramp.fonts, body.face, s));
 
       // The LAST line is the only one that can fall out of the box: the lines are laid
       // on an ascending run of line boxes, so if the deepest descender is inside the
@@ -183,7 +205,30 @@ TEST_CASE("the peek's panel holds whole lines and does not reach the hint bar") 
       CAPTURE(p.lines.back().baselineY);
       CAPTURE(body.face.descent());
       CHECK(inkBottom <= pm.columnTop + pm.columnH);
-      CHECK(p.lines.front().baselineY - body.face.ascent() >= pm.columnTop);
+
+      // AND THE FIRST LINE'S TOP, WHICH IS NOT THE SAME BOUND AT EVERY LEAD -- this is
+      // the hazard settings.h records rather than one this panel introduced. The face's
+      // nominal extent is `ascent - descent`, and the two tightest steps of
+      // kLineSpacingSteps are deliberately TIGHTER than it: at ppem 32 the extent is
+      // 48px against a 32px box at lead 1.000 and 38px at 1.200. That was offered
+      // anyway, as a reading-comfort call to be settled on the glass.
+      //
+      // So a first line's NOMINAL top rises above the column at those two steps -- by
+      // 12px at ppem 46 and 1.000, measured. What must still hold there is that it stays
+      // out of the BAND, which is what a reader would see as damage: the body's 16px of
+      // top padding is the room it has. Where the extent fits its box, the column's own
+      // top is the bound.
+      const int nominalExtent = body.face.ascent() - body.face.descent();
+      const int lineBoxPx = reader::f26ToPx(reader::Tracking::em(ppem, lead).f26());
+      const int inkTop = p.lines.front().baselineY - body.face.ascent();
+      CAPTURE(nominalExtent);
+      CAPTURE(lineBoxPx);
+      if (nominalExtent <= lineBoxPx) {
+        CHECK(inkTop >= pm.columnTop);
+      } else {
+        // 16 is the board's `padding: 16px 20px 20px 20px`, top side.
+        CHECK(inkTop >= pm.columnTop - 16);
+      }
 
       // THE DRAWN BORDER, AND THE TEXT INSIDE IT. Bw rather than a grayscale plane
       // because a border is coverage 0 or 3 and is therefore identical in every pass --

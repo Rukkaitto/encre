@@ -20,21 +20,48 @@ struct ContentsViewModel;
 struct TypographyViewModel;
 struct PeekViewModel;
 
-// HOW MANY LINES OF BOOK TEXT A PEEK SHOWS, and the number IS the design rather than
-// a consequence of one.
+// THE PEEK PANEL'S HEIGHT. The BOX is the constant and the LINE COUNT is the result,
+// and this is the inversion of what shipped -- there was a `kPeekLines = 8` here and
+// the height was derived from it.
 //
-// design/Peek.dc.html: content-sizing alone ran to ELEVEN lines and the panel then
-// filled the glass to within 48px of the top, which reads as a bordered full screen
-// rather than as a modal -- precisely the full-width alternative the board rejects,
-// arrived at by accident instead of chosen. A pinned HEIGHT was worse still: it cut
-// the last line in half lengthwise, which the firmware cannot even do, since
-// PageBuilder lays out whole lines.
+// design/Peek.dc.html carried the argument for the old shape and it does not hold. It
+// ran: a pinned height "cut the last line in half lengthwise", therefore the panel
+// must be sized by its text. The premise is true; the conclusion needs a step that is
+// missing. A pinned height only cuts a line in half if the COUNT is not floored, and
+// PageBuilder floors it already -- it lays out whole lines and fits
+// `pxToF26(columnH) / leadF26` of them (rowsThatFit, layout.h). Pin the box, floor
+// the count, and every line is whole AND the panel is one size.
 //
-// So the firmware picks the line count and the panel's height is a RESULT, exactly as
-// headerBandHeight() and hintBarHeight() are results. Eight lines is about 180
-// characters -- one or two sentences, which is the whole answer to "who is this
-// again?".
-inline constexpr int kPeekLines = 8;
+// TWO THINGS THE OLD SHAPE COST, BOTH MEASURED:
+//
+//   * ON GLASS THE PANEL WAS "A LOT SHORTER" THAN THE SIMULATOR SHOWS. Reported by a
+//     reader running a smaller ppem and a tighter lead -- 17 lines in their reading
+//     column where the default fits 12. `lineBox` shrinks with both, so eight of THEIR
+//     boxes is ~310px against 546: a small box adrift in a lot of veil, on a screen
+//     whose whole job is to read as a modal rather than as a bordered full screen. No
+//     board and no golden could show it, because nothing renders the reader at
+//     non-default typography (#40).
+//   * AT THE TOP OF THE SETTINGS RAMP THE PANEL WAS TALLER THAN THE GLASS. The widest
+//     line box either ramp can ask for is kBodyPpemSteps' 46 at kLineSpacingSteps'
+//     2000 -- 92px -- so eight of them was a 736px column and an 846px panel, against
+//     800 on the X4 and 792 on the X3. centreIn then yields a NEGATIVE origin and the
+//     panel runs off both edges. A fixed box cannot do that, and 546 fits both panels
+//     with 127px (X4) / 123px (X3) of veil above it.
+//
+// 546 IS WHAT THE OLD DERIVATION PRODUCED AT THE DEFAULT SETTINGS, to the pixel, which
+// is what makes this a re-derivation rather than a redesign: 4px of border, a 70px
+// band, 16px above the text and 20px below leaves 436px of column, and 436 holds
+// exactly eight 54.4px line boxes. Neither peek golden moves.
+//
+// WHAT IS LEFT OVER IS SLACK at the foot of the panel, which is the precedent
+// design/Typography.dc.html's preview box already set: "the box's height is DERIVED
+// and fixed with respect to the settings, so the five rows never move and there is
+// visible slack at large sizes".
+//
+// The line count is now a QUERY -- Theme::peekVisibleLines -- for the reason
+// libraryVisibleRows and contentsVisibleRows are: it depends on the type ramp and on
+// the reader's settings, so it is not a number anything can pin.
+inline constexpr int kPeekPanelH = 546;
 
 // Themes own the entire presentation, layout structure included (spec 3.3).
 // The FontSet is supplied by the caller so device knowledge — which asset backs
@@ -216,6 +243,20 @@ class Theme {
   virtual void peekMetrics(int panelW, int panelH, const FontSet& fonts,
                            const GlyphSource& body, const Settings& settings,
                            PageMetrics& out) const = 0;
+
+  // HOW MANY WHOLE LINES OF BOOK TEXT THE PEEK SHOWS -- the derived half of the
+  // inversion kPeekPanelH describes, and a query for libraryVisibleRows' reason: the
+  // band's height depends on its type roles and the line box on the reader's own
+  // ppem and lead, so this is not a number anything can hold.
+  //
+  // IT TAKES NO PANEL SIZE, and the absence is the statement: the box is fixed, so
+  // the count cannot depend on which glass it is drawn on. libraryVisibleRows takes a
+  // panelH precisely because ITS box is the screen.
+  //
+  // AT LEAST 1, always. See the implementation for why that clamp is dead code on the
+  // shipped ramps and what it would mean if it ever fired.
+  virtual int peekVisibleLines(const FontSet& fonts, const GlyphSource& body,
+                               const Settings& settings) const = 0;
 
   // design/Peek.dc.html. Takes the page for renderReader's reason: it is already
   // positioned, in framebuffer coordinates, by reader/layout.h.

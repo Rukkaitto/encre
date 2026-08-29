@@ -137,12 +137,12 @@ class PeekScreen : public Screen {
   // as ReaderScreen::setMetrics: the screen is not renderable until it has been called,
   // because a chapter cannot be paginated without a column height.
   //
-  // THE LEAD TRAVELS IN THE VIEW MODEL. The panel's HEIGHT is a result of its line count
-  // (kPeekLines line boxes), so renderPeek has to compute its box from the same line
-  // height peekMetrics did -- and a render that assumed the default would draw the
-  // border a line away from its own text the moment a reader changed their line spacing.
-  // Two spellings of one geometry is this project's first invariant; carrying the number
-  // is what forecloses it.
+  // AND THE LEAD DOES NOT TRAVEL WITH IT, where it used to. While the panel's HEIGHT
+  // was a result of a fixed line count, renderPeek had to compute its box from the same
+  // line height peekMetrics did, so PeekViewModel carried the lead across for it. The
+  // box is fixed now (theme.h's kPeekPanelH) and neither function reads a lead at all,
+  // so the two spellings this project's first invariant warns about no longer exist to
+  // be reconciled. The lead reaches PageBuilder through `m` and stops there.
   void setMetrics(const PageMetrics& m);
 
   void setItalic(const GlyphSource* italic);

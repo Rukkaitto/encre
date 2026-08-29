@@ -75,8 +75,11 @@ PageBuilder::PageBuilder(const GlyphSource& font, const PageMetrics& m)
   quoteInsetPx_ = f26ToPx(Tracking::em(font.ppem(), kQuoteInsetEm).f26());
   listHangPx_ = f26ToPx(Tracking::em(font.ppem(), kListHangEm).f26());
   // A column that cannot hold one line box yields no pages at all, rather than
-  // dividing by zero -- layout.h says a caller must not loop on that.
-  rows_ = (leadF26_ > 0 && m.columnW > 0) ? pxToF26(m.columnH) / leadF26_ : 0;
+  // dividing by zero -- layout.h says a caller must not loop on that. The height
+  // half of that question is rowsThatFit's, which the peek's box model asks too;
+  // the WIDTH gate is this constructor's alone, since a column with no measure is
+  // not a layout question the theme can be asking.
+  rows_ = m.columnW > 0 ? rowsThatFit(m.columnH, font.ppem(), m.leadEm1000) : 0;
   beginPage();
 }
 
