@@ -856,8 +856,11 @@ struct FitBox {
 };
 
 // Pure arithmetic, so it is testable without an image. Vertical centring for Fill
-// is at 0.4 rather than 0.5: a cover's title band sits low and a centred crop of a
-// 2:3 into a 3:5 eats it. Measured on real covers, not chosen for symmetry.
+// is at 0.4 rather than 0.5 FOR THE COVERS WHERE FILL CROPS HEIGHT: a cover's title
+// band sits low, and a centred crop takes from it. Measured on real covers, not
+// chosen for symmetry -- and measured again as to how often it fires, which is 2 of
+// 225 books on the X4 and 18 on the X3, because most covers are RELATIVELY WIDER
+// than the panel and lose width instead.
 FitBox fitCover(int srcW, int srcH, int panelW, int panelH, CoverFit fit);
 
 // TURNS SOURCE ROWS INTO TWO 1-BIT PLANE ROWS, IN ORDER, HOLDING NEITHER IMAGE.
@@ -1004,19 +1007,26 @@ TEST_CASE("fitCover crops for Fill and letterboxes for Whole") {
   CHECK(x3.srcW == 1400);
   CHECK(x3.srcH == 2100);
 
-  // X4 is 3:5, so the same cover loses height to Fill and gains bands under Whole.
+  // X4 is 3:5 = 0.600 and the cover is 0.667, so the cover is RELATIVELY WIDER than
+  // the panel. Fill therefore crops WIDTH and keeps the full height; Whole fills the
+  // width and leaves bands ABOVE AND BELOW.
+  //
+  // THIS PLAN HAD BOTH AXES BACKWARDS UNTIL 2026-08-29, and why it was not obvious is
+  // worth keeping: the loss is 10.0% either way, because 0.600/0.667 is 0.9 whichever
+  // ratio you divide by. The NUMBER in the spec's table was right and the AXIS in its
+  // prose was wrong, so nothing in the documents disagreed with anything.
   const reader::FitBox fill = reader::fitCover(1400, 2100, 480, 800, reader::CoverFit::Fill);
   CHECK(fill.dstW == 480);
   CHECK(fill.dstH == 800);
-  CHECK(fill.srcH < 2100);
-  CHECK(fill.srcW == 1400);
+  CHECK(fill.srcW < 1400);   // width is the cropped axis
+  CHECK(fill.srcH == 2100);  // height is used whole
 
   const reader::FitBox whole = reader::fitCover(1400, 2100, 480, 800, reader::CoverFit::Whole);
-  CHECK(whole.srcH == 2100);
   CHECK(whole.srcW == 1400);
-  CHECK(whole.dstH == 800);
-  CHECK(whole.dstW < 480);
-  CHECK(whole.dstX > 0);  // centred, so there is a band each side
+  CHECK(whole.srcH == 2100);
+  CHECK(whole.dstW == 480);
+  CHECK(whole.dstH < 800);
+  CHECK(whole.dstY > 0);  // centred, so there is a band above and below
 }
 
 TEST_CASE("every emitted level is 0..3 and the two planes agree on it") {
@@ -1328,8 +1338,13 @@ TEST_CASE("decodeCover turns a real JPEG cover into a full set of plane rows") {
   CHECK(sink.finishedOk);
   // Not a blank plane: a cover that decoded to nothing would satisfy every count
   // above and put white on the glass.
+  //
+  // MIND THE POLARITY -- Framebuffer's convention is 1 = WHITE, so an inked pixel
+  // is a CLEARED bit and a plane row starts 0xFF. "Some ink" is therefore "some
+  // byte is not 0xFF", not "some byte is non-zero"; the latter reads as ink only
+  // by accident and answers FALSE for an all-black cover.
   bool anyInk = false;
-  for (uint8_t b : sink.msb) if (b != 0) { anyInk = true; break; }
+  for (uint8_t b : sink.msb) if (b != 0xFF) { anyInk = true; break; }
   CHECK(anyInk);
 }
 
@@ -1476,9 +1491,21 @@ inline constexpr uint32_t kSleepCoverMagic = 0x56435245;  // "ERCV"
 inline constexpr int kSleepCoverVersion = 1;
 
 // THE CACHED COVER'S HEADER, then plane 0 (MSB) then plane 1 (LSB), each
-// `planeBytes` of PHYSICAL store layout -- so a pass is one read into
-// Framebuffer::data() and costs no extra RAM at all. That is what makes four grey
-// levels affordable at the 42,152-byte reading floor.
+// `planeBytes` of LOGICAL raster rows -- panelW pixels a row, (panelW + 7) / 8
+// bytes, top to bottom, 1 = white as Framebuffer means it.
+//
+// LOGICAL, NOT PHYSICAL, AND AN EARLIER DRAFT OF THIS PLAN SAID PHYSICAL. That was
+// wrong on the device and right on the desktop, which is the worst way to be wrong:
+// the shell binds Rotation::Ccw (shell/src/main.cpp), and under Ccw
+// `byteIndex` maps logical (x, y) to physical (physX = y, physY = width - 1 - x) --
+// so ONE LOGICAL ROW IS ONE PHYSICAL COLUMN. A streaming row-major downscale can
+// only ever emit logical rows (a physical row would need the whole image), so a
+// file of physical rows cannot be produced by CoverFitter at all.
+//
+// The simulator and every golden are Rotation::None, where logical IS physical --
+// so a reader that just memcpy'd would pass the entire desktop suite and smear on
+// glass. That is the exact hazard CLAUDE.md records for the veil, fillRect, the
+// glyph blit and ditherRect, four times over.
 //
 // TWO PLANES SERVE THREE PASSES: Plane::Bw inks where coverage >= 2, which is
 // exactly "MSB set", so the Bw base pass and the Msb pass read the same plane.
@@ -1642,12 +1669,54 @@ cmake -S . -B build && make test 2>&1 | tail -5
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Add `Framebuffer::writePackedRow`, WHICH IS WHERE THE ROTATION LIVES**
+
+The cache holds **logical** raster rows, and on the device the frame is
+`Rotation::Ccw`, so getting a row onto the frame is not a memcpy. This is the one
+function that knows that, and it goes in `core/` **because `shell/` has no
+harness** — a scatter written in `shell/src/main.cpp` could not be tested at all,
+and the desktop cannot catch it anyway (see below).
+
+```cpp
+  // ONE LOGICAL ROW OF PACKED BITS ONTO THE FRAME, 1 = white, MSB = leftmost --
+  // the packing `bitMask()` already implies and `imagefit.h` already emits.
+  //
+  // NOT A memcpy, AND THAT IS THE WHOLE POINT. Under Rotation::Ccw, byteIndex maps
+  // logical (x, y) to physical (physX = y, physY = width - 1 - x), so one logical
+  // ROW is one physical COLUMN: `row`'s bits land in `width` different bytes at one
+  // fixed bit position, strided by physRowBytes(). Under Rotation::None it really is
+  // a memcpy into `data() + y * physRowBytes()`.
+  //
+  // THE DESKTOP CANNOT CATCH A WRONG ONE. The simulator and every golden are
+  // Rotation::None, where the two branches agree -- so a version that always
+  // memcpy'd would pass the entire suite and smear diagonally on glass, which is
+  // precisely what CLAUDE.md records happening to the veil, fillRect, the glyph blit
+  // and ditherRect. The test below therefore asserts the ROTATED case against
+  // getPixel, and that assertion is the only thing standing between this and the
+  // panel.
+  void writePackedRow(int y, const uint8_t* row);
+```
+
+Test it in `test/unit/test_framebuffer.cpp`, beside the existing byte-wise cases,
+and make it the shape those already use: build a frame at **both** rotations, write
+a known pattern through `writePackedRow`, and read every pixel back with
+`getPixel`, asserting it equals what a per-pixel `setPixel` of the same pattern
+would have produced. Include a `panelW` that is **not** a multiple of 8 so the
+partial last byte is exercised — the real panels are 480 and 528, both multiples of
+8, so nothing on the device reaches that edge and only a test can.
+
+**Prove it by mutation**: force the unrotated branch for both rotations. Under
+`Rotation::None` nothing should fail; under `Ccw` it must fail loudly. If it fails
+nothing, your test is not building a `Ccw` frame.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add core/include/reader/sleep_cover.h core/src/sleep_cover.cpp test/unit/test_sleep_cover.cpp
+git add core/include/reader/sleep_cover.h core/src/sleep_cover.cpp \
+        core/include/reader/framebuffer.h core/src/framebuffer.cpp \
+        test/unit/test_sleep_cover.cpp test/unit/test_framebuffer.cpp
 git diff --cached --stat
-git commit -m "core: the cached cover's header, and one predicate for whether it may be painted"
+git commit -m "core: the cached cover's header, and the one row-blit that knows about rotation"
 ```
 
 ---

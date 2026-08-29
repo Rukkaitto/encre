@@ -149,6 +149,14 @@ Measured over 224 covers with usable dimensions:
 | **X3** 528 × 792 (2:3 exactly) | **0.0 %** | **162 / 224** |
 | **X4** 480 × 800 (3:5) | **10.0 %** | 3 / 224 |
 
+**Which axis is cropped, stated because leaving it implicit cost real work.** A 2:3
+cover is 0.667 and the X4 is 0.600, so the cover is *relatively wider* than the
+panel: `FILL` crops **width** and keeps the full height, and `WHOLE` fills the width
+and leaves bands **above and below**. The implementation plan asserted both the
+other way round for a while and nothing disagreed with it, because the loss is 10.0%
+whichever axis you measure — 0.600/0.667 is 0.9 either way. The number was right and
+the axis was unstated.
+
 163 of 224 covers are 2:3, so **on the dev device this is a no-op for 73% of books**
 and it is very largely an X4 concern. The tail is what justifies a control: the
 squarest cover in the corpus is 877 × 973 and `FILL` cuts its title off at both
@@ -267,7 +275,19 @@ the 42,152-byte reading floor: each pass reads one plane straight into
 ### The cache
 
 One file, `/.reader/sleep.cover`: a header — magic, version, panel geometry,
-rotation, book path, `bookBytes` — then two 1-bit planes in physical store layout.
+rotation, book path, `bookBytes` — then two 1-bit planes as **logical raster rows**.
+
+**CORRECTED 2026-08-29: this said "physical store layout", and that was wrong on the
+device and right on the desktop** — the worst way to be wrong. The shell binds
+`Rotation::Ccw`, under which `byteIndex` maps logical *(x, y)* to physical
+*(physX = y, physY = width − 1 − x)*, so **one logical row is one physical column**.
+A streaming row-major downscale can only emit logical rows, so a file of physical
+rows cannot be produced at all. Getting a row onto the frame is therefore a strided
+scatter, not a `memcpy` — `Framebuffer::writePackedRow` — and it lives in `core/`
+because `shell/` has no harness and because **the simulator and every golden are
+`Rotation::None`, where the two branches agree**. A version that always memcpy'd
+would pass the whole desktop suite and smear on glass, exactly as CLAUDE.md records
+for the veil, `fillRect`, the glyph blit and `ditherRect`.
 
 **Two planes serve three passes.** `Plane::Bw` inks where coverage ≥ 2, which is
 exactly "MSB set", so the `Bw` base pass and the `Msb` pass read the **same** plane.
