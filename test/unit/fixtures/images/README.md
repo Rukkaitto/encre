@@ -12,6 +12,10 @@ against `image_fixtures.h`'s stb_image oracle.
 | `tiny_444.jpg` | Synthetic -- generated here, see below | None to state: no third party's bytes are in it |
 | `tiny_422.jpg` | Synthetic -- generated here, see below | as above |
 | `tiny_420.jpg` | Synthetic -- generated here, see below | as above |
+| `grey8.png` | Derived from `truecolour.png` -- same book, same rights | as above |
+| `greyalpha8.png` | as above | as above |
+| `rgba8.png` | as above | as above |
+| `split_idat.png` | `grey8.png`, re-chunked -- identical compressed bytes | as above |
 
 **The three `tiny_*.jpg` are the MCU geometries a real cover cannot reach.**
 `baseline.jpg` is 4:2:0, so `msx == msy == 2` and its MCU band is always 16 rows
@@ -90,3 +94,84 @@ What that leaves untested is narrower than it first looks: a 1-component JPEG is
 `tiny_444.jpg`. So `jpegd.cpp`'s own logic is exercised; only vendored code
 downstream of it differs. Re-measure before adding one: the command is in the
 commit that added this paragraph.
+
+## The four PNG fixtures beside `truecolour.png`
+
+**`pngd.h` accepts colour types 0, 2, 4 and 6, and the corpus has only type 2.**
+39 of 39 PNG covers across the 225 books are colour type 2, bit depth 8,
+non-interlaced. The other three are accepted on the argument that they "come
+free with the same unfilter" -- which is true of the code and says nothing about
+whether the code is right. **Accepting a type that has never once been decoded
+is a claim, not a tested behaviour**, so the three of them exist here and
+`test_pngd.cpp` decodes each byte for byte against the stb_image oracle. This is
+the same call `tiny_444.jpg` and its two siblings got for JPEG's MCU geometries,
+and the opposite of the call the grayscale JPEG got -- the difference is that a
+grayscale JPEG needs a branch in VENDORED code, where a colour type here is a
+branch in ours.
+
+| file | size | what it is for |
+|---|---|---|
+| `grey8.png` | 200x300, type 0 | one channel; and the only fixture that uses **all five row filters** |
+| `greyalpha8.png` | 200x300, type 4 | two channels, so the grey byte is not at a pixel-sized stride and alpha must be dropped rather than composited |
+| `rgba8.png` | 200x300, type 6 | four channels; the weighting reads bytes 0..2 and must ignore byte 3 |
+| `split_idat.png` | 200x300, type 0 | **five IDAT chunks**, with `pHYs` and `tEXt` around them |
+
+**The filter coverage was its own hole, found while filling this one.**
+`truecolour.png`'s 2400 rows use filters 1 (Sub, 26), 2 (Up, 2291) and 4 (Paeth,
+83) -- and **not one None row and not one Average row**. So the byte-exactness
+assertion, the strongest one in the file, never reached two of the five unfilter
+branches. `grey8.png` uses all five (None 3, Sub 15, Up 197, Average 4, Paeth
+81), which is what makes the Average branch testable at all. Read the
+distribution back out of a candidate fixture rather than assuming an encoder
+will produce a spread; both of these were checked by decompressing the IDAT and
+counting the leading byte of each scanline.
+
+**`split_idat.png` is `grey8.png`'s own compressed bytes, re-framed.** A real
+PNG splits its IDAT -- libpng emits 8192-byte chunks by default -- and
+`truecolour.png` has exactly one, so nothing exercised the concatenation the
+chunk walk exists to do, nor the ancillary-chunk skip. The IDAT payload is cut
+into five and wrapped with a `pHYs` and two `tEXt` chunks; the deflate stream is
+byte-for-byte the one Pillow wrote, so the fixture tests the FRAMING and nothing
+else. Verified to decode to the same pixels as `grey8.png` through Pillow before
+it was committed, and `test_pngd.cpp` asserts the same thing against the oracle.
+
+**No derivative carries a rights question the source did not.** All four come
+from `truecolour.png`, whose own `dc:rights` reads `Public domain in the USA.`;
+the pictures are a resize and a channel conversion of it, plus an alpha ramp
+generated here.
+
+Reproduce with Pillow 10.0.0 -- and note the alpha is a real gradient, not a
+constant, so a decoder that read the wrong channel of a two- or four-channel
+pixel differs visibly rather than by luck:
+
+```python
+im = Image.open("truecolour.png").convert("RGB").resize((200, 300), Image.LANCZOS)
+a = Image.linear_gradient("L").resize((200, 300))
+im.convert("L").save("grey8.png", "PNG", optimize=True)
+la = im.convert("L").convert("LA"); la.putalpha(a)
+la.save("greyalpha8.png", "PNG", optimize=True)
+rgba = im.convert("RGBA"); rgba.putalpha(a)
+rgba.save("rgba8.png", "PNG", optimize=True)
+```
+
+`split_idat.png` is then `grey8.png` with its IDAT payload cut into five equal
+pieces and re-chunked with fresh CRCs, ancillary chunks added before the first
+IDAT and after the last. (The decoder verifies no CRCs -- see `pngd.h` for why --
+but stb_image is the oracle here and the file should be valid for anything else
+that ever reads it.)
+
+**Bit depth 16, palette, and interlace have NO fixture, deliberately**, and the
+tests say so at the site: they are made by changing one byte of
+`truecolour.png`'s IHDR and leaving the CRC wrong. That is stronger than a
+fixture would be, because `pngd.cpp` verifies no CRCs -- so the only thing that
+can be declining those files is the IHDR field itself, which is exactly what
+those tests claim.
+
+**One thing no PNG fixture can cover, measured rather than assumed: the first
+row's filter.** All five PNG files here have a **Sub**-filtered first row, and
+Sub never reads the row above -- so the spec's virtual row of zeroes above the
+image was reached by nothing at all. An encoder will not fix that: filtering row
+0 against a known-zero row is wasteful, so every one of them picks Sub or None.
+`test_pngd.cpp` builds a PNG in the test instead (DEFLATE's stored-block mode
+needs no compressor, the same trick `test_reader_restream.cpp` uses for a real
+method-8 zip entry) and sets that first byte to Up, Average and Paeth in turn.
