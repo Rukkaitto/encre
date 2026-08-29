@@ -500,6 +500,56 @@ under `Epub::open`. It belongs to the EPUB refusal rate, not to cover support, a
 Desktop decode: median 76.6 ms, slowest 200.4 ms. **Not predictive of the device** —
 this project has been wrong by 8× that way once already.
 
+## ON GLASS — 2026-08-29, X3/UC8279, *Le Fléau*
+
+**The four-level cover reads as a photograph, not as noise.** That was the decision
+deferred to the panel when `Grayscale` was chosen over 1-bit Floyd–Steinberg, and it is
+now settled in the direction the design assumed. **No ghosting** of the card's text under
+the cover. The wake is unremarkable and no slower than before.
+
+### The `App` release was necessary, not prudent — and the gate under-stated it
+
+```
+[stage] sleep-painted    heap=91468             <- before gApp.reset()
+[stage] sleep-gray-base  heap=157884 min=70248  <- after the release, decode done
+```
+
+The release freed **66,416 B**; the decode peaked at **87,636 B**.
+
+| | free heap |
+|---|--:|
+| the decode needs | 87,636 |
+| available **with** the release | 157,884 — 70 KB spare |
+| available **without** it | 91,468 — **3,832 B spare** |
+
+**Under four kilobytes**, and on a book opened through **Home → CONTINUE**, the route the
+gate's arithmetic predicted would have ~40 KB of margin. Two errors cancelled into a worse
+answer than either: the pre-release heap was lower than modelled, and this cover's peak is
+**6.5 KB above the gate's figure** because at 881×1400 it decodes at scale **1/1**, so the
+MCU band is 16 × 881 rather than 8 × 700. **A cover that needs no downscaling is the
+expensive case, not the cheap one** — the opposite of the intuition.
+
+### What a sleep costs, measured
+
+`save=10 + paint1=774 + probe=11 + decode=3444 + paint2=2368` = **6,608 ms** for the first
+sleep of a book. Every sleep after it skips the decode and the mono paint: **~2.4 s against
+825 ms** before this feature. That is the standing price of four levels, paid per sleep, on
+a screen the panel then holds for hours.
+
+**The forced clean base is 694 ms of that 1,582 ms of waveform** — 44% of the second paint:
+
+```
+8279_DRF (694 ms)      <- requestResync()'s GC
+8279_gray_DRF (367 ms) + (366 ms) + (155 ms)
+```
+
+**Whether it earns its keep is still open.** "No ghosting" was observed *with* it in place,
+which confirms the shipped configuration and says nothing about the counterfactual. The
+reader's own refinement deliberately does not force a resync, relying on the cheap settle —
+the difference being that it repaints the same content at higher fidelity where this
+replaces a dither field with a photograph. Removing it is a one-line experiment and the
+symptom to look for is the card's text ghosted under the picture.
+
 ## Stated limits
 
 | limit | incidence |
