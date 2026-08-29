@@ -100,9 +100,12 @@ TEST_CASE("not-charging to charging asks for exactly one repaint") {
   CHECK(t.takeRepaintRequest() == false);
 }
 
-TEST_CASE("unplugging never asks for a repaint") {
-  // Falling edges are free: the stale bolt is corrected by the next Home paint,
-  // which is the same guarantee we would have had with no polling at all.
+TEST_CASE("an unplug asks for nothing until the dwell confirms it") {
+  // The falling edge ITSELF is free -- a bare "charging went false" must not
+  // spend a repaint, because on the X3 that edge fires on every tick of the
+  // gauge's dithering sign at full charge. See "a confirmed unplug asks for
+  // exactly one repaint" below for what an unplug HELD past the dwell does:
+  // this test is the immediate sample only, one second after the plug-in.
   BatteryTracker t;
   t.update(good(64, false), 0);
   t.update(good(64, true), 1000);
@@ -140,6 +143,94 @@ TEST_CASE("a dithering charge signal can never unlatch") {
   }
 }
 
+TEST_CASE("a confirmed unplug asks for exactly one repaint") {
+  // THE DEFECT THIS GUARDS AGAINST, reported from an X3: the bolt appears
+  // within ~2 s of plugging in (correct) and then stays on glass indefinitely
+  // after unplugging, because nothing repaints Home once charging_ goes false
+  // and the user is sitting on Home pressing nothing. The design's original
+  // rule -- unplugging never spends a refresh -- assumed a button press would
+  // correct it; sitting still, nothing does.
+  //
+  // The fix rides the SAME dwell that already exists to tell a real unplug
+  // from the gauge's zero-current dither, so it needs no new constant and
+  // inherits the same by-construction argument: a signal that cannot hold
+  // kUnlatchMs of unbroken not-charging can never reach this branch at all.
+  BatteryTracker t;
+  t.update(good(64, false), 0);
+  t.update(good(64, true), 1000);
+  REQUIRE(t.takeRepaintRequest() == true);
+
+  // The dwell clock starts at the FIRST not-charging sample after the plug,
+  // not at the plug itself -- that one sample only arms sawNotCharging_ and
+  // stamps notChargingSinceMs_; the dwell is checked only from the SECOND
+  // not-charging sample onward. It must not grant anything on its own.
+  const uint32_t unplugAt = 2000;
+  t.update(good(64, false), unplugAt);
+  CHECK(t.takeRepaintRequest() == false);
+
+  // Continuous not-charging, sampled every 2 s like the shell's real poll,
+  // right up to the dwell: nothing granted yet.
+  uint32_t now = unplugAt;
+  while (now + 2000 < unplugAt + BatteryTracker::kUnlatchMs) {
+    now += 2000;
+    t.update(good(64, false), now);
+    CHECK(t.takeRepaintRequest() == false);
+  }
+
+  // The sample that completes kUnlatchMs of unbroken not-charging, measured
+  // from that first not-charging sample, grants exactly one repaint -- the
+  // clearing this feature exists for.
+  now = unplugAt + BatteryTracker::kUnlatchMs;
+  t.update(good(64, false), now);
+  CHECK(t.takeRepaintRequest() == true);
+
+  // Taken means taken, and continuing to report not-charging asks for nothing
+  // further: the latch is already clear, so there is no second dwell to cross
+  // and nothing left to confirm.
+  for (int i = 0; i < 20; ++i) {
+    now += 2000;
+    t.update(good(64, false), now);
+    CHECK(t.takeRepaintRequest() == false);
+  }
+}
+
+TEST_CASE("the clearing repaint respects the session cap") {
+  // The clearing fires through the SAME grants_ < kMaxGrantsPerSession gate as
+  // the rising edge -- one budget, whichever edge spends it -- so a full
+  // plug/unplug cycle can now cost up to TWO grants instead of one: one for
+  // the plug, one for the confirmed unplug. Reach the cap with a mix of both
+  // and confirm neither edge asks for anything more once it is spent.
+  BatteryTracker t;
+  uint32_t now = 0;
+
+  t.update(good(64, false), now);
+  now += 1000;
+  t.update(good(64, true), now);  // grant 1: the plug
+  REQUIRE(t.takeRepaintRequest() == true);
+
+  now += BatteryTracker::kUnlatchMs;
+  t.update(good(64, false), now);  // dwell clock starts
+  now += BatteryTracker::kUnlatchMs;
+  t.update(good(64, false), now);  // grant 2: the confirmed unplug
+  REQUIRE(t.takeRepaintRequest() == true);
+
+  now += 1000;
+  t.update(good(64, true), now);  // grant 3: the plug -- cap now fully spent
+  REQUIRE(t.takeRepaintRequest() == true);
+
+  now += BatteryTracker::kUnlatchMs;
+  t.update(good(64, false), now);  // dwell clock starts again
+  now += BatteryTracker::kUnlatchMs;
+  t.update(good(64, false), now);  // would be grant 4: refused, cap already hit
+  CHECK(t.takeRepaintRequest() == false);
+
+  // And the cap holds for a further plug too, not just the clearing -- it is
+  // one shared budget, not one counter per edge.
+  now += 1000;
+  t.update(good(64, true), now);
+  CHECK(t.takeRepaintRequest() == false);
+}
+
 TEST_CASE("a real unplug, held past the dwell, re-arms the latch") {
   BatteryTracker t;
   t.update(good(64, false), 0);
@@ -162,6 +253,15 @@ TEST_CASE("a real unplug, held past the dwell, re-arms the latch") {
 }
 
 TEST_CASE("the session cap stops it asking after kMaxGrantsPerSession") {
+  // UPDATED FOR THE CLEARING REPAINT (2026-08-29): a full plug/unplug cycle now
+  // spends up to two grants -- one for the plug, one for the confirmed unplug
+  // -- from the SAME counter, not one each. So a loop of full cycles hits the
+  // cap after fewer cycles than before, and the request has to be taken after
+  // BOTH updates that can fire one (the dwell-crossing not-charging sample as
+  // well as the following plug) or a grant spent by the clearing would go
+  // unobserved, exactly as it did before this test was fixed: it used to read
+  // `granted == 3` from one take() per cycle and started failing with `2 == 3`
+  // the moment the clearing began spending grants of its own.
   BatteryTracker t;
   uint32_t now = 0;
   int granted = 0;
@@ -169,11 +269,13 @@ TEST_CASE("the session cap stops it asking after kMaxGrantsPerSession") {
     t.update(good(64, false), now);
     now += BatteryTracker::kUnlatchMs + 1;
     t.update(good(64, false), now);
+    if (t.takeRepaintRequest()) ++granted;
     now += 1000;
     t.update(good(64, true), now);
     if (t.takeRepaintRequest()) ++granted;
     now += 1000;
   }
+  // Whatever the split between the two edges, the total never exceeds the cap.
   CHECK(granted == BatteryTracker::kMaxGrantsPerSession);
 }
 

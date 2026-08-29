@@ -20,7 +20,14 @@ struct BatteryReading {
   bool charging = false;
 };
 
-// WHAT THE BAND SHOULD SAY, AND WHETHER PLUGGING IN IS WORTH A REPAINT.
+// WHAT THE BAND SHOULD SAY, AND WHETHER A CHANGE OF CHARGE STATE IS WORTH A REPAINT.
+//
+// Both edges can be: a plug-in repaints on a rising edge, and an unplug repaints
+// once the dwell below has confirmed it -- see "THE CLEARING REPAINT" in update().
+// The original design fired on the rising edge only and left the falling edge to
+// the next Home paint, on the assumption that a button press would supply one.
+// Reported from an X3 (2026-08-29): sitting on Home with nothing pressed, nothing
+// does, and the bolt stays on glass indefinitely after the cable comes out.
 //
 // In core/ rather than shell/ for the reason ProgressSaveGate is: this is a latch
 // with a dwell timer and a session cap, `shell/` has no test harness, and five bugs
@@ -54,6 +61,12 @@ class BatteryTracker {
   // one. Three extra panel refreshes per awake session, worst case, and then this
   // mechanism goes quiet and the mark simply waits for the next Home paint --
   // which is exactly the behaviour of not polling at all.
+  //
+  // ONE SHARED BUDGET FOR BOTH EDGES, NOT ONE EACH. The clearing repaint spends
+  // from the same counter as the rising edge, so a full plug/unplug cycle can
+  // now cost two grants instead of one -- accepted, because this was already a
+  // backstop against a hardware quirk rather than a promise of exactly one
+  // refresh per cycle.
   static constexpr int kMaxGrantsPerSession = 3;
 
   void update(const BatteryReading& r, uint32_t nowMs) {
@@ -98,7 +111,37 @@ class BatteryTracker {
                    // Unsigned difference, so this is correct across the ~49-day
                    // millis() wrap, as every quiet-window gate in the shell is.
                    static_cast<uint32_t>(nowMs - notChargingSinceMs_) >= kUnlatchMs) {
+          // THE CLEARING REPAINT. Reported from an X3: the bolt appears within
+          // ~2 s of plugging in (correct) and then stays on glass indefinitely
+          // after unplugging, because nothing repaints Home once charging_
+          // goes false and the user is sitting on Home pressing nothing. The
+          // design's original rule -- a falling edge never spends a refresh --
+          // assumed a button press would correct it; sitting still, nothing
+          // does. A stale "charging" claim is the same defect class this
+          // project already refuses for an unread gauge (-1, not 0%) and a
+          // book with no reading position (no demo substitute): a false claim
+          // is worse than an absent one.
+          //
+          // This rides the SAME dwell that already tells a real unplug from
+          // the gauge's zero-current dither, so it needs no new constant and
+          // inherits the same by-construction argument as the latch itself: a
+          // signal that cannot hold kUnlatchMs of unbroken not-charging can
+          // never reach this branch, so a plain falling edge's flicker risk
+          // does not come back.
+          //
+          // latched_ clears UNCONDITIONALLY -- it tracks reality, and must not
+          // stay true just because the session ran out of repaint budget, or
+          // the very next real plug-in would be refused as "already latched"
+          // when it is not. Only the REPAINT is grant-gated, through the same
+          // budget the rising edge spends -- so a full plug/unplug cycle can
+          // now cost up to two grants instead of one. Accepted: three grants
+          // was already a backstop against a hardware quirk this project
+          // cannot bench-test, not a promise of exactly one refresh per cycle.
           latched_ = false;
+          if (grants_ < kMaxGrantsPerSession) {
+            ++grants_;
+            repaintWanted_ = true;
+          }
         }
       }
     }
@@ -112,10 +155,11 @@ class BatteryTracker {
   // known "not charging". There is nothing for a sentinel to buy here.
   bool charging() const { return haveCharging_ && charging_; }
 
-  // True once per granted rising edge. TAKING IT CLEARS IT: the shell's paint-time
-  // read calls this and discards the answer, because a paint is already happening
-  // and a surviving request would fire a second refresh at the next poll,
-  // immediately after the paint that already showed the bolt.
+  // True once per granted edge -- a plug-in, or an unplug the dwell has just
+  // confirmed. TAKING IT CLEARS IT: the shell's paint-time read calls this and
+  // discards the answer, because a paint is already happening and a surviving
+  // request would fire a second refresh at the next poll, immediately after
+  // the paint that already showed (or cleared) the bolt.
   bool takeRepaintRequest() {
     const bool wanted = repaintWanted_;
     repaintWanted_ = false;
