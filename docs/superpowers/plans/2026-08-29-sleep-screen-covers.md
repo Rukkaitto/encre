@@ -1472,7 +1472,16 @@ Walks `~/.cache/encre-corpus`, runs `reader_sim cover` per book at both geometri
 make sim && python3 tools/covers.py | tail -20
 ```
 
-Expected, from the spec's measurements: **~222 `Ok`, 2 `Unsupported` (progressive JPEG), 1 `NoCover` or `OutOfMemory`.** A materially different result means a decoder bug — investigate before continuing, do not adjust the expectation.
+Expected: **~223 `Ok` and 2 `Unsupported`** (the two progressive JPEGs). A materially
+different result means a decoder bug — investigate before continuing, do not adjust the
+expectation.
+
+**`OutOfMemory` MUST NOT APPEAR, and its absence is not good news.** The one deflated
+PNG in the corpus needs two 32 KB inflate windows and refuses *on the device*; a 64-bit
+host serves both without complaint, so it counts `Ok` here. **This report measures
+format support, not what fits** — the only instrument for the second is the device, at
+Task 9. Say so in the tool's own output rather than letting a clean run read as "every
+book's cover will appear."
 
 - [ ] **Step 4: Commit**
 

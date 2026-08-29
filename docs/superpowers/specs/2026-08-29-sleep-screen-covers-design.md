@@ -267,9 +267,21 @@ call, nothing held afterwards:
 
 So the estimate above was right in shape and ~1.6 KB low. The deflated JPEG — the
 **majority** case, since 59% of JPEG covers are deflated — is 63.6 KB against ~87 KB
-free, about three quarters of the headroom. **The deflated PNG does not fit**, which
-confirms the stated limit rather than contradicting it: it is 1 of 225 corpus books
-and it answers `OutOfMemory` and falls back to the card.
+free, about three quarters of the headroom. **The deflated PNG does not fit on the
+device**, which confirms the stated limit rather than contradicting it: it is 1 of 225
+corpus books, it answers `OutOfMemory`, and it falls back to the card.
+
+**That refusal is DEVICE-ONLY, and the desktop cannot show it.** A 64-bit host serves
+both 36,956-byte windows without complaint, so `tools/covers.py` will count that book
+`Ok`. The corpus report is therefore a measure of *format support*, not of what fits —
+the only instrument for the second is the device. Do not read a clean corpus run as
+evidence that every book's cover will appear.
+
+Reporting a shortfall **as** a shortfall took a change rather than a reword: both
+decoders now carry `outOfMemory()` beside `aborted()`. Before it, a failed inflate
+window arrived as `ReadFailed` — a card fault that had not happened — because
+`PngDecoder` asks the sink before taking its window, so the sink was already declared
+by the time the allocation failed. The shell branches on that word.
 
 **CORRECTED 2026-08-29, from reading the vendored source rather than its summary.**
 This table first omitted the band buffer and read ~45 KB. `jd_decomp` emits **MCU
