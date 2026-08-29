@@ -67,6 +67,25 @@ struct OpenedBook {
   // One per spine entry, in spine order. `size()` is the chapter count.
   std::vector<ChapterSpan> chapters;
 
+  // WHERE THE COVER IS, or an unreadable span if the book declares none.
+  //
+  // A ChapterSpan rather than a new type, because it is the same four facts -- a
+  // local header offset, two sizes and whether it is deflated -- and a second type
+  // spelling one shape is what this project's own rule warns about. It is not a
+  // chapter and it is not in `chapters`: the spine names what to READ, and a cover
+  // is not in it.
+  //
+  // NOTED DURING THE OPF WALK, not looked up later: Epub already resolves every
+  // manifest href, so finding it afterwards would re-parse the OPF for ~100 ms and
+  // ~32 KB of transient. Exactly the argument Epub already makes for the NCX.
+  //
+  // TWO ROUTES, BOTH NEEDED. `<meta name="cover" content="id">` is the EPUB 2
+  // convention and what a 225-book corpus overwhelmingly uses; `properties="cover-image"`
+  // is EPUB 3's. Neither is required by any spec, so a book may have neither -- and
+  // that is NOT an error. The book opens, and the screen that wanted a picture falls
+  // back to what it drew before.
+  ChapterSpan cover;
+
   int chapterCount() const { return static_cast<int>(chapters.size()); }
 
   // Where chapter `i` is, for a ChapterReader. An unreadable or out-of-range index
@@ -81,6 +100,21 @@ struct OpenedBook {
     out.uncompressedSize = c.uncompressedSize;
     out.compressedSize = c.compressedSize;
     out.deflated = c.deflated;
+    return out;
+  }
+
+  // Where the cover is, for a decoder. Mirrors locate() and refuses the same way: a
+  // book with no cover yields a location with no size and no path, which every
+  // consumer already treats as "there is nothing here" -- so a caller needs no
+  // special case for the commonest reason a cover does not appear.
+  ChapterLocation locateCover() const {
+    ChapterLocation out;
+    if (!cover.readable()) return out;
+    out.bookPath = path;
+    out.localHeaderOffset = cover.localHeaderOffset;
+    out.uncompressedSize = cover.uncompressedSize;
+    out.compressedSize = cover.compressedSize;
+    out.deflated = cover.deflated;
     return out;
   }
 };

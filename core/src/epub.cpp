@@ -15,6 +15,29 @@ bool readEntry(FileHandle& file, Zip& zip, std::string_view path, std::string& o
   return zip.read(file, *e, out);
 }
 
+// Does a space-separated attribute value carry this exact token?
+//
+// AN EPUB 3 `properties` IS A SET, NOT A STRING, so `find()` is the wrong tool: it
+// answers yes for `not-cover-image`, which declares no cover at all, and for any
+// future vocabulary term that happens to end in one we look for. The whole attribute
+// is at most a handful of short words, so walking it costs nothing.
+bool hasToken(std::string_view list, std::string_view token) {
+  size_t at = 0;
+  while (at < list.size()) {
+    // XML attribute values may be separated by any whitespace, not only a space.
+    while (at < list.size() && (list[at] == ' ' || list[at] == '\t' || list[at] == '\n' ||
+                                list[at] == '\r'))
+      ++at;
+    size_t end = at;
+    while (end < list.size() && list[end] != ' ' && list[end] != '\t' &&
+           list[end] != '\n' && list[end] != '\r')
+      ++end;
+    if (end > at && list.substr(at, end - at) == token) return true;
+    at = end;
+  }
+  return false;
+}
+
 }  // namespace
 
 bool resolveHref(std::string_view base, std::string_view href, std::string& out) {
@@ -73,6 +96,15 @@ bool Epub::fail(const char* why) {
   author_.clear();
   identifier_.clear();
   chapters_.clear();
+  // ...AND THE THREE FIELDS NOTED DURING THE OPF WALK. tocPath_ and cssPaths_ were
+  // not reset here, so a SECOND open() on the same Epub reported the first book's
+  // NCX and stylesheets when the second book declared none. Nothing in the firmware
+  // reuses an Epub today -- openBook builds a local -- so it has never bitten; adding
+  // a third field that behaved either way would have made the inconsistency
+  // structural, which is why it is fixed rather than matched.
+  tocPath_.clear();
+  cssPaths_.clear();
+  coverPath_.clear();
   return false;
 }
 
@@ -114,6 +146,7 @@ bool Epub::open(FileHandle& file, Zip& zip) {
   std::vector<std::pair<std::string, std::string>> manifest;  // id -> path
   std::vector<std::string> spine;
   std::string tocId;  // the spine's `toc` attribute, resolved against the manifest below
+  std::string coverId;  // `<meta name="cover">`'s value, resolved the same way
 
   {
     Xml x(opf);
@@ -158,7 +191,25 @@ bool Epub::open(FileHandle& file, Zip& zip) {
           // names mean italic -- see reader/css.h for why that matters at all.
           if (x.attr("media-type") == "text/css" && cssPaths_.size() < kMaxStylesheets)
             cssPaths_.push_back(resolved);
+          // THE COVER, NOTED IN PASSING for the third time and the same reason: this
+          // is the one walk that resolves every manifest href, and a cover href is
+          // relative to the OPF's directory exactly as a chapter's is. Finding it
+          // afterwards would re-parse the OPF -- ~100 ms and ~32 KB of transient on
+          // the device -- for a fact this walk already has in its hand.
+          //
+          // EPUB 3's ROUTE, and it wins over the EPUB 2 one resolved below: this is
+          // the manifest declaring which of its items IS the cover, where
+          // `<meta name="cover">` is a convention that predates any spec saying so.
+          // Same precedence the NCX already uses -- the formal statement over the
+          // conventional one.
+          if (hasToken(x.attr("properties"), "cover-image")) coverPath_ = resolved;
           manifest.emplace_back(std::string(x.attr("id")), std::move(resolved));
+        } else if (tag == "meta" && x.attr("name") == "cover") {
+          // EPUB 2'S ROUTE, and the one the corpus overwhelmingly uses: a bare
+          // convention, in no specification, naming a manifest id. Resolved after the
+          // walk rather than here, because the manifest item it names may not have
+          // been read yet -- the same shape as the spine's `toc` attribute below.
+          coverId.assign(x.attr("content"));
         } else if (tag == "spine") {
           // The spine's `toc` names the manifest id of the table of contents. It
           // takes precedence over the media-type guess above: it is the book saying
@@ -223,6 +274,28 @@ bool Epub::open(FileHandle& file, Zip& zip) {
     for (const auto& item : manifest)
       if (item.first == tocId) {
         tocPath_ = item.second;
+        break;
+      }
+  }
+
+  // THE COVER, IF THE MANIFEST DID NOT ALREADY SAY. `coverPath_` is non-empty only
+  // when an item declared `properties="cover-image"`, and that is the book stating it
+  // outright; this is the older convention filling in when it did not.
+  //
+  // A `<meta name="cover">` NAMING AN ID THE MANIFEST DOES NOT LIST COSTS THE BOOK
+  // ITS COVER AND NOTHING ELSE -- the same call this layer makes for the `toc`
+  // attribute and for an unresolved `unique-identifier`. A cover is metadata a reader
+  // does not need, and refusing a book over it is how a quarter of one measured
+  // library was lost once already.
+  //
+  // NO MEDIA-TYPE FILTER, deliberately. An `image/*` check would refuse a cover whose
+  // manifest spells its type oddly, where a wrong pointer costs only a decoder that
+  // sniffs the bytes, refuses them and falls back to the card. Losing a real cover is
+  // the more expensive mistake of the two.
+  if (coverPath_.empty() && !coverId.empty()) {
+    for (const auto& item : manifest)
+      if (item.first == coverId) {
+        coverPath_ = item.second;
         break;
       }
   }

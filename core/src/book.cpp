@@ -56,6 +56,25 @@ bool openBook(FileSystem& fs, std::string_view path, OpenedBook& out, const char
     out.chapters.push_back(span);
   }
 
+  // THE COVER, FROM THE SAME CENTRAL DIRECTORY AND WITH THE SAME TWO NUMBERS. Epub
+  // has already resolved the href against the OPF's directory -- the identical
+  // resolveHref a spine href goes through -- so what is left here is a lookup.
+  //
+  // A COVER THE ARCHIVE DOES NOT HOLD IS NOT A REFUSAL, which is where this differs
+  // from a chapter: Epub::open validates every SPINE entry against the archive and
+  // refuses the whole book if one is missing, because a spine is a reading order and
+  // a book missing a chapter is a book the reader cannot tell is broken. A cover is
+  // metadata. `out.cover` stays unreadable and the book opens.
+  if (!book.coverPath().empty()) {
+    const Zip::Entry* art = zip.find(book.coverPath());
+    if (art != nullptr) {
+      out.cover.localHeaderOffset = art->localHeaderOffset;
+      out.cover.compressedSize = art->compressedSize;
+      out.cover.uncompressedSize = art->uncompressedSize;
+      out.cover.deflated = art->deflated;
+    }
+  }
+
   if (out.chapters.empty()) {
     *reason = "the spine names no chapters";
     return false;

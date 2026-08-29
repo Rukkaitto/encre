@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "doctest.h"
+#include "epub_builder.h"
 #include "epub_fixtures.h"
 #include "fake_fs.h"
 #include "reader/book.h"
@@ -310,4 +311,97 @@ TEST_CASE("AN UNREADABLE SPAN IS A LOCAL-HEADER FAILURE, not a missing file") {
   REQUIRE(reader::openBook(fs, "/books/book.epub", out, &why));
   for (const reader::ChapterSpan& c : out.chapters) CHECK(c.readable());
   CHECK_FALSE(reader::ChapterSpan{}.readable());
+}
+
+
+// --- WHERE THE COVER IS ---------------------------------------------------------
+
+TEST_CASE("openBook records where the cover is, by both OPF routes") {
+  // Route 1: <meta name="cover" content="id">, the EPUB 2 convention -- and the one
+  // the 225-book corpus overwhelmingly uses. Route 2: a manifest item with
+  // properties="cover-image", EPUB 3's. Both are needed: real files use one or the
+  // other and NEITHER is required by any spec.
+  //
+  // The sizes are asserted, not just readable(), because readable() is only
+  // `compressedSize > 0` -- which any entry in the archive satisfies. What says the
+  // span points at the COVER and not at chapter one is its length and its storage
+  // method: the fixture stores the image (method 0) as a real EPUB stores a JPEG.
+  const size_t coverLen = std::strlen(epubbuild::kFakeCoverBytes);
+
+  FakeFileSystem fs;
+  put(fs, epubbuild::withCoverMetaTag());
+  OpenedBook book;
+  const char* why = "";
+  REQUIRE_MESSAGE(reader::openBook(fs, "/books/book.epub", book, &why), std::string(why));
+  CHECK(book.cover.readable());
+  CHECK(book.cover.compressedSize == coverLen);
+  CHECK(book.cover.uncompressedSize == coverLen);
+  CHECK_FALSE(book.cover.deflated);
+
+  FakeFileSystem fs3;
+  put(fs3, epubbuild::withCoverProperties());
+  OpenedBook book3;
+  REQUIRE_MESSAGE(reader::openBook(fs3, "/books/book.epub", book3, &why), std::string(why));
+  CHECK(book3.cover.readable());
+  CHECK(book3.cover.uncompressedSize == coverLen);
+  CHECK_FALSE(book3.cover.deflated);
+  // NOT an offset comparison between the two books: they are two archives whose OPFs
+  // differ in length, so the same entry legitimately sits at a different offset in
+  // each. What has to agree is the ENTRY chosen, and its size and storage method say
+  // that -- the only other entry in either archive that is stored is the mimetype,
+  // which is a different length.
+}
+
+TEST_CASE("the cover's href resolves against the OPF's directory, as a spine href does") {
+  // The fixture puts the cover at OEBPS/images/cover.jpg and the OPF says
+  // `images/cover.jpg`. An implementation that took the href as an archive path
+  // would find nothing; one that ignored the OPF's directory would look for
+  // `images/cover.jpg` and also find nothing. Only resolveHref gets there, which is
+  // the point: this is the SAME resolver a spine href goes through, not a second one.
+  FakeFileSystem fs;
+  put(fs, epubbuild::withCoverMetaTag());
+  OpenedBook book;
+  const char* why = "";
+  REQUIRE_MESSAGE(reader::openBook(fs, "/books/book.epub", book, &why), std::string(why));
+  REQUIRE(book.cover.readable());
+
+  // locateCover mirrors locate(): the same four facts plus the book's own path.
+  const reader::ChapterLocation at = book.locateCover();
+  CHECK(at.bookPath == "/books/book.epub");
+  CHECK(at.localHeaderOffset == book.cover.localHeaderOffset);
+  CHECK(at.compressedSize == book.cover.compressedSize);
+  CHECK(at.uncompressedSize == book.cover.uncompressedSize);
+  CHECK(at.deflated == book.cover.deflated);
+  // ...and it is not one of the chapters, which is the other way to be wrong.
+  for (int i = 0; i < book.chapterCount(); ++i)
+    CHECK(book.cover.localHeaderOffset != book.locate(i).localHeaderOffset);
+}
+
+TEST_CASE("a book with no cover opens normally and says it has none") {
+  // 225 of 225 corpus books declare one, but the firmware must not require it: a
+  // book that opens and reads is worth more than a cover, and the sleep screen has a
+  // card to fall back to.
+  FakeFileSystem fs;
+  put(fs, epubbuild::minimalEpub());
+  OpenedBook book;
+  const char* why = "";
+  REQUIRE_MESSAGE(reader::openBook(fs, "/books/book.epub", book, &why), std::string(why));
+  CHECK(book.chapterCount() == 2);
+  CHECK_FALSE(book.cover.readable());
+  // An unreadable span yields a location with no size, exactly as locate() does for
+  // an index out of range -- so a decoder refuses it without a special case.
+  CHECK(book.locateCover().compressedSize == 0);
+  CHECK(book.locateCover().bookPath.empty());
+}
+
+TEST_CASE("an EPUB 3 properties list is matched token by token, never as a substring") {
+  // `properties` is a SPACE-SEPARATED SET, so `not-cover-image` contains the token
+  // this code looks for and declares none of it. A find() over the attribute passes
+  // every other test in this file and adopts this book's image as its cover.
+  FakeFileSystem fs;
+  put(fs, epubbuild::withCoverPropertiesLookalike());
+  OpenedBook book;
+  const char* why = "";
+  REQUIRE_MESSAGE(reader::openBook(fs, "/books/book.epub", book, &why), std::string(why));
+  CHECK_FALSE(book.cover.readable());
 }

@@ -53,6 +53,22 @@ class Epub {
   // chapter list, which is a missing feature and not a broken book.
   const std::string& tocPath() const { return tocPath_; }
 
+  // The cover image's resolved archive path, or EMPTY when the book declares none.
+  //
+  // Empty is not a failure. 225 of 225 books in one measured corpus declare a cover,
+  // and no specification requires one -- so a book without it opens and reads, and
+  // the screen that wanted the picture falls back to what it drew before.
+  //
+  // TWO ROUTES, BOTH IN THE WILD. `<meta name="cover" content="id">` is the EPUB 2
+  // convention -- in no spec, and overwhelmingly the common one -- and an item with
+  // `properties="cover-image"` is EPUB 3's. The manifest's own declaration wins where
+  // a book carries both, the same precedence the spine's `toc` attribute gets over
+  // the NCX media type.
+  //
+  // Resolved against the OPF's directory by the SAME resolveHref a spine href goes
+  // through, so `images/cover.jpg` in `OEBPS/content.opf` is `OEBPS/images/cover.jpg`.
+  const std::string& coverPath() const { return coverPath_; }
+
   // Every stylesheet the manifest declares, in manifest order. Usually one; a
   // converted book sometimes carries two or three.
   const std::vector<std::string>& cssPaths() const { return cssPaths_; }
@@ -67,6 +83,7 @@ class Epub {
   std::string identifier_;
   std::vector<Chapter> chapters_;
   std::string tocPath_;
+  std::string coverPath_;
   // A book declaring more stylesheets than this is not a book, and the cap is what
   // keeps a malformed manifest from becoming an unbounded read on the open path.
   static constexpr size_t kMaxStylesheets = 8;
