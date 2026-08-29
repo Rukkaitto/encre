@@ -32,7 +32,7 @@ class QuietTheme : public Theme {
   void settingsMetrics(int panelH, const FontSet& fonts, int& listH, int& rowH,
                        int& headerH) const override;
   void renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepViewModel& vm,
-                   Plane plane) override;
+                   Plane plane, CoverSource* cover) override;
 
   void renderSettings(Framebuffer& fb, const FontSet& fonts, const SettingsViewModel& vm,
                       Plane plane) override;

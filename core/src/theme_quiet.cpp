@@ -5,6 +5,7 @@
 #include "reader/components.h"
 #include "reader/dither.h"
 #include "reader/framebuffer.h"
+#include "reader/screen_sleep.h"  // CoverSource
 #include "reader/text.h"
 #include "reader/viewmodel.h"
 
@@ -805,13 +806,48 @@ constexpr int kSleepNoteEm = 200;
 }  // namespace
 
 void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepViewModel& vm,
-                             Plane plane) {
-  // The FIELD first: the board's `.dither-field` is the same 4px-pitch dot as
-  // `.dither-dots`, so this is kClustered at level 1 over the whole panel -- the
-  // one dither this screen wants, and the reason it is clustered rather than
-  // dispersed is in dither.cpp: a tint reads as a blob, not as grain.
-  fb.clear(true);
-  ditherRect(fb, 0, 0, fb.width(), fb.height(), 1, Ink::Black);
+                             Plane plane, CoverSource* cover) {
+  // THE COVER REPLACES THE CLEAR -- design/SleepCoverDetails.dc.html is
+  // design/Sleep.dc.html with its background swapped and nothing else, so this is
+  // the ONE branch the two cover boards need. Everything below is the shipped
+  // screen unchanged.
+  //
+  // It is asked per PASS because a plane is what it can deliver; see
+  // CoverSource::loadPlane, which also says why the passes cannot realistically
+  // disagree.
+  const bool covered =
+      cover != nullptr && vm.shows != SleepShows::Details && cover->loadPlane(plane, fb);
+
+  if (!covered) {
+    // The FIELD: the board's `.dither-field` is the same 4px-pitch dot as
+    // `.dither-dots`, so this is kClustered at level 1 over the whole panel -- the
+    // one dither this screen wants, and the reason it is clustered rather than
+    // dispersed is in dither.cpp: a tint reads as a blob, not as grain.
+    //
+    // AND THE CLEAR IS WHAT MAKES A FAILED LOAD SAFE. loadPlane does not promise
+    // it left the frame alone -- a streaming implementation finds out the card is
+    // gone half way down the picture -- so whatever it wrote is overwritten here
+    // rather than shown.
+    fb.clear(true);
+    ditherRect(fb, 0, 0, fb.width(), fb.height(), 1, Ink::Black);
+  }
+
+  // ONE PREDICATE, ASKED ONCE, AND IT DRIVES BOTH THE CARD AND THE BADGE.
+  // design/SleepCover.dc.html is SleepCoverDetails with the card and the badge
+  // taken away, so they go together or not at all.
+  //
+  // THE BADGE HALF OVERRIDES A RULE CLAUDE.md STATES OUTRIGHT -- the badge "is the
+  // load-bearing half and it stays", because e-ink holds its last image and a
+  // screen left on the glass gives no clue the device is asleep rather than
+  // frozen. It may go HERE because a full-bleed book cover is not a screen the
+  // device can otherwise be in, so it is unambiguous by itself. That reason is
+  // FALSE the moment no cover is on the glass, which is exactly why `covered` is
+  // in this expression and not just `vm.shows`: every fallback -- no source, a
+  // source that refused, a mode that never asked -- puts the badge back.
+  //
+  // Two conditions spelled separately would drift, and this project has shipped a
+  // dead button twice from that shape.
+  const bool coverOnly = covered && vm.shows == SleepShows::Cover;
 
   const Font& label = fonts[Role::Meta500];
   const Font& title = fonts[Role::Title700];
@@ -824,7 +860,11 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   // the half that carries this screen's whole purpose, which is telling the user the
   // device is asleep rather than frozen. Drawn by the shared tail below, so the two
   // states cannot disagree about where it sits.
-  if (!vm.nothingToContinue) {
+  //
+  // `coverOnly` is the OTHER way this block goes away -- see the predicate above.
+  // design/SleepCover.dc.html drops the card and the badge together, so they hang
+  // off the one flag rather than off two that could drift apart.
+  if (!coverOnly && !vm.nothingToContinue) {
 
   // The card's width is the board's max, or the panel less a margin on the
   // narrower X4 -- `max-width` is a ceiling, not a pin.
@@ -882,6 +922,7 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   // The badge, measured from the BOTTOM as the board positions it -- and OUTSIDE the
   // branch above, because both states draw it in the same place. That is what makes
   // SleepIdle one screen with its content removed rather than a second screen.
+  if (coverOnly) return;
   const int noteW = note.measure(vm.note, trackingEm(note, kSleepNoteEm));
   const int badgeW = noteW + 2 * (kSleepBadgeBorder + kSleepBadgePadX);
   const int badgeH = note.lineHeight() + 2 * (kSleepBadgeBorder + kSleepBadgePadY);

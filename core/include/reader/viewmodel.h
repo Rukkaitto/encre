@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "reader/layout.h"  // kBodyLeadEm
+#include "reader/settings.h"  // SleepShows
 
 namespace reader {
 
@@ -216,6 +217,21 @@ struct SleepViewModel {
   int progressPercent = 0;
   std::string progress;   // "6% - CH. 01", the line under the bar
   std::string note;       // "ASLEEP - PRESS POWER TO WAKE"
+
+  // WHICH OF THE THREE SLEEP BOARDS THIS IS -- design/Sleep.dc.html,
+  // SleepCoverDetails.dc.html, SleepCover.dc.html.
+  //
+  // THE DEFAULT IS Details AND Settings' DEFAULT IS CoverAndDetails, and the two
+  // disagreeing is deliberate rather than an oversight. This struct's default is
+  // "what a view model built without being told does", and that has to be the
+  // shipped screen to the pixel: every existing sleep golden constructs one of
+  // these and sets no `shows`, so any other default here would move them and the
+  // property this whole feature rests on -- with no cached cover every mode
+  // paints byte-identically to today -- would stop being checkable.
+  //
+  // It is only ever a REQUEST. The screen draws a cover if it also has a
+  // CoverSource that answers; see screen_sleep.h.
+  SleepShows shows = SleepShows::Details;
 };
 
 // design/Reader.dc.html's CHROME -- the header band and the footer. The page's

@@ -6,7 +6,8 @@
 
 namespace reader {
 
-SleepScreen::SleepScreen(SleepViewModel vm) : vm_(std::move(vm)) {}
+SleepScreen::SleepScreen(SleepViewModel vm, CoverSource* cover)
+    : vm_(std::move(vm)), cover_(cover) {}
 
 Action SleepScreen::onGesture(const GestureEvent&) {
   // Everything, including Back. See the header: the device is asleep, and a screen
@@ -17,7 +18,7 @@ Action SleepScreen::onGesture(const GestureEvent&) {
 
 void SleepScreen::render(Framebuffer& fb, const FontSet& fonts, Theme& theme,
                          Plane plane) const {
-  theme.renderSleep(fb, fonts, vm_, plane);
+  theme.renderSleep(fb, fonts, vm_, plane, cover_);
 }
 
 }  // namespace reader

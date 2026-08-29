@@ -6,6 +6,7 @@
 namespace reader {
 class Framebuffer;
 class FontSet;
+class CoverSource;
 struct HomeViewModel;
 struct SdMissingViewModel;
 struct LibraryViewModel;
@@ -125,9 +126,16 @@ class Theme {
   // to SettingsScreen, not here. So the theme reports the three heights it owns
   // and the screen, which knows where its headers are, does the counting. Neither
   // side ends up holding a copy of the other's data.
-  // design/Sleep.dc.html. No hint bar and no focus -- the device is asleep.
+  // design/Sleep.dc.html, SleepCoverDetails.dc.html, SleepCover.dc.html. No hint
+  // bar and no focus -- the device is asleep.
+  //
+  // `cover` MAY BE NULL AND IS NOT DEFAULTED, deliberately. A default argument on
+  // a virtual is resolved statically, so an override that spelled a different one
+  // would give two behaviours for one call depending on the static type of the
+  // reference -- and every caller here goes through `Theme&`. Explicit nullptr at
+  // the three call sites that have no cover is one word and cannot do that.
   virtual void renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepViewModel& vm,
-                           Plane plane) = 0;
+                           Plane plane, CoverSource* cover) = 0;
 
   // The reader's menu overlay, and the chapter list it opens.
   virtual void renderReaderMenu(Framebuffer& fb, const FontSet& fonts,

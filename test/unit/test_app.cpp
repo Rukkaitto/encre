@@ -94,7 +94,8 @@ class NullTheme : public Theme {
   void renderSettings(Framebuffer&, const FontSet&, const SettingsViewModel&, Plane) override {}
   void renderTypography(Framebuffer&, const FontSet&, const GlyphSource*,
                         const TypographyViewModel&, Plane) override {}
-  void renderSleep(Framebuffer&, const FontSet&, const SleepViewModel&, Plane) override {}
+  void renderSleep(Framebuffer&, const FontSet&, const SleepViewModel&, Plane,
+                   CoverSource*) override {}
   void renderReaderMenu(Framebuffer&, const FontSet&, const ReaderMenuViewModel&,
                         Plane) override {}
   void renderContents(Framebuffer&, const FontSet&, const ContentsViewModel&, Plane) override {}
