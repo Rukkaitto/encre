@@ -66,8 +66,8 @@ struct Standalone {
   std::vector<uint8_t> ttf;
   ScalableFont body;
   // THE PEEK'S COLUMN COMES FROM THE THEME, not from four numbers written out here
-  // as the Reader's are. Its panel is inset and its line count is the design
-  // (kPeekLines), so a hand-built PageMetrics would be a second, disagreeing
+  // as the Reader's are. Its panel is inset and its height is a fixed box the theme
+  // owns (kPeekPanelH), so a hand-built PageMetrics would be a second, disagreeing
   // spelling of the geometry -- and a peek built at the reading measure is exactly
   // the state test_screen_peek.cpp's last case exists to refuse. Held by pointer so
   // the other twelve screens do not each load the twelve-file ramp for nothing.
