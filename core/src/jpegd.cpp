@@ -95,9 +95,10 @@ struct JpegDecoder::Impl {
     return false;
   }
 
-  // Push the band in hand to the sink. False means the sink asked to stop, or a
-  // rectangle wrote somewhere it should not have -- `sinkStopped` is what tells
-  // decode() which, because only one of the two is the caller's own doing.
+  // Push the band in hand to the sink. The only way this answers false is the
+  // SINK asking to stop, and it sets `sinkStopped` saying so -- emit()'s other
+  // route to a false (a rectangle that does not fit the band) is emit's own and
+  // leaves a reason instead. decode() tells the two apart by that flag.
   bool flushBand() {
     if (bandTop < 0) return true;
     for (int y = 0; y < bandFilled; ++y) {
@@ -118,7 +119,7 @@ struct JpegDecoder::Impl {
   // jd_prepare tests `infunc(...) != len` for every segment it loads, so a
   // ByteSource handing back one byte at a time -- which is the case the tests
   // run -- must be drained in a loop rather than reported as the stream ending.
-  static size_t feed(JDEC* jd, uint8_t* buff, size_t nbyte) {
+  static size_t feed(JDEC* jd, uint8_t* buff, size_t nbyte) noexcept {
     auto* im = static_cast<Impl*>(jd->device);
     size_t got = 0;
     if (buff != nullptr) {
@@ -145,7 +146,7 @@ struct JpegDecoder::Impl {
 
   // One decoded MCU, in OUTPUT coordinates -- mcu_output has already applied the
   // scale to both the origin and the size, so nothing here shifts anything.
-  static int emit(JDEC* jd, void* bitmap, JRECT* rect) {
+  static int emit(JDEC* jd, void* bitmap, JRECT* rect) noexcept {
     auto* im = static_cast<Impl*>(jd->device);
     const int left = static_cast<int>(rect->left);
     const int top = static_cast<int>(rect->top);
@@ -159,6 +160,10 @@ struct JpegDecoder::Impl {
       im->bandTop = top;
       im->bandFilled = 0;
     }
+    // ZERO ON EVERY PATH, because the branch above has just made bandTop equal to
+    // top. It is spelled as the subtraction anyway so the two lines below say what
+    // they mean -- a rectangle goes at its own offset within the band -- rather
+    // than resting on a fact the next reader would have to re-derive.
     const int rowOff = top - im->bandTop;
 
     // These are bytes off somebody's card by way of a library this project did
@@ -231,6 +236,11 @@ bool JpegDecoder::Impl::run(int atLeastW, int atLeastH) {
   // The band cannot be sized before now: it needs the sampling factors, which
   // only the SOF says, and the scale, which is chosen from them.
   bandRows = (jd.msy * 8) >> shift;
+  // AND THIS REFUSAL IS WHAT MAKES emit()'s FLUSH TRIGGER SOUND. That trigger is
+  // "the rectangle's top is not the band's top", which detects a completed band
+  // only because consecutive bands have DISTINCT scaled tops -- and they do only
+  // because a band is at least one output row tall. A zero-row band would give
+  // two bands the same top, and they would merge into one silently.
   if (bandRows < 1) return fail("the JPEG's sampling factors make no sense");
   const size_t bandBytes = static_cast<size_t>(bandRows) * outW;
   // Value-initialised, so a band with a hole in it -- which the geometry says
@@ -280,6 +290,11 @@ bool JpegDecoder::Impl::run(int atLeastW, int atLeastH) {
     case JDR_FMT1:
       return fail("the JPEG's image data is malformed");
     default:
+      // UNREACHABLE, and read out of the vendored source rather than assumed, so
+      // that nobody pays for the reading twice: jd_decomp returns only OK, INTR,
+      // INP and FMT1. MEM1, MEM2 and FMT3 are jd_prepare's alone, and JDR_PAR is
+      // its `scale > 3` guard, which `shift` cannot reach. Kept because it costs
+      // nothing and a version bump could add a result.
       return fail("the JPEG's image data could not be decoded");
   }
 }

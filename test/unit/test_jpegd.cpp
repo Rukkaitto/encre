@@ -65,6 +65,15 @@ Diff compare(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
 // right and bottom edge are dropped, exactly as the decoder's own truncation
 // does.
 std::vector<uint8_t> boxAverage(const imgfix::Oracle& src, int n, int w, int h) {
+  // w/h ARE THE DECODER'S OWN REPORTED SIZE, so they are the thing under test and
+  // must not be trusted to index the oracle. Without this, a decoder that reports
+  // a size too large reads off the end of `src.pixels` and compares garbage --
+  // the test then fails by luck rather than by design, and under a sanitizer it
+  // fails as a harness crash instead of as a named assertion.
+  REQUIRE(w > 0);
+  REQUIRE(h > 0);
+  REQUIRE(w * n <= src.width);
+  REQUIRE(h * n <= src.height);
   std::vector<uint8_t> out(static_cast<size_t>(w) * h);
   for (int y = 0; y < h; ++y) {
     for (int x = 0; x < w; ++x) {
@@ -194,6 +203,112 @@ TEST_CASE("JpegDecoder scales down but never below what the caller asked for") {
     CHECK(dec.scaleDivisor() == 1);
     CHECK(sink.width == full.width);
   }
+}
+
+TEST_CASE("JpegDecoder handles every MCU geometry, not just the one a cover happens to have") {
+  // THE BAND IS THE WHOLE OF jpegd.cpp, AND baseline.jpg EXERCISES ONE SHAPE OF
+  // IT. That cover is 4:2:0, so msx == msy == 2 and the band is always 16 rows;
+  // every other sampling factor gives a band of 8, a different spacing between
+  // consecutive band tops, and a different trigger point for the flush. Nothing
+  // on the desktop would have caught a regression in those, and the device has
+  // no oracle to notice on its behalf.
+  //
+  // Three synthetic fixtures, each a few hundred bytes, chosen for the cases the
+  // real cover cannot reach -- see fixtures/images/README.md for how they were
+  // made. All three also end in a SHORT final band (one row), which is the part
+  // of the flush that arithmetic rather than the rectangles would get wrong.
+  // THE BAND'S SHAPE IS INVISIBLE FROM OUT HERE except through workspaceBytes(),
+  // so without this the band could be sized for the wrong geometry and every
+  // assertion below would still pass: `bandFilled` comes from the rectangles, so
+  // a band buffer that is too TALL is not a wrong picture, only wasted heap --
+  // and heap is the whole reason this class exists. Proved by mutation: hardcoding
+  // a 16-row band (i.e. assuming 4:2:0 everywhere) failed nothing at all until
+  // this check existed.
+  //
+  // The pool is recovered from a fixture whose geometry is known rather than
+  // transcribed as a literal, so re-deriving kPoolBytes does not falsely fail
+  // this test -- only a change to the BAND does.
+  size_t pool = 0;
+  {
+    const std::string cover = imgfix::loadFixture("baseline.jpg");
+    grainsrc::Grained src(cover, 4096);
+    CollectingSink sink;
+    reader::JpegDecoder dec;
+    REQUIRE(dec.decode(src, sink));
+    const size_t band = 16u * 740u;  // 4:2:0 at full scale, 740 wide
+    REQUIRE(dec.workspaceBytes() > band);
+    pool = dec.workspaceBytes() - band;
+  }
+
+  struct Case {
+    const char* file;
+    int w, h;
+    int bandRows;  // msy * 8, at full scale
+    const char* what;
+  };
+  const Case cases[] = {
+      // msx=1 msy=1, band 8 rows, 5 MCU columns of which the last is 1px wide.
+      {"tiny_444.jpg", 33, 9, 8, "4:4:4, a short final band and a short final column"},
+      // msx=2 msy=1 -- the mixed factors, and NARROWER THAN ONE MCU (9 < 16), so
+      // the only rectangle in each band is clipped on both axes.
+      {"tiny_422.jpg", 9, 17, 8, "4:2:2, narrower than a single MCU"},
+      // msx=2 msy=2 as the cover, but 17x17: one full band plus a band of one row.
+      {"tiny_420.jpg", 17, 17, 16, "4:2:0, one full band and a one-row band"},
+  };
+
+  for (const Case& c : cases) {
+    CAPTURE(c.file);
+    CAPTURE(c.what);
+    const std::string bytes = imgfix::loadFixture(c.file);
+    REQUIRE(!bytes.empty());
+    const imgfix::Oracle want = imgfix::decodeWithStb(bytes);
+    REQUIRE(want.width == c.w);
+    REQUIRE(want.height == c.h);
+
+    // Grain 1 as well as a satisfying grain, for the reason the cover is read
+    // both ways: these files are small enough that a single read would satisfy
+    // TJpgDec outright and hide every refill.
+    for (size_t grain : {size_t{4096}, size_t{1}}) {
+      CAPTURE(grain);
+      grainsrc::Grained src(bytes, grain);
+      CollectingSink sink;
+      reader::JpegDecoder dec;
+      REQUIRE(dec.decode(src, sink));
+      CHECK(dec.scaleDivisor() == 1);
+      CHECK(sink.width == c.w);
+      CHECK(sink.height == c.h);
+      CHECK(sink.rows == c.h);
+      REQUIRE(sink.px.size() == want.pixels.size());
+      const Diff d = compare(sink.px, want.pixels);
+      CHECK(d.worst <= 24);
+      CHECK(d.mean <= 2.0);
+      CHECK(dec.workspaceBytes() ==
+            pool + static_cast<size_t>(c.bandRows) * static_cast<size_t>(c.w));
+    }
+  }
+}
+
+TEST_CASE("a scaled decode of an odd geometry still fills every row it promises") {
+  // Halving moves the band as well as the picture -- an 8-row band becomes 4 --
+  // so the short final band and the dropped final column both land at different
+  // places than they do at full scale. 33x9 at 1/2 is 16x4: the 1px-wide last
+  // MCU column rounds away entirely, which is the case where deriving the output
+  // width from anything but the rectangles goes wrong.
+  const std::string bytes = imgfix::loadFixture("tiny_444.jpg");
+  const imgfix::Oracle full = imgfix::decodeWithStb(bytes);
+  REQUIRE(full.width == 33);
+
+  grainsrc::Grained src(bytes, 1);
+  CollectingSink sink;
+  reader::JpegDecoder dec;
+  REQUIRE(dec.decode(src, sink, 16, 4));
+  CHECK(dec.scaleDivisor() == 2);
+  CHECK(sink.width == 16);
+  CHECK(sink.height == 4);
+  CHECK(sink.rows == 4);
+  const Diff d = compare(sink.px, boxAverage(full, 2, sink.width, sink.height));
+  CHECK(d.worst <= 24);
+  CHECK(d.mean <= 2.0);
 }
 
 TEST_CASE("a sink that says stop aborts the decode") {

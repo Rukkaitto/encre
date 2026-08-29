@@ -72,6 +72,14 @@ class JpegDecoder {
   //
   // Nothing is held after this returns: the pool and the band are given back, and
   // only the reported figures survive.
+  //
+  // WHAT THE SINK KEEPS WHEN THIS ANSWERS FALSE: every row it was already given.
+  // A refusal part-way through -- a truncated file is the one that happens --
+  // leaves the complete bands that were pushed before it pushed, and discards the
+  // band that was in hand, which was never whole. So a false means "this picture
+  // is not finished", never "undo what you were told". The sink decides what a
+  // partial frame is worth; for a cover it is worth nothing and the caller should
+  // draw the fallback.
   bool decode(ByteSource& src, ImageRowSink& sink, int atLeastW = 0, int atLeastH = 0);
 
   // What the file said, before scaling. Valid once decode() has read the headers,
