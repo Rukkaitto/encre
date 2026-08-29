@@ -8,10 +8,28 @@
 // project's notes are pointed about the difference between "should be" and "was
 // measured", so it is measured.
 //
-// AND IT RUNS UNDER Rotation::Ccw AS WELL AS Rotation::None, because veilRect is one
-// of the four byte-wise primitives in core/ that has to know Rotation exists -- and
-// the whole desktop is Rotation::None, so a transposed veil passes every golden and
-// every simulator PNG and smears diagonally on glass.
+// WHAT THIS FILE DOES NOT CHECK, STATED BECAUSE IT USED TO CLAIM IT DID. This header
+// said the file runs under Rotation::Ccw "because a transposed veil passes every golden
+// and every simulator PNG and smears diagonally on glass" -- true of the primitive, and
+// not something any case here can detect. Case 1 RECOVERS the mask from veilRect's own
+// output, so a wrong geometry moves both sides of `veiled(C) == C | mask` together;
+// case 2 is `0xFF | anything`, satisfied by any mask at all; and case 3's density is
+// ~4/9 whichever axis the tile is walked along. A file that reports on less than it
+// claims is worse than no file, because it is trusted.
+//
+// THE ROTATION CLAIM IS test_dither.cpp'S, and it is genuinely made there: "the
+// byte-wise veil is byte-identical to the per-pixel one" compares veilRect against an
+// INDEPENDENT per-pixel reference -- its own 3x3 tile, its own absolute-coordinate cell
+// index -- byte for byte over a pseudo-random ground, at both panel sizes full-frame
+// and under both rotations. A transposition fails it. Recomputing the tile here would
+// be a second copy of arithmetic that file already owns, with no reason written down
+// for the duplication, so this file states the properties it can actually carry:
+// veilRect is a content-independent OR mask, it never inks, and its density is ~4/9.
+//
+// Both rotations are still walked below, because the properties are about the BYTES
+// and the two rotations lay them out differently -- a path that inked something extra
+// in the rotated store alone would fail case 2 there and pass here. That is what the
+// second rotation buys; it is not a transposition check.
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -80,7 +98,11 @@ TEST_CASE("the veil whitens the same cells whatever the plane had drawn in it") 
   // The mask is recovered rather than recomputed: ink is a 0 bit and the veil ORs,
   // so veiling an ALL-INK frame leaves exactly the mask standing in the bytes. No
   // second copy of the tile arithmetic, which is what test_dither.cpp's per-pixel
-  // reference is for.
+  // reference is for -- AND THAT IS THE LIMIT OF THIS CASE, stated so it is not
+  // mistaken for more: a mask recovered from veilRect's own output moves with it, so
+  // a wrong GEOMETRY moves both sides of the comparison and this still passes. What
+  // it can see is a veil whose mask depends on what it found in the frame, which is
+  // exactly the property named above and the one a plane could break.
   for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw}) {
     for (const auto wh : std::vector<std::pair<int, int>>{{480, 800}, {528, 792}}) {
       const int w = wh.first, h = wh.second;
@@ -134,10 +156,18 @@ TEST_CASE("the veil leaves paper alone, so a plane that inked nothing is untouch
 
 TEST_CASE("the veil whitens ink identically at both geometries under both rotations") {
   // The counts, not just the equality: 4 of every 9 pixels of ink survive (one 2x2
-  // block per 3x3 cell), which test_dither.cpp already pins on a 36x36 frame. Asserted
-  // here at PANEL sizes, because 480, 800, 528 and 792 are none of them multiples of
-  // 3 -- so the tile's phase runs off the end of the frame, which is the case a
-  // 36x36 test cannot reach.
+  // block per 3x3 cell), which test_dither.cpp already pins on a 36x36 frame.
+  //
+  // THIS COMMENT USED TO SAY "480, 800, 528 AND 792 ARE NONE OF THEM MULTIPLES OF 3",
+  // AND THREE OF THEM ARE: 480 = 3x160, 528 = 3x176, 792 = 3x264. Only 800 is not
+  // (3x266 + 2). So the X3's frame tiles exactly and lands on 4/9 to the pixel, and
+  // it is the X4's HEIGHT alone that leaves the vertical phase open at the last row --
+  // two extra rows of a three-row cycle, which is the case a 36x36 frame (a multiple
+  // of 3 in both axes) cannot reach. That is worth a bound rather than a number, and
+  // it is why the bound below is a range: 44.42% on the X4 against 44.44% on the X3.
+  //
+  // The panel sizes are worth walking anyway for the duller reason -- they are the
+  // frames an overlay actually asks for, at a stride 36x36 does not have.
   for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw}) {
     for (const auto wh : std::vector<std::pair<int, int>>{{480, 800}, {528, 792}}) {
       const int w = wh.first, h = wh.second;

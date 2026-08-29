@@ -35,6 +35,14 @@ int leadF26Of(const reader::GlyphSource& body, int leadEm1000) {
 }
 
 // How many lines PageBuilder fits in a column this tall -- `rows_` verbatim.
+//
+// AND VERBATIM IS THE WEAKNESS AS WELL AS THE POINT: this is layout.cpp's rule
+// TRANSCRIBED, so what the case below pins is peekMetrics against a copy of the rule
+// rather than against PageBuilder. Change the derivation and this file stays green
+// while the panel paginates to seven. The assertion that goes through the real engine
+// is in test_screen_peek.cpp -- "a peek page in the body of a chapter fills all
+// kPeekLines line boxes" -- and it is what makes this helper a cheap cross-check
+// rather than the only check.
 int linesIn(int columnH, int leadF26) {
   return leadF26 > 0 ? reader::pxToF26(columnH) / leadF26 : 0;
 }
@@ -132,20 +140,48 @@ TEST_CASE("the peek's column holds exactly eight lines, and the height follows")
     // The whole-pixel form the board states: 54px line boxes, eight of them.
     CHECK(m.columnH / reader::f26ToPx(leadF26) == reader::kPeekLines);
 
-    // THE PANEL'S BOTTOM EDGE, from the column the metrics report plus the two runs
-    // below it the board states -- `padding: 16px 20px 20px 20px` and the 2px border.
-    // The board says outright that the bar "is drawn over the veil after this, and the
-    // panel does not reach it", and a panel that did would put its own border through
-    // the labels.
+    // THE PANEL'S TWO EDGES, from the column the metrics report plus the runs either
+    // side of it the board states: `padding: 16px 20px 20px 20px`, the band, and the
+    // 2px border. Both are spelled here as literals for the reason the veil margin
+    // above is -- they are the board's authored geometry, and peekBox is not public.
+    const reader::Font& lbl = ramp.fonts[reader::Role::Label500];
+    const reader::Font& val = ramp.fonts[reader::Role::Value700];
+    // The band is `align-items: center`, so its line box is the TALLER of its two
+    // faces; then `padding: 18px 20px` and the 2px rule under it.
+    const int bandH =
+        (val.lineHeight() > lbl.lineHeight() ? val.lineHeight() : lbl.lineHeight()) + 2 * 18 + 2;
+    const int panelTop = m.columnTop - 16 - bandH - reader::kPanelBorder;
     const int panelBottom = m.columnTop + m.columnH + 20 + reader::kPanelBorder;
+
+    // THE BOTTOM EDGE DOES NOT REACH THE BAR. The board says outright that the bar "is
+    // drawn over the veil after this, and the panel does not reach it", and a panel
+    // that did would put its own border through the labels.
     CHECK(panelBottom <= h - barH);
 
-    // AND IT READS AS A MODAL, which is the whole of the eight-vs-eleven argument. The
-    // panel is centred, so the veil above it is what is left below it -- and the bar's
-    // own height is the non-arbitrary measure of "enough": a panel inset from the top
-    // by less than the bar takes at the bottom is a bordered full screen. At eight
-    // lines this is 127px against the board's measured 128; at eleven it is 46.
-    CHECK(h - panelBottom >= barH);
+    // AND THE TOP EDGE READS AS A MODAL, which is the whole of the eight-vs-eleven
+    // argument -- and which nothing asserted until now. This slot held
+    // `h - panelBottom >= barH`, which is `panelBottom <= h - barH` rearranged: the
+    // same inequality over the same ints, presented as a second claim. The top inset
+    // was never measured. The bar's own height is the non-arbitrary threshold: a panel
+    // inset from the top by less than the bar takes at the bottom is a bordered full
+    // screen. At eight lines this is 127px on the X4 against the board's measured 128;
+    // at eleven it is 46, and this fails.
+    CHECK(panelTop >= barH);
+
+    // ...AND THE TWO EDGES ARE ONE FACT, because the panel is centred on the screen
+    // (`top: 50%; transform: translateY(-50%)`). Off by at most a pixel, since an odd
+    // amount of leftover veil cannot be halved -- and centreIn "halves up", so the odd
+    // pixel goes ABOVE the panel rather than below it. That direction is asserted
+    // rather than absorbed into a symmetric bound because it is the one this project
+    // chose on purpose, and because it is what caught this assertion being written the
+    // other way round.
+    //
+    // THIS PAIR IS ALSO WHAT PROVES THE ARITHMETIC ABOVE. panelTop and panelBottom are
+    // derived here from the board's runs, and peekBox is not public -- so a derivation
+    // that drifted from the box the theme actually computes would show up as a panel
+    // that is no longer centred.
+    CHECK(panelTop - (h - panelBottom) >= 0);
+    CHECK(panelTop - (h - panelBottom) <= 1);
   }
 }
 

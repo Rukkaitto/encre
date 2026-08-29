@@ -657,7 +657,26 @@ TEST_CASE("the peek's page is NOT the reader's page, because the column is narro
   REQUIRE_FALSE(readerfix::pageText(peek.page()).empty());
   // DIFFERENT WRAP, so different text on page one. The two columns differ by ~76px,
   // which is two or three words a line.
+  //
+  // ...AND THE WHOLE-PAGE COMPARISON CANNOT SAY THAT, which is why the line below it
+  // exists. pageText concatenates every line, and this page comes out as seven lines in
+  // the panel against eleven on the reading page -- so these two strings differ in
+  // their line COUNT alone, and the assertion passes unchanged over two columns that
+  // wrapped IDENTICALLY, which is the one thing the case is named for. Proved by
+  // mutation: hand the peek the reader's columnLeft and columnW while leaving it the
+  // panel's columnH, and this still passes while the check below is the only failure.
+  // It is kept as the coarse check it is.
   CHECK(readerfix::pageText(peek.page()) != readerfix::pageText(r.scr->page()));
+
+  // THE ASSERTION THAT BITES ON THE MEASURE. Line 0 is `<h1>Chapter One</h1>`, short
+  // enough to fit either column and therefore identical in both -- so the first line
+  // that can differ is line 1, and it differs because 368px holds `Paragraph 0 of a
+  // chapter` where 444px holds `Paragraph 0 of a chapter long`. Built at the READER's
+  // metrics this fails; built at the panel's it is the two-or-three-words-a-line the
+  // comment above claims.
+  REQUIRE(peek.page().lines.size() > 1);
+  REQUIRE(r.scr->page().lines.size() > 1);
+  CHECK(peek.page().lines[1].text != r.scr->page().lines[1].text);
 
   // AND THE LINES ARE INSIDE THE PANEL, not on the page's own left edge.
   for (const reader::LaidLine& ln : peek.page().lines) CHECK(ln.x >= pm.columnLeft);
@@ -665,7 +684,36 @@ TEST_CASE("the peek's page is NOT the reader's page, because the column is narro
   // THE PANEL HOLDS kPeekLines LINE BOXES AND NO MORE. Its HEIGHT is a result of that
   // count, so a page laid at the reading column's height would run out through the
   // border.
+  //
+  // A CEILING AND NOT AN EQUALITY *HERE*, and the reason is the heading: this page
+  // opens with one, and a block boundary costs a blank line box that carries no
+  // LaidLine -- so a full eight boxes come back as seven lines. The equality lives on
+  // the next case, over a page with no heading in it.
   CHECK(peek.page().lines.size() <= static_cast<size_t>(reader::kPeekLines));
+}
+
+TEST_CASE("a peek page in the body of a chapter fills all kPeekLines line boxes") {
+  // EIGHT LINES IS THE DESIGN, AND NOTHING RAN IT THROUGH THE LAYOUT ENGINE. Every
+  // check on this panel's line count was `<=` -- here, in the demo case below, and in
+  // test_theme_peek_golden.cpp -- and a ceiling is satisfied by seven. What made that
+  // worth more than tidiness is test_theme_peek_metrics.cpp, whose `linesIn()` helper
+  // is PageBuilder's `rows_ = pxToF26(columnH) / leadF26_` TRANSCRIBED: it checks
+  // peekMetrics against a copy of the rule rather than against PageBuilder, so a change
+  // to the derivation would leave that file green while the panel paginated to seven.
+  // This is the assertion that goes through the real engine.
+  //
+  // NOT PAGE ONE. `longChapter` opens with `<h1>Chapter One</h1>`, and a block boundary
+  // spends a line box that produces no LaidLine, so page one is seven lines over eight
+  // boxes -- an honest full page that an equality would read as a defect. Page two is
+  // paragraph text throughout.
+  for (const auto geo : {std::pair<int, int>{480, 800}, std::pair<int, int>{528, 792}}) {
+    PeekFix p(4, geo.first, geo.second);
+    CAPTURE(geo.first);
+    const std::string first = p.text();
+    p.s().onGesture({Gesture::Next});
+    REQUIRE(p.text() != first);  // it really did turn
+    CHECK(p.s().page().lines.size() == static_cast<size_t>(reader::kPeekLines));
+  }
 }
 
 // --- WHAT THE FACTORY WILL AND WILL NOT BUILD -----------------------------------
@@ -759,6 +807,9 @@ TEST_CASE("the demo Peek builds and shows the board's opening") {
   // the bound it really is -- the panel's height is a result of kPeekLines -- and the
   // left edge is what carries the claim.
   for (const reader::LaidLine& ln : peek->page().lines) CHECK(ln.x >= f.peekLeft);
+  // Still a ceiling here, and deliberately: the case above -- "a peek page in the body
+  // of a chapter fills all kPeekLines line boxes" -- is where the count is pinned to
+  // the number, over real pagination rather than over a specimen authored to fit.
   CHECK(peek->page().lines.size() <= static_cast<size_t>(reader::kPeekLines));
   // AND IT IS THE BOARD'S OWN SENTENCE. Checked on the text rather than only on the
   // line count, because a peek built from the READER's demo chapter would also fit --

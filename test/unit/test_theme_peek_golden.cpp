@@ -168,6 +168,12 @@ TEST_CASE("the peek's panel holds whole lines and does not reach the hint bar") 
       // vacuously true over an empty page, which is exactly the shape of the "reports
       // on less than it claims" defect this repo keeps hitting.
       REQUIRE_FALSE(p.lines.empty());
+      // A CEILING, AND IT IS ONE ON PURPOSE. What this case is about is where the ink
+      // lands against the drawn border, which is true of a page holding fewer lines
+      // than the panel offers. The count itself is pinned to the NUMBER in
+      // test_screen_peek.cpp, over a page in the body of a real chapter -- every check
+      // on this panel's line count was `<=` until then, and a ceiling is satisfied by
+      // seven.
       CHECK(static_cast<int>(p.lines.size()) <= reader::kPeekLines);
 
       // The LAST line is the only one that can fall out of the box: the lines are laid
