@@ -590,7 +590,11 @@ git commit -m "core: baseline JPEG pushed a row at a time, over a ByteSource"
 
 **Why ours rather than a second vendored decoder:** a PNG is DEFLATE plus per-row unfiltering, and we already own the hard half. Measured: every one of the 39 corpus PNGs is colour type 2, bit depth 8, non-interlaced.
 
-**Same push interface as `JpegDecoder`, and deliberately so.** PNG *could* be pull — scanlines come out in order — but `cover.cpp` must drive both formats through one code path, and two shapes would mean two drivers and two chances to get the fitter's feeding wrong. `ImageRowSink` is defined in `jpegd.h` and reused here.
+**Same push interface as `JpegDecoder`, and deliberately so.** PNG *could* be pull — scanlines come out in order — but `cover.cpp` must drive both formats through one code path, and two shapes would mean two drivers and two chances to get the fitter's feeding wrong.
+
+**FIRST STEP OF THIS TASK: move `ImageRowSink` out of `jpegd.h` into its own `core/include/reader/image_sink.h`, and have `jpegd.h` include that.** Task 2 correctly left it in `jpegd.h` — it had one consumer, and a shared home for a single caller is a header edge bought for nothing, which this project has a rule about. This task creates the second consumer, and **the second copy is the extraction point, not the fifth**. Leaving it where it is would mean `pngd.h` includes `jpegd.h` for a base class, so a PNG-only build drags in the JPEG decoder's declaration and the two decoders are coupled through nothing but an accident of which one was written first.
+
+That move is a pure rename-and-reinclude: `jpegd.h` keeps compiling for its existing includers because it includes the new header, and `test_jpegd.cpp` needs no change. Do it first, confirm `make test` is still green, and commit it separately from the PNG work so the extraction is legible in the history.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -715,7 +719,7 @@ Expected: compile error, `reader/pngd.h` missing.
 #include <memory>
 
 #include "reader/inflate_stream.h"
-#include "reader/jpegd.h"  // ImageRowSink -- one sink shape for both formats
+#include "reader/image_sink.h"  // ImageRowSink -- one sink shape for both formats
 
 namespace reader {
 
