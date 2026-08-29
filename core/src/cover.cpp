@@ -31,6 +31,15 @@ enum class Format { None, Jpeg, Png };
 // WHAT THE BYTES SAY THEY ARE. The OPF's cover pointer is not filtered by media
 // type -- see cover.h -- so this is the only thing that decides which decoder
 // runs, and a span that is neither is refused before a decoder is built.
+//
+// THE PNG SIGNATURE IS CHECKED WHOLE AND ONLY THE FIRST FOUR BYTES DECIDE
+// ANYTHING, which is worth writing down rather than rediscovering: pngd.cpp reads
+// and checks the same eight bytes itself (`kSignature`, pngd.cpp:15), so
+// shortening this to `\x89PNG` fails no test and cannot -- a file that clears
+// four and not eight is refused one layer down instead, with a better sentence
+// and the same Unsupported. It is the whole signature because that is what the
+// signature is; the last four bytes are the format's own CRLF-mangling detector
+// and truncating them would be an arbitrary line to draw.
 Format sniff(const uint8_t* p, size_t n) {
   if (n >= 2 && p[0] == 0xFFu && p[1] == 0xD8u) return Format::Jpeg;
   if (n >= kSniffBytes && std::memcmp(p, kPngSignature, kSniffBytes) == 0) return Format::Png;
@@ -41,11 +50,14 @@ Format sniff(const uint8_t* p, size_t n) {
 // decoder will start part-way into its own header, so the prefix already read is
 // served first and everything after it comes from the source below.
 //
-// It FILLS a read across the seam rather than returning short at it. jd_prepare
-// tests `infunc(...) != len` for every segment it loads (jpegd.cpp says so), so a
-// short read at the one byte the sniff happened to stop on would refuse a
-// perfectly good JPEG -- and it would do it only for files whose header lands on
-// that boundary, which is the sort of defect that reaches a device.
+// IT FILLS A READ ACROSS THE SEAM, AND THAT IS A COURTESY RATHER THAN A FIX --
+// written down because the first version of this comment claimed otherwise, and a
+// mutation returning short at the seam failed nothing. `ByteSource::read` says
+// "up to `bytes`", and BOTH decoders drain in a loop for it (jpegd's `feed` and
+// pngd's `fillFrom`, each with a comment saying a short read is not the stream
+// ending). So a short read here would be handled. What filling buys is that this
+// source behaves like the EntrySource and InflateSource it stands in front of,
+// rather than being the one source in the chain with a hiccup eight bytes in.
 class PrefixSource : public ByteSource {
  public:
   PrefixSource(const uint8_t* prefix, size_t n, ByteSource& rest)
@@ -209,20 +221,22 @@ const char* coverResultName(CoverResult r) {
 CoverResult decodeCover(FileSystem& fs, const OpenedBook& book, int panelW, int panelH,
                         CoverFit fit, CoverPlaneSink& sink, CoverStopFn stop, void* stopCtx,
                         CoverReport* report) {
-  // A LOCAL REPORT ALWAYS, COPIED OUT ONCE. Every branch below fills the fields it
-  // knows and one line at the end hands them over, so a caller that passed null
-  // and a caller that did not take the same path -- and no refusal can forget to
-  // say what it saw.
+  // A LOCAL REPORT, FILLED AS THE DECODE GOES AND HANDED OVER IN ONE PLACE. Every
+  // branch below is an early return, so a `report != nullptr` test at each of them
+  // would be a dozen chances to leave a caller with nothing to log.
   CoverReport rep;
-  // EVERY REFUSAL GOES THROUGH ONE PLACE, so `finish` cannot be forgotten on one
-  // of them -- and it is called even when `begin` was not, which cover.h states
+  auto deliver = [&](CoverResult r, const char* why) -> CoverResult {
+    rep.reason = why;
+    if (report != nullptr) *report = rep;
+    return r;
+  };
+  // AND EVERY REFUSAL GOES THROUGH ONE PLACE TOO, so `finish` cannot be forgotten
+  // on one of them -- it is called even when `begin` was not, which cover.h states
   // as the contract: it is the sink's one guaranteed call, so a stale file from
   // another book is dropped on the way past.
   auto refuse = [&](CoverResult r, const char* why) -> CoverResult {
-    rep.reason = why;
-    if (report != nullptr) *report = rep;
     sink.finish(false);
-    return r;
+    return deliver(r, why);
   };
 
   // A caller-side error rather than anything about the book. The six results have
@@ -262,7 +276,10 @@ CoverResult decodeCover(FileSystem& fs, const OpenedBook& book, int panelW, int 
     bytes = &inflated;
   }
 
-  uint8_t head[kSniffBytes];
+  // Value-initialised: `sniff` reads only what `got` covers, and an entry shorter
+  // than eight bytes is a real card, so leaving the tail as whatever the stack
+  // held would make the refusal depend on it.
+  uint8_t head[kSniffBytes] = {};
   size_t got = 0;
   while (got < kSniffBytes) {
     const size_t n = bytes->read(head + got, kSniffBytes - got);
@@ -317,13 +334,12 @@ CoverResult decodeCover(FileSystem& fs, const OpenedBook& book, int panelW, int 
   if (ok) {
     if (!adapter.pad())
       return refuse(CoverResult::ReadFailed, "the cover's plane rows could not be written");
-    if (!sink.finish(true)) {
-      rep.reason = "the cover could not be committed";
-      if (report != nullptr) *report = rep;
-      return CoverResult::ReadFailed;
-    }
-    if (report != nullptr) *report = rep;
-    return CoverResult::Ok;
+    // NOT THROUGH `refuse`: finish has already been called, with true, and calling
+    // it a second time would break the "exactly once" half of its contract to
+    // report a failure the sink itself just declared.
+    if (!sink.finish(true))
+      return deliver(CoverResult::ReadFailed, "the cover could not be committed");
+    return deliver(CoverResult::Ok, nullptr);
   }
 
   // WHY IT STOPPED, ASKED OF OURSELVES BEFORE THE DECODER. Both decoders report a

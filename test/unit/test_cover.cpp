@@ -29,6 +29,7 @@ struct VectorSink : reader::CoverPlaneSink {
   bool finished = false, finishedOk = false;
   int finishes = 0;
   bool acceptBegin = true;
+  bool acceptFinish = true;
   int refuseRowAt = -1;  // -1 never refuses
   std::vector<uint8_t> msb, lsb;
 
@@ -50,7 +51,7 @@ struct VectorSink : reader::CoverPlaneSink {
     finished = true;
     finishedOk = ok;
     ++finishes;
-    return true;
+    return acceptFinish;
   }
 
   // A row of the accumulated MSB plane. Empty if that row was never pushed.
@@ -290,6 +291,11 @@ TEST_CASE("Whole letterboxes with PAPER ROWS, and the panel is still filled") {
   REQUIRE(rep.dstY == 75);
   REQUIRE(rep.dstW == 480);
   CHECK(sink.rows == 800);       // the bands are PUSHED, not skipped
+  // AND PROMISED: `rows` is the panel, not the box. This is the one shape where
+  // the two differ, so declaring the box here would be invisible in the Fill
+  // case above -- which is exactly what a mutation found.
+  CHECK(sink.declaredRows == 800);
+  CHECK(sink.h == 800);
 
   int paperAbove = 0, paperBelow = 0;
   for (int y = 0; y < rep.dstY; ++y) paperAbove += rowIsPaper(sink, y) ? 1 : 0;
@@ -322,6 +328,7 @@ TEST_CASE("a cover smaller than the panel is centred, never enlarged") {
   REQUIRE(rep.dstX == 223);
   REQUIRE(rep.dstY == 395);
   CHECK(sink.rows == 800);
+  CHECK(sink.declaredRows == 800);   // nine rows of cover, eight hundred promised
   CHECK(rowIsPaper(sink, rep.dstY - 1));
   CHECK(rowIsPaper(sink, rep.dstY + rep.dstH));
   CHECK(rowIsPaper(sink, 0));
@@ -356,6 +363,21 @@ TEST_CASE("a cover much larger than the panel is decoded at a smaller scale") {
   CHECK(rep.dstH == 300);
   CHECK(sink.rows == 300);
   CHECK(anyInk(sink.msb));
+
+  // AND A PANEL WHOSE TRANSPOSE ANSWERS DIFFERENTLY, because 200x300 does not:
+  // 740x1000 halved is 370x500, which clears 300x200 as readily as 200x300, so
+  // swapping the pair is invisible there. At 300x450 it is not -- halved clears
+  // (300, 450) and does not clear (450, 300) -- so this is the case that says the
+  // width is asked for as a width.
+  VectorSink wide;
+  reader::CoverReport wideRep;
+  REQUIRE(reader::decodeCover(fs, book, 300, 450, reader::CoverFit::Fill, wide, nullptr,
+                              nullptr, &wideRep) == reader::CoverResult::Ok);
+  CHECK(wideRep.scaleDivisor == 2);
+  CHECK(wideRep.dstW == 300);
+  CHECK(wideRep.dstH == 450);
+  CHECK(wide.rows == 450);
+  CHECK(wide.bytes == 38);
 }
 
 TEST_CASE("a panel width that is not a multiple of eight still packs whole bytes") {
@@ -432,6 +454,26 @@ TEST_CASE("a sink that refuses a row part-way through stops the decode") {
         reader::CoverResult::Ok);
   CHECK(sink.rows == 100);
   CHECK_FALSE(sink.finishedOk);
+}
+
+TEST_CASE("a commit the sink refuses is NOT an Ok cover") {
+  // THE LAST THING THAT CAN GO WRONG IS THE ONE THAT MATTERS MOST: every plane row
+  // is down and the card refuses the flag that says so. Reporting Ok there would
+  // leave the shell believing a cache it must not paint -- a half-written file
+  // presented as a good one, which is exactly what sleep_cover.h's `complete`
+  // flag exists to prevent.
+  FakeFileSystem fs;
+  putBook(fs, epubbuild::withCoverImage(imgfix::loadFixture("baseline.jpg")));
+  VectorSink sink;
+  sink.acceptFinish = false;
+
+  reader::CoverReport rep;
+  CHECK(reader::decodeCover(fs, openIt(fs), 480, 800, reader::CoverFit::Fill, sink, nullptr,
+                            nullptr, &rep) == reader::CoverResult::ReadFailed);
+  CHECK(rep.reason != nullptr);
+  CHECK(sink.rows == 800);        // the decode itself was fine
+  CHECK(sink.finishes == 1);      // and finish is called exactly ONCE, not retried
+  CHECK(sink.finishedOk);         // with true -- the sink is the one that said no
 }
 
 TEST_CASE("a card that will not open the book is ReadFailed") {

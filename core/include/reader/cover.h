@@ -113,19 +113,37 @@ struct CoverReport {
 
 // DECODE `book`'s COVER INTO `sink`, STREAMING, HOLDING NEITHER IMAGE NOR PLANE.
 //
-// Peak heap, worst realistic case (a deflated JPEG -- 59% of corpus JPEG covers
-// are deflated inside the zip): the zip inflater's 36,956 bytes, TJpgDec's ~3,500,
-// ITS MCU BAND BUFFER at 8.4-16.9 KB, a destination accumulator and an error row
-// at ~2,112 each, and two plane rows. About 54-62 KB, against ~87 KB free at sleep
-// once the reader's chapter is released.
+// PEAK HEAP, MEASURED RATHER THAN ADDED UP. A probe that counts live bytes across
+// one call, over a 740x1000 JPEG and a 1600x2400 PNG, both fits, both panels:
+//
+//   stored JPEG      26.6 KB   largest block 11,840 (TJpgDec's MCU band)
+//   DEFLATED JPEG    63.6 KB   largest block 36,956 (the zip's inflate window)
+//   stored PNG       58.7 KB   largest block 36,956 (the PNG's own window)
+//   deflated PNG     95.7 KB   two windows, one after the other
+//
+// Nothing is held after the call returns -- the probe reports zero live bytes at
+// every one of them, which is the property the decoders' own headers promise and
+// the only one this layer could break by holding a decoder past its picture.
+//
+// AGAINST ~87 KB FREE AT SLEEP, once the reader's chapter is released, that makes
+// the deflated JPEG -- 59% of the corpus's JPEG covers -- the worst case that
+// FITS, at about three quarters of the budget, and the deflated PNG the one shape
+// that does NOT. That is 1 of 225 corpus books, it answers OutOfMemory, and the
+// caller falls back to the reading card. The spec estimated 54-62 KB for the
+// deflated JPEG and the measurement is 63.6, so the shape of the estimate was
+// right and its total was a little low.
 //
 // THE BAND IS THE PART THAT SURPRISES, and it is why JpegDecoder reports its own
 // workspace rather than this comment asserting a number: TJpgDec emits MCU
 // RECTANGLES, so a row is not complete until its whole band has arrived and one
 // band must be held. Ask JpegDecoder::workspaceBytes() rather than trusting this.
+// It is bounded here rather than unbounded because of the `atLeast` request: the
+// band is `mcuHeight * outputWidth`, and asking only for the panel keeps the
+// output width inside [panelW, 2*panelW) whatever the cover's real size.
 //
-// A DEFLATED PNG NEEDS TWO WINDOWS and may run out of memory. That is 1 of 225
-// corpus books, and the caller falls back to the reading card.
+// THE FIGURES ARE THE DESKTOP'S ALLOCATOR, so the ESP32's per-block overhead is
+// on top and the std::string/std::vector sizes are not exactly the firmware's.
+// What transfers is the sizeable blocks, which are the same objects.
 //
 // THE SPAN IS NOT ASSUMED TO BE AN IMAGE. Task 5 deliberately applied no
 // media-type filter to the cover the OPF names -- the same call Epub::open makes
