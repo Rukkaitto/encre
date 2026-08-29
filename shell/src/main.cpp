@@ -3107,6 +3107,310 @@ static void refineNow() {
   logFlush();
 }
 
+// ============================================================================
+// TEMPORARY -- THE COVER DECODE PROBE. Task 9's gate, removed by Task 18.
+//
+// REMOVING IT IS THIS BLOCK PLUS ITS ONE CALL SITE. Everything the probe needs
+// lives between the banner above and the matching banner below -- includes, the
+// sink, the sniff and the driver -- and setup() references it from a single
+// three-line `#if` guard marked with the same banner. Nothing else in this file
+// knows it exists.
+//
+// WHAT IT ANSWERS: what a cover decode costs on this panel, in milliseconds, for
+// a real book off the user's own card. That number decides whether the whole
+// sleep-cover architecture survives, and it cannot be had from the desktop --
+// the simulator does no SD reads and no real inflate, and this project's ~135x
+// desktop-to-device ratio on card-and-inflate paths is a warning it has already
+// paid for twice.
+//
+// BUILT IN ONLY WITH -DENCRE_COVER_PROBE=1, the same shape as ENCRE_FS_SELFTEST
+// and for the same reason -- a normal build must not carry a diagnostic. The
+// verified recipe:
+//
+//   PLATFORMIO_BUILD_FLAGS="-DENCRE_COVER_PROBE=1" make firmware
+//
+// That variable APPENDS to platformio.ini's build_flags. Do NOT reach for
+// `--project-option="build_flags=..."`, which REPLACES the list: the device
+// defines vanish and the binary silently builds for the wrong board.
+//
+// -DENCRE_COVER_PROBE_BOOKS=N says how many to try (default 4). The plan names
+// four corpus books that span the cases -- JPEG deflated, JPEG stored, PNG
+// stored, PNG deflated -- and they are picked deliberately, because a JPEG and a
+// PNG are NOT comparable: TJpgDec's IDCT scaling shrinks a JPEG before the box
+// filter ever sees it and PNG has no such lever. One number is not an answer to
+// this gate.
+#if defined(ENCRE_COVER_PROBE) && ENCRE_COVER_PROBE
+
+// INCLUDED HERE RATHER THAN AT THE TOP OF THE FILE, so that "delete this block"
+// is literally true. These are self-contained `#pragma once` headers at global
+// scope, so their position costs nothing.
+#include <cstring>
+
+#include "reader/cover.h"
+#include "reader/inflate_stream.h"
+#include "reader/zip.h"
+
+#ifndef ENCRE_COVER_PROBE_BOOKS
+#define ENCRE_COVER_PROBE_BOOKS 4
+#endif
+
+namespace {
+
+// A SINK THAT COUNTS AND DISCARDS. This is a TIMING probe, so writing a file
+// would put ~40 ms of card write per row into the number being measured -- the
+// instrument making the delay it is hunting, which is the mistake `logToCard`
+// was designed around.
+//
+// It still READS both rows, cheaply, rather than ignoring the pointers. Two
+// reasons: a sink that never touches its argument would not notice a plane
+// pointer that is wrong, and the real sink reads them, so the memory traffic
+// belongs in the measurement. Note a PAPER row passes the SAME pointer twice --
+// cover.h says so -- which is why this sums rather than compares.
+class CountingCoverSink : public reader::CoverPlaneSink {
+ public:
+  bool begin(int panelW, int panelH, int planeRowBytes, int rows) override {
+    panelW_ = panelW;
+    panelH_ = panelH;
+    rowBytes_ = planeRowBytes;
+    expected_ = rows;
+    began_ = true;
+    return true;
+  }
+
+  bool row(const uint8_t* msb, const uint8_t* lsb) override {
+    if (msb == nullptr || lsb == nullptr) return false;
+    uint32_t sum = 0;
+    for (int i = 0; i < rowBytes_; ++i) sum += msb[i] + lsb[i];
+    checksum_ += sum;
+    ++rows_;
+    return true;
+  }
+
+  bool finish(bool ok) override {
+    finishedOk_ = ok;
+    return true;
+  }
+
+  int rows() const { return rows_; }
+  int expected() const { return expected_; }
+  bool began() const { return began_; }
+  uint32_t checksum() const { return checksum_; }
+  int rowBytes() const { return rowBytes_; }
+  int panelW() const { return panelW_; }
+  int panelH() const { return panelH_; }
+  bool finishedOk() const { return finishedOk_; }
+
+ private:
+  int panelW_ = 0, panelH_ = 0, rowBytes_ = 0, expected_ = 0, rows_ = 0;
+  bool began_ = false, finishedOk_ = false;
+  uint32_t checksum_ = 0;
+};
+
+// WHAT THE COVER'S FIRST BYTES SAY IT IS.
+//
+// decodeCover sniffs this internally and CoverReport does not carry the answer,
+// so the probe asks the same question the same way rather than guessing from
+// `scaleDivisor` -- which is 1 for every PNG *and* for a JPEG that needed no
+// scaling, so it cannot tell the two apart. Since Step 2b turns entirely on
+// which path was measured, guessing is not good enough.
+//
+// IT CANNOT LOWER THE HEAP FLOOR BELOW WHAT THE DECODE WILL REACH, which is the
+// one thing that would make it a measurement artefact. For a deflated entry it
+// takes one 36,956-byte inflate window and gives it straight back; the decode
+// then takes the same window and more on top. For a stored entry it takes
+// nothing at all. So for any given book its peak is strictly below the decode's,
+// and `getMinFreeHeap()` after the decode still reports the decode's floor.
+//
+// Returns a short constant string for the log line -- never allocates.
+const char* sniffCoverFormat(reader::FileSystem& fs, const reader::OpenedBook& book) {
+  const reader::ChapterLocation where = book.locateCover();
+  if (where.bookPath.empty() || where.compressedSize == 0) return "none";
+
+  std::unique_ptr<reader::FileHandle> file = fs.openRead(where.bookPath);
+  if (file == nullptr) return "unopenable";
+
+  uint32_t dataOffset = 0;
+  if (!reader::Zip::locateData(*file, where.localHeaderOffset, where.compressedSize,
+                               dataOffset))
+    return "badheader";
+
+  // Declaration order is lifetime order, innermost last -- exactly as cover.cpp
+  // orders the same four objects, and for the same reason.
+  reader::EntrySource entry;
+  entry.reset(*file, dataOffset, where.compressedSize);
+  reader::Inflater inflater;
+  reader::InflateSource inflated(inflater);
+  reader::ByteSource* bytes = &entry;
+  if (where.deflated) {
+    if (!inflater.begin(entry)) return "oom";
+    bytes = &inflated;
+  }
+
+  uint8_t head[8] = {};
+  size_t got = 0;
+  while (got < sizeof head) {
+    const size_t n = bytes->read(head + got, sizeof head - got);
+    if (n == 0) break;
+    got += n;
+  }
+  if (got >= 2 && head[0] == 0xFFu && head[1] == 0xD8u) return "jpeg";
+  static const uint8_t kPng[8] = {0x89u, 'P', 'N', 'G', '\r', '\n', 0x1Au, '\n'};
+  if (got >= sizeof kPng && std::memcmp(head, kPng, sizeof kPng) == 0) return "png";
+  return "other";
+}
+
+// `.epub` on the final extension, case-insensitively. NARROWER THAN
+// BookList::isBook, which also accepts `.txt`: a text file declares no cover, so
+// probing one spends an open to print a NoCover row that says nothing about the
+// decode.
+bool isEpubName(const std::string& name) {
+  if (name.size() < 5) return false;
+  const char* p = name.c_str() + name.size() - 5;
+  return p[0] == '.' && (p[1] | 32) == 'e' && (p[2] | 32) == 'p' && (p[3] | 32) == 'u' &&
+         (p[4] | 32) == 'b';
+}
+
+}  // namespace
+
+// `storage` is bringUpStorage()'s OWN answer, passed in rather than read from
+// gStorageUsable -- which is not assigned until ~90 lines below the call site, so
+// asking the global here would make the probe print "no usable card" on every run
+// of every build. A diagnostic that reports nothing looks exactly like a device
+// with nothing to report, which is the dead-button shape this project has shipped
+// twice; it is a parameter so it cannot happen.
+static void runCoverProbe(bool storage) {
+  mark("cover-probe");
+  if (!storage) {
+    logf("[cover] no usable card -- nothing to probe\n");
+    logFlush();
+    return;
+  }
+  // ASK THE FRAME, not the driver: getDisplayWidth()/Height() are the panel's
+  // native LANDSCAPE geometry, and the cover is fitted to the logical PORTRAIT
+  // canvas every screen draws against. Handing the landscape pair to a fitter
+  // would measure a decode of the wrong shape -- the same swap that once gave
+  // the Library four rows instead of seven.
+  const int panelW = gFrame ? gFrame->width() : 0;
+  const int panelH = gFrame ? gFrame->height() : 0;
+  if (panelW <= 0 || panelH <= 0) {
+    logf("[cover] no frame geometry -- nothing to probe\n");
+    logFlush();
+    return;
+  }
+
+  // COLLECT THE PATHS, THEN DROP THE LISTING, BEFORE ANY DECODE. A 203-book
+  // listing retains ~59 KB, and the heap floor is half of what this probe is for
+  // -- holding the Library across the decodes would measure a heap this feature
+  // never runs against, since the sleep path decodes with the reader's chapter
+  // already released.
+  std::vector<std::string> paths;
+  int epubsFound = 0;
+  {
+    std::vector<reader::BookEntry> rows;
+    if (!reader::BookList::scan(gSd, reader::kBooksRoot, rows)) {
+      logf("[cover] cannot list %s -- nothing to probe\n", reader::kBooksRoot);
+      logFlush();
+      return;
+    }
+    for (const reader::BookEntry& e : rows) {
+      if (e.isDir || !isEpubName(e.name)) continue;
+      ++epubsFound;
+      if (paths.size() < static_cast<size_t>(ENCRE_COVER_PROBE_BOOKS))
+        paths.push_back(std::string(reader::kBooksRoot) + "/" + e.name);
+    }
+  }
+
+  logf("[cover] %s holds %d epub(s); trying %u, panel=%dx%d fit=fill\n", reader::kBooksRoot,
+       epubsFound, (unsigned)paths.size(), panelW, panelH);
+  logFlush();
+
+  int ok = 0, noCover = 0, unsupported = 0, readFailed = 0, outOfMemory = 0, abandoned = 0;
+  int bookRefused = 0;
+
+  for (size_t i = 0; i < paths.size(); ++i) {
+    const std::string& path = paths[i];
+
+    reader::OpenedBook opened;
+    const char* reason = nullptr;
+    const uint32_t tOpen = millis();
+    if (!reader::openBook(gSd, path, opened, &reason)) {
+      // NOT a CoverResult. The book never opened, so nothing was ever asked
+      // about its cover -- calling that NoCover would put a book this firmware
+      // cannot READ into a column about pictures. One corpus book in 225 lands
+      // here, for an OPF attribute over Xml::kMaxAttrBytes, and that is expected.
+      ++bookRefused;
+      logf("[cover] #%u result=BookRefused open=%lums file=%s reason=%s\n", (unsigned)(i + 1),
+           (unsigned long)(millis() - tOpen), path.c_str(),
+           reason != nullptr ? reason : "unknown");
+      logFlush();
+      continue;
+    }
+    const uint32_t openMs = millis() - tOpen;
+
+    const char* fmt = sniffCoverFormat(gSd, opened);
+    const char* zip = !opened.cover.readable() ? "none" : (opened.cover.deflated ? "deflated"
+                                                                                 : "stored");
+
+    CountingCoverSink sink;
+    reader::CoverReport report;
+    const uint32_t heapBefore = ESP.getFreeHeap();
+    const uint32_t t0 = millis();
+    // NO STOP PREDICATE. The shell answers one from rawSamplesPending() in
+    // anger; here a button press mid-decode would truncate the very number being
+    // measured and report it as if it were the whole cost.
+    const reader::CoverResult r =
+        reader::decodeCover(gSd, opened, panelW, panelH, reader::CoverFit::Fill, sink, nullptr,
+                            nullptr, &report);
+    const uint32_t decodeMs = millis() - t0;
+
+    switch (r) {
+      case reader::CoverResult::Ok: ++ok; break;
+      case reader::CoverResult::NoCover: ++noCover; break;
+      case reader::CoverResult::Unsupported: ++unsupported; break;
+      case reader::CoverResult::ReadFailed: ++readFailed; break;
+      case reader::CoverResult::OutOfMemory: ++outOfMemory; break;
+      case reader::CoverResult::Abandoned: ++abandoned; break;
+    }
+
+    // FIELD ORDER IS PART OF THE FORMAT, as it is for the simulator's own cover
+    // line: `file=` and `reason=` are the two values that can hold a space, so
+    // they go last and in that order.
+    //
+    // heapMin IS ESP.getMinFreeHeap() AND NOT getFreeHeap(), because the free
+    // figure cannot see the largest transient this path takes -- 36,956 bytes
+    // for an inflate window, freed before the next line prints. heapBefore is
+    // the free heap on the way in, so `heapBefore - heapMin` is this decode's
+    // peak ONLY IF this decode set a new floor; the minimum is monotone since
+    // boot, so the FIRST book's figure is the trustworthy one and a later book
+    // that reports the same heapMin simply never went lower.
+    logf("[cover] #%u result=%s fmt=%s zip=%s src=%dx%d scale=1/%d dst=%dx%d+%d+%d "
+         "rows=%d/%d rowBytes=%d open=%lums decode=%lums heapBefore=%u heapMin=%u "
+         "sum=%lu file=%s%s%s\n",
+         (unsigned)(i + 1), reader::coverResultName(r), fmt, zip, report.sourceWidth,
+         report.sourceHeight, report.scaleDivisor, report.dstW, report.dstH, report.dstX,
+         report.dstY, sink.rows(), sink.began() ? sink.expected() : 0, sink.rowBytes(),
+         (unsigned long)openMs, (unsigned long)decodeMs, (unsigned)heapBefore,
+         (unsigned)ESP.getMinFreeHeap(), (unsigned long)sink.checksum(), path.c_str(),
+         report.reason != nullptr ? " reason=" : "",
+         report.reason != nullptr ? report.reason : "");
+    logFlush();
+  }
+
+  // ONE LINE A RUN CAN BE READ FROM. Per-book lines say what happened; this says
+  // whether the run is worth reading at all -- a probe whose every row is
+  // BookRefused looks, in a scrollback, exactly like a probe that worked.
+  logf("[cover] summary: tried=%u ok=%d nocover=%d unsupported=%d readfailed=%d oom=%d "
+       "abandoned=%d bookrefused=%d (of %d epub(s) on the card)\n",
+       (unsigned)paths.size(), ok, noCover, unsupported, readFailed, outOfMemory, abandoned,
+       bookRefused, epubsFound);
+  logFlush();
+  mark("cover-probe-done");
+}
+
+#endif  // ENCRE_COVER_PROBE
+// ---- END OF THE TEMPORARY COVER DECODE PROBE (Task 18 deletes to here) ------
+// ============================================================================
+
 void setup() {
   // A BIGGER TX RING, BEFORE begin() ALLOCATES IT. HWCDC::write posts what fits
   // the ring without blocking and then blocks for the remainder until the host
@@ -3572,6 +3876,13 @@ void setup() {
     ensureBooksDir("boot");
     armCardProbes("boot");
   }
+
+  // ---- TEMPORARY: the cover decode probe. Task 18 deletes these three lines
+  // and the block above setup(). Guarded so a normal build holds no reference to
+  // it at all -- which is what makes "byte-comparable to today's" checkable.
+#if defined(ENCRE_COVER_PROBE) && ENCRE_COVER_PROBE
+  runCoverProbe(storage);
+#endif
 
   // HOW MANY LIBRARY ROWS FIT ON THIS PANEL, asked once and carried into every
   // Library the factory builds. The theme owns the box model (panel height minus
