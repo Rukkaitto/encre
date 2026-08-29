@@ -476,6 +476,20 @@ static reader::BatteryTracker gBattery;
 // sit idle.
 static bool gChargingObservable = false;
 static bool gBatteryEverRead = false;
+// How many times the 2 s poll has actually run. The poll's only other trace is
+// the one-shot [battery] boot line and an occasional "-> repainting Home", so
+// without this a disarmed poll, a poll pinned by kMaxGrantsPerSession and a
+// poll quietly working are all silent in the same way -- reported on [alive]
+// below for the same reason the listing cache's hit=/miss= is.
+static uint32_t gBatteryPolls = 0;
+// When the cadence last had a reason to reset -- file scope because BOTH the
+// paint-time read (renderTop) and the periodic poll (loop) stamp it, so a Home
+// paint counts as a read for cadence purposes too. Without that a boot in
+// particular leaves this at 0, and the periodic poll fires on the very next
+// quiet iteration to re-read what the boot paint just read a moment earlier --
+// harmless (the tracker will not double-fire a request), but an avoidable I2C
+// transaction.
+static uint32_t gLastBatteryPollMs = 0;
 static InputManager gInput;
 // The card. One instance: SDCardManager is a singleton underneath, so a second
 // SdFileSystem would address the same volume with its own idea of whether it is
@@ -2941,9 +2955,18 @@ static reader::BatteryReading readBattery() {
   r.percent = static_cast<int>(s.percentage);
   r.chargingKnown = s.chargingKnown;
   r.charging = s.charging;
+  // STICKY, NOT FIRST-SAMPLE. readStatus() reads SoC and charging as two
+  // independent I2C transactions, so the charging half can fail on its own --
+  // and deciding this from one sample would let a single glitch at the first
+  // Home paint disable the plug-in poll for the rest of the session, on a
+  // device that supports it perfectly well. On an X4 no reading ever reports
+  // chargingKnown, so this stays false there, which is the whole point of the
+  // gate. On an X3 it arms itself at the first reading that succeeds -- and the
+  // paint-time read runs on every Home paint regardless of this flag, so it
+  // is self-healing rather than needing a retry of its own.
+  if (r.chargingKnown) gChargingObservable = true;
   if (!gBatteryEverRead) {
     gBatteryEverRead = true;
-    gChargingObservable = s.chargingKnown;
     logf("[battery] %s pct=%s charging=%s (%s backend)\n",
          s.supported ? "supported" : "UNSUPPORTED",
          s.percentageKnown ? String(s.percentage).c_str() : "unknown",
@@ -2987,7 +3010,19 @@ static void renderTop() {
   // The repaint request is TAKEN AND DISCARDED. A rising edge seen here is already
   // being satisfied by the paint that is about to happen; leaving the request
   // standing would fire a second refresh at the next poll, immediately after it.
+  //
+  // UNTRACKED IN [i] ON PURPOSE, STATED RATHER THAN SILENT. This runs before t0
+  // below, so its ~450 us is counted in `total` and attributable to no named
+  // stage -- it lands in the gap between `post` (already accumulated before
+  // renderTop was called) and `render` (timed from t0). Under 0.2% of a paint,
+  // not worth restructuring for; the [i] line exists to eliminate exactly this
+  // kind of unattributed gap, so it should be named rather than left quiet.
   (void)refreshBatteryOnHome();
+  // Also resets the poll's own cadence timer, so a Home paint counts as a read
+  // for that purpose too -- see gLastBatteryPollMs's own comment for why a boot
+  // that skipped this would have the periodic poll immediately re-read what the
+  // paint just read.
+  gLastBatteryPollMs = millis();
   // EVERY PAINT, not just the first. The frame is the driver's, and the driver
   // can take it back (bindFrameToDriver says how and why). Nothing lends it
   // today, so this is a pointer comparison that always agrees -- it is here so
@@ -5034,11 +5069,14 @@ void loop() {
     }
   }
 
-  // ONE GATE, TWO USERS, AND IT IS LITERALLY ONE EXPRESSION. Both of the calls
-  // below are SPI traffic on the display's shared bus taken in an idle window, and
-  // the card log's flush is specified as running "under the same gate the
-  // card-presence poll uses" -- so it reads the same local rather than carrying a
-  // second copy of the condition that can drift away from this one.
+  // ONE GATE, AND IT IS LITERALLY ONE EXPRESSION -- deliberately not naming how
+  // many things read it below, because that count has already gone stale once
+  // (the card log's flush, then pollCardPresence, then the battery poll) and
+  // will again. What matters is that each of them reads THIS local rather than
+  // carrying its own copy of the condition that can drift away from it. The
+  // card log's flush is specified as running "under the same gate the
+  // card-presence poll uses", and the battery poll below follows the same rule
+  // for a different bus.
   const bool quiet = !gApp->dirty() && rawSamplesPending() == 0;
 
   // THE CARD LOG'S IDLE FLUSH. This is the call kLogFlushAtBytes was declared for
@@ -5114,10 +5152,10 @@ void loop() {
   // of continuous not-charging, and three grants a session. The dwell is what
   // stops a device sitting at 100% on the charger -- where the gauge's Current()
   // sign dithers around zero -- repainting the panel all night.
-  static uint32_t gLastBatteryPollMs = 0;
   if (quiet && gChargingObservable && homeOnGlass() &&
       static_cast<uint32_t>(millis() - gLastBatteryPollMs) >= kBatteryPollMs) {
     gLastBatteryPollMs = millis();
+    ++gBatteryPolls;
     if (refreshBatteryOnHome()) {
       gApp->markDirty();
       logf("[battery] charging -> repainting Home\n");
@@ -5137,13 +5175,24 @@ void loop() {
     // faster" and "it stopped being called" look identical, and this file records
     // that shape as a defect three times over. hits/misses is what tells a cache
     // that is working from one that is merely quiet.
+    // BATTERY, ON THE SAME LINE AND FOR THE SAME REASON AS listings= ABOVE. The
+    // poll's only other trace is the one-shot [battery] boot line and an
+    // occasional "-> repainting Home", so a disarmed poll, one pinned by
+    // kMaxGrantsPerSession and one quietly seeing no change all look identical
+    // otherwise -- indistinguishable from "I plugged in and nothing happened."
+    // observable/pct/charging are read straight off gChargingObservable/gBattery
+    // rather than re-derived, so this can never disagree with what setBattery()
+    // just handed the screen.
     logf("[alive] last-stage=%s heap=%u minHeap=%u screen=%s depth=%d "
-         "dropped=%lu/%lu listings=%u slots/%uB hit=%u miss=%u\n",
+         "dropped=%lu/%lu listings=%u slots/%uB hit=%u miss=%u "
+         "battery observable=%d pct=%d charging=%d polls=%lu\n",
          stage, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
          reader::screenName(gApp->top().id()), gApp->depth(),
          (unsigned long)rawSamplesDropped(), (unsigned long)gPresses.dropped(),
          (unsigned)gSd.listings().slotsHeld(), (unsigned)gSd.listings().residentBytes(),
-         (unsigned)gSd.listings().hits(), (unsigned)gSd.listings().misses());
+         (unsigned)gSd.listings().hits(), (unsigned)gSd.listings().misses(),
+         (int)gChargingObservable, gBattery.percent(), (int)gBattery.charging(),
+         (unsigned long)gBatteryPolls);
     // WHAT THE CARD LOG HAS COST AND WHAT IT HAS LOST, on the heartbeat rather than
     // per flush. `dropped` non-zero means the buffer overran between two idle
     // windows and the log has a HOLE in it -- which must never be mistaken for the
