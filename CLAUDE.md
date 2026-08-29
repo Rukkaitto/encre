@@ -103,10 +103,47 @@ the one that added the check -- and buys a rename before every PR rather than
 any clarity. **There is no `develop` branch and this does not invent one**: full
 git flow is a change to how the project is developed, not a CI check.
 
+**THE SAME CHECK RUNS AS TWO GIT HOOKS**, tracked in `.githooks/` and installed
+by `make hooks` (one `git config core.hooksPath`, which lives in the common
+`.git/config` and so covers every worktree at once). `commit-msg` validates the
+subject you just wrote, when the fix is `git commit --amend` rather than an
+interactive rebase; `pre-push` validates the branch name and every commit the
+push would add. Both run `tools/check_conventions.py`, so they cannot drift from
+the gate they mirror, and both are bypassable with `--no-verify` **by design** --
+they are a fast local mirror, not a second source of truth.
+
+**`commit-msg` ALLOWS `fixup!` AND PUSH AND CI DO NOT.** `git commit --fixup`
+writes one, and it is a legitimate local state whose whole purpose is to be
+squashed later; rejecting it at commit time would break the workflow. It stays
+rejected at the two moments it must not survive. The hook is also skipped for a
+merge, a revert and a cherry-pick, whose messages git wrote.
+
+**`pre-push` TAKES ITS RANGE FROM GIT'S STDIN, NOT FROM `origin/main..HEAD`.**
+git hands the hook the remote sha it negotiated for each ref, live; a
+remote-tracking ref can be STALE, and a stale one drags already-merged history
+into the range -- where **128 of main's commits predate this rule** and would
+fail it. For a branch the remote does not have yet that sha is all zeros, and
+the fallback is "commits on no branch of this remote".
+
+**AND NONE OF IT IS BLOCKING ON GITHUB TODAY.** Branch protection answers
+`403: Upgrade to GitHub Pro or make this repository public`, so the check cannot
+be made a required status check: a violation shows a red X on the PR and the
+merge button still works. **The hooks are currently the only thing that stops
+anything**, which is why they exist rather than being belt-and-braces.
+
 **AN EMPTY COMMIT RANGE IS AN ERROR IN CI** (`--require-commits`), because a
 wrong base ref would otherwise check nothing and pass -- the
 reports-on-less-than-it-claims shape again. It is only a note locally, where a
 branch with no commits yet is an ordinary state.
+
+**CI'S FIRST RUN FOUND A REAL PORTABILITY BUG, AND IT WAS NOT THE GOLDENS.**
+`test_scalablefont.cpp` called `std::memcmp` without including `<cstring>`:
+libc++ pulls it in transitively and libstdc++ does not, so the file had compiled
+on macOS for months and **failed on the first Linux build**. A
+transitively-satisfied include is a bug only the other toolchain can see, which
+is the whole argument for building somewhere other than the machine that wrote
+the code. Note the build died before `ctest` ran, so **the goldens-under-gcc
+question is still open** -- it has not been answered, only postponed.
 
 **A `\x1f`-SEPARATED `git log` MUST NOT BE `.strip()`ed.** Python counts `\x1f`
 as whitespace, so a bare `.strip()` ate the trailing empty field of the last
