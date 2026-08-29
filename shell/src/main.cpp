@@ -583,6 +583,26 @@ static int gPendingSpine = -1;
 // that removes the peek is what makes the answer needed and the stack no longer says a
 // peek was ever there.
 static bool gPeekOpen = false;
+// WHICH CHAPTER THE CROSSING DETECTOR LAST SAW, and -1 for "no book open".
+//
+// IT WAS A FUNCTION-LOCAL STATIC INSIDE loop() AND IT COULD NEVER BE INITIALISED,
+// which the device showed: opening a peek logged `[chapter] spine=55 ... in 0ms` and
+// ran a save for a chapter that had not changed. The detector is gated on the Reader
+// being on TOP, and `handleOpen()` -- which pushes the Reader -- runs BELOW it in the
+// same iteration. So on the press that opens a book the detector looks while Home is
+// still on top, the static stays -1, and the FIRST later press that leaves the Reader
+// on top fires a crossing for the chapter the reader is already in. A plain page turn
+// did it too; the peek is only where it was noticed.
+//
+// It costs two sidecar reads and a stray log line rather than a wrong screen, which is
+// why it survived. Recorded at file scope now and SET BY openBookAt, which is the one
+// function a button press and a wake both go through and the moment the chapter
+// becomes known -- so the detector fires on crossings and nothing else.
+//
+// RESET WHEN THE BOOK CLOSES, because it outlives one book otherwise: opening a second
+// book at the same spine index as the first was left on would suppress the next real
+// crossing, which is the same defect wearing the opposite sign.
+static int gLastChapter = -1;
 // WHAT THE PEEK CHOSE, taken while it is still on top -- the dispatch pops it, and after
 // that there is no screen left to ask. Three values rather than a pointer, because the
 // screen is gone by the time they are used.
@@ -2258,6 +2278,14 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
     readerWhy = rd->error();
     logChapterOpen(rd, millis() - t0);
   }
+  // THE CROSSING DETECTOR'S STARTING POINT -- see gLastChapter. Taken from the SCREEN
+  // where there is one, because `startChapter` is what was ASKED for and openChapterAt
+  // skips a spine entry that paginates to nothing: three of a real book's 92 are a
+  // cover and two title pages, so the two differ on exactly the opens where it matters.
+  // On the wake path there is no screen yet (App::restore does the pushing), and the
+  // requested chapter is the best that is known.
+  gLastChapter = pushed ? static_cast<const reader::ReaderScreen*>(&gApp->top())->chapterIndex()
+                        : startChapter;
   // THE STACK HIGH-WATER MARK, because a stack is the one budget this firmware had
   // no instrument for -- and the first thing to exhaust it did so on the very first
   // book. uxTaskGetStackHighWaterMark reports the SMALLEST free space the task has
@@ -4288,9 +4316,9 @@ void loop() {
     // wants a stage line of its own rather than another round trip to find out.
     if (gApp->top().id() == reader::ScreenId::Reader) {
       const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
-      static int lastChapter = -1;
-      if (rd->chapterIndex() != lastChapter) {
-        lastChapter = rd->chapterIndex();
+      const int was = gLastChapter;
+      if (rd->chapterIndex() != was) {
+        gLastChapter = rd->chapterIndex();
         mark("chapter-opened");
         // WHICH BRANCH, AND WHAT IT COST. A small chapter is counted before its
         // first paint and a big one is not, and the eager side had no line -- so a
@@ -4301,7 +4329,14 @@ void loop() {
         // A CROSSING IS ONE OF THE THREE SAVE EDGES. It is also the coarsest unit a
         // power cut can cost the reader, which is what makes saving per page turn
         // unnecessary rather than merely expensive.
-        if (lastChapter >= 0) saveReadingPosition("chapter");
+        // THE PREVIOUS VALUE, not the one just stored. As written this tested the
+        // chapter it had assigned a line above, which is an index and so always >= 0 --
+        // a guard that could not refuse. It reads the departure now, so it means what
+        // it says: a crossing FROM somewhere is a save edge, and the first observation
+        // of a book is not. openBookAt records the opening chapter, so this cannot be
+        // negative any more, and the test is kept because that is a fact about the open
+        // path rather than about this one.
+        if (was >= 0) saveReadingPosition("chapter");
       }
     }
     // LEAVING THE BOOK, which is the edge the user actually reported: going back to
@@ -4321,6 +4356,10 @@ void loop() {
     // now -- see readerOnStack().
     if (gReading.open && readerOnStack(*gApp) == nullptr) {
       gReading.open = false;
+      // ...and the crossing detector forgets where it was. It outlives one book
+      // otherwise, so opening a second book at the same spine index the first was left
+      // on would suppress the next real crossing and its save edge. See gLastChapter.
+      gLastChapter = -1;
       logf("[progress] book closed\n");
       logFlush();
     }
