@@ -156,6 +156,17 @@ ICONS = {
         "source": "design/Main.dc.html",
         "match": '<rect x="19.5"',
     },
+    # THE SAME MARK WITH A BOLT KNOCKED OUT, and a second entry rather than a
+    # variant for the reason book_large is one: these are pre-rendered bitmaps,
+    # so two states are two assets. The matcher keys on the terminal nub, which
+    # BOTH batteries carry -- so `source` is what tells them apart, and it has
+    # to be a board that holds exactly one of them.
+    "battery_charging": {
+        "symbol": "kBatteryCharging",
+        "note": "the header band's charge cell, bolt knocked out: charging",
+        "source": "design/HomeCharging.dc.html",
+        "match": '<rect x="19.5"',
+    },
     # The only mark in the set that is neither a button nor a row ornament: it is
     # the subject of a full-screen prompt, drawn at 84x105 where every other mark
     # here is 21-46px. The match keys on the card's own outline -- the notched

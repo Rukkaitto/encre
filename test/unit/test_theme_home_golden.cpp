@@ -128,3 +128,14 @@ TEST_CASE("Home's action block carries the long arrow, not the row chevron") {
     CHECK(x1 >= right - 20 - 3);
   }
 }
+
+TEST_CASE("the charging battery is the same box as the idle one") {
+  // The band's height is derived from the mark (headerBandHeight takes it), and
+  // the number's position is derived from the mark's width. If the two states
+  // differed in either, swapping them would move the band and every row under
+  // it -- which is the header-band defect this project has already paid for once.
+  CHECK(reader::icons::kBatteryCharging.w == reader::icons::kBattery.w);
+  CHECK(reader::icons::kBatteryCharging.h == reader::icons::kBattery.h);
+  // Not the same BYTES, though: that would mean the bolt never reached the asset.
+  CHECK(reader::icons::kBatteryCharging.rows != reader::icons::kBattery.rows);
+}
