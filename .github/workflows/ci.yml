@@ -77,8 +77,14 @@ jobs:
       - name: Configure
         run: cmake -S . -B build
 
+      # `-- -k` so make KEEPS GOING after a failed TU and reports every compile
+      # error in one run. Without it make stops launching new jobs at the first
+      # failure, so a run reveals only a subset -- which cost two round trips
+      # here: run one named a single file, and fixing it uncovered four more
+      # that had been there all along. The step still fails; it just fails
+      # having said everything it knows.
       - name: Build
-        run: cmake --build build -j
+        run: cmake --build build -j -- -k
 
       - name: Test
         run: ctest --test-dir build --output-on-failure

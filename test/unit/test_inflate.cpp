@@ -1,5 +1,8 @@
 #include <pthread.h>
 
+// <cstdint> for uintptr_t. libc++ satisfies this transitively and libstdc++ does
+// not, so it compiled on macOS and failed on the first Linux build.
+#include <cstdint>
 #include <algorithm>
 #include <cstring>
 #include <string>
