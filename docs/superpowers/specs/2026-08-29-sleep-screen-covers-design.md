@@ -468,6 +468,27 @@ board: **generated from one source, never transcribed twice.**
   never `git checkout` to undo one, which reverts the change under test as well as
   the mutation.
 
+## What the corpus actually yields, measured with the built pipeline
+
+`tools/covers.py`, over the 225-book manifest, at both geometries — identical results on
+each:
+
+| | count |
+|---|--:|
+| `Ok` | **222** |
+| `Unsupported` — both progressive JPEGs | 2 |
+| the book never reaches a decoder | 1 |
+| `NoCover` / `ReadFailed` / `OutOfMemory` / `Abandoned` | 0 |
+
+**224 books open, and 222 of them give a cover.** The 225th is refused by `openBook`
+before any of this runs — a Calibre `user_metadata` `<meta content="…">` of **849 bytes**
+against `Xml::kMaxAttrBytes`'s 512, which CLAUDE.md already records as a known refusal
+under `Epub::open`. It belongs to the EPUB refusal rate, not to cover support, and
+**"222 of 225" would double-count it.**
+
+Desktop decode: median 76.6 ms, slowest 200.4 ms. **Not predictive of the device** —
+this project has been wrong by 8× that way once already.
+
 ## Stated limits
 
 | limit | incidence |
