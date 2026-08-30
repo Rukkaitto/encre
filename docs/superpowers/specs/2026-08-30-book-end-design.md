@@ -82,11 +82,16 @@ take their column; BookEnd's slabs are full usable width (`padding: 0 24px`).
 
 ## `finished` is a flag on the sidecar
 
-`ReadingPosition` gains one field and `kPositionVersion` goes **1 → 2**.
+`ReadingPosition` gains one field and **`kPositionVersion` DOES NOT MOVE**.
 
 ```
 bool finished = false;
 ```
+
+**The key is WRITTEN ONLY WHEN TRUE**, which is the anchor's own rule three keys
+above it in `serialise()` and it is what makes everything else here work.
+`json.h` has `setBool`/`getBool`, so this is a real bool and not an int standing in
+for one.
 
 **Why a flag and not `percent == 100`.** Those are different claims. Reading to the
 last byte of a book whose final 8% is an appendix, an index and a colophon is not
@@ -96,15 +101,24 @@ percentage records a MEASUREMENT. Conflating them is the shape this file already
 refuses where "no books" and "could not look" are kept apart, and "flat" from "did
 not answer".
 
-**Why a version bump when an added field usually does not need one.** `settings.h`'s
-rule — an added field takes its default from an older file — holds only where the
-default is the pre-feature behaviour. It is here (`false` is exactly today), so the
-bump is NOT forced by the field. It is taken anyway because `parsePosition` is
-`total`: any wrong-version text reads as "no position", and a reader who has
-downgraded firmware would otherwise get a record whose `finished` key the older
-parser ignores while the newer one trusts. **The cost is stated rather than
-discovered**: every existing reading position on every card reads as absent once,
-so the first open of each book after this lands starts at the beginning.
+**WHY NOT, AND AN EARLIER DRAFT OF THIS SPEC SAID 1 → 2.** The argument for bumping
+was that a downgraded firmware would read a record whose `finished` key it ignores.
+It would — and that is BENIGN: the reader's position is intact and the book merely
+stops saying `DONE`. The bump's own cost is not benign. `parsePosition` gates on the
+version and is `total`, so **every reading position on every card would read as
+absent once** and every reader would lose their place in every book, to protect
+against a downgrade whose failure mode is a missing label.
+
+`settings.h`'s rule is the one that applies: an added field takes its default from an
+older file, and the default is exactly today's behaviour. `kSettingsVersion` has
+declined to move three times on this reasoning.
+
+**And writing the key only when true is what makes the record byte-identical.**
+`savePosition` goes through `writeIfChanged`, which reads the card back and compares
+bytes — so a `finished: false` written unconditionally would change every sidecar's
+text and rewrite the lot on their next save, a card write per book to record nothing.
+Absent-when-false means an unfinished record is the same bytes it was before this
+feature existed, which is precisely why the anchor's three keys are written that way.
 
 **READING THE BOOK AGAIN IS WHAT UN-MARKS IT**, and this has to be stated because
 it is otherwise decided by accident: `savePosition` writes the whole record, so
@@ -315,8 +329,12 @@ from desktop evidence three times.** It goes in the on-glass list.
   the book pushes BookEnd" cannot see a corrupt chapter pushing it too.
 - **A trailing chapter that paginates to nothing** — the case a range test gets
   wrong. `fake_fs.h` serves a real EPUB, so this is buildable on the desktop.
-- **`finished` round-trips through `serialise`/`parsePosition`**, and a version-1
-  record reads as absent.
+- **`finished` round-trips through `serialise`/`parsePosition`**, AND a record with
+  `finished == false` serialises to bytes IDENTICAL to one from before the field
+  existed. That second assertion is the one that matters — it is what keeps
+  `writeIfChanged`'s `Unchanged` answer true and stops a card write per book.
+- **A pre-feature record parses**, with `finished` defaulting false rather than the
+  parse failing.
 - **`last.json` is cleared only when it names the marked book** — the assertion that
   distinguishes this from the unconditional version.
 - **`test_focus_restore.cpp`** gains `BookEnd` in `kAllScreens`, the assert moves to
@@ -342,7 +360,6 @@ from desktop evidence three times.** It goes in the on-glass list.
 
 | limit | why |
 |---|---|
-| Every existing reading position reads as absent once | `kPositionVersion` 1 → 2, and `parsePosition` is total |
 | No `FINISHED <date>` | no RTC; parked on #25 |
 | Book details still shows a percentage for a finished book | its board states no value at all; gets a card |
 | `BookEnd` does not survive a wake | refused unprimed, by design; wake lands on the last page |
