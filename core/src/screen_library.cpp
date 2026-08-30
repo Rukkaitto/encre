@@ -18,6 +18,10 @@ const char* const kMiddot = " \xC2\xB7 ";
 // and the board draws the two differently.
 const char* const kNewBook = "NEW";
 
+// design/Library.dc.html's own word for a finished book, beside NEW for the same
+// reason: a value the board states, spelled once.
+const char* const kDoneBook = "DONE";
+
 // The last segment of a path, which is the name of the directory being listed.
 // Not FileSystem's job: it addresses things, it does not decompose them.
 std::string_view leafOf(std::string_view path) {
@@ -152,6 +156,19 @@ void LibraryScreen::applyProgress(LibraryItem& item,
     // keep stating a position the card no longer holds.
     item.details.progress.clear();
     item.details.chapter.clear();
+    return;
+  }
+  // THE BOARD'S OWN WORD. design/Library.dc.html draws `DONE`, and LibraryRow::value
+  // has listed it since the screen landed -- this is not copy for a firmware to
+  // choose. A finished book states that instead of a number, because 100% and "the
+  // reader said they were done" are different claims and the row has one slot. Book
+  // details' own Progress row takes it too, for the reason the two share this
+  // function at all: one derivation, so they cannot say different things about one
+  // book. The chapter is still the sidecar's -- a finished book was left somewhere.
+  if (seen->finished) {
+    item.progress = kDoneBook;
+    item.details.progress = kDoneBook;
+    item.details.chapter = seen->chapter;
     return;
   }
   // BOOK DETAILS' OWN RUNS, which are not the row's. Its Progress row is the

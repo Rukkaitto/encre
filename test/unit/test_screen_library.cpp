@@ -710,6 +710,65 @@ TEST_CASE("a started book shows its percentage and an unopened one reads NEW") {
   CHECK(valueOf(lib, "Walden") == "NEW");
 }
 
+TEST_CASE("a finished book's row reads DONE, an unfinished one its percentage") {
+  // THE BOARD'S OWN WORD. design/Library.dc.html draws a `DONE` row and
+  // LibraryRow::value has listed `"6%", "DONE", "NEW"` since the screen landed --
+  // the state was boarded before the device could produce it, because applyProgress
+  // had no flag to read. All three states asserted together, or the case is checking
+  // one row and calling it a rule.
+  FakeFileSystem fs = cardWithBooks();
+  fs.writeAll("/books/Persuasion.epub", "p");  // never opened
+
+  reader::ReadingPosition done;
+  done.bookPath = "/books/Middlemarch.epub";
+  done.spine = 9;
+  done.percent = 100;
+  done.finished = true;
+  done.bookBytes = 1;
+  done.ppem = 32;
+  done.columnW = 492;
+  REQUIRE(reader::savePosition(fs, done) == reader::SaveResult::Written);
+
+  reader::ReadingPosition partway;
+  partway.bookPath = "/books/Walden.txt";
+  partway.spine = 4;
+  partway.percent = 31;
+  partway.bookBytes = 1;
+  partway.ppem = 32;
+  partway.columnW = 492;
+  REQUIRE(reader::savePosition(fs, partway) == reader::SaveResult::Written);
+
+  LibraryScreen lib(fs, "/books");
+  lib.setVisibleRows(8);
+  CHECK(valueOf(lib, "Middlemarch") == "DONE");
+  // NOT "100%": the percentage is still on the sidecar, and the row states the
+  // stronger claim instead. One slot, and the reader said they were done.
+  CHECK(valueOf(lib, "Walden") == "31%");
+  CHECK(valueOf(lib, "Persuasion") == "NEW");
+}
+
+TEST_CASE("finishing a book refreshes its row from DONE's own path") {
+  // refreshProgress() shares applyProgress with the rescan precisely so the two
+  // cannot spell one state two ways -- the pop out of a book goes through this one.
+  FakeFileSystem fs = cardWithBooks();
+  LibraryScreen lib(fs, "/books");
+  lib.setVisibleRows(8);
+  REQUIRE(valueOf(lib, "Middlemarch") == "NEW");
+
+  reader::ReadingPosition p;
+  p.bookPath = "/books/Middlemarch.epub";
+  p.spine = 9;
+  p.percent = 100;
+  p.finished = true;
+  p.bookBytes = 1;
+  p.ppem = 32;
+  p.columnW = 492;
+  REQUIRE(reader::savePosition(fs, p) == reader::SaveResult::Written);
+
+  REQUIRE(lib.refreshProgress());
+  CHECK(valueOf(lib, "Middlemarch") == "DONE");
+}
+
 TEST_CASE("a folder row has no progress value at all") {
   // The board gives a folder `FOLDER - 6 BOOKS` in its meta line, so a percentage in
   // the value slot would be two facts in one field.

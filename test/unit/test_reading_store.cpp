@@ -408,3 +408,37 @@ TEST_CASE("an accented chapter name survives the sidecar") {
   REQUIRE(reader::parsePosition(reader::serialise(p), out));
   CHECK(out.chapter == p.chapter);
 }
+
+TEST_CASE("loadProgressIndex reports whether a book was finished") {
+  // The Library's row says DONE for a finished book, and the row is drawn from this
+  // index -- so the flag has to travel the same road `percent` and `chapter` do,
+  // rather than being recovered by opening the book.
+  FakeFileSystem fs;
+  reader::ReadingPosition p;
+  p.bookPath = "/books/Jane Eyre.epub";
+  p.spine = 9;
+  p.percent = 100;
+  p.finished = true;
+  REQUIRE(reader::savePosition(fs, p) == reader::SaveResult::Written);
+
+  std::vector<reader::ProgressEntry> index;
+  REQUIRE(reader::loadProgressIndex(fs, index));
+  const reader::ProgressEntry* e = reader::progressFor(index, "/books/Jane Eyre.epub");
+  REQUIRE(e != nullptr);
+  CHECK(e->finished == true);
+}
+
+TEST_CASE("a book that was merely read to the end is not finished") {
+  // 100% and "the reader said they were done" are different claims, and the row has
+  // one slot -- so the default must not be inferred from the percentage.
+  FakeFileSystem fs;
+  ReadingPosition p = pos("/books/nearly.epub");
+  p.percent = 100;
+  REQUIRE(reader::savePosition(fs, p) == SaveResult::Written);
+
+  std::vector<reader::ProgressEntry> index;
+  REQUIRE(reader::loadProgressIndex(fs, index));
+  const reader::ProgressEntry* e = reader::progressFor(index, "/books/nearly.epub");
+  REQUIRE(e != nullptr);
+  CHECK(e->finished == false);
+}
