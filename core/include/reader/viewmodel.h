@@ -233,7 +233,7 @@ struct SleepViewModel {
   std::string author;
   int progressPercent = 0;
   std::string progress;   // "6% - CH. 01", the line under the bar
-  std::string note;       // "ASLEEP - PRESS POWER TO WAKE"
+  std::string note;       // "ASLEEP - HOLD POWER TO WAKE"
 
   // WHICH OF THE THREE SLEEP BOARDS THIS IS -- design/Sleep.dc.html,
   // SleepCoverDetails.dc.html, SleepCover.dc.html.

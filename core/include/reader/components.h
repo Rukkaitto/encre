@@ -94,7 +94,7 @@ inline constexpr int kHintEm = 120;        // 0.12em, hint bar label
 // Sleep badge's tracking rather than the hint bar's. A hint label sits beside a
 // mark and is read as one of four; this is a single centred statement with the
 // whole bar to itself, and it is the same run Sleep already uses for exactly that
-// (design/Sleep.dc.html's `ASLEEP - PRESS POWER TO WAKE`, and SleepWaking's
+// (design/Sleep.dc.html's `ASLEEP - HOLD POWER TO WAKE`, and SleepWaking's
 // `WAKING...` in the same badge). One spelling for one kind of line.
 inline constexpr int kStatusEm = 200;
 inline constexpr int kMetaEm = 160;        // 0.16em, the page-count meta line

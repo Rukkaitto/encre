@@ -1960,7 +1960,7 @@ been demo fiction or an empty card. Progress persistence supplied the content an
 **IT IS PAINTED WITHOUT BEING PUSHED**, which was the trap recorded here for whoever
 wired it and is now the reason `paintSleepScreen` bypasses `App` entirely. The session
 record names the top of the stack, so pushing `SleepScreen` would make the next wake
-RESTORE INTO IT — press power, get "asleep, press power to wake" back. Bypassing `App`
+RESTORE INTO IT — press power, get "asleep, hold power to wake" back. Bypassing `App`
 moves two things it normally owns into that function: the **clear**, and
 **`gFrameContentsUnknown`**, because `App`'s partial-repaint record now describes a
 frame that no longer exists. Nothing reads it before the chip resets, but leaving a lie

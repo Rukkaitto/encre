@@ -4919,7 +4919,7 @@ static void paintSleepScreen() {
   int passes = 0;
 
   const reader::SleepViewModel vm =
-      sleepVmFromCard(std::string("ASLEEP") + "\xC2\xB7" + "PRESS POWER TO WAKE");
+      sleepVmFromCard(std::string("ASLEEP") + "\xC2\xB7" + "HOLD POWER TO WAKE");
 
   // THE COVER IS RESOLVED BEFORE THE SCREEN IS CONSTRUCTED, which is the whole of
   // sleepCoverForPaint's contract rather than a convenience here: it validates the
