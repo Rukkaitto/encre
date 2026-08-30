@@ -65,7 +65,7 @@ resets the chip, so each capture is a fresh boot even with `--no-reset`.
 | `abort() was called` then `Rebooting...`, looping | Allocation failure. The firmware is `-fno-exceptions`, so a `std::vector` that cannot allocate aborts | Compare frame size against `largest block` in the log — **total** free heap is not the constraint, fragmentation is |
 | No serial port at all | Deep sleep powered down USB, or the chip is parked in the bootloader | Ask the user to unplug USB, hold power ~10s, then boot |
 | Screen unchanged, log shows `refresh-complete` | The paint ran. Compare against the golden — this is a fidelity question, not a failure | `make compare` |
-| Buttons do nothing | Expected until Phase 2B adds input dispatch | — |
+| Buttons do nothing | **Never expected** — input dispatch shipped in 2B. Either one screen promises an action it does not bind, or the loop lost its `gApp->dispatch(ev)` (which builds clean and passes every desktop test, because `shell/` has no harness) | `[i] ... paint=none` marks a press that changed nothing — that is the line worth having |
 
 ## Never
 

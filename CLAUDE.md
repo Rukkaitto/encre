@@ -142,8 +142,9 @@ libc++ pulls it in transitively and libstdc++ does not, so the file had compiled
 on macOS for months and **failed on the first Linux build**. A
 transitively-satisfied include is a bug only the other toolchain can see, which
 is the whole argument for building somewhere other than the machine that wrote
-the code. Note the build died before `ctest` ran, so **the goldens-under-gcc
-question is still open** -- it has not been answered, only postponed.
+the code. That first build died before `ctest` ran, which left the
+goldens-under-gcc question postponed rather than answered -- **and it is answered
+now: it has been green ever since.** See the paragraph below.
 
 **A `\x1f`-SEPARATED `git log` MUST NOT BE `.strip()`ed.** Python counts `\x1f`
 as whitespace, so a bare `.strip()` ate the trailing empty field of the last
@@ -154,11 +155,17 @@ over its fixtures, every one of which had a parent.
 **A GOLDEN IS NEVER RE-BLESSED TO MAKE CI GREEN.** A failing golden uploads its
 `build/<name>_candidate.png` as an artifact precisely so the pixels can be
 looked at, which is the only way to tell an intended change from a regression.
-**The goldens were blessed on macOS/clang and this job is Linux/gcc**, and that
-has not been observed yet: layout accumulates in fixed point and should be
-bit-identical, but `stb_truetype`'s rasteriser is float. If the first run
-reddens on goldens alone, the candidates are the evidence and the fix is to move
-the job to `macos-latest`, not to bless anything.
+**The goldens were blessed on macOS/clang and this job is Linux/gcc, AND THAT
+QUESTION IS NOW ANSWERED: they pass under both.** It was recorded here twice as
+open -- the reasoning being that layout accumulates in fixed point and should be
+bit-identical while `stb_truetype`'s rasteriser is float -- and every `Tests and
+goldens` run on `main` since has run `ctest` on `ubuntu-latest` and gone green.
+The float rasteriser agrees across the two toolchains at these ppem values.
+**Nothing was done to make that true, which is why nobody came back to say it
+had become true** -- a question with an expiry date and no owner, the same shape
+this file records for "nothing uses it today". If a run ever does redden on
+goldens alone, the candidates are the evidence and the fix is to move the job to
+`macos-latest`, not to bless anything.
 
 ## What V1 is, and is not
 
@@ -4686,7 +4693,7 @@ the paragraph goes in the roadmap and the card gets the line number.
 
 | Field | Holds |
 |---|---|
-| `Release` | `V1` / `V2` / `Someday`. What is left for each is the **Left to do** view, grouped by this |
+| `Release` | `V1` / `V1.1` / `V2` / `Someday`. What is left for each is the **Left to do** view, grouped by this |
 | `Status` | the six stages below, with two entry doors |
 | `Kind` | `Screen` / `Engine` / `Fidelity` / `Perf` / `Hardware` / `Tooling` / `Docs` — **and it names the skill**: `Screen` goes through `implement-screen`, `Fidelity` through `design-change`, an `On glass` move through `flash-device` |
 | `Board` | which `.dc.html`, or empty |
@@ -4772,7 +4779,7 @@ ever go stale:
 | `Kind` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUU` — `Screen` `fe704ca2`, `Engine` `e45425d2`, `Fidelity` `067a44e5`, `Perf` `3906b97c`, `Hardware` `8952abc2`, `Tooling` `09fcefaa`, `Docs` `ac2492c0` |
 | `Source` | `PVTF_lAHOAkvc3c4BhZ5gzhgVwX8` (text) |
 | `Phase` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgV6lo` — `1` `1af00faf`, `2A` `70d666b6`, `2A-2` `10dd1639`, `2B` `891e6f65`, `2C` `226e8a24`, `3A` `726ae204`, `3B` `e13f494d`, `3C` `edb93849`, `3C+` `40a66d57`, `3D` `8f1728ee`, `3E` `f7ea731c`, `4` `e7a6573a`, `5` `f00b8560` |
-| `Release` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUQ` — `V1` `245a6600`, `V2` `5696d63f`, `Someday` `ebc1c1c1` |
+| `Release` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUQ` — `V1` `88741031`, **`V1.1` `0244a105`**, `V2` `3a9bcb84`, `Someday` `4cd5509e`. **Every option id on this row changed and `V1.1` was added since it was written** — re-read it with `field-list` before trusting it; `Status`, `Kind` and `Phase` have not moved |
 
 Moving one card is `gh project item-edit --id <item> --project-id <project>
 --field-id <field> --single-select-option-id <option>`; the item id comes from
@@ -4784,3 +4791,19 @@ Moving one card is `gh project item-edit --id <item> --project-id <project>
 `docs/superpowers/plans/2026-08-20-v1-roadmap.md` — phases, and two sections
 worth reading before starting anything: "What Phase 2A-2 established" and the
 on-device bring-up findings.
+
+`docs/on-device-smoke-checklist.md` — **what only the panel can be wrong about**,
+grouped by failure class rather than by screen: the five byte-wise primitives
+that are invisible to the whole desktop under rotation, the overlay stack, wake
+versus USB reset, the card probes, the refinement, the battery latch. This is
+what a card's move from `On glass` to `Done` is evidence of, and it is the list
+to run after touching a drawing primitive, the paint sequence, storage or power.
+
+`docs/releasing.md` — what a release is here (an annotated tag and nothing
+else), the gate in order, and the blocker list as a **`gh project` query rather
+than a written list**, because a list here would be a second copy of the board.
+It also records why there is deliberately no `CHANGELOG.md`.
+
+`README.md` — the outward-facing one: what works, what is stated-refused, how to
+back up the stock firmware before flashing, and what "written with Claude Code"
+means for someone about to run this on their own reader.
