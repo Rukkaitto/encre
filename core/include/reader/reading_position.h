@@ -101,6 +101,23 @@ struct ReadingPosition {
   // and the row says that, which is honest.
   std::string chapter;
 
+  // THE READER SAID THEY WERE DONE, which is not the same claim as `percent == 100`
+  // and is why this is not derived from it. Reading to the last byte of a book whose
+  // final 8% is an appendix, an index and a colophon is a MEASUREMENT; this is an
+  // ASSERTION, made by pressing a button. Conflating them would mark a reader who
+  // abandoned a book in its endnotes as having finished it.
+  //
+  // WRITTEN ONLY WHEN TRUE -- see serialise(). That is the anchor's own rule three
+  // keys below, and it is what keeps an unfinished record byte-identical to one from
+  // before this field existed, which is what keeps writeIfChanged's `Unchanged`
+  // answer true instead of rewriting every sidecar on the card once.
+  //
+  // READING THE BOOK AGAIN UN-MARKS IT: a position save from the Reader builds the
+  // record fresh, so the flag clears. There is no board for a toggle, so the
+  // alternative is finished-forever, which is worse than the cost -- opening a
+  // finished book and immediately leaving also clears it, recoverably and visibly.
+  bool finished = false;
+
   // --- THE WAY BACK, and -1 in `anchorSpine` means there is none ----------------
   //
   // The return anchor (return_anchor.h), which is the same {spine, block, line}
