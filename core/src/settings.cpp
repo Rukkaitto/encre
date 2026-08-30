@@ -124,6 +124,44 @@ bool snapToTable(int& field, const int (&table)[N]) {
   return false;
 }
 
+// Resets an enum field to `fallback` when its value is not one of the
+// enumerators, returning false when it had to. NOT A CLAMP, and the difference
+// is the point: an integer outside an enum has no nearest meaningful neighbour,
+// so a `sleepShows` of 47 clamped to the top would silently become `Details` --
+// an intent the file never carried. The default is the only honest answer.
+//
+// The BOUND is `kSleepShowsCount` / `kCoverFitCount`, derived in settings.h from
+// the last enumerator rather than written here, so an added mode cannot be
+// rejected by a count nobody remembered to move.
+template <typename E>
+bool resetIfNotAnEnumerator(E& field, int count, E fallback) {
+  const int v = static_cast<int>(field);
+  if (v >= 0 && v < count) return true;
+  field = fallback;
+  return false;
+}
+
+// Reads an enum field written as its integer index. A value outside the
+// enumerators keeps the DEFAULT rather than being clamped, for the reason above,
+// and clears `ok` -- the boot log then says CORRECTED, which is the only way a
+// user learns their hand-edited file was not applied. A wrong JSON TYPE keeps the
+// default and clears `ok` too, which is readBool's rule.
+template <typename E>
+void readEnum(const JsonObject& o, const char* key, E& field, int count, bool& ok) {
+  int64_t v = 0;
+  if (!o.getInt(key, v)) {
+    if (presentAsAnything(o, key)) ok = false;
+    return;
+  }
+  // Compared as int64 BEFORE any narrowing, exactly as readClampedInt refuses to
+  // narrow: `sleepShows: 4294967296` truncates to a perfectly plausible 0.
+  if (v < 0 || v >= count) {
+    ok = false;
+    return;  // `field` still holds the default
+  }
+  field = static_cast<E>(static_cast<int>(v));
+}
+
 }  // namespace
 
 bool Settings::validate() {
@@ -150,6 +188,11 @@ bool Settings::validate() {
   if (!snapToTable(margins, kMarginSteps)) ok = false;
   if (!snapToTable(lineSpacing, kLineSpacingSteps)) ok = false;
   // `justify` is a bool: there is no invalid value to snap.
+  // The two enums are RESET rather than clamped -- see the helper, and the
+  // header's own note on why an enum is a third kind of correction.
+  if (!resetIfNotAnEnumerator(sleepShows, kSleepShowsCount, Settings{}.sleepShows))
+    ok = false;
+  if (!resetIfNotAnEnumerator(coverFit, kCoverFitCount, Settings{}.coverFit)) ok = false;
   return ok;
 }
 
@@ -210,6 +253,8 @@ bool loadSettings(FileSystem& fs, Settings& out) {
   readSteppedInt(o, "margins", parsed.margins, kMarginSteps, ok);
   readSteppedInt(o, "lineSpacing", parsed.lineSpacing, kLineSpacingSteps, ok);
   readBool(o, "justify", parsed.justify, ok);
+  readEnum(o, "sleepShows", parsed.sleepShows, kSleepShowsCount, ok);
+  readEnum(o, "coverFit", parsed.coverFit, kCoverFitCount, ok);
 
   if (!parsed.validate()) ok = false;
 
@@ -231,6 +276,11 @@ bool saveSettings(FileSystem& fs, const Settings& in) {
   o.setInt("margins", valid.margins);
   o.setInt("lineSpacing", valid.lineSpacing);
   o.setBool("justify", valid.justify);
+  // The enums go out as their integer index, which is what makes the order in
+  // settings.h a stored format rather than a free choice: reordering the
+  // enumerators would re-read every card's file as a different setting.
+  o.setInt("sleepShows", static_cast<int64_t>(valid.sleepShows));
+  o.setInt("coverFit", static_cast<int64_t>(valid.coverFit));
   // writeAll creates /.reader on the way past, so there is no mkdirs here.
   return fs.writeAll(kSettingsPath, o.dump());
 }

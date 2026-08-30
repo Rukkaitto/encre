@@ -456,3 +456,126 @@ TEST_CASE("an off-table size in a hand-edited file is corrected and reported") {
   // value clamps instead of failing the load.
   CHECK(s.sleepAfterMs == 300000u);
 }
+
+// --- The sleep screen (design/Settings.dc.html's SLEEP SCREEN section) --------
+
+TEST_CASE("the two sleep-screen fields default to today's behaviour plus a cover") {
+  const reader::Settings s;
+  CHECK(s.sleepShows == reader::SleepShows::CoverAndDetails);
+  CHECK(s.coverFit == reader::CoverFit::Fill);
+}
+
+TEST_CASE("the sleep-screen fields survive a save and load") {
+  FakeFileSystem fs;
+  reader::Settings in;
+  in.sleepShows = reader::SleepShows::Details;
+  in.coverFit = reader::CoverFit::Whole;
+  REQUIRE(reader::saveSettings(fs, in));
+
+  reader::Settings out;
+  REQUIRE(reader::loadSettings(fs, out));
+  CHECK(out.sleepShows == reader::SleepShows::Details);
+  CHECK(out.coverFit == reader::CoverFit::Whole);
+  // The whole struct, so a field that round-tripped by accident of its default
+  // cannot pass -- the same reason the typography round trip says so.
+  CHECK(out == in);
+}
+
+TEST_CASE("a file from before the sleep-screen fields loads and keeps today's behaviour") {
+  // kSettingsVersion did NOT move, so an older file must load clean -- not
+  // DEFAULTED -- and take the new fields' defaults. Typography set this precedent
+  // and this is the case the rule exists for.
+  FakeFileSystem fs;
+  plant(fs, R"({"version":1,"sleepAfterMs":600000,"fullRefreshEvery":0,)"
+            R"("fullOnTransition":true,"logToCard":false,"bodyPpem":32,)"
+            R"("margins":18,"lineSpacing":1700,"justify":true})");
+  reader::Settings out;
+  CHECK(reader::loadSettings(fs, out));  // true: nothing was corrected
+  CHECK(out.sleepShows == reader::SleepShows::CoverAndDetails);
+  CHECK(out.coverFit == reader::CoverFit::Fill);
+  CHECK(out.sleepAfterMs == 600000u);
+}
+
+TEST_CASE("a nonsense value in either sleep-screen field is CORRECTED, not fatal") {
+  FakeFileSystem fs;
+  plant(fs, R"({"version":1,"sleepShows":47,"coverFit":-3,"sleepAfterMs":600000})");
+  reader::Settings out;
+  CHECK_FALSE(reader::loadSettings(fs, out));  // false: something was corrected
+  CHECK(out.sleepShows == reader::SleepShows::CoverAndDetails);
+  CHECK(out.coverFit == reader::CoverFit::Fill);
+  CHECK(out.sleepAfterMs == 600000u);  // the rest of the file still loaded
+}
+
+TEST_CASE("a sleep-screen field of the wrong JSON type keeps its default, loudly") {
+  // readBool's rule, applied to an enum read as an int: `"COVER"` is not 0, so
+  // the field keeps its default and the caller is told the file was not clean.
+  FakeFileSystem fs;
+  plant(fs, R"({"version":1,"sleepShows":"COVER","sleepAfterMs":600000})");
+  reader::Settings out;
+  CHECK_FALSE(reader::loadSettings(fs, out));
+  CHECK(out.sleepShows == reader::SleepShows::CoverAndDetails);
+  CHECK(out.sleepAfterMs == 600000u);
+}
+
+TEST_CASE("every sleep-screen value round-trips, not just the two the cases name") {
+  // Walked rather than sampled: the write is an int cast and the read is a
+  // bounded one, so an off-by-one at either end of either enum is exactly the
+  // shape a two-value sample misses.
+  for (const reader::SleepShows shows :
+       {reader::SleepShows::Cover, reader::SleepShows::CoverAndDetails,
+        reader::SleepShows::Details}) {
+    for (const reader::CoverFit fit : {reader::CoverFit::Fill, reader::CoverFit::Whole}) {
+      FakeFileSystem fs;
+      reader::Settings in;
+      in.sleepShows = shows;
+      in.coverFit = fit;
+      REQUIRE(reader::saveSettings(fs, in));
+      reader::Settings out;
+      REQUIRE(reader::loadSettings(fs, out));
+      CHECK(out.sleepShows == shows);
+      CHECK(out.coverFit == fit);
+    }
+  }
+}
+
+TEST_CASE("validate() resets an out-of-enum value handed to it in memory") {
+  // THE HOLE A MUTATION FOUND. Deleting validate()'s enum reset outright failed
+  // NOTHING: every case above reaches the fields through loadSettings, where
+  // readEnum has already refused an out-of-range value, so validate() only ever
+  // saw a good one. The in-memory path is not shielded -- saveSettings validates
+  // whatever a CALLER hands it, so without this the wrong value would have been
+  // written to the card. Exactly the shape snapToTable's INT_MIN note records.
+  //
+  // The cast is how a caller gets there: a JSON int reinterpreted upstream, or a
+  // struct memcpy'd out of a record from a firmware that had a fourth mode.
+  reader::Settings s;
+  s.sleepShows = static_cast<reader::SleepShows>(47);
+  s.coverFit = static_cast<reader::CoverFit>(-3);
+  CHECK_FALSE(s.validate());
+  CHECK(s.sleepShows == reader::SleepShows::CoverAndDetails);
+  CHECK(s.coverFit == reader::CoverFit::Fill);
+
+  // A GOOD value is not touched and does not report a correction -- otherwise the
+  // reset above would be indistinguishable from validate() clobbering the field
+  // on every save.
+  reader::Settings good;
+  good.sleepShows = reader::SleepShows::Details;
+  good.coverFit = reader::CoverFit::Whole;
+  CHECK(good.validate());
+  CHECK(good.sleepShows == reader::SleepShows::Details);
+  CHECK(good.coverFit == reader::CoverFit::Whole);
+}
+
+TEST_CASE("saveSettings never writes an out-of-enum value to the card") {
+  // The consequence of the case above, at the layer that matters: a caller with a
+  // bogus enum must not persist it, or the next boot reads a file that loadSettings
+  // has to correct and the user is told their settings were wrong.
+  FakeFileSystem fs;
+  reader::Settings bad;
+  bad.sleepShows = static_cast<reader::SleepShows>(47);
+  REQUIRE(reader::saveSettings(fs, bad));
+
+  reader::Settings back;
+  CHECK(reader::loadSettings(fs, back));  // TRUE: the file on the card is clean
+  CHECK(back.sleepShows == reader::SleepShows::CoverAndDetails);
+}

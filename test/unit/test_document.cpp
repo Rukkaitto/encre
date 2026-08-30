@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "doctest.h"
+#include "grained_source.h"
 #include "reader/chapter.h"
 #include "reader/document.h"
 
@@ -189,22 +190,7 @@ TEST_CASE("a real chapter builds, with the shape mkepub.py wrote") {
 
 namespace {
 
-class Grained : public reader::ByteSource {
- public:
-  Grained(std::string_view b, size_t grain) : b_(b), grain_(grain) {}
-  size_t read(void* dst, size_t bytes) override {
-    const size_t want = bytes < grain_ ? bytes : grain_;
-    const size_t got = b_.size() - at_ < want ? b_.size() - at_ : want;
-    for (size_t i = 0; i < got; ++i) static_cast<char*>(dst)[i] = b_[at_ + i];
-    at_ += got;
-    return got;
-  }
-
- private:
-  std::string_view b_;
-  size_t grain_;
-  size_t at_ = 0;
-};
+using grainsrc::Grained;
 
 // A chapter with the shape a real one has: a heading, many paragraphs, a quote and
 // a list. Long enough that holding all of it would be visible.

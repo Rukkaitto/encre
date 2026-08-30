@@ -43,7 +43,7 @@ TEST_CASE("QuietTheme renders Sleep to golden on both panel geometries") {
   REQUIRE(reader::SleepScreen(sampleSleep()).fidelity() == reader::Fidelity::Mono);
   auto renderOne = [&](int w, int h, const std::string& name) {
     reader::Framebuffer fb(w, h);
-    theme.renderSleep(fb, ramp.fonts, sampleSleep(), reader::Plane::Bw);
+    theme.renderSleep(fb, ramp.fonts, sampleSleep(), reader::Plane::Bw, nullptr);
     golden::checkGolden(fb, name);
   };
   SUBCASE("X4 480x800") { renderOne(480, 800, "sleep_quiet"); }
@@ -59,7 +59,7 @@ TEST_CASE("SLEEP'S BAR FILL IS INSIDE ITS BORDER, as box-sizing: border-box says
   reader::Framebuffer fb(480, 800);
   reader::SleepViewModel vm = sampleSleep();
   vm.progressPercent = 50;
-  theme.renderSleep(fb, ramp.fonts, vm, reader::Plane::Bw);
+  theme.renderSleep(fb, ramp.fonts, vm, reader::Plane::Bw, nullptr);
 
   // Find the bar: the widest horizontal black run that is exactly 170px long.
   int barY = -1, barX = -1;
@@ -107,7 +107,7 @@ TEST_CASE("QuietTheme renders the idle Sleep screen to golden on both geometries
   reader::QuietTheme theme;
   auto renderOne = [&](int w, int h, const std::string& name) {
     reader::Framebuffer fb(w, h);
-    theme.renderSleep(fb, ramp.fonts, reader::demoSleepIdleVm(), reader::Plane::Bw);
+    theme.renderSleep(fb, ramp.fonts, reader::demoSleepIdleVm(), reader::Plane::Bw, nullptr);
     golden::checkGolden(fb, name);
   };
   SUBCASE("X4 480x800") { renderOne(480, 800, "sleep_idle"); }
@@ -122,12 +122,12 @@ TEST_CASE("the idle Sleep screen draws the badge and NOTHING where the card was"
   ramp::Ramp ramp;
   reader::QuietTheme theme;
   reader::Framebuffer withCard(480, 800), idle(480, 800), field(480, 800);
-  theme.renderSleep(withCard, ramp.fonts, reader::demoSleepVm(), reader::Plane::Bw);
-  theme.renderSleep(idle, ramp.fonts, reader::demoSleepIdleVm(), reader::Plane::Bw);
+  theme.renderSleep(withCard, ramp.fonts, reader::demoSleepVm(), reader::Plane::Bw, nullptr);
+  theme.renderSleep(idle, ramp.fonts, reader::demoSleepIdleVm(), reader::Plane::Bw, nullptr);
   // The field alone, for comparison: a view model whose note is empty draws no badge.
   reader::SleepViewModel bare;
   bare.nothingToContinue = true;
-  theme.renderSleep(field, ramp.fonts, bare, reader::Plane::Bw);
+  theme.renderSleep(field, ramp.fonts, bare, reader::Plane::Bw, nullptr);
 
   // Rows the two renders disagree on are exactly the card's rows.
   int firstDiff = -1, lastDiff = -1;

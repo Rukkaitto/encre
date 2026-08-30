@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "reader/layout.h"  // kBodyLeadEm
+#include "reader/settings.h"  // SleepShows
 
 namespace reader {
 
@@ -233,6 +234,47 @@ struct SleepViewModel {
   int progressPercent = 0;
   std::string progress;   // "6% - CH. 01", the line under the bar
   std::string note;       // "ASLEEP - PRESS POWER TO WAKE"
+
+  // WHICH OF THE THREE SLEEP BOARDS THIS IS -- design/Sleep.dc.html,
+  // SleepCoverDetails.dc.html, SleepCover.dc.html.
+  //
+  // THE DEFAULT IS Details AND Settings' DEFAULT IS CoverAndDetails, and the two
+  // disagreeing is deliberate rather than an oversight. This struct's default is
+  // "what a view model built without being told does", and that has to be the
+  // shipped screen to the pixel: every existing sleep golden constructs one of
+  // these and sets no `shows`, so any other default here would move them and the
+  // property this whole feature rests on -- with no cached cover every mode
+  // paints byte-identically to today -- would stop being checkable.
+  //
+  // It is only ever a REQUEST. The screen draws a cover if it also has a
+  // CoverSource that answers; see screen_sleep.h.
+  SleepShows shows = SleepShows::Details;
+
+  // WAKING RATHER THAN ASLEEP -- design/SleepWaking.dc.html -- AND IT EXISTS TO
+  // KEEP THE BADGE WHERE COVER MODE DROPS IT.
+  //
+  // theme_quiet.cpp's `coverOnly` takes the card and the badge away together,
+  // and the badge half is allowed to go ONLY because a full-bleed book cover is
+  // not a screen this device can otherwise be in: the picture says "asleep" by
+  // itself, so no words are needed to say it.
+  //
+  // A SCREEN SAYING "WAKING" IS MAKING A DIFFERENT CLAIM AND CANNOT DELEGATE IT
+  // TO THE PICTURE. The cover is identical in both states -- it is the note text
+  // that differs -- so with the badge suppressed a COVER-mode wake would paint
+  // something indistinguishable from the sleep it is waking from, which is worse
+  // than the stale screen it replaced. So this suppresses the SUPPRESSION, for
+  // the badge only: the card stays hidden by `coverOnly` alone, because a waking
+  // COVER screen is the cover and the words, not the cover and the reading card.
+  //
+  // A fact about WHICH SCREEN THIS IS, not about what it holds, which is why it
+  // is a flag here rather than something derived from `note` -- the note is free
+  // copy and a theme must not read words to decide a layout.
+  //
+  // FALSE IS THE SHIPPED SCREEN. Nothing that renders a sleep view model without
+  // setting this can move, which is what keeps every existing sleep golden --
+  // including sleep_waking, which has no cover source and so never reaches
+  // `coverOnly` at all -- byte-identical.
+  bool waking = false;
 };
 
 // design/Reader.dc.html's CHROME -- the header band and the footer. The page's

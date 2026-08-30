@@ -123,6 +123,44 @@ class Framebuffer {
   // per-pixel form cost and why the two rotations are two loops.
   void fillRect(int x, int y, int w, int h, bool white);
 
+  // ONE LOGICAL ROW OF PACKED BITS ONTO THE FRAME, 1 = white, MSB = leftmost --
+  // the packing bitMask() already implies and imagefit.h already emits. `row`
+  // must hold at least ceil(width() / 8) bytes; the bits past width() in the
+  // last one are the caller's slack and are never written anywhere.
+  //
+  // NOT A memcpy, AND THAT IS THE WHOLE POINT. Under Rotation::Ccw, byteIndex
+  // maps logical (x, y) to physical (physX = y, physY = width - 1 - x), so one
+  // logical ROW is one physical COLUMN: `row`'s bits land in `width` different
+  // bytes at one fixed bit position, 0x80 >> (y % 8), strided by
+  // physRowBytes(). Under Rotation::None it really is a memcpy into
+  // data() + y * physRowBytes(), give or take the last byte's mask.
+  //
+  // THE DESKTOP CANNOT CATCH A WRONG ONE. The simulator and every golden are
+  // Rotation::None, where the two branches agree -- so a version that always
+  // memcpy'd would pass the entire suite and smear diagonally on glass, which
+  // is precisely what CLAUDE.md records happening to the veil, fillRect, the
+  // glyph blit and ditherRect. test_framebuffer.cpp therefore asserts the
+  // ROTATED case against getPixel, and that assertion is the only thing
+  // standing between this and the panel.
+  //
+  // A y off the frame, a null `row` and an inert buffer are all no-ops. That
+  // one check is the whole of this function's safety: it indexes raw bytes with
+  // no per-pixel bounds test, which is why it is fast and why it must not be
+  // handed a row number it did not verify.
+  //
+  // NO PhaseSpan, deliberately: Profile's five slots are RENDER primitives (a
+  // fill, a veil, a dither, a glyph, an icon) and this is not in a render. It
+  // is the cache-to-frame blit on the paint path, called by the shell once per
+  // plane per sleep, and putting it in the render breakdown would make the
+  // percentages in that table describe two different jobs.
+  //
+  // NOT BATCHED ACROSS EIGHT ROWS, and the arithmetic is in framebuffer.cpp:
+  // eight consecutive logical rows do share a byte column under Ccw, and
+  // composing them would turn eight read-modify-writes into one store -- but
+  // the caller streams one row at a time off a card, so batching means either
+  // an 8-row signature or hidden state with a flush the caller must remember.
+  void writePackedRow(int y, const uint8_t* row);
+
  private:
   // Logical (x, y) -> index into bytes_ and the bit mask within it. Only valid
   // for an in-bounds coordinate; callers bounds-check first.

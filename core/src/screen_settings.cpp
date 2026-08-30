@@ -9,36 +9,43 @@ namespace reader {
 namespace {
 
 // THE BOARD'S ROWS, IN THE BOARD'S ORDER, and the order is the only thing that
-// makes this table checkable against design/Settings.dc.html by eye. Seven items:
-// two section headers and five rows, which FITS the panel -- so Settings draws no
+// makes this table checkable against design/Settings.dc.html by eye. Nine items:
+// three section headers and six rows, which FITS the panel -- so Settings draws no
 // rail today.
 //
-// IT WAS ELEVEN. A TYPOGRAPHY section carried Font, Size, Margins, Line spacing and
-// Alignment, drawn and unreachable because the settings behind them did not exist.
-// They do now, and they are edited on their own screen -- so five rows that merely
-// DISPLAYED them became one row that OPENS it. A placeholder is right only until
-// the setting exists; after that it is a screen showing a number nobody can trust.
-// READING rather than TYPOGRAPHY so the section is a sibling of DEVICE, has room
-// for the reading settings still to come, and does not repeat the row's own word
-// directly above it.
+// IT WAS ELEVEN, THEN SEVEN. A TYPOGRAPHY section carried Font, Size, Margins, Line
+// spacing and Alignment, drawn and unreachable because the settings behind them did
+// not exist. They do now, and they are edited on their own screen -- so five rows
+// that merely DISPLAYED them became one row that OPENS it. A placeholder is right
+// only until the setting exists; after that it is a screen showing a number nobody
+// can trust. READING rather than TYPOGRAPHY so the section is a sibling of DEVICE,
+// has room for the reading settings still to come, and does not repeat the row's own
+// word directly above it.
+//
+// SLEEP SCREEN PUT TWO BACK, and took the last placeholder out with them. `Sleep
+// screen` / `BOOK COVER` sat at the bottom of DEVICE, drawn and inert, the row
+// CLAUDE.md ties to issue #11 by number -- so nothing here now states a value that
+// does not come from `settings_`. The row is `Shows` rather than `Sleep screen` for
+// the same reason the section above is READING rather than TYPOGRAPHY: a section
+// must not repeat the word of the row directly under it.
 //
 // It also had a CONNECTIONS section with a Wi-Fi row, and losing that is what
 // brought the list back inside the panel in the first place: V1 is card-transfer
 // only, Wi-Fi having been cut as too big. Nothing here has to change when the list
 // overflows again -- renderSettings reads `totalRows > rows` and draws the rail and
 // takes its gutter only then.
-//
-// The placeholder string is the BOARD'S value for the one row whose setting does not
-// exist yet, kept verbatim so the screen matches the board. It is not a default and
-// nothing reads it back.
-constexpr std::array<SettingsScreen::Item, 7> kItems{{
-    {"READING", SettingsScreen::Field::None, true, false, ""},
-    {"Typography", SettingsScreen::Field::Typography, false, true, ""},
-    {"DEVICE", SettingsScreen::Field::None, true, false, ""},
-    {"Sleep after", SettingsScreen::Field::SleepAfter, false, true, ""},
-    {"Full refresh", SettingsScreen::Field::FullRefresh, false, true, ""},
-    {"Refresh on screen change", SettingsScreen::Field::OnTransition, false, true, ""},
-    {"Sleep screen", SettingsScreen::Field::None, false, false, "BOOK COVER"},
+constexpr std::array<SettingsScreen::Item, 9> kItems{{
+    {"READING", SettingsScreen::Field::None, true, false},
+    {"Typography", SettingsScreen::Field::Typography, false, true},
+    {"SLEEP SCREEN", SettingsScreen::Field::None, true, false},
+    {"Shows", SettingsScreen::Field::SleepShows, false, true},
+    // `reachable` is a CEILING and not the answer here: focusable() also asks
+    // whether `Shows` is showing a cover. See focusable().
+    {"Cover fit", SettingsScreen::Field::CoverFit, false, true},
+    {"DEVICE", SettingsScreen::Field::None, true, false},
+    {"Sleep after", SettingsScreen::Field::SleepAfter, false, true},
+    {"Full refresh", SettingsScreen::Field::FullRefresh, false, true},
+    {"Refresh on screen change", SettingsScreen::Field::OnTransition, false, true},
 }};
 
 // The values CHANGE cycles through, and they wrap: this is one button, so there is
@@ -61,6 +68,32 @@ std::string refreshLabel(int every) {
   return "EVERY " + std::to_string(every) + " PAGES";
 }
 
+// THE BOARD'S OWN STRINGS. Deliberately not `FILL` / `FIT` for the fit: one
+// letter apart is bad at 25px on this glass, which design/Settings.dc.html says
+// at the row.
+const char* showsLabel(SleepShows s) {
+  switch (s) {
+    case SleepShows::Cover: return "COVER";
+    case SleepShows::CoverAndDetails: return "COVER + DETAILS";
+    case SleepShows::Details: return "DETAILS";
+  }
+  return "COVER + DETAILS";  // unreachable; validate() refuses anything else
+}
+
+const char* fitLabel(CoverFit f) {
+  switch (f) {
+    case CoverFit::Fill: return "FILL";
+    case CoverFit::Whole: return "WHOLE";
+  }
+  return "FILL";
+}
+
+// Whether the sleep screen draws a cover at all, which is what decides whether
+// `Cover fit` can be acted on. ONE SPELLING, asked by focusable() -- a second
+// would be the drifting-condition defect this project has shipped twice, both
+// times as a dead button.
+bool showsACover(SleepShows s) { return s != SleepShows::Details; }
+
 }  // namespace
 
 SettingsScreen::SettingsScreen(const Settings& initial, SettingsSink* sink)
@@ -80,7 +113,15 @@ bool SettingsScreen::focusable(int index) const {
   // NOT `field != None`, which used to serve here and cannot any more: `Typography`
   // has no field and must be focusable, because it discloses a screen instead of
   // editing a value. See Item::reachable.
-  return !it.isHeader && it.reachable;
+  if (it.isHeader || !it.reachable) return false;
+  // AND THE TABLE IS NOT THE WHOLE ANSWER. A fit is meaningless with no cover on
+  // the screen, so `Cover fit` is unreachable while `Shows` reads DETAILS --
+  // DERIVED from settings_ rather than tabulated, which is Typography's precedent
+  // (`Font` is unreachable while one body face is vendored and becomes reachable
+  // the moment a second lands, with no line to remember). The gate is asked per
+  // landing, so cycling `Shows` changes this answer with nothing to invalidate.
+  if (it.field == Field::CoverFit) return showsACover(settings_.sleepShows);
+  return true;
 }
 
 int SettingsScreen::firstFocusable() const {
@@ -93,9 +134,9 @@ int SettingsScreen::firstFocusable() const {
 
 void SettingsScreen::setMetrics(int listH, int rowH, int headerH) {
   // Counted from the TOP of the list, and that is the conservative end on purpose.
-  // The top window carries the most headers -- both sections begin within the first
-  // three items -- so any window further down fits at least as many
-  // items. A count that varied with scroll position would make the rail's
+  // The top window carries the most headers -- all THREE sections begin within the
+  // first six items, so no window further down can hold more than the top one and
+  // every one of them therefore fits at least as many items. A count that varied with scroll position would make the rail's
   // proportion move as the user scrolled, which reads as the list changing length.
   int used = 0, n = 0;
   for (const Item& it : kItems) {
@@ -135,6 +176,21 @@ Action SettingsScreen::cycleFocused() {
     case Field::OnTransition:
       settings_.fullOnTransition = !settings_.fullOnTransition;
       break;
+    case Field::SleepShows: {
+      // Wraps on kSleepShowsCount, which settings.h derives from the last
+      // enumerator -- so a fourth mode joins the cycle without a number here to
+      // remember. CYCLING THIS ROW CAN MAKE THE ROW BELOW INERT, and that is safe
+      // by construction: the focus is on THIS row, and focusable() is re-asked on
+      // the next move, so the step simply passes over `Cover fit`.
+      const int at = static_cast<int>(settings_.sleepShows);
+      settings_.sleepShows = static_cast<SleepShows>((at + 1) % kSleepShowsCount);
+      break;
+    }
+    case Field::CoverFit: {
+      const int at = static_cast<int>(settings_.coverFit);
+      settings_.coverFit = static_cast<CoverFit>((at + 1) % kCoverFitCount);
+      break;
+    }
     case Field::Typography:
       // Handled by onGesture BEFORE we get here -- this row discloses rather than
       // edits, so there is nothing to cycle and nothing to commit. Listed rather
@@ -204,10 +260,16 @@ void SettingsScreen::syncVm() {
         // four typography settings into the right slot would break it and would not
         // fit. The chevron is the whole content of that slot.
         case Field::Typography: break;
+        case Field::SleepShows: row.value = showsLabel(settings_.sleepShows); break;
+        case Field::CoverFit: row.value = fitLabel(settings_.coverFit); break;
         case Field::SleepAfter: row.value = sleepLabel(settings_.sleepAfterMs); break;
         case Field::FullRefresh: row.value = refreshLabel(settings_.fullRefreshEvery); break;
         case Field::OnTransition: row.value = settings_.fullOnTransition ? "ON" : "OFF"; break;
-        case Field::None: row.value = it.placeholder; break;
+        // A ROW WITH NO FIELD AND NO CHEVRON DRAWS NOTHING, and there is no
+        // longer any such row: `Item::placeholder` was removed with `Sleep
+        // screen`. Named rather than swept into a `default:` so -Wswitch still
+        // fails the build the day a field is added and not handled here.
+        case Field::None: break;
       }
     }
     vm_.rows.push_back(std::move(row));
@@ -218,7 +280,8 @@ void SettingsScreen::syncVm() {
   //
   // This comment used to state the premise outright -- "CHANGE, not OPEN: nothing
   // here pushes a screen, every focusable row edits a value in place" -- and the
-  // READING row makes that false. The alternative is worse than a moving label: a
+  // READING row makes that false. It is still ONE row against five: `Typography`
+  // opens, and both SLEEP SCREEN rows and all three DEVICE rows cycle in place. The alternative is worse than a moving label: a
   // Confirm labelled CHANGE that opens a screen is the misleading-button defect this
   // project keeps recording, and it is the one thing a hint bar exists to prevent.
   // So one slot moves as the focus moves, and the bar stays true of the button it

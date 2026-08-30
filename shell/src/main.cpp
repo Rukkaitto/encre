@@ -9,10 +9,19 @@
 #include <esp_system.h>
 #include <Preferences.h>  // esp_restart(), for the RETRY-after-a-pull branch
 #include <XteinkDetect.h>
+// THE COVER CACHE'S WRITER GOES STRAIGHT TO SdFat, and these two are the whole
+// reason: 104 KB cannot go through reader::FileSystem::writeAll, which takes a
+// whole buffer, and that contract has no write handle. `appendToCard` is a shell
+// free function over SdMan for exactly the same reason -- see sd_fs.h, which
+// argues it at length. Nothing else in this file needs them.
+#include <SDCardManager.h>
+#include <SdFat.h>
 
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <memory>
+#include <new>
 #include <optional>
 #include <string>
 #include <vector>
@@ -35,6 +44,7 @@
 #include "reader/app.h"
 #include "reader/battery_tracker.h"
 #include "reader/booklist.h"
+#include "reader/cover.h"
 #include "reader/font_manifest.h"
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
@@ -54,6 +64,7 @@
 #include "reader/reading_store.h"
 #include "reader/progress_save_gate.h"
 #include "reader/screen_sleep.h"
+#include "reader/sleep_cover.h"
 #include "reader/screen_contents.h"
 #include "reader/screen_peek.h"
 #include "reader/screen_reader_menu.h"
@@ -1436,6 +1447,11 @@ static void armCardProbes(const char* why) {
 }
 
 static reader::SleepViewModel sleepVmFromCard(std::string note);
+
+// Declared here for setup()'s wake paint, which has to know whether the glass is
+// holding a COVER before it may assert anything about the panel's baseline. Both
+// definitions are far below, beside the sleep path they were written for.
+static reader::CoverSource* sleepCoverForPaint();
 
 // --- WHAT THE CARD'S POINTER SAYS ---------------------------------------------
 //
@@ -3808,38 +3824,165 @@ void setup() {
       // The budget is already handled AFTER setup's first paint (see
       // skipInitialResync below, "the panel now holds a frame we just wrote"). This
       // is the same assertion made one paint earlier, and on a wake it is a
-      // DIFFERENT and weaker claim, which is the part to understand before touching
-      // it:
+      // DIFFERENT and weaker claim -- WHICH HOLDS ONLY WHEN THE GLASS IS HOLDING
+      // THE CARD SCREEN, and that is the whole of the branch below:
       //
       //   * The glass holds the SLEEP SCREEN -- e-ink keeps its image with no power.
       //   * The CONTROLLER's DTM1 baseline does not survive; after the reset it is
-      //     whatever the RAM powered up as. skipInitialResync asserts it is valid,
-      //     so the DU below diffs against that.
+      //     whatever the RAM powered up as. skipInitialResync asserts it is valid
+      //     (_oldPlaneValid = true, _initialFullsRemaining = 0), so the DU below
+      //     diffs against that.
       //   * CLAUDE.md records this exact call producing "a split second of noisy
       //     banding on every wake" -- but that was a differential onto a WHOLE NEW
-      //     SCREEN. Here the frame being painted is the sleep screen with one line
-      //     changed, so almost every pixel the garbage baseline calls unchanged
-      //     really is unchanged, and keeping what the glass holds is correct.
+      //     SCREEN. With no cover, the frame being painted is the sleep screen with
+      //     one line changed, so almost every pixel the garbage baseline calls
+      //     unchanged really is unchanged, and keeping what the glass holds is
+      //     correct.
       //
-      // IF THAT IS WRONG ON GLASS the symptom is specific and worth naming: the
-      // WAKING line faint, banded, or absent, with the rest of the card intact. The
-      // fallback is one line -- move skipInitialResync() to AFTER the paint and drop
-      // requestResync(). The wake then flashes once, here, instead of once at Home,
-      // which is still better than the two it started with.
-      display.skipInitialResync();
-      const reader::SleepViewModel vm = sleepVmFromCard(reader::kStatusWaking);
-      reader::SleepScreen scr(vm);
-      gFrame->clear(true);
-      scr.render(*gFrame, *gFonts, gTheme, reader::Plane::Bw);
-      gFrameContentsUnknown = true;
-      // FAST, so this is a DU and the badge's words change without a flash.
-      showOnePass(reader::RefreshMode::Fast);
-      // ...and the NEXT paint is the strong one. Home is a whole new screen over a
-      // baseline we have just admitted we do not know, so it takes the GC -- which
-      // is both the honest refresh and the one that clears anything the DU above got
-      // wrong. This is the flash a screen change is allowed to have.
-      display.requestResync();
-      mark("waking-painted");
+      // AND WITH A COVER ON THE GLASS THAT LAST BULLET IS SIMPLY FALSE. The sleep
+      // path paints a four-level PHOTOGRAPH over the whole panel, and whatever this
+      // paints is a ONE-PASS frame, so nearly every pixel differs whichever way it
+      // goes. Asserting a valid baseline there is asserting something known to be
+      // untrue, and what it buys -- a DU -- is the one refresh that cannot survive
+      // being wrong about it.
+      //
+      // SO THE COVER CASE TAKES THE FALLBACK THIS BLOCK ALREADY NAMED: assert
+      // nothing, let the paint below be the honest clear, and move
+      // skipInitialResync() to AFTER it, where the claim is true because we have
+      // just written the frame ourselves. requestResync() goes with it -- its whole
+      // job was to force a GC at Home over a baseline we had admitted we did not
+      // know, and after a real clear here we DO know it.
+      //
+      // WHAT THIS PAINT DRAWS OVER A COVER IS THE COVER, and that reverses what
+      // this block used to say. It read "handing this paint the cover does not
+      // work", on two grounds, and the DEVICE settled both against it -- a wake
+      // replaced a photograph with the dithered card, which reads as the book
+      // having been closed. The grounds, and what is actually true:
+      //
+      //   * "it would be a one-bit threshold of a four-level picture". It is, and
+      //     that is the affordable rendition rather than a wrong one: renderSleep
+      //     draws the cover from Plane::Bw, which IS the Msb plane (screen_sleep.h),
+      //     so one pass gives the same picture at two levels for one waveform. The
+      //     alternative is the full grayscale sequence -- ~2.4 s, slower than the
+      //     restore this screen exists to cover for, and there is no windowed
+      //     refresh on this panel to repaint the badge box alone: PanelDriver.h's
+      //     displayWindow default DISCARDS the window and calls display(), and
+      //     Uc8279Driver does not override it.
+      //   * "fidelity() would answer Grayscale for a path that paints one pass".
+      //     True and inert here: nothing on this path CONSULTS fidelity(). It is
+      //     read by renderTop() for an App-owned screen and by paintSleepScreen for
+      //     the sleep sequence, and this paint is neither -- it renders Plane::Bw
+      //     and calls showOnePass itself, exactly as it did with no cover.
+      //
+      // IF THE ONE-BIT RENDITION READS BADLY ON GLASS, kWakePaintsCoverAsMono below
+      // is the one-line way out. This is the half nobody has seen yet.
+      //
+      // WHAT IT COSTS: the wake's one allowed flash moves from Home to here, and on
+      // a card with `fullOnTransition` left on, Home's own transition GC makes that
+      // two. That is the honest price of a photograph on the glass, and it replaces
+      // a mangled intermediate frame with a clean one.
+      //
+      // THE TEST IS "WOULD A COVER BE PAINTED NOW", which is the same question the
+      // sleep asked, asked of the same cache and the same setting. It can be wrong
+      // only if the card changed while the device slept -- and then this falls back
+      // to exactly today's shipped behaviour, so the no-cover path is untouched in
+      // every case including that one.
+      //
+      // IF THE NO-COVER BRANCH IS WRONG ON GLASS the symptom is specific and worth
+      // naming: the WAKING line faint, banded, or absent, with the rest of the card
+      // intact. Its fallback is to stop asserting a baseline at all -- drop the
+      // `if (!coverOnGlass)` below and let every wake take the clean clear.
+
+      // THE ONE-LINE WAY OUT FOR THE OTHER HALF, AND WHAT IT SWITCHES BETWEEN.
+      //
+      //   true  (shipped): a cover on the glass is REPAINTED in one bit with the
+      //         waking badge over it. The picture stays, the words appear, and it
+      //         costs one waveform -- the same wake cost as the no-cover case.
+      //   false:           a cover on the glass is NOT REPAINTED AT ALL. The whole
+      //         block below is skipped and the four-level photograph the sleep left
+      //         there simply stays until the restored screen paints over it. The
+      //         waking message is given up, and so is the flash: the resync
+      //         handling goes with it, so Home takes the GC as it does today.
+      //
+      // FLIP IT IF THE ONE-BIT COVER READS BADLY -- and that is a real risk nobody
+      // has checked, because the MSB of a Floyd-Steinberg image is a threshold
+      // THROUGH a dithered picture, not a threshold of the original. The symptoms
+      // to flip on: the cover coming back as coarse blotches or bands where the
+      // sleep screen showed tone, a recognisable face or title going illegible, or
+      // the wake reading as a visible DEGRADING of the picture rather than as the
+      // same picture with words on it. Those are all "the rendition is wrong", and
+      // a photograph left alone beats a photograph made worse.
+      //
+      // Do NOT flip it for a slow or flashy wake: that is the resync branch above,
+      // whose own fallback is named there.
+      constexpr bool kWakePaintsCoverAsMono = true;
+
+      // ONE CALL, AND THE POINTER IS BOTH THE DECISION AND THE PICTURE. This used
+      // to ask only whether a cover WOULD be painted; it now also paints it, and
+      // asking twice would be two card reads and two chances to disagree.
+      //
+      // Everything it reads is live by here, and it was checked rather than
+      // assumed: bindFrameToDriver("boot") gave gFrame, loadAndApplySettings() set
+      // gSettings.sleepShows, and gStorageUsable took `storage` -- all three
+      // earlier in this same setup(), in that order. It refuses on any of them
+      // being missing rather than assuming them, so a reordering degrades to
+      // today's no-cover behaviour instead of misbehaving.
+      reader::CoverSource* const cover = sleepCoverForPaint();
+      const bool coverOnGlass = cover != nullptr;
+      if (coverOnGlass && !kWakePaintsCoverAsMono) {
+        // Leave the glass exactly as the sleep left it. No paint, so no baseline
+        // claim either way -- Home is the next thing the panel does, over a
+        // baseline nobody has asserted, which is the GC it would have taken anyway.
+        logf("[power] waking paint: skipped -- a cover is on the glass and it is kept\n");
+        logFlush();
+        mark("waking-skipped");
+      } else {
+        if (!coverOnGlass) display.skipInitialResync();
+        reader::SleepViewModel vm = sleepVmFromCard(reader::kStatusWaking);
+        // WHICH SCREEN THIS IS, and it is the note's other half. COVER mode drops the
+        // badge for a sleeping screen because a full-bleed cover says "asleep" by
+        // itself; it cannot say "waking", so this puts the badge back -- and only the
+        // badge. See SleepViewModel::waking. Without it a COVER-mode wake would paint
+        // the cover with no message at all, which is the whole point of the paint.
+        vm.waking = true;
+        reader::SleepScreen scr(vm, cover);
+        // THE SHARED-BUS INVARIANT, and it is new on this path: with a cover the
+        // RENDER ITSELF reads the card, one packed row at a time, while the panel's
+        // CS is in play. Same guard paintSleepScreen and renderTop take, same reason.
+        SpiBusGuard bus;
+        gFrame->clear(true);
+        // ONE PASS, Plane::Bw, cover included -- which is the Msb plane, so this is
+        // the sleep screen's own picture at two levels rather than a different image.
+        scr.render(*gFrame, *gFonts, gTheme, reader::Plane::Bw);
+        gFrameContentsUnknown = true;
+        // FAST is what this ASKS for, and it is what it gets only in the no-cover
+        // case: a DU, so the badge's words change without a flash. In the cover case
+        // nothing has asserted a baseline, so displayStart sees !_oldPlaneValid,
+        // seeds DTM1 white and takes the GC regardless of the mode -- which is the
+        // clean clear a panel holding a photograph needs.
+        showOnePass(reader::RefreshMode::Fast);
+        if (coverOnGlass) {
+          // NOW it is true: the panel holds a frame we just wrote, and the boot
+          // clear budget has been spent on the paint that needed it.
+          display.skipInitialResync();
+        } else {
+          // ...and the NEXT paint is the strong one. Home is a whole new screen over a
+          // baseline we have just admitted we do not know, so it takes the GC -- which
+          // is both the honest refresh and the one that clears anything the DU above got
+          // wrong. This is the flash a screen change is allowed to have.
+          display.requestResync();
+        }
+        // NAMES THE COVER, because "the cover did not survive the wake" has two
+        // explanations that look identical on glass -- no usable cache to paint
+        // from, or a cache this paint refused -- and paintSleepScreen's own line
+        // makes the same distinction at the other end of the sleep.
+        logf("[power] waking paint: %s\n",
+             coverOnGlass
+                 ? "a cover is on the glass -- repainted in one bit, no baseline asserted"
+                 : "the card screen is on the glass -- DU over it");
+        logFlush();
+        mark("waking-painted");
+      }
     }
     // The root is Home, built from the shared catalogue. Nothing rebuilds it, so
     // popping back to Home returns this object with its focus intact.
@@ -4001,6 +4144,510 @@ void setup() {
   saveCrumbs();
 }
 
+// --- THE CACHED COVER: WRITING IT, AND READING IT BACK ------------------------
+//
+// design/SleepCover.dc.html puts the book's own cover behind the sleep screen.
+// Decoding one costs seconds and, measured on the X3, up to ~81 KB of heap -- so
+// it is done ONCE per book and kept at /.reader/sleep.cover, a header and two bit
+// planes that reader/sleep_cover.h describes and that nothing in core/ knows how
+// to reach.
+//
+// NOTHING ON THE DESKTOP COMPILES ANY OF THIS. The simulator has its own sink and
+// its own CoverSource (sim/main.cpp), the goldens synthesise their planes from
+// arithmetic, and shell/ has no harness -- so everything below is an argument
+// until it is on glass.
+
+namespace {
+
+// HOW MUCH OF EACH PLANE IS HELD BEFORE IT GOES TO THE CARD. This is a BUS number
+// rather than a memory one, and without it the write is unusably slow.
+//
+// The decoder hands over one destination row of BOTH planes at a time (cover.h)
+// and the file holds the two planes CONTIGUOUSLY (sleep_cover.h), so the writer
+// has to alternate between two regions a whole plane -- ~52 KB -- apart. SdFat
+// here has exactly ONE 512-byte sector cache (FsCache holds a single
+// m_buffer[512], and USE_SEPARATE_FAT_CACHE is gated on __arm__, so it is off on
+// this RISC-V part) -- the same geometry the card probe's whole design rests on.
+// So a 66-byte write to one region EVICTS the other region's sector: unbatched,
+// 792 rows would cost ~1,600 sector write-then-read pairs on top of the ~200 the
+// data itself needs.
+//
+// 1 KB a plane is 15 rows on the X3, which takes that to ~53 evictions a plane.
+// ~2 KB of heap, taken at decode time and given straight back -- not a static
+// buffer, which would come off the 42,152-byte reading floor for something that
+// runs once per sleep.
+constexpr int kCoverBatchBytes = 1024;
+
+// THE COVER CACHE'S WRITER, over SdFat directly rather than through
+// reader::FileSystem.
+//
+// ATOMICITY WITHOUT A RENAME. The header goes down with `complete = 0`, the plane
+// rows stream, and only then is the header rewritten with `complete = 1`. So an
+// abandoned decode, a refusal or a flat battery leaves a file that
+// sleepCoverUsable declines, and the next sleep simply tries again.
+//
+// THE WHOLE HEADER IS REWRITTEN, not the four bytes of the flag, and that is
+// deliberate: encodeSleepCoverHeader stays the ONE spelling of the wire format.
+// Seeking to the flag would put a hand-computed field offset in this file, which
+// a field added to the struct would silently invalidate -- and sleep_cover.h
+// already records a tripwire being added because a derived-LOOKING constant was
+// not derived.
+//
+// WHY THERE IS A FILLER PASS: SdFat REFUSES a seek past the end of a file
+// (FatFile::seekSet, `if (pos > m_fileSize) goto fail`), so the first LSB row --
+// which belongs one whole plane further in than anything written so far -- has
+// nowhere to go until the bytes in front of it exist. One plane of filler is
+// enough: after it the MSB batches seek BACK into ground that exists and the LSB
+// batches land exactly at the end of the file, which is an ordinary append. The
+// cost is one extra 52 KB sequential write, against holding a whole plane in RAM
+// (52,272 bytes, which is most of the budget this feature has) or writing the two
+// planes to two files and concatenating them (52 KB read plus 52 KB write, two
+// files, and the same eviction problem while both are open).
+class CardCoverSink : public reader::CoverPlaneSink {
+ public:
+  CardCoverSink(const std::string& bookPath, uint32_t bookBytes, int rotation)
+      : bookPath_(bookPath) {
+    header_.rotation = rotation;
+    header_.bookBytes = bookBytes;
+  }
+  ~CardCoverSink() override { closeFile(); }
+
+  CardCoverSink(const CardCoverSink&) = delete;
+  CardCoverSink& operator=(const CardCoverSink&) = delete;
+
+  bool begin(int panelW, int panelH, int planeRowBytes, int rows) override {
+    if (planeRowBytes <= 0 || rows <= 0) return false;
+    rowBytes_ = planeRowBytes;
+    rowsExpected_ = rows;
+    const size_t planeBytes =
+        static_cast<size_t>(planeRowBytes) * static_cast<size_t>(rows);
+
+    header_.panelW = panelW;
+    header_.panelH = panelH;
+    header_.planeBytes = static_cast<int32_t>(planeBytes);
+    header_.complete = 0;
+    // A PATH THAT DOES NOT FIT IS A REFUSAL HERE, not a file written and never
+    // read. setSleepCoverBookPath stores EMPTY rather than truncating -- two books
+    // sharing their first 127 bytes would otherwise each accept the other's
+    // picture -- and sleepCoverUsable never matches empty, so the 104 KB would be
+    // work nothing could ever use.
+    if (!reader::setSleepCoverBookPath(header_, bookPath_)) {
+      logf("[cover] the path will not fit the cache header: %s\n", bookPath_.c_str());
+      return false;
+    }
+    // THE CACHE HAS TO BE THE SHAPE OF THE FRAME IT WILL BE READ INTO, or
+    // sleepCoverUsable refuses it forever. The two derivations differ -- cover.cpp
+    // sizes a plane as ceil(panelW / 8) * panelH and Framebuffer sizes its store
+    // as ceil(physWidth / 8) * physHeight -- and they agree only because both
+    // panels are multiples of 8. Cheaper to find that out here than after a decode
+    // and 104 KB of card writes.
+    if (gFrame && header_.planeBytes != gFrame->sizeBytes()) {
+      logf("[cover] a %d-byte plane is not the frame's %d bytes; not caching\n",
+           static_cast<int>(header_.planeBytes), gFrame->sizeBytes());
+      return false;
+    }
+
+    rowsPerBatch_ = kCoverBatchBytes / rowBytes_;
+    if (rowsPerBatch_ < 1) rowsPerBatch_ = 1;
+    batchBytes_ = static_cast<size_t>(rowsPerBatch_) * static_cast<size_t>(rowBytes_);
+    // nothrow, because -fno-exceptions makes a failed `new` an abort() with no
+    // diagnostic -- this project has lost a boot to exactly that.
+    batch_.reset(new (std::nothrow) uint8_t[2 * batchBytes_]);
+    if (batch_ == nullptr) {
+      logf("[cover] no memory for the cache's %u-byte row batch\n",
+           static_cast<unsigned>(2 * batchBytes_));
+      return false;
+    }
+
+    // /.reader exists on any card that has booted -- the settings file and the
+    // reading state both live there -- so this is insurance rather than a step.
+    // The parent is derived from the one path constant rather than spelled again.
+    const char* const path = reader::kSleepCoverPath;
+    const char* const slash = std::strrchr(path, '/');
+    if (slash != nullptr && slash != path)
+      gSd.mkdirs(std::string(path, static_cast<size_t>(slash - path)));
+
+    file_ = SdMan.open(path, O_WRONLY | O_CREAT | O_TRUNC);
+    if (!file_) {
+      logf("[cover] cannot open %s to write\n", path);
+      return false;
+    }
+    open_ = true;
+
+    uint8_t raw[reader::kSleepCoverHeaderBytes];
+    reader::encodeSleepCoverHeader(header_, raw);
+    if (file_.write(raw, sizeof(raw)) != sizeof(raw)) return false;
+
+    // The filler. 0xFF is paper, so a file cut off inside it is at least
+    // paper-shaped -- though nothing will ever read it, because `complete` stays 0
+    // until finish() says otherwise.
+    std::memset(batch_.get(), 0xFF, 2 * batchBytes_);
+    const size_t chunk = 2 * batchBytes_;
+    for (size_t left = planeBytes; left > 0;) {
+      const size_t n = left < chunk ? left : chunk;
+      if (file_.write(batch_.get(), n) != n) return false;
+      left -= n;
+    }
+
+    msbOff_ = reader::kSleepCoverHeaderBytes;
+    lsbOff_ = reader::kSleepCoverHeaderBytes + planeBytes;
+    return true;
+  }
+
+  bool row(const uint8_t* msb, const uint8_t* lsb) override {
+    if (!open_ || batch_ == nullptr || msb == nullptr || lsb == nullptr) return false;
+    // MORE ROWS THAN begin() DECLARED would run off the end of the plane regions
+    // the file was sized for. cover.h promises exactly `rows` of them; this is
+    // what makes that a check rather than a belief.
+    if (rowsSeen_ >= rowsExpected_) return false;
+    const size_t at = static_cast<size_t>(pending_) * static_cast<size_t>(rowBytes_);
+    // A PAPER ROW PASSES THE SAME POINTER TWICE (cover.h), so these are two copies
+    // of one row rather than a pair to compare.
+    std::memcpy(batch_.get() + at, msb, static_cast<size_t>(rowBytes_));
+    std::memcpy(batch_.get() + batchBytes_ + at, lsb, static_cast<size_t>(rowBytes_));
+    ++pending_;
+    ++rowsSeen_;
+    if (pending_ >= rowsPerBatch_) return flushBatch();
+    return true;
+  }
+
+  bool finish(bool ok) override {
+    // ALWAYS CALLED, EVEN WHEN begin() WAS NOT (cover.h) -- a book with no cover, a
+    // span that is not an image, a card that would not open. `open_` is what tells
+    // those from a real write.
+    bool good = ok && open_;
+    // A SHORT DECODE IS NOT A GOOD FILE. cover.h promises `rows` calls unless
+    // something refused, so a decode that stopped early with ok = true is a bug
+    // upstream, and the one file the user stares at for hours is the wrong place
+    // to be lenient about it.
+    if (good && rowsSeen_ != rowsExpected_) {
+      logf("[cover] the cache got %d of %d rows; not committing\n", rowsSeen_, rowsExpected_);
+      good = false;
+    }
+    if (good) good = flushBatch();
+    if (good) {
+      // THE COMMIT. Sync the planes FIRST, so `complete` cannot reach the card
+      // ahead of the bytes it vouches for, then rewrite the whole header with the
+      // flag set and sync again.
+      header_.complete = 1;
+      uint8_t raw[reader::kSleepCoverHeaderBytes];
+      reader::encodeSleepCoverHeader(header_, raw);
+      good = file_.sync() && file_.seekSet(0) &&
+             file_.write(raw, sizeof(raw)) == sizeof(raw) && file_.sync();
+    }
+    // NOTHING IS REMOVED ON FAILURE, and that is what the flag is for: the file
+    // still says complete = 0, sleepCoverUsable refuses it, and the next sleep
+    // opens it O_TRUNC and tries again. A remove would be a second failure path
+    // guarding a state the first one already covers.
+    closeFile();
+    if (!good) logf("[cover] the cache was NOT committed\n");
+    return good;
+  }
+
+ private:
+  bool flushBatch() {
+    if (pending_ == 0) return true;
+    const size_t n = static_cast<size_t>(pending_) * static_cast<size_t>(rowBytes_);
+    if (!file_.seekSet(msbOff_)) return false;
+    if (file_.write(batch_.get(), n) != n) return false;
+    msbOff_ += n;
+    // The LSB region is written strictly forward and always lands exactly at the
+    // end of the file, so this seek reaches an append rather than a rewrite. That
+    // is the property the single plane of filler in begin() buys.
+    if (!file_.seekSet(lsbOff_)) return false;
+    if (file_.write(batch_.get() + batchBytes_, n) != n) return false;
+    lsbOff_ += n;
+    pending_ = 0;
+    return !file_.getWriteError();
+  }
+
+  void closeFile() {
+    if (open_) {
+      file_.close();
+      open_ = false;
+    }
+    batch_.reset();
+  }
+
+  // ONE GUARD FOR THE WHOLE WRITE, held for this object's lifetime -- the only
+  // place in this firmware that holds one that long. sd_fs.h argues the opposite
+  // for a FileHandle and is right there: a reader holds a book open for MINUTES
+  // across many paints, and renderTop() would block behind it, which reads as a
+  // display fault. This is the other shape -- seconds, on the loop task, with
+  // nothing left to paint until it is finished. It is declared first so it is
+  // taken before anything below it touches the card, and the SD card is on the
+  // DISPLAY'S own bus, which is what makes it necessary at all.
+  SpiBusGuard bus_;
+  std::string bookPath_;
+  reader::SleepCoverHeader header_;
+  FsFile file_;
+  std::unique_ptr<uint8_t[]> batch_;
+  size_t batchBytes_ = 0;
+  // Where the next batch of each plane goes. Byte offsets into the file, not row
+  // numbers: one of them seeks backwards into ground the filler laid and the
+  // other appends, and only bytes say that.
+  size_t msbOff_ = 0, lsbOff_ = 0;
+  int rowBytes_ = 0, rowsExpected_ = 0, rowsSeen_ = 0;
+  int rowsPerBatch_ = 0, pending_ = 0;
+  bool open_ = false;
+};
+
+// THE COVER CACHE'S READER.
+//
+// ONE OPEN AND ONE PASS PER PLANE, holding nothing: a resident plane is 52,272
+// bytes, which is more than this whole feature's budget. That is what
+// CoverSource exists to make possible -- see reader/screen_sleep.h.
+//
+// IT IS NOT A memcpy INTO fb.data(), AND THAT IS THE HALF ONLY THE PANEL CAN SEE.
+// The file holds LOGICAL raster rows -- a streaming row-major downscale can emit
+// nothing else (imagefit.h) -- and this shell binds Rotation::Ccw, under which one
+// logical ROW is a physical COLUMN. Framebuffer::writePackedRow is the one
+// function in this feature that knows that. A memcpy would be right in the
+// simulator, right in every golden and right in every desktop test there is, and
+// would smear diagonally on glass -- which is what CLAUDE.md records happening to
+// the veil, fillRect, the glyph blit and ditherRect in turn.
+//
+// TWO PLANES SERVE THREE PASSES: Plane::Bw inks where coverage >= 2, which is
+// exactly "MSB set", so the base pass and the Msb pass read the SAME plane. A
+// source that answered Bw with anything else would give a base pass that
+// disagrees with the refinement drawn over it.
+class CardCoverSource : public reader::CoverSource {
+ public:
+  // WHICH BOOK THIS IS A PICTURE OF. Not optional and not derivable here: a cover
+  // is not a subtle wrong when it is the wrong book's.
+  void setBook(const std::string& path, uint32_t bytes) {
+    bookPath_ = path;
+    bookBytes_ = bytes;
+  }
+
+  bool loadPlane(reader::Plane plane, reader::Framebuffer& fb) override;
+
+ private:
+  std::string bookPath_;
+  uint32_t bookBytes_ = 0;
+};
+
+// The header off an already-open handle. Two callers -- the paint's gate opens the
+// file for this alone, loadPlane needs the handle open for the planes anyway -- so
+// the parse lives here once rather than being spelled at both.
+bool readSleepCoverHeader(reader::FileHandle& f, reader::SleepCoverHeader& out) {
+  uint8_t raw[reader::kSleepCoverHeaderBytes];
+  if (!f.seek(0)) return false;
+  if (f.read(raw, sizeof(raw)) != sizeof(raw)) return false;
+  return reader::decodeSleepCoverHeader(raw, sizeof(raw), out);
+}
+
+bool CardCoverSource::loadPlane(reader::Plane plane, reader::Framebuffer& fb) {
+  // One row of one plane: 60 bytes on the X4, 66 on the X3. On the stack, which
+  // has 16 KB (SET_LOOP_TASK_STACK_SIZE). The cap is CHECKED rather than assumed,
+  // because every length below is derived from a number that came off a card.
+  uint8_t rowBuf[128];
+  const int rowBytes = (fb.width() + 7) / 8;
+  if (rowBytes <= 0 || rowBytes > static_cast<int>(sizeof(rowBuf))) return false;
+
+  std::unique_ptr<reader::FileHandle> f = gSd.openRead(reader::kSleepCoverPath);
+  if (f == nullptr) return false;
+  reader::SleepCoverHeader h;
+  if (!readSleepCoverHeader(*f, h)) return false;
+  // ASKED AGAIN, although the shell asked it before the screen was built. It is
+  // one predicate and it is free here -- the header is already in hand -- and this
+  // is the call that stands between a card that changed under us and a write into
+  // the driver's own framebuffer.
+  if (!reader::sleepCoverUsable(h, bookPath_, bookBytes_, fb.width(), fb.height(),
+                                static_cast<int>(fb.rotation()), fb.sizeBytes()))
+    return false;
+  // sleepCoverUsable has pinned the plane's SIZE to this frame's; this pins its
+  // SHAPE, which is what decides how far each read goes. Both panels are multiples
+  // of 8 so the two derivations agree -- a panel that was not would land here
+  // rather than on a sheared picture.
+  if (static_cast<int64_t>(rowBytes) * fb.height() != h.planeBytes) return false;
+
+  // Bw and Msb are plane 0, Lsb is plane 1. See the class comment: Bw inks where
+  // coverage >= 2, which is exactly "MSB set". BwDithered cannot reach here -- the
+  // screen declares Grayscale whenever it has a cover -- and takes the MSB with
+  // everything else rather than being a fourth case with nothing to answer.
+  const size_t planeIndex = (plane == reader::Plane::Lsb) ? 1u : 0u;
+  const size_t start =
+      reader::kSleepCoverHeaderBytes + planeIndex * static_cast<size_t>(h.planeBytes);
+  if (!f->seek(static_cast<uint32_t>(start))) return false;
+  for (int y = 0; y < fb.height(); ++y) {
+    // A FALSE HERE LEAVES THE FRAME PART-WRITTEN, which the contract allows and
+    // renderSleep is built for: it clears and draws the dither field whenever this
+    // answers false, so a partial picture is overwritten rather than shown.
+    if (f->read(rowBuf, static_cast<size_t>(rowBytes)) != static_cast<size_t>(rowBytes))
+      return false;
+    fb.writePackedRow(y, rowBuf);
+  }
+  return true;
+}
+
+}  // namespace
+
+// NOT OWNED BY THE SCREEN AND IT MUST OUTLIVE IT (screen_sleep.h), so it lives
+// here rather than on paintSleepScreen's stack.
+static CardCoverSource gCoverSource;
+
+// WHICH BOOK THE SLEEP SCREEN IS ABOUT, and how big it is.
+//
+// FROM last.json, which is what the sleep CARD is drawn from (sleepVmFromCard), so
+// the picture and the words cannot end up naming two different books. Not from
+// gReading: the device sleeps from Home and from the Library as often as from a
+// page, and there is no book open on either.
+//
+// THE SIZE IS READ OFF THE FILE rather than remembered, because it is the cache's
+// identity check and last.json does not carry it. One open, which also answers the
+// question sleepVmFromCard asks with exists(): is this book still on the card.
+static bool sleepCoverBook(std::string& path, uint32_t& bytes) {
+  if (!gStorageUsable) return false;
+  reader::LastRead last;
+  if (!reader::loadLastRead(gSd, last) || last.bookPath.empty()) return false;
+  std::unique_ptr<reader::FileHandle> f = gSd.openRead(last.bookPath);
+  if (f == nullptr) return false;
+  path = last.bookPath;
+  bytes = f->size();
+  return true;
+}
+
+// Whether the setting asks for a picture at all. design/Settings.dc.html's `Shows`
+// row, and SleepShows::Details is the shipped screen with no cover in it.
+static bool coverWanted() { return gSettings.sleepShows != reader::SleepShows::Details; }
+
+// THE COVER TO HAND SleepScreen, OR NULL -- AND THE HEADER IS VALIDATED HERE,
+// BEFORE THE SCREEN IS CONSTRUCTED.
+//
+// THAT ORDER IS THE CONSTRAINT, not a nicety. Fidelity is decided ONCE, from
+// whether the screen has a source at all, and the three grayscale passes then each
+// ask loadPlane separately -- so a source that succeeded for Msb and failed for
+// Lsb would compose a frame with the cover in one plane and the dither field in
+// the other. Validating up front is what keeps that theoretical: after it the only
+// remaining failure is the card physically leaving mid-paint, at which point the
+// sleep screen has lost more than its cover.
+//
+// It is also why a source that WILL refuse must never be handed over. SleepScreen
+// declares Fidelity::Grayscale on the strength of holding one, so a source that
+// then fell back would spend three waveforms -- ~1041 ms of panel -- drawing a
+// screen one waveform could have drawn.
+static reader::CoverSource* sleepCoverForPaint() {
+  if (!coverWanted() || !gStorageUsable || !gFrame) return nullptr;
+  std::string path;
+  uint32_t bytes = 0;
+  if (!sleepCoverBook(path, bytes)) return nullptr;
+  std::unique_ptr<reader::FileHandle> f = gSd.openRead(reader::kSleepCoverPath);
+  if (f == nullptr) return nullptr;
+  reader::SleepCoverHeader h;
+  if (!readSleepCoverHeader(*f, h)) return nullptr;
+  if (!reader::sleepCoverUsable(h, path, bytes, gFrame->width(), gFrame->height(),
+                                static_cast<int>(gFrame->rotation()), gFrame->sizeBytes()))
+    return nullptr;
+  gCoverSource.setBook(path, bytes);
+  return &gCoverSource;
+}
+
+// Whether a paint could use the cache right now, which is the sleep path's "do I
+// need to decode". ONE spelling, the same call the paint makes, so the two can
+// never disagree about what counts as a usable cover.
+static bool coverCacheUsable() { return sleepCoverForPaint() != nullptr; }
+
+// Stops the sleep decode on a genuinely NEW press. See the block below for why a
+// bare rawSamplesPending() cannot serve here and what it cost.
+static bool sleepDecodeShouldStop(void*) {
+  bool pressed = false;
+  RawSample s{};
+  // Drain whatever is queued: the release edge of the press that asked for this
+  // sleep is in here, and it is not a reason to stop.
+  while (popRawSample(s)) {
+    if (s.down) pressed = true;
+  }
+  return pressed;
+}
+
+// DECODE THE LAST-READ BOOK'S COVER INTO THE CACHE.
+//
+// It reads the book itself: openBook is a central-directory parse and an OPF
+// inflate, ~32 KB transient, which is why this is not done on every sleep but only
+// when coverCacheUsable() says there is nothing to paint.
+//
+// THE STOP PREDICATE IS sleepDecodeShouldStop(), NOT rawSamplesPending(), AND THE
+// DIFFERENCE IS THE WHOLE FEATURE.
+//
+// It was rawSamplesPending(), copied from the four idle jobs in loop(), and it
+// abandoned EVERY decode a power press ever started -- which is every decode a
+// user starts. Measured on the X3: `[cover] Abandoned in 353ms`, `paint2=0ms`,
+// the cache never committed, and the sleep screen therefore identical to the one
+// that shipped. The feature looked unimplemented.
+//
+// The mechanism is that rawSamplesPending() means "is there NEW input" ONLY where
+// something drains the queue. loop() drains it at the top of every iteration --
+// waitForRawSample's own comment says "the loop's own drain at the top of the next
+// iteration is what owns these" -- so the four idle jobs read it correctly.
+// sleepNow() is [[noreturn]] and never returns to loop(), so NOTHING drains it.
+// POWER fires Short on the DOWN edge (that is how this sleep was triggered) and
+// the input task queues the matching RELEASE while the first paint blocks for its
+// ~774 ms waveform. That release then sits in the queue for the rest of sleepNow,
+// and a bare count cannot tell it from a new press.
+//
+// So this predicate DRAINS and looks at what it drained, and only a DOWN edge --
+// a genuinely new press -- stops the decode. Consuming is correct here and
+// nowhere else, for the same reason the bug existed: there is no loop left to own
+// these samples. Nothing downstream reads them either; deepSleepUntilPowerButton()
+// waits on the GPIO, not on this queue.
+//
+// KEEPING IT INTERRUPTIBLE AT ALL IS DELIBERATE. The panel already shows the sleep
+// screen, so the decode is invisible -- but the power button cannot WAKE the device
+// until deepSleepUntilPowerButton() is reached, so an uninterruptible decode would
+// leave a reader pressing power at a dead device for up to seven seconds. A new
+// press means "I want it back"; abandoning gets there in milliseconds.
+//
+// An abandoned decode leaves `complete = 0` and is simply re-attempted at the next
+// sleep -- there is no half-usable state to reason about.
+//
+// ONE `[cover]` LINE PER ATTEMPT, WHATEVER HAPPENS, AND IT CARRIES THE TIME.
+// The verdict and the elapsed milliseconds were two separate lines while this was
+// being built -- the report here, the duration at the call site -- which printed
+// the result twice and let the two disagree about which attempt they were
+// describing. They are one line. The early refusals below print it too: a decode
+// that returned in silence is indistinguishable from one that never ran, which is
+// exactly the shape this project keeps paying for (a probe answered from cache, a
+// comparison sheet that skipped four screens).
+static reader::CoverResult coverVerdict(reader::CoverResult r, uint32_t t0,
+                                        const char* why) {
+  logf("[cover] %s in %lums: %s\n", reader::coverResultName(r),
+       (unsigned long)(millis() - t0), why);
+  logFlush();
+  return r;
+}
+
+static reader::CoverResult decodeCoverToCache() {
+  // THE CLOCK STARTS BEFORE THE REFUSALS, not just around decodeCover: a decode
+  // that spends 300 ms discovering the book will not open has still spent it, and
+  // this number is the sleep path's whole latency budget.
+  const uint32_t t0 = millis();
+  if (!gStorageUsable || !gFrame)
+    return coverVerdict(reader::CoverResult::ReadFailed, t0, "no card, or no frame");
+  std::string path;
+  uint32_t bytes = 0;
+  if (!sleepCoverBook(path, bytes))
+    return coverVerdict(reader::CoverResult::NoCover, t0, "no book is open");
+
+  reader::OpenedBook opened;
+  const char* why = nullptr;
+  if (!reader::openBook(gSd, path, opened, &why))
+    return coverVerdict(reader::CoverResult::ReadFailed, t0,
+                        why != nullptr ? why : "the book will not open");
+
+  CardCoverSink sink(path, bytes, static_cast<int>(gFrame->rotation()));
+  reader::CoverReport rep;
+  const reader::CoverResult r = reader::decodeCover(
+      gSd, opened, gFrame->width(), gFrame->height(), gSettings.coverFit, sink,
+      sleepDecodeShouldStop, nullptr, &rep);
+  logf("[cover] %s in %lums src=%dx%d /%d box=%d,%d %dx%d%s%s\n",
+       reader::coverResultName(r), (unsigned long)(millis() - t0), rep.sourceWidth,
+       rep.sourceHeight, rep.scaleDivisor, rep.dstX, rep.dstY, rep.dstW, rep.dstH,
+       rep.reason != nullptr ? ": " : "", rep.reason != nullptr ? rep.reason : "");
+  logFlush();
+  return r;
+}
+
 // THE SLEEP SCREEN, PAINTED WITHOUT BEING PUSHED -- and that is the whole trap this
 // screen has carried a warning about since it was written. The session record names the
 // top of the stack, so pushing SleepScreen would make the next wake RESTORE INTO IT: the
@@ -4049,6 +4696,25 @@ static reader::SleepViewModel sleepVmFromCard(std::string note) {
                   last.spine + 1);
     vm.progress = line;
   }
+
+  // WHAT THIS SLEEP IS ALLOWED TO SHOW -- design/Settings.dc.html's `Shows` row --
+  // AND NOTHING-OPEN FORCES DETAILS.
+  //
+  // design/SleepIdle.dc.html is the badge ALONE: with no book there is no cover to
+  // be a picture OF, so COVER or COVER + DETAILS would be a mode asking for
+  // something that cannot exist. The force lives here rather than in the theme
+  // because the fallback ladder has four rungs -- the setting, then whether there
+  // is a book at all, then whether the cache holds a picture of THIS book
+  // (sleepCoverForPaint), then whether the load actually answered
+  // (QuietTheme::renderSleep's `covered`) -- and it reads as one ladder only while
+  // the rungs are not scattered across three files. The theme already gates every
+  // cover-shaped decision on `covered`, so this is the rung ABOVE that, not a
+  // second copy of it.
+  //
+  // IT IS SET IN ONE PLACE FOR THE SAME REASON: after the branch above, so the
+  // nothing-open answer is final whichever way that branch went, rather than being
+  // written once optimistically and corrected later.
+  vm.shows = vm.nothingToContinue ? reader::SleepShows::Details : gSettings.sleepShows;
   return vm;
 }
 
@@ -4068,20 +4734,166 @@ static void paintStatusBar(const char* label) {
   logFlush();
 }
 
+// WHAT A SLEEP PAINT COST, split the way [i] splits an interaction, because a
+// sleep is no longer one waveform and nobody should have to instrument it again to
+// find that out. With a cover the panel does THREE waveforms and this renders FOUR
+// passes; without one it is the single ~825 ms it always was, and `paint=` is which.
+//
+// `panel=` is total less render, so it carries the log's own cost as well as the
+// waveform's -- which is what `ser=` is for. Unplugged it reads ~0 and the rest of
+// the line is the device's own, exactly as CLAUDE.md's `ser=` rule says.
+static void logSleepPaintCost(const char* how, int passes, uint32_t renderMs,
+                              uint32_t t0, uint32_t log0) {
+  const uint32_t total = millis() - t0;
+  logf("[power] sleep paint=%s passes=%d render=%lums panel=%lums total=%lums ser=%lums\n",
+       how, passes, (unsigned long)renderMs, (unsigned long)(total - renderMs),
+       (unsigned long)total, (unsigned long)(gLogMs - log0));
+  logFlush();
+}
+
 static void paintSleepScreen() {
+  const uint32_t t0 = millis();
+  const uint32_t log0 = gLogMs;
+  uint32_t renderMs = 0;
+  int passes = 0;
+
   const reader::SleepViewModel vm =
       sleepVmFromCard(std::string("ASLEEP") + "\xC2\xB7" + "PRESS POWER TO WAKE");
 
-  reader::SleepScreen scr(vm);
-  gFrame->clear(true);
-  scr.render(*gFrame, *gFonts, gTheme, reader::Plane::Bw);
-  gFrameContentsUnknown = true;
-  logf("[power] sleep screen: %s\n",
-       vm.nothingToContinue ? "the badge alone, nothing open" : vm.title.c_str());
+  // THE COVER IS RESOLVED BEFORE THE SCREEN IS CONSTRUCTED, which is the whole of
+  // sleepCoverForPaint's contract rather than a convenience here: it validates the
+  // cache's header against THIS book and THIS frame and answers null when there is
+  // nothing paintable, so fidelity() -- decided once, from whether the screen holds
+  // a source at all -- can never promise four levels to a source that will then
+  // refuse a plane mid-sequence. A screen that did would spend three waveforms
+  // drawing something one waveform could have drawn.
+  reader::CoverSource* const cover = sleepCoverForPaint();
+  reader::SleepScreen scr(vm, cover);
+
+  // THE OTHER HALF OF THE SHARED-BUS INVARIANT, and it did not matter on this path
+  // until now: with a cover the RENDER ITSELF reads the card -- CardCoverSource
+  // pulls one packed row at a time out of /.reader/ while the panel's CS is in play
+  // -- so a paint here is exactly the mixed-traffic case renderTop() holds this
+  // across its whole sequence for. Free insurance today (one task, recursive
+  // guard); here to be structural rather than a rule someone remembers.
+  SpiBusGuard bus;
+
+  // BEFORE THE PANEL WORK, NOT AFTER, and it moved one statement for that reason:
+  // the ~825 ms below is the last thing this device does, so a log that says which
+  // sequence is about to run beats one that says which one just did. It also names
+  // the cover, because "the cover did not appear" has two explanations that look
+  // identical on glass -- no usable cache, or a cache the paint refused.
+  logf("[power] sleep screen: %s%s\n",
+       vm.nothingToContinue ? "the badge alone, nothing open" : vm.title.c_str(),
+       cover != nullptr ? " +cover (four levels)" : "");
   logFlush();
-  // FULL, not fast: this is the last thing the panel is asked to do for hours and a
-  // differential update would leave the previous screen's residue under it.
-  showOnePass(reader::RefreshMode::Full);
+
+  if (scr.fidelity() != reader::Fidelity::Grayscale) {
+    // TODAY'S PATH, UNCHANGED: one Bw render, one FULL waveform. Reached whenever
+    // there is no usable cached cover -- which is every sleep before the first
+    // decode, every sleep with `Shows` on DETAILS, and every sleep with nothing
+    // open (sleepVmFromCard forces DETAILS there; SleepIdle is the badge alone and
+    // has no cover to show).
+    const uint32_t r0 = millis();
+    gFrame->clear(true);
+    scr.render(*gFrame, *gFonts, gTheme, reader::Plane::Bw);
+    gFrameContentsUnknown = true;
+    renderMs += millis() - r0;
+    ++passes;
+    // FULL, not fast: this is the last thing the panel is asked to do for hours and a
+    // differential update would leave the previous screen's residue under it.
+    showOnePass(reader::RefreshMode::Full);
+    logSleepPaintCost("mono", passes, renderMs, t0, log0);
+    mark("sleep-painted");
+    return;
+  }
+
+  // FOUR LEVELS, RENDERED STRAIGHT OFF `scr` -- AND paintGray() CANNOT SERVE.
+  //
+  // That is the trap this branch exists to avoid, not a stylistic choice. Every one
+  // of paintGray()'s passes goes through paintPlane() -> gApp->render(), and this
+  // screen is painted WITHOUT BEING PUSHED: there is no App on top holding it, and
+  // pushing it is precisely what must not happen, since the session record names
+  // the top of the stack and the next wake would restore INTO the sleep screen.
+  // Worse, sleepNow() RELEASES gApp before calling this a second time, so
+  // paintGray() here would be a null dereference on the one paint that carries the
+  // cover.
+  //
+  // The sequence below is paintGray()'s, step for step, with that one substitution.
+  // Every rule in it was earned by breaking the panel -- LSB before MSB, the settle
+  // pass before the planes, the Bw re-render instead of a fourth frame -- and none
+  // of the reasoning is restated here on purpose: two copies of it would drift, and
+  // paintGray() is where it lives.
+  const auto renderSleepPlane = [&scr, &renderMs, &passes](reader::Plane plane) {
+    const uint32_t r0 = millis();
+    gFrame->clear(true);
+    scr.render(*gFrame, *gFonts, gTheme, plane);
+    // App's partial-repaint record now describes a frame App did not write, and it
+    // cannot see that: its check compares the Framebuffer's ADDRESS, which has not
+    // moved. Set per pass rather than once, because each pass rewrites the frame.
+    gFrameContentsUnknown = true;
+    renderMs += millis() - r0;
+    ++passes;
+  };
+
+  // 1. The B/W base frame the panel paints first.
+  //
+  //    A CLEAN BASE IS FORCED, and this is the ONE place this sequence departs from
+  //    paintGray(). displayGrayscaleBase() takes its cheap differential settle
+  //    whenever the controller's old plane is valid -- which after any ordinary
+  //    paint it is -- and that is right for the READER, where the refinement
+  //    replaces a page with the same page at four levels and CLAUDE.md records it
+  //    as "366 ms of gray_DRF with no visible flash". It is wrong here twice over:
+  //    a first sleep paint replaces a whole chrome screen, and a second replaces a
+  //    card on a dither field with a PHOTOGRAPH. This is the last image the glass
+  //    holds for hours, and the rule for that is already written down one branch
+  //    up -- the sleep paint is FULL "because a differential update would leave the
+  //    previous screen's residue under it". requestResync() is how that rule
+  //    reaches the grayscale path; on Uc8279 it sets _forceFullSyncNext, which is
+  //    what makes displayGrayscaleBase take its clean-base branch and drive the
+  //    `fallback` mode below.
+  //
+  //    THE ASYMMETRY IS WHY IT IS HERE, and it is what Task 18 must settle on
+  //    glass. Being wrong costs one extra GC flash (~693 ms) per grayscale sleep
+  //    paint, on a device the user has already walked away from. NOT doing it and
+  //    being wrong costs the card's text ghosted under a book cover for as long as
+  //    the device is asleep. The reversal is this one line.
+  display.requestResync();
+  renderSleepPlane(reader::Plane::Bw);
+  // FULL rather than paintGray()'s HALF for the same reason the mono branch above
+  // asks for FULL. Note the two are the same waveform on Uc8279 -- displayStart
+  // picks GC for anything that is not Fast -- so this states the intent on a driver
+  // where it is free, rather than relying on that identity holding elsewhere.
+  display.displayGrayscaleBase(EInkDisplay::FULL_REFRESH);
+  mark("sleep-gray-base");
+
+  // 2. The settle pass. NOT a duplicate of the settle inside displayGrayscaleBase,
+  //    however identical the two command sequences look: paintGray() records what
+  //    dropping it did to the panel (ink accumulating on every refresh).
+  display.preconditionGrayscale();
+
+  // 3. The two bit-planes, LSB FIRST -- the MSB copy is dropped unless the driver
+  //    has seen a valid LSB. Each copy goes straight out over SPI and retains no
+  //    pointer, so the one frame serves both.
+  renderSleepPlane(reader::Plane::Lsb);
+  display.copyGrayscaleLsbBuffers(gFrame->data());
+  renderSleepPlane(reader::Plane::Msb);
+  display.copyGrayscaleMsbBuffers(gFrame->data());
+  mark("sleep-gray-planes");
+
+  // 4. The combined 4-level image, then the rebase onto a valid B/W baseline.
+  //
+  //    THE REBASE IS NOT SKIPPABLE EVEN HERE, where the next statement is a chip
+  //    reset -- and the temptation to skip it is exactly the confusion CLAUDE.md
+  //    warns about. cleanupGrayscaleBuffers is what takes the controller OUT of
+  //    grayscale mode, and display.deepSleep() runs against it moments later; the
+  //    glass keeps its image with no power, the controller keeps nothing. Leaving
+  //    the driver in a state its own invariants do not expect, on the way into the
+  //    one call that cannot be observed, is not a saving worth 156 ms.
+  display.displayGrayBuffer();
+  renderSleepPlane(reader::Plane::Bw);
+  display.cleanupGrayscaleBuffers(gFrame->data());
+  logSleepPaintCost("gray", passes, renderMs, t0, log0);
   mark("sleep-painted");
 }
 
@@ -4107,11 +4919,115 @@ static void paintSleepScreen() {
   // THE READING POSITION GOES DOWN WITH THE DEVICE. Deep sleep is a chip reset, so
   // nothing in RAM survives it -- and a reader who closes the cover mid-page expects
   // that page back.
+  // THE PHASE CLOCKS. A sleep used to be one waveform and is now up to five things,
+  // so it gets the same treatment an interaction gets: one line at the end that adds
+  // up, rather than a reader summing `[stage]` timestamps by hand. See the
+  // `[power] sleep cost` line below.
+  const uint32_t tSleep0 = millis();
+  const uint32_t logSleep0 = gLogMs;
+
   saveReadingPosition("sleep");
+  const uint32_t tSaved = millis();
   paintSleepScreen();
+  const uint32_t tPaint1 = millis();
+
+  // CAPTURED BEFORE ANYTHING CAN RELEASE THE App, and the log line below is the
+  // reason. screenName returns a string literal, so this outlives the stack it was
+  // asked from -- which by the time that line prints may not exist.
+  const char* const sleptFrom = reader::screenName(gApp->top().id());
+
+  // THE SLEEP SCREEN REFINES, EXACTLY AS A READER PAGE DOES. The card is painted
+  // first because it is correct and honest immediately; the cover arrives on a
+  // second sequence a few seconds later. The user has pressed power and walked
+  // away, so the first sleep of a new book still ENDS with the cover on the glass
+  // -- and every sleep after it paints the cover straight away, because the cache
+  // is already there.
+  //
+  // WHY IT IS HERE AND NOT ANYWHERE ELSE IN THIS FUNCTION: the decode needs the
+  // CARD and the second paint needs the PANEL, and the next two statements take
+  // both away -- display.deepSleep(), then powerDownRailsForSleep() cutting the
+  // X3's SD rail. So the position is forced by the hardware rather than chosen.
+  //
+  // AND IT IS BEFORE markSleeping(), which the ordering already gave us for free:
+  // that call sits below deepSleep() and the rail cut. It matters that it stays
+  // that way round. The flag is what the next boot needs and the log is only what
+  // a human needs, so a decode that hangs and takes a reset must leave NO flag: an
+  // unflagged boot starts cold, which is the correct answer for a sleep that never
+  // completed, where a flagged one would resume from a sleep that did not happen.
+  //
+  // THE PROBE IS HOISTED OUT OF THE `if` SO IT CAN BE TIMED. It is two openReads and
+  // a header parse -- the same pair the paint above already did -- and it is paid on
+  // EVERY sleep that wants a cover, hit or miss, so it is a number worth having
+  // rather than a shrug.
+  const bool decodeNeeded = coverWanted() && !coverCacheUsable();
+  const uint32_t tProbed = millis();
+  uint32_t decodeMs = 0;
+  uint32_t paint2Ms = 0;
+
+  if (decodeNeeded) {
+    // RELEASE THE WHOLE App, NOT JUST THE CHAPTER -- and the margin is why.
+    //
+    // ReaderScreen::releaseChapter() already exists, built for the peek, and it
+    // frees the right 36,956 bytes (Inflater's private Scratch; note that
+    // `inflater_` is a VALUE member, so an "obvious" release that drops the
+    // BlockReader, the InflateSource wrapper, the buffer view and the file handle
+    // frees none of them). It is not enough. Measured on the X3, a deflated JPEG
+    // peaks at 81,088 bytes -- 17.5 KB ABOVE the desktop's 63,560 for the same
+    // work -- and releasing only the chapter leaves ~87 KB when the book was
+    // opened through the LIBRARY, whose 203 entries sit resident under the Reader
+    // at ~59 KB. That is a margin of about SIX kilobytes on the commonest way to
+    // open a book, and the failure would be SILENT: decodeCover answers
+    // OutOfMemory, the screen falls back to the reading card, and it reads as
+    // "covers don't work for some books" rather than as a defect anybody reports.
+    // Releasing the App takes it to ~65 KB.
+    //
+    // NOTHING NEEDS THE App AFTER THE FIRST SLEEP PAINT, and each half of that was
+    // checked rather than assumed: saveWhereWeAre wrote the session record at
+    // NAVIGATION time and not here; saveReadingPosition ran above, while the stack
+    // was still standing; paintSleepScreen bypasses App by design, because pushing
+    // SleepScreen would make the next wake restore INTO it; and the next statement
+    // after this block is a chip reset. So this is the sentence the spec always
+    // carried -- sleep is the only moment in this firmware where freeing
+    // everything is free -- finally spent.
+    gApp.reset();
+    const uint32_t d0 = millis();
+    const reader::CoverResult r = decodeCoverToCache();
+    decodeMs = millis() - d0;
+    // The verdict, the reason and the elapsed time are one `[cover]` line inside
+    // decodeCoverToCache. Printing it again here would be the same fact twice.
+    if (r == reader::CoverResult::Ok) {
+      const uint32_t p0 = millis();
+      paintSleepScreen();
+      paint2Ms = millis() - p0;
+    }
+    // reacquireChapter() is deliberately NOT called, and neither is anything that
+    // would rebuild the App. There is nothing to come back to: the next statement
+    // is deepSleep(), and the wake after it is a chip reset that runs setup() from
+    // the top and restores the stack from the session record.
+  }
+
+  // WHAT THIS SLEEP COST, in one line that adds up.
+  //
+  // The shape a reader should expect, and why each case is what it is:
+  //   * DETAILS, or nothing open      -- paint1 only, ~825 ms, probe=0 decode=0.
+  //   * a cover wanted, cache warm    -- paint1 is the GRAY paint (three waveforms
+  //                                      plus four render passes), decode=0.
+  //   * a cover wanted, cache cold    -- paint1 MONO, then probe, then decode, then
+  //                                      paint2 GRAY. This is the expensive one, and
+  //                                      it happens once per book.
+  // `[power] sleep paint=` above breaks each paint into render and panel, and
+  // `[cover] … in Nms` names what the decode was doing. `ser=` is how much of the
+  // total was this device talking to a USB host: unplugged it reads ~0 and every
+  // other number on the line is the device's own.
+  logf("[power] sleep cost save=%lums paint1=%lums probe=%lums decode=%lums "
+       "paint2=%lums total=%lums ser=%lums\n",
+       (unsigned long)(tSaved - tSleep0), (unsigned long)(tPaint1 - tSaved),
+       (unsigned long)(tProbed - tPaint1), (unsigned long)decodeMs,
+       (unsigned long)paint2Ms, (unsigned long)(millis() - tSleep0),
+       (unsigned long)(gLogMs - logSleep0));
   logf("[power] sleeping from screen=%s; the record should name it on wake. Wake with "
        "the power button\n",
-       reader::screenName(gApp->top().id()));
+       sleptFrom);
   logFlush();
   display.deepSleep();
   // Cuts the X3's SD rail (GPIO13) and any other gated rail, latched so the

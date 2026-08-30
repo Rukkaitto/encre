@@ -10,3 +10,7 @@ platformio.local.ini
 
 # Visual brainstorming companion scratch (superpowers)
 .superpowers/
+
+# Device captures. CLAUDE.md uses run.log by convention; these are
+# transient evidence, and what they established belongs in the spec.
+*.log

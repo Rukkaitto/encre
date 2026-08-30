@@ -2,6 +2,23 @@
 #include <cstddef>
 #include <cstdint>
 
+// A LEAF, AND CoverFit IS WHY THIS INCLUDE IS THE ONE EXCEPTION. `cover_fit.h`
+// includes nothing at all -- it holds the enum alone, precisely so this header
+// can reach it, and it costs NINE preprocessed lines (17 against 8 for an empty
+// translation unit).
+//
+// Measured with `c++ -std=gnu++2a -E`, and the three numbers are the whole
+// argument: this header was 895 lines and this include takes it to 904, where
+// `imagefit.h` -- the other home the enum could have had -- is 72,962 because it
+// needs `<vector>`, and `layout.h` is 73,976, which this header already REFUSES
+// at `bodyPpem`, spelling two integers as literals rather than paying it. Reaching
+// into the imaging layer for one enum would have undone that decision exactly.
+//
+// (The header measures 915 today: 904 plus the eleven lines of its own the sleep
+// screen's two fields and their enum declarations take. The include's share is the
+// nine, and that is the number this note is about.)
+#include "reader/cover_fit.h"
+
 namespace reader {
 class FileSystem;
 
@@ -27,6 +44,25 @@ inline constexpr uint32_t kSleepAfterMsMax = 60u * 60u * 1000u;
 // cadence is indistinguishable from never, so anything larger is a bad number
 // rather than a preference.
 inline constexpr int kFullRefreshEveryMax = 255;
+
+// WHAT THE SLEEP SCREEN SHOWS (design/Sleep.dc.html, design/SleepCover*.dc.html).
+// The order is the CYCLE's order and it wraps, so it is a fact the Settings row
+// depends on rather than a free choice: `Shows` steps down this list.
+//
+// COVER draws the cover full-bleed and NO BADGE -- a full-bleed cover is not a
+// screen the device can otherwise be in, so it is unambiguous by itself where a
+// Library or a half-read page is not. Every fallback puts the badge back, which
+// is the whole reason the sleep screen exists.
+//
+// A THREE-VALUE ENUM RATHER THAN TWO BOOLS: `showCover` and `showDetails` would
+// spell a fourth state that shows NEITHER, which is a blank panel -- the one
+// thing this screen must never be. An enum cannot express it.
+enum class SleepShows { Cover, CoverAndDetails, Details };
+// The count is derived from the last enumerator rather than written twice: the
+// loader bounds a hand-edited value against it and the screen's cycle wraps on
+// it, and two spellings of one number is what this project keeps paying for.
+inline constexpr int kSleepShowsCount = static_cast<int>(SleepShows::Details) + 1;
+inline constexpr int kCoverFitCount = static_cast<int>(CoverFit::Whole) + 1;
 
 // --- THE TYPOGRAPHY STEPS ----------------------------------------------------
 //
@@ -154,14 +190,27 @@ struct Settings {
   int lineSpacing = 1700;
   bool justify = true;
 
+  // --- The sleep screen (design/Settings.dc.html's SLEEP SCREEN section) ------
+  //
+  // kSettingsVersion is NOT bumped, for the reason stated at the top of this
+  // header and for Typography's precedent: an added field takes its default from
+  // an older file. Both defaults below are chosen so a card carrying today's file
+  // behaves EXACTLY as it does today -- with no cached cover, every mode paints
+  // byte-identically to the shipped screen, so the goldens do not move either.
+  SleepShows sleepShows = SleepShows::CoverAndDetails;
+  CoverFit coverFit = CoverFit::Fill;
+
   // Corrects every field, returning false if anything had to be corrected --
-  // and there are TWO corrections, not one. The ranged fields (sleepAfterMs,
+  // and there are THREE corrections, not one. The ranged fields (sleepAfterMs,
   // fullRefreshEvery) are CLAMPED into a range. The typography fields are
   // SNAPPED onto their step tables above, which is a different operation and
   // deliberately not a range clamp: the Typography screen steps a table by
   // index, so a value in range but off the table is one the user could never
-  // leave. A file that needs either is a file to distrust, but correcting it and
-  // carrying on beats refusing to boot.
+  // leave. The two ENUMS are RESET TO THEIR DEFAULT, which is neither -- an
+  // integer outside an enum's enumerators has no nearest meaningful neighbour,
+  // so clamping 47 to `Details` would invent an intent the file never carried.
+  // A file that needs any of the three is a file to distrust, but correcting it
+  // and carrying on beats refusing to boot.
   bool validate();
 
   bool operator==(const Settings&) const = default;

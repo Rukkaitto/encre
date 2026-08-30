@@ -2,6 +2,7 @@
 #include <vector>
 
 #include "doctest.h"
+#include "grained_source.h"
 #include "reader/xml.h"
 
 using reader::Xml;
@@ -259,22 +260,7 @@ TEST_CASE("deterministic fuzz: every truncation and byte flip is survivable") {
 
 namespace {
 
-class Grained : public reader::ByteSource {
- public:
-  Grained(std::string_view bytes, size_t grain) : b_(bytes), grain_(grain) {}
-  size_t read(void* dst, size_t bytes) override {
-    const size_t want = bytes < grain_ ? bytes : grain_;
-    const size_t got = b_.size() - at_ < want ? b_.size() - at_ : want;
-    for (size_t i = 0; i < got; ++i) static_cast<char*>(dst)[i] = b_[at_ + i];
-    at_ += got;
-    return got;
-  }
-
- private:
-  std::string_view b_;
-  size_t grain_;
-  size_t at_ = 0;
-};
+using grainsrc::Grained;
 
 std::string flattenGrained(std::string_view doc, size_t grain) {
   Grained src(doc, grain);

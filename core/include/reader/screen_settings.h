@@ -32,22 +32,27 @@ class SettingsSink {
 
 // design/Settings.dc.html.
 //
-// THE SCREEN DRAWS EVERY BOARD ROW AND ONLY SOME RESPOND. `Sleep screen` is the
-// last one with nothing behind it -- covers are issue #11 -- and rather than let it
-// be selected and do nothing when pressed, FOCUS SKIPS IT. A row that cannot be
-// reached cannot mislead; a row that focuses and then ignores CHANGE is the silent
-// no-op this project has been bitten by twice. It is drawn identically to an
-// unfocused focusable row: no dimming, because a visual difference nobody designed
-// is worse than none.
+// EVERY ROW HERE RESPONDS NOW. `Sleep screen` / `BOOK COVER` was the last one
+// drawn with nothing behind it -- issue #11 -- and it is gone: the SLEEP SCREEN
+// section replaces it with `Shows` and `Cover fit`, two rows that act.
+//
+// FOCUS STILL SKIPS WHAT CANNOT ACT, and there is still one case: `Cover fit` is
+// unreachable while `Shows` shows no cover, DERIVED from settings_ rather than
+// tabulated -- Typography's own precedent, where `Font` is unreachable while one
+// body face is vendored and becomes reachable the moment a second lands, with no
+// line to remember. A row that cannot be reached cannot mislead; a row that
+// focuses and then ignores CHANGE is the silent no-op this project has been
+// bitten by twice. It is drawn identically to an unfocused focusable row: no
+// dimming, because a visual difference nobody designed is worse than none.
 //
 // IT USED TO SKIP FIVE MORE. A TYPOGRAPHY section carried Font, Size, Margins, Line
 // spacing and Alignment, drawn and unreachable because the settings behind them did
 // not exist. They do now, and they are edited on their own screen -- so those five
 // readout rows became one `Typography` row that opens it. That is what makes this
 // screen the FIRST here whose Confirm hint varies within itself: OPEN on that row,
-// CHANGE on the four DEVICE rows. See syncVm.
+// CHANGE on the five that edit a value in place. See syncVm.
 //
-// The list FITS the panel today -- seven items where eleven fit -- but it will grow
+// The list FITS the panel today -- nine items where eleven fit -- but it will grow
 // again, so it SCROLLS, with the same rail Library uses, taken off `totalRows >
 // rows` rather than assumed. Section headers are items in that list: they scroll
 // with the rows, they are never focusable, and they count toward the rail's
@@ -94,29 +99,45 @@ class SettingsScreen : public FocusScreen {
   // it -- keeping the table next to the board's order is what makes it checkable
   // by eye against design/Settings.dc.html, which is worth more than the
   // encapsulation of two descriptive types.
-  enum class Field { None, Typography, SleepAfter, FullRefresh, OnTransition };
+  enum class Field {
+    None,
+    Typography,
+    SleepShows,
+    CoverFit,
+    SleepAfter,
+    FullRefresh,
+    OnTransition
+  };
 
   struct Item {
     const char* label;
     Field field;
     bool isHeader;
-    // Whether a focus may land here. NOT derivable from `field`: a header has no
-    // field and cannot be focused, `Sleep screen` has no field and cannot be
-    // focused, and `Typography` has no field and MUST be -- it discloses a screen
-    // rather than editing a value.
+    // Whether a focus may land here AT ALL. NOT derivable from `field`: a header
+    // has no field and cannot be focused, and `Typography` has no field and MUST
+    // be -- it discloses a screen rather than editing a value.
+    //
+    // It is a CEILING, not the answer: focusable() reads this AND asks the
+    // settings, because `Cover fit` is reachable only while `Shows` shows a cover.
+    // A row that is `false` here can never be focused; a row that is `true` may
+    // still be refused by a condition no table can hold.
     bool reachable;
-    // What a row with no setting behind it shows. A board placeholder, NOT a
-    // setting: the value design/Settings.dc.html states, kept so the screen matches
-    // the board before the setting behind it exists. `Sleep screen` is the only one
-    // left -- covers are issue #11. Empty for a row whose value comes from
-    // `settings_`, and empty for a row that discloses instead of stating one.
-    const char* placeholder;
+    // `Item::placeholder` IS GONE. It carried the BOARD's value for a row whose
+    // setting did not exist yet, and `Sleep screen` / `BOOK COVER` was its last
+    // producer -- that row is now two rows that read `settings_`. The field is
+    // removed rather than left with no writer, which is how this project handles
+    // an outlived member (`ListRow::trackingEm1000` is the counter-example that
+    // stayed and had to be pinned by a test to keep it honest). A test asserts
+    // that every drawn row either discloses a screen or states a value, so the
+    // removal is a stated fact rather than an assumption.
   };
 
  private:
   Action cycleFocused();
-  // Which rows a focus may land on: not a header, and marked `reachable`.
-  // Consumed by FocusScreen through Focus::Gate.
+  // Which rows a focus may land on: not a header, marked `reachable`, and -- for
+  // `Cover fit` -- only while `Shows` shows a cover. Consumed by FocusScreen
+  // through Focus::Gate, so it is re-asked on every step rather than cached: the
+  // answer changes when the row above it is cycled.
   bool focusable(int index) const override;
   void syncVm() override;
   int firstFocusable() const;

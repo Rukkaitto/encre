@@ -587,3 +587,218 @@ TEST_CASE("fillRect draws the same bytes into a viewing frame as into an owning 
     CHECK(diffs == 0);
   }
 }
+
+// --- writePackedRow: one logical row of packed bits, and where the rotation is --
+//
+// THE CACHE HOLDS LOGICAL RASTER ROWS AND THE DEVICE'S FRAME IS Rotation::Ccw, so
+// getting one onto the frame is a strided SCATTER and not a memcpy: byteIndex maps
+// logical (x, y) to physical (physX = y, physY = width - 1 - x), so all `width`
+// pixels of logical row y land at ONE bit position, 0x80 >> (y % 8), in `width`
+// different bytes strided by physRowBytes().
+//
+// THE DESKTOP CANNOT CATCH A WRONG ONE ON ITS OWN. The simulator, every golden and
+// tools/compare-design.py are all Rotation::None, where the two branches agree --
+// so a version that always memcpy'd passes the entire suite and smears diagonally
+// on glass, which is precisely what CLAUDE.md records happening to the veil,
+// fillRect, the glyph blit and ditherRect. The Ccw cases below are the only thing
+// standing between this function and the panel, and they were proved by MUTATION:
+// forcing the unrotated branch for both rotations fails nothing under None and
+// fails loudly under Ccw.
+//
+// The reference is the per-pixel setPixel loop, for the reason fillRectReference
+// above is: setPixel IS the specification of what a logical coordinate means, and
+// any disagreement means the fast path is wrong. The comparison is over data()
+// rather than over pixels, because a mapping that is right per pixel and lays the
+// bytes out differently is still a wrong frame from the driver's point of view.
+
+namespace {
+
+void writePackedRowReference(Framebuffer& fb, int y, const uint8_t* row) {
+  for (int x = 0; x < fb.width(); ++x)
+    fb.setPixel(x, y, (row[x >> 3] & static_cast<uint8_t>(0x80u >> (x & 7))) != 0);
+}
+
+// A packed row whose SLACK BITS ARE GARBAGE. The last byte of a row covers eight
+// columns and a width that is not a multiple of eight uses only some of them; the
+// rest must not reach the frame. Filling them with the same pseudo-random stream
+// is what makes a missing edge mask visible -- zeroing them would hide it.
+std::vector<uint8_t> packedRow(int w, uint32_t& s) {
+  std::vector<uint8_t> row(static_cast<size_t>((w + 7) / 8));
+  for (uint8_t& b : row) {
+    s ^= s << 13; s ^= s >> 17; s ^= s << 5;  // xorshift32
+    b = static_cast<uint8_t>(s);
+  }
+  return row;
+}
+
+void checkWritePackedRowMatchesReference(int w, int h, reader::Rotation rot) {
+  Framebuffer fast(w, h, rot), ref(w, h, rot);
+  const uint32_t seed = static_cast<uint32_t>(w * 7919 + h * 104729) | 1u;
+  // The ground has no byte-level symmetry, so a scatter that is off by a bit, a
+  // byte or a row cannot coincidentally match -- and it is NOT plain white, which
+  // would hide every bit the fast path failed to write.
+  fillPseudoRandom(fast, seed);
+  fillPseudoRandom(ref, seed);
+
+  uint32_t s = seed;
+  for (int y = 0; y < h; ++y) {
+    const std::vector<uint8_t> row = packedRow(w, s);
+    fast.writePackedRow(y, row.data());
+    writePackedRowReference(ref, y, row.data());
+  }
+
+  REQUIRE(fast.sizeBytes() == ref.sizeBytes());
+  int diffs = 0, first = -1;
+  for (int i = 0; i < ref.sizeBytes(); ++i)
+    if (fast.data()[i] != ref.data()[i]) {
+      if (diffs == 0) first = i;
+      ++diffs;
+    }
+  const char* rn = rot == reader::Rotation::Ccw ? "Ccw" : "None";
+  CHECK_MESSAGE(diffs == 0, w << "x" << h << " rot=" << rn << ": " << diffs << " of "
+                              << ref.sizeBytes() << " bytes differ, first at offset " << first);
+}
+
+}  // namespace
+
+TEST_CASE("writePackedRow is byte-identical to a per-pixel setPixel of the same bits") {
+  struct Geom { int w, h; const char* what; };
+  const Geom cases[] = {
+      // The two real panels. Both widths are multiples of 8, which is exactly why
+      // the ragged cases below have to exist: nothing on the device reaches the
+      // partial last byte and only a test can.
+      {528, 792, "X3"},
+      {480, 800, "X4"},
+      // Neither dimension a multiple of 8, in both orders. Under Ccw the WIDTH is
+      // the number of physical rows and the HEIGHT is what the stride is rounded
+      // up from, so the two axes fail differently and both have to be ragged.
+      {13, 21, "ragged, taller than wide"},
+      {21, 13, "ragged, wider than tall"},
+      {7, 9, "ragged and small"},
+      {9, 7, "ragged and small, transposed"},
+      // Height not a multiple of 8 with width that is: under Ccw the row's bit
+      // position is 0x80 >> (y % 8), so the last byte COLUMN of the store is the
+      // partial one and it is the height that decides how much of it is used.
+      {16, 20, "width aligned, height not"},
+      {20, 16, "height aligned, width not"},
+      // Degenerate shapes, where a loop bound off by one has nowhere to hide.
+      {1, 1, "single pixel"},
+      {8, 1, "one byte, one row"},
+      {1, 800, "single column"},
+      {800, 1, "single row"},
+      {8, 8, "exactly one byte column"},
+      {9, 9, "one bit past a byte in both axes"},
+  };
+  for (const Geom& g : cases)
+    for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw})
+      checkWritePackedRowMatchesReference(g.w, g.h, rot);
+}
+
+TEST_CASE("writePackedRow puts a known pattern at the logical coordinates it names") {
+  // The case above compares against a reference; this one compares against the
+  // ARITHMETIC, so a reference and a fast path that shared a bug would still be
+  // caught. One black pixel per row, walking diagonally, read back through
+  // getPixel -- which is the contract every screen in this firmware draws against.
+  for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw}) {
+    const int w = 13, h = 21;  // ragged in both axes, on purpose
+    Framebuffer fb(w, h, rot);
+    fb.clear(true);
+    for (int y = 0; y < h; ++y) {
+      std::vector<uint8_t> row(static_cast<size_t>((w + 7) / 8), 0xFF);
+      const int black = y % w;
+      row[static_cast<size_t>(black >> 3)] &= static_cast<uint8_t>(~(0x80u >> (black & 7)));
+      fb.writePackedRow(y, row.data());
+    }
+    int ink = 0;
+    for (int y = 0; y < h; ++y)
+      for (int x = 0; x < w; ++x) {
+        const bool expectInk = x == y % w;
+        REQUIRE(fb.getPixel(x, y) == !expectInk);
+        if (expectInk) ++ink;
+      }
+    CHECK(ink == h);  // and the walk really did ink something on every row
+  }
+}
+
+TEST_CASE("writePackedRow writes ONE row and leaves the rest of the frame alone") {
+  // The scatter walks `width` bytes strided by physRowBytes(), so an off-by-one in
+  // the stride or the mirror term lands on a NEIGHBOURING row rather than failing a
+  // pattern check -- and under Ccw a wrong bit position corrupts a different row of
+  // the same byte column, which is eight rows' worth of blast radius.
+  for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw}) {
+    const int w = 21, h = 19;
+    Framebuffer fb(w, h, rot), untouched(w, h, rot);
+    fillPseudoRandom(fb, 0x5EEDu);
+    fillPseudoRandom(untouched, 0x5EEDu);
+
+    const int target = 9;  // mid-byte in both axes
+    const std::vector<uint8_t> row(static_cast<size_t>((w + 7) / 8), 0x00);  // all ink
+    fb.writePackedRow(target, row.data());
+
+    for (int y = 0; y < h; ++y)
+      for (int x = 0; x < w; ++x) {
+        CAPTURE(x); CAPTURE(y);
+        REQUIRE(fb.getPixel(x, y) == (y == target ? false : untouched.getPixel(x, y)));
+      }
+  }
+}
+
+TEST_CASE("writePackedRow refuses a row that is not on the frame, and a null one") {
+  // The scatter indexes raw bytes with no per-pixel bounds check -- that is the
+  // whole point of it -- so the ONE check it does have is the whole of its safety.
+  // ASAN is the real assertion here; the frame being untouched is the visible one.
+  for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw}) {
+    Framebuffer fb(24, 16, rot);
+    fb.clear(true);
+    const std::vector<uint8_t> row(3, 0x00);  // all ink, so any leak shows
+    fb.writePackedRow(-1, row.data());
+    fb.writePackedRow(16, row.data());
+    fb.writePackedRow(1000, row.data());
+    fb.writePackedRow(-1000, row.data());
+    fb.writePackedRow(0, nullptr);
+    fb.writePackedRow(8, nullptr);
+    int inked = 0;
+    for (int i = 0; i < fb.sizeBytes(); ++i)
+      if (fb.data()[i] != 0xFF) ++inked;
+    CHECK(inked == 0);
+    // ...and the check above is not passing on a function that does nothing.
+    fb.writePackedRow(8, row.data());
+    for (int x = 0; x < 24; ++x) CHECK_FALSE(fb.getPixel(x, 8));
+  }
+  // An inert buffer has no store at all, so this must return before data() is
+  // dereferenced -- and a refused VIEW is inert while still holding a pointer.
+  const std::vector<uint8_t> row(64, 0x00);
+  Framebuffer empty(0, 0);
+  empty.writePackedRow(0, row.data());
+  CHECK(empty.sizeBytes() == 0);
+  std::vector<uint8_t> tooSmall(4, 0xFF);
+  Framebuffer refused(tooSmall.data(), tooSmall.size(), 16, 4);
+  REQUIRE(refused.sizeBytes() == 0);
+  refused.writePackedRow(0, row.data());
+  for (uint8_t b : tooSmall) CHECK(b == 0xFF);
+}
+
+TEST_CASE("writePackedRow draws the same bytes into a viewing frame as into an owning one") {
+  // A view is what the shell paints into on the device -- the panel driver's own
+  // framebuffer -- and it is the case no golden covers. Same equivalence fillRect
+  // is held to, for the same reason.
+  for (const reader::Rotation rot : {reader::Rotation::None, reader::Rotation::Ccw}) {
+    const int w = 29, h = 37;
+    Framebuffer owned(w, h, rot);
+    std::vector<uint8_t> storage(static_cast<size_t>(owned.sizeBytes()), 0x00);
+    Framebuffer viewed(storage.data(), storage.size(), w, h, rot);
+    REQUIRE(viewed.sizeBytes() == owned.sizeBytes());
+    owned.clear(true);
+    viewed.clear(true);
+    uint32_t s = 0xC0FFEEu;
+    for (int y = 0; y < h; ++y) {
+      const std::vector<uint8_t> row = packedRow(w, s);
+      owned.writePackedRow(y, row.data());
+      viewed.writePackedRow(y, row.data());
+    }
+    int diffs = 0;
+    for (int i = 0; i < owned.sizeBytes(); ++i)
+      if (owned.data()[i] != viewed.data()[i]) ++diffs;
+    CHECK(diffs == 0);
+  }
+}

@@ -15,36 +15,15 @@
 
 #include "deflate_fixtures.h"
 #include "doctest.h"
+#include "grained_source.h"
 #include "stack_ceiling.h"
 #include "reader/inflate.h"
 #include "reader/inflate_stream.h"
 
 namespace {
 
+using grainsrc::Grained;
 using reader::Inflater;
-
-// A source over a buffer, handing out at most `grain` bytes a call.
-//
-// `grain` is the point of this class. A source that always satisfies a full read
-// hides every resumption bug in the decoder -- the bit reader's refill, a match
-// straddling an input boundary, a block header split across two reads. One byte at
-// a time makes every one of those happen on every stream.
-class Grained : public reader::ByteSource {
- public:
-  Grained(std::string_view bytes, size_t grain) : b_(bytes), grain_(grain) {}
-  size_t read(void* dst, size_t bytes) override {
-    const size_t want = bytes < grain_ ? bytes : grain_;
-    const size_t got = b_.size() - at_ < want ? b_.size() - at_ : want;
-    std::memcpy(dst, b_.data() + at_, got);
-    at_ += got;
-    return got;
-  }
-
- private:
-  std::string_view b_;
-  size_t grain_;
-  size_t at_ = 0;
-};
 
 std::string_view view(const unsigned char* p, size_t n) {
   return std::string_view(reinterpret_cast<const char*>(p), n);

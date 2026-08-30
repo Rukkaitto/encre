@@ -1,0 +1,219 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware.
+
+       ONE ROLE IS USED HERE AND THE REST STAY. `SleepCover.dc.html` uses none
+       of them -- the cover is its whole frame -- and says so; this board draws
+       the badge, so `--t-meta` is live and its five siblings are not. The ramp
+       is kept whole anyway, because these four sleep boards are one screen with
+       its content removed a piece at a time (Sleep -> SleepCoverDetails ->
+       SleepCover, and this one branching off SleepCover), and a helmet that
+       drifts between them is how two of them stop being comparable. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+  </style>
+</helmet>
+<div style="width: 480px; height: 800px; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; box-sizing: border-box; position: relative;">
+
+  <!-- COVER, WAKING. This is `SleepCover.dc.html` with the badge put back and
+       the waking words in it. Same frame, same box model, same helmet, same
+       committed picture, still no card. It is the screen a wake paints when the
+       sleep it is waking from had a cover on the glass.
+
+       THREE DIFFERENCES FROM THAT BOARD, AND THE THIRD IS NOT A DESIGN CHANGE:
+       the badge is present, it says WAKING, and the image carries a
+       `contrast(100000%)` filter. The filter is a RENDITION difference rather
+       than a design one -- the same file at one bit instead of four levels,
+       because a wake gets one waveform -- and the section below works through
+       why that is a discard of tone rather than an invention of it.
+
+       IT EXISTS BECAUSE NEITHER NEIGHBOUR STATES IT. `SleepCover.dc.html` is
+       this picture with no badge at all, by the deliberate rule below;
+       `SleepWaking.dc.html` is these words over the dithered card and no
+       picture. A wake over a cover is both, and a rendition nothing on disk
+       states is a rendition that drifts.
+
+  ==== WHY THE BADGE IS BACK, WHERE SleepCover.dc.html DROPS IT ====
+
+       That board drops it, and CLAUDE.md's standing rule is that it may not be
+       dropped: e-ink holds its last image with no power, so a screen left on the
+       glass gives no clue the device is asleep rather than frozen. The licence
+       `SleepCover.dc.html` claims is narrow and it is real -- a full-bleed book
+       cover is NOT A SCREEN THIS DEVICE CAN OTHERWISE BE IN, so it says "asleep"
+       unaided and needs no words to say it.
+
+       A SCREEN SAYING "WAKING" IS MAKING A DIFFERENT CLAIM AND CANNOT DELEGATE
+       IT TO THE PICTURE. The cover is byte-identical in both states -- the words
+       are the only thing that differ -- so a badgeless waking screen would paint
+       something indistinguishable from the sleep it is waking from, which is
+       worse than the stale screen it replaced. The picture can carry "asleep"
+       because it is unambiguous; it has nothing to say about which direction the
+       device is going.
+
+       So the suppression is SUPPRESSED FOR THE BADGE ONLY. The card stays gone,
+       by the same `coverOnly` rule and with nothing added to it: waking is the
+       cover and the words, never the cover and the reading card. One flag in the
+       view model (`SleepViewModel::waking`) is what exempts the badge, and it is
+       a fact about WHICH SCREEN THIS IS rather than about what it holds -- the
+       note is free copy, and a theme must not read words to decide a layout.
+
+  ==== THE COPY IS SleepWaking.dc.html'S, VERBATIM ====
+
+       `WAKING…` -- the same string, the same `--t-meta`, the same 0.2em, the
+       same box, the same `bottom: 34px`. Two boards spelling one message
+       differently is the drift this project keeps recording, so the badge below
+       is a copy of that board's badge with nothing about it reconsidered.
+
+       THE COLLISION IS REAL, IT IS VISIBLE ON THIS VERY ASSET, AND IT IS NOT
+       THIS BOARD'S TO FIX. A Standard Ebooks cover carries its title band low,
+       so the badge slices the artwork -- and on the committed Romola cover it
+       lands squarely on the author line, cutting `GEORGE ELIOT` in half
+       lengthwise with the badge's own top border. Rendered and looked at, not
+       inferred. `SleepCoverDetails.dc.html` carries the same collision as an
+       open on-glass question, and it is the strongest argument the boards make
+       for why the SLEEPING cover mode drops the badge at all.
+
+       IT DOES NOT REACH HERE, because here there is no alternative: the words
+       are the entire content of this screen, and a wake with nothing on it is
+       the defect this whole rendition exists to fix. DO NOT MOVE THE BADGE TO
+       FIX IT -- its position is `Sleep.dc.html`'s, and a badge that sat somewhere
+       else when a cover was behind it would be two spellings of one thing, on a
+       screen whose sibling boards all agree about where it goes. If the slice is
+       judged unacceptable on glass the answer is a rule about the badge that all
+       four sleep boards adopt together, not a special case on this one.
+
+  ==== THE COVER IS ONE BIT HERE AND FOUR LEVELS ON THE SLEEP ====
+
+       THIS IS THE SAME PICTURE, NOT A DIFFERENT ONE. `Plane::Bw` inks where
+       coverage >= 2, which is exactly "the Msb plane set" -- and the Msb plane
+       is one of the two the sleep's four-level render composes. So the wake
+       paints the sleep's own cover with its Lsb thrown away, which is why the
+       image below is the SAME committed file both cover boards use, shown at its
+       own threshold.
+
+       WHY ONE BIT: a wake paints ONE WAVEFORM. The grayscale sequence is three
+       plus a rebase (~2.4 s), which is slower than the restore this screen
+       exists to cover for -- a waking message that arrives after the screen it
+       announces is worse than none. And there is no windowed refresh on this
+       panel to repaint the badge box alone and leave the four-level picture
+       standing: `PanelDriver.h`'s `displayWindow` default discards the window,
+       and `Uc8279Driver` does not override it. So the choice was the whole frame
+       in one bit, or no waking message at all.
+
+       THE RISK, STATED: the Msb of a Floyd-Steinberg image is a threshold
+       THROUGH a dithered picture, not a threshold of the original, and nobody
+       has seen this on glass. If it comes back as coarse blotches where the
+       sleep showed tone, `kWakePaintsCoverAsMono` in `shell/src/main.cpp` is the
+       one-line way out -- it leaves the four-level photograph untouched and
+       gives up the waking message. That would make this board a description of a
+       screen the device no longer paints, so it is a board to delete rather than
+       to edit if that flag is ever flipped.
+
+  ==== THE ASSET, AND WHY IT IS THE FOUR-LEVEL ONE WITH A FILTER ON IT ====
+
+       THE PICTURE IS GENERATED BY OUR OWN PIPELINE AND COMMITTED, NOT AUTHORED,
+       for the reason `design/assets/README.md` gives at length: `make compare`
+       renders this board in Chrome and diffs it against the firmware per pixel,
+       and CHROME CANNOT FLOYD-STEINBERG. On this board the cover is the whole
+       frame bar the badge, so without the shared file there would be nothing
+       here worth comparing at all.
+
+         make sim
+         ./build/reader_sim cover <book.epub> design/assets/sleep-cover-480x800.png \
+             --canvas 480x800 --fit fill
+         ./build/reader_sim cover <book.epub> design/assets/sleep-cover-528x792.png \
+             --canvas 528x792 --fit fill
+
+       SAME PAIR OF FILES AS ITS TWO SIBLINGS, AND NO THIRD FILE. The obvious
+       alternative was to generate and commit a one-bit asset beside them, and it
+       is the wrong answer here for one specific reason: `sim/main.cpp`'s
+       `BoardCover` -- the FIRMWARE column -- decodes the four-level PNG and
+       unpacks its two planes. A one-bit asset would be a SECOND COPY of a
+       picture the firmware column already reads from the first, kept in step by
+       nothing, which is the exact shape this repo has been bitten by more times
+       than any other. One file feeds both columns, as `iconc.py`'s rule demands.
+
+       THE FILTER IS A DISCARD, NOT AN INVENTION, WHICH IS WHY IT IS ALLOWED.
+       The rule the committed asset exists to enforce is that Chrome must not
+       INVENT tone -- it cannot diffuse error, so a browser-made cover would put
+       two rasterisers in the comparison. Throwing tone AWAY is a different
+       operation and Chrome does it exactly: `contrast(100000%)` is a hard
+       threshold at 0.5, and the file holds only the four ramp levels
+       `{0xFF, 0xAA, 0x55, 0x00}` written by `writeGrayPng`. 0xAA (170) and 0x55
+       (85) sit either side of 128, and that boundary IS the Msb boundary,
+       because the ramp is indexed `(msb << 1) | lsb`. So the threshold of the
+       four-level file is the Msb plane bit for bit, which is what `Plane::Bw`
+       inks. The board and the firmware are showing one picture through one
+       operation, not two pictures that happen to look alike.
+
+       MEASURED RATHER THAN ARGUED, because the argument has a hole in it that
+       only a measurement can close: CSS filters could plausibly threshold in
+       LINEAR light, where 170 and 85 are 0.40 and 0.09 and BOTH fall below 0.5 --
+       the cover would come back solid black. Rendered through this tool's own
+       Chrome invocation, the filtered board is a pixel-for-pixel match for the
+       threshold-at-128 of the source file: 0 pixels differ of 384,000. It also
+       fails LOUDLY rather than quietly if that ever changes -- a linearising
+       Chrome blacks out the 17% of the frame that is paper, which is a mismatch
+       nobody could read as noise.
+
+       TWO FILES, ONE PER PANEL, BECAUSE A FIT IS NOT A SCALE. The X4 is 3:5 and
+       the X3 is 2:3, so `--fit fill` crops a 1400x2100 cover differently on each
+       and the dither grid is keyed on absolute panel coordinates either way.
+       Letting Chrome resample the 480x800 file up to 528x792 would compare the
+       browser's resampler against the firmware's dither, which is the exact
+       thing this asset exists to avoid. `(width: 528px)` is the X3 render:
+       compare-design.py drives Chrome at `--window-size=WxH`, so the viewport IS
+       the panel. A human opening this file in an ordinary window sees the
+       authored X4 asset, which is what the board is authored at. -->
+  <picture>
+    <source media="(width: 528px)" srcset="assets/sleep-cover-528x792.png">
+    <img src="assets/sleep-cover-480x800.png" alt=""
+         style="position: absolute; top: 0px; left: 0px; width: 480px; height: 800px; object-fit: cover; display: block; filter: contrast(100000%);">
+  </picture>
+
+  <!-- NO CARD, AND THAT HALF IS UNCHANGED FROM `SleepCover.dc.html`. `coverOnly`
+       takes the card and the badge away together; only the badge is exempted
+       above. A waking screen wants the cover and the words. Putting the reading
+       card back would make this `SleepCoverDetails.dc.html` with different copy,
+       which is a fourth mode nobody asked for -- and COVER + DETAILS already
+       keeps its badge, so a wake in THAT mode needs nothing from this board
+       beyond the note text. -->
+
+  <!-- The badge: `SleepWaking.dc.html`'s, verbatim. `position: absolute` and no
+       `position: relative` sibling to stack against, so it paints over the
+       absolutely-positioned cover on document order alone -- unlike
+       `SleepCoverDetails.dc.html`, whose in-flow card needed `position: relative`
+       added to lift it above the image. -->
+  <div style="position: absolute; bottom: 34px; background: #ffffff; border: 1px solid #000000; padding: 8px 18px;">
+    <div style="font-size: var(--t-meta); letter-spacing: 0.2em;">WAKING&hellip;</div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

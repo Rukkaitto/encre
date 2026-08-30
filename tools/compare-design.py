@@ -129,6 +129,20 @@ FLOW_SCREENS = [
     ("home_charging",   "HomeCharging.dc.html",   "Home / charging"),
     ("home_missing",    "HomeMissing.dc.html",    "Home / missing book"),
     ("sleep_idle",      "SleepIdle.dc.html",      "Sleep / nothing open"),
+    # The two cover modes. Their own rows rather than variants of `sleep`, because
+    # the mismatch percentage is per screen and folding them in would average a
+    # regression in one mode against a board that cannot show it. BOTH BOARDS DISPLAY
+    # A COMMITTED PNG -- the firmware's own cover output -- so render_board has to
+    # serve design/assets alongside index.html; see the note there.
+    ("sleep_cover",         "SleepCover.dc.html",        "Sleep / cover"),
+    ("sleep_cover_details", "SleepCoverDetails.dc.html", "Sleep / cover + details"),
+    # THE WAKE OVER A COVER, and its own row for a reason the two above do not have:
+    # it is the only sleep render that paints ONE pass. A wake gets one waveform, so
+    # the firmware column here is Plane::Bw -- the Msb plane, the same picture at two
+    # levels -- where its two siblings are the three-pass grayscale sequence. Folded
+    # into either of them, a regression in the one-bit rendition would be averaged
+    # against a board that cannot show it.
+    ("sleep_cover_waking",  "SleepCoverWaking.dc.html",  "Sleep / cover, waking"),
     # THE LOADING STATE, and it is two boards rather than one because the mechanism
     # has two homes: it replaces the HINT BAR on a screen that draws one, and it
     # replaces the badge's words on Sleep, which draws no hint bar because it takes
@@ -211,6 +225,33 @@ def render_board(board_path, out_png, w, h):
             + "<style>html,body{margin:0;background:#fff}</style>"
             + frame_override
             + panel_body)
+        # THE BOARD'S ASSETS GO WITH IT. This directory is the document root, so a
+        # board that says `src="assets/sleep-cover-480x800.png"` -- as both cover
+        # sleep boards do -- 404s without this and renders a blank frame with a
+        # broken-image glyph. It fails LOUDLY, since a blank panel against a
+        # full-bleed cover is an enormous mismatch rather than a quiet pass, but it
+        # fails, and the fix belongs here rather than in the board: inlining the PNG
+        # as a data URI would make the markup a SECOND COPY of a file whose entire
+        # purpose is that the board and the firmware read the same bytes.
+        #
+        # A symlink, not a copy: the pair is 263 KB and this runs once per board per
+        # geometry (60 times for the full sheet), so copying would be ~16 MB of
+        # temporary files for bytes nothing writes to. copytree is the fallback for a
+        # filesystem that will not link.
+        #
+        # AND ITS ABSENCE IS A HARD ERROR rather than a skip, for the same reason a
+        # board named in the list and absent from disk is: a tool that quietly serves
+        # less than it claims still prints `ok`, and a board whose picture failed to
+        # load would be measured against a blank design panel with nothing saying so.
+        assets = ROOT / "design" / "assets"
+        if not assets.is_dir():
+            raise SystemExit(
+                "design/assets is missing, so any board that displays a committed "
+                "picture would render blank -- restore %s" % assets)
+        try:
+            os.symlink(assets, tmp / "assets", target_is_directory=True)
+        except OSError:
+            shutil.copytree(assets, tmp / "assets")
         port = serve(tmp)
         subprocess.run(
             [CHROME, "--headless", "--disable-gpu", "--force-device-scale-factor=1",
