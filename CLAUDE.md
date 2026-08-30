@@ -3804,23 +3804,26 @@ among the eight boards sharing the overlay panel box, `kActionsPanelW` is the sa
 and `drawPanelRow` was already "72 tall, inset on a panel's own 20px padding, discloses
 with a chevron". The only thing the menu added to the primitives is a row that states a
 VALUE — its `Bookmarks` count — which is the other half of Home's "a row states a
-quantity or discloses a screen, never both".
+quantity or discloses a screen, never both". **THAT ROW IS CUT AND THE PARAMETER IS
+NOT** — see the trackingEm1000 paragraph below, which is where this went next.
 
 **IT DECLARES `Mono` WHERE THE READER DECLARES `Grayscale`.** Fidelity comes from the
 top screen, so the menu paints in one waveform instead of three and its focus moves are
 eligible for the overlay-only partial repaint (grayscale never is). The page under the
 veil is hard-thresholded for those frames — the trade, and acceptable because the menu
 is chrome and the page is the one thing here that wanted four levels. Its
-`paintFootprint` is a constant, unlike the actions panel's: all five rows are one
-height, so the panel cannot change height when the focus moves and every move takes the
-fast path.
+`paintFootprint` is a constant, unlike the actions panel's: every row is one height, so
+the panel cannot change height when the focus moves and every move takes the fast path.
+(That sentence counted the rows twice and the count was wrong twice; the property is
+"one height", and the number belongs in the test.)
 
 **`discloses` CANNOT BE DERIVED FROM AN EMPTY VALUE**, and deriving it drew a chevron on
 `Close book` promising a screen that does not exist — that row had neither a value nor a
 mark, because it acted in place. So `ListRow` carries the flag explicitly, as
-`ItemActionEntry` already did. `Bookmarks` is the surviving instance of the same rule
-from the other side: a value where its siblings have marks. Both fixes took the menu from
-3.24% to **3.02%** against its board.
+`ItemActionEntry` already did. `Bookmarks` WAS the surviving instance of the same rule
+from the other side — a value where its siblings have marks — and with that row cut
+(#55) **this sheet states no quantity at all and every row on it discloses**. Both fixes
+took the menu from 3.24% to **3.02%** against its board.
 
 **`ListRow::trackingEm1000` NOW HAS NO PRODUCER.** `Close book` was `0.06em` where its
 siblings were untracked — 1.5px a gap at Value500, ~15px across that label — and it was
@@ -3829,6 +3832,25 @@ the field, `drawPanelRow`'s `labelTrackingEm1000` and the `trackingEm` call it g
 **untested capability rather than working behaviour**. Kept because it is a generic
 component parameter a board can ask for again; a test asserts every row is `0` so this
 stays a stated fact rather than an assumption.
+
+**AND `drawPanelRow`'s VALUE PATH JOINED IT, WITH THE OPPOSITE ANSWER.** Cutting
+`Bookmarks` (#55) left the value argument in exactly the shape tracking is already in —
+a parameter whose last producer walked out — and the two were settled differently on
+purpose. **Tracking is a board's typographic request and its absence is invisible; a
+value is a MARK, and a wrong one is a number in the wrong place on the glass.** So the
+pixels are pinned at the PRIMITIVE instead of at a screen — `test_components.cpp`, "a
+panel row states a quantity or discloses a screen, never both" — which needs no caller
+to reach them: the value wins over the chevron, it is right-aligned by MEASURING itself
+rather than by a fixed offset, and it inverts with the focus. **Proved by mutation, and
+the first version of the alignment case did not bite**: it asserted a wider value's LEFT
+edge moved, which passes against a hardcoded offset because `1` and `2` have different
+side bearings — it was reading the FACE. Two values ending at the same column is the
+assertion that is actually about the placement.
+
+**The parameter stays for the same reason tracking's does** — `Bookmarks.dc.html` is a
+board that asks for it again in V1.1 — and `ListRow::value` is untouched either way,
+since Settings, Contents and Typography all still state values through their own row
+primitives. It is `drawPanelRow`'s argument alone that lost its caller.
 
 **A MERGE CHANGED THIS BOARD UNDER THE SCREEN, and `make compare` said "firmware ok"
 the whole time.** Another branch (`claude/book-character-identification`) added a `Names`
@@ -3860,12 +3882,20 @@ it has open, and neither has to know how the other is shaped. Two details worth 
   after opening them from a book would show the book — a stale answer that looks like the
   right screen.
 
-**THREE OF THE MENU'S FIVE ROWS DO NOTHING AND ARE DRAWN ANYWAY** — Settings' rule, and
+**ONE OF THE MENU'S FOUR ROWS DOES NOTHING AND IS DRAWN ANYWAY** — Settings' rule, and
 the board was edited to match before the screen was written: it had focused Typography,
-which is not built, so implementing it faithfully would have drawn a selection on a dead
-row. `Contents` and `About this book` respond; Typography, Bookmarks and Names do not.
+which was not built then, so implementing it faithfully would have drawn a selection on a
+dead row. `Contents`, `Typography` and `About this book` respond; `Names` does not.
 
-**TWO ROWS WERE CUT ENTIRELY (2026-08-24), NEITHER FOR ROOM.** `Go to page…` because
+**AND THAT RULE HAS A LIMIT, WHICH `Bookmarks` IS WHERE IT WAS REACHED (#55).** Skipping
+the focus stops an unbuilt row misleading a reader who PRESSES it; it does nothing about
+the row itself promising a feature the release does not have. The distinction that
+decides it is **which release the row is waiting on**: `Names` waits on its own screen
+inside V1, so it is drawn and skipped, where `Bookmarks` moved to V1.1 (#3) and was cut
+from the board and the enum instead. It comes back with the screen.
+
+**THREE ROWS HAVE BEEN CUT ENTIRELY, AND NOT ONE OF THEM FOR ROOM** — two of them on
+2026-08-24 and `Bookmarks` above. `Go to page…` because
 **nobody navigates an EPUB by page number**: a reflowable book has no stable page to go
 to and the number a picker offers moves with the type size, so the honest jump is the
 chapter name `Contents` already gives. (Its board and its roadmap entry went too; the
@@ -3875,12 +3905,23 @@ one, and it cost a fourth save edge to stay correct. Removing it deleted that ed
 `popTo(Library)` it was the only user of on this screen, and the only producer of row
 tracking in the firmware. The enum shrank with it: **a row index is not a stable
 numbering** here, because the one thing that persists one is `FocusScreen`'s restore,
-and that refuses an index it cannot land on — exactly what a shrunk table produces.
+and that refuses an index it cannot land on — exactly what a shrunk table produces. It
+has now shrunk twice on that argument with nothing to migrate either time.
 
-The menu measures **3.10% / 3.60%** against the board after the cut, against 3.06% /
-3.60% before: the panel shrank consistently on both sides, so the residual is the same
+The menu measured **3.10% / 3.60%** against the board after that cut, against 3.06% /
+3.60% before: the panel shrank consistently on both sides, so the residual was the same
 rasteriser difference rather than new drift. **That the number barely moved is the
 check** — a structural mismatch would have shown as a jump.
+
+**AFTER THE `Bookmarks` CUT IT IS 2.46% / 3.02%**, and that one moved the number rather
+than holding it — which is the expected direction and worth saying why: the row that
+went was the only one carrying a **right-aligned bold numeral**, and a numeral is where
+Chrome's subpixel advances and the firmware's whole-pixel ones disagree most per pixel of
+ink. **The sheet still prints `ok` and not a percentage (#41)**, so both figures are a
+threshold-at-128 count over the bare panel PNGs `--export` writes. Measured in the same
+tree, the untouched `reader` reads 5.24% / 6.29% against the 5.34% / 6.38% recorded
+elsewhere here — the same ~0.1pp offset this file already notes for the peek, which is
+what makes the before and after comparable rather than two instruments.
 
 **THE ROW'S RIGHT SLOT HAS HELD TWO WRONG THINGS.** It was `P. 21`, a page number for a
 place in the book, which needs every chapter paginated (~49 s). That became `CH. 01`, the
@@ -4518,7 +4559,9 @@ passed — `shell/` has no harness, so nothing on the desktop touches that loop.
 - **A GOLDEN THAT PASSES WITHOUT BITING IS WORTHLESS, so mutate and watch it fail.**
   Every golden added here was proved by breaking the code it defends: blockquote no
   longer italic fails 2, heading no longer centred fails 2, blank rows between blocks
-  off fails 4, the menu's `Bookmarks` value removed fails 2, and the section header's
+  off fails 4, the menu's `Bookmarks` value removed fails 2 (**that mutation is no longer
+available** — the row is cut, and the value path is pinned at the primitive instead; see
+the reader-menu section), and the section header's
   positional rule dropped fails exactly 4 -- `contents` and `settings` at both
   geometries and none of the other three. **One of my mutations was a no-op** and looked
   like a passing test: I patched `rowRuleFor` in components.cpp where it lives in

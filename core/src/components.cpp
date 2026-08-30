@@ -826,8 +826,11 @@ int drawPanelRow(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
            labelTrackingEm1000 == 0 ? Tracking{} : trackingEm(lf, labelTrackingEm1000), plane);
   // A ROW STATES A QUANTITY OR DISCLOSES A SCREEN, NEVER BOTH -- the same rule Home's
   // menu rows follow, and the reader menu is where a panel row first needed the other
-  // half of it: its `Bookmarks` row carries a count where its five siblings carry
-  // chevrons. Value700 in both focus states, as the board draws it.
+  // half of it: its `Bookmarks` row carried a count where its siblings carried chevrons.
+  // That row is CUT (#55, bookmarks moved to V1.1), so this branch has no producer in
+  // the firmware today and its behaviour is pinned directly instead -- test_components
+  // .cpp, "a panel row states a quantity or discloses a screen, never both". Value700 in
+  // both focus states, as the board drew it.
   if (!value.empty()) {
     const Font& vf = fonts[Role::Value700];
     drawText(fb, vf, x + w - kPanelPadX - vf.measure(value), baselineIn(vf, y, kPanelRowContentH),

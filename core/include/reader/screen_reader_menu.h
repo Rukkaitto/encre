@@ -20,11 +20,18 @@ namespace reader {
 // those frames, which is the trade: it is under a veil and the menu is chrome, where
 // the page is the one thing on this device that wanted four levels.
 //
-// TWO OF ITS FIVE ROWS ARE NOT BUILT and are drawn anyway, with the focus skipping
-// them -- Settings' rule, and its reasoning verbatim: a row that cannot be reached
-// cannot mislead, where a row that focuses and then ignores SELECT is the silent no-op
-// this project has been bitten by twice. An inert row is drawn EXACTLY as an unfocused
-// live one; `ListRow::focusable` is about input, not appearance.
+// ONE OF ITS FOUR ROWS IS NOT BUILT and is drawn anyway, with the focus skipping it --
+// Settings' rule, and its reasoning verbatim: a row that cannot be reached cannot
+// mislead, where a row that focuses and then ignores SELECT is the silent no-op this
+// project has been bitten by twice. An inert row is drawn EXACTLY as an unfocused live
+// one; `ListRow::focusable` is about input, not appearance.
+//
+// THAT RULE HAS A LIMIT, AND `Bookmarks` IS WHERE IT WAS REACHED. Skipping the focus
+// keeps an unbuilt row from misleading a reader who presses it; it does not keep the
+// row itself from promising a feature the release does not have. Bookmarks moved to
+// V1.1 (#3), so the row was cut from the board and from here rather than left drawn
+// and dead -- the distinction being that Names is a row waiting on its own screen in
+// this release, where Bookmarks is a row waiting on the next one.
 class ReaderMenuScreen : public FocusScreen {
  public:
   // `bookTitle` and `progress` are the panel's header -- the book's name and how far
@@ -57,19 +64,19 @@ class ReaderMenuScreen : public FocusScreen {
   // per pixel it was 13.02% against 3.02% before -- "ok" means the sim produced a frame,
   // not that the frame matches, and only the mismatch number says which.
   //
-  // `kGoToPage` and `kCloseBook` are GONE, and the board states why: a reflowable book
-  // has no stable page to go to, and Back from the page already closes the book. The
-  // enum is not a stable numbering to be preserved -- the ONE thing that persists a row
-  // index is FocusScreen's restore, and it refuses an index it cannot land on, which is
-  // exactly the case a shrunk table creates.
+  // `kGoToPage`, `kCloseBook` and `kBookmarks` are GONE, and the board states why: a
+  // reflowable book has no stable page to go to, Back from the page already closes the
+  // book, and bookmarks are V1.1. The enum is not a stable numbering to be preserved --
+  // the ONE thing that persists a row index is FocusScreen's restore, and it refuses an
+  // index it cannot land on, which is exactly the case a shrunk table creates. This is
+  // the second cut for that reason and it needed no more care than the first.
   enum Row : int {
     kContents,
     kTypography,
-    kBookmarks,
     kNames,
     kAboutBook,
   };
-  static constexpr int kRowCount = 5;
+  static constexpr int kRowCount = 4;
 
  protected:
   void syncVm() override;

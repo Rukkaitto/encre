@@ -399,10 +399,13 @@ using SettingsRow = ListRow;
 // design/ReaderMenu.dc.html: the overlay the Reader's Activate opens.
 //
 // An OVERLAY, so the page stays visible under a veil -- the reader has not left the
-// book, they have asked it a question. Four of its six rows are not built, and they
-// are DRAWN and skipped by the focus, which is Settings' rule: a row that cannot be
-// reached cannot mislead, where a row that focuses and then does nothing is the silent
-// no-op this project has been bitten by twice.
+// book, they have asked it a question. ONE of its four rows is not built, and it is
+// DRAWN and skipped by the focus, which is Settings' rule: a row that cannot be reached
+// cannot mislead, where a row that focuses and then does nothing is the silent no-op
+// this project has been bitten by twice. (This line said "four of its six" through two
+// separate cuts -- a count in prose beside a table is a second copy of the table, and
+// it drifts. It is asserted in test_screen_contents.cpp, which is where a number that
+// has to stay true belongs.)
 struct ReaderMenuViewModel {
   std::string bookTitle;  // the panel's header, shouted by the theme
   std::string progress;   // its right slot: "6%"
