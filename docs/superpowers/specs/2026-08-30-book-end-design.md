@@ -126,22 +126,33 @@ reason that function is shaped the way it is.
 
 ## What the Library draws
 
-`applyProgress` is the ONE spelling of the derivation, shared by the scan and by
-`refreshProgress()` so the two cannot disagree. It gains one branch: a finished book
-reads **`FINISHED`** where an unfinished started book reads its percentage and an
-unopened one reads `NEW`.
+**THE FINISHED ROW IS ALREADY BOARDED, AND ITS WORD IS `DONE`.**
+`Library.dc.html` draws five rows — `6%`, **`DONE`**, `48%`, `NEW`, `31%` — and
+`LibraryRow::value`'s own comment has said `"6%", "DONE", "NEW"` since the screen
+landed. So this design does NOT get to pick the copy, and `FINISHED` (which is what
+this spec said before the board was read properly) would have been invented copy
+overriding a state the design already had.
 
-**This is a UI change, so `Library.dc.html` and `LibraryScrolled.dc.html` get a
-`FINISHED` row first.** Both goldens re-bless, at both geometries — four PNGs on two
-screens that have nothing else to do with this issue. **That churn was named before
-approval and kept deliberately**: without it the flag is invisible everywhere except
-by Home's CONTINUE block ceasing to offer the book, which is an absence, and a
-feature whose only evidence is an absence cannot be told from one that silently does
-nothing.
+**Nothing on the board changes and no Library golden re-blesses.** `demoLibraryItems()`
+already types `"DONE"` straight into Jane Eyre's row, so the board, the golden and the
+comparison sheet have agreed about this state all along. **What is missing is only the
+DEVICE path**: `applyProgress` — the ONE spelling of the derivation, shared by the scan
+and by `refreshProgress()` so the two cannot disagree — has no way to produce `DONE`,
+because the flag it would read did not exist. It gains one branch.
 
-Book details' Progress row reads the same index and is **left alone in this change**
-— its board says nothing about a finished state, and a row invented in code is the
-thing CLAUDE.md's first rule forbids. It gets a card.
+That is the whole Library change: a finished book reads `DONE` where an unfinished
+started book reads its percentage and an unopened one reads `NEW`.
+
+**This removes churn this spec previously accepted.** An earlier draft planned board
+edits and four re-blessed PNGs on two screens unrelated to this issue, and warned about
+them. Reading the board rather than assuming what it must say deleted all of it — which
+is the design-first rule paying for itself in the direction it is least often credited
+for, by making the change SMALLER.
+
+Book details' Progress row reads the same index and is **left alone in this change**.
+`BookDetails.dc.html` states no value for it at all, so unlike the Library there is
+nothing boarded to follow, and a row invented in code is the thing CLAUDE.md's first
+rule forbids. It gets a card.
 
 ## Reaching the screen
 
@@ -291,9 +302,14 @@ from desktop evidence three times.** It goes in the on-glass list.
   `golden::checkGolden` over `Plane::Bw`, and the test asserts the fidelity before
   naming the plane so a change to the shipped path fails rather than leaving the
   golden pinning a path nothing paints.
-- **Re-bless `library` and `library_scrolled` at both geometries** for the `FINISHED`
-  row. Verified the strong way rather than by eyeballing totals: the change is
-  confined to one row's value run, so assert **0 pixels differing** outside it.
+- **No Library golden moves, and that is an assertion rather than an expectation.**
+  `demoLibraryItems()` is unchanged, so `library` and `library_scrolled` must be
+  byte-identical at both geometries after this work. A moved Library golden means
+  `applyProgress` has started overriding demo values that were typed in directly, which
+  is a real bug this would otherwise hide.
+- **A unit test that `applyProgress` yields `DONE` for a finished record**, `NEW` for an
+  unstarted one and a percentage otherwise — the device path the goldens cannot reach,
+  because the demo rows never go through it.
 - **The `RanOff` / `Failed` distinction gets its own cases**, because a bool that
   conflated them is what the enum replaces and a test that only checks "the end of
   the book pushes BookEnd" cannot see a corrupt chapter pushing it too.
@@ -328,7 +344,7 @@ from desktop evidence three times.** It goes in the on-glass list.
 |---|---|
 | Every existing reading position reads as absent once | `kPositionVersion` 1 → 2, and `parsePosition` is total |
 | No `FINISHED <date>` | no RTC; parked on #25 |
-| Book details still shows a percentage for a finished book | no board for it; gets a card |
+| Book details still shows a percentage for a finished book | its board states no value at all; gets a card |
 | `BookEnd` does not survive a wake | refused unprimed, by design; wake lands on the last page |
 | Opening a finished book and leaving clears the flag | a save from the Reader builds the record fresh; recoverable in two presses, and visible |
 | `24 CHAPTERS` counts spine entries, cover included | the same number Home already says `OF`; a text-chapter count is the ~49 s walk |
