@@ -101,6 +101,13 @@ FLOW_SCREENS = [
     # serve design/assets alongside index.html; see the note there.
     ("sleep_cover",         "SleepCover.dc.html",        "Sleep / cover"),
     ("sleep_cover_details", "SleepCoverDetails.dc.html", "Sleep / cover + details"),
+    # THE WAKE OVER A COVER, and its own row for a reason the two above do not have:
+    # it is the only sleep render that paints ONE pass. A wake gets one waveform, so
+    # the firmware column here is Plane::Bw -- the Msb plane, the same picture at two
+    # levels -- where its two siblings are the three-pass grayscale sequence. Folded
+    # into either of them, a regression in the one-bit rendition would be averaged
+    # against a board that cannot show it.
+    ("sleep_cover_waking",  "SleepCoverWaking.dc.html",  "Sleep / cover, waking"),
     # THE LOADING STATE, and it is two boards rather than one because the mechanism
     # has two homes: it replaces the HINT BAR on a screen that draws one, and it
     # replaces the badge's words on Sleep, which draws no hint bar because it takes

@@ -654,6 +654,13 @@ int main(int argc, char** argv) {
   // not be named by the comparison sheet or by a golden.
   const bool isSleepCover = std::strcmp(argv[1], "sleep_cover") == 0;
   const bool isSleepCoverDetails = std::strcmp(argv[1], "sleep_cover_details") == 0;
+  // design/SleepCoverWaking.dc.html: the WAKE over a cover, which is neither of the
+  // two above and neither of the two waking/sleeping boards. `sleep_waking` is the
+  // words over the dithered card with no picture; `sleep_cover` is the picture with
+  // no words, because a full-bleed cover says "asleep" unaided. It cannot say
+  // "waking", so this is the one place the cover keeps its badge -- and the one
+  // sleep render that paints ONE pass, because a wake gets one waveform.
+  const bool isSleepCoverWaking = std::strcmp(argv[1], "sleep_cover_waking") == 0;
   // design/LibraryOpening.dc.html. The SAME journey as `library` -- it is the same
   // screen, with the status line drawn over its hint bar the way the shell draws it
   // over a finished frame. Rendering it any other way would compare a board against
@@ -709,7 +716,7 @@ int main(int argc, char** argv) {
       !isHomeUnopened && !isLibraryScrolled && !isReader && !isSleepIdle &&
       !isReaderMenu && !isContents && !isChapterOpen && !isReaderList && !isAnchored &&
       !isSleepWaking && !isLibraryOpening && !isTypography && !isPeek && !isSleepCover &&
-      !isSleepCoverDetails) {
+      !isSleepCoverDetails && !isSleepCoverWaking) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
@@ -717,7 +724,7 @@ int main(int argc, char** argv) {
                  "'library_scrolled', 'reader', 'reader_anchored', "
                  "'reader_chapter_open', 'reader_list', "
                  "'reader_menu', 'contents', 'typography', 'sleep_waking', "
-                 "'sleep_cover', 'sleep_cover_details', "
+                 "'sleep_cover', 'sleep_cover_details', 'sleep_cover_waking', "
                  "'library_opening', 'peek' or 'app')\n",
                  argv[1]);
     return 3;
@@ -849,7 +856,7 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  if (isSleepCover || isSleepCoverDetails) {
+  if (isSleepCover || isSleepCoverDetails || isSleepCoverWaking) {
     // NOT THROUGH THE App, AND NOT THROUGH THE FACTORY, and both halves of that are
     // the device's own shape rather than a shortcut.
     //
@@ -873,19 +880,53 @@ int main(int argc, char** argv) {
     if (!loadBoardCover(cover, w, h)) return 1;
 
     reader::SleepViewModel vm = reader::demoSleepVm();
-    vm.shows = isSleepCover ? reader::SleepShows::Cover : reader::SleepShows::CoverAndDetails;
+    vm.shows = isSleepCoverDetails ? reader::SleepShows::CoverAndDetails : reader::SleepShows::Cover;
+    if (isSleepCoverWaking) {
+      // BOTH FIELDS, as the shell sets both and as screens.cpp's waking demo does:
+      // the note is what the screen SAYS, `waking` is which screen this IS -- and
+      // only the second reaches the badge rule that COVER mode would otherwise
+      // silence. Setting the note alone would render design/SleepCover.dc.html and
+      // report it as this board.
+      vm.note = reader::kStatusWaking;
+      vm.waking = true;
+    }
     reader::SleepScreen scr(std::move(vm), &cover);
-    // A COVER IS THE ONE THING ON THIS DEVICE THAT NEEDS FOUR LEVELS, so this is the
-    // only sleep render that takes the three-pass path -- asserted rather than
-    // assumed, because a Mono render of these two boards would be a plausible-looking
-    // sheet measuring the wrong pipeline. See SleepScreen::fidelity.
+    // A COVER IS THE ONE THING ON THIS DEVICE THAT NEEDS FOUR LEVELS, so the two
+    // SLEEPING boards take the three-pass path -- asserted rather than assumed,
+    // because a Mono render of them would be a plausible-looking sheet measuring the
+    // wrong pipeline. See SleepScreen::fidelity.
+    //
+    // THE WAKING BOARD ASSERTS THE SAME THING AND THEN IGNORES IT, WHICH IS THE
+    // DEVICE'S OWN SHAPE. fidelity() answers Grayscale here too -- there is a cover
+    // and the mode is COVER, and nothing about waking changes that -- but the wake
+    // paint in shell/src/main.cpp does not CONSULT it: fidelity() is read by
+    // renderTop() for an App-owned screen and by paintSleepScreen for the sleep
+    // sequence, and the wake is neither. It renders Plane::Bw and calls showOnePass
+    // itself, because a wake gets one waveform. So the assertion stays (it pins that
+    // the screen was built the same way) and the render below is one pass, and the
+    // two together are exactly what the shell does.
     if (scr.fidelity() != reader::Fidelity::Grayscale) {
       std::fprintf(stderr, "the cover sleep screen did not ask for Grayscale\n");
       return 1;
     }
-    if (!renderToPng(scr, fonts, theme, w, h, argv[2])) return 1;
+    if (isSleepCoverWaking) {
+      // ONE PASS, Plane::Bw -- which IS the Msb plane, so this is the sleep screen's
+      // own picture at two levels rather than a different image. Fidelity::Mono is
+      // how renderPassesToPng spells that; it is NOT a claim about scr.fidelity(),
+      // which is asserted Grayscale two lines up.
+      if (!renderPassesToPng(
+              [&](reader::Framebuffer& fb, reader::Plane p) { scr.render(fb, fonts, theme, p); },
+              reader::Fidelity::Mono, w, h, argv[2]))
+        return 1;
+    } else if (!renderToPng(scr, fonts, theme, w, h, argv[2])) {
+      return 1;
+    }
     std::printf("wrote %s (%dx%d) sleep, %s, over design/assets/sleep-cover-%dx%d.png\n", argv[2],
-                w, h, isSleepCover ? "the cover alone" : "the cover behind the card", w, h);
+                w, h,
+                isSleepCoverWaking  ? "waking over the cover, one pass"
+                : isSleepCover      ? "the cover alone"
+                                    : "the cover behind the card",
+                w, h);
     return 0;
   }
 

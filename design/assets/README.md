@@ -8,9 +8,34 @@ thing worth comparing it against.
 | `sleep-cover-480x800.png` | 124,807 | `de433f3eaf7d734a55cc4c351d47210522f00a3f1be671ebe2c0d902e2b5038b` | `reader_sim cover`, X4 geometry |
 | `sleep-cover-528x792.png` | 137,979 | `eee45dcd73e584a2eb0d4ad1649aa00e7713056abaef83566e48403e6724db20` | `reader_sim cover`, X3 geometry |
 
-Used by `design/SleepCover.dc.html` and `design/SleepCoverDetails.dc.html`, the
-two cover modes of the sleep screen. `Sleep.dc.html` and `SleepIdle.dc.html` are
-the `DETAILS` mode and need no asset.
+Used by **three** boards: `design/SleepCover.dc.html` and
+`design/SleepCoverDetails.dc.html`, the two cover modes of the sleep screen, and
+`design/SleepCoverWaking.dc.html`, the wake over a cover. `Sleep.dc.html` and
+`SleepIdle.dc.html` are the `DETAILS` mode and need no asset.
+
+**The third one shows the same file at one bit, and there is no fourth file for
+it.** A wake paints one waveform, so the firmware renders `Plane::Bw` -- which
+inks where coverage >= 2, which is exactly "the Msb plane set". These files hold
+only the four ramp levels `{0xFF, 0xAA, 0x55, 0x00}` that `writeGrayPng` writes,
+indexed `(msb << 1) | lsb`, so **thresholding one at 128 recovers its Msb plane
+bit for bit**: 0xAA (170) and 0x55 (85) fall either side of the threshold, and
+that boundary IS the Msb boundary. `SleepCoverWaking.dc.html` therefore shows
+this same PNG under a `contrast(100000%)` filter -- a hard threshold at 0.5 --
+rather than a committed one-bit twin.
+
+**Committing a one-bit asset was the obvious alternative and it is the wrong
+one**, for a reason specific to how the comparison works: `sim/main.cpp`'s
+`BoardCover` -- the *firmware* column of `make compare` -- decodes the
+four-level PNG and unpacks its two planes. A one-bit file would be a second copy
+of a picture the firmware column already reads from the first, kept in step by
+nothing. One file feeds both columns of all three boards.
+
+**Measured, not argued.** CSS filters could plausibly threshold in *linear*
+light, where 170 and 85 are 0.40 and 0.09 and both fall below 0.5 -- the cover
+would come back solid black. Rendered through `compare-design.py`'s own Chrome
+invocation, the filtered board matches the threshold-at-128 of the source file
+on every one of 384,000 pixels. It also fails loudly if that ever changes: a
+linearising Chrome blacks out the ~17% of the frame that is paper.
 
 ## Why the board's cover is generated and not drawn
 
