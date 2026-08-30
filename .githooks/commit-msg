@@ -1,0 +1,28 @@
+#!/bin/sh
+# Validate the commit subject you just wrote, at the moment the fix is cheapest:
+# `git commit --amend` rather than an interactive rebase over several commits.
+#
+# Installed by `make hooks`, which sets core.hooksPath. It is the SAME script CI
+# runs, so this cannot drift from the gate it mirrors.
+#
+# `--allow-fixup` is the one difference: `git commit --fixup` writes a `fixup!`
+# subject, which is a legitimate local state whose whole purpose is to be
+# squashed later. It stays rejected on push and in CI, which are the moments it
+# must not survive.
+#
+# Bypass with `git commit --no-verify`. That is by design -- this is a fast local
+# mirror of CI, not a second source of truth.
+set -e
+
+git_dir=$(git rev-parse --git-dir)
+
+# Messages git wrote, not the author: a merge, a revert, a cherry-pick reusing a
+# message that already passed this check when it was first written.
+for state in MERGE_HEAD REVERT_HEAD CHERRY_PICK_HEAD; do
+    if [ -e "$git_dir/$state" ]; then
+        exit 0
+    fi
+done
+
+exec python3 "$(git rev-parse --show-toplevel)/tools/check_conventions.py" \
+    --message-file "$1" --allow-fixup

@@ -50,7 +50,41 @@ GEOMETRIES = {
 }
 GEOMETRY_ORDER = ["x4", "x3"]
 
-CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+# Chrome rasterises the boards, and WHERE it lives depends on the machine. This
+# was a hardcoded macOS path until CI wanted the same comparison on a Linux
+# runner, where that path cannot exist -- so the run died at "Chrome not found"
+# before rendering anything, which is a tooling fault reported as a design one.
+# $CHROME wins if set, and is NOT checked against this list: a wrong override
+# must report itself rather than fall through to a system Chrome that rasterises
+# differently, because the whole point of this script is that the two engines
+# agree.
+CHROME_CANDIDATES = [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+]
+
+
+def resolve_chrome():
+    """The Chrome binary to rasterise boards with, or None if there is none."""
+    env = os.environ.get("CHROME")
+    if env:
+        return env
+    for candidate in CHROME_CANDIDATES:
+        if pathlib.Path(candidate).exists():
+            return candidate
+    return shutil.which("google-chrome") or shutil.which("chromium")
+
+
+CHROME = resolve_chrome()
+
+# Extra flags for the Chrome invocation, space-separated. A sandboxed CI runner
+# usually needs --no-sandbox, and that belongs in the workflow that knows it is
+# one rather than being switched on here by sniffing $CI -- a developer's Chrome
+# should keep its sandbox.
+CHROME_FLAGS = os.environ.get("CHROME_FLAGS", "").split()
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SIM = ROOT / "build" / "reader_sim"
 
@@ -92,6 +126,7 @@ V2_SCREENS = [
 FLOW_SCREENS = [
     ("home_empty",      "HomeEmpty.dc.html",      "Home / empty"),
     ("home_unopened",   "HomeUnopened.dc.html",   "Home / nothing open"),
+    ("home_charging",   "HomeCharging.dc.html",   "Home / charging"),
     ("home_missing",    "HomeMissing.dc.html",    "Home / missing book"),
     ("sleep_idle",      "SleepIdle.dc.html",      "Sleep / nothing open"),
     # The two cover modes. Their own rows rather than variants of `sleep`, because
@@ -220,6 +255,7 @@ def render_board(board_path, out_png, w, h):
         port = serve(tmp)
         subprocess.run(
             [CHROME, "--headless", "--disable-gpu", "--force-device-scale-factor=1",
+             *CHROME_FLAGS,
              "--hide-scrollbars", "--default-background-color=FFFFFFFF",
              # Without a virtual-time budget the screenshot can fire before the
              # Google Fonts webfont arrives, silently rendering the board in a
@@ -284,15 +320,28 @@ def recentre_panels(body, w):
 def render_sim(screen_id, out_png, w, h):
     """Ask the simulator for a screen at panel size w x h.
 
-    None when it does not implement the screen (at all, or at this geometry).
+    Returns (path_or_None, status). The status separates the two ways a screen
+    produces no firmware render, which look IDENTICAL on the sheet and are
+    opposites: "unimplemented" is a screen the simulator has never heard of -- a
+    board waiting for its screen, the normal state of a good third of this list
+    -- and "failed" is a screen it DOES know and could not draw, which is a
+    regression. While this returned a bare None the two were indistinguishable,
+    which is why a crashed subcommand printed "not implemented" and exited 0.
     """
     if not SIM.exists():
-        return None
+        return None, "nosim"
     r = subprocess.run(
         [str(SIM), screen_id, out_png, "--canvas", f"{w}x{h}"],
         capture_output=True)
     p = pathlib.Path(out_png)
-    return p if r.returncode == 0 and p.exists() else None
+    if r.returncode == 0 and p.exists():
+        return p, "ok"
+    # The simulator names an id it does not recognise on stderr. Anything else
+    # is a screen it accepted and then failed on -- a refused factory, a face
+    # that would not load, a crash.
+    if b"unknown screen" in r.stderr:
+        return None, "unimplemented"
+    return None, "failed"
 
 
 def normalise(im, w, h):
@@ -369,6 +418,13 @@ def main():
                           "x3 (528x792), or both (default)")
     ap.add_argument("--out", default=str(ROOT / "build" / "design-vs-firmware.png"))
     ap.add_argument("--pairs-per-row", type=int, default=2)
+    ap.add_argument("--require-implemented", action="store_true",
+                    help="exit non-zero if a screen the simulator KNOWS fails to "
+                         "render. A board with no screen behind it is still fine -- "
+                         "that is a third of this list. Off by default so a human "
+                         "comparing mid-implementation is unaffected; CI passes it, "
+                         "because otherwise a crashed subcommand reads as "
+                         "'not implemented' and the run exits 0.")
     ap.add_argument("--export", metavar="DIR",
                     help="also write every render as a bare panel-size PNG into DIR, "
                          "named <screen>_<x4|x3>_<design|firmware>.png. No labels, "
@@ -423,13 +479,17 @@ def main():
             "the row from compare-design.py:\n%s"
             % (len(absent),
                "\n".join(f"  {sid}: design/{board}" for sid, board in absent)))
-    if not pathlib.Path(CHROME).exists():
-        raise SystemExit(f"Chrome not found at {CHROME}")
+    if CHROME is None or not pathlib.Path(CHROME).exists():
+        raise SystemExit(
+            "Chrome not found%s. Set $CHROME to the binary, or install it at one of:\n%s"
+            % ("" if CHROME is None else f" at {CHROME}",
+               "\n".join(f"  {c}" for c in CHROME_CANDIDATES)))
 
     geom_keys = GEOMETRY_ORDER if args.geometry == "both" else [args.geometry]
 
     rows = []
     exported = []
+    broken = []
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
         for sid, board, label in screens:
@@ -441,8 +501,10 @@ def main():
                 g = GEOMETRIES[key]
                 gw, gh, device = g["w"], g["h"], g["device"]
                 bimg = render_board(bpath, str(tmp / f"{sid}_{key}_design.png"), gw, gh)
-                simg = render_sim(sid, str(tmp / f"{sid}_{key}_sim.png"), gw, gh)
+                simg, status = render_sim(sid, str(tmp / f"{sid}_{key}_sim.png"), gw, gh)
                 impl = simg is not None
+                if status == "failed":
+                    broken.append(f"{sid} [{device} {gw}x{gh}]")
                 any_impl = any_impl or impl
                 dimg = (normalise(Image.open(bimg), gw, gh) if bimg
                         else placeholder("DESIGN FAILED", gw, gh))
@@ -469,6 +531,19 @@ def main():
     print(f"\nwrote {args.out} {size}  -  {done}/{total} screens implemented")
     if args.export:
         print(f"exported {len(exported)} bare panel PNGs to {args.export}/")
+    if broken:
+        # Printed whether or not the flag is set: a screen the simulator knows and
+        # cannot draw is worth saying out loud even when nobody asked for a gate.
+        print("\n%d screen render(s) FAILED (the simulator knows the id and could "
+              "not draw it):\n%s" % (len(broken), "\n".join(f"  {b}" for b in broken)))
+    if args.require_implemented:
+        if not SIM.exists():
+            raise SystemExit(
+                f"--require-implemented, but there is no simulator at {SIM}. "
+                "Every screen would report as unimplemented and the gate would "
+                "pass on nothing having run. Build it first: make sim")
+        if broken:
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":

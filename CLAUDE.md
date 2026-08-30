@@ -41,6 +41,125 @@ panel-size PNGs for overlaying in a design tool.
 CMake uses `file(GLOB ...)`: **re-run `cmake -S . -B build` after adding or
 removing a source file**, or it is silently ignored.
 
+## CI
+
+`.github/workflows/ci.yml`, three jobs on every PR and on pushes to `main`,
+cancelling a ref's own earlier run. `test` is `make test` on a bare checkout --
+no submodule and no Python, because every generated asset is committed.
+`firmware` is the only thing anywhere that compiles `shell/`; it checks out
+submodules (an empty `freeink-sdk/` fails with `PackageException: not a
+directory`, which names neither the submodule nor the fix) and caches the ~1 GB
+toolchain.
+
+**THE `compare` JOB IS A NARROW GATE AND IS NOT A FIDELITY CHECK.** It fails on
+two things: a board named in `compare-design.py` and absent from disk, and a
+screen the SIMULATOR KNOWS that will not render. It does **not** measure how
+close the render is -- the sheet still prints `ok` rather than a percentage,
+which is #41. A board with no screen behind it stays fine; that is nine of the
+32.
+
+**Wiring it at all needed the script to be able to fail.** `render_sim` returned
+a bare `None` for both "the simulator has never heard of this id" and "the
+simulator knows it and crashed", so a broken subcommand printed
+`firmware not implemented` and the run exited **0** -- the same
+reports-on-less-than-it-claims shape as the card probe answered from cache and
+the `make compare` default that skipped four screens. It returns a status now,
+and `--require-implemented` fails on the second. The flag is **off by default**,
+so comparing mid-implementation is unaffected; CI passes it. Proved by mutation:
+breaking `home` in the simulator takes the gate to exit 1 naming both
+geometries, while `--only boot` (a real board with no screen) stays green.
+
+`$CHROME` overrides the board rasteriser's path, which was hardcoded to macOS
+and cannot exist on a Linux runner, and `$CHROME_FLAGS` carries a runner's
+`--no-sandbox` -- set by the workflow that knows it is one rather than by
+sniffing `$CI` in the script, so a developer's Chrome keeps its sandbox.
+
+**BRANCH NAMES AND COMMIT SUBJECTS ARE ENFORCED ON PRs**, by
+`tools/check_conventions.py` -- runnable as `make conventions`, which is the
+point: a convention enforced only by CI is one you are told about after pushing,
+which is the worst moment to be asked to rewrite a commit message.
+
+**Commit subjects are Conventional Commits with the ELEVEN STANDARD TYPES**
+(`feat fix docs style refactor perf test build ci chore revert`) and a free-form
+scope. **The house style writes the SUBSYSTEM as the type** -- `peek:`,
+`design:`, `reader:`, `shell:` -- and that is a scope wearing a type's clothes:
+`feat(peek):` says the same thing, validates against a stock config, and carries
+the one bit the bare area name never did. Measured when this landed: **358 of
+main's 513 subjects already passed**, and of the 155 that did not, **128 failed
+that one way** and the remaining **27 were merge commits**, which are exempt
+because git wrote their subject. **History is not re-litigated** -- the check
+runs on the commits a PR adds.
+
+The scope vocabulary is deliberately **not** restricted (a list of allowed
+scopes needs a line per subsystem and conflicts every time a screen lands), and
+subject **length** is not enforced (Conventional Commits says nothing about it
+and this project writes long explanatory subjects on purpose).
+
+**Branch names take git-flow's vocabulary plus `claude/`.** `feature` `bugfix`
+`hotfix` `release` `support` `chore` `docs` `ci` `refactor` `test` `perf`, then
+`/<lowercase-slug>`. **`claude/` is in the list because Claude Code NAMES ITS
+OWN BRANCHES**, so a pattern without it rejects every agent branch -- including
+the one that added the check -- and buys a rename before every PR rather than
+any clarity. **There is no `develop` branch and this does not invent one**: full
+git flow is a change to how the project is developed, not a CI check.
+
+**THE SAME CHECK RUNS AS TWO GIT HOOKS**, tracked in `.githooks/` and installed
+by `make hooks` (one `git config core.hooksPath`, which lives in the common
+`.git/config` and so covers every worktree at once). `commit-msg` validates the
+subject you just wrote, when the fix is `git commit --amend` rather than an
+interactive rebase; `pre-push` validates the branch name and every commit the
+push would add. Both run `tools/check_conventions.py`, so they cannot drift from
+the gate they mirror, and both are bypassable with `--no-verify` **by design** --
+they are a fast local mirror, not a second source of truth.
+
+**`commit-msg` ALLOWS `fixup!` AND PUSH AND CI DO NOT.** `git commit --fixup`
+writes one, and it is a legitimate local state whose whole purpose is to be
+squashed later; rejecting it at commit time would break the workflow. It stays
+rejected at the two moments it must not survive. The hook is also skipped for a
+merge, a revert and a cherry-pick, whose messages git wrote.
+
+**`pre-push` TAKES ITS RANGE FROM GIT'S STDIN, NOT FROM `origin/main..HEAD`.**
+git hands the hook the remote sha it negotiated for each ref, live; a
+remote-tracking ref can be STALE, and a stale one drags already-merged history
+into the range -- where **128 of main's commits predate this rule** and would
+fail it. For a branch the remote does not have yet that sha is all zeros, and
+the fallback is "commits on no branch of this remote".
+
+**AND NONE OF IT IS BLOCKING ON GITHUB TODAY.** Branch protection answers
+`403: Upgrade to GitHub Pro or make this repository public`, so the check cannot
+be made a required status check: a violation shows a red X on the PR and the
+merge button still works. **The hooks are currently the only thing that stops
+anything**, which is why they exist rather than being belt-and-braces.
+
+**AN EMPTY COMMIT RANGE IS AN ERROR IN CI** (`--require-commits`), because a
+wrong base ref would otherwise check nothing and pass -- the
+reports-on-less-than-it-claims shape again. It is only a note locally, where a
+branch with no commits yet is an ordinary state.
+
+**CI'S FIRST RUN FOUND A REAL PORTABILITY BUG, AND IT WAS NOT THE GOLDENS.**
+`test_scalablefont.cpp` called `std::memcmp` without including `<cstring>`:
+libc++ pulls it in transitively and libstdc++ does not, so the file had compiled
+on macOS for months and **failed on the first Linux build**. A
+transitively-satisfied include is a bug only the other toolchain can see, which
+is the whole argument for building somewhere other than the machine that wrote
+the code. Note the build died before `ctest` ran, so **the goldens-under-gcc
+question is still open** -- it has not been answered, only postponed.
+
+**A `\x1f`-SEPARATED `git log` MUST NOT BE `.strip()`ed.** Python counts `\x1f`
+as whitespace, so a bare `.strip()` ate the trailing empty field of the last
+line -- the ROOT commit, the only one with no parents -- and the parse crashed
+on it. Found by running the checker over the real 513-commit history rather than
+over its fixtures, every one of which had a parent.
+
+**A GOLDEN IS NEVER RE-BLESSED TO MAKE CI GREEN.** A failing golden uploads its
+`build/<name>_candidate.png` as an artifact precisely so the pixels can be
+looked at, which is the only way to tell an intended change from a regression.
+**The goldens were blessed on macOS/clang and this job is Linux/gcc**, and that
+has not been observed yet: layout accumulates in fixed point and should be
+bit-identical, but `stb_truetype`'s rasteriser is float. If the first run
+reddens on goldens alone, the candidates are the evidence and the fix is to move
+the job to `macos-latest`, not to bless anything.
+
 ## What V1 is, and is not
 
 **V1 IS CARD TRANSFER ONLY. Wi-Fi is cut.** It was too big, and cutting it took
@@ -316,7 +435,7 @@ re-bless of Home — first onto the dithered path, then onto `Mono` — moved **
 partial-coverage pixels, verified per pixel against the coverage map rather than
 by eyeballing totals.
 
-**Icons are not in that set.** All eleven shipped marks are 2 bpp
+**Icons are not in that set.** All thirteen shipped marks are 2 bpp
 (`core/src/icons.cpp`) because they are generated anti-aliased from the boards, so
 they legitimately carry partial coverage at their edges and take whichever
 treatment the plane implies. `Icon::bpp == 1` is the opt-in for a mark that wants
@@ -1852,6 +1971,146 @@ classification is now verified only by `test_input.cpp` on the desktop**, and
 `shell/` is where four bugs have hidden. If held-scroll or press classification
 needs eyes on glass again, it comes back as a board row, not a hidden gesture.
 
+## The battery
+
+**Home is the only screen that reports charge**, and until 2026-08-29 it reported a
+hardcoded `87%` -- the board's number, set by all three demo view-models and written
+by nothing in `shell/`. `BatteryMonitor` had been a declared `lib_dep` since Phase 2
+and had never been constructed.
+
+**The backend is chosen at RUNTIME, per board profile**, which is what lets one C3
+binary serve both models -- and it means the two models legitimately report at
+different granularity:
+
+| | X3 | X4 |
+|---|---|---|
+| backend | BQ27220 I2C gauge, 0x55 on SDA20/SCL0 | ADC on GPIO0, divider 2.0 |
+| percentage | true SoC, per 1% | `percentageFromMillivolts`, **multiples of 10** |
+| charging | sign of the gauge's `Current()` | **never** -- `NO_GAUGE`, no charge pin |
+
+`percentageFromMillivolts` quantises deliberately: voltage cannot resolve a Li-ion
+pack finer than that, and pretending otherwise produces a number that wanders while
+the battery sits still. So an X3 reading `64%` beside an X4 reading `60%` is not a
+bug, and `[battery] ... (I2C gauge|ADC backend)` on the boot line is what settles it.
+
+**THE X3 PATH WAS PROVEN BEFORE IT WAS WRITTEN**: `XteinkDetect::probeBq27220`
+already reads that gauge's SoC and voltage on every boot, and X3-vs-X4 detection
+needs two of its three I2C chips to answer on both passes -- so the panel driver
+this firmware selects already depends on the gauge responding.
+
+**`-1` MEANS THE GAUGE DID NOT ANSWER, and the band then draws its mark alone.** Not
+`0%`: `readPercentage()` answers a failed read with `0` and `percentageFromMillivolts`
+maps a failed `0 mV` to `0%` rather than `100%`, so a `0` taken at face value puts a
+flat battery on the panel of a device that is fine. Same call `homeVmForCard()` makes
+for the LIBRARY row's count -- "no books" and "could not look" are different claims,
+and so are "flat" and "did not answer". `BatteryTracker` keeps the last good value,
+so one transient I2C miss does not blank a number that was right two seconds ago.
+
+**THE CHARGING MARK IS A SECOND ICON, NOT A FLAG ON THE FIRST.** `kBatteryCharging`
+is `kBattery` with a bolt knocked out of its fill, generated by `iconc.py` from
+`design/HomeCharging.dc.html` -- **its own board**, because `iconc.py`'s battery
+matcher keys on the bolt's own path (`M11.4 2`), not the terminal nub
+(`<rect x="19.5"`), which is on BOTH batteries and identifies neither. `source` is a
+second line of defence, exactly as it is for `kBook`/`kBookLarge`. `renderHome`
+chooses between them **once**, at the top, because there are two draw sites (the band
+and the `nothingToContinue` strip) and a choice made twice is one that will
+eventually be made differently in the two places.
+
+**PLUGGING IN REPAINTS HOME, AND THE LATCH IS THE WHOLE DESIGN.** There is no
+plug-in event to hook: `BoardProfile::usbDetect` is `20` on both Xteink profiles, set
+positionally with no comment, **nothing in the SDK reads it**, and on the X3 GPIO20 is
+the gauge's own SDA. So the shell polls `isCharging()` every 2 s while Home is on
+glass. The hazard is that the X3 has no charger IC, so `isCharging()` is
+`(int16_t)Current() > 0` -- **a bare sign test with no deadband** -- and plugged in at
+full charge is ~0 mA with a dithering sign, which is the state a device spends all
+night in. `BatteryTracker` answers it four ways: a rising edge (a plug-in), a first
+reading that seeds without firing (so booting on the cable adds no refresh), a latch
+that clears only after **60 s of CONTINUOUS** not-charging (so a dither can never
+accumulate enough to re-arm it), and **three grants per session** as a backstop. It
+is in `core/` for `ProgressSaveGate`'s reason -- a latch with a dwell timer and a
+session cap, and `shell/` has no harness.
+
+**UNPLUGGING NOW SPENDS A REFRESH TOO, AND IT DID NOT AT FIRST.** The original
+design fired on the rising edge only and left the falling edge free, on the stated
+argument that "the stale bolt is corrected by the next Home paint" -- which assumes
+a button press. Reported from an X3: the bolt appears correctly within ~2 s of
+plugging in and then **stays on glass indefinitely after unplugging**, because a
+reader sitting on Home reading nothing presses nothing, and nothing else repaints
+it. A false "charging" claim is the same defect class this project already refuses
+for an unread gauge (`-1`, not `0%`) and a book with no reading position (no demo
+substitute) -- a false claim is worse than an absent one, and this was one.
+
+The fix fires the repaint at the moment the **60 s dwell confirms the unplug**,
+rather than on the bare falling edge -- a plain falling edge would reintroduce
+exactly the flicker the latch exists to prevent, since the dithering sign trips it
+every few seconds at full charge. It needs no new constant: the dwell was already
+computed to decide whether to clear `latched_` and was simply not acted on. So
+`latched_` clearing and the clearing repaint are now the same event, gated the same
+way the rising edge always was.
+
+**THE GRANT BUDGET IS SHARED BY BOTH EDGES, NOT ONE EACH.** `latched_` clears
+UNCONDITIONALLY -- it tracks reality, and must not stay true just because the
+session ran out of repaint budget, or the next real plug-in would be wrongly
+refused as "already latched". Only the repaint itself is gated on
+`grants_ < kMaxGrantsPerSession`, from the same counter the rising edge spends, so
+**a full plug/unplug cycle can now cost up to two grants instead of one**. Accepted
+deliberately: three grants was already a backstop against a hardware quirk this
+project cannot bench-test, not a promise of exactly one refresh per cycle.
+
+**The poll needs no `SpiBusGuard`**, and that is what makes 2 s affordable: it is I2C
+on the sensor bus and cannot race a panel refresh. It is gated on
+`gChargingObservable`, which is **STICKY, NOT DECIDED FROM THE FIRST READING**: it is
+set by ANY reading that reports `chargingKnown`, because `readStatus()` reads SoC and
+charging as two independent I2C transactions, and deciding this from one sample would
+let a single glitch on the charging half disable the poll for the rest of the
+session on hardware that supports it perfectly well. It never arms at all on an X4,
+which has no charge-status pin and so never reports `chargingKnown` from anything.
+
+**THE POLL IS OTHERWISE INVISIBLE, THE SAME SHAPE THIS FILE ALREADY RECORDS FOR THE
+LISTING CACHE AND THE RING WARM.** Its only other trace is the one-shot `[battery]`
+boot line and an occasional `-> repainting Home`, so a disarmed poll, one pinned by
+`kMaxGrantsPerSession`, and one quietly seeing no change all read identically: nothing.
+`[alive]` carries `battery observable=%d pct=%d charging=%d polls=%lu`, read straight
+off `gChargingObservable`/`gBattery` rather than re-derived, so it can never disagree
+with what `setBattery()` just handed the screen.
+
+**`App::markDirty()` IS THE FIRST DIRTY THAT NO PRESS CAUSED.** It does not set
+`transition_`: a charge state appearing is not a screen change and takes the 389 ms DU
+rather than the 693 ms GC. It also resets the partial-repaint record, because every
+earlier route to `dirty_` was a dispatch or a push/pop and `canRenderTopOnly`
+quietly rested on that -- with an overlay on top, a bare `dirty_ = true` would have
+passed every other clause and left `renderTopOnly` repainting the overlay alone
+while whatever `markDirty` was actually for stayed stale on glass.
+
+**`drawHeaderBand` LOOKS LIKE IT HAS A BUG WITH AN EMPTY VALUE AND DOES NOT.** It
+computes `groupW = vw + kBandGap + mark->w`, which reserves a gap for a number that is
+not there -- but the icon draws at `groupX + vw + kBandGap`, so the phantom gap
+**cancels** and the mark lands on the margin exactly. "Fixing" `groupW` alone pushes
+it 7px PAST the margin on every screen that draws a band. The only real effect is
+`labelMaxW` 380 against 387 at 480 wide, for a label that on Home is the literal
+`NOW READING` and never elides. Left alone deliberately; see
+`docs/superpowers/specs/2026-08-29-home-battery-design.md`.
+
+**`BatteryMonitor`'s CONSTRUCTOR CAPTURES THE BOARD PROFILE BEFORE THE PROBE HAS
+RUN, and it is harmless for a reason worth writing down rather than re-deriving.**
+`gBatteryMonitor` is a file-scope static, so it is constructed before `setup()` and
+therefore before `detectAndSelectBoard()` -- and its constructor copies `_adcPin`,
+`_dividerMultiplier` and `_chargeStatusPin` out of `BoardConfig::ACTIVE`, which at
+that moment is still the compile-time default. Two independent things keep it from
+biting: `readStatus()` tests `ACTIVE.batteryGauge.gaugeAddr` **live** rather than
+from a cached member, so a real X3 takes the gauge branch and never consults those
+members at all; and the X4's own ADC values happen to equal the default's. **The
+second of those is a coincidence, not a design**, so a profile whose `batteryAdc`
+differs from the default's would need this object built after the probe instead.
+
+**A PLUG-IN REPAINT CAN BE PRE-EMPTED BY AN ALREADY-DUE SLEEP.** `gIdle` is checked
+earlier in `loop()` than the dirty-driven paint, and plugging in does not count as
+activity -- so an edge detected in the last seconds before the idle timeout can set
+`markDirty()` and then have `sleepNow()` (which is `[[noreturn]]` and bypasses `App`)
+fire first. Harmless and self-healing: deep sleep is a chip reset, the flag goes with
+RAM, and the first Home paint after the wake reads the gauge fresh. Worth knowing
+only because it looks like the latch failing when it is the timer winning.
+
 ## Covers
 
 The sleep screen can hold the open book's cover (#11). `SleepCover.dc.html` is the
@@ -1860,13 +2119,23 @@ badge over it, and `Sleep.dc.html` is the card on paper that shipped and is stil
 default. Settings' `SLEEP SCREEN` section picks between them — `Shows`
 (COVER / COVER + DETAILS / DETAILS) and `Cover fit` (FILL / WHOLE).
 
-**IT IS DESKTOP-VERIFIED AND DEVICE-TIMED, AND THE PANEL HAS NOT YET SEEN A COVER.**
-Every number below is a corpus measurement, a desktop render, or a boot-time probe on
-the X3 — nothing here is a fact about the glass. The two questions the feature
-actually turns on are both still open and both are `On glass`: whether four grey
-levels of a photograph read as a picture or as noise, and whether a full-bleed cover
-reads as *asleep* with no badge on it. This project has been wrong about this panel
-from desktop evidence three times.
+**IT IS ON GLASS, AND THE QUESTION IT TURNED ON IS ANSWERED: A FOUR-LEVEL COVER READS
+AS A PHOTOGRAPH, NOT AS NOISE.** Confirmed on the X3, 2026-08-29, with no ghosting of
+the card's text under the picture. That was the decision deferred to the panel when
+`Grayscale` was chosen over 1-bit Floyd–Steinberg, and it went the way the design
+assumed — which is worth recording precisely because this project has been wrong about
+this panel from desktop evidence three times.
+
+**What the glass also corrected, and it is the sharper half:** the heap. A deflated
+JPEG peaks at **81,088 bytes on the device against the desktop's 63,560** for the same
+work — every case measured 17–25 KB above its desktop figure, because the allocator is
+simply different. That is the ratio trap in a third disguise, after time-on-the-card and
+`__divdi3`. See **Sleep releases the whole `App`** below for what it cost.
+
+**Two things remain untested on glass** and are honest gaps rather than oversights: the
+**one-bit cover the WAKE paints** (the Msb plane is a threshold *through* an already
+dithered picture, and hard thresholding a photograph is exactly what this file warns
+about), and whether the badge slicing a cover's own title band is tolerable.
 
 ### A cover is universal, and it can never be held
 
@@ -3397,9 +3666,17 @@ Three things worth keeping:
   "`shell/` has no test harness" has been to move logic where a fake can reach it;
   a stack is not movable, so it is MEASURED instead. `test_inflate.cpp` runs the
   inflate on a pthread with a stack it owns, fills it with a pattern and counts what
-  survives — FreeRTOS's own high-water technique. It reports **7,348 bytes** and
-  asserts a 10 KB ceiling, so a vendored-library bump that grows the appetite fails
-  on the desktop rather than panicking the device.
+  survives — FreeRTOS's own high-water technique. It reports **7,348 bytes** under
+  clang and asserts a 10 KB ceiling there, so a vendored-library bump that grows the appetite fails
+  on the desktop rather than panicking the device. **THE CEILING IS PER HOST
+  COMPILER AND CANNOT BE ONE NUMBER** (`test/unit/stack_ceiling.h`): the same
+  chain measures **12,212** under x86-64 gcc, and the streaming decoder 3,072
+  against 6,824, so the clang-calibrated ceilings failed the first Linux CI run
+  with nothing regressed. Raising one number to cover both was refused — it would
+  need clang's appetite to **more than double** before tripping, and clang is
+  where nearly all work here happens. **Neither host figure is the device's**:
+  the device is gcc-shaped but 32-bit, and its real number is the `[stack]`
+  serial line.
 
 The `[stack]` serial line reports `uxTaskGetStackHighWaterMark` after an open — the
 worst case since boot, inflate included.

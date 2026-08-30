@@ -1,3 +1,7 @@
+// <initializer_list> for the range-for over a braced list below. libc++ satisfies this transitively and libstdc++ does
+// not, so it compiled on macOS and failed on the first Linux build.
+#include <initializer_list>
+
 #include "doctest.h"
 #include "reader/refresh.h"
 

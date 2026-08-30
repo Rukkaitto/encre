@@ -6,12 +6,17 @@
 // every one of them is a stream a real file could contain.
 #include <pthread.h>
 
+// <cstdint> for uintptr_t. libc++ satisfies this transitively and libstdc++ does
+// not, so it compiled on macOS and failed on the first Linux build.
+#include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
 #include "deflate_fixtures.h"
 #include "doctest.h"
 #include "grained_source.h"
+#include "stack_ceiling.h"
 #include "reader/inflate.h"
 #include "reader/inflate_stream.h"
 
@@ -317,6 +322,10 @@ TEST_CASE("THE STREAMING DECODER'S STACK IS A FRACTION OF THE ONE IT REPLACES") 
   // A CEILING, so a refactor that moves a table onto the stack fails here rather
   // than on the device. stb's whole chain measured 7,348 bytes; this must stay
   // well under it, and the 32 KB window is on the HEAP and so is not counted.
+  //
+  // Per HOST compiler: clang measures 3,072 and x86-64 gcc 6,824. The RATIO is
+  // what this test is really about, and it survives the compiler change -- under
+  // gcc the stb chain wants 12,212, so this is still 56% of it.
   CHECK(used > 256);    // the measurement is real, not a pattern-scan artifact
-  CHECK(used <= 4096);  // measured 3,072 -- 42% of the 7,348 the stb chain wanted
+  CHECK(used <= stackceil::pick(/*clang=*/4096, /*gcc=*/9216));
 }

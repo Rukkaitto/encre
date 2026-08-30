@@ -120,6 +120,17 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   Hint homeHints[4];
   buildHints(kHomeMarks, vm.hints, vm.holds, homeHints);
 
+  // ONE CHOICE OF MARK AND ONE SPELLING OF THE NUMBER, for both draw sites below
+  // -- the header band and the nothingToContinue strip. A choice made in two
+  // places is a choice that will eventually be made differently in the two
+  // places, which is this file's own rule about the second copy.
+  const Icon& batteryMark = vm.batteryCharging ? icons::kBatteryCharging : icons::kBattery;
+  // An empty string, not "0%": see HomeViewModel::batteryPercent. drawText and
+  // measure both answer nothing for it, so the mark keeps its place on the margin
+  // and no gap is left where the number would have been.
+  const std::string charge =
+      vm.batteryPercent < 0 ? std::string() : std::to_string(vm.batteryPercent) + "%";
+
   if (vm.nothingToContinue) {
     // NOT A HEADER BAND, and drawHeaderBand is the wrong primitive for it. This
     // board's top strip is a bare right-aligned battery -- `padding: 18px 24px 0`,
@@ -132,13 +143,12 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
     // `NOW READING` is also absent for a reason -- it would be a claim about a
     // book that does not exist.
     const Font& pct = fonts[Role::Value700];
-    const std::string charge = std::to_string(vm.batteryPercent) + "%";
     const int chargeW = pct.measure(charge);
     const int stripRight = fb.width() - kMargin;
-    const int battX = stripRight - icons::kBattery.w;
+    const int battX = stripRight - batteryMark.w;
     const int textX = battX - kBandGap - chargeW;
     int ey = kEmptyStripTop;
-    drawIcon(fb, icons::kBattery, battX, iconTopIn(ey, pct.lineHeight(), icons::kBattery.h),
+    drawIcon(fb, batteryMark, battX, iconTopIn(ey, pct.lineHeight(), batteryMark.h),
              Ink::Black, plane);
     drawText(fb, pct, textX, baselineIn(pct, ey, pct.lineHeight()), charge, Ink::Black, {},
              plane);
@@ -181,8 +191,7 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
     return;
   }
 
-  int y = drawHeaderBand(fb, fonts, "NOW READING", std::to_string(vm.batteryPercent) + "%",
-                             &icons::kBattery, plane);
+  int y = drawHeaderBand(fb, fonts, "NOW READING", charge, &batteryMark, plane);
 
   // Two columns: cover on the left, the reading state stacked on the right.
   y += kCoverTopGap;

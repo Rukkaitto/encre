@@ -8,6 +8,12 @@
 // macro ever changed a result, this file is what notices. STBTT_STATIC keeps
 // both copies internal to their own translation unit, so there is no ODR
 // question.
+// <cstring> for std::memcmp, and it is NOT redundant: libc++ pulls it in
+// transitively so this file compiled on macOS for months without it, and
+// libstdc++ does not -- so the first Linux build in CI failed here with
+// "'memcmp' is not a member of 'std'". A transitively-satisfied include is a
+// portability bug that only the other toolchain can see.
+#include <cstring>
 #include <string>
 #include <vector>
 

@@ -24,7 +24,24 @@ struct HomeViewModel {
   // novel -- and `chapterLabel` carries the free counter instead (`CH. 08 OF 92`).
   // The Reader's own footer is a different question: that counter is within ONE
   // chapter, which is affordable, and it lives in ReaderViewModel.
-  int batteryPercent = 0;
+  // -1 = THE GAUGE DID NOT ANSWER, and the band then draws its mark alone.
+  //
+  // Not 0, and the distinction is the whole point: BatteryMonitor answers a
+  // FAILED read with 0 -- readPercentage() returns 0, and percentageFromMillivolts
+  // maps a failed 0 mV to 0% rather than 100%, deliberately -- so a 0 taken at
+  // face value puts a flat battery on the panel of a device that is fine. This is
+  // the same call homeVmForCard() already makes for the LIBRARY row's count, where
+  // -1 means "could not look" and draws nothing: "no books" and "could not look"
+  // are different claims, and so are "flat" and "did not answer".
+  //
+  // The default is -1 rather than a number for the same reason: a view model
+  // nobody has told about the battery must not claim one. The demo view-models
+  // set the board's 87 explicitly, exactly as they set the board's LIBRARY 12.
+  int batteryPercent = -1;
+  // Drawn as a bolt knocked out of the battery's fill. X3 only in practice: the
+  // X4 profile declares no gauge and no charge-status pin, so BatteryMonitor
+  // answers isCharging() false there unconditionally.
+  bool batteryCharging = false;
   // Cover art is not decoded yet (Phase 3 owns EPUB images), so the theme draws
   // a dithered placeholder carrying the title. This flag says whether a real
   // cover exists, so the placeholder can be replaced without a view-model change.

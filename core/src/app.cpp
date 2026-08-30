@@ -121,6 +121,17 @@ void App::clearDirty() {
   transition_ = false;
 }
 
+void App::markDirty() {
+  dirty_ = true;
+  // See app.h: this is the one route to dirty_ that is not about the top
+  // screen, so the partial-repaint record cannot be trusted to still describe
+  // what the next paint needs to cover. Resetting it to a fresh App's state is
+  // what makes the next paint go through App::render regardless of what is on
+  // top, rather than relying on every future caller to know not to call this
+  // with an overlay up.
+  painted_ = PaintRecord{};
+}
+
 void App::render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const {
   // Walk down from the top to the first screen that is not an overlay -- the
   // parent the overlays are floating over -- then paint upward from there.

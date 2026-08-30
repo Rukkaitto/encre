@@ -460,6 +460,15 @@
       "page": "page-4"
     },
     {
+      "file": "HomeCharging.dc.html",
+      "title": "Home · Charging",
+      "x": 4060,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
       "file": "SleepIdle.dc.html",
       "title": "Sleep · Idle",
       "x": 1160,
