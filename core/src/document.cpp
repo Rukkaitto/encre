@@ -132,6 +132,67 @@ bool onlyWhitespace(const std::string& s) {
   return true;
 }
 
+// The byte length of a dialogue dash opening `s`, or 0 if there is none.
+//
+// THREE MARKS, AND THE CORPUS CHOSE THEM. Across 225 real books, a paragraph opens
+// with U+2014 EM DASH (45 books), ASCII '-' (7) or U+2013 EN DASH (4) and with
+// nothing else -- U+2010, U+2011, U+2012, U+2015 and U+2212 open none. Two of those
+// are not in tools/fontc.py's CODEPOINTS either, so a rule for them would be a rule
+// for a notdef box.
+size_t dialogueDashLen(const std::string& s) {
+  if (s.empty()) return 0;
+  if (s[0] == '-') return 1;
+  if (s.size() >= 3 && static_cast<unsigned char>(s[0]) == 0xE2 &&
+      static_cast<unsigned char>(s[1]) == 0x80) {
+    const unsigned char c = static_cast<unsigned char>(s[2]);
+    if (c == 0x93 || c == 0x94) return 3;  // U+2013 EN DASH, U+2014 EM DASH
+  }
+  return 0;
+}
+
+// A DIALOGUE DASH IS GLUED TO ITS FIRST WORD, by replacing the ordinary space after
+// it with U+00A0.
+//
+// A dash opening a paragraph is direct speech, and it belongs to the words after
+// it -- so that space must be neither elastic nor a break opportunity. U+00A0 is
+// exactly that on this device and needs no new mechanism: `wrapProseLead`,
+// `stretchFor` and `drawRunF26` all key on U+0020 and nothing else, so a
+// non-breaking space is already unbreakable and already unstretchable in all three.
+//
+// THIS IS THE MAJORITY FORM, SUPPLIED FOR THE BOOKS THAT OMITTED IT, which is what
+// makes it a normalisation rather than a style this layer invented. Of the corpus's
+// dash-opening paragraphs, 17,435 already carry the non-breaking space themselves
+// (15,053 with an em dash, 2,382 with an en dash) and 8,095 carry a plain space. The
+// publishers state the rule; a third of them just do not encode it.
+//
+// WHAT IT LOOKED LIKE WITHOUT THIS. `Le Fleau` is 6,837 of the plain-space ones and
+// is what reported it: the gap after the dash was justified along with every other
+// gap on its line, so across four consecutive lines of one exchange it was 1, 1, 5.5
+// and 5.7 spaces wide and read as the paragraph indent moving at random. The indent
+// never moved -- it is 48px on every one of them. On a line holding only the dash and
+// one long word (`- Brrrrrrrrrroum...`) the single gap took all 164px of the line's
+// slack: 28 spaces.
+//
+// CHROME DOES NOT DO THIS, and that is deliberate rather than drift. It stretches
+// U+00A0 exactly as it stretches U+0020, so it opens the same gap -- the firmware
+// already declines to, in the three functions named above, and this extends that
+// existing decision to the books that wrote the wrong character. No board states it
+// because no board states the U+00A0 rule it rides on.
+//
+// THE SPANS MOVE WITH IT. U+00A0 is two bytes where the space was one, so every
+// emphasis span after the seam shifts and every span across it grows. Getting that
+// wrong italicises from one byte early -- and that byte is a space, so it is
+// INVISIBLE. test_document.cpp asserts the spans against the bytes they cover.
+void glueDialogueDash(Block& b) {
+  const size_t d = dialogueDashLen(b.text);
+  if (d == 0 || d >= b.text.size() || b.text[d] != ' ') return;
+  b.text.replace(d, 1, "\xC2\xA0");
+  for (Span& s : b.emphasis) {
+    if (static_cast<size_t>(s.off) > d) ++s.off;
+    else if (static_cast<size_t>(s.off) + s.len > d) ++s.len;
+  }
+}
+
 // The kind a block gets, read from the WHOLE STACK rather than from the tag that
 // started it -- outermost wins. `<blockquote><p>x</p></blockquote>` is a quoted
 // paragraph, not a paragraph that happens to sit inside a quote, and the same for
@@ -250,6 +311,9 @@ bool BlockReader::next(Block& out) {
       // space. `<p>a <em>b </em></p>` trims one byte off a span that ended there.
       if (before != st.cur.text.size())
         st.cur.emphasis = clipTo(st.cur.emphasis, 0, st.cur.text.size());
+      // AFTER THE TRIM, so a block that is nothing but a dash and a space has had
+      // the space removed and has no gap left to glue.
+      glueDialogueDash(st.cur);
       if (!onlyWhitespace(st.cur.text)) {
         if (emitted_ >= static_cast<int>(kMaxBlocks)) {
           error_ = "too many blocks";

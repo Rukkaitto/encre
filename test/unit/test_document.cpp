@@ -71,6 +71,45 @@ TEST_CASE("a leading or trailing space in a block is trimmed") {
   CHECK(flatten("<p>  padded  </p>") == "P[padded]");
 }
 
+TEST_CASE("A DIALOGUE DASH IS GLUED TO ITS FIRST WORD") {
+  // A paragraph that opens with a dash is direct speech, and the dash belongs to
+  // the words after it. The space between them is therefore NOT elastic and NOT a
+  // break opportunity -- which on this device means U+00A0, because `stretchFor`,
+  // `drawRunF26` and `wrapProseLead` all key on U+0020 and nothing else.
+  //
+  // MEASURED BEFORE IT WAS WRITTEN, over the 225-book corpus: 17,435 paragraphs
+  // already ship the non-breaking space themselves (15,053 with an em dash, 2,382
+  // with an en dash), and 8,095 ship a plain space instead. So this is not a rule
+  // invented here -- it is the majority form, supplied for the books that omitted
+  // it. `Le Fleau` is 6,837 of the plain-space ones, and it is what reported this:
+  // the gap after the dash was justified along with every other gap on the line,
+  // so it swung between one space and five from line to line and read as the
+  // indent moving at random. On a line holding only the dash and one long word it
+  // reached 164px -- 28 spaces -- which is what made it a bug rather than a taste.
+  CHECK(flatten("<p>– On va bien rigoler.</p>") == "P[– On va bien rigoler.]");
+  CHECK(flatten("<p>— Yes, I said.</p>") == "P[— Yes, I said.]");
+  CHECK(flatten("<p>- Bonjour.</p>") == "P[- Bonjour.]");
+}
+
+TEST_CASE("gluing the dash touches nothing else that looks like one") {
+  // ALREADY GLUED IS LEFT ALONE, which is most of the corpus: onlyWhitespace()
+  // treats U+00A0 as whitespace and the block builder keeps it inside text, so
+  // this arrives correct and must stay correct.
+  CHECK(flatten("<p>– Deja glued.</p>") == "P[– Deja glued.]");
+  // A DASH MID-BLOCK IS PUNCTUATION, not a speaker mark: an em dash sets off a
+  // clause and its spaces are ordinary. Only the block's first character opens
+  // direct speech.
+  CHECK(flatten("<p>She paused — then spoke.</p>") == "P[She paused — then spoke.]");
+  // NO SPACE MEANS NO GAP TO GLUE. `-5` is a minus sign and `--` is a rule.
+  CHECK(flatten("<p>-5 degrees.</p>") == "P[-5 degrees.]");
+  CHECK(flatten("<p>–– twice.</p>") == "P[–– twice.]");
+  // A HYPHENATED FIRST WORD IS NOT A DASH EITHER.
+  CHECK(flatten("<p>Jean-Marc spoke.</p>") == "P[Jean-Marc spoke.]");
+  // AND A BLOCK THAT IS NOTHING BUT A DASH survives the trim without the glue
+  // reading past the end of it.
+  CHECK(flatten("<body><p>– </p><p>real</p></body>") == "P[–]P[real]");
+}
+
 TEST_CASE("an empty block is dropped, not emitted blank") {
   // `<p></p>` and `<p>   </p>` are layout artifacts of a generator, not content,
   // and a blank block would take a line of the page.
@@ -364,6 +403,17 @@ TEST_CASE("em, i and cite are emphasis; strong and b are not") {
   // arrives; it is simply not marked.
   CHECK(marked("<p>a <strong>b</strong> c</p>") == "[a b c]");
   CHECK(marked("<p>a <b>b</b> c</p>") == "[a b c]");
+}
+
+TEST_CASE("GLUING THE DASH CARRIES THE EMPHASIS SPANS WITH IT") {
+  // The glue grows the block by one byte, so every span after it moves. This is
+  // `Le Fleau`'s own shape -- `<p>- <i>Brrrrrrrrrroum...</i> Prends ca</p>` -- and
+  // an unshifted span would italicise from one byte early, which is a space and
+  // therefore INVISIBLE. marked() asserts the span against the bytes it covers
+  // for exactly that reason.
+  CHECK(marked("<p>– <em>Brrr</em> Prends ca</p>") == "[– <Brrr> Prends ca]");
+  // A span that COVERS the glued space grows rather than moves.
+  CHECK(marked("<p><em>– Brrr</em> ca</p>") == "[<– Brrr> ca]");
 }
 
 TEST_CASE("nested emphasis is ONE run, not two") {
