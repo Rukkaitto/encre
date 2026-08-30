@@ -163,10 +163,24 @@ them. Reading the board rather than assuming what it must say deleted all of it 
 is the design-first rule paying for itself in the direction it is least often credited
 for, by making the change SMALLER.
 
-Book details' Progress row reads the same index and is **left alone in this change**.
-`BookDetails.dc.html` states no value for it at all, so unlike the Library there is
-nothing boarded to follow, and a row invented in code is the thing CLAUDE.md's first
-rule forbids. It gets a card.
+**BOOK DETAILS' PROGRESS ROW READS `DONE` TOO, AND THAT FALLS OUT RATHER THAN BEING
+CHOSEN.** `applyProgress` writes `item.details.progress` in every branch, which is
+deliberate and predates this work — CLAUDE.md records that it is "the one spelling of
+the derivation, shared by both callers", precisely so the Library row and this row
+cannot disagree. Splitting them to keep a number here would be a second spelling of
+one fact, which is the thing that rule exists to prevent.
+
+**AND AN EARLIER DRAFT OF THIS PARAGRAPH SAID `BookDetails.dc.html` STATES NO VALUE AT
+ALL.** It states `31%`. The claim came from a grep whose pattern matched the HTML
+comment above the div rather than the div — the same mistake CLAUDE.md records under the
+table of contents, where "a loose regex is not a measurement" got the NCX nesting
+question backwards and wrote the wrong claim into a header. **Where the answer decides a
+design, parse the thing.**
+
+What the board actually shows is a book at **31%**, which is a started, unfinished one —
+so it says nothing about a FINISHED book's row and there is no contradiction to resolve.
+The unboarded state gets the consistent answer for free. No test or golden covers it
+today; that gets a card.
 
 ## Reaching the screen
 
@@ -361,7 +375,7 @@ from desktop evidence three times.** It goes in the on-glass list.
 | limit | why |
 |---|---|
 | No `FINISHED <date>` | no RTC; parked on #25 |
-| Book details still shows a percentage for a finished book | its board states no value at all; gets a card |
+| Book details' Progress row says `DONE`, unboarded and uncovered by any golden | `applyProgress` is one derivation by design; a second spelling is worse. Gets a card |
 | `BookEnd` does not survive a wake | refused unprimed, by design; wake lands on the last page |
 | Opening a finished book and leaving clears the flag | a save from the Reader builds the record fresh; recoverable in two presses, and visible |
 | `24 CHAPTERS` counts spine entries, cover included | the same number Home already says `OF`; a text-chapter count is the ~49 s walk |
