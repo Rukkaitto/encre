@@ -184,6 +184,23 @@ ICONS = {
         "source": "design/SdMissing.dc.html",
         "match": "M4 1h9l6 6v16",
     },
+    # The other mark that is neither a button nor a row ornament, alongside
+    # sdcard: the end-of-book confirmation tick, 26x21 on its board. The match
+    # keys on the tick's own two-segment path, which no hint-bar mark carries.
+    # THE SAME PATH IS ON TWO OTHER BOARDS -- SyncDone at 26x21 and WebUpload at
+    # 15x12, both parked V2 Wi-Fi screens -- so `source` is what disambiguates
+    # them, exactly as it does for book/book_large, and it has to.
+    #
+    # IT IS A THIN DIAGONAL, which is the shape Plane::Bw treats worst --
+    # kChevron's stroke is mostly coverage-1 pixels and comes out a notch
+    # lighter. At 26x21 the stroke resolves thicker than the chevron's, so it
+    # should hold, but that is an argument and only the panel can settle it.
+    "check": {
+        "symbol": "kCheck",
+        "note": "a tick: the end-of-book confirmation mark",
+        "source": "design/BookEnd.dc.html",
+        "match": "M1 6l5 5L15 1",
+    },
 }
 
 # The boards are hand-written one-element-per-line HTML with no nested <svg>, so

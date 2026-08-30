@@ -53,6 +53,7 @@ extern const Icon kFolder;   // folder: a Library directory row
 extern const Icon kBattery;  // the header band's charge cell
 extern const Icon kBatteryCharging;  // ...with a bolt knocked out: charging
 extern const Icon kSdCard;   // an SD card: the subject of the no-card prompt
+extern const Icon kCheck;    // a tick: the end-of-book confirmation mark
 }  // namespace icons
 
 }  // namespace reader
