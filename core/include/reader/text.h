@@ -167,6 +167,35 @@ int drawTextJustified(Framebuffer& fb, const GlyphSource& font, int x, int basel
 // IT LIVES HERE, WITH THE FUNCTION THAT APPLIES IT. Both were reader/layout's
 // until the Typography preview needed the same rule: a constant in one layer
 // governing a function in another is two places to read one decision.
+//
+// RE-ASKED IN 2026-08 WITH MEASUREMENTS, AND THE ANSWER IS STILL THIS RULE ALONE.
+// The complaint was a real one and it is worth knowing what it was, because it will
+// be noticed again: this test is BLIND TO THE GAP COUNT, and the gap count is what
+// turns slack into stretch. Over 743,197 justifiable lines from 39 real books at
+// this column, the MEDIAN gap on a ONE-gap line is 17.2 space widths -- typical, not
+// a tail -- against 7.2 at two gaps, 4.0 at three and under 2.7 at four or more. The
+// worst seen on a device was 33.
+//
+// A CEILING ON THE GAP WAS BUILT AND THEN DROPPED, on this evidence. Twelve space
+// widths -- the smallest ceiling that leaves three-gap lines to this test at both
+// geometries -- takes ragged lines from 2.50% to 5.23%, which is roughly HALF the
+// pages gaining a line that stops short mid-paragraph against a quarter of them
+// today. That is the wrong trade, and the reason is the one already written above:
+// a wide gap reads as loose typesetting and a short line mid-paragraph reads as the
+// feature being broken. Trading a defect for a WORSE-CLASS defect is not a fix, even
+// when the number being traded away is large.
+//
+// TWO THINGS THAT MAKE IT LESS ALARMING THAN IT SOUNDS. This test already BOUNDS the
+// gap: a one-gap line at exactly the floor is 30.5 spaces on the X4, so the worst
+// case is bounded rather than open. And no board is anywhere near it -- forcing a
+// ceiling down to SIX space widths moves not one golden, so every board's widest gap
+// is under a fifth of what a real book produces.
+//
+// THERE IS NO THIRD MECHANISM, which is the part worth not re-deriving. For a
+// one-gap line whose next word is ~190px, shrinking the spaces buys ~6px and
+// letter-spacing the line at a defensible 5% of em buys ~29px. It is a wide gap or a
+// short line until there is HYPHENATION, which is the actual fix and is a dictionary
+// this device does not carry.
 inline constexpr int kMinJustifyFillPercent = 60;
 
 // How much each ASCII space on this line stretches, or 0 for ragged.
