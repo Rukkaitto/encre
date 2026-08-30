@@ -226,6 +226,12 @@ void App::dispatch(const InputEvent& ev) {
       // Action::open().
       open_ = true;
       break;
+    case Action::Kind::Finish:
+      // Latched for the reason Retry and Open are: the card is the shell's. Nothing
+      // is marked dirty -- what the write changes on glass is the shell's to decide,
+      // and it is usually a screen change rather than a repaint of this one.
+      finish_ = true;
+      break;
   }
 }
 

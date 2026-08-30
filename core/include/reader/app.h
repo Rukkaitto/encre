@@ -61,7 +61,9 @@ const char* screenName(ScreenId id);
 // the mount rather than repaint the same message -- so the screen asks, App
 // latches the request, and the shell answers it. See App::retryRequested().
 struct Action {
-  enum class Kind : uint8_t { None, Redraw, Push, Pop, PopTo, Sleep, Retry, Open };
+  // APPENDED, never inserted -- a Kind is compared, never stored, but appending
+  // costs nothing and keeps every existing value where it was.
+  enum class Kind : uint8_t { None, Redraw, Push, Pop, PopTo, Sleep, Retry, Open, Finish };
   Kind kind = Kind::None;
   ScreenId target = ScreenId::Home;  // meaningful for Push and PopTo
 
@@ -95,6 +97,15 @@ struct Action {
   // Action kind. The shell already holds the LibraryScreen, so it can ask which
   // book is selected; see App::openRequested().
   static Action open() { return {Kind::Open, ScreenId::Reader}; }
+  // "Mark the book I mean as finished." Shaped like Retry and Open and for the
+  // identical reason: this is a WRITE TO THE CARD, and storage is not core/'s.
+  //
+  // It carries no path, deliberately, exactly as open() carries none -- adding one
+  // would put a std::string in every Action returned by every gesture on every
+  // screen to serve one kind. TWO screens ask and they mean different books:
+  // BookEnd means the open book, the item-actions overlay means the Library's
+  // focused row. The shell resolves it the way handleOpen already resolves open().
+  static Action finish() { return {Kind::Finish, ScreenId::Home}; }
 };
 
 // The four hint slots are the four front buttons in hardware order (spec 4.0).
@@ -530,6 +541,29 @@ class App {
   bool openRequested() const { return open_; }
   void clearOpenRequest() { open_ = false; }
 
+  // The user asked for a book to be marked finished. The shell's job, in order:
+  //
+  //   1. clearFinishRequest(), so a failed write does not re-fire forever;
+  //   2. work out WHICH book -- the open one if a Reader is on the stack under
+  //      BookEnd, otherwise the Library's focused row;
+  //   3. load that book's position (or build a minimal record for a book never
+  //      opened), set `finished`, savePosition, keeping SD traffic off the display
+  //      bus exactly as the retry and the open do;
+  //   4. clear last.json ONLY IF it names this book -- clearing it unconditionally
+  //      would take an unrelated book off Home's CONTINUE block, which is another
+  //      book's state destroyed by this book's button;
+  //   5. set gHomeStale AND gLibraryStale, separately, because each is consumed
+  //      when its own screen is reachable and one shared flag lets Library, Back,
+  //      Home clear it before Home uses it.
+  //
+  // A FAILED SAVE IS LOGGED AND NOT FATAL. writeAll calls noteCardGone() on a write
+  // that fails after opening, which pollCardPresence turns into an App rooted at
+  // SdMissingScreen -- so treating this as fatal would throw a reader out of a book
+  // they can still read, over a flag. reading_store.h states the same hazard for
+  // savePosition and it applies unchanged.
+  bool finishRequested() const { return finish_; }
+  void clearFinishRequest() { finish_ = false; }
+
   ButtonMask longPressable() const { return top().longPressable(); }
   ButtonMask autoRepeat() const { return top().autoRepeat(); }
 
@@ -565,6 +599,7 @@ class App {
   bool sleep_ = false;
   bool retry_ = false;
   bool open_ = false;
+  bool finish_ = false;
   // Mutable because render() is const: painting does not change the app, but it
   // does change what is on glass, and this is what remembers that. The
   // alternative -- a non-const render() -- would make every const App& in the
