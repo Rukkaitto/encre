@@ -46,7 +46,20 @@ enum class ScreenId : uint8_t {
   // for the reason ReaderMenu and Typography were: the session record stores a screen by
   // NAME (session_record.h), so an insertion could not silently become another screen,
   // but appending also leaves every existing ordinal where it was.
-  Peek
+  Peek,
+  // design/BookEnd.dc.html -- the screen a book's last page turns into. APPENDED
+  // for the reason ReaderMenu, Typography and Peek were: the session record stores
+  // a screen by NAME (session_record.h) so an insertion could not silently become
+  // another screen, but appending also leaves every existing ordinal where it was.
+  //
+  // AND THE GUARD IN test_focus_restore.cpp DID NOT NOTICE THIS APPEND, which is
+  // worth writing down where the next member will be added. That static_assert
+  // compares the catalogue's length against `ScreenId::Peek + 1` -- a NAMED member,
+  // not the last one -- so an append leaves both sides at 13 and it passes over a
+  // screen the catalogue does not cover. That is #42, and it is still open: it fires
+  // only once the array grows, which is the wrong way round for a guard whose job is
+  // to force the array to grow.
+  BookEnd
 };
 
 // A screen's name, for logs. Same reasoning as buttonName: a numeric ScreenId in

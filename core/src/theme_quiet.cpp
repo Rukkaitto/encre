@@ -359,6 +359,13 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   drawHintBar(fb, fonts, homeHints, plane);
 }
 
+void QuietTheme::renderBookEnd(Framebuffer&, const FontSet&, const BookEndViewModel&,
+                               Plane) {
+  // NOT WRITTEN YET, and deliberately empty rather than approximate: a screen that
+  // draws something almost right is harder to notice than one that draws nothing.
+  // design/BookEnd.dc.html is the source of truth and the render follows it.
+}
+
 void QuietTheme::renderSdMissing(Framebuffer& fb, const FontSet& fonts,
                                  const SdMissingViewModel& vm, Plane plane) {
   fb.clear(true);

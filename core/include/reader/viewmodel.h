@@ -97,6 +97,27 @@ struct SdMissingViewModel {
   std::array<bool, 4> holds{};
 };
 
+// The end of a book (design/BookEnd.dc.html). Semantic content only: every string
+// here is composed by the screen, because a byline and a chapter count are CONTENT
+// and the theme has no business knowing that a book has an author.
+struct BookEndViewModel {
+  std::string bookTitle;    // the header band's value, shouted: "MIDDLEMARCH"
+  std::string title;        // "THE END"
+  std::string byline;       // "Middlemarch · George Eliot"; the name alone if no author
+  std::string meta;         // "24 CHAPTERS"; EMPTY when the count is unknown
+  std::string finishLabel;  // the filled slab
+  // "BACK TO LIBRARY" or "BACK TO HOME". TWO SPELLINGS OF ONE BUTTON, and that is
+  // deliberate: popTo(Library) stops at the root when no Library is on the stack, so
+  // the button always works and only its NAME could be wrong. A slab that says
+  // LIBRARY and lands on Home is the `About this book` shape -- right in the common
+  // case, quietly wrong otherwise, and nobody can learn the rule.
+  std::string leaveLabel;
+  std::string note;  // the footnote above the hint bar
+  int focusedAction = 0;
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
 // One Library row as the theme draws it (design/Library.dc.html). Nothing here
 // addresses a file: the leaf name the card knows the thing by stays on the
 // screen's side of the wall, because the theme has no business with it and a

@@ -26,6 +26,9 @@ const char* screenName(ScreenId id) {
     // Two separate facts that happen to agree; this one is free to be reworded.
     case ScreenId::Typography: return "TYPOGRAPHY";
     case ScreenId::Peek: return "PEEK";
+    // Kebab, as ITEM-ACTIONS and BOOK-DETAILS are. A log label, free to be
+    // reworded; the session record's spelling is a storage format and is not this.
+    case ScreenId::BookEnd: return "BOOK-END";
   }
   return "?";
 }
