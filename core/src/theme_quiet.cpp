@@ -5,6 +5,7 @@
 #include "reader/components.h"
 #include "reader/dither.h"
 #include "reader/framebuffer.h"
+#include "reader/screen_book_end.h"  // BookEndScreen::kFinish / kLeave
 #include "reader/screen_sleep.h"  // CoverSource
 #include "reader/text.h"
 #include "reader/viewmodel.h"
@@ -52,6 +53,19 @@ constexpr int kDisplayLineH = 67;  // 1.00 * 67
 // sum of what is in it, and where it starts falls out of that.
 constexpr int kPromptGap = 22;
 constexpr int kPromptActionW = 260;
+
+// design/BookEnd.dc.html's own box model. Every one of these is a number the board
+// STATES; the heights it COMPUTES -- the band's, the slabs', the hint bar's -- are
+// derived from the primitives that draw them, never pinned. Pinning a computed
+// height is the defect that put the header band 6px out, compounded a pixel a row
+// down the menu, and gave the hint bar asymmetric padding.
+constexpr int kBookEndBlockPadTop = 56;    // the content block's `padding-top`
+constexpr int kBookEndGap = 12;            // `gap: 12px`, in the block and the slabs
+constexpr int kBookEndSlabPadTop = 36;     // the slab block's `padding-top`
+constexpr int kBookEndNotePadBottom = 14;  // the note's `padding-bottom`
+constexpr int kBookEndTitleEm = 80;        // THE END's `letter-spacing: 0.08em`
+constexpr int kBookEndMetaEm = 140;        // the meta line's `0.14em`
+constexpr int kBookEndNoteLeadEm = 1500;   // the note's `line-height: 1.5`
 
 // NOTE: this theme used to carry its own copy of the half-leading baseline
 // formula, and it was the *correct* copy while the shared primitives in
@@ -359,11 +373,94 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   drawHintBar(fb, fonts, homeHints, plane);
 }
 
-void QuietTheme::renderBookEnd(Framebuffer&, const FontSet&, const BookEndViewModel&,
-                               Plane) {
-  // NOT WRITTEN YET, and deliberately empty rather than approximate: a screen that
-  // draws something almost right is harder to notice than one that draws nothing.
-  // design/BookEnd.dc.html is the source of truth and the render follows it.
+void QuietTheme::renderBookEnd(Framebuffer& fb, const FontSet& fonts,
+                               const BookEndViewModel& vm, Plane plane) {
+  fb.clear(true);
+
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+
+  // NO MARK ON THIS BAND, and that is not an omission: drawHeaderBand DEFAULTS to the
+  // battery, which this board does not draw. Passing null is also what makes
+  // headerBandHeight answer about the band this screen actually draws -- asking it
+  // about Home's would put every run below here in the wrong place.
+  const int bandH = drawHeaderBand(fb, fonts, "BOOK FINISHED", vm.bookTitle,
+                                   /*mark=*/nullptr, plane);
+
+  const int usableW = fb.width() - 2 * kMargin;
+  const Font& titleF = fonts[Role::Title700];
+  const Font& bylineF = fonts[Role::Value500];
+  const Font& metaF = fonts[Role::Meta400];
+
+  // --- The content block, top-anchored under the band --------------------------
+  //
+  // Accumulated in 1/64 px and rounded ONCE where each run is painted. Three
+  // truncating divisions once put an icon 1.5px low on another screen, and
+  // pre-rounding 2.52px of tracking to 3 drifted a label ~3px.
+  int yF26 = pxToF26(bandH + kBookEndBlockPadTop);
+
+  const Icon& tick = icons::kCheck;
+  drawIcon(fb, tick, centreIn(kMargin, usableW, tick.w), f26ToPx(yF26), Ink::Black, plane);
+  yF26 += pxToF26(tick.h + kBookEndGap);
+
+  drawCentredText(fb, titleF, kMargin, usableW,
+                  baselineInF26(titleF, yF26, pxToF26(titleF.lineHeight())), vm.title,
+                  Ink::Black, trackingEm(titleF, kBookEndTitleEm), plane);
+  yF26 += pxToF26(titleF.lineHeight() + kBookEndGap);
+
+  // The byline is untracked -- the board states no letter-spacing on it, and Value500
+  // is the role because the run carries `font-weight: 500` with no Value400 in the ramp.
+  drawCentredText(fb, bylineF, kMargin, usableW,
+                  baselineInF26(bylineF, yF26, pxToF26(bylineF.lineHeight())), vm.byline,
+                  Ink::Black, Tracking{}, plane);
+  yF26 += pxToF26(bylineF.lineHeight());
+
+  // THE META LINE IS ABSENT, NOT BLANK, when the book's chapter count is unknown --
+  // and ITS GAP GOES WITH IT. Adding the gap unconditionally would sit the slabs a
+  // line lower on a book that simply did not say, which is a layout that moves for a
+  // reason the reader cannot see.
+  if (!vm.meta.empty()) {
+    yF26 += pxToF26(kBookEndGap);
+    drawCentredText(fb, metaF, kMargin, usableW,
+                    baselineInF26(metaF, yF26, pxToF26(metaF.lineHeight())), vm.meta,
+                    Ink::Black, trackingEm(metaF, kBookEndMetaEm), plane);
+    yF26 += pxToF26(metaF.lineHeight());
+  }
+
+  // --- The two slabs ------------------------------------------------------------
+  //
+  // FILLED IS THE FOCUS, not the button's identity -- components.h states the rule:
+  // "the boards fill exactly the slab the focus is on". The variant changes the TYPE
+  // as well as the box (Value700 against Label500), which is the half that is easy to
+  // miss and would be invisible in review. The HEIGHT comes back from the primitive
+  // rather than from a constant here, so an outlined slab and a filled one cannot
+  // disagree about the rect they occupy.
+  yF26 += pxToF26(kBookEndSlabPadTop);
+  int slabY = f26ToPx(yF26);
+  slabY += drawActionButton(fb, fonts, kMargin, slabY, usableW, vm.finishLabel,
+                            vm.focusedAction == BookEndScreen::kFinish, plane);
+  slabY += kBookEndGap;
+  drawActionButton(fb, fonts, kMargin, slabY, usableW, vm.leaveLabel,
+                   vm.focusedAction == BookEndScreen::kLeave, plane);
+
+  // --- The note, bottom-anchored above the hint bar ------------------------------
+  //
+  // `margin-top: auto` on the board, so it hangs off the BOTTOM of the frame and not
+  // off the slabs. That is what keeps it still when the meta line is absent, and it
+  // is why the hint bar's height is ASKED FOR rather than assumed.
+  //
+  // Wrapped once, then both measured and drawn from that one Prose: two calls that
+  // each re-wrapped would be two chances to disagree, and the disagreement reads as a
+  // paragraph drifted off position.
+  const Prose note = wrapProse(metaF, vm.note, usableW, kBookEndNoteLeadEm);
+  const int barH = hintBarHeight(fonts, hints);
+  const int noteTop = fb.height() - barH - kBookEndNotePadBottom - f26ToPx(note.heightF26());
+  // LEFT, not the Centre default: the board states no `text-align` on this block,
+  // unlike the centred content block above it.
+  drawProse(fb, metaF, note, kMargin, usableW, pxToF26(noteTop), Ink::Black, plane,
+            ProseAlign::Left);
+
+  drawHintBar(fb, fonts, hints, plane);
 }
 
 void QuietTheme::renderSdMissing(Framebuffer& fb, const FontSet& fonts,
