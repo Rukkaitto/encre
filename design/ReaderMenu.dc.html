@@ -55,17 +55,22 @@
       <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">6%</div>
     </div>
     <div style="display: flex; flex-direction: column;">
-      <!-- FIVE ROWS. `Go to page` and `Close book` were cut, and neither was cut for
-           room: NOBODY NAVIGATES AN EPUB BY PAGE NUMBER -- a reflowable book has no
-           stable page to go to, and the number a picker would offer changes with the
-           type size, so the honest way to jump is the chapter name, which Contents
-           already gives. `Close book` was a second door to a room Back already opens
-           from the page: it duplicated the reader's own Back and had to carry its own
-           save edge to stay correct.
+      <!-- FOUR ROWS. `Go to page`, `Close book` and `Bookmarks` were cut, and not one
+           of the three for room: NOBODY NAVIGATES AN EPUB BY PAGE NUMBER -- a
+           reflowable book has no stable page to go to, and the number a picker would
+           offer changes with the type size, so the honest way to jump is the chapter
+           name, which Contents already gives. `Close book` was a second door to a room
+           Back already opens from the page: it duplicated the reader's own Back and had
+           to carry its own save edge to stay correct.
 
-           FOCUS IS ON CONTENTS, and this board had it on Typography. THREE of these
-           five rows are not built -- Typography, Bookmarks, Names -- and the board
-           focused one of them, so implementing it faithfully would have drawn a
+           BOOKMARKS WENT WITH THE SCOPE CALL THAT MOVED THE FEATURE TO V1.1. Its row
+           stated a count and did nothing, and a control that cannot act reads as a
+           broken device -- the defect this project has shipped twice. Bookmarks.dc.html
+           stays and this row returns with the screen; drawing it in the meantime is
+           promising a door this release does not have.
+
+           FOCUS IS ON CONTENTS, and this board had it on Typography back when
+           Typography was unbuilt, so implementing it faithfully would have drawn a
            selection on a row that does nothing.
 
            SETTINGS' RULE APPLIES, and it is already written down for that screen: every
@@ -75,8 +80,9 @@
            is drawn EXACTLY as an unfocused live one -- no dimming, because focusability
            is about input and a visual difference nobody designed is worse than none.
 
-           What responds today: Contents and About this book. The rest arrive with
-           their own screens and need no change here when they do. -->
+           What responds today: Contents, Typography and About this book. `Names` is
+           the one row left drawn and inert; it arrives with its own screen and needs no
+           change here when it does. -->
       <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 20px; background: #000000; color: #ffffff;">
         <div style="font-size: var(--t-value); font-weight: 700;">Contents</div>
         <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#ffffff" stroke-width="2"></path></svg>
@@ -85,24 +91,20 @@
         <div style="font-size: var(--t-value); font-weight: 500;">Typography</div>
         <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
       </div>
-      <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 20px; border-bottom: 1px solid #000000;">
-        <div style="font-size: var(--t-value); font-weight: 500;">Bookmarks</div>
-        <div style="font-size: var(--t-value); font-weight: 700;">2</div>
-      </div>
       <!-- NAMES -- "who's this character again?", the one row on this sheet that
-           answers a question rather than moving you somewhere. Placed beside
-           Bookmarks because both are references you consult and come back from,
-           and Names is the only one that opens a PEEK rather than a screen: it
-           lists the names the book has used up to where you have read, and
-           selecting one shows the sentence that introduced them over the page you
-           are on. See design/Names.dc.html.
+           answers a question rather than moving you somewhere, and the only one
+           that opens a PEEK rather than a screen: it lists the names the book has
+           used up to where you have read, and selecting one shows the sentence
+           that introduced them over the page you are on. See design/Names.dc.html.
 
-           A CHEVRON, NOT A COUNT, where Bookmarks shows a bold `2`. Bookmarks
-           counts a thing the reader made and can therefore verify -- two
-           bookmarks, both theirs. A names count is an artefact of the display
-           threshold: the same book reads 300 at five mentions and 713 at two, so
-           the number would be large, meaningless and quietly arbitrary. The
-           chevron promises a screen, which is the honest promise. -->
+           A CHEVRON, NOT A COUNT -- and with `Bookmarks` cut this is the only row
+           left that could have carried one, so the reason it does not is the whole
+           reason this sheet now draws no count at all. A bookmark count is a thing
+           the reader made and can therefore verify: two bookmarks, both theirs. A
+           names count is an artefact of the display threshold, since the same book
+           reads 300 at five mentions and 713 at two, so the number would be large,
+           meaningless and quietly arbitrary. The chevron promises a screen, which
+           is the honest promise. -->
       <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 20px; border-bottom: 1px solid #000000;">
         <div style="font-size: var(--t-value); font-weight: 500;">Names</div>
         <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
