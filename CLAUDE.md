@@ -33,6 +33,12 @@ pio device monitor -e xteink | tee run.log   # capture a device run, PLUGGED
 # ...or unplugged: set logToCard in /.reader/settings.json and read /encre.log
 python3 tools/latency.py run.log             # what each interaction cost, by press
 reader_sim <screen> out.png --bench 200      # render cost per pass, on the desktop
+
+build/paging_probe book.epub --whole --idle --interrupt 2
+                                             # every page of a real book, turned the
+                                             # way a reader turns it -- and compared
+                                             # with the page before it. --only names
+                                             # which quiet-window walk is to blame.
 ```
 
 `make compare COMPARE_ARGS="--only home --export build/overlay"` writes bare
@@ -3393,6 +3399,44 @@ was written that way first. Reading forward already seeds the ring with the last
 left behind — the mutation passed. It walks back **twice** the depth now. Same
 lesson as the no-op mutation recorded under **Goldens**: check the mutation lands
 before believing what it tells you.
+
+**AND A SKIPPING BUILDER MUST NOT CHARGE THE PAGE IT HAS NOT BEGUN — THIS IS THE
+DOUBLED PAGE.** Reported off the device as "I turn the page and the same page comes
+back with a different number", and reproduced over **8 of the 16 books in one real
+library**. `PageBuilder::drain` charges a block's blank rows to `row_` before its
+first line, and did so **while `skipping_`** — while the builder is still discarding
+everything before the cursor `startAt` gave it. `row_` is how full the page BEING
+BUILT is, and there is no page being built there: the skip's own exit zeroes it. So
+those rows are charged to a page about to be thrown away, and they ACCUMULATE,
+because nothing resets `row_` until the skip ends.
+
+Once `row_` reaches `rows_`, `ready()` — which is exactly `row_ >= rows_` — claims a
+page the builder has not begun. `seekTo` loops on that, takes an **empty** page, and
+spends an index slot on it: the page that truly began at the target is then cached
+under the NEXT page's cursor and handed back as the next page, and `starts_` ends up
+holding **two consecutive pages with the same start cursor**. That is the doubled
+page, and the index is where it is visible.
+
+- **GUARDING `ready()` IS THE WRONG FIX AND WEDGES THE BUILDER**, which is how it was
+  settled which of the two is the cause. The lay loop is gated on `row_ < rows_`, so a
+  full `row_` means the skip can never REACH its exit — **the empty take was the only
+  thing un-sticking it.** The fix is one word on the increment; the decrement stays
+  outside the guard, so exactly what was consumed before is consumed now and no page
+  boundary moves.
+- **ALL THREE `startAt` CALLERS HAD IT** — `seekTo`, `rewalkToCurrentPage` and
+  `layoutPage`, the last of which could return a **blank** page for a start cursor
+  deep in a document. One line in the primitive, which is this file's own rule.
+- **NO FIXTURE IN THE SUITE COULD REACH IT**, and that is the part worth keeping.
+  `blankRowsBefore` charges a row only when a heading, a blockquote or a list
+  boundary is crossed, and `readerfix::longChapter` is paragraphs all the way down —
+  so `row_` never climbed. **A stream of one block kind is not a chapter**, and every
+  paging fixture here was one. The regression test alternates kinds and says so.
+- **AND A FORWARD WALK ALONE NEVER SEES IT.** It needs the builder to be null, which
+  on a device means an idle walk was INTERRUPTED — the common case while reading, and
+  the one a desktop probe turning pages back to back never produces.
+  `tools/paging_probe.cpp` is what reproduced it: `--whole` crosses chapters,
+  `--idle` runs the three quiet-window walks in the shell's own order, `--interrupt N`
+  answers their stop predicate, and `--only` names which of the three is to blame.
 
 **SO THERE IS A RING OF LAID-OUT PAGES, DEPTH 3**, and turning back to the page you
 just left now decodes nothing at all: 5,858 → **8.3 µs** desktop for a backward turn,
