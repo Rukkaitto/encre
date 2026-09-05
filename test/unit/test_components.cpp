@@ -1739,6 +1739,78 @@ TEST_CASE("a panel row is 72 plus its rule, and its weight follows the focus") {
   CHECK(firstX < 72 + reader::kPanelPadX + 6);
 }
 
+TEST_CASE("a panel row states a quantity or discloses a screen, never both") {
+  // THIS IS THE VALUE PATH'S ONLY REMAINING TEST, AND THAT IS WHY IT IS HERE. The
+  // reader menu's `Bookmarks` row was the last thing in the firmware that passed
+  // `drawPanelRow` a value, and it was cut when bookmarks moved to V1.1 (#3) -- a row
+  // that states a count and does nothing reads as a broken device. The parameter stays,
+  // because Bookmarks is a board that will ask for it again; what must not stay is the
+  // shape `ListRow::trackingEm1000` already has here, where a producer left and the
+  // drawing behind it became a claim nobody runs. So the pixels are pinned at the
+  // PRIMITIVE, where no screen is needed to reach them.
+  Ramp f;
+  const int x = 72, y = 292, w = 336;
+  auto row = [&](reader::Framebuffer& fb, std::string_view value, bool focused) {
+    fb.clear(true);
+    reader::drawPanelRow(fb, f.fonts, x, y, w, "Bookmarks", focused, /*discloses=*/true,
+                         /*rule=*/false, reader::Plane::Bw, value);
+  };
+  auto inkedIn = [&](const reader::Framebuffer& fb, int x0, int x1) {
+    for (int px = x0; px < x1; ++px)
+      for (int py = y; py < y + 72; ++py)
+        if (!fb.getPixel(px, py)) return true;
+    return false;
+  };
+
+  reader::Framebuffer valued(480, 800), chevroned(480, 800);
+  row(valued, "2", false);
+  row(chevroned, "", false);
+  // THE VALUE WINS OVER THE CHEVRON, which is the rule and is the half that cannot be
+  // derived: both marks are right-aligned to the same padding, so the two renders agree
+  // about where the right slot is and must disagree about what is in it.
+  bool differs = false;
+  for (int px = x; px < x + w && !differs; ++px)
+    for (int py = y; py < y + 72; ++py)
+      if (valued.getPixel(px, py) != chevroned.getPixel(px, py)) { differs = true; break; }
+  CHECK(differs);
+
+  // Right-aligned inside the board's own 20px, not against the panel's edge.
+  CHECK(inkedIn(valued, x + w - reader::kPanelPadX - 20, x + w - reader::kPanelPadX));
+  CHECK_FALSE(inkedIn(valued, x + w - reader::kPanelPadX, x + w));
+
+  // TWO VALUES OF DIFFERENT WIDTHS END AT THE SAME COLUMN, which is what "right
+  // aligned" means and is the half the measure buys. A placement that ignored the
+  // measure -- a fixed offset from the padding -- puts both LEFT edges together and
+  // runs the wider one out through the padding instead.
+  //
+  // The first attempt here asserted the wider value's LEFT edge was further left, and
+  // it passed against exactly that mutation: `1` and `2` have different left side
+  // bearings, so the check was reading the face rather than the placement. A mutation
+  // that fails nothing tells you about your input before it tells you about your test.
+  reader::Framebuffer wide(480, 800);
+  row(wide, "12", false);
+  auto rightEdgeOfSlot = [&](const reader::Framebuffer& fb) {
+    for (int px = x + w - 1; px >= x; --px)
+      for (int py = y; py < y + 72; ++py)
+        if (!fb.getPixel(px, py)) return px;
+    return -1;
+  };
+  CHECK(rightEdgeOfSlot(wide) == rightEdgeOfSlot(valued));
+  CHECK(rightEdgeOfSlot(wide) < x + w - reader::kPanelPadX);
+  CHECK_FALSE(inkedIn(wide, x + w - reader::kPanelPadX, x + w));
+
+  // ON A FOCUSED ROW THE VALUE IS KNOCKED OUT OF THE FILL, as the label is. Drawn in
+  // black it would be invisible against it -- and invisible is exactly what a golden of
+  // an unfocused row cannot see.
+  reader::Framebuffer lit(480, 800);
+  row(lit, "2", true);
+  bool paperInFill = false;
+  for (int px = x + w - reader::kPanelPadX - 20; px < x + w - reader::kPanelPadX; ++px)
+    for (int py = y; py < y + 72; ++py)
+      if (lit.getPixel(px, py)) { paperInFill = true; break; }
+  CHECK(paperInFill);
+}
+
 // --- A title longer than its column ------------------------------------------
 //
 // The defect these pin was reported off a real card: the boards' sample titles

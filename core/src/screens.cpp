@@ -117,7 +117,7 @@ SleepViewModel demoSleepVm() {
   vm.author = "George Eliot";
   vm.progressPercent = 6;
   vm.progress = std::string("6%") + kDot + "CH. 01";
-  vm.note = std::string("ASLEEP") + kDot + "PRESS POWER TO WAKE";
+  vm.note = std::string("ASLEEP") + kDot + "HOLD POWER TO WAKE";
   return vm;
 }
 
@@ -129,7 +129,7 @@ SleepViewModel demoSleepVm() {
 SleepViewModel demoSleepIdleVm() {
   SleepViewModel vm;
   vm.nothingToContinue = true;
-  vm.note = std::string("ASLEEP") + kDot + "PRESS POWER TO WAKE";
+  vm.note = std::string("ASLEEP") + kDot + "HOLD POWER TO WAKE";
   return vm;
 }
 
