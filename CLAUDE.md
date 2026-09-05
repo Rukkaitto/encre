@@ -602,6 +602,59 @@ what needs hardware — raw button samples, the panel calls, deep sleep.
   `PowerManager::powerDownRailsForSleep()` → `deepSleepUntilPowerButton()`. That
   middle call does cut the X3's SD rail (the profile declares
   `sd.powerEnable = 13`), despite the SDK header calling it a no-op on X3/X4.
+- **THE WAKE REQUIRES A HOLD, AND THE CHIP CANNOT ENFORCE ONE — `setup()` DOES.**
+  `armPowerButtonWakeup` arms a **level-triggered** source
+  (`esp_deep_sleep_enable_gpio_wakeup` on the C3, ext1 on Xtensa), so the SoC
+  resumes the instant the line reaches its active level and there is no dwell
+  anywhere on that path nor any way to ask for one. So the badge's
+  `HOLD POWER TO WAKE` is made true **after** the wake, by
+  `requireHeldPowerButtonOrSleepAgain` refusing one that was not held for
+  `kWakeHoldMs` (600) and sleeping again.
+  - **CONFIRMED ON GLASS (2026-08-30), which is the only place it could be:
+    `shell/` has no harness, so not one line of this gate is executed by the
+    desktop suite** — 1250 green test cases say nothing about it. A tap leaves the
+    sleep screen exactly as it was and a hold wakes normally.
+  - **WHAT THAT CONFIRMATION DOES NOT REACH, so it is not read as covering it:**
+    the reset-reason guard below is exercised only by flashing a device that was
+    ASLEEP at the time — flashing an awake one leaves no `slept` flag, so the
+    branch is never entered and a working boot afterwards proves nothing about it.
+    The refusal COUNT and the `at=` figure are likewise separate observations,
+    readable off `[wake] refused`/`[wake] held` with a terminal attached.
+  - **WHERE IT IS CALLED IS THE WHOLE COST OF THE FEATURE: before
+    `display.begin()`**, the earliest anything can reach the panel. E-ink holds its
+    last image, so the glass still shows the sleep screen that named the hold — a
+    refusal repaints nothing and spends **no waveform**. One line later, past the
+    panel bring-up, and a brush against the button in a bag costs a flash.
+  - **It is after `detectAndSelectBoard()` because it needs the profile.** Both
+    Xteink profiles happen to agree on GPIO 3 active-LOW; that is the same
+    coincidence `BatteryMonitor`'s constructor rests on, and not a design.
+  - **`fromSleep` ALONE WOULD BRICK A FLASH.** The `slept` flag is NVS and survives
+    **any** reset, so a chip that was asleep and is then reset by a host attaching
+    (`ESP_RST_USB`), esptool, `esp_restart` or a panic still reports `fromSleep`
+    with no finger near the device — and would sleep straight back with a stale
+    image and no log. The gate also requires `rst` to be `DEEPSLEEP` (USB attached)
+    or `POWERON` (on battery), the two a real button resume produces. A first-ever
+    `POWERON` carries no flag, so neither test is redundant.
+  - **A REFUSAL GIVES THE `slept` FLAG BACK** (`markSleeping()`). `takeSleptFlag()`
+    consumed it on the way in and one flag buys exactly one resume — a refused wake
+    did not spend it, and without the re-arm the **next** wake reads as a cold start
+    and the reader loses their page. That would be blamed on the restore.
+  - **The dwell is measured against `millis()`, whose zero is after the
+    bootloader**, so the real hold asked for is a little longer than 600 ms. It also
+    assumes boot reaches the gate before the threshold — ~215 ms unplugged, ~470 ms
+    plugged into a charger with no terminal. `at=` on the refusal line is what makes
+    that readable off a device rather than guessed at.
+  - **A refusal is otherwise INVISIBLE — it paints nothing and the log buffer dies
+    with the RAM** — so the count rides `RTC_DATA_ATTR` (2 bytes, and it shows on the
+    build's `RTC SLOW .data`) and is reported by the wake that finally succeeds.
+    Not NVS: a refusal must not cost a flash write. The price is the documented one,
+    that `ESP_RST_USB` re-initialises `.rtc.data`, so plugging in to read the count
+    erases it.
+  - **`kWakeHoldMs = 0` disables it**, and a compile-time constant is the only
+    possible escape hatch: every other tunable is a row in
+    `/.reader/settings.json`, which is on the **card**, mounted hundreds of lines
+    below — a gate that waited for it would already have paid the bring-up it
+    exists to avoid.
 
 ## What an interaction costs
 
@@ -1913,7 +1966,7 @@ been demo fiction or an empty card. Progress persistence supplied the content an
 **IT IS PAINTED WITHOUT BEING PUSHED**, which was the trap recorded here for whoever
 wired it and is now the reason `paintSleepScreen` bypasses `App` entirely. The session
 record names the top of the stack, so pushing `SleepScreen` would make the next wake
-RESTORE INTO IT — press power, get "asleep, press power to wake" back. Bypassing `App`
+RESTORE INTO IT — press power, get "asleep, hold power to wake" back. Bypassing `App`
 moves two things it normally owns into that function: the **clear**, and
 **`gFrameContentsUnknown`**, because `App`'s partial-repaint record now describes a
 frame that no longer exists. Nothing reads it before the chip resets, but leaving a lie
@@ -4920,7 +4973,7 @@ these five rows that has ever moved. Re-list before trusting the table.
 | `Kind` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUU` — `Screen` `fe704ca2`, `Engine` `e45425d2`, `Fidelity` `067a44e5`, `Perf` `3906b97c`, `Hardware` `8952abc2`, `Tooling` `09fcefaa`, `Docs` `ac2492c0` |
 | `Source` | `PVTF_lAHOAkvc3c4BhZ5gzhgVwX8` (text) |
 | `Phase` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgV6lo` — `1` `1af00faf`, `2A` `70d666b6`, `2A-2` `10dd1639`, `2B` `891e6f65`, `2C` `226e8a24`, `3A` `726ae204`, `3B` `e13f494d`, `3C` `edb93849`, `3C+` `40a66d57`, `3D` `8f1728ee`, `3E` `f7ea731c`, `4` `e7a6573a`, `5` `f00b8560` |
-| `Release` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUQ` — `V1` `88741031`, **`V1.1` `0244a105`**, `V2` `3a9bcb84`, `Someday` `4cd5509e` |
+| `Release` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUQ` — `V1` `88741031`, **`V1.1` `0244a105`**, `V2` `3a9bcb84`, `Someday` `4cd5509e`. **All four were stale here and the fourth was missing entirely** — the recorded ids answered `The single select option Id does not belong to the field`, silently, because `gh project item-edit` prints a GraphQL error and still **exits 0**. So a scripted `set -e` sweep reports success on the fields it did not set. Re-read them from `field-list` rather than from this table, which is what the line below already says. |
 
 Moving one card is `gh project item-edit --id <item> --project-id <project>
 --field-id <field> --single-select-option-id <option>`; the item id comes from

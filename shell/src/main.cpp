@@ -3242,6 +3242,161 @@ static void refineNow() {
   logFlush();
 }
 
+// ---------------------------------------------------------------------------
+// HOLD TO WAKE
+//
+// design/Sleep.dc.html's badge says `ASLEEP - HOLD POWER TO WAKE`, and this
+// function is the whole of what makes that claim true. THE CHIP CANNOT MAKE IT:
+// PowerManager::armPowerButtonWakeup arms a LEVEL-triggered source
+// (esp_deep_sleep_enable_gpio_wakeup on the C3, ext1 on Xtensa), so the SoC
+// resumes the instant the power line reaches its active level and there is no
+// dwell anywhere on that path -- nor any way to ask for one. The only place a
+// hold can be required is AFTER the wake, by refusing one that was not held.
+//
+// So a refused wake is a real boot that goes straight back to sleep, and the
+// entire cost of the feature is decided by WHERE THIS IS CALLED: before
+// display.begin(), which is the earliest anything can reach the panel. E-ink
+// holds its last image with no power, so the glass is still showing the sleep
+// screen that named the hold -- a refusal repaints nothing, spends no waveform
+// and is invisible. Move this one line later, past the panel bring-up, and a
+// brush against the button in a bag costs a flash and several seconds.
+//
+// IT NEEDS THE BOARD PROFILE, which is why it is not first: the pin and its
+// polarity come from BoardConfig::ACTIVE, and reading them before
+// detectAndSelectBoard() would read the compile-time default. Both Xteink
+// profiles happen to agree on GPIO 3 active-LOW -- a coincidence, not a design,
+// and this file already records one object built on that coincidence
+// (BatteryMonitor's constructor captures the ADC pins before the probe runs).
+//
+// THE ESCAPE HATCH IS A CONSTANT AND HAS TO BE. Every other tunable on this
+// device is a row in /.reader/settings.json, and that file is on the card, which
+// is mounted hundreds of lines below here -- a gate that waited for it would
+// have already paid the panel bring-up it exists to avoid. kWakeHoldMs = 0
+// disables the gate outright and restores wake-on-press exactly.
+namespace {
+
+// The dwell a wake must survive. Measured against millis(), whose zero is the
+// RTOS timer starting -- which is AFTER the bootloader, so the button really
+// went down some tens of milliseconds before t=0 and the hold this asks for is
+// slightly longer than the number says. Wrong in the conservative direction, and
+// `at=` on the refusal line below is what makes the real figure readable off a
+// device rather than guessed at here.
+constexpr uint32_t kWakeHoldMs = 600;
+
+// SURVIVES A DEEP-SLEEP CYCLE, which is exactly the property that makes counting
+// refusals free: a refused wake sleeps again, so the next wake -- refused or
+// accepted -- still sees this. Deliberately NOT NVS: a refusal must not cost a
+// flash write, or the gate would put wear on the part every time the device is
+// jostled. The price is the one CLAUDE.md already records for .rtc.data --
+// ESP_RST_USB re-initialises it, so plugging in to read the count is what erases
+// it. Acceptable here because this is a curiosity, where the diagnostic record
+// it warns about was a decision.
+RTC_DATA_ATTR uint16_t gRefusedWakes = 0;
+
+}  // namespace
+
+// Returns only when the wake is accepted. A refusal re-arms the sleep flag this
+// boot consumed, powers the rails back down and does not return.
+static void requireHeldPowerButtonOrSleepAgain(bool fromSleep, esp_reset_reason_t rst) {
+  if (kWakeHoldMs == 0) return;
+
+  // ONLY A RESUME IS GATED, AND ONLY ONE THE BUTTON COULD HAVE CAUSED. `fromSleep`
+  // alone is not enough, and the gap between the two is the one that would look
+  // like a brick.
+  //
+  // The slept flag lives in NVS and survives ANY reset, so a chip that was asleep
+  // and is then reset by something that is not the power button -- a host
+  // attaching (ESP_RST_USB), esptool, an esp_restart, a panic -- still reports
+  // fromSleep with no finger anywhere near the device. Gating on that alone puts
+  // the device straight back to sleep after a flash, with a stale image on the
+  // glass and no line on a serial log that is about to be cut: "I flashed it and
+  // it is dead". CLAUDE.md records ESP_RST_USB turning a wake into a cold boot for
+  // exactly this reason, in the other direction.
+  //
+  // The two reset reasons a power-button resume produces, both measured on an X3
+  // and both recorded in session.h:
+  //
+  //   ESP_RST_DEEPSLEEP -- USB attached, so the chip really deep-slept
+  //   ESP_RST_POWERON   -- on battery the sleep powers the chip down entirely,
+  //                        which is indistinguishable from a first-ever boot
+  //
+  // A first-ever POWERON carries no slept flag, so `fromSleep` is what excludes
+  // it and neither test is redundant.
+  const bool buttonCouldHaveWokenUs =
+      rst == ESP_RST_DEEPSLEEP || rst == ESP_RST_POWERON;
+  if (!fromSleep || !buttonCouldHaveWokenUs) return;
+
+  const int8_t pin = BoardConfig::ACTIVE.input.power;
+  // No power pin means no hold to require, and refusing every wake on a board
+  // that cannot answer the question is the one outcome worse than an accidental
+  // wake. PowerManager spells the same test the same way.
+  if (pin < 0) return;
+  const bool activeHigh = BoardConfig::ACTIVE.input.powerActiveHigh;
+  const int pressedLevel = activeHigh ? HIGH : LOW;
+  // The same pull PowerManager::armPowerButtonWakeup held the line with, so this
+  // reads the pin as it was armed rather than reading a float.
+  pinMode(pin, activeHigh ? INPUT_PULLDOWN : INPUT_PULLUP);
+
+  // THE PRESS BEGAN AT t=0, near enough: it is what woke the chip. So the dwell
+  // needs no start time of its own -- "still down at millis() >= kWakeHoldMs" is
+  // the whole test, and the loop exits the moment the button comes up.
+  //
+  // ONE ASSUMPTION IT RESTS ON, worth checking on glass rather than trusting:
+  // that boot reaches here before the threshold. Serial's cap is 400 ms and the
+  // detect passes ~66 ms, so the worst configuration (plugged into a charger with
+  // no terminal open) samples first at ~470 ms of the 600. Unplugged -- which is
+  // how this device lives -- it is ~215 ms. If boot ever got slower than the
+  // dwell, a genuine hold released before the first sample would read as a tap;
+  // `at=` on the line below is there to make that visible instead of mysterious.
+  const uint32_t firstSampleMs = millis();
+  bool held = digitalRead(pin) == pressedLevel;
+  while (held && millis() < kWakeHoldMs) {
+    delay(10);
+    held = digitalRead(pin) == pressedLevel;
+  }
+
+  if (held) {
+    // A REFUSAL IS OTHERWISE INVISIBLE BY DESIGN -- it paints nothing and the log
+    // buffer dies with the RAM -- so the count is reported by the wake that
+    // finally succeeds. Without this, a gate refusing everything and a gate never
+    // being reached read identically: silence.
+    if (gRefusedWakes > 0) {
+      logf("[wake] held %lums, accepted; %u earlier wake(s) refused since the last "
+           "accepted one\n",
+           (unsigned long)millis(), (unsigned)gRefusedWakes);
+      gRefusedWakes = 0;
+    }
+    return;
+  }
+
+  const uint32_t releasedMs = millis();
+  if (gRefusedWakes != 0xFFFF) ++gRefusedWakes;
+  logf("[wake] refused: power released by %lums, needs %lums (first sample at=%lums, "
+       "refused=%u). Sleeping again; nothing was painted\n",
+       (unsigned long)releasedMs, (unsigned long)kWakeHoldMs,
+       (unsigned long)firstSampleMs, (unsigned)gRefusedWakes);
+
+  // GIVE THE FLAG BACK. takeSleptFlag() consumed it on the way in -- reading it
+  // clears it, and one flag buys exactly one resume -- and this wake did not
+  // spend it, because the device is going straight back to the state that set it.
+  // Without this the NEXT wake, the real one, reads as a cold start: the session
+  // record is declined and the reader loses the page they were on, which is the
+  // failure session.h exists to prevent and would be blamed on the restore.
+  markSleeping();
+  logFlush();
+
+  // NO display.deepSleep() HERE, and its absence is deliberate rather than an
+  // omission: begin() has not run, so there is no initialised driver to ask, and
+  // the controller was already put into DSLP by the sleep this is returning to.
+  // Cutting the rails is what actually holds the current down, and it also undoes
+  // the one thing that has touched the panel since -- detectAndSelectBoard's bus
+  // probe, which releases the rail hold to issue its reset pulse.
+  freeink::PowerManager::powerDownRailsForSleep();
+  // Opens with waitForPowerButtonRelease(), which returns at once: the only way
+  // to reach here is having read the button as up.
+  freeink::PowerManager::deepSleepUntilPowerButton();
+}
+
 void setup() {
   // A BIGGER TX RING, BEFORE begin() ALLOCATES IT. HWCDC::write posts what fits
   // the ring without blocking and then blocks for the remainder until the host
@@ -3313,19 +3468,6 @@ void setup() {
 
   detectAndSelectBoard();
 
-  display.begin();
-  mark("display-begin-returned");
-  // Fresh boot after a flash: force a clean full sync so the panel is not
-  // differentially updated against whatever the previous firmware left on it.
-  // A fresh boot after a flash must not be differentially updated against
-  // whatever the previous firmware left on the panel, so the driver's two
-  // initial full clears are right -- they are what flashes the screen black.
-  //
-  // Waking from deep sleep is a chip reset that looks identical from here, but
-  // it is NOT the same situation: e-ink holds its image with no power, so the
-  // panel still shows exactly what we painted before sleeping. Clearing then is
-  // a black flash to replace a correct image with the same image. Tell the
-  // driver the panel is already valid instead.
   const esp_sleep_wakeup_cause_t wake = esp_sleep_get_wakeup_cause();
   // TAKEN HERE, EARLY, AND ONCE: reading it clears it, so this is the only place
   // that may ask. On battery the sleep powers the chip down, so `wake` is
@@ -3349,6 +3491,25 @@ void setup() {
   // stopped working" and "the logger reset the device" look identical from the
   // serial output.
   const esp_reset_reason_t rst = esp_reset_reason();
+
+  // MAY NOT RETURN. See the definition: a wake the user did not hold through is
+  // refused here, before display.begin(), so it costs no waveform and nothing on
+  // the glass changes.
+  requireHeldPowerButtonOrSleepAgain(fromSleep, rst);
+
+  display.begin();
+  mark("display-begin-returned");
+  // Fresh boot after a flash: force a clean full sync so the panel is not
+  // differentially updated against whatever the previous firmware left on it.
+  // A fresh boot after a flash must not be differentially updated against
+  // whatever the previous firmware left on the panel, so the driver's two
+  // initial full clears are right -- they are what flashes the screen black.
+  //
+  // Waking from deep sleep is a chip reset that looks identical from here, but
+  // it is NOT the same situation: e-ink holds its image with no power, so the
+  // panel still shows exactly what we painted before sleeping. Clearing then is
+  // a black flash to replace a correct image with the same image. Tell the
+  // driver the panel is already valid instead.
   const char* rstName = rst == ESP_RST_DEEPSLEEP ? "DEEPSLEEP (a real resume)"
                         : rst == ESP_RST_USB     ? "USB (a host attaching reset the chip)"
                         : rst == ESP_RST_POWERON ? "POWERON"
@@ -4758,7 +4919,7 @@ static void paintSleepScreen() {
   int passes = 0;
 
   const reader::SleepViewModel vm =
-      sleepVmFromCard(std::string("ASLEEP") + "\xC2\xB7" + "PRESS POWER TO WAKE");
+      sleepVmFromCard(std::string("ASLEEP") + "\xC2\xB7" + "HOLD POWER TO WAKE");
 
   // THE COVER IS RESOLVED BEFORE THE SCREEN IS CONSTRUCTED, which is the whole of
   // sleepCoverForPaint's contract rather than a convenience here: it validates the
