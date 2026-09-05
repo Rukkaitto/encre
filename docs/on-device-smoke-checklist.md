@@ -97,8 +97,12 @@ investigating into a cold boot that looks exactly like a bug.
 
 - [ ] **4.1** Open a book, read a few pages, press power. The sleep screen
       paints before the device goes down.
-- [ ] **4.2** Press power again. **The screen you left comes back.** If it does,
-      the wake works and any earlier contrary evidence was the logger.
+- [ ] **4.2** **Hold** power ~1s. **The screen you left comes back.** If it does,
+      the wake works and any earlier contrary evidence was the logger. A brief
+      tap must leave the glass untouched: the chip's wake source is
+      level-triggered and cannot require a dwell, so the hold is enforced after
+      the wake by a gate that refuses one it was not held through and sleeps
+      again. A refusal runs before `display.begin()`, so it paints nothing.
 - [ ] **4.3** Sleep from Home, from the Library, and from inside a book. Each
       wakes back to where it was, focus included.
 - [ ] **4.4** Sleep with a peek open. Waking to the **page underneath** is
