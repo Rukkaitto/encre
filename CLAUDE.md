@@ -4801,7 +4801,10 @@ it empty.
   `your authentication token is missing required scopes`.
 
 The ids, rediscoverable with `gh project field-list 1 --owner Rukkaitto` if they
-ever go stale:
+ever go stale — **and `Release`'s HAD, silently**: all four of its option ids had
+changed and a `V1.1` had appeared, which reads as
+`The single select option Id does not belong to the field` and is the only one of
+these five rows that has ever moved. Re-list before trusting the table.
 
 | | id |
 |---|---|
@@ -4810,7 +4813,7 @@ ever go stale:
 | `Kind` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUU` — `Screen` `fe704ca2`, `Engine` `e45425d2`, `Fidelity` `067a44e5`, `Perf` `3906b97c`, `Hardware` `8952abc2`, `Tooling` `09fcefaa`, `Docs` `ac2492c0` |
 | `Source` | `PVTF_lAHOAkvc3c4BhZ5gzhgVwX8` (text) |
 | `Phase` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgV6lo` — `1` `1af00faf`, `2A` `70d666b6`, `2A-2` `10dd1639`, `2B` `891e6f65`, `2C` `226e8a24`, `3A` `726ae204`, `3B` `e13f494d`, `3C` `edb93849`, `3C+` `40a66d57`, `3D` `8f1728ee`, `3E` `f7ea731c`, `4` `e7a6573a`, `5` `f00b8560` |
-| `Release` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUQ` — `V1` `245a6600`, `V2` `5696d63f`, `Someday` `ebc1c1c1` |
+| `Release` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUQ` — `V1` `88741031`, **`V1.1` `0244a105`**, `V2` `3a9bcb84`, `Someday` `4cd5509e` |
 
 Moving one card is `gh project item-edit --id <item> --project-id <project>
 --field-id <field> --single-select-option-id <option>`; the item id comes from
