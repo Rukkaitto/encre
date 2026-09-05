@@ -24,6 +24,7 @@
 #include "reader/screen_library.h"
 #include "reader/screen_sd_missing.h"
 #include "reader/scalablefont.h"
+#include "reader/screen_book_end.h"
 #include "reader/screen_contents.h"
 #include "reader/screen_reader.h"
 #include "reader/screen_peek.h"
@@ -716,12 +717,16 @@ int main(int argc, char** argv) {
   // peek is reached from Contents, and the pop that opens it takes the menu AND
   // Contents off -- so the stack the board draws is Reader + Peek and nothing else.
   const bool isPeek = std::strcmp(argv[1], "peek") == 0;
+  // design/BookEnd.dc.html. Its own subcommand rather than a state of `reader`, for
+  // the reason every other state board has one: a flag could not be named by the
+  // comparison sheet or by a golden.
+  const bool isBookEnd = std::strcmp(argv[1], "book_end") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
       !isHomeUnopened && !isHomeCharging && !isLibraryScrolled && !isReader && !isSleepIdle &&
       !isReaderMenu && !isContents && !isChapterOpen && !isReaderList && !isAnchored &&
       !isSleepWaking && !isLibraryOpening && !isTypography && !isPeek && !isSleepCover &&
-      !isSleepCoverDetails && !isSleepCoverWaking) {
+      !isSleepCoverDetails && !isSleepCoverWaking && !isBookEnd) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
@@ -730,7 +735,7 @@ int main(int argc, char** argv) {
                  "'reader_chapter_open', 'reader_list', "
                  "'reader_menu', 'contents', 'typography', 'sleep_waking', "
                  "'sleep_cover', 'sleep_cover_details', 'sleep_cover_waking', "
-                 "'library_opening', 'peek' or 'app')\n",
+                 "'library_opening', 'peek', 'book_end' or 'app')\n",
                  argv[1]);
     return 3;
   }
@@ -953,6 +958,27 @@ int main(int argc, char** argv) {
     const auto& c = static_cast<const reader::ContentsScreen&>(*scr);
     std::printf("wrote %s (%dx%d) %d entries, %s, focus %d\n", argv[2], w, h, c.rowCount(),
                 c.sectioned() ? "sectioned" : "flat", c.focus());
+    return 0;
+  }
+
+  if (isBookEnd) {
+    // A full screen, not an overlay -- the board has no veil and no panel, and it draws
+    // its own header band and hint bar -- so it renders on its own with no App beneath.
+    reader::DemoScreenFactory factory;
+    // ASKED FOR, as the Reader's and Contents' demos are: the factory refuses a BookEnd
+    // that nothing primed rather than substituting, so a shell that failed to hand over
+    // the facts shows nothing rather than another book's title.
+    factory.setBookEndDemo();
+    std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::BookEnd);
+    if (scr == nullptr) {
+      std::fprintf(stderr, "the factory refused ScreenId::BookEnd\n");
+      return 1;
+    }
+    if (!renderToPng(*scr, fonts, theme, w, h, argv[2])) return 1;
+    const auto& be = static_cast<const reader::BookEndScreen&>(*scr);
+    std::printf("wrote %s (%dx%d) '%s' / '%s' / '%s', focus %d\n", argv[2], w, h,
+                be.vm().title.c_str(), be.vm().byline.c_str(), be.vm().meta.c_str(),
+                be.focus());
     return 0;
   }
 
