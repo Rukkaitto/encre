@@ -7,6 +7,7 @@
 #include "reader/screen_settings.h"
 #include "reader/screen_typography.h"
 #include "reader/screen_book_details.h"
+#include "reader/screen_book_end.h"
 #include "reader/screen_library.h"
 #include "reader/book.h"
 #include "reader/screen_peek.h"
@@ -46,6 +47,10 @@ std::vector<TocEntry> demoContents();
 int demoContentsSpine();
 // design/SleepIdle.dc.html: asleep with nothing open, so the badge without the card.
 SleepViewModel demoSleepIdleVm();
+
+// design/BookEnd.dc.html's own book -- the same Middlemarch design/Main.dc.html gives
+// `CH. 01 OF 24`, because two boards drawing one demo book must agree.
+BookEndScreen::Facts demoBookEndFacts();
 
 // design/Peek.dc.html's own peeked text -- Middlemarch's opening, which is the board's
 // story: the reader is at CH. 07, 34%, has met a name they cannot place, and has peeked
@@ -276,6 +281,30 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   }
   void clearDetailsFacts() { detailsFactsSet_ = false; }
 
+  // EVERYTHING BookEnd DRAWS, handed over rather than reached for. The reader menu's
+  // `About this book` is the precedent: a screen built from another screen refuses to
+  // open when that screen is not on the stack, which made it a button that worked only
+  // sometimes.
+  //
+  // `bookEndPrimed_` IS ITS OWN FLAG rather than an inference from the Facts, for
+  // contentsPrimed_'s reason: an EPUB that names no author and a spine count of zero
+  // are both legitimate primed states -- the byline drops its middot and the meta line
+  // is not drawn -- so emptiness cannot stand for "nothing was primed at all".
+  void setBookEndFacts(BookEndScreen::Facts f) {
+    bookEndFacts_ = std::move(f);
+    bookEndPrimed_ = true;
+  }
+
+  // design/BookEnd.dc.html's own content, ASKED FOR. Same rule as setReaderDemo,
+  // setContentsDemo and setPeekDemo: the factory refuses a BookEnd nothing primed
+  // rather than substituting, because this project has shipped that substitution twice
+  // and each time it hid the real cause -- once as a device waking into a book the user
+  // was not reading, once as one book showing another's chapters.
+  void setBookEndDemo() {
+    bookEndFacts_ = demoBookEndFacts();
+    bookEndPrimed_ = true;
+  }
+
   // THE BOOK'S TABLE OF CONTENTS, for the Contents screen. Set by the shell when the
   // menu's Contents row is chosen -- reading it is card work (`toc.h` re-opens the
   // archive) and `core/` does no storage, so the factory is handed the answer rather
@@ -373,6 +402,8 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   std::string detailsAuthor_;
   BookDetailsScreen::Facts detailsFacts_{};
   bool detailsFactsSet_ = false;
+  BookEndScreen::Facts bookEndFacts_{};
+  bool bookEndPrimed_ = false;
   std::vector<TocEntry> contentsToc_;
   int contentsSpine_ = 0;
   bool contentsPrimed_ = false;

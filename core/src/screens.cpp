@@ -133,6 +133,21 @@ SleepViewModel demoSleepIdleVm() {
   return vm;
 }
 
+// design/BookEnd.dc.html's own book.
+BookEndScreen::Facts demoBookEndFacts() {
+  BookEndScreen::Facts f;
+  f.bookTitle = "Middlemarch";
+  f.author = "George Eliot";
+  // design/Main.dc.html says `CH. 01 OF 24` for this same demo book. One demo book,
+  // one count -- two boards drawing it must agree, and a merge once left
+  // ReaderMenu.dc.html disagreeing with Reader.dc.html while `make compare` said ok.
+  f.chapterCount = 24;
+  // The board draws BACK TO LIBRARY, which is the common case: CLAUDE.md calls the
+  // Library "the commonest way to open a book".
+  f.libraryBeneath = true;
+  return f;
+}
+
 // demoSleepVm: a screen the simulator and the goldens must render needs a source
 // for its content, and the board's copy is the one source that makes the
 // comparison sheet meaningful.
@@ -351,6 +366,14 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
         return std::make_unique<BookDetailsScreen>(std::move(f));
       }
       return std::make_unique<BookDetailsScreen>(BookDetailsScreen::Facts{});
+    case ScreenId::BookEnd:
+      // REFUSED WHEN UNPRIMED. A refused push leaves the Reader standing, which is
+      // wrong in a way the reader can see through -- where a substituted demo would
+      // put another book's title over the one they just finished. setBookEndDemo() is
+      // how the simulator and the goldens ask for the board's content, on the same
+      // rule as setReaderDemo, setContentsDemo and setPeekDemo.
+      if (!bookEndPrimed_) return nullptr;
+      return std::make_unique<BookEndScreen>(bookEndFacts_);
     case ScreenId::Settings: {
       auto scr = std::make_unique<SettingsScreen>(settings_, settingsSink_);
       scr->setMetrics(settingsListH_, settingsRowH_, settingsHeaderH_);
