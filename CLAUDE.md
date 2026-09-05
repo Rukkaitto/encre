@@ -4768,6 +4768,26 @@ it.
 - **Finishing something with no hardware surface:** `Closes #N` in the commit or
   PR moves the card to `Done` on its own, which is exactly why the V1 items are
   real issues rather than drafts. Prefer it to editing the field by hand.
+- **THE LINK IS ONE-WAY: SETTING `Status` TO `Done` DOES NOT CLOSE THE ISSUE.**
+  `Closes #N` moves the card; moving the card moves nothing back. So a card set to
+  `Done` by hand — which is what `On glass` → `Done` on device evidence is — leaves
+  its issue OPEN, and the issue is the half anybody outside the board reads.
+  **Close it, and comment first**: the card records status and the issue is where
+  the answer goes, so a card that asked a question (#35's was *skipped or
+  truncated*) owes it an answer and a link to the PR that carries it.
+  - **`gh issue close --comment` DROPS THE COMMENT if the issue is already
+    closed.** It refuses the whole command (`is already closed`) rather than
+    posting the comment and skipping the close, so the note is lost behind a
+    message that reads like a harmless no-op. `gh issue comment` then
+    `gh issue close`, in that order, cannot lose it.
+  - **AND `closed_by=Rukkaitto` IN A TIMELINE IS A PERSON, NOT THE BOARD.** This
+    entry first said the opposite — that `Done` auto-closes — and the whole basis
+    for it was an issue found already closed, by the repo owner's own handle,
+    within the same second as the card moved. That is what a maintainer merging a
+    PR and closing its issue looks like, and it was read as an automation
+    attributed to the owner. **A coincidence in time is not a mechanism**, the same
+    shape as the 2.5 s of USB wait once recorded as the panel detection's cost, and
+    it went into this file as fact before anyone asked the one person who knew.
 - **Finishing anything the panel can be wrong about:** set `On glass`, and do
   **not** write `Closes #N` — it would close the card on desktop evidence, which
   is the failure above with a keyword attached.
