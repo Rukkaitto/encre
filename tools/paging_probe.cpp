@@ -153,10 +153,15 @@ int main(int argc, char** argv) {
       if (scr.chapterIndex() == prevC && scr.pageIndex() == prevP) break;  // the book ended
       ++turns;
       const std::string now = pageText(scr.page());
-      if (now == prev && !now.empty()) {
+      // WITHIN ONE CHAPTER ONLY. Across a crossing this compared two different
+      // chapters' pages, and a book with a run of one-page navigation chapters each
+      // reading "back" is not a book with duplicated pages -- 15 false positives on
+      // one Gutenberg title, which is exactly the kind of noise that gets a real
+      // finding dismissed.
+      if (now == prev && !now.empty() && scr.chapterIndex() == prevC) {
         ++dups;
-        std::printf("DUP spine %d p%d -> spine %d p%d, identical (%zu bytes)\n", prevC, prevP,
-                    scr.chapterIndex(), scr.pageIndex(), now.size());
+        std::printf("DUP spine %d p%d -> p%d, identical (%zu bytes)\n", prevC, prevP,
+                    scr.pageIndex(), now.size());
         if (verbose) std::printf("    |%.90s|\n", now.c_str());
       }
       if (trace) {
