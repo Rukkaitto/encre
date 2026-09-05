@@ -66,10 +66,18 @@ not a format one: the corpus decides whether books commonly exceed 512, and whet
 | site | today | after |
 |---|---|---|
 | **an unknown entity, in text or an attribute** | errors the whole document | a named table plus numeric refs; anything still unknown passes through as literal text |
-| **attribute bytes over `kMaxAttrBytes` (512)** | errors the whole document | truncate the value, keep parsing — issue #35 |
-| more than `kMaxAttrs` (16) attributes | errors | ignore the extras |
+| **attribute bytes over `kMaxAttrBytes` (512)** | errors the whole document | **DROP the attribute whole, keep parsing** — issue #35, LANDED |
+| more than `kMaxAttrs` (16) attributes | errors | ignore the extras — LANDED, and it is the SAME rule as the row above |
 | an unquoted attribute value | errors | accept it |
 | unterminated comment, CDATA, PI, tag | errors | still errors — but an error ends a *document*, never a book |
+
+**THIS TABLE SAID "TRUNCATE THE VALUE" AND WHAT LANDED IS A DROP**, which is a real
+departure from the plan and not a wording change. A truncated `href` resolves to a path
+that is *wrong* rather than to nothing, and no caller can tell a short value from a cut
+one — where an ABSENT attribute is a state every caller of this parser already handles,
+because `hasAttr()` exists to say so. Dropping also makes the two rows above ONE rule
+("an attribute this parser cannot hold reads as absent") rather than two answers to the
+same event, which is what the next row down would otherwise have had to explain.
 
 **The entity table is HTML 4's 252 named references**, not HTML 5's 2,231: a sorted
 static table with a binary search, a few KB of flash against a 6.25 MB partition, and

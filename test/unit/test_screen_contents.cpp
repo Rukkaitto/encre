@@ -155,22 +155,20 @@ TEST_CASE("the reader menu focuses Contents, skipping the rows that do nothing")
   CHECK(m.focus() == reader::ReaderMenuScreen::kContents);
   CHECK(m.onEvent(kGo).kind == Action::Kind::Push);
   // Down from Contents reaches Typography, which is the row next to it and is live.
-  // It used to land on About this book, over THREE inert rows in a row -- the case a
-  // naive skip walk gets wrong -- and Bookmarks and Names are still that case from
-  // here, which the next press covers.
   m.onEvent(kDown);
   CHECK(m.focus() == reader::ReaderMenuScreen::kTypography);
-  // Down from Typography skips Bookmarks and Names -- two inert rows in a row -- and
-  // lands on About this book, which is live because Book details takes facts now
-  // rather than a Library row.
+  // Down from Typography skips Names -- the one inert row left, now that Bookmarks is
+  // cut -- and lands on About this book, which is live because Book details takes facts
+  // now rather than a Library row.
   m.onEvent(kDown);
   CHECK(m.focus() == reader::ReaderMenuScreen::kAboutBook);
   // ...and wraps back round to Contents rather than sticking. About this book is the
-  // LAST row now, so this is also the wrap-from-the-end case that `Close book` used to
+  // LAST row, so this is also the wrap-from-the-end case that `Close book` used to
   // stand in for.
   m.onEvent(kDown);
   CHECK(m.focus() == reader::ReaderMenuScreen::kContents);
-  // Up from Contents wraps the other way over the same two, to the same live row.
+  // Up from Contents wraps the other way over that same skipped row, to the same live
+  // one.
   m.onEvent(kUp);
   CHECK(m.focus() == reader::ReaderMenuScreen::kAboutBook);
 }
@@ -198,33 +196,41 @@ TEST_CASE("making the Typography row live changed no row's appearance") {
   // says the pixels are the same and this says which field is allowed to differ.
   const reader::ReaderMenuScreen m("Middlemarch", "6%");
   const auto& rows = m.vm().rows;
-  REQUIRE(rows.size() == 5);
+  REQUIRE(rows.size() == 4);
   CHECK(rows[reader::ReaderMenuScreen::kTypography].label == "Typography");
   // The board draws it with a chevron and no value, unchanged by going live.
   CHECK(rows[reader::ReaderMenuScreen::kTypography].value.empty());
   CHECK(rows[reader::ReaderMenuScreen::kTypography].discloses);
-  // TWO INERT ROWS LEFT, not three: Bookmarks (#3) and Names. Counted rather than
-  // named, so the next row to go live fails this and has to say so.
+  // ONE INERT ROW LEFT: Names. Bookmarks was the other and is cut, because skipping the
+  // focus keeps an unbuilt row from misleading a press and does NOT keep it from
+  // promising a feature the release does not have. Counted rather than named, so the
+  // next row to go live fails this and has to say so.
   int inert = 0;
   for (const auto& r : rows)
     if (!r.focusable) ++inert;
-  CHECK(inert == 2);
+  CHECK(inert == 1);
 }
 
-TEST_CASE("the menu has five rows, and neither cut row is among them") {
+TEST_CASE("the menu has four rows, and none of the three cut ones is among them") {
   // GO TO PAGE AND CLOSE BOOK ARE GONE, for reasons that are about reading rather than
   // about room: a reflowable book has no stable page to go to -- the number a picker
   // would offer moves with the type size -- so the honest jump is the chapter name,
   // which Contents gives. And Back from the page already closes the book, so that row
   // was a second door to a room with one, and had to carry its own save edge to stay
   // correct.
+  //
+  // BOOKMARKS IS THE THIRD, and it went with a scope call rather than a design one:
+  // the feature moved to V1.1 (#3), and a row that discloses a screen this release does
+  // not have is a control that cannot act -- which this project has shipped twice and
+  // refuses a third time. It comes back with the screen.
   const reader::ReaderMenuScreen m("Middlemarch", "6%");
   const auto& rows = m.vm().rows;
-  REQUIRE(rows.size() == 5);
-  REQUIRE(reader::ReaderMenuScreen::kRowCount == 5);
+  REQUIRE(rows.size() == 4);
+  REQUIRE(reader::ReaderMenuScreen::kRowCount == 4);
   for (const auto& r : rows) {
     CHECK(r.label.find("Go to page") == std::string::npos);
     CHECK(r.label.find("Close book") == std::string::npos);
+    CHECK(r.label.find("Bookmarks") == std::string::npos);
   }
   CHECK(rows[reader::ReaderMenuScreen::kAboutBook].label == "About this book");
 }
@@ -264,26 +270,31 @@ TEST_CASE("the menu's only way out is CLOSE, and it dismisses the panel not the 
   CHECK(seen == 3);  // Contents, Typography and About this book
 }
 
-TEST_CASE("a row states a quantity or discloses a screen, never both") {
-  // Deriving `discloses` from an empty value drew a chevron promising a screen that
-  // does not exist. `Bookmarks` is the surviving instance: a value where its siblings
-  // have marks, and no mark of its own.
+TEST_CASE("no menu row states a quantity, and every one of them discloses") {
+  // `discloses` CANNOT BE DERIVED FROM AN EMPTY VALUE, and deriving it drew a chevron
+  // promising a screen that does not exist. `Bookmarks` was the surviving instance of
+  // the other half -- a value where its siblings have marks -- and with it cut this
+  // sheet states no quantity at all, so every row here now carries a chevron.
   const reader::ReaderMenuScreen m("Middlemarch", "6%");
   const auto& rows = m.vm().rows;
   REQUIRE(rows.size() == reader::ReaderMenuScreen::kRowCount);
-  CHECK(rows[reader::ReaderMenuScreen::kContents].discloses);
-  CHECK(rows[reader::ReaderMenuScreen::kContents].value.empty());
-  CHECK_FALSE(rows[reader::ReaderMenuScreen::kBookmarks].discloses);
-  CHECK(rows[reader::ReaderMenuScreen::kBookmarks].value == "2");
-  // NO ROW IS TRACKED NOW. `Close book` was the only one on any panel the boards
-  // letter-spaced, so this asserts the absence rather than leaving the reader of this
-  // file to assume the tracking path still has a producer.
+  for (const auto& r : rows) {
+    CHECK(r.discloses);
+    CHECK(r.value.empty());
+  }
+  // NEITHER TRACKED NOR VALUED NOW. `Close book` was the only row on any panel the
+  // boards letter-spaced and `Bookmarks` the only one that counted anything, so this
+  // asserts BOTH absences rather than leaving the reader of this file to assume either
+  // path still has a producer here. The value path is pinned at the primitive instead
+  // -- test_components.cpp, "a panel row states a quantity or discloses a screen" --
+  // which is the difference between capability that still works and capability nobody
+  // runs.
   for (const auto& r : rows) CHECK(r.trackingEm1000 == 0);
 }
 
 TEST_CASE("the menu's panel never changes height, so every focus move is partial") {
   // Unlike the actions panel, whose focused row loses its rule and makes the panel a
-  // pixel shorter -- so two of its four focus moves refuse the fast path. All six rows
+  // pixel shorter -- so two of its four focus moves refuse the fast path. All four rows
   // here are one height, which is what makes a constant footprint a true promise.
   reader::ReaderMenuScreen m("Middlemarch", "6%");
   const uint32_t before = m.paintFootprint();

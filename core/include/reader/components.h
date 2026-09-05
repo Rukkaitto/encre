@@ -768,7 +768,10 @@ int drawPanelCaption(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
 int panelRowHeight(bool rule);
 // `value` is the row's right slot where the board gives one, and empty where it draws
 // a chevron -- a row states a quantity or discloses a screen, never both. Defaulted
-// empty so the actions panel, which only ever discloses, is unchanged.
+// empty so the actions panel, which only ever discloses, is unchanged; with the reader
+// menu's `Bookmarks` row cut (#55) that default is what EVERY caller takes, and the
+// value path keeps its own test at the primitive rather than becoming a claim nobody
+// runs, the way `labelTrackingEm1000` did when `Close book` went.
 int drawPanelRow(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
                  std::string_view label, bool focused, bool discloses, bool rule,
                  Plane plane = Plane::Bw, std::string_view value = {},

@@ -180,7 +180,30 @@ void PageBuilder::drain() {
   // from the drawing pass, which is the one thing pagination may never do.
   while (pendingBlankRows_ > 0 && row_ < rows_ && line_ < count) {
     --pendingBlankRows_;
-    ++row_;
+    // NOT WHILE SKIPPING, AND THAT ONE WORD IS A READER'S DOUBLED PAGE.
+    //
+    // `row_` is how full the page BEING BUILT is, and while `skipping_` there is no
+    // page being built -- the skip's own exit below zeroes it. So every blank row
+    // charged here before the start cursor is reached is charged to a page that is
+    // about to be thrown away, and it ACCUMULATES: nothing resets `row_` until the
+    // skip ends. Over a few hundred skipped blocks it reaches `rows_`, and then two
+    // things go wrong at once.
+    //
+    //   * `ready()` is `row_ >= rows_`, so the builder claims a page it has not
+    //     begun. ReaderScreen::seekTo loops on that and takes an EMPTY page, which
+    //     spends the index slot the real page wanted -- so the page that truly
+    //     began at the target is cached under the NEXT page's cursor and handed
+    //     back as the next page. The index then records two consecutive pages
+    //     starting in the same place, and the reader sees one page twice with the
+    //     number advanced. Reproduced over 8 of the 16 books in one real library.
+    //   * The lay loop below is gated on `row_ < rows_`, so once `row_` is full the
+    //     skip can never REACH its exit. Guarding `ready()` instead of this line
+    //     wedges the builder outright, which is how it was established that the
+    //     empty take was the only thing un-sticking the skip.
+    //
+    // The DECREMENT stays outside the guard, so what is consumed is exactly what was
+    // consumed before and no boundary moves: this changes `row_` and nothing else.
+    if (!skipping_) ++row_;
   }
   while (line_ < count && row_ < rows_) {
     // Everything before the requested start is measured and thrown away -- the
