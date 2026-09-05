@@ -1990,6 +1990,21 @@ static reader::SaveResult saveReadingPosition(const char* why,
   const auto* rd =
       from != nullptr ? from : static_cast<const reader::ReaderScreen*>(&gApp->top());
 
+  // BUILT FRESH, AND THAT IS WHAT DROPS `finished` -- deliberately, not by oversight.
+  // READING THE BOOK AGAIN IS WHAT UN-MARKS IT: there is no board for a toggle, so the
+  // alternative is finished-forever, and a flag with no way back is worse than the cost
+  // of clearing it. The cost is real and bounded -- reopening a finished book and
+  // leaving it also clears the flag -- and it is recoverable in two presses from the
+  // item-actions overlay, and VISIBLE, because the Library row changes back.
+  //
+  // This looks like a bug from here, which is why it is written down here: a reviewer
+  // reading only this function would carry `finished` forward and silently make the
+  // flag permanent.
+  //
+  // THE FINISH FLOW ITSELF IS NOT AT RISK, for two independent reasons. handleFinish
+  // leaves the book through dispatchBack(), which calls App::dispatch directly and so
+  // never reaches loop()'s pre-dispatch `leaving` save; and every later save is gated
+  // on the Reader being on top (just above), which it no longer is.
   reader::ReadingPosition p;
   p.bookPath = gReading.path;
   p.spine = rd->chapterIndex();
