@@ -1261,16 +1261,34 @@ and encoding it in a `core/` header is how a change over there leaves a screen
 silently one-way. `test/unit/test_focus_restore.cpp` walks **every** `ScreenId`
 and asserts the round trip, `static_assert`s its own catalogue against the enum
 so an added screen cannot slip past, and **counts** the screens whose focus can
-move (**eight** — this line said five, and the test has said seven since the reader
-menu and the contents landed) so it cannot quietly end up testing nothing. **There
+move (**nine** — this line said five, then seven, then eight, and each figure was
+right when written) so it cannot quietly end up testing nothing. **There
 are TWO such counts**, `movable` and `wrapping`, and this line only ever mentioned
 one. **And the `static_assert` beside them let a screen through**: it compared
 against `ScreenId::SdMissing + 1`, a NAMED member rather than the last one, so
 appending `Typography` satisfied it unchanged and the guard that exists to force a
 new screen into `kAllScreens` said nothing. Caught only because the hand-maintained
-counts failed for an unrelated reason; #42 is the fix. **The rule is structural
-now**: `focus()` and `setFocus()` are `final` on `FocusScreen`, so a derived
-screen cannot take one half without the other — the test checks a property the
+counts failed for an unrelated reason; #42 is the fix.
+
+**IT RECURRED WHEN `BookEnd` LANDED, AND THE SECOND INSTANCE WAS THE EXPENSIVE
+ONE.** The assert had been advanced to `ScreenId::Peek + 1` — still a named member,
+so appending `BookEnd` satisfied it unchanged and said nothing, exactly as
+`Typography` had. That is the same defect twice in the same line, which is what
+makes it a pattern rather than an oversight. **And the pattern is not confined to
+the test**: `core/src/session_record.cpp` had *three* bounds spelled
+`<= ScreenId::Peek`, so `sessionWireName` fell through to `return kNames[0]` and
+**serialised the new screen as `home`** — a reader idle-sleeping on the end-of-book
+screen would have woken on Home, with no failing test and no log line, because the
+round-trip test could not see a screen the table was too short to name.
+`session_record.cpp`'s table is `static_assert`ed against the enum's END now, so it
+cannot be short. **#42 STAYS OPEN**: both asserts still name a member by hand, so
+the next append needs the line moved by hand or it goes quiet again — and the
+instance count is the argument for fixing it generally rather than one file at a
+time.
+
+**The rule is structural now**: `focus()` and `setFocus()` are `final` on
+`FocusScreen`, so a derived screen cannot take one half without the other — the
+test checks a property the
 type system also enforces, and a sixth focused screen gets the whole contract by
 choosing its base class.
 
@@ -1804,6 +1822,7 @@ worth knowing before changing it:
 | Sleep / cover | `SleepCover.dc.html` | The cover full-bleed, and **the one screen that drops the badge**. `Grayscale`, decided per paint. |
 | Sleep / cover + details | `SleepCoverDetails.dc.html` | The same cover with the reading card and the badge over it. Keeps both. |
 | Reader | `Reader.dc.html` | The only screen whose content is the BOOK's — but no longer the only `Fidelity::Grayscale` one. |
+| Book end | `BookEnd.dc.html` | **The only screen a PAGE TURN opens rather than a press** — off the last page, so it must be reachable with no button bound to it. Its leaving slab's LABEL follows what is under the Reader; its ACTION does not. |
 | Typography | `Typography.dc.html` | Two doors, and it needs nothing from the book. `CHANGE` cycles in place; `Font` is drawn and unreachable. |
 | Peek | `Peek.dc.html` | The only overlay over a `Grayscale` screen. Its column is NOT the reading column, which is why it shows no page number. |
 | SD missing | `SdMissing.dc.html` | RETRY restarts the device when the card was lost after a mount. |
@@ -4673,9 +4692,11 @@ prose bullet inside the roadmap phase that spawned it, which is why this file ha
 had to record the same class of loss more than once: a follow-up note that
 "stayed true for exactly as long as nobody read it", a paragraph that tracked its
 own subject through three states in one session, `ListRow::trackingEm1000`
-outliving its last producer, and two boarded screens (`BookEnd`, `Boot`) that the
-roadmap does not mention at all. **A deferral with no card is a deferral nobody
-will find.**
+outliving its last producer, and one boarded screen (`Boot`) that the roadmap
+does not mention at all. **A deferral with no card is a deferral nobody will
+find.** `BookEnd` was the second of those two and is built (#6), which is the
+argument working rather than an exception to it: it had a board and no roadmap
+line, and what made it findable was the card.
 
 **THE BOARD HOLDS STATUS AND NOTHING ELSE.** The roadmap holds the reasoning; a
 card holds a `Source` pointer back to it (`roadmap:832`, `CLAUDE.md`) and at most
