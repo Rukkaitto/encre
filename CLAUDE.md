@@ -4768,6 +4768,20 @@ it.
 - **Finishing something with no hardware surface:** `Closes #N` in the commit or
   PR moves the card to `Done` on its own, which is exactly why the V1 items are
   real issues rather than drafts. Prefer it to editing the field by hand.
+- **AND IT WORKS THE OTHER WAY TOO: SETTING `Status` TO `Done` CLOSES THE ISSUE**,
+  by a built-in project workflow, within the same second and attributed to the
+  repo owner rather than to whoever moved the card. So the two directions are one
+  mechanism and a card left `Done` with its issue open is not a state that occurs.
+  Two things follow, and the second is the one that bites:
+  - **A card moved to `Done` by hand still owes the issue a COMMENT** saying what
+    landed and where. The auto-close writes nothing, so an issue closed this way
+    carries no link to the PR and no answer to whatever question the card asked —
+    which for #35 was *skipped or truncated*, the whole point of the card.
+  - **`gh issue close --comment` DROPS THE COMMENT when the issue is already
+    closed.** It refuses the command outright (`is already closed`) rather than
+    posting the comment and skipping the close, so the resolution note is lost
+    with a message that reads like a no-op. Use `gh issue comment` — it is the
+    only half that was ever needed.
 - **Finishing anything the panel can be wrong about:** set `On glass`, and do
   **not** write `Closes #N` — it would close the card on desktop evidence, which
   is the failure above with a keyword attached.
