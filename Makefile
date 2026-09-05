@@ -1,12 +1,17 @@
 .PHONY: test sim firmware fonts icons compare epubs epubs-bulk card-add card-remove zips conventions hooks
 # PlatformIO installs outside PATH by default; allow an override: make firmware PIO=/path/to/pio
 #
-# Invoked through its MODULE entry point rather than the `pio` launcher script.
-# The launcher runs a dependency check before it does anything, and that check can
-# fail with "Failed to install Python dependencies into penv" while the toolchain
-# itself is perfectly fine -- it did, mid-Phase-2C, with no change on our side.
-# `python -m platformio` skips the check and builds identically, so a broken
-# launcher no longer blocks a build or a flash.
+# Invoked through its MODULE entry point rather than the `pio` launcher script,
+# which is a convenience and NOT a way around the dependency check. That check
+# can fail with "Failed to install Python dependencies into penv" while the
+# toolchain itself is perfectly fine -- it did, mid-Phase-2C, with no change on
+# our side -- and this comment used to claim the module entry point SKIPS it.
+# It does not, and no entry point can: the check lives in the platform's builder
+# script, ~/.platformio/platforms/espressif32/builder/penv_setup.py, not in the
+# `pio` launcher. It is gated on having a network, runs `uv pip install
+# --upgrade` when there is one, and exits 1 on failure -- so the failure means a
+# PyPI hiccup or two builds sharing the `uv` cache. RETRY IT, and do not run two
+# builds at once. See CLAUDE.md, "Hardware facts".
 PIO_PY ?= $(HOME)/.platformio/penv/bin/python
 PIO ?= $(if $(wildcard $(PIO_PY)),$(PIO_PY) -m platformio,pio)
 PYTHON ?= python3
