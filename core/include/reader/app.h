@@ -68,8 +68,13 @@ const char* screenName(ScreenId id);
 
 // What a screen asks the app to do after handling an event.
 //
-// `Retry` is the odd one out and is deliberately shaped like `Sleep`: both name
-// something only the shell can do. Storage is not core/'s -- the SD-missing
+// FOUR OF THE KINDS ARE LATCHES, not instructions: `Sleep`, `Retry`, `Open` and
+// `Finish` each name something only the shell can do, so the screen asks, App
+// records the request, and the shell answers it on its next pass. (This line
+// called `Retry` "the odd one out" when it was the only one; `Open` and `Finish`
+// have since made it the pattern rather than the exception.)
+//
+// Storage is not core/'s -- the SD-missing
 // screen cannot mount a card, and spec 6 requires its button actually re-attempt
 // the mount rather than repaint the same message -- so the screen asks, App
 // latches the request, and the shell answers it. See App::retryRequested().

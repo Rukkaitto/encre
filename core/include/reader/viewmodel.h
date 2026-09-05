@@ -178,7 +178,11 @@ struct ItemActionEntry {
 
 struct ItemActionsViewModel {
   std::string title;   // the book's name; the theme shouts it, as a caps label
-  std::string status;  // the caption's right-hand value: "31%", or "NEW" today
+  // The caption's right-hand value: "31%", "DONE" or "NEW". It is `item->progress`
+  // verbatim, so it inherits whatever applyProgress derives -- which is how DONE
+  // reached this overlay with no code of its own, and is the point of that
+  // derivation being spelled once.
+  std::string status;
   std::vector<ItemActionEntry> actions;
   int focusedAction = 0;
   std::array<std::string, 4> hints{};

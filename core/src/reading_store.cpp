@@ -156,7 +156,13 @@ bool loadProgressIndex(FileSystem& fs, std::vector<ProgressEntry>& out) {
     // SKIPPED INDIVIDUALLY, never fatal. A truncated record -- a save cut by a power
     // loss -- costs that one book its percentage and says nothing about the rest.
     if (!parsePosition(text, p) || p.bookPath.empty()) continue;
-    out.push_back(ProgressEntry{p.bookPath, p.percent, p.chapter, p.finished});
+    // DESIGNATED, not positional. Four members of which two are already `int`-ish
+    // and one is a bool: a future member of a matching type could be silently
+    // transposed with its neighbour, and the compiler would not say so.
+    out.push_back(ProgressEntry{.bookPath = p.bookPath,
+                               .percent = p.percent,
+                               .chapter = p.chapter,
+                               .finished = p.finished});
   }
   return true;
 }
