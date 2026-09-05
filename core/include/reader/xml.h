@@ -64,6 +64,12 @@ class BufferSource : public ByteSource {
 // a real book: 45,217 text runs, median 46 bytes, longest 812. Any caller that
 // accumulates text already handles several nodes in a row, because
 // `a <em>b</em> c` is three of them.
+
+// AN ATTRIBUTE LONGER THAN THE BUFFER IS REPORTED ABSENT, which is the same
+// principle reaching the one place it could not be spelled as chunking: a value
+// cannot be split because `attr()` answers about the whole tag. Nothing here is a
+// reason to refuse a document, and treating one as such cost two real books --
+// see `kMaxAttrBytes` and `attrsDropped()`.
 //
 // WHAT IT SKIPS, silently and by design: the XML declaration, DOCTYPE, comments,
 // and processing instructions. None carries content a book needs, and a reader
@@ -95,7 +101,10 @@ class Xml {
   };
 
   // Bounded like the JSON reader's pairs, and for the same reason: these numbers
-  // size buffers, and a file is free to claim anything.
+  // size buffers, and a file is free to claim anything. AN ATTRIBUTE PAST EITHER
+  // BOUND IS REPORTED ABSENT rather than refusing the document -- see kMaxAttrBytes
+  // below, and `attrsDropped()`. Sixteen is 2x the fattest tag measured across 226
+  // real EPUBs (an <html> carrying eight namespace declarations).
   static constexpr size_t kMaxAttrs = 16;
   static constexpr size_t kMaxNameBytes = 128;
 
@@ -104,11 +113,17 @@ class Xml {
   // 812 bytes, so in practice a run arrives whole.
   static constexpr size_t kTextBytes = 1024;
 
-  // All of one tag's attribute names and decoded values, together. Refused above
-  // this, because unlike a text run it cannot be split: `attr()` answers about the
-  // current tag as a whole. Measured over a real book's 143,119 attributes: the
-  // longest single value is 49 bytes and the fattest tag carries 160, so this is
-  // 3x the observed worst case.
+  // All of one tag's attribute names and decoded values, together. Measured over a
+  // real book's 143,119 attributes: the longest single value is 49 bytes and the
+  // fattest tag carries 160, so this is 3x the observed worst case.
+  //
+  // AN ATTRIBUTE PAST IT IS DROPPED, NOT A REFUSAL, and it took two refused books
+  // to correct that. A value cannot be SPLIT the way a text run is -- `attr()`
+  // answers about the whole tag -- and the conclusion drawn from that for two
+  // phases was "therefore the document is malformed". Between splitting and
+  // refusing sits reporting it ABSENT, which every caller of this parser already
+  // handles. See next()'s attribute loop for what the refusal cost and why the drop
+  // is whole rather than truncated.
   static constexpr size_t kMaxAttrBytes = 512;
 
   // How much of the source is held at once. Only ever a few bytes are examined --
@@ -148,6 +163,14 @@ class Xml {
   std::string_view attr(std::string_view attrName) const;
   bool hasAttr(std::string_view attrName) const;
   size_t attrCount() const { return attrCount_; }
+
+  // How many attributes this document has been unable to hold, cumulative since the
+  // last `restart()`. Zero for every one of 226 corpus books but the two Calibre
+  // ones, and it exists so that a drop is observable rather than silent: a caller
+  // that finds an attribute missing can tell "the book did not say" from "we could
+  // not hold what it said", which is the distinction the refusal used to make
+  // loudly and at the price of the whole document.
+  size_t attrsDropped() const { return attrsDropped_; }
 
   // How many bytes of the source have been consumed, and why parsing stopped. A
   // byte offset rather than a line: this reads machine-written XML, and an offset
@@ -203,6 +226,7 @@ class Xml {
   };
   Attr attrs_[kMaxAttrs];
   size_t attrCount_ = 0;
+  size_t attrsDropped_ = 0;
 
   const char* error_ = "";
 };

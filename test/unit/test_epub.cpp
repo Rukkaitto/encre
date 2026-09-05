@@ -183,6 +183,41 @@ TEST_CASE("every truncation of a good EPUB is survivable") {
   }
 }
 
+TEST_CASE("a Calibre metadata blob costs the book that blob and nothing else") {
+  // THE BOOK THIS FIX EXISTS FOR. Calibre writes one <meta> per custom column
+  // carrying a JSON dump of the column's definition, and one of them is over
+  // Xml::kMaxAttrBytes -- so the tokenizer errored, open() reported "the OPF is
+  // malformed", and a three-hundred-page novel was refused over a field describing
+  // a column in somebody's library manager.
+  //
+  // Two books out of 226 in one measured corpus, and BOTH from the same real shelf,
+  // which is the number that matters: the corpus under-counts this because it is
+  // full of publisher output and this is a Calibre habit.
+  //
+  // Every fact after the blob is the assertion. Title, author, identifier, the
+  // spine's order and the cover are all read from the same walk, and before this
+  // the walk did not survive the blob to reach any of them.
+  FakeFileSystem fs;
+  REQUIRE(fs.writeAll("/calibre.epub", epubbuild::withCalibreUserMetadata()));
+  std::unique_ptr<reader::FileHandle> h = fs.openRead("/calibre.epub");
+  REQUIRE(h != nullptr);
+  reader::Zip zip;
+  REQUIRE(zip.open(*h));
+  reader::Epub epub;
+  REQUIRE(epub.open(*h, zip));
+
+  CHECK(epub.title() == "Middlemarch");
+  CHECK(epub.author() == "George Eliot");
+  CHECK(epub.identifier() == "urn:uuid:0000-1111");
+  REQUIRE(epub.chapters().size() == 2);
+  CHECK(epub.chapters()[0].id == "ch1");
+  CHECK(epub.chapters()[1].id == "ch2");
+  // AND THE COVER, which is the sharp one: it is declared by a SECOND <meta> sitting
+  // directly after the blob, so it is the fact that proves the walk resumed rather
+  // than merely survived to Eof.
+  CHECK(epub.coverPath() == "OEBPS/images/cover.jpg");
+}
+
 TEST_CASE("a second open() over the same Epub keeps nothing from the first book") {
   // fail("") IS THE RESET, and it is what open() begins with -- so this covers the
   // success path too, not only a refusal.

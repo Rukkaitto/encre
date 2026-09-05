@@ -68,6 +68,7 @@ void Xml::restart(ByteSource& src) {
   pendingEndLen_ = 0;
   endPending_ = false;
   attrUsed_ = attrCount_ = 0;
+  attrsDropped_ = 0;
   error_ = "";
 }
 
@@ -384,19 +385,44 @@ Xml::Node Xml::next() {
         return Node::StartTag;
       }
 
-      if (attrCount_ >= kMaxAttrs) return fail("more attributes on one tag than we will read");
+      // AN ATTRIBUTE THIS PARSER CANNOT HOLD READS AS ABSENT.
+      //
+      // It used to be a refusal, on the reasoning in the header: unlike a text run a
+      // value cannot be SPLIT, because attr() answers about the whole tag. True, and
+      // the conclusion drawn from it was not -- there is a third answer between
+      // splitting and refusing the document, and it is the one every caller of this
+      // parser already handles, since hasAttr() exists precisely to say absent.
+      //
+      // What the refusal cost: a Calibre EPUB writes one <meta> per custom column
+      // carrying a JSON dump of that column's definition, and one of them exceeds
+      // kMaxAttrBytes -- so the OPF read as malformed and a whole novel was refused
+      // over a field describing a column in somebody's library manager. Two books
+      // out of 226 in one corpus, and both of them off the same real shelf.
+      //
+      // DROPPED WHOLE, NEVER TRUNCATED, which is the half that has to be got right:
+      // a clamped href resolves to a path that is WRONG rather than to nothing, and
+      // no caller can tell a short value from a cut one. Absent, they all already
+      // handle -- and where the missing attribute really was load-bearing the layer
+      // above still refuses, by its own rule and with its own message (a spine that
+      // names a manifest id nothing carries).
+      //
+      // BOTH CAPS, ONE RULE. Running out of slots is the same event as running out
+      // of bytes, and having one refuse while the other dropped would be a
+      // distinction the next reader of this file has to rediscover. Observed maximum
+      // on one tag across 226 real EPUBs is EIGHT, on an <html> carrying namespace
+      // declarations, so kMaxAttrs has never been reached by a real book.
+      const size_t mark = attrUsed_;
+      bool keep = attrCount_ < kMaxAttrs;
 
       // The name goes straight into the shared buffer; the value follows it.
       char scratch[kMaxNameBytes];
       size_t scratchLen = 0;
       if (!parseName(scratch, scratchLen)) return fail("a tag attribute with no name");
-      if (attrUsed_ + scratchLen > kMaxAttrBytes)
-        return fail("an element carries more attribute bytes than we will hold");
-      Attr& a = attrs_[attrCount_];
-      a.nameAt = static_cast<uint16_t>(attrUsed_);
-      a.nameLen = static_cast<uint16_t>(scratchLen);
-      std::memcpy(attrBuf_ + attrUsed_, scratch, scratchLen);
-      attrUsed_ += scratchLen;
+      if (attrUsed_ + scratchLen > kMaxAttrBytes) keep = false;
+      if (keep) {
+        std::memcpy(attrBuf_ + attrUsed_, scratch, scratchLen);
+        attrUsed_ += scratchLen;
+      }
 
       skipSpace();
       // NO BARE ATTRIBUTES. HTML permits `<input disabled>`; XML does not, and
@@ -409,7 +435,7 @@ Xml::Node Xml::next() {
       const char quote = at(0);
       bump(1);
 
-      a.valueAt = static_cast<uint16_t>(attrUsed_);
+      const size_t valueAt = attrUsed_;
       size_t valueLen = 0;
       for (;;) {
         if (ensure(1) < 1) return fail("an unterminated attribute value");
@@ -417,8 +443,17 @@ Xml::Node Xml::next() {
           bump(1);
           break;
         }
-        if (attrUsed_ + kMaxEntityBytes + 2 > kMaxAttrBytes)
-          return fail("an element carries more attribute bytes than we will hold");
+        if (keep && attrUsed_ + kMaxEntityBytes + 2 > kMaxAttrBytes) keep = false;
+        if (!keep) {
+          // SCANNING TO THE CLOSING QUOTE, STORING NOTHING -- and not decoding
+          // either, which is safe for one reason worth stating: the quote that ends
+          // a value cannot appear inside an entity reference, and a value written
+          // with `&quot;` is written that way precisely so no raw quote is there.
+          // So the raw bytes carry the terminator, and a discarded value costs the
+          // table lookups its characters would have needed.
+          bump(1);
+          continue;
+        }
         if (at(0) == '&') {
           size_t n = 0;
           if (!decodeEntity(attrBuf_ + attrUsed_, kMaxAttrBytes - attrUsed_, n))
@@ -431,6 +466,20 @@ Xml::Node Xml::next() {
         ++valueLen;
         bump(1);
       }
+
+      if (!keep) {
+        // REWIND, which is what lets a blob sitting FIRST cost only itself. Without
+        // it the name and the partial value stay packed and every attribute after
+        // the dropped one is dropped too -- so a tag would lose the href it needed
+        // for the metadata it did not.
+        attrUsed_ = mark;
+        ++attrsDropped_;
+        continue;
+      }
+      Attr& a = attrs_[attrCount_];
+      a.nameAt = static_cast<uint16_t>(mark);
+      a.nameLen = static_cast<uint16_t>(scratchLen);
+      a.valueAt = static_cast<uint16_t>(valueAt);
       a.valueLen = static_cast<uint16_t>(valueLen);
       ++attrCount_;
     }
