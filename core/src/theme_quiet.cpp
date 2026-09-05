@@ -66,6 +66,7 @@ constexpr int kBookEndNotePadBottom = 14;  // the note's `padding-bottom`
 constexpr int kBookEndTitleEm = 80;        // THE END's `letter-spacing: 0.08em`
 constexpr int kBookEndMetaEm = 140;        // the meta line's `0.14em`
 constexpr int kBookEndNoteLeadEm = 1500;   // the note's `line-height: 1.5`
+constexpr int kBookEndNoteEm = 100;        // the note's `letter-spacing: 0.1em`
 
 // NOTE: this theme used to carry its own copy of the half-leading baseline
 // formula, and it was the *correct* copy while the shared primitives in
@@ -452,7 +453,12 @@ void QuietTheme::renderBookEnd(Framebuffer& fb, const FontSet& fonts,
   // Wrapped once, then both measured and drawn from that one Prose: two calls that
   // each re-wrapped would be two chances to disagree, and the disagreement reads as a
   // paragraph drifted off position.
-  const Prose note = wrapProse(metaF, vm.note, usableW, kBookEndNoteLeadEm);
+  // TRACKED, and the wrap is where the tracking has to arrive -- Prose carries it
+  // through to the draw precisely so the two cannot disagree. Passing it only to
+  // drawProse would wrap at one measure and paint at another, which is a line that
+  // breaks in the wrong place rather than a line that looks slightly off.
+  const Prose note = wrapProse(metaF, vm.note, usableW, kBookEndNoteLeadEm,
+                               trackingEm(metaF, kBookEndNoteEm));
   const int barH = hintBarHeight(fonts, hints);
   const int noteTop = fb.height() - barH - kBookEndNotePadBottom - f26ToPx(note.heightF26());
   // LEFT, not the Centre default: the board states no `text-align` on this block,
