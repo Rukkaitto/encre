@@ -3,6 +3,12 @@
 **Status:** Round 0's deliverable. Measured after the entity fix (`7a83774`) and before
 any other leniency work. The next plan is written from this document.
 
+**SUPERSEDED IN ONE ROW, AND THE NUMBERS BELOW ARE LEFT AS MEASURED.** The single
+refusal is fixed — an attribute over `kMaxAttrBytes` reads as absent now, issue #35 —
+so the corpus opens **225 of 225**, with the other 224 books byte-identical in every
+field this document reports. A dated baseline is not rewritten when the thing it
+measured moves; it is what the next measurement is compared against.
+
 Spec: `docs/superpowers/specs/2026-08-28-epub-leniency-design.md`
 Plan: `docs/superpowers/plans/2026-08-28-epub-leniency-round-0.md`
 
@@ -55,10 +61,18 @@ per-source figure or none at all.
 
 | refusal | books | audit row |
 |---|--:|---|
-| `the OPF is malformed` | 1 | **Xml, attribute bytes over 512** — issue #35 |
+| `the OPF is malformed` | 1 | **Xml, attribute bytes over 512** — issue #35, **FIXED** |
 
 `Le soleil et l'acier`, in the local library. Calibre writes a `user_metadata`
 `<meta content="…">` of 720–848 bytes and `kMaxAttrBytes` is 512, so the OPF errors.
+
+**AND THE CORPUS UNDER-COUNTED IT, WHICH IS THE FINDING RATHER THAN THE FIX.** One
+book in 225 reads as a rounding error; a THIRD book off the same shelf
+(`Walden ou la vie dans les bois`, 574 decoded bytes) hit it afterwards, and both are
+Calibre output. **This corpus is 209 books of Gutenberg and Standard Ebooks against 16
+of the population that complains** — the skew this document already warns about, and
+here is a case where it hid a defect's real rate behind a denominator that was mostly
+publisher output.
 
 **Two chapters lost, and the cause is NOT IN THE AUDIT:**
 
@@ -106,8 +120,10 @@ statement is "no evidence yet", not "does not happen".**
 
 ## What Round 1 should be
 
-1. **`kMaxAttrBytes` — truncate the value instead of erroring.** The only refusal in
-   the corpus, in the only real-world sample, and already carded as #35.
+1. ~~**`kMaxAttrBytes` — truncate the value instead of erroring.**~~ **DONE, and as a
+   DROP rather than a truncation** — a truncated `href` resolves to a path that is
+   wrong rather than to nothing, where an absent one is a state every caller already
+   handles. `kMaxAttrs` went with it, by the same rule. 225 of 225 open.
 2. **`kMaxBlockBytes` — emit what fits instead of erroring.** Two chapters, and the
    same silent-truncation shape the entity fix removed. Needs a decision the corpus
    cannot make: split the block, or truncate it and say so.

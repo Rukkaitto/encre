@@ -2389,13 +2389,17 @@ expensive one, and the first sleep of a new book is always it.**
 | X4 crops ~10% of a 2:3 cover's **width** at `FILL` | default, reversible in Settings |
 | first sleep of a new book shows the card for a few seconds | by design |
 
-**WHAT THE CORPUS ACTUALLY YIELDS, run through the built pipeline: `Ok` for 222**,
+**WHAT THE CORPUS ACTUALLY YIELDS, run through the built pipeline: `Ok` for 223**,
 `Unsupported` for 2 (both progressive JPEGs), and `NoCover` / `ReadFailed` /
-`OutOfMemory` / `Abandoned` all **zero**. **The denominator is 224 and not 225**, and
-the distinction is load-bearing: one book never reaches a decoder at all, because
-`openBook` refuses it over a Calibre `user_metadata` `<meta content="…">` of 849 bytes
-against `Xml::kMaxAttrBytes`'s 512. **That belongs to the EPUB refusal rate, not to
-cover support — "222 of 225" would double-count it.**
+`OutOfMemory` / `Abandoned` all **zero**. **The denominator is 225 now, and it read
+224 here for as long as one book could not be opened at all** — `openBook` refused it
+over a Calibre `user_metadata` `<meta content="…">` against `Xml::kMaxAttrBytes`, so
+it never reached a decoder and counting it as a cover failure would have
+double-counted it against the EPUB refusal rate. That refusal is gone (an attribute
+too long to hold reads as absent — see **The lifetime rules that changed**), the book
+opens, and **its cover decodes**, which is why the numerator moved with the
+denominator. **The distinction it was drawn for still holds** and is the thing to keep:
+a book that cannot be opened is not a book whose cover failed.
 
 **Every one falls back to `DETAILS` with the badge shown, and logs the reason.** That
 is the whole reason `CoverResult` distinguishes `NoCover` / `Unsupported` /
@@ -2822,10 +2826,44 @@ best-effort now and **empty means the book did not say**, the same call the spin
   a book that named nothing — reporting an identifier the book never designated.
   `!uniqueIdRef.empty()` is what keeps empty honest, and it is proved by mutation
   rather than by argument.
-- **A DIFFERENT BOOK IS STILL REFUSED, AND FOR A NEIGHBOURING REASON**: `Xml`'s
-  `kMaxAttrBytes` is 512 and Calibre writes a `user_metadata` `<meta content="…">` of
-  720–848 bytes, so the tokenizer errors and the OPF reads as malformed. Same family —
-  a book refused over metadata it does not need — and not the same fix.
+- **A DIFFERENT BOOK WAS REFUSED FOR A NEIGHBOURING REASON, AND AN ATTRIBUTE TOO LONG
+  TO HOLD READS AS ABSENT NOW.** `Xml` capped a tag's attribute bytes at
+  `kMaxAttrBytes` (512) and answered `Error` above it, so `Epub::open` reported "the
+  OPF is malformed" and the book was gone. What was over the cap was one `<meta>` of
+  Calibre custom-column JSON — **574 decoded bytes on `Walden ou la vie dans les bois`
+  and 489 on `Le soleil et l'acier`**, both off the same real shelf, both
+  three-hundred-page novels lost to a field describing a column in somebody's library
+  manager. Same family as the identifier and the unknown entity, and it took all three
+  to make the rule visible: **nothing in a tokenizer's bounds is a reason to refuse a
+  document.**
+  - **THE ARGUMENT FOR THE REFUSAL WAS TRUE AND THE CONCLUSION DID NOT FOLLOW**, which
+    is the part worth keeping. A value cannot be SPLIT the way a long text run is,
+    because `attr()` answers about the whole tag — and `xml.h` said so and stopped
+    there. **Between splitting and refusing sits reporting it ABSENT**, which every
+    caller already handles: `hasAttr()` exists precisely to tell absent from empty.
+  - **DROPPED WHOLE, NEVER TRUNCATED.** A clamped `href` resolves to a path that is
+    *wrong* rather than to nothing, and no caller can tell a short value from a cut
+    one. Where the missing attribute really was load-bearing the layer above still
+    refuses, by its own rule and with its own message — a spine naming a manifest id
+    nothing carries.
+  - **THE PACKING OFFSET REWINDS**, so a blob sitting FIRST costs only itself. Without
+    that, everything after the dropped attribute is dropped too and a tag loses the
+    `href` it needed for the metadata it did not.
+  - **`kMaxAttrs` DROPS BY THE SAME RULE**, because running out of slots is the same
+    event as running out of bytes and two spellings of one rule is what this file has
+    a section about. Observed maximum on one tag across 226 real EPUBs is **eight**, on
+    an `<html>` carrying namespace declarations, so that cap has never been reached by
+    a real book.
+  - **THE CAP DID NOT MOVE, AND RAISING IT WAS THE WRONG FIX** — it is what produced
+    512 ("3x the observed worst case") and that was already wrong twice. Measured over
+    226 real EPUBs: every tag over 400 bytes of attributes is a Calibre
+    `user_metadata` meta, and the fattest tag that is **not** one is that 379-byte
+    `<html>`. The failure mode was the bug; the number was fine.
+  - **THE CHECK IS THE 224 BOOKS THAT DID NOT MOVE.** The corpus goes 224/225 opened
+    to **225/225**, and every other book is byte-identical in title, author, spine
+    length, block count and text bytes — the same standard the entity fix was held to,
+    where "the unchanged thirteen are the check that matters". `Xml::attrsDropped()`
+    is what keeps a drop from being silent.
 
 ### A grayscale screen is painted twice: fast, then four levels
 

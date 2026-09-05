@@ -484,18 +484,24 @@ board: **generated from one source, never transcribed twice.**
 `tools/covers.py`, over the 225-book manifest, at both geometries — identical results on
 each:
 
-| | count |
-|---|--:|
-| `Ok` | **222** |
-| `Unsupported` — both progressive JPEGs | 2 |
-| the book never reaches a decoder | 1 |
-| `NoCover` / `ReadFailed` / `OutOfMemory` / `Abandoned` | 0 |
+| | count | re-measured after issue #35 |
+|---|--:|--:|
+| `Ok` | **222** | **223** |
+| `Unsupported` — both progressive JPEGs | 2 | 2 |
+| the book never reaches a decoder | 1 | **0** |
+| `NoCover` / `ReadFailed` / `OutOfMemory` / `Abandoned` | 0 | 0 |
 
-**224 books open, and 222 of them give a cover.** The 225th is refused by `openBook`
-before any of this runs — a Calibre `user_metadata` `<meta content="…">` of **849 bytes**
-against `Xml::kMaxAttrBytes`'s 512, which CLAUDE.md already records as a known refusal
-under `Epub::open`. It belongs to the EPUB refusal rate, not to cover support, and
-**"222 of 225" would double-count it.**
+**224 books open, and 222 of them give a cover.** The 225th was refused by `openBook`
+before any of this ran — a Calibre `user_metadata` `<meta content="…">` of **849 bytes**
+against `Xml::kMaxAttrBytes`'s 512. It belonged to the EPUB refusal rate, not to cover
+support, and **"222 of 225" would have double-counted it.**
+
+**THAT REFUSAL IS GONE (issue #35): an attribute too long to hold reads as ABSENT
+rather than making the document malformed.** So the denominator is 225, the book opens,
+**and its cover decodes** — the numerator moved with it. **The distinction this
+paragraph was written to draw is unchanged and is the half to keep**: a book that
+cannot be opened is not a book whose cover failed, and folding the two together makes a
+parser bug read as a decoder's.
 
 Desktop decode: median 76.6 ms, slowest 200.4 ms. **Not predictive of the device** —
 this project has been wrong by 8× that way once already.
