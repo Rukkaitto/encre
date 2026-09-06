@@ -3240,6 +3240,40 @@ static bool refreshBatteryOnHome() {
 // bus and cannot race a panel refresh.
 static void pollBatteryLevel() { gBattery.update(readBattery(), millis()); }
 
+// ARM THE BANNER ON A FRESH ENTRY INTO Low, and only while the Reader is on TOP.
+//
+// gWasLow is the EDGE, not the state: re-arming on every poll would put the banner
+// back the moment the reader dismissed it, which is the dead-button defect with the
+// sign flipped. It re-arms when the level leaves Low and comes back -- and a wake is
+// a chip reset, so a low battery shows the banner again on every wake. That is the
+// right behaviour and, when the Reader is what the wake restores, it rides that
+// paint and costs no extra waveform.
+//
+// ON TOP rather than on the stack, unlike the Typography apply: the banner is drawn
+// by renderReader, so with a Peek or the reader menu over it there is nothing to
+// see. An armed banner under an overlay simply waits -- ReaderScreen holds the
+// field and the overlay's pop reveals it.
+//
+// level() != Normal RATHER THAN == Low: a device that reaches Critical without a
+// poll landing on Low in between must still warn. The shutdown is kCriticalDwellMs
+// away and the banner is what explains it.
+static bool gWasLow = false;
+static void armBannerIfNewlyLow() {
+  const bool low = gBattery.level() != reader::BatteryLevel::Normal;
+  const bool edge = low && !gWasLow;
+  gWasLow = low;
+  if (!edge || !gApp || gApp->top().id() != reader::ScreenId::Reader) return;
+  static_cast<reader::ReaderScreen&>(gApp->top()).setBatteryLow(gBattery.percent());
+  // markDirty(), not a transition: this is the same screen with one band drawn over
+  // it, so it takes the 389 ms DU rather than the 693 ms GC. It also resets the
+  // partial-repaint record, which is right here for the reason it was added -- the
+  // Reader is not an overlay and was never eligible for the partial path anyway, so
+  // this costs nothing and cannot leave the banner unpainted.
+  gApp->markDirty();
+  logf("[battery] low pct=%d -> banner armed\n", gBattery.percent());
+  logFlush();
+}
+
 static void renderTop() {
   // BEFORE the SpiBusGuard below, and deliberately: this is I2C on the sensor bus
   // and has nothing to do with the display's SPI, so keeping the two visibly apart
@@ -6476,6 +6510,8 @@ void loop() {
     // THE LADDER FIRST AND UNCONDITIONALLY. It is the safety mechanism and must not
     // sit behind either of the band's two gates.
     pollBatteryLevel();
+    // Immediately after, so the edge is tested against the reading just taken.
+    armBannerIfNewlyLow();
 
     // THE BAND'S REPAINT, still behind its own two gates -- what it drives is the
     // bolt on Home, which is a Home question. refreshBatteryOnHome takes its own
