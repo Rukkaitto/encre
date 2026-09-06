@@ -2510,6 +2510,21 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
                                   unreadable ? reader::BookErrorReason::Unreadable
                                              : reader::BookErrorReason::Damaged,
                                   returnTo});
+      // ...AND THE CONFIRMATION BEHIND ITS `DELETE FILE...` SLAB, PRIMED HERE TOO,
+      // because the screen answers a bare `Action::push(ScreenId::DeleteConfirm)` and
+      // the factory's fallback for an unprimed one is the LIBRARY'S FOCUSED ROW. From
+      // the Library that fallback happens to name this same book, so the slab worked
+      // by luck; from Home's CONTINUE there is no Library at all, the factory refuses,
+      // and the slab does NOTHING. That is the works-only-sometimes defect the Facts
+      // refactor exists to prevent -- and CONTINUE is the likeliest real corruption
+      // path, because it is a book the reader was part-way through.
+      //
+      // The same three facts the dialog itself took: `returnTo` is decided above by
+      // the one place that knows which screen asked, and the LEAF NAME is the display
+      // name -- not the Library row's `title()`, because a book that will not open has
+      // no OPF title to offer and the filename is the only honest name for it. It is
+      // also what the dialog's own paragraph quotes one screen up, so the two agree.
+      gFactory.setDeleteFacts({path, leaf, returnTo});
       if (!gApp->pushScreen(reader::ScreenId::BookError))
         logf("[open] ...and the dialog would not build\n");
     }
@@ -5705,6 +5720,13 @@ void loop() {
       // the reader menu left behind must go. Without this, opening details from the
       // Library after opening them from a book would show the BOOK.
       gFactory.clearDetailsFacts();
+      // THE SAME RULE FOR THE DELETE, and it is not theoretical: the factory checks
+      // `deleteFactsSet_` BEFORE its Library fallback, and openBookAt primes those
+      // facts for BookError's own slab. So Confirm a book that will not open, close
+      // the dialog, then `Delete...` a DIFFERENT book from this panel, and the
+      // confirmation would name -- and remove -- the corrupt one. This panel's rows
+      // are answered from the Library's focused row and nothing else.
+      gFactory.clearDeleteFacts();
       reader::LibraryScreen* lib = gFactory.library();
       const reader::LibraryItem* sel = lib != nullptr ? lib->focusedItem() : nullptr;
       if (sel != nullptr && !sel->entry.isDir) {
