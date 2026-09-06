@@ -687,6 +687,25 @@ void drawOverlayHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[
   fb.fillRect(0, fb.height() - barH, fb.width(), barH, true);
   drawHintBar(fb, fonts, hints, plane);
 }
+
+// HOW TALL A CENTRED OVERLAY PANEL MAY BE, which is the canvas less the hint bar
+// TWICE -- and the two is the whole point of the function existing.
+//
+// The boards say `max-height: 100%`, and 100% of the canvas is not the bound a
+// firmware can honour, because the board draws its hint bar `position: absolute;
+// bottom: 0` OVER the panel while `drawOverlayHintBar` paints an opaque strip that
+// slices whatever is under it -- and the slab it slices is the one the reader is
+// about to press. Reserving the bar ONCE does not fix it either: `centreIn` splits
+// the slack evenly, so a panel of `height - barH` still hangs barH/2 into the bar.
+// Reserving it at both ends is what a centred box costs.
+//
+// DERIVED THROUGH hintBarHeight, never pinned -- the bar's own height follows its
+// hints and the type ramp, and this project has paid three times for a number a
+// board computes being written down instead. It needs the hints for that, which is
+// why both callers build theirs before they size their panel rather than at the end.
+int centredPanelRoom(const Framebuffer& fb, const FontSet& fonts, const Hint hints[4]) {
+  return fb.height() - 2 * hintBarHeight(fonts, hints);
+}
 }  // namespace
 
 void QuietTheme::renderItemActions(Framebuffer& fb, const FontSet& fonts,
@@ -775,6 +794,10 @@ void QuietTheme::renderDeleteConfirm(Framebuffer& fb, const FontSet& fonts,
   // otherwise hang out past the panel's own border.
   std::string captionTail;
   Prose label = wrapPanelCaption(fonts, vm.title, contentW, WordBreak::Anywhere);
+  // The bar is measured BEFORE the panel is sized, because its height is an input to
+  // the budget below -- renderBookDetails' order, for renderBookDetails' reason.
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
   // The paragraph, wrapped before anything is placed: its height is what it wraps
   // to, and everything below it -- both buttons and the panel's own bottom edge --
   // hangs off that. Wrapping it twice would be two chances to disagree.
@@ -786,14 +809,19 @@ void QuietTheme::renderDeleteConfirm(Framebuffer& fb, const FontSet& fonts,
   // height is unbounded, so it is the part that yields. Everything else in the
   // panel is fixed once the paragraph is wrapped, so subtract it and divide the
   // rest by the caption's line box -- derived from the canvas, never pinned, and
-  // 13 lines on the X4 against 12 on the X3, which no ordinary name comes near.
+  // ten lines on the X4 against nine on the X3, which no ordinary name comes near.
   // A caption clipped by the panel's border would be worse than an ellipsis, and
   // a panel taller than the glass -- centred, so cut off at BOTH ends -- worse
   // still.
+  //
+  // THE ROOM IS THE CANVAS LESS THE HINT BAR TWICE, not the whole canvas: this line
+  // read `fb.height() - panelFixedH`, so a 255-character name -- FAT's own maximum,
+  // a name a real card can hold -- grew the panel until CANCEL was sliced in half by
+  // the bar and the panel's bottom border went off the glass. See centredPanelRoom.
   const int panelFixedH = 2 * kPanelBorder + 2 * kPanelCaptionPadY + kPanelCaptionRuleH +
                           (2 * kConfirmProsePadY + proseH) +
                           (2 * kActionH + kConfirmButtonGap + kConfirmButtonPadBottom);
-  const int captionRoom = fb.height() - panelFixedH;
+  const int captionRoom = centredPanelRoom(fb, fonts, hints) - panelFixedH;
   int maxCaptionLines = 1;
   while (maxCaptionLines < label.lineCount() &&
          f26ToPx((maxCaptionLines + 1) * label.leadF26) <= captionRoom)
@@ -829,8 +857,6 @@ void QuietTheme::renderDeleteConfirm(Framebuffer& fb, const FontSet& fonts,
   drawActionButton(fb, fonts, cx + kPanelPadX, cy, colW, vm.confirmLabel, vm.focusedAction == 1,
                    plane);
 
-  Hint hints[4];
-  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
   drawOverlayHintBar(fb, fonts, hints, plane);
 }
 
@@ -854,6 +880,11 @@ void QuietTheme::renderBookError(Framebuffer& fb, const FontSet& fonts,
   // budget below be spent on the paragraph instead.
   const Prose label = wrapPanelCaption(fonts, vm.title, contentW, WordBreak::Anywhere);
   const int captionH = panelCaptionHeight(fonts, label);
+
+  // The bar is measured BEFORE the panel is sized, because its height is an input to
+  // the budget below -- renderBookDetails' order, for renderBookDetails' reason.
+  Hint bookErrorHints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, bookErrorHints);
 
   // Wrapped once, before anything is placed: its height is what it wraps to, and the
   // panel's own bottom edge hangs off that. Two wraps would be two chances to
@@ -880,10 +911,16 @@ void QuietTheme::renderBookError(Framebuffer& fb, const FontSet& fonts,
   // Clamping the caption instead would bound the run that cannot grow and leave the
   // one that can, and the panel is CENTRED, so one taller than the canvas is cut off
   // at BOTH ends.
+  //
+  // THE ROOM IS THE CANVAS LESS THE HINT BAR TWICE, not the whole canvas: this line
+  // read `fb.height() - panelFixedH`, so a 255-character name -- FAT's own maximum,
+  // a name a real card can hold -- grew the panel until `DELETE FILE...` was sliced
+  // in half by the bar and the panel's bottom border went off the glass. See
+  // centredPanelRoom for why reserving the bar ONCE would not have been enough.
   const int panelFixedH = 2 * kPanelBorder + captionH +
                           (2 * kConfirmProsePadY + mark.h + kBookErrorIconGap) +
                           (2 * kActionH + kConfirmButtonGap + kConfirmButtonPadBottom);
-  const int proseRoom = fb.height() - panelFixedH;
+  const int proseRoom = centredPanelRoom(fb, fonts, bookErrorHints) - panelFixedH;
   int maxProseLines = 1;
   while (maxProseLines < prose.lineCount() &&
          f26ToPx((maxProseLines + 1) * prose.leadF26) <= proseRoom)
@@ -925,8 +962,6 @@ void QuietTheme::renderBookError(Framebuffer& fb, const FontSet& fonts,
   drawActionButton(fb, fonts, cx + kPanelPadX, cy, colW, vm.deleteLabel,
                    vm.focusedAction == 1, plane);
 
-  Hint bookErrorHints[4];
-  buildHints(kHintSlotMarks, vm.hints, vm.holds, bookErrorHints);
   drawOverlayHintBar(fb, fonts, bookErrorHints, plane);
 }
 
