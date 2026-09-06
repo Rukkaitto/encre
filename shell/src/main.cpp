@@ -2373,6 +2373,82 @@ static void handleFinish() {
   }
 }
 
+// THE USER CONFIRMED A DELETE. See Action::del() and app.h's five-step note, which
+// this follows in order.
+//
+// THE PATH IS READ WHILE DeleteConfirm IS STILL ON TOP, because leaving the flow is
+// what takes it away and after that there is no screen left to ask. Contents'
+// chosenSpine() has exactly this shape and for exactly this reason.
+static void handleDelete() {
+  // The latch first, so a removal that fails does not re-fire on every loop.
+  gApp->clearDeleteRequest();
+
+  const reader::Screen& top = gApp->top();
+  if (top.id() != reader::ScreenId::DeleteConfirm) {
+    logf("[delete] latched with no confirmation on top\n");
+    logFlush();
+    return;
+  }
+  // A COPY, not a reference: the Backs below destroy the screen these live in.
+  const reader::DeleteConfirmScreen::Facts facts =
+      static_cast<const reader::DeleteConfirmScreen&>(top).facts();
+
+  // KEEP SD TRAFFIC OFF THE DISPLAY BUS, exactly as handleFinish and the retry do.
+  // The card shares the panel's SPI and SDCardManager does no locking at all, so a
+  // transfer racing a refresh is the kind of fault that looks random. The guard is
+  // recursive and SdFileSystem takes it per method; this is the whole-sequence one.
+  SpiBusGuard bus;
+
+  // THE RESULT IS NOT BRANCHED ON. FileSystem::remove reports the END STATE, so a
+  // false means the file is still there -- and the list the reader is about to be
+  // looking at has just been rescanned and already says which it was. An error panel
+  // would be a screen with no board saying what the Library already shows.
+  const bool gone = gSd.remove(facts.path);
+  logf("[delete] %s -> %s\n", facts.path.c_str(), gone ? "gone" : "still there");
+  logFlush();
+
+  // BOTH FLAGS, SEPARATELY. Each is consumed when ITS screen is reachable, and one
+  // shared flag lets Library, Back, Home clear it before Home has used it. Home's
+  // CONTINUE may name the file just removed, and its LIBRARY count is keyed on
+  // removals() -- which gSd.remove has just advanced.
+  //
+  // Both consumers are BELOW this call in loop(), which is handleFinish's placement
+  // and its reason: this handler LEAVES a screen, so the screen it lands on has to be
+  // repainted on the very press that caused the removal rather than one press later.
+  gHomeStale = true;
+  gLibraryStale = true;
+  // RESCANNED, not refreshed: a row has gone, and refreshProgress only re-derives the
+  // percentages of rows that are already there. The listing cache was dropped by
+  // remove()'s own forgetCardFacts, so this reaches the card -- which it must.
+  if (reader::LibraryScreen* lib = gFactory.library(); lib != nullptr) lib->rescan();
+
+  // ...AND NOW LEAVE, down to whatever asked. From the actions panel that is the
+  // Library; from BookError it may be Home, and the BookError under this confirmation
+  // goes too -- it names a book that no longer exists.
+  //
+  // SYNTHESISED BACKS RATHER THAN popTo(). THE SHELL CANNOT APPLY AN Action AT ALL:
+  // App::dispatch takes an InputEvent, App exposes pushScreen() and no popScreen() and
+  // no apply(Action), and an Action is a value a SCREEN returns. dispatchBack() above
+  // exists for precisely this, and handleFinish leaves BookEnd the same way -- whatever
+  // Back means on each screen is what runs, decided by the screen, once.
+  //
+  // BOUNDED THREE WAYS, because a Back that does not pop would otherwise spin loop()
+  // forever: the target is reached, the root is reached (popTo's own "stop at the
+  // root" rule, which is what a returnTo of Library means on a stack that has none),
+  // or a Back moved nothing. Every reachable stack costs two -- DeleteConfirm over
+  // ItemActions over the Library, and DeleteConfirm over BookError over Home or the
+  // Library.
+  for (int guard = 0; guard < 8; ++guard) {
+    if (gApp->top().id() == facts.returnTo || gApp->depth() <= 1) break;
+    const int was = gApp->depth();
+    dispatchBack();
+    if (gApp->depth() == was) {
+      logf("[delete] Back moved nothing on %s\n", reader::screenName(gApp->top().id()));
+      break;
+    }
+  }
+}
+
 // PRIME THE FACTORY WITH A BOOK AND ITS SAVED POSITION. Everything the Reader needs
 // before it can be pushed, in one place, because TWO paths need it and they must
 // agree: a button press (the Library's selection, or Home's CONTINUE) and a WAKE.
@@ -5813,6 +5889,12 @@ void loop() {
     // would miss by one press -- the overlay would dismiss onto a Library row still
     // reading its old percentage, which is the state the write just changed.
     if (gApp->finishRequested()) handleFinish();
+    // AND THE DELETE IS HERE FOR THE SAME REASON, not down with Retry and Open: it
+    // leaves a screen and sets both stale flags, and the blocks that answer for those
+    // -- Home's rebuild and the Library's row refresh -- are both below this point.
+    // Placed with Open instead, the Library would be repainted one press later, still
+    // listing the book that has just been removed.
+    if (gApp->deleteRequested()) handleDelete();
     // Between the dispatch and the mask refresh below, so the refresh sees
     // whatever screen the retry left on top -- on success that is a brand new App
     // rooted at Home, whose holds are not the SD-missing screen's.
