@@ -172,6 +172,24 @@ ICONS = {
         "source": "design/HomeCharging.dc.html",
         "match": "M11.4 2",
     },
+    # A SECOND ASSET FOR THE SAME DRAWING, at 98x52 against kBattery's 38x21 --
+    # these are pre-rendered bitmaps and there is no scaling one up. kBookLarge's
+    # precedent exactly, and it is a second *state* as well as a second size: the
+    # fill bar is 2.5 units wide where the header band's is 14.
+    #
+    # `source` HAS TO DISAMBIGUATE IT, AND IS THE ONLY THING THAT DOES. Every
+    # element of this mark is on Main.dc.html's battery too -- the body rect, the
+    # terminal nub kBattery keys on, and this `rect x="2" y="2"`, which differs
+    # only in its `width`. So the match locates the mark on its own board and the
+    # board name is the primary key, exactly as for kBook/kBookLarge. Keying on
+    # `width="2.5"` would distinguish them and is worse: how empty "empty" looks
+    # is the part of this mark a designer would retune.
+    "battery_large": {
+        "symbol": "kBatteryLarge",
+        "note": "a nearly-empty battery drawn large: the critical-shutdown mark",
+        "source": "design/BatteryEmpty.dc.html",
+        "match": 'rect x="2" y="2"',
+    },
     # The only mark in the set that is neither a button nor a row ornament: it is
     # the subject of a full-screen prompt, drawn at 84x105 where every other mark
     # here is 21-46px. The match keys on the card's own outline -- the notched
@@ -200,6 +218,21 @@ ICONS = {
         "note": "a tick: the end-of-book confirmation mark",
         "source": "design/BookEnd.dc.html",
         "match": "M1 6l5 5L15 1",
+    },
+    # THE WARNING TRIANGLE, 32x28 on design/LowBattery.dc.html and the only mark
+    # this firmware draws inside an inverted band. Authored WHITE on the board, as
+    # kForward is, because that is the ink it is drawn in -- the generator reads
+    # coverage, not colour, so this is about the board being honest rather than
+    # about the bitmap.
+    #
+    # The match keys on the triangle's own outline. `stroke-width="1.6"` is on
+    # both of the mark's paths and identifies neither of them; the closed
+    # `M9 1 17 15H1z` appears once on the board and nowhere else in the set.
+    "warning": {
+        "symbol": "kWarning",
+        "note": "a warning triangle: the low-battery banner's mark",
+        "source": "design/LowBattery.dc.html",
+        "match": "M9 1 17 15H1z",
     },
 }
 
