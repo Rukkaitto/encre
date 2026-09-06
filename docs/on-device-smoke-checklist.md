@@ -189,34 +189,68 @@ investigating into a cold boot that looks exactly like a bug.
       multiples of ten and that is not a bug.
 - [ ] **9.4** A gauge that does not answer draws the mark **alone**, never `0%`.
 
-## 10. Every hint slot does what it says
+## 10. Battery states — the safety ladder (#9, #10)
+
+**Not one line of the resume gate is executed by the desktop suite**, and the same
+is true of the shutdown's ordering and of the `critShut` flag surviving a chip
+reset — `shell/` has no harness. This section needs **its own build**: draining a
+real pack to 3% on demand is not practical, so build with
+
+    PLATFORMIO_BUILD_FLAGS="-DENCRE_BATTERY_FAKE_PERCENT=n" make firmware
+
+to reach each rung. `[alive] battery ... level=N` reports which rung the device
+thinks it is on (`0` Normal, `1` Low, `2` Critical), and **a silent shutdown with
+no `[power] CRITICAL` line is a poll that stopped running, not a ladder that
+fired** — the poll is the one part of this that is otherwise invisible.
+
+- [ ] **10.1** `=8`, in a book. The banner appears over the page **without moving
+      the text** — count the lines: a default page holds twelve under the band, and
+      eleven means the banner was honoured inside `columnH` and the chapter has
+      re-paginated. One press of **any** button clears it and does nothing else.
+- [ ] **10.2** `=2`. `[power] CRITICAL pct=2` then
+      `[power] battery empty: painting the shutdown screen`, then the panel shows
+      BATTERY EMPTY. **The paint must COMPLETE before the rails go down** — a
+      half-drawn screen here is the last thing the reader sees for hours.
+- [ ] **10.3** `=2`, then press power. `[boot] battery pct=2 critShut=1 -> refused`
+      and **nothing is repainted**: the glass still holds the screen from the step
+      above, because the gate runs before `display.begin()` and spends no waveform.
+      Repeat three times and confirm the flag is given back each time — a refusal
+      that consumed it would let the fourth press boot a flat device.
+- [ ] **10.4** Rebuild **without** the flag on a charged pack and press power: the
+      reader's page comes back, not Home. That is `markSleeping()` inside
+      `criticalShutdown` redeeming the board's *"Your page is saved"*.
+- [ ] **10.5** X3 only, `=2` **on the cable**: the device does **not** shut down.
+      `charging` suppresses `Critical` and not `Low`, so the banner is still right
+      to be up. An X4 has no charge-status pin and cannot show this.
+
+## 11. Every hint slot does what it says
 
 Walk each built screen and press all four front buttons plus both side buttons.
 This project has shipped a dead button twice — a control that draws and does
 nothing reads as a broken device.
 
-- [ ] **10.1** Home, Library, book details, item actions, delete confirm,
+- [ ] **11.1** Home, Library, book details, item actions, delete confirm,
       Settings, Typography, the reader, the reader menu, contents, the peek,
       SD-missing.
-- [ ] **10.2** The side buttons turn pages **in the direction they point**.
-- [ ] **10.3** Hold Up or Down on the Library: it scrolls, accelerating, and
+- [ ] **11.2** The side buttons turn pages **in the direction they point**.
+- [ ] **11.3** Hold Up or Down on the Library: it scrolls, accelerating, and
       **rests at the end rather than wrapping**. A single press at the end wraps.
-- [ ] **10.4** `UP` on the reader page does nothing when there is no return
+- [ ] **11.4** `UP` on the reader page does nothing when there is no return
       anchor ahead of you. Correct, and it reads as broken — if it bothers you
       on glass, that is a design finding worth a card.
 
-## 11. Progress survives — **[unplugged]**
+## 12. Progress survives — **[unplugged]**
 
-- [ ] **11.1** Read into a book, sleep, wake, page on, then Back to Home.
+- [ ] **12.1** Read into a book, sleep, wake, page on, then Back to Home.
       Home's CONTINUE block names the book and a percentage that matches.
-- [ ] **11.2** The Library row for that book shows the same percentage, not
+- [ ] **12.2** The Library row for that book shows the same percentage, not
       `NEW`.
-- [ ] **11.3** **The percentage never goes backwards** — check it across a
+- [ ] **12.3** **The percentage never goes backwards** — check it across a
       chapter crossing and across the moment a deferred page count lands. This
       has been reported from a device once.
-- [ ] **11.4** Power the device down hard mid-chapter. On the next boot the
+- [ ] **12.4** Power the device down hard mid-chapter. On the next boot the
       position is at most a couple of seconds stale, not a chapter stale.
-- [ ] **11.5** Delete a book from the Library and re-add it. Its progress is
+- [ ] **12.5** Delete a book from the Library and re-add it. Its progress is
       still there.
 
 ---

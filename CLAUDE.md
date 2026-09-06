@@ -1352,6 +1352,27 @@ the next append needs the line moved by hand or it goes quiet again — and the
 instance count is the argument for fixing it generally rather than one file at a
 time.
 
+**IT RECURRED A THIRD TIME WITH `BatteryEmpty`, AND THE SENTENCE ABOVE IS WHY IT
+WAS ALLOWED TO.** "`session_record.cpp`'s table is `static_assert`ed against the
+enum's END" was believed of that file and is **not true of it**: the assert reads
+`static_cast<size_t>(ScreenId::BookEnd) + 1` — a NAMED member, exactly the shape
+`test_focus_restore.cpp` has — so appending `BatteryEmpty` put `BookEnd + 1` on both
+sides and it said nothing. **Its own comment claims "TIED TO THE ENUM, NOT TO A
+NAMED MEMBER"**, which is the worst version of this defect: a guard that documents
+itself as the fixed one. The only thing that pointed at the tables was **`-Wswitch`,
+three warnings and not errors**, so a build with warnings scrolling past would have
+shipped the new screen serialising as `home`.
+
+**THERE ARE SIX HAND-MAINTAINED BOUNDS ACROSS THREE FILES**, and this line had
+counted two of them — `grep -n "ScreenId::BatteryEmpty"` over the three names them
+all, which is the check to run before believing any figure here.
+`session_record.cpp`'s assert **and** its `decodeName` loop,
+`test_focus_restore.cpp`'s catalogue **and** its assert, and
+`test_session_record.cpp`'s two every-id walks, **both of which were silently one
+screen short**. Every append has to move all six by hand; only the `switch` in
+`sessionWireName` is covered by anything, and `-Wswitch` covers it as a warning.
+That count is the argument for fixing #42 generally rather than a file at a time.
+
 **The rule is structural now**: `focus()` and `setFocus()` are `final` on
 `FocusScreen`, so a derived screen cannot take one half without the other — the
 test checks a property the
@@ -1890,7 +1911,9 @@ worth knowing before changing it:
 | Reader | `Reader.dc.html` | The only screen whose content is the BOOK's — but no longer the only `Fidelity::Grayscale` one. |
 | Book end | `BookEnd.dc.html` | **The only screen a PAGE TURN opens rather than a press** — off the last page, so it must be reachable with no button bound to it. Its leaving slab's LABEL follows what is under the Reader; its ACTION does not. |
 | Typography | `Typography.dc.html` | Two doors, and it needs nothing from the book. `CHANGE` cycles in place; `Font` is drawn and unreachable. |
+| Reader / battery low | `LowBattery.dc.html` | A **variant**, not a screen: the same Reader with one 78px band drawn OVER the page. `columnH` is untouched, so no chapter re-paginates, and **any** button dismisses it. |
 | Peek | `Peek.dc.html` | The only overlay over a `Grayscale` screen. Its column is NOT the reading column, which is why it shows no page number. |
+| Battery empty | `BatteryEmpty.dc.html` | Painted and never pushed, on `Sleep`'s argument. The last thing on the glass before a critical shutdown, and what the resume gate leaves standing when it refuses. |
 | SD missing | `SdMissing.dc.html` | RETRY restarts the device when the card was lost after a mount. |
 
 **SETTINGS IS NINE ITEMS NOW — THREE SECTIONS AND SIX ROWS — AND NOTHING ON IT IS
@@ -2195,6 +2218,185 @@ activity -- so an edge detected in the last seconds before the idle timeout can 
 fire first. Harmless and self-healing: deep sleep is a chip reset, the flag goes with
 RAM, and the first Home paint after the wake reads the gauge fresh. Worth knowing
 only because it looks like the latch failing when it is the timer winning.
+
+## The safety ladder (#9, #10)
+
+**TWO CARDS, ONE MECHANISM.** The low banner and the critical shutdown are two rungs
+of one ladder and share the piece that did not exist before them — a battery reading
+taken on **every** screen. Building either alone builds the whole watcher and uses one
+rung of it, and the second consumer is what proves the abstraction: the second copy is
+the extraction point, and here both copies arrived in the same change.
+
+**`BatteryTracker` ANSWERS WHICH RUNG THE PACK IS ON; NOTHING ELSE THRESHOLDS A
+PERCENTAGE.** `BatteryLevel { Normal, Low, Critical }` and `level()` ride the same
+`update()` as the charge latch above, because two objects fed the same reading would
+be a caller list — the shape this file names as a function not yet written — and the
+shell would be free to feed one and forget the other. One `update()` cannot be
+half-fed. Its consumers are `armBannerIfNewlyLow()` and the `Critical` test at the top
+of `loop()`, plus `level=` on the `[alive]` line; the numbers stay in the header with
+their derivation, because a threshold spelled at a call site is one that gets spelled
+differently at the next.
+
+**THE THREE THRESHOLDS ARE THE X4'S NOTCH TABLE AND NOT ROUND NUMBERS.**
+`percentageFromMillivolts` walks `LIION_NOTCH_MV[11]` and returns a **multiple of
+ten**, so a threshold that curve cannot express is one that never fires on half the
+fleet:
+
+| constant | value | why that value |
+|---|---|---|
+| `kLowPercent` | 10 | the X4's lowest non-zero notch, ~3.68 V. Anything lower is unreachable there until the pack already reads `0`. |
+| `kCriticalPercent` | 3 | X4-reachable only as the notch `0`, which is ≤3.565 V. Read literally on an X3, where it is minutes of runtime rather than a cliff. |
+| `kResumePercent` | 15 | the resume gate's floor. It requires the X4's **20%** notch, ~3.71 V. |
+| `kCriticalDwellMs` | 10 s | continuous, in `kUnlatchMs`'s idiom. A panel refresh is the heaviest load this device draws and the SDK's 0% anchor is sized to leave headroom for that sag, so one low reading is not a flat pack. The poll already runs only in the `quiet` window, which excludes a sample taken mid-waveform; the dwell is the belt to that braces. |
+
+**THE HYSTERESIS IS THE LOAD-BEARING NUMBER, AND IT IS 145 mV.** Put
+`kResumePercent` anywhere an X4 can satisfy at the `0`/`10` boundary and the shutdown
+edge and the resume edge become the *same* 3.565 V midpoint — so a device left on the
+cable shuts down, charges for a minute, wakes, discharges and shuts down again, all
+night. Requiring the next notch up is what makes the two edges different voltages, and
+it is what `kResumePercent = 15` buys. The price is stated rather than hidden: **a
+device refused at 14% cannot be forced on, on either model, even plugged in.**
+
+**THE BOARD'S `BATTERY LOW · 5%` IS A DISPLAYED VALUE AND WAS NEVER A TRIGGER.** 5 is
+an X3 specimen; the X4 has no fuel gauge, so `10%` is the only value its banner can
+ever show and `BATTERY LOW · 10%` is the widest string the firmware can produce. That
+one fact settled the banner's type role — see below.
+
+**CHARGING SUPPRESSES `Critical` AND NOT `Low`.** A device on the cable must not shut
+down, and the battery is still low, so the banner saying so is still true. **An X4
+never reports charging at all** (`NO_GAUGE`, no charge pin), so there nothing
+suppresses — and shutdown-then-refuse-to-wake is exactly right for a flat X4 on a
+cable: the glass says `CHARGE TO WAKE`, and it does. **A reading with
+`percentKnown == false` holds the level where it was and cannot advance the dwell**:
+"flat" and "did not answer" stay different claims, as they already do for `percent()`'s
+`kUnknownPercent`, and a dwell satisfied by silence is a shutdown nothing confirmed.
+`Low` has no dwell — the cost of being wrong there is one banner.
+
+**THE POLL RUNS ON EVERY SCREEN, WITH NO `gChargingObservable` GATE.**
+`pollBatteryLevel()` is `readBattery()`'s second caller, every 2 s in `loop()`'s
+`quiet` window; `refreshBatteryOnHome()` keeps both of its gates unchanged, because
+what it drives is Home's band and the charge-latch repaint. Neither of those gates can
+serve a safety mechanism: `homeOnGlass()` means a reader an hour into a book has had no
+reading taken at all, and `gChargingObservable` is never true on an X4, so on that
+model nothing would ever read the gauge. Both callers go through one `gBattery.update()`,
+so the level and the band cannot disagree about the percent.
+
+**AND WIRING THAT FOUND A REAL DEFECT IN `renderTop()`, WHICH IS EXACTLY THE CLASS THIS
+FILE EXISTS TO RECORD.** The stamp `gLastBatteryPollMs = millis()` was unconditional —
+harmless while the timer's only consumer was itself gated on Home, since a Reader paint
+reset a cadence nothing outside Home was waiting on. With an ungated poll it means every
+paint pushes the next reading out by another `kBatteryPollMs`, so **a reader turning
+pages faster than 2 s starves the safety mechanism on the one screen the banner is drawn
+on**. The stamp is inside `homeOnGlass()` now: a paint that takes no reading must not
+claim one, which is what the comment above it always said.
+
+**THE BANNER DRAWS OVER THE PAGE AND NEVER INTO THE COLUMN, AND THAT IS THE WHOLE
+DESIGN.** `readerMetrics` derives `columnH` and `PageBuilder` seats
+`rowsThatFit(columnH, lineBox)` lines in it, so honouring the board's 78px band *inside*
+that column takes a default page from **twelve lines to ten** and re-paginates the whole
+chapter — a `relayout` at the exact moment the device has least energy to spend, moving
+the reader's page under them. So `renderReader` draws it at
+`footerTop - kReadFooterPadTop - kBannerH` and `columnH` is untouched.
+`ReaderViewModel::anchorLabel` already carried this reasoning for the footer's third
+field, and it is the same rule one band lower. **Verified per row rather than by
+eyeballing the render**: exactly **78 contiguous rows** differ from the plain `reader`
+render at both geometries and every other row is byte-identical.
+
+**ITS LABEL IS `Role::Meta700` AT `--t-meta`, NOT `Label500` AT `--t-label`, AND THE
+RAMP IS HALF THE REASON.** The ramp carries `Label400`/`Label500` at 11pt and
+`Meta400/500/700` at 10pt (`font_manifest.h`), so **there is no 23px/700 role** and the
+design's first spelling asked for a pre-rendered asset nobody has — unbuildable rather
+than merely terse. The X4's fit chose between the two roles that do exist: measured in
+Chrome on the board at the widest string the firmware can produce, `Label500` at 23px
+leaves a gap of **0.00px** and **wraps both runs to two lines** inside a 78px band,
+against **27.11px** at `Meta700` (X3: 42.59 against 75.11). After the firmware's ~3%
+wider `.rfnt` advances that X4 gap is **~15.9px**, which is the figure that has to stay
+positive on glass. The band's `padding: 0 18px` is the page's own, so its runs align
+with the header's book title and the footer's percentage; the 24px it replaced was
+orphaned from a pre-rebase board with 40px margins.
+
+**`ANY BUTTON` IS A BINDING, NOT A CAPTION.** `ReaderScreen::setBatteryLow(int)` arms
+the latch — **one argument, `-1` to disarm, the same sentinel
+`ReaderViewModel::batteryLowPercent` carries**, because a `(bool, int)` pair would spell
+the condition twice — and the dismissal at the top of `onGesture` clears it and returns
+`Action::redraw()` **whatever the gesture**. The latch is `ReaderScreen`'s rather than
+the shell's so a test can reach it; `shell/` is where the bugs hide. The first press is
+spent dismissing and does nothing else, which is what the bar promises and matters most
+for `Back`, since `Back` on the Reader otherwise pops out of the book. Power is not
+swallowed — the shell handles it before dispatch — and the banner goes with the RAM,
+which is correct. It re-arms on a **fresh entry** into `Low` rather than per poll, so a
+wake shows it again and, when the Reader is what the wake restores, rides that paint for
+no extra waveform. A banner armed under a peek or the reader menu simply waits: the
+Reader is not on top, so nothing draws it until the overlay pops.
+
+**`ScreenId::BatteryEmpty` IS PAINTED DIRECTLY AND NEVER PUSHED**, on `Sleep`'s
+argument — the session record names the top of the stack, so pushing it would make the
+next wake restore *into* it. `paintBatteryEmptyScreen()` therefore owns the two things
+`App` normally does, the **clear** and `gFrameContentsUnknown`. It is `Fidelity::Mono`,
+takes no input and draws no hint bar: the shell paints it and calls deep sleep, so there
+is nobody left to press anything. `drawBadge` moved into `components.h` because this
+screen's `CHARGE TO WAKE` badge is byte-identical to `Sleep`'s `HOLD POWER TO WAKE` —
+the second copy, and `renderSleep` migrated to it in the same change. Two new marks,
+`kWarning` (32×28, white, for the inverted band) and `kBatteryLarge` (98×52), generated
+by `iconc.py` from their own boards and disambiguated by `source` exactly as
+`kBook`/`kBookLarge` are.
+
+**THE RESUME GATE IS BEFORE `display.begin()`, AND THAT IS THE WHOLE COST OF THE
+FEATURE.** `requireChargeOrSleepAgain()` sits in `setup()` immediately after
+`requireHeldPowerButtonOrSleepAgain` — the cheaper refusal first, so a bag-brush is
+refused for the *hold* reason without spending an I2C transaction — and still before the
+panel bring-up. E-ink holds its last image, so the glass is already showing the
+`BATTERY EMPTY` screen the shutdown painted: **a refusal repaints nothing and spends no
+waveform.** One line later and every brush against a flat device's power button costs a
+flash. It is after `detectAndSelectBoard()` because it needs the profile, and safely so
+for the reason `BatteryMonitor`'s constructor is safe above: `readStatus()` tests
+`BoardConfig::ACTIVE.batteryGauge.gaugeAddr` **live**.
+
+- **THE `critShut` NVS FLAG IS WHAT MAKES A STRICT `≥15%` LEGAL.** Without it the gate
+  would have to sit at the critical threshold itself, which flaps — and a `15%` gate
+  applied to *every* boot would refuse a device sitting at a perfectly usable 10%. It
+  fires only for a device that shut itself down.
+- **Read-and-cleared, and given back on a refusal**, exactly as `slept` is: one flag
+  buys one resume, a boot that sets out to refuse and then panics must not refuse for
+  ever, and a refused wake spent neither flag. Dropping the `slept` half would make the
+  **next** wake — the real one, once charged — read as a cold start, and the reader would
+  lose their page to something that looks like the restore failing.
+- **A reading that did not answer lets the device boot.** Fail open here, fail safe in
+  the loop: a failed gauge would otherwise refuse every wake for ever, and the ladder
+  shuts the device down again ten seconds later if the pack really is flat.
+- `[boot] battery pct=N critShut=1 -> RESUME|refused` prints the whole decision, in
+  `[boot] reset reason=… slept-flag=…`'s idiom. Read that line before believing anything
+  about a device that will not turn on.
+
+**`criticalShutdown()` IS `sleepNow()`'s SHAPE AND IS `[[noreturn]]`**, reached from
+`loop()` before the idle-sleep check: `saveReadingPosition("battery")` → paint →
+`display.deepSleep()` → `powerDownRailsForSleep()` → `markSleeping()` **and**
+`markCriticalShutdown()` → flush → `deepSleepUntilPowerButton()`. `markSleeping()` too,
+deliberately: once charged, the wake should restore the reader's page rather than
+starting cold, which is the other half of the board's *"Your page is saved"* — the save
+makes the promise and this flag redeems it. **A cold boot on a flat pack spends one Home
+paint before the dwell fires**, because a device that appears to do nothing when you
+press power is indistinguishable from a brick.
+
+**`ENCRE_BATTERY_FAKE_PERCENT=n` IS HOW THE LADDER IS WALKED ON GLASS**, in
+`ENCRE_FS_SELFTEST`'s shape and absent by default (+108 bytes when present). Draining a
+real pack to 3% on demand is not practical, and without it none of the five things only
+the panel can answer is reachable. **It overrides the percent and nothing else**, so an
+X3 on the cable still suppresses `Critical` — which is what makes the on-cable check a
+real test rather than a tautology. `docs/on-device-smoke-checklist.md` §10 is the list.
+
+**MEASURED AGAINST THE BOARDS:** `low_battery` 5.03% (X4) / 6.02% (X3) against the
+untouched `reader`'s 5.34%/6.38% — compare it against the other **grayscale** screens,
+for the reason recorded under the peek. `battery_empty` is 1.81%/1.66% against
+`sd_missing`'s 1.83%/1.67%, measured as a control in the same tree with the same
+instrument. `make compare` reports 30/36 implemented and both ids `firmware ok`.
+
+**ONE STATED LIMIT, PRE-EXISTING RATHER THAN INTRODUCED:** `criticalShutdown()` flushes
+the card log **after** `powerDownRailsForSleep()` has cut the X3's SD rail. That is
+`sleepNow()`'s ordering verbatim and the flag ordering it inherits is right — the flag
+is what the next boot needs and the log is only what a human needs — but it means
+`[log] battery empty` may never reach `/encre.log` on an X3, so the serial capture is the
+authority for this path.
 
 ## Covers
 
