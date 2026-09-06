@@ -350,6 +350,20 @@ struct ReaderViewModel {
   // device: a footer that changed height would reflow the text column and
   // re-paginate the chapter mid-read.
   std::string anchorLabel;
+
+  // --- The low-battery banner, and -1 MEANS THERE IS NONE -------------------------
+  //
+  // design/LowBattery.dc.html: an inverted 78px band over the bottom of the page.
+  // One field with a sentinel rather than a bool and an int, for anchorLabel's
+  // reason -- the field IS the condition, so it cannot be spelled twice and the two
+  // spellings cannot drift.
+  //
+  // IT IS DRAWN OVER THE PAGE AND NEVER DISPLACES IT. The band inside the column
+  // would take a default page from 12 lines to 10 and re-paginate the whole
+  // chapter, at the moment the device has least energy to spend and with the
+  // reader's page moving under them -- which is the identical reasoning anchorLabel
+  // carries for the footer's third field, turned ninety degrees.
+  int batteryLowPercent = -1;
 };
 
 // design/Peek.dc.html -- book text over the veiled page, for looking somewhere else
