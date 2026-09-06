@@ -20,6 +20,14 @@ struct BatteryReading {
   bool charging = false;
 };
 
+// WHICH RUNG OF THE SAFETY LADDER THE PACK IS ON.
+//
+// Not a percentage the caller thresholds itself: a threshold spelled at the call
+// site is a threshold that can be spelled differently at the next one, and this
+// project has shipped a dead button twice from exactly that shape. The shell asks
+// which rung; the numbers live here with their derivation.
+enum class BatteryLevel : uint8_t { Normal, Low, Critical };
+
 // WHAT THE BAND SHOULD SAY, AND WHETHER A CHANGE OF CHARGE STATE IS WORTH A REPAINT.
 //
 // Both edges can be: a plug-in repaints on a rising edge, and an unplug repaints
@@ -68,6 +76,40 @@ class BatteryTracker {
   // backstop against a hardware quirk rather than a promise of exactly one
   // refresh per cycle.
   static constexpr int kMaxGrantsPerSession = 3;
+
+  // --- The ladder ---------------------------------------------------------------
+  //
+  // THE X4 REPORTS 10% NOTCHES, which is what sets all three of these. Its ADC path
+  // walks LIION_NOTCH_MV[11] and returns a multiple of ten, so a threshold that is
+  // not expressible on that curve is one that never fires on half the fleet. The
+  // board's `BATTERY LOW - 5%` is the value DISPLAYED, never the trigger.
+
+  // The X4's lowest non-zero notch, ~3.68 V. Anything lower is unreachable there
+  // until the pack is already at 0.
+  static constexpr int kLowPercent = 10;
+
+  // X4-reachable only as the notch `0`, which is <=3.565 V -- the midpoint of the
+  // 3.45 V and 3.68 V anchors. The 0% anchor is deliberately above the cell's
+  // protection cut-off and leaves headroom for the sag under an e-ink refresh, so
+  // this is minutes of runtime rather than the cliff. Read literally on an X3.
+  static constexpr int kCriticalPercent = 3;
+
+  // THE HYSTERESIS, AND IT IS THE LOAD-BEARING NUMBER. The resume gate in setup()
+  // refuses to wake below this. It must require the X4's *20%* notch, ~3.71 V,
+  // because anything the X4 can satisfy at the 0/10 boundary puts the shutdown edge
+  // and the resume edge at the SAME 3.565 V midpoint -- and a device on the cable
+  // then shuts down, charges for a minute, wakes, discharges and shuts down again.
+  // 145 mV between the two edges is what makes them different voltages.
+  static constexpr int kResumePercent = 15;
+
+  // CONTINUOUS, in kUnlatchMs's idiom and for its reason. A panel refresh is the
+  // heaviest load this device draws and the SDK's own notch table says the 0%
+  // anchor leaves headroom for that sag -- so one low reading is not a flat pack.
+  // The poll already runs only in the shell's `quiet` window, which excludes a
+  // sample taken mid-waveform; this is the belt to that braces.
+  static constexpr uint32_t kCriticalDwellMs = 10u * 1000u;
+
+  BatteryLevel level() const { return level_; }
 
   void update(const BatteryReading& r, uint32_t nowMs) {
     if (r.percentKnown) {
@@ -145,6 +187,50 @@ class BatteryTracker {
         }
       }
     }
+
+    // --- The ladder ---------------------------------------------------------------
+    //
+    // AFTER the blocks above, so it reads the values this reading has already
+    // installed rather than a second copy of them. One update(), one level: two
+    // objects fed the same reading would be a caller list, and the shell would be
+    // free to feed one and forget the other.
+    //
+    // A READING THAT DID NOT ANSWER CHANGES NOTHING. It cannot lower the level (a
+    // bus glitch is not a flat pack) and it cannot advance the dwell (a dwell
+    // satisfied by silence is a shutdown nothing confirmed). "Flat" and "did not
+    // answer" stay different claims, exactly as percent()'s kUnknownPercent keeps
+    // them.
+    if (!r.percentKnown) return;
+
+    if (percent_ > kLowPercent) {
+      level_ = BatteryLevel::Normal;
+      sawCriticalSinceMs_ = 0;
+      inCriticalRun_ = false;
+      return;
+    }
+
+    level_ = BatteryLevel::Low;
+
+    // CHARGING SUPPRESSES CRITICAL AND NOT LOW. A device on the cable must not shut
+    // down; but the battery IS low, and the banner saying so is true. On an X4
+    // charging() is never known -- there is no charge-status pin -- so it never
+    // suppresses there, and shutdown-then-refuse-to-wake is exactly right for a
+    // flat X4 on a cable: the glass says CHARGE TO WAKE, and it does.
+    if (percent_ > kCriticalPercent || charging()) {
+      sawCriticalSinceMs_ = 0;
+      inCriticalRun_ = false;
+      return;
+    }
+
+    if (!inCriticalRun_) {
+      inCriticalRun_ = true;
+      sawCriticalSinceMs_ = nowMs;
+      return;
+    }
+    // Unsigned difference, so this is correct across the ~49-day millis() wrap, as
+    // kUnlatchMs's dwell and every quiet-window gate in the shell are.
+    if (static_cast<uint32_t>(nowMs - sawCriticalSinceMs_) >= kCriticalDwellMs)
+      level_ = BatteryLevel::Critical;
   }
 
   int percent() const { return havePercent_ ? percent_ : kUnknownPercent; }
@@ -176,6 +262,9 @@ class BatteryTracker {
   bool repaintWanted_ = false;
   int grants_ = 0;
   uint32_t notChargingSinceMs_ = 0;
+  BatteryLevel level_ = BatteryLevel::Normal;
+  bool inCriticalRun_ = false;
+  uint32_t sawCriticalSinceMs_ = 0;
 };
 
 }  // namespace reader
