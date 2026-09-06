@@ -30,12 +30,28 @@
 
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
   <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">BOOK FINISHED</div>
-  <div style="font-size: var(--t-value); font-weight: 700;">MIDDLEMARCH</div>
+  <!-- THE RIGHT SLOT IS EMPTY AND STILL RESERVED. It held the book's shouted name,
+       which the BYLINE forty pixels below already states -- two spellings of one
+       fact on one panel, and the redundant one was the one that broke: a long title
+       squeezed BOOK FINISHED until the LABEL elided, so the screen stopped saying
+       what it is. Reported off the device.
+       But the BAND'S HEIGHT must not vary by screen: it is set by its two type
+       roles, and a band that shrank when a screen left the slot empty would move
+       every row beneath it. Chrome sizes a flex row by its children where the
+       firmware's bandContentH() takes max(--t-label, --t-value) UNCONDITIONALLY, so
+       deleting the div outright would shrink this band by 2px here and not there.
+       The nbsp holds the --t-value line box. Same rule, and the same comment, as
+       design/Typography.dc.html's band. -->
+  <div style="font-size: var(--t-value); font-weight: 700;">&nbsp;</div>
 </div>
   <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 56px 24px 0 24px; text-align: center;">
     <svg width="26" height="21" viewBox="0 0 16 12" fill="none"><path d="M1 6l5 5L15 1" stroke="#000000" stroke-width="2"></path></svg>
     <div style="font-size: var(--t-title); font-weight: 700; letter-spacing: 0.08em;">THE END</div>
-    <div style="font-size: var(--t-value); font-weight: 500;">Middlemarch &middot; George Eliot</div>
+    <!-- IT WRAPS, and `anywhere` rather than `break-word` for BookDetails' reason:
+         a title that fell back to a filename is usually one word, and CSS offers no
+         break opportunity at an underscore. It ran off both margins on a real card
+         until this said so. -->
+    <div style="font-size: var(--t-value); font-weight: 500; overflow-wrap: anywhere;">Middlemarch &middot; George Eliot</div>
     <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">24 CHAPTERS</div>
   </div>
   <div style="display: flex; flex-direction: column; gap: 12px; padding: 36px 24px 0 24px;">
