@@ -1347,10 +1347,23 @@ the test**: `core/src/session_record.cpp` had *three* bounds spelled
 screen would have woken on Home, with no failing test and no log line, because the
 round-trip test could not see a screen the table was too short to name.
 `session_record.cpp`'s table is `static_assert`ed against the enum's END now, so it
-cannot be short. **#42 STAYS OPEN**: both asserts still name a member by hand, so
-the next append needs the line moved by hand or it goes quiet again — and the
-instance count is the argument for fixing it generally rather than one file at a
-time.
+cannot be short.
+
+**#42 IS CLOSED, AND THE THIRD APPEND IS WHAT CLOSED IT.** `ScreenId` ends in a
+`Count` sentinel, and all four bounds — `kNames`' assert, its decode loop, and both
+catalogue asserts — name that instead of a member. **The defect was reproduced
+before it was fixed**: `BookError` was appended alone and BOTH guards stayed silent,
+the only diagnostic being a `-Wswitch` warning, which this project does not build
+with `-Werror`. Then the same append was made against the sentinel and failed the
+build twice, in sequence — `kNames` first, `kAllScreens` second — until each table
+grew. That is the guard doing its job at the moment it was written for, rather than
+one append later.
+
+**`Count` IS NOT A SCREEN AND NOTHING MAY MAKE IT ONE.** `sessionWireName` breaks
+out, `screenName` answers `"?"` and `DemoScreenFactory::create` returns nullptr —
+each **explicitly** rather than by fall-through, so `-Wswitch` keeps working as the
+reminder that a new screen needs a case. A sentinel that quietly became
+serialisable would be a worse version of the bug it closes.
 
 **The rule is structural now**: `focus()` and `setFocus()` are `final` on
 `FocusScreen`, so a derived screen cannot take one half without the other — the
@@ -1888,6 +1901,7 @@ worth knowing before changing it:
 | Sleep / cover | `SleepCover.dc.html` | The cover full-bleed, and **the one screen that drops the badge**. `Grayscale`, decided per paint. |
 | Sleep / cover + details | `SleepCoverDetails.dc.html` | The same cover with the reading card and the badge over it. Keeps both. |
 | Reader | `Reader.dc.html` | The only screen whose content is the BOOK's — but no longer the only `Fidelity::Grayscale` one. |
+| Book error | `BookError.dc.html` | An overlay whose parent may be Home — **the only one whose parent is not a list**, so it is the only veil no board draws. Two copy shapes, because one of its four refusals is not damage. |
 | Book end | `BookEnd.dc.html` | **The only screen a PAGE TURN opens rather than a press** — off the last page, so it must be reachable with no button bound to it. Its leaving slab's LABEL follows what is under the Reader; its ACTION does not. |
 | Typography | `Typography.dc.html` | Two doors, and it needs nothing from the book. `CHANGE` cycles in place; `Font` is drawn and unreachable. |
 | Peek | `Peek.dc.html` | The only overlay over a `Grayscale` screen. Its column is NOT the reading column, which is why it shows no page number. |
@@ -4606,6 +4620,103 @@ the headroom `init` needs, that the apply fires exactly once per panel visit, th
 the frame after the pop shows the re-paginated page under the veil, and what
 `relayout` costs on a card-backed book — the desktop does no SD reads and no real
 inflate, and this file's ~135× ratio warning applies to that walk.
+
+## The corrupt-book dialog
+
+`BookError.dc.html`, and `BookErrorUnreadable.dc.html` for the refusal that is not
+damage. Issue #5.
+
+**WHAT IT CLOSES IS A PRESS THAT DID NOTHING.** `openBookAt` refused a book with a
+log line and **nothing on the panel**, so Confirm on a damaged book produced no
+visible change — worse than a dead button, because the press was correct and the
+file is the problem. `book.h` had already anticipated the screen in as many words:
+a refusal is "NEVER an abort ... the caller has a screen it can put the reason on".
+
+**RAISED ONLY WHEN `push` IS TRUE**, which is a user press — a Library row or Home's
+CONTINUE. The wake restore is excluded deliberately: `App::restore` already stops
+short of a Reader it cannot build and leaves Home or the Library standing, which is
+wrong in a way the reader can see through, and waking into a modal about a book
+nobody just asked for replaces a calm landing with an interruption. The two other
+`openBook` call sites are not this screen's and were checked rather than assumed —
+the sleep-cover decode answers `CoverResult::ReadFailed` and falls back to the
+reading card, and Book details' author lookup is best-effort; neither is a reader
+asking to read a book.
+
+**TWO COPY SHAPES, BECAUSE ONE SENTENCE WOULD BE A LIE.** `openBook`'s four reasons
+are not one event: three are parse failures, and the fourth — `"cannot open the book
+file"` — is `openRead` returning null, a file that is gone or a card that is. And
+**`SdFileSystem::openRead` does not call `noteCardGone()`**; only a handle read that
+comes up short does. So a card pulled between the Library's listing and the press is
+noticed by `pollCardPresence` between 2 s (the fast probe) and 25 s (the FAT-scan
+backstop), and for that whole window a single sentence would tell the reader a
+perfectly healthy book "appears to be damaged". **A false claim is worse than an
+absent one** — the same call this file already records for the unread battery gauge
+(`-1`, not `0%`) and for the charging bolt that spends a refresh on the unplug edge.
+
+The screen takes a bounded `BookErrorReason`, **never the `why` string**, which is
+developer English (`"the spine names no chapters"`), unstyled, unbounded and with no
+slot on any board. It still goes to the log, where it is actionable. **Which shape,
+and where a delete returns to, are both decided in the SHELL**, because that is the
+one place that knows the reason and knows which screen asked.
+
+**`DELETE FILE…` IS WHY `DeleteConfirmScreen` TOOK FACTS.** It held a
+`LibraryScreen&` and acted through `deleteFocused()`, so it was reachable only from
+the Library — and **Home's CONTINUE has none**, which is the likeliest real
+corruption path because it is a book the reader was part-way through. A button that
+works only sometimes is worse than one that never works, because nobody can learn
+the rule. `BookDetailsScreen::Facts` had solved the identical problem for the
+identical reason. The removal became a shell latch beside `Open`/`Retry`/`Finish`,
+since a delete's consequences — `forgetCardFacts`, the rescan, `gHomeStale`,
+`gLibraryStale` — are all the shell's.
+
+- **PRIMING THE FACTS IS PART OF RAISING THE DIALOG, and leaving it out left the
+  slab dead in exactly the case the refactor existed for.** `BookError` returns a
+  bare `Action::push(ScreenId::DeleteConfirm)`; the factory checks `deleteFactsSet_`
+  above its Library fallback, so from the Library it worked *by luck* — the focused
+  row happened to be the failing book — and from Home it was refused outright.
+  `openBookAt` primes both facts together now.
+- **AND THE CLEAR IS NOT OPTIONAL.** Nothing cleared `deleteFacts_`, so: fail to
+  open a book, dismiss, then `Delete…` a *different* book from the actions panel,
+  and the confirmation named and removed the corrupt one. `clearDeleteFacts()` sits
+  beside the `clearDetailsFacts()` that exists for the identical reason on the
+  identical press.
+
+**A CENTRED PANEL MUST RESERVE THE HINT BAR TWICE, AND `renderDeleteConfirm` HAD THE
+SAME DEFECT.** The clamp budget was `fb.height() - panelFixedH`, the whole canvas.
+With a 255-character name — FAT's LFN maximum, so a name a real card can hold — the
+panel ran to the canvas bottom, `DELETE FILE…` was sliced by the hint bar and the
+panel's bottom border went off-glass. `centreIn` splits the slack evenly, so
+reserving the bar **once** still leaves the panel hanging half a bar into it: the
+budget is `height - 2 * hintBarHeight(...)`, derived and never pinned.
+
+- **THE TEST THAT EXISTED TO CATCH THIS PASSED VACUOUSLY.** It found the panel by
+  the first and last row carrying a `>= panelW` run, and the caption's **rule** spans
+  the content width between the two side borders — so all three are contiguous and
+  that row measures `panelW` too. With the bottom border off-canvas entirely, the
+  "last such row" resolved to the caption's rule and the bound read `82 < 735`. Both
+  cases locate the panel by its **side border columns** now, which nothing else on the
+  frame inks. Reverting the budget fails 8 assertions; under the old form it failed
+  none.
+
+**THE BOARD DECLARES THE WRAP AND THE BOUND**, and for a while the code had both and
+the board neither — `overflow-wrap: anywhere` on the paragraph and `max-height: 100%;
+overflow: hidden` on the panel. Note this board needs the bound **one run further
+down** than `DeleteConfirm.dc.html` does: there the caption carries the filename and
+is the part that grows, here the caption is the fixed `CAN'T OPEN FILE` and the
+PARAGRAPH carries the name. Getting that backwards — clamping the caption, wrapping
+the prose `Normal` — put **391 pixels of a single realistic 67-character filename
+outside the panel** on the X3.
+
+**THE DAMAGED SHAPE SITS ON THE WRAP BOUNDARY AND MEASURES 11.12% / 11.70%**, against
+3.58% / 3.44% for the unreadable one, which differs from it only by a sentence. The
+mechanism is innocent and this file already records it: `damaged` would end at x=406
+against a column bound of x=407, so it misses fitting by about the width of a final
+letter's side bearing, wraps to a sixth line, and a centred panel 41px taller puts
+every rule ~20px out. **It is a difference and not a rendering defect — but it is
+visible**, because lines 1 and 2 come out as 232 and 193 against a 336px column and
+read as a text block that has gone wrong. **A SPECIMEN BOARD MUST NOT PUT A LINE ON
+THE WRAP BOUNDARY** is this file's own rule, and the fix is the board's copy, as
+`ReaderList`'s "Space is measured in rows." was moved for 24px of clearance. Open.
 
 ## Editing this repo with scripts
 
