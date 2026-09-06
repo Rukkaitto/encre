@@ -23,30 +23,210 @@
     }
     body { margin: 0; background: #ffffff; }
     a { color: #000000; } a:hover { color: #000000; }
-    
   </style>
 </helmet>
-<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: Literata, Georgia, serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; padding: 20px 18px 0 18px;">
 
-  <div style="display: flex; justify-content: space-between; align-items: baseline; padding: 26px 40px 22px 40px;">
+  <div style="display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 22px; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
     <div style="font-size: var(--t-meta); letter-spacing: 0.18em; font-weight: 500;">MIDDLEMARCH</div>
-    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">CH. 01</div>
+    <!-- THE CHAPTER'S NAME, and this said `CH. 01`. The position was all the device
+         honestly had: the spine gives an order and no names, so a bare `CH. 03` was the
+         only true thing to put here. The table of contents supplies the name now.
+
+         IT ELIDES, and it has to: a real book's chapter names run long ("PREMIÈRE
+         PARTIE : À LIRE AVANT L'ACHAT") and this row is `space-between` with the book's
+         title on its left. `min-width: 0` is what lets a flex item shrink below its
+         content at all -- without it the name pushes the title off instead of
+         truncating.
+
+         THE POSITION IS THE FALLBACK, not a second element: a book with no table of
+         contents, or a chapter its contents does not name, still shows `CH. 03` here.
+         One slot, the best name available for it. -->
+    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-left: 16px;">LIVRE I</div>
   </div>
-  <div style="padding: 0 40px; font-family: Literata, Georgia, serif; font-size: 32px; line-height: 1.7; text-align: justify; flex-grow: 1; overflow: hidden;">
-    <p style="margin: 0;">Miss Brooke had that kind of beauty which seems to be thrown into relief by poor dress. Her hand and wrist were so finely formed that she could wear sleeves not less bare of style.</p>
+
+  <!-- THE COLUMN IS 676px AND SEATS 12 WHOLE LINES, WHICH IS 652.8 OF THEM.
+       Both numbers belong on this board, and using only one of them is how it went
+       wrong twice.
+
+       676px is the firmware's column -- `panelH - padTop - headerH - footerH`, and
+       `reader_sim` reports it as `column 444x676`. That is the BOX, so the footer is
+       placed off it and has to keep its position: this board measured 3.06% against
+       the firmware with the footer where 676 puts it, and clipping the box instead
+       of its contents moved the footer up 23px.
+
+       652.8px is what can hold TEXT: `rows_ = columnH / lead`, and the row is
+       `leadEm1000 = 1700` on a 32px face, so 676 / 54.4 = 12.42 and the reader draws
+       twelve. This board used to let its prose fill all 676px, and its THIRTEENTH
+       line began at y=738 and came out sliced in half lengthwise by the panel edge
+       -- rendering what PageBuilder cannot, overstating how much text a page holds,
+       and reported as `firmware ok` throughout, because "ok" means a frame was
+       produced and nothing more.
+
+       So the outer box is the column and holds the footer down; the inner box is the
+       twelve rows. The ~23px between them is not slack to tidy away, it is column
+       the firmware genuinely cannot seat a line in. -->
+  <div style="flex-grow: 1; position: relative;">
+    <div style="height: 652.8px; overflow: hidden; font-size: 32px; line-height: 1.7; text-align: justify;">
+    <!-- NO DROP CAP. This opened with a 102px floated `M`, and it is dropped from
+         V1 rather than deferred -- the mechanism note is kept because it is the
+         interesting part and whoever brings it back will need it:
+
+           * A drop cap is a BOUNDED set -- 26 letters and a few quote marks --
+             where body text's size set is unbounded, which is exactly why the
+             reader rasterises at runtime. So it wants a PRE-RENDERED asset, like
+             the chrome ramp: the opposite mechanism from the one the body face
+             uses, on the same screen.
+           * At 102px it does not fit the glyph cache. 2bpp is ceil(102/4)*102 =
+             2,652 bytes for ONE glyph, against an 8 KB arena that printable ASCII
+             at ppem 29 already fills to 7,785. Rasterising it would evict a third
+             of the page and re-rasterise those glyphs at ~3,794us each.
+           * `float: left` is a layout feature nothing else on this device needs:
+             the first N lines indent by the cap's width, N depending on its height
+             and the line height. One ornament is a thin reason to put a float in
+             the layout engine.
+
+         Justification stays, because that is not ornament -- it is what the
+         paragraph looks like. -->
+    <!-- PARAGRAPHS ARE SEPARATED BY AN INDENT, NOT A GAP, and the second paragraph
+         is here because a board with one paragraph does not state that. `margin: 0`
+         alone says "no gap"; it does not say what marks the boundary, and with
+         neither a gap nor an indent two consecutive paragraphs read as one.
+
+         An indent rather than a blank line, on two grounds. It is what a printed
+         book does, which is the reference this whole screen is drawn against. And
+         a gap costs a line box of a 20-line page -- 5% of the text on screen for
+         every paragraph break -- where an indent costs nothing vertical, which on
+         a panel that repaints in ~520ms is the difference between a page turn and
+         two.
+
+         1.5em at 32px is 48px, the conventional book indent (1 to 2 ems).
+
+         THE FIRST PARAGRAPH AFTER A BREAK IS FLUSH. That is the other half of the
+         convention and the reason mkepub.py marks its openers `class="first"`:
+         an indent says "this continues what you were reading", so a paragraph
+         with nothing above it has nothing to distinguish itself from. -->
+    <p style="margin: 0;">Miss Brooke had that kind of beauty which seems to be thrown into relief by poor dress. Her hand and wrist were so finely formed that she could wear sleeves not less bare of style than those in which the Blessed Virgin appeared to Italian painters.</p>
+    <p style="margin: 0; text-indent: 1.5em;">Her sister Celia wore a necklace, and the two of them had that air of being dressed alike which is never quite an accident. It was the kind of morning that makes a plain room look deliberate.</p>
   </div>
-  <div style="background: #000000; color: #ffffff; display: flex; justify-content: space-between; align-items: center; height: 78px; padding: 0 24px; flex-shrink: 0;">
-    <div style="display: flex; align-items: center; gap: 12px;">
-      <svg width="32" height="28" viewBox="0 0 18 16" fill="none"><path d="M9 1 17 15H1z" stroke="#ffffff" stroke-width="1.6"></path><path d="M9 6v4" stroke="#ffffff" stroke-width="1.6"></path><rect x="8.3" y="11.6" width="1.4" height="1.4" fill="#ffffff"></rect></svg>
-      <div style="font-size: var(--t-label); letter-spacing: 0.1em; font-weight: 700;">BATTERY LOW &middot; 5%</div>
+
+    <!-- THE BANNER IS DRAWN OVER THE PAGE AND NEVER DISPLACES IT.
+         `position: absolute` against the column box is the whole point. This band
+         is 78px; the column seats 12 whole lines of a 54.4px box, so a band INSIDE
+         the flow takes the page to 10 lines and re-paginates the entire chapter --
+         at the moment the device has least energy to spend, and with the reader's
+         page moving under them. ReaderViewModel::anchorLabel already carries this
+         reasoning for the footer's third field: "a footer that changed height
+         would reflow the text column and re-paginate the chapter mid-read."
+
+         So the firmware draws it at `footerTop - 78` with columnH untouched, and
+         the last line and a half of the page go under it. This board shows a FULL
+         twelve-line page for that reason -- with a short paragraph it would cover
+         nothing and would not be comparable to what the device draws.
+
+         THE COLUMN BOX DROPS `overflow: hidden`, AND THAT IS THE ONLY THING ON
+         THIS BOARD THAT DIFFERS FROM Reader.dc.html BESIDES THE BANNER ITSELF.
+         The band escapes the page's own `padding: 0 18px` by `left: -18px;
+         right: -18px`, and a clipping ancestor eats exactly those 36px: the band
+         rendered 444px wide on a 480px panel, which is the content width, not the
+         panel -- an inset band, where every inverted band on this device is
+         full-bleed. Clipping the TEXT is the inner 652.8px box's job and it still
+         does it, so the outer box loses nothing: rendered against Reader.dc.html
+         the two panels are bit-identical outside the band's own 78 rows, at both
+         geometries.
+
+         `ANY BUTTON` IS A BINDING, not a caption. ReaderScreen::onGesture clears
+         the banner and returns Action::redraw() whatever the gesture, so the first
+         press dismisses it and does nothing else. A bar cannot promise what
+         nothing has bound. -->
+    <!-- 18px OF PADDING, NOT 24, AND IT IS AN ALIGNMENT RATHER THAN A SHAVE.
+         The page's own box is `padding: 20px 18px 0 18px`, so the header's
+         MIDDLEMARCH and the footer's `6%` both begin at x=18. This band is
+         full-bleed -- it escapes that padding with `left: -18px; right: -18px` --
+         so at 24px its runs started at x=24 and lined up with NOTHING on the
+         screen they sit on. At 18 they sit on the same two verticals as the
+         header and the footer, which is what a full-bleed band on this page
+         should do.
+
+         The 24 was inherited from the pre-rebase board, where the page had 40px
+         margins and 24 aligned with nothing there either. An orphaned number,
+         not a considered one -- and it happens to be worth 12px to the fit
+         measured below. -->
+    <div style="position: absolute; left: -18px; right: -18px; bottom: 0; background: #000000; color: #ffffff; display: flex; justify-content: space-between; align-items: center; height: 78px; padding: 0 18px; box-sizing: border-box; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <svg width="32" height="28" viewBox="0 0 18 16" fill="none"><path d="M9 1 17 15H1z" stroke="#ffffff" stroke-width="1.6"></path><path d="M9 6v4" stroke="#ffffff" stroke-width="1.6"></path><rect x="8.3" y="11.6" width="1.4" height="1.4" fill="#ffffff"></rect></svg>
+        <!-- --t-meta AT WEIGHT 700, AND THE X4's FIT IS WHAT DECIDED IT.
+             The ramp has no 23px/700 role -- font_manifest.h carries Label400 and
+             Label500 at 11pt and Meta400/500/700 at 10pt -- so the choice was
+             Label500 (the right size, the wrong weight) or Meta700 (the right
+             weight, a size down). A role is a pre-rendered asset per size AND
+             weight, 15-20 KB of flash each, so adding a 23px/700 was never the
+             third option; Sleep's 53px title and HomeEmpty's 39px were both
+             answered the same way.
+
+             THE STRING THAT HAS TO FIT IS `BATTERY LOW · 10%`, not the `5%` this
+             board shows. The X4 has no fuel gauge -- its ADC quantises to 10%
+             notches (LIION_NOTCH_MV) -- so 10 is the only value its banner can
+             ever show, and it is also the widest. Measured in Chrome at that
+             string, gap between the two runs:
+
+               Label500 23px/500   X4  0.00px   X3  42.59px
+               Meta700  21px/700   X4 27.11px   X3  75.11px
+
+             Label500 does not merely crowd at 480px: at 0.00px of slack BOTH
+             RUNS WRAP TO TWO LINES inside a 78px band (measured run heights 60
+             and 54 against a 27px line box). That is the whole argument.
+
+             THE `5%` ON THIS BOARD IS AN X3 SPECIMEN and is legal: the X3 has a
+             real BQ27220 fuel gauge and reports per 1%, so 5% is a value that
+             device genuinely shows. Do not "fix" it to 10% -- the board is drawn
+             at the X4 frame but the copy is a device-agnostic specimen, and the
+             fit above is what pins the worst case.
+
+             ~3% IS THE NUMBER THAT ACTUALLY HAS TO STAY POSITIVE. The firmware's
+             autohinted .rfnt faces have whole-pixel advances and measure ~3%
+             wider than Chrome's (SdMissing's max-width needed 400 -> 420 for
+             exactly this). Widening the two text runs by 3% and leaving the 32px
+             icon alone costs 11.19px, so the X4 gap on glass is ~15.9px. The
+             firmware draws both runs at computed positions and does not wrap, so
+             OVERLAP is its only failure mode -- there is no second line to fall
+             back to, and no ellipsis. -->
+        <!-- The 32px icon and the 0.1em tracking are the design spec's and were
+             left alone: shaving either would have bought this fit at the price of
+             a spec deviation, which is what the 18px padding above made
+             unnecessary. -->
+        <div style="font-size: var(--t-meta); letter-spacing: 0.1em; font-weight: 700;">BATTERY LOW &middot; 5%</div>
+      </div>
+      <div style="font-size: var(--t-meta); letter-spacing: 0.1em;">ANY BUTTON</div>
     </div>
-    <div style="font-size: var(--t-meta); letter-spacing: 0.1em;">ANY BUTTON</div>
   </div>
-  <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 40px 16px 40px;">
+
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0 16px 0; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
     <div style="font-size: var(--t-meta); letter-spacing: 0.12em; font-weight: 700;">6%</div>
-    <div style="width: 210px; height: 5px; border: 1px solid #000000; box-sizing: border-box;"><div style="width: 6%; height: 100%; background: #000000;"></div></div>
+    <div style="width: 210px; height: 5px; border: 1px solid #000000; box-sizing: border-box;">
+      <div style="width: 6%; height: 100%; background: #000000;"></div>
+    </div>
+    <!-- THE TOTAL CAN BE UNKNOWN, AND THEN IT IS AN EM DASH: `53 / —`.
+         Not a placeholder and not an error -- a real, brief state of this screen.
+
+         Knowing the total means paginating the whole chapter, which is one decode of
+         it: ~545 ms on the device for a long one, measured. Paying that before the
+         first page appears made crossing into a chapter cost 1.14 s against 575 ms
+         for an ordinary page turn, and a chapter crossing IS a page turn from the
+         reader's side. So the page appears first and the count follows a moment
+         later, and the footer has to be able to say "I do not know yet".
+
+         An em dash rather than a blank, a zero or a spinner: the slash needs
+         something after it or the line reads as broken, `0` would be a lie, and
+         nothing on this device animates. It is also the same width every time, so
+         the counter does not reflow when the number arrives.
+
+         The board shows the settled state because that is the one a reader sees for
+         all but a moment of a chapter. If the transient state ever needs comparing
+         against the firmware it wants its own board file. -->
     <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">53 / 890</div>
   </div>
+
 </div>
 </x-dc>
 <script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
