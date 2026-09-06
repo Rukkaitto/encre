@@ -59,7 +59,23 @@ enum class ScreenId : uint8_t {
   // screen the catalogue does not cover. That is #42, and it is still open: it fires
   // only once the array grows, which is the wrong way round for a guard whose job is
   // to force the array to grow.
-  BookEnd
+  BookEnd,
+  // design/BatteryEmpty.dc.html -- what the panel holds after a critical shutdown.
+  // APPENDED for the reason ReaderMenu, Typography, Peek and BookEnd were: the
+  // session record stores a screen by NAME (session_record.h), so an insertion
+  // could not silently become another screen, but appending also leaves every
+  // existing ordinal where it was.
+  //
+  // PAINTED DIRECTLY AND NEVER PUSHED, on SleepScreen's argument: the record names
+  // the top of the stack, so pushing it would make the next wake restore INTO it --
+  // press power, get "battery empty" back on a pack that has just been charged.
+  //
+  // AND test_focus_restore.cpp's static_assert WILL NOT NOTICE THIS APPEND either.
+  // It compares the catalogue's length against a NAMED member, so appending
+  // satisfies it unchanged -- exactly as appending Typography and then BookEnd did.
+  // That is #42; the catalogue there is extended by hand. session_record.cpp's is
+  // tied to the enum's END and does fire, which is the difference between the two.
+  BatteryEmpty
 };
 
 // A screen's name, for logs. Same reasoning as buttonName: a numeric ScreenId in

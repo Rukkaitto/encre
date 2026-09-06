@@ -97,6 +97,18 @@ struct SdMissingViewModel {
   std::array<bool, 4> holds{};
 };
 
+// design/BatteryEmpty.dc.html. SdMissing's shape without the action slab, plus
+// Sleep's badge -- and the hints are all empty, deliberately: the shell paints this
+// and calls deep sleep, so there is nobody left to press anything and a bar is a
+// contract about four buttons that do nothing.
+struct BatteryEmptyViewModel {
+  std::string title;    // "BATTERY EMPTY"
+  std::string message;  // the paragraph under it, wrapped by the theme
+  std::string note;     // the badge's label: "CHARGE TO WAKE"
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
 // The end of a book (design/BookEnd.dc.html). Semantic content only: every string
 // here is composed by the screen, because a byline and a chapter count are CONTENT
 // and the theme has no business knowing that a book has an author.

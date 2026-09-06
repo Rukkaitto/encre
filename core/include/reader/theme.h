@@ -10,6 +10,7 @@ class CoverSource;
 struct HomeViewModel;
 struct SdMissingViewModel;
 struct BookEndViewModel;
+struct BatteryEmptyViewModel;
 struct LibraryViewModel;
 struct ItemActionsViewModel;
 struct DeleteConfirmViewModel;
@@ -87,6 +88,12 @@ class Theme {
   // that nothing else does.
   virtual void renderBookEnd(Framebuffer& fb, const FontSet& fonts,
                              const BookEndViewModel& vm, Plane plane = Plane::Bw) = 0;
+  // design/BatteryEmpty.dc.html, the critical-shutdown screen. Its own method for
+  // renderSdMissing's reason again: it shares that board's centred column and shares
+  // none of its furniture -- no action slab, no hint bar -- and it ends in the badge
+  // that only Sleep draws.
+  virtual void renderBatteryEmpty(Framebuffer& fb, const FontSet& fonts,
+                                  const BatteryEmptyViewModel& vm, Plane plane = Plane::Bw) = 0;
   // The Library (spec 4.1). Its own typed method, for the reason
   // renderSdMissing is its own: it is its own board, and a shared "titled list"
   // surface would have to be told which board it was drawing.

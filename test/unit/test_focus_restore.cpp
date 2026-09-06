@@ -39,6 +39,7 @@ constexpr ScreenId kAllScreens[] = {
     ScreenId::BookDetails, ScreenId::Settings,  ScreenId::Sleep,       ScreenId::Reader,
     ScreenId::ReaderMenu,  ScreenId::Contents,  ScreenId::SdMissing,
     ScreenId::Typography,  ScreenId::Peek,     ScreenId::BookEnd,
+    ScreenId::BatteryEmpty,
 };
 // AND IT NAMES THE LAST MEMBER, WHICH IS THE ONLY WAY IT BITES. It named
 // SdMissing, and Typography was APPENDED after it -- so the array's length still
@@ -56,8 +57,16 @@ constexpr ScreenId kAllScreens[] = {
 // the next append needs this line moved BY HAND or it goes quiet again. #42 is the
 // general fix -- it has instances in more than one file -- and is deliberately not
 // attempted here.
+//
+// AND A THIRD TIME, WITH BatteryEmpty. It is STILL a named member below and this is
+// STILL #42: the append left both sides reading 14 and the build said nothing, so
+// this line was moved by hand for the third time. The count of instances is the
+// argument for fixing it generally rather than one file at a time -- and note that
+// session_record.cpp's assert, which CLAUDE.md records as the one tied to the enum's
+// END, names a member too and was equally silent. Nothing but -Wswitch pointed at
+// either table.
 static_assert(sizeof(kAllScreens) / sizeof(kAllScreens[0]) ==
-                  static_cast<size_t>(ScreenId::BookEnd) + 1,
+                  static_cast<size_t>(ScreenId::BatteryEmpty) + 1,
               "a ScreenId was added or removed; give it a row in kAllScreens, and"
               " name the LAST member here");
 
