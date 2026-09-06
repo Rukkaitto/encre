@@ -2406,6 +2406,37 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
          why, (unsigned)ESP.getFreeHeap(),
          (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     logFlush();
+    // A REFUSAL THE READER ASKED FOR GETS A SCREEN; A REFUSAL ON THE WAKE DOES NOT.
+    // `push` is false only for the session restore, where App::restore already stops
+    // short of a Reader it cannot build and leaves Home or the Library standing --
+    // wrong in a way the reader can see through. Waking into a modal about a book
+    // nobody just asked for replaces a calm landing with an interruption, seconds
+    // after pressing power and with no context for it.
+    if (push && gApp != nullptr) {
+      // WHICH REFUSAL, in the only vocabulary the screen has. openBook's `why` is
+      // developer English and stays in the log; what reaches glass is one of two
+      // bounded shapes, because "cannot open the book file" is a file that is gone
+      // or a card that is -- and openRead does not call noteCardGone(), so
+      // pollCardPresence takes 2-25s to notice. Telling the reader a healthy book is
+      // damaged for that whole window would be a false claim, which this firmware
+      // refuses elsewhere for the battery gauge and the charging bolt.
+      const bool unreadable =
+          (why != nullptr && std::strcmp(why, "cannot open the book file") == 0);
+      // The leaf name, not the path: the board's paragraph quotes a filename.
+      const size_t slash = path.find_last_of('/');
+      const std::string leaf = slash == std::string::npos ? path : path.substr(slash + 1);
+      // WHERE A DELETE RETURNS TO is decided here, because this is the one place that
+      // knows which screen asked. Home's CONTINUE has no Library to go back to.
+      const reader::ScreenId returnTo = gApp->top().id() == reader::ScreenId::Home
+                                            ? reader::ScreenId::Home
+                                            : reader::ScreenId::Library;
+      gFactory.setBookErrorFacts({path, leaf,
+                                  unreadable ? reader::BookErrorReason::Unreadable
+                                             : reader::BookErrorReason::Damaged,
+                                  returnTo});
+      if (!gApp->pushScreen(reader::ScreenId::BookError))
+        logf("[open] ...and the dialog would not build\n");
+    }
     return false;
   }
   const uint32_t t1 = millis();
