@@ -3202,6 +3202,30 @@ static reader::BatteryReading readBattery() {
          BoardConfig::ACTIVE.batteryGauge.gaugeAddr != 0 ? "I2C gauge" : "ADC");
     logFlush();
   }
+#ifdef ENCRE_BATTERY_FAKE_PERCENT
+  // THE ONLY WAY TO WALK THIS LADDER ON GLASS. Draining a real pack to 3% on demand
+  // is not practical, and without this the Low banner, the critical shutdown and the
+  // resume gate are all unwalkable. ENCRE_FS_SELFTEST's shape: absent by default, so
+  // a normal build has neither the branch nor the log line.
+  //
+  // AFTER the sticky gChargingObservable arm and after the first-read line, so a
+  // faked build still reports what the gauge really said and still arms the poll the
+  // way a real one does -- the override is the last word on the percent and touches
+  // nothing else.
+  //
+  // IT OVERRIDES THE PERCENT AND NOTHING ELSE. `charging` stays whatever the gauge
+  // said, so an X3 on the cable still suppresses Critical -- which is one of the
+  // things that needs verifying on glass and would be untestable if this faked it
+  // too.
+  r.percentKnown = true;
+  r.percent = ENCRE_BATTERY_FAKE_PERCENT;
+  static bool announced = false;
+  if (!announced) {
+    announced = true;
+    logf("[battery] FAKE percent=%d -- this is not a real reading\n", r.percent);
+    logFlush();
+  }
+#endif
   return r;
 }
 
