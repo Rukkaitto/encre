@@ -7,6 +7,7 @@
 // ordinal (2C-2 inserted three screens into the middle of ScreenId and silently
 // renamed every stored record), and an unrecognised name is "no session" rather
 // than a best-effort decode -- nothing here casts an integer into a ScreenId.
+#include <set>
 #include <string>
 #include <vector>
 
@@ -151,4 +152,27 @@ TEST_CASE("every ScreenId round-trips to ITSELF") {
     INFO("id " << i << " wire name '" << std::string(n) << "'");
     CHECK(out[0].screen == id);
   }
+}
+
+// EVERY SCREEN, NOT EVERY SCREEN SOMEBODY REMEMBERED. session_record.cpp's table and
+// switch have twice been left short by an append -- Typography, then BookEnd -- and
+// each time the new screen fell through to `return kNames[0]` and serialised as
+// `home`, so a reader idle-sleeping on it woke on Home with no failing test and no log
+// line. A static_assert on the table's LENGTH cannot see that, because the bound it
+// compares against is a hand-named member that the append does not move.
+//
+// This walks the enum by ORDINAL up to the Count sentinel, so it cannot be left short.
+TEST_CASE("every ScreenId has its own wire name") {
+  std::set<std::string> seen;
+  for (int i = 0; i < static_cast<int>(reader::ScreenId::Count); ++i) {
+    const reader::ScreenId id = static_cast<reader::ScreenId>(i);
+    const char* n = reader::sessionWireName(id);
+    REQUIRE(n != nullptr);
+    CAPTURE(i);
+    CAPTURE(n);
+    // Distinct: a screen that fell through to kNames[0] collides with Home, and a
+    // collision is exactly what the fall-through produces.
+    CHECK(seen.insert(n).second);
+  }
+  CHECK(seen.size() == static_cast<size_t>(reader::ScreenId::Count));
 }
