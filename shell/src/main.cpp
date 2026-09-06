@@ -2456,6 +2456,14 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
          saved.spine, saved.block, saved.line,
          kFitWord[static_cast<int>(fit)]);
     logFlush();
+    // A FINISHED BOOK IS DELIBERATELY NOT RESTORED, and without this line the log
+    // reports a perfectly good fit and then opens at page one -- which reads as the
+    // restore having failed rather than as it having been declined. restoreFrom is
+    // what decides (see its comment); this only says so out loud.
+    if (saved.finished) {
+      logf("[progress] ...but it is marked finished, so opening at the front\n");
+      logFlush();
+    }
     if (r.any) {
       startChapter = r.spine;
       startAt = r.cursor;

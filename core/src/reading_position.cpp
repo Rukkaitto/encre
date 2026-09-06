@@ -57,6 +57,26 @@ PositionFit fitOf(const ReadingPosition& saved, std::string_view bookPath, uint3
 
 PositionRestore restoreFrom(const ReadingPosition& saved, PositionFit fit) {
   PositionRestore r;
+  // A FINISHED BOOK OPENS AT THE FRONT, whatever its record still supports, and this
+  // is checked BEFORE the fit because it is a different question. `fitOf` asks how
+  // much of the record still APPLIES -- a re-export or a type-size change is about
+  // validity. This asks whether it should be USED at all, and the answer for a book
+  // the reader has declared finished is no: reopening one is re-reading it, not
+  // resuming it. Reported from a device, where a DONE book reopened somewhere in its
+  // last chapter.
+  //
+  // ANSWERED AS `any = false`, which is the same answer Unusable gets, because the
+  // caller's response to both is identical -- start at the beginning -- and
+  // loadPosition's own header already takes that line about its several false cases:
+  // "Distinguishing them would be a distinction with no consequence."
+  //
+  // THE ANCHOR GOES WITH IT, by falling through to the same early return. A way back
+  // to where the reader was is meaningless when they are no longer there.
+  //
+  // IT UN-MARKS ITSELF, so this is not a state the reader can get stuck in: the next
+  // save from the Reader builds a fresh record (see saveReadingPosition), so reading
+  // on from the front clears `finished` and the book resumes normally from then on.
+  if (saved.finished) return r;
   switch (fit) {
     case PositionFit::Unusable:
       return r;

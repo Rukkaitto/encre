@@ -414,3 +414,73 @@ TEST_CASE("two positions differing only in finished are not equal") {
   b.finished = true;
   CHECK_FALSE(a == b);
 }
+
+// REOPENING A FINISHED BOOK STARTS IT AGAIN, reported from a device: a DONE book
+// reopened somewhere in its last chapter instead of at the beginning.
+//
+// Asserted at EVERY fit, because the point is that this is not a fit question. An
+// Exact record is the case that actually bit -- the record is perfectly valid and is
+// deliberately not used.
+TEST_CASE("a finished book restores nothing, whatever its fit") {
+  reader::ReadingPosition p;
+  p.bookPath = "/books/Middlemarch.epub";
+  p.spine = 47;
+  p.block = 12;
+  p.line = 3;
+  p.bookBytes = 1024;
+  p.ppem = 32;
+  p.columnW = 492;
+  p.finished = true;
+
+  for (const reader::PositionFit fit :
+       {reader::PositionFit::Exact, reader::PositionFit::Relaid, reader::PositionFit::Rebound,
+        reader::PositionFit::Unusable}) {
+    CAPTURE(static_cast<int>(fit));
+    const reader::PositionRestore r = reader::restoreFrom(p, fit);
+    CHECK_FALSE(r.any);
+    CHECK(r.spine == 0);
+    CHECK(r.cursor.block == 0);
+    CHECK(r.cursor.line == 0);
+  }
+}
+
+// THE SAME RECORD UNFINISHED STILL RESTORES, which is what says the guard above keys
+// on the flag and not on something else about this fixture.
+TEST_CASE("the same record unfinished restores exactly as before") {
+  reader::ReadingPosition p;
+  p.bookPath = "/books/Middlemarch.epub";
+  p.spine = 47;
+  p.block = 12;
+  p.line = 3;
+  p.bookBytes = 1024;
+  p.ppem = 32;
+  p.columnW = 492;
+  p.finished = false;
+
+  const reader::PositionRestore r = reader::restoreFrom(p, reader::PositionFit::Exact);
+  REQUIRE(r.any);
+  CHECK(r.spine == 47);
+  CHECK(r.cursor.block == 12);
+  CHECK(r.cursor.line == 3);
+}
+
+// A FINISHED BOOK DROPS ITS WAY BACK TOO. The anchor points at where the reader was,
+// and they are not there any more.
+TEST_CASE("a finished book restores no anchor either") {
+  reader::ReadingPosition p;
+  p.bookPath = "/books/Middlemarch.epub";
+  p.spine = 47;
+  p.bookBytes = 1024;
+  p.ppem = 32;
+  p.columnW = 492;
+  p.anchorSpine = 40;
+  p.anchorBlock = 2;
+  p.anchorLine = 1;
+  REQUIRE(p.hasAnchor());
+
+  p.finished = false;
+  REQUIRE(reader::restoreFrom(p, reader::PositionFit::Exact).anchorAny);
+
+  p.finished = true;
+  CHECK_FALSE(reader::restoreFrom(p, reader::PositionFit::Exact).anchorAny);
+}
