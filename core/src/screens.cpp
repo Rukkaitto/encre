@@ -351,8 +351,26 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       if (library_ == nullptr) return nullptr;
       return std::make_unique<ItemActionsScreen>(*library_);
     case ScreenId::DeleteConfirm:
+      // THE FACTS ARE CHECKED FIRST, and the `library_ == nullptr` guard that used to
+      // sit above this line is GONE WITH THE REFERENCE. Leaving it would repeat the
+      // exact defect recorded on BookDetails below: a change that replaces the
+      // `return` and not the GUARD leaves the case refused for the very reason it
+      // was meant to stop refusing. WHEN A CASE'S EARLY RETURN ENCODES AN ASSUMPTION
+      // A CHANGE REMOVES, THE GUARD IS PART OF THE CHANGE.
+      if (deleteFactsSet_) return std::make_unique<DeleteConfirmScreen>(deleteFacts_);
+      // The Library is the fallback, and it is what the simulator and the goldens
+      // use: it can answer both facts from its focused row.
       if (library_ == nullptr) return nullptr;
-      return std::make_unique<DeleteConfirmScreen>(*library_);
+      {
+        const LibraryItem* item = library_->focusedItem();
+        // A folder has no file to remove, so there is nothing to confirm. The
+        // actions panel is only ever opened over a book, which is why this has
+        // never had to refuse; it is stated rather than assumed because the facts
+        // path can be primed by anyone.
+        if (item == nullptr || item->entry.isDir) return nullptr;
+        return std::make_unique<DeleteConfirmScreen>(DeleteConfirmScreen::Facts{
+            library_->focusedPath(), std::string(item->entry.title()), ScreenId::Library});
+      }
     case ScreenId::BookDetails:
       // THE FACTS ARE CHECKED FIRST, and a `library_ == nullptr` guard used to sit ABOVE
       // this line -- left over from when the screen was built from a Library reference.

@@ -145,6 +145,13 @@ std::unique_ptr<Standalone> build(ScreenId id) {
   if (id == ScreenId::ItemActions || id == ScreenId::DeleteConfirm ||
       id == ScreenId::BookDetails) {
     b->parent = b->factory.create(ScreenId::Library);
+    // ONTO A BOOK, because all three of these are about one. The demo list's first
+    // row is a FOLDER, and the Library refuses Gesture::Secondary over one -- so a
+    // fixture left on row 0 asks the factory for a state no press can reach. It is
+    // DeleteConfirm that says so out loud: it refuses a folder, on FileSystem::
+    // remove's own files-only contract, exactly as LibraryScreen::deleteFocused
+    // always has.
+    b->parent->onEvent(InputEvent{Button::Down, PressKind::Short});
   }
   b->screen = b->factory.create(id);
   return b;

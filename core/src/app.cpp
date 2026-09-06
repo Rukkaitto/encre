@@ -239,6 +239,13 @@ void App::dispatch(const InputEvent& ev) {
       // and it is usually a screen change rather than a repaint of this one.
       finish_ = true;
       break;
+    case Action::Kind::Delete:
+      // Latched for the reason Retry, Open and Finish are: the card is the shell's.
+      // Nothing is marked dirty and NOTHING IS POPPED -- the shell pops with
+      // popTo(facts().returnTo) after the file is gone, because where a completed
+      // delete lands is a fact about how the confirmation was reached.
+      delete_ = true;
+      break;
   }
 }
 

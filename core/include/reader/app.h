@@ -83,11 +83,11 @@ const char* screenName(ScreenId id);
 
 // What a screen asks the app to do after handling an event.
 //
-// FOUR OF THE KINDS ARE LATCHES, not instructions: `Sleep`, `Retry`, `Open` and
-// `Finish` each name something only the shell can do, so the screen asks, App
-// records the request, and the shell answers it on its next pass. (This line
-// called `Retry` "the odd one out" when it was the only one; `Open` and `Finish`
-// have since made it the pattern rather than the exception.)
+// FIVE OF THE KINDS ARE LATCHES, not instructions: `Sleep`, `Retry`, `Open`,
+// `Finish` and `Delete` each name something only the shell can do, so the screen
+// asks, App records the request, and the shell answers it on its next pass. (This
+// line called `Retry` "the odd one out" when it was the only one, and then said
+// FOUR; the count is what keeps going stale, so read the enum.)
 //
 // Storage is not core/'s -- the SD-missing
 // screen cannot mount a card, and spec 6 requires its button actually re-attempt
@@ -96,7 +96,9 @@ const char* screenName(ScreenId id);
 struct Action {
   // APPENDED, never inserted -- a Kind is compared, never stored, but appending
   // costs nothing and keeps every existing value where it was.
-  enum class Kind : uint8_t { None, Redraw, Push, Pop, PopTo, Sleep, Retry, Open, Finish };
+  enum class Kind : uint8_t {
+    None, Redraw, Push, Pop, PopTo, Sleep, Retry, Open, Finish, Delete
+  };
   Kind kind = Kind::None;
   ScreenId target = ScreenId::Home;  // meaningful for Push and PopTo
 
@@ -139,6 +141,12 @@ struct Action {
   // BookEnd means the open book, the item-actions overlay means the Library's
   // focused row. The shell resolves it the way handleOpen already resolves open().
   static Action finish() { return {Kind::Finish, ScreenId::Home}; }
+  // "Remove the book this confirmation names." A latch like Retry, Open and Finish,
+  // and for their reason: the card is the shell's. It carries no path for the reason
+  // Open carries none -- a std::string in every Action, returned by value from every
+  // gesture on every screen, to serve one. The shell reads the path off the screen
+  // that is still on top when the dispatch runs.
+  static Action del() { return {Kind::Delete, ScreenId::Home}; }
 };
 
 // The four hint slots are the four front buttons in hardware order (spec 4.0).
@@ -597,6 +605,23 @@ class App {
   bool finishRequested() const { return finish_; }
   void clearFinishRequest() { finish_ = false; }
 
+  // The user confirmed a delete. The shell's job, in this order:
+  //
+  //   1. clearDeleteRequest(), so a failed removal does not re-fire forever;
+  //   2. read the path off the DeleteConfirm screen -- WHILE IT IS STILL ON TOP,
+  //      because the dispatch that follows pops it and after that there is no screen
+  //      left to ask. Contents' chosenSpine() has exactly this shape;
+  //   3. fs.remove(path), keeping SD traffic off the display bus;
+  //   4. if a Library exists, rescan() it; and set gHomeStale AND gLibraryStale,
+  //      separately, because each is consumed when its own screen is reachable.
+  //
+  // THE RESULT IS NOT BRANCHED ON. FileSystem::remove reports the END STATE, so a
+  // false means the file is still there -- and the list the reader lands on already
+  // says which it was. An error panel would be a screen with no board saying
+  // something the Library already shows.
+  bool deleteRequested() const { return delete_; }
+  void clearDeleteRequest() { delete_ = false; }
+
   ButtonMask longPressable() const { return top().longPressable(); }
   ButtonMask autoRepeat() const { return top().autoRepeat(); }
 
@@ -633,6 +658,7 @@ class App {
   bool retry_ = false;
   bool open_ = false;
   bool finish_ = false;
+  bool delete_ = false;
   // Mutable because render() is const: painting does not change the app, but it
   // does change what is on glass, and this is what remembers that. The
   // alternative -- a non-const render() -- would make every const App& in the

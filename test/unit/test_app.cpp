@@ -887,3 +887,41 @@ TEST_CASE("a finish request changes nothing itself -- not the frame, not the sta
   CHECK_FALSE(app.retryRequested());
   CHECK_FALSE(app.openRequested());
 }
+
+TEST_CASE("a delete action is latched until the shell clears it") {
+  // Mirrors Retry, Open and Finish, and for their reason: removing a file is CARD
+  // WORK, and the consequences -- forgetCardFacts, the Library's rescan, gHomeStale
+  // and gLibraryStale -- all live in the shell.
+  FakeFactory f;
+  App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::del()), f);
+  CHECK_FALSE(app.deleteRequested());
+  app.dispatch(kConfirm);
+  CHECK(app.deleteRequested());
+  app.clearDeleteRequest();
+  CHECK_FALSE(app.deleteRequested());
+  // And it re-latches: the shell clears the flag before it removes anything, so a
+  // second confirmation after a failed removal must be visible as a second request.
+  app.dispatch(kConfirm);
+  CHECK(app.deleteRequested());
+}
+
+TEST_CASE("a delete request changes nothing itself -- not the frame, not the stack") {
+  FakeFactory f;
+  App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::del()), f);
+  app.clearDirty();
+  REQUIRE_FALSE(app.dirty());
+  app.dispatch(kConfirm);
+  REQUIRE(app.deleteRequested());
+  // Nothing repaints on its own, and nothing pops. The shell pops with
+  // popTo(facts().returnTo) once the file is gone -- which is a screen change it
+  // owns, exactly as Retry, Open and Finish leave theirs to it.
+  CHECK_FALSE(app.dirty());
+  CHECK_FALSE(app.transition());
+  CHECK(app.depth() == 1);
+  CHECK(app.top().id() == ScreenId::Home);
+  // And it is its own latch: a delete must not read as a finish, a sleep or a retry.
+  CHECK_FALSE(app.finishRequested());
+  CHECK_FALSE(app.sleepRequested());
+  CHECK_FALSE(app.retryRequested());
+  CHECK_FALSE(app.openRequested());
+}

@@ -9,6 +9,7 @@
 #include "reader/screen_book_details.h"
 #include "reader/screen_book_end.h"
 #include "reader/screen_book_error.h"
+#include "reader/screen_delete_confirm.h"
 #include "reader/screen_library.h"
 #include "reader/book.h"
 #include "reader/screen_peek.h"
@@ -300,6 +301,21 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   }
   void clearBookErrorFacts() { bookErrorFactsSet_ = false; }
 
+  // WHICH FILE THE CONFIRMATION IS ABOUT, and where a completed delete lands, for the
+  // caller that has no Library row to point at. BookError's `DELETE FILE...` is that
+  // caller: the dialog is raised from the Library AND from Home's CONTINUE, and only
+  // one of those has a Library. Clearing it puts the screen back on the Library's
+  // focused row, which is what the simulator and the goldens use.
+  //
+  // Its own flag rather than an inference from the Facts, for setBookErrorFacts'
+  // reason: an empty display name is representable, so emptiness cannot stand for
+  // "nothing primed it".
+  void setDeleteFacts(DeleteConfirmScreen::Facts f) {
+    deleteFacts_ = std::move(f);
+    deleteFactsSet_ = true;
+  }
+  void clearDeleteFacts() { deleteFactsSet_ = false; }
+
   // EVERYTHING BookEnd DRAWS, handed over rather than reached for. The reader menu's
   // `About this book` is the precedent: a screen built from another screen refuses to
   // open when that screen is not on the stack, which made it a button that worked only
@@ -425,6 +441,8 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   bool bookEndPrimed_ = false;
   BookErrorScreen::Facts bookErrorFacts_{};
   bool bookErrorFactsSet_ = false;
+  DeleteConfirmScreen::Facts deleteFacts_{};
+  bool deleteFactsSet_ = false;
   std::vector<TocEntry> contentsToc_;
   int contentsSpine_ = 0;
   bool contentsPrimed_ = false;
