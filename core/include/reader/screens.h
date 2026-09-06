@@ -8,6 +8,7 @@
 #include "reader/screen_typography.h"
 #include "reader/screen_book_details.h"
 #include "reader/screen_book_end.h"
+#include "reader/screen_book_error.h"
 #include "reader/screen_library.h"
 #include "reader/book.h"
 #include "reader/screen_peek.h"
@@ -51,6 +52,13 @@ SleepViewModel demoSleepIdleVm();
 // design/BookEnd.dc.html's own book -- the same Middlemarch design/Main.dc.html gives
 // `CH. 01 OF 24`, because two boards drawing one demo book must agree.
 BookEndScreen::Facts demoBookEndFacts();
+
+// design/BookError.dc.html's own book -- the `dubliners.epub` its paragraph names,
+// which is also the row design/Library.dc.html draws focused, because the board
+// stacks this dialog over that list.
+BookErrorScreen::Facts demoBookErrorFacts();
+// design/BookErrorUnreadable.dc.html: the same file, the other refusal.
+BookErrorScreen::Facts demoBookErrorUnreadableFacts();
 
 // design/Peek.dc.html's own peeked text -- Middlemarch's opening, which is the board's
 // story: the reader is at CH. 07, 34%, has met a name they cannot place, and has peeked
@@ -281,6 +289,17 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   }
   void clearDetailsFacts() { detailsFactsSet_ = false; }
 
+  // EVERYTHING BookError DRAWS, for the same reason setDetailsFacts exists: the dialog
+  // is raised from the Library AND from Home's CONTINUE, and only one of those has a
+  // Library row to ask. Its own flag rather than an inference from the Facts, for
+  // bookEndPrimed_'s reason -- a Damaged reason and an empty display name are both
+  // representable, so emptiness cannot stand for "nothing primed it".
+  void setBookErrorFacts(BookErrorScreen::Facts f) {
+    bookErrorFacts_ = std::move(f);
+    bookErrorFactsSet_ = true;
+  }
+  void clearBookErrorFacts() { bookErrorFactsSet_ = false; }
+
   // EVERYTHING BookEnd DRAWS, handed over rather than reached for. The reader menu's
   // `About this book` is the precedent: a screen built from another screen refuses to
   // open when that screen is not on the stack, which made it a button that worked only
@@ -404,6 +423,8 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   bool detailsFactsSet_ = false;
   BookEndScreen::Facts bookEndFacts_{};
   bool bookEndPrimed_ = false;
+  BookErrorScreen::Facts bookErrorFacts_{};
+  bool bookErrorFactsSet_ = false;
   std::vector<TocEntry> contentsToc_;
   int contentsSpine_ = 0;
   bool contentsPrimed_ = false;

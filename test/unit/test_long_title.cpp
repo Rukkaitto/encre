@@ -30,6 +30,7 @@
 #include "reader/icons.h"
 #include "reader/screens.h"
 #include "reader/screen_book_end.h"
+#include "reader/screen_book_error.h"
 #include "reader/screen_home.h"
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
@@ -450,5 +451,79 @@ TEST_CASE("a long title on BookEnd matches its golden") {
     reader::Framebuffer fb(w, h);
     s.render(fb, r.fonts, theme, reader::Plane::Bw);
     golden::checkGolden(fb, w == 480 ? "book_end_long_title" : "book_end_long_title_x3");
+  }
+}
+
+TEST_CASE("the corrupt-book dialog keeps a real card's name inside its panel") {
+  // THE SAME DEFECT AS THE DELETE PANEL'S, ONE RUN DOWN. That board puts the
+  // filename in the CAPTION, which wraps `Anywhere` and is clamped; this one puts it
+  // in the PARAGRAPH, which had neither -- so a name with no space in it wrapped to a
+  // single line WIDER than the column, was drawn through the panel's right border and
+  // off the glass, and the rest of the name was lost. Found by rendering it and
+  // looking, which is what every board's one-word sample name prevents.
+  Ramp r;
+  reader::QuietTheme theme;
+  for (int width : {480, 528}) {
+    const int height = width == 480 ? 800 : 792;
+    // 1 is a real card's name; 4 and 12 are past what FAT allows, as the delete
+    // panel's case is, because the bound has to hold rather than happen to.
+    for (int repeats : {1, 4, 12}) {
+      std::string name;
+      for (int i = 0; i < repeats; ++i) name += kLongTitle;
+      reader::BookErrorScreen s({"/books/" + name, name, reader::BookErrorReason::Damaged,
+                                 reader::ScreenId::Library});
+
+      reader::Framebuffer fb(width, height);
+      fb.clear(true);
+      theme.renderBookError(fb, r.fonts, s.vm(), reader::Plane::Bw);
+
+      const int panelW = 380;
+      const int panelX = (width - panelW) / 2;
+      // HORIZONTAL: no ink outside the panel's own columns, above the hint bar --
+      // which is full width by design and is drawn last, so it is excluded by row.
+      reader::Hint hints[4];
+      reader::buildHints(reader::kHintSlotMarks, s.vm().hints, s.vm().holds, hints);
+      const int barTop = height - reader::hintBarHeight(r.fonts, hints);
+      int outside = 0;
+      for (int y = 0; y < barTop; ++y)
+        for (int x = 0; x < width; ++x)
+          if ((x < panelX || x >= panelX + panelW) && !fb.getPixel(x, y)) ++outside;
+      // The veil is white-on-paper, so it inks nothing here: any black outside the
+      // panel is a glyph that escaped it.
+      CHECK_MESSAGE(outside == 0, "ink outside the panel, repeats " << repeats << " at "
+                                                                   << width);
+
+      // VERTICAL: the same defect turned ninety degrees. The panel is centred, so one
+      // taller than the canvas is cut off at BOTH ends.
+      //
+      // ASSERTED BY FINDING BOTH BORDERS, not by checking the frame's first and last
+      // rows carry no panel-wide run -- which is the delete panel's own form and has
+      // a hole this case fell into. A panel that overflows a LITTLE puts its border
+      // on row 0 and that check bites; a panel that overflows a LOT puts the border
+      // off the canvas entirely, leaving row 0 with the two vertical border segments
+      // and nothing 380 wide, and the check passes. Removing this screen's clamp
+      // failed NOTHING under that form, which is what sent me back to the assertion.
+      auto longestRun = [&](int y) {
+        int best = 0, run = 0;
+        for (int x = 0; x < width; ++x) {
+          if (!fb.getPixel(x, y)) { if (++run > best) best = run; } else run = 0;
+        }
+        return best;
+      };
+      // >= panelW is what tells a BORDER from the caption's rule, which spans the
+      // content width (376) and not the panel's.
+      int top = -1, bottom = -1;
+      for (int y = 0; y < barTop; ++y)
+        if (longestRun(y) >= panelW) {
+          if (top < 0) top = y;
+          bottom = y;
+        }
+      CHECK_MESSAGE(top > 0, "no top border inside the canvas, repeats " << repeats << " at "
+                                                                        << width);
+      CHECK_MESSAGE(bottom > top, "no bottom border inside the canvas, repeats "
+                                      << repeats << " at " << width);
+      CHECK_MESSAGE(bottom < barTop - 1,
+                    "panel reaches the hint bar, repeats " << repeats << " at " << width);
+    }
   }
 }

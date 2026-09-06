@@ -102,6 +102,12 @@ std::unique_ptr<Standalone> build(ScreenId id) {
   // face, no metrics and no parent -- the Reader's and the Peek's demos are gated
   // only because a body face costs a TTF load the other screens should not pay.
   b->factory.setBookEndDemo();
+  // AND BookError, on exactly that argument: Facts is a value copy, so priming it
+  // unconditionally costs nothing and keeps the screen inside every loop below. The
+  // factory REFUSES an unprimed one, so a fixture that did not prime it would get a
+  // null and the REQUIRE would fire -- which is the refusal working, not a reason to
+  // let the screen out of the catalogue.
+  b->factory.setBookErrorFacts(demoBookErrorFacts());
   if (id == ScreenId::Reader || id == ScreenId::Peek) {
     // GIVEN a body face rather than skipped. Excluding either from the loop would
     // have been a screen this file claims to cover and does not -- and both are
@@ -154,7 +160,8 @@ TEST_CASE("every screen accepts back the focus it reports") {
   // mode this project keeps hitting -- a check that reports on less than it
   // claims. NINE screens can move their focus today: Home, Library, the two Library
   // overlays, Settings, the reader menu, the contents, Typography and BookEnd, whose
-  // two slabs are the ninth. BookDetails, Sleep, the Reader, the Peek and the
+  // two slabs are the ninth, and BookError, whose OK/DELETE pair is the tenth.
+  // BookDetails, Sleep, the Reader, the Peek and the
   // SD-missing prompt have one thing on them and legitimately report 0 -- the Peek has
   // no selection at all, only a page.
   //
@@ -184,7 +191,7 @@ TEST_CASE("every screen accepts back the focus it reports") {
     CHECK(restored->get().focus() == moved);
   }
 
-  CHECK(movable == 9);
+  CHECK(movable == 10);
 }
 
 TEST_CASE("every screen with a movable focus wraps off the end") {
@@ -215,7 +222,7 @@ TEST_CASE("every screen with a movable focus wraps off the end") {
     CHECK(wrapped);
     ++wrapping;
   }
-  CHECK(wrapping == 9);
+  CHECK(wrapping == 10);
 }
 
 TEST_CASE("restoring the focus a screen is already on is a no-op, not a failure") {

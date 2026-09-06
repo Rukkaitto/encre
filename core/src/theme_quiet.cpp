@@ -849,30 +849,47 @@ void QuietTheme::renderBookError(Framebuffer& fb, const FontSet& fonts,
 
   // This caption is the board's fixed `CAN'T OPEN FILE` and cannot overflow, unlike
   // the confirmation's, which is a sentence with a filename in it. It goes through
-  // the same wrap anyway so the two panels cannot disagree about a caption's height.
-  std::string captionTail;
-  Prose label = wrapPanelCaption(fonts, vm.title, contentW, WordBreak::Anywhere);
+  // the same wrap anyway so the two panels cannot disagree about a caption's height,
+  // and its height is INDEPENDENT of the paragraph here -- which is what lets the
+  // budget below be spent on the paragraph instead.
+  const Prose label = wrapPanelCaption(fonts, vm.title, contentW, WordBreak::Anywhere);
+  const int captionH = panelCaptionHeight(fonts, label);
 
   // Wrapped once, before anything is placed: its height is what it wraps to, and the
   // panel's own bottom edge hangs off that. Two wraps would be two chances to
   // disagree, and the disagreement reads as a paragraph drifted off centre.
-  const Prose prose = wrapProse(body, vm.message, colW, kConfirmProseLeadEm);
-  const int proseH = f26ToPx(prose.heightF26());
+  //
+  // `WordBreak::Anywhere` IS renderDeleteConfirm's CAPTION rule arriving one slot
+  // down. This board puts the filename in the PARAGRAPH, and a filename is
+  // frequently one unbreakable word -- so under the default `Normal` a real card's
+  // name is one line WIDER than the column, drawn straight through the panel's right
+  // border and off the glass, with the rest of the name lost. Rendered and looked at,
+  // not reasoned about.
+  // DECLARED BEFORE THE WRAP IT WILL BE VIEWED BY, which is renderDeleteConfirm's
+  // order: clampProse's elided last line is a new string that is not in the wrapped
+  // text, so it must outlive the Prose that views it.
+  std::string proseTail;
+  Prose prose = wrapProse(body, vm.message, colW, kConfirmProseLeadEm, {}, WordBreak::Anywhere);
 
   // The board's `max-height: 100%; overflow: hidden`, in the one form a firmware can
-  // honour it -- renderDeleteConfirm's rule, with the mark added to the fixed part.
-  const int panelFixedH = 2 * kPanelBorder + 2 * kPanelCaptionPadY + kPanelCaptionRuleH +
-                          (2 * kConfirmProsePadY + mark.h + kBookErrorIconGap + proseH) +
+  // honour it -- renderDeleteConfirm's rule with the two runs SWAPPED. There the
+  // caption carries the name and yields; here the caption is a fixed literal and the
+  // PARAGRAPH is the unbounded part, because that is where this board puts the name.
+  // Clamping the caption instead would bound the run that cannot grow and leave the
+  // one that can, and the panel is CENTRED, so one taller than the canvas is cut off
+  // at BOTH ends.
+  const int panelFixedH = 2 * kPanelBorder + captionH +
+                          (2 * kConfirmProsePadY + mark.h + kBookErrorIconGap) +
                           (2 * kActionH + kConfirmButtonGap + kConfirmButtonPadBottom);
-  const int captionRoom = fb.height() - panelFixedH;
-  int maxCaptionLines = 1;
-  while (maxCaptionLines < label.lineCount() &&
-         f26ToPx((maxCaptionLines + 1) * label.leadF26) <= captionRoom)
-    ++maxCaptionLines;
-  clampProse(fonts[Role::Label500], label, maxCaptionLines, panelCaptionColumnW(contentW),
-             captionTail);
+  const int proseRoom = fb.height() - panelFixedH;
+  int maxProseLines = 1;
+  while (maxProseLines < prose.lineCount() &&
+         f26ToPx((maxProseLines + 1) * prose.leadF26) <= proseRoom)
+    ++maxProseLines;
+  clampProse(body, prose, maxProseLines, colW, proseTail);
+  const int proseH = f26ToPx(prose.heightF26());
 
-  const int panelH = 2 * kPanelBorder + panelCaptionHeight(fonts, label) +
+  const int panelH = 2 * kPanelBorder + captionH +
                      (kConfirmProsePadY + mark.h + kBookErrorIconGap + proseH +
                       kConfirmProsePadY) +
                      (2 * kActionH + kConfirmButtonGap + kConfirmButtonPadBottom);

@@ -148,6 +148,20 @@ BookEndScreen::Facts demoBookEndFacts() {
   return f;
 }
 
+// design/BookError.dc.html's own book. `dubliners.epub` is the file its paragraph
+// names, and Dubliners is the row design/Library.dc.html draws focused -- the board
+// stacks this dialog over that list, so the two agree by construction.
+BookErrorScreen::Facts demoBookErrorFacts() {
+  return {"/books/dubliners.epub", "dubliners.epub", BookErrorReason::Damaged,
+          ScreenId::Library};
+}
+
+// design/BookErrorUnreadable.dc.html: the same file, the other refusal.
+BookErrorScreen::Facts demoBookErrorUnreadableFacts() {
+  return {"/books/dubliners.epub", "dubliners.epub", BookErrorReason::Unreadable,
+          ScreenId::Library};
+}
+
 // demoSleepVm: a screen the simulator and the goldens must render needs a source
 // for its content, and the board's copy is the one source that makes the
 // comparison sheet meaningful.
@@ -374,6 +388,13 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // rule as setReaderDemo, setContentsDemo and setPeekDemo.
       if (!bookEndPrimed_) return nullptr;
       return std::make_unique<BookEndScreen>(bookEndFacts_);
+    case ScreenId::BookError:
+      // REFUSED WHEN NOTHING PRIMED IT, never substituted. A dialog naming a book the
+      // reader did not try to open is how this device once woke into Middlemarch.
+      // A refused push leaves the parent standing, which is wrong in a way the reader
+      // can see through, and the shell logs why.
+      if (!bookErrorFactsSet_) return nullptr;
+      return std::make_unique<BookErrorScreen>(bookErrorFacts_);
     case ScreenId::Settings: {
       auto scr = std::make_unique<SettingsScreen>(settings_, settingsSink_);
       scr->setMetrics(settingsListH_, settingsRowH_, settingsHeaderH_);
