@@ -1155,6 +1155,13 @@ constexpr int kReadMetaEm = 120;
 // way instead. Enough for `CH. 01` plus an ellipsis, so the fallback form always fits
 // whole and a long name always shows something.
 constexpr int kReadChapterFloor = 96;   // the chapter, the percent and the counter, 0.12em
+// design/LowBattery.dc.html's band: full-bleed, 78px tall, `padding: 0 18px` -- the
+// page's own horizontal padding, so the band's two runs align with the header's book
+// title and the footer's percentage. A 12px gap between the mark and its label.
+constexpr int kBannerH = 78;
+constexpr int kBannerPadX = 18;
+constexpr int kBannerGap = 12;
+constexpr int kBannerLabelEm = 100;  // letter-spacing: 0.1em, both runs
 // U+2014, the real character. Every chrome face's subset carries it (tools/fontc.py
 // adds it alongside the quotes and the ellipsis), so this is not a hyphen standing in.
 constexpr std::string_view kEmDash = "\xE2\x80\x94";
@@ -1335,6 +1342,62 @@ void QuietTheme::renderReader(Framebuffer& fb, const FontSet& fonts, const Glyph
     const int barX = centreIn(kReadPadX, fb.width() - 2 * kReadPadX, kReadBarW);
     const int barY = iconTopIn(footerTop, meta.lineHeight(), kReadBarH);
     drawProgressBar(fb, barX, barY, kReadBarW, kReadBarH, vm.progressPercent);
+  }
+
+  // --- The low-battery banner ----------------------------------------------------
+  //
+  // LAST, SO IT IS ON TOP. It is drawn OVER the page and never displaces it: the
+  // band inside the column would take a default page from 12 lines to 10 and
+  // re-paginate the whole chapter, at the moment the device has least energy to
+  // spend and with the reader's page moving under them. So `columnH` is untouched
+  // and the last line and a half of the page go under the band -- which is what
+  // design/LowBattery.dc.html draws, with the band absolutely positioned against
+  // the column's bottom for exactly this reason.
+  //
+  // AND THAT IS WHERE THE y COMES FROM. The band's bottom IS the column box's
+  // bottom, and readerMetrics puts that at `panelH - footerH` where `footerH =
+  // kReadFooterPadTop + lineHeight + kReadFooterPadBottom` -- which is exactly
+  // `footerTop - kReadFooterPadTop`. Derived from the same two terms the footer is
+  // placed by rather than restated as a number, so a footer that moves takes the
+  // band with it.
+  //
+  // FULL-BLEED, so it is placed from 0 and fb.width() rather than from kReadPadX.
+  // Every inverted band on this device is.
+  //
+  // Meta700 AND NOT Label500, and the X4's fit is why: at 23px the label and the
+  // hint collide on a 480px panel with the longest string the firmware can produce
+  // (`BATTERY LOW - 10%`, since the X4's ADC reports 10% notches and 10 is the only
+  // value its banner ever shows). The ramp has no 23px/700 role either. Measured in
+  // Chrome on the board: 27px of gap at 480 wide, ~16px once the firmware's ~3%
+  // wider advances are allowed for.
+  if (vm.batteryLowPercent >= 0) {
+    const Font& label = fonts[Role::Meta700];
+    const int top = footerTop - kReadFooterPadTop - kBannerH;
+    // `false` IS INK. Framebuffer::fillRect takes `white`, so the inverted band is
+    // the FALSE case -- exactly as drawMenuRow's focused fill and the hint bar's rule
+    // spell it. `true` here paints white on paper and the whole band vanishes, with
+    // the white runs on top of it invisible too: a banner that renders as nothing.
+    fb.fillRect(0, top, fb.width(), kBannerH, false);
+
+    const Icon& warn = icons::kWarning;
+    // WHITE INK on a filled band. The board authors the triangle white for the same
+    // reason, and drawIcon takes the ink rather than the icon carrying it.
+    drawIcon(fb, warn, kBannerPadX, iconTopIn(top, kBannerH, warn.h), Ink::White, plane);
+
+    const Tracking track = trackingEm(label, kBannerLabelEm);
+    // THE MIDDLE DOT IS ITS OWN LITERAL, and it must stay that way: a C++ hex escape
+    // is UNBOUNDED, so `"\xC2\xB75%"` parses `\xB75` as one escape -- clang rejects
+    // it and the ESP32's GCC accepts it and emits a byte that is not U+00B7. Adjacent
+    // literals end the escape. The board writes `&middot;` with a space either side.
+    const std::string text = std::string("BATTERY LOW ") + "\xC2\xB7" + " " +
+                             std::to_string(vm.batteryLowPercent) + "%";
+    drawText(fb, label, kBannerPadX + warn.w + kBannerGap,
+             baselineIn(label, top, kBannerH), text, Ink::White, track, plane);
+
+    const Tracking anyTrack = trackingEm(meta, kBannerLabelEm);
+    const int anyW = meta.measure("ANY BUTTON", anyTrack);
+    drawText(fb, meta, fb.width() - kBannerPadX - anyW, baselineIn(meta, top, kBannerH),
+             "ANY BUTTON", Ink::White, anyTrack, plane);
   }
 }
 
