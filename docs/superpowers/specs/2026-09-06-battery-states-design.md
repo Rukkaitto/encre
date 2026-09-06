@@ -233,9 +233,29 @@ cannot promise what nothing has bound. So:
 
 `ReaderViewModel` gains `batteryLowPercent`, **−1 meaning no banner** — one field,
 so the condition cannot be spelled twice. From the board: full-bleed, 78px, inverted;
-`padding: 0 24px`; left group is the warning triangle then a 12px gap then
-`BATTERY LOW · N%` at `--t-label`/700/0.1em; right is `ANY BUTTON` at
+`padding: 0 18px`; left group is the warning triangle then a 12px gap then
+`BATTERY LOW · N%` at `--t-meta`/700/0.1em; right is `ANY BUTTON` at
 `--t-meta`/0.1em.
+
+**This paragraph said `--t-label`/700, and that role does not exist** — the ramp
+carries `Label400`/`Label500` at 11pt and `Meta400/500/700` at 10pt
+(`font_manifest.h`), so the spec as first written asked for a pre-rendered asset
+nobody has, which is unbuildable rather than merely terse. **The X4's fit is what
+chose between the two roles that do exist.** The widest string the banner can draw
+is `BATTERY LOW · 10%` — the X4 has no fuel gauge and its ADC quantises to 10%
+notches, so 10 is the only value it ever shows — and measured in Chrome at that
+string the gap between the two runs is **0.00px at `Label500` 23px/500, with both
+runs wrapping to two lines inside a 78px band**, against **27.11px at `Meta700`**
+(X3: 42.59 against 75.11). `Meta700` also restores the weight the board originally
+asked for.
+
+**The `padding: 0 18px` is an alignment, not a shave.** The page's box is
+`padding: 20px 18px 0 18px`, so the header and the footer both begin at x=18; the
+band is full-bleed and at 24px its runs lined up with nothing. The 24 was orphaned
+from the pre-rebase board's 40px margins. The 12px it returns is what takes the X4
+clear — and after the firmware's ~3% wider `.rfnt` advances the X4 gap is ~15.9px,
+which is the figure that has to stay positive on glass. The 32px icon and the
+0.1em tracking are this spec's and are not levers.
 
 ## 5 · `BatteryEmpty`
 
