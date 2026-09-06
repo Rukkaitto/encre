@@ -655,6 +655,11 @@ constexpr int kConfirmProseLeadEm = 1450;
 constexpr int kConfirmButtonGap = 12;
 constexpr int kConfirmButtonPadBottom = 20;
 
+// design/BookError.dc.html's body is `display: flex; flex-direction: column;
+// gap: 12px` holding the mark and then the paragraph -- so this is the gap BELOW
+// the icon, and it is the board's own number rather than the button gap reused.
+constexpr int kBookErrorIconGap = 12;
+
 // --- design/BookDetails.dc.html ---------------------------------------------
 //
 // Its cover is bigger than Home's -- 120x180 against 112x168 -- because it is the
@@ -827,6 +832,83 @@ void QuietTheme::renderDeleteConfirm(Framebuffer& fb, const FontSet& fonts,
   Hint hints[4];
   buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
   drawOverlayHintBar(fb, fonts, hints, plane);
+}
+
+void QuietTheme::renderBookError(Framebuffer& fb, const FontSet& fonts,
+                                 const BookErrorViewModel& vm, Plane plane) {
+  // No fb.clear(): the parent -- the Library, or HOME on the CONTINUE path -- is
+  // already painted. Getting this wrong is a panel floating on white, and nothing on
+  // the desktop can catch it, because the simulator and every golden go through
+  // App::render.
+  veilRect(fb, 0, 0, fb.width(), fb.height());
+
+  const int contentW = panelContentW(kConfirmPanelW);
+  const int colW = contentW - 2 * kPanelPadX;
+  const Font& body = fonts[Role::Body400];
+  const Icon& mark = icons::kWarning;
+
+  // This caption is the board's fixed `CAN'T OPEN FILE` and cannot overflow, unlike
+  // the confirmation's, which is a sentence with a filename in it. It goes through
+  // the same wrap anyway so the two panels cannot disagree about a caption's height.
+  std::string captionTail;
+  Prose label = wrapPanelCaption(fonts, vm.title, contentW, WordBreak::Anywhere);
+
+  // Wrapped once, before anything is placed: its height is what it wraps to, and the
+  // panel's own bottom edge hangs off that. Two wraps would be two chances to
+  // disagree, and the disagreement reads as a paragraph drifted off centre.
+  const Prose prose = wrapProse(body, vm.message, colW, kConfirmProseLeadEm);
+  const int proseH = f26ToPx(prose.heightF26());
+
+  // The board's `max-height: 100%; overflow: hidden`, in the one form a firmware can
+  // honour it -- renderDeleteConfirm's rule, with the mark added to the fixed part.
+  const int panelFixedH = 2 * kPanelBorder + 2 * kPanelCaptionPadY + kPanelCaptionRuleH +
+                          (2 * kConfirmProsePadY + mark.h + kBookErrorIconGap + proseH) +
+                          (2 * kActionH + kConfirmButtonGap + kConfirmButtonPadBottom);
+  const int captionRoom = fb.height() - panelFixedH;
+  int maxCaptionLines = 1;
+  while (maxCaptionLines < label.lineCount() &&
+         f26ToPx((maxCaptionLines + 1) * label.leadF26) <= captionRoom)
+    ++maxCaptionLines;
+  clampProse(fonts[Role::Label500], label, maxCaptionLines, panelCaptionColumnW(contentW),
+             captionTail);
+
+  const int panelH = 2 * kPanelBorder + panelCaptionHeight(fonts, label) +
+                     (kConfirmProsePadY + mark.h + kBookErrorIconGap + proseH +
+                      kConfirmProsePadY) +
+                     (2 * kActionH + kConfirmButtonGap + kConfirmButtonPadBottom);
+
+  const int x = panelLeft(fb.width(), kConfirmPanelW);
+  const int y = centreIn(0, fb.height(), panelH);
+  drawPanel(fb, x, y, kConfirmPanelW, panelH);
+
+  const int cx = x + kPanelBorder;
+  int cy = y + kPanelBorder;
+  cy += drawPanelCaption(fb, fonts, cx, cy, contentW, label, "", plane);
+
+  cy += kConfirmProsePadY;
+  // LEFT-ALIGNED at the column's own left edge, not centred: the board's body is a
+  // flex COLUMN with default `align-items: stretch`, so the mark sits at the start of
+  // the line box rather than in the middle of the panel.
+  drawIcon(fb, mark, cx + kPanelPadX, cy, Ink::Black, plane);
+  cy += mark.h + kBookErrorIconGap;
+
+  // Left-aligned: the board's paragraph declares no `text-align`, so it is a plain
+  // block -- unlike a full-screen prompt's, which is centred.
+  cy += f26ToPx(drawProse(fb, body, prose, cx + kPanelPadX, colW, pxToF26(cy), Ink::Black,
+                          plane, ProseAlign::Left));
+  cy += kConfirmProsePadY;
+
+  // The focused slab is filled and the other outlined, which is the boards' rule
+  // wherever they pair the two. Focus starts on OK.
+  drawActionButton(fb, fonts, cx + kPanelPadX, cy, colW, vm.okLabel, vm.focusedAction == 0,
+                   plane);
+  cy += kActionH + kConfirmButtonGap;
+  drawActionButton(fb, fonts, cx + kPanelPadX, cy, colW, vm.deleteLabel,
+                   vm.focusedAction == 1, plane);
+
+  Hint bookErrorHints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, bookErrorHints);
+  drawOverlayHintBar(fb, fonts, bookErrorHints, plane);
 }
 
 void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,

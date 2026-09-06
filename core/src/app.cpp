@@ -29,6 +29,7 @@ const char* screenName(ScreenId id) {
     // Kebab, as ITEM-ACTIONS and BOOK-DETAILS are. A log label, free to be
     // reworded; the session record's spelling is a storage format and is not this.
     case ScreenId::BookEnd: return "BOOK-END";
+    case ScreenId::BookError: return "BOOK-ERROR";
     // NOT A SCREEN -- see ScreenId::Count's own comment. Refused explicitly so this
     // switch stays exhaustive, the same reason session_record.cpp's does.
     case ScreenId::Count: return "?";

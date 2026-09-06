@@ -89,6 +89,8 @@ class NullTheme : public Theme {
                          Plane) override {}
   void renderDeleteConfirm(Framebuffer&, const FontSet&, const DeleteConfirmViewModel&,
                            Plane) override {}
+  void renderBookError(Framebuffer&, const FontSet&, const BookErrorViewModel&,
+                       Plane) override {}
   void renderBookDetails(Framebuffer&, const FontSet&, const BookDetailsViewModel&,
                          Plane) override {}
   int libraryVisibleRows(int, const FontSet&) const override { return 0; }

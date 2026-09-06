@@ -23,6 +23,7 @@ constexpr const char* kNames[] = {
     "home", "library", "item-actions", "delete-confirm",
     "book-details", "settings", "sleep", "reader", "reader-menu",
     "contents", "sd-missing", "typography", "peek", "book-end",
+    "book-error",
 };
 
 // TIED TO THE ENUM, NOT TO A NAMED MEMBER. Three separate bounds in this feature were
@@ -120,6 +121,10 @@ const char* sessionWireName(ScreenId id) {
     // the failure the note on ReaderMenu above says this table exists to prevent,
     // having already happened once to Contents.
     case ScreenId::BookEnd: return kNames[13];
+    // design/BookError.dc.html. Appended with the enum, which the static_assert on
+    // kNames above is what forces -- it names Count, so this table cannot be left
+    // short by an append the way it was for Typography and BookEnd.
+    case ScreenId::BookError: return kNames[14];
     // NOT A SCREEN, so it has no name and must never reach the fall-through below,
     // which is what silently made a missing case read as `home`.
     case ScreenId::Count: break;

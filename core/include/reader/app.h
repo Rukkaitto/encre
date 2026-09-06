@@ -60,6 +60,10 @@ enum class ScreenId : uint8_t {
   // only once the array grows, which is the wrong way round for a guard whose job is
   // to force the array to grow.
   BookEnd,
+  // design/BookError.dc.html -- the dialog a book that will not open raises. The
+  // session record stores a screen by NAME, so appending cannot silently become
+  // another screen, and appending also leaves every existing ordinal where it was.
+  BookError,
   // NOT A SCREEN. A bound, so a guard can name "one past the last member" without
   // naming a member -- which is #42, and which had gone quiet twice by the time it
   // was fixed: session_record.cpp spelled three bounds `<= ScreenId::Peek` and then

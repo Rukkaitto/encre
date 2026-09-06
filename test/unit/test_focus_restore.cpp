@@ -39,6 +39,7 @@ constexpr ScreenId kAllScreens[] = {
     ScreenId::BookDetails, ScreenId::Settings,  ScreenId::Sleep,       ScreenId::Reader,
     ScreenId::ReaderMenu,  ScreenId::Contents,  ScreenId::SdMissing,
     ScreenId::Typography,  ScreenId::Peek,     ScreenId::BookEnd,
+    ScreenId::BookError,
 };
 // NAMES THE SENTINEL, so an append cannot satisfy it unchanged. It used to name the
 // last member by hand -- `ScreenId::Peek + 1`, then `ScreenId::BookEnd + 1` -- and
