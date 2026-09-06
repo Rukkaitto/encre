@@ -54,6 +54,7 @@ extern const Icon kBattery;  // the header band's charge cell
 extern const Icon kBatteryCharging;  // ...with a bolt knocked out: charging
 extern const Icon kSdCard;   // an SD card: the subject of the no-card prompt
 extern const Icon kCheck;    // a tick: the end-of-book confirmation mark
+extern const Icon kWarning;  // a warning triangle: the corrupt-book dialog's mark
 }  // namespace icons
 
 }  // namespace reader

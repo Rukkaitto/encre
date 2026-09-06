@@ -201,6 +201,22 @@ ICONS = {
         "source": "design/BookEnd.dc.html",
         "match": "M1 6l5 5L15 1",
     },
+    # The corrupt-book dialog's mark. Matched on the TRIANGLE's own path rather
+    # than on the exclamation stroke or the dot: BookError.dc.html and
+    # BookErrorUnreadable.dc.html both carry this svg, so `source` names which
+    # board owns it -- the same second line of defence kBook/kBookLarge and
+    # kBattery/kBatteryCharging already need.
+    #
+    # THREE DIAGONALS, which is the shape Mono thresholding treats worst:
+    # CLAUDE.md records kChevron coming out a notch lighter because its stroke is
+    # mostly coverage-1 pixels. At 32x28 with a 1.6 stroke this should hold, but
+    # that is an argument and only the panel can settle it.
+    "warning": {
+        "symbol": "kWarning",
+        "note": "a warning triangle: the corrupt-book dialog's mark",
+        "source": "design/BookError.dc.html",
+        "match": "M9 1 17 15H1z",
+    },
 }
 
 # The boards are hand-written one-element-per-line HTML with no nested <svg>, so
