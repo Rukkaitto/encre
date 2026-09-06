@@ -101,9 +101,15 @@ struct SdMissingViewModel {
 // here is composed by the screen, because a byline and a chapter count are CONTENT
 // and the theme has no business knowing that a book has an author.
 struct BookEndViewModel {
-  std::string bookTitle;    // the header band's value, shouted: "MIDDLEMARCH"
-  std::string title;        // "THE END"
-  std::string byline;       // "Middlemarch · George Eliot"; the name alone if no author
+  // NO BAND VALUE. This carried the book's shouted name until a long title squeezed
+  // the band's own LABEL until it elided -- and the slot was redundant besides, since
+  // `byline` states the same book forty pixels below. The board's slot is reserved
+  // with an nbsp and the theme passes "" (drawHeaderBand's phantom gap cancels, so an
+  // empty value lands the band's right edge on the margin exactly).
+  std::string title;   // "THE END"
+  // "Middlemarch · George Eliot"; the name alone if no author. IT WRAPS, so it must
+  // outlive the render that reads it -- Prose holds views into it.
+  std::string byline;
   std::string meta;         // "24 CHAPTERS"; EMPTY when the count is unknown
   std::string finishLabel;  // the filled slab
   // "BACK TO LIBRARY" or "BACK TO HOME". TWO SPELLINGS OF ONE BUTTON, and that is

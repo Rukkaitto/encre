@@ -2,7 +2,6 @@
 
 #include <string>
 
-#include "reader/text.h"  // upperLatin1
 #include "reader/theme.h"
 
 namespace reader {
@@ -18,10 +17,6 @@ const char* const kMiddot = "\xC2\xB7";
 }  // namespace
 
 BookEndScreen::BookEndScreen(const Facts& facts) : FocusScreen(kRowCount, kRowCount) {
-  // SHOUTED for the band, mixed for the byline -- which is what the board draws, and
-  // upperLatin1 rather than upperAscii because a real card carries accented titles
-  // and the device once showed `LE FLéAU`.
-  vm_.bookTitle = upperLatin1(facts.bookTitle);
   vm_.title = "THE END";
 
   // THE SEPARATOR GOES WITH THE NAME IT SEPARATES. An EPUB is not obliged to carry

@@ -385,13 +385,42 @@ void QuietTheme::renderBookEnd(Framebuffer& fb, const FontSet& fonts,
   // battery, which this board does not draw. Passing null is also what makes
   // headerBandHeight answer about the band this screen actually draws -- asking it
   // about Home's would put every run below here in the wrong place.
-  const int bandH = drawHeaderBand(fb, fonts, "BOOK FINISHED", vm.bookTitle,
+  //
+  // AND NO VALUE EITHER. The slot held the book's shouted name, which the byline
+  // below states again -- and a long title squeezed the LABEL until `BOOK FINISHED`
+  // itself elided, so the screen stopped saying what it is. drawHeaderBand with an
+  // empty value is already right: it reserves a gap for the absent run and then
+  // draws the (null) mark past it, so the phantom gap CANCELS and nothing lands off
+  // the margin. The board reserves the slot with an nbsp for the other half of this
+  // -- Chrome sizes a flex row by its children, bandContentH() does not.
+  const int bandH = drawHeaderBand(fb, fonts, "BOOK FINISHED", "",
                                    /*mark=*/nullptr, plane);
 
   const int usableW = fb.width() - 2 * kMargin;
   const Font& titleF = fonts[Role::Title700];
   const Font& bylineF = fonts[Role::Value500];
   const Font& metaF = fonts[Role::Meta400];
+
+  // --- The note's box, computed FIRST because it is a floor -----------------------
+  //
+  // `margin-top: auto` on the board, so the note hangs off the BOTTOM of the frame
+  // and not off the slabs. That is what keeps it still when the meta line is absent,
+  // and it is why the hint bar's height is ASKED FOR rather than assumed.
+  //
+  // Wrapped once, then both measured and drawn from that one Prose: two calls that
+  // each re-wrapped would be two chances to disagree, and the disagreement reads as a
+  // paragraph drifted off position.
+  // TRACKED, and the wrap is where the tracking has to arrive -- Prose carries it
+  // through to the draw precisely so the two cannot disagree. Passing it only to
+  // drawProse would wrap at one measure and paint at another, which is a line that
+  // breaks in the wrong place rather than a line that looks slightly off.
+  //
+  // It is wrapped up here rather than beside its draw because `noteTop` is the FLOOR
+  // the content block may not reach, and the byline's line budget is derived from it.
+  const Prose note = wrapProse(metaF, vm.note, usableW, kBookEndNoteLeadEm,
+                               trackingEm(metaF, kBookEndNoteEm));
+  const int barH = hintBarHeight(fonts, hints);
+  const int noteTop = fb.height() - barH - kBookEndNotePadBottom - f26ToPx(note.heightF26());
 
   // --- The content block, top-anchored under the band --------------------------
   //
@@ -409,12 +438,39 @@ void QuietTheme::renderBookEnd(Framebuffer& fb, const FontSet& fonts,
                   Ink::Black, trackingEm(titleF, kBookEndTitleEm), plane);
   yF26 += pxToF26(titleF.lineHeight() + kBookEndGap);
 
-  // The byline is untracked -- the board states no letter-spacing on it, and Value500
-  // is the role because the run carries `font-weight: 500` with no Value400 in the ramp.
-  drawCentredText(fb, bylineF, kMargin, usableW,
-                  baselineInF26(bylineF, yF26, pxToF26(bylineF.lineHeight())), vm.byline,
-                  Ink::Black, Tracking{}, plane);
-  yF26 += pxToF26(bylineF.lineHeight());
+  // THE BYLINE WRAPS, and it is the only run on this screen that does. It was one
+  // centred line, so a long title ran off BOTH margins on a real card -- and this is
+  // the run that now carries the book's name alone, the band having given the slot
+  // up. `WordBreak::Anywhere` is Home's and Book details' choice for the same reason:
+  // a title that fell back to a filename is usually one unbreakable word.
+  //
+  // `vm.byline` is passed DIRECTLY, and that is load-bearing: `Prose::lines` are
+  // views into the text handed to the wrap, so a temporary here would render a
+  // wrapped title as a column of notdef boxes while a short one came out fine --
+  // which is exactly the bug Home's title shipped with, invisible to every golden
+  // because a notdef box inks rows like a letter does. A view-model member outlives
+  // the render; `upperLatin1(...)` inline would not.
+  //
+  // The lead is the face's own line box, because the board states no `line-height`
+  // here -- which is also what makes a ONE-LINE byline bit-identical to the
+  // drawCentredText this replaced: drawProse's first baseline is
+  // baselineInF26(font, topF26, leadF26), which is that call's own argument.
+  //
+  // The budget is DERIVED, never pinned: what is left between this run's top and the
+  // note's, once the meta line and the two slabs have taken theirs. Unbounded, a long
+  // enough name pushes the slabs off the bottom -- the same defect as the overflow
+  // this fixes, turned ninety degrees, which is the case clampProse exists for.
+  const int metaH = vm.meta.empty() ? 0 : kBookEndGap + metaF.lineHeight();
+  const int slabsH = kBookEndSlabPadTop + 2 * kActionH + kBookEndGap;
+  int maxBylineLines = (noteTop - f26ToPx(yF26) - metaH - slabsH) / bylineF.lineHeight();
+  if (maxBylineLines < 1) maxBylineLines = 1;
+
+  std::string bylineTail;
+  Prose bylineProse = wrapProseLead(bylineF, vm.byline, usableW, pxToF26(bylineF.lineHeight()),
+                                    Tracking{}, WordBreak::Anywhere);
+  clampProse(bylineF, bylineProse, maxBylineLines, usableW, bylineTail);
+  yF26 += drawProse(fb, bylineF, bylineProse, kMargin, usableW, yF26, Ink::Black, plane,
+                    ProseAlign::Centre);
 
   // THE META LINE IS ABSENT, NOT BLANK, when the book's chapter count is unknown --
   // and ITS GAP GOES WITH IT. Adding the gap unconditionally would sit the slabs a
@@ -444,23 +500,8 @@ void QuietTheme::renderBookEnd(Framebuffer& fb, const FontSet& fonts,
   drawActionButton(fb, fonts, kMargin, slabY, usableW, vm.leaveLabel,
                    vm.focusedAction == BookEndScreen::kLeave, plane);
 
-  // --- The note, bottom-anchored above the hint bar ------------------------------
+  // --- The note, in the box measured at the top of this function -----------------
   //
-  // `margin-top: auto` on the board, so it hangs off the BOTTOM of the frame and not
-  // off the slabs. That is what keeps it still when the meta line is absent, and it
-  // is why the hint bar's height is ASKED FOR rather than assumed.
-  //
-  // Wrapped once, then both measured and drawn from that one Prose: two calls that
-  // each re-wrapped would be two chances to disagree, and the disagreement reads as a
-  // paragraph drifted off position.
-  // TRACKED, and the wrap is where the tracking has to arrive -- Prose carries it
-  // through to the draw precisely so the two cannot disagree. Passing it only to
-  // drawProse would wrap at one measure and paint at another, which is a line that
-  // breaks in the wrong place rather than a line that looks slightly off.
-  const Prose note = wrapProse(metaF, vm.note, usableW, kBookEndNoteLeadEm,
-                               trackingEm(metaF, kBookEndNoteEm));
-  const int barH = hintBarHeight(fonts, hints);
-  const int noteTop = fb.height() - barH - kBookEndNotePadBottom - f26ToPx(note.heightF26());
   // LEFT, not the Centre default: the board states no `text-align` on this block,
   // unlike the centred content block above it.
   drawProse(fb, metaF, note, kMargin, usableW, pxToF26(noteTop), Ink::Black, plane,

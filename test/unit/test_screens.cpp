@@ -59,7 +59,7 @@ TEST_CASE("a primed BookEnd states the facts it was given") {
   auto s = f.create(ScreenId::BookEnd);
   REQUIRE(s != nullptr);
   const auto& vm = static_cast<BookEndScreen*>(s.get())->vm();
-  CHECK(vm.bookTitle == "WALDEN");
+  CHECK(vm.byline == "Walden \xC2\xB7 Henry David Thoreau");
   CHECK(vm.meta == "18 CHAPTERS");
   // No Library beneath, so the slab names where it actually lands.
   CHECK(vm.leaveLabel == "BACK TO HOME");
@@ -71,7 +71,6 @@ TEST_CASE("the demo BookEnd is the board's own content") {
   auto s = f.create(ScreenId::BookEnd);
   REQUIRE(s != nullptr);
   const auto& vm = static_cast<BookEndScreen*>(s.get())->vm();
-  CHECK(vm.bookTitle == "MIDDLEMARCH");
   // design/Main.dc.html gives this same demo book `CH. 01 OF 24`, and two boards
   // drawing one demo book must agree.
   CHECK(vm.meta == "24 CHAPTERS");

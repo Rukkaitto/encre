@@ -125,6 +125,45 @@ bool rowsEqual(const Framebuffer& a, const Framebuffer& b, int y) {
 // rather than against a literal.
 constexpr int kSlabGap = 12;
 
+// NOTHING LEAVES THE PANEL. This screen draws no full-bleed fill of its own -- only
+// the two bars' rules run to x = 0 -- so ink in a margin is a run that overran its
+// box. Returns the number of full-bleed rows it skipped, so a caller can assert the
+// scan was not silently treating every row as one of the two rules.
+int marginsAreClear(const Framebuffer& fb) {
+  int ruleRows = 0;
+  for (int y = 0; y < fb.height(); ++y) {
+    bool fullBleed = true;
+    for (int x = 0; x < fb.width(); ++x)
+      if (!inked(fb, x, y)) {
+        fullBleed = false;
+        break;
+      }
+    if (fullBleed) {
+      ++ruleRows;
+      continue;
+    }
+    for (int x = 0; x < reader::kMargin; ++x) {
+      CAPTURE(y);
+      CAPTURE(x);
+      CHECK_FALSE(inked(fb, x, y));
+      CHECK_FALSE(inked(fb, fb.width() - 1 - x, y));
+    }
+  }
+  return ruleRows;
+}
+
+// Long in the two ways a real card is long, which are not the same case.
+//
+// A name with SPACES wraps at them and tests the ordinary path; a name with NONE has
+// no break opportunity at all, so only WordBreak::Anywhere keeps it on the panel --
+// and the filenames people actually have are underscore- or hyphen-joined, which CSS
+// offers no break at either. test_long_title.cpp makes the same distinction and for
+// the same reason.
+const char* const kLongSpaced =
+    "Middlemarch: A Study of Provincial Life, in Eight Books, with an Introduction";
+const char* const kLongUnbroken =
+    "Middlemarch_A_Study_of_Provincial_Life_George_Eliot_1871_unabridged_edition";
+
 }  // namespace
 
 // NOTHING LEAVES THE PANEL. This screen draws no full-bleed fill of its own -- only
@@ -140,30 +179,9 @@ TEST_CASE("BookEnd keeps every run inside the panel") {
       Framebuffer fb(p.w, p.h);
       paint(fb, r.fonts, theme, middlemarch(), focus);
 
-      int ruleRows = 0;
-      for (int y = 0; y < fb.height(); ++y) {
-        // A full-bleed row is one of the two rules and is the only thing allowed
-        // to ink column 0.
-        bool fullBleed = true;
-        for (int x = 0; x < fb.width(); ++x)
-          if (!inked(fb, x, y)) {
-            fullBleed = false;
-            break;
-          }
-        if (fullBleed) {
-          ++ruleRows;
-          continue;
-        }
-        for (int x = 0; x < reader::kMargin; ++x) {
-          CAPTURE(y);
-          CAPTURE(x);
-          CHECK_FALSE(inked(fb, x, y));
-          CHECK_FALSE(inked(fb, fb.width() - 1 - x, y));
-        }
-      }
-      // The band's 2px rule and the hint bar's 1px one -- so the loop above was
-      // not silently skipping every row as full-bleed.
-      CHECK(ruleRows == 3);
+      // The band's 2px rule and the hint bar's 1px one -- so the scan was not
+      // silently skipping every row as full-bleed.
+      CHECK(marginsAreClear(fb) == 3);
       // And something was actually drawn.
       CHECK(slabRuns(fb).size() >= 2u);
     }
@@ -250,6 +268,110 @@ TEST_CASE("BookEnd's note and hint bar do not follow the missing meta line") {
     for (int y = slabsBottom + 1; y < p.h; ++y) {
       CAPTURE(y);
       CHECK(rowsEqual(with, without, y));
+    }
+  }
+}
+
+// --- A long title -----------------------------------------------------------------
+//
+// THE BYLINE IS THE ONLY RUN ON THIS SCREEN THAT CARRIES THE BOOK'S OWN NAME, and it
+// carries it alone now that the header band has given the slot up. It was drawn with
+// drawCentredText, which draws ONE line and does not wrap, so a real card's title ran
+// off BOTH margins -- reported off the device.
+//
+// The two shapes are not one case: a title with spaces wraps at them, and a title with
+// none is on the panel only because the wrap is WordBreak::Anywhere.
+
+TEST_CASE("a long book title stays inside the margins, spaced or unbroken") {
+  ramp::Ramp r;
+  QuietTheme theme;
+  for (const Panel& p : kPanels) {
+    CAPTURE(p.w);
+    for (const char* title : {kLongSpaced, kLongUnbroken}) {
+      CAPTURE(title);
+      for (int focus = 0; focus < reader::BookEndScreen::kRowCount; ++focus) {
+        CAPTURE(focus);
+        reader::BookEndScreen::Facts f = middlemarch();
+        f.bookTitle = title;
+        Framebuffer fb(p.w, p.h);
+        paint(fb, r.fonts, theme, f, focus);
+        CHECK(marginsAreClear(fb) == 3);
+      }
+    }
+  }
+}
+
+// AND THE FIXTURE REACHES THE WRAP. Every assertion above is satisfied by a byline
+// that was silently elided to one line instead, which is what the run did before this
+// and is the thing being fixed -- so the long title must ink MORE rows than the short
+// one does. Same check, and the same reason, as Home's.
+TEST_CASE("a long book title WRAPS rather than eliding") {
+  ramp::Ramp r;
+  QuietTheme theme;
+  for (const Panel& p : kPanels) {
+    CAPTURE(p.w);
+    for (const char* title : {kLongSpaced, kLongUnbroken}) {
+      CAPTURE(title);
+      reader::BookEndScreen::Facts f = middlemarch();
+      f.bookTitle = title;
+
+      Framebuffer shortFb(p.w, p.h), longFb(p.w, p.h);
+      paint(shortFb, r.fonts, theme, middlemarch(), reader::BookEndScreen::kFinish);
+      paint(longFb, r.fonts, theme, f, reader::BookEndScreen::kFinish);
+
+      auto inkedRows = [](const Framebuffer& fb) {
+        int n = 0;
+        for (int y = 0; y < fb.height(); ++y)
+          for (int x = 0; x < fb.width(); ++x)
+            if (inked(fb, x, y)) {
+              ++n;
+              break;
+            }
+        return n;
+      };
+      CHECK(inkedRows(longFb) > inkedRows(shortFb));
+    }
+  }
+}
+
+// THE SAME DEFECT TURNED NINETY DEGREES. A wrap turns a width limit into a HEIGHT, and
+// this screen's slabs sit below the byline while its note and hint bar are anchored to
+// the bottom -- so an unbounded wrap pushes the slabs into them and off the glass. The
+// budget clampProse is given is derived from the note's own top, and this is what says
+// so: both slabs keep their full box, and everything below them is byte-identical to
+// the short-title frame, however pathological the name.
+TEST_CASE("BookEnd keeps its slabs whole and its note where it was, however long the title") {
+  ramp::Ramp r;
+  QuietTheme theme;
+  for (const Panel& p : kPanels) {
+    CAPTURE(p.w);
+    Framebuffer shortFb(p.w, p.h);
+    paint(shortFb, r.fonts, theme, middlemarch(), reader::BookEndScreen::kFinish);
+
+    for (int repeats = 1; repeats <= 8; ++repeats) {
+      CAPTURE(repeats);
+      reader::BookEndScreen::Facts f = middlemarch();
+      f.bookTitle.clear();
+      for (int i = 0; i < repeats; ++i) f.bookTitle += kLongUnbroken;
+
+      Framebuffer fb(p.w, p.h);
+      paint(fb, r.fonts, theme, f, reader::BookEndScreen::kFinish);
+
+      // Both slabs are still whole boxes of kActionH: a slab pushed off the bottom
+      // would lose rows, and one overlapping the note would stop being a solid run.
+      const std::vector<Box> boxes = slabBoxes(fb);
+      REQUIRE(boxes.size() == 2u);
+      CHECK(boxes[0].height() == reader::kActionH);
+      CHECK(boxes[1].height() == reader::kActionH);
+      CHECK(boxes[1].top - boxes[0].bottom - 1 == kSlabGap);
+
+      // And nothing the title did reached below them. The note and the hint bar are
+      // bottom-anchored, so their rows are the short frame's; the slack between is
+      // blank in both.
+      for (int y = boxes[1].bottom + 1; y < p.h; ++y) {
+        CAPTURE(y);
+        CHECK(rowsEqual(fb, shortFb, y));
+      }
     }
   }
 }

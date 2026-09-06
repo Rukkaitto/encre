@@ -30,7 +30,9 @@ reader::GestureEvent press(reader::Gesture g) {
 // and a count are CONTENT, and the theme has no business knowing a book has an author.
 TEST_CASE("BookEnd states the board's lines") {
   reader::BookEndScreen s(middlemarch());
-  CHECK(s.vm().bookTitle == "MIDDLEMARCH");
+  // NO BAND VALUE. The band's right slot held the shouted book name and now holds
+  // nothing: a long title squeezed `BOOK FINISHED` until the LABEL elided, and the
+  // slot said what the byline below already says.
   CHECK(s.vm().title == "THE END");
   CHECK(s.vm().byline == "Middlemarch \xC2\xB7 George Eliot");
   CHECK(s.vm().meta == "24 CHAPTERS");
