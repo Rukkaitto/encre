@@ -40,26 +40,13 @@ constexpr ScreenId kAllScreens[] = {
     ScreenId::ReaderMenu,  ScreenId::Contents,  ScreenId::SdMissing,
     ScreenId::Typography,  ScreenId::Peek,     ScreenId::BookEnd,
 };
-// AND IT NAMES THE LAST MEMBER, WHICH IS THE ONLY WAY IT BITES. It named
-// SdMissing, and Typography was APPENDED after it -- so the array's length still
-// equalled SdMissing + 1 and this assert passed over a screen missing from the
-// catalogue. Every append is a screen this guard silently lets through unless the
-// name here moves with it, which is the "reports on less than it claims" shape
-// three other checks in this repo have had.
-//
-// IT HAPPENED AGAIN, AND THIS GUARD IS ITSELF AN INSTANCE OF #42. It said `Peek`
-// while BookEnd was appended after it, so both sides read 13 and the build stayed
-// green over a screen the catalogue did not cover -- caught only because the two
-// hand-maintained counts below failed for an unrelated reason. Naming BookEnd means
-// the array can no longer be SHORT today, and that is all it means: the assert is
-// still pinned to a NAME rather than to whatever the last member happens to be, so
-// the next append needs this line moved BY HAND or it goes quiet again. #42 is the
-// general fix -- it has instances in more than one file -- and is deliberately not
-// attempted here.
+// NAMES THE SENTINEL, so an append cannot satisfy it unchanged. It used to name the
+// last member by hand -- `ScreenId::Peek + 1`, then `ScreenId::BookEnd + 1` -- and
+// both times an append left both sides equal and the guard that exists to force a
+// new screen into kAllScreens said nothing. That was #42.
 static_assert(sizeof(kAllScreens) / sizeof(kAllScreens[0]) ==
-                  static_cast<size_t>(ScreenId::BookEnd) + 1,
-              "a ScreenId was added or removed; give it a row in kAllScreens, and"
-              " name the LAST member here");
+                  static_cast<size_t>(ScreenId::Count),
+              "a ScreenId was added or removed; give it a row in kAllScreens");
 
 // One screen, plus whatever has to outlive it. The three screens built over a
 // Library hold a REFERENCE to it, so the Library cannot be a temporary -- and it

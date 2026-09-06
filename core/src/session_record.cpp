@@ -31,9 +31,11 @@ constexpr const char* kNames[] = {
 // while sessionWireName's fallthrough stored the new screen as `home`. That is the
 // same shape as #42 and as the three "reports on less than it claims" checks CLAUDE.md
 // records. A count against the enum's end cannot be left behind by an append.
-static_assert(sizeof(kNames) / sizeof(kNames[0]) ==
-                  static_cast<size_t>(ScreenId::BookEnd) + 1,
-              "a ScreenId was added: give it a wire name, in enum order");
+static_assert(sizeof(kNames) / sizeof(kNames[0]) == static_cast<size_t>(ScreenId::Count),
+              "a ScreenId was added or removed; give it a row in kNames and a case in"
+              " sessionWireName. This names the Count SENTINEL, never a member -- a"
+              " named member does not move when a screen is appended, which is how"
+              " Typography and then BookEnd each shipped serialising as `home`.");
 
 // Clamped so the encoded length is bounded. -1 is the floor rather than 0 because
 // it is a real position: Home's CONTINUE block, an empty Library.
@@ -42,7 +44,7 @@ constexpr int kFocusMax = 32767;
 
 bool decodeName(const char* start, size_t len, ScreenId& out) {
   if (len == 0) return false;
-  for (int i = 0; i <= static_cast<int>(ScreenId::BookEnd); ++i) {
+  for (int i = 0; i < static_cast<int>(ScreenId::Count); ++i) {
     const char* n = kNames[i];
     if (std::strlen(n) == len && std::strncmp(n, start, len) == 0) {
       out = static_cast<ScreenId>(i);
@@ -118,6 +120,9 @@ const char* sessionWireName(ScreenId id) {
     // the failure the note on ReaderMenu above says this table exists to prevent,
     // having already happened once to Contents.
     case ScreenId::BookEnd: return kNames[13];
+    // NOT A SCREEN, so it has no name and must never reach the fall-through below,
+    // which is what silently made a missing case read as `home`.
+    case ScreenId::Count: break;
   }
   return kNames[0];
 }

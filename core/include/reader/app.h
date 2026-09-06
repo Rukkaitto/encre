@@ -59,7 +59,18 @@ enum class ScreenId : uint8_t {
   // screen the catalogue does not cover. That is #42, and it is still open: it fires
   // only once the array grows, which is the wrong way round for a guard whose job is
   // to force the array to grow.
-  BookEnd
+  BookEnd,
+  // NOT A SCREEN. A bound, so a guard can name "one past the last member" without
+  // naming a member -- which is #42, and which had gone quiet twice by the time it
+  // was fixed: session_record.cpp spelled three bounds `<= ScreenId::Peek` and then
+  // `<= ScreenId::BookEnd`, and each append satisfied them unchanged while leaving
+  // the table short, so the new screen serialised as `home`.
+  //
+  // Nothing may give this a row, a name or a case. `sessionWireName` and
+  // `screenName` both refuse it, and the static_assert on kNames is what proves the
+  // table did not quietly grow one for it -- a sentinel that became serialisable
+  // would be a worse version of the bug this fixes.
+  Count
 };
 
 // A screen's name, for logs. Same reasoning as buttonName: a numeric ScreenId in

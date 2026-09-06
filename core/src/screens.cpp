@@ -537,6 +537,12 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       scr->setMetrics(peekMetrics_);
       return scr;
     }
+    // NOT A SCREEN -- see ScreenId::Count's own comment. Refused explicitly so this
+    // switch stays exhaustive and -Wswitch keeps working as the reminder that a NEW
+    // screen needs a case here. Falling through to the `return nullptr` below would
+    // behave identically and cost exactly that reminder.
+    case ScreenId::Count:
+      return nullptr;
   }
   return nullptr;
 }
