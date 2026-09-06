@@ -118,7 +118,21 @@ Refs #42"
 
 ---
 
-### Task 2: Append `ScreenId::BookError` and fix #42 with a `Count` sentinel
+### Task 2: Fix #42 with a `Count` sentinel
+
+> **AMENDED DURING EXECUTION.** This task originally appended `ScreenId::BookError`
+> *and* fixed #42 in one go, and Step 7 claimed the suite would pass with the factory
+> having no case for the new screen. **That was wrong.** `test_focus_restore.cpp`'s
+> `build()` helper does `REQUIRE(screen != nullptr)`, so every id in `kAllScreens` must
+> be buildable — and `kAllScreens` must cover every id, because the `static_assert`
+> says so. The append therefore forces the factory case, which forces the screen to
+> exist. The enum append moved to **Task 5**, and #42 landed alone.
+>
+> The reorder makes the proof stronger, not weaker. The defect was reproduced first
+> (append a screen, watch both guards stay silent — only a `-Wswitch` warning, which
+> is not an error here), and now the *later* append in Task 5 must fail the build
+> until its tables grow. That is the fix demonstrated by the very thing that used to
+> defeat it. Landed as `f1a54e0`, `Closes #42`.
 
 **Files:**
 - Modify: `core/include/reader/app.h` (the `ScreenId` enum)
@@ -386,10 +400,47 @@ Refs #5"
 ### Task 5: The view-model and the screen
 
 **Files:**
+- Modify: `core/include/reader/app.h` (append `ScreenId::BookError`)
+- Modify: `core/src/session_record.cpp` (its wire name)
+- Modify: `test/unit/test_focus_restore.cpp` (its catalogue row)
 - Modify: `core/include/reader/viewmodel.h`
 - Create: `core/include/reader/screen_book_error.h`
 - Create: `core/src/screen_book_error.cpp`
 - Create: `test/unit/test_screen_book_error.cpp`
+
+- [ ] **Step 0: Append the enum member, and let the guards force the tables**
+
+Task 2's sentinel means this append does NOT go quiet — it fails the build until
+every table grows. Do them in that order deliberately, so the guard is seen working.
+
+In `core/include/reader/app.h`, immediately after `BookEnd,` and BEFORE the `Count`
+sentinel's comment block:
+
+```cpp
+  // design/BookError.dc.html -- the dialog a book that will not open raises. The
+  // session record stores a screen by NAME, so appending cannot silently become
+  // another screen, and appending also leaves every existing ordinal where it was.
+  BookError,
+```
+
+Build. Expect **two `static_assert` failures** — `session_record.cpp`'s `kNames`
+and `test_focus_restore.cpp`'s `kAllScreens`. That is #42's fix working. Then:
+
+- add `"book-error",` as the last row of `kNames` in `core/src/session_record.cpp`;
+- add `case ScreenId::BookError: return kNames[14];` to `sessionWireName`, beside
+  `BookEnd`'s and above the `case ScreenId::Count: break;`;
+- add `ScreenId::BookError,` as the last row of `kAllScreens` in
+  `test/unit/test_focus_restore.cpp`;
+- add `case ScreenId::BookError: return "BOOK-ERROR";` to `screenName` in
+  `core/src/app.cpp` (kebab, as `BOOK-END` is — a log label, not the storage format).
+
+`test_focus_restore.cpp` walks every id through the factory with a hard
+`REQUIRE(screen != nullptr)`, so the suite stays RED until the factory case lands.
+That case is **Task 7 Step 3** and it is a hard dependency of this task: Task 5 is not
+green on its own. Land Task 5, 6 and 7's factory case together if the suite must be
+green before committing, or commit Task 5+6 red and note it — but do not invent a
+graceful skip in `test_focus_restore.cpp`, which would blunt the very guard Task 2
+just sharpened.
 
 - [ ] **Step 1: Write the failing test**
 
