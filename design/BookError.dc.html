@@ -93,14 +93,21 @@
 </div>
   </div>
   <div class="dim-veil" style="position: absolute; top: 0; left: 0; width: 480px; height: 800px;"></div>
-  <div style="position: absolute; top: 50%; transform: translateY(-50%); left: 50px; width: 380px; background: #ffffff; border: 2px solid #000000; box-sizing: border-box;">
+  <!-- The panel's `max-height: 100%; overflow: hidden` is the BOUND, and this board
+       needs it one run further down than DeleteConfirm.dc.html does. There the
+       caption carries the filename and is the part that grows; here the caption is
+       the fixed `CAN'T OPEN FILE` and the PARAGRAPH below carries the name, so the
+       paragraph is the unbounded run. FAT allows a 255-character name, and a panel
+       grown past the screen is centred -- so it is cut off at BOTH ends and its
+       buttons go under the hint bar. Cut off at the panel instead. -->
+  <div style="position: absolute; top: 50%; transform: translateY(-50%); left: 50px; width: 380px; max-height: 100%; overflow: hidden; background: #ffffff; border: 2px solid #000000; box-sizing: border-box;">
 
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 21px 20px; border-bottom: 2px solid #000000;">
   <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">CAN&rsquo;T OPEN FILE</div>
 </div>
   <div style="padding: 18px 20px; display: flex; flex-direction: column; gap: 12px;">
     <svg width="32" height="28" viewBox="0 0 18 16" fill="none"><path d="M9 1 17 15H1z" stroke="#000000" stroke-width="1.6"></path><path d="M9 6v4" stroke="#000000" stroke-width="1.6"></path><rect x="8.3" y="11.6" width="1.4" height="1.4" fill="#000000"></rect></svg>
-    <div style="font-size: var(--t-body); line-height: 1.45;">&ldquo;dubliners.epub&rdquo; appears to be damaged and can&rsquo;t be opened. The file was left untouched on the card.</div>
+    <div style="font-size: var(--t-body); line-height: 1.45; overflow-wrap: anywhere;">&ldquo;dubliners.epub&rdquo; appears to be damaged and can&rsquo;t be opened. The file was left untouched on the card.</div>
   </div>
   <div style="display: flex; flex-direction: column; gap: 12px; padding: 0 20px 20px 20px;">
     <div style="background: #000000; color: #ffffff; height: 68px; display: flex; align-items: center; justify-content: center;">

@@ -859,12 +859,14 @@ void QuietTheme::renderBookError(Framebuffer& fb, const FontSet& fonts,
   // panel's own bottom edge hangs off that. Two wraps would be two chances to
   // disagree, and the disagreement reads as a paragraph drifted off centre.
   //
-  // `WordBreak::Anywhere` IS renderDeleteConfirm's CAPTION rule arriving one slot
-  // down. This board puts the filename in the PARAGRAPH, and a filename is
-  // frequently one unbreakable word -- so under the default `Normal` a real card's
-  // name is one line WIDER than the column, drawn straight through the panel's right
-  // border and off the glass, with the rest of the name lost. Rendered and looked at,
-  // not reasoned about.
+  // `WordBreak::Anywhere` IS THE BOARD'S `overflow-wrap: anywhere` on the paragraph,
+  // and renderDeleteConfirm's CAPTION rule arriving one slot down: this board puts
+  // the filename in the PARAGRAPH, and a filename is frequently one unbreakable word
+  // -- so under the default `Normal` a real card's name is one line WIDER than the
+  // column, drawn straight through the panel's right border and off the glass, with
+  // the rest of the name lost. Rendered and looked at, not reasoned about; both
+  // boards declare it, because a behaviour invented in code silently invalidates
+  // `make compare`.
   // DECLARED BEFORE THE WRAP IT WILL BE VIEWED BY, which is renderDeleteConfirm's
   // order: clampProse's elided last line is a new string that is not in the wrapped
   // text, so it must outlive the Prose that views it.
