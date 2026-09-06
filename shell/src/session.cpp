@@ -16,6 +16,10 @@ namespace {
 // in one place rather than inline at each call.
 constexpr const char* kNamespace = "encre_sess";
 constexpr const char* kKeySlept = "slept";
+// 8 characters, inside NVS's 15. See session.h for why this is not the `slept`
+// flag with a second meaning: the resume gate it licenses is strict, and a strict
+// gate applied to every boot would refuse a perfectly usable 10% battery.
+constexpr const char* kKeyCritShut = "critShut";
 constexpr const char* kKeyVersion = "ver";
 constexpr const char* kKeyStack = "stack";
 
@@ -177,6 +181,37 @@ bool takeSleptFlag() {
   if (slept) prefs.remove(kKeySlept);
   prefs.end();
   return slept != 0;
+}
+
+bool markCriticalShutdown() {
+  Preferences prefs;
+  if (!prefs.begin(kNamespace, false)) {
+    Serial.printf("[session] could not open %s to record the critical shutdown; the next "
+                  "boot will not enforce CHARGE TO WAKE and will come up on a flat pack\n",
+                  kNamespace);
+    Serial.flush();
+    return false;
+  }
+  const bool ok = prefs.putUChar(kKeyCritShut, 1) == sizeof(uint8_t);
+  prefs.end();
+  if (!ok) {
+    Serial.printf("[session] the critical-shutdown flag did not store; the next boot will "
+                  "not enforce CHARGE TO WAKE\n");
+    Serial.flush();
+  }
+  return ok;
+}
+
+bool takeCriticalShutdownFlag() {
+  Preferences prefs;
+  // Read-write, because taking the flag clears it -- see the header. One flag buys
+  // exactly one refusal, so a boot that sets out to refuse and then panics does not
+  // refuse for ever.
+  if (!prefs.begin(kNamespace, false)) return false;
+  const uint8_t crit = prefs.getUChar(kKeyCritShut, 0);
+  if (crit) prefs.remove(kKeyCritShut);
+  prefs.end();
+  return crit != 0;
 }
 
 bool clearSession() {

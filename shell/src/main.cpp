@@ -3667,6 +3667,66 @@ static void requireHeldPowerButtonOrSleepAgain(bool fromSleep, esp_reset_reason_
   freeink::PowerManager::deepSleepUntilPowerButton();
 }
 
+// `CHARGE TO WAKE`, made true after the wake -- because the SoC cannot make it true
+// before one. The wake source is the power button and there is no charge-detect
+// anywhere on that path, so the board's promise is enforced exactly as
+// HOLD POWER TO WAKE is: by refusing a resume that does not satisfy it.
+//
+// Returns only when the resume is accepted. A refusal re-arms both flags, powers the
+// rails back down and does not return.
+//
+// AFTER THE HOLD GATE, because that is the cheaper refusal and already stands: a
+// brush against the button in a bag should be refused for the HOLD reason without
+// spending an I2C transaction.
+//
+// AFTER detectAndSelectBoard(), because it needs the profile -- and safely so:
+// readStatus() tests BoardConfig::ACTIVE.batteryGauge.gaugeAddr LIVE rather than
+// from BatteryMonitor's cached members, which is what makes the file-scope static
+// (constructed before setup() runs, from the compile-time default) correct here.
+//
+// AND STILL BEFORE display.begin(), which is the whole cost of the feature: e-ink
+// holds its last image, so the glass is still showing the BATTERY EMPTY screen the
+// shutdown painted. A refusal repaints nothing and spends no waveform. One line
+// later, past the panel bring-up, and every brush against the button on a flat
+// device costs a flash.
+static void requireChargeOrSleepAgain() {
+  if (!takeCriticalShutdownFlag()) return;
+
+  const reader::BatteryReading r = readBattery();
+  const int pct = r.percentKnown ? r.percent : -1;
+
+  // A READING THAT DID NOT ANSWER LETS THE DEVICE BOOT. The alternative is a brick:
+  // a gauge that has failed would refuse every wake for ever, and the ladder in
+  // loop() will shut the device down again ten seconds later if the pack really is
+  // flat. Fail open here, fail safe there.
+  if (pct < 0 || pct >= reader::BatteryTracker::kResumePercent) {
+    logf("[boot] battery pct=%d critShut=1 -> RESUME (needs %d)\n", pct,
+         reader::BatteryTracker::kResumePercent);
+    logFlush();
+    return;
+  }
+
+  logf("[boot] battery pct=%d critShut=1 -> refused, needs %d. Sleeping again; nothing "
+       "was painted\n",
+       pct, reader::BatteryTracker::kResumePercent);
+
+  // GIVE BOTH FLAGS BACK. takeCriticalShutdownFlag() consumed one on the way in and
+  // setup() consumed `slept` a few lines above; this wake spent neither, because the
+  // device is going straight back to the state that set them. Without the `slept`
+  // half the NEXT wake -- the real one, once charged -- reads as a cold start and the
+  // reader loses the page they were on, which would be blamed on the restore.
+  markCriticalShutdown();
+  markSleeping();
+  logFlush();
+
+  // NO display.deepSleep(): begin() has not run, so there is no initialised driver
+  // to ask, and the controller was put into DSLP by the shutdown this is returning
+  // to. Cutting the rails is what holds the current down. Identical to the hold
+  // gate's refusal path, and for the same reasons.
+  freeink::PowerManager::powerDownRailsForSleep();
+  freeink::PowerManager::deepSleepUntilPowerButton();
+}
+
 void setup() {
   // A BIGGER TX RING, BEFORE begin() ALLOCATES IT. HWCDC::write posts what fits
   // the ring without blocking and then blocks for the remainder until the host
@@ -3766,6 +3826,13 @@ void setup() {
   // refused here, before display.begin(), so it costs no waveform and nothing on
   // the glass changes.
   requireHeldPowerButtonOrSleepAgain(fromSleep, rst);
+
+  // MAY NOT RETURN. See the definition: a resume on a pack that is still flat is
+  // refused here, BEFORE display.begin(), so it costs no waveform and nothing on
+  // the glass changes -- e-ink holds its last image, which is still the BATTERY
+  // EMPTY screen the shutdown painted. This is requireHeldPowerButtonOrSleepAgain's
+  // argument verbatim, one line later.
+  requireChargeOrSleepAgain();
 
   display.begin();
   mark("display-begin-returned");
