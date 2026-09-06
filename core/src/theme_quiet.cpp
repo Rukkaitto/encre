@@ -954,14 +954,9 @@ constexpr int kSleepRuleH = 2;
 constexpr int kSleepBarW = 170;
 constexpr int kSleepBarH = 8;
 constexpr int kSleepBarTopGap = 8;  // the bar's own `margin-top`, on top of the gap
-constexpr int kSleepBadgeBottom = 34;
-constexpr int kSleepBadgePadX = 18;
-constexpr int kSleepBadgePadY = 8;
-constexpr int kSleepBadgeBorder = 1;
 constexpr int kSleepLabelEm = 260;   // NOW READING, 0.26em
 constexpr int kSleepAuthorEm = 220;  // 0.22em
 constexpr int kSleepProgressEm = 140;
-constexpr int kSleepNoteEm = 200;
 
 }  // namespace
 
@@ -1093,16 +1088,7 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   // cover and the words, never the cover and the reading card. See
   // SleepViewModel::waking, which carries the whole of this reasoning.
   if (coverOnly && !vm.waking) return;
-  const int noteW = note.measure(vm.note, trackingEm(note, kSleepNoteEm));
-  const int badgeW = noteW + 2 * (kSleepBadgeBorder + kSleepBadgePadX);
-  const int badgeH = note.lineHeight() + 2 * (kSleepBadgeBorder + kSleepBadgePadY);
-  const int badgeX = centreIn(0, fb.width(), badgeW);
-  const int badgeY = fb.height() - kSleepBadgeBottom - badgeH;
-  fb.fillRect(badgeX, badgeY, badgeW, badgeH, true);
-  outlineRect(fb, badgeX, badgeY, badgeW, badgeH, kSleepBadgeBorder);
-  drawText(fb, note, badgeX + kSleepBadgeBorder + kSleepBadgePadX,
-           baselineIn(note, badgeY + kSleepBadgeBorder + kSleepBadgePadY, note.lineHeight()),
-           vm.note, Ink::Black, trackingEm(note, kSleepNoteEm), plane);
+  drawBadge(fb, note, vm.note, plane);
 }
 
 // --- Settings ----------------------------------------------------------------
