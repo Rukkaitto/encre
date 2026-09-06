@@ -94,7 +94,7 @@ inline constexpr int kHintEm = 120;        // 0.12em, hint bar label
 // Sleep badge's tracking rather than the hint bar's. A hint label sits beside a
 // mark and is read as one of four; this is a single centred statement with the
 // whole bar to itself, and it is the same run Sleep already uses for exactly that
-// (design/Sleep.dc.html's `ASLEEP - PRESS POWER TO WAKE`, and SleepWaking's
+// (design/Sleep.dc.html's `ASLEEP - HOLD POWER TO WAKE`, and SleepWaking's
 // `WAKING...` in the same badge). One spelling for one kind of line.
 inline constexpr int kStatusEm = 200;
 inline constexpr int kMetaEm = 160;        // 0.16em, the page-count meta line
@@ -768,7 +768,10 @@ int drawPanelCaption(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
 int panelRowHeight(bool rule);
 // `value` is the row's right slot where the board gives one, and empty where it draws
 // a chevron -- a row states a quantity or discloses a screen, never both. Defaulted
-// empty so the actions panel, which only ever discloses, is unchanged.
+// empty so the actions panel, which only ever discloses, is unchanged; with the reader
+// menu's `Bookmarks` row cut (#55) that default is what EVERY caller takes, and the
+// value path keeps its own test at the primitive rather than becoming a claim nobody
+// runs, the way `labelTrackingEm1000` did when `Close book` went.
 int drawPanelRow(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
                  std::string_view label, bool focused, bool discloses, bool rule,
                  Plane plane = Plane::Bw, std::string_view value = {},

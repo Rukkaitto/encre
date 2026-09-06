@@ -75,6 +75,12 @@ target_link_libraries(corpus_probe PRIVATE reader_core)
 target_compile_options(corpus_probe PRIVATE ${READER_WARNINGS})
 target_compile_definitions(corpus_probe PRIVATE READER_DESKTOP=1)
 
+add_executable(paging_probe ${CMAKE_SOURCE_DIR}/tools/paging_probe.cpp)
+target_link_libraries(paging_probe PRIVATE reader_core)
+target_compile_options(paging_probe PRIVATE ${READER_WARNINGS})
+target_compile_definitions(paging_probe PRIVATE READER_DESKTOP=1
+  ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+
 add_executable(reader_sim ${CMAKE_SOURCE_DIR}/sim/main.cpp)
 target_link_libraries(reader_sim PRIVATE reader_core)
 target_compile_options(reader_sim PRIVATE ${READER_WARNINGS})

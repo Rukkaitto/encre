@@ -6,20 +6,28 @@ namespace reader {
 
 namespace {
 
-// The board's five rows. `value` is the row's right slot where the board puts one and
+// The board's four rows. `value` is the row's right slot where the board puts one and
 // empty where it draws a chevron -- the same "a row states a quantity or discloses a
 // screen, never both" rule the menu rows on Home follow.
 //
 // WHAT RESPONDS is the second flag, and it is a statement about what exists rather
-// than about the design: Bookmarks has a board and no screen (#3). Each becomes
-// focusable in the commit that gives it something to do, and Typography's is that
-// commit -- design/Typography.dc.html is built, so the row opens it.
+// than about the design: Names has a board and no screen. It becomes focusable in the
+// commit that gives it something to do, exactly as Typography's did.
 //
-// NO TRACKING COLUMN. `Close book` was the only row on any panel in this firmware that
-// the boards letter-spaced, so with it gone `ListRow::trackingEm1000` and
-// `drawPanelRow`'s label tracking have NO producer. The plumbing stays -- it is a
-// generic component parameter and a board can ask for it again -- but nothing exercises
-// it now, so it is untested capability rather than working behaviour.
+// NEITHER A TRACKING COLUMN NOR A VALUE ONE. `Close book` was the only row on any panel
+// in this firmware that the boards letter-spaced, and `Bookmarks` was the only one that
+// stated a count; with both gone, `ListRow::trackingEm1000`, `ListRow::value` on THIS
+// view-model and `drawPanelRow`'s two optional arguments have no producer here. The
+// plumbing stays -- they are generic component parameters, Bookmarks (#3) is the board
+// that asks for the value again, and `ListRow::value` is still driven by Settings,
+// Contents and Typography through their own row primitives.
+//
+// THE DIFFERENCE BETWEEN THEM IS WHETHER ANYTHING EXERCISES THE DRAWING. Tracking is
+// untested capability, which this file has said since `Close book` went. The value path
+// is not: test_components.cpp drives `drawPanelRow`'s value slot directly, so what a
+// board asks for again is behaviour that still works rather than a parameter nobody has
+// run since its last caller left. That test is the deliberate answer to "does the value
+// path keep a test or go" -- the pixels are cheaper to keep honest than to re-derive.
 struct Item {
   const char* label;
   const char* value;
@@ -29,12 +37,10 @@ struct Item {
 constexpr Item kItems[ReaderMenuScreen::kRowCount] = {
     {"Contents", "", true, true},
     {"Typography", "", true, true},
-    // The board shows `2`, a bookmark count. Zero would be a claim about a feature that
-    // cannot make one, so the row carries the board's own value and does not act.
-    {"Bookmarks", "2", false, false},
-    // The character index another branch boards as Names.dc.html. Drawn and inert like
-    // its four unbuilt siblings -- it becomes focusable in the commit that gives it a
-    // screen, and needs no change here when it does.
+    // The character index another branch boards as Names.dc.html. Drawn and inert -- it
+    // becomes focusable in the commit that gives it a screen, and needs no change here
+    // when it does. It is the LAST row that may be, too: a row waits on its own screen
+    // within a release, where `Bookmarks` was waiting on the next one and was cut.
     {"Names", "", false, true},
     // ABOUT THIS BOOK OPENS BOOK DETAILS, and it was inert because that screen used to be
     // built from the LIBRARY's focused row -- fine from the Library and wrong from a

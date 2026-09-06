@@ -146,7 +146,7 @@ reader::SleepViewModel sampleWithCover(reader::SleepShows shows) {
   vm.author = "Ring Lardner";
   vm.progressPercent = 34;
   vm.progress = "34% \xC2\xB7 CH. 07";
-  vm.note = "ASLEEP \xC2\xB7 PRESS POWER TO WAKE";
+  vm.note = "ASLEEP \xC2\xB7 HOLD POWER TO WAKE";
   vm.shows = shows;
   return vm;
 }

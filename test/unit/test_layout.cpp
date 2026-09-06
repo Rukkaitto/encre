@@ -1022,3 +1022,57 @@ TEST_CASE("justify defaults to true, which is design/Reader.dc.html's own") {
   const PageMetrics m;
   CHECK(m.justify);
 }
+
+TEST_CASE("startAt: a builder that has not reached its cursor yet has NO page to give") {
+  // THE BUG A READER SEES AS A DOUBLED PAGE. `ready()` asked only whether the row
+  // budget was spent, and `row_` is charged for a block's BLANK ROWS while the
+  // builder is still skipping to its start cursor -- and nothing resets it until the
+  // skip ends. Over a few hundred skipped blocks it therefore climbs to `rows_`, the
+  // builder reports ready with nothing on the page, and `ReaderScreen::seekTo` takes
+  // an EMPTY page that consumes an index slot.
+  //
+  // Everything after that is one slot out: the page that really began at the target
+  // is cached under the NEXT page's cursor and handed back as the next page, and the
+  // index then records two consecutive pages starting at the same cursor. On glass
+  // that is the same page twice with the number advanced -- reported off the device,
+  // and reproduced over 8 of the 16 books in one real library.
+  //
+  // Kinds ALTERNATE because that is what charges a blank row: blankRowsBefore gives
+  // one whenever a heading, a blockquote or a list boundary is crossed, so a stream
+  // of plain paragraphs never reproduces this.
+  Body b;
+  const PageMetrics m = boardMetrics();
+  reader::PageBuilder pb(b.face, m);
+  REQUIRE(pb.viable());
+
+  const int kTarget = 400;  // far enough in that the skip crosses many blank rows
+  pb.startAt(Cursor{kTarget, 0});
+
+  int taken = 0, empties = 0;
+  Cursor firstStart{-1, -1};
+  // ...AND ENOUGH BLOCKS PAST IT TO FILL A PAGE, or the assertions below are
+  // reached with nothing taken and pass by saying nothing. `taken` is REQUIREd
+  // below for exactly that reason.
+  for (int i = 0; i <= kTarget + 60; ++i) {
+    const BlockKind kind = (i % 3 == 0) ? BlockKind::Heading : BlockKind::Paragraph;
+    const reader::Block blk{kind, "A sentence of quite ordinary words, long enough to wrap "
+                                  "across more than one line of the column it is set in."};
+    pb.add(blk, i);
+    while (pb.ready()) {
+      const Cursor was = pb.pageStart();
+      const Page p = pb.take();
+      if (taken == 0) firstStart = was;
+      ++taken;
+      if (p.lines.empty()) ++empties;
+    }
+  }
+
+  // A page with no lines is not a page. Nothing downstream can tell one from a real
+  // one, and both `seekTo` and `advance` spend an index slot on whatever take()
+  // hands back.
+  CHECK(empties == 0);
+  REQUIRE(taken > 0);  // the fixture must actually reach a page, or nothing is tested
+  // And the first page it does give must begin exactly where it was asked to begin.
+  CHECK(firstStart.block == kTarget);
+  CHECK(firstStart.line == 0);
+}

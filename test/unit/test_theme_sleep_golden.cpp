@@ -29,7 +29,7 @@ reader::SleepViewModel sampleSleep() {
   vm.author = "George Eliot";
   vm.progressPercent = 6;
   vm.progress = "6% \xC2\xB7 CH. 01";
-  vm.note = "ASLEEP \xC2\xB7 PRESS POWER TO WAKE";
+  vm.note = "ASLEEP \xC2\xB7 HOLD POWER TO WAKE";
   return vm;
 }
 

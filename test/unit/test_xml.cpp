@@ -210,11 +210,24 @@ TEST_CASE("an empty document is Eof, not an error") {
   CHECK(x.next() == Node::Eof);
 }
 
-TEST_CASE("more attributes than the cap is a refusal") {
+TEST_CASE("more attributes than the cap is a drop, by the same rule as the bytes") {
+  // ONE RULE, NOT TWO: an attribute this parser cannot hold reads as absent,
+  // whether what ran out was the byte buffer or the slot table. The two caps sit
+  // four lines apart in the header and a reader who learned one would assume the
+  // other. Observed maximum on one tag across 226 real EPUBs is EIGHT, on an
+  // <html> carrying namespace declarations -- so this cap has never been reached
+  // by a real book, and the shape it would meet first is more xmlns nobody reads.
   std::string doc = "<a";
   for (size_t i = 0; i <= Xml::kMaxAttrs; ++i) doc += " a" + std::to_string(i) + "='v'";
   doc += "/>";
-  CHECK_FALSE(parses(doc));
+  CHECK(parses(doc));
+
+  Xml x(doc);
+  REQUIRE(x.next() == Node::StartTag);
+  CHECK(x.attr("a0") == "v");
+  CHECK(x.attr("a" + std::to_string(Xml::kMaxAttrs - 1)) == "v");
+  CHECK_FALSE(x.hasAttr("a" + std::to_string(Xml::kMaxAttrs)));
+  CHECK(x.attrsDropped() == 1);
 }
 
 TEST_CASE("a name longer than the cap is a refusal") {
@@ -377,18 +390,91 @@ TEST_CASE("an entity is never split across two Text nodes") {
   }
 }
 
-TEST_CASE("a tag with more attribute bytes than the buffer holds is refused") {
-  // Unlike a text run this CANNOT be split: attr() answers about the whole tag.
-  // So it is a refusal, and the cap is 3x the fattest tag measured in a real book
-  // (160 bytes across 143,119 attributes).
+TEST_CASE("an attribute too big for the buffer is DROPPED, not a refusal") {
+  // It cannot be split -- attr() answers about the whole tag -- and for two phases
+  // the conclusion drawn from that was "therefore refuse the document". There is a
+  // third answer: report it ABSENT, which every caller of this parser already
+  // handles, and which no caller can be hurt by for an attribute it never reads.
+  //
+  // Measured over 226 real EPUBs: every tag carrying more than 400 bytes of
+  // attributes is a Calibre `<meta name="calibre:user_metadata:#...">`, and the
+  // fattest tag that is NOT one is an `<html>` at 379 bytes of namespace
+  // declarations. So the only thing this cap ever refuses is metadata, and it
+  // refused the whole book with it.
   std::string doc = "<item";
   for (int i = 0; i < 12; ++i) doc += " attribute" + std::to_string(i) + "=\"" +
                                      std::string(60, 'v') + "\"";
   doc += "/>";
-  CHECK_FALSE(parses(doc));
-  // And a realistic tag is nowhere near it.
-  CHECK(parses("<item id=\"ch1\" href=\"OEBPS/ch1.xhtml\" "
-               "media-type=\"application/xhtml+xml\" properties=\"nav\"/>"));
+  CHECK(parses(doc));
+  // And a realistic tag is nowhere near it, so nothing is dropped from one.
+  Xml x("<item id=\"ch1\" href=\"OEBPS/ch1.xhtml\" "
+        "media-type=\"application/xhtml+xml\" properties=\"nav\"/>");
+  REQUIRE(x.next() == Node::StartTag);
+  CHECK(x.attr("href") == "OEBPS/ch1.xhtml");
+  CHECK(x.attrsDropped() == 0);
+}
+
+TEST_CASE("a dropped attribute reads as ABSENT, never as a truncated value") {
+  // The distinction is the whole reason this is a drop and not a clamp: a
+  // truncated href resolves to a path that is wrong rather than to nothing, and a
+  // caller cannot tell a short value from a cut one. `hasAttr` exists precisely to
+  // tell absent from empty, so it must say absent here.
+  // NAMED, because Xml's string_view constructor holds a view and a temporary
+  // std::string would be freed before the first next(). This project has already
+  // shipped that exact lifetime bug once, in Home's wrapped title.
+  const std::string doc =
+      "<meta name='calibre:user_metadata' content='" +
+      std::string(Xml::kMaxAttrBytes, 'v') + "'/>";
+  Xml x(doc);
+  REQUIRE(x.next() == Node::StartTag);
+  CHECK(x.name() == "meta");
+  CHECK(x.attr("name") == "calibre:user_metadata");  // the one before it survives
+  CHECK_FALSE(x.hasAttr("content"));
+  CHECK(x.attr("content") == "");
+  CHECK(x.attrsDropped() == 1);
+  CHECK(x.next() == Node::EndTag);
+  CHECK(x.next() == Node::Eof);
+}
+
+TEST_CASE("dropping an attribute gives its bytes back to the ones after it") {
+  // The order of a tag's attributes is the author's, so the blob can come FIRST --
+  // and if a drop did not rewind the packing offset, everything after it would be
+  // dropped too and a book would lose the href it needed for the metadata it did
+  // not. This is the case that fails if the rewind is missing.
+  const std::string doc = "<item content='" + std::string(Xml::kMaxAttrBytes, 'v') +
+                          "' id='ch1' href='OEBPS/ch1.xhtml'/>";
+  Xml x(doc);
+  REQUIRE(x.next() == Node::StartTag);
+  CHECK_FALSE(x.hasAttr("content"));
+  CHECK(x.attr("id") == "ch1");
+  CHECK(x.attr("href") == "OEBPS/ch1.xhtml");
+  CHECK(x.attrsDropped() == 1);
+}
+
+TEST_CASE("the real Calibre meta that refused two books in one library") {
+  // `Walden` and `Le soleil et l'acier`, both from the same shelf, both refused with
+  // "the OPF is malformed" over ONE <meta> of Calibre custom-column JSON: 574 and
+  // 489 decoded bytes of `content` against a 512-byte cap. Entity-heavy, because
+  // the JSON's every quote is written `&quot;` -- which is what makes the raw
+  // attribute nearly twice its decoded length.
+  std::string blob;
+  while (blob.size() < 700) blob += "&quot;is_multiple&quot;: null, ";
+  const std::string doc =
+      "<package><metadata>"
+      "<meta name='calibre:user_metadata:#formats' content='{" + blob + "}'/>"
+      "<meta name='cover' content='book-cover'/>"
+      "</metadata></package>";
+  Xml x(doc);
+  REQUIRE(x.next() == Node::StartTag);  // package
+  REQUIRE(x.next() == Node::StartTag);  // metadata
+  REQUIRE(x.next() == Node::StartTag);  // the blob
+  CHECK(x.attr("name") == "calibre:user_metadata:#formats");
+  CHECK_FALSE(x.hasAttr("content"));
+  REQUIRE(x.next() == Node::EndTag);
+  REQUIRE(x.next() == Node::StartTag);  // and the NEXT meta is read normally
+  CHECK(x.attr("name") == "cover");
+  CHECK(x.attr("content") == "book-cover");
+  CHECK(x.attrsDropped() == 1);
 }
 
 TEST_CASE("a name at the cap parses and one past it is refused") {

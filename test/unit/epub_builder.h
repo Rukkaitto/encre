@@ -295,4 +295,24 @@ inline std::string withDeflatedCoverImage(const std::string& bytes) {
                           detail::coverItem(""), bytes, true, true);
 }
 
+// THE CALIBRE BLOB THAT REFUSED TWO REAL BOOKS. Calibre writes one <meta> per
+// custom column, each a JSON dump of that column's definition, and one of them was
+// 574 decoded bytes on `Walden` and 489 on `Le soleil et l'acier` -- both from the
+// same shelf, both reported as "the OPF is malformed" against Xml::kMaxAttrBytes.
+//
+// IT IS PLACED BEFORE THE COVER META ON PURPOSE. The blob has to be something the
+// walk reads PAST rather than the last thing it reads, or the fixture cannot show
+// that the OPF's own facts survive it -- which is the whole claim.
+//
+// The quotes are written as entities because Calibre writes them that way, and that
+// is what makes the raw attribute nearly twice its decoded length.
+inline std::string withCalibreUserMetadata() {
+  std::string blob;
+  while (blob.size() < 700) blob += "&quot;is_multiple&quot;: null, ";
+  return detail::assemble(
+      "<meta name=\"calibre:user_metadata:#formats\" content=\"{" + blob + "}\"/>"
+      "<meta name=\"cover\" content=\"cover-img\"/>",
+      detail::coverItem(""), kFakeCoverBytes, true);
+}
+
 }  // namespace epubbuild

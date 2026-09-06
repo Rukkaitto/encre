@@ -357,3 +357,62 @@ TEST_CASE("a restream between every turn does not change what any page says") {
     CHECK(readerfix::pageText(r.scr->page()) == text[static_cast<size_t>(want)]);
   }
 }
+
+TEST_CASE("an interrupted count never leaves two pages starting in the same place") {
+  // THE DOUBLED PAGE, AS A READER MEETS IT. Reported off the device: turn the page
+  // and the same page comes back with the number advanced.
+  //
+  // The path is the one this file is about. An abandoned count drops `pb_`, so the
+  // next forward turn goes through seekTo -- which rewinds and re-walks from
+  // `starts_[p - (depth-1)]`, skipping everything before it. PageBuilder charged a
+  // block's blank rows to `row_` while it was still skipping, `row_` accumulated
+  // across every skipped block, and once it reached `rows_` the builder claimed a
+  // page it had not begun. seekTo took that EMPTY page, it spent an index slot, and
+  // every page after it was cached and returned one slot out -- so the index ended
+  // up recording two consecutive pages with the same start cursor.
+  //
+  // THE KINDS MUST ALTERNATE, and that is why no existing fixture could reach this:
+  // blankRowsBefore charges a row only when a heading, a blockquote or a list
+  // boundary is crossed, and readerfix::longChapter is paragraphs all the way down.
+  // A stream of plain paragraphs never charges a blank row, so `row_` never climbs
+  // and the bug is invisible -- which is a fact about the FIXTURE, not about the
+  // code it was pointed at.
+  std::string ch;
+  ch = "<html><body>";
+  for (int i = 0; i < 160; ++i) {
+    ch += "<h2>Section " + std::to_string(i) + "</h2>";
+    ch += "<p>A paragraph of quite ordinary words, numbered " + std::to_string(i) +
+          ", long enough to wrap across more than one line of the column.</p>";
+  }
+  ch += "</body></html>";
+
+  cardfix::CardReading r(ch);
+  REQUIRE(r.scr->pageCount() > 0);
+
+  std::vector<reader::Cursor> cursors;
+  std::vector<std::string> texts;
+  cursors.push_back(r.scr->currentCursor());
+  texts.push_back(readerfix::pageText(r.scr->page()));
+
+  for (int i = 0; i < 40; ++i) {
+    // The count abandoned the instant it is asked, which is a press landing inside
+    // the quiet window -- the common case on a device that is being read.
+    if (r.scr->indexPending())
+      CHECK_FALSE(r.scr->completeIndex([](void*) { return true; }, nullptr));
+    const int was = r.scr->pageIndex();
+    r.scr->onGesture({reader::Gesture::Next});
+    if (r.scr->pageIndex() == was) break;  // the chapter ended
+    cursors.push_back(r.scr->currentCursor());
+    texts.push_back(readerfix::pageText(r.scr->page()));
+  }
+
+  // Enough turns to get past the ring's depth and into the skipping walk, or the
+  // assertions below are reached without exercising anything.
+  REQUIRE(cursors.size() > 8);
+
+  for (size_t i = 1; i < cursors.size(); ++i) {
+    CAPTURE(i);
+    CHECK(cursors[i] != cursors[i - 1]);
+    CHECK(texts[i] != texts[i - 1]);
+  }
+}
