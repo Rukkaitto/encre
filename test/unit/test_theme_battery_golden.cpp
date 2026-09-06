@@ -9,6 +9,7 @@
 #include "ramp.h"
 #include "reader_fixture.h"
 #include "reader/framebuffer.h"
+#include "reader/screen_battery_empty.h"
 #include "reader/screen_reader.h"
 #include "reader/screens.h"
 #include "reader/theme_quiet.h"
@@ -71,4 +72,21 @@ TEST_CASE("the banner does not change how many lines the page holds") {
   CHECK(r->page().lines.size() == before);
   CHECK(r->vm().page == pageBefore);
   CHECK(r->vm().pageTotal == totalBefore);
+}
+
+TEST_CASE("QuietTheme renders BatteryEmpty to golden at both geometries") {
+  ramp::Ramp ramp;
+  QuietTheme theme;
+  BatteryEmptyScreen scr;
+  // Mono, asserted before the plane is named -- a golden that pinned Bw while the
+  // screen declared Grayscale would quietly test a path nothing paints.
+  REQUIRE(scr.fidelity() == Fidelity::Mono);
+  auto renderOne = [&](int w, int h, const std::string& name) {
+    Framebuffer fb(w, h);
+    fb.clear(true);
+    scr.render(fb, ramp.fonts, theme, Plane::Bw);
+    golden::checkGolden(fb, name);
+  };
+  SUBCASE("X4 480x800") { renderOne(480, 800, "battery_empty"); }
+  SUBCASE("X3 528x792") { renderOne(528, 792, "battery_empty_x3"); }
 }
