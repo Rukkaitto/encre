@@ -3227,6 +3227,19 @@ static bool refreshBatteryOnHome() {
   return gBattery.takeRepaintRequest();
 }
 
+// THE LADDER'S READING, ON ANY SCREEN. refreshBatteryOnHome() cannot serve it: it
+// is gated on homeOnGlass() AND on gChargingObservable, so nothing outside Home
+// ever reads the gauge and on an X4 -- which has no charge-status pin -- nothing
+// reads it at all. Both gates are right for what they guard (the band, and the
+// charge-latch repaint); neither can be reused for a safety mechanism.
+//
+// It goes through the SAME gBattery.update(), so the level and the band can never
+// disagree about the percent.
+//
+// NO SpiBusGuard, and that is what makes 2 s affordable: this is I2C on the sensor
+// bus and cannot race a panel refresh.
+static void pollBatteryLevel() { gBattery.update(readBattery(), millis()); }
+
 static void renderTop() {
   // BEFORE the SpiBusGuard below, and deliberately: this is I2C on the sensor bus
   // and has nothing to do with the display's SPI, so keeping the two visibly apart
@@ -3245,12 +3258,24 @@ static void renderTop() {
   // renderTop was called) and `render` (timed from t0). Under 0.2% of a paint,
   // not worth restructuring for; the [i] line exists to eliminate exactly this
   // kind of unattributed gap, so it should be named rather than left quiet.
-  (void)refreshBatteryOnHome();
-  // Also resets the poll's own cadence timer, so a Home paint counts as a read
-  // for that purpose too -- see gLastBatteryPollMs's own comment for why a boot
-  // that skipped this would have the periodic poll immediately re-read what the
-  // paint just read.
-  gLastBatteryPollMs = millis();
+  if (homeOnGlass()) {
+    (void)refreshBatteryOnHome();
+    // Also resets the poll's own cadence timer, so a Home paint counts as a read
+    // for that purpose too -- see gLastBatteryPollMs's own comment for why a boot
+    // that skipped this would have the periodic poll immediately re-read what the
+    // paint just read.
+    //
+    // ONLY WHEN HOME IS ON GLASS, and that gate is new with the ladder. The stamp
+    // used to be unconditional, which was harmless while the timer's only consumer
+    // was itself gated on Home: a Reader paint reset a cadence nothing outside Home
+    // was waiting on. The ladder's poll is not gated, so an unconditional stamp
+    // means every page turn pushes the next reading out by another kBatteryPollMs
+    // -- and a reader turning pages faster than that starves the safety mechanism
+    // on the one screen the banner is drawn on. A paint that is not Home's takes no
+    // reading at all, so it must not claim one; this makes the stamp say what the
+    // comment above it always said.
+    gLastBatteryPollMs = millis();
+  }
   // EVERY PAINT, not just the first. The frame is the driver's, and the driver
   // can take it back (bindFrameToDriver says how and why). Nothing lends it
   // today, so this is a pointer comparison that always agrees -- it is here so
@@ -6435,36 +6460,50 @@ void loop() {
   // are making will hit the card itself soon enough.
   if (quiet) pollCardPresence(millis());
 
-  // PLUGGING IN SHOULD SHOW THE BOLT WITHOUT A BUTTON BEING PRESSED, and nothing
-  // else will make that happen: e-ink holds its image, no input arrives, and
-  // Home's view model is otherwise only rebuilt at boot, on a wake and on a Back
-  // out of a book.
+  // TWO JOBS OFF ONE TIMER, and the gates are what separate them. The cadence, the
+  // `quiet` gate and the I2C transaction are shared; what is NOT shared is who may
+  // be refused. The safety ladder must be read on every screen and on both models,
+  // so it sits in the outer block with no gate but the clock; the band's repaint
+  // keeps the two gates it has always had, below.
   //
   // Same gate as pollCardPresence -- after the paint block, nothing owed to the
   // panel -- but for a different reason: this needs no SpiBusGuard, because it is
   // I2C on the sensor bus and cannot race a refresh. What the gate buys is only
   // that a repaint it asks for does not jump a frame the user is waiting for.
-  //
-  // UNPLUGGING HAS TO REACH THE GLASS TOO, and the first version of this did not.
-  // It fired on a rising edge only, on the stated grounds that a stale bolt would
-  // be corrected by the next Home paint -- which assumed a button press that never
-  // came. Reported off the device: the bolt appeared on plug-in and then stayed
-  // for ever. A mark claiming the device is charging when it is not is the same
-  // class of lie as a 0% for a gauge that did not answer.
-  //
-  // Skipped entirely where charging cannot be observed, which is every X4.
-  // BatteryTracker owns everything that makes this safe: an edge in either
-  // direction, a first reading that seeds without firing, a latch that clears only
-  // after 60 s of continuous not-charging, and three grants a session. The dwell is
-  // what stops a device sitting at 100% on the charger -- where the gauge's
-  // Current() sign dithers around zero -- repainting the panel all night, and it is
-  // also what tells a real unplug from that dither, which is why CLEARING the bolt
-  // rides the same timer rather than a second constant.
-  if (quiet && gChargingObservable && homeOnGlass() &&
-      static_cast<uint32_t>(millis() - gLastBatteryPollMs) >= kBatteryPollMs) {
+  if (quiet && static_cast<uint32_t>(millis() - gLastBatteryPollMs) >= kBatteryPollMs) {
     gLastBatteryPollMs = millis();
     ++gBatteryPolls;
-    if (refreshBatteryOnHome()) {
+    // THE LADDER FIRST AND UNCONDITIONALLY. It is the safety mechanism and must not
+    // sit behind either of the band's two gates.
+    pollBatteryLevel();
+
+    // THE BAND'S REPAINT, still behind its own two gates -- what it drives is the
+    // bolt on Home, which is a Home question. refreshBatteryOnHome takes its own
+    // reading; that is one extra I2C transaction on Home only, and one call site
+    // that cannot disagree with itself is worth ~150 us (readBattery's own
+    // comment).
+    //
+    // PLUGGING IN SHOULD SHOW THE BOLT WITHOUT A BUTTON BEING PRESSED, and nothing
+    // else will make that happen: e-ink holds its image, no input arrives, and
+    // Home's view model is otherwise only rebuilt at boot, on a wake and on a Back
+    // out of a book.
+    //
+    // UNPLUGGING HAS TO REACH THE GLASS TOO, and the first version of this did not.
+    // It fired on a rising edge only, on the stated grounds that a stale bolt would
+    // be corrected by the next Home paint -- which assumed a button press that never
+    // came. Reported off the device: the bolt appeared on plug-in and then stayed
+    // for ever. A mark claiming the device is charging when it is not is the same
+    // class of lie as a 0% for a gauge that did not answer.
+    //
+    // Skipped entirely where charging cannot be observed, which is every X4.
+    // BatteryTracker owns everything that makes this safe: an edge in either
+    // direction, a first reading that seeds without firing, a latch that clears only
+    // after 60 s of continuous not-charging, and three grants a session. The dwell is
+    // what stops a device sitting at 100% on the charger -- where the gauge's
+    // Current() sign dithers around zero -- repainting the panel all night, and it is
+    // also what tells a real unplug from that dither, which is why CLEARING the bolt
+    // rides the same timer rather than a second constant.
+    if (gChargingObservable && homeOnGlass() && refreshBatteryOnHome()) {
       gApp->markDirty();
       // WHICH EDGE, because both grant a repaint now and a line that says only
       // "charging" would misreport half of them -- on glass this is the one
@@ -6494,16 +6533,24 @@ void loop() {
     // observable/pct/charging are read straight off gChargingObservable/gBattery
     // rather than re-derived, so this can never disagree with what setBattery()
     // just handed the screen.
+    //
+    // level= IS THE SAFETY LADDER'S OWN RUNG, and it matters here more than the
+    // rest: a ladder that has quietly stopped being polled and one that is fine
+    // read IDENTICALLY, because nothing happens in either case. Without this a
+    // shutdown that never came, and one that came with no [power] CRITICAL line
+    // in front of it, would both be unattributable. Straight off level() -- 0
+    // Normal, 1 Low, 2 Critical -- never re-thresholded from pct, which would be
+    // a second spelling of the ladder free to disagree with the first.
     logf("[alive] last-stage=%s heap=%u minHeap=%u screen=%s depth=%d "
          "dropped=%lu/%lu listings=%u slots/%uB hit=%u miss=%u "
-         "battery observable=%d pct=%d charging=%d polls=%lu\n",
+         "battery observable=%d pct=%d charging=%d level=%d polls=%lu\n",
          stage, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
          reader::screenName(gApp->top().id()), gApp->depth(),
          (unsigned long)rawSamplesDropped(), (unsigned long)gPresses.dropped(),
          (unsigned)gSd.listings().slotsHeld(), (unsigned)gSd.listings().residentBytes(),
          (unsigned)gSd.listings().hits(), (unsigned)gSd.listings().misses(),
          (int)gChargingObservable, gBattery.percent(), (int)gBattery.charging(),
-         (unsigned long)gBatteryPolls);
+         (int)gBattery.level(), (unsigned long)gBatteryPolls);
     // WHAT THE CARD LOG HAS COST AND WHAT IT HAS LOST, on the heartbeat rather than
     // per flush. `dropped` non-zero means the buffer overran between two idle
     // windows and the log has a HOLE in it -- which must never be mistaken for the
