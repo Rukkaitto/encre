@@ -55,6 +55,7 @@
 #include "reader/document.h"
 #include "reader/progress.h"
 #include "reader/refresh.h"
+#include "reader/screen_battery_empty.h"
 #include "reader/screen_home.h"
 #include "reader/screen_sd_missing.h"
 #include "reader/book.h"
@@ -5556,6 +5557,67 @@ static void paintSleepScreen() {
   freeink::PowerManager::deepSleepUntilPowerButton();
 }
 
+// BYPASSES App, exactly as paintSleepScreen does and for its reason: pushing this
+// screen would make the next wake RESTORE INTO IT.
+//
+// That moves two things App normally owns into this function -- the CLEAR, and
+// gFrameContentsUnknown, because App's partial-repaint record would otherwise
+// describe a frame that no longer exists. Nothing reads it before the chip stops,
+// and leaving a lie there is a trap for the next person to paint after it.
+static void paintBatteryEmptyScreen() {
+  reader::BatteryEmptyScreen scr;
+  // Free insurance today (one task, recursive guard); here to be structural rather
+  // than a rule someone remembers, exactly as paintSleepScreen and renderTop take it.
+  SpiBusGuard bus;
+  logf("[power] battery empty: painting the shutdown screen\n");
+  logFlush();
+  gFrame->clear(true);
+  scr.render(*gFrame, *gFonts, gTheme, reader::Plane::Bw);
+  gFrameContentsUnknown = true;
+  // FULL, not fast: this is the last thing the panel is asked to do, for as long as
+  // the pack stays flat, and a differential update would leave the previous screen's
+  // residue under it.
+  showOnePass(reader::RefreshMode::Full);
+}
+
+// The pack is flat. Save, say so, and stop.
+//
+// [[noreturn]] like sleepNow, and reached from loop() rather than from a dispatch:
+// a paint cannot be interrupted, so this must not run inside one.
+[[noreturn]] static void criticalShutdown() {
+  logf("[power] CRITICAL pct=%d charging=%d -> shutting down\n", gBattery.percent(),
+       gBattery.charging() ? 1 : 0);
+  logFlush();
+
+  // FIRST, AND THE BOARD'S COPY DEPENDS ON IT. "Your page is saved" is a promise,
+  // and this is what keeps it.
+  saveReadingPosition("battery");
+  paintBatteryEmptyScreen();
+
+  display.deepSleep();
+  // Cuts the X3's SD rail (GPIO13) and any other gated rail, latched so the switches
+  // stay off. On a flat pack that is the difference between a device that can be
+  // charged back up and one that reaches the cell's protection cut-off.
+  freeink::PowerManager::powerDownRailsForSleep();
+
+  // BOTH FLAGS. markSleeping() so that once charged the wake RESTORES the reader's
+  // page rather than starting cold -- the other half of "your page is saved".
+  // markCriticalShutdown() is what licenses setup()'s strict >= kResumePercent gate:
+  // without it the gate would have to sit at the critical threshold itself (which
+  // flaps), or refuse every boot below 15% (which would refuse a perfectly usable
+  // 10% battery that never shut anything down).
+  markSleeping();
+  markCriticalShutdown();
+
+  // THE LAST THING BEFORE THE CHIP STOPS, for sleepNow's reason: the buffer dies
+  // with the RAM, and this is the one shutdown whose log a user will want.
+  if (gLogToCard && gLogLen > 0) {
+    logf("[log] battery empty\n");
+    flushLogToCard();
+  }
+  freeink::PowerManager::deepSleepUntilPowerButton();
+}
+
 void loop() {
   // setup() bails out without building the app on a font-load, heap or geometry
   // failure. Repeat the last stage reached so the hang point is visible even
@@ -6165,6 +6227,15 @@ void loop() {
 
     gAct.postMs += millis() - afterDispatch;
   }
+
+  // BEFORE THE IDLE SLEEP, because a flat device should say why it stopped rather
+  // than showing the ordinary sleep screen. Both are [[noreturn]]; whichever runs
+  // first is the one the user sees.
+  //
+  // FROM loop() AND NEVER FROM A DISPATCH: a paint cannot be interrupted, so the
+  // shutdown's own paint must not run inside one. Same placement and the same
+  // reason as the idle sleep below it.
+  if (gBattery.level() == reader::BatteryLevel::Critical) criticalShutdown();
 
   if (gApp->sleepRequested() || gIdle.tick(millis()) == reader::PowerAction::Sleep) sleepNow();
 
