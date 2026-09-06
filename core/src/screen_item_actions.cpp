@@ -52,13 +52,20 @@ Action ItemActionsScreen::onGesture(const GestureEvent& g) {
         case kDetails:
           return Action::push(ScreenId::BookDetails);
         case kFinished:
-          // NOTHING, deliberately. "Finished" is per-book state, and per-book
-          // state does not exist: `/.reader/state/` has no format yet because
-          // there is no Reader to write one. Inventing a file here would commit
-          // 2C-3 and Phase 3 to agreeing with a schema chosen by the screen that
-          // needed it least -- and a wrong schema on the card is worse than a
-          // button that does nothing, because the card outlives the firmware.
-          return Action::none();
+          // LATCHED FOR THE SHELL, exactly as kOpen's Action::open() is: the write is
+          // to the card and storage is not core/'s. Two screens ask for this and mean
+          // different books -- this one means the Library's focused row, BookEnd means
+          // the open book -- and the shell resolves it the way handleOpen already does.
+          //
+          // This returned none() for two phases behind a comment saying per-book state
+          // "does not exist ... because there is no Reader to write one". There is,
+          // and /.reader/state/ has a format, so the comment's own expiry date had
+          // passed and the row was a dead button on a shipped screen.
+          //
+          // NO POP HERE. The board gives this row no chevron -- "Mark as finished and
+          // Delete... act in place" -- and the shell pops the overlay after the write,
+          // so the Library underneath is repainted with the row reading DONE.
+          return Action::finish();
         case kDelete:
           return Action::push(ScreenId::DeleteConfirm);
         default:

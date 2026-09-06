@@ -88,6 +88,10 @@ struct ProgressEntry {
   // here so that row costs the same listing the percentages already cost, rather than
   // an archive open and an NCX parse per book.
   std::string chapter;
+  // Whether the reader marked this book finished. Carried here for the reason
+  // `percent` and `chapter` are: the Library draws a value per ROW, and recovering
+  // this any other way would mean opening every started book's archive.
+  bool finished = false;
 };
 
 // False only if the directory could not be read at all -- an absent directory is an

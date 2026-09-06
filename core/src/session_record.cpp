@@ -22,8 +22,18 @@ namespace {
 constexpr const char* kNames[] = {
     "home", "library", "item-actions", "delete-confirm",
     "book-details", "settings", "sleep", "reader", "reader-menu",
-    "contents", "sd-missing", "typography", "peek",
+    "contents", "sd-missing", "typography", "peek", "book-end",
 };
+
+// TIED TO THE ENUM, NOT TO A NAMED MEMBER. Three separate bounds in this feature were
+// spelled `<= ScreenId::Peek`, so appending a screen left the table short, the decode
+// loop unable to see the new name, and the round-trip test silently not covering it --
+// while sessionWireName's fallthrough stored the new screen as `home`. That is the
+// same shape as #42 and as the three "reports on less than it claims" checks CLAUDE.md
+// records. A count against the enum's end cannot be left behind by an append.
+static_assert(sizeof(kNames) / sizeof(kNames[0]) ==
+                  static_cast<size_t>(ScreenId::BookEnd) + 1,
+              "a ScreenId was added: give it a wire name, in enum order");
 
 // Clamped so the encoded length is bounded. -1 is the floor rather than 0 because
 // it is a real position: Home's CONTINUE block, an empty Library.
@@ -32,7 +42,7 @@ constexpr int kFocusMax = 32767;
 
 bool decodeName(const char* start, size_t len, ScreenId& out) {
   if (len == 0) return false;
-  for (int i = 0; i <= static_cast<int>(ScreenId::Peek); ++i) {
+  for (int i = 0; i <= static_cast<int>(ScreenId::BookEnd); ++i) {
     const char* n = kNames[i];
     if (std::strlen(n) == len && std::strncmp(n, start, len) == 0) {
       out = static_cast<ScreenId>(i);
@@ -101,6 +111,13 @@ const char* sessionWireName(ScreenId id) {
     // switch stays exhaustive and a record naming it cannot decode as something
     // else.
     case ScreenId::Peek: return kNames[12];
+    // NAMEABLE, and its restorability is Task 9's question rather than this
+    // function's. It needs a name for the reason every id above does: without a
+    // case it fell through to `return kNames[0]` and stored the end-of-book
+    // screen as "home", so a reader who idle-slept on it woke on Home -- which is
+    // the failure the note on ReaderMenu above says this table exists to prevent,
+    // having already happened once to Contents.
+    case ScreenId::BookEnd: return kNames[13];
   }
   return kNames[0];
 }

@@ -26,6 +26,9 @@ const char* screenName(ScreenId id) {
     // Two separate facts that happen to agree; this one is free to be reworded.
     case ScreenId::Typography: return "TYPOGRAPHY";
     case ScreenId::Peek: return "PEEK";
+    // Kebab, as ITEM-ACTIONS and BOOK-DETAILS are. A log label, free to be
+    // reworded; the session record's spelling is a storage format and is not this.
+    case ScreenId::BookEnd: return "BOOK-END";
   }
   return "?";
 }
@@ -225,6 +228,12 @@ void App::dispatch(const InputEvent& ev) {
       // Latched for the same reason Retry is: the card is the shell's. See
       // Action::open().
       open_ = true;
+      break;
+    case Action::Kind::Finish:
+      // Latched for the reason Retry and Open are: the card is the shell's. Nothing
+      // is marked dirty -- what the write changes on glass is the shell's to decide,
+      // and it is usually a screen change rather than a repaint of this one.
+      finish_ = true;
       break;
   }
 }

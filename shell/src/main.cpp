@@ -1924,6 +1924,18 @@ static reader::ReaderScreen* readerOnStack(reader::App& app) {
   return nullptr;
 }
 
+// IS `id` ANYWHERE ON THE STACK. readerOnStack's question without the pointer, for a
+// caller that wants the fact rather than the screen.
+//
+// SCANNED, NOT TRACKED, which is readerOnStack's own reasoning: a remembered bool is a
+// second copy of the stack's own shape, and the two copies are free to disagree on
+// exactly the paths nobody walked. The stack is four deep at most here.
+static bool appHasScreen(const reader::App& app, reader::ScreenId id) {
+  for (int i = 0; i < app.depth(); ++i)
+    if (app.at(i).id() == id) return true;
+  return false;
+}
+
 // SAVE WHERE THE READER IS, to the card, if a book is open.
 //
 // FOUR CALLERS, AND THE FOURTH IS THE ONE THAT MAKES THIS DURABLE. Three are edges
@@ -1978,6 +1990,21 @@ static reader::SaveResult saveReadingPosition(const char* why,
   const auto* rd =
       from != nullptr ? from : static_cast<const reader::ReaderScreen*>(&gApp->top());
 
+  // BUILT FRESH, AND THAT IS WHAT DROPS `finished` -- deliberately, not by oversight.
+  // READING THE BOOK AGAIN IS WHAT UN-MARKS IT: there is no board for a toggle, so the
+  // alternative is finished-forever, and a flag with no way back is worse than the cost
+  // of clearing it. The cost is real and bounded -- reopening a finished book and
+  // leaving it also clears the flag -- and it is recoverable in two presses from the
+  // item-actions overlay, and VISIBLE, because the Library row changes back.
+  //
+  // This looks like a bug from here, which is why it is written down here: a reviewer
+  // reading only this function would carry `finished` forward and silently make the
+  // flag permanent.
+  //
+  // THE FINISH FLOW ITSELF IS NOT AT RISK, for two independent reasons. handleFinish
+  // leaves the book through dispatchBack(), which calls App::dispatch directly and so
+  // never reaches loop()'s pre-dispatch `leaving` save; and every later save is gated
+  // on the Reader being on top (just above), which it no longer is.
   reader::ReadingPosition p;
   p.bookPath = gReading.path;
   p.spine = rd->chapterIndex();
@@ -2202,6 +2229,150 @@ static void handleOpen() {
   openBookAt(path, bookBytes, /*push=*/true);
 }
 
+// LEAVE THE TOP SCREEN FROM OUTSIDE A GESTURE, by handing it the press it would have
+// taken.
+//
+// THE SHELL CANNOT APPLY AN Action AT ALL, which is worth stating because it looks as
+// though it should be able to. `Action::pop()` and `Action::popTo()` are values a
+// SCREEN returns; `App::dispatch` is the only thing that interprets one, and the only
+// stack call App exposes is `pushScreen()` -- there is no popScreen() and no
+// apply(Action). So a latch handler that has to leave a screen either grows a second
+// interpretation of the stack in the shell, or synthesises the press. This is the
+// second, and it is the one that cannot drift: whatever Back means on that screen is
+// what runs, decided by the screen, once.
+//
+// Short on Back, because gestureFor turns exactly that into Gesture::Back -- a Long is
+// dropped there unless the screen bound a hold, which is not the press being imitated.
+static void dispatchBack() {
+  reader::InputEvent ev{};
+  ev.button = reader::Button::Back;
+  ev.kind = reader::PressKind::Short;
+  ev.steps = 1;
+  // The press is happening now. `at` is what the interaction line's `wait=` is measured
+  // from, and a zero here would report this as having waited since boot.
+  ev.at = millis();
+  gApp->dispatch(ev);
+}
+
+// THE USER ASKED FOR A BOOK TO BE MARKED FINISHED -- from BookEnd's MARK AS FINISHED
+// slab, or from the item-actions overlay's row. See Action::finish().
+//
+// WHICH BOOK IS RESOLVED HERE rather than carried in the Action, which is exactly the
+// shape handleOpen has for the identical two-caller problem: BookEnd means the book
+// that is open, the overlay means the Library's selected row. An Action that carried a
+// path would put a std::string in every Action returned by every gesture on every
+// screen to serve one kind.
+static void handleFinish() {
+  // The latch first, so a write that fails does not re-fire on every loop.
+  gApp->clearFinishRequest();
+
+  const reader::ScreenId asked = gApp->top().id();
+  const bool fromBookEnd = asked == reader::ScreenId::BookEnd;
+
+  std::string path;
+  uint32_t bookBytes = 0;
+  if (fromBookEnd) {
+    if (!gReading.open) {
+      logf("[finish] BookEnd with no open book\n");
+      logFlush();
+      return;
+    }
+    path = gReading.path;
+    bookBytes = gReading.bytes;
+  } else {
+    reader::LibraryScreen* lib = gFactory.library();
+    if (lib == nullptr) {
+      logf("[finish] no Library to ask\n");
+      logFlush();
+      return;
+    }
+    const reader::LibraryItem* item = lib->focusedItem();
+    if (item == nullptr || item->entry.isDir) {
+      logf("[finish] nothing selected, or a folder\n");
+      logFlush();
+      return;
+    }
+    // handleOpen's own three lines, and for its reason: BookEntry::name is a leaf name
+    // and never a path (booklist.h), so only the Library knows where it has descended
+    // to. A second spelling of this join is a second place to get a subfolder wrong.
+    path = lib->path();
+    if (path.empty() || path.back() != '/') path += '/';
+    path += item->entry.name;
+    bookBytes = item->entry.size;
+  }
+
+  // KEEP SD TRAFFIC OFF THE DISPLAY BUS. The card shares the panel's SPI and
+  // SDCardManager does no locking at all, so a transfer racing a refresh is the kind of
+  // fault that looks random. Every SdFileSystem method takes the guard itself and it is
+  // recursive; taking it around the whole sequence is what the retry and the poll do.
+  SpiBusGuard bus;
+
+  // A BOOK NEVER OPENED HAS NO SIDECAR, and marking one finished from the Library is a
+  // legitimate thing for a reader to assert about a book they read elsewhere -- so a
+  // minimal record is BUILT rather than the press refused. `bookBytes` is what makes it
+  // a record about THIS book: ReadingPosition::bookBytes is the staleness check, and a
+  // record with a zero there would read back as a book that had changed.
+  reader::ReadingPosition pos;
+  if (!reader::loadPosition(gSd, path, pos)) {
+    pos = reader::ReadingPosition{};
+    pos.bookPath = path;
+    pos.bookBytes = bookBytes;
+  }
+  pos.finished = true;
+
+  const reader::SaveResult r = reader::savePosition(gSd, pos);
+  // NOT FATAL, and this is the one hazard in the feature. writeAll calls noteCardGone()
+  // on a write that fails after opening, which pollCardPresence turns into an App
+  // rooted at SdMissingScreen -- so acting on this would throw a reader out of a book
+  // they can still perfectly well read, over a flag. reading_store.h states the same
+  // hazard for savePosition and it applies unchanged.
+  logf("[finish] %s from %s -> %s\n", path.c_str(), reader::screenName(asked),
+       r == reader::SaveResult::Failed
+           ? "FAILED"
+           : (r == reader::SaveResult::Unchanged ? "unchanged" : "ok"));
+
+  // ...AND ONLY IF IT NAMES THIS BOOK. Clearing it unconditionally would take an
+  // unrelated book off Home's CONTINUE block -- another book's state destroyed by this
+  // one's button -- and the overlay can mark any row finished, including one that is
+  // not the book the pointer names.
+  //
+  // gReading.open IS DELIBERATELY NOT TOUCHED HERE. The book-closed scan in loop() is
+  // the one place that closes a book, and it does two more things this would have to
+  // copy -- the crossing detector's gLastChapter and the two idle-walk stuck trackers,
+  // each of which outlives one book and suppresses real work on the next. Clearing the
+  // flag here would make that scan's condition false forever and leak all three.
+  reader::LastRead last;
+  if (reader::loadLastRead(gSd, last) && last.bookPath == path) {
+    const bool forgot = reader::forgetLastRead(gSd);
+    logf("[finish] the card's pointer named this book: %s\n",
+         forgot ? "cleared" : "NOT CLEARED");
+  }
+  logFlush();
+
+  // BOTH, AND SEPARATELY. Each is consumed when its own screen is reachable, and one
+  // shared flag would let Library, Back, Home clear it before Home ever used it. Both
+  // blocks that consume these are BELOW this call in loop(), which is what puts the
+  // refreshed row on the very paint this press causes.
+  gHomeStale = true;
+  gLibraryStale = true;
+
+  // AND NOW LEAVE. Neither producer pops itself: BookEnd's slab and the overlay's row
+  // both answer a bare Action::finish(), because what the write should cost on glass is
+  // the shell's to decide.
+  if (fromBookEnd) {
+    // BookEnd's own Back returns to the last page and the Reader's returns to whatever
+    // pushed it, so the two together ARE Action::popTo(Library) for every stack that
+    // can reach here -- the Library when one is beneath, and Home when the reader
+    // arrived through CONTINUE, which is popTo's own "stop at the root" rule.
+    dispatchBack();
+    if (gApp->top().id() == reader::ScreenId::Reader) dispatchBack();
+  } else if (asked == reader::ScreenId::ItemActions) {
+    // DISMISSED IN PLACE, because the board gives that row no chevron -- so the Library
+    // underneath is repainted with the row reading its new percentage.
+    dispatchBack();
+  }
+}
+
 // PRIME THE FACTORY WITH A BOOK AND ITS SAVED POSITION. Everything the Reader needs
 // before it can be pushed, in one place, because TWO paths need it and they must
 // agree: a button press (the Library's selection, or Home's CONTINUE) and a WAKE.
@@ -2285,6 +2456,14 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
          saved.spine, saved.block, saved.line,
          kFitWord[static_cast<int>(fit)]);
     logFlush();
+    // A FINISHED BOOK IS DELIBERATELY NOT RESTORED, and without this line the log
+    // reports a perfectly good fit and then opens at page one -- which reads as the
+    // restore having failed rather than as it having been declined. restoreFrom is
+    // what decides (see its comment); this only says so out loud.
+    if (saved.finished) {
+      logf("[progress] ...but it is marked finished, so opening at the front\n");
+      logFlush();
+    }
     if (r.any) {
       startChapter = r.spine;
       startAt = r.cursor;
@@ -2369,6 +2548,38 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   } else {
     gFactory.clearReaderAnchor();
   }
+
+  // AND THE END-OF-BOOK SCREEN, PRIMED AT OPEN FOR THE READER MENU'S REASON.
+  //
+  // BookEnd is pushed from INSIDE ReaderScreen's Gesture::Next, when the walk runs out
+  // of spine entries -- so there is no press the shell sees first and no moment between
+  // the decision and the push. The factory refuses an unprimed BookEnd (correctly: a
+  // substituted demo would put another book's title over the one just finished), and a
+  // refused push leaves the last page standing with the button doing nothing, which is
+  // the dead button this whole screen exists to remove.
+  //
+  // Everything it needs is already in hand here: the title and the author came with the
+  // OPF, and the count is the spine's length -- cover included, which is exactly the
+  // number Home already says `OF` in `CH. 08 OF 92`.
+  reader::BookEndScreen::Facts endFacts;
+  endFacts.bookTitle = opened.title;
+  endFacts.author = opened.author;
+  endFacts.chapterCount = opened.chapterCount();
+  // WHICH DECIDES THE LEAVING SLAB'S LABEL ONLY -- the action is popTo(Library) either
+  // way, and that stops at the root when there is none. Scanned rather than tracked;
+  // see appHasScreen.
+  //
+  // IT IS EXACT ON A PRESS AND A GUESS ON A WAKE. A Confirm that opens a book leaves
+  // the Library (or the overlay above it) standing, so the scan is reading the stack
+  // the Reader is about to be pushed onto. The WAKE calls this with push=false and
+  // BEFORE App::restore has replayed anything, so the stack is the bare root and this
+  // reads false even for a record that names the Library -- the slab then says BACK TO
+  // HOME and still lands on the Library. Corrected here rather than at the restore site
+  // it would cost a second priming call, and this file's rule is that the second caller
+  // is the extraction point rather than the first.
+  endFacts.libraryBeneath = appHasScreen(*gApp, reader::ScreenId::Library);
+  gFactory.setBookEndFacts(std::move(endFacts));
+
   const bool pushed = push && gApp->pushScreen(reader::ScreenId::Reader);
   // The push builds the screen, which locates the chapter, decodes it once to index
   // its pages, and lays out the first -- the whole expensive part.
@@ -5561,6 +5772,16 @@ void loop() {
       gPeekCommitted = false;
       logFlush();
     }
+    // MARK THE BOOK FINISHED, and this one is NOT down with Retry and Open.
+    //
+    // Those two are placed just above the mask refresh because that is all they need.
+    // This handler also LEAVES a screen and sets both stale flags, and the three blocks
+    // that answer for that are all below here: the book-closed scan (which owns
+    // gReading.open and two more things a copy would have to keep), Home's rebuild, and
+    // the Library's row refresh. Placed with Retry and Open instead, each of those
+    // would miss by one press -- the overlay would dismiss onto a Library row still
+    // reading its old percentage, which is the state the write just changed.
+    if (gApp->finishRequested()) handleFinish();
     // Between the dispatch and the mask refresh below, so the refresh sees
     // whatever screen the retry left on top -- on success that is a brand new App
     // rooted at Home, whose holds are not the SD-missing screen's.

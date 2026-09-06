@@ -37,3 +37,42 @@ TEST_CASE("Home is never rebuilt by the factory") {
   DemoScreenFactory f;
   CHECK(f.create(ScreenId::Home) == nullptr);
 }
+
+TEST_CASE("the factory refuses a BookEnd nothing primed") {
+  // A REFUSED PUSH LEAVES THE READER STANDING. The alternative -- falling back to the
+  // board's Middlemarch -- is the substitution this project has shipped twice, once
+  // waking the device into a book the user was not reading and once showing one book's
+  // chapters over another's.
+  DemoScreenFactory f;
+  CHECK(f.create(ScreenId::BookEnd) == nullptr);
+}
+
+TEST_CASE("a primed BookEnd states the facts it was given") {
+  DemoScreenFactory f;
+  BookEndScreen::Facts facts;
+  facts.bookTitle = "Walden";
+  facts.author = "Henry David Thoreau";
+  facts.chapterCount = 18;
+  facts.libraryBeneath = false;
+  f.setBookEndFacts(facts);
+
+  auto s = f.create(ScreenId::BookEnd);
+  REQUIRE(s != nullptr);
+  const auto& vm = static_cast<BookEndScreen*>(s.get())->vm();
+  CHECK(vm.byline == "Walden \xC2\xB7 Henry David Thoreau");
+  CHECK(vm.meta == "18 CHAPTERS");
+  // No Library beneath, so the slab names where it actually lands.
+  CHECK(vm.leaveLabel == "BACK TO HOME");
+}
+
+TEST_CASE("the demo BookEnd is the board's own content") {
+  DemoScreenFactory f;
+  f.setBookEndDemo();
+  auto s = f.create(ScreenId::BookEnd);
+  REQUIRE(s != nullptr);
+  const auto& vm = static_cast<BookEndScreen*>(s.get())->vm();
+  // design/Main.dc.html gives this same demo book `CH. 01 OF 24`, and two boards
+  // drawing one demo book must agree.
+  CHECK(vm.meta == "24 CHAPTERS");
+  CHECK(vm.leaveLabel == "BACK TO LIBRARY");
+}

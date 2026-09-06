@@ -144,7 +144,7 @@ void ReaderScreen::relayout(const PageMetrics& m) {
     // A FAILED RE-OPEN LEAVES THE PREVIOUS CHAPTER STANDING, which is openChapterAt's
     // own contract -- it puts back the chapter, the page and the index it moved out --
     // so this returns rather than walking into a screen that has nothing open.
-    if (!openChapterAt(chapterAt_, false)) return;
+    if (openChapterAt(chapterAt_, false) != WalkResult::Landed) return;
     openAtCursor(want);
     syncVm();
     return;
@@ -187,7 +187,7 @@ void ReaderScreen::updateChapterLabel() {
   chapter_label_.assign(buf);
 }
 
-bool ReaderScreen::openChapterAt(int c, bool atEnd) {
+ReaderScreen::WalkResult ReaderScreen::openChapterAt(int c, bool atEnd) {
   // A FAILED TURN MUST LEAVE THE SCREEN WHERE IT WAS. The walk below opens each
   // candidate before it can know whether that candidate has any pages, so running
   // off either end of the book left `chapterAt_` on the last thing tried and
@@ -196,8 +196,10 @@ bool ReaderScreen::openChapterAt(int c, bool atEnd) {
   // NOTHING TO PAGE INTO, so nothing may be disturbed. The in-memory constructor has
   // no book behind it, and without this the moved-out index below was never put back
   // -- pressing past the last page of the demo chapter left the screen reporting
-  // zero pages.
-  if (fs_ == nullptr || book_.path.empty() || body_ == nullptr) return false;
+  // zero pages. `Failed` and not `RanOff`: there is no book here, so there is no end
+  // of one to have reached, and the demo Reader must not offer to close a book it
+  // does not have.
+  if (fs_ == nullptr || book_.path.empty() || body_ == nullptr) return WalkResult::Failed;
 
   const int wasAt = chapterAt_;
   const int wasPage = at_;
@@ -208,8 +210,11 @@ bool ReaderScreen::openChapterAt(int c, bool atEnd) {
   const bool wasComplete = indexComplete_;
   starts_.clear();
 
-  if (walkToChapter(c, atEnd)) return true;
-  if (!starts_.empty() && chapterAt_ == wasAt) return false;  // nothing was disturbed
+  // THE WALK'S OWN ANSWER IS CARRIED OUT, not collapsed: the restore below is the
+  // same on every failing path, but WHY it failed is what the caller decides with.
+  const WalkResult why = walkToChapter(c, atEnd);
+  if (why == WalkResult::Landed) return WalkResult::Landed;
+  if (!starts_.empty() && chapterAt_ == wasAt) return why;  // nothing was disturbed
 
   // Put back exactly what was showing, INDEX INCLUDED. Restoring through the forward
   // landing was the first attempt and it threw the count away: paging back off the
@@ -219,17 +224,17 @@ bool ReaderScreen::openChapterAt(int c, bool atEnd) {
     // Even a failed restore must leave the index intact: the page on glass is still
     // the one it describes.
     starts_ = std::move(wasStarts);
-    return false;
+    return why;
   }
   starts_ = std::move(wasStarts);
   indexComplete_ = wasComplete;
-  if (starts_.empty()) return false;
+  if (starts_.empty()) return why;
   at_ = wasPage < static_cast<int>(starts_.size()) ? wasPage
                                                    : static_cast<int>(starts_.size()) - 1;
   seekTo(at_);
   updateChapterLabel();
   syncVm();
-  return false;
+  return why;
 }
 
 bool ReaderScreen::reopenChapter(int c) {
@@ -244,14 +249,23 @@ bool ReaderScreen::reopenChapter(int c) {
   return true;
 }
 
-bool ReaderScreen::walkToChapter(int c, bool atEnd) {
-  if (fs_ == nullptr || book_.path.empty() || body_ == nullptr) return false;
+ReaderScreen::WalkResult ReaderScreen::walkToChapter(int c, bool atEnd) {
+  // UNREACHABLE THROUGH ITS ONLY CALLER, which is openChapterAt and which states the
+  // identical guard before it gets here -- found by a mutation to this line failing
+  // nothing at all. Kept, because it is what makes this function safe to call
+  // directly, and answering `Failed` is what openChapterAt's copy answers: there is
+  // no book here, so there is no end of one to have run off.
+  if (fs_ == nullptr || book_.path.empty() || body_ == nullptr) return WalkResult::Failed;
   const int dir = atEnd ? -1 : +1;
 
   // Bounded by the spine's own length: every step moves one entry, so this cannot
   // loop even if every chapter were empty.
   for (int guard = 0; guard <= book_.chapterCount(); ++guard) {
-    if (c < 0 || c >= book_.chapterCount()) return false;
+    // THE EDGE OF THE BOOK, and the ONLY answer that means it. Reached either
+    // immediately (the caller asked for an entry off either end) or after stepping
+    // over every remaining entry because each paginated to nothing -- which is why
+    // this cannot be replaced by a bounds check at the call site.
+    if (c < 0 || c >= book_.chapterCount()) return WalkResult::RanOff;
 
     // A ROW LOOKUP, not an archive parse. This called openBook per candidate, and
     // each call re-read the central directory and re-inflated the OPF -- ~32 KB
@@ -264,7 +278,11 @@ bool ReaderScreen::walkToChapter(int c, bool atEnd) {
       c += dir;
       continue;
     }
-    if (!chapter_.begin(*fs_, where)) return false;
+    // AN ENTRY THAT WILL NOT OPEN IS NOT THE END OF THE BOOK. A corrupt local header
+    // is the one route here (Epub::open validates the spine against the central
+    // directory), and saying THE END over it would be a wrong claim rather than a
+    // missing one.
+    if (!chapter_.begin(*fs_, where)) return WalkResult::Failed;
 
     chapterAt_ = c;
     // GOING FORWARD, ONLY PAGE ONE IS DECODED -- the count follows later, inside the
@@ -309,13 +327,15 @@ bool ReaderScreen::walkToChapter(int c, bool atEnd) {
     if (landed) {
       updateChapterLabel();
       syncVm();
-      return true;
+      return WalkResult::Landed;
     }
     // Nothing on this one -- a cover, a title page. Keep going the way we were
     // heading rather than stopping on a blank page.
     c += dir;
   }
-  return false;
+  // The guard, not the spine: unreachable, since the loop's own bounds check answers
+  // RanOff first. `Failed` because an exhausted guard is a bug here, not an edge.
+  return WalkResult::Failed;
 }
 
 ReaderScreen::CountOutcome ReaderScreen::countPages(std::vector<Cursor>& out, StopFn stop,
@@ -823,7 +843,7 @@ bool ReaderScreen::goToChapter(int spine) {
   // the high-water mark if this chapter is further on than anything reached before --
   // so a jump forward carries the mark with it and a jump back leaves it standing
   // ahead, which is exactly the way back Contents needs.
-  return openChapterAt(spine, /*atEnd=*/false);
+  return openChapterAt(spine, /*atEnd=*/false) == WalkResult::Landed;
 }
 
 bool ReaderScreen::goToPosition(int spine, Cursor at) {
@@ -865,7 +885,7 @@ bool ReaderScreen::goToPosition(int spine, Cursor at) {
   // cursor left standing would be spent by the NEXT chapter this screen opens -- a page
   // turn landing at a stranger's offset, long after the jump that armed it.
   startAt_ = at;
-  const bool landed = openChapterAt(spine, /*atEnd=*/false);
+  const bool landed = openChapterAt(spine, /*atEnd=*/false) == WalkResult::Landed;
   startAt_ = Cursor{};
   if (!landed) return false;
   // AND THE MARK IS RAISED BY THIS, not by a case of its own: a commit that lands
@@ -906,7 +926,7 @@ bool ReaderScreen::reacquireChapter() {
 // withdraws the promise, and it needs no case of its own to do it.
 bool ReaderScreen::goToAnchor(const AnchorPos& to) {
   if (to.spine != chapterAt_) {
-    if (!openChapterAt(to.spine, /*atEnd=*/false)) return false;
+    if (openChapterAt(to.spine, /*atEnd=*/false) != WalkResult::Landed) return false;
   }
   if (!openAtCursor(Cursor{to.block, to.line})) return false;
   syncVm();
@@ -1080,8 +1100,22 @@ Action ReaderScreen::onGesture(const GestureEvent& g) {
       // reader rather than a chapter viewer. openChapterAt lands through syncVm, so
       // the crossing raises the mark exactly as an ordinary turn does -- there is no
       // longer a paging-versus-jumping distinction for it to get wrong.
-      if (!openChapterAt(chapterAt_ + 1, false)) return Action::none();
-      return Action::redraw();
+      switch (openChapterAt(chapterAt_ + 1, false)) {
+        case WalkResult::Landed:
+          return Action::redraw();
+        case WalkResult::RanOff:
+          // AND OFF THE END OF THE BOOK IS THE BOARD. This was Action::none() -- a
+          // dead button on the last page of every book, which is the defect this
+          // project has shipped twice before. PUSHED rather than replacing the
+          // Reader, so Back comes straight back to this page.
+          return Action::push(ScreenId::BookEnd);
+        case WalkResult::Failed:
+          // An entry that would not open is not the end of the book, and saying so
+          // would be a wrong claim rather than a missing one. The in-memory demo
+          // Reader lands here too -- it has no book to have reached the end of.
+          return Action::none();
+      }
+      return Action::none();
     }
     case Gesture::Prev: {
       // Where the page index earns itself: the stream only goes forward, so an
@@ -1091,7 +1125,10 @@ Action ReaderScreen::onGesture(const GestureEvent& g) {
         // And back off the top is the PREVIOUS chapter's LAST page, so paging
         // backwards through a book is continuous rather than stopping at each
         // chapter's start.
-        if (!openChapterAt(chapterAt_ - 1, true)) return Action::none();
+        // EVERY NON-LANDING ANSWER IS none() HERE, RanOff included: there is no
+        // board for the beginning of a book and no reason to invent one.
+        if (openChapterAt(chapterAt_ - 1, true) != WalkResult::Landed)
+          return Action::none();
         return Action::redraw();
       }
       if (!seekTo(at_ - 1)) return Action::none();

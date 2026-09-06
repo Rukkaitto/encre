@@ -577,15 +577,28 @@ class ReaderScreen : public Screen {
   // is the whole reason abandoning it is safe. It does rewind the shared
   // ChapterReader, so the caller owns resetting `pb_`.
   CountOutcome countPages(std::vector<Cursor>& out, StopFn stop, void* ctx);
+  // WHY A CHAPTER WALK STOPPED, because a bool conflated three outcomes and only one
+  // of them is the end of a book. Pushing BookEnd on a bare false would put THE END
+  // on the glass for a corrupt local header, and would fire on the in-memory demo
+  // Reader, which has no book behind it at all.
+  enum class WalkResult : uint8_t {
+    Landed,  // a chapter with pages is open
+    RanOff,  // the spine ran out in the direction asked for -- the edge of the book
+    Failed,  // nothing to page into, or an entry that would not open
+  };
   // Opens spine entry `c` and lands on its first page, or its last when `atEnd`.
   //
   // SKIPS CHAPTERS THAT PAGINATE TO NOTHING, continuing in whichever direction it
   // was already going. Three of the 92 spine entries in one real book do -- a cover
   // and two title pages, each an `<img>` and nothing document.h models. A reader
   // that stopped on one would show a blank page and no way off it.
-  bool openChapterAt(int c, bool atEnd);
+  //
+  // AND THAT IS WHY THE EDGE OF THE BOOK CANNOT BE A RANGE TEST: a trailing entry
+  // that paginates to nothing is in range and is not another page, so only the walk
+  // can say. Every answer but `Landed` leaves the screen exactly as it was found.
+  WalkResult openChapterAt(int c, bool atEnd);
   // The walk itself. Separate so openChapterAt can undo it on failure.
-  bool walkToChapter(int c, bool atEnd);
+  WalkResult walkToChapter(int c, bool atEnd);
   // Re-establishes a chapter's stream without touching the index or the page, for
   // undoing a walk that failed.
   bool reopenChapter(int c);

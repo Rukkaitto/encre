@@ -9,6 +9,11 @@
 // screens -- the boards' `text-overflow: ellipsis`, and the two deliberate
 // exceptions to it.
 //
+// AND IT IS SIX SCREENS NOW. BookEnd's byline is the sixth, and it arrived by the
+// same route as Home's: the run was drawn with a one-line primitive, a real card's
+// title ran off both margins, and nothing here noticed because every board's sample
+// title is a word.
+//
 // IT SAID "FOUR SCREENS" AND COVERED FOUR THAT DO NOT INCLUDE HOME, which draws the
 // most prominent title on the device. Home elided, the device showed a truncated
 // book name on the one screen whose whole job is to name the book being read, and
@@ -24,6 +29,7 @@
 #include "reader/framebuffer.h"
 #include "reader/icons.h"
 #include "reader/screens.h"
+#include "reader/screen_book_end.h"
 #include "reader/screen_home.h"
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
@@ -413,5 +419,36 @@ TEST_CASE("an accented title shouts, and its accented capitals have real glyphs"
     reader::Framebuffer fb(w, h);
     theme.renderHome(fb, r.fonts, vm, reader::Plane::Bw);
     golden::checkGolden(fb, w == 480 ? "home_accented_title" : "home_accented_title_x3");
+  }
+}
+
+
+// --- The end of a book ------------------------------------------------------------
+
+TEST_CASE("a long title on BookEnd matches its golden") {
+  // THE ONLY CHECK THAT DISTINGUISHES INK THAT SPELLS SOMETHING FROM INK THAT DOES
+  // NOT, which on a WRAPPED run is the whole hazard: `Prose::lines` are views into the
+  // text handed to the wrap, so a temporary would draw a wrapped title as a column of
+  // notdef boxes and render a short one correctly -- and a notdef box inks rows
+  // exactly like a letter does, so every structural assertion in
+  // test_theme_book_end.cpp passes either way. Home shipped that bug; this is the
+  // check that would have caught it.
+  //
+  // Rendered through the screen rather than the theme, because the BYLINE is composed
+  // by the screen -- the title, the separator and the author are one string it owns,
+  // and it is that string the wrap holds views into.
+  Ramp r;
+  reader::QuietTheme theme;
+  reader::BookEndScreen::Facts f;
+  f.bookTitle = kLongTitle;
+  f.author = "George Eliot";
+  f.chapterCount = 24;
+  f.libraryBeneath = true;
+  for (const int w : {480, 528}) {
+    const int h = w == 480 ? 800 : 792;
+    reader::BookEndScreen s(f);
+    reader::Framebuffer fb(w, h);
+    s.render(fb, r.fonts, theme, reader::Plane::Bw);
+    golden::checkGolden(fb, w == 480 ? "book_end_long_title" : "book_end_long_title_x3");
   }
 }

@@ -103,13 +103,18 @@ TEST_CASE("the actions overlay's four rows do what the plan says, including noth
   CHECK(details.kind == Action::Kind::Push);
   CHECK(details.target == ScreenId::BookDetails);
 
-  // Mark as finished: NOTHING, and deliberately. Per-book state has no format
-  // yet, and a state file invented here would commit 2C-3 and Phase 3 to a
-  // schema chosen by the screen with the least stake in it -- on a card that
-  // outlives the firmware.
+  // MARK AS FINISHED ACTS. This asserted none() behind "per-book state has no format
+  // yet, and a state file invented here would commit 2C-3 and Phase 3 to a schema
+  // chosen by the screen with the least stake in it" -- and /.reader/state/ has a
+  // format now and ReadingPosition carries the flag, so the comment's expiry date had
+  // passed and the test was pinning a placeholder on a shipped screen. Same shape as
+  // the OPEN row three assertions up.
+  //
+  // Finish and not Pop: the write is to the card, so it is a latch for the shell
+  // exactly as Open is, and the shell pops the overlay after the write.
   CHECK(actions.onEvent(kDown).kind == Action::Kind::Redraw);
   CHECK(actions.focus() == 2);
-  CHECK(actions.onEvent(kConfirm).kind == Action::Kind::None);
+  CHECK(actions.onEvent(kConfirm).kind == Action::Kind::Finish);
 
   CHECK(actions.onEvent(kDown).kind == Action::Kind::Redraw);
   const Action del = actions.onEvent(kConfirm);

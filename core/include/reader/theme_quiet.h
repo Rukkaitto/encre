@@ -14,6 +14,8 @@ class QuietTheme : public Theme {
                   Plane plane = Plane::Bw) override;
   void renderSdMissing(Framebuffer& fb, const FontSet& fonts, const SdMissingViewModel& vm,
                        Plane plane = Plane::Bw) override;
+  void renderBookEnd(Framebuffer& fb, const FontSet& fonts, const BookEndViewModel& vm,
+                     Plane plane = Plane::Bw) override;
   void renderLibrary(Framebuffer& fb, const FontSet& fonts, const LibraryViewModel& vm,
                      Plane plane = Plane::Bw) override;
   void renderItemActions(Framebuffer& fb, const FontSet& fonts, const ItemActionsViewModel& vm,

@@ -9,6 +9,7 @@ class FontSet;
 class CoverSource;
 struct HomeViewModel;
 struct SdMissingViewModel;
+struct BookEndViewModel;
 struct LibraryViewModel;
 struct ItemActionsViewModel;
 struct DeleteConfirmViewModel;
@@ -80,6 +81,12 @@ class Theme {
   // header band, no rows and no battery reading, and nothing about it is a list.
   virtual void renderSdMissing(Framebuffer& fb, const FontSet& fonts,
                                const SdMissingViewModel& vm, Plane plane = Plane::Bw) = 0;
+  // design/BookEnd.dc.html. Its own board and its own method, for the reason
+  // renderSdMissing has one: a shared "prompt with two slabs" abstraction would have
+  // to carry a header band that SdMissing does not draw and a bottom-anchored note
+  // that nothing else does.
+  virtual void renderBookEnd(Framebuffer& fb, const FontSet& fonts,
+                             const BookEndViewModel& vm, Plane plane = Plane::Bw) = 0;
   // The Library (spec 4.1). Its own typed method, for the reason
   // renderSdMissing is its own: it is its own board, and a shared "titled list"
   // surface would have to be told which board it was drawing.

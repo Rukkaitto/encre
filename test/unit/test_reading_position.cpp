@@ -343,3 +343,144 @@ TEST_CASE("THE ANCHOR DEGRADES WITH THE POSITION, dropped below Exact") {
     CHECK_FALSE(r.anchorAny);
   }
 }
+
+// THE FLAG IS AN ASSERTION, NOT A MEASUREMENT, and it round-trips.
+TEST_CASE("finished round-trips through serialise and parsePosition") {
+  reader::ReadingPosition p;
+  p.bookPath = "/books/Middlemarch.epub";
+  p.spine = 3;
+  p.finished = true;
+
+  reader::ReadingPosition back;
+  REQUIRE(reader::parsePosition(reader::serialise(p), back));
+  CHECK(back.finished == true);
+  CHECK(back.spine == 3);
+}
+
+// THE ASSERTION THAT ACTUALLY MATTERS. savePosition goes through writeIfChanged,
+// which reads the card back and compares BYTES -- so a `finished: false` written
+// unconditionally would change every existing sidecar's text and rewrite the lot
+// on their next save, a card write per book to record nothing. Absent-when-false
+// is the same rule the anchor's three keys already follow.
+TEST_CASE("an unfinished position serialises to the bytes it did before the field existed") {
+  reader::ReadingPosition p;
+  p.bookPath = "/books/Middlemarch.epub";
+  p.spine = 3;
+  p.block = 7;
+  p.finished = false;
+
+  CHECK(reader::serialise(p).find("finished") == std::string::npos);
+}
+
+// A record written before this field existed must still load -- with `finished`
+// defaulting false, not with the parse refusing. kPositionVersion deliberately did
+// NOT move: bumping it would make every reader lose their place in every book, to
+// protect against a downgrade whose worst outcome is a missing label.
+//
+// WHAT THIS CASE DEFENDS IS THE `REQUIRE`, NOT THE `CHECK`. The load-bearing
+// assertion is that a record lacking the key PARSES rather than being refused, which
+// is the entire basis for leaving the version at 1.
+//
+// IT DOES NOT DEFEND THE `o.getBool` READ, and a comment here used to claim it did:
+// `parsePosition` ends in `out = p`, a wholesale assignment from a locally
+// constructed ReadingPosition whose `finished` is already false, so the seeded value
+// below cannot survive a successful parse whatever the body does with the key.
+// Verified by mutation rather than argued: deleting that read fails the ROUND-TRIP
+// case above and leaves this one green. So the round-trip case is what pins the
+// read, and anyone weakening it should not expect this one to notice.
+//
+// The seeding is KEPT because it does pin a real property -- a successful parse
+// leaves nothing of the caller's prior record standing -- and that property is what
+// would make this case a genuine guard if `parsePosition` were ever refactored to
+// write into `out` field by field instead of assigning it whole.
+TEST_CASE("a record with no finished key parses, defaulting to unfinished") {
+  reader::ReadingPosition p;
+  p.bookPath = "/books/Walden.epub";
+  p.spine = 1;
+  const std::string before = reader::serialise(p);
+
+  reader::ReadingPosition back;
+  back.finished = true;  // see above: pins the no-leak-through property, NOT the read
+  REQUIRE(reader::parsePosition(before, back));
+  CHECK(back.finished == false);
+}
+
+// operator== has to see it, or "did the position change" answers wrongly for the
+// one field this feature adds.
+TEST_CASE("two positions differing only in finished are not equal") {
+  reader::ReadingPosition a;
+  a.bookPath = "/books/Walden.epub";
+  reader::ReadingPosition b = a;
+  b.finished = true;
+  CHECK_FALSE(a == b);
+}
+
+// REOPENING A FINISHED BOOK STARTS IT AGAIN, reported from a device: a DONE book
+// reopened somewhere in its last chapter instead of at the beginning.
+//
+// Asserted at EVERY fit, because the point is that this is not a fit question. An
+// Exact record is the case that actually bit -- the record is perfectly valid and is
+// deliberately not used.
+TEST_CASE("a finished book restores nothing, whatever its fit") {
+  reader::ReadingPosition p;
+  p.bookPath = "/books/Middlemarch.epub";
+  p.spine = 47;
+  p.block = 12;
+  p.line = 3;
+  p.bookBytes = 1024;
+  p.ppem = 32;
+  p.columnW = 492;
+  p.finished = true;
+
+  for (const reader::PositionFit fit :
+       {reader::PositionFit::Exact, reader::PositionFit::Relaid, reader::PositionFit::Rebound,
+        reader::PositionFit::Unusable}) {
+    CAPTURE(static_cast<int>(fit));
+    const reader::PositionRestore r = reader::restoreFrom(p, fit);
+    CHECK_FALSE(r.any);
+    CHECK(r.spine == 0);
+    CHECK(r.cursor.block == 0);
+    CHECK(r.cursor.line == 0);
+  }
+}
+
+// THE SAME RECORD UNFINISHED STILL RESTORES, which is what says the guard above keys
+// on the flag and not on something else about this fixture.
+TEST_CASE("the same record unfinished restores exactly as before") {
+  reader::ReadingPosition p;
+  p.bookPath = "/books/Middlemarch.epub";
+  p.spine = 47;
+  p.block = 12;
+  p.line = 3;
+  p.bookBytes = 1024;
+  p.ppem = 32;
+  p.columnW = 492;
+  p.finished = false;
+
+  const reader::PositionRestore r = reader::restoreFrom(p, reader::PositionFit::Exact);
+  REQUIRE(r.any);
+  CHECK(r.spine == 47);
+  CHECK(r.cursor.block == 12);
+  CHECK(r.cursor.line == 3);
+}
+
+// A FINISHED BOOK DROPS ITS WAY BACK TOO. The anchor points at where the reader was,
+// and they are not there any more.
+TEST_CASE("a finished book restores no anchor either") {
+  reader::ReadingPosition p;
+  p.bookPath = "/books/Middlemarch.epub";
+  p.spine = 47;
+  p.bookBytes = 1024;
+  p.ppem = 32;
+  p.columnW = 492;
+  p.anchorSpine = 40;
+  p.anchorBlock = 2;
+  p.anchorLine = 1;
+  REQUIRE(p.hasAnchor());
+
+  p.finished = false;
+  REQUIRE(reader::restoreFrom(p, reader::PositionFit::Exact).anchorAny);
+
+  p.finished = true;
+  CHECK_FALSE(reader::restoreFrom(p, reader::PositionFit::Exact).anchorAny);
+}

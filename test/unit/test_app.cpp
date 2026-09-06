@@ -83,6 +83,7 @@ class NullTheme : public Theme {
  public:
   void renderHome(Framebuffer&, const FontSet&, const HomeViewModel&, Plane) override {}
   void renderSdMissing(Framebuffer&, const FontSet&, const SdMissingViewModel&, Plane) override {}
+  void renderBookEnd(Framebuffer&, const FontSet&, const BookEndViewModel&, Plane) override {}
   void renderLibrary(Framebuffer&, const FontSet&, const LibraryViewModel&, Plane) override {}
   void renderItemActions(Framebuffer&, const FontSet&, const ItemActionsViewModel&,
                          Plane) override {}
@@ -847,4 +848,40 @@ TEST_CASE("a sleep action is latched until the shell clears it") {
   CHECK(app.sleepRequested());
   app.clearSleepRequest();
   CHECK_FALSE(app.sleepRequested());
+}
+
+TEST_CASE("a finish action is latched until the shell clears it") {
+  // Mirrors the Retry and Open latches, and for their reason: marking a book
+  // finished is a WRITE TO THE CARD, and storage is not core/'s.
+  FakeFactory f;
+  App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::finish()), f);
+  CHECK_FALSE(app.finishRequested());
+  app.dispatch(kConfirm);
+  CHECK(app.finishRequested());
+  app.clearFinishRequest();
+  CHECK_FALSE(app.finishRequested());
+  // And it re-latches: the shell clears the flag before it writes, so a second
+  // press after a failed save must be visible as a second request.
+  app.dispatch(kConfirm);
+  CHECK(app.finishRequested());
+}
+
+TEST_CASE("a finish request changes nothing itself -- not the frame, not the stack") {
+  FakeFactory f;
+  App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::finish()), f);
+  app.clearDirty();
+  REQUIRE_FALSE(app.dirty());
+  app.dispatch(kConfirm);
+  REQUIRE(app.finishRequested());
+  // Nothing repaints on its own. What the write changes on glass is the shell's
+  // to decide, and it is usually a screen change rather than a repaint of this
+  // one -- exactly the rule Retry and Open already follow.
+  CHECK_FALSE(app.dirty());
+  CHECK_FALSE(app.transition());
+  CHECK(app.depth() == 1);
+  CHECK(app.top().id() == ScreenId::Home);
+  // And it is its own latch: a finish must not read as a sleep or a retry.
+  CHECK_FALSE(app.sleepRequested());
+  CHECK_FALSE(app.retryRequested());
+  CHECK_FALSE(app.openRequested());
 }

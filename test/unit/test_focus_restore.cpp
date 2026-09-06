@@ -38,7 +38,7 @@ constexpr ScreenId kAllScreens[] = {
     ScreenId::Home,     ScreenId::Library,      ScreenId::ItemActions, ScreenId::DeleteConfirm,
     ScreenId::BookDetails, ScreenId::Settings,  ScreenId::Sleep,       ScreenId::Reader,
     ScreenId::ReaderMenu,  ScreenId::Contents,  ScreenId::SdMissing,
-    ScreenId::Typography,  ScreenId::Peek,
+    ScreenId::Typography,  ScreenId::Peek,     ScreenId::BookEnd,
 };
 // AND IT NAMES THE LAST MEMBER, WHICH IS THE ONLY WAY IT BITES. It named
 // SdMissing, and Typography was APPENDED after it -- so the array's length still
@@ -46,8 +46,18 @@ constexpr ScreenId kAllScreens[] = {
 // catalogue. Every append is a screen this guard silently lets through unless the
 // name here moves with it, which is the "reports on less than it claims" shape
 // three other checks in this repo have had.
+//
+// IT HAPPENED AGAIN, AND THIS GUARD IS ITSELF AN INSTANCE OF #42. It said `Peek`
+// while BookEnd was appended after it, so both sides read 13 and the build stayed
+// green over a screen the catalogue did not cover -- caught only because the two
+// hand-maintained counts below failed for an unrelated reason. Naming BookEnd means
+// the array can no longer be SHORT today, and that is all it means: the assert is
+// still pinned to a NAME rather than to whatever the last member happens to be, so
+// the next append needs this line moved BY HAND or it goes quiet again. #42 is the
+// general fix -- it has instances in more than one file -- and is deliberately not
+// attempted here.
 static_assert(sizeof(kAllScreens) / sizeof(kAllScreens[0]) ==
-                  static_cast<size_t>(ScreenId::Peek) + 1,
+                  static_cast<size_t>(ScreenId::BookEnd) + 1,
               "a ScreenId was added or removed; give it a row in kAllScreens, and"
               " name the LAST member here");
 
@@ -99,6 +109,11 @@ std::unique_ptr<Standalone> build(ScreenId id) {
   // book came to show Middlemarch's chapters on the device. A fixture that did not ask
   // would get a null screen, which is the refusal working.
   b->factory.setContentsDemo();
+  // AND BookEnd, for that same reason. It is primed unconditionally rather than
+  // under `if (id == ScreenId::BookEnd)` because it is a value copy and needs no
+  // face, no metrics and no parent -- the Reader's and the Peek's demos are gated
+  // only because a body face costs a TTF load the other screens should not pay.
+  b->factory.setBookEndDemo();
   if (id == ScreenId::Reader || id == ScreenId::Peek) {
     // GIVEN a body face rather than skipped. Excluding either from the loop would
     // have been a screen this file claims to cover and does not -- and both are
@@ -149,10 +164,15 @@ TEST_CASE("every screen accepts back the focus it reports") {
   // Counted, not assumed. A refactor that made every screen report a fixed focus
   // would leave the loop below passing on nothing at all, which is the failure
   // mode this project keeps hitting -- a check that reports on less than it
-  // claims. EIGHT screens can move their focus today: Home, Library, the two Library
-  // overlays, Settings, the reader menu, the contents and Typography. BookDetails,
-  // Sleep, the Reader, the Peek and the SD-missing prompt have one thing on them and
-  // legitimately report 0 -- the Peek has no selection at all, only a page.
+  // claims. NINE screens can move their focus today: Home, Library, the two Library
+  // overlays, Settings, the reader menu, the contents, Typography and BookEnd, whose
+  // two slabs are the ninth. BookDetails, Sleep, the Reader, the Peek and the
+  // SD-missing prompt have one thing on them and legitimately report 0 -- the Peek has
+  // no selection at all, only a page.
+  //
+  // THERE ARE TWO OF THESE COUNTS, this one and `wrapping` below, and they live in
+  // different test cases. This project's own notes have only ever mentioned one, so a
+  // screen added to the catalogue moves both or fails on the half nobody looked at.
   int movable = 0;
 
   for (const ScreenId id : kAllScreens) {
@@ -176,7 +196,7 @@ TEST_CASE("every screen accepts back the focus it reports") {
     CHECK(restored->get().focus() == moved);
   }
 
-  CHECK(movable == 8);
+  CHECK(movable == 9);
 }
 
 TEST_CASE("every screen with a movable focus wraps off the end") {
@@ -207,7 +227,7 @@ TEST_CASE("every screen with a movable focus wraps off the end") {
     CHECK(wrapped);
     ++wrapping;
   }
-  CHECK(wrapping == 8);
+  CHECK(wrapping == 9);
 }
 
 TEST_CASE("restoring the focus a screen is already on is a no-op, not a failure") {

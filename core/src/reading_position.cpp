@@ -18,6 +18,7 @@ constexpr const char* kKeyPpem = "ppem";
 constexpr const char* kKeyColumnW = "columnW";
 constexpr const char* kKeyPercent = "percent";
 constexpr const char* kKeyChapter = "chapter";
+constexpr const char* kKeyFinished = "finished";
 // The anchor's three. Written only when there IS one, so a record for a reader with
 // nowhere to go back to is byte-identical to one written before the anchor existed --
 // which is what keeps the shell's "skip a write that changes nothing" true for the
@@ -36,8 +37,9 @@ int nonNegative(int64_t v) { return v < 0 ? 0 : static_cast<int>(v > 0x7fffffff 
 bool ReadingPosition::operator==(const ReadingPosition& o) const {
   return bookPath == o.bookPath && spine == o.spine && block == o.block && line == o.line &&
          bookBytes == o.bookBytes && ppem == o.ppem && columnW == o.columnW &&
-         percent == o.percent && chapter == o.chapter && anchorSpine == o.anchorSpine &&
-         anchorBlock == o.anchorBlock && anchorLine == o.anchorLine;
+         percent == o.percent && chapter == o.chapter && finished == o.finished &&
+         anchorSpine == o.anchorSpine && anchorBlock == o.anchorBlock &&
+         anchorLine == o.anchorLine;
 }
 
 PositionFit fitOf(const ReadingPosition& saved, std::string_view bookPath, uint32_t bookBytes,
@@ -55,6 +57,26 @@ PositionFit fitOf(const ReadingPosition& saved, std::string_view bookPath, uint3
 
 PositionRestore restoreFrom(const ReadingPosition& saved, PositionFit fit) {
   PositionRestore r;
+  // A FINISHED BOOK OPENS AT THE FRONT, whatever its record still supports, and this
+  // is checked BEFORE the fit because it is a different question. `fitOf` asks how
+  // much of the record still APPLIES -- a re-export or a type-size change is about
+  // validity. This asks whether it should be USED at all, and the answer for a book
+  // the reader has declared finished is no: reopening one is re-reading it, not
+  // resuming it. Reported from a device, where a DONE book reopened somewhere in its
+  // last chapter.
+  //
+  // ANSWERED AS `any = false`, which is the same answer Unusable gets, because the
+  // caller's response to both is identical -- start at the beginning -- and
+  // loadPosition's own header already takes that line about its several false cases:
+  // "Distinguishing them would be a distinction with no consequence."
+  //
+  // THE ANCHOR GOES WITH IT, by falling through to the same early return. A way back
+  // to where the reader was is meaningless when they are no longer there.
+  //
+  // IT UN-MARKS ITSELF, so this is not a state the reader can get stuck in: the next
+  // save from the Reader builds a fresh record (see saveReadingPosition), so reading
+  // on from the front clears `finished` and the book resumes normally from then on.
+  if (saved.finished) return r;
   switch (fit) {
     case PositionFit::Unusable:
       return r;
@@ -100,6 +122,10 @@ std::string serialise(const ReadingPosition& p) {
   o.setInt(kKeyColumnW, p.columnW);
   o.setInt(kKeyPercent, p.percent);
   o.setString(kKeyChapter, p.chapter);
+  // ABSENT RATHER THAN false, exactly as the anchor's three keys are absent rather
+  // than -1: an unfinished record is then byte-identical to one written before this
+  // field existed, so writeIfChanged still answers Unchanged and no card is rewritten.
+  if (p.finished) o.setBool(kKeyFinished, true);
   // ABSENT RATHER THAN -1 when there is no anchor. Three keys that appear only for a
   // reader who has somewhere to go back to, so the common record does not grow and
   // an unchanged save stays byte-identical.
@@ -144,6 +170,10 @@ bool parsePosition(std::string_view text, ReadingPosition& out) {
   // OPTIONAL, because every sidecar written before this field existed lacks it -- and a
   // position is still perfectly usable without a chapter name. The row draws blank.
   o.getString(kKeyChapter, p.chapter);
+  // OPTIONAL, and its absence is "not finished" rather than a parse failure -- every
+  // sidecar written before this field existed lacks it, and kPositionVersion
+  // deliberately did not move so those records must still load.
+  o.getBool(kKeyFinished, p.finished);
   // OPTIONAL AS A GROUP, and the SPINE is what decides. A record from a firmware that
   // did not know about anchors has none of the three; one written by a reader with no
   // way back has none either. Both must read as "no anchor" rather than as an anchor

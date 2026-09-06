@@ -93,7 +93,7 @@ TEST_CASE("every screen in the catalogue has a wire name, and they are all disti
   // must be a deliberate one. This is the check that makes forgetting a row show
   // up here rather than as a screen that quietly never restores.
   std::vector<std::string> names;
-  for (int i = 0; i <= static_cast<int>(ScreenId::Peek); ++i) {
+  for (int i = 0; i <= static_cast<int>(ScreenId::BookEnd); ++i) {
     const ScreenId id = static_cast<ScreenId>(i);
     const char* n = sessionWireName(id);
     REQUIRE(n != nullptr);
@@ -124,4 +124,31 @@ TEST_CASE("Peek round-trips through the record's screen NAME") {
   REQUIRE(decodeSessionStack(wire.c_str(), out));
   REQUIRE(out.size() == in.size());
   CHECK(out[2].screen == ScreenId::Peek);
+}
+
+TEST_CASE("every ScreenId round-trips to ITSELF") {
+  // WALKS TO THE ENUM'S LAST MEMBER, NOT TO A NAMED ONE. The walk above this one
+  // said `<= ScreenId::Peek`, so appending BookEnd left it silently covering
+  // twelve of thirteen screens -- while sessionWireName's `return kNames[0]`
+  // fallthrough stored the thirteenth as `home`. A reader who idle-slept on the
+  // end-of-book screen would have woken on Home, which is exactly the failure
+  // sessionWireName's own comment says the name table exists to prevent.
+  //
+  // DISTINCTNESS IS NOT ASSERTED HERE, and deliberately: the case above already
+  // asserts it across the same walk, and a round-trip catches a collision anyway --
+  // a shared name decodes to the LOWER id, so at most one of the two can come back
+  // as itself. That is what made a second copy of the collision loop a second copy
+  // rather than a second check.
+  for (int i = 0; i <= static_cast<int>(ScreenId::BookEnd); ++i) {
+    const ScreenId id = static_cast<ScreenId>(i);
+    const char* n = sessionWireName(id);
+    REQUIRE(n != nullptr);
+
+    const std::string wire = encodeSessionStack({{id, 0}});
+    std::vector<StackEntry> out;
+    REQUIRE(decodeSessionStack(wire.c_str(), out));
+    REQUIRE(out.size() == 1);
+    INFO("id " << i << " wire name '" << std::string(n) << "'");
+    CHECK(out[0].screen == id);
+  }
 }
