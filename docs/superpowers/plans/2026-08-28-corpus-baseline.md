@@ -124,9 +124,18 @@ statement is "no evidence yet", not "does not happen".**
    DROP rather than a truncation** — a truncated `href` resolves to a path that is
    wrong rather than to nothing, where an absent one is a state every caller already
    handles. `kMaxAttrs` went with it, by the same rule. 225 of 225 open.
-2. **`kMaxBlockBytes` — emit what fits instead of erroring.** Two chapters, and the
-   same silent-truncation shape the entity fix removed. Needs a decision the corpus
-   cannot make: split the block, or truncate it and say so.
+2. ~~**`kMaxBlockBytes` — emit what fits instead of erroring.**~~ **DONE, and as a
+   SPLIT rather than a truncation** — issue #37. What the cap protects is the size of
+   ONE block and both halves are under it, so splitting keeps the bound exactly and
+   loses no text, where truncation's magnitude is unbounded (a chapter that is one
+   giant `<div>` with no `<p>` is one block). `BlockReader::blocksSplit()` counts the
+   cuts. **And the damage was far larger than the row above records, which is this
+   document's own stated blind spot arriving** — see "What this baseline cannot tell
+   you": `truncated` counts chapters, not bytes. Re-measured over the same 225 books,
+   the two were losing **84–92% of the whole book**, not a trailing paragraph:
+   `The 32nd Mersenne Prime` 19,411 → **251,869** text bytes, `The Number "e"`
+   19,494 → **121,991**. Chapter rate 99.97% → **100.00%**, +334,955 bytes, with
+   **223 of 225 byte-identical in every field**.
 3. **Nothing else, until a book demands it.** Grow the corpus toward the population
    that complains — Kobo files, Kindle conversions, publisher output — before spending
    a round on the ten unproven rows.
