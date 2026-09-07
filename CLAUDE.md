@@ -4790,12 +4790,50 @@ and is dropped — worth deciding deliberately for both screens rather than chan
 **CONTENTS IS SETTINGS' SHAPE**: a header band, a list interleaving section headers with
 64px rows, a rail when it overflows, a hint bar. `drawDetailRow`'s own comment was
 written anticipating it — "`focused` inverts it, which BookDetails never does and
-Contents does on the chapter you are in". The section header turned out to be **byte
-identical on both boards** (`--t-meta`, 0.2em/500, `padding: 18px 24px 6px 24px`, a 2px
-`border-top` except the first), so it is `drawSectionHeader` now rather than a second
-copy — and it returns the height it ACTUALLY drew, because a first header is shorter by
-its missing rule and a caller advancing by the nominal height puts every row 2px low.
-Settings shipped that exact bug once.
+Contents does on the chapter you are in". The section header's **BOX** is byte identical
+on both boards (`--t-meta`, 0.2em/500, `padding: 18px 24px 6px 24px`), so it is
+`drawSectionHeader` now rather than a second copy — and it returns the height it ACTUALLY
+drew, because a header without its rule is 2px shorter and a caller advancing by the
+nominal height puts every row 2px low. Settings shipped that exact bug once.
+
+**ITS RULE IS NOT SHARED, AND THIS PARAGRAPH SAID IT WAS — "a 2px `border-top` except
+the first", which is SETTINGS' rule and not this board's (#81).** `Contents.dc.html`
+gives **neither** header a `border-top` and neither section-final row a `border-bottom`;
+`Settings.dc.html` gives every non-first header one. So `renderContents` drew a row's 1px
+rule straight into a 2px header rule — a **3px** full-width line where the board draws
+none, **1,440 of 13,274 differing pixels at X4 and 1,584 of 13,514 at X3**, ~11% of the
+screen's whole mismatch and the largest contiguous band on it. The same false claim stood
+in `drawSectionHeader`'s own doc comment, which is what licensed it: **a comment about a
+neighbouring file is not evidence about it**, the shape this file already records for the
+`book.cpp` comment describing `Epub::open`.
+
+- **THE BOARD WAS RIGHT AND THE TWO ABSENCES ARE ONE DECISION.** A Settings section is a
+  change of SUBJECT and a divider says so; a part of a book is a soft hierarchy over one
+  continuous reading sequence, carried by the label's own 18/6 padding and tracked caps.
+  **And Contents SCROLLS where Settings does not**, so a header that ruled at all would
+  make Settings' positional first-versus-later question something this screen has to
+  answer correctly at every scroll offset, for a line it wants nowhere. **WHETHER a
+  screen's headers rule at all stays at the call site** — Settings passes `i != 0`,
+  Contents passes `false` — and `Contents.dc.html` now carries the reasoning, because
+  nothing on it said the absences were deliberate and that is why the render copied
+  Settings' shape.
+- **THE ROW'S HALF IS `rowRuleFor`'s THIRD TERM NOW, AND IT ARRIVED ONE COPY LATE.**
+  `renderSettings` carried it hand-written as `rowRuleFor(...) && !nextIsHeader` and this
+  file's own primitive carried the rest of it in **PROSE** ("screens with extra reasons to
+  drop a rule … AND this together"). **A rule half in a constexpr and half in a sentence
+  is a primitive not yet finished, and the sentence is the half that does not get copied
+  to the next caller.** `nextIsHeader` defaults to false, which is the answer *by
+  construction* for every headerless list rather than merely convenient; the one-line
+  lookahead that answers it stays per-screen, because the two sectioned screens hold
+  different row types. Proved by mutation: dropping the term reddens both Contents
+  goldens, both mixed-depth goldens **and both Settings goldens**, which is what says the
+  extraction moved behaviour rather than leaving a dead parameter.
+- **MEASURED, and the gain is bigger than the band** because the 3px also put everything
+  below the header out of register with the board: **13,274 → 8,814 (3.46% → 2.30%) at X4
+  and 13,514 → 8,814 (3.23% → 2.11%) at X3**, no full-width differing row left on either
+  panel. Threshold-at-128 over the bare `--export` panels — the sheet still prints `ok`
+  rather than a percentage (#41). **Confined to the band and below, checked rather than
+  claimed: above y=505 the count is 6,733 before AND after, at both geometries.**
 
 **A DEPTH-1 ENTRY IS A HEADER ONLY IN A BOOK THAT HAS DEEPER ONES.** Two of the four
 measured books are flat, and treating depth 1 as a header unconditionally would render
