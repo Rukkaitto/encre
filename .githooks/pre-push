@@ -11,6 +11,37 @@
 # For a branch the remote does not have yet, that sha is all zeros, and the
 # fallback is "commits on no branch of this remote", which is the same question
 # asked a different way.
+#
+# AND THAT FALLBACK IS THE WHOLE OF ISSUE #71. The negotiated sha alone says
+# "since the remote's tip OF THIS BRANCH" -- which after `git merge origin/main`
+# includes every commit the merge brought in, so ONE non-conforming subject on
+# main rejects the push of a branch that did not write it, and poisons every
+# future merge until the base moves past it. There are five such subjects on
+# main, all of them PR titles a squash-merge turned into commit subjects (which
+# the PR-title CI job now covers). The two arms also DISAGREED: a never-pushed
+# branch took the --remotes fallback and passed, and the same branch after one
+# push failed on the same tree.
+#
+# So both arms now exclude what this remote already has. What that gives up,
+# stated precisely because the property above was earned:
+#
+#   KEPT -- the negotiated sha is still an exclusion, so it still bounds the
+#   range, and nothing local can WIDEN it back into already-merged history.
+#   A stale remote-tracking ref is one that is BEHIND reality, and a behind ref
+#   excludes FEWER commits than the truth, so staleness can only make this check
+#   examine more, never less. That is the direction that cannot hide anything.
+#
+#   GIVEN UP -- the range is no longer purely what git negotiated; it also reads
+#   local remote-tracking refs. A ref that is AHEAD of the real remote (the
+#   remote branch rewound or deleted since the last fetch) would exclude commits
+#   genuinely being pushed. Those commits were on the remote once, so the push
+#   that put them there already checked them.
+#
+#   WHY THE EXCHANGE IS SOUND -- a merge can only bring in what a local ref
+#   points at. `git merge origin/main` merges the tracking ref ITSELF, so
+#   excluding what the tracking refs hold excludes exactly what a merge from
+#   this remote brought in. Staleness cannot bite here, because a stale ref is
+#   one you did not merge from.
 set -e
 
 remote="$1"
@@ -27,10 +58,13 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         *) continue ;;
     esac
 
+    # Everything after --not is an exclusion, so this reads: the commits this
+    # push adds, minus anything already on a branch of this remote, minus
+    # anything already at the tip git negotiated for this ref.
     if [ "$remote_sha" = "$zero" ]; then
         range="$local_sha --not --remotes=$remote"
     else
-        range="$remote_sha..$local_sha"
+        range="$local_sha --not --remotes=$remote $remote_sha"
     fi
 
     python3 "$root/tools/check_conventions.py" \
