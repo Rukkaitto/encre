@@ -175,6 +175,17 @@ def main():
     check(r.code != 0 and "nope1" in r.message and "nope2" in r.message,
           "every unrecognised id is named", f"msg={r.message!r}")
 
+    # AN EMPTY --only IS THE SAME QUIET PASS REACHED FROM THE OTHER SIDE: it
+    # selects nothing, so nothing is MISSING either, and the run exits 0 having
+    # rendered no screens and reported "0/0 screens implemented".
+    for argv, spelling in ((["--only", ""], 'empty string'),
+                           (["--only", ","], 'a bare comma'),
+                           (["--only", " , "], 'whitespace and a comma')):
+        r = run(mod, argv + x4)
+        check(r.code != 0 and r.total == 0,
+              f"an empty --only is an error, not 0/0 ({spelling})",
+              f"exit={r.code} total={r.total} msg={r.message!r}")
+
     print("\nthe screen tables are a set, not a bag")
     # A DUPLICATE ROW INFLATES BOTH HALVES OF THE RATIO. `reader_anchored` was
     # listed in V1_SCREENS and in FLOW_SCREENS at once, so the default sheet

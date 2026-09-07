@@ -63,7 +63,10 @@ id named by **two** rows of those tables (#77 — it would be rendered and count
 twice), and a screen the SIMULATOR KNOWS that will not render. It does **not**
 measure how close the render is -- the sheet still prints `ok` rather than a
 percentage, which is #41. A board with no screen behind it stays fine; that is
-six of the 36.
+**five of the 36** — measured, not inherited: a full run with the gate on reports
+`31/36 screens implemented` and exits 0 (Bookmarks, Boot, Home / missing book,
+Names, Names / empty). It read **37** before #77, and the extra row was the same
+board counted twice.
 
 **Wiring it at all needed the script to be able to fail.** `render_sim` returned
 a bare `None` for both "the simulator has never heard of this id" and "the
