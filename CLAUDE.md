@@ -24,7 +24,7 @@ make sim        # render Home to build/home.png
 make firmware   # build for the ESP32-C3
 make fonts      # regenerate the .rfnt type ramp and embedded headers
 make icons      # regenerate icon bitmaps from the design boards' SVG
-make compare    # design-vs-firmware contact sheet, all 32 boards (~2.8 min)
+make compare    # design-vs-firmware contact sheet, all 36 boards (~2.8 min)
                 # ...and it prints `ok`, NOT a percentage -- see #41
 ```
 
