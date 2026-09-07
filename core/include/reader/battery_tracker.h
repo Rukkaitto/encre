@@ -215,7 +215,12 @@ class BatteryTracker {
     // down; but the battery IS low, and the banner saying so is true. On an X4
     // charging() is never known -- there is no charge-status pin -- so it never
     // suppresses there, and shutdown-then-refuse-to-wake is exactly right for a
-    // flat X4 on a cable: the glass says CHARGE TO WAKE, and it does.
+    // flat X4 on a cable: the glass says CHARGE `·` HOLD POWER TO WAKE, and once it
+    // has charged, holding power does. This comment said a bare `CHARGE TO WAKE`
+    // "and it does", which was false -- CHARGING ALONE WAKES NOTHING ON THIS
+    // HARDWARE (there is no charge-detect wake source, and on battery the chip is
+    // fully powered down so no timer can fire one either); it only makes the hold
+    // succeed. Reported from an X3.
     if (percent_ > kCriticalPercent || charging()) {
       sawCriticalSinceMs_ = 0;
       inCriticalRun_ = false;

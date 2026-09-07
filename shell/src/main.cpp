@@ -3714,10 +3714,13 @@ static void requireHeldPowerButtonOrSleepAgain(bool fromSleep, esp_reset_reason_
   freeink::PowerManager::deepSleepUntilPowerButton();
 }
 
-// `CHARGE TO WAKE`, made true after the wake -- because the SoC cannot make it true
-// before one. The wake source is the power button and there is no charge-detect
-// anywhere on that path, so the board's promise is enforced exactly as
-// HOLD POWER TO WAKE is: by refusing a resume that does not satisfy it.
+// The CHARGE half of `CHARGE · HOLD POWER TO WAKE`, made true after the wake --
+// because the SoC cannot make it true before one. The wake source is the power button
+// and there is no charge-detect anywhere on that path, so the board's promise is
+// enforced exactly as the HOLD half is: by refusing a resume that does not satisfy it.
+// (The badge used to say a bare `CHARGE TO WAKE`, which promised a charge-detect wake
+// this hardware does not have and omitted the hold this file's own gate requires
+// FIRST. Reported from an X3.)
 //
 // Returns only when the resume is accepted. A refusal re-arms both flags, powers the
 // rails back down and does not return.

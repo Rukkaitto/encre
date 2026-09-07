@@ -211,15 +211,35 @@ fired** — the poll is the one part of this that is otherwise invisible.
       `[power] battery empty: painting the shutdown screen`, then the panel shows
       BATTERY EMPTY. **The paint must COMPLETE before the rails go down** — a
       half-drawn screen here is the last thing the reader sees for hours.
-- [ ] **10.3** `=2`, then press power. `[boot] battery pct=2 critShut=1 -> refused`
-      and **nothing is repainted**: the glass still holds the screen from the step
-      above, because the gate runs before `display.begin()` and spends no waveform.
-      Repeat three times and confirm the flag is given back each time — a refusal
-      that consumed it would let the fourth press boot a flat device.
-- [ ] **10.4** Rebuild **without** the flag on a charged pack and press power: the
+      **READ THE TWO STRINGS ON THAT SCREEN WHILE IT IS UP**, because both were
+      wrong once and both were found here and nowhere else: the badge must say
+      `CHARGE · HOLD POWER TO WAKE` with a real middle dot (a notdef box means the
+      hex escape swallowed a byte — GCC accepts what clang rejects), and the
+      paragraph must **name no connector** at all. It said *"charge over USB-C"*,
+      and **the X3 has no USB-C port**; one binary drives both models, they do not
+      share a socket, and no `BoardProfile` field describes one, so any named
+      connector is false on one of the two.
+- [ ] **10.3** `=2`, then **hold** power for at least 600 ms — the badge now says
+      `CHARGE · HOLD POWER TO WAKE`, and that is the gesture, because
+      `requireHeldPowerButtonOrSleepAgain` runs BEFORE the charge gate. Expect
+      `[boot] battery pct=2 critShut=1 -> refused` and **nothing repainted**: the
+      glass still holds the screen from the step above, because the gate runs before
+      `display.begin()` and spends no waveform. Repeat three times and confirm the
+      flag is given back each time — a refusal that consumed it would let the fourth
+      hold boot a flat device. **A TAP is a separate case and refuses for the OTHER
+      reason** (`[wake] refused`, the hold gate), so it proves nothing about
+      `critShut`; hold, or you are testing the wrong gate.
+- [ ] **10.4** Rebuild **without** the flag on a charged pack and **hold** power: the
       reader's page comes back, not Home. That is `markSleeping()` inside
       `criticalShutdown` redeeming the board's *"Your page is saved"*.
-- [ ] **10.5** X3 only, `=2` **on the cable**: the device does **not** shut down.
+- [ ] **10.5** `=2`, then **plug the device in and leave it alone**. It must stay
+      asleep with the BATTERY EMPTY screen on the glass and nothing must repaint.
+      **There is no charge-detect wake source on this hardware** — `usbDetect` is a
+      declaration nothing in the SDK reads, and on the X3 that pin is the gauge's own
+      I2C SDA — and no timer wake either, because on battery the chip is fully
+      powered down. This step is what the old `CHARGE TO WAKE` badge promised and
+      what an X3 reported as not happening.
+- [ ] **10.6** X3 only, `=2` **on the cable**: the device does **not** shut down.
       `charging` suppresses `Critical` and not `Low`, so the banner is still right
       to be up. An X4 has no charge-status pin and cannot show this.
 

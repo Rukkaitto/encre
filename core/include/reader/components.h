@@ -360,8 +360,9 @@ int drawActionButton(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
 // --- The boards' bottom badge ------------------------------------------------
 //
 // A 1px-outlined box measured from the BOTTOM of the panel, holding one tracked
-// caps label. design/Sleep.dc.html's `HOLD POWER TO WAKE` and
-// design/BatteryEmpty.dc.html's `CHARGE TO WAKE` are the same box to the pixel --
+// caps label. design/Sleep.dc.html's `ASLEEP · HOLD POWER TO WAKE` and
+// design/BatteryEmpty.dc.html's `CHARGE · HOLD POWER TO WAKE` are the same box to
+// the pixel --
 // 34px from the bottom, 1px border, 8/18 padding, --t-meta at 0.2em -- which is
 // what makes this an extraction rather than a generalisation. (The two boards
 // spell the 34 differently, Sleep as `position: absolute; bottom: 34px` and

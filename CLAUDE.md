@@ -2266,7 +2266,10 @@ one fact settled the banner's type role — see below.
 down, and the battery is still low, so the banner saying so is still true. **An X4
 never reports charging at all** (`NO_GAUGE`, no charge pin), so there nothing
 suppresses — and shutdown-then-refuse-to-wake is exactly right for a flat X4 on a
-cable: the glass says `CHARGE TO WAKE`, and it does. **A reading with
+cable: the glass says `CHARGE · HOLD POWER TO WAKE`, and once it is charged, holding
+power does. **THE `and it does` HERE USED TO BE ATTACHED TO A BARE `CHARGE TO WAKE`, AND
+THAT WAS FALSE** — charging alone wakes nothing on this hardware; it only makes the hold
+succeed. See the badge paragraph under `ScreenId::BatteryEmpty`. **A reading with
 `percentKnown == false` holds the level where it was and cannot advance the dwell**:
 "flat" and "did not answer" stay different claims, as they already do for `percent()`'s
 `kUnknownPercent`, and a dwell satisfied by silence is a shutdown nothing confirmed.
@@ -2335,11 +2338,84 @@ next wake restore *into* it. `paintBatteryEmptyScreen()` therefore owns the two 
 `App` normally does, the **clear** and `gFrameContentsUnknown`. It is `Fidelity::Mono`,
 takes no input and draws no hint bar: the shell paints it and calls deep sleep, so there
 is nobody left to press anything. `drawBadge` moved into `components.h` because this
-screen's `CHARGE TO WAKE` badge is byte-identical to `Sleep`'s `HOLD POWER TO WAKE` —
-the second copy, and `renderSleep` migrated to it in the same change. Two new marks,
+screen's badge is byte-identical to `Sleep`'s — the second copy, and `renderSleep`
+migrated to it in the same change. Two new marks,
 `kWarning` (32×28, white, for the inverted band) and `kBatteryLarge` (98×52), generated
 by `iconc.py` from their own boards and disambiguated by `source` exactly as
 `kBook`/`kBookLarge` are.
+
+**ITS BADGE SAID `CHARGE TO WAKE` AND BOTH HALVES OF THAT WERE WRONG — FOUND ON GLASS
+AND BY NOTHING ELSE.** Reported from an X3: plugging the device in does not wake it, you
+have to hold power, and the screen did not say so. It is `CHARGE · HOLD POWER TO WAKE`
+now, and the two defects are worth keeping separate because only one of them is a copy
+problem.
+
+- **CHARGING CANNOT WAKE THIS HARDWARE, so the old badge promised something no code
+  could deliver.** There is no charge-detect wake source: `usbDetect` appears **only** as
+  a field declaration in `freeink-sdk/libs/hardware/BoardConfig/include/BoardConfig.h`
+  and **nothing in the SDK reads it** — the same dead field the charge-latch poll exists
+  because of — and on the X3 the pin the Xteink profile names for it is the fuel gauge's
+  own I2C SDA. **A timer wake cannot substitute either**, and that is the half that
+  surprises: on battery the sleep leaves the chip **fully powered down**, which is
+  exactly why a resume there reports `ESP_RST_POWERON` rather than `ESP_RST_DEEPSLEEP`,
+  so there is nothing left running to fire one. **This is the class of claim this file
+  exists to record and the class the battery work already refuses elsewhere** — an unread
+  gauge answers `-1` and never `0%`, a book with no reading position gets no demo
+  substitute. **A false claim is worse than an absent one**, and a badge is a claim.
+- **IT OMITTED THE HOLD, AND THE HOLD GATE RUNS FIRST.** `setup()` calls
+  `requireHeldPowerButtonOrSleepAgain` **before** `requireChargeOrSleepAgain`, so a wake
+  off this screen needs `kWakeHoldMs` (600 ms) of held power **and** a pack at
+  `kResumePercent` — and a tap is refused for the *hold* reason with the gauge never
+  read. So the screen named the second gate and not the first, in a state where the first
+  is the one the reader keeps failing.
+- **THE FIT NEEDED NO NEW MEASUREMENT, WHICH IS WHY THIS STRING AND NOT A SHORTER ONE.**
+  It is character-for-character as long as `Sleep`'s `ASLEEP · HOLD POWER TO WAKE`
+  (27 each, both `--t-meta` at 0.2em), and that badge **already ships on the X4** — the
+  narrower panel. Measured after the change: the label is **427px** and `drawBadge`'s
+  box **465px** on the 480px glass, leaving 8px and 7px of margin — against `Sleep`'s
+  422/**460**, the 5px being `CHARGE` measuring wider than `ASLEEP` at whole-pixel
+  advances. **The 1px margin asymmetry is `centreIn` halving an odd 15px leftover and
+  is not a centring defect.**
+- **`drawBadge` SIZES TO ITS LABEL, so both `battery_empty` goldens moved and were
+  re-blessed** — the badge went **267px wide to 465px**, still centred, still 34px off
+  the bottom, still one line. Design-vs-firmware went 1.81%/1.66% to **2.08%/1.91%**
+  with both copy changes in, and **the increase is accounted for row by row**: the
+  badge's own 45 rows go 563 → **1344** differing pixels, and everything outside them
+  goes 6374 → **6646**, the +272 being the one reworded paragraph line and nothing else.
+  The badge BOX agrees with Chrome's to 1px at both geometries (465 against 466, same
+  top, bottom and right edge) — a longer tracked run of small caps is simply where
+  Chrome's subpixel advances and the firmware's whole-pixel ones disagree most per pixel
+  of ink. `sd_missing` measured 1.83%/1.67% as a control in the same tree, **unchanged
+  to the pixel**, which is what makes the before and after the same instrument.
+- **The middle dot is its own string literal** (`std::string("CHARGE ") + kMiddot + " HOLD
+  POWER TO WAKE"`), for the reason this file records twice: a C++ hex escape is UNBOUNDED,
+  clang rejects `"\xB7H"` and the ESP32's GCC **accepts** it and emits a byte that is not
+  U+00B7. That is a sixth local spelling of the two-byte string and deliberately so —
+  `screens.cpp` records it as a punctuation choice each board makes rather than a
+  constant, and **its `kDot` is unreachable anyway**: `const char* const` in an
+  anonymous namespace in a .cpp, and not even the same string (`" · "` with its spaces
+  baked in, against `screen_book_end.cpp`'s bare two bytes).
+
+**AND ITS PROSE NAMED A CONNECTOR THE X3 DOES NOT HAVE — THE SECOND FALSE CLAIM ON THE
+SAME SCREEN, ALSO FOUND ON GLASS AND BY NOTHING ELSE.** It read *"charge over USB-C to
+continue"* and was reported from an X3, **which has no USB-C port**. It is
+*"connect a charger to continue"* now, and **the connector is deliberately unnamed
+rather than corrected**:
+
+- **ONE BINARY DRIVES BOTH MODELS AND THEY DO NOT SHARE A CONNECTOR**, so naming either
+  one is false on the other — swapping `USB-C` for the X3's socket would have moved the
+  defect to the X4 rather than fixed it.
+- **AND IT COULD NOT BE MADE CONDITIONAL EITHER**, which is the fact worth keeping:
+  **nothing in `BoardProfile` describes the socket.** It names the battery ADC, the
+  gauge address and the dead `usbDetect` pin, and there is no field anywhere from which
+  a screen could ask which port is fitted. So the copy cannot name one *correctly* under
+  any amount of work.
+- **THE WRAP WAS VERIFIED IN BOTH ENGINES RATHER THAN ASSUMED**, because
+  `SdMissing.dc.html` needed `max-width` 400→420 for exactly this — the `.rfnt` faces
+  measure ~3% wider than Chrome's. `connect a charger` is 17 characters as
+  `charge over USB-C` was, and both engines wrap the paragraph to **four lines at the
+  same three break positions** (after *The*, after *down —*, after *to*) at both
+  geometries, before and after. `max-width` did not move.
 
 **THE RESUME GATE IS BEFORE `display.begin()`, AND THAT IS THE WHOLE COST OF THE
 FEATURE.** `requireChargeOrSleepAgain()` sits in `setup()` immediately after

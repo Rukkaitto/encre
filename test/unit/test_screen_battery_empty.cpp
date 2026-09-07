@@ -12,8 +12,48 @@ TEST_CASE("BatteryEmpty carries the board's own copy") {
   BatteryEmptyScreen s;
   CHECK(s.id() == ScreenId::BatteryEmpty);
   CHECK(s.vm().title == "BATTERY EMPTY");
-  CHECK(s.vm().note == "CHARGE TO WAKE");
+  CHECK(s.vm().note == "CHARGE \xC2\xB7 HOLD POWER TO WAKE");
   CHECK(s.vm().message.find("Your page is saved") != std::string::npos);
+}
+
+TEST_CASE("BatteryEmpty's badge states the HOLD, not just the charge") {
+  // THE POINT OF THE COPY IS THE GESTURE. `CHARGE TO WAKE` promised a wake this
+  // hardware cannot perform -- there is no charge-detect wake source, and on battery
+  // the chip is fully powered down so no timer can fire one either -- and it omitted
+  // the one thing the reader must actually do. setup() runs
+  // requireHeldPowerButtonOrSleepAgain BEFORE requireChargeOrSleepAgain, so a tap does
+  // nothing even on a charged pack. Asserted separately from the string above so a
+  // future rewording cannot drop the gesture and still pass one of the two.
+  BatteryEmptyScreen s;
+  CHECK(s.vm().note.find("HOLD POWER") != std::string::npos);
+  CHECK(s.vm().note.find("CHARGE") != std::string::npos);
+  // A REAL U+00B7, in its own literal. A C++ hex escape is unbounded, so this project
+  // has twice emitted a byte that is not the middle dot; the byte pair is what a
+  // notdef box on glass would be traced back to.
+  CHECK(s.vm().note.find("\xC2\xB7") != std::string::npos);
+  // design/Sleep.dc.html's badge is what proves this one fits the 480px panel: the two
+  // are the same length in CHARACTERS (the dot is two bytes), at the same role and the
+  // same tracking, and that one already ships on the X4.
+  CHECK(s.vm().note.size() == std::string("ASLEEP \xC2\xB7 HOLD POWER TO WAKE").size());
+}
+
+TEST_CASE("BatteryEmpty's prose names no connector") {
+  // THE POINT OF THIS COPY IS WHAT IT DOES NOT SAY. It read `charge over USB-C` and was
+  // reported from an X3, WHICH HAS NO USB-C PORT. One binary drives both models, they do
+  // not share a connector, and nothing in the board profile names the socket -- so the
+  // sentence cannot name one correctly and cannot be made conditional either. Asserted
+  // as an absence rather than as a string so a future rewording that reintroduces any
+  // connector fails, whichever one it picks.
+  BatteryEmptyScreen s;
+  const std::string& m = s.vm().message;
+  // REQUIRE first: an empty or renamed message would satisfy every find() below
+  // trivially, which is how a mutation-proof assertion turns into `0 == 0`.
+  REQUIRE(m.find("Your page is saved") != std::string::npos);
+  for (const char* connector : {"USB-C", "USB C", "USB-A", "micro-USB", "microUSB", "USB"}) {
+    CHECK(m.find(connector) == std::string::npos);
+  }
+  // And it still says what to DO, which is the half that must survive the deletion.
+  CHECK(m.find("connect a charger") != std::string::npos);
 }
 
 TEST_CASE("BatteryEmpty is Mono and takes no input") {

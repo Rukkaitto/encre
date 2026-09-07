@@ -104,7 +104,7 @@ struct SdMissingViewModel {
 struct BatteryEmptyViewModel {
   std::string title;    // "BATTERY EMPTY"
   std::string message;  // the paragraph under it, wrapped by the theme
-  std::string note;     // the badge's label: "CHARGE TO WAKE"
+  std::string note;     // the badge's label: "CHARGE · HOLD POWER TO WAKE"
   std::array<std::string, 4> hints{};
   std::array<bool, 4> holds{};
 };
