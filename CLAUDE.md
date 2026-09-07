@@ -4922,7 +4922,7 @@ NARROWER, so a block has MORE lines there and panel line L has consumed LESS tex
 reading line L — so handing L across landed the reader **past the passage they pressed
 GO HERE on**, with nothing on the screen to say so. Measured over a 600-word paragraph:
 a commit from panel page 8 landed on reading page **5** with the peeked text on page
-**4**, and one from panel page 16 named **line 128 of a block with 120 reading lines**,
+**4**, and one from panel page 18 named **line 130 of a block with 120 reading lines**,
 which took `openAtCursor`'s documented "the end of the chapter is the closest honest
 answer" exit and put the reader in the **next paragraph** — not a page off, the wrong
 paragraph, from a commit made in the middle of the first one.

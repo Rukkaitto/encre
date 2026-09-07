@@ -96,8 +96,8 @@ Cursor PeekScreen::chosenCursor() const {
   // NARROWER, so a block has MORE lines there and panel line L has consumed LESS text
   // than reading line L -- so handing L across landed the reader PAST the passage they
   // pressed GO HERE on. Measured over a 600-word paragraph: a commit from panel page 8
-  // landed on reading page 5 with the peeked text on page 4, and one from panel page 16
-  // named line 128 of a block with 120 reading lines, which took `openAtCursor`'s
+  // landed on reading page 5 with the peeked text on page 4, and one from panel page 18
+  // named line 130 of a block with 120 reading lines, which took `openAtCursor`'s
   // documented "the end of the chapter is the closest honest answer" exit and put the
   // reader in the NEXT paragraph. Landing at the top of the block undershoots instead,
   // so the passage is ahead of the reader rather than behind them and one press reaches

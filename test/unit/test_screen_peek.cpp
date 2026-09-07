@@ -950,7 +950,24 @@ namespace {
 // a phrase would be broken by whichever column happened to wrap inside it, and a word of
 // real prose repeats and would match the wrong paragraph.
 std::string oneLongParagraph(int words) {
+  // A BLOCK IN FRONT OF IT, A WHOLE READING PAGE LONG, and that is a test-fixture fix
+  // rather than decoration -- it was added because a mutation went unnoticed twice over.
+  // With the long paragraph at block 0, `Cursor{block, 0}` and `Cursor{}` are the SAME
+  // VALUE, so dropping the block as well as the line passed every assertion here: the
+  // cases could see the line being kept and could not see the block being lost. Making
+  // it block 1 fixes the exact-cursor case; making the front matter fill a reading page
+  // fixes the behavioural one too, since otherwise block 1 begins on reading page 0 and
+  // landing at the front of the chapter is indistinguishable from landing at the top of
+  // the block. Caught by running the mutation rather than by reading the test.
   std::string d = "<html><body><p>";
+  for (int i = 0; i < 70; ++i) {
+    if (i > 0) d += ' ';
+    d += 'f';
+    d += static_cast<char>('0' + (i / 100) % 10);
+    d += static_cast<char>('0' + (i / 10) % 10);
+    d += static_cast<char>('0' + i % 10);
+  }
+  d += "</p><p>";
   for (int i = 0; i < words; ++i) {
     if (i > 0) d += ' ';
     d += 'w';
@@ -1003,15 +1020,18 @@ TEST_CASE("the committed cursor keeps the block and drops the line") {
   panel.setMetrics(pm);
   panel.completeIndex();
 
-  for (int i = 0; i < 8; ++i) {
+  for (int i = 0; i < 10; ++i) {
     peek.onGesture({Gesture::Next});
     panel.onGesture({Gesture::Next});
   }
   const Cursor raw = panel.currentCursor();
   // NOT A `0 == 0` ASSERTION, and this is the REQUIRE the whole file was missing: over
   // `longChapter` this line is a single digit and the case below holds for a reason that
-  // has nothing to do with the fix. Measured here it is 64.
+  // has nothing to do with the fix. Measured here it is 66.
   REQUIRE(raw.line >= 60);
+  // AND NOT BLOCK 0, or the assertion below cannot tell a kept block from a dropped one
+  // -- `Cursor{0, 0}` IS `Cursor{}`. See the fixture.
+  REQUIRE(raw.block > 0);
   REQUIRE(peek.chosenSpine() == 0);
 
   CHECK(peek.chosenCursor() == Cursor{raw.block, 0});
@@ -1031,10 +1051,10 @@ TEST_CASE("committing from deep inside one block does not land past the peeked t
 
   // TWO DEPTHS, because the defect has two failure classes and only the first looks like
   // "a page off". At panel page 8 the raw line exists in the reading column's block and
-  // simply names a later place in it; at panel page 16 it names line 128 of a block that
+  // simply names a later place in it; at panel page 18 it names line 130 of a block that
   // has 120 reading lines, so `openAtCursor` falls through to the END of the chapter --
   // a different paragraph, from a commit made in the middle of the first one.
-  for (const int deep : {8, 16}) {
+  for (const int deep : {8, 18}) {
     CAPTURE(deep);
 
     reader::PeekScreen peek(r.fs, r.ob, 0, &r.body.face);
@@ -1048,7 +1068,10 @@ TEST_CASE("committing from deep inside one block does not land past the peeked t
     }
     REQUIRE(panel.pageIndex() == deep);  // the panel really did get that far
     const Cursor raw = panel.currentCursor();
-    REQUIRE(raw.block == 0);
+    // THE LONG PARAGRAPH, AND NOT BLOCK 0 -- see the fixture: at block 0 the assertions
+    // below cannot tell `{block, 0}` from `Cursor{}`.
+    REQUIRE(raw.block == 1);
+    REQUIRE(raw.line > 0);
 
     // THE TEXT THE READER PRESSED GO HERE ON: the first token of the panel's top line.
     REQUIRE_FALSE(peek.page().lines.empty());
@@ -1062,7 +1085,7 @@ TEST_CASE("committing from deep inside one block does not land past the peeked t
     // reader STRICTLY PAST the page holding the passage they chose.
     REQUIRE(r.scr->goToPosition(0, raw));
     REQUIRE(r.scr->pageIndex() > truePage);
-    if (deep == 16) {
+    if (deep == 18) {
       // AND THE SHARPER FORM: not a page off but the END of the chapter, in the OTHER
       // paragraph, reached by naming a line the reading column does not have.
       //
@@ -1075,11 +1098,23 @@ TEST_CASE("committing from deep inside one block does not land past the peeked t
       CHECK(readerfix::pageText(r.scr->page()).find("tail alpha") != std::string::npos);
     }
 
-    // AND THE FIX. At or before the passage, and at the top of the block it is in, so
-    // pressing forward reaches it and nothing was skipped.
+    // AND THE FIX. At or before the passage, so pressing forward reaches it and nothing
+    // was skipped -- and on the page that holds the TOP of the peeked paragraph, which
+    // is the landing the fix promises.
+    //
+    // ASSERTED ON THE TEXT, NOT ON THE LANDED CURSOR, and the first spelling of it was
+    // simply wrong about goToPosition: it lands on the page CONTAINING the cursor, and
+    // `currentCursor()` then answers that PAGE's start -- which is only the target when
+    // the target happens to be a page boundary. `{1, 0}` here is mid-page, so the landed
+    // cursor is `{0, N}` and an equality against the target fails for a reason that has
+    // nothing to do with #48. The exact cursor is pinned on `chosenCursor()` itself in
+    // the case above; what belongs here is what the reader can see.
     REQUIRE(r.scr->goToPosition(0, peek.chosenCursor()));
     CHECK(r.scr->pageIndex() <= truePage);
-    CHECK(r.scr->currentCursor() == Cursor{raw.block, 0});
+    CHECK(readerfix::pageText(r.scr->page()).find("w000") != std::string::npos);
+    // AND NOT THE FRONT OF THE CHAPTER, which is what a dropped BLOCK would give: the
+    // front matter is a whole reading page, so the top of block 1 is not on page 0.
+    CHECK(r.scr->pageIndex() > 0);
   }
 }
 
