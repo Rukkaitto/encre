@@ -2999,6 +2999,121 @@ cross-compile it and read the assembly** — `riscv32-esp-elf-g++ -Os -S`, then 
 is always worth a look; `__divdi3`, `__udivdi3`, `__moddi3` and the soft-float family
 are what to expect on a part with no FPU and a 32-bit divider.
 
+### A small cover is enlarged, up to a measured ×2 (#64)
+
+**`fitCover` USED TO NEVER UPSCALE, AND `imagefit.h` STATED THAT AS A PROPERTY RATHER
+THAN A TASTE.** Every word of the argument was true — a box filter's support is the
+destination pixel's footprint, which when enlarging is *smaller* than a source pixel, so
+area-averaging an enlargement is nearest-neighbour however it is spelled; and
+one-source-row-to-one-destination-row streaming cannot complete two rows from one push.
+**What was written down is what the reader saw as a defect**: a 260×346 cover sat on the
+X3's 528×792 as a small picture covering **22% of the glass**, for hours, and
+`design/SleepCover.dc.html` says full-bleed. That state matched no board at all — it drew
+neither the picture nor the reading card.
+
+**THE CAP IS ×2 AND IT WAS MEASURED TWICE, BOTH TIMES AGAINST THE SMALLEST STRUCTURE THIS
+GLASS CARRIES.** Nearest-neighbour replication at scale *k* introduces structure of period
+*k* pixels, so the question is where that stops being absorbed:
+
+- **THE PIPELINE'S OWN GRAIN, off the shipped `CoverFitter`.** A flat field at each of the
+  three level midpoints — grey 42/43, 127/128, 212/213, the tones four levels carry worst
+  and therefore the patterns with the most contrast — comes out of `emitRow` as a run
+  length of **exactly one**, which is a period-**two** alternation. Over all 234 greys that
+  need a pattern at all the mean run is **3.20 px**, so 2 px is the floor of that
+  distribution and its highest-contrast end. **That picture is confirmed on the X3 to read
+  as a photograph** (2026-08-29, at the head of this section), so 2 px is structure this
+  panel is *known* to accept.
+- **THE PROJECT'S OWN LEGIBILITY FLOOR, already in the repo.** "Below ~10pt is not legible
+  on this glass, measured"; 10 pt at 150 DPI is a 21 px ppem whose stem is ~2 px, and the
+  whole `Mono` argument is about "a 2px stem fully inked". 2 px is the smallest structure
+  this project has measured as carrying meaning here.
+
+Two independent measurements landing on the same number is what makes it a derivation
+rather than a pick, and it is why the cap is what makes nearest-neighbour **sufficient**
+rather than the two being separate choices. Anything smoother needs a reconstruction
+filter wider than the destination pixel — real interpolation, a new hot loop, ~520 bytes
+of held source rows — and that is the named next step if the glass ever says the
+replication reads blocky.
+
+**WHAT THE CORPUS SAYS AND WHERE IT IS THE WRONG INSTRUMENT.** Run through the real
+`decodeCover` at both panels: 223 of 225 covers have dimensions that parse, and the worst
+enlargement any of them asks for is **×1.32** (400×662 on the X3). So **the cap admits
+every corpus cover** — `tools/covers.py` reports 223 `Ok` and **0 `TooSmall`** at both
+geometries — and the change fills the panel for the **3 (X4) / 4 (X3)** covers that used
+to sit centred. It says nothing about the book that produced the report: 260×346 is far
+smaller than anything in the corpus and asks for ×2.29 (`FILL`) or ×2.03 (`WHOLE`), so
+**that one is refused and falls back to the reading card**. The corpus under-counts this
+the way it under-counted #35, and **both of the books #35 made openable are small-cover
+cases**, so that fix raised this one's incidence.
+
+**A REFUSAL IS `CoverResult::TooSmall`, WHICH IS A SIXTH VALUE AND NOT THE NEAREST
+EXISTING ONE.** `Unsupported` is "not an image we read" and this is an image we read
+perfectly; `OutOfMemory` is the false `CoverFitter::begin` used to answer, and nothing is
+wrong with the memory. Both would be a log line asserting something untrue about a book —
+the shape this file already refuses for an unread gauge (`-1`, never `0%`) and for a badge
+promising a wake charging cannot deliver. `CoverReport` carries the **1:1 box the cover
+would have occupied**, because the reason is a fixed sentence and the geometry is the half
+that says by how much it missed.
+
+**NO BOARD CHANGED, AND THAT IS THE ARGUMENT FOR THIS SHAPE.** Both outcomes are already
+boarded — full-bleed (`SleepCover.dc.html`) or the reading card (`Sleep.dc.html`) — so the
+firmware moved *toward* a board it had been failing rather than a board moving toward it.
+The small centred picture was the only unboarded state and it is gone.
+
+**THE INTERFACE HAD TO WIDEN, AND IT WIDENED HONESTLY.** `addRow(src, bool& emitted)` is
+now `addRow(src)` plus `nextRow()`, drained in a loop. A bool can say "zero or one"; an
+enlargement completes several rows from one push, and a contract promising "at most two"
+would be true only while the cap happens to be 200%. The one misuse it introduces —
+pushing with rows still pending, which would blend two source rows into one accumulator —
+is **refused rather than silent**, and no downscale can reach it, which is why every
+shipped caller changed by exactly one `if` becoming a `while`.
+
+**THE ACCUMULATE PATH IS A SECOND PATH AND NOT A SECOND COPY.** A downscale is a forward
+**scatter** (walk the source, add each pixel to the cell it lands in) and an enlargement is
+an inverse **gather** (walk the destination, read the pixel it sits on): different
+operations over one accumulator, with the mean, the diffusion, the packing and every guard
+shared. The forward form is kept **verbatim** rather than generalised, because a gather
+with the same boundaries rounds its cell edges the other way and would move a byte of
+every cover the device has ever drawn.
+
+**AND THE ROW MAP HAD TO CHANGE WITH IT — THE DEFECT THIS NEARLY SHIPPED.** The columns
+gather with `floor(c·srcW/dstW)`, so the rows must say the same thing: source row *i* owes
+the destination rows *r* with `floor(r·srcH/dstH) == i`, which is `r < CEIL((i+1)·dstH/srcH)`.
+Reusing the downscale's **floor** there handed destination row 1 of a 33-to-64 enlargement
+to source row 1 while its *columns* were reading source row 0 — **a picture sheared by one
+source pixel down its whole height**, still a picture, so nothing but a reference
+comparison could see it. It was caught by the reference disagreeing, which is what that
+file is for.
+
+**A REPLICATED ROW IS NOT A DUPLICATED ROW**, and this is worth knowing before predicting
+what an enlargement looks like. The accumulator is held across the rows one source row
+completes, but `err_` advances **per emitted row** — so the copies are the same tone in
+*different* dither patterns. Asserted as **zero** identical adjacent destination rows over
+a flat midtone at ×1.94 (33 source rows into 64), where 31 of those rows are second
+copies. Clearing the accumulator on every emit instead — the obvious spelling — makes the
+second copy **paper**, and fails that case with the tone as well as the pattern.
+
+**WHAT IT COSTS: NOTHING NEW IN MEMORY, AND IT IS THE CHEAP DIRECTION IN TIME.** `acc_`,
+`count_` and `err_` are sized by `dstW`, which for `FILL` is the panel width — the same
+bound a full-panel downscale already pays, so at most **+1,280 bytes** against what a
+small cover used to take and **nothing** against the worst case that already ships. The
+device's 81,088-byte deflated-JPEG peak is untouched. The gather runs `dstW` times per
+source row, so **349,536 iterations** for 400×662 → 528×792 against the **2.65 M** a
+median cover's downscale walks. Desktop, three runs each: that cover's decode goes
+**4.4 → 5.9 ms** against a median cover's 21 ms.
+
+**WHAT ONLY THE PANEL CAN ANSWER, AND FOR THIS TICKET IT IS THE DECISIVE HALF.** The two
+measurements above bound the *introduced structure* at the grain the glass has accepted;
+they do not say a ×2 enlargement of a photograph reads well, and **this panel has
+corrected desktop reasoning three times**. So: (1) whether ×2 replication reads as a
+photograph or as blocks, on which `kMaxCoverUpscalePercent` is a **one-constant** change in
+either direction; (2) whether refusing at ×2.29 and showing the reading card is the better
+answer than a soft full-bleed picture, which is the reporting book's own case and the one
+question the corpus cannot reach; and (3) whether the `FILL` crop of an *enlarged* cover
+cuts type the reader wanted — the crop is unchanged arithmetic, but it now bites on covers
+that used to be shown whole. `[cover] TooSmall … dst=…` is the line that makes the refusal
+readable off a device.
+
 ### Sleep releases the whole `App`, not just the chapter
 
 `ReaderScreen::releaseChapter()` already existed, built for the peek, and it frees the
@@ -3153,6 +3268,7 @@ expensive one, and the first sleep of a new book is always it.**
 | one cached cover; alternating books re-decode | by design |
 | X4 crops ~10% of a 2:3 cover's **width** at `FILL` | default, reversible in Settings |
 | first sleep of a new book shows the card for a few seconds | by design |
+| a cover needing more than **×2** to fill the panel is refused `TooSmall` | 0 / 225 |
 
 **WHAT THE CORPUS ACTUALLY YIELDS, run through the built pipeline: `Ok` for 223**,
 `Unsupported` for 2 (both progressive JPEGs), and `NoCover` / `ReadFailed` /
@@ -3168,9 +3284,11 @@ a book that cannot be opened is not a book whose cover failed.
 
 **Every one falls back to `DETAILS` with the badge shown, and logs the reason.** That
 is the whole reason `CoverResult` distinguishes `NoCover` / `Unsupported` /
-`ReadFailed` / `OutOfMemory` / `Abandoned` rather than answering a bool: a refusal that
-cannot say which of the five it was is indistinguishable from a decoder that does not
-work, and this file has paid for that shape more than once.
+`ReadFailed` / `OutOfMemory` / `Abandoned` / `TooSmall` rather than answering a bool: a
+refusal that cannot say which of the six it was is indistinguishable from a decoder
+that does not work, and this file has paid for that shape more than once. **`TooSmall`
+is the sixth and it was added rather than borrowed** — see **A small cover is enlarged**
+below, which is exactly this rule applied one refusal later.
 
 **PROGRESSIVE JPEG MATTERS MORE THAN 2/225 SUGGESTS.** It is **12.5% of the user's own
 library**, and no small streaming decoder handles it. It is a **stated refusal**, not

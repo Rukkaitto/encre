@@ -50,21 +50,50 @@ Planes reference(const std::vector<uint8_t>& src, int sw, int sh, int pw, int ph
   out.bytes = (pw + 7) / 8;
   if (b.dstW <= 0 || b.dstH <= 0) return out;
 
-  // 1. Box filter the crop rectangle down to dstW x dstH, rounding to nearest.
-  std::vector<long> sum(static_cast<size_t>(b.dstW) * b.dstH, 0);
-  std::vector<long> num(static_cast<size_t>(b.dstW) * b.dstH, 0);
-  for (int i = 0; i < b.srcH; ++i) {
-    const int dy = static_cast<int>(static_cast<long long>(i) * b.dstH / b.srcH);
-    const uint8_t* row = src.data() + static_cast<size_t>(b.srcY + i) * sw + b.srcX;
-    for (int j = 0; j < b.srcW; ++j) {
-      const int dx = static_cast<int>(static_cast<long long>(j) * b.dstW / b.srcW);
-      sum[static_cast<size_t>(dy) * b.dstW + dx] += row[j];
-      num[static_cast<size_t>(dy) * b.dstW + dx] += 1;
+  // 1. Resample the crop rectangle to dstW x dstH cell means, rounding to
+  //    nearest.
+  //
+  //    WRITTEN AS AN INVERSE MAP FOR BOTH DIRECTIONS, which is a DIFFERENT
+  //    spelling from the implementation's and is the point of a reference. The
+  //    fitter walks the source forward and scatters each pixel into the one cell
+  //    it lands in; this walks the destination and states, per axis, exactly
+  //    which source indices a cell covers:
+  //
+  //      downscale (dst <= src): the j with floor(j * dst / src) == c, which is
+  //                              [ceil(c * src / dst), ceil((c + 1) * src / dst))
+  //      upscale   (dst >  src): the single j = floor(c * src / dst), because a
+  //                              cell narrower than a source pixel sits inside
+  //                              one -- nearest neighbour, which is all a box
+  //                              filter can do when enlarging (imagefit.h)
+  //
+  //    The two forms agreeing on every downscale shape below is itself a check:
+  //    a ceil written as a floor would redden the whole sweep.
+  auto range = [](int c, int srcN, int dstN, int& lo, int& hi) {
+    const long long s = srcN, d = dstN;
+    if (dstN > srcN) {
+      lo = static_cast<int>(c * s / d);
+      hi = lo + 1;
+    } else {
+      lo = static_cast<int>((c * s + d - 1) / d);
+      hi = static_cast<int>(((c + 1) * s + d - 1) / d);
+    }
+  };
+  std::vector<int> grey(static_cast<size_t>(b.dstW) * b.dstH, 255);
+  for (int y = 0; y < b.dstH; ++y) {
+    int rlo = 0, rhi = 0;
+    range(y, b.srcH, b.dstH, rlo, rhi);
+    for (int x = 0; x < b.dstW; ++x) {
+      int clo = 0, chi = 0;
+      range(x, b.srcW, b.dstW, clo, chi);
+      long sum = 0, num = 0;
+      for (int i = rlo; i < rhi; ++i)
+        for (int j = clo; j < chi; ++j) {
+          sum += src[static_cast<size_t>(b.srcY + i) * sw + b.srcX + j];
+          ++num;
+        }
+      if (num > 0) grey[static_cast<size_t>(y) * b.dstW + x] = static_cast<int>((sum + num / 2) / num);
     }
   }
-  std::vector<int> grey(static_cast<size_t>(b.dstW) * b.dstH, 255);
-  for (size_t i = 0; i < grey.size(); ++i)
-    if (num[i] > 0) grey[i] = static_cast<int>((sum[i] + num[i] / 2) / num[i]);
 
   // 2. Floyd-Steinberg over the whole buffer, to the four levels the panel has.
   std::vector<int> level(static_cast<size_t>(b.dstW) * b.dstH, 0);
@@ -114,19 +143,34 @@ Planes streamed(const std::vector<uint8_t>& src, int sw, int sh, int pw, int ph,
   Planes out;
   out.bytes = (pw + 7) / 8;
   for (int y = 0; y < sh; ++y) {
-    bool emitted = false;
-    REQUIRE(f.addRow(src.data() + static_cast<size_t>(y) * sw, emitted));
-    if (!emitted) continue;
-    out.msb.insert(out.msb.end(), f.msbRow(), f.msbRow() + out.bytes);
-    out.lsb.insert(out.lsb.end(), f.lsbRow(), f.lsbRow() + out.bytes);
-    CHECK(f.lastEmittedRow() == out.rows);
-    ++out.rows;
+    REQUIRE(f.addRow(src.data() + static_cast<size_t>(y) * sw));
+    while (f.nextRow()) {
+      out.msb.insert(out.msb.end(), f.msbRow(), f.msbRow() + out.bytes);
+      out.lsb.insert(out.lsb.end(), f.lsbRow(), f.lsbRow() + out.bytes);
+      CHECK(f.lastEmittedRow() == out.rows);
+      ++out.rows;
+    }
   }
   CHECK(f.rowsEmitted() == out.rows);
   CHECK(f.rowsEmitted() == f.box().dstH);
   return out;
 }
 
+
+// Read one destination row's levels back out of the two planes, exactly as
+// png.cpp's composeGray does it: an INKED plane counts 1, and the level is
+// (msb << 1) | lsb.
+void readLevels(const reader::CoverFitter& f, std::vector<int>& out) {
+  const reader::FitBox& b = f.box();
+  out.clear();
+  for (int x = 0; x < b.dstW; ++x) {
+    const int px = b.dstX + x;
+    const uint8_t bit = static_cast<uint8_t>(0x80u >> (px & 7));
+    const int m = (f.msbRow()[px >> 3] & bit) ? 0 : 1;
+    const int l = (f.lsbRow()[px >> 3] & bit) ? 0 : 1;
+    out.push_back((m << 1) | l);
+  }
+}
 }  // namespace
 
 TEST_CASE("CoverFitter streams to exactly what the whole-image reference produces") {
@@ -134,11 +178,21 @@ TEST_CASE("CoverFitter streams to exactly what the whole-image reference produce
   // the destination -- an exact multiple would hide every rounding bug in the
   // box filter.
   //
-  // The four shapes are chosen to reach both crop directions: 601x1000 is
+  // The first four shapes are chosen to reach both crop directions: 601x1000 is
   // 0.601, narrower than the X3's 0.667, so Fill crops its HEIGHT there and its
   // WIDTH on the X4; 877x973 and 1400x2100 crop width or nothing.
+  //
+  // THE LAST THREE ARE ENLARGEMENTS, and they are what puts the inverse map in
+  // this sweep. 400x662 is the smallest cover in the corpus (x1.21 on the X4,
+  // x1.32 on the X3); 301x501 is mid-range at x1.60/x1.75; 265x401 is as close to
+  // kMaxCoverUpscalePercent as a shape can be and still clear it at BOTH panels
+  // -- x1.995 on the X4 and x1.992 on the X3 -- so the sweep reaches the top of
+  // the admitted range rather than only its comfortable middle. None is an
+  // integer multiple of either panel, for the reason the downscale shapes are
+  // not: an exact multiple hides every rounding bug in the map.
   const int panels[2][2] = {{480, 800}, {528, 792}};
-  const int sources[4][2] = {{1400, 2100}, {877, 973}, {601, 1000}, {1600, 2400}};
+  const int sources[7][2] = {{1400, 2100}, {877, 973}, {601, 1000}, {1600, 2400},
+                             {400, 662},   {301, 501}, {265, 401}};
 
   for (const auto& p : panels) {
     for (const auto& s : sources) {
@@ -218,56 +272,205 @@ TEST_CASE("Fill centres a HEIGHT crop at 0.4, not at 0.5") {
   CHECK(tall.srcY == 133);
 }
 
-TEST_CASE("fitCover never upscales, and Fill degrades to Whole-at-1:1") {
-  // A few corpus covers are smaller than a panel in some axis, the smallest of
-  // them 400x662 -- the counts are in the census in reader/cover_fit.h, and
-  // 400x662 is used here because it is that smallest one. A box filter cannot
-  // enlarge, and CoverFitter's one-source-row-to-one-destination-row streaming
-  // cannot either, so the box is clamped to the source rectangle and centred.
+TEST_CASE("a cover smaller than the panel is ENLARGED to fill it") {
+  // #64: this case read "fitCover never upscales, and Fill degrades to
+  // Whole-at-1:1", and it pinned the behaviour a reader reported as a defect --
+  // design/SleepCover.dc.html says full-bleed and a small cover sat in the middle
+  // of the glass. 400x662 is the smallest cover in the corpus (the census is in
+  // reader/cover_fit.h), and on the X4 it asks for x1.21.
   const reader::FitBox small = reader::fitCover(400, 662, 480, 800, reader::CoverFit::Fill);
-  CHECK(small.dstW <= 480);
-  CHECK(small.dstH <= 800);
-  CHECK(small.dstW <= small.srcW);
-  CHECK(small.dstH <= small.srcH);
-  CHECK(small.dstX > 0);
-  CHECK(small.dstY > 0);
+  CHECK_FALSE(small.tooSmall);
+  CHECK(small.dstW == 480);   // the WHOLE panel, which is what Fill means
+  CHECK(small.dstH == 800);
+  CHECK(small.dstX == 0);     // and therefore no band on either axis
+  CHECK(small.dstY == 0);
+  // Fill still crops to the panel's aspect first: 662 * 480 / 800 = 397.2 -> 397
+  // of 400 columns, centred.
+  CHECK(small.srcW == 397);
+  CHECK(small.srcH == 662);
+  CHECK(small.srcX == 1);
 
+  // Whole enlarges too, and still letterboxes: 400x662 is 0.604 against the X4's
+  // 0.600, so the WIDTH binds and there are bands above and below.
   const reader::FitBox smallWhole = reader::fitCover(400, 662, 480, 800, reader::CoverFit::Whole);
-  CHECK(smallWhole.dstW == 400);
-  CHECK(smallWhole.dstH == 662);
+  CHECK_FALSE(smallWhole.tooSmall);
   CHECK(smallWhole.srcW == 400);
   CHECK(smallWhole.srcH == 662);
-  CHECK(smallWhole.dstX == 40);
-  CHECK(smallWhole.dstY == 69);
+  CHECK(smallWhole.dstW == 480);
+  CHECK(smallWhole.dstH == 794);  // 662 * 480 / 400
+  CHECK(smallWhole.dstX == 0);
+  CHECK(smallWhole.dstY == 3);
 
-  // And the fitter serves it rather than refusing: a refusal here is a book
-  // with no cover at all.
+  // And the fitter fills the whole box from a source with fewer rows in it,
+  // which is the half the old one-source-row-to-one-destination-row streaming
+  // could not do at all.
   const std::vector<uint8_t> px = ramp(400, 662);
   reader::CoverFitter f;
-  REQUIRE(f.begin(400, 662, 480, 800, reader::CoverFit::Whole));
+  REQUIRE(f.begin(400, 662, 480, 800, reader::CoverFit::Fill));
   for (int y = 0; y < 662; ++y) {
-    bool emitted = false;
-    REQUIRE(f.addRow(px.data() + static_cast<size_t>(y) * 400, emitted));
+    REQUIRE(f.addRow(px.data() + static_cast<size_t>(y) * 400));
+    while (f.nextRow()) { /* drained */ }
   }
-  CHECK(f.rowsEmitted() == 662);
+  CHECK(f.rowsEmitted() == 800);
+  CHECK(f.rowsEmitted() == f.box().dstH);
+}
+
+TEST_CASE("kMaxCoverUpscalePercent is a boundary, and exactly 200% is admitted") {
+  // THE NUMBER'S DERIVATION IS IN imagefit.h; what is pinned here is that the
+  // comparison is exact. 264x396 is exactly half the X3's 528x792, so it asks for
+  // exactly x2.00 -- the case a floating-point scale would decide by rounding.
+  const reader::FitBox at2 = reader::fitCover(264, 396, 528, 792, reader::CoverFit::Fill);
+  CHECK_FALSE(at2.tooSmall);
+  CHECK(at2.dstW == 528);
+  CHECK(at2.dstH == 792);
+
+  // One row less of source and it is over the cap: 792 / 395 = x2.005.
+  const reader::FitBox over = reader::fitCover(264, 395, 528, 792, reader::CoverFit::Fill);
+  CHECK(over.tooSmall);
+  // AND THE BOX IS THE 1:1 CENTRED ONE, which is exactly what this function
+  // returned for such a cover before it could enlarge at all. The flag is the
+  // only observable that moved, so a caller that ignores it gets the old geometry
+  // rather than a surprise -- and CoverReport can report where the cover WOULD
+  // have gone.
+  //
+  // 1:1 IS 1:1 WITH THE CROP RECTANGLE, NOT WITH THE FILE, which is easy to read
+  // past: Fill crops to the panel's aspect BEFORE the cap is consulted, so
+  // 264x395 has already lost a column -- 395 * 528 / 792 = 263.33 -> 263 -- and
+  // the fallback box is that crop at 1:1. Asserting 264 here failed, and the
+  // failure was the test's.
+  CHECK(over.srcW == 263);
+  CHECK(over.dstW == 263);
+  CHECK(over.dstH == 395);
+  CHECK(over.dstX == 132);  // (528 - 263) / 2
+  CHECK(over.dstY == 198);  // (792 - 395) / 2
+
+  // The same shape on the OTHER panel is over the cap as well -- 800 / 396 is
+  // x2.02 -- so the boundary is per panel and not a property of the picture.
+  CHECK(reader::fitCover(264, 396, 480, 800, reader::CoverFit::Fill).tooSmall);
+
+  // The book that produced #64: 260x346, far smaller than anything in the
+  // corpus, asking for x2.29 on the X3 (Fill) and x2.03 (Whole). Both refused,
+  // and the sleep screen falls back to its reading card with a logged reason --
+  // which is a boarded screen, where the small centred picture was not.
+  CHECK(reader::fitCover(260, 346, 528, 792, reader::CoverFit::Fill).tooSmall);
+  CHECK(reader::fitCover(260, 346, 528, 792, reader::CoverFit::Whole).tooSmall);
+  CHECK(reader::fitCover(260, 346, 480, 800, reader::CoverFit::Fill).tooSmall);
+
+  // NOTHING MAY DRAW A REFUSED COVER, which is what makes the flag worth having
+  // rather than being advice. begin() is the one gate every caller goes through.
+  reader::CoverFitter f;
+  CHECK_FALSE(f.begin(260, 346, 528, 792, reader::CoverFit::Fill));
+  CHECK(f.rowsEmitted() == 0);
+  // And a source ONE row bigger on the binding axis is served: 792 / 396 == 2.
+  CHECK(f.begin(260, 396, 528, 792, reader::CoverFit::Whole));
+}
+
+TEST_CASE("the two axes are asked separately, and a mixed box is served") {
+  // fitCover keeps the two scales equal up to one rounding step, so an
+  // enlargement is normally both axes at once -- but the rounding can land one
+  // axis at exactly 1:1 while the other is over it, and CoverFitter asks each
+  // axis its own question so that case needs no special handling.
+  //
+  // 100x40 into 101x50 with Whole: the source is relatively wider, so the width
+  // binds -- dstW is 101 (an enlargement of one pixel) and dstH is
+  // round(40 * 101 / 100) = 40, which is 1:1. A single "is this an enlargement"
+  // flag would take the whole row path down the wrong branch.
+  const reader::FitBox mixed = reader::fitCover(100, 40, 101, 50, reader::CoverFit::Whole);
+  REQUIRE(mixed.dstW == 101);
+  REQUIRE(mixed.dstH == 40);
+  REQUIRE(mixed.srcW == 100);
+  REQUIRE(mixed.srcH == 40);
+  CHECK_FALSE(mixed.tooSmall);
+
+  const std::vector<uint8_t> px = ramp(100, 40);
+  const Planes want = reference(px, 100, 40, 101, 50, reader::CoverFit::Whole);
+  const Planes got = streamed(px, 100, 40, 101, 50, reader::CoverFit::Whole);
+  REQUIRE(got.rows == 40);
+  CHECK(got.msb == want.msb);
+  CHECK(got.lsb == want.lsb);
+}
+
+TEST_CASE("a replicated row is not a duplicated row") {
+  // WHAT THE ENLARGEMENT ACTUALLY LOOKS LIKE, and the property that makes
+  // nearest-neighbour replication acceptable at the cap. The accumulator is held
+  // across the several destination rows one source row completes, but err_
+  // advances per emitted row -- so the copies are the same TONE in DIFFERENT
+  // dither patterns, and the vertical replication is broken up by the diffusion
+  // instead of showing as pairs of identical rows.
+  //
+  // A flat mid-tone is the case that shows it: grey 128 is a level midpoint, the
+  // tone four levels carry worst, so every row has to be a pattern.
+  const int sw = 33, sh = 33;
+  const std::vector<uint8_t> flat(static_cast<size_t>(sw) * sh, 128);
+  reader::CoverFitter f;
+  REQUIRE(f.begin(sw, sh, 64, 64, reader::CoverFit::Fill));
+  REQUIRE(f.box().dstH == 64);
+
+  std::vector<std::vector<int>> rows;
+  std::vector<int> levels;
+  for (int y = 0; y < sh; ++y) {
+    REQUIRE(f.addRow(flat.data() + static_cast<size_t>(y) * sw));
+    while (f.nextRow()) {
+      readLevels(f, levels);
+      rows.push_back(levels);
+    }
+  }
+  REQUIRE(rows.size() == 64);
+  // Some source rows completed TWO destination rows -- 64 out of 33 is where the
+  // replication happens at all.
+  int identicalNeighbours = 0;
+  for (size_t i = 1; i < rows.size(); ++i)
+    if (rows[i] == rows[i - 1]) ++identicalNeighbours;
+  // Not a single pair of adjacent destination rows is identical. Zero rather than
+  // "few": if the accumulator were emitted twice with err_ frozen, EVERY
+  // replicated pair would match, and the diffusion is what makes none of them do.
+  CHECK(identicalNeighbours == 0);
+  // And the tone is right, which is the other half: a held accumulator that was
+  // cleared too early would emit paper for the second copy.
+  long long ink = 0;
+  for (const auto& r : rows)
+    for (int lv : r) ink += lv;
+  const double mean = 255.0 - 85.0 * (static_cast<double>(ink) / (64.0 * 64.0));
+  CHECK(mean > 118.0);
+  CHECK(mean < 138.0);
+}
+
+TEST_CASE("an undrained push is refused rather than blended") {
+  // THE ONE MISUSE THE DRAIN INTERFACE INTRODUCES. A caller that kept the old
+  // `if (emitted)` shape would, on an enlargement, drop every second destination
+  // row and add the next source row on top of an accumulator still holding the
+  // last -- a picture with rows blended into each other, which is worse than a
+  // missing one because it still looks like a picture.
+  const int sw = 33, sh = 33;
+  const std::vector<uint8_t> px = ramp(sw, sh);
+  reader::CoverFitter f;
+  REQUIRE(f.begin(sw, sh, 64, 64, reader::CoverFit::Fill));
+  REQUIRE(f.addRow(px.data()));
+  REQUIRE(f.nextRow());        // one taken
+  CHECK(f.rowsEmitted() == 1);
+  // 64 destination rows over 33 source rows means this row owes a second one, so
+  // pushing again now is the misuse.
+  CHECK_FALSE(f.addRow(px.data() + sw));
+  // Drain it and the next push is accepted.
+  REQUIRE(f.nextRow());
+  CHECK_FALSE(f.nextRow());
+  CHECK(f.addRow(px.data() + sw));
+
+  // AND A DOWNSCALE CANNOT REACH IT, which is why no shipped caller had to
+  // change more than an `if` into a `while`: nothing is ever pending on entry.
+  const std::vector<uint8_t> big = ramp(64, 64);
+  reader::CoverFitter g;
+  REQUIRE(g.begin(64, 64, 33, 33, reader::CoverFit::Fill));
+  for (int y = 0; y < 64; ++y) {
+    REQUIRE(g.addRow(big.data() + static_cast<size_t>(y) * 64));
+    int drained = 0;
+    while (g.nextRow()) ++drained;
+    CHECK(drained <= 1);
+  }
 }
 
 namespace {
 
-// Read one destination row's levels back out of the two planes, exactly as
-// png.cpp's composeGray does it: an INKED plane counts 1, and the level is
-// (msb << 1) | lsb.
-void readLevels(const reader::CoverFitter& f, std::vector<int>& out) {
-  const reader::FitBox& b = f.box();
-  out.clear();
-  for (int x = 0; x < b.dstW; ++x) {
-    const int px = b.dstX + x;
-    const uint8_t bit = static_cast<uint8_t>(0x80u >> (px & 7));
-    const int m = (f.msbRow()[px >> 3] & bit) ? 0 : 1;
-    const int l = (f.lsbRow()[px >> 3] & bit) ? 0 : 1;
-    out.push_back((m << 1) | l);
-  }
-}
 
 // How far the fitted picture's mean tone sits from the source's, in grey units
 // of 255. A level L is grey 255 - 85L, so the two are directly comparable.
@@ -278,11 +481,11 @@ double toneDrift(const std::vector<uint8_t>& px, int sw, int sh, int pw, int ph)
   std::vector<int> levels;
   long long ink = 0;
   for (int y = 0; y < sh; ++y) {
-    bool emitted = false;
-    REQUIRE(f.addRow(px.data() + static_cast<size_t>(y) * sw, emitted));
-    if (!emitted) continue;
-    readLevels(f, levels);
-    for (int lv : levels) ink += lv;
+    REQUIRE(f.addRow(px.data() + static_cast<size_t>(y) * sw));
+    while (f.nextRow()) {
+      readLevels(f, levels);
+      for (int lv : levels) ink += lv;
+    }
   }
   long long srcSum = 0, srcN = 0;
   for (int y = b.srcY; y < b.srcY + b.srcH; ++y)
@@ -315,12 +518,12 @@ TEST_CASE("the diffusion reaches all four levels") {
   std::vector<int> levels;
   int rows = 0;
   for (int y = 0; y < 2100; ++y) {
-    bool emitted = false;
-    REQUIRE(f.addRow(px.data() + static_cast<size_t>(y) * 1400, emitted));
-    if (!emitted) continue;
-    ++rows;
-    readLevels(f, levels);
-    for (int lv : levels) ++seen[lv];
+    REQUIRE(f.addRow(px.data() + static_cast<size_t>(y) * 1400));
+    while (f.nextRow()) {
+      ++rows;
+      readLevels(f, levels);
+      for (int lv : levels) ++seen[lv];
+    }
   }
   CHECK(rows == 800);
   CHECK(f.rowsEmitted() == 800);
@@ -391,9 +594,15 @@ TEST_CASE("a fit box is inside its panel and inside its source, for every shape"
   // the awkward shapes are where rounding decides: 1x1, 7x9, a source one pixel
   // off the panel, a landscape panel.
   //
-  // `dstW <= srcW` is in here too, because it is not a nicety: CoverFitter's
-  // whole one-source-row-to-one-destination-row streaming depends on it, and
-  // begin() refuses without it.
+  // THE UPSCALE CAP IS SWEPT WITH IT, and the two halves are what the shapes are
+  // for: a box may now be BIGGER than its source, so the bound that matters is
+  // kMaxCoverUpscalePercent rather than the source rectangle, and 1x1 and 7x9 are
+  // the shapes over it -- a 1x1 source asks for x480, which no cap admits. So the
+  // sweep asserts the flag and begin() AGREE about every shape, in both
+  // directions: a box within the cap must be servable, and one over it must be
+  // refused. That equivalence is the whole of what makes the flag safe to rest a
+  // packer's bounds on -- it is what says nothing can reach emitRow() with a
+  // geometry fitCover marked.
   const int widths[7] = {1, 7, 100, 400, 877, 1400, 3000};
   const int heights[7] = {1, 9, 100, 662, 973, 2100, 4000};
   const int panels[3][2] = {{480, 800}, {528, 792}, {800, 480}};
@@ -417,10 +626,19 @@ TEST_CASE("a fit box is inside its panel and inside its source, for every shape"
           CHECK(b.srcY >= 0);
           CHECK(b.srcX + b.srcW <= sw);
           CHECK(b.srcY + b.srcH <= sh);
-          CHECK(b.dstW <= b.srcW);
-          CHECK(b.dstH <= b.srcH);
+          // Within the cap in both axes, whichever direction the scale went.
+          CHECK(static_cast<long long>(b.dstW) * 100 <=
+                static_cast<long long>(b.srcW) * reader::kMaxCoverUpscalePercent);
+          CHECK(static_cast<long long>(b.dstH) * 100 <=
+                static_cast<long long>(b.srcH) * reader::kMaxCoverUpscalePercent);
+          // A cover over the cap keeps its own size, which is the fallback
+          // geometry, and is refused rather than drawn.
+          if (b.tooSmall) {
+            CHECK(b.dstW == b.srcW);
+            CHECK(b.dstH == b.srcH);
+          }
           reader::CoverFitter f;
-          CHECK(f.begin(sw, sh, p[0], p[1], fit));
+          CHECK(f.begin(sw, sh, p[0], p[1], fit) == !b.tooSmall);
         }
       }
     }
@@ -454,14 +672,14 @@ TEST_CASE("no destination column is left without a source pixel") {
     const reader::FitBox& b = f.box();
     long paperInsideTheBox = 0;
     for (int y = 0; y < c[1]; ++y) {
-      bool emitted = false;
-      REQUIRE(f.addRow(black.data() + static_cast<size_t>(y) * c[0], emitted));
-      if (!emitted) continue;
-      for (int x = 0; x < b.dstW; ++x) {
-        const int px = b.dstX + x;
-        const uint8_t bit = static_cast<uint8_t>(0x80u >> (px & 7));
-        if (f.msbRow()[px >> 3] & bit) ++paperInsideTheBox;
-        if (f.lsbRow()[px >> 3] & bit) ++paperInsideTheBox;
+      REQUIRE(f.addRow(black.data() + static_cast<size_t>(y) * c[0]));
+      while (f.nextRow()) {
+        for (int x = 0; x < b.dstW; ++x) {
+          const int px = b.dstX + x;
+          const uint8_t bit = static_cast<uint8_t>(0x80u >> (px & 7));
+          if (f.msbRow()[px >> 3] & bit) ++paperInsideTheBox;
+          if (f.lsbRow()[px >> 3] & bit) ++paperInsideTheBox;
+        }
       }
     }
     CHECK(f.rowsEmitted() == b.dstH);
@@ -491,10 +709,10 @@ TEST_CASE("a cell that takes more than 65535 samples still averages correctly") 
   REQUIRE(f.box().srcW == side);
   REQUIRE(f.box().srcH == side);
 
-  bool emitted = false;
-  for (int y = 0; y < side; ++y)
-    REQUIRE(f.addRow(flat.data() + static_cast<size_t>(y) * side, emitted));
-  REQUIRE(emitted);
+  for (int y = 0; y < side; ++y) {
+    REQUIRE(f.addRow(flat.data() + static_cast<size_t>(y) * side));
+    while (f.nextRow()) { /* the single row lands on the last push */ }
+  }
   REQUIRE(f.rowsEmitted() == 1);
   // Grey 200 quantises to 170, which is level 1: lsb inked, msb paper.
   CHECK((f.msbRow()[0] & 0x80u) != 0);
@@ -517,10 +735,9 @@ TEST_CASE("a ratio that could overflow the accumulator is refused, not wrapped")
 
 TEST_CASE("CoverFitter refuses a geometry it cannot serve, and never aborts") {
   reader::CoverFitter f;
-  bool emitted = true;
   // Never begun.
-  CHECK_FALSE(f.addRow(nullptr, emitted));
-  CHECK_FALSE(emitted);
+  CHECK_FALSE(f.addRow(nullptr));
+  CHECK_FALSE(f.nextRow());
   CHECK(f.rowsEmitted() == 0);
   CHECK(f.lastEmittedRow() == -1);
 
@@ -533,13 +750,12 @@ TEST_CASE("CoverFitter refuses a geometry it cannot serve, and never aborts") {
   const std::vector<uint8_t> px = ramp(64, 32);
   REQUIRE(f.begin(64, 32, 16, 8, reader::CoverFit::Fill));
   for (int y = 0; y < 32; ++y) {
-    bool e = false;
-    REQUIRE(f.addRow(px.data() + static_cast<size_t>(y) * 64, e));
+    REQUIRE(f.addRow(px.data() + static_cast<size_t>(y) * 64));
+    while (f.nextRow()) { /* drained */ }
   }
   CHECK(f.rowsEmitted() == 8);
-  bool extra = true;
-  CHECK_FALSE(f.addRow(px.data(), extra));
-  CHECK_FALSE(extra);
+  CHECK_FALSE(f.addRow(px.data()));
+  CHECK_FALSE(f.nextRow());
   CHECK(f.rowsEmitted() == 8);
 }
 
@@ -568,9 +784,8 @@ TEST_CASE("a packed plane row means to Framebuffer what it means here") {
   lsb.clear(true);
   int rows = 0;
   for (int y = 0; y < h; ++y) {
-    bool emitted = false;
-    REQUIRE(f.addRow(px.data() + static_cast<size_t>(y) * w, emitted));
-    REQUIRE(emitted);
+    REQUIRE(f.addRow(px.data() + static_cast<size_t>(y) * w));
+    REQUIRE(f.nextRow());
     // The raw bytes first: black at the leftmost pixel of the byte is bit 7.
     CHECK(f.msbRow()[0] == 0x7F);
     CHECK(f.lsbRow()[0] == 0x7F);
@@ -610,14 +825,13 @@ TEST_CASE("the two mid levels land in the plane the panel expects") {
   reader::CoverFitter f;
   REQUIRE(f.begin(w, h, w, h, reader::CoverFit::Fill));
 
-  bool emitted = false;
-  REQUIRE(f.addRow(px.data(), emitted));
-  REQUIRE(emitted);
+  REQUIRE(f.addRow(px.data()));
+  REQUIRE(f.nextRow());
   CHECK(f.msbRow()[0] == 0xFF);  // paper
   CHECK(f.lsbRow()[0] == 0x00);  // ink
 
-  REQUIRE(f.addRow(px.data() + w, emitted));
-  REQUIRE(emitted);
+  REQUIRE(f.addRow(px.data() + w));
+  REQUIRE(f.nextRow());
   CHECK(f.msbRow()[0] == 0x00);  // ink
   CHECK(f.lsbRow()[0] == 0xFF);  // paper
 }
@@ -642,8 +856,10 @@ TEST_CASE("the letterbox bands come out paper, not ink") {
   REQUIRE(g.box().dstX == 4);
   const std::vector<uint8_t> tall(static_cast<size_t>(20) * 40, 0);
   bool emitted = false;
-  for (int y = 0; y < 40 && !emitted; ++y)
-    REQUIRE(g.addRow(tall.data() + static_cast<size_t>(y) * 20, emitted));
+  for (int y = 0; y < 40 && !emitted; ++y) {
+    REQUIRE(g.addRow(tall.data() + static_cast<size_t>(y) * 20));
+    emitted = g.nextRow();
+  }
   REQUIRE(emitted);
   // Columns 0..3 and 12..15 are band; 4..11 are a black cover.
   CHECK(g.msbRow()[0] == 0xF0);

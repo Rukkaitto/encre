@@ -124,13 +124,13 @@ FakeCover coverFor(int w, int h) {
   REQUIRE(f.box().dstX == 0);
   REQUIRE(f.box().dstY == 0);
   for (int y = 0; y < sh; ++y) {
-    bool emitted = false;
-    REQUIRE(f.addRow(px.data() + static_cast<size_t>(y) * static_cast<size_t>(sw), emitted));
-    if (!emitted) continue;
-    const size_t at = static_cast<size_t>(f.box().dstY + f.lastEmittedRow()) *
-                      static_cast<size_t>(c.rowBytes);
-    std::memcpy(c.msb.data() + at, f.msbRow(), static_cast<size_t>(c.rowBytes));
-    std::memcpy(c.lsb.data() + at, f.lsbRow(), static_cast<size_t>(c.rowBytes));
+    REQUIRE(f.addRow(px.data() + static_cast<size_t>(y) * static_cast<size_t>(sw)));
+    while (f.nextRow()) {
+      const size_t at = static_cast<size_t>(f.box().dstY + f.lastEmittedRow()) *
+                        static_cast<size_t>(c.rowBytes);
+      std::memcpy(c.msb.data() + at, f.msbRow(), static_cast<size_t>(c.rowBytes));
+      std::memcpy(c.lsb.data() + at, f.lsbRow(), static_cast<size_t>(c.rowBytes));
+    }
   }
   REQUIRE(f.rowsEmitted() == h);
   return c;
