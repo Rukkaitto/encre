@@ -4730,16 +4730,31 @@ PARAGRAPH carries the name. Getting that backwards — clamping the caption, wra
 the prose `Normal` — put **391 pixels of a single realistic 67-character filename
 outside the panel** on the X3.
 
-**THE DAMAGED SHAPE SITS ON THE WRAP BOUNDARY AND MEASURES 11.12% / 11.70%**, against
-3.58% / 3.44% for the unreadable one, which differs from it only by a sentence. The
-mechanism is innocent and this file already records it: `damaged` would end at x=406
-against a column bound of x=407, so it misses fitting by about the width of a final
-letter's side bearing, wraps to a sixth line, and a centred panel 41px taller puts
-every rule ~20px out. **It is a difference and not a rendering defect — but it is
-visible**, because lines 1 and 2 come out as 232 and 193 against a 336px column and
-read as a text block that has gone wrong. **A SPECIMEN BOARD MUST NOT PUT A LINE ON
-THE WRAP BOUNDARY** is this file's own rule, and the fix is the board's copy, as
-`ReaderList`'s "Space is measured in rows." was moved for 24px of clearance. Open.
+**BOTH COPY SHAPES SAT ON THE WRAP BOUNDARY AND BOTH ARE OFF IT NOW (#76).** The
+damaged sentence broke after `appears to be` because `damaged` needed **337px
+against a 336px column** — one pixel. Chrome fits it, since the firmware's
+whole-pixel advances measure ~3% wider, so the firmware wrapped to six lines where
+the board wrapped to five, the centred panel was 41px taller, every rule landed
+~20px out, and the sheet read **11.12% / 11.70%** against 3.58% for the screen that
+differs from it only by a sentence. `appears damaged` clears it by 19px:
+**3.44% / 3.53%**.
+
+**THE UNREADABLE SHAPE WAS ON THE SAME EDGE AT 3px** and agreed with Chrome by luck
+rather than by clearance — it would have flipped on any change to the face or the
+ramp. Dropping `SD` takes it to 39px and to **2.99% / 3.17%**, and makes it agree
+with the other shape, which already said "on the card".
+
+**THE SLACK IS THE WRONG METRIC AND CHECKING IT WOULD NOT HAVE CAUGHT THIS.** A line
+with 15px of slack is safe when the next word is 130px wide and on a knife edge when
+the next word is 14px; what decides a break is by how much the NEXT WORD overflowed.
+`test_book_error_copy.cpp` asserts that is at least 12px — ~3% of the column plus a
+little — so a copy edit cannot put a line back on the boundary. It is proved by
+mutation: the shipped sentences fail it reporting exactly 2 and 3.
+
+**That makes this file's own rule mechanical for one screen** — *a specimen board
+must not put a line on the wrap boundary* had no enforcement anywhere, and
+`ReaderList`'s "Space is measured in rows." had already been moved by hand for it.
+Every other board is still on the honour system.
 
 ## Editing this repo with scripts
 

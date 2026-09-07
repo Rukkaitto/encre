@@ -21,11 +21,11 @@ BookErrorScreen::BookErrorScreen(Facts facts)
       facts_.reason == BookErrorReason::Damaged
           // design/BookError.dc.html, verbatim.
           ? quoted +
-                " appears to be damaged and can\xE2\x80\x99t be opened. The file was left"
+                " appears damaged and can\xE2\x80\x99t be opened. The file was left"
                 " untouched on the card."
           // design/BookErrorUnreadable.dc.html. Makes no promise about retrying,
           // because this board has no RETRY slab -- unlike SdMissing, which does.
-          : quoted + " could not be read from the SD card. The file was left untouched.";
+          : quoted + " could not be read from the card. The file was left untouched.";
 
   vm_.okLabel = "OK";
   vm_.deleteLabel = "DELETE FILE\xE2\x80\xA6";  // U+2026, the board's &hellip;
