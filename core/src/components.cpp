@@ -90,31 +90,54 @@ int drawHeaderBand(Framebuffer& fb, const FontSet& fonts, std::string_view label
   const int contentH = bandContentH(fonts, mark);
   const int labelBase = baselineIn(lf, kBandPadTop, contentH);
   const int valueBase = baselineIn(vf, kBandPadTop, contentH);
-  // The value and the battery glyph are one right-aligned group: the icon's
-  // right edge, not the text's, lands on the margin. Right-aligning the value
-  // alone and hanging the icon off it would push the glyph past the margin.
-  const int vw = vf.measure(value);
-  // With no mark the group IS the value, so the value's own right edge lands on
-  // the margin -- which is what the Library's `12 BOOKS` and Book details' `EPUB`
-  // measure on their boards. Reserving the gap and a glyph width anyway would
-  // pull both 45px left of the design.
-  const int groupW = vw + (mark ? kBandGap + mark->w : 0);
-  const int groupX = fb.width() - kMargin - groupW;
-  // The label truncates, because on ONE board it is data: the Library's band
-  // reads a subfolder's own name, and a folder on a real card is called whatever
-  // someone called it. Every other band's label is a literal that fits, so this
-  // never engages there -- which is the point of putting it in the primitive
-  // rather than in the Library's own render, where the next data-driven band
-  // would have to remember to repeat it.
+  // EITHER RUN CAN BE THE DATA ONE, AND EITHER CAN TRUNCATE. The Library's label
+  // is a subfolder's own name and Contents' value is the book title, so a rule
+  // that gave one of them its width first was wrong on the other -- `labelShare`
+  // in the header carries the whole of it, and why the choice is made by
+  // measuring rather than by asking the caller.
   //
-  // The budget is what the value's group leaves, less the board's `gap: 7px`.
-  // Reserved whenever there IS a group, because `justify-content: space-between`
-  // with no gap lets the ellipsis touch the value the moment the label fills the
-  // line -- the Library's board declares that gap for exactly this reason.
-  const int labelMaxW = groupX - kMargin - (groupW > 0 ? kBandGap : 0);
-  drawTextElided(fb, lf, kMargin, labelBase, label, labelMaxW, Ink::Black,
+  // The mark's own reservation is the board's `gap: 7px` plus the glyph, and it
+  // comes out of the row before either run is measured: with no mark the group IS
+  // the value, so the value's own right edge lands on the margin -- which is what
+  // the Library's `12 BOOKS` and Book details' `EPUB` measure on their boards.
+  // Reserving a gap and a glyph width anyway would pull both 45px left of the
+  // design.
+  const int markW = mark ? kBandGap + mark->w : 0;
+  const int vNatural = vf.measure(value);
+  // The two runs' shared row, less the board's `gap: 7px` between them. Reserved
+  // whenever there IS a group, because `justify-content: space-between` with no gap
+  // lets the ellipsis touch the value the moment the label fills the line -- the
+  // Library's board declares that gap for exactly this reason, and Contents.dc.html
+  // now declares it too because it is what keeps an ellipsis off `CONTENTS`.
+  const bool hasGroup = (vNatural + markW) > 0;
+  const int avail = fb.width() - 2 * kMargin - markW - (hasGroup ? kBandGap : 0);
+  const int labelW = labelShare(lf.measure(label, trackingEm(lf, kBandLabelEm)), vNatural,
+                                avail);
+  // THE VALUE IS ELIDED ONLY WHEN IT HAS TO BE, so the common case allocates
+  // nothing and takes the same path it always took. drawTextElided cannot serve
+  // here: the group is right-aligned on the margin, so the CUT run's own width is
+  // what positions it, and that has to be known before it is drawn. The flag is
+  // what selects the string rather than `cut.empty()`: elideToWidth answers EMPTY
+  // for a budget that cannot hold even the ellipsis (its documented contract), and
+  // reading that as "nothing was cut" would draw the whole run at full length --
+  // the overhang the elide exists to prevent.
+  const bool cutting = vNatural > avail - labelW;
+  const std::string cut = cutting ? elideToWidth(vf, value, avail - labelW) : std::string();
+  const std::string_view drawn = cutting ? std::string_view(cut) : value;
+  // RIGHT-ALIGNED ON THE MARGIN even when cut, which is the reader header's own
+  // rule for the same run one band up (`right - measure(chapter)`), and is what
+  // keeps a band's right slot flush with the margin whatever it holds. The board
+  // instead keeps the box at the budget and left-aligns the truncated text inside
+  // it, so Chrome leaves the ellipsis a few pixels short of the margin -- a
+  // disagreement that exists only in the truncating state, which no board's
+  // committed specimen shows, and the alternative is a value that visibly drifts
+  // off the margin exactly when it is longest.
+  const int vw = vf.measure(drawn);
+  const int groupW = vw + markW;
+  const int groupX = fb.width() - kMargin - groupW;
+  drawTextElided(fb, lf, kMargin, labelBase, label, labelW, Ink::Black,
                  trackingEm(lf, kBandLabelEm), plane);
-  drawText(fb, vf, groupX, valueBase, value, Ink::Black, {}, plane);
+  drawText(fb, vf, groupX, valueBase, drawn, Ink::Black, {}, plane);
   // Centred in the band's content box, which is what the design's
   // `align-items: center` does to that flex row and its nested value+battery
   // row alike: every child of a flex line, whatever its height, centres on the
@@ -749,8 +772,21 @@ int drawDetailRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view
   //
   // FIXED IN THE PRIMITIVE, not in the screen: a row that overflows its own box is
   // wrong on every screen that draws one, and the next caller would inherit it.
-  const int valueW = value.empty() ? 0 : vf.measure(value) + kBandGap;
-  const int labelW = fb.width() - 2 * kMargin - valueW;
+  //
+  // AND THE DIVISION IS `labelShare`'s, WHICH IS WHERE THIS ROW'S OWN COPY OF IT
+  // WENT (#82). It read `labelW = row - valueW`, which is the header band's old
+  // rule verbatim and is correct HERE for a reason that is a fact about the
+  // callers rather than about the primitive: every value this row is ever handed
+  // is a literal from the screen (`NOW` on the chapter being read, `EPUB`, a
+  // percentage) and every label is a fact about the card. Left as its own
+  // expression it would be the second spelling of a rule the band has just had to
+  // change -- so it is the same call, and it is pixel-identical for every input
+  // any screen produces: `avail - valueNatural` is what the half-row floor
+  // resolves to until BOTH runs are wider than half the row, which no caller can
+  // reach with a two-to-four-character value.
+  const int vNatural = value.empty() ? 0 : vf.measure(value);
+  const int avail = fb.width() - 2 * kMargin - (value.empty() ? 0 : kBandGap);
+  const int labelW = labelShare(lf.measure(label), vNatural, avail);
   drawText(fb, lf, kMargin, baselineIn(lf, y, kDetailRowContentH),
            elideToWidth(lf, label, labelW), ink, {}, plane);
   if (!value.empty())

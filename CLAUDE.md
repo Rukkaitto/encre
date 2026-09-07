@@ -1909,6 +1909,68 @@ case to look at if one ever appears.
   found on one screen and belonged in `components.cpp` / `text.cpp` /
   `dither.cpp` / a generator. Special-casing a screen means the next screen
   inherits the bug.
+- **WHEN TWO RUNS SHARE A ROW, WHICH ONE TRUNCATES IS A DESIGN DECISION AND IT
+  MUST NOT BE THE ONE THE FIRST CALLER HAPPENED TO NEED (#82).**
+  `drawHeaderBand` gave the right-hand **value** its measured width first and
+  handed the **label** the remainder, which is right for the Library — whose
+  label is a subfolder's own name and whose value is a derived count — and
+  exactly wrong for Contents, whose value is the **book title**: with `Amusing
+  Ourselves to Death` on a real card the screen's own name came out as `C …` at
+  480×800 and `C O N T …` at 528×792. **The run that names the screen is the one
+  that may never elide**, because unlike a chapter name it is not content, and a
+  band that cannot say which screen you are on is worse than a title cut short.
+  It is the *third* instance of this shape: the reader header had the priority
+  inverted when `CH. 01` became a chapter name, and `drawDetailRow`'s label
+  elided at full length until real chapter names went through it.
+  - **`labelShare` (`reader/components.h`) IS THE ONE RULE, AND IT IS DECIDED BY
+    MEASUREMENT RATHER THAN BY A FLAG**: each run keeps its natural width for as
+    long as the other's natural width leaves room for it, and neither may be
+    squeezed below half the row they share. That is "the run with slack to give
+    up is the one that has more of it", which reproduces what **both** boards
+    declare — `Library.dc.html` marks its label as the yielding run,
+    `Contents.dc.html` marks its value — with nothing for a caller to remember.
+    **A `bool` parameter would be a caller list**, which this file has a rule
+    about: seven band call sites, and **five of them have no yielding question at
+    all** because both their runs are literals that fit, so five of the seven
+    answers would be unverifiable and the sixth would be this defect
+    reintroduced. `drawDetailRow` held the second spelling of the old rule and
+    shares this one now, pixel-identical for every input a screen can produce.
+  - **THE HALF-ROW FLOOR IS THE DERIVED FORM OF `kReadChapterFloor`**, which is
+    the same fix one band up and is a **pinned 96** justified by knowing the
+    shortest fallback label. A primitive knows neither run's content, so the only
+    floor it can derive is an equal division of the row it is dividing. It is a
+    **bound, not a rendered behaviour**: it engages only where BOTH runs exceed
+    half the row, which no board declares and no screen reaches — the widest band
+    label in the firmware is `ABOUT THIS BOOK` at 268px and the value beside it
+    is `EPUB`.
+  - **`min-width: 0` IS HOW A BOARD SAYS WHICH RUN YIELDS**, and it is the
+    vocabulary `Library.dc.html` and `Reader.dc.html` already used: a flex item's
+    automatic minimum size is its min-content width, so a `nowrap` run *without*
+    `min-width: 0` cannot be shrunk below its text and one with it can. Marking
+    one run is the whole of the priority. `Contents.dc.html` declared **neither**,
+    so Chrome wrapped the title to two lines into the label while the firmware cut
+    the label instead — **both wrong, differently, and invisible on the sheet**
+    because the specimen is `MIDDLEMARCH`, which fits. Its `gap: 7px` was missing
+    for the same reason and becomes load-bearing the moment the title fills its
+    budget. `Bookmarks.dc.html` is the only other board whose value is a book
+    title and now declares the same thing, although its screen is V1.1.
+  - **THE ONE PLACE THE FIRMWARE DOES NOT FOLLOW THE BOARD IS THE CUT RUN'S
+    ALIGNMENT**, and it is deliberate: Chrome keeps the box at the budget and
+    left-aligns the truncated text in it, leaving the ellipsis a few pixels short
+    of the margin, where the firmware right-aligns the cut run **on** the margin —
+    the reader header's own rule for the same run (`right - measure(chapter)`),
+    and what keeps a band's right slot flush whatever it holds. It exists only in
+    the truncating state, which no board's committed specimen shows.
+  - **The proof is a golden and an arithmetic test, not a board state.** The
+    boards' committed renders are byte-identical (0 differing pixels, both
+    geometries), so `contents` measures **2.30% / 2.11%** before and after —
+    8,814 pixels to the digit, the same figure #81 recorded — with `library`
+    3.85%/3.54%, `settings` 1.91%/1.76% and `book_details` 3.57%/3.28% as
+    controls in the same tree, threshold-at-128 over the `--export` panels. What
+    moved is the two `contents_mixed_depths` goldens, whose fixture is a real long
+    title, and **every differing pixel is in rows 25–42, the band's one text line,
+    with 0 outside it at either geometry**. Same shape as #74's Home wrap, which
+    also shipped with goldens and a board declaration and no board state.
 - **...AND NOT THE FIRST, EITHER.** The Typography panel's value formatters were
   extracted into `settings.h` while Settings was going to read the same five values
   out; Settings became a single disclosing row instead, leaving one caller, and the
@@ -2567,6 +2629,15 @@ it 7px PAST the margin on every screen that draws a band. The only real effect i
 `labelMaxW` 380 against 387 at 480 wide, for a label that on Home is the literal
 `NOW READING` and never elides. Left alone deliberately; see
 `docs/superpowers/specs/2026-08-29-home-battery-design.md`.
+
+**#82 SPLIT THAT EXPRESSION AND CHANGED NEITHER HALF OF IT.** The mark's
+reservation is `markW` now and it comes out of the row **before** either run is
+measured (`avail`), so the two runs divide what is left; the icon still draws at
+`groupX + vw + kBandGap` and the phantom gap still cancels. Home's shared row is
+still the 380 above, and `NOW READING` (207px) still takes its natural width
+beside a percentage. Nothing on this paragraph became false — read it before
+touching that arithmetic, and see the `labelShare` bullet under **Invariants
+worth not relearning** for what the runs do with the row once it is theirs.
 
 **`BatteryMonitor`'s CONSTRUCTOR CAPTURES THE BOARD PROFILE BEFORE THE PROBE HAS
 RUN, and it is harmless for a reason worth writing down rather than re-deriving.**

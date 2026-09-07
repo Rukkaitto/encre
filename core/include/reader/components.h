@@ -343,6 +343,60 @@ constexpr bool rowRuleFor(int i, int rows, bool focused, bool nextIsHeader = fal
   return !focused && i != rows - 1 && !nextIsHeader;
 }
 
+// --- HOW TWO RUNS SHARE ONE ROW, and the answer for the left-hand one -------
+//
+// Every `justify-content: space-between` pair in this file asks it -- a header
+// band's label and value, a detail row's field name and its state -- and until
+// #82 the answer was spelled once per site as "the value keeps its measured width
+// and the label gets the remainder". That is right for a row whose VALUE is a
+// literal and whose LABEL is a fact about the card, which is the shape both sites
+// happened to have when they were written, and it is exactly wrong the other way
+// round: Contents' band is `CONTENTS` beside the BOOK TITLE, so with `Amusing
+// Ourselves to Death` on a real card the screen's own name came out as `C ...` at
+// 480x800 and `C O N T ...` at 528x792. A band that cannot say which screen you
+// are on is worse than a book title cut short.
+//
+// SO THE RUN THAT YIELDS IS DECIDED BY MEASUREMENT, NOT BY A FLAG: each run keeps
+// its natural width for as long as the other's natural width leaves room for it,
+// and neither may be squeezed below half the row they share. Written out, that is
+// "the run with slack to give up is the one that has more of it" -- which is the
+// design rule the boards state per screen, reached without asking the caller which
+// of its two runs is data. `Library.dc.html` marks its LABEL as the yielding run
+// (a subfolder's own name, against a derived count) and `Contents.dc.html` marks
+// its VALUE (a book title, against the screen's name); this reproduces both, and
+// no caller can forget to answer a question it is never asked.
+//
+// A `bool` PARAMETER INSTEAD WOULD BE A CALLER LIST, which this file has a rule
+// about: seven band call sites, five of which have no yielding question at all
+// because both their runs are literals that fit -- so five of the seven answers
+// would be unverifiable, and the sixth would be this defect reintroduced the day a
+// screen got it wrong.
+//
+// THE HALF-ROW FLOOR IS THE DERIVED FORM OF THE READER HEADER'S
+// `kReadChapterFloor`, which is the same fix one band up (theme_quiet.cpp: the
+// chapter's name yields and the book title is capped so the chapter can never be
+// squeezed to nothing). That floor is a pinned 96 justified by knowing what the
+// shortest fallback label is; this primitive knows neither run's content, so its
+// floor is the only thing it can derive -- an equal division of the row it is
+// dividing. It is a BOUND rather than a rendered behaviour: it engages only where
+// BOTH runs are wider than half the row, which no board declares and no screen
+// produces today (the widest band label in the firmware is `ABOUT THIS BOOK` at
+// 268px, and the value beside it is `EPUB`).
+//
+// `avail` IS THE ROW THE TWO RUNS SHARE -- the content row less anything reserved
+// beside them (the band's mark) and less the board's `gap: 7px` between them. The
+// caller subtracts those, because what is reserved differs per primitive.
+//
+// Reduces to the old expression whenever the label is the run that yields, so
+// every band and every detail row that shipped is pixel-identical: a label
+// narrower than its budget is drawn whole either way (elideToWidth returns a run
+// that fits untouched), and a label wider than it gets `avail - valueNatural`
+// exactly as before.
+constexpr int labelShare(int labelNatural, int valueNatural, int avail) {
+  const int floored = avail - valueNatural > avail / 2 ? avail - valueNatural : avail / 2;
+  return labelNatural < floored ? labelNatural : floored;
+}
+
 // --- A prompt button -------------------------------------------------------
 //
 // The boards' primary action on a full-screen prompt: a filled slab with one
