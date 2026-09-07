@@ -215,6 +215,40 @@ reader::SleepViewModel longTitleSleep() {
   return vm;
 }
 
+// TWO AUTHOR SPECIMENS, because the run now has two outcomes and a fixture that
+// only reaches one of them tests half the mechanism.
+//
+// "Robert Louis Stevenson" is the WRAPPING case: 393px against a 312px column, so
+// it takes two lines and both are COMPLETE -- which is the outcome the cap was
+// chosen to buy, and 58 of the corpus's 68 overflowing names share it. It clears
+// its wrap boundary by 88px (the test at the bottom of this file measures it).
+reader::SleepViewModel longAuthorSleep() {
+  reader::SleepViewModel vm;
+  vm.label = "NOW READING";
+  vm.title = "Kidnapped";
+  vm.author = "Robert Louis Stevenson";
+  vm.progressPercent = 22;
+  vm.progress = "22% \xC2\xB7 CH. 04";
+  vm.note = "ASLEEP \xC2\xB7 HOLD POWER TO WAKE";
+  return vm;
+}
+
+// ...and this is the CLAMPING case, which is the name the defect was reported
+// with. "Fyodor Mikhailovich Dostoevsky" is 540px and wraps to THREE lines in this
+// face -- FYODOR / MIKHAILOVICH / DOSTOEVSKY -- so the cap elides the last one and
+// the ellipsis appears on a run that has already been given every line it may have.
+// Five distinct names in the 225-book corpus reach this, three of them corporate.
+//
+// It is also the exact string that rendered as `ODOR MIKHAILOVICH DOSTOEVS` before
+// this change: centred at a NEGATIVE offset, painted over both card borders and out
+// onto the dither field, and clipped by the panel edge.
+reader::SleepViewModel clampedAuthorSleep() {
+  reader::SleepViewModel vm = longAuthorSleep();
+  vm.title = "Crime and Punishment";
+  vm.author = "Fyodor Mikhailovich Dostoevsky";
+  return vm;
+}
+
 struct Box {
   int top = -1, bottom = -1;
   int height() const { return bottom - top + 1; }
@@ -467,4 +501,199 @@ TEST_CASE("the wrapping-title specimen is OFF the wrap boundary") {
                                       << "px of taking its next word: a narrower face would "
                                          "pull that word up");
   }
+}
+
+
+// --- The author run -----------------------------------------------------------
+
+TEST_CASE("QuietTheme renders a wrapping Sleep author to golden at both geometries") {
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  auto renderOne = [&](int w, int h, const std::string& name) {
+    reader::Framebuffer fb(w, h);
+    theme.renderSleep(fb, ramp.fonts, longAuthorSleep(), reader::Plane::Bw, nullptr);
+    golden::checkGolden(fb, name);
+  };
+  SUBCASE("X4 480x800") { renderOne(480, 800, "sleep_long_author"); }
+  SUBCASE("X3 528x792") { renderOne(528, 792, "sleep_long_author_x3"); }
+}
+
+TEST_CASE("A LONG AUTHOR STAYS INSIDE THE CARD, which is the whole defect") {
+  // THE TEST THIS BUG NEEDED, and nothing in the suite could have failed for it.
+  //
+  // The author was drawn by drawCentredText, which places a run at
+  // `centreIn(0, contentW, w)` -- and centreIn returns a NEGATIVE half when the run
+  // is wider than the box. So an over-wide name did not elide and did not wrap: it
+  // started LEFT of the card's own padding, painted over both 2px borders and out
+  // onto the dither field, and was clipped by the panel edge. Every golden passed,
+  // because every golden's author was short.
+  //
+  // The invariant is the card's PADDING: the card is opaque white and the only thing
+  // drawn inside it is drawn in the content column, so the 42px band between each
+  // border and that column is paper by construction. Ink there means a run escaped.
+  // That is checked rather than the panel edge because the panel edge is where the
+  // damage ENDED -- the run had already crossed the border by then, and a test that
+  // only watched the edge would pass for a name that merely ate the frame.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  const reader::SleepViewModel vms[] = {longAuthorSleep(), clampedAuthorSleep()};
+  for (const reader::SleepViewModel& vm : vms) {
+    for (int i = 0; i < 2; ++i) {
+      const int w = i == 0 ? 480 : 528;
+      const int h = i == 0 ? 800 : 792;
+      reader::Framebuffer fb(w, h);
+      theme.renderSleep(fb, ramp.fonts, vm, reader::Plane::Bw, nullptr);
+
+      const Box b = cardBox(fb, 400);
+      const int cardX = (w - 400) / 2;  // centreIn of the card, both panels
+      const int border = 2, padX = 42;
+      int stray = 0;
+      for (int y = b.top + border; y <= b.bottom - border; ++y) {
+        for (int x = cardX + border; x < cardX + border + padX; ++x)
+          if (!fb.getPixel(x, y)) ++stray;
+        for (int x = cardX + 400 - border - padX; x < cardX + 400 - border; ++x)
+          if (!fb.getPixel(x, y)) ++stray;
+      }
+      CHECK_MESSAGE(stray == 0, "author '" << vm.author << "' at " << w << "x" << h << ": "
+                                           << stray << " inked pixels in the card's padding");
+    }
+  }
+}
+
+TEST_CASE("a long author makes the CARD taller rather than escaping it") {
+  // The wrap's own geometry, asserted so a re-bless cannot quietly take it back. The
+  // author's line box is the FACE's line height here, not one of this screen's
+  // numbers, because the board leaves this run at `line-height: normal`.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  const int authorLine = ramp.fonts[reader::Role::Label400].lineHeight();
+  for (int i = 0; i < 2; ++i) {
+    const int w = i == 0 ? 480 : 528;
+    const int h = i == 0 ? 800 : 792;
+    reader::Framebuffer one(w, h), two(w, h);
+    theme.renderSleep(one, ramp.fonts, sampleSleep(), reader::Plane::Bw, nullptr);
+    theme.renderSleep(two, ramp.fonts, longAuthorSleep(), reader::Plane::Bw, nullptr);
+    const Box a = cardBox(one, 400), b = cardBox(two, 400);
+    CHECK(b.height() - a.height() == authorLine);  // exactly one more author line
+    CHECK(b.top < a.top);                          // ...and still centred
+    CHECK(b.bottom > a.bottom);
+  }
+}
+
+TEST_CASE("THE AUTHOR IS CAPPED AT TWO LINES AND THE TITLE KEEPS THE REMAINDER") {
+  // The budget ORDER, which is the design decision this change actually made. Both
+  // runs on this card can grow, so one is measured against a fixed rule and the other
+  // against what is left over -- and it is the AUTHOR that takes the fixed rule,
+  // because the title is the one fact this screen exists to state.
+  //
+  // Driven with BOTH runs unbreakable and far too long, which is the only state that
+  // makes the order observable: if the title yielded first, the card would fill with
+  // author and the title would be cut to a single line.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  const int authorLine = ramp.fonts[reader::Role::Label400].lineHeight();
+  reader::SleepViewModel vm = sampleSleep();
+  vm.title = std::string(255, 'W');
+  vm.author = std::string(255, 'W');
+
+  // THE BADGE IS MEASURED OFF A CARD-LESS RENDER, never relative to the card -- see
+  // badgeTopOf, which carries the reason: the badge is drawn FIRST, so a card that
+  // overran would paint white across it and a relative search would find the REMAINS
+  // of the badge it had already destroyed and report a card that stopped short of it.
+  // That trap is not the title's alone; a two-line author is one more line pushing at
+  // the same bound, so this test has to measure the bound the same honest way.
+  reader::SleepViewModel idle = sampleSleep();
+  idle.nothingToContinue = true;
+
+  for (int i = 0; i < 2; ++i) {
+    const int w = i == 0 ? 480 : 528;
+    const int h = i == 0 ? 800 : 792;
+    reader::Framebuffer bare(w, h), fb(w, h);
+    theme.renderSleep(bare, ramp.fonts, idle, reader::Plane::Bw, nullptr);
+    theme.renderSleep(fb, ramp.fonts, vm, reader::Plane::Bw, nullptr);
+    const int badge = badgeTopOf(bare);
+    REQUIRE(badge < h);  // the badge really is down there to collide with
+    const Box b = cardBox(fb, 400);
+
+    // Still on the glass and still clear of the badge -- the bound holds with TWO
+    // growable runs pushing at it, which is what changed about this screen.
+    CHECK(b.top > 0);
+    CHECK(b.bottom < h - 1);
+    CHECK(b.bottom < badge);
+
+    // AND WITH THE CARD AT ITS BOUND THE TITLE IS WHAT PAYS, which is the order
+    // stated as an observation rather than as a comment. Both runs are maximal here,
+    // so there is no slack: the author still takes its two line boxes, and the extra
+    // one comes OUT of the title's allocation rather than out of the card's bound.
+    //
+    // The first version of this test asserted the card GREW by an author line here
+    // and failed at -17px, which is the arithmetic being right: 29px of author bought
+    // against a 46px title line the budget then had to give back. That failure is
+    // what the two halves below were split out of -- a card at its bound cannot grow,
+    // so measuring growth there measures the floor in the title's division instead.
+    reader::Framebuffer shortAuthor(w, h);
+    reader::SleepViewModel titleOnly = vm;
+    titleOnly.author = "X";
+    theme.renderSleep(shortAuthor, ramp.fonts, titleOnly, reader::Plane::Bw, nullptr);
+    const Box t = cardBox(shortAuthor, 400);
+    CHECK(t.bottom < badge);
+    CHECK_MESSAGE(b.height() <= t.height(),
+                  "a two-line author grew the card past a one-line author's at the "
+                  "bound: the title did not give way");
+  }
+
+  // THE CAP ITSELF, measured where there IS slack -- which is the only place it can
+  // be seen. With a short title the card is nowhere near the badge, so an uncapped
+  // author would simply keep growing it; that it grows by EXACTLY one extra line box
+  // is what says the cap is two rather than unbounded.
+  for (int i = 0; i < 2; ++i) {
+    const int w = i == 0 ? 480 : 528;
+    const int h = i == 0 ? 800 : 792;
+    reader::SleepViewModel one = sampleSleep(), many = sampleSleep();
+    many.author = std::string(255, 'W');  // enough for many lines if nothing capped it
+    reader::Framebuffer a(w, h), c(w, h);
+    theme.renderSleep(a, ramp.fonts, one, reader::Plane::Bw, nullptr);
+    theme.renderSleep(c, ramp.fonts, many, reader::Plane::Bw, nullptr);
+    CHECK_MESSAGE(cardBox(c, 400).height() - cardBox(a, 400).height() == authorLine,
+                  "an unbreakable 255-char author took "
+                      << (cardBox(c, 400).height() - cardBox(a, 400).height())
+                      << "px where the cap allows one extra line box of " << authorLine);
+  }
+}
+
+TEST_CASE("the wrapping-author specimen is OFF the wrap boundary") {
+  // The title's rule, applied to the run beside it -- see the title's own version of
+  // this test above for why the SLACK is the wrong metric and the next word's
+  // OVERFLOW is the right one.
+  //
+  // It matters more here than there, because this specimen's whole point is that both
+  // its lines are complete: a break that moved would turn a two-line author into a
+  // clamped one and the golden would report it as a rendering regression.
+  ramp::Ramp ramp;
+  const reader::Font& author = ramp.fonts[reader::Role::Label400];
+  const int contentW = 400 - 2 * (2 + 42);
+  const reader::Tracking tr = reader::trackingEm(author, 220);
+
+  const std::string shouted = reader::upperLatin1(longAuthorSleep().author);
+  reader::Prose p = reader::wrapProseLead(author, shouted, contentW,
+                                          reader::pxToF26(author.lineHeight()), tr,
+                                          reader::WordBreak::Anywhere);
+  REQUIRE(p.lineCount() == 2);
+  for (int i = 0; i + 1 < p.lineCount(); ++i) {
+    const std::string_view line = p.lines[static_cast<size_t>(i)];
+    const std::string_view next = p.lines[static_cast<size_t>(i + 1)];
+    const size_t sp = next.find(' ');
+    const std::string word(next.substr(0, sp == std::string_view::npos ? next.size() : sp));
+    const int over = author.measure(std::string(line) + " " + word, p.tracking) - contentW;
+    CHECK_MESSAGE(over >= 12, "line " << i << " (\"" << std::string(line) << "\") is within "
+                                      << over << "px of taking its next word");
+  }
+
+  // ...and the CLAMPING specimen must stay firmly over the cap, for the mirror
+  // reason: if it ever wrapped to two it would stop exercising the ellipsis at all.
+  const std::string shoutedC = reader::upperLatin1(clampedAuthorSleep().author);
+  reader::Prose c = reader::wrapProseLead(author, shoutedC, contentW,
+                                          reader::pxToF26(author.lineHeight()), tr,
+                                          reader::WordBreak::Anywhere);
+  CHECK(c.lineCount() >= 3);
 }
