@@ -364,3 +364,33 @@ TEST_CASE("the place lands before the overlay above it is built") {
   const ItemActionsScreen& panel = static_cast<const ItemActionsScreen&>(woken.app.top());
   CHECK(panel.vm().title == "Odyssey");
 }
+
+TEST_CASE("what a wake into a subfolder costs in directory listings") {
+  // MEASURED, because the figure is in CLAUDE.md and this project's rule is to
+  // measure rather than argue. The screen is built before it is told where it
+  // was, so the root is listed and then the subfolder is: the constructor's
+  // rescan, one countBooks per folder for the board's `FOLDER - 6 BOOKS` line
+  // (memoised per card state by DirCountCache, so a repeat is free), and
+  // setPlace's own listing of the directory the record named.
+  //
+  // A listing is ~2.9 ms an ENTRY on the device, so this is the honest cost of
+  // the fix and the reason setPlace refuses to re-list a directory it is already
+  // showing -- which is the common case, since most records name the root.
+  CardApp live(cardWithFolders());
+  const std::vector<StackEntry> snap = inTheSubfolder(live, 2);
+
+  CardApp woken(cardWithFolders());
+  const size_t before = woken.fs.listCalls();
+  woken.app.restore(snap);
+  const size_t spent = woken.fs.listCalls() - before;
+  CAPTURE(spent);
+  // /books, its two folders' counts, and /books/Classics.
+  CHECK(spent == 4);
+  // AND THE PLACE IS ONE OF THEM, not all of them: a record naming the root pays
+  // what a Library push has always paid and nothing more.
+  CardApp atRoot(cardWithFolders());
+  const size_t rootBefore = atRoot.fs.listCalls();
+  atRoot.app.restore({{ScreenId::Home, 0, ""}, {ScreenId::Library, 1, "/books"}});
+  CHECK(atRoot.fs.listCalls() - rootBefore == spent - 1);
+  CHECK(atRoot.library().focus() == 1);
+}

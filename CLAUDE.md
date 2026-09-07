@@ -1489,10 +1489,15 @@ list it indexes, so the list is stored beside the index into it: `Screen::place(
 - **WHAT ONLY A CARD CAN EXERCISE, and therefore where this was untestable
   before:** the sample Library the goldens and the comparison sheet use has ONE
   directory and cannot descend, so nothing on the desktop could reach the defect
-  until `test_session_restore.cpp` grew a `FakeFileSystem`-backed App. Two listings
-  are paid on a wake into a subfolder — the constructor's root listing and
-  `setPlace`'s — which is the honest cost of the screen being built before it is
-  told where it was.
+  until `test_session_restore.cpp` grew a `FakeFileSystem`-backed App. **The
+  listing cost is measured there rather than argued**: a wake into a subfolder
+  spends **4** listings against **3** for one at the root — `/books`, one
+  `countBooks` per folder for the board's `FOLDER · 6 BOOKS` line, and then the
+  subfolder — so the place costs exactly one more listing than a Library push
+  always has. That is the honest price of the screen being built before it is told
+  where it was, and it is why `setPlace` refuses to re-list a directory it is
+  already showing. (This line first said "two", from reading the code rather than
+  running it, and the folder counts are what it missed.)
 
 **The stored focus is real**, and this paragraph twice said otherwise: it claimed
 "always 0" after 2C-2 made that false, and the roadmap said the same. An
