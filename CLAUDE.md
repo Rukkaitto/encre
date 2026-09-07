@@ -1414,9 +1414,85 @@ held only for a namespace's FIRST write, since an update's previous version key 
 already valid. One payload plus a version written after it has no such gap.
 
 The wire format is `core/include/reader/session_record.h` —
-`home:-1;library:7;item-actions:1`, root first — and it lives in `core/` because
-`shell/` has no test harness and this is the only pure logic on the resume path.
-Record version is **4**.
+`home:-1;library:7:/books;item-actions:1`, root first — and it lives in `core/`
+because `shell/` has no test harness and this is the only pure logic on the
+resume path. An entry is `name:focus` or `name:focus:place`. Record version is
+**5**.
+
+**AN ENTRY'S THIRD FIELD IS WHAT ITS FOCUS IS AN INDEX INTO, AND WITHOUT IT THE
+RECORD PRODUCED A WRONG ROW THAT LOOKED RIGHT (#14).** The Library can be listing
+a **subfolder** of `/books` and the record could not say which, so sleeping in
+`/books/Classics` on row 3 woke on `/books` row 3 — which is worse than losing
+the position, because nothing on the glass says the restore went wrong and the row
+opens a book the reader never chose. A focus is only meaningful relative to the
+list it indexes, so the list is stored beside the index into it: `Screen::place()`
+/ `setPlace()`, mirrored into `StackEntry::place`.
+
+- **`core/` NEVER LEARNS WHAT A PLACE IS.** The Library's is a directory path;
+  `session_record.cpp` knows only that it is bytes and what may not appear in them
+  raw. A `path` field would put a filesystem into `App` and name one screen in a
+  format that names none — the ladder-of-screen-names shape `App::restore` exists
+  to have deleted. **One screen has a place today**, and a count in
+  `test_focus_restore.cpp` says so, so the loop cannot quietly test nothing.
+- **PERCENT-ESCAPED, BECAUSE A LEGAL FILENAME MUST NOT BREAK THE FORMAT.** `%`,
+  `;`, `:` and every control byte become `%XX` — **`;` and `%` are both legal in a
+  FAT long name**, so a format that trusted them is not a fix. Everything else
+  passes through, **UTF-8 included**, because `nvs_get encre_sess stack str`
+  printing `library:7:/books/Le Fléau` is the same property that made the screen a
+  NAME rather than an ordinal: a record a person can read off a device is one they
+  can diagnose. (`:` cannot occur in a FAT or exFAT name at all, so the only
+  escapes a real card produces are `%` and `;`.)
+- **A MALFORMED ESCAPE REFUSES THE WHOLE RECORD**, on the unknown-name rule; a
+  place TOO LONG is a different question with a different answer. `kPlaceMaxBytes`
+  is **128 escaped bytes** — enough for the `/books/<author>/<title>` a real card
+  carries, and not enough for what FAT permits, which is stated as a limit rather
+  than hidden — and a place over it is **dropped whole, never truncated**, because
+  a cut path addresses a *different* directory rather than none. That is
+  `Xml::kMaxAttrBytes`'s rule reached from the other side. **The entry's focus goes
+  with it, written as `-1`**: a row index without the folder it indexes is the whole
+  of #14, and -1 is not a marker but the real "nothing selected" every focused
+  screen already accepts.
+- **THE BOUND IS ENFORCED ON THE WAY OUT ONLY**, which is what lets
+  `sessionStackMaxBytes()` stay derived (1,209 bytes at `kMaxDepth` 8, inside NVS's
+  4,000-byte cap for a string, and the read buffer in `shell/src/session.cpp` comes
+  from it). Anything that fit that buffer is by definition within the bound on the
+  way in, and the SCREEN is the thing entitled to refuse a place — which it does.
+- **THE FOCUS IS APPLIED ONLY WHEN THE PLACE WAS HONOURED**, in `App::restore`,
+  and that one branch is what makes every failure degrade instead of mislead: a
+  folder deleted while the device slept, a card that is not the card the record was
+  written on, a `..` component, or **a screen that reports a place and never learned
+  to accept one back** all land the user at the top of the list the screen did
+  build. `reading_position.h`'s `fitOf` grading is the same rule one layer down.
+  There is deliberately no `FocusScreen`-style `final` pair here: one screen has a
+  place, and a shared base for a single caller is a header edge bought for nothing
+  (the Typography formatters' extraction was undone for that reason), so the
+  **default `setPlace` returns false** and the half-taken pair costs a row rather
+  than putting one in the wrong folder. The second screen to want a place is the
+  extraction point.
+- **`setPlace`'s BOOL IS NOT `setFocus`'s BOOL**, and the difference is stated at
+  the one site: a place is not a coordinate you can be part of the way to, so it
+  answers "you are there now", where `setFocus` answers "something moved" because
+  `moveFocus` needs to know whether a 520 ms refresh is owed. Asking for the place
+  already listed is honoured and **touches no card** — the ordinary case, since the
+  constructor lists the root.
+- **THE VERSION BUMP IS A DECISION, NOT A NECESSITY.** A version-4 record still
+  parses under the new decoder — two fields is the no-place form — and it is
+  discarded anyway, because its `library:7` means "row 7 of some directory" and
+  honouring that is exactly the wrong row the field exists to stop claiming. The
+  cost is the documented one: one wake per device, the first after this firmware
+  lands, which starts at Home.
+- **A REFUSED PLACE IS VISIBLE IN THE LOG WITHOUT A NEW LINE**, because the restore
+  already prints where it LANDED and compares it against what the record named
+  (`encodeSessionStack(gApp->snapshot())` against the record's own string) — a
+  dropped folder makes those differ, and the parenthetical now names it as one of
+  the three reasons they can.
+- **WHAT ONLY A CARD CAN EXERCISE, and therefore where this was untestable
+  before:** the sample Library the goldens and the comparison sheet use has ONE
+  directory and cannot descend, so nothing on the desktop could reach the defect
+  until `test_session_restore.cpp` grew a `FakeFileSystem`-backed App. Two listings
+  are paid on a wake into a subfolder — the constructor's root listing and
+  `setPlace`'s — which is the honest cost of the screen being built before it is
+  told where it was.
 
 **The stored focus is real**, and this paragraph twice said otherwise: it claimed
 "always 0" after 2C-2 made that false, and the roadmap said the same. An
@@ -1574,7 +1650,10 @@ things about the fix are worth keeping:
 
 - **Order is load-bearing.** Each entry's focus is set BEFORE the next push,
   because an overlay reads its parent's focused row *at construction*. That is
-  also what makes an overlay restorable at all.
+  also what makes an overlay restorable at all. **The place now goes in front of
+  the focus for the same reason one layer down** — the row is an index into the
+  directory, so a Library told which folder only afterwards would caption the
+  overlay above it with a book from the wrong one.
 - **It deleted the special cases.** The shell's restore was a ladder naming Home
   ("already the root, nothing to push") and SD-missing ("the card mounted, so the
   message is no longer true"), and every screen not in the ladder was handled by
@@ -1583,7 +1662,7 @@ things about the fix are worth keeping:
   screen at all. **A restore that stops early keeps what already stands**: a
   record from a newer firmware should not cost the user the Library they were in.
 - **The wire format is in `core/`** (`reader/session_record.h`), as
-  `home:-1;library:7;item-actions:1`, because `shell/` has no test harness and
+  `home:-1;library:7:/books;item-actions:1`, because `shell/` has no test harness and
   that is the only part of the resume path that is pure logic. One payload key
   also makes the version key a real commit record — with `scr` and `focus` as two
   keys, a cut between them left a valid-looking mixed record.

@@ -53,7 +53,7 @@ constexpr int kFocusMax = 32767;
 // the path contains rather than whatever it happens to be made of.
 //
 // It bounds the record and nothing else: eight entries of a name, a focus, a
-// place and their separators is 1,193 bytes, which is a derived read buffer in
+// place and their separators is 1,209 bytes, which is a derived read buffer in
 // shell/src/session.cpp and comfortably inside NVS's 4,000-byte cap for a string.
 // A cap large enough for every path a card can hold would not be -- one FAT long
 // name is 255 characters and a path is components of them -- so this is a real
