@@ -160,10 +160,24 @@ class BlockReader {
   // is what a page cursor names.
   int emitted() const { return emitted_; }
 
+  // HOW MANY TIMES A BLOCK HAS BEEN CUT AT `kMaxBlockBytes`, cumulative since the
+  // last `restart()`, and it exists for `Xml::attrsDropped()`'s reason: a caller
+  // that finds more blocks than the book has paragraphs can tell "the book wrote
+  // them" from "we could not hold what it wrote". Zero for every book in the
+  // 225-book corpus but the two Gutenberg mathematics texts.
+  //
+  // CUTS, NOT EXTRA BLOCKS, and they differ only in one case: a cut is made when a
+  // byte arrives with the block already full, so the continuation always receives that
+  // byte and is normally emitted -- but a piece that is nothing but whitespace is
+  // dropped like any other empty block, and then a cut happened with no extra block to
+  // show for it. A cut is the thing that occurred, so a cut is what this counts.
+  size_t blocksSplit() const { return blocksSplit_; }
+
  private:
   struct State;
   State* st_;  // one heap allocation, for the reason Inflater's Scratch gives
   int emitted_ = 0;
+  size_t blocksSplit_ = 0;
   const char* error_ = "";
 };
 
@@ -179,6 +193,19 @@ bool buildDocument(std::string_view xhtml, Document& out, const char** reason);
 // Caps, because a chapter is a file and a file may claim anything. A long
 // chapter of a novel is a few hundred paragraphs.
 inline constexpr size_t kMaxBlocks = 4096;
+
+// WHERE A BLOCK IS CUT IN TWO, not where the document is refused -- issue #37, and
+// `Xml::kTextBytes`'s "NOT a limit on a run's length; a longer run is split across
+// nodes" one layer up. It used to be a refusal, which stopped BlockReader, which ended
+// the chapter with nothing able to report it: two Gutenberg mathematics texts in the
+// 225-book corpus lost everything after one paragraph of a hundred thousand digits.
+// `BlockReader::blocksSplit()` is what makes a cut observable, and document.cpp's text
+// branch carries the reasoning for splitting rather than truncating.
+//
+// AN EMITTED BLOCK CAN EXCEED IT BY TWO BYTES, which is worth knowing before sizing
+// anything against it: `appendSpace` may add a word boundary at the cap, and the
+// dialogue-dash glue replaces one byte with two. Neither is new -- both predate the
+// cut -- and 65,538 against 65,536 changes no heap argument.
 inline constexpr size_t kMaxBlockBytes = 64u * 1024u;
 inline constexpr size_t kMaxNestDepth = 64;
 
