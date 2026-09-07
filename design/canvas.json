@@ -397,6 +397,60 @@
       "page": "page-4"
     },
     {
+      "file": "SleepWaking.dc.html",
+      "title": "Sleep · Waking",
+      "x": 1740,
+      "y": 3600,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "SleepCover.dc.html",
+      "title": "Sleep · Cover",
+      "x": 2320,
+      "y": 3600,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "SleepCoverDetails.dc.html",
+      "title": "Sleep · Cover + Details",
+      "x": 2900,
+      "y": 3600,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "SleepCoverWaking.dc.html",
+      "title": "Sleep · Cover Waking",
+      "x": 3480,
+      "y": 3600,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "LibraryOpening.dc.html",
+      "title": "Library · Opening",
+      "x": 4060,
+      "y": 3600,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "BookErrorUnreadable.dc.html",
+      "title": "Book Error · Unreadable",
+      "x": 0,
+      "y": 4500,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
       "file": "WebUpload.dc.html",
       "title": "Web · Send Books",
       "x": 0,

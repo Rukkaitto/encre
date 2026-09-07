@@ -68,19 +68,35 @@ rather than a screen is almost always the right implementation. See the
 
 ## Republish the canvas
 
-The design canvas is a published artifact and must be kept current:
+`design/ereader-v1-ui.html` is a **generated file** — the compiled canvas editor
+plus every `design/*.dc.html` and `design/canvas.json` seeded into it. Never
+hand-edit it. Reseed:
 
 ```bash
-cd design && node "<design skill dir>/seed-canvas.mjs" \
-  --template "<design skill dir>/payload.template.html" \
-  --out ereader-v1-ui.html --title "Encre UI" \
-  $(for f in *.dc.html; do printf -- "--artboard %s " "$f"; done) --canvas canvas.json
+make canvas          # reseed from every board on disk
+make canvas-check    # is the committed canvas what the boards say? names what drifted
 ```
 
 Then publish with the `Artifact` tool passing `url:
 https://claude.ai/code/artifact/49eef3a1-97f8-4f95-b290-75e4021df141` and
 `contract: "0.1.31"` — that URL is the canvas; publishing without it creates a
 stray duplicate.
+
+**A new board needs an entry in `design/canvas.json` as well as the file.** Being
+in the canvas's file record is *not* being on the canvas: with no `artboards`
+entry the editor loads a board and never shows it, which is invisible in review.
+`make canvas` refuses rather than guessing — which page a board belongs on is a
+design decision — and prints the next free slot in the layout's 580/900 grid.
+Every state board goes on `page-4`.
+
+**This invocation used to name `<design skill dir>/seed-canvas.mjs`, and that file
+did not exist.** It lived here untracked, so it was absent from every fresh clone
+and worktree, and the canvas could only be hand-edited — which is how it went six
+boards stale with nothing saying so (issue #60). The generator is
+`tools/design-canvas/`, tracked, with the rest of this project's generators; the
+`make` targets above are the supported interface, and `make compare
+COMPARE_ARGS=--require-canvas-current` (which CI passes) is what makes a stale
+canvas loud.
 
 ## Showing the user
 
