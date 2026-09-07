@@ -244,10 +244,47 @@ single 50,983-byte block.
 - [ ] **8.3** `[power] sleep cost save= paint1= probe= decode=` adds up to what
       you watched.
 - [ ] **8.4** A book whose cover is refused falls back to the reading card **with
-      the badge shown**, and `[cover]` names which of the five refusals it was.
+      the badge shown**, and `[cover]` names which of the six refusals it was.
       A progressive JPEG is a stated refusal.
 - [ ] **8.5** In Settings, switch `Shows` to `DETAILS` and confirm `Cover fit`
       becomes unreachable — a fit is meaningless with no cover on the glass.
+
+### The upscale cap ([#64](https://github.com/Rukkaitto/encre/issues/64))
+
+**This is the one item on this list that is being asked to settle a question the
+desktop cannot even pose.** `kMaxCoverUpscalePercent` is **250**, and that is an
+owner override of a bound two measurements put at **200** — the pipeline's own
+diffusion grain and this project's measured legibility floor both land on 2 panel
+pixels, and at k = 2.5 a source pixel becomes a run of 2 or 3. So past 200 the
+sufficiency of nearest-neighbour is **assumed, not measured**. Neither the
+simulator nor the goldens can arbitrate: they run this same arithmetic, so they
+agree with it by construction. `imagefit.h` carries the whole derivation and every
+figure, kept deliberately so this can be moved *back* with evidence.
+
+- [ ] **8.6 A cover that used to sit small now fills the panel.** Any cover
+      smaller than the glass on an axis. Before this it was drawn at 1:1 and
+      centred; it should now be full-bleed, which is what `SleepCover.dc.html`
+      draws. `[cover]` reports the source and destination rectangles.
+- [ ] **8.7 THE DECISIVE ONE — does a x2+ enlargement read as a photograph or as
+      blocks?** A small cover on the X3 (~260x346 asks x2.29). Look for countable
+      2–3px steps on curves and type, the way this file's rotation items look for
+      a smear. **If it reads as blocks, 200 is the number the measurements
+      support and it is a one-line change back** — say so on
+      [#64](https://github.com/Rukkaitto/encre/issues/64) rather than tuning it
+      quietly, because the constant is now carrying a judgement and not a
+      measurement.
+- [ ] **8.8 A cover too small to enlarge is `TooSmall`, and nothing is drawn.**
+      Past the cap the reading card comes up behind it and `[cover]` says
+      `TooSmall` — **not** `OutOfMemory`, which is the false answer it used to
+      arrive as.
+- [ ] **8.9 The `FILL` crop of an *enlarged* cover.** The crop arithmetic did not
+      change, but the raise widened the set of covers it bites on, so a title or
+      author line can now be cut on a book that used to be shown whole.
+      `Cover fit = WHOLE` is the existing escape.
+- [ ] **8.10 The one-bit cover the WAKE paints**, at these ratios. The `Msb`
+      plane is a threshold *through* an already-dithered picture, and hard
+      thresholding a photograph is what this project warns about. Pre-existing,
+      and reachable by more covers now.
 
 ## 9. The battery
 
