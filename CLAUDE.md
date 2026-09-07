@@ -307,6 +307,61 @@ count**, never a pixel, because that is where all six of these defects lived.
 no Python and no submodule; so it is a test that has to be remembered, which is
 the honest cost of keeping the fast loop interpreter-free.
 
+**AND THE SAME SHAPE HAD THE REVIEW SURFACE ITSELF: `design/ereader-v1-ui.html`
+IS A GENERATED FILE AND ITS GENERATOR WAS LOST** (#60). It is the published design
+canvas — one artifact URL, the compiled Claude Design editor plus every
+`design/*.dc.html` and `design/canvas.json` seeded into its `appifact-doc` block
+— and it is what the design is reviewed from. `seed-canvas.mjs` and
+`payload.template.html` lived beside the skill that documented them, in
+`.claude/skills/design-change/`, **untracked**: only `SKILL.md` was ever added to
+git, so a fresh clone or worktree materialised the instructions and not the tool,
+the documented reseed could not be run at all, and the canvas could only be
+hand-edited — the wrong operation on a generated file. Reseed with **`make
+canvas`**; **`make canvas-check`** says whether the committed file is what the
+boards say, and names what drifted.
+
+- **IT WENT SIX BOARDS BEHIND, AND FIVE OF THE SIX WERE *CARRIED*.** Being in the
+  file record is **not** being on the canvas: with no `canvas.json` `artboards`
+  entry the editor loads a board and never shows it, so `SleepCover`,
+  `SleepCoverDetails`, `SleepCoverWaking`, `SleepWaking` and `LibraryOpening` were
+  present and invisible, and `BookErrorUnreadable` was absent outright. **Two
+  staleness axes, and the quieter one is the layout.** `make canvas` refuses
+  rather than placing a board itself — which page it belongs on is a design
+  decision — and prints the next free slot in the layout's own 580/900 row-major
+  grid. Every state board is on `page-4`.
+- **NOTHING COULD HAVE NOTICED, because the doc is ONE 526 KB LINE.** Every commit
+  that has ever touched this file is an identical `1 insertion, 1 deletion` in a
+  diffstat, so `git diff --stat` — this file's own rule for catching a scripted
+  edit gone wrong — is blind to it, and so is review. That is why the check had to
+  be a program.
+- **`make compare COMPARE_ARGS=--require-canvas-current` IS WHAT MAKES IT LOUD,
+  off by default, and CI passes it** — `--require-implemented`'s bargain exactly,
+  for its reason: a developer comparing a board mid-edit must not owe a 3 MB
+  reseed, and what the flag buys is a red X in front of the one person who can
+  still fix it. It is independent of `--only`, because whether a board reached the
+  canvas is not a fact about the screens a run selected. It **delegates** to the
+  generator rather than reimplementing the comparison, so there is no second
+  answer to keep in step, and a missing `node` is an **error rather than a pass**.
+- **THE TOOL IS IN `tools/design-canvas/`, TRACKED**, with every other generator
+  here, and that placement *is* the fix — the code was never the thing that was
+  missing, version control was. It carries `test_seed_canvas.mjs`, plain `node`,
+  not wired into `make test` for `test_compare_design.py`'s reason; **its first
+  case is the whole proof**: the original's only surviving specification was its
+  3 MB output, so the test rebuilds the committed canvas from the content that
+  canvas itself carries and demands **byte-identity**. It reproduces it exactly,
+  which is what says this is *the* generator and not merely *a* generator. The
+  layout guards are proved by driving the CLI against throwaway trees, because a
+  guard that has stopped firing looks exactly like a repository with nothing wrong.
+- **`payload.template.html` is 2.4 MB of compiled editor this repo cannot
+  rebuild**, kept verbatim with the doc block and the title as its only
+  placeholders. So a reseed changes content and never the editor — asserted by
+  comparing every byte outside the doc block against the published page. **`<` is
+  escaped, as a `\u003c` sequence, and nothing else is**: the JSON sits inside a
+  `<script>`, so one literal `</script>` in a board would close the block early
+  and truncate the canvas at that byte, and every board is HTML.
+- **Publishing is still a separate, human step**, with `contract: "0.1.31"` and
+  the canvas's own `url` — publishing without it creates a stray duplicate.
+
 ## Hardware facts
 
 - One binary drives both models. **The panel controller varies by production

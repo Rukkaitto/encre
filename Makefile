@@ -1,4 +1,4 @@
-.PHONY: test sim firmware fonts icons compare epubs epubs-bulk card-add card-remove zips conventions hooks
+.PHONY: test sim firmware fonts icons compare epubs epubs-bulk card-add card-remove zips conventions hooks canvas canvas-check canvas-test
 # PlatformIO installs outside PATH by default; allow an override: make firmware PIO=/path/to/pio
 #
 # Invoked through its MODULE entry point rather than the `pio` launcher script,
@@ -200,3 +200,37 @@ card-remove:
 	sh tools/cardsync.sh remove $(EPUB_OUT)
 compare: sim
 	$(PYTHON) tools/compare-design.py $(COMPARE_ARGS)
+
+# THE DESIGN CANVAS IS A GENERATED FILE, and these three targets are the only
+# supported way to touch it. design/ereader-v1-ui.html is the published review
+# surface (one artifact URL, see the design-change skill): the compiled canvas
+# editor from tools/design-canvas/payload.template.html, with every
+# design/*.dc.html and design/canvas.json seeded into its appifact-doc block.
+#
+# `make canvas` after ANY board change. Its predecessor lived untracked beside
+# the skill that documented it and was lost, so for weeks the only way to change
+# the canvas was to hand-edit 3 MB of generated JSON -- issue #60. It went six
+# boards stale that way and nothing said so.
+#
+# NONE of this is wired into `make test`, for tools/test_compare_design.py's
+# reason: the fast loop builds on a bare checkout with no interpreter, and node
+# there would be worse than Python. `make compare COMPARE_ARGS=--require-canvas-current`
+# is what makes staleness loud, and CI passes that flag.
+CANVAS_SEED = node tools/design-canvas/seed-canvas.mjs \
+	--template tools/design-canvas/payload.template.html \
+	--out design/ereader-v1-ui.html --title "Encre UI" \
+	--canvas design/canvas.json --boards-dir design
+
+canvas:
+	$(CANVAS_SEED)
+
+# Verify the committed canvas is byte-identical to what the boards say it should
+# be, and name what drifted if not. No Chrome, no simulator, about a second.
+canvas-check:
+	$(CANVAS_SEED) --check
+
+# The generator's own test, including the round trip that proves it reproduces
+# the committed canvas byte for byte from the canvas's own embedded content --
+# the only specification the lost original left behind.
+canvas-test:
+	node tools/design-canvas/test_seed_canvas.mjs
