@@ -3282,12 +3282,34 @@ static void pollBatteryLevel() { gBattery.update(readBattery(), millis()); }
 // level() != Normal RATHER THAN == Low: a device that reaches Critical without a
 // poll landing on Low in between must still warn. The shutdown is kCriticalDwellMs
 // away and the banner is what explains it.
+//
+// THE EDGE IS SPENT ONLY WHEN IT IS DELIVERED, and this had it the other way round.
+// `gWasLow = low` ran BEFORE the Reader test, so a crossing that happened while the
+// reader was anywhere else was CONSUMED with nothing drawn -- and since the flag
+// stays true for as long as the pack stays low, the banner was then lost for the
+// whole session. The device boots to Home, so with a low battery the very first
+// poll ate the only edge there would ever be and opening a book showed nothing.
+//
+// The real case is the same shape and worse: the pack crosses 10% while the reader
+// is on Home or in the Library, and the warning they are owed is silently gone.
+// Keeping the edge until a Reader is on top to receive it is what makes "on a fresh
+// entry into Low" mean what it says. Dismissal is unaffected -- the flag is true by
+// then, so the banner does not come back until the level has left Low and returned.
 static bool gWasLow = false;
 static void armBannerIfNewlyLow() {
   const bool low = gBattery.level() != reader::BatteryLevel::Normal;
-  const bool edge = low && !gWasLow;
-  gWasLow = low;
-  if (!edge || !gApp || gApp->top().id() != reader::ScreenId::Reader) return;
+  // Leaving Low re-arms, and does so wherever the reader is standing: this is the
+  // state going away, not a notification being delivered.
+  if (!low) {
+    gWasLow = false;
+    return;
+  }
+  if (gWasLow) return;  // already told them, this entry into Low
+  // NOT YET DELIVERABLE -- keep the edge rather than spending it. renderReader is
+  // what draws the band, so with anything else on top there is nothing to show and
+  // nothing to consume.
+  if (!gApp || gApp->top().id() != reader::ScreenId::Reader) return;
+  gWasLow = true;
   static_cast<reader::ReaderScreen&>(gApp->top()).setBatteryLow(gBattery.percent());
   // markDirty(), not a transition: this is the same screen with one band drawn over
   // it, so it takes the 389 ms DU rather than the 693 ms GC. It also resets the
