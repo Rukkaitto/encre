@@ -55,6 +55,7 @@
 #include "reader/document.h"
 #include "reader/progress.h"
 #include "reader/refresh.h"
+#include "reader/screen_battery_empty.h"
 #include "reader/screen_home.h"
 #include "reader/screen_sd_missing.h"
 #include "reader/book.h"
@@ -3323,6 +3324,30 @@ static reader::BatteryReading readBattery() {
          BoardConfig::ACTIVE.batteryGauge.gaugeAddr != 0 ? "I2C gauge" : "ADC");
     logFlush();
   }
+#ifdef ENCRE_BATTERY_FAKE_PERCENT
+  // THE ONLY WAY TO WALK THIS LADDER ON GLASS. Draining a real pack to 3% on demand
+  // is not practical, and without this the Low banner, the critical shutdown and the
+  // resume gate are all unwalkable. ENCRE_FS_SELFTEST's shape: absent by default, so
+  // a normal build has neither the branch nor the log line.
+  //
+  // AFTER the sticky gChargingObservable arm and after the first-read line, so a
+  // faked build still reports what the gauge really said and still arms the poll the
+  // way a real one does -- the override is the last word on the percent and touches
+  // nothing else.
+  //
+  // IT OVERRIDES THE PERCENT AND NOTHING ELSE. `charging` stays whatever the gauge
+  // said, so an X3 on the cable still suppresses Critical -- which is one of the
+  // things that needs verifying on glass and would be untestable if this faked it
+  // too.
+  r.percentKnown = true;
+  r.percent = ENCRE_BATTERY_FAKE_PERCENT;
+  static bool announced = false;
+  if (!announced) {
+    announced = true;
+    logf("[battery] FAKE percent=%d -- this is not a real reading\n", r.percent);
+    logFlush();
+  }
+#endif
   return r;
 }
 
@@ -3349,6 +3374,75 @@ static bool refreshBatteryOnHome() {
   return gBattery.takeRepaintRequest();
 }
 
+// THE LADDER'S READING, ON ANY SCREEN. refreshBatteryOnHome() cannot serve it: it
+// is gated on homeOnGlass() AND on gChargingObservable, so nothing outside Home
+// ever reads the gauge and on an X4 -- which has no charge-status pin -- nothing
+// reads it at all. Both gates are right for what they guard (the band, and the
+// charge-latch repaint); neither can be reused for a safety mechanism.
+//
+// It goes through the SAME gBattery.update(), so the level and the band can never
+// disagree about the percent.
+//
+// NO SpiBusGuard, and that is what makes 2 s affordable: this is I2C on the sensor
+// bus and cannot race a panel refresh.
+static void pollBatteryLevel() { gBattery.update(readBattery(), millis()); }
+
+// ARM THE BANNER ON A FRESH ENTRY INTO Low, and only while the Reader is on TOP.
+//
+// gWasLow is the EDGE, not the state: re-arming on every poll would put the banner
+// back the moment the reader dismissed it, which is the dead-button defect with the
+// sign flipped. It re-arms when the level leaves Low and comes back -- and a wake is
+// a chip reset, so a low battery shows the banner again on every wake. That is the
+// right behaviour and, when the Reader is what the wake restores, it rides that
+// paint and costs no extra waveform.
+//
+// ON TOP rather than on the stack, unlike the Typography apply: the banner is drawn
+// by renderReader, so with a Peek or the reader menu over it there is nothing to
+// see. An armed banner under an overlay simply waits -- ReaderScreen holds the
+// field and the overlay's pop reveals it.
+//
+// level() != Normal RATHER THAN == Low: a device that reaches Critical without a
+// poll landing on Low in between must still warn. The shutdown is kCriticalDwellMs
+// away and the banner is what explains it.
+//
+// THE EDGE IS SPENT ONLY WHEN IT IS DELIVERED, and this had it the other way round.
+// `gWasLow = low` ran BEFORE the Reader test, so a crossing that happened while the
+// reader was anywhere else was CONSUMED with nothing drawn -- and since the flag
+// stays true for as long as the pack stays low, the banner was then lost for the
+// whole session. The device boots to Home, so with a low battery the very first
+// poll ate the only edge there would ever be and opening a book showed nothing.
+//
+// The real case is the same shape and worse: the pack crosses 10% while the reader
+// is on Home or in the Library, and the warning they are owed is silently gone.
+// Keeping the edge until a Reader is on top to receive it is what makes "on a fresh
+// entry into Low" mean what it says. Dismissal is unaffected -- the flag is true by
+// then, so the banner does not come back until the level has left Low and returned.
+static bool gWasLow = false;
+static void armBannerIfNewlyLow() {
+  const bool low = gBattery.level() != reader::BatteryLevel::Normal;
+  // Leaving Low re-arms, and does so wherever the reader is standing: this is the
+  // state going away, not a notification being delivered.
+  if (!low) {
+    gWasLow = false;
+    return;
+  }
+  if (gWasLow) return;  // already told them, this entry into Low
+  // NOT YET DELIVERABLE -- keep the edge rather than spending it. renderReader is
+  // what draws the band, so with anything else on top there is nothing to show and
+  // nothing to consume.
+  if (!gApp || gApp->top().id() != reader::ScreenId::Reader) return;
+  gWasLow = true;
+  static_cast<reader::ReaderScreen&>(gApp->top()).setBatteryLow(gBattery.percent());
+  // markDirty(), not a transition: this is the same screen with one band drawn over
+  // it, so it takes the 389 ms DU rather than the 693 ms GC. It also resets the
+  // partial-repaint record, which is right here for the reason it was added -- the
+  // Reader is not an overlay and was never eligible for the partial path anyway, so
+  // this costs nothing and cannot leave the banner unpainted.
+  gApp->markDirty();
+  logf("[battery] low pct=%d -> banner armed\n", gBattery.percent());
+  logFlush();
+}
+
 static void renderTop() {
   // BEFORE the SpiBusGuard below, and deliberately: this is I2C on the sensor bus
   // and has nothing to do with the display's SPI, so keeping the two visibly apart
@@ -3367,12 +3461,24 @@ static void renderTop() {
   // renderTop was called) and `render` (timed from t0). Under 0.2% of a paint,
   // not worth restructuring for; the [i] line exists to eliminate exactly this
   // kind of unattributed gap, so it should be named rather than left quiet.
-  (void)refreshBatteryOnHome();
-  // Also resets the poll's own cadence timer, so a Home paint counts as a read
-  // for that purpose too -- see gLastBatteryPollMs's own comment for why a boot
-  // that skipped this would have the periodic poll immediately re-read what the
-  // paint just read.
-  gLastBatteryPollMs = millis();
+  if (homeOnGlass()) {
+    (void)refreshBatteryOnHome();
+    // Also resets the poll's own cadence timer, so a Home paint counts as a read
+    // for that purpose too -- see gLastBatteryPollMs's own comment for why a boot
+    // that skipped this would have the periodic poll immediately re-read what the
+    // paint just read.
+    //
+    // ONLY WHEN HOME IS ON GLASS, and that gate is new with the ladder. The stamp
+    // used to be unconditional, which was harmless while the timer's only consumer
+    // was itself gated on Home: a Reader paint reset a cadence nothing outside Home
+    // was waiting on. The ladder's poll is not gated, so an unconditional stamp
+    // means every page turn pushes the next reading out by another kBatteryPollMs
+    // -- and a reader turning pages faster than that starves the safety mechanism
+    // on the one screen the banner is drawn on. A paint that is not Home's takes no
+    // reading at all, so it must not claim one; this makes the stamp say what the
+    // comment above it always said.
+    gLastBatteryPollMs = millis();
+  }
   // EVERY PAINT, not just the first. The frame is the driver's, and the driver
   // can take it back (bindFrameToDriver says how and why). Nothing lends it
   // today, so this is a pointer comparison that always agrees -- it is here so
@@ -3730,6 +3836,69 @@ static void requireHeldPowerButtonOrSleepAgain(bool fromSleep, esp_reset_reason_
   freeink::PowerManager::deepSleepUntilPowerButton();
 }
 
+// The CHARGE half of `CHARGE · HOLD POWER TO WAKE`, made true after the wake --
+// because the SoC cannot make it true before one. The wake source is the power button
+// and there is no charge-detect anywhere on that path, so the board's promise is
+// enforced exactly as the HOLD half is: by refusing a resume that does not satisfy it.
+// (The badge used to say a bare `CHARGE TO WAKE`, which promised a charge-detect wake
+// this hardware does not have and omitted the hold this file's own gate requires
+// FIRST. Reported from an X3.)
+//
+// Returns only when the resume is accepted. A refusal re-arms both flags, powers the
+// rails back down and does not return.
+//
+// AFTER THE HOLD GATE, because that is the cheaper refusal and already stands: a
+// brush against the button in a bag should be refused for the HOLD reason without
+// spending an I2C transaction.
+//
+// AFTER detectAndSelectBoard(), because it needs the profile -- and safely so:
+// readStatus() tests BoardConfig::ACTIVE.batteryGauge.gaugeAddr LIVE rather than
+// from BatteryMonitor's cached members, which is what makes the file-scope static
+// (constructed before setup() runs, from the compile-time default) correct here.
+//
+// AND STILL BEFORE display.begin(), which is the whole cost of the feature: e-ink
+// holds its last image, so the glass is still showing the BATTERY EMPTY screen the
+// shutdown painted. A refusal repaints nothing and spends no waveform. One line
+// later, past the panel bring-up, and every brush against the button on a flat
+// device costs a flash.
+static void requireChargeOrSleepAgain() {
+  if (!takeCriticalShutdownFlag()) return;
+
+  const reader::BatteryReading r = readBattery();
+  const int pct = r.percentKnown ? r.percent : -1;
+
+  // A READING THAT DID NOT ANSWER LETS THE DEVICE BOOT. The alternative is a brick:
+  // a gauge that has failed would refuse every wake for ever, and the ladder in
+  // loop() will shut the device down again ten seconds later if the pack really is
+  // flat. Fail open here, fail safe there.
+  if (pct < 0 || pct >= reader::BatteryTracker::kResumePercent) {
+    logf("[boot] battery pct=%d critShut=1 -> RESUME (needs %d)\n", pct,
+         reader::BatteryTracker::kResumePercent);
+    logFlush();
+    return;
+  }
+
+  logf("[boot] battery pct=%d critShut=1 -> refused, needs %d. Sleeping again; nothing "
+       "was painted\n",
+       pct, reader::BatteryTracker::kResumePercent);
+
+  // GIVE BOTH FLAGS BACK. takeCriticalShutdownFlag() consumed one on the way in and
+  // setup() consumed `slept` a few lines above; this wake spent neither, because the
+  // device is going straight back to the state that set them. Without the `slept`
+  // half the NEXT wake -- the real one, once charged -- reads as a cold start and the
+  // reader loses the page they were on, which would be blamed on the restore.
+  markCriticalShutdown();
+  markSleeping();
+  logFlush();
+
+  // NO display.deepSleep(): begin() has not run, so there is no initialised driver
+  // to ask, and the controller was put into DSLP by the shutdown this is returning
+  // to. Cutting the rails is what holds the current down. Identical to the hold
+  // gate's refusal path, and for the same reasons.
+  freeink::PowerManager::powerDownRailsForSleep();
+  freeink::PowerManager::deepSleepUntilPowerButton();
+}
+
 void setup() {
   // A BIGGER TX RING, BEFORE begin() ALLOCATES IT. HWCDC::write posts what fits
   // the ring without blocking and then blocks for the remainder until the host
@@ -3829,6 +3998,13 @@ void setup() {
   // refused here, before display.begin(), so it costs no waveform and nothing on
   // the glass changes.
   requireHeldPowerButtonOrSleepAgain(fromSleep, rst);
+
+  // MAY NOT RETURN. See the definition: a resume on a pack that is still flat is
+  // refused here, BEFORE display.begin(), so it costs no waveform and nothing on
+  // the glass changes -- e-ink holds its last image, which is still the BATTERY
+  // EMPTY screen the shutdown painted. This is requireHeldPowerButtonOrSleepAgain's
+  // argument verbatim, one line later.
+  requireChargeOrSleepAgain();
 
   display.begin();
   mark("display-begin-returned");
@@ -5552,6 +5728,67 @@ static void paintSleepScreen() {
   freeink::PowerManager::deepSleepUntilPowerButton();
 }
 
+// BYPASSES App, exactly as paintSleepScreen does and for its reason: pushing this
+// screen would make the next wake RESTORE INTO IT.
+//
+// That moves two things App normally owns into this function -- the CLEAR, and
+// gFrameContentsUnknown, because App's partial-repaint record would otherwise
+// describe a frame that no longer exists. Nothing reads it before the chip stops,
+// and leaving a lie there is a trap for the next person to paint after it.
+static void paintBatteryEmptyScreen() {
+  reader::BatteryEmptyScreen scr;
+  // Free insurance today (one task, recursive guard); here to be structural rather
+  // than a rule someone remembers, exactly as paintSleepScreen and renderTop take it.
+  SpiBusGuard bus;
+  logf("[power] battery empty: painting the shutdown screen\n");
+  logFlush();
+  gFrame->clear(true);
+  scr.render(*gFrame, *gFonts, gTheme, reader::Plane::Bw);
+  gFrameContentsUnknown = true;
+  // FULL, not fast: this is the last thing the panel is asked to do, for as long as
+  // the pack stays flat, and a differential update would leave the previous screen's
+  // residue under it.
+  showOnePass(reader::RefreshMode::Full);
+}
+
+// The pack is flat. Save, say so, and stop.
+//
+// [[noreturn]] like sleepNow, and reached from loop() rather than from a dispatch:
+// a paint cannot be interrupted, so this must not run inside one.
+[[noreturn]] static void criticalShutdown() {
+  logf("[power] CRITICAL pct=%d charging=%d -> shutting down\n", gBattery.percent(),
+       gBattery.charging() ? 1 : 0);
+  logFlush();
+
+  // FIRST, AND THE BOARD'S COPY DEPENDS ON IT. "Your page is saved" is a promise,
+  // and this is what keeps it.
+  saveReadingPosition("battery");
+  paintBatteryEmptyScreen();
+
+  display.deepSleep();
+  // Cuts the X3's SD rail (GPIO13) and any other gated rail, latched so the switches
+  // stay off. On a flat pack that is the difference between a device that can be
+  // charged back up and one that reaches the cell's protection cut-off.
+  freeink::PowerManager::powerDownRailsForSleep();
+
+  // BOTH FLAGS. markSleeping() so that once charged the wake RESTORES the reader's
+  // page rather than starting cold -- the other half of "your page is saved".
+  // markCriticalShutdown() is what licenses setup()'s strict >= kResumePercent gate:
+  // without it the gate would have to sit at the critical threshold itself (which
+  // flaps), or refuse every boot below 15% (which would refuse a perfectly usable
+  // 10% battery that never shut anything down).
+  markSleeping();
+  markCriticalShutdown();
+
+  // THE LAST THING BEFORE THE CHIP STOPS, for sleepNow's reason: the buffer dies
+  // with the RAM, and this is the one shutdown whose log a user will want.
+  if (gLogToCard && gLogLen > 0) {
+    logf("[log] battery empty\n");
+    flushLogToCard();
+  }
+  freeink::PowerManager::deepSleepUntilPowerButton();
+}
+
 void loop() {
   // setup() bails out without building the app on a font-load, heap or geometry
   // failure. Repeat the last stage reached so the hang point is visible even
@@ -6175,6 +6412,15 @@ void loop() {
     gAct.postMs += millis() - afterDispatch;
   }
 
+  // BEFORE THE IDLE SLEEP, because a flat device should say why it stopped rather
+  // than showing the ordinary sleep screen. Both are [[noreturn]]; whichever runs
+  // first is the one the user sees.
+  //
+  // FROM loop() AND NEVER FROM A DISPATCH: a paint cannot be interrupted, so the
+  // shutdown's own paint must not run inside one. Same placement and the same
+  // reason as the idle sleep below it.
+  if (gBattery.level() == reader::BatteryLevel::Critical) criticalShutdown();
+
   if (gApp->sleepRequested() || gIdle.tick(millis()) == reader::PowerAction::Sleep) sleepNow();
 
   // Coalesce a burst of presses into one paint.
@@ -6570,36 +6816,52 @@ void loop() {
   // are making will hit the card itself soon enough.
   if (quiet) pollCardPresence(millis());
 
-  // PLUGGING IN SHOULD SHOW THE BOLT WITHOUT A BUTTON BEING PRESSED, and nothing
-  // else will make that happen: e-ink holds its image, no input arrives, and
-  // Home's view model is otherwise only rebuilt at boot, on a wake and on a Back
-  // out of a book.
+  // TWO JOBS OFF ONE TIMER, and the gates are what separate them. The cadence, the
+  // `quiet` gate and the I2C transaction are shared; what is NOT shared is who may
+  // be refused. The safety ladder must be read on every screen and on both models,
+  // so it sits in the outer block with no gate but the clock; the band's repaint
+  // keeps the two gates it has always had, below.
   //
   // Same gate as pollCardPresence -- after the paint block, nothing owed to the
   // panel -- but for a different reason: this needs no SpiBusGuard, because it is
   // I2C on the sensor bus and cannot race a refresh. What the gate buys is only
   // that a repaint it asks for does not jump a frame the user is waiting for.
-  //
-  // UNPLUGGING HAS TO REACH THE GLASS TOO, and the first version of this did not.
-  // It fired on a rising edge only, on the stated grounds that a stale bolt would
-  // be corrected by the next Home paint -- which assumed a button press that never
-  // came. Reported off the device: the bolt appeared on plug-in and then stayed
-  // for ever. A mark claiming the device is charging when it is not is the same
-  // class of lie as a 0% for a gauge that did not answer.
-  //
-  // Skipped entirely where charging cannot be observed, which is every X4.
-  // BatteryTracker owns everything that makes this safe: an edge in either
-  // direction, a first reading that seeds without firing, a latch that clears only
-  // after 60 s of continuous not-charging, and three grants a session. The dwell is
-  // what stops a device sitting at 100% on the charger -- where the gauge's
-  // Current() sign dithers around zero -- repainting the panel all night, and it is
-  // also what tells a real unplug from that dither, which is why CLEARING the bolt
-  // rides the same timer rather than a second constant.
-  if (quiet && gChargingObservable && homeOnGlass() &&
-      static_cast<uint32_t>(millis() - gLastBatteryPollMs) >= kBatteryPollMs) {
+  if (quiet && static_cast<uint32_t>(millis() - gLastBatteryPollMs) >= kBatteryPollMs) {
     gLastBatteryPollMs = millis();
     ++gBatteryPolls;
-    if (refreshBatteryOnHome()) {
+    // THE LADDER FIRST AND UNCONDITIONALLY. It is the safety mechanism and must not
+    // sit behind either of the band's two gates.
+    pollBatteryLevel();
+    // Immediately after, so the edge is tested against the reading just taken.
+    armBannerIfNewlyLow();
+
+    // THE BAND'S REPAINT, still behind its own two gates -- what it drives is the
+    // bolt on Home, which is a Home question. refreshBatteryOnHome takes its own
+    // reading; that is one extra I2C transaction on Home only, and one call site
+    // that cannot disagree with itself is worth ~150 us (readBattery's own
+    // comment).
+    //
+    // PLUGGING IN SHOULD SHOW THE BOLT WITHOUT A BUTTON BEING PRESSED, and nothing
+    // else will make that happen: e-ink holds its image, no input arrives, and
+    // Home's view model is otherwise only rebuilt at boot, on a wake and on a Back
+    // out of a book.
+    //
+    // UNPLUGGING HAS TO REACH THE GLASS TOO, and the first version of this did not.
+    // It fired on a rising edge only, on the stated grounds that a stale bolt would
+    // be corrected by the next Home paint -- which assumed a button press that never
+    // came. Reported off the device: the bolt appeared on plug-in and then stayed
+    // for ever. A mark claiming the device is charging when it is not is the same
+    // class of lie as a 0% for a gauge that did not answer.
+    //
+    // Skipped entirely where charging cannot be observed, which is every X4.
+    // BatteryTracker owns everything that makes this safe: an edge in either
+    // direction, a first reading that seeds without firing, a latch that clears only
+    // after 60 s of continuous not-charging, and three grants a session. The dwell is
+    // what stops a device sitting at 100% on the charger -- where the gauge's
+    // Current() sign dithers around zero -- repainting the panel all night, and it is
+    // also what tells a real unplug from that dither, which is why CLEARING the bolt
+    // rides the same timer rather than a second constant.
+    if (gChargingObservable && homeOnGlass() && refreshBatteryOnHome()) {
       gApp->markDirty();
       // WHICH EDGE, because both grant a repaint now and a line that says only
       // "charging" would misreport half of them -- on glass this is the one
@@ -6629,16 +6891,24 @@ void loop() {
     // observable/pct/charging are read straight off gChargingObservable/gBattery
     // rather than re-derived, so this can never disagree with what setBattery()
     // just handed the screen.
+    //
+    // level= IS THE SAFETY LADDER'S OWN RUNG, and it matters here more than the
+    // rest: a ladder that has quietly stopped being polled and one that is fine
+    // read IDENTICALLY, because nothing happens in either case. Without this a
+    // shutdown that never came, and one that came with no [power] CRITICAL line
+    // in front of it, would both be unattributable. Straight off level() -- 0
+    // Normal, 1 Low, 2 Critical -- never re-thresholded from pct, which would be
+    // a second spelling of the ladder free to disagree with the first.
     logf("[alive] last-stage=%s heap=%u minHeap=%u screen=%s depth=%d "
          "dropped=%lu/%lu listings=%u slots/%uB hit=%u miss=%u "
-         "battery observable=%d pct=%d charging=%d polls=%lu\n",
+         "battery observable=%d pct=%d charging=%d level=%d polls=%lu\n",
          stage, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
          reader::screenName(gApp->top().id()), gApp->depth(),
          (unsigned long)rawSamplesDropped(), (unsigned long)gPresses.dropped(),
          (unsigned)gSd.listings().slotsHeld(), (unsigned)gSd.listings().residentBytes(),
          (unsigned)gSd.listings().hits(), (unsigned)gSd.listings().misses(),
          (int)gChargingObservable, gBattery.percent(), (int)gBattery.charging(),
-         (unsigned long)gBatteryPolls);
+         (int)gBattery.level(), (unsigned long)gBatteryPolls);
     // WHAT THE CARD LOG HAS COST AND WHAT IT HAS LOST, on the heartbeat rather than
     // per flush. `dropped` non-zero means the buffer overran between two idle
     // windows and the log has a HOLE in it -- which must never be mistaken for the

@@ -52,9 +52,15 @@ extern const Icon kBookLarge;
 extern const Icon kFolder;   // folder: a Library directory row
 extern const Icon kBattery;  // the header band's charge cell
 extern const Icon kBatteryCharging;  // ...with a bolt knocked out: charging
+// The same cell nearly empty and drawn large, and a separate asset for
+// kBookLarge's reason: there is no scaling a header-band mark up. BatteryEmpty's.
+extern const Icon kBatteryLarge;
 extern const Icon kSdCard;   // an SD card: the subject of the no-card prompt
 extern const Icon kCheck;    // a tick: the end-of-book confirmation mark
-extern const Icon kWarning;  // a warning triangle: the corrupt-book dialog's mark
+extern const Icon kWarning;  // a warning triangle: the corrupt-book dialog and
+                             // low-battery banner's mark. ONE bitmap: all three
+                             // boards' svgs differ only in colour, and colour is
+                             // Ink's business -- see iconc.py's `warning` entry.
 }  // namespace icons
 
 }  // namespace reader

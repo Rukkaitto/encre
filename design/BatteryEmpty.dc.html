@@ -31,11 +31,58 @@
   <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; flex-grow: 1; text-align: center; padding: 0 24px;">
     <svg width="98" height="52" viewBox="0 0 22 12" fill="none"><rect x="0.5" y="0.5" width="18" height="11" stroke="#000000"></rect><rect x="19.5" y="3.5" width="2" height="5" fill="#000000"></rect><rect x="2" y="2" width="2.5" height="8" fill="#000000"></rect></svg>
     <div style="font-size: var(--t-title); font-weight: 700; letter-spacing: 0.06em;">BATTERY EMPTY</div>
-    <div style="font-size: var(--t-body); line-height: 1.55; max-width: 400px;">Your page is saved. The reader is shutting down &mdash; charge over USB-C to continue.</div>
+    <!-- THE CONNECTOR IS DELIBERATELY UNNAMED, AND IT USED TO SAY `USB-C`. Found on
+         glass and by nothing else: THE X3 DOES NOT HAVE A USB-C PORT, so the copy was
+         a false claim on the model it was reported from. Do not "helpfully" name one
+         again:
+
+         ONE BINARY DRIVES BOTH MODELS and they do not share a connector, so a named
+         connector is wrong on one of them whichever one is named. Nothing in the board
+         profile knows which port is fitted either -- `BoardProfile` names the battery
+         ADC, the gauge address and a (dead) `usbDetect` pin, and no field anywhere
+         describes the socket -- so the copy cannot even be made conditional. `connect a
+         charger` is true on both.
+
+         This is the same rule the badge below already follows by not claiming a
+         charge-wake, and the same rule the firmware follows for an unread gauge (`-1`,
+         never `0%`): A FALSE CLAIM IS WORSE THAN AN ABSENT ONE.
+
+         `connect a charger` is 17 characters exactly as `charge over USB-C` was, so the
+         wrap was expected to be unchanged and was verified rather than assumed -- four
+         lines at the same break positions in Chrome and in the firmware, at both
+         geometries. -->
+    <div style="font-size: var(--t-body); line-height: 1.55; max-width: 400px;">Your page is saved. The reader is shutting down &mdash; connect a charger to continue.</div>
   </div>
+  <!-- THE BADGE NAMES TWO STEPS BECAUSE THE WAKE TAKES TWO, AND IT SAID ONLY ONE.
+       It read `CHARGE TO WAKE`, and reported from an X3: plugging in does not wake
+       the device -- you have to HOLD power, which the badge did not say. Both
+       halves of that were wrong, so do not "simplify" this back:
+
+       1. CHARGING CANNOT WAKE THIS HARDWARE. There is no charge-detect wake
+          source: `usbDetect` exists only as a field declaration in
+          freeink-sdk/libs/hardware/BoardConfig/include/BoardConfig.h and nothing
+          in the SDK reads it -- and on the X3 the pin the Xteink profile names for
+          it is the fuel gauge's own I2C SDA. A timer wake cannot substitute
+          either: on battery the sleep leaves the chip FULLY POWERED DOWN, which is
+          why a resume there reports ESP_RST_POWERON rather than
+          ESP_RST_DEEPSLEEP -- nothing is left running to fire one.
+       2. THE HOLD IS REQUIRED AND CAME FIRST. In shell/src/main.cpp's setup(),
+          requireHeldPowerButtonOrSleepAgain runs BEFORE
+          requireChargeOrSleepAgain, so a tap does nothing even on a charged pack:
+          the wake needs kWakeHoldMs (600 ms) of held power AND a pack at or above
+          BatteryTracker::kResumePercent.
+
+       A badge that promises what the hardware cannot do is the same defect class
+       this project refuses for an unread gauge (`-1`, never `0%`): a false claim
+       is worse than an absent one.
+
+       THE WIDTH IS PROVEN BY A SIBLING, NOT BY A FRESH MEASUREMENT. This string is
+       character-for-character as long as Sleep.dc.html's `ASLEEP &middot; HOLD
+       POWER TO WAKE` -- both 27 characters, both --t-meta at 0.2em -- and that one
+       already ships on the X4, the narrower panel. -->
   <div style="display: flex; justify-content: center; padding-bottom: 34px;">
     <div style="border: 1px solid #000000; padding: 8px 18px;">
-      <div style="font-size: var(--t-meta); letter-spacing: 0.2em;">CHARGE TO WAKE</div>
+      <div style="font-size: var(--t-meta); letter-spacing: 0.2em;">CHARGE &middot; HOLD POWER TO WAKE</div>
     </div>
   </div>
 </div>

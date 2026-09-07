@@ -300,6 +300,15 @@ class ReaderScreen : public Screen {
     anchor_.set(a);
     syncAnchorLabel();
   }
+
+  // ARM OR DISARM THE LOW-BATTERY BANNER. `-1` disarms -- ONE ARGUMENT AND ONE
+  // SENTINEL, the same one the view model carries, because a (bool, int) pair would
+  // spell the condition twice.
+  //
+  // It writes the view model directly rather than a shadow field: syncVm() must not
+  // clobber it, and the simplest way to guarantee that is for there to be nothing
+  // for syncVm() to clobber it from.
+  void setBatteryLow(int percent) { vm_.batteryLowPercent = percent; }
   // Where the reader is, as the anchor spells a page.
   AnchorPos here() const;
 

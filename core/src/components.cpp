@@ -341,6 +341,30 @@ int drawActionButton(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
   return kActionH;
 }
 
+namespace {
+// design/Sleep.dc.html and design/BatteryEmpty.dc.html, identically.
+constexpr int kBadgeBottom = 34;
+constexpr int kBadgePadX = 18;
+constexpr int kBadgePadY = 8;
+constexpr int kBadgeBorder = 1;
+constexpr int kBadgeEm = 200;  // letter-spacing: 0.2em
+}  // namespace
+
+int drawBadge(Framebuffer& fb, const GlyphSource& font, std::string_view label, Plane plane) {
+  const Tracking track = trackingEm(font, kBadgeEm);
+  const int labelW = font.measure(label, track);
+  const int w = labelW + 2 * (kBadgeBorder + kBadgePadX);
+  const int h = font.lineHeight() + 2 * (kBadgeBorder + kBadgePadY);
+  const int x = centreIn(0, fb.width(), w);
+  const int y = fb.height() - kBadgeBottom - h;
+  fb.fillRect(x, y, w, h, true);
+  outlineRect(fb, x, y, w, h, kBadgeBorder);
+  drawText(fb, font, x + kBadgeBorder + kBadgePadX,
+           baselineIn(font, y + kBadgeBorder + kBadgePadY, font.lineHeight()), label, Ink::Black,
+           track, plane);
+  return y;
+}
+
 Prose wrapProse(const GlyphSource& font, std::string_view text, int maxW, int leadEm1000,
                 Tracking tracking, WordBreak breaking) {
   // The board states the leading as a multiple of the font size, so it resolves

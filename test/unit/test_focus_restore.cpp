@@ -39,12 +39,16 @@ constexpr ScreenId kAllScreens[] = {
     ScreenId::BookDetails, ScreenId::Settings,  ScreenId::Sleep,       ScreenId::Reader,
     ScreenId::ReaderMenu,  ScreenId::Contents,  ScreenId::SdMissing,
     ScreenId::Typography,  ScreenId::Peek,     ScreenId::BookEnd,
-    ScreenId::BookError,
+    ScreenId::BookError,   ScreenId::BatteryEmpty,
 };
 // NAMES THE SENTINEL, so an append cannot satisfy it unchanged. It used to name the
 // last member by hand -- `ScreenId::Peek + 1`, then `ScreenId::BookEnd + 1` -- and
 // both times an append left both sides equal and the guard that exists to force a
 // new screen into kAllScreens said nothing. That was #42.
+//
+// AND THE FIX HELD ON ITS FIRST REAL TEST. BatteryEmpty and BookError were appended
+// on two branches at once, and merging them failed this assert rather than sliding
+// past it -- which is what every earlier append did while this line named a member.
 static_assert(sizeof(kAllScreens) / sizeof(kAllScreens[0]) ==
                   static_cast<size_t>(ScreenId::Count),
               "a ScreenId was added or removed; give it a row in kAllScreens");

@@ -54,6 +54,16 @@ constexpr int kDisplayLineH = 67;  // 1.00 * 67
 constexpr int kPromptGap = 22;
 constexpr int kPromptActionW = 260;
 
+// design/BatteryEmpty.dc.html's paragraph says `max-width: 400px` and means it, and
+// that was CHECKED IN BOTH ENGINES rather than assumed -- which is the whole point of
+// the note on kProseMaxW, where SdMissing's 400 became 420 because its copy's three
+// Chrome lines came out as four here. This copy wraps to FOUR lines at 400 in Chrome
+// AND four here, at the same four breaks, so there is nothing to buy: the widths that
+// would matter are the ones where the two engines disagree, and this is not one.
+// Its own constant rather than kProseMaxW because the two boards state different
+// numbers, and a board's max-width is a number to check rather than to share.
+constexpr int kBatteryProseMaxW = 400;
+
 // design/BookEnd.dc.html's own box model. Every one of these is a number the board
 // STATES; the heights it COMPUTES -- the band's, the slabs', the hint bar's -- are
 // derived from the primitives that draw them, never pinned. Pinning a computed
@@ -573,6 +583,64 @@ void QuietTheme::renderSdMissing(Framebuffer& fb, const FontSet& fonts,
   drawHintBar(fb, fonts, hints, plane);
 }
 
+void QuietTheme::renderBatteryEmpty(Framebuffer& fb, const FontSet& fonts,
+                                    const BatteryEmptyViewModel& vm, Plane plane) {
+  fb.clear(true);
+
+  const Icon& mark = icons::kBatteryLarge;
+  const Font& title = fonts[Role::Title700];
+  // Body400, not Body500: the board's paragraph is `font-size: var(--t-body)` with
+  // no font-weight, so it is CSS default 400 -- the distinction that had Home's
+  // author line rendering 19% over the board's ink.
+  const Font& body = fonts[Role::Body400];
+  const Font& note = fonts[Role::Meta400];
+
+  // THE BADGE FIRST, because the column above it is centred on the room the badge
+  // leaves and the badge is the only thing that knows how much that is. It returns
+  // its own top y, which is exactly the bottom of the board's `flex-grow: 1` block:
+  // the outer flex column holds the centring block and then the badge's row, and the
+  // row's height is the badge plus its `padding-bottom: 34px`. Asking drawBadge is
+  // what makes this correct on both panels and on a label of any width, where
+  // subtracting a transcribed height would be a second spelling of its box model.
+  //
+  // NOT the hint bar's height, which is what SdMissing subtracts: this screen draws
+  // no bar, because the shell paints it and then calls deep sleep and there is
+  // nobody left to press anything.
+  const int areaH = drawBadge(fb, note, vm.note, plane);
+  const int usableW = fb.width() - 2 * kMargin;
+
+  // kPromptGap and kPromptTitleEm, NOT a second pair of numbers: this board and
+  // SdMissing's state the identical `gap: 22px` and `letter-spacing: 0.06em` on the
+  // identical centred column, and two spellings of one number is the shape this
+  // project has a rule about. What the two boards do NOT share is the paragraph's
+  // `max-width`, which is per-copy rather than per-screen -- see kBatteryProseMaxW.
+  const int colW = usableW < kBatteryProseMaxW ? usableW : kBatteryProseMaxW;
+  const int colX = centreIn(kMargin, usableW, colW);
+  const Prose prose = wrapProse(body, vm.message, colW, kProseLeadEm);
+
+  // Two gaps, not SdMissing's three: the mark, one line of title, the paragraph, and
+  // no action slab -- this screen has nothing to offer, because the next statement in
+  // the shell is deep sleep. In 1/64 px because the paragraph's height is a fraction
+  // (1.55 x 29px is 44.95) and rounding it before halving the free space would put
+  // the whole column half a pixel off centre.
+  const int stackF26 =
+      pxToF26(mark.h + title.lineHeight() + 2 * kPromptGap) + prose.heightF26();
+  // Arithmetic shift rather than / 2, for renderSdMissing's reason: identical on
+  // every positive value, and it halves a column TALLER than its area the same way
+  // instead of truncating toward the origin.
+  int yF26 = (pxToF26(areaH) - stackF26) >> 1;
+
+  drawIcon(fb, mark, centreIn(kMargin, usableW, mark.w), f26ToPx(yF26), Ink::Black, plane);
+  yF26 += pxToF26(mark.h + kPromptGap);
+
+  drawCentredText(fb, title, kMargin, usableW,
+                  baselineInF26(title, yF26, pxToF26(title.lineHeight())), vm.title, Ink::Black,
+                  trackingEm(title, kPromptTitleEm), plane);
+  yF26 += pxToF26(title.lineHeight() + kPromptGap);
+
+  drawProse(fb, body, prose, colX, colW, yF26, Ink::Black, plane);
+}
+
 int QuietTheme::libraryVisibleRows(int panelH, const FontSet& fonts) const {
   // Labelless slots: only the marks and the type role can change a bar's height,
   // and both are the same here as in renderLibrary. An empty LABEL narrows a
@@ -1090,14 +1158,9 @@ constexpr int kSleepRuleH = 2;
 constexpr int kSleepBarW = 170;
 constexpr int kSleepBarH = 8;
 constexpr int kSleepBarTopGap = 8;  // the bar's own `margin-top`, on top of the gap
-constexpr int kSleepBadgeBottom = 34;
-constexpr int kSleepBadgePadX = 18;
-constexpr int kSleepBadgePadY = 8;
-constexpr int kSleepBadgeBorder = 1;
 constexpr int kSleepLabelEm = 260;   // NOW READING, 0.26em
 constexpr int kSleepAuthorEm = 220;  // 0.22em
 constexpr int kSleepProgressEm = 140;
-constexpr int kSleepNoteEm = 200;
 
 }  // namespace
 
@@ -1229,16 +1292,7 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   // cover and the words, never the cover and the reading card. See
   // SleepViewModel::waking, which carries the whole of this reasoning.
   if (coverOnly && !vm.waking) return;
-  const int noteW = note.measure(vm.note, trackingEm(note, kSleepNoteEm));
-  const int badgeW = noteW + 2 * (kSleepBadgeBorder + kSleepBadgePadX);
-  const int badgeH = note.lineHeight() + 2 * (kSleepBadgeBorder + kSleepBadgePadY);
-  const int badgeX = centreIn(0, fb.width(), badgeW);
-  const int badgeY = fb.height() - kSleepBadgeBottom - badgeH;
-  fb.fillRect(badgeX, badgeY, badgeW, badgeH, true);
-  outlineRect(fb, badgeX, badgeY, badgeW, badgeH, kSleepBadgeBorder);
-  drawText(fb, note, badgeX + kSleepBadgeBorder + kSleepBadgePadX,
-           baselineIn(note, badgeY + kSleepBadgeBorder + kSleepBadgePadY, note.lineHeight()),
-           vm.note, Ink::Black, trackingEm(note, kSleepNoteEm), plane);
+  drawBadge(fb, note, vm.note, plane);
 }
 
 // --- Settings ----------------------------------------------------------------
@@ -1305,6 +1359,13 @@ constexpr int kReadMetaEm = 120;
 // way instead. Enough for `CH. 01` plus an ellipsis, so the fallback form always fits
 // whole and a long name always shows something.
 constexpr int kReadChapterFloor = 96;   // the chapter, the percent and the counter, 0.12em
+// design/LowBattery.dc.html's band: full-bleed, 78px tall, `padding: 0 18px` -- the
+// page's own horizontal padding, so the band's two runs align with the header's book
+// title and the footer's percentage. A 12px gap between the mark and its label.
+constexpr int kBannerH = 78;
+constexpr int kBannerPadX = 18;
+constexpr int kBannerGap = 12;
+constexpr int kBannerLabelEm = 100;  // letter-spacing: 0.1em, both runs
 // U+2014, the real character. Every chrome face's subset carries it (tools/fontc.py
 // adds it alongside the quotes and the ellipsis), so this is not a hyphen standing in.
 constexpr std::string_view kEmDash = "\xE2\x80\x94";
@@ -1485,6 +1546,62 @@ void QuietTheme::renderReader(Framebuffer& fb, const FontSet& fonts, const Glyph
     const int barX = centreIn(kReadPadX, fb.width() - 2 * kReadPadX, kReadBarW);
     const int barY = iconTopIn(footerTop, meta.lineHeight(), kReadBarH);
     drawProgressBar(fb, barX, barY, kReadBarW, kReadBarH, vm.progressPercent);
+  }
+
+  // --- The low-battery banner ----------------------------------------------------
+  //
+  // LAST, SO IT IS ON TOP. It is drawn OVER the page and never displaces it: the
+  // band inside the column would take a default page from 12 lines to 10 and
+  // re-paginate the whole chapter, at the moment the device has least energy to
+  // spend and with the reader's page moving under them. So `columnH` is untouched
+  // and the last line and a half of the page go under the band -- which is what
+  // design/LowBattery.dc.html draws, with the band absolutely positioned against
+  // the column's bottom for exactly this reason.
+  //
+  // AND THAT IS WHERE THE y COMES FROM. The band's bottom IS the column box's
+  // bottom, and readerMetrics puts that at `panelH - footerH` where `footerH =
+  // kReadFooterPadTop + lineHeight + kReadFooterPadBottom` -- which is exactly
+  // `footerTop - kReadFooterPadTop`. Derived from the same two terms the footer is
+  // placed by rather than restated as a number, so a footer that moves takes the
+  // band with it.
+  //
+  // FULL-BLEED, so it is placed from 0 and fb.width() rather than from kReadPadX.
+  // Every inverted band on this device is.
+  //
+  // Meta700 AND NOT Label500, and the X4's fit is why: at 23px the label and the
+  // hint collide on a 480px panel with the longest string the firmware can produce
+  // (`BATTERY LOW - 10%`, since the X4's ADC reports 10% notches and 10 is the only
+  // value its banner ever shows). The ramp has no 23px/700 role either. Measured in
+  // Chrome on the board: 27px of gap at 480 wide, ~16px once the firmware's ~3%
+  // wider advances are allowed for.
+  if (vm.batteryLowPercent >= 0) {
+    const Font& label = fonts[Role::Meta700];
+    const int top = footerTop - kReadFooterPadTop - kBannerH;
+    // `false` IS INK. Framebuffer::fillRect takes `white`, so the inverted band is
+    // the FALSE case -- exactly as drawMenuRow's focused fill and the hint bar's rule
+    // spell it. `true` here paints white on paper and the whole band vanishes, with
+    // the white runs on top of it invisible too: a banner that renders as nothing.
+    fb.fillRect(0, top, fb.width(), kBannerH, false);
+
+    const Icon& warn = icons::kWarning;
+    // WHITE INK on a filled band. The board authors the triangle white for the same
+    // reason, and drawIcon takes the ink rather than the icon carrying it.
+    drawIcon(fb, warn, kBannerPadX, iconTopIn(top, kBannerH, warn.h), Ink::White, plane);
+
+    const Tracking track = trackingEm(label, kBannerLabelEm);
+    // THE MIDDLE DOT IS ITS OWN LITERAL, and it must stay that way: a C++ hex escape
+    // is UNBOUNDED, so `"\xC2\xB75%"` parses `\xB75` as one escape -- clang rejects
+    // it and the ESP32's GCC accepts it and emits a byte that is not U+00B7. Adjacent
+    // literals end the escape. The board writes `&middot;` with a space either side.
+    const std::string text = std::string("BATTERY LOW ") + "\xC2\xB7" + " " +
+                             std::to_string(vm.batteryLowPercent) + "%";
+    drawText(fb, label, kBannerPadX + warn.w + kBannerGap,
+             baselineIn(label, top, kBannerH), text, Ink::White, track, plane);
+
+    const Tracking anyTrack = trackingEm(meta, kBannerLabelEm);
+    const int anyW = meta.measure("ANY BUTTON", anyTrack);
+    drawText(fb, meta, fb.width() - kBannerPadX - anyW, baselineIn(meta, top, kBannerH),
+             "ANY BUTTON", Ink::White, anyTrack, plane);
   }
 }
 

@@ -357,6 +357,29 @@ inline constexpr int kActionBorder = 2;  // the outlined variant's `border: 2px`
 int drawActionButton(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
                      std::string_view label, bool filled = true, Plane plane = Plane::Bw);
 
+// --- The boards' bottom badge ------------------------------------------------
+//
+// A 1px-outlined box measured from the BOTTOM of the panel, holding one tracked
+// caps label. design/Sleep.dc.html's `ASLEEP · HOLD POWER TO WAKE` and
+// design/BatteryEmpty.dc.html's `CHARGE · HOLD POWER TO WAKE` are the same box to
+// the pixel --
+// 34px from the bottom, 1px border, 8/18 padding, --t-meta at 0.2em -- which is
+// what makes this an extraction rather than a generalisation. (The two boards
+// spell the 34 differently, Sleep as `position: absolute; bottom: 34px` and
+// BatteryEmpty as a centring row's `padding-bottom`, and they render identically.)
+//
+// IT SIZES ITSELF TO THE LABEL and is centred on the panel, so the two screens'
+// different words need no second set of numbers. Returns the badge's top y, which
+// a caller that stacks anything above it needs and neither of today's two do.
+//
+// IT FILLS ITS INTERIOR unconditionally. Sleep's board says `background: #ffffff`
+// because the badge sits on the dither field; BatteryEmpty's sits on paper and does
+// not need it. Filling is correct on both and is what ships today.
+//
+// The label's tracking is the BADGE's (0.2em), not the hint bar's -- a hint label
+// sits beside a mark and this one stands alone. One spelling for one kind of line.
+int drawBadge(Framebuffer& fb, const GlyphSource& font, std::string_view label, Plane plane);
+
 // --- A list row that is a book -----------------------------------------------
 //
 // design/Library.dc.html's row, which four boards draw (Library and the three

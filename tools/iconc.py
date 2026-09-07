@@ -172,6 +172,24 @@ ICONS = {
         "source": "design/HomeCharging.dc.html",
         "match": "M11.4 2",
     },
+    # A SECOND ASSET FOR THE SAME DRAWING, at 98x52 against kBattery's 38x21 --
+    # these are pre-rendered bitmaps and there is no scaling one up. kBookLarge's
+    # precedent exactly, and it is a second *state* as well as a second size: the
+    # fill bar is 2.5 units wide where the header band's is 14.
+    #
+    # `source` HAS TO DISAMBIGUATE IT, AND IS THE ONLY THING THAT DOES. Every
+    # element of this mark is on Main.dc.html's battery too -- the body rect, the
+    # terminal nub kBattery keys on, and this `rect x="2" y="2"`, which differs
+    # only in its `width`. So the match locates the mark on its own board and the
+    # board name is the primary key, exactly as for kBook/kBookLarge. Keying on
+    # `width="2.5"` would distinguish them and is worse: how empty "empty" looks
+    # is the part of this mark a designer would retune.
+    "battery_large": {
+        "symbol": "kBatteryLarge",
+        "note": "a nearly-empty battery drawn large: the critical-shutdown mark",
+        "source": "design/BatteryEmpty.dc.html",
+        "match": 'rect x="2" y="2"',
+    },
     # The only mark in the set that is neither a button nor a row ornament: it is
     # the subject of a full-screen prompt, drawn at 84x105 where every other mark
     # here is 21-46px. The match keys on the card's own outline -- the notched
@@ -201,11 +219,28 @@ ICONS = {
         "source": "design/BookEnd.dc.html",
         "match": "M1 6l5 5L15 1",
     },
-    # The corrupt-book dialog's mark. Matched on the TRIANGLE's own path rather
-    # than on the exclamation stroke or the dot: BookError.dc.html and
-    # BookErrorUnreadable.dc.html both carry this svg, so `source` names which
-    # board owns it -- the same second line of defence kBook/kBookLarge and
-    # kBattery/kBatteryCharging already need.
+    # THE WARNING TRIANGLE, 32x28, and THREE BOARDS DRAW IT -- BookError.dc.html,
+    # BookErrorUnreadable.dc.html and LowBattery.dc.html. It arrived twice, on two
+    # branches at once (the corrupt-book dialog and the low-battery banner), each
+    # adding a `warning` entry naming its own board. ICONS is a DICT, so keeping
+    # both would have let the second silently overwrite the first rather than
+    # failing -- one entry is the resolution, not a merge of two.
+    #
+    # ONE BITMAP SERVES ALL THREE, and that is a fact about the generator rather
+    # than a coincidence: the three svgs are geometrically identical -- same
+    # viewBox, same three shapes, same 1.6 stroke -- and differ only in COLOUR,
+    # #000000 on the two dialogs against #ffffff on the banner, which draws it
+    # inside an inverted band. extract() re-colours an all-white mark to black
+    # because the bitmap is coverage and reader::Ink picks the colour at draw
+    # time, so the white authoring rasterises to the same bytes. The banner's
+    # board is honest about the ink it is drawn in; it is not a second mark.
+    #
+    # `source` NAMES BookError.dc.html AND THE CHOICE IS ARBITRARY between the
+    # three -- the match `M9 1 17 15H1z` is on all of them, so `source` is the
+    # second line of defence kBook/kBookLarge and kBattery/kBatteryCharging need,
+    # not a statement that this board owns the design. The cost is the one shared
+    # icons always have: editing the triangle on LowBattery.dc.html alone would
+    # not reach the generator. Change it on all three or on none.
     #
     # THREE DIAGONALS, which is the shape Mono thresholding treats worst:
     # CLAUDE.md records kChevron coming out a notch lighter because its stroke is
@@ -213,7 +248,7 @@ ICONS = {
     # that is an argument and only the panel can settle it.
     "warning": {
         "symbol": "kWarning",
-        "note": "a warning triangle: the corrupt-book dialog's mark",
+        "note": "a warning triangle: the corrupt-book dialog and low-battery mark",
         "source": "design/BookError.dc.html",
         "match": "M9 1 17 15H1z",
     },

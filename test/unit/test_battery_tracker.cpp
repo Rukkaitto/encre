@@ -310,3 +310,121 @@ TEST_CASE("a boot onto the dither's low side costs at most one grant") {
   }
   CHECK(extra == 0);
 }
+
+// --- The level ladder ----------------------------------------------------------
+
+TEST_CASE("the level is Normal until a reading says otherwise") {
+  BatteryTracker t;
+  // NEVER READ is Normal, not Critical. A device that shut itself down because the
+  // gauge had not answered yet would be unusable, and percent() already answers -1
+  // for the same state.
+  CHECK(t.level() == BatteryLevel::Normal);
+  t.update(good(50), 0);
+  CHECK(t.level() == BatteryLevel::Normal);
+}
+
+TEST_CASE("Low is entered at kLowPercent and needs no dwell") {
+  BatteryTracker t;
+  t.update(good(11), 0);
+  CHECK(t.level() == BatteryLevel::Normal);
+  // No dwell: the cost of being wrong is one banner, not a shutdown.
+  t.update(good(BatteryTracker::kLowPercent), 1000);
+  CHECK(t.level() == BatteryLevel::Low);
+}
+
+TEST_CASE("Low is left again when the battery comes back up") {
+  BatteryTracker t;
+  t.update(good(5), 0);
+  CHECK(t.level() == BatteryLevel::Low);
+  t.update(good(40), 1000);
+  CHECK(t.level() == BatteryLevel::Normal);
+}
+
+TEST_CASE("Critical requires the dwell, continuously") {
+  BatteryTracker t;
+  t.update(good(BatteryTracker::kCriticalPercent), 0);
+  // Below the threshold but not yet held: the level is Low, not Critical. A single
+  // sagging reading -- and an e-ink refresh is the heaviest load this device draws
+  // -- must not be able to shut it down.
+  CHECK(t.level() == BatteryLevel::Low);
+  t.update(good(2), BatteryTracker::kCriticalDwellMs - 1);
+  CHECK(t.level() == BatteryLevel::Low);
+  t.update(good(2), BatteryTracker::kCriticalDwellMs);
+  CHECK(t.level() == BatteryLevel::Critical);
+}
+
+TEST_CASE("one reading above the threshold restarts the dwell") {
+  BatteryTracker t;
+  t.update(good(1), 0);
+  t.update(good(1), BatteryTracker::kCriticalDwellMs - 1);
+  CHECK(t.level() == BatteryLevel::Low);
+  // The recovery. The dwell is measured from the FIRST reading in an UNBROKEN run,
+  // exactly as kUnlatchMs's is, so this one resets it.
+  t.update(good(20), BatteryTracker::kCriticalDwellMs);
+  CHECK(t.level() == BatteryLevel::Normal);
+  t.update(good(1), BatteryTracker::kCriticalDwellMs + 1);
+  // Held for the dwell measured from HERE, not from 0.
+  t.update(good(1), BatteryTracker::kCriticalDwellMs + 1 + BatteryTracker::kCriticalDwellMs - 1);
+  CHECK(t.level() == BatteryLevel::Low);
+  t.update(good(1), BatteryTracker::kCriticalDwellMs + 1 + BatteryTracker::kCriticalDwellMs);
+  CHECK(t.level() == BatteryLevel::Critical);
+}
+
+TEST_CASE("charging suppresses Critical but not Low") {
+  BatteryTracker t;
+  for (uint32_t ms = 0; ms <= BatteryTracker::kCriticalDwellMs * 2;
+       ms += BatteryTracker::kCriticalDwellMs / 4)
+    t.update(good(1, /*charging=*/true), ms);
+  // A device on the cable must not shut down, however long it has been flat. The
+  // banner still shows: the battery IS low, and saying so is true.
+  CHECK(t.level() == BatteryLevel::Low);
+  // Unplugged, the dwell starts now rather than being satisfied by the time spent
+  // charging -- a run that was suppressed was not a run.
+  t.update(good(1, /*charging=*/false), BatteryTracker::kCriticalDwellMs * 2 + 1);
+  CHECK(t.level() == BatteryLevel::Low);
+  t.update(good(1, /*charging=*/false),
+           BatteryTracker::kCriticalDwellMs * 2 + 1 + BatteryTracker::kCriticalDwellMs);
+  CHECK(t.level() == BatteryLevel::Critical);
+}
+
+TEST_CASE("a failed reading holds the level where it was") {
+  BatteryTracker t;
+  t.update(good(1), 0);
+  CHECK(t.level() == BatteryLevel::Low);
+  // A transient I2C miss is not a fact about the battery. "Flat" and "did not
+  // answer" are different claims -- the same rule percent()'s -1 already keeps --
+  // and a dwell satisfied by silence would shut the device down on a bus glitch.
+  t.update(failed(), BatteryTracker::kCriticalDwellMs * 2);
+  CHECK(t.level() == BatteryLevel::Low);
+  t.update(good(50), BatteryTracker::kCriticalDwellMs * 2 + 1);
+  CHECK(t.level() == BatteryLevel::Normal);
+}
+
+TEST_CASE("a failed reading cannot complete a dwell that was already running") {
+  BatteryTracker t;
+  t.update(good(1), 0);
+  t.update(failed(), BatteryTracker::kCriticalDwellMs);
+  // The clock ran, but nothing confirmed the battery is still flat.
+  CHECK(t.level() == BatteryLevel::Low);
+  t.update(good(1), BatteryTracker::kCriticalDwellMs + 1);
+  CHECK(t.level() == BatteryLevel::Critical);
+}
+
+TEST_CASE("the ladder's thresholds are ordered and X4-reachable") {
+  // The X4's ADC reports 10% notches (LIION_NOTCH_MV), so a threshold it cannot
+  // express is a threshold that never fires there. Asserted rather than trusted to
+  // a comment, because changing one of these numbers is exactly the edit that would
+  // silently disarm the feature on half the fleet.
+  static_assert(BatteryTracker::kCriticalPercent < BatteryTracker::kLowPercent, "");
+  static_assert(BatteryTracker::kLowPercent < BatteryTracker::kResumePercent, "");
+  // Critical must be reachable as the notch `0`.
+  static_assert(BatteryTracker::kCriticalPercent < 10, "");
+  // Low must be reachable as the notch `10`.
+  static_assert(BatteryTracker::kLowPercent % 10 == 0, "");
+  // Resume must need the notch `20`, which is a DIFFERENT voltage from the one
+  // Critical fires at -- 3.71 V against 3.565 V. Without that gap the shutdown edge
+  // and the resume edge are the same midpoint and a device on the cable flaps.
+  static_assert(BatteryTracker::kResumePercent > 10, "");
+  static_assert(BatteryTracker::kResumePercent <= 20, "");
+  CHECK(true);
+}

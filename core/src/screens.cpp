@@ -4,6 +4,7 @@
 #include "reader/screen_reader_menu.h"
 #include "reader/screen_sleep.h"
 
+#include "reader/screen_battery_empty.h"
 #include "reader/screen_book_details.h"
 #include "reader/screen_delete_confirm.h"
 #include "reader/screen_item_actions.h"
@@ -544,6 +545,14 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // replace the stack with it if the card goes away later and the simulator
       // can render it. It takes no arguments: a missing card is a missing card.
       return std::make_unique<SdMissingScreen>();
+    case ScreenId::BatteryEmpty:
+      // BUILDABLE AND NEVER PUSHED. The shell paints this one directly, on
+      // SleepScreen's argument -- a pushed BatteryEmpty would be restored INTO on the
+      // next wake -- so nothing here ever asks the factory for it. It is a case
+      // anyway, for SdMissing's reason: the simulator and the goldens then reach it
+      // the way they reach every other screen, and it needs no priming, because a
+      // flat pack is a flat pack and the board's copy is the only copy.
+      return std::make_unique<BatteryEmptyScreen>();
     case ScreenId::Home:
       // The root is never rebuilt: popping to Home returns the original object,
       // with its focus intact.

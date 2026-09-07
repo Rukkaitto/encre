@@ -95,3 +95,24 @@ bool clearSession();
 //   key: "slept"  uint8  1 = the last shutdown was a deliberate sleep
 bool markSleeping();
 bool takeSleptFlag();
+
+// --- "Was that shutdown a flat battery?" -------------------------------------
+//
+// THE CRITICAL-SHUTDOWN FLAG, and it is what makes `CHARGE TO WAKE` enforceable.
+//
+// The SoC cannot wake on charge -- the wake source is the power button and there is
+// no charge-detect anywhere on that path -- so the board's promise is kept AFTER the
+// wake, exactly as HOLD POWER TO WAKE is: setup() refuses a resume below
+// BatteryTracker::kResumePercent and sleeps again.
+//
+// A SEPARATE FLAG FROM `slept`, and it has to be. The gate is strict (>= 15%), and a
+// gate that strict applied to EVERY boot would refuse a device sitting at a
+// perfectly usable 10% that never shut anything down. This flag is what scopes it to
+// "the last shutdown was this one".
+//
+// TAKING IT CLEARS IT, for takeSleptFlag()'s reason -- one flag buys one refusal --
+// and the refusal path gives it back, because a refused wake did not spend it.
+//
+//   key: "critShut"  uint8  1 = the last shutdown was a critical battery shutdown
+bool markCriticalShutdown();
+bool takeCriticalShutdownFlag();

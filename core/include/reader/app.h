@@ -64,6 +64,23 @@ enum class ScreenId : uint8_t {
   // session record stores a screen by NAME, so appending cannot silently become
   // another screen, and appending also leaves every existing ordinal where it was.
   BookError,
+  // design/BatteryEmpty.dc.html -- what the panel holds after a critical shutdown.
+  // APPENDED after BookError rather than before it: BookError had already landed on
+  // main when this screen merged, and re-ordering a member that has shipped moves
+  // ordinals for nothing. The record stores a NAME, so neither order can silently
+  // become another screen.
+  //
+  // PAINTED DIRECTLY AND NEVER PUSHED, on SleepScreen's argument: the record names
+  // the top of the stack, so pushing it would make the next wake restore INTO it --
+  // press power, get "battery empty" back on a pack that has just been charged.
+  //
+  // AND #42 IS FIXED, so this append was caught rather than waved through. Every
+  // bound that used to name a member by hand now names the Count sentinel below --
+  // session_record.cpp's table and decode loop, test_focus_restore.cpp's catalogue
+  // and assert, and test_session_record.cpp's two every-id walks. Appending this
+  // member failed all of them at once, which is the whole point: the guards that
+  // stayed quiet for Typography and then BookEnd cannot stay quiet for the next one.
+  BatteryEmpty,
   // NOT A SCREEN. A bound, so a guard can name "one past the last member" without
   // naming a member -- which is #42, and which had gone quiet twice by the time it
   // was fixed: session_record.cpp spelled three bounds `<= ScreenId::Peek` and then

@@ -97,6 +97,18 @@ struct SdMissingViewModel {
   std::array<bool, 4> holds{};
 };
 
+// design/BatteryEmpty.dc.html. SdMissing's shape without the action slab, plus
+// Sleep's badge -- and the hints are all empty, deliberately: the shell paints this
+// and calls deep sleep, so there is nobody left to press anything and a bar is a
+// contract about four buttons that do nothing.
+struct BatteryEmptyViewModel {
+  std::string title;    // "BATTERY EMPTY"
+  std::string message;  // the paragraph under it, wrapped by the theme
+  std::string note;     // the badge's label: "CHARGE · HOLD POWER TO WAKE"
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
 // The end of a book (design/BookEnd.dc.html). Semantic content only: every string
 // here is composed by the screen, because a byline and a chapter count are CONTENT
 // and the theme has no business knowing that a book has an author.
@@ -371,6 +383,20 @@ struct ReaderViewModel {
   // device: a footer that changed height would reflow the text column and
   // re-paginate the chapter mid-read.
   std::string anchorLabel;
+
+  // --- The low-battery banner, and -1 MEANS THERE IS NONE -------------------------
+  //
+  // design/LowBattery.dc.html: an inverted 78px band over the bottom of the page.
+  // One field with a sentinel rather than a bool and an int, for anchorLabel's
+  // reason -- the field IS the condition, so it cannot be spelled twice and the two
+  // spellings cannot drift.
+  //
+  // IT IS DRAWN OVER THE PAGE AND NEVER DISPLACES IT. The band inside the column
+  // would take a default page from 12 lines to 10 and re-paginate the whole
+  // chapter, at the moment the device has least energy to spend and with the
+  // reader's page moving under them -- which is the identical reasoning anchorLabel
+  // carries for the footer's third field, turned ninety degrees.
+  int batteryLowPercent = -1;
 };
 
 // design/Peek.dc.html -- book text over the veiled page, for looking somewhere else

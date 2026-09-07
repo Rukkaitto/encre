@@ -23,10 +23,16 @@ constexpr const char* kNames[] = {
     "home", "library", "item-actions", "delete-confirm",
     "book-details", "settings", "sleep", "reader", "reader-menu",
     "contents", "sd-missing", "typography", "peek", "book-end",
-    "book-error",
+    "book-error", "battery-empty",
 };
 
-// TIED TO THE ENUM, NOT TO A NAMED MEMBER. Three separate bounds in this feature were
+// AND IT IS STILL A NAMED MEMBER, WHICH IS #42 AND NOT THE FIX THIS COMMENT CLAIMS.
+// Appending BatteryEmpty left this assert reading `BookEnd + 1` on both sides and it
+// said NOTHING -- the same silence test_focus_restore.cpp's has now produced three
+// times. What actually pointed at the table was -Wswitch on sessionWireName below,
+// which is a WARNING rather than an error. The line still has to be advanced by hand.
+//
+// Three separate bounds in this feature were
 // spelled `<= ScreenId::Peek`, so appending a screen left the table short, the decode
 // loop unable to see the new name, and the round-trip test silently not covering it --
 // while sessionWireName's fallthrough stored the new screen as `home`. That is the
@@ -125,6 +131,13 @@ const char* sessionWireName(ScreenId id) {
     // kNames above is what forces -- it names Count, so this table cannot be left
     // short by an append the way it was for Typography and BookEnd.
     case ScreenId::BookError: return kNames[14];
+    // NAMEABLE AND NEVER STORED, which is a third state again: the shell PAINTS this
+    // screen and never pushes it, on SleepScreen's argument -- the record names the
+    // top of the stack, so a pushed BatteryEmpty would wake the reader back into it.
+    // It needs a name so this switch stays exhaustive, because an id with no case
+    // falls through to `return kNames[0]` and stores the new screen as "home". That
+    // has already happened twice here.
+    case ScreenId::BatteryEmpty: return kNames[15];
     // NOT A SCREEN, so it has no name and must never reach the fall-through below,
     // which is what silently made a missing case read as `home`.
     case ScreenId::Count: break;

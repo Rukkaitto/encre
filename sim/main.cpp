@@ -727,13 +727,23 @@ int main(int argc, char** argv) {
   // the reason every other state board has one: a flag could not be named by the
   // comparison sheet or by a golden.
   const bool isBookEnd = std::strcmp(argv[1], "book_end") == 0;
+  // design/LowBattery.dc.html. THE READER, with the banner armed -- it is not a
+  // screen of its own, it is the page with an inverted band drawn over its foot, so
+  // this takes `reader`'s path exactly and adds one call. Its own subcommand for the
+  // reason every other state board has one: a flag on `reader` could be named by
+  // neither the comparison sheet nor a golden.
+  const bool isLowBattery = std::strcmp(argv[1], "low_battery") == 0;
+  // design/BatteryEmpty.dc.html. Nothing navigates here -- the shell paints it on the
+  // way down -- so it is pushed directly, which is `sleep`'s model and for `sleep`'s
+  // reason. It needs no priming: the board's copy lives in the screen's constructor.
+  const bool isBatteryEmpty = std::strcmp(argv[1], "battery_empty") == 0;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
       !isHomeUnopened && !isHomeCharging && !isLibraryScrolled && !isReader && !isSleepIdle &&
       !isReaderMenu && !isContents && !isChapterOpen && !isReaderList && !isAnchored &&
       !isSleepWaking && !isLibraryOpening && !isTypography && !isPeek && !isSleepCover &&
       !isSleepCoverDetails && !isSleepCoverWaking && !isBookEnd && !isBookError &&
-      !isBookErrorUnreadable) {
+      !isBookErrorUnreadable && !isLowBattery && !isBatteryEmpty) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
@@ -743,7 +753,8 @@ int main(int argc, char** argv) {
                  "'reader_menu', 'contents', 'typography', 'sleep_waking', "
                  "'sleep_cover', 'sleep_cover_details', 'sleep_cover_waking', "
                  "'library_opening', 'peek', 'book_end', 'book_error', "
-                 "'book_error_unreadable' or 'app')\n",
+                 "'book_error_unreadable', 'low_battery', 'battery_empty' or "
+                 "'app')\n",
                  argv[1]);
     return 3;
   }
@@ -765,7 +776,7 @@ int main(int argc, char** argv) {
   std::vector<uint8_t> italicTtf;
   reader::ScalableFont italic;
   if (isReader || isReaderMenu || isChapterOpen || isReaderList || isAnchored ||
-      isTypography || isPeek) {
+      isTypography || isPeek || isLowBattery) {
     bodyTtf = slurp(std::string(ASSETS_DIR) + "/built/literata_body.ttf");
     if (!body.init(bodyTtf.data(), bodyTtf.size(), reader::kBodyPpem)) {
       std::fprintf(stderr, "body face failed to load\n");
@@ -1052,7 +1063,7 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  if (isReader) {
+  if (isReader || isLowBattery) {
     // Through the real ReaderScreen, and the metrics through the real
     // Theme::readerMetrics -- so the PNG is laid out by exactly the arithmetic the
     // device runs, rather than by a column this file picked. Reader declares
@@ -1077,6 +1088,16 @@ int main(int argc, char** argv) {
     // that showed the transient state would put `1 / —` in the comparison sheet
     // against a board that says `53 / 890`, and would disagree with the goldens.
     static_cast<reader::ReaderScreen*>(scr.get())->completeIndex();
+    // design/LowBattery.dc.html's own 5%. The board's number, so the sheet compares
+    // the same string the design states.
+    //
+    // 5 IS AN X3 SPECIMEN, not the X4's value: the X4's ADC reports 10% notches so
+    // its banner only ever shows 10. The board says 5 and this matches the board;
+    // the fit at 480px was measured against `BATTERY LOW - 10%`, which is longer.
+    //
+    // AFTER completeIndex, and the ordering is the settled-state rule rather than a
+    // dependency -- the band is drawn OVER a page the count does not move.
+    if (isLowBattery) static_cast<reader::ReaderScreen*>(scr.get())->setBatteryLow(5);
     if (!renderToPng(*scr, fonts, theme, w, h, argv[2])) return 1;
     const auto& rd = static_cast<const reader::ReaderScreen&>(*scr);
     std::printf("wrote %s (%dx%d) page %d/%d, %zu lines, column %dx%d\n", argv[2], w, h,
@@ -1253,6 +1274,15 @@ int main(int argc, char** argv) {
     // pin the way Library's and Settings' renders do.
     if (!app.pushScreen(reader::ScreenId::Sleep)) {
       std::fprintf(stderr, "the factory refused ScreenId::Sleep\n");
+      return 1;
+    }
+  }
+  if (isBatteryEmpty) {
+    // Sleep's model, for Sleep's reason: nothing navigates here. The shell paints
+    // this one directly on the way down -- a pushed BatteryEmpty would be the screen
+    // the next wake restores INTO -- so there is no journey to pin, only a render.
+    if (!app.pushScreen(reader::ScreenId::BatteryEmpty)) {
+      std::fprintf(stderr, "the factory refused ScreenId::BatteryEmpty\n");
       return 1;
     }
   }

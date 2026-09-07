@@ -93,8 +93,13 @@ TEST_CASE("every screen in the catalogue has a wire name, and they are all disti
   // A screen with no name cannot be stored, which is a defined outcome -- but it
   // must be a deliberate one. This is the check that makes forgetting a row show
   // up here rather than as a screen that quietly never restores.
+  //
+  // NAMES THE Count SENTINEL, NOT A MEMBER. This walk said `<= ScreenId::Peek`,
+  // then `<= ScreenId::BookEnd`, then `<= ScreenId::BatteryEmpty` -- each append
+  // left it one screen short and nothing said so, which is #42. A bound one past
+  // the last member cannot be left behind by an append.
   std::vector<std::string> names;
-  for (int i = 0; i <= static_cast<int>(ScreenId::BookEnd); ++i) {
+  for (int i = 0; i < static_cast<int>(ScreenId::Count); ++i) {
     const ScreenId id = static_cast<ScreenId>(i);
     const char* n = sessionWireName(id);
     REQUIRE(n != nullptr);
@@ -140,7 +145,12 @@ TEST_CASE("every ScreenId round-trips to ITSELF") {
   // a shared name decodes to the LOWER id, so at most one of the two can come back
   // as itself. That is what made a second copy of the collision loop a second copy
   // rather than a second check.
-  for (int i = 0; i <= static_cast<int>(ScreenId::BookEnd); ++i) {
+  //
+  // AND IT NAMES THE Count SENTINEL NOW, not a member. Both walks in this file were
+  // spelled by hand and both went quiet on every append -- Peek, then BookEnd, then
+  // BatteryEmpty. That was #42, and the sentinel is its general fix: a bound one past
+  // the last member cannot be satisfied unchanged by adding a screen.
+  for (int i = 0; i < static_cast<int>(ScreenId::Count); ++i) {
     const ScreenId id = static_cast<ScreenId>(i);
     const char* n = sessionWireName(id);
     REQUIRE(n != nullptr);

@@ -1056,6 +1056,21 @@ void ReaderScreen::syncAnchorLabel() {
 }
 
 Action ReaderScreen::onGesture(const GestureEvent& g) {
+  // ANY BUTTON DISMISSES THE BANNER, AND SPENDS THE PRESS. Before the switch and
+  // outside it, because it has to reach gestures this screen does not otherwise act
+  // on -- and Back is the one that matters: it POPS the Reader, so without this the
+  // first press after a warning would leave the book.
+  //
+  // The press is spent dismissing and does nothing else, which is exactly what
+  // design/LowBattery.dc.html's `ANY BUTTON` slot promises. A bar cannot promise
+  // what nothing has bound, and this is the binding.
+  //
+  // Power is not seen here and does not need to be: the shell handles it before
+  // dispatch and sleeps, and the banner goes with the RAM.
+  if (vm_.batteryLowPercent >= 0) {
+    vm_.batteryLowPercent = -1;
+    return Action::redraw();
+  }
   switch (g.what) {
     case Gesture::Next: {
       // A HELD button turns pages one at a time here, unlike a list. `steps` is
