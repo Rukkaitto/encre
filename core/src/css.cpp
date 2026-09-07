@@ -183,11 +183,12 @@ bool readEntry(FileHandle& file, const Zip::Entry& entry, std::string& out) {
   }
   out.clear();
   uint8_t buf[512];
-  // A CAP IS NOT A GUARD, which is the lesson `kMaxBlockBytes` taught one layer
-  // down. 32 KB of `append` climbs a geometric ladder and its largest single
-  // request was measured at 16,640 bytes on a real book -- taken while the 36,956
-  // byte inflate window above it is still held, inside the phase that is the PEAK of
-  // a whole book open. `append` cannot refuse; `appendOrRefuse` probes for the block
+  // A CAP IS NOT A GUARD, and `kMaxBlockBytes` one layer down is the same shape
+  // sitting at 64 KB against a 42,152-byte reading floor -- a bound that cannot be
+  // honoured is not a bound. 32 KB of `append` climbs a geometric ladder and its
+  // largest single request was measured at 16,640 bytes on a real book -- taken
+  // while the 36,956-byte inflate window above it is still held, inside the phase
+  // that is the PEAK of a whole book open. `append` cannot refuse; `appendOrRefuse` probes for the block
   // the growth will want and answers false instead of `abort()`.
   //
   // A REFUSAL HERE IS NOT A BOOK FAILURE. `readEntry` returning false already means
