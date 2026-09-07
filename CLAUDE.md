@@ -4681,6 +4681,29 @@ since a delete's consequences — `forgetCardFacts`, the rescan, `gHomeStale`,
   beside the `clearDetailsFacts()` that exists for the identical reason on the
   identical press.
 
+**`DELETE FILE…` REPLACES THIS DIALOG RATHER THAN STACKING ON IT, AND A PUSH IS WHAT
+SHIPPED FIRST.** `App::render` draws **every** overlay above the topmost non-overlay,
+so pushing one overlay from another leaves the asking screen's panel standing under
+the new one's veil. That is invisible between `ItemActions` and `DeleteConfirm` — the
+confirmation is 380 wide against 340 and taller on both geometries, so it covers the
+actions panel completely, which is why no board draws that panel behind it. **This
+screen breaks the coincidence in the one direction that shows**: its paragraph makes
+its panel TALLER than the confirmation's, so the error dialog stood out above and
+below the thing meant to replace it. Reported off the device, and nothing on the
+desktop had a reason to look — both goldens pin a single overlay.
+
+- **`Action::replace` is the primitive**, not a special case in the screen. Two
+  Actions cannot express it for `Action::popTo`'s own reason: a screen returns ONE
+  Action, and one that followed a `Pop` with a `Push` would be reaching into the
+  stack.
+- **IT PUSHES BEFORE IT REMOVES**, so a factory that refuses leaves the stack exactly
+  as it was — popping first would lose the screen that asked and put the reader back
+  on the list with nothing to show for the press. From the root it degrades to a
+  push, because erasing the root leaves nothing to render and nothing to receive the
+  next event.
+- The **depth** is the property the tests pin, and mutation says so: a push leaves
+  three where a replace leaves two.
+
 **A CENTRED PANEL MUST RESERVE THE HINT BAR TWICE, AND `renderDeleteConfirm` HAD THE
 SAME DEFECT.** The clamp budget was `fb.height() - panelFixedH`, the whole canvas.
 With a 255-character name — FAT's LFN maximum, so a name a real card can hold — the
