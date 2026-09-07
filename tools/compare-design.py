@@ -163,6 +163,7 @@ FLOW_SCREENS = [
     ("book_details",    "BookDetails.dc.html",    "Book details"),
     ("book_error",      "BookError.dc.html",      "Book error"),
     ("book_error_unreadable", "BookErrorUnreadable.dc.html", "Book error (unreadable)"),
+    ("book_error_memory", "BookErrorMemory.dc.html", "Book error (out of memory)"),
     ("typography",      "Typography.dc.html",     "Typography"),
     ("contents",        "Contents.dc.html",       "Contents"),
     # Peek and return (3D). `peek` is the overlay -- book text over the veiled page

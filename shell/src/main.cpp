@@ -2624,14 +2624,17 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
     // after pressing power and with no context for it.
     if (push && gApp != nullptr) {
       // WHICH REFUSAL, in the only vocabulary the screen has. openBook's `why` is
-      // developer English and stays in the log; what reaches glass is one of two
+      // developer English and stays in the log; what reaches glass is one of three
       // bounded shapes, because "cannot open the book file" is a file that is gone
       // or a card that is -- and openRead does not call noteCardGone(), so
-      // pollCardPresence takes 2-25s to notice. Telling the reader a healthy book is
-      // damaged for that whole window would be a false claim, which this firmware
-      // refuses elsewhere for the battery gauge and the charging bolt.
-      const bool unreadable =
-          (why != nullptr && std::strcmp(why, "cannot open the book file") == 0);
+      // pollCardPresence takes 2-25s to notice -- while "not enough memory to ..."
+      // is a book that is perfectly fine on a device that is momentarily short.
+      // Telling the reader either of those is damaged would be a false claim, which
+      // this firmware refuses elsewhere for the battery gauge and the charging bolt.
+      //
+      // THE MAPPING IS core/'s (bookErrorReasonFor), not a strcmp here. It was one,
+      // against a literal this file spelled and book.cpp spelled again, and a third
+      // shape would have made it two -- in the one directory with no test harness.
       // The leaf name, not the path: the board's paragraph quotes a filename.
       const size_t slash = path.find_last_of('/');
       const std::string leaf = slash == std::string::npos ? path : path.substr(slash + 1);
@@ -2640,10 +2643,7 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
       const reader::ScreenId returnTo = gApp->top().id() == reader::ScreenId::Home
                                             ? reader::ScreenId::Home
                                             : reader::ScreenId::Library;
-      gFactory.setBookErrorFacts({path, leaf,
-                                  unreadable ? reader::BookErrorReason::Unreadable
-                                             : reader::BookErrorReason::Damaged,
-                                  returnTo});
+      gFactory.setBookErrorFacts({path, leaf, reader::bookErrorReasonFor(why), returnTo});
       // ...AND THE CONFIRMATION BEHIND ITS `DELETE FILE...` SLAB, PRIMED HERE TOO,
       // because the screen answers a bare `Action::push(ScreenId::DeleteConfirm)` and
       // the factory's fallback for an unprimed one is the LIBRARY'S FOCUSED ROW. From

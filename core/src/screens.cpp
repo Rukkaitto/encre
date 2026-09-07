@@ -163,6 +163,13 @@ BookErrorScreen::Facts demoBookErrorUnreadableFacts() {
           ScreenId::Library};
 }
 
+// design/BookErrorMemory.dc.html: the same file, the third refusal -- a book that is
+// fine and did not fit.
+BookErrorScreen::Facts demoBookErrorMemoryFacts() {
+  return {"/books/dubliners.epub", "dubliners.epub", BookErrorReason::OutOfMemory,
+          ScreenId::Library};
+}
+
 // demoSleepVm: a screen the simulator and the goldens must render needs a source
 // for its content, and the board's copy is the one source that makes the
 // comparison sheet meaningful.

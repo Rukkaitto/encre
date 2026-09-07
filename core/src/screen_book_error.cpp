@@ -1,10 +1,23 @@
 #include "reader/screen_book_error.h"
 
+#include <cstring>
 #include <utility>
 
+#include "reader/book.h"
 #include "reader/theme.h"
 
 namespace reader {
+
+BookErrorReason bookErrorReasonFor(const char* why) {
+  if (why == nullptr) return BookErrorReason::Damaged;
+  // THE PREFIX FIRST, because it is the class of refusal that is not about the file
+  // and the other two both are. See book.h for why the class is a prefix and not a
+  // code, and test_heapguard.cpp for what stops that being a convention on trust.
+  if (std::strncmp(why, kOpenOutOfMemory, std::strlen(kOpenOutOfMemory)) == 0)
+    return BookErrorReason::OutOfMemory;
+  if (std::strcmp(why, kOpenCannotOpen) == 0) return BookErrorReason::Unreadable;
+  return BookErrorReason::Damaged;
+}
 
 BookErrorScreen::BookErrorScreen(Facts facts)
     : FocusScreen(kRowCount, kRowCount), facts_(std::move(facts)) {
@@ -17,15 +30,33 @@ BookErrorScreen::BookErrorScreen(Facts facts)
   // (&ldquo;/&rdquo;). A dialog that does not name the thing is one people learn to
   // dismiss without reading.
   const std::string quoted = "\xE2\x80\x9C" + facts_.displayName + "\xE2\x80\x9D";
-  vm_.message =
-      facts_.reason == BookErrorReason::Damaged
-          // design/BookError.dc.html, verbatim.
-          ? quoted +
-                " appears damaged and can\xE2\x80\x99t be opened. The file was left"
-                " untouched on the card."
-          // design/BookErrorUnreadable.dc.html. Makes no promise about retrying,
-          // because this board has no RETRY slab -- unlike SdMissing, which does.
-          : quoted + " could not be read from the card. The file was left untouched.";
+  switch (facts_.reason) {
+    case BookErrorReason::Damaged:
+      // design/BookError.dc.html, verbatim.
+      vm_.message = quoted +
+                    " appears damaged and can\xE2\x80\x99t be opened. The file was left"
+                    " untouched on the card.";
+      break;
+    case BookErrorReason::Unreadable:
+      // design/BookErrorUnreadable.dc.html. Makes no promise about retrying,
+      // because this board has no RETRY slab -- unlike SdMissing, which does.
+      vm_.message = quoted + " could not be read from the card. The file was left untouched.";
+      break;
+    case BookErrorReason::OutOfMemory:
+      // design/BookErrorMemory.dc.html. It says WHAT and not WHAT TO DO, and the
+      // omission is deliberate: the reader has no way to free memory on purpose --
+      // there is no second book to close and no restart control -- and the one thing
+      // that reliably helps, a power cycle, is a promise about the resume path that
+      // this screen is in no position to make. Naming the transience (`right now`)
+      // is as far as the firmware actually knows.
+      //
+      // The second sentence is `Damaged`'s, character for character, because it is
+      // the same fact and one rule should have one spelling.
+      vm_.message = quoted +
+                    " needs more memory than is free right now. The file was left"
+                    " untouched on the card.";
+      break;
+  }
 
   vm_.okLabel = "OK";
   vm_.deleteLabel = "DELETE FILE\xE2\x80\xA6";  // U+2026, the board's &hellip;

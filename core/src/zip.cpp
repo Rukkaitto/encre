@@ -4,6 +4,7 @@
 
 #include <cstring>
 
+#include "reader/heapguard.h"
 #include "reader/inflate.h"
 
 namespace reader {
@@ -73,17 +74,14 @@ class Buf {
 // Whether the heap could serve `n` bytes right now, without keeping them.
 //
 // For the one buffer this file does not own: Zip::read fills a caller's
-// std::string, whose assign() would abort. Probing with the same size and freeing
-// it immediately is reliable on this device because it is single-threaded and the
-// assign follows at once -- the allocator hands back the block it just released.
-// It is a poor substitute for an interface that could report failure, and it is
-// here rather than in a comment on a crash report.
-bool canAllocate(size_t n) {
-  char* p = new (std::nothrow) char[n];
-  const bool ok = p != nullptr;
-  delete[] p;
-  return ok;
-}
+// std::string, whose assign() would abort.
+//
+// THIS FILE WROTE THAT PROBE FIRST AND IS NO LONGER THE ONLY PLACE THAT NEEDS IT,
+// so the body moved to reader/heapguard.h and this is the name it was called by.
+// `Epub::open`, `loadToc`, `readItalicClasses` and `openBook` all grow containers
+// from numbers a file states, and a fourth hand-rolled copy of a five-line probe is
+// the second-copy rule this project keeps paying to retrofit.
+bool canAllocate(size_t n) { return Heap::hasBlock(n); }
 
 // The backward EOCD scan's window, on the STACK. Sized at four SdFat sectors: the
 // scan walks backwards, so every read is a real card read, and a 64 KB window at
@@ -167,7 +165,21 @@ bool Zip::open(FileHandle& file) {
   if (cdSize > 0 && !readAt(file, cdOffset, cd.data(), cd.size()))
     return fail("could not read the central directory");
 
-  entries_.reserve(claimed);
+  // SIZED BY A NUMBER THE FILE STATES, exactly as `Buf cd` above is -- and until
+  // this line it was the one allocation in this file that could not refuse. 512
+  // entries (kMaxEntries) is ~20 KB of contiguous vector on the device, taken while
+  // the central directory buffer above is still held, and a `reserve` that cannot
+  // allocate is `abort()` with no diagnostic.
+  //
+  // AFTER THE CAP AND AFTER `cd`, both deliberately: the cap is what bounds this at
+  // all, and probing before `cd` was taken would answer a question nobody asked --
+  // `Zip::read`'s own note, one allocation up.
+  //
+  // The loop below runs exactly `claimed` times, so this reserve is the ONLY
+  // allocation the vector makes and guarding it closes the site rather than
+  // narrowing it.
+  if (!ensureRoom(entries_, claimed))
+    return fail("not enough memory to hold the archive's entry list");
   const unsigned char* p = reinterpret_cast<const unsigned char*>(cd.data());
   size_t at = 0;
   for (uint16_t i = 0; i < claimed; ++i) {
@@ -197,6 +209,13 @@ bool Zip::open(FileHandle& file) {
       return fail("an entry uses a compression method we do not implement");
 
     Entry entry;
+    // A NAME IS A FILE-STATED LENGTH TOO, up to 65,535 bytes by the format and
+    // bounded here only by the directory actually read. Every real EPUB's longest
+    // name is ~100 bytes, so this refuses nothing a book does -- it is the same
+    // one-line guard as the entry list above, on the same kind of number, and the
+    // alternative is an `abort()` for a name.
+    if (!ensureRoom(entry.name, nameLen))
+      return fail("not enough memory to hold an entry's name");
     entry.name.assign(reinterpret_cast<const char*>(p + at + 46), nameLen);
     entry.compressedSize = csize;
     entry.uncompressedSize = usize;
@@ -238,7 +257,7 @@ bool Zip::read(FileHandle& file, const Entry& entry, std::string& out) const {
 
   Buf raw(entry.compressedSize);
   if (!raw.ok()) {
-    reason_ = "not enough memory to read this chapter";
+    reason_ = "not enough memory to read an archive entry";
     return false;
   }
   if (!readAt(file, dataAt, raw.data(), raw.size())) return false;
@@ -248,7 +267,7 @@ bool Zip::read(FileHandle& file, const Entry& entry, std::string& out) const {
     // describing something this cannot represent.
     if (entry.compressedSize != entry.uncompressedSize) return false;
     if (!canAllocate(entry.uncompressedSize + 1)) {
-      reason_ = "not enough memory to read this chapter";
+      reason_ = "not enough memory to read an archive entry";
       return false;
     }
     out.assign(raw.data(), raw.size());
@@ -260,13 +279,13 @@ bool Zip::read(FileHandle& file, const Entry& entry, std::string& out) const {
   // top of the first. Probing before allocating raw would answer a question nobody
   // asked.
   if (!canAllocate(static_cast<size_t>(entry.uncompressedSize) + 1)) {
-    reason_ = "not enough memory to inflate this chapter";
+    reason_ = "not enough memory to inflate an archive entry";
     return false;
   }
   out.assign(entry.uncompressedSize, '\0');
   if (!inflateRaw(std::string_view(raw.data(), raw.size()), out)) {
     out.clear();
-    reason_ = "the chapter's compressed data is malformed";
+    reason_ = "an archive entry's compressed data is malformed";
     return false;
   }
   return true;

@@ -81,6 +81,15 @@ TEST_CASE("neither copy shape breaks within a pixel of the column") {
     CAPTURE(over);
     CHECK(over >= kMinOverflow);
   }
+  SUBCASE("out of memory") {
+    // THE THIRD SHAPE, written against this test rather than measured after the
+    // fact -- which is the whole point of the rule having become mechanical for one
+    // screen. `design/BookErrorMemory.dc.html`.
+    const int over =
+        tightestNextWordOverflow(body, messageFor(reader::BookErrorReason::OutOfMemory));
+    CAPTURE(over);
+    CHECK(over >= kMinOverflow);
+  }
 }
 
 TEST_CASE("the copy the screen composes is the copy the board draws") {
@@ -96,4 +105,11 @@ TEST_CASE("the copy the screen composes is the copy the board draws") {
   // that nothing it understands is in it. Dropping "appears" would state as fact
   // something it inferred -- the same reason there are two copy shapes at all.
   CHECK(messageFor(reader::BookErrorReason::Damaged).find("appears") != std::string::npos);
+  CHECK(messageFor(reader::BookErrorReason::OutOfMemory).find("more memory than is free") !=
+        std::string::npos);
+  // `right now` is load-bearing for the same reason `appears` is: what the firmware
+  // knows is that the heap was short at one instant, not that this book is too big
+  // for the device. Dropping it would state the stronger thing.
+  CHECK(messageFor(reader::BookErrorReason::OutOfMemory).find("right now") !=
+        std::string::npos);
 }

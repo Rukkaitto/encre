@@ -24,7 +24,7 @@ make sim        # render Home to build/home.png
 make firmware   # build for the ESP32-C3
 make fonts      # regenerate the .rfnt type ramp and embedded headers
 make icons      # regenerate icon bitmaps from the design boards' SVG
-make compare    # design-vs-firmware contact sheet, all 36 boards (~2.8 min)
+make compare    # design-vs-firmware contact sheet, all 37 boards (~2.8 min)
                 # ...and it prints `ok`, NOT a percentage -- see #41
 ```
 
@@ -63,10 +63,13 @@ id named by **two** rows of those tables (#77 — it would be rendered and count
 twice), and a screen the SIMULATOR KNOWS that will not render. It does **not**
 measure how close the render is -- the sheet still prints `ok` rather than a
 percentage, which is #41. A board with no screen behind it stays fine; that is
-**five of the 36** — measured, not inherited: a full run with the gate on reports
-`31/36 screens implemented` and exits 0 (Bookmarks, Boot, Home / missing book,
-Names, Names / empty). It read **37** before #77, and the extra row was the same
-board counted twice.
+**five of the 37** — measured, not inherited: a full run with the gate on reports
+`32/37 screens implemented` and exits 0 (Bookmarks, Boot, Home / missing book,
+Names, Names / empty). **Both figures move whenever a board lands** — this line has
+said 36 and 31; `BookErrorMemory.dc.html` is what took them to 37 and 32, and the
+five with nothing behind them are unchanged. Note the denominator read **37 before
+#77 as well**, and for the opposite reason: the extra row there was one board counted
+twice, not a thirty-seventh board.
 
 **Wiring it at all needed the script to be able to fail.** `render_sim` returned
 a bare `None` for both "the simulator has never heard of this id" and "the
@@ -2297,7 +2300,7 @@ worth knowing before changing it:
 | Sleep / cover | `SleepCover.dc.html` | The cover full-bleed, and **the one screen that drops the badge**. `Grayscale`, decided per paint. |
 | Sleep / cover + details | `SleepCoverDetails.dc.html` | The same cover with the reading card and the badge over it. Keeps both. Its golden pinned a **truncated** title for two phases. |
 | Reader | `Reader.dc.html` | The only screen whose content is the BOOK's — but no longer the only `Fidelity::Grayscale` one. |
-| Book error | `BookError.dc.html` | An overlay whose parent may be Home — **the only one whose parent is not a list**, so it is the only veil no board draws. Two copy shapes, because one of its four refusals is not damage. |
+| Book error | `BookError.dc.html` | An overlay whose parent may be Home — **the only one whose parent is not a list**, so it is the only veil no board draws. THREE copy shapes: damaged, unreadable, and a book that is fine and did not fit. |
 | Book end | `BookEnd.dc.html` | **The only screen a PAGE TURN opens rather than a press** — off the last page, so it must be reachable with no button bound to it. Its leaving slab's LABEL follows what is under the Reader; its ACTION does not. |
 | Typography | `Typography.dc.html` | Two doors, and it needs nothing from the book. `CHANGE` cycles in place; `Font` is drawn and unreachable. |
 | Reader / battery low | `LowBattery.dc.html` | A **variant**, not a screen: the same Reader with one 78px band drawn OVER the page. `columnH` is untouched, so no chapter re-paginates, and **any** button dismisses it. |
@@ -4932,14 +4935,98 @@ worst case since boot, inflate included.
 ### Memory, which is what a real book runs into
 
 **`new` ABORTS under `-fno-exceptions`, with no message and no stack.** The reboot
-looks like a navigation bug — twice now it has been reported as "opening a book goes
-back to Home". `MCAUSE 0x2` plus `abort() was called` plus `addr2line` on the stack
-words is how you get from that to `operator new` → `std::bad_alloc` → `__terminate`.
+looks like a navigation bug — **three times now** it has been reported that way, twice
+as "opening a book goes back to Home" and once as a book that **crashed the firmware
+on the first press and opened normally on the second**. `MCAUSE 0x2` plus `abort() was
+called` plus `addr2line` on the stack words is how you get from that to
+`operator new` → `std::bad_alloc` → `__terminate`.
 
-So every sizeable allocation in the EPUB path is **`std::nothrow`-checked** and
-answers with a reason: `Zip`'s central directory and both of its read buffers, and
-`BlockReader`'s `State` and its block buffer — the last of those being **#90**, and
-until it landed this sentence had an exception in it that was the whole of that ticket.
+**THIS PARAGRAPH SAID "every sizeable allocation in the EPUB path is
+`std::nothrow`-checked and answers with a reason", AND IT WAS TRUE OF EVERY
+HAND-ROLLED BUFFER AND FALSE OF EVERY CONTAINER.** There is no nothrow spelling of
+`reserve` or `push_back`, and the open path grows five of them from numbers a **FILE**
+states — a zip's entry count, a manifest's length, a spine's length, an NCX's entry
+count, a stylesheet's size. So the sentence covered the allocations somebody had
+written a `Buf` for and silently exempted the ones the standard library makes, which
+is the class the third report was. **A comment that overclaims is this project's most
+expensive recurring defect** and this is the fourth instance of it recorded here.
+
+**MEASURED, NOT GREPPED**, by replacing global `operator new` and running the real
+`openBook` → `loadToc` → chapter walk over all 225 corpus books. Largest **single
+contiguous request** per site, which is the number that decides — see "the largest
+free BLOCK decides" below:
+
+| bytes | site | who guards it |
+|--:|---|---|
+| 64,080 | `Epub::open` → the OPF string | `Zip::read`'s probe, since 3A |
+| 39,610 | `Zip::open` → the central directory | nothrow `Buf`, since 3A |
+| 36,956 | `Inflater::begin` → the window | nothrow, since 3C |
+| 32,768 | `loadToc` → `vector<TocEntry>` | `pushOrRefuse` |
+| 24,576 | `Epub::open` → the manifest vector | `pushOrRefuse` |
+| 17,920 | `Zip::open` → `entries_.reserve(claimed)` | `ensureRoom` |
+| 16,640 | `readItalicClasses` → the stylesheet | `appendOrRefuse` |
+| 15,408 | `Epub::open` → `chapters_.reserve` | `ensureRoom` |
+| 12,288 | `Epub::open` → the spine vector | `pushOrRefuse` |
+| 8,194 | `BlockReader::next` → `Block::text` | nothrow probe + `reserve`, **#90** |
+| 5,136 | `openBook` → `out.chapters.reserve` | `ensureRoom` |
+
+**AND THE PHASE THAT PEAKS IS `loadToc`, NOT THE CHAPTER WALK**, which is where every
+one of those unguarded sites lived. Across the user's own 16 books the toc-and-styles
+phase peaks at **47.6–91.8 KB** against a flat **~48–51 KB** for a chapter walk of the
+book's longest chapter — so the expensive moment of a book open is the one that reads
+what the book says about itself, and the reader's own 36,956-byte window is the
+cheaper half. (Desktop figures. The device's cover work measured **17–25 KB above**
+its desktop twin for the same allocations, because the allocator is simply different,
+so treat these as a floor.)
+
+**`reader/heapguard.h` IS `Zip`'s OWN PROBE, MOVED BEFORE A FOURTH COPY OF IT WAS
+WRITTEN.** `canAllocate` had lived in that file's anonymous namespace since 3A with a
+comment saying it was "a poor substitute for an interface that could report failure";
+`Heap::hasBlock` is the same five lines, plus `ensureRoom` / `pushOrRefuse` /
+`appendOrRefuse` over it. Four things about it:
+
+- **It asks for a BLOCK and never a total**, and it asks while the container's OLD
+  buffer is still held — which is exactly the state a reallocation is in.
+  `getFreeHeap()` answers the wrong question, as this file already says two bullets
+  down.
+- **It grows GEOMETRICALLY and falls back to the exact size when a doubling is
+  refused.** Reserving what was asked for each time would make a 32 KB stylesheet read
+  64 reallocations; doubling asks for twice what is needed, so near the limit it would
+  refuse a book that fits. **The fallback is the half a mutation catches and nothing
+  else does** — the corpus never comes near the ceiling.
+- **Failure is INJECTED for the tests**, because the desktop cannot be made to fail an
+  8 KB allocation: `Heap::install` swaps the allocator question the way `Profile`
+  installs a clock `core/` must not acquire for itself.
+- **`test_heapguard.cpp` IS A PROPERTY AND A SITE SET, AND IT NEEDED BOTH.** The
+  property refuses every probe the open path makes, from the Nth onward, and demands a
+  refusal whose reason maps to `BookErrorReason::OutOfMemory`. That alone **cannot see
+  a REMOVED guard** — a deleted guard makes no probe, so the walk has one fewer element
+  and every remaining one still passes; deleting the entry-list guard passed all 1,403
+  cases. So each site's own words are asserted too. Per-site **words** rather than a
+  probe count, because a count is a fact about the standard library's growth ladder and
+  libc++ and libstdc++ double from different capacities.
+
+**WHAT IS DELIBERATELY LEFT UNGUARDED, stated rather than implied:**
+
+- **`Block::text` WAS the largest unguarded allocation here at 98,304 bytes, and on
+  this tree it is neither.** That figure was measured against a `kMaxBlockBytes` of
+  64 KB, which #90 has since derived down to **8 KB** and reserved once through a
+  nothrow probe — so the request is **8,194** and it refuses rather than aborting. The
+  two changes were written on separate branches and neither touched the other's file,
+  which is why the table above needed correcting on the merge rather than either half
+  being wrong. **The 98,304 is kept as the before figure**, because it is what #90
+  removed and it is the largest single number this path has ever asked for.
+- **Everything under ~2 KB**: `cssPaths_` at 8 entries, italic class names at 64,
+  `Epub::Chapter`'s two path strings, `Block::emphasis` at 256 `Span`s. They are
+  bounded and small, and a guard on each buys a branch rather than a refusal.
+- The nothrow sites above are **not** re-guarded. They already refuse.
+
+**TWO FALSE CLAIMS WENT WITH IT, BOTH PRE-EXISTING.** `Epub::open` collapsed "the
+entry is absent" and "the entry would not read" into one message, so an out-of-memory
+inside the container read arrived as *"this is not an EPUB"* — and would have reached
+the panel as `appears damaged`, about a book that is fine. And `Zip::read`'s own
+refusals said **"chapter"**, when its one caller is `Epub::readEntry` reading a
+container and an OPF, so the noun was wrong at every site it can fire from.
 
 **AND THE `book.cpp` HALF OF THIS SENTENCE HAD BEEN FALSE SINCE 3C.** It read "a
 pre-flight probe in `book.cpp` before `buildDocument` (whose `std::string`/`std::vector`
@@ -5941,9 +6028,14 @@ the sleep-cover decode answers `CoverResult::ReadFailed` and falls back to the
 reading card, and Book details' author lookup is best-effort; neither is a reader
 asking to read a book.
 
-**TWO COPY SHAPES, BECAUSE ONE SENTENCE WOULD BE A LIE.** `openBook`'s four reasons
-are not one event: three are parse failures, and the fourth — `"cannot open the book
-file"` — is `openRead` returning null, a file that is gone or a card that is. And
+**THREE COPY SHAPES, BECAUSE ONE SENTENCE WOULD BE A LIE.** `openBook`'s refusals are
+not one event. Most are parse failures; `"cannot open the book file"` is `openRead`
+returning null, a file that is gone or a card that is; and the `"not enough memory
+to …"` family is a book that is fine on a device that is momentarily short. (This
+said "four reasons … the fourth" while there were four; the count moved when the heap
+guards added a class, which is why the shapes are named here and the reasons are
+not counted.)
+
 **`SdFileSystem::openRead` does not call `noteCardGone()`**; only a handle read that
 comes up short does. So a card pulled between the Library's listing and the press is
 noticed by `pollCardPresence` between 2 s (the fast probe) and 25 s (the FAT-scan
@@ -5952,11 +6044,58 @@ perfectly healthy book "appears to be damaged". **A false claim is worse than an
 absent one** — the same call this file already records for the unread battery gauge
 (`-1`, not `0%`) and for the charging bolt that spends a refresh on the unplug edge.
 
+**AND THE THIRD IS `OutOfMemory`, WHICH IS THE SAME ARGUMENT ARRIVING ONE REFUSAL
+LATER** — `design/BookErrorMemory.dc.html`, which is `BookError.dc.html` with one
+sentence changed exactly as `BookErrorUnreadable.dc.html` is. `openBook` can run out
+of memory (see **Memory, which is what a real book runs into**), and **neither
+existing shape may carry it**: `Damaged` says the bytes are not a book and they are,
+`Unreadable` says the card would not answer and it did. The book is fine and the
+device was momentarily short, which is `CoverResult::OutOfMemory`'s distinction one
+screen over and the reason that enum has six values rather than a bool.
+
+- **The copy says WHAT and not WHAT TO DO**, deliberately: *"…needs more memory than
+  is free right now. The file was left untouched on the card."* The reader has no way
+  to free memory on purpose — there is no second book to close and no restart control
+  — and the one thing that reliably helps, a power cycle, is a promise about the
+  resume path this screen is in no position to make. **`right now` is load-bearing the
+  way `appears` is**: what the firmware knows is that the heap was short at one
+  instant, not that this book is too big for the device. Its second sentence is
+  `Damaged`'s character for character.
+- **It clears the wrap boundary by 30px** against `test_book_error_copy.cpp`'s 12px
+  floor (`Damaged` 19, `Unreadable` 39), so #76's rule was satisfied at authoring time
+  rather than measured after the fact — which is what having made that rule mechanical
+  for one screen buys. Measured against its board at **3.45% / 3.54%**, against
+  `book_error`'s 3.44% / 3.53% in the same tree: the two wrap to five lines each, so
+  the panel is the same height and the residual is the same rasteriser difference.
+- **THE `DELETE FILE…` SLAB IS STILL DRAWN AND STILL ACTS, and that is the one thing
+  here worth an owner's opinion.** Deleting a perfectly good book over a transient
+  shortage is not what the reader wants. It stays because the alternative is the
+  `works only sometimes` trap this screen already refuses for `Unreadable`, and
+  because a row removed on one shape alone is a fourth board plus a panel whose height
+  depends on which refusal it is reporting.
+
 The screen takes a bounded `BookErrorReason`, **never the `why` string**, which is
 developer English (`"the spine names no chapters"`), unstyled, unbounded and with no
-slot on any board. It still goes to the log, where it is actionable. **Which shape,
-and where a delete returns to, are both decided in the SHELL**, because that is the
-one place that knows the reason and knows which screen asked.
+slot on any board. It still goes to the log, where it is actionable.
+
+**WHICH SHAPE IS `core/`'s NOW, AND WHERE A DELETE RETURNS TO IS STILL THE SHELL'S.**
+That split used to read "both are decided in the SHELL", and the mapping half was a
+bare `strcmp` against a literal the shell spelled and `book.cpp` spelled again — in
+the one directory with no test harness, where five of this project's bugs have hidden.
+A third shape would have made it two comparisons; a fourth that nobody remembered to
+add reads as "damaged" on a healthy file. `bookErrorReasonFor` is the whole mapping
+from developer English to the only vocabulary the panel has, and it lives beside the
+enum. The `returnTo` stays the shell's, because only the shell knows which screen
+asked.
+
+**THE CLASS OF REFUSAL IS A PREFIX, NOT A CODE.** Every layer on the open path says
+`"not enough memory to …"` and then what it was doing, so the class is readable off
+`kOpenOutOfMemory` while the log keeps the site. That is a convention rather than a
+type, and `test_heapguard.cpp` is what stops it being a convention nobody kept — it
+drives real refusals out of every guarded site with an injected allocator and asserts
+each one lands on this board. The alternative was a reason code out through
+`openBook`'s signature and its five callers, which is worth it if a fourth class ever
+appears.
 
 **`DELETE FILE…` IS WHY `DeleteConfirmScreen` TOOK FACTS.** It held a
 `LibraryScreen&` and acted through `deleteFocused()`, so it was reachable only from

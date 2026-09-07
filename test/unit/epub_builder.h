@@ -135,7 +135,8 @@ namespace detail {
 // is one book, so the fixtures differ only where they mean to.
 inline std::string assemble(const std::string& metaExtra, const std::string& itemExtra,
                             std::string_view coverBytes, bool withCoverEntry,
-                            bool deflateCover = false) {
+                            bool deflateCover = false,
+                            const std::vector<ZipEntry>& extraEntries = {}) {
   const std::string container =
       "<?xml version=\"1.0\"?>"
       "<container version=\"1.0\" "
@@ -168,6 +169,7 @@ inline std::string assemble(const std::string& metaExtra, const std::string& ite
   };
   if (withCoverEntry)
     entries.push_back({std::string(kCoverEntry), std::string(coverBytes), deflateCover});
+  for (const ZipEntry& e : extraEntries) entries.push_back(e);
   return buildZip(entries);
 }
 
@@ -252,6 +254,27 @@ inline std::string withEverythingNoted() {
       "<item id=\"css\" href=\"style.css\" media-type=\"text/css\"/>" +
           detail::coverItem(""),
       kFakeCoverBytes, true);
+}
+
+// A STYLESHEET THAT IS REALLY IN THE ARCHIVE, deflated, declaring one italic class.
+//
+// Every other fixture here notes its CSS in the manifest and leaves the entry out,
+// which is right for what they test (Epub::open validates the spine and nothing
+// else) and means nothing in the suite ever reached the code that READS a stylesheet
+// off the card. A mutation removing readEntry's growth guard passed all 1,403 cases
+// against a fixture with no stylesheet at all -- a mutation telling you about your
+// input before it tells you about your test.
+// PADDED PAST 2 KB, so the sheet's own growth is the LARGEST thing the open path
+// allocates and a test can therefore refuse it alone. At 29 bytes it was the
+// smallest, and no ceiling could single it out.
+inline std::string withRealStylesheet() {
+  std::string sheet = ".ital { font-style: italic; }\n/*";
+  sheet.append(4096, 'x');
+  sheet += "*/\n";
+  const std::vector<ZipEntry> extra = {{"OEBPS/style.css", sheet, true}};
+  return detail::assemble("",
+                          "<item id=\"css\" href=\"style.css\" media-type=\"text/css\"/>", "",
+                          false, false, extra);
 }
 
 // A manifest that DECLARES a cover the archive does not hold. Every other fixture
