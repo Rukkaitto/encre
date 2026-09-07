@@ -36,12 +36,17 @@ std::string_view leafOf(std::string_view path) {
 // setPlace() needs, and the only one available at this layer: FileSystem
 // addresses paths and does not decompose or resolve them.
 //
-// A `..` COMPONENT IS REFUSED RATHER THAN RESOLVED, because it is textually under
-// the root and addresses somewhere else -- and nothing below here would notice:
-// FileSystem's contract normalises a redundant separator and says nothing about
-// walking up. A folder legitimately named `..` cannot exist, and one merely
-// CONTAINING two dots (`Vol..Two`) is untouched, because this compares whole
-// components.
+// A `..` COMPONENT IS REFUSED RATHER THAN RESOLVED, and the reason is that
+// WHETHER ONE RESOLVES IS A PROPERTY OF WHAT IS BEHIND THE INTERFACE. Checked
+// rather than assumed, over all three implementations: SdFat's name lookup skips
+// every directory entry beginning with `.` (FatFileLFN.cpp, "skip empty slot or
+// '.' or '..'"), so on the card it does not resolve; HostFileSystem hands the
+// joined path to std::filesystem and the OS resolves it, so on the desktop and in
+// the simulator it does; the fake compares literal keys, so it does not. A
+// containment test that holds for two of three implementations is not a
+// containment test, and this is the layer that can state the rule once. A folder
+// legitimately named `..` cannot exist, and one merely CONTAINING two dots
+// (`Vol..Two`) is untouched, because this compares whole components.
 bool withinRoot(std::string_view root, std::string_view p) {
   if (p.empty() || p.front() != '/') return false;
   for (size_t at = 0; at < p.size();) {

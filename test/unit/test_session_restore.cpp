@@ -296,18 +296,29 @@ TEST_CASE("a folder deleted while the device slept costs the ROW as well") {
   CHECK(woken.library().focus() != snap[1].focus);
 }
 
-TEST_CASE("a place outside the Library's own root is refused") {
+TEST_CASE("a place outside the Library's own root is refused, before any listing") {
   // A record is written by a device and read by a device, but not necessarily
-  // with the same card in the slot or the same --root on the command line. A
-  // prefix test is the only containment this layer can perform, and a path with a
-  // `..` component is textually inside the root and addresses somewhere else --
-  // FileSystem resolves neither, so nothing below here would notice.
+  // with the same card in the slot or the same --root on the command line, so a
+  // prefix test is the containment this layer performs.
+  //
+  // AND THE ASSERTION THAT MATTERS IS THAT NO LISTING WAS ATTEMPTED, not that
+  // setPlace answered false. The fake compares literal keys, so `/books/../etc`
+  // fails to list whatever this code does -- a case that asserted only the bool
+  // passed with the whole check deleted, which is this project's own rule about a
+  // mutation telling you about your INPUT first. Whether a `..` resolves is a
+  // property of what is behind the interface (SdFat skips dot entries and does
+  // not; HostFileSystem hands the path to the OS and does), so the refusal has to
+  // happen HERE, on the path, and the way to see that is that the card is never
+  // touched.
   FakeFileSystem fs = cardWithFolders();
   LibraryScreen lib(fs, "/books");
+  const size_t before = fs.listCalls();
   CHECK_FALSE(lib.setPlace("/elsewhere/Classics"));
   CHECK_FALSE(lib.setPlace("/booksmith"));  // a prefix, not a parent
   CHECK_FALSE(lib.setPlace("/books/../etc"));
   CHECK_FALSE(lib.setPlace("books/Classics"));  // not absolute
+  CHECK_FALSE(lib.setPlace(""));               // no place at all is not a place
+  CHECK(fs.listCalls() == before);
   CHECK(lib.path() == "/books");
 
   // And the same thing through the restore, where it costs the row: /books row 2
