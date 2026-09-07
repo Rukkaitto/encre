@@ -77,7 +77,12 @@ TEST_CASE("DELETE FILE... opens the confirmation") {
   REQUIRE(s.onGesture({Gesture::Next}).kind != Action::Kind::None);
   REQUIRE(s.focus() == 1);
   const Action a = s.onGesture({Gesture::Activate});
-  CHECK(a.kind == Action::Kind::Push);
+  // REPLACE, not Push. Both are overlays and App::render draws every overlay above
+  // the topmost non-overlay, so a push left THIS panel standing under the
+  // confirmation's veil -- and this panel is TALLER than the confirmation, so it
+  // stood out above and below rather than being covered the way the actions panel
+  // is. Reported off the device.
+  CHECK(a.kind == Action::Kind::Replace);
   CHECK(a.target == ScreenId::DeleteConfirm);
 }
 

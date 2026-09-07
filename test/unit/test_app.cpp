@@ -278,6 +278,60 @@ TEST_CASE("a popped screen returns to the one underneath, which kept its state")
   CHECK(&app.top() == home);
 }
 
+TEST_CASE("a replace puts the new screen where the old one was") {
+  FakeFactory f;
+  auto root = std::make_unique<FakeScreen>(ScreenId::Home, Action::push(ScreenId::Library));
+  App app(std::move(root), f);
+  f.actions[ScreenId::Library] = Action::replace(ScreenId::Settings);
+
+  app.dispatch(kConfirm);  // Home pushes Library
+  REQUIRE(app.depth() == 2);
+  app.dispatch(kConfirm);  // Library replaces itself with Settings
+
+  // The DEPTH is the property: a push would have left three, with the Library
+  // still drawn underneath -- which for two overlays means the old panel standing
+  // under the new one's veil, and is the defect this exists to fix.
+  CHECK(app.depth() == 2);
+  CHECK(app.top().id() == ScreenId::Settings);
+  CHECK(app.at(0).id() == ScreenId::Home);
+  // A screen change like any other, so it takes the transition's full refresh and
+  // can never be a partial repaint.
+  CHECK(app.dirty());
+  CHECK(app.transition());
+}
+
+TEST_CASE("a replace the factory refuses leaves the stack exactly as it was") {
+  FakeFactory f;
+  auto root = std::make_unique<FakeScreen>(ScreenId::Home, Action::push(ScreenId::Library));
+  App app(std::move(root), f);
+  f.actions[ScreenId::Library] = Action::replace(ScreenId::Settings);
+
+  app.dispatch(kConfirm);
+  REQUIRE(app.depth() == 2);
+  // Nothing is buildable from here -- the shape of a real factory refusing a screen
+  // nothing primed, which is how BookError and the Reader both behave.
+  f.refuse = true;
+  app.clearDirty();
+  app.dispatch(kConfirm);
+
+  // PUSHED BEFORE THE OLD ONE IS REMOVED. Popping first would have lost the Library
+  // and left the reader on Home with nothing to show for the press.
+  CHECK(app.depth() == 2);
+  CHECK(app.top().id() == ScreenId::Library);
+  CHECK_FALSE(app.dirty());
+}
+
+TEST_CASE("a replace from the root is a push, because the root is the app") {
+  FakeFactory f;
+  App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::replace(ScreenId::Library)), f);
+  app.dispatch(kConfirm);
+  // Erasing the root would leave nothing to render and nothing to receive the next
+  // event, so there is nothing beneath to remove and this degrades to a push.
+  CHECK(app.depth() == 2);
+  CHECK(app.top().id() == ScreenId::Library);
+  CHECK(app.at(0).id() == ScreenId::Home);
+}
+
 TEST_CASE("a redraw is dirty but is not a transition") {
   FakeFactory f;
   App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::redraw()), f);

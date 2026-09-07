@@ -97,7 +97,7 @@ struct Action {
   // APPENDED, never inserted -- a Kind is compared, never stored, but appending
   // costs nothing and keeps every existing value where it was.
   enum class Kind : uint8_t {
-    None, Redraw, Push, Pop, PopTo, Sleep, Retry, Open, Finish, Delete
+    None, Redraw, Push, Pop, PopTo, Replace, Sleep, Retry, Open, Finish, Delete
   };
   Kind kind = Kind::None;
   ScreenId target = ScreenId::Home;  // meaningful for Push and PopTo
@@ -119,6 +119,23 @@ struct Action {
   // an id that is not there is a caller bug, and unwinding to nothing would take
   // the device down on the next paint.
   static Action popTo(ScreenId t) { return {Kind::PopTo, t}; }
+  // "Put `target` where I am" -- one screen leaves and one arrives, in one Action.
+  //
+  // ONE MODAL AT A TIME, AND A PUSH CANNOT EXPRESS IT. App::render draws EVERY
+  // overlay above the topmost non-overlay, so pushing one overlay from another
+  // leaves the asking screen's panel standing under the new one's veil, visible
+  // wherever the two panels differ in size. That is invisible between ItemActions
+  // and DeleteConfirm -- the confirmation is 380 wide against 340 and taller on
+  // both geometries, so it covers it completely, which is why the boards do not
+  // draw the actions panel behind it. It is NOT invisible under BookError, whose
+  // paragraph makes its panel TALLER than the confirmation's, so the error dialog
+  // stood out above and below the confirmation meant to replace it. Reported off
+  // the device.
+  //
+  // Two Actions cannot express it either, for Action::popTo's reason: a screen
+  // returns ONE Action, and a screen that followed a Pop with a Push of its own
+  // would be reaching into the stack.
+  static Action replace(ScreenId t) { return {Kind::Replace, t}; }
   static Action sleep() { return {Kind::Sleep, ScreenId::Home}; }
   static Action retry() { return {Kind::Retry, ScreenId::Home}; }
   // "Open the book I have selected." Shaped like Retry and for the same reason:

@@ -59,7 +59,12 @@ Action BookErrorScreen::onGesture(const GestureEvent& g) {
       // the `works only sometimes` trap. If the card really is gone the removal
       // simply fails, which needs no branch here: FileSystem::remove reports the END
       // STATE and the list the reader lands on already says which it was.
-      return Action::push(ScreenId::DeleteConfirm);
+      // REPLACE, NOT PUSH. Both screens are overlays and App::render draws every
+      // overlay above the topmost non-overlay, so a push left THIS panel standing
+      // under the confirmation's veil -- and unlike the actions panel, which the
+      // confirmation covers completely, this one's paragraph makes it taller, so it
+      // stood out above and below. Reported off the device.
+      return Action::replace(ScreenId::DeleteConfirm);
     default:
       return Action::none();
   }
