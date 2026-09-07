@@ -89,6 +89,8 @@ class NullTheme : public Theme {
                          Plane) override {}
   void renderDeleteConfirm(Framebuffer&, const FontSet&, const DeleteConfirmViewModel&,
                            Plane) override {}
+  void renderBookError(Framebuffer&, const FontSet&, const BookErrorViewModel&,
+                       Plane) override {}
   void renderBookDetails(Framebuffer&, const FontSet&, const BookDetailsViewModel&,
                          Plane) override {}
   int libraryVisibleRows(int, const FontSet&) const override { return 0; }
@@ -274,6 +276,60 @@ TEST_CASE("a popped screen returns to the one underneath, which kept its state")
   // The same object, not a rebuilt one: its event count survived the round trip.
   CHECK(home->events == 1);
   CHECK(&app.top() == home);
+}
+
+TEST_CASE("a replace puts the new screen where the old one was") {
+  FakeFactory f;
+  auto root = std::make_unique<FakeScreen>(ScreenId::Home, Action::push(ScreenId::Library));
+  App app(std::move(root), f);
+  f.actions[ScreenId::Library] = Action::replace(ScreenId::Settings);
+
+  app.dispatch(kConfirm);  // Home pushes Library
+  REQUIRE(app.depth() == 2);
+  app.dispatch(kConfirm);  // Library replaces itself with Settings
+
+  // The DEPTH is the property: a push would have left three, with the Library
+  // still drawn underneath -- which for two overlays means the old panel standing
+  // under the new one's veil, and is the defect this exists to fix.
+  CHECK(app.depth() == 2);
+  CHECK(app.top().id() == ScreenId::Settings);
+  CHECK(app.at(0).id() == ScreenId::Home);
+  // A screen change like any other, so it takes the transition's full refresh and
+  // can never be a partial repaint.
+  CHECK(app.dirty());
+  CHECK(app.transition());
+}
+
+TEST_CASE("a replace the factory refuses leaves the stack exactly as it was") {
+  FakeFactory f;
+  auto root = std::make_unique<FakeScreen>(ScreenId::Home, Action::push(ScreenId::Library));
+  App app(std::move(root), f);
+  f.actions[ScreenId::Library] = Action::replace(ScreenId::Settings);
+
+  app.dispatch(kConfirm);
+  REQUIRE(app.depth() == 2);
+  // Nothing is buildable from here -- the shape of a real factory refusing a screen
+  // nothing primed, which is how BookError and the Reader both behave.
+  f.refuse = true;
+  app.clearDirty();
+  app.dispatch(kConfirm);
+
+  // PUSHED BEFORE THE OLD ONE IS REMOVED. Popping first would have lost the Library
+  // and left the reader on Home with nothing to show for the press.
+  CHECK(app.depth() == 2);
+  CHECK(app.top().id() == ScreenId::Library);
+  CHECK_FALSE(app.dirty());
+}
+
+TEST_CASE("a replace from the root is a push, because the root is the app") {
+  FakeFactory f;
+  App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::replace(ScreenId::Library)), f);
+  app.dispatch(kConfirm);
+  // Erasing the root would leave nothing to render and nothing to receive the next
+  // event, so there is nothing beneath to remove and this degrades to a push.
+  CHECK(app.depth() == 2);
+  CHECK(app.top().id() == ScreenId::Library);
+  CHECK(app.at(0).id() == ScreenId::Home);
 }
 
 TEST_CASE("a redraw is dirty but is not a transition") {
@@ -881,6 +937,44 @@ TEST_CASE("a finish request changes nothing itself -- not the frame, not the sta
   CHECK(app.depth() == 1);
   CHECK(app.top().id() == ScreenId::Home);
   // And it is its own latch: a finish must not read as a sleep or a retry.
+  CHECK_FALSE(app.sleepRequested());
+  CHECK_FALSE(app.retryRequested());
+  CHECK_FALSE(app.openRequested());
+}
+
+TEST_CASE("a delete action is latched until the shell clears it") {
+  // Mirrors Retry, Open and Finish, and for their reason: removing a file is CARD
+  // WORK, and the consequences -- forgetCardFacts, the Library's rescan, gHomeStale
+  // and gLibraryStale -- all live in the shell.
+  FakeFactory f;
+  App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::del()), f);
+  CHECK_FALSE(app.deleteRequested());
+  app.dispatch(kConfirm);
+  CHECK(app.deleteRequested());
+  app.clearDeleteRequest();
+  CHECK_FALSE(app.deleteRequested());
+  // And it re-latches: the shell clears the flag before it removes anything, so a
+  // second confirmation after a failed removal must be visible as a second request.
+  app.dispatch(kConfirm);
+  CHECK(app.deleteRequested());
+}
+
+TEST_CASE("a delete request changes nothing itself -- not the frame, not the stack") {
+  FakeFactory f;
+  App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::del()), f);
+  app.clearDirty();
+  REQUIRE_FALSE(app.dirty());
+  app.dispatch(kConfirm);
+  REQUIRE(app.deleteRequested());
+  // Nothing repaints on its own, and nothing pops. The shell pops with
+  // popTo(facts().returnTo) once the file is gone -- which is a screen change it
+  // owns, exactly as Retry, Open and Finish leave theirs to it.
+  CHECK_FALSE(app.dirty());
+  CHECK_FALSE(app.transition());
+  CHECK(app.depth() == 1);
+  CHECK(app.top().id() == ScreenId::Home);
+  // And it is its own latch: a delete must not read as a finish, a sleep or a retry.
+  CHECK_FALSE(app.finishRequested());
   CHECK_FALSE(app.sleepRequested());
   CHECK_FALSE(app.retryRequested());
   CHECK_FALSE(app.openRequested());

@@ -276,6 +276,12 @@ bool LibraryScreen::ascend() {
   return true;
 }
 
+std::string LibraryScreen::focusedPath() const {
+  const LibraryItem* item = focusedItem();
+  if (item == nullptr || item->entry.isDir) return {};
+  return join(item->entry.name);
+}
+
 bool LibraryScreen::deleteFocused() {
   const LibraryItem* item = focusedItem();
   if (item == nullptr || fs_ == nullptr) return false;

@@ -1,13 +1,14 @@
 #include "reader/screen_delete_confirm.h"
 
-#include "reader/screen_library.h"
+#include <utility>  // std::move -- libc++ pulls it in via <string> and libstdc++ does not
+
 #include "reader/text.h"  // upperLatin1
 #include "reader/theme.h"
 
 namespace reader {
 
-DeleteConfirmScreen::DeleteConfirmScreen(LibraryScreen& library)
-    : FocusScreen(kRowCount, kRowCount), library_(library) {
+DeleteConfirmScreen::DeleteConfirmScreen(Facts facts)
+    : FocusScreen(kRowCount, kRowCount), facts_(std::move(facts)) {
   // The board's caption, with the book's name in it: `DELETE "DUBLINERS"?`, in
   // U+201C/U+201D as the board spells them (&ldquo; / &rdquo;).
   //
@@ -17,8 +18,7 @@ DeleteConfirmScreen::DeleteConfirmScreen(LibraryScreen& library)
   //
   // A confirmation that does not NAME the thing is one people learn to dismiss
   // without reading, so this is load-bearing rather than decorative.
-  const LibraryItem* item = library.focusedItem();
-  const std::string name = item != nullptr ? upperLatin1(item->entry.title()) : std::string();
+  const std::string name = upperLatin1(facts_.displayName);
   vm_.title = "DELETE \xE2\x80\x9C" + name + "\xE2\x80\x9D?";
   // The board's own paragraph, verbatim -- and it is a promise the code keeps:
   // nothing here goes near /.reader/state/.
@@ -48,19 +48,21 @@ Action DeleteConfirmScreen::onGesture(const GestureEvent& g) {
       return Action::pop();
     case Gesture::Activate:
       if (vm_.focusedAction == kCancel) return Action::pop();
-      // The delete itself, and the rescan that follows it, are the Library's:
-      // it owns the path and the list. This screen owns the confirmation.
+      // LATCHED, not done here. The removal's consequences are all the shell's --
+      // forgetCardFacts, the Library's rescan, gHomeStale and gLibraryStale -- and
+      // core/ has no filesystem. The shell reads the path off this screen while it
+      // is still on top, then pops to `facts_.returnTo`.
       //
-      // The result is deliberately not branched on. `FileSystem::remove` reports
-      // the END STATE, so a false means the file is still there -- and the
-      // rescan the Library just did has already told the user which it was, on
-      // the list they are about to be looking at. An error panel here would be a
-      // screen with no board saying something the Library already shows.
-      library_.deleteFocused();
-      // Back to the Library, not back one: the actions panel this was opened
-      // from acted on a book that no longer exists, so it goes too. One Action,
-      // one screen change, however deep the flow was.
-      return Action::popTo(ScreenId::Library);
+      // The result is deliberately not branched on: FileSystem::remove reports the
+      // END STATE, so a false means the file is still there and the list the reader
+      // lands on already says so.
+      //
+      // THIS RETURNS NO POP, AND THAT IS NOT AN OMISSION. The pop is the shell's,
+      // with the same popTo(facts().returnTo) it reads the path from -- because
+      // where a completed delete lands depends on how the confirmation was reached,
+      // and the actions panel this may have been opened from must go too. Until the
+      // shell wires that, confirming leaves this panel standing.
+      return Action::del();
     default:
       return Action::none();
   }

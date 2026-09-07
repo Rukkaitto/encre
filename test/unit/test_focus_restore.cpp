@@ -39,27 +39,15 @@ constexpr ScreenId kAllScreens[] = {
     ScreenId::BookDetails, ScreenId::Settings,  ScreenId::Sleep,       ScreenId::Reader,
     ScreenId::ReaderMenu,  ScreenId::Contents,  ScreenId::SdMissing,
     ScreenId::Typography,  ScreenId::Peek,     ScreenId::BookEnd,
+    ScreenId::BookError,
 };
-// AND IT NAMES THE LAST MEMBER, WHICH IS THE ONLY WAY IT BITES. It named
-// SdMissing, and Typography was APPENDED after it -- so the array's length still
-// equalled SdMissing + 1 and this assert passed over a screen missing from the
-// catalogue. Every append is a screen this guard silently lets through unless the
-// name here moves with it, which is the "reports on less than it claims" shape
-// three other checks in this repo have had.
-//
-// IT HAPPENED AGAIN, AND THIS GUARD IS ITSELF AN INSTANCE OF #42. It said `Peek`
-// while BookEnd was appended after it, so both sides read 13 and the build stayed
-// green over a screen the catalogue did not cover -- caught only because the two
-// hand-maintained counts below failed for an unrelated reason. Naming BookEnd means
-// the array can no longer be SHORT today, and that is all it means: the assert is
-// still pinned to a NAME rather than to whatever the last member happens to be, so
-// the next append needs this line moved BY HAND or it goes quiet again. #42 is the
-// general fix -- it has instances in more than one file -- and is deliberately not
-// attempted here.
+// NAMES THE SENTINEL, so an append cannot satisfy it unchanged. It used to name the
+// last member by hand -- `ScreenId::Peek + 1`, then `ScreenId::BookEnd + 1` -- and
+// both times an append left both sides equal and the guard that exists to force a
+// new screen into kAllScreens said nothing. That was #42.
 static_assert(sizeof(kAllScreens) / sizeof(kAllScreens[0]) ==
-                  static_cast<size_t>(ScreenId::BookEnd) + 1,
-              "a ScreenId was added or removed; give it a row in kAllScreens, and"
-              " name the LAST member here");
+                  static_cast<size_t>(ScreenId::Count),
+              "a ScreenId was added or removed; give it a row in kAllScreens");
 
 // One screen, plus whatever has to outlive it. The three screens built over a
 // Library hold a REFERENCE to it, so the Library cannot be a temporary -- and it
@@ -114,6 +102,12 @@ std::unique_ptr<Standalone> build(ScreenId id) {
   // face, no metrics and no parent -- the Reader's and the Peek's demos are gated
   // only because a body face costs a TTF load the other screens should not pay.
   b->factory.setBookEndDemo();
+  // AND BookError, on exactly that argument: Facts is a value copy, so priming it
+  // unconditionally costs nothing and keeps the screen inside every loop below. The
+  // factory REFUSES an unprimed one, so a fixture that did not prime it would get a
+  // null and the REQUIRE would fire -- which is the refusal working, not a reason to
+  // let the screen out of the catalogue.
+  b->factory.setBookErrorFacts(demoBookErrorFacts());
   if (id == ScreenId::Reader || id == ScreenId::Peek) {
     // GIVEN a body face rather than skipped. Excluding either from the loop would
     // have been a screen this file claims to cover and does not -- and both are
@@ -151,6 +145,13 @@ std::unique_ptr<Standalone> build(ScreenId id) {
   if (id == ScreenId::ItemActions || id == ScreenId::DeleteConfirm ||
       id == ScreenId::BookDetails) {
     b->parent = b->factory.create(ScreenId::Library);
+    // ONTO A BOOK, because all three of these are about one. The demo list's first
+    // row is a FOLDER, and the Library refuses Gesture::Secondary over one -- so a
+    // fixture left on row 0 asks the factory for a state no press can reach. It is
+    // DeleteConfirm that says so out loud: it refuses a folder, on FileSystem::
+    // remove's own files-only contract, exactly as LibraryScreen::deleteFocused
+    // always has.
+    b->parent->onEvent(InputEvent{Button::Down, PressKind::Short});
   }
   b->screen = b->factory.create(id);
   return b;
@@ -166,7 +167,8 @@ TEST_CASE("every screen accepts back the focus it reports") {
   // mode this project keeps hitting -- a check that reports on less than it
   // claims. NINE screens can move their focus today: Home, Library, the two Library
   // overlays, Settings, the reader menu, the contents, Typography and BookEnd, whose
-  // two slabs are the ninth. BookDetails, Sleep, the Reader, the Peek and the
+  // two slabs are the ninth, and BookError, whose OK/DELETE pair is the tenth.
+  // BookDetails, Sleep, the Reader, the Peek and the
   // SD-missing prompt have one thing on them and legitimately report 0 -- the Peek has
   // no selection at all, only a page.
   //
@@ -196,7 +198,7 @@ TEST_CASE("every screen accepts back the focus it reports") {
     CHECK(restored->get().focus() == moved);
   }
 
-  CHECK(movable == 9);
+  CHECK(movable == 10);
 }
 
 TEST_CASE("every screen with a movable focus wraps off the end") {
@@ -227,7 +229,7 @@ TEST_CASE("every screen with a movable focus wraps off the end") {
     CHECK(wrapped);
     ++wrapping;
   }
-  CHECK(wrapping == 9);
+  CHECK(wrapping == 10);
 }
 
 TEST_CASE("restoring the focus a screen is already on is a no-op, not a failure") {

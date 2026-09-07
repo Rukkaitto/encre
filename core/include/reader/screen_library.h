@@ -160,6 +160,16 @@ class LibraryScreen : public FocusScreen {
   // is the root for a Library that has not descended into anything.
   const std::string& path() const { return path_; }
 
+  // THE ABSOLUTE PATH OF THE FOCUSED ROW, or empty when nothing is focused or the
+  // row is a FOLDER -- FileSystem::remove is files-only by contract, which is the
+  // same rule deleteFocused() states.
+  //
+  // ONE SPELLING of "which file is this row", because the join has a case that is
+  // easy to get subtly wrong (a root that IS "/" would otherwise produce "//books")
+  // and a wrong path here is a delete aimed at the wrong file. The factory built
+  // this by hand for one release; that was the second copy, so it is a function.
+  std::string focusedPath() const;
+
   // Re-reads the directory and pulls the focus back into range. False when there
   // is no filesystem or the directory could not be read -- in which case the list
   // is EMPTY rather than stale, because BookList::scan clears its output either

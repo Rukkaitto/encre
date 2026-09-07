@@ -30,6 +30,7 @@
 #include "reader/icons.h"
 #include "reader/screens.h"
 #include "reader/screen_book_end.h"
+#include "reader/screen_book_error.h"
 #include "reader/screen_home.h"
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
@@ -98,6 +99,20 @@ reader::DeleteConfirmViewModel longDeleteConfirm(const std::string& name) {
   vm.confirmLabel = "DELETE";
   vm.hints = {"CANCEL", "SELECT", "UP", "DOWN"};
   return vm;
+}
+
+// THE NAMES A PANEL THAT QUOTES A FILENAME HAS TO SURVIVE. 67 characters is a real
+// card's name; 255 is FAT's LONG-FILENAME MAXIMUM, so it is the longest a card can
+// hold and is where a bound has to hold rather than happen to; 804 is well past
+// what FAT allows, because a bound that only just holds is one that will stop
+// holding. No spaces anywhere, for kLongTitle's reason.
+std::vector<std::string> pathologicalNames() {
+  std::string longest(kLongTitle);
+  while (longest.size() < 255) longest += kLongTitle;
+  longest.resize(255);
+  std::string huge;
+  for (int i = 0; i < 12; ++i) huge += kLongTitle;
+  return {std::string(kLongTitle), longest, huge};
 }
 
 // The topmost inked row at or below `from`, or -1.
@@ -223,37 +238,48 @@ TEST_CASE("the delete panel stays on the glass for a pathologically long name") 
   // allows a 255-character name; the clamp is what bounds it.
   for (int width : {480, 528}) {
     const int height = width == 480 ? 800 : 792;
-    for (int repeats : {1, 4, 12}) {
-      std::string name;
-      for (int i = 0; i < repeats; ++i) name += kLongTitle;
+    for (const std::string& name : pathologicalNames()) {
+      const size_t chars = name.size();  // reported by the messages below
 
+      const reader::DeleteConfirmViewModel vm = longDeleteConfirm(name);
       reader::Framebuffer fb(width, height);
       fb.clear(true);
-      theme.renderDeleteConfirm(fb, r.fonts, longDeleteConfirm(name), reader::Plane::Bw);
+      theme.renderDeleteConfirm(fb, r.fonts, vm, reader::Plane::Bw);
 
-      // The panel's own top border is inside the canvas, and so is its bottom:
-      // there is at least one row of veil above the first and below the last, so
-      // neither edge is clipped. The veil is a 3px-pitch stipple, so a row of pure
-      // paper does not exist -- what is asserted instead is that the top and
-      // bottom rows of the frame carry no SOLID run as wide as the panel.
-      auto longestRun = [&](int y) {
-        int best = 0, run = 0;
-        for (int x = 0; x < width; ++x) {
-          if (!fb.getPixel(x, y)) { if (++run > best) best = run; } else run = 0;
-        }
-        return best;
-      };
+      // ASSERTED FROM THE PANEL'S OWN BORDER COLUMNS, which is the corrupt-book
+      // dialog's form and replaces the one this case used to carry. That one asked
+      // whether rows 0, 1 and barTop-1 hold a SOLID run as wide as the panel, and it
+      // has two holes: a panel that overflows a LOT puts its border off the canvas
+      // entirely, so row 0 holds only the two 2px side segments and the check passes;
+      // and the CAPTION'S RULE spans the content width between those same segments,
+      // so a `>= panelW` run does not tell a border from a rule either.
+      //
+      // The side borders are inked on EVERY row the panel occupies and nothing else
+      // on this frame inks them -- the veil is white-on-paper, the caption's rule and
+      // the slabs are inset, and the parent is not drawn -- so the first and last row
+      // carrying both is the panel's true extent.
       const int panelW = 380;
-      CHECK_MESSAGE(longestRun(0) < panelW, "panel border on row 0, repeats " << repeats);
-      CHECK_MESSAGE(longestRun(1) < panelW, "panel border on row 1, repeats " << repeats);
-      // The hint bar is drawn over the veil last, so the bottom rows are the bar's
-      // -- what matters is that the panel did not reach past the bar's top.
+      const int panelX = (width - panelW) / 2;
       reader::Hint hints[4];
-      const reader::DeleteConfirmViewModel vm = longDeleteConfirm(name);
       reader::buildHints(reader::kHintSlotMarks, vm.hints, vm.holds, hints);
       const int barTop = height - reader::hintBarHeight(r.fonts, hints);
-      CHECK_MESSAGE(longestRun(barTop - 1) < panelW,
-                    "panel border under the bar, repeats " << repeats);
+      auto borderRow = [&](int y) {
+        return !fb.getPixel(panelX, y) && !fb.getPixel(panelX + panelW - 1, y);
+      };
+      int top = -1, bottom = -1;
+      for (int y = 0; y < barTop; ++y)
+        if (borderRow(y)) {
+          if (top < 0) top = y;
+          bottom = y;
+        }
+      CHECK_MESSAGE(top > 0, "no top border inside the canvas, name of " << chars << " chars at "
+                                                                        << width);
+      CHECK_MESSAGE(bottom > top, "no bottom border inside the canvas, name of "
+                                      << chars << " chars at " << width);
+      // Strictly above the bar: the scan stops at barTop, so a panel that runs into
+      // the bar reports bottom == barTop - 1 rather than where it really ends.
+      CHECK_MESSAGE(bottom < barTop - 1,
+                    "panel reaches the hint bar, name of " << chars << " chars at " << width);
     }
   }
 }
@@ -450,5 +476,80 @@ TEST_CASE("a long title on BookEnd matches its golden") {
     reader::Framebuffer fb(w, h);
     s.render(fb, r.fonts, theme, reader::Plane::Bw);
     golden::checkGolden(fb, w == 480 ? "book_end_long_title" : "book_end_long_title_x3");
+  }
+}
+
+TEST_CASE("the corrupt-book dialog keeps a real card's name inside its panel") {
+  // THE SAME DEFECT AS THE DELETE PANEL'S, ONE RUN DOWN. That board puts the
+  // filename in the CAPTION, which wraps `Anywhere` and is clamped; this one puts it
+  // in the PARAGRAPH, which had neither -- so a name with no space in it wrapped to a
+  // single line WIDER than the column, was drawn through the panel's right border and
+  // off the glass, and the rest of the name was lost. Found by rendering it and
+  // looking, which is what every board's one-word sample name prevents.
+  Ramp r;
+  reader::QuietTheme theme;
+  for (int width : {480, 528}) {
+    const int height = width == 480 ? 800 : 792;
+    for (const std::string& name : pathologicalNames()) {
+      const size_t chars = name.size();  // reported by the messages below
+      reader::BookErrorScreen s({"/books/" + name, name, reader::BookErrorReason::Damaged,
+                                 reader::ScreenId::Library});
+
+      reader::Framebuffer fb(width, height);
+      fb.clear(true);
+      theme.renderBookError(fb, r.fonts, s.vm(), reader::Plane::Bw);
+
+      const int panelW = 380;
+      const int panelX = (width - panelW) / 2;
+      // HORIZONTAL: no ink outside the panel's own columns, above the hint bar --
+      // which is full width by design and is drawn last, so it is excluded by row.
+      reader::Hint hints[4];
+      reader::buildHints(reader::kHintSlotMarks, s.vm().hints, s.vm().holds, hints);
+      const int barTop = height - reader::hintBarHeight(r.fonts, hints);
+      int outside = 0;
+      for (int y = 0; y < barTop; ++y)
+        for (int x = 0; x < width; ++x)
+          if ((x < panelX || x >= panelX + panelW) && !fb.getPixel(x, y)) ++outside;
+      // The veil is white-on-paper, so it inks nothing here: any black outside the
+      // panel is a glyph that escaped it.
+      CHECK_MESSAGE(outside == 0, "ink outside the panel, name of " << chars << " chars at "
+                                                                   << width);
+
+      // VERTICAL: the same defect turned ninety degrees. The panel is centred, so one
+      // taller than the canvas is cut off at BOTH ends.
+      //
+      // ASSERTED FROM THE BORDER COLUMNS, and the two forms that came before it both
+      // had holes. "The frame's first and last rows carry no panel-wide run" is the
+      // delete panel's own form: a panel that overflows a LITTLE puts a border on row
+      // 0 and it bites, a panel that overflows a LOT puts that border off the canvas
+      // and it passes. Finding the first and last row with a `>= panelW` run does not
+      // fix it either, and this case shipped believing it did: the CAPTION'S RULE
+      // spans the content width (376) between the two 2px side borders, so the three
+      // are contiguous and that row measures 380 as well. With a 255-character name
+      // it read top=8 bottom=82 barTop=736 -- top and bottom BOTH landing on the
+      // caption's rule, with the real bottom border 55px under the hint bar.
+      //
+      // The panel's two side borders are inked on EVERY row it occupies and nothing
+      // else on this frame inks them: the veil is white-on-paper, the caption's rule
+      // and the slabs are inset, and the parent is not drawn. So the first and last
+      // row carrying both is the panel's true extent, whatever is between them.
+      auto borderRow = [&](int y) {
+        return !fb.getPixel(panelX, y) && !fb.getPixel(panelX + panelW - 1, y);
+      };
+      int top = -1, bottom = -1;
+      for (int y = 0; y < barTop; ++y)
+        if (borderRow(y)) {
+          if (top < 0) top = y;
+          bottom = y;
+        }
+      CHECK_MESSAGE(top > 0, "no top border inside the canvas, name of " << chars << " chars at "
+                                                                        << width);
+      CHECK_MESSAGE(bottom > top, "no bottom border inside the canvas, name of "
+                                      << chars << " chars at " << width);
+      // Strictly above the bar: the scan stops at barTop, so a panel that runs into
+      // the bar reports bottom == barTop - 1 rather than where it really ends.
+      CHECK_MESSAGE(bottom < barTop - 1,
+                    "panel reaches the hint bar, name of " << chars << " chars at " << width);
+    }
   }
 }

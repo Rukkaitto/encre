@@ -2373,6 +2373,82 @@ static void handleFinish() {
   }
 }
 
+// THE USER CONFIRMED A DELETE. See Action::del() and app.h's five-step note, which
+// this follows in order.
+//
+// THE PATH IS READ WHILE DeleteConfirm IS STILL ON TOP, because leaving the flow is
+// what takes it away and after that there is no screen left to ask. Contents'
+// chosenSpine() has exactly this shape and for exactly this reason.
+static void handleDelete() {
+  // The latch first, so a removal that fails does not re-fire on every loop.
+  gApp->clearDeleteRequest();
+
+  const reader::Screen& top = gApp->top();
+  if (top.id() != reader::ScreenId::DeleteConfirm) {
+    logf("[delete] latched with no confirmation on top\n");
+    logFlush();
+    return;
+  }
+  // A COPY, not a reference: the Backs below destroy the screen these live in.
+  const reader::DeleteConfirmScreen::Facts facts =
+      static_cast<const reader::DeleteConfirmScreen&>(top).facts();
+
+  // KEEP SD TRAFFIC OFF THE DISPLAY BUS, exactly as handleFinish and the retry do.
+  // The card shares the panel's SPI and SDCardManager does no locking at all, so a
+  // transfer racing a refresh is the kind of fault that looks random. The guard is
+  // recursive and SdFileSystem takes it per method; this is the whole-sequence one.
+  SpiBusGuard bus;
+
+  // THE RESULT IS NOT BRANCHED ON. FileSystem::remove reports the END STATE, so a
+  // false means the file is still there -- and the list the reader is about to be
+  // looking at has just been rescanned and already says which it was. An error panel
+  // would be a screen with no board saying what the Library already shows.
+  const bool gone = gSd.remove(facts.path);
+  logf("[delete] %s -> %s\n", facts.path.c_str(), gone ? "gone" : "still there");
+  logFlush();
+
+  // BOTH FLAGS, SEPARATELY. Each is consumed when ITS screen is reachable, and one
+  // shared flag lets Library, Back, Home clear it before Home has used it. Home's
+  // CONTINUE may name the file just removed, and its LIBRARY count is keyed on
+  // removals() -- which gSd.remove has just advanced.
+  //
+  // Both consumers are BELOW this call in loop(), which is handleFinish's placement
+  // and its reason: this handler LEAVES a screen, so the screen it lands on has to be
+  // repainted on the very press that caused the removal rather than one press later.
+  gHomeStale = true;
+  gLibraryStale = true;
+  // RESCANNED, not refreshed: a row has gone, and refreshProgress only re-derives the
+  // percentages of rows that are already there. The listing cache was dropped by
+  // remove()'s own forgetCardFacts, so this reaches the card -- which it must.
+  if (reader::LibraryScreen* lib = gFactory.library(); lib != nullptr) lib->rescan();
+
+  // ...AND NOW LEAVE, down to whatever asked. From the actions panel that is the
+  // Library; from BookError it may be Home, and the BookError under this confirmation
+  // goes too -- it names a book that no longer exists.
+  //
+  // SYNTHESISED BACKS RATHER THAN popTo(). THE SHELL CANNOT APPLY AN Action AT ALL:
+  // App::dispatch takes an InputEvent, App exposes pushScreen() and no popScreen() and
+  // no apply(Action), and an Action is a value a SCREEN returns. dispatchBack() above
+  // exists for precisely this, and handleFinish leaves BookEnd the same way -- whatever
+  // Back means on each screen is what runs, decided by the screen, once.
+  //
+  // BOUNDED THREE WAYS, because a Back that does not pop would otherwise spin loop()
+  // forever: the target is reached, the root is reached (popTo's own "stop at the
+  // root" rule, which is what a returnTo of Library means on a stack that has none),
+  // or a Back moved nothing. Every reachable stack costs two -- DeleteConfirm over
+  // ItemActions over the Library, and DeleteConfirm over BookError over Home or the
+  // Library.
+  for (int guard = 0; guard < 8; ++guard) {
+    if (gApp->top().id() == facts.returnTo || gApp->depth() <= 1) break;
+    const int was = gApp->depth();
+    dispatchBack();
+    if (gApp->depth() == was) {
+      logf("[delete] Back moved nothing on %s\n", reader::screenName(gApp->top().id()));
+      break;
+    }
+  }
+}
+
 // PRIME THE FACTORY WITH A BOOK AND ITS SAVED POSITION. Everything the Reader needs
 // before it can be pushed, in one place, because TWO paths need it and they must
 // agree: a button press (the Library's selection, or Home's CONTINUE) and a WAKE.
@@ -2406,6 +2482,52 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
          why, (unsigned)ESP.getFreeHeap(),
          (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     logFlush();
+    // A REFUSAL THE READER ASKED FOR GETS A SCREEN; A REFUSAL ON THE WAKE DOES NOT.
+    // `push` is false only for the session restore, where App::restore already stops
+    // short of a Reader it cannot build and leaves Home or the Library standing --
+    // wrong in a way the reader can see through. Waking into a modal about a book
+    // nobody just asked for replaces a calm landing with an interruption, seconds
+    // after pressing power and with no context for it.
+    if (push && gApp != nullptr) {
+      // WHICH REFUSAL, in the only vocabulary the screen has. openBook's `why` is
+      // developer English and stays in the log; what reaches glass is one of two
+      // bounded shapes, because "cannot open the book file" is a file that is gone
+      // or a card that is -- and openRead does not call noteCardGone(), so
+      // pollCardPresence takes 2-25s to notice. Telling the reader a healthy book is
+      // damaged for that whole window would be a false claim, which this firmware
+      // refuses elsewhere for the battery gauge and the charging bolt.
+      const bool unreadable =
+          (why != nullptr && std::strcmp(why, "cannot open the book file") == 0);
+      // The leaf name, not the path: the board's paragraph quotes a filename.
+      const size_t slash = path.find_last_of('/');
+      const std::string leaf = slash == std::string::npos ? path : path.substr(slash + 1);
+      // WHERE A DELETE RETURNS TO is decided here, because this is the one place that
+      // knows which screen asked. Home's CONTINUE has no Library to go back to.
+      const reader::ScreenId returnTo = gApp->top().id() == reader::ScreenId::Home
+                                            ? reader::ScreenId::Home
+                                            : reader::ScreenId::Library;
+      gFactory.setBookErrorFacts({path, leaf,
+                                  unreadable ? reader::BookErrorReason::Unreadable
+                                             : reader::BookErrorReason::Damaged,
+                                  returnTo});
+      // ...AND THE CONFIRMATION BEHIND ITS `DELETE FILE...` SLAB, PRIMED HERE TOO,
+      // because the screen answers a bare `Action::push(ScreenId::DeleteConfirm)` and
+      // the factory's fallback for an unprimed one is the LIBRARY'S FOCUSED ROW. From
+      // the Library that fallback happens to name this same book, so the slab worked
+      // by luck; from Home's CONTINUE there is no Library at all, the factory refuses,
+      // and the slab does NOTHING. That is the works-only-sometimes defect the Facts
+      // refactor exists to prevent -- and CONTINUE is the likeliest real corruption
+      // path, because it is a book the reader was part-way through.
+      //
+      // The same three facts the dialog itself took: `returnTo` is decided above by
+      // the one place that knows which screen asked, and the LEAF NAME is the display
+      // name -- not the Library row's `title()`, because a book that will not open has
+      // no OPF title to offer and the filename is the only honest name for it. It is
+      // also what the dialog's own paragraph quotes one screen up, so the two agree.
+      gFactory.setDeleteFacts({path, leaf, returnTo});
+      if (!gApp->pushScreen(reader::ScreenId::BookError))
+        logf("[open] ...and the dialog would not build\n");
+    }
     return false;
   }
   const uint32_t t1 = millis();
@@ -5598,6 +5720,13 @@ void loop() {
       // the reader menu left behind must go. Without this, opening details from the
       // Library after opening them from a book would show the BOOK.
       gFactory.clearDetailsFacts();
+      // THE SAME RULE FOR THE DELETE, and it is not theoretical: the factory checks
+      // `deleteFactsSet_` BEFORE its Library fallback, and openBookAt primes those
+      // facts for BookError's own slab. So Confirm a book that will not open, close
+      // the dialog, then `Delete...` a DIFFERENT book from this panel, and the
+      // confirmation would name -- and remove -- the corrupt one. This panel's rows
+      // are answered from the Library's focused row and nothing else.
+      gFactory.clearDeleteFacts();
       reader::LibraryScreen* lib = gFactory.library();
       const reader::LibraryItem* sel = lib != nullptr ? lib->focusedItem() : nullptr;
       if (sel != nullptr && !sel->entry.isDir) {
@@ -5782,6 +5911,12 @@ void loop() {
     // would miss by one press -- the overlay would dismiss onto a Library row still
     // reading its old percentage, which is the state the write just changed.
     if (gApp->finishRequested()) handleFinish();
+    // AND THE DELETE IS HERE FOR THE SAME REASON, not down with Retry and Open: it
+    // leaves a screen and sets both stale flags, and the blocks that answer for those
+    // -- Home's rebuild and the Library's row refresh -- are both below this point.
+    // Placed with Open instead, the Library would be repainted one press later, still
+    // listing the book that has just been removed.
+    if (gApp->deleteRequested()) handleDelete();
     // Between the dispatch and the mask refresh below, so the refresh sees
     // whatever screen the retry left on top -- on success that is a brand new App
     // rooted at Home, whose holds are not the SD-missing screen's.

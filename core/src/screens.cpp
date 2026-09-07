@@ -148,6 +148,20 @@ BookEndScreen::Facts demoBookEndFacts() {
   return f;
 }
 
+// design/BookError.dc.html's own book. `dubliners.epub` is the file its paragraph
+// names, and Dubliners is the row design/Library.dc.html draws focused -- the board
+// stacks this dialog over that list, so the two agree by construction.
+BookErrorScreen::Facts demoBookErrorFacts() {
+  return {"/books/dubliners.epub", "dubliners.epub", BookErrorReason::Damaged,
+          ScreenId::Library};
+}
+
+// design/BookErrorUnreadable.dc.html: the same file, the other refusal.
+BookErrorScreen::Facts demoBookErrorUnreadableFacts() {
+  return {"/books/dubliners.epub", "dubliners.epub", BookErrorReason::Unreadable,
+          ScreenId::Library};
+}
+
 // demoSleepVm: a screen the simulator and the goldens must render needs a source
 // for its content, and the board's copy is the one source that makes the
 // comparison sheet meaningful.
@@ -337,8 +351,26 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       if (library_ == nullptr) return nullptr;
       return std::make_unique<ItemActionsScreen>(*library_);
     case ScreenId::DeleteConfirm:
+      // THE FACTS ARE CHECKED FIRST, and the `library_ == nullptr` guard that used to
+      // sit above this line is GONE WITH THE REFERENCE. Leaving it would repeat the
+      // exact defect recorded on BookDetails below: a change that replaces the
+      // `return` and not the GUARD leaves the case refused for the very reason it
+      // was meant to stop refusing. WHEN A CASE'S EARLY RETURN ENCODES AN ASSUMPTION
+      // A CHANGE REMOVES, THE GUARD IS PART OF THE CHANGE.
+      if (deleteFactsSet_) return std::make_unique<DeleteConfirmScreen>(deleteFacts_);
+      // The Library is the fallback, and it is what the simulator and the goldens
+      // use: it can answer both facts from its focused row.
       if (library_ == nullptr) return nullptr;
-      return std::make_unique<DeleteConfirmScreen>(*library_);
+      {
+        const LibraryItem* item = library_->focusedItem();
+        // A folder has no file to remove, so there is nothing to confirm. The
+        // actions panel is only ever opened over a book, which is why this has
+        // never had to refuse; it is stated rather than assumed because the facts
+        // path can be primed by anyone.
+        if (item == nullptr || item->entry.isDir) return nullptr;
+        return std::make_unique<DeleteConfirmScreen>(DeleteConfirmScreen::Facts{
+            library_->focusedPath(), std::string(item->entry.title()), ScreenId::Library});
+      }
     case ScreenId::BookDetails:
       // THE FACTS ARE CHECKED FIRST, and a `library_ == nullptr` guard used to sit ABOVE
       // this line -- left over from when the screen was built from a Library reference.
@@ -374,6 +406,13 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // rule as setReaderDemo, setContentsDemo and setPeekDemo.
       if (!bookEndPrimed_) return nullptr;
       return std::make_unique<BookEndScreen>(bookEndFacts_);
+    case ScreenId::BookError:
+      // REFUSED WHEN NOTHING PRIMED IT, never substituted. A dialog naming a book the
+      // reader did not try to open is how this device once woke into Middlemarch.
+      // A refused push leaves the parent standing, which is wrong in a way the reader
+      // can see through, and the shell logs why.
+      if (!bookErrorFactsSet_) return nullptr;
+      return std::make_unique<BookErrorScreen>(bookErrorFacts_);
     case ScreenId::Settings: {
       auto scr = std::make_unique<SettingsScreen>(settings_, settingsSink_);
       scr->setMetrics(settingsListH_, settingsRowH_, settingsHeaderH_);
@@ -537,6 +576,12 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       scr->setMetrics(peekMetrics_);
       return scr;
     }
+    // NOT A SCREEN -- see ScreenId::Count's own comment. Refused explicitly so this
+    // switch stays exhaustive and -Wswitch keeps working as the reminder that a NEW
+    // screen needs a case here. Falling through to the `return nullptr` below would
+    // behave identically and cost exactly that reminder.
+    case ScreenId::Count:
+      return nullptr;
   }
   return nullptr;
 }
