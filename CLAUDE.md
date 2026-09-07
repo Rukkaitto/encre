@@ -3545,6 +3545,36 @@ best-effort now and **empty means the book did not say**, the same call the spin
     where "the unchanged thirteen are the check that matters". `Xml::attrsDropped()`
     is what keeps a drop from being silent.
 
+**AND A BLOCK OVER `kMaxBlockBytes` IS CUT IN TWO, WHICH IS THE THIRD MEMBER OF THE
+SAME FAMILY (#37).** 64 KB set `error_`, which stops `BlockReader`, which ends the
+chapter — and `next()` returning false is **also** how a chapter ends normally, so
+nothing reported it. It was found by the CORPUS and not by the audit, because the audit
+was read off the refusal sites and this is a truncation site. **Split rather than
+truncate-and-record**, the ticket's other candidate: what the cap protects is the size
+of ONE block and both halves are under it, so splitting keeps the bound exactly and
+loses no text, where truncation's magnitude is unbounded — a chapter that is one giant
+`<div>` with no `<p>` is one block. `BlockReader::blocksSplit()` counts the cuts, in
+`Xml::attrsDropped()`'s shape and for its reason.
+
+- **THE TICKET SAID "2 CHAPTERS" AND THE DAMAGE WAS 84–92% OF TWO WHOLE BOOKS**, which
+  is the corpus baseline's own stated blind spot arriving: *"`truncated` counts
+  chapters, not bytes"*. Measured before and after over all 225: `The 32nd Mersenne
+  Prime` 19,411 → **251,869** text bytes and `The Number "e"` 19,494 → **121,991**, so
+  the over-long paragraph was the second block of the FIRST chapter and everything after
+  it went. Chapter rate 99.97% → **100.00%**, +334,955 bytes, and **223 of 225 books
+  byte-identical in every field**.
+- **WHAT IT COSTS, stated rather than discovered:** `indentedAfter(Paragraph,
+  Paragraph)` is true, so a continuation takes the 1.5em paragraph indent — one spurious
+  paragraph break per 64 KB of unbroken text, about once per 120 pages, against text
+  that is simply absent. **Raising the cap was refused for #35's reason twice over: the
+  failure mode was the bug and the number is fine.**
+- **THE SIBLING BOUNDS STILL HAVE THIS SHAPE and are cards rather than paragraphs.**
+  `kMaxEmphasisPerBlock` (256) is the likeliest of them to meet a real converted book
+  and the cheapest to fix — an emphasis run past the cap could be DROPPED, which costs
+  one phrase its italics, where today it costs the rest of the chapter. `kMaxBlocks`,
+  `kMaxNestDepth` and `kMaxTocEntries` end their stream the same way; 0 corpus hits
+  each, which is "no evidence yet" and not "does not happen".
+
 ### A grayscale screen is painted twice: fast, then four levels
 
 `renderTop` paints a `Fidelity::Grayscale` screen with ONE waveform and `loop()`

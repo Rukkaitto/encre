@@ -7,6 +7,16 @@
 #include "reader/xml.h"
 
 namespace reader {
+
+// AT MOST ONE CUT PER TEXT NODE, which is what lets the cut defer its return to the
+// end of the node: `out` holds the piece that was handed over, and a second cut in the
+// same node would overwrite it. A node is at most `Xml::kTextBytes` and a cut needs
+// `kMaxBlockBytes` of text, so this is the inequality that makes it impossible -- as an
+// assert rather than a comment, because the two constants live in different headers and
+// nothing else ties them together.
+static_assert(Xml::kTextBytes < kMaxBlockBytes,
+              "a text node must be smaller than a block, or one node could cut twice");
+
 namespace {
 
 // THREE CATEGORIES OF ELEMENT, and naming them is the whole design. Every tag an
@@ -262,6 +272,7 @@ void BlockReader::restart(ByteSource& src) {
   st_->emDepth = 0;
   st_->emStart = 0;
   emitted_ = 0;
+  blocksSplit_ = 0;
   error_ = "";
 }
 
@@ -471,17 +482,53 @@ bool BlockReader::next(Block& out) {
     // A bare text node with no block around it is still the book's words, so it
     // opens one rather than being lost.
     if (!st.open) beginBlock();
+    // WHETHER A CUT PUT A FINISHED BLOCK IN `out`. The return is deferred to the end
+    // of the text node so the bytes AFTER the cut land in the continuation instead of
+    // being dropped -- returning from inside the loop would lose the rest of the node,
+    // because the next call moves the tokenizer on.
+    bool cutHere = false;
     for (const char c : st.xml.text()) {
       if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
         appendSpace();
         continue;
       }
+      // A BLOCK OVER THE CAP IS CUT, NOT REFUSED -- issue #37, and the same
+      // correction `kMaxAttrBytes` got in #35.
+      //
+      // This used to set `error_`, which stops BlockReader, which ends the chapter --
+      // and `next()` returning false is ALSO how a chapter ends normally, so nothing
+      // reported it. Two Gutenberg mathematics texts in the 225-book corpus lost
+      // everything after one paragraph of a hundred thousand digits, and the book read
+      // as though it simply stopped there. It is the named-entity bug's exact shape.
+      //
+      // SPLIT RATHER THAN TRUNCATE-AND-RECORD, which was the other candidate. What the
+      // cap protects is the size of ONE block -- the peak this layer exists to bound --
+      // and both halves are under it, so splitting keeps the bound exactly and loses no
+      // text. Truncating would have kept the reporting and thrown the bytes away, and
+      // its magnitude is unbounded rather than academic: a chapter that is one giant
+      // <div> with no <p> is ONE block, and a real book's longest chapter is 228,849
+      // bytes of blocks, so truncation there would drop 72% of it. CLAUDE.md's rule
+      // decides between them -- A VISIBLE WRONG BEATS AN INVISIBLE ONE.
+      //
+      // WHAT IT COSTS, stated rather than discovered: `indentedAfter(Paragraph,
+      // Paragraph)` is true, so a continuation gets the 1.5em paragraph indent and a
+      // split blockquote or heading gets a blank row above its second half. That is one
+      // spurious paragraph break per 64 KB of unbroken text -- about once per 120 pages
+      // -- against text that is simply absent. RAISING THE CAP IS NOT THE FIX: the
+      // failure mode was the bug and the number is fine, which is #35's finding twice.
       if (st.cur.text.size() >= kMaxBlockBytes) {
-        error_ = "block too long";
-        return false;
+        bool have = false;
+        if (!take(have)) return false;
+        ++blocksSplit_;
+        // The kind is RE-DERIVED from the tag stack rather than remembered, and the
+        // emphasis run open across the seam closes and reopens -- both are the rule
+        // `<em><p>a</p><p>b</p></em>` already states, reached from the other direction.
+        beginBlock();
+        cutHere = cutHere || have;
       }
       st.cur.text.push_back(c);
     }
+    if (cutHere) return true;
   }
 }
 
