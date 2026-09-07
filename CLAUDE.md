@@ -5652,12 +5652,22 @@ it.
 - **Starting work:** set the card to `Building` before the first commit, so a
   session that dies mid-task leaves a trace of what it was doing.
 - **Finishing something with no hardware surface:** `Closes #N` in the commit or
-  PR moves the card to `Done` on its own, which is exactly why the V1 items are
-  real issues rather than drafts. Prefer it to editing the field by hand.
-- **THE LINK IS ONE-WAY: SETTING `Status` TO `Done` DOES NOT CLOSE THE ISSUE.**
-  `Closes #N` moves the card; moving the card moves nothing back. So a card set to
-  `Done` by hand — which is what `On glass` → `Done` on device evidence is — leaves
-  its issue OPEN, and the issue is the half anybody outside the board reads.
+  PR closes the ISSUE on merge, which is exactly why the V1 items are real issues
+  rather than drafts. **It does NOT move the card** — see below.
+- **THERE IS NO LINK IN EITHER DIRECTION, AND THIS ENTRY CLAIMED ONE FOR MONTHS.**
+  Setting `Status` to `Done` does not close the issue, and `Closes #N` does not
+  move the card. **Both halves are hand work, every time.** Observed 2026-09-07 on
+  #77: `Closes #77` in PR #84's body, squash-merged, left the issue `CLOSED`
+  `COMPLETED` and the card sitting at `Building` through two separate reads, until
+  it was set by hand. So a card set by hand — which is what `On glass` → `Done` on
+  device evidence is — leaves its issue OPEN, and an issue closed by the keyword
+  leaves its card wherever it was; the issue is the half anybody outside the board
+  reads, and the card is the half the **Left to do** view counts.
+  - **THE SHAPE IS THIS FILE'S OWN, ONE PARAGRAPH APART.** The bullet below already
+    records the *other* direction of this claim being wrong, and corrects it from a
+    coincidence in time — and left this direction standing on exactly the same
+    unexamined basis, in the same entry, having just demonstrated the habit that
+    catches it. **A correction is not a licence for the sentence next to it.**
   **Close it, and comment first**: the card records status and the issue is where
   the answer goes, so a card that asked a question (#35's was *skipped or
   truncated*) owes it an answer and a link to the PR that carries it.
@@ -5675,8 +5685,9 @@ it.
     shape as the 2.5 s of USB wait once recorded as the panel detection's cost, and
     it went into this file as fact before anyone asked the one person who knew.
 - **Finishing anything the panel can be wrong about:** set `On glass`, and do
-  **not** write `Closes #N` — it would close the card on desktop evidence, which
-  is the failure above with a keyword attached.
+  **not** write `Closes #N` — it would close the ISSUE on desktop evidence, which
+  is the failure above with a keyword attached. The card would stay where it is,
+  so the board and the tracker would then disagree as well.
 - **Finding something deferrable:** make a card. Not a `TODO`, not a bullet in a
   plan, not a paragraph here. **This is the rule the board is for.**
 
