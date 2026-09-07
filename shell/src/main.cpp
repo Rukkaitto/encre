@@ -2171,14 +2171,34 @@ static reader::SaveResult saveReadingPosition(const char* why,
   };
   // Logged at every outcome including `unchanged`, because "the save did nothing"
   // and "the save did not happen" look identical on a device and are not the same.
-  // Home now has something different to say, whether or not the card took the write:
-  // the pointer in hand is newer than the one Home was built from either way. LATCHED
-  // rather than derived, because a save REWRITES the sidecar and leaves no counter
-  // behind for the gate to notice -- see reader/home_rebuild.h.
-  gHomeRebuild.markStale();
-  // ...and so does the Library's row for this book, whether or not the card took the
-  // write: the percentage in hand is newer than the one those rows were built from.
-  gLibraryStale = true;
+  //
+  // BUT `unchanged` DOES NOT LATCH HOME, and it did until a device run caught it. This
+  // block latched unconditionally, on the argument that "the pointer in hand is newer
+  // than the one Home was built from either way" -- which is true of `written` and of
+  // `FAILED`, and FALSE of `unchanged`: that answer means the card ALREADY held this
+  // record, so whichever earlier save actually wrote it has already latched, and Home
+  // was either rebuilt from it or is still latched from then. Nothing is newer.
+  //
+  // Two things it cost, both observed on an X3 (2026-09-07, #43's own validation run):
+  //   * A FALSE LOG LINE. Leaving a book without moving in it latched Home, so the next
+  //     rebuild -- whatever really caused it -- reported `the reading position has
+  //     moved`. In that run the real cause was a DELETE, and the line named the wrong
+  //     one of the two causes the strings exist to tell apart.
+  //   * A NEEDLESS REBUILD. `stale()` is `latched_ || the counter moved`, so a Back out
+  //     of a book the reader only looked at put a /books listing (~96 ms on a 14-entry
+  //     card) plus a repaint on the way to Home, for a block whose content is identical.
+  //     That is exactly the cost this gate exists to avoid.
+  //
+  // LATCHED rather than derived, because a save REWRITES the sidecar and leaves no
+  // counter behind for the gate to notice -- see reader/home_rebuild.h.
+  const bool wrote = a != reader::SaveResult::Unchanged || b != reader::SaveResult::Unchanged;
+  if (wrote) gHomeRebuild.markStale();
+  // ...and so does the Library's row for this book, on the same terms and for the same
+  // reason: `written` and `FAILED` both mean the percentage in hand is newer than the
+  // one those rows were built from, and `unchanged` means it is not. Gated by the SAME
+  // expression rather than by a second copy of the test -- the observed cost here was a
+  // `Library rows re-read: ok in 160ms` on every Back out of an unmoved book.
+  if (wrote) gLibraryStale = true;
   logf("[progress] %s: spine=%d block=%d line=%d %d%% -- position %s, pointer %s\n", why,
        p.spine, p.block, p.line, last.percent, outcome(a), outcome(b));
   logFlush();
