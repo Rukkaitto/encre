@@ -128,6 +128,18 @@ class ChapterReader {
   // already made of, available with no count and no walk.
   uint32_t bytesRead() const { return inflated_ != nullptr ? inflater_.produced() : 0; }
 
+  // HOW MANY TIMES A BLOCK HAS BEEN CUT AT `kMaxBlockBytes` on the current walk --
+  // `BlockReader::blocksSplit()`, passed through, and an observation point in
+  // `held()`'s sense rather than something to branch on.
+  //
+  // PER WALK, NOT PER CHAPTER, and the difference is load-bearing: a rewind calls
+  // `BlockReader::restart()`, which zeroes the counter, so this answers "cuts since
+  // the stream was last established" and a reader that has paged backward has reset
+  // it. That is what makes it honest for a single forward walk -- which is what the
+  // corpus probe and the page index both do -- and why nothing sums it across a
+  // reading session.
+  size_t blocksSplit() const { return blocks_ != nullptr ? blocks_->blocksSplit() : 0; }
+
   bool ok() const { return error_[0] == '\0'; }
   const char* error() const { return error_; }
 

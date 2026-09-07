@@ -116,8 +116,15 @@ struct Document {
 // handful -- so this hands them over as they finish and forgets them.
 //
 // Its whole memory is the Xml it drives (2,560 bytes), a tag stack of 64 truncated
-// names, and ONE block. Measured over a real book, the largest single block is
-// 4,406 bytes, so the peak is bounded by a paragraph rather than by a chapter.
+// names, and ONE block.
+//
+// AND THE BLOCK IS BOUNDED BY `kMaxBlockBytes`, NOT BY WHAT THE BOOK WROTE. This used
+// to read "the largest single block over a real book is 4,406 bytes, so the peak is
+// bounded by a paragraph" -- true of Le Fléau and false of the corpus, where one block
+// reaches 232,388 bytes, and an argument from a typical case is not a bound at all.
+// The buffer is RESERVED at `kMaxBlockBytes + 2` and never grown, so the peak really
+// is bounded now: two buffers plus one transient, 18,308 bytes, whatever the book
+// says. See `kMaxBlockBytes` below and #90.
 //
 // UNBALANCED TAGS ARE CAUGHT HERE, which is the boundary xml.h documents: this is
 // the layer that keeps a stack to know which block it is in, so an unclosed tag is
@@ -163,8 +170,9 @@ class BlockReader {
   // HOW MANY TIMES A BLOCK HAS BEEN CUT AT `kMaxBlockBytes`, cumulative since the
   // last `restart()`, and it exists for `Xml::attrsDropped()`'s reason: a caller
   // that finds more blocks than the book has paragraphs can tell "the book wrote
-  // them" from "we could not hold what it wrote". Zero for every book in the
-  // 225-book corpus but the two Gutenberg mathematics texts.
+  // them" from "we could not hold what it wrote". Zero for 208 of the 225-book
+  // corpus, and 190 cuts across the other 17 -- it read "the two Gutenberg
+  // mathematics texts" while the cap was 64 KB, which is #90's whole subject.
   //
   // CUTS, NOT EXTRA BLOCKS, and they differ only in one case: a cut is made when a
   // byte arrives with the block already full, so the continuation always receives that
@@ -205,8 +213,56 @@ inline constexpr size_t kMaxBlocks = 4096;
 // AN EMITTED BLOCK CAN EXCEED IT BY TWO BYTES, which is worth knowing before sizing
 // anything against it: `appendSpace` may add a word boundary at the cap, and the
 // dialogue-dash glue replaces one byte with two. Neither is new -- both predate the
-// cut -- and 65,538 against 65,536 changes no heap argument.
-inline constexpr size_t kMaxBlockBytes = 64u * 1024u;
+// cut -- and it is why document.cpp reserves `kMaxBlockBytes + 2` rather than the cap.
+//
+// 8 KB, AND IT WAS 64 KB UNTIL #90 -- A BOUND THE HEAP COULD NOT HONOUR. The old
+// figure was calibrated ~1.5x above the measured reading floor, so the heap gave out
+// first and the failure was `abort()` with no diagnostic under -fno-exceptions,
+// arriving as a reboot onto Home. It was worse than 1.5x, because `push_back` grows
+// GEOMETRICALLY and a cap of N does not cost N: on libstdc++, which is what the ESP32
+// toolchain ships, the ladder is 15*2^k, so a 64 KB block ended at a capacity of
+// 122,880 and its last reallocation held 61,440 and 122,880 AT ONCE. And blocks far
+// below the cap were already impossible -- measured over the 225-book corpus, with the
+// binding floor being the 42,152 bytes free when a book is opened through the Library:
+//
+//   natural block   final capacity   peak while growing   vs the 42,152 B floor
+//        8,192 B         15,360 B             38,400 B            91%
+//       16,384 B         30,720 B             76,800 B           182%   <- 7 books
+//       32,768 B         61,440 B            153,600 B           364%   <- 4 books
+//       65,536 B        122,880 B            307,200 B           729%   <- 2 books
+//      232,388 B        245,760 B            614,400 B          1458%   <- the largest
+//
+// So SEVEN of 225 books (3.1%) could not be read on this device, not the two #37
+// found, and the cap named none of them.
+//
+// THE NUMBER IS THREE BOUNDS THAT AGREE, none of them a round figure:
+//
+//  1. THE CORPUS'S 99.99th PERCENTILE. 69 of the 537,474 blocks 225 real books write
+//     exceed 8,192 bytes -- 0.0128% -- and 208 of the 225 books have no block over it
+//     at all. Above it are Gutenberg's plain-text conversions (`Paradise Lost` as one
+//     50,983-byte block, `The Online World`) and the two mathematics texts.
+//  2. WHAT IT COSTS AGAINST THE FLOOR. document.cpp reserves the buffer instead of
+//     growing it, so the steady state is two buffers and nothing else -- the piece
+//     handed to the caller and the one being built -- 2 * (8,192 + 2) = 16,388 B, and
+//     the peak is that plus one 1,920-byte transient at the first cut, 18,308 B. That
+//     is 43.4% of the floor, largest single request 8,194 B (19.4%). The next power of
+//     two doubles both to 82%, and "the largest free BLOCK decides, not the free
+//     total" is not a rule you can satisfy at 82% of a fragmented heap.
+//  3. IT IS NOT A REGRESSION IN THE COMMON CASE, measured rather than assumed. A
+//     caller's `out` keeps its capacity between blocks and never shrinks, so a book
+//     already pays 2 * ladder(its largest paragraph): the MEDIAN corpus book pays
+//     15,360 B today and the p90 book 30,720 B. 16,388 B is therefore +1,028 B on the
+//     median book and -475,132 B on the worst.
+//
+// THE FLOOR IS ALSO A FLOOR: it cannot go below `Xml::kTextBytes` (1,024) without
+// breaking the one-cut-per-text-node invariant document.cpp asserts, so the feasible
+// band was (1,024, ~8,192].
+//
+// WHAT IT COSTS, in the same unit #37 priced itself in: 190 cuts across 17 of the 225
+// books, against 4 cuts in 2 books at 64 KB -- one spurious paragraph indent per 8,192
+// bytes of UNBROKEN text, about once per 15 pages of it, where #37 said once per 121.
+// On 208 of the 225 books the rate is zero, because they write no such paragraph.
+inline constexpr size_t kMaxBlockBytes = 8u * 1024u;
 inline constexpr size_t kMaxNestDepth = 64;
 
 }  // namespace reader
