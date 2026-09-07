@@ -218,10 +218,61 @@ single 50,983-byte block.
 - [ ] **6b.5** An ordinary novel is **unchanged**. 208 of the 225 corpus books
       are byte-identical including their block count, so a difference you can see
       on a normal book is a regression, not this change.
-- [ ] **6b.6** *(needs a nearly-full heap, and there may be no way to force it)*
-      If the reserve ever fails, the chapter is refused with **"not enough memory
-      to read this chapter"** on `BookError.dc.html` — the existing copy shape,
-      no new one. Nothing in the corpus can produce it on the desktop.
+- [ ] **6b.6** If the reserve ever fails, the chapter is refused with **"not
+      enough memory to read this chapter"** on `BookError.dc.html` — the existing
+      copy shape, no new one. Nothing in the corpus can produce it on the desktop.
+      **This used to say there was no way to force it, and there is: §6c.**
+
+## 6c. A big library plus a big chapter — how to force a nearly-full heap
+
+**Found the hard way on 2026-09-07: this is a `reason=4 PANIC`, three times.** It is
+not a defect in any one book — it is the heap budget, and the Library's residency is
+what spends it. Measured on an X3 opening `Digital Minimalism` (chapter 12 is 66,843
+bytes) from the Library:
+
+| `/books` entries | heap at the Library | cost of the open | left over |
+|---|--:|--:|--:|
+| 7 | ~168,300 | 63,552 | ~105 KB |
+| **232** | **96,272** | 63,552 | **13,696** |
+
+So the *same* open is comfortable on a small card and 8% from the edge on a large
+one. **This is the recipe §6b.6 said did not exist**, and it is the only way this
+project has found to drive the reading path to the edge of the heap on purpose.
+
+**Staging it — and the warning is the important half.** Copy the corpus in under a
+prefix so removal cannot touch a real book, and `dot_clean` after, or macOS's `._`
+sidecars **double** the listing at ~2.7 ms an entry:
+
+    card=/Volumes/<card>
+    find ~/.cache/encre-corpus -name '*.epub' | while read f; do \
+      cp "$f" "$card/books/zzbulk-$(basename "$f")"; done
+    dot_clean "$card/books"
+    # afterwards, and this cannot take a real book with it:
+    rm -f "$card/books/zzbulk-"*.epub
+
+**A RIG BUILT FOR ONE CHECK CONDITIONS EVERY OTHER CHECK ON THE SAME CARD.** That is
+how this was found: the bulk library was staged for §6b and manufactured a crash in an
+unrelated book open, which read as a regression in work that had nothing to do with it.
+**Bisect the rig before the firmware** — removing the bulk books is one command and no
+reflash, where a firmware bisect costs a flash cycle. Do not judge a fault found under
+this rig until it has been reproduced without it.
+
+- [ ] **6c.1** With the bulk library staged, open a book with a large chapter from
+      the **Library** (not from Home's CONTINUE — that route leaves ~34 KB more).
+      `[open]`'s `heap A -> B (cost N) min=M` is the line to read.
+- [ ] **6c.2** **It refuses rather than panicking.** `BookError.dc.html`, "not
+      enough memory to read this chapter", and the device still usable. A
+      `reason=4 PANIC` on the next `[boot]` line is the failure — and it is silent
+      by construction, so that line is the only evidence.
+- [ ] **6c.3** `[boot] reset reason=` across the whole session names no `4 PANIC`.
+      Grep it rather than trusting the screen: the reboot lands on Home and looks
+      exactly like a navigation bug, which this project has had reported as one
+      **twice**.
+- [ ] **6c.4** Remove the bulk books and repeat. The same open must now be
+      comfortable — if it is not, the fault is real and is not the rig.
+- [ ] **6c.5** *(if a coredump is wanted)* `pio ... -t coredump` needs `gdb`
+      installed and the **flashed** ELF, so pull it before rebuilding or the
+      SHA256 will not match.
 
 ## 7. Grayscale refinement
 
