@@ -15,7 +15,7 @@ namespace {
 // the slot is a different card, a screen that reports a place and never learned
 // to accept one -- goes down this one branch and lands the user at the top of
 // whatever list the screen DID build. That is reading_position.h's grading rule
-// one layer up: degrade, never mislead.
+// over a different quantity: degrade, never mislead.
 //
 // An empty place means the screen has only ever one list, so the focus means what
 // it always meant. That is every screen but the Library.

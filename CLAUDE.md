@@ -1462,7 +1462,8 @@ list it indexes, so the list is stored beside the index into it: `Screen::place(
   folder deleted while the device slept, a card that is not the card the record was
   written on, a `..` component, or **a screen that reports a place and never learned
   to accept one back** all land the user at the top of the list the screen did
-  build. `reading_position.h`'s `fitOf` grading is the same rule one layer down.
+  build. `reading_position.h`'s `fitOf` grading is the same rule over
+  a different quantity — a book's block rather than a screen's list.
   There is deliberately no `FocusScreen`-style `final` pair here: one screen has a
   place, and a shared base for a single caller is a header edge bought for nothing
   (the Typography formatters' extraction was undone for that reason), so the
