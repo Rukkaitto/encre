@@ -62,7 +62,7 @@ bool openBook(FileSystem& fs, std::string_view path, OpenedBook& out, const char
   // big ones are -- a `reserve` that cannot allocate is the same silent `abort()`
   // whatever its size, and the loop under it pushes exactly this many.
   if (!ensureRoom(out.chapters, book.chapters().size())) {
-    *reason = "not enough memory to hold the spine";
+    *reason = "not enough memory to hold the book's chapter list";
     return false;
   }
 

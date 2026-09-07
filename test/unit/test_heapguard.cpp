@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "doctest.h"
+#include "epub_builder.h"
 #include "epub_fixtures.h"
 #include "fake_fs.h"
 #include "reader/book.h"
@@ -160,12 +161,17 @@ TEST_CASE("every probe on the open path, refused in turn, is a refusal and not a
   const char* why = "";
   REQUIRE(reader::openBook(fs, "/books/book.epub", book, &why));
   const int probes = gAsked;
-  // Four sites are reachable on this fixture: the entry list, an entry name, the
-  // two `Zip::read` probes, the manifest, the spine and both spine copies. The
-  // number is not the point -- that there are several, and that they all refuse
-  // rather than abort, is.
+  // Ten probes over six distinct sites on this fixture. The one guarded site it does
+  // NOT reach is the entry NAME: every name in an EPUB fixture fits the
+  // small-string buffer, so nothing is allocated and nothing is asked. That guard is
+  // for a 65,535-byte name the format permits and no book writes, and it is stated
+  // here as uncovered rather than left looking covered.
   REQUIRE(probes >= 4);
 
+  // WHICH SITE OWNED PROBE k, collected. The refusal from a sticky failure at k is
+  // the message of the site holding probe k, so walking k over every probe collects
+  // one message per guarded site.
+  std::vector<std::string> seen;
   for (int k = 0; k < probes; ++k) {
     gAsked = 0;
     gRefuseFrom = k;
@@ -179,7 +185,34 @@ TEST_CASE("every probe on the open path, refused in turn, is a refusal and not a
     // landed: an out-of-memory inside `Epub::open`'s container read was reported as
     // "this is not an EPUB", so a healthy book was named damaged on the panel.
     CHECK(reader::bookErrorReasonFor(reason) == reader::BookErrorReason::OutOfMemory);
+    seen.push_back(reason);
   }
+
+  // AND EVERY SITE IS STILL GUARDED, which the property above cannot see on its own:
+  // a REMOVED guard makes no probe, so the walk simply has one fewer element and
+  // every remaining one still refuses correctly. Proved by mutation -- deleting the
+  // entry-list guard passed all 1,403 cases before this block existed, which is this
+  // project's own "reports on less than it claims" shape inside the test written to
+  // stop it.
+  //
+  // Each site's words rather than a count, because a count is a fact about the
+  // standard library's growth ladder (libc++ and libstdc++ double from different
+  // starting capacities) and would differ between the dev machine and CI.
+  const auto sawSite = [&seen](const char* words) {
+    for (const std::string& one : seen)
+      if (one == words) return true;
+    return false;
+  };
+  CHECK(sawSite("not enough memory to hold the archive's entry list"));
+  // The two `Zip::read` probes -- the container and the OPF, both deflated in this
+  // fixture. They have been guarded since 3A; what is new is that `Epub::open`
+  // REPORTS them, where it used to answer "this is not an EPUB" and put a healthy
+  // book on the `appears damaged` board.
+  CHECK(sawSite("not enough memory to inflate an archive entry"));
+  CHECK(sawSite("not enough memory to read the manifest"));
+  CHECK(sawSite("not enough memory to read the spine"));
+  CHECK(sawSite("not enough memory to hold the spine"));
+  CHECK(sawSite("not enough memory to hold the book's chapter list"));
 }
 
 TEST_CASE("a refused table of contents costs the chapter names and never claims the book is too long") {
@@ -193,6 +226,7 @@ TEST_CASE("a refused table of contents costs the chapter names and never claims 
   const int probes = gAsked;
   REQUIRE(probes >= 4);
 
+  bool sawTocSite = false;
   for (int k = 0; k < probes; ++k) {
     gAsked = 0;
     gRefuseFrom = k;
@@ -206,18 +240,51 @@ TEST_CASE("a refused table of contents costs the chapter names and never claims 
     if (!ok) {
       CAPTURE(std::string(reason));
       CHECK(reader::bookErrorReasonFor(reason) == reader::BookErrorReason::OutOfMemory);
+      // AND NEVER THE OTHER REFUSAL'S WORDS. `commit()` had one failure mode and now
+      // has two, and both call sites reported the first -- so without `commitWhy` an
+      // out-of-memory would have gone into the log as a claim about the book's list
+      // being too long.
       CHECK(std::string(reason) != "the table of contents is too long");
+      if (std::string(reason) == "not enough memory to read the table of contents")
+        sawTocSite = true;
     }
   }
+  // THE ENTRY VECTOR IS STILL GUARDED. Same hole as the open path's: a removed guard
+  // makes no probe, so the loop shrinks by one and every remaining case still passes.
+  // Proved by mutation -- deleting this guard passed all 1,403 cases before this line.
+  CHECK(sawTocSite);
 }
 
 TEST_CASE("a stylesheet that will not fit costs the italics and nothing else") {
-  // `readItalicClasses` swallows its failures by design, so the observable is the
-  // LIST: empty rather than a crash, and the book still opens after it.
-  Injected inj;
-  FakeFileSystem fs = cardWith(asBytes(epubfix::kEpubToc, epubfix::kEpubTocLen));
-  gCeiling = 8;  // nothing this path wants will fit
+  // `readItalicClasses` swallows its failures by design -- `readEntry` returning
+  // false already means "this book has no styles" to its one caller -- so the
+  // observable is the LIST rather than a reason.
+  //
+  // THE FIXTURE HAS TO CARRY A REAL STYLESHEET. Written first against a book whose
+  // CSS is declared in the manifest and absent from the archive, which every other
+  // fixture in the suite is, this case passed with the guard deleted: `italics` was
+  // empty because nothing had been read, not because the read refused. That is this
+  // project's own rule about a mutation telling you about your input first.
+  FakeFileSystem fs = cardWith(epubbuild::withRealStylesheet());
 
+  // The class is found when there is room for it, which is what makes the refusal
+  // below mean something.
+  {
+    std::vector<reader::TocEntry> toc;
+    std::vector<std::string> italics;
+    const char* reason = "";
+    reader::loadToc(fs, "/books/book.epub", toc, &reason, &italics);
+    REQUIRE(italics.size() == 1);
+    REQUIRE(italics.front() == "ital");
+  }
+
+  // A CEILING THAT REFUSES THE SHEET AND NOTHING ELSE. Everything else the open path
+  // asks for on this fixture is under 2 KB -- the entry list, the container, the OPF,
+  // the manifest, the spine -- and the sheet is padded past it, so a refusal here is
+  // this site's and not an archive that never opened. Set to 8 first, which refused
+  // `Zip::open` and left `italics` empty for the wrong reason.
+  Injected inj;
+  gCeiling = 2048;
   std::vector<reader::TocEntry> toc;
   std::vector<std::string> italics;
   const char* reason = "";
