@@ -182,17 +182,27 @@ TEST_CASE("CoverFitter streams to exactly what the whole-image reference produce
   // 0.601, narrower than the X3's 0.667, so Fill crops its HEIGHT there and its
   // WIDTH on the X4; 877x973 and 1400x2100 crop width or nothing.
   //
-  // THE LAST THREE ARE ENLARGEMENTS, and they are what puts the inverse map in
+  // THE LAST FOUR ARE ENLARGEMENTS, and they are what puts the inverse map in
   // this sweep. 400x662 is the smallest cover in the corpus (x1.21 on the X4,
-  // x1.32 on the X3); 301x501 is mid-range at x1.60/x1.75; 265x401 is as close to
-  // kMaxCoverUpscalePercent as a shape can be and still clear it at BOTH panels
-  // -- x1.995 on the X4 and x1.992 on the X3 -- so the sweep reaches the top of
-  // the admitted range rather than only its comfortable middle. None is an
-  // integer multiple of either panel, for the reason the downscale shapes are
-  // not: an exact multiple hides every rounding bug in the map.
+  // x1.32 on the X3); 301x501 is mid-range at x1.60/x1.75; 265x401 is x1.995 on
+  // the X4 and x1.992 on the X3, which was the top of the admitted range while
+  // kMaxCoverUpscalePercent was 200 and is kept because that range is still
+  // inside the current one and it is where the two panels come closest to
+  // disagreeing.
+  //
+  // 214x321 IS THE TOP OF THE ADMITTED RANGE AT 250, and the sweep has to reach
+  // it or it stops covering the band the cap was raised to allow -- which is the
+  // whole of what this change does. It is as close to the cap as a shape can be
+  // and still clear it at BOTH panels and BOTH fits: x2.4922 (X4 Fill), x2.2430
+  // (X4 Whole), x2.4673 (X3, both fits). It is exactly 2:3 -- 214 = 2 * 107 and
+  // 321 = 3 * 107 -- which is the corpus's median aspect and the X3's own, so on
+  // that panel Fill crops nothing and this is the 71%-of-books case at the
+  // steepest ratio the firmware will draw it at. None of the four is an integer
+  // multiple of either panel, for the reason the downscale shapes are not: an
+  // exact multiple hides every rounding bug in the map.
   const int panels[2][2] = {{480, 800}, {528, 792}};
-  const int sources[7][2] = {{1400, 2100}, {877, 973}, {601, 1000}, {1600, 2400},
-                             {400, 662},   {301, 501}, {265, 401}};
+  const int sources[8][2] = {{1400, 2100}, {877, 973}, {601, 1000}, {1600, 2400},
+                             {400, 662},   {301, 501}, {265, 401}, {214, 321}};
 
   for (const auto& p : panels) {
     for (const auto& s : sources) {
@@ -315,17 +325,34 @@ TEST_CASE("a cover smaller than the panel is ENLARGED to fill it") {
   CHECK(f.rowsEmitted() == f.box().dstH);
 }
 
-TEST_CASE("kMaxCoverUpscalePercent is a boundary, and exactly 200% is admitted") {
-  // THE NUMBER'S DERIVATION IS IN imagefit.h; what is pinned here is that the
-  // comparison is exact. 264x396 is exactly half the X3's 528x792, so it asks for
-  // exactly x2.00 -- the case a floating-point scale would decide by rounding.
-  const reader::FitBox at2 = reader::fitCover(264, 396, 528, 792, reader::CoverFit::Fill);
-  CHECK_FALSE(at2.tooSmall);
-  CHECK(at2.dstW == 528);
-  CHECK(at2.dstH == 792);
+TEST_CASE("kMaxCoverUpscalePercent is a boundary, and exactly 250% is admitted") {
+  // THE NUMBER'S DERIVATION IS IN imagefit.h -- as is the fact that 250 is an
+  // OWNER OVERRIDE of what that derivation bounds. What is pinned here is not the
+  // number but that the comparison is EXACT: a shape asking for exactly the cap
+  // is admitted, and one rounding step past it is refused. That is the case a
+  // floating-point scale would decide by rounding.
+  //
+  // 192x320 INTO THE X4 IS EXACTLY x2.50 ON BOTH AXES, which is why it is the
+  // shape: 480 = 5 * 96 and 800 = 5 * 160, and 192/320 is 0.600, the X4's own
+  // aspect, so Fill crops nothing and neither axis is decided by a rounding step.
+  //
+  // THE SHAPE IS LITERAL AND ITS STATUS AS THE BOUNDARY IS NOT. These two REQUIREs
+  // say "this shape sits exactly ON the cap" in terms of the constant, so moving
+  // the constant again fails HERE, immediately, at the place that explains what
+  // the shape was for -- rather than leaving the case silently straddling nothing,
+  // which is what raising the cap from 200 did to this test's previous shapes.
+  REQUIRE(480 * 100 == 192 * reader::kMaxCoverUpscalePercent);
+  REQUIRE(800 * 100 == 320 * reader::kMaxCoverUpscalePercent);
 
-  // One row less of source and it is over the cap: 792 / 395 = x2.005.
-  const reader::FitBox over = reader::fitCover(264, 395, 528, 792, reader::CoverFit::Fill);
+  const reader::FitBox atCap = reader::fitCover(192, 320, 480, 800, reader::CoverFit::Fill);
+  CHECK_FALSE(atCap.tooSmall);
+  CHECK(atCap.dstW == 480);
+  CHECK(atCap.dstH == 800);
+  // Whole answers the same box for this shape, the aspects being equal.
+  CHECK_FALSE(reader::fitCover(192, 320, 480, 800, reader::CoverFit::Whole).tooSmall);
+
+  // One row less of source and it is over the cap: 800 / 319 = x2.508.
+  const reader::FitBox over = reader::fitCover(192, 319, 480, 800, reader::CoverFit::Fill);
   CHECK(over.tooSmall);
   // AND THE BOX IS THE 1:1 CENTRED ONE, which is exactly what this function
   // returned for such a cover before it could enlarge at all. The flag is the
@@ -335,34 +362,42 @@ TEST_CASE("kMaxCoverUpscalePercent is a boundary, and exactly 200% is admitted")
   //
   // 1:1 IS 1:1 WITH THE CROP RECTANGLE, NOT WITH THE FILE, which is easy to read
   // past: Fill crops to the panel's aspect BEFORE the cap is consulted, so
-  // 264x395 has already lost a column -- 395 * 528 / 792 = 263.33 -> 263 -- and
-  // the fallback box is that crop at 1:1. Asserting 264 here failed, and the
-  // failure was the test's.
-  CHECK(over.srcW == 263);
-  CHECK(over.dstW == 263);
-  CHECK(over.dstH == 395);
-  CHECK(over.dstX == 132);  // (528 - 263) / 2
-  CHECK(over.dstY == 198);  // (792 - 395) / 2
+  // 192x319 has already lost a column -- 319 * 480 / 800 = 191.4 -> 191 -- and
+  // the fallback box is that crop at 1:1. Asserting the file's 192 here failed,
+  // and the failure was the test's.
+  CHECK(over.srcW == 191);
+  CHECK(over.dstW == 191);
+  CHECK(over.dstH == 319);
+  CHECK(over.dstX == 144);  // (480 - 191) / 2
+  CHECK(over.dstY == 240);  // (800 - 319) / 2
 
-  // The same shape on the OTHER panel is over the cap as well -- 800 / 396 is
-  // x2.02 -- so the boundary is per panel and not a property of the picture.
-  CHECK(reader::fitCover(264, 396, 480, 800, reader::CoverFit::Fill).tooSmall);
+  // THE BOUNDARY IS PER PANEL AND PER FIT, NOT A PROPERTY OF THE PICTURE, and the
+  // same shape shows both answers at once on the OTHER panel: the X3 is 2:3 where
+  // this cover is 3:5, so Fill crops its height and asks x2.75 -- refused -- while
+  // Whole letterboxes and asks only x2.475, which the cap admits.
+  CHECK(reader::fitCover(192, 320, 528, 792, reader::CoverFit::Fill).tooSmall);
+  CHECK_FALSE(reader::fitCover(192, 320, 528, 792, reader::CoverFit::Whole).tooSmall);
 
-  // The book that produced #64: 260x346, far smaller than anything in the
-  // corpus, asking for x2.29 on the X3 (Fill) and x2.03 (Whole). Both refused,
-  // and the sleep screen falls back to its reading card with a logged reason --
-  // which is a boarded screen, where the small centred picture was not.
-  CHECK(reader::fitCover(260, 346, 528, 792, reader::CoverFit::Fill).tooSmall);
-  CHECK(reader::fitCover(260, 346, 528, 792, reader::CoverFit::Whole).tooSmall);
-  CHECK(reader::fitCover(260, 346, 480, 800, reader::CoverFit::Fill).tooSmall);
+  // THE BOOK THAT PRODUCED #64 IS NOW ADMITTED, AND THAT IS THE WHOLE POINT OF
+  // THE RAISE. 260x346 asks x2.29 on the X3 (Fill), x2.03 there (Whole), x2.31 on
+  // the X4 (Fill) and x1.85 (Whole) -- all four refused at 200 and all four served
+  // at 250, so the sleep screen draws the picture its board draws instead of
+  // falling back to the reading card. Whether x2.29 replication READS as a
+  // photograph is the open question imagefit.h hands to the glass; this only pins
+  // that the arithmetic lets it through.
+  CHECK_FALSE(reader::fitCover(260, 346, 528, 792, reader::CoverFit::Fill).tooSmall);
+  CHECK_FALSE(reader::fitCover(260, 346, 528, 792, reader::CoverFit::Whole).tooSmall);
+  CHECK_FALSE(reader::fitCover(260, 346, 480, 800, reader::CoverFit::Fill).tooSmall);
+  CHECK_FALSE(reader::fitCover(260, 346, 480, 800, reader::CoverFit::Whole).tooSmall);
 
   // NOTHING MAY DRAW A REFUSED COVER, which is what makes the flag worth having
-  // rather than being advice. begin() is the one gate every caller goes through.
+  // rather than being advice. begin() is the one gate every caller goes through,
+  // and it agrees with the flag on both sides of the boundary.
   reader::CoverFitter f;
-  CHECK_FALSE(f.begin(260, 346, 528, 792, reader::CoverFit::Fill));
+  CHECK_FALSE(f.begin(192, 319, 480, 800, reader::CoverFit::Fill));
   CHECK(f.rowsEmitted() == 0);
-  // And a source ONE row bigger on the binding axis is served: 792 / 396 == 2.
-  CHECK(f.begin(260, 396, 528, 792, reader::CoverFit::Whole));
+  // And a source ONE row bigger on the binding axis is served: 800 / 320 == 2.5.
+  CHECK(f.begin(192, 320, 480, 800, reader::CoverFit::Fill));
 }
 
 TEST_CASE("the two axes are asked separately, and a mixed box is served") {

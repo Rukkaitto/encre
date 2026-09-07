@@ -11,9 +11,12 @@ not rescue it either: the first scan is a 1/8-scale image, 180x275 against a
 would be refused as `TooSmall`.
 
 (That last clause used to read "and the fitter never upscales", which was true
-of #64's fitter and is not of this one. The conclusion did not move: 200% is the
-cap and a 1/8-scale first scan needs nearly three times that. It is restated
-because a stale REASON for a right answer is how a right answer gets revisited.)
+of #64's fitter and is not of this one, and then named 200% as the cap, which
+was true until the owner raised it to 250. The conclusion has survived both: a
+1/8-scale first scan asks x2.93 and the cap has never been near that. It is
+restated because a stale REASON for a right answer is how a right answer gets
+revisited -- and this clause has now been stale twice, so it is written to
+depend on the margin rather than on the number.)
 
 So the fix cannot live on the device, and this is the desktop half of it.
 

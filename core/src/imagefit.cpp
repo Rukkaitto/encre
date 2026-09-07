@@ -95,10 +95,10 @@ FitBox fitCover(int srcW, int srcH, int panelW, int panelH, CoverFit fit) {
   // `||` is what makes "almost" not matter.
   //
   // The comparison is cross-multiplied rather than divided for fitCover's own
-  // reason two dozen lines up: a cover asking for exactly 2.00x must be ADMITTED,
-  // and a double deciding that by rounding is not a boundary anybody can reason
-  // about. In long long because dst * 200 on a nonsense panel would otherwise
-  // overflow before the guards could look at it.
+  // reason two dozen lines up: a cover asking for exactly the cap must be
+  // ADMITTED, and a double deciding that by rounding is not a boundary anybody
+  // can reason about. In long long because dst * 250 on a nonsense panel would
+  // otherwise overflow before the guards could look at it.
   const long long cap = kMaxCoverUpscalePercent;
   if (static_cast<long long>(b.dstW) * 100 > static_cast<long long>(b.srcW) * cap ||
       static_cast<long long>(b.dstH) * 100 > static_cast<long long>(b.srcH) * cap) {
