@@ -2,11 +2,15 @@
 // can be tested at all -- shell/ has no test harness, and this is the one piece
 // of the resume path that is pure logic.
 //
-// `home:-1;library:7;item-actions:1`, root first. Two things it inherits from the
-// single-screen format it replaces: the screen is a NAME rather than an enum
-// ordinal (2C-2 inserted three screens into the middle of ScreenId and silently
-// renamed every stored record), and an unrecognised name is "no session" rather
-// than a best-effort decode -- nothing here casts an integer into a ScreenId.
+// `home:-1;library:7:/books;item-actions:1`, root first. Two things it inherits
+// from the single-screen format it replaces: the screen is a NAME rather than an
+// enum ordinal (2C-2 inserted three screens into the middle of ScreenId and
+// silently renamed every stored record), and an unrecognised name is "no session"
+// rather than a best-effort decode -- nothing here casts an integer into a
+// ScreenId.
+//
+// AN ENTRY'S THIRD FIELD IS OPTIONAL AND IS Screen::place() -- what that entry's
+// focus is an index into (#14). The cases for it are at the foot of this file.
 #include <set>
 #include <string>
 #include <vector>
@@ -185,4 +189,140 @@ TEST_CASE("every ScreenId has its own wire name") {
     CHECK(seen.insert(n).second);
   }
   CHECK(seen.size() == static_cast<size_t>(reader::ScreenId::Count));
+}
+
+// --- THE FOLDER AN ENTRY'S FOCUS IS AN INDEX INTO (#14) ----------------------
+//
+// The Library can be listing a SUBFOLDER of /books, and the record could not say
+// which -- so sleeping in /books/Classics on row 3 woke on /books row 3. A wrong
+// row that looks right is worse than no row, so the list has to be on the wire
+// beside the index into it.
+//
+// EVERY CASE HERE IS ABOUT A STRING A REAL CARD CAN PRODUCE. A wire format that a
+// legal filename can break is not a fix, and `;` and `%` are both legal in a FAT
+// long name.
+
+TEST_CASE("a place rides beside the focus and round-trips") {
+  const std::vector<StackEntry> in{
+      {ScreenId::Home, -1, ""}, {ScreenId::Library, 3, "/books/Classics"}};
+  const std::string wire = encodeSessionStack(in);
+  // The place is the entry's THIRD field, and `/` is deliberately not escaped:
+  // `nvs_get encre_sess stack str` printing a readable path is the same property
+  // that made the screen a name rather than an ordinal.
+  CHECK(wire == "home:-1;library:3:/books/Classics");
+
+  std::vector<StackEntry> out;
+  REQUIRE(decodeSessionStack(wire.c_str(), out));
+  CHECK(out == in);
+  CHECK(out[1].place == "/books/Classics");
+}
+
+TEST_CASE("a screen with no place writes no third field") {
+  // Which is every screen but the Library, so the overwhelming majority of
+  // entries are byte-for-byte the two-field form this format replaces -- and a
+  // two-field entry still parses, which is what makes the version bump a decision
+  // rather than a necessity. (It is still made: see session.cpp.)
+  CHECK(encodeSessionStack({{ScreenId::Settings, 4, ""}}) == "settings:4");
+  std::vector<StackEntry> out;
+  REQUIRE(decodeSessionStack("home:-1;library:7", out));
+  REQUIRE(out.size() == 2);
+  CHECK(out[1].focus == 7);
+  CHECK(out[1].place.empty());
+}
+
+TEST_CASE("a folder name containing the format's own separators survives it") {
+  // `;` and `%` are legal in a FAT long name; `:` is not, but nothing here knows
+  // which filesystem wrote the path, and a raw one would silently become a fourth
+  // field. All three are escaped, so the parser cannot be fooled by a filename.
+  const std::string nasty = "/books/A; B%C:D";
+  const std::string wire = encodeSessionStack({{ScreenId::Library, 2, nasty}});
+  CHECK(wire == "library:2:/books/A%3B B%25C%3AD");
+  CHECK(wire.find(';') == std::string::npos);
+
+  std::vector<StackEntry> out;
+  REQUIRE(decodeSessionStack(wire.c_str(), out));
+  REQUIRE(out.size() == 1);  // one entry, not two -- the `;` did not split it
+  CHECK(out[0].place == nasty);
+}
+
+TEST_CASE("an accented 90-character folder name is carried whole and unescaped") {
+  // A real card carries these. UTF-8 passes through byte for byte, because
+  // escaping it would triple the record for no gain and cost the one property the
+  // format is readable for.
+  std::string deep = "/books/Le Fl\xC3\xA9" "au";
+  while (deep.size() < 90) deep += "\xC3\xA9";  // e-acute, two bytes each
+  const std::string wire = encodeSessionStack({{ScreenId::Library, 11, deep}});
+  CHECK(wire.find("Fl\xC3\xA9" "au") != std::string::npos);
+  CHECK(wire.find('%') == std::string::npos);  // nothing here needed escaping
+
+  std::vector<StackEntry> out;
+  REQUIRE(decodeSessionStack(wire.c_str(), out));
+  CHECK(out[0].place == deep);
+  CHECK(out[0].focus == 11);
+}
+
+TEST_CASE("a control byte in a name is escaped rather than put in a log line") {
+  const std::string sneaky = "/books/a\nb";
+  const std::string wire = encodeSessionStack({{ScreenId::Library, 0, sneaky}});
+  CHECK(wire == "library:0:/books/a%0Ab");
+  std::vector<StackEntry> out;
+  REQUIRE(decodeSessionStack(wire.c_str(), out));
+  CHECK(out[0].place == sneaky);
+}
+
+TEST_CASE("a malformed place refuses the WHOLE record") {
+  // The unknown-name rule: a place this cannot decode was written by something
+  // that is not this format, so the entries around it may not mean what they say
+  // either. Home is the answer.
+  std::vector<StackEntry> out;
+  CHECK_FALSE(decodeSessionStack("library:3:/books/%", out));     // truncated escape
+  CHECK_FALSE(decodeSessionStack("library:3:/books/%2", out));    // half an escape
+  CHECK_FALSE(decodeSessionStack("library:3:/books/%ZZ", out));   // not hex
+  CHECK_FALSE(decodeSessionStack("library:3:/books/%00x", out));  // a NUL cannot be a path
+  CHECK_FALSE(decodeSessionStack("library:3:", out));             // a field with nothing in it
+  // A FOURTH FIELD, which there is no such thing as: every `:` a place contains
+  // is escaped, so a raw one is malformed rather than ambiguous.
+  CHECK_FALSE(decodeSessionStack("library:3:/books:extra", out));
+  CHECK(out.empty());
+}
+
+TEST_CASE("the focus is refused before the place is even looked at") {
+  // The focus span ends at the SECOND colon, so a junk focus is still junk when
+  // an entry has three fields -- it is not swallowed into the place.
+  std::vector<StackEntry> out;
+  CHECK_FALSE(decodeSessionStack("library:x:/books", out));
+  CHECK_FALSE(decodeSessionStack("library::/books", out));
+}
+
+TEST_CASE("a place too long to hold is dropped WHOLE, and takes its row with it") {
+  // Truncating it would address a DIFFERENT directory rather than none, which is
+  // the reasoning Xml::kMaxAttrBytes reached from the other side. And the row
+  // goes with it: a row index without the folder it indexes is the whole of #14,
+  // so the two cannot be dropped separately. -1 is not a marker -- it is
+  // "nothing selected", which clamps to the top of whatever list is built.
+  const std::string tooDeep = "/books/" + std::string(200, 'a');
+  CHECK(encodeSessionStack({{ScreenId::Library, 3, tooDeep}}) == "library:-1");
+
+  // AND THE BOUND IS ON THE ESCAPED FORM, so it holds whatever the path contains:
+  // 60 semicolons are 60 bytes of filename and 180 bytes of wire.
+  const std::string spiky = "/books/" + std::string(60, ';');
+  CHECK(encodeSessionStack({{ScreenId::Library, 3, spiky}}) == "library:-1");
+
+  // A path at the cap is still carried, so the drop is a real ceiling rather than
+  // a refusal of anything interesting: 121 characters of folder inside /books.
+  const std::string atCap = "/books/" + std::string(121, 'a');
+  CHECK(encodeSessionStack({{ScreenId::Library, 3, atCap}}) == "library:3:" + atCap);
+}
+
+TEST_CASE("the read buffer the format derives holds the longest record it can write") {
+  // shell/src/session.cpp sizes its NVS read from sessionStackMaxBytes() rather
+  // than from a number kept in step by hand, and the place is the term that made
+  // that matter -- it is larger than the rest of an entry put together. A record
+  // that did not fit would read back as 0 bytes and be refused as "no session",
+  // which is a silent lost wake.
+  std::vector<StackEntry> worst;
+  for (size_t i = 0; i < App::kMaxDepth; ++i)
+    worst.push_back({ScreenId::DeleteConfirm, 32767, "/" + std::string(127, 'a')});
+  const std::string wire = encodeSessionStack(worst);
+  CHECK(wire.size() + 1 <= sessionStackMaxBytes());
 }
