@@ -4898,7 +4898,9 @@ void setup() {
              landed == reader::encodeSessionStack(stack)
                           ? ""
                           : " (not what the record named: a screen it wants no longer builds, "
-                            "or a focused row is no longer in its list)");
+                            "a folder it named is no longer on the card -- in which case its "
+                            "row was dropped with it rather than applied to another "
+                            "directory -- or a focused row is no longer in its list)");
         logFlush();
         mark("session-restored");
       }

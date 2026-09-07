@@ -2,6 +2,30 @@
 
 namespace reader {
 
+namespace {
+
+// PUT ONE ENTRY'S POSITION BACK: the place first, and the focus ONLY if the place
+// was honoured.
+//
+// The order is the whole of #14. A focus is an index into a list, and the Library
+// can be listing a subfolder of /books -- so applying row 3 to a screen that is
+// showing a different directory from the one the record named is a plausible
+// looking wrong row, which is worse than no row at all. Every way a place can
+// fail to come back -- the folder was deleted while the device slept, the card in
+// the slot is a different card, a screen that reports a place and never learned
+// to accept one -- goes down this one branch and lands the user at the top of
+// whatever list the screen DID build. That is reading_position.h's grading rule
+// over a different quantity: degrade, never mislead.
+//
+// An empty place means the screen has only ever one list, so the focus means what
+// it always meant. That is every screen but the Library.
+void restoreFocusIn(Screen& screen, const StackEntry& entry) {
+  if (!entry.place.empty() && !screen.setPlace(entry.place)) return;
+  screen.setFocus(entry.focus);
+}
+
+}  // namespace
+
 const char* screenName(ScreenId id) {
   switch (id) {
     case ScreenId::Home: return "HOME";
@@ -69,7 +93,10 @@ const Screen& App::top() const { return *stack_.back(); }
 std::vector<StackEntry> App::snapshot() const {
   std::vector<StackEntry> out;
   out.reserve(stack_.size());
-  for (const auto& screen : stack_) out.push_back({screen->id(), screen->focus()});
+  // The place is COPIED, because the snapshot's whole job is to outlive these
+  // screens: Screen::place() hands back a view of the screen's own member.
+  for (const auto& screen : stack_)
+    out.push_back({screen->id(), screen->focus(), std::string(screen->place())});
   return out;
 }
 
@@ -88,14 +115,14 @@ App::RestoreReport App::restore(const std::vector<StackEntry>& stack) {
   // gets its focus set rather than being pushed. That is the ONLY difference
   // between the root and everything above it, and it is a difference about the
   // root, not about Home.
-  stack_.front()->setFocus(stack.front().focus);
+  restoreFocusIn(*stack_.front(), stack.front());
   r.restored = 1;
 
   for (size_t i = 1; i < stack.size(); ++i) {
     if (!pushScreen(stack[i].screen)) break;
     // Before the next push, because an overlay reads the focused row of the
     // screen under it at construction time.
-    top().setFocus(stack[i].focus);
+    restoreFocusIn(top(), stack[i]);
     ++r.restored;
   }
 

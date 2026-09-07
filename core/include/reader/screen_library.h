@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "reader/booklist.h"
@@ -160,6 +161,37 @@ class LibraryScreen : public FocusScreen {
   // is the root for a Library that has not descended into anything.
   const std::string& path() const { return path_; }
 
+  // Screen::place() IS THAT SAME MEMBER, under the record's generic name for it:
+  // what this screen's focus is an index into. One datum, two accessors, so they
+  // cannot drift -- `path()` is what the filesystem callers want to be reading
+  // and `place()` is the question App::snapshot asks every screen.
+  //
+  // THIS IS THE ONE SCREEN THAT HAS ONE, and #14 is what it cost not to store it:
+  // sleeping in /books/Classics on row 3 woke on /books row 3.
+  std::string_view place() const override { return path_; }
+
+  // LIST `p` AGAIN, or refuse and stay exactly where we are. True means this
+  // screen is now showing that directory, which is what licenses App::restore to
+  // apply the focus that came with it -- see Screen::setPlace.
+  //
+  // Refused, and each of these is a record that would otherwise land the user on
+  // a plausible-looking wrong row:
+  //   * a path that is not this Library's root or inside it. A record is written
+  //     by a device and read by a device, but not necessarily with the same card
+  //     in the slot or the same root on the command line, and a prefix test is
+  //     the only containment this layer can perform.
+  //   * a path with a `..` component, which is textually under the root and
+  //     addresses somewhere else. FileSystem does not resolve one, so nothing
+  //     below here would notice.
+  //   * a directory that no longer reads -- the commonest case by far, a folder
+  //     deleted or renamed while the device slept. The fallback is the root, and
+  //     App::restore then drops the row: the top of /books is honest where row 3
+  //     of it is not.
+  //
+  // Asking for the directory already listed is honoured and touches no card,
+  // which is the ordinary case: the root is what the constructor lists.
+  bool setPlace(std::string_view p) override;
+
   // THE ABSOLUTE PATH OF THE FOCUSED ROW, or empty when nothing is focused or the
   // row is a FOLDER -- FileSystem::remove is files-only by contract, which is the
   // same rule deleteFocused() states.
@@ -214,6 +246,12 @@ class LibraryScreen : public FocusScreen {
   // `to_string(percent) + "%"` is how a row and the details screen drift into
   // disagreeing about one number.
   void applyProgress(LibraryItem& item, const std::vector<ProgressEntry>& started) const;
+  // GO TO `p` AND LIST IT, returning what rescan() thought of the directory.
+  // Three callers -- descend, ascend and setPlace -- and they had two copies of
+  // this trio between them before the third arrived: set the path, reset the
+  // window so a fresh directory starts at its first row rather than inheriting
+  // the parent's scroll position, rescan.
+  bool listAt(std::string p);
   bool descend();
   bool ascend();
   // Rebuilds the view-model from `items_` and the window. One place, called

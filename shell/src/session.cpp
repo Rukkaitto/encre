@@ -35,12 +35,19 @@ constexpr const char* kKeyStack = "stack";
 //   Home the CONTINUE block -- stopped being flattened to row 0.
 // 3 -> 4: `scr` and `focus` became one `stack` string holding the WHOLE stack.
 //   See session.h for why, and for what the single-screen form could not restore.
+// 4 -> 5: an entry may carry a third field, Screen::place() -- WHAT ITS FOCUS IS
+//   AN INDEX INTO. The Library can be listing a subfolder of /books and the
+//   record could not say which, so sleeping in /books/Classics on row 3 woke on
+//   /books row 3 (#14). A version-4 record still PARSES under the new decoder --
+//   two fields is the no-place form -- and is discarded anyway, on purpose: its
+//   `library:7` means "row 7 of some directory", and honouring that is exactly
+//   the wrong row this field exists to stop claiming.
 //
 // Each bump discards the records before it, which costs exactly one wake per
 // device -- the first after this firmware lands -- and cannot be misread. The
 // alternative, translating an old record, is how a stored 2 becomes the wrong
 // screen.
-constexpr uint8_t kVersion = 4;
+constexpr uint8_t kVersion = 5;
 
 // The last record known to be in NVS, so an unchanged save can skip the store
 // entirely. Held in its ENCODED form, because that is the thing that is actually
