@@ -4565,9 +4565,22 @@ back to Home". `MCAUSE 0x2` plus `abort() was called` plus `addr2line` on the st
 words is how you get from that to `operator new` → `std::bad_alloc` → `__terminate`.
 
 So every sizeable allocation in the EPUB path is **`std::nothrow`-checked** and
-answers with a reason: `Zip`'s central directory and both of its read buffers, and a
+answers with a reason: `Zip`'s central directory and both of its read buffers, and
+`BlockReader`'s `State` and its block buffer — the last of those being **#90**, and
+until it landed this sentence had an exception in it that was the whole of that ticket.
+
+**AND THE `book.cpp` HALF OF THIS SENTENCE HAD BEEN FALSE SINCE 3C.** It read "a
 pre-flight probe in `book.cpp` before `buildDocument` (whose `std::string`/`std::vector`
-growth cannot fail politely — that one is a bound, not a guarantee).
+growth cannot fail politely — that one is a bound, not a guarantee)". `openBook` has not
+called `buildDocument` since it stopped returning a chapter's blocks and started
+returning the spine's geometry; there is no probe in `book.cpp` and there is nothing
+there for one to guard. The **claim** it was making survived the move, though, and it
+moved down a layer with the work: the growth that cannot fail politely is
+`Block::text`'s `push_back`, and *"a bound, not a guarantee"* was exactly right about it
+— **a bound of 64 KB against a 42,152-byte floor, which is a bound that cannot be
+honoured.** #90 made it a guarantee: the buffer is reserved once through a nothrow
+probe, so the growth cannot allocate at all, and the cap is derived from the floor. See
+**The lifetime rules that changed**.
 
 **THE EOCD SCAN NO LONGER ALLOCATES.** It used to take the whole 64 KB comment
 window in one `std::string`, which was the largest single allocation in the reader
