@@ -81,7 +81,50 @@ const Page& PeekScreen::page() const { return inner_->page(); }
 
 int PeekScreen::chosenSpine() const { return inner_->chapterIndex(); }
 
-Cursor PeekScreen::chosenCursor() const { return inner_->currentCursor(); }
+Cursor PeekScreen::chosenCursor() const {
+  // THE BLOCK, AND NOT THE LINE, AND THIS IS WHERE THE TWO MEASURES MEET. The inner
+  // reader paginated at the PANEL's ~368px column and `ReaderScreen::goToPosition` will
+  // resolve whatever comes back at the reading page's 444 -- and a `Cursor`'s `line` is
+  // a line WITHIN A BLOCK AT ONE COLUMN WIDTH. A block is a fact about the document and
+  // crosses intact; a line is a fact about a layout the Reader does not share. See #48,
+  // and `reading_position.h`, which grades this exact change as `Relaid` and zeroes the
+  // same field -- as `ReaderScreen::relayout` drops it for the same reason one layer up.
+  // This is the third place that question is asked and was the one answering it
+  // differently.
+  //
+  // IT WAS WRONG FORWARD, WHICH IS THE ONLY DIRECTION THAT MATTERS. The panel is
+  // NARROWER, so a block has MORE lines there and panel line L has consumed LESS text
+  // than reading line L -- so handing L across landed the reader PAST the passage they
+  // pressed GO HERE on. Measured over a 600-word paragraph: a commit from panel page 8
+  // landed on reading page 5 with the peeked text on page 4, and one from panel page 16
+  // named line 128 of a block with 120 reading lines, which took `openAtCursor`'s
+  // documented "the end of the chapter is the closest honest answer" exit and put the
+  // reader in the NEXT paragraph. Landing at the top of the block undershoots instead,
+  // so the passage is ahead of the reader rather than behind them and one press reaches
+  // it -- "the top of the right paragraph beats the front of the book".
+  //
+  // WHAT IT COSTS, measured rather than asserted: over real prose the two answers are
+  // the SAME reading page in 20 of `longChapter`'s 45 panel pages and one page apart in
+  // the rest, because a paragraph is four or five panel lines and the disagreement is
+  // block-relative. The cost is a long paragraph, where the landing is its top.
+  //
+  // AND NOT IN goToPosition, THOUGH IT HAS ONE CALLER AND THE EFFECT WOULD BE THE SAME
+  // TODAY. That function's contract is "a cursor", and `goToAnchor` and a restored
+  // reading position hand it lines measured at the reading column, where the line is
+  // exactly right. The fact "my column is not the reader's" belongs to the screen that
+  // has the other column -- this is the one place both widths are known.
+  //
+  // THE ALTERNATIVE WAS RE-MEASURING ON ARRIVAL, and it needs a representation `Cursor`
+  // does not have: a within-block offset, which means `layout.h` and `PageBuilder` --
+  // the most performance-critical code here, and a `LaidLine` that deliberately owns
+  // re-based text and carries no offsets. It would also make the peek the ONLY place in
+  // the firmware that resolves a line across two measures, with a bespoke
+  // representation and a single caller, while `relayout` and the sidecar went on
+  // dropping theirs. Scaling the line by the ratio of the two columns was refused
+  // outright: it is a guess wearing a measurement's clothes, it can still overshoot,
+  // and nothing would catch it being a few lines out.
+  return Cursor{inner_->currentCursor().block, 0};
+}
 
 int PeekScreen::percentHere() const {
   // WHERE THE PANEL'S CHAPTER IS IN THE BOOK, recomputed from the chapter actually on

@@ -114,9 +114,12 @@ forwarded into its `onGesture`; the panel reads back `page()`, `chapterIndex()`,
   fraction of it. It stays available if a third pager ever appears.
 - *Reusing `ReaderScreen`*, which is this. It costs ~2–3 KB of duplicated
   `OpenedBook` spans and chapter names, and it is a `Screen` used as a model, which
-  is unusual. What it buys is that **the cursor the peek commits is by construction
-  the one the Reader restores** — there is no second spelling of a page position to
-  disagree with the first.
+  is unusual. What it buys is that **the block the peek commits is by construction
+  the one the Reader restores** — there is no second spelling of a block to
+  disagree with the first. **CORRECTED 2026-09-07 (#48):** this said *the cursor*,
+  which was true of the block and false of the line — a line is a line within a
+  block at one column width, and these are two column widths. `chosenCursor()`
+  drops the line, as `relayout()` and a `Relaid` restore already did.
 
 Two properties fall out of it rather than being arranged:
 
@@ -349,7 +352,12 @@ Then:
   page-number-based scheme would fail. **CORRECTED 2026-08-29:** this also said "while
   the anchor is the departure point". It is the high-water mark, so a forward commit
   leaves it at the arrival and a backward one leaves it ahead; `test_screen_peek.cpp`
-  asserts both directions.
+  asserts both directions. **CORRECTED 2026-09-07 (#48):** "exactly" is
+  **block-granular** — the Reader's `currentCursor()` is `{C.block, 0}`, because C's
+  line was measured at the panel's column. The test that says so needs a fixture
+  `longChapter` cannot supply: its paragraphs are four or five panel lines, so its
+  block-relative line index never leaves single figures and every case in the file
+  passed over the defect. One 600-word paragraph reaches it.
 - **The peek's page is not the Reader's page.** The narrower column re-wraps, so a
   test that the two disagree is what pins the panel to its own pagination rather
   than to a copy of the Reader's.

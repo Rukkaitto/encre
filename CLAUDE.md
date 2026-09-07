@@ -4903,24 +4903,49 @@ worse: a bespoke pager is a second copy of open/advance/seek — the three routi
 project has spent the most effort on, each carrying rules a copy would have to re-earn —
 and extracting a `ChapterPager` is a large refactor of the most performance-critical
 code here for a screen that wants a fraction of it. **What owning a Reader buys is the
-one property that matters: the cursor the peek commits is by construction the one the
+one property that matters: the BLOCK the peek commits is by construction the one the
 Reader restores.** Both sides are `currentCursor` over the same document, so there is no
-second spelling of a page position free to disagree with the first — which is exactly
-how a "go here" lands a page off.
+second spelling of a *block* free to disagree with the first — which is exactly how a
+"go here" lands in the wrong paragraph.
 
-**THAT IS TRUE OF THE BLOCK AND FALSE OF THE LINE, and the paragraph above said it
-without the qualification** until the device produced
-`[peek] GO HERE spine=54 block=1 line=7: ok`. A `Cursor`'s line is a line *within a
-block at one ppem and one column width* — `reading_position.h` grades exactly that as
-`Relaid` and zeroes the field — and the peek's column is ~368px against the page's 444.
-So the two sides really are one spelling of a *block* and two spellings of a *line*.
+**AND IT SAID `the cursor` THERE, WHICH WAS TRUE OF THE BLOCK AND FALSE OF THE LINE
+(#48, closed).** A `Cursor`'s line is a line *within a block at one ppem and one column
+width* — `reading_position.h` grades exactly that as `Relaid` and zeroes the field, and
+`ReaderScreen::relayout` drops it one layer up for the same reason — so the two sides
+were one spelling of a block and **two spellings of a line**. `PeekScreen::chosenCursor`
+is the third place that question is asked and was the one answering it differently; it
+returns `{block, 0}` now, which is the rule the other two already applied to the same
+quantity.
 
-It looked right in the run that found it because a 17-line reading page swallows the
-difference: the peek's page 2 started at `(1, 7)`, which at the reading measure still
-falls on page 1. The error is sub-page for small offsets and grows with the line index,
-so **committing from deep inside a long chapter is where it lands a page off** — which
-is the case the peek exists for. Issue #48; no data loss, and the landing is always in
-the right chapter and the right block.
+**IT WAS WRONG FORWARD, AND THAT IS THE ONLY DIRECTION THAT MATTERED.** The panel is
+NARROWER, so a block has MORE lines there and panel line L has consumed LESS text than
+reading line L — so handing L across landed the reader **past the passage they pressed
+GO HERE on**, with nothing on the screen to say so. Measured over a 600-word paragraph:
+a commit from panel page 8 landed on reading page **5** with the peeked text on page
+**4**, and one from panel page 16 named **line 128 of a block with 120 reading lines**,
+which took `openAtCursor`'s documented "the end of the chapter is the closest honest
+answer" exit and put the reader in the **next paragraph** — not a page off, the wrong
+paragraph, from a commit made in the middle of the first one.
+
+**THE COST IS MEASURED, NOT ASSERTED, AND IT IS ONE PAGE.** Over real prose the two
+answers are the **same** reading page in 20 of `longChapter`'s 45 panel pages and one
+page apart in the other 25, because a paragraph is four or five panel lines and the
+disagreement is block-relative. What it costs is a long paragraph, where the landing is
+its top — the passage is then *ahead* of the reader rather than behind them and one press
+reaches it, which is `reading_position.h`'s own ordering: the top of the right paragraph
+beats the front of the book, which beats nothing.
+
+**IT LOOKED FINE ON THE DEVICE FOR THE SAME REASON IT LOOKED FINE IN 1,377 GREEN TESTS.**
+The run that found it read `[peek] GO HERE spine=54 block=1 line=7: ok` — the peek's
+page 2, at `(1, 7)`, which at the reading measure still falls on page 1, because a
+17-line page swallows a seven-line offset. And **every paging fixture in this file's
+suite was `longChapter`**, whose paragraphs are four or five lines, so its
+block-relative index never leaves single figures and no case could reach the defect at
+all: the same shape as the mutation that tells you about your INPUT before it tells you
+about your test. `test_screen_peek.cpp` now carries a **one-600-word-paragraph** fixture
+with a short second block after it, and the case is self-proving — the raw line is
+asserted to land strictly *past* the page holding the peeked token, so it cannot pass
+by being too shallow.
 
 **THE READER BENEATH RELEASES ITS CHAPTER**, because two live chapters do not fit:
 69,884 bytes peak with a 36,956-byte single allocation, against a measured 45,840-byte

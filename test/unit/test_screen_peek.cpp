@@ -916,4 +916,171 @@ TEST_CASE("the demo Peek builds and shows the board's opening") {
   CHECK(peek->page().lines.back().text.back() == '.');
 }
 
+// --- WHAT A COMMIT MAY CARRY ACROSS THE TWO MEASURES (#48) ----------------------
+//
+// The panel's column is ~368px and the reading page's is 444, and a `Cursor`'s `line`
+// is a line WITHIN A BLOCK AT ONE COLUMN WIDTH -- so a line index handed straight
+// across means a different place in the text on each side. `reading_position.h` grades
+// exactly that change as `Relaid` and ZEROES the field for it, and
+// `ReaderScreen::relayout` drops the line for the same reason. `chosenCursor()` is the
+// third place the same question is asked, and it was the one answering it differently.
+//
+// WHICH DIRECTION IT WAS WRONG IN IS THE WHOLE POINT. The panel is NARROWER, so a block
+// has MORE lines there -- line L of the panel has consumed LESS text than line L of the
+// page. Reading L as a reading line therefore lands the reader PAST the text they
+// pressed GO HERE on, which is the one failure a commit must not have: the passage you
+// chose is behind you, and nothing on the screen says so.
+
+namespace {
+
+// ONE PARAGRAPH LONG ENOUGH TO SPAN PAGES, which is what `longChapter` is not -- and
+// that is why #48 reached a device with 1,377 green test cases behind it.
+//
+// `line` is block-relative, so the disagreement between the two measures grows with the
+// line index INSIDE ONE BLOCK. `longChapter`'s paragraphs are four or five panel lines
+// each, so its block-relative index never leaves single figures; measured over all 45 of
+// its panel pages, the two answers are the same reading page in 20 of them and one page
+// apart in the rest. A fixture built from it cannot see this defect at all, which is
+// exactly the shape this project records: a mutation tells you about your INPUT before
+// it tells you about your test.
+//
+// NUMBERED WORDS RATHER THAN PROSE, so a token taken off the panel's page can be found
+// again on the reading page and the question "where is this text NOW" has an exact
+// answer. There is no hyphenation here, so a word is never split across a line -- where
+// a phrase would be broken by whichever column happened to wrap inside it, and a word of
+// real prose repeats and would match the wrong paragraph.
+std::string oneLongParagraph(int words) {
+  std::string d = "<html><body><p>";
+  for (int i = 0; i < words; ++i) {
+    if (i > 0) d += ' ';
+    d += 'w';
+    d += static_cast<char>('0' + (i / 100) % 10);
+    d += static_cast<char>('0' + (i / 10) % 10);
+    d += static_cast<char>('0' + i % 10);
+  }
+  // A SECOND, SHORT BLOCK AFTER IT, and it is not decoration: it is what makes the
+  // sharper half of the defect visible. A panel line index deep in block 0 can name a
+  // line the reading column's block 0 DOES NOT HAVE -- 150 panel lines against 120
+  // reading ones -- and `openAtCursor` then takes its documented `!found` exit, "the end
+  // of the chapter is the closest honest answer". With one block that end is next door;
+  // with this one it is a different paragraph.
+  d += "</p><p>tail alpha beta gamma delta</p></body></html>";
+  return d;
+}
+
+// WHICH READING PAGE HOLDS A TOKEN, walked from the top rather than computed: the point
+// is where the text really is at the reading measure, and only the layout knows that.
+// Leaves the screen wherever it stopped; every caller re-jumps afterwards.
+int readingPageHolding(reader::ReaderScreen& s, const std::string& token) {
+  REQUIRE(s.goToPosition(0, Cursor{}));
+  s.completeIndex();
+  for (int i = 0; i < s.pageCount(); ++i) {
+    if (readerfix::pageText(s.page()).find(token) != std::string::npos) return i;
+    s.onGesture({Gesture::Next});
+  }
+  return -1;
+}
+
+}  // namespace
+
+TEST_CASE("the committed cursor keeps the block and drops the line") {
+  // THE FIX IN ONE ASSERTION. The block is a fact about the DOCUMENT and survives the
+  // crossing; the line is a fact about a LAYOUT that the Reader does not share.
+  cardfix::CardReading r(oneLongParagraph(600));
+
+  reader::PageMetrics pm;
+  r.theme.peekMetrics(480, 800, r.ramp.fonts, r.body.face, reader::Settings{}, pm);
+  reader::PeekScreen peek(r.fs, r.ob, 0, &r.body.face);
+  peek.setMetrics(pm);
+
+  // THE PANEL'S OWN PAGINATION, SPELLED TWICE ON PURPOSE. `PeekScreen` holds a
+  // `ReaderScreen` built at these metrics and forwards page gestures into it, so a
+  // sibling built the same way and paged the same number of times is that inner
+  // reader -- the layout is deterministic in the xhtml, the metrics and the face. It is
+  // the only way to see the cursor the peek is degrading, because the peek exposes the
+  // degraded one and nothing else.
+  reader::ReaderScreen panel(r.fs, r.ob, 0, &r.body.face);
+  panel.setMetrics(pm);
+  panel.completeIndex();
+
+  for (int i = 0; i < 8; ++i) {
+    peek.onGesture({Gesture::Next});
+    panel.onGesture({Gesture::Next});
+  }
+  const Cursor raw = panel.currentCursor();
+  // NOT A `0 == 0` ASSERTION, and this is the REQUIRE the whole file was missing: over
+  // `longChapter` this line is a single digit and the case below holds for a reason that
+  // has nothing to do with the fix. Measured here it is 64.
+  REQUIRE(raw.line >= 60);
+  REQUIRE(peek.chosenSpine() == 0);
+
+  CHECK(peek.chosenCursor() == Cursor{raw.block, 0});
+}
+
+TEST_CASE("committing from deep inside one block does not land past the peeked text") {
+  // THE BEHAVIOURAL HALF, and it is self-proving: the same fixture shows the raw line
+  // landing PAST the text the panel was showing and the committed cursor landing at or
+  // before it. So the case cannot pass because the fixture is too shallow to reach the
+  // branch -- the REQUIRE on the raw landing is what says it is deep enough.
+  const std::string ch = oneLongParagraph(600);
+  cardfix::CardReading r(ch);
+  r.scr->completeIndex();
+
+  reader::PageMetrics pm;
+  r.theme.peekMetrics(480, 800, r.ramp.fonts, r.body.face, reader::Settings{}, pm);
+
+  // TWO DEPTHS, because the defect has two failure classes and only the first looks like
+  // "a page off". At panel page 8 the raw line exists in the reading column's block and
+  // simply names a later place in it; at panel page 16 it names line 128 of a block that
+  // has 120 reading lines, so `openAtCursor` falls through to the END of the chapter --
+  // a different paragraph, from a commit made in the middle of the first one.
+  for (const int deep : {8, 16}) {
+    CAPTURE(deep);
+
+    reader::PeekScreen peek(r.fs, r.ob, 0, &r.body.face);
+    peek.setMetrics(pm);
+    reader::ReaderScreen panel(r.fs, r.ob, 0, &r.body.face);
+    panel.setMetrics(pm);
+    panel.completeIndex();
+    for (int i = 0; i < deep; ++i) {
+      peek.onGesture({Gesture::Next});
+      panel.onGesture({Gesture::Next});
+    }
+    REQUIRE(panel.pageIndex() == deep);  // the panel really did get that far
+    const Cursor raw = panel.currentCursor();
+    REQUIRE(raw.block == 0);
+
+    // THE TEXT THE READER PRESSED GO HERE ON: the first token of the panel's top line.
+    REQUIRE_FALSE(peek.page().lines.empty());
+    const std::string token = peek.page().lines.front().text.substr(0, 4);
+    const int truePage = readingPageHolding(*r.scr, token);
+    // IT HAS TO BE SOMEWHERE, and not on the first page -- a commit cannot be measurably
+    // wrong about a passage that is already on the page the reader would land on anyway.
+    REQUIRE(truePage > 0);
+
+    // THE DEFECT, DEMONSTRATED. Handed across unchanged, the panel's line index lands the
+    // reader STRICTLY PAST the page holding the passage they chose.
+    REQUIRE(r.scr->goToPosition(0, raw));
+    REQUIRE(r.scr->pageIndex() > truePage);
+    if (deep == 16) {
+      // AND THE SHARPER FORM: not a page off but the END of the chapter, in the OTHER
+      // paragraph, reached by naming a line the reading column does not have.
+      //
+      // ASSERTED ON THE TEXT AND NOT ON THE LANDING CURSOR, which was the first
+      // spelling and does not say this: the last reading page's start cursor is still
+      // block 0 -- `{0, 120}` is where block 0's lines run out, and the boundary between
+      // two blocks has a spelling on each side. What the reader is looking at is the
+      // second paragraph, and that is the claim worth making.
+      CHECK(r.scr->pageIndex() == r.scr->pageCount() - 1);
+      CHECK(readerfix::pageText(r.scr->page()).find("tail alpha") != std::string::npos);
+    }
+
+    // AND THE FIX. At or before the passage, and at the top of the block it is in, so
+    // pressing forward reaches it and nothing was skipped.
+    REQUIRE(r.scr->goToPosition(0, peek.chosenCursor()));
+    CHECK(r.scr->pageIndex() <= truePage);
+    CHECK(r.scr->currentCursor() == Cursor{raw.block, 0});
+  }
+}
+
 
