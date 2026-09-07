@@ -2229,6 +2229,55 @@ the instrument is the one this file uses elsewhere and the 0.27% is the outlier.
 sheet still prints `ok` rather than a percentage (#41), so any figure here is a count
 someone ran by hand: **quote the method with the number.**
 
+**THE AUTHOR WRAPS TOO, TO TWO LINES, AND IT USED TO DO NEITHER — so a long name left
+the card entirely.** `drawCentredText` places a run at `centreIn(0, contentW, w)`, and
+`centreIn` returns a **NEGATIVE** half when the run is wider than the box: the name began
+left of the card's padding, painted over both 2px borders onto the dither field, and was
+clipped by the panel edge. "Fyodor Mikhailovich Dostoevsky" is 540px against a 312px
+column and rendered as `ODOR MIKHAILOVICH DOSTOEVS` — cut at BOTH ends with no ellipsis
+to say so, sitting on the frame. **Every golden passed, because every golden's author was
+short.**
+
+- **THE CAP IS TWO AND IT WAS MEASURED, not chosen.** Every `dc:creator` in the 225-book
+  corpus, shouted, at `Label400`/0.22em against this column: **68 of 221 (30.8%) overflow
+  one line**, so an ellipsis here is the COMMON case and not the edge one — and of those
+  68, **58 (85%) fit WHOLE in two**. Only **five DISTINCT names** in the corpus need a
+  third and three of the five are corporate, so **216 of 221 render complete**. **None of
+  the 16 books on the user's own shelf overflow at all**, the INVERSE of the
+  progressive-JPEG split, which is why the figure is quoted with its sources rather than
+  as one number.
+- **IT IS A LINE COUNT WHERE THE TITLE'S BOUND IS THE CARD'S ROOM, and the two being
+  different KINDS is the design.** Both runs can grow now, and **one budget cannot serve
+  two growable runs without saying which yields**. The author yields, FIRST and by a fixed
+  amount, so the title — the one fact this screen exists to state — keeps every line left
+  over. It is expressed as the ORDER of two statements in `renderSleep` rather than as a
+  comment, so it cannot drift from what is drawn. A proportional split would let a
+  three-line corporate name eat the hero.
+- **AT THE BOUND THE TITLE PAYS, AND THE FIRST TEST OF IT ASSERTED THE OPPOSITE AND
+  FAILED AT −17px.** That figure is the arithmetic being right: 29px of author bought
+  against a 46px title line the budget then gave back. **A card at its bound cannot
+  grow**, so measuring growth there measures the floor in the title's division instead —
+  the cap is asserted where there IS slack and the ordering where there is not.
+- **THE AUTHOR'S LEAD IS THE FACE'S OWN LINE HEIGHT**, not one of this screen's numbers,
+  because the board leaves this run at `line-height: normal` — which is what
+  `wrapProseLead` is for, and what makes a one-line author **byte-identical** to the
+  `drawCentredText` it replaces. **No golden was re-blessed**: the eight existing sleep
+  goldens are untouched and the two `sleep_long_author` files are the only ones added.
+  Board fidelity did not move either — **2.42%/2.22%, 9301 differing pixels at both
+  geometries**, and `sleep_cover_details` 2.86%/2.62%.
+- **THE TEST THIS NEEDED WATCHES THE CARD'S PADDING, NOT THE PANEL EDGE.** The card is
+  opaque white and only ever drawn in its content column, so the 42px band between each
+  border and that column is **paper by construction** and ink there means a run escaped.
+  The edge is where the damage ENDED — a test watching only the edge passes for a name
+  that merely eats the frame. Restoring `drawCentredText` fails it with 385–435 stray
+  pixels per geometry.
+- **CHROME AND THE FIRMWARE DISAGREE ABOUT THIS RUN, which is why the corpus figure is
+  the firmware's.** Chrome fits `MARY WOLLSTONECRAFT` in the column and the firmware does
+  not, so that name is two lines on the board and **three** on the device. The boards'
+  committed specimen is one line in both, so nothing on the sheet moves — but a
+  long-author *specimen* would land differently in the two engines, the same ~3% the
+  `.rfnt` faces measure wider everywhere else.
+
 The `6% · CH. 01` line is the percentage and the SPINE POSITION. A chapter *name* would
 need a table of contents, which is not built — the same reason the Reader's own footer
 says a bare `CH. 03`.

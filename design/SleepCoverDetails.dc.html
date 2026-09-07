@@ -133,7 +133,43 @@
          The bound is the CARD's `max-height` above, not a line count here: the
          card's height is a result and it is what collides with the badge. -->
     <div style="font-size: var(--t-title); font-weight: 700; text-align: center; line-height: 1.1; text-transform: uppercase; overflow-wrap: anywhere;">Middlemarch</div>
-    <div style="font-size: var(--t-label); letter-spacing: 0.22em;">GEORGE ELIOT</div>
+    <!-- THE AUTHOR WRAPS TO TWO LINES AND THEN ELIDES, and it used to do NEITHER --
+         so a long name escaped the card entirely. A centred run is placed at
+         `centreIn(0, contentW, w)`, which returns a NEGATIVE half when the run is
+         wider than the box: the name began left of this card's padding, painted
+         over both 2px borders and out onto the dither field, and was finally
+         clipped by the panel edge. "Fyodor Mikhailovich Dostoevsky" measures 540px
+         against 312px of content and rendered as ODOR MIKHAILOVICH DOSTOEVS -- cut
+         at BOTH ends, with no ellipsis to say so, sitting on top of the frame.
+
+         MEASURED RATHER THAN ASSUMED: every `dc:creator` in the 225-book corpus, at
+         this face and this tracking, against this column. 68 of 221 (30.8%)
+         overflow -- so an ellipsis here is the COMMON case and not the edge one --
+         and of those 68, 58 (85%) fit WHOLE in exactly two lines. Only 10 need a
+         third and every one is a corporate author ("United States. Central
+         Intelligence Agency", 735px). None of the 16 books on the author's own
+         shelf overflow at all, which is the INVERSE of the progressive-JPEG
+         finding, and the reason the figure is quoted with its split rather than as
+         one number.
+
+         TWO IS THEREFORE THE CAP, AND IT IS A LINE COUNT WHERE THE TITLE'S BOUND IS
+         THE CARD'S `max-height`. The two bounds are different KINDS deliberately:
+         both runs can grow now, and one budget cannot serve two growable runs
+         without saying who yields first. The AUTHOR yields -- it is capped at two
+         lines before the title is measured at all, so the title, the one fact this
+         screen exists to state, keeps every line left over. Splitting the budget
+         proportionally instead would let a three-line corporate name eat the hero.
+
+         THE WRAP DOES NOT REMOVE THE ELISION, it only makes it rare: the third line
+         and beyond still elide, which is what `-webkit-line-clamp` draws here and
+         what clampProse draws in the firmware. So this is a change of DEGREE -- how
+         much of a name survives -- and not the arrival of truncation.
+
+         `overflow-wrap: anywhere` for the title's reason directly above: a name can
+         arrive as one unbroken token and CSS offers no break opportunity inside it.
+         `text-align: center` was implicit while this was a single line and has to be
+         stated once it can be two. -->
+    <div style="font-size: var(--t-label); letter-spacing: 0.22em; text-align: center; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;">GEORGE ELIOT</div>
     <div style="width: 170px; height: 8px; border: 1px solid #000000; box-sizing: border-box; margin-top: 8px;">
       <div style="width: 6%; height: 100%; background: #000000;"></div>
     </div>

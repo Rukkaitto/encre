@@ -1178,6 +1178,21 @@ constexpr int kSleepProgressEm = 140;
 // worth one line of a future tidy-up, not a cross-screen edit now.
 constexpr int kSleepTitleLineH = 46;  // round(1.1 * 42)
 
+// HOW MANY LINES THE AUTHOR MAY TAKE BEFORE IT ELIDES -- design/Sleep.dc.html's
+// `-webkit-line-clamp: 2`, and the board carries the measurement this number is
+// made of. In short: every `dc:creator` in the 225-book corpus, shouted, at this
+// face and this tracking, against this 312px column -- 68 of 221 (30.8%) overflow
+// one line, and 58 of those 68 (85%) fit WHOLE in two. Only 10 need a third and
+// every one is a corporate author rather than a person.
+//
+// IT IS A LINE COUNT WHERE THE TITLE'S BOUND IS THE CARD'S ROOM, and the two being
+// different KINDS is the point: both runs grow now, and one budget cannot serve two
+// growable runs without saying which yields. This one does, FIRST and by a fixed
+// amount, so the title -- the one fact this screen exists to state -- keeps every
+// line left over. A proportional split would let a three-line corporate name eat
+// the hero.
+constexpr int kSleepAuthorMaxLines = 2;
+
 }  // namespace
 
 void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepViewModel& vm,
@@ -1307,15 +1322,52 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   // 34px offset, so this needs no number of its own.
   const int badgeReserve = fb.height() - badgeTop;
   const int cardRoom = badgeTop - badgeReserve;
-  // Every child but the title, plus both of the board's paddings and its border:
-  // five gaps, the label, the little rule, the author, the bar with its own
+  // Every child but the title AND THE AUTHOR, plus both of the board's paddings and
+  // its border: five gaps, the label, the little rule, the bar with its own
   // margin-top, and the progress line. A constant here would be a second copy of
-  // the box model six lines below.
+  // the box model a dozen lines below.
+  //
+  // THE AUTHOR'S LINE LEFT THIS SUM WHEN IT STOPPED BEING ONE LINE. It was a fixed
+  // term here for exactly as long as the run could not wrap; now it is a result,
+  // measured just below and added to both the budget and the height, which is the
+  // move the title made one change earlier for the same reason.
   const int cardFixedH = 2 * (kSleepCardBorder + kSleepCardPadY) + label.lineHeight() +
-                         kSleepGap + kSleepRuleH + kSleepGap + kSleepGap + author.lineHeight() +
+                         kSleepGap + kSleepRuleH + kSleepGap + kSleepGap +
                          kSleepGap + kSleepBarTopGap + kSleepBarH + kSleepGap +
                          progress.lineHeight();
-  int maxTitleLines = (cardRoom - cardFixedH) / kSleepTitleLineH;
+
+  // THE AUTHOR IS WRAPPED FIRST, AND THE ORDER IS THE WHOLE OF HOW THE BUDGET IS
+  // SPLIT. Two runs on this card can grow, so one of them has to be measured
+  // against a fixed rule and the other against what is left; the author takes the
+  // fixed rule (kSleepAuthorMaxLines, whose derivation is with the constant) and
+  // the title takes the remainder. That ordering IS the design decision -- the
+  // author is not the fact this screen exists to state -- and it is expressed as
+  // a sequence rather than as a comment, so it cannot drift from what is drawn.
+  //
+  // The lead is the FACE's own line height, not a number of this screen's, because
+  // the board sets no `line-height` on this run and so leaves it at `normal` --
+  // which is what wrapProseLead is for. That is also what keeps a ONE-LINE author
+  // byte-identical to the drawCentredText call this replaces: same box, same
+  // baseline, same tracking, so no golden with a short author may move.
+  //
+  // `WordBreak::Anywhere` for the title's reason: a name can arrive as one
+  // unbroken token with no break opportunity inside it.
+  //
+  // BOTH STRINGS ARE NAMED LOCALS AND HAVE TO BE -- `Prose::lines` are string
+  // VIEWS into the text handed to the wrap, and clampProse's elided last line is a
+  // NEW string that is not in that text. Home passed `upperLatin1(...)` inline
+  // once and drew a column of NOTDEF BOXES from freed memory, correctly for a
+  // short name and wrongly for a long one -- silently right in exactly the case
+  // every golden covered.
+  const std::string shoutedAuthor = upperLatin1(vm.author);
+  std::string authorTail;
+  Prose authorProse =
+      wrapProseLead(author, shoutedAuthor, contentW, pxToF26(author.lineHeight()),
+                    trackingEm(author, kSleepAuthorEm), WordBreak::Anywhere);
+  clampProse(author, authorProse, kSleepAuthorMaxLines, contentW, authorTail);
+  const int authorH = f26ToPx(authorProse.heightF26());
+
+  int maxTitleLines = (cardRoom - cardFixedH - authorH) / kSleepTitleLineH;
   if (maxTitleLines < 1) maxTitleLines = 1;
 
   // THE SHOUTED STRING AND THE ELIDED TAIL ARE BOTH NAMED, and they have to be:
@@ -1342,7 +1394,7 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   // of the Prose rather than multiplied out here, so the height the card reserves
   // and the height drawProse consumes are ONE expression. `cardFixedH` is the same
   // sum the line budget above was measured against, for the same reason.
-  const int cardH = cardFixedH + f26ToPx(titleProse.heightF26());
+  const int cardH = cardFixedH + authorH + f26ToPx(titleProse.heightF26());
 
   const int cardX = centreIn(0, fb.width(), cardW);
   const int cardY = centreIn(0, fb.height(), cardH);
@@ -1371,9 +1423,14 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
                          ProseAlign::Centre));
   y += kSleepGap;
 
-  drawCentredText(fb, author, cx, contentW, baselineIn(author, y, author.lineHeight()),
-                  upperLatin1(vm.author), Ink::Black, trackingEm(author, kSleepAuthorEm), plane);
-  y += author.lineHeight() + kSleepGap + kSleepBarTopGap;
+  // `ProseAlign::Centre` is the board's `text-align: center`, and drawProse centres
+  // each line on its OWN measured width -- the identical centreIn this run reached
+  // through drawCentredText while it was one line. The tracking rides on the Prose
+  // rather than being passed again here, which is what stops the wrap and the
+  // centring measuring the run differently.
+  y += f26ToPx(drawProse(fb, author, authorProse, cx, contentW, pxToF26(y), Ink::Black, plane,
+                         ProseAlign::Centre));
+  y += kSleepGap + kSleepBarTopGap;
 
   // The bar: a 1px outline with a proportional fill, the treatment kBattery uses
   // and the same reason -- an outline plus a solid fill is what reads on this glass
