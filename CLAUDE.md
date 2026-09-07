@@ -3265,10 +3265,15 @@ all. **This panel has corrected desktop reasoning three times**, and nothing on 
 can arbitrate here by construction — the simulator and the goldens run this same
 arithmetic, so they agree with it whatever it says. So:
 
-1. **Whether ×2.29 replication of a 260 px cover across 528 px reads as a photograph or as
-   BLOCKS** — the exact failure the cap existed to prevent, now unproven rather than merely
-   unconfirmed. `kMaxCoverUpscalePercent` is a **one-constant** change in either direction,
-   and **200 is the number the two measurements support** if the answer is blocks.
+1. ~~Whether ×2.29 replication of a 260 px cover across 528 px reads as a photograph or as
+   BLOCKS.~~ **ANSWERED ON GLASS (2026-09-07): CONFIRMED on an X3**, on the real book the
+   raise was made for — `Walden ou la vie dans les bois`, 260×346, a **deflated PNG**, the
+   one corpus format this file says *may* refuse on heap. The verdict was that it *"looks
+   good enough"*, and **that wording is the finding rather than a rough note**: it is an
+   ACCEPTANCE, not a measurement, so it does not extend the two measurements to ×2.5 —
+   they still bound 200. `kMaxCoverUpscalePercent` remains a **one-constant** change in
+   either direction and **200 is still the number the measurements support**, so the way
+   back stays open and cheap.
 2. Whether the `FILL` crop of an *enlarged* cover cuts type the reader wanted — the crop is
    unchanged arithmetic, but it now bites on covers that used to be shown whole, and the
    raise widened the set it bites on.

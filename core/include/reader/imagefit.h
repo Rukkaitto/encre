@@ -62,14 +62,21 @@ namespace reader {
 // was not a wrong answer, it was the derived answer, and it has been overruled on
 // a judgement no measurement in this repo can make.
 //
-// WHAT IS NOW UNPROVEN IS EXACTLY WHAT THE CAP EXISTED TO PREVENT: a 260 px
-// picture replicated across 528 px at x2.29 may read as BLOCKS rather than as a
-// photograph. Nothing on the desktop can answer it -- the simulator and the
-// goldens run this same arithmetic, so they agree with it by construction, and
-// this project has been wrong about this panel from desktop evidence three times.
-// THE GLASS SETTLES IT, and it settles it in both directions: if a x2.3 cover
-// reads as mush on an X3, 200 is the number the measurements above support and
-// this is a one-line change back.
+// AND THE GLASS HAS NOW ANSWERED IT: CONFIRMED ON AN X3 (2026-09-07). What was
+// unproven was exactly what the cap existed to prevent -- a 260 px picture
+// replicated across 528 px at x2.29 reading as BLOCKS rather than as a
+// photograph -- and the owner's verdict on the real book (Walden ou la vie dans
+// les bois, 260x346, a deflated PNG) was that it "looks good enough".
+//
+// THAT WORDING IS KEPT RATHER THAN IMPROVED, because it is the whole finding: it
+// is an ACCEPTANCE, not a measurement, and it does not retroactively extend the
+// two measurements below to x2.5. They still bound 200. So the fallback stands
+// and stays cheap -- if a x2.3 cover ever reads as mush, 200 is the number the
+// measurements support and this is a one-line change back.
+//
+// Nothing on the desktop could have answered this: the simulator and the goldens
+// run this same arithmetic, so they agree with it by construction, and this
+// project has been wrong about this panel from desktop evidence three times.
 //
 // WHAT THE CORPUS SAYS AND WHAT IT CANNOT: over the 225 books in
 // ~/.cache/encre-corpus, run through the real decodeCover at both panels, 223
