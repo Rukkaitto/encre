@@ -211,11 +211,19 @@ TEST_CASE("an empty label falls back rather than showing nothing") {
   CHECK(r.scr->vm().chapter == "CH. 01");
 }
 
-TEST_CASE("the LAST entry naming a chapter wins, which is where you are in it") {
-  // Several entries can point into one file; the later ones are further into it.
+TEST_CASE("the FIRST entry naming a chapter wins, and the band agrees with Contents") {
+  // Several entries can point into one file, and this asserted the LAST of them for
+  // two phases on the argument that "the later ones are further into it". The premise
+  // is true and the conclusion needs the reader to be at the END of the file: the
+  // fragment is stripped before the match, so every entry in the group resolves to the
+  // file's start, and this label is computed when a chapter OPENS -- which is its first
+  // page on a jump and on a forward crossing. See toc.h.
+  //
+  // It is one rule with Contents' `NOW` marker rather than two, because a band naming
+  // one entry over a list marking another is two spellings of one fact.
   Reading r(longChapter(10));
   r.scr->setChapterNames({{0, 1, "PART ONE"}, {0, 2, "Section two"}});
-  CHECK(r.scr->vm().chapter == "Section two");
+  CHECK(r.scr->vm().chapter == "PART ONE");
 }
 
 // --- WHAT A RESTORE COSTS ----------------------------------------------------

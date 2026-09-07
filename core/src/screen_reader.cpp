@@ -171,9 +171,13 @@ void ReaderScreen::updateChapterLabel() {
   // design/Contents.dc.html and is not built -- the position is the only thing honestly
   // known". It is built.
   //
-  // THE LAST entry naming this spine, which is tocIndexForSpine's rule: where several
-  // entries point into one file the later ones are further into it, so the last is the
-  // closest thing to "where you are" that a spine-granular position can name.
+  // THE FIRST entry naming this spine, which is tocIndexForSpine's rule and is one
+  // rule with Contents' `NOW` marker: where several entries point into one file, every
+  // one of them resolves to that file's START, so the first is the only member of the
+  // group that can be proved not to be AHEAD of the reader. It said the LAST for two
+  // phases -- and this label is computed when a chapter OPENS, which is its first page
+  // on a jump and on a forward crossing, so the last was wrong at the one moment it
+  // was asked. See toc.h for the argument and the corpus figures.
   const int at = tocIndexForSpine(names_, chapterAt_);
   if (at >= 0 && !names_[static_cast<size_t>(at)].label.empty()) {
     chapter_label_ = names_[static_cast<size_t>(at)].label;

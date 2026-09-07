@@ -207,10 +207,12 @@ bool loadToc(FileSystem& fs, std::string_view bookPath, std::vector<TocEntry>& o
 }
 
 int tocIndexForSpine(const std::vector<TocEntry>& toc, int spine) {
-  int found = -1;
+  // THE FIRST MATCH. This kept the LAST for two phases -- see the header for why that
+  // was the wrong end of the group, and for the corpus figures that say how common a
+  // group is.
   for (size_t i = 0; i < toc.size(); ++i)
-    if (toc[i].spine == spine) found = static_cast<int>(i);
-  return found;
+    if (toc[i].spine == spine) return static_cast<int>(i);
+  return -1;
 }
 
 }  // namespace reader
