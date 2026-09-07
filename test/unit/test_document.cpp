@@ -603,7 +603,11 @@ TEST_CASE("A SPLIT IS COUNTED, so it is not silent") {
   const Walked exact =
       walkBlocks("<body><p>" + digits(2 * reader::kMaxBlockBytes) + "</p></body>");
   CHECK(exact.split == 1);
-  CHECK(exact.texts.size() == 2);
+  // REQUIRE, NOT CHECK, BECAUSE THE NEXT TWO LINES INDEX. Found by mutating the cut
+  // back into a refusal: the vector came back EMPTY, the indexing segfaulted, and
+  // doctest reported one crashed case and SKIPPED the two after it -- so a regression
+  // would have reported on less than it claims. REQUIRE does end the case here.
+  REQUIRE(exact.texts.size() == 2);
   CHECK(exact.texts[0].size() == reader::kMaxBlockBytes);
   CHECK(exact.texts[1].size() == reader::kMaxBlockBytes);
 
@@ -632,19 +636,31 @@ TEST_CASE("emphasis open across a split closes at the seam and reopens") {
   // The rule `<em><p>a</p><p>b</p></em>` already states, reached from the other
   // direction: a span's offsets index the string they were measured against, so one
   // carried across the seam would index a block it does not belong to.
+  //
+  // THE `abc` IS WHAT MAKES THIS TEST BITE, and its absence is how the fixture was
+  // caught being too weak: with the run starting at byte 0 the reopened span's offset
+  // is 0 either way, so a seam that failed to reset `emStart` was RIGHT BY ACCIDENT.
+  // Three bytes of roman in front of it put the first span at a non-zero offset, so
+  // the second one being 0 is a fact about the reset rather than about the fixture.
   const std::string run = digits(reader::kMaxBlockBytes + 3000);
-  const std::string doc = "<body><p><em>" + run + "</em></p></body>";
+  const std::string doc = "<body><p>abc<em>" + run + "</em></p></body>";
   Grained src(doc, 4096);
   reader::BlockReader r(src);
   reader::Block b;
-  std::vector<size_t> lens;
-  while (r.next(b)) {
-    REQUIRE(b.emphasis.size() == 1);
-    CHECK(b.emphasis[0].off == 0);
-    CHECK(b.emphasis[0].len == b.text.size());
-    lens.push_back(b.text.size());
-  }
+  std::vector<reader::Block> got;
+  while (r.next(b)) got.push_back(b);
   CHECK(r.ok());
-  REQUIRE(lens.size() == 2);
-  CHECK(lens[0] + lens[1] == run.size());
+  REQUIRE(got.size() == 2);
+
+  REQUIRE(got[0].emphasis.size() == 1);
+  CHECK(got[0].text.compare(0, 3, "abc") == 0);
+  CHECK(got[0].emphasis[0].off == 3);
+  CHECK(got[0].emphasis[0].len == got[0].text.size() - 3);
+
+  REQUIRE(got[1].emphasis.size() == 1);
+  CHECK(got[1].emphasis[0].off == 0);
+  CHECK(got[1].emphasis[0].len == got[1].text.size());
+
+  // ...and the emphasised bytes are the run, whole, across the seam.
+  CHECK(got[0].text.substr(3) + got[1].text == run);
 }
