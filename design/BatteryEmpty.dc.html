@@ -31,7 +31,27 @@
   <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; flex-grow: 1; text-align: center; padding: 0 24px;">
     <svg width="98" height="52" viewBox="0 0 22 12" fill="none"><rect x="0.5" y="0.5" width="18" height="11" stroke="#000000"></rect><rect x="19.5" y="3.5" width="2" height="5" fill="#000000"></rect><rect x="2" y="2" width="2.5" height="8" fill="#000000"></rect></svg>
     <div style="font-size: var(--t-title); font-weight: 700; letter-spacing: 0.06em;">BATTERY EMPTY</div>
-    <div style="font-size: var(--t-body); line-height: 1.55; max-width: 400px;">Your page is saved. The reader is shutting down &mdash; charge over USB-C to continue.</div>
+    <!-- THE CONNECTOR IS DELIBERATELY UNNAMED, AND IT USED TO SAY `USB-C`. Found on
+         glass and by nothing else: THE X3 DOES NOT HAVE A USB-C PORT, so the copy was
+         a false claim on the model it was reported from. Do not "helpfully" name one
+         again:
+
+         ONE BINARY DRIVES BOTH MODELS and they do not share a connector, so a named
+         connector is wrong on one of them whichever one is named. Nothing in the board
+         profile knows which port is fitted either -- `BoardProfile` names the battery
+         ADC, the gauge address and a (dead) `usbDetect` pin, and no field anywhere
+         describes the socket -- so the copy cannot even be made conditional. `connect a
+         charger` is true on both.
+
+         This is the same rule the badge below already follows by not claiming a
+         charge-wake, and the same rule the firmware follows for an unread gauge (`-1`,
+         never `0%`): A FALSE CLAIM IS WORSE THAN AN ABSENT ONE.
+
+         `connect a charger` is 17 characters exactly as `charge over USB-C` was, so the
+         wrap was expected to be unchanged and was verified rather than assumed -- four
+         lines at the same break positions in Chrome and in the firmware, at both
+         geometries. -->
+    <div style="font-size: var(--t-body); line-height: 1.55; max-width: 400px;">Your page is saved. The reader is shutting down &mdash; connect a charger to continue.</div>
   </div>
   <!-- THE BADGE NAMES TWO STEPS BECAUSE THE WAKE TAKES TWO, AND IT SAID ONLY ONE.
        It read `CHARGE TO WAKE`, and reported from an X3: plugging in does not wake
