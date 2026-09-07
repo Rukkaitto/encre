@@ -53,6 +53,12 @@ GEOMETRIES = [("480x800", "X4"), ("528x792", "X3")]
 # occurring still prints as 0 -- a column that vanishes reads as a category that
 # was never checked.
 RESULTS = ["Ok", "NoCover", "Unsupported", "ReadFailed", "OutOfMemory", "Abandoned",
+           # A picture we read perfectly and cannot enlarge to the panel within
+           # imagefit.h's kMaxCoverUpscalePercent. Unlike OutOfMemory this one IS
+           # reachable here -- it is decided from the declared dimensions on any
+           # host -- so a non-zero count in this column is a real device answer
+           # and not a desktop artefact.
+           "TooSmall",
            # The book did not open at all, so nothing was ever asked about its
            # cover. Kept out of `NoCover`, which is a book that opened and
            # declares none.

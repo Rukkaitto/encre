@@ -7,7 +7,13 @@ progressive requires every DCT coefficient resident, because later scans refine
 earlier ones, and a 1440x2200 cover at 4:2:0 is 4,757,760 coefficients, 9.5 MB,
 against ~158 KB of free heap at sleep. Sixty times over. The DC-only trick does
 not rescue it either: the first scan is a 1/8-scale image, 180x275 against a
-528x792 panel, and the fitter never upscales.
+528x792 panel, which asks for x2.93 -- past `kMaxCoverUpscalePercent`, so it
+would be refused as `TooSmall`.
+
+(That last clause used to read "and the fitter never upscales", which was true
+of #64's fitter and is not of this one. The conclusion did not move: 200% is the
+cap and a 1/8-scale first scan needs nearly three times that. It is restated
+because a stale REASON for a right answer is how a right answer gets revisited.)
 
 So the fix cannot live on the device, and this is the desktop half of it.
 
