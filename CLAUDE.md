@@ -1935,10 +1935,10 @@ worth knowing before changing it:
 | Item actions, Delete confirm | their own boards | Overlays; a focus move repaints the overlay alone. |
 | Book details | `BookDetails.dc.html` | Not an overlay, despite covering the Library. Its title **wraps**; everywhere else elides. |
 | Settings | `Settings.dc.html` | Nine items, three sections, and every drawn row responds. |
-| Sleep | `Sleep.dc.html` | Painted directly, never pushed — a push would make the wake restore into it. |
+| Sleep | `Sleep.dc.html` | Painted directly, never pushed — a push would make the wake restore into it. Its title **wraps**; the badge is drawn first, because its top is the card's bound. |
 | Sleep / nothing open | `SleepIdle.dc.html` | The badge alone. Same screen with its card removed. |
 | Sleep / cover | `SleepCover.dc.html` | The cover full-bleed, and **the one screen that drops the badge**. `Grayscale`, decided per paint. |
-| Sleep / cover + details | `SleepCoverDetails.dc.html` | The same cover with the reading card and the badge over it. Keeps both. |
+| Sleep / cover + details | `SleepCoverDetails.dc.html` | The same cover with the reading card and the badge over it. Keeps both. Its golden pinned a **truncated** title for two phases. |
 | Reader | `Reader.dc.html` | The only screen whose content is the BOOK's — but no longer the only `Fidelity::Grayscale` one. |
 | Book error | `BookError.dc.html` | An overlay whose parent may be Home — **the only one whose parent is not a list**, so it is the only veil no board draws. Two copy shapes, because one of its four refusals is not damage. |
 | Book end | `BookEnd.dc.html` | **The only screen a PAGE TURN opens rather than a press** — off the last page, so it must be reachable with no button bound to it. Its leaving slab's LABEL follows what is under the Reader; its ACTION does not. |
@@ -2073,7 +2073,55 @@ OVERRIDES THAT RULE AND IT IS THE ONLY THING THAT MAY** — see **Covers**, whic
 records why the override cannot be generalised. One screen with and
 without its content, not two screens. `SleepViewModel::nothingToContinue` is spelled
 exactly as `HomeViewModel`'s, because it is the same fact and one rule should have one
-spelling. Measured against its board at **0.27%**, the closest panel on the sheet.
+spelling.
+
+**THE TITLE WRAPS NOW, AND IT USED TO ELIDE (#74).** Home's arc, Home's reason and
+Home's mechanism — `wrapProseLead(..., WordBreak::Anywhere)` → `clampProse` →
+`drawProse` — because an ellipsis on a *list row* hides only which of seven rows this
+is, and here it hides the one fact the screen exists to state. What makes it worse
+here than on Home: **this screen holds the glass for HOURS**, so a name cut short is
+not a truncation the reader presses past, it is the one they live with.
+`Sleep.dc.html`, `SleepWaking.dc.html` and `SleepCoverDetails.dc.html` all gained
+`overflow-wrap: anywhere`; the other three sleep boards do not draw the card.
+
+- **THE DEFECT WAS BLESSED INTO A GOLDEN, which is how long it had been there.**
+  `test/golden/sleep_cover_details.png` read **`GULLIBLE'S T…`** — its fixture's
+  title has never fitted the card — so the repo's own baseline pinned the truncation
+  and every run was green. It reads `GULLIBLE'S / TRAVELS` now.
+- **THE BADGE IS WHAT BOUNDS THE CARD, AND THE RESERVE IS TAKEN TWICE.** The thing a
+  growing card collides with is not the edge of the glass, it is the badge — an
+  overrunning title runs UNDER an opaque white box and is hidden by it, an ellipsis
+  by another name. And the card is CENTRED, so `centreIn` splits the slack evenly and
+  reserving the badge *once* still leaves a tall card hanging half a badge into it:
+  the same arithmetic `renderDeleteConfirm` and `renderBookError` each shipped wrong.
+  It comes from **`drawBadge`'s own returned top**, not from a second copy of its
+  private 34px and note-face line box — deriving a shared edge twice is how the
+  header band ended up 6px out. **That is why the badge is now drawn BEFORE the
+  card**, and the reorder is pixel-neutral: `sleep_idle` and `sleep_cover` are
+  byte-identical across it.
+- **THE TITLE'S LINE BOX IS THE BOARD'S `1.1`, NOT THE FACE'S 53px.** `Title700`'s
+  own `lineHeight()` is 53 at ppem 42 and the board says 46, and the single line this
+  screen used to draw took the face's. A wrap has to be *handed* a lead, so there was
+  no way to leave the question unanswered — and `BookDetails.dc.html` states the
+  identical `--t-title` at `line-height: 1.1` and already resolves it to 46, so
+  `kSleepTitleLineH` is a **documented second copy** of `kDetailsTitleLineH` rather
+  than a new number.
+- **The card's height is still a RESULT**, now a sum whose title term is the wrap's
+  own height. The budget derives to **8 lines on both panels** — X4 `800 − 2×79 =
+  642` and X3 `792 − 2×79 = 634`, less the 253px of card that is not the title, over
+  46 — where 79 is the badge's 34px offset plus its 45px box.
+
+**MEASURED AGAINST ITS BOARD: 3.28% → 2.42% (X4) and 3.01% → 2.22% (X3)**, and the
+board's own render is **byte-identical** before and after, so the whole gain is the
+firmware moving toward an unchanged board (honouring the 1.1 closed most of the 7px
+card-height gap). `sleep_cover_details` went **3.48% → 2.86%** and **3.18% → 2.62%**.
+**THIS LINE USED TO SAY `0.27%`, "the closest panel on the sheet", AND THAT FIGURE IS
+NOT REPRODUCIBLE** — a threshold-at-128 count over the `--export` panels puts the
+pre-change screen at 3.28%/3.01%, and the same instrument reproduces this file's
+recorded `sleep_cover_details` pair (3.48%/3.18%) **to the digit**, which is what says
+the instrument is the one this file uses elsewhere and the 0.27% is the outlier. The
+sheet still prints `ok` rather than a percentage (#41), so any figure here is a count
+someone ran by hand: **quote the method with the number.**
 
 The `6% · CH. 01` line is the percentage and the SPINE POSITION. A chapter *name* would
 need a table of contents, which is not built — the same reason the Reader's own footer
