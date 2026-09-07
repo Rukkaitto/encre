@@ -211,9 +211,16 @@ TEST_CASE("the cover's BYTES pick the decoder, not the manifest's media type") {
   putBook(fs, epubbuild::withCoverImage(imgfix::loadFixture("grey8.png")));
   VectorSink sink;
   // 300x450 RATHER THAN A REAL PANEL, and the reason is worth a line: grey8.png
-  // is 200x300, so on the X4 it would ask for x2.4 and be refused as TooSmall
-  // before either decoder ran -- this case would then pass while proving nothing
-  // about the sniff. x1.50 is comfortably inside kMaxCoverUpscalePercent.
+  // is 200x300, and a case whose fit box sits anywhere near the cap can start
+  // passing for the wrong reason -- refused before either decoder runs, so the
+  // sniff this case exists for is never exercised. 300x450 is x1.50 on both axes,
+  // which no plausible kMaxCoverUpscalePercent refuses.
+  //
+  // THAT LINE USED TO ARGUE THE OPPOSITE FACT: it said the X4 "would ask for x2.4
+  // and be refused", which was true at the cap of 200 and is not at 250 -- Whole
+  // on the X4 asks exactly x2.40 and is now served. The panel choice was right and
+  // its stated reason had an expiry date, so the reason is now the one that does
+  // not: pick a ratio far from the cap, whatever the cap is.
   CHECK(reader::decodeCover(fs, openIt(fs), 300, 450, reader::CoverFit::Whole, sink) ==
         reader::CoverResult::Ok);
   CHECK(anyInk(sink.msb));
@@ -370,11 +377,18 @@ TEST_CASE("a cover smaller than the panel is ENLARGED to fill it") {
 }
 
 TEST_CASE("a cover too small to enlarge is TooSmall, and nothing is drawn") {
-  // tiny_444.jpg is 33x9, which asks for x88 on the X4 -- far past
-  // kMaxCoverUpscalePercent, and the case imagefit.h says replication would
-  // render as mush. So the refusal IS the answer, and the sleep screen falls back
-  // to its reading card: a boarded screen, where the small centred picture this
-  // used to draw was not.
+  // tiny_444.jpg is 33x9. On the X4 with Whole -- which is the fit this case
+  // calls -- the width binds, so the box is 480x131 and the ask is x14.6; with
+  // Fill it would be x96. Either is far past kMaxCoverUpscalePercent at any value
+  // it has held, and this is the case imagefit.h says replication would render as
+  // mush. So the refusal IS the answer, and the sleep screen falls back to its
+  // reading card: a boarded screen, where the small centred picture this used to
+  // draw was not.
+  //
+  // (This read "x88 on the X4", which is neither fit's figure -- it is 800/9, the
+  // Fill box's HEIGHT ratio taken alone, and Fill's binding axis is its width at
+  // x96. Recomputed while confirming this case was unaffected by the cap moving
+  // to 250, which it is: nothing about x14.6 was ever close to the boundary.)
   FakeFileSystem fs;
   putBook(fs, epubbuild::withCoverImage(imgfix::loadFixture("tiny_444.jpg")));
 

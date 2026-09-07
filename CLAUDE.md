@@ -2914,7 +2914,7 @@ cross-compile it and read the assembly** — `riscv32-esp-elf-g++ -Os -S`, then 
 is always worth a look; `__divdi3`, `__udivdi3`, `__moddi3` and the soft-float family
 are what to expect on a part with no FPU and a 32-bit divider.
 
-### A small cover is enlarged, up to a measured ×2 (#64)
+### A small cover is enlarged — to a measured ×2, then to an overridden ×2.5 (#64)
 
 **`fitCover` USED TO NEVER UPSCALE, AND `imagefit.h` STATED THAT AS A PROPERTY RATHER
 THAN A TASTE.** Every word of the argument was true — a box filter's support is the
@@ -2926,9 +2926,16 @@ X3's 528×792 as a small picture covering **22% of the glass**, for hours, and
 `design/SleepCover.dc.html` says full-bleed. That state matched no board at all — it drew
 neither the picture nor the reading card.
 
-**THE CAP IS ×2 AND IT WAS MEASURED TWICE, BOTH TIMES AGAINST THE SMALLEST STRUCTURE THIS
-GLASS CARRIES.** Nearest-neighbour replication at scale *k* introduces structure of period
-*k* pixels, so the question is where that stops being absorbed:
+**THE CAP WAS MEASURED TWICE AT ×2, AND THE SHIPPED CAP IS ×2.5 — AN OWNER OVERRIDE OF
+THAT DERIVATION AND NOT A CORRECTION OF IT.** Both halves have to be read together, and
+they are kept apart on purpose: the measurements below bound **200**, they are unchanged
+and nothing has falsified either, and `kMaxCoverUpscalePercent` is **250**. Restating the
+derivation under the larger number — letting the argument for 200 read as though it had
+produced 250 — is the comment-drifted-from-code defect this file records over and over,
+and the figures are kept whole so the constant can be moved **back** with evidence.
+Both measurements are against the smallest structure this glass carries. Nearest-neighbour
+replication at scale *k* introduces structure of period *k* pixels, so the question is
+where that stops being absorbed:
 
 - **THE PIPELINE'S OWN GRAIN, off the shipped `CoverFitter`.** A flat field at each of the
   three level midpoints — grey 42/43, 127/128, 212/213, the tones four levels carry worst
@@ -2943,23 +2950,44 @@ GLASS CARRIES.** Nearest-neighbour replication at scale *k* introduces structure
   whole `Mono` argument is about "a 2px stem fully inked". 2 px is the smallest structure
   this project has measured as carrying meaning here.
 
-Two independent measurements landing on the same number is what makes it a derivation
-rather than a pick, and it is why the cap is what makes nearest-neighbour **sufficient**
-rather than the two being separate choices. Anything smoother needs a reconstruction
-filter wider than the destination pixel — real interpolation, a new hot loop, ~520 bytes
-of held source rows — and that is the named next step if the glass ever says the
-replication reads blocky.
+Two independent measurements landing on the same number is what makes **200** a derivation
+rather than a pick. At *k* ≤ 2 the introduced structure is no coarser than the dither grain
+beside it and is absorbed into the diffusion; **at *k* = 2.5 it is not** — a source pixel
+becomes a run of **2 or 3** destination pixels, mean 2.5 — so past 200 the sufficiency of
+nearest-neighbour is **assumed rather than measured**. That is the stated cost of the
+override. Anything smoother needs a reconstruction filter wider than the destination
+pixel — real interpolation, a new hot loop, ~520 bytes of held source rows — and that is
+the named next step if the glass says the replication reads blocky, which is now a
+sharper question than it was at ×2.
+
+**WHY IT WAS RAISED, WHICH IS A DECISION AND NOT A FINDING.** The reporting book —
+`Walden ou la vie dans les bois`, 260×346 — asks **×2.29** on the X3 and **×2.31** on the
+X4, so 200 refused it and the sleep screen showed the reading card. Both states are
+boarded, and the owner's call is that a **soft full-bleed cover beats a card**:
+`SleepCover.dc.html` draws a picture, and the card is what the screen falls back to when
+there is *none*. The refusal was not a wrong answer, it was the *derived* answer, and it
+was overruled on a judgement no measurement in this repo can make. All four of that
+shape's combinations are now served, verified through the real `decodeCover` at both
+panels: `Ok`, `dst=528×792+0+0` and `480×800+0+0` at `FILL`, `528×703+0+44` and
+`480×639+0+80` at `WHOLE`, against the pre-#64 binary's `231×346+148+223`.
 
 **WHAT THE CORPUS SAYS AND WHERE IT IS THE WRONG INSTRUMENT.** Run through the real
 `decodeCover` at both panels: 223 of 225 covers have dimensions that parse, and the worst
 enlargement any of them asks for is **×1.32** (400×662 on the X3). So **the cap admits
 every corpus cover** — `tools/covers.py` reports 223 `Ok` and **0 `TooSmall`** at both
 geometries — and the change fills the panel for the **3 (X4) / 4 (X3)** covers that used
-to sit centred. It says nothing about the book that produced the report: 260×346 is far
-smaller than anything in the corpus and asks for ×2.29 (`FILL`) or ×2.03 (`WHOLE`), so
-**that one is refused and falls back to the reading card**. The corpus under-counts this
-the way it under-counted #35, and **both of the books #35 made openable are small-cover
-cases**, so that fix raised this one's incidence.
+to sit centred.
+
+**AND THAT IS WHY THE RAISE TO ×2.5 MOVES NO CORPUS COVER AT ALL.** 200 already admitted
+every one of them, so the corpus reports the identical 223 `Ok` / 0 `TooSmall` at both
+caps and **all 892 cover renders are byte-identical across the change** — measured, not
+argued, by keeping both runs' PNGs. Against the pre-#64 binary the count is unchanged at
+either cap: **10 of 892 renders differ** (7 `FILL`, 3 `WHOLE`, four distinct books), which
+is exactly the 3/4-per-panel set #64 itself moved. So the corpus has nothing to say for or
+against the override, **which is the point rather than a gap**: the case it is for is the
+one the corpus does not contain. 260×346 is far smaller than anything in it, the corpus
+under-counts this the way it under-counted #35, and **both of the books #35 made openable
+are small-cover cases**, so that fix raised this one's incidence.
 
 **A REFUSAL IS `CoverResult::TooSmall`, WHICH IS A SIXTH VALUE AND NOT THE NEAREST
 EXISTING ONE.** `Unsupported` is "not an image we read" and this is an image we read
@@ -2978,7 +3006,9 @@ The small centred picture was the only unboarded state and it is gone.
 **THE INTERFACE HAD TO WIDEN, AND IT WIDENED HONESTLY.** `addRow(src, bool& emitted)` is
 now `addRow(src)` plus `nextRow()`, drained in a loop. A bool can say "zero or one"; an
 enlargement completes several rows from one push, and a contract promising "at most two"
-would be true only while the cap happens to be 200%. The one misuse it introduces —
+would have been true only while the cap happened to be 200% — **which it stopped being one
+ticket later**, so the honest shape earned itself faster than expected. The one misuse it
+introduces —
 pushing with rows still pending, which would blend two source rows into one accumulator —
 is **refused rather than silent**, and no downscale can reach it, which is why every
 shipped caller changed by exactly one `if` becoming a `while`.
@@ -3017,17 +3047,25 @@ source row, so **349,536 iterations** for 400×662 → 528×792 against the **2.
 median cover's downscale walks. Desktop, three runs each: that cover's decode goes
 **4.4 → 5.9 ms** against a median cover's 21 ms.
 
-**WHAT ONLY THE PANEL CAN ANSWER, AND FOR THIS TICKET IT IS THE DECISIVE HALF.** The two
-measurements above bound the *introduced structure* at the grain the glass has accepted;
-they do not say a ×2 enlargement of a photograph reads well, and **this panel has
-corrected desktop reasoning three times**. So: (1) whether ×2 replication reads as a
-photograph or as blocks, on which `kMaxCoverUpscalePercent` is a **one-constant** change in
-either direction; (2) whether refusing at ×2.29 and showing the reading card is the better
-answer than a soft full-bleed picture, which is the reporting book's own case and the one
-question the corpus cannot reach; and (3) whether the `FILL` crop of an *enlarged* cover
-cuts type the reader wanted — the crop is unchanged arithmetic, but it now bites on covers
-that used to be shown whole. `[cover] TooSmall … dst=…` is the line that makes the refusal
-readable off a device.
+**WHAT ONLY THE PANEL CAN ANSWER, AND THE OVERRIDE MADE IT THE WHOLE TICKET.** The two
+measurements bound the *introduced structure* at the grain the glass has accepted; they do
+not say a ×2 enlargement of a photograph reads well, and at ×2.5 they do not reach it at
+all. **This panel has corrected desktop reasoning three times**, and nothing on the desktop
+can arbitrate here by construction — the simulator and the goldens run this same
+arithmetic, so they agree with it whatever it says. So:
+
+1. **Whether ×2.29 replication of a 260 px cover across 528 px reads as a photograph or as
+   BLOCKS** — the exact failure the cap existed to prevent, now unproven rather than merely
+   unconfirmed. `kMaxCoverUpscalePercent` is a **one-constant** change in either direction,
+   and **200 is the number the two measurements support** if the answer is blocks.
+2. Whether the `FILL` crop of an *enlarged* cover cuts type the reader wanted — the crop is
+   unchanged arithmetic, but it now bites on covers that used to be shown whole, and the
+   raise widened the set it bites on.
+
+**Question (2) of the original three is closed, by decision and not by evidence**: it asked
+whether refusing at ×2.29 beats a soft full-bleed picture, and the owner answered *no*,
+which is what this constant now records. `[cover] TooSmall … dst=…` is still the line that
+makes a refusal readable off a device — there is simply less that reaches it.
 
 ### Sleep releases the whole `App`, not just the chapter
 
@@ -3183,7 +3221,7 @@ expensive one, and the first sleep of a new book is always it.**
 | one cached cover; alternating books re-decode | by design |
 | X4 crops ~10% of a 2:3 cover's **width** at `FILL` | default, reversible in Settings |
 | first sleep of a new book shows the card for a few seconds | by design |
-| a cover needing more than **×2** to fill the panel is refused `TooSmall` | 0 / 225 |
+| a cover needing more than **×2.5** to fill the panel is refused `TooSmall` | 0 / 225 |
 
 **WHAT THE CORPUS ACTUALLY YIELDS, run through the built pipeline: `Ok` for 223**,
 `Unsupported` for 2 (both progressive JPEGs), and `NoCover` / `ReadFailed` /

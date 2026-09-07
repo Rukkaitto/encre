@@ -12,8 +12,22 @@
 namespace reader {
 
 // THE LARGEST ENLARGEMENT A COVER MAY BE DRAWN AT, as a percentage of the source
-// rectangle. 200 is not a taste; two independent measurements land on it, and
-// both are about the SMALLEST STRUCTURE THIS GLASS CARRIES.
+// rectangle.
+//
+// 250 IS AN OWNER OVERRIDE OF A DERIVED BOUND, NOT A CORRECTION OF IT. The two
+// measurements below derived 200, they are unchanged, nothing has falsified
+// either, and 250 EXCEEDS WHAT THEY BOUND. Both halves are stated because
+// restating the derivation under the larger constant -- letting the argument for
+// 200 stand as though it had produced 250 -- would be this project's most
+// expensive recurring defect, the one book.cpp committed about Epub::open's
+// behaviour and the one a static_assert committed about its own tie to the enum.
+// A future reader needs the figures to move this BACK with evidence, so they are
+// kept whole rather than adjusted to fit.
+//
+// WHAT THE TWO MEASUREMENTS BOUND, AND THEY BOUND 200. Nearest-neighbour
+// replication at scale k introduces structure of period k pixels -- a source
+// pixel's footprint -- and both of these are about the SMALLEST STRUCTURE THIS
+// GLASS CARRIES, which is 2 px:
 //
 //   * THE PIPELINE'S OWN GRAIN, measured off the shipped CoverFitter. A flat
 //     field at each of the three level midpoints -- grey 42/43, 127/128, 212/213,
@@ -30,25 +44,45 @@ namespace reader {
 //     inked". 2 px is the smallest structure this project has measured as
 //     carrying meaning here.
 //
-// Nearest-neighbour replication at scale k introduces structure of period k
-// pixels (a source pixel's footprint). At k <= 2 that is no coarser than the
-// dither grain already on the glass beside it; past 2 it is coarser than
-// anything this panel has been measured to carry, and it becomes the picture's
-// own structure rather than being absorbed into the diffusion. THAT is the line,
-// and it is why the cap is what makes nearest-neighbour sufficient rather than
-// the two being independent choices.
+// Two independent measurements landing on one number is what made 200 a
+// derivation rather than a taste. At k <= 2 the introduced structure is no
+// coarser than the dither grain already on the glass beside it, and it is
+// absorbed into the diffusion. AT k = 2.5 IT IS NOT: a source pixel becomes a run
+// of 2 or 3 destination pixels, mean 2.5, so it is coarser than the only floor
+// this project has evidence for and it becomes the picture's own structure. That
+// is the cost of this constant, stated rather than argued away -- past 200 the
+// sufficiency of nearest-neighbour is no longer measured, it is assumed.
+//
+// WHY IT WAS RAISED ANYWAY, WHICH IS A DECISION AND NOT A FINDING. The book that
+// produced #64 -- Walden ou la vie dans les bois, 260x346 -- asks x2.29 on the X3
+// and x2.31 on the X4, so 200 REFUSED it and the sleep screen showed its reading
+// card instead. Both of those are boarded states, and the owner's call is that a
+// soft full-bleed cover beats a card: design/SleepCover.dc.html draws a picture,
+// and the card is what the screen falls back to when there is NONE. The refusal
+// was not a wrong answer, it was the derived answer, and it has been overruled on
+// a judgement no measurement in this repo can make.
+//
+// WHAT IS NOW UNPROVEN IS EXACTLY WHAT THE CAP EXISTED TO PREVENT: a 260 px
+// picture replicated across 528 px at x2.29 may read as BLOCKS rather than as a
+// photograph. Nothing on the desktop can answer it -- the simulator and the
+// goldens run this same arithmetic, so they agree with it by construction, and
+// this project has been wrong about this panel from desktop evidence three times.
+// THE GLASS SETTLES IT, and it settles it in both directions: if a x2.3 cover
+// reads as mush on an X3, 200 is the number the measurements above support and
+// this is a one-line change back.
 //
 // WHAT THE CORPUS SAYS AND WHAT IT CANNOT: over the 225 books in
 // ~/.cache/encre-corpus, run through the real decodeCover at both panels, 223
 // declare a cover whose dimensions parse and the worst enlargement any of them
-// asks for is x1.32 (400x662 on the X3) -- so this cap admits EVERY corpus
-// cover, where today 3 of 223 (X4) and 4 of 223 (X3) are drawn as small centred
-// pictures. It says nothing about the book that produced #64: 260x346 is far
-// smaller than anything in the corpus and asks for x2.29 on the X3, so that one
-// is REFUSED and the sleep screen falls back to its reading card. The corpus
-// under-counts this case the way it under-counted #35, and both of the books #35
-// made openable are small-cover cases, so that fix raised this one's incidence.
-inline constexpr int kMaxCoverUpscalePercent = 200;
+// asks for is x1.32 (400x662 on the X3) -- so 200 ALREADY admitted every one of
+// them and RAISING IT MOVES NO CORPUS COVER AT ALL (tools/covers.py: 223 Ok and 0
+// TooSmall at both caps, and all 892 cover renders byte-identical across the
+// change). The corpus therefore has nothing to say for or against this raise,
+// which is the point rather than a gap: the case it is for is the one the corpus
+// does not contain. #64's book is far smaller than anything in it, the corpus
+// under-counts this the way it under-counted #35, and both of the books #35 made
+// openable are small-cover cases.
+inline constexpr int kMaxCoverUpscalePercent = 250;
 
 // The rectangle the cover occupies inside the panel, and which source rectangle
 // maps onto it. Whole leaves bands; Fill leaves none and crops the source.
@@ -97,8 +131,12 @@ struct FitBox {
 //     (at an integer ratio the grids align and it IS replication again). Anything
 //     smoother needs a reconstruction filter wider than the destination pixel,
 //     which is real interpolation and a new hot loop. So this replicates, and
-//     kMaxCoverUpscalePercent above is what makes that sufficient: it bounds the
-//     introduced structure at the grain the glass already carries.
+//     kMaxCoverUpscalePercent above is what bounds how coarse that is allowed to
+//     get. At the 200 that constant's two measurements derived, the bound held
+//     the introduced structure at the grain the glass already carries; at the 250
+//     it now holds, it does not, and whether replication is still sufficient
+//     there is the open question recorded with the constant. Real interpolation
+//     is the answer if the glass says it is not.
 //   * THE INTERFACE. One source row can now complete SEVERAL destination rows,
 //     so addRow() below no longer answers "did one come out" -- the caller drains
 //     with nextRow(). That is the honest shape for any ratio rather than a
