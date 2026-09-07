@@ -1868,6 +1868,144 @@ TEST_CASE("the header band's label truncates instead of running into its value")
   }
 }
 
+TEST_CASE("the header band's screen name survives a book title too long for the row") {
+  Ramp f;
+  // THE MIRROR OF THE CASE ABOVE, and the defect was that one rule served both (#82).
+  // Contents' band is `CONTENTS` beside the BOOK TITLE, so here the VALUE is the data
+  // and the label is the screen's own name -- the one run on any band that must never
+  // elide, because it is what says which screen you are on. `drawHeaderBand` gave the
+  // value its measured width first and handed the label the remainder, which on a real
+  // card ("Amusing Ourselves to Death", 374px) left `C ...` at 480x800 and
+  // `C O N T ...` at 528x792.
+  //
+  // No board could show it: `Contents.dc.html`'s specimen is `MIDDLEMARCH`, which fits.
+  // The board now marks the title as the yielding run (`min-width: 0`) and leaves the
+  // label `nowrap`, which is Library.dc.html's declaration with the marks swapped.
+  const char* const kLabel = "CONTENTS";
+  const std::string kTitle = reader::upperLatin1("Amusing Ourselves to Death");
+  for (int width : {480, 528}) {
+    const int h = reader::headerBandHeight(f.fonts, nullptr);
+    const int text = h - reader::kBandRuleH;
+
+    reader::Framebuffer fb(width, 200);
+    fb.clear(true);
+    reader::drawHeaderBand(fb, f.fonts, kLabel, kTitle, nullptr);
+
+    // THE LABEL IS DRAWN AS IF THE VALUE WERE NOT THERE, asserted per pixel rather
+    // than by measuring where its ink stops: a budget one glyph too small still puts
+    // ink in roughly the right place, and only byte-identity says the run is WHOLE.
+    // The reference is the same band with an empty value, where there is no other run
+    // to give way to at all.
+    reader::Framebuffer labelOnly(width, 200);
+    labelOnly.clear(true);
+    reader::drawHeaderBand(labelOnly, f.fonts, kLabel, "", nullptr);
+    const reader::Font& lf = f.fonts[reader::Role::Label500];
+    const int labelNatural =
+        lf.measure(kLabel, reader::trackingEm(lf, reader::kBandLabelEm));
+    for (int y = 0; y < text; ++y)
+      for (int x = 0; x < reader::kMargin + labelNatural; ++x)
+        REQUIRE_MESSAGE(fb.getPixel(x, y) == labelOnly.getPixel(x, y),
+                        "the label moved at (" << x << ", " << y << ") on a " << width
+                                               << "px panel");
+
+    // AND THE TITLE YIELDED: it is cut, it still ends on the margin -- the reader
+    // header's rule for the same run one band up, and what keeps a band's right slot
+    // flush whatever it holds -- and the board's `gap: 7px` still separates the two.
+    const reader::Font& vf = f.fonts[reader::Role::Value700];
+    CHECK(vf.measure(kTitle) > width - 2 * reader::kMargin - labelNatural);
+    CHECK(rightmostInk(fb, 0, text) <= width - reader::kMargin);
+    CHECK(rightmostInk(fb, 0, text) >= width - reader::kMargin - 4);
+    const int valueLeft =
+        leftmostInkFrom(fb, 0, text, reader::kMargin + labelNatural);
+    CHECK_MESSAGE(valueLeft - (reader::kMargin + labelNatural) >= reader::kBandGap,
+                  "the title's ink at " << valueLeft << " against a label ending at "
+                                        << reader::kMargin + labelNatural);
+  }
+}
+
+TEST_CASE("labelShare divides a row between two runs") {
+  // THE RULE ITSELF, driven directly rather than through pixels, because with both
+  // runs over-long they are ADJACENT on one baseline and no scan can tell whose ink
+  // is whose -- the first attempt at this case measured the value's right edge and
+  // called it the label's. It is a pure function for `rowRuleFor`'s reason: the
+  // arithmetic is what two primitives share, and a test that reached it only through
+  // a framebuffer would be measuring the faces as well as the rule.
+  //
+  // `avail` is the row the two runs share: 425 on the X4 (480 - 2*24 - 7) and 473 on
+  // the X3 (528 - 2*24 - 7), with no mark on the band.
+  for (int avail : {425, 473}) {
+    const int half = avail / 2;
+    // BOTH FIT: each keeps its natural width, which is every band that shipped.
+    CHECK(reader::labelShare(157, 179, avail) == 157);   // CONTENTS / MIDDLEMARCH
+    CHECK(reader::labelShare(207, 49, avail) == 207);    // NOW READING / 87%
+    CHECK(reader::labelShare(268, 65, avail) == 268);    // ABOUT THIS BOOK / EPUB
+    // THE VALUE IS THE LONG ONE: the label keeps all of its width and the title
+    // takes the rest. `CONTENTS` is 157 and `AMUSING OURSELVES TO DEATH` is 374, so
+    // the old rule left the label 51 (X4) and 99 (X3) -- `C ...` and `C O N T ...`.
+    CHECK(reader::labelShare(157, 374, avail) == 157);
+    CHECK(avail - reader::labelShare(157, 374, avail) < 374);
+    // THE LABEL IS THE LONG ONE: unchanged from what shipped, because this is the
+    // shape the old rule was written for -- the Library's band, a subfolder's name
+    // against `12 BOOKS`.
+    CHECK(reader::labelShare(900, 112, avail) == avail - 112);
+    // BOTH LONG: the floor, and the only case where it is what decides. Neither run
+    // is annihilated; dropping the floor gives the label 51 and widening it to the
+    // whole row leaves the value nothing at all.
+    CHECK(reader::labelShare(900, 374, avail) == half);
+    CHECK(avail - reader::labelShare(900, 374, avail) >= half);
+    // A run's own width is never exceeded, whatever the other asks for.
+    CHECK(reader::labelShare(10, 374, avail) == 10);
+    CHECK(reader::labelShare(0, 374, avail) == 0);
+  }
+}
+
+TEST_CASE("neither band run is squeezed below half the row they share") {
+  Ramp f;
+  // THE BOUND, not a rendered behaviour: it engages only where BOTH runs are wider
+  // than half the row, which no board declares and no screen produces today -- the
+  // widest band label in the firmware is `ABOUT THIS BOOK` at 268px and the value
+  // beside it is `EPUB`. It is what makes "the run with slack to give up is the one
+  // that has more of it" total rather than a rule with a hole in it, and it is the
+  // derived form of the reader header's pinned `kReadChapterFloor`.
+  //
+  // Both mutations of labelShare's floor fail here and nowhere else: dropping it
+  // (`avail - valueNatural` alone, which is what shipped) cuts the label to a letter
+  // and an ellipsis, and widening it to the whole row leaves the value no budget at
+  // all -- elideToWidth answers EMPTY below its ellipsis, so the value vanishes.
+  const std::string kLabel =
+      reader::upperLatin1("Middlemarch_George_Eliot_1871_unabridged_edition_vol_one");
+  const std::string kTitle = reader::upperLatin1("Amusing Ourselves to Death");
+  for (int width : {480, 528}) {
+    const int h = reader::headerBandHeight(f.fonts, nullptr);
+    const int text = h - reader::kBandRuleH;
+    const int avail = width - 2 * reader::kMargin - reader::kBandGap;
+
+    reader::Framebuffer fb(width, 200);
+    fb.clear(true);
+    reader::drawHeaderBand(fb, f.fonts, kLabel, kTitle, nullptr);
+
+    const reader::Font& lf = f.fonts[reader::Role::Label500];
+    REQUIRE(lf.measure(kLabel, reader::trackingEm(lf, reader::kBandLabelEm)) > avail);
+    REQUIRE(f.fonts[reader::Role::Value700].measure(kTitle) > avail / 2);
+
+    // THAT THE DIVISION REACHES THE FRAME, which is all this case can honestly
+    // assert: the two runs are adjacent on one baseline, so no scan separates them
+    // and the arithmetic is pinned above instead. What IS unambiguous is that the
+    // value survived -- it is right-aligned on the margin, and a value squeezed
+    // below an ellipsis is drawn as nothing at all (elideToWidth's contract), which
+    // leaves the columns beside the margin blank.
+    CHECK_MESSAGE(rightmostInk(fb, 0, text) >= width - reader::kMargin - 4,
+                  "the value was squeezed out of the band entirely: last ink at "
+                      << rightmostInk(fb, 0, text));
+    CHECK(rightmostInk(fb, 0, text) <= width - reader::kMargin);
+    // And the label still begins on the margin -- it is elided, not dropped. Its
+    // first glyph's own left side bearing is why this is a bound and not an equality.
+    const int labelLeft = leftmostInkFrom(fb, 0, text, 0);
+    CHECK(labelLeft >= reader::kMargin);
+    CHECK(labelLeft <= reader::kMargin + 6);
+  }
+}
+
 TEST_CASE("a short band label is drawn exactly as it was before a budget existed") {
   Ramp f;
   // The other 26 boards' band labels are literals that fit, and they must be

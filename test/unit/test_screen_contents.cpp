@@ -347,13 +347,16 @@ TEST_CASE("QuietTheme renders a mixed-depth chapter list to golden") {
   //    (3 rows x 480) and 1,584 of 13,514 at X3. Pre-existing, and filed rather than
   //    fixed here, because whether the board grows a rule or the render drops one is a
   //    design decision and not #75.
-  //  - THE BAND'S OWN LABEL ELIDES TO `C ...` (X4) / `C O N T ...` (X3), because
-  //    `drawHeaderBand` gives the value its width first and this book's title is long.
-  //    No board shows it -- `Contents.dc.html`'s book is `MIDDLEMARCH` -- and the
-  //    screen's own name is the one run on the band that should never elide. Also
-  //    pre-existing, also filed, and deliberately left IN this golden: it is what a real
-  //    long title does, and a fixture trimmed to hide it would be a fixture chosen to
-  //    look tidy.
+  //  - THE BAND'S OWN LABEL ELIDED TO `C ...` (X4) / `C O N T ...` (X3), because
+  //    `drawHeaderBand` gave the value its width first and this book's title is long.
+  //    FIXED (#82), and this golden is where it was visible: the band reads
+  //    `C O N T E N T S` whole with the title cut instead, which is what
+  //    `Contents.dc.html` now declares by marking the title as the run that yields.
+  //    Every differing pixel of the re-bless is in rows 25-42, the band's one text
+  //    line, at both geometries -- 0 outside it -- so the band's 2px border, every
+  //    header, every row, the focused inverted row and the hint bar are byte-identical.
+  //    The long title stays IN this fixture deliberately: it is what a real card holds,
+  //    and a fixture trimmed to fit would be a fixture chosen to look tidy.
   ramp::Ramp ramp;
   reader::QuietTheme theme;
 

@@ -28,9 +28,41 @@
 </helmet>
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
 
-  <div style="display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
-  <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">CONTENTS</div>
-  <div style="font-size: var(--t-value); font-weight: 700;">MIDDLEMARCH</div>
+  <!-- THE BOOK TITLE IS THE RUN THAT YIELDS, AND THIS BAND DID NOT SAY SO (#82).
+       `MIDDLEMARCH` fits, so nothing on this board ever showed the question -- and the
+       firmware answered it the other way round: `drawHeaderBand` gave the right-hand
+       value its measured width first and handed the label what was left, so with
+       `Amusing Ourselves to Death` on a real card the screen's own name came out as
+       `C ...` at 480x800 and `C O N T ...` at 528x792. The one run on this band that
+       must never elide is the one that says which screen you are on: unlike a chapter
+       name it is not content, and a screen that cannot name itself is worse than a book
+       title cut short. That is the same invisibility as #75 -- a board whose only
+       specimen is short cannot be wrong.
+
+       `min-width: 0` IS THE DECLARATION, and it is the vocabulary Library.dc.html and
+       Reader.dc.html already use. A flex item's automatic minimum size is its
+       min-content width, which for a `white-space: nowrap` run is the whole run -- so
+       an item WITHOUT `min-width: 0` cannot be shrunk below its text, and one with it
+       can. Marking the title and leaving the label alone is therefore the whole of the
+       priority: the title gives way, the label keeps its width.
+
+       THE MIRROR OF LIBRARY.DC.HTML, DELIBERATELY. There the LABEL is the data -- a
+       subfolder's own name, shouted -- and the count beside it is derived and short, so
+       that board marks the label and leaves the value `nowrap`. Two boards, opposite
+       marks, one rule: whichever of the two runs is a fact about the card is the run
+       that yields. The firmware resolves it by MEASUREMENT rather than by a per-screen
+       flag -- see drawHeaderBand -- which reaches the same answer on both boards and
+       needs no caller to remember which is which.
+
+       AND THE `gap: 7px` IS LOAD-BEARING NOW, where before it was moot. `space-between`
+       with two runs that fit distributes the leftover and the gap never shows; the
+       moment the title fills its budget the gap is the only thing keeping the ellipsis
+       off the label. Library.dc.html declares it for exactly that reason and the
+       firmware has always reserved it (kBandGap); this band simply never said it. It
+       moves nothing in the committed state. -->
+  <div style="display: flex; justify-content: space-between; align-items: center; gap: 7px; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
+  <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500; white-space: nowrap;">CONTENTS</div>
+  <div style="font-size: var(--t-value); font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">MIDDLEMARCH</div>
 </div>
   <!-- NO `border-top` ON EITHER HEADER, AND NO `border-bottom` ON THE ROW ABOVE ONE.
        Those two absences are ONE decision and they are paired deliberately, said out

@@ -28,9 +28,19 @@
 </helmet>
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
 
-  <div style="display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
-  <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">BOOKMARKS</div>
-  <div style="font-size: var(--t-value); font-weight: 700;">MIDDLEMARCH</div>
+  <!-- THE BOOK TITLE YIELDS, as it does on Contents.dc.html and for its reason (#82):
+       this is the other band on any board whose right-hand run is a book title, so it
+       is the other board that has to say which of the two gives way. `MIDDLEMARCH`
+       fits and `Amusing Ourselves to Death` does not, and the run that must survive is
+       the one naming the screen. Declared here although this screen is not built
+       (bookmarks are V1.1) precisely so the screen that eventually draws this band
+       inherits the answer rather than rediscovering the defect: `min-width: 0` on the
+       title, `nowrap` and no `min-width` on the label, and the band's own `gap: 7px`,
+       which is what keeps an ellipsis off the label once the title fills its budget.
+       Contents.dc.html carries the full reasoning. -->
+  <div style="display: flex; justify-content: space-between; align-items: center; gap: 7px; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
+  <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500; white-space: nowrap;">BOOKMARKS</div>
+  <div style="font-size: var(--t-value); font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">MIDDLEMARCH</div>
 </div>
   <div style="display: flex; flex-direction: column; gap: 6px; padding: 16px 24px; background: #000000; color: #ffffff;">
     <div style="font-size: var(--t-meta); letter-spacing: 0.14em; font-weight: 700;">P. 21 &middot; CH. 01</div>
