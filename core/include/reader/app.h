@@ -60,22 +60,38 @@ enum class ScreenId : uint8_t {
   // only once the array grows, which is the wrong way round for a guard whose job is
   // to force the array to grow.
   BookEnd,
+  // design/BookError.dc.html -- the dialog a book that will not open raises. The
+  // session record stores a screen by NAME, so appending cannot silently become
+  // another screen, and appending also leaves every existing ordinal where it was.
+  BookError,
   // design/BatteryEmpty.dc.html -- what the panel holds after a critical shutdown.
-  // APPENDED for the reason ReaderMenu, Typography, Peek and BookEnd were: the
-  // session record stores a screen by NAME (session_record.h), so an insertion
-  // could not silently become another screen, but appending also leaves every
-  // existing ordinal where it was.
+  // APPENDED after BookError rather than before it: BookError had already landed on
+  // main when this screen merged, and re-ordering a member that has shipped moves
+  // ordinals for nothing. The record stores a NAME, so neither order can silently
+  // become another screen.
   //
   // PAINTED DIRECTLY AND NEVER PUSHED, on SleepScreen's argument: the record names
   // the top of the stack, so pushing it would make the next wake restore INTO it --
   // press power, get "battery empty" back on a pack that has just been charged.
   //
-  // AND test_focus_restore.cpp's static_assert WILL NOT NOTICE THIS APPEND either.
-  // It compares the catalogue's length against a NAMED member, so appending
-  // satisfies it unchanged -- exactly as appending Typography and then BookEnd did.
-  // That is #42; the catalogue there is extended by hand. session_record.cpp's is
-  // tied to the enum's END and does fire, which is the difference between the two.
-  BatteryEmpty
+  // AND #42 IS FIXED, so this append was caught rather than waved through. Every
+  // bound that used to name a member by hand now names the Count sentinel below --
+  // session_record.cpp's table and decode loop, test_focus_restore.cpp's catalogue
+  // and assert, and test_session_record.cpp's two every-id walks. Appending this
+  // member failed all of them at once, which is the whole point: the guards that
+  // stayed quiet for Typography and then BookEnd cannot stay quiet for the next one.
+  BatteryEmpty,
+  // NOT A SCREEN. A bound, so a guard can name "one past the last member" without
+  // naming a member -- which is #42, and which had gone quiet twice by the time it
+  // was fixed: session_record.cpp spelled three bounds `<= ScreenId::Peek` and then
+  // `<= ScreenId::BookEnd`, and each append satisfied them unchanged while leaving
+  // the table short, so the new screen serialised as `home`.
+  //
+  // Nothing may give this a row, a name or a case. `sessionWireName` and
+  // `screenName` both refuse it, and the static_assert on kNames is what proves the
+  // table did not quietly grow one for it -- a sentinel that became serialisable
+  // would be a worse version of the bug this fixes.
+  Count
 };
 
 // A screen's name, for logs. Same reasoning as buttonName: a numeric ScreenId in
@@ -84,11 +100,11 @@ const char* screenName(ScreenId id);
 
 // What a screen asks the app to do after handling an event.
 //
-// FOUR OF THE KINDS ARE LATCHES, not instructions: `Sleep`, `Retry`, `Open` and
-// `Finish` each name something only the shell can do, so the screen asks, App
-// records the request, and the shell answers it on its next pass. (This line
-// called `Retry` "the odd one out" when it was the only one; `Open` and `Finish`
-// have since made it the pattern rather than the exception.)
+// FIVE OF THE KINDS ARE LATCHES, not instructions: `Sleep`, `Retry`, `Open`,
+// `Finish` and `Delete` each name something only the shell can do, so the screen
+// asks, App records the request, and the shell answers it on its next pass. (This
+// line called `Retry` "the odd one out" when it was the only one, and then said
+// FOUR; the count is what keeps going stale, so read the enum.)
 //
 // Storage is not core/'s -- the SD-missing
 // screen cannot mount a card, and spec 6 requires its button actually re-attempt
@@ -97,7 +113,9 @@ const char* screenName(ScreenId id);
 struct Action {
   // APPENDED, never inserted -- a Kind is compared, never stored, but appending
   // costs nothing and keeps every existing value where it was.
-  enum class Kind : uint8_t { None, Redraw, Push, Pop, PopTo, Sleep, Retry, Open, Finish };
+  enum class Kind : uint8_t {
+    None, Redraw, Push, Pop, PopTo, Replace, Sleep, Retry, Open, Finish, Delete
+  };
   Kind kind = Kind::None;
   ScreenId target = ScreenId::Home;  // meaningful for Push and PopTo
 
@@ -118,6 +136,23 @@ struct Action {
   // an id that is not there is a caller bug, and unwinding to nothing would take
   // the device down on the next paint.
   static Action popTo(ScreenId t) { return {Kind::PopTo, t}; }
+  // "Put `target` where I am" -- one screen leaves and one arrives, in one Action.
+  //
+  // ONE MODAL AT A TIME, AND A PUSH CANNOT EXPRESS IT. App::render draws EVERY
+  // overlay above the topmost non-overlay, so pushing one overlay from another
+  // leaves the asking screen's panel standing under the new one's veil, visible
+  // wherever the two panels differ in size. That is invisible between ItemActions
+  // and DeleteConfirm -- the confirmation is 380 wide against 340 and taller on
+  // both geometries, so it covers it completely, which is why the boards do not
+  // draw the actions panel behind it. It is NOT invisible under BookError, whose
+  // paragraph makes its panel TALLER than the confirmation's, so the error dialog
+  // stood out above and below the confirmation meant to replace it. Reported off
+  // the device.
+  //
+  // Two Actions cannot express it either, for Action::popTo's reason: a screen
+  // returns ONE Action, and a screen that followed a Pop with a Push of its own
+  // would be reaching into the stack.
+  static Action replace(ScreenId t) { return {Kind::Replace, t}; }
   static Action sleep() { return {Kind::Sleep, ScreenId::Home}; }
   static Action retry() { return {Kind::Retry, ScreenId::Home}; }
   // "Open the book I have selected." Shaped like Retry and for the same reason:
@@ -140,6 +175,12 @@ struct Action {
   // BookEnd means the open book, the item-actions overlay means the Library's
   // focused row. The shell resolves it the way handleOpen already resolves open().
   static Action finish() { return {Kind::Finish, ScreenId::Home}; }
+  // "Remove the book this confirmation names." A latch like Retry, Open and Finish,
+  // and for their reason: the card is the shell's. It carries no path for the reason
+  // Open carries none -- a std::string in every Action, returned by value from every
+  // gesture on every screen, to serve one. The shell reads the path off the screen
+  // that is still on top when the dispatch runs.
+  static Action del() { return {Kind::Delete, ScreenId::Home}; }
 };
 
 // The four hint slots are the four front buttons in hardware order (spec 4.0).
@@ -598,6 +639,23 @@ class App {
   bool finishRequested() const { return finish_; }
   void clearFinishRequest() { finish_ = false; }
 
+  // The user confirmed a delete. The shell's job, in this order:
+  //
+  //   1. clearDeleteRequest(), so a failed removal does not re-fire forever;
+  //   2. read the path off the DeleteConfirm screen -- WHILE IT IS STILL ON TOP,
+  //      because the dispatch that follows pops it and after that there is no screen
+  //      left to ask. Contents' chosenSpine() has exactly this shape;
+  //   3. fs.remove(path), keeping SD traffic off the display bus;
+  //   4. if a Library exists, rescan() it; and set gHomeStale AND gLibraryStale,
+  //      separately, because each is consumed when its own screen is reachable.
+  //
+  // THE RESULT IS NOT BRANCHED ON. FileSystem::remove reports the END STATE, so a
+  // false means the file is still there -- and the list the reader lands on already
+  // says which it was. An error panel would be a screen with no board saying
+  // something the Library already shows.
+  bool deleteRequested() const { return delete_; }
+  void clearDeleteRequest() { delete_ = false; }
+
   ButtonMask longPressable() const { return top().longPressable(); }
   ButtonMask autoRepeat() const { return top().autoRepeat(); }
 
@@ -634,6 +692,7 @@ class App {
   bool retry_ = false;
   bool open_ = false;
   bool finish_ = false;
+  bool delete_ = false;
   // Mutable because render() is const: painting does not change the app, but it
   // does change what is on glass, and this is what remembers that. The
   // alternative -- a non-const render() -- would make every const App& in the

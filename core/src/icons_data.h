@@ -705,8 +705,8 @@ inline constexpr uint8_t kCheckBits[] = {
     0x00, 0x00, 0x24, 0x00, 0x00, 0x00, 0x00,
 };
 
-// warning: a warning triangle: the low-battery banner's mark
-// design/LowBattery.dc.html:157, viewBox "0 0 18 16", drawn 32x28  (authored in white; re-coloured)
+// warning: a warning triangle: the corrupt-book dialog and low-battery mark
+// design/BookError.dc.html:109, viewBox "0 0 18 16", drawn 32x28
 // coverage levels 0/1/2/3: 558/75/69/194 px
 inline constexpr int kWarningW = 32;
 inline constexpr int kWarningH = 28;

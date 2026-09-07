@@ -7,6 +7,7 @@
 // ordinal (2C-2 inserted three screens into the middle of ScreenId and silently
 // renamed every stored record), and an unrecognised name is "no session" rather
 // than a best-effort decode -- nothing here casts an integer into a ScreenId.
+#include <set>
 #include <string>
 #include <vector>
 
@@ -92,8 +93,13 @@ TEST_CASE("every screen in the catalogue has a wire name, and they are all disti
   // A screen with no name cannot be stored, which is a defined outcome -- but it
   // must be a deliberate one. This is the check that makes forgetting a row show
   // up here rather than as a screen that quietly never restores.
+  //
+  // NAMES THE Count SENTINEL, NOT A MEMBER. This walk said `<= ScreenId::Peek`,
+  // then `<= ScreenId::BookEnd`, then `<= ScreenId::BatteryEmpty` -- each append
+  // left it one screen short and nothing said so, which is #42. A bound one past
+  // the last member cannot be left behind by an append.
   std::vector<std::string> names;
-  for (int i = 0; i <= static_cast<int>(ScreenId::BatteryEmpty); ++i) {
+  for (int i = 0; i < static_cast<int>(ScreenId::Count); ++i) {
     const ScreenId id = static_cast<ScreenId>(i);
     const char* n = sessionWireName(id);
     REQUIRE(n != nullptr);
@@ -140,10 +146,11 @@ TEST_CASE("every ScreenId round-trips to ITSELF") {
   // as itself. That is what made a second copy of the collision loop a second copy
   // rather than a second check.
   //
-  // AND "THE ENUM'S LAST MEMBER" IS SPELLED BY HAND, so appending BatteryEmpty left
-  // both walks one screen short again and nothing said so. Same #42 instance as the
-  // two static_asserts; advanced by hand for the same reason.
-  for (int i = 0; i <= static_cast<int>(ScreenId::BatteryEmpty); ++i) {
+  // AND IT NAMES THE Count SENTINEL NOW, not a member. Both walks in this file were
+  // spelled by hand and both went quiet on every append -- Peek, then BookEnd, then
+  // BatteryEmpty. That was #42, and the sentinel is its general fix: a bound one past
+  // the last member cannot be satisfied unchanged by adding a screen.
+  for (int i = 0; i < static_cast<int>(ScreenId::Count); ++i) {
     const ScreenId id = static_cast<ScreenId>(i);
     const char* n = sessionWireName(id);
     REQUIRE(n != nullptr);
@@ -155,4 +162,27 @@ TEST_CASE("every ScreenId round-trips to ITSELF") {
     INFO("id " << i << " wire name '" << std::string(n) << "'");
     CHECK(out[0].screen == id);
   }
+}
+
+// EVERY SCREEN, NOT EVERY SCREEN SOMEBODY REMEMBERED. session_record.cpp's table and
+// switch have twice been left short by an append -- Typography, then BookEnd -- and
+// each time the new screen fell through to `return kNames[0]` and serialised as
+// `home`, so a reader idle-sleeping on it woke on Home with no failing test and no log
+// line. A static_assert on the table's LENGTH cannot see that, because the bound it
+// compares against is a hand-named member that the append does not move.
+//
+// This walks the enum by ORDINAL up to the Count sentinel, so it cannot be left short.
+TEST_CASE("every ScreenId has its own wire name") {
+  std::set<std::string> seen;
+  for (int i = 0; i < static_cast<int>(reader::ScreenId::Count); ++i) {
+    const reader::ScreenId id = static_cast<reader::ScreenId>(i);
+    const char* n = reader::sessionWireName(id);
+    REQUIRE(n != nullptr);
+    CAPTURE(i);
+    CAPTURE(n);
+    // Distinct: a screen that fell through to kNames[0] collides with Home, and a
+    // collision is exactly what the fall-through produces.
+    CHECK(seen.insert(n).second);
+  }
+  CHECK(seen.size() == static_cast<size_t>(reader::ScreenId::Count));
 }

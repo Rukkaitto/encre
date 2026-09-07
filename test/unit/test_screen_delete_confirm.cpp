@@ -1,16 +1,16 @@
 #include <array>
+#include <memory>
 #include <string>
 
 #include "doctest.h"
-#include "fake_fs.h"
 #include "golden.h"
 #include "library_app.h"
 #include "ramp.h"
 #include "reader/app.h"
 #include "reader/components.h"
 #include "reader/framebuffer.h"
+#include "reader/gesture.h"
 #include "reader/screen_delete_confirm.h"
-#include "reader/screen_library.h"
 #include "reader/screens.h"
 #include "reader/theme_quiet.h"
 
@@ -66,7 +66,7 @@ TEST_CASE("the delete confirmation names the book, and starts on CANCEL") {
   CHECK(app.app.depth() == 4);  // Home, Library, actions, confirm
 }
 
-TEST_CASE("cancelling leaves the actions panel up; confirming returns to the Library") {
+TEST_CASE("cancelling leaves the actions panel up; confirming latches the delete") {
   Ramp r;
   reader::QuietTheme theme;
   {
@@ -86,12 +86,14 @@ TEST_CASE("cancelling leaves the actions panel up; confirming returns to the Lib
     libapp::LibraryApp app = confirmOver(theme, r.fonts, 800);
     app.app.dispatch(kDown);  // onto DELETE
     app.app.dispatch(kConfirm);
-    // BOTH overlays go: the actions panel was acting on a book that no longer
-    // exists. One Action, one screen change, however deep the flow was.
-    CHECK(app.app.top().id() == ScreenId::Library);
-    CHECK(app.app.depth() == 2);
-    CHECK(app.app.dirty());
-    CHECK(app.app.transition());
+    // LATCHED, and the stack is left exactly where it was. The removal's
+    // consequences -- forgetCardFacts, the Library's rescan, gHomeStale and
+    // gLibraryStale -- are all the shell's, and core/ has no filesystem, so this
+    // is shaped like Retry, Open and Finish. The shell pops with
+    // popTo(facts().returnTo) once the file is gone; nothing here does.
+    CHECK(app.app.deleteRequested());
+    CHECK(app.app.top().id() == ScreenId::DeleteConfirm);
+    CHECK(app.app.depth() == 4);
   }
 }
 
@@ -112,40 +114,90 @@ TEST_CASE("the confirmation's focus is two rows, wrapping, and it binds no hold"
   CHECK(confirm.onEvent(kHold).kind == Action::Kind::None);
 }
 
-TEST_CASE("confirming deletes the file, keeps reading progress, and rescans") {
+TEST_CASE("the confirmation names the book from its facts, not from a Library") {
+  reader::DeleteConfirmScreen s(
+      {"/books/dubliners.epub", "Dubliners", reader::ScreenId::Library});
+  // ADJACENT LITERALS, not one: a C++ hex escape is UNBOUNDED, so
+  // "\x9CDUBLINERS" parses \x9CD as a single escape. clang refuses it and the
+  // ESP32's GCC would have accepted it and emitted the wrong byte. This project
+  // has recorded the same trap once already, on the sleep screen's middle dot.
+  CHECK(s.vm().title == "DELETE \xE2\x80\x9C" "DUBLINERS" "\xE2\x80\x9D?");
+  CHECK(s.facts().path == "/books/dubliners.epub");
+}
+
+TEST_CASE("confirming latches the delete rather than doing it") {
+  // The removal is the SHELL's: forgetCardFacts, the Library's rescan, gHomeStale
+  // and gLibraryStale all live there, and core/ has no filesystem. Shaped like
+  // Open/Retry/Finish for that reason.
+  reader::DeleteConfirmScreen s(
+      {"/books/dubliners.epub", "Dubliners", reader::ScreenId::Library});
+  REQUIRE(s.onGesture({reader::Gesture::Next}).kind != reader::Action::Kind::None);
+  REQUIRE(s.focus() == 1);
+  const reader::Action a = s.onGesture({reader::Gesture::Activate});
+  CHECK(a.kind == reader::Action::Kind::Delete);
+}
+
+TEST_CASE("the app latches a delete request") {
   Ramp r;
   reader::QuietTheme theme;
-  FakeFileSystem fs;
-  fs.mkdirs("/books");
-  fs.writeAll("/books/Dubliners.epub", "d");
-  fs.writeAll("/books/Middlemarch.epub", "m");
-  // The one place per-book state would live. Spec 4.0: a delete "never erases
-  // reading progress" -- a book that comes back should still know where you were.
-  fs.writeAll("/.reader/state/Middlemarch.json", "{\"page\":78}");
+  libapp::LibraryApp app = confirmOver(theme, r.fonts, 800);
+  CHECK_FALSE(app.app.deleteRequested());
+  app.app.dispatch(kDown);  // onto DELETE
+  app.app.dispatch(kConfirm);
+  CHECK(app.app.deleteRequested());
+  app.app.clearDeleteRequest();
+  CHECK_FALSE(app.app.deleteRequested());
+}
 
-  reader::LibraryScreen lib(fs, "/books");
-  lib.setVisibleRows(theme.libraryVisibleRows(800, r.fonts));
-  lib.onEvent(kDown);  // onto Middlemarch, the last row
-  REQUIRE(lib.focus() == 1);
-  REQUIRE(lib.focusedItem()->entry.name == "Middlemarch.epub");
+TEST_CASE("where a completed delete returns to comes from the facts") {
+  // The whole reason for Facts: BookError over Home's CONTINUE has no Library.
+  CHECK(reader::DeleteConfirmScreen({"/b/x.epub", "X", reader::ScreenId::Home})
+            .facts().returnTo == reader::ScreenId::Home);
+  // ...and the actions panel's route still lands on the Library, which is the
+  // default and what the factory's Library fallback fills in.
+  CHECK(reader::DeleteConfirmScreen({"/b/x.epub", "X"}).facts().returnTo ==
+        reader::ScreenId::Library);
+}
 
-  reader::DeleteConfirmScreen confirm(lib);
-  CHECK(confirm.vm().title.find("MIDDLEMARCH") != std::string::npos);
-  confirm.onEvent(kDown);  // onto DELETE
-  const Action a = confirm.onEvent(kConfirm);
-  CHECK(a.kind == Action::Kind::PopTo);
-  CHECK(a.target == ScreenId::Library);
+TEST_CASE("the factory fills the facts from the Library's focused row") {
+  // The fallback the simulator and the goldens take. It answers BOTH facts from
+  // the row, so the caption and the path agree about which book this is.
+  Ramp r;
+  reader::QuietTheme theme;
+  libapp::LibraryApp app = confirmOver(theme, r.fonts, 800);
+  const auto& confirm = static_cast<const reader::DeleteConfirmScreen&>(app.app.top());
+  CHECK(confirm.facts().displayName == "Dubliners");
+  CHECK(confirm.facts().path == "/books/Dubliners.epub");
+  // ...and it is the LIBRARY's spelling of that path, not a second one. The
+  // factory built the join by hand for one release; join() has a root-is-"/"
+  // case that is easy to get subtly wrong, and a wrong path here is a delete
+  // aimed at the wrong file.
+  CHECK(confirm.facts().path == app.library().focusedPath());
+  CHECK(confirm.facts().returnTo == ScreenId::Library);
+}
 
-  CHECK_FALSE(fs.exists("/books/Middlemarch.epub"));
-  // The state file is untouched, and so is the rest of the card.
-  CHECK(fs.exists("/.reader/state/Middlemarch.json"));
-  CHECK(fs.exists("/books/Dubliners.epub"));
-  // The list was re-read and the focus pulled back into range rather than left
-  // one past the end, which is what would index off the vector on the next paint.
-  CHECK(lib.itemCount() == 1);
-  CHECK(lib.focus() == 0);
-  CHECK(lib.vm().rows.size() == 1);
-  CHECK(lib.vm().rows[0].title == "Dubliners");
+TEST_CASE("the factory builds a confirmation from primed facts, with NO Library at all") {
+  // THE WHOLE REASON FOR FACTS, and the case the stale guard would have eaten.
+  // BookError's `DELETE FILE...` is raised over Home's CONTINUE as well as over a
+  // Library row, and Home has no Library under it -- so this factory has never
+  // built one and library() is null. A `library_ == nullptr` guard left above the
+  // facts check refuses here, silently, which is exactly the defect recorded on
+  // the BookDetails case: the screen stays refused for the very reason it was
+  // meant to stop being refused.
+  reader::DemoScreenFactory factory;
+  REQUIRE(factory.library() == nullptr);
+  factory.setDeleteFacts({"/books/dubliners.epub", "dubliners.epub", ScreenId::Home});
+  std::unique_ptr<reader::Screen> s = factory.create(ScreenId::DeleteConfirm);
+  REQUIRE(s != nullptr);
+  const auto& confirm = static_cast<const reader::DeleteConfirmScreen&>(*s);
+  CHECK(confirm.facts().path == "/books/dubliners.epub");
+  CHECK(confirm.facts().returnTo == ScreenId::Home);
+  CHECK(confirm.vm().title == "DELETE \xE2\x80\x9C" "DUBLINERS.EPUB" "\xE2\x80\x9D?");
+
+  // And clearing puts it back on the Library fallback -- which, with no Library,
+  // is a refusal rather than a substitution.
+  factory.clearDeleteFacts();
+  CHECK(factory.create(ScreenId::DeleteConfirm) == nullptr);
 }
 
 TEST_CASE("the confirmation matches its golden at both geometries") {

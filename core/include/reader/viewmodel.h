@@ -225,6 +225,27 @@ struct DeleteConfirmViewModel {
   std::array<bool, 4> holds{};
 };
 
+// The corrupt-book dialog (design/BookError.dc.html, and
+// design/BookErrorUnreadable.dc.html for the refusal that is not damage).
+//
+// Semantic content only. Which of the two sentences is in `message` is decided by
+// the screen from a bounded BookErrorReason -- never by the theme, which is layout,
+// and never from openBook's `why` string, which is developer English
+// ("the spine names no chapters"), unstyled and unbounded, and which no board has a
+// slot for. The reason still goes to the serial log, where it is actionable.
+struct BookErrorViewModel {
+  std::string title;    // the caption: the board's fixed `CAN'T OPEN FILE`
+  std::string message;  // the paragraph, with the file's name in it
+  std::string okLabel;
+  std::string deleteLabel;
+  // 0 = OK, 1 = delete, in the board's own top-to-bottom order. Spelled exactly as
+  // DeleteConfirmViewModel::focusedAction because it is the same fact, and one rule
+  // should have one spelling.
+  int focusedAction = 0;
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
 // Book details (design/BookDetails.dc.html) -- a full screen, NOT an overlay.
 //
 // Its board has no veil and no panel: it has its own header band and its own hint

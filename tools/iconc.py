@@ -219,19 +219,37 @@ ICONS = {
         "source": "design/BookEnd.dc.html",
         "match": "M1 6l5 5L15 1",
     },
-    # THE WARNING TRIANGLE, 32x28 on design/LowBattery.dc.html and the only mark
-    # this firmware draws inside an inverted band. Authored WHITE on the board, as
-    # kForward is, because that is the ink it is drawn in -- the generator reads
-    # coverage, not colour, so this is about the board being honest rather than
-    # about the bitmap.
+    # THE WARNING TRIANGLE, 32x28, and THREE BOARDS DRAW IT -- BookError.dc.html,
+    # BookErrorUnreadable.dc.html and LowBattery.dc.html. It arrived twice, on two
+    # branches at once (the corrupt-book dialog and the low-battery banner), each
+    # adding a `warning` entry naming its own board. ICONS is a DICT, so keeping
+    # both would have let the second silently overwrite the first rather than
+    # failing -- one entry is the resolution, not a merge of two.
     #
-    # The match keys on the triangle's own outline. `stroke-width="1.6"` is on
-    # both of the mark's paths and identifies neither of them; the closed
-    # `M9 1 17 15H1z` appears once on the board and nowhere else in the set.
+    # ONE BITMAP SERVES ALL THREE, and that is a fact about the generator rather
+    # than a coincidence: the three svgs are geometrically identical -- same
+    # viewBox, same three shapes, same 1.6 stroke -- and differ only in COLOUR,
+    # #000000 on the two dialogs against #ffffff on the banner, which draws it
+    # inside an inverted band. extract() re-colours an all-white mark to black
+    # because the bitmap is coverage and reader::Ink picks the colour at draw
+    # time, so the white authoring rasterises to the same bytes. The banner's
+    # board is honest about the ink it is drawn in; it is not a second mark.
+    #
+    # `source` NAMES BookError.dc.html AND THE CHOICE IS ARBITRARY between the
+    # three -- the match `M9 1 17 15H1z` is on all of them, so `source` is the
+    # second line of defence kBook/kBookLarge and kBattery/kBatteryCharging need,
+    # not a statement that this board owns the design. The cost is the one shared
+    # icons always have: editing the triangle on LowBattery.dc.html alone would
+    # not reach the generator. Change it on all three or on none.
+    #
+    # THREE DIAGONALS, which is the shape Mono thresholding treats worst:
+    # CLAUDE.md records kChevron coming out a notch lighter because its stroke is
+    # mostly coverage-1 pixels. At 32x28 with a 1.6 stroke this should hold, but
+    # that is an argument and only the panel can settle it.
     "warning": {
         "symbol": "kWarning",
-        "note": "a warning triangle: the low-battery banner's mark",
-        "source": "design/LowBattery.dc.html",
+        "note": "a warning triangle: the corrupt-book dialog and low-battery mark",
+        "source": "design/BookError.dc.html",
         "match": "M9 1 17 15H1z",
     },
 }

@@ -47,6 +47,31 @@ TEST_CASE("the factory refuses a BookEnd nothing primed") {
   CHECK(f.create(ScreenId::BookEnd) == nullptr);
 }
 
+TEST_CASE("the factory refuses a BookError nothing primed") {
+  // THE SAME RULE, and the reason is sharper here: this dialog NAMES A FILE. A
+  // substituted one would tell the reader a book they did not try to open is damaged,
+  // and its `DELETE FILE...` slab would then offer to remove that book. A refused
+  // push leaves the parent standing -- the Library, or Home on the CONTINUE path --
+  // which is wrong in a way the reader can see through, and the shell logs why.
+  //
+  // The refusal was exercised only indirectly, through the simulator's own guard on
+  // an unprimed push. This asks the factory.
+  DemoScreenFactory f;
+  CHECK(f.create(ScreenId::BookError) == nullptr);
+  // ...and it is the PRIMING that lifts it, not the mere existence of a demo: the
+  // simulator has to ask for the board's content by name, exactly as setBookEndDemo
+  // and setReaderDemo are asked for.
+  f.setBookErrorFacts(demoBookErrorFacts());
+  CHECK(f.create(ScreenId::BookError) != nullptr);
+  // An EMPTY display name is representable and does not mean "nothing primed it",
+  // which is why the factory keeps its own flag rather than inferring one from the
+  // facts. Clearing is the only thing that puts the refusal back.
+  f.setBookErrorFacts({});
+  CHECK(f.create(ScreenId::BookError) != nullptr);
+  f.clearBookErrorFacts();
+  CHECK(f.create(ScreenId::BookError) == nullptr);
+}
+
 TEST_CASE("a primed BookEnd states the facts it was given") {
   DemoScreenFactory f;
   BookEndScreen::Facts facts;

@@ -14,6 +14,7 @@ struct BatteryEmptyViewModel;
 struct LibraryViewModel;
 struct ItemActionsViewModel;
 struct DeleteConfirmViewModel;
+struct BookErrorViewModel;
 struct BookDetailsViewModel;
 struct SettingsViewModel;
 struct SleepViewModel;
@@ -111,6 +112,16 @@ class Theme {
   virtual void renderDeleteConfirm(Framebuffer& fb, const FontSet& fonts,
                                    const DeleteConfirmViewModel& vm,
                                    Plane plane = Plane::Bw) = 0;
+
+  // The corrupt-book dialog, an overlay like the confirmation and drawing over a
+  // parent App::render has painted -- so this must NOT clear the framebuffer.
+  //
+  // Its own typed method rather than a shared "panel with a paragraph and two
+  // slabs" surface: it draws a MARK the confirmation does not, and a shared
+  // abstraction would have to be told which board it was drawing. That is the same
+  // reasoning renderSdMissing and renderBookEnd each carry.
+  virtual void renderBookError(Framebuffer& fb, const FontSet& fonts,
+                               const BookErrorViewModel& vm, Plane plane = Plane::Bw) = 0;
 
   // Book details, which is a whole screen and not an overlay -- so it clears the
   // framebuffer and draws its own hint bar like any other screen.

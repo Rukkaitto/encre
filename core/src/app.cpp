@@ -29,7 +29,11 @@ const char* screenName(ScreenId id) {
     // Kebab, as ITEM-ACTIONS and BOOK-DETAILS are. A log label, free to be
     // reworded; the session record's spelling is a storage format and is not this.
     case ScreenId::BookEnd: return "BOOK-END";
+    case ScreenId::BookError: return "BOOK-ERROR";
     case ScreenId::BatteryEmpty: return "BATTERY-EMPTY";
+    // NOT A SCREEN -- see ScreenId::Count's own comment. Refused explicitly so this
+    // switch stays exhaustive, the same reason session_record.cpp's does.
+    case ScreenId::Count: return "?";
   }
   return "?";
 }
@@ -215,6 +219,24 @@ void App::dispatch(const InputEvent& ev) {
       dirty_ = true;
       transition_ = true;
       break;
+    case Action::Kind::Replace: {
+      // PUSHED BEFORE THE OLD ONE IS REMOVED, so a factory that refuses leaves the
+      // stack exactly as it was. Popping first would lose the screen that asked and
+      // put the reader back on the list with nothing to show for the press -- the
+      // same "wrong in a way the reader cannot see through" the factory's refusals
+      // exist to avoid.
+      const size_t before = stack_.size();
+      if (!pushScreen(a.target)) break;
+      // The root is the app: with only a root there is nothing beneath the new
+      // screen to remove, and erasing it would leave nothing to render and nothing
+      // to receive the next event. That degrades to a plain Push, which is the right
+      // answer for a caller that is somehow the root.
+      if (before >= 2) stack_.erase(stack_.end() - 2);
+      // pushScreen already set dirty_ and transition_. A replace IS a screen change,
+      // so it takes the transition's full refresh and is never a partial repaint --
+      // which it must not be, since the frame beneath it is about to be wrong.
+      break;
+    }
     case Action::Kind::Sleep:
       sleep_ = true;
       break;
@@ -235,6 +257,13 @@ void App::dispatch(const InputEvent& ev) {
       // is marked dirty -- what the write changes on glass is the shell's to decide,
       // and it is usually a screen change rather than a repaint of this one.
       finish_ = true;
+      break;
+    case Action::Kind::Delete:
+      // Latched for the reason Retry, Open and Finish are: the card is the shell's.
+      // Nothing is marked dirty and NOTHING IS POPPED -- the shell pops with
+      // popTo(facts().returnTo) after the file is gone, because where a completed
+      // delete lands is a fact about how the confirmation was reached.
+      delete_ = true;
       break;
   }
 }

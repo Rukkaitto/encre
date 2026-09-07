@@ -155,6 +155,7 @@ FLOW_SCREENS = [
     ("delete_confirm",  "DeleteConfirm.dc.html",  "Delete confirm"),
     ("book_details",    "BookDetails.dc.html",    "Book details"),
     ("book_error",      "BookError.dc.html",      "Book error"),
+    ("book_error_unreadable", "BookErrorUnreadable.dc.html", "Book error (unreadable)"),
     ("typography",      "Typography.dc.html",     "Typography"),
     ("contents",        "Contents.dc.html",       "Contents"),
     # Peek and return (3D). `peek` is the overlay -- book text over the veiled page

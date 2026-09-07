@@ -89,6 +89,40 @@ look for: diagonal streaking, or ink displaced along one axis.
       hard-thresholded for those frames — that is the declared trade, not a
       regression.
 
+## 3b. The corrupt-book dialog (#5)
+
+**Nothing below is executed by the desktop suite** — `shell/` has no harness, so
+the whole of the raise path and the delete latch are unverified until this runs.
+
+Prepare a card with a **truncated `.epub`** (copy a real one and cut it short —
+`head -c 40000 book.epub > broken.epub`). That is the reproducible case; a
+zero-byte file is not, since it fails differently.
+
+- [ ] **3b.1** Confirm on the broken book **from the Library**. The dialog
+      appears over the veiled Library, saying the file "appears to be damaged".
+      Before this, the press produced no visible change at all.
+- [ ] **3b.2** The **warning triangle** still reads as a warning mark. It is
+      three diagonals, and `Mono` thresholding treats a thin diagonal worst —
+      `kChevron` is the recorded precedent for coming out a notch lighter.
+- [ ] **3b.3** `OK` and `Back` both close it, and the Library is exactly as it
+      was.
+- [ ] **3b.4** **The veil over HOME.** Get the dialog from Home's CONTINUE (make
+      `last.json` name the broken book). **No board draws this** — every overlay
+      board in the repo veils a list, and Home is the first parent with a 67px
+      numeral and a dither block under the stipple.
+- [ ] **3b.5** **`DELETE FILE…` from Home's CONTINUE.** This is the whole reason
+      `DeleteConfirmScreen` took `Facts`, and it was a dead button until the
+      shell primed them. The confirmation must name the right book, and
+      confirming must land on **Home**, not the Library.
+- [ ] **3b.6** The stale-facts sequence: fail to open a book, dismiss with `OK`,
+      then `Delete…` a **different** book from the Library's actions panel. The
+      confirmation must name the book you just long-pressed, **not** the corrupt
+      one. Without `clearDeleteFacts()` it named the corrupt one and removed it.
+- [ ] **3b.7** Pull the card between a Library listing and a press, if you can
+      catch it. The dialog must say the file **could not be read**, never that it
+      is damaged — `pollCardPresence` takes 2–25 s to notice, and that window is
+      the whole reason there are two copy shapes.
+
 ## 4. Sleep and wake — **[unplugged]**
 
 The decisive test needs no logger, and attaching one invalidates it: deep sleep

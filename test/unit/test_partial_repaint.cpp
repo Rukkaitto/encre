@@ -25,6 +25,7 @@
 #include "reader/app.h"
 #include "reader/framebuffer.h"
 #include "reader/screen_book_details.h"
+#include "reader/screen_book_error.h"
 #include "reader/theme_quiet.h"
 
 using reader::App;
@@ -224,6 +225,57 @@ TEST_CASE("every focus move in the delete confirmation repaints identically") {
           CHECK_MESSAGE(o.footprintA == o.footprintB, where);
           CHECK_MESSAGE(o.allowed, where << ": refused");
           CHECK_MESSAGE(o.identical, where << ": " << o.differing << " pixels differ");
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("every focus move in the corrupt-book dialog repaints identically") {
+  // BookErrorScreen::paintFootprint() is a constant, and its header says so at
+  // length; the spec says the constant is "pinned by test_partial_repaint.cpp" and
+  // for a while it was not -- this file covered ItemActions and DeleteConfirm only.
+  // ItemActions is the recorded precedent for a footprint that LOOKED constant and
+  // was not, by one pixel: its panel's height is the sum of its rows and the focused
+  // row loses its rule, so focusing the last row makes the panel a pixel taller and,
+  // being centred, a pixel higher. Nothing about this screen's shape is more obvious
+  // than that was, so it is asserted rather than argued.
+  //
+  // BOTH COPY SHAPES, because they wrap to different heights and the header rests on
+  // that not mattering: a push is never a partial repaint, so two INSTANCES are never
+  // compared against one frame record, and the token only has to hold across focus
+  // moves within one screen's life. Walking both is what says the paragraph's height
+  // is fixed once the screen exists rather than merely equal between the two.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  for (const Geometry& g : kGeometries) {
+    for (const Rotation rot : {Rotation::None, Rotation::Ccw}) {
+      for (const bool unreadable : {false, true}) {
+        for (int a = 0; a < 2; ++a) {
+          for (int b = 0; b < 2; ++b) {
+            if (a == b) continue;
+            libapp::LibraryApp la(theme, ramp.fonts, g.h, 5);
+            // NOT reached by pressing: no gesture on a Library row raises this
+            // dialog. The shell raises it when an open refuses, so priming the
+            // factory and pushing is the honest model of what the device does --
+            // the simulator's own route.
+            la.factory.setBookErrorFacts(unreadable ? reader::demoBookErrorUnreadableFacts()
+                                                    : reader::demoBookErrorFacts());
+            REQUIRE(la.app.pushScreen(ScreenId::BookError));
+            REQUIRE(la.app.top().id() == ScreenId::BookError);
+            REQUIRE(la.app.top().isOverlay());
+            // Home, Library, dialog. Shallower than the confirmation's four,
+            // because this one is pushed over the list rather than over a panel.
+            REQUIRE(la.app.depth() == 3);
+            const Outcome o = focusMove(la.app, ramp.fonts, theme, g, rot, Plane::Bw, a, b);
+            const std::string where = std::string(g.what) + " rot=" +
+                                      (rot == Rotation::Ccw ? "Ccw" : "None") +
+                                      (unreadable ? " unreadable" : " damaged") + " focus " +
+                                      std::to_string(a) + "->" + std::to_string(b);
+            CHECK_MESSAGE(o.footprintA == o.footprintB, where);
+            CHECK_MESSAGE(o.allowed, where << ": refused");
+            CHECK_MESSAGE(o.identical, where << ": " << o.differing << " pixels differ");
+          }
         }
       }
     }
