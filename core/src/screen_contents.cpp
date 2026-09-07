@@ -10,10 +10,15 @@ namespace {
 
 // Does this table of contents have a hierarchy, or is it one flat list?
 //
-// Measured: two of four real books are flat and one is three levels deep. So this is
-// a property of the BOOK, decided once, and not a rule applied per entry -- treating
+// A property of the BOOK, decided once, and not a rule applied per entry -- treating
 // depth 1 as a header unconditionally would render a flat book as nothing but headers,
 // with no focusable row and nothing to select.
+//
+// Measured over ~/.cache/encre-corpus rather than over the four books this comment
+// used to cite: of 225 real EPUBs, 19 carry no usable NCX at all, 103 are FLAT and 103
+// are sectioned -- an even split, so neither shape is the edge case. It answers only
+// "are there headers at all"; WHICH entries are headers is `isHeaderAt`, and keying
+// that on depth alone was issue #75.
 bool hasDeeperEntries(const std::vector<TocEntry>& toc) {
   for (const TocEntry& e : toc)
     if (e.depth > 1) return true;

@@ -49,6 +49,14 @@ namespace reader {
 // and two are flat. Flattening would have shown `PREFACE EN DEUX PARTIES` as a peer of
 // the two parts inside it, which is worse than either honest alternative.
 //
+// RE-MEASURED OVER THE WHOLE CORPUS for issue #75, because a design turned on how these
+// depths are distributed and four books is not a distribution. Of ~/.cache/encre-corpus'
+// 225 real EPUBs: 19 carry no usable NCX, 103 are FLAT and 103 are sectioned, and of the
+// sectioned ones 98 mix ENTRIES THAT GROUP OTHERS with top-level entries that group
+// nothing -- 1,635 such entries in all, and 9 of the 9 sectioned books on the user's own
+// shelf. `screen_contents.h` is where that matters: a depth is not by itself a level in
+// a hierarchy, and reading it as one made those 1,635 rows unreachable.
+//
 // The list stays LINEAR and each entry carries its `depth`, rather than becoming a
 // tree. A tree would need allocation per node and a traversal to draw, where the
 // screen wants "the Nth visible row" -- and a depth is all the board's indentation and
