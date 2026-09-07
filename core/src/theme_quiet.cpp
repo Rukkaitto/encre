@@ -1839,15 +1839,42 @@ void QuietTheme::renderContents(Framebuffer& fb, const FontSet& fonts,
   for (int i = 0; i < rows; ++i) {
     const ListRow& row = vm.rows[static_cast<size_t>(i)];
     if (row.isHeader) {
-      y += drawSectionHeader(fb, fonts, y, listW, upperLatin1(row.label), /*rule=*/i != 0, plane);
+      // NO RULE ON ANY HEADER HERE, AND THAT IS WHERE THIS SCREEN DIFFERS FROM ITS
+      // SETTINGS SIBLING -- which passes `i != 0` through this same primitive and gets
+      // the boards' positional first-versus-later line. `Contents.dc.html` gives
+      // NEITHER header a `border-top`, and `Settings.dc.html` gives every non-first one
+      // a `border-top: 2px`. The two boards genuinely differ and the difference is a
+      // design decision written down on the board: a Settings section is a change of
+      // SUBJECT and a divider says so, where a part of a book is a soft hierarchy over
+      // one continuous reading sequence, carried by the label's own 18/6 padding and
+      // tracked caps.
+      //
+      // AND THIS LIST SCROLLS. Settings' rule is positional because the header band's
+      // own 2px border is the separation at the top of the window; a header that ruled
+      // at all would make that a question this screen has to answer correctly at every
+      // scroll offset, for a line it wants nowhere. `false` has no offsets.
+      //
+      // WHAT THIS COST BEFORE IT WAS TRUE: `i != 0` here plus a row rule above it drew
+      // a 3px full-width line, and that band was 1,440 of 13,274 differing pixels at X4
+      // and 1,584 of 13,514 at X3 -- ~11% of the screen's whole mismatch (#81). The
+      // header being 2px shorter moves nothing below it, because `drawSectionHeader`
+      // returns the height it ACTUALLY drew; Settings shipped the other version of that
+      // bug once.
+      y += drawSectionHeader(fb, fonts, y, listW, upperLatin1(row.label), /*rule=*/false, plane);
       continue;
     }
     const bool focused = (i == vm.focusedRow);
     // THE LAST DRAWN ROW HAS NO RULE, which is renderLibrary's and renderSettings' rule
     // verbatim -- the list ends at the hint bar and a trailing hairline reads as a row
-    // that was cut off.
+    // that was cut off. AND NEITHER DOES THE LAST ROW OF A SECTION: with the header
+    // above drawing no line, a row rule there would be the only line between two
+    // sections and the board draws none -- `VI` and `VIII` both drop their
+    // `border-bottom`. The lookahead is here and the rule is `rowRuleFor`'s, because
+    // `ListRow` is this view model's type and the rule is every sectioned list's.
+    const bool nextIsHeader =
+        (i + 1 < rows) && vm.rows[static_cast<size_t>(i + 1)].isHeader;
     y += drawDetailRow(fb, fonts, y, row.label, row.value, focused,
-                       rowRuleFor(i, rows, focused), plane);
+                       rowRuleFor(i, rows, focused, nextIsHeader), plane);
   }
 
   Hint hints[4];
@@ -1962,9 +1989,15 @@ void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
     // verbatim (`i != rows - 1`): it leaves the list's bottom edge open rather
     // than hanging a hairline over the slack above the hint bar. Missing it left a
     // rule under `Sleep screen` that the board does not draw.
+    //
+    // The section-final term lives in `rowRuleFor` now rather than beside it here:
+    // `renderContents` is the second sectioned list and had none of it (#81), and a
+    // rule spelled once in a constexpr and once in a `&&` at a call site is the shape
+    // that drifts. What stays here is the one-line lookahead that ANSWERS it, because
+    // the row type is this view model's.
     const bool nextIsHeader =
         (i + 1 < rows) && vm.rows[static_cast<size_t>(i + 1)].isHeader;
-    if (rowRuleFor(i, rows, focused) && !nextIsHeader) {
+    if (rowRuleFor(i, rows, focused, nextIsHeader)) {
       fb.fillRect(0, y, fb.width() - inset, kSettingsRuleH, false);
       y += kSettingsRuleH;
     }

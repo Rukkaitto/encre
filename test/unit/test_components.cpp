@@ -2181,6 +2181,34 @@ TEST_CASE("rowRuleFor states the boards' positional rule") {
   CHECK_FALSE(reader::rowRuleFor(0, 1, false));  // a one-row list has no rule at all
 }
 
+TEST_CASE("rowRuleFor drops the rule under the LAST ROW OF A SECTION") {
+  // The third term, and it arrived one copy late (#81): `renderSettings` carried it
+  // hand-written as `rowRuleFor(...) && !nextIsHeader` and `renderContents` -- the
+  // second sectioned list -- had none of it, so a row's 1px rule ran straight into a
+  // header's 2px `border-top` and drew a 3px line where the board draws none.
+  //
+  // WHATEVER the next header itself draws is the line between the two sections; a row
+  // rule under it is a second one.
+  CHECK_FALSE(reader::rowRuleFor(0, 3, false, /*nextIsHeader=*/true));
+  CHECK_FALSE(reader::rowRuleFor(1, 3, false, /*nextIsHeader=*/true));
+  // ...and it does not RESTORE a rule the other two terms took away. Three
+  // independent reasons to draw nothing, none of them able to outvote another.
+  CHECK_FALSE(reader::rowRuleFor(1, 3, true, /*nextIsHeader=*/true));
+  CHECK_FALSE(reader::rowRuleFor(2, 3, false, /*nextIsHeader=*/true));
+
+  // THE DEFAULT IS THE HEADERLESS LIST'S ANSWER, and it is `false` by construction
+  // rather than by convenience: Library, Book details, both overlay panels and the
+  // reader menu hold view models that cannot produce a header, so every one of them
+  // must be byte-identical to the two-term rule. Asserted as an equivalence over the
+  // whole small space rather than as a handful of cases, which is the shape
+  // test_focus.cpp already uses to pin its gated walk to the ungated arithmetic.
+  for (int rows = 1; rows <= 6; ++rows)
+    for (int i = 0; i < rows; ++i)
+      for (int focused = 0; focused <= 1; ++focused)
+        CHECK(reader::rowRuleFor(i, rows, focused != 0) ==
+              reader::rowRuleFor(i, rows, focused != 0, /*nextIsHeader=*/false));
+}
+
 // --- buildHints ------------------------------------------------------------------
 
 TEST_CASE("buildHints gives a mark only to a slot with a label") {
