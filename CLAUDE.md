@@ -58,11 +58,15 @@ directory`, which names neither the submodule nor the fix) and caches the ~1 GB
 toolchain.
 
 **THE `compare` JOB IS A NARROW GATE AND IS NOT A FIDELITY CHECK.** It fails on
-two things: a board named in `compare-design.py` and absent from disk, and a
-screen the SIMULATOR KNOWS that will not render. It does **not** measure how
-close the render is -- the sheet still prints `ok` rather than a percentage,
-which is #41. A board with no screen behind it stays fine; that is nine of the
-32.
+three things: a board named in `compare-design.py` and absent from disk, a screen
+id named by **two** rows of those tables (#77 — it would be rendered and counted
+twice), and a screen the SIMULATOR KNOWS that will not render. It does **not**
+measure how close the render is -- the sheet still prints `ok` rather than a
+percentage, which is #41. A board with no screen behind it stays fine; that is
+**five of the 36** — measured, not inherited: a full run with the gate on reports
+`31/36 screens implemented` and exits 0 (Bookmarks, Boot, Home / missing book,
+Names, Names / empty). It read **37** before #77, and the extra row was the same
+board counted twice.
 
 **Wiring it at all needed the script to be able to fail.** `render_sim` returned
 a bare `None` for both "the simulator has never heard of this id" and "the
@@ -215,6 +219,44 @@ The list is checked against the disk up front now, so it fails in a second
 instead of after three minutes. **A check that reports on less than it
 claims is worse than no check, because it is trusted** — the same shape as the
 card probe that was answered from cache and kept reporting success.
+
+**`--only` TAKES A LIST, IN BOTH SPELLINGS: `--only home,reader` and
+`--only home --only reader` are the same run**, and the unrecognised-id error
+applies to **every** element, so an id's position cannot decide whether a typo is
+caught. The comma form is primary because it is the one that survives
+`make compare COMPARE_ARGS=...`, where `$(COMPARE_ARGS)` is expanded **unquoted**
+by make — a spelling needing shell quoting inside a make variable would be a worse
+tool. `action="append"` sits under it because **argparse's default for a plain
+option is to OVERWRITE**: `--only home --only library` kept only `library`,
+dropped `home` without a word, and printed a confident `1/1 screens implemented`.
+An **empty** `--only` (`--only ""`, `--only ,`) is an error too, because selecting
+nothing finds nothing missing and exits 0 on `0/0` — the same quiet pass reached by
+an empty argument instead of an unknown one. Issue #77 reported this against the
+COMMA form, which had worked since 2026-08-20; the repeated flag is where the
+defect actually was, and it produces the identical `1/1`.
+
+**AND THE SAME COUNT WAS INFLATED FROM THE OTHER SIDE, WHICH NOTHING HAD
+REPORTED: `reader_anchored` WAS LISTED TWICE.** Its board was added to
+`FLOW_SCREENS` design-first, then the implementation commit added a second row
+beside the other styled reader specimens — same id, same board, a **different
+label** — so every default `make compare` rendered that board four times instead
+of twice, showed the same screen twice under two names, and printed a denominator
+of **37 for the 36 screens that exist**. That is the exact mirror of the absent
+board that shrank the denominator: in both cases the ratio is over something other
+than the set of screens it claims to measure, and here **both halves moved
+together**, which is why no ratio ever looked wrong. The tables are checked for a
+repeated id up front now, over all three of them on every run rather than over the
+selection — a duplicate is an authoring mistake in the table and should not need
+the right `--only` to surface. It **errors rather than de-duplicating**, because
+the two rows carried different labels: there is a real question about which was
+meant, and this tool must not answer it by guessing.
+
+**THE SCRIPT HAS ITS OWN TESTS NOW** — `tools/test_compare_design.py`, plain
+`python3`, Chrome and the simulator stubbed out. They assert the **set and the
+count**, never a pixel, because that is where all six of these defects lived.
+**Deliberately NOT wired into `make test`**, which builds on a bare checkout with
+no Python and no submodule; so it is a test that has to be remembered, which is
+the honest cost of keeping the fast loop interpreter-free.
 
 ## Hardware facts
 
