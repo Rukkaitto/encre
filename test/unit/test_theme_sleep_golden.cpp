@@ -256,11 +256,20 @@ Box cardBox(const reader::Framebuffer& fb, int cardW) {
   return b;
 }
 
-// The topmost inked row below the card, which is the badge's top edge -- and the
-// bound the card may not reach. Taken from the frame rather than from drawBadge's
-// constants, which are private to components.cpp; renderSleep asks drawBadge itself.
-int badgeTopBelow(const reader::Framebuffer& fb, int below, int cardW) {
-  for (int y = below; y < fb.height(); ++y) {
+// The badge's top edge, taken from a render that has NO CARD -- the idle state,
+// which is this same screen with its content removed, so the badge is the same box
+// in the same place. The field's own dots are one pixel wide, so the badge's border
+// is the first long run on the frame.
+//
+// IT MUST NOT BE MEASURED RELATIVE TO THE CARD, and the first version of this file
+// did exactly that: "the topmost inked row below the card's bottom". The badge is
+// drawn FIRST now, so a card that overruns fills white across it -- and that search
+// then finds the REMAINS of a badge the card has already destroyed, its surviving
+// bottom border, and reports it as a badge the card stopped short of. Proved by
+// mutation: reserving the badge once instead of twice overruns it by 35 rows, and
+// the relative form passed all 24 assertions.
+int badgeTopOf(const reader::Framebuffer& fb) {
+  for (int y = 0; y < fb.height(); ++y) {
     int run = 0, best = 0;
     for (int x = 0; x < fb.width(); ++x) {
       if (!fb.getPixel(x, y)) {
@@ -270,8 +279,7 @@ int badgeTopBelow(const reader::Framebuffer& fb, int below, int cardW) {
         run = 0;
       }
     }
-    // The field's own dots are one pixel wide; the badge's border is a long run.
-    if (best > cardW / 4) return y;
+    if (best > 100) return y;
   }
   return fb.height();
 }
@@ -330,19 +338,35 @@ TEST_CASE("THE CARD NEVER REACHES THE BADGE, and the reserve is taken TWICE") {
   reader::SleepViewModel vm = sampleSleep();
   vm.title = std::string(255, 'W');  // the widest cap in the face, 255 of them
 
+  // The badge alone, which is the same box in the same place: design/SleepIdle.dc.html
+  // is this screen with its content removed, drawn by the same tail.
+  reader::SleepViewModel idle;
+  idle.nothingToContinue = true;
+  idle.note = vm.note;
+
   for (int i = 0; i < 2; ++i) {
     const int w = i == 0 ? 480 : 528;
     const int h = i == 0 ? 800 : 792;
-    reader::Framebuffer fb(w, h);
+    reader::Framebuffer bare(w, h), fb(w, h);
+    theme.renderSleep(bare, ramp.fonts, idle, reader::Plane::Bw, nullptr);
     theme.renderSleep(fb, ramp.fonts, vm, reader::Plane::Bw, nullptr);
+
+    const int badge = badgeTopOf(bare);
+    REQUIRE(badge < h);  // the badge really is down there to collide with
+
     const Box b = cardBox(fb, 400);
     // On the glass at all, both borders included.
     CHECK(b.top > 0);
     CHECK(b.bottom < h - 1);
-    // And clear of the badge, which is the bound that actually binds.
-    const int badge = badgeTopBelow(fb, b.bottom + 1, 400);
-    CHECK(badge < h);         // the badge really is down there to collide with
-    CHECK(b.bottom < badge);  // ...and the card stopped short of it
+    // ...and clear of the badge, which is the bound that actually binds.
+    CHECK(b.bottom < badge);
+
+    // THE BADGE IS INTACT, which is the assertion a mutant cannot slip past.
+    // "The card stopped above where the badge starts" can also be satisfied by a
+    // card that PAINTED OVER the badge and left only its bottom border behind,
+    // because the badge is drawn first. This says the badge's whole band is
+    // byte-identical to the render that has no card in it at all.
+    CHECK(golden::rowsIdentical(fb, bare, badge, h));
   }
 }
 
@@ -399,10 +423,36 @@ TEST_CASE("the wrapping-title specimen is OFF the wrap boundary") {
   const std::string shouted = reader::upperLatin1(longTitleSleep().title);
   reader::Prose p = reader::wrapProseLead(title, shouted, contentW, reader::pxToF26(46),
                                           reader::Tracking{}, reader::WordBreak::Anywhere);
-  REQUIRE(p.lineCount() == 3);
+  // THAT IT WRAPS AT ALL, and no more than that: pinning the exact line count here
+  // would pre-empt the clearance loop below, which is the thing this case exists to
+  // run. Proved by mutation -- putting the rejected specimen back made this REQUIRE
+  // fire on "4 == 3" and the clearance was never measured. The count is pinned where
+  // it belongs, by the card's growth above.
+  REQUIRE(p.lineCount() >= 2);
 
-  for (int i = 0; i + 1 < p.lineCount(); ++i) {
+  // A BREAK HAS TWO DIRECTIONS AND BOTH ARE CHECKED, which the first version of this
+  // case got wrong -- it measured one and passed the very specimen it was written to
+  // reject. A line sits on the wrap boundary if a small change to the face could make
+  // it either GAIN its next word or LOSE its last one:
+  //
+  //   gain -- the next word only just failed to fit, so a slightly NARROWER measure
+  //           pulls it up. That is the direction CLAUDE.md's rule names and the one
+  //           test_book_error_copy.cpp measures: by how much did the next word
+  //           overflow. Slack is the wrong metric for it, because a line with 15px
+  //           left over is safe when the next word is 130px wide and on a knife edge
+  //           when it is 14px.
+  //   lose -- the line itself only just fitted, so a slightly WIDER measure pushes
+  //           its last word down. Here slack IS the metric, and it is the direction
+  //           the rejected specimen failed on: "JEKYLL AND MR" measures 312 in a
+  //           312px column -- it fits by ZERO pixels -- while its next word
+  //           overflowed by more than 100, so a next-word check alone called it safe.
+  for (int i = 0; i < p.lineCount(); ++i) {
     const std::string_view line = p.lines[static_cast<size_t>(i)];
+    const int slack = contentW - title.measure(line, p.tracking);
+    CHECK_MESSAGE(slack >= 12, "line " << i << " (\"" << std::string(line) << "\") fits by "
+                                       << slack
+                                       << "px: a wider face would push its last word down");
+    if (i + 1 >= p.lineCount()) continue;
     const std::string_view next = p.lines[static_cast<size_t>(i + 1)];
     // EVERY BREAK HERE FALLS AT A SPACE, which is the premise of the measurement
     // below: `WordBreak::Anywhere` may split a word, and a split has no "next word"
@@ -412,9 +462,9 @@ TEST_CASE("the wrapping-title specimen is OFF the wrap boundary") {
     const std::string word(next.substr(0, sp == std::string_view::npos ? next.size() : sp));
     const std::string with = std::string(line) + " " + word;
     const int over = title.measure(with, p.tracking) - contentW;
-    CHECK_MESSAGE(over >= 12, "line " << i << " (\"" << std::string(line)
-                                      << "\") is within " << over
-                                      << "px of taking its next word: too close to the "
-                                         "wrap boundary for a specimen");
+    CHECK_MESSAGE(over >= 12, "line " << i << " (\"" << std::string(line) << "\") is within "
+                                      << over
+                                      << "px of taking its next word: a narrower face would "
+                                         "pull that word up");
   }
 }
