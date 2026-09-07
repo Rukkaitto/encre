@@ -22,7 +22,43 @@ namespace reader {
 // makes for an unread battery gauge (-1, not 0%), for a book with no reading
 // position (no demo substitute), and for the charging bolt that spends a refresh on
 // the unplug edge rather than staying wrong on glass.
-enum class BookErrorReason : uint8_t { Damaged, Unreadable };
+//
+// AND THERE IS A THIRD NOW, WHICH IS THE SAME ARGUMENT ARRIVING ONE REFUSAL LATER.
+// `openBook` can run out of memory: the open path grows five containers from numbers
+// a FILE states, and until the heap guards landed a `reserve` that could not allocate
+// was `abort()` with no message -- reported off an X3 as a book that crashed the
+// firmware and then opened normally on the second press, with a 232-book library
+// resident underneath and 13,696 bytes of heap left over a successful open.
+//
+// NEITHER EXISTING SHAPE MAY CARRY IT. `Damaged` says the bytes are not a book, and
+// they are; `Unreadable` says the card would not answer, and it did. The book is
+// fine and the device was momentarily short -- which is `CoverResult::OutOfMemory`'s
+// distinction, one screen over, and the same reason that enum has six values rather
+// than a bool. So it gets its own board (design/BookErrorMemory.dc.html) and its own
+// sentence.
+//
+// THE `DELETE FILE...` SLAB IS STILL DRAWN AND STILL ACTS, and that is the one thing
+// here worth arguing about: deleting a perfectly good book over a transient shortage
+// is not what the reader wants, and offering it is a nudge in the wrong direction.
+// It stays because the alternative is worse in a way this project has already paid
+// for -- a slab that is inert on one shape of a screen and live on the other two is
+// the `works only sometimes` trap, which is the recorded reason it is live on
+// `Unreadable` too. A row REMOVED on this shape alone would be a fourth board and a
+// panel whose height depends on which refusal it is reporting. Worth an owner's
+// decision rather than a silent one.
+enum class BookErrorReason : uint8_t { Damaged, Unreadable, OutOfMemory };
+
+// WHICH SHAPE `openBook`'s REASON IS, and it lives here rather than in the shell
+// because it is the whole of the mapping from developer English to the only
+// vocabulary the panel has -- and `shell/` has no test harness, which is where five
+// of this project's bugs have hidden. The shell had a bare `strcmp` against a
+// literal spelled twice; a third shape would have meant a second one beside it, and
+// a fourth that nobody remembered to add reads as "damaged" on a healthy file.
+//
+// `why` is `openBook`'s out-parameter. A null or empty string is `Damaged`, which is
+// the conservative answer: a refusal that would not say why is at least not a claim
+// about the card or about the heap.
+BookErrorReason bookErrorReasonFor(const char* why);
 
 // The corrupt-book dialog (design/BookError.dc.html).
 //

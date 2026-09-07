@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "reader/epub.h"
+#include "reader/heapguard.h"
 #include "reader/zip.h"
 
 namespace reader {
@@ -36,7 +37,7 @@ bool openBook(FileSystem& fs, std::string_view path, OpenedBook& out, const char
   // ANOTHER chapter cost nothing at all.
   std::unique_ptr<FileHandle> file = fs.openRead(path);
   if (file == nullptr) {
-    *reason = "cannot open the book file";
+    *reason = kOpenCannotOpen;
     return false;
   }
 
@@ -55,7 +56,15 @@ bool openBook(FileSystem& fs, std::string_view path, OpenedBook& out, const char
   out.path = std::string(path);
   out.title = book.title();
   out.author = book.author();
-  out.chapters.reserve(book.chapters().size());
+  // The only allocation this function makes that is sized by the book: 16 bytes an
+  // entry, so 5,136 for the longest spine in a 225-book corpus, taken while the Zip
+  // and the Epub above are BOTH still held. Small, and guarded for the reason the
+  // big ones are -- a `reserve` that cannot allocate is the same silent `abort()`
+  // whatever its size, and the loop under it pushes exactly this many.
+  if (!ensureRoom(out.chapters, book.chapters().size())) {
+    *reason = "not enough memory to hold the spine";
+    return false;
+  }
 
   for (const Epub::Chapter& ch : book.chapters()) {
     // Epub::open has already refused the book if any spine entry is missing, so

@@ -60,6 +60,8 @@ BookEndScreen::Facts demoBookEndFacts();
 BookErrorScreen::Facts demoBookErrorFacts();
 // design/BookErrorUnreadable.dc.html: the same file, the other refusal.
 BookErrorScreen::Facts demoBookErrorUnreadableFacts();
+// design/BookErrorMemory.dc.html: the same file, the third -- fine, and it did not fit.
+BookErrorScreen::Facts demoBookErrorMemoryFacts();
 
 // design/Peek.dc.html's own peeked text -- Middlemarch's opening, which is the board's
 // story: the reader is at CH. 07, 34%, has met a name they cannot place, and has peeked

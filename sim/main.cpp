@@ -644,12 +644,13 @@ int main(int argc, char** argv) {
   const bool isLibrary = std::strcmp(argv[1], "library") == 0;
   const bool isLibraryActions = std::strcmp(argv[1], "library_actions") == 0;
   const bool isDeleteConfirm = std::strcmp(argv[1], "delete_confirm") == 0;
-  // design/BookError.dc.html and design/BookErrorUnreadable.dc.html: one screen with
-  // two copy shapes. Their own subcommands rather than a flag, for the reason every
-  // other state board has one -- a flag could not be named by the comparison sheet
-  // or by a golden.
+  // design/BookError.dc.html, BookErrorUnreadable.dc.html and BookErrorMemory.dc.html:
+  // one screen with three copy shapes. Their own subcommands rather than a flag, for
+  // the reason every other state board has one -- a flag could not be named by the
+  // comparison sheet or by a golden.
   const bool isBookError = std::strcmp(argv[1], "book_error") == 0;
   const bool isBookErrorUnreadable = std::strcmp(argv[1], "book_error_unreadable") == 0;
+  const bool isBookErrorMemory = std::strcmp(argv[1], "book_error_memory") == 0;
   const bool isBookDetails = std::strcmp(argv[1], "book_details") == 0;
   const bool isSettings = std::strcmp(argv[1], "settings") == 0;
   const bool isSleep = std::strcmp(argv[1], "sleep") == 0;
@@ -743,7 +744,8 @@ int main(int argc, char** argv) {
       !isReaderMenu && !isContents && !isChapterOpen && !isReaderList && !isAnchored &&
       !isSleepWaking && !isLibraryOpening && !isTypography && !isPeek && !isSleepCover &&
       !isSleepCoverDetails && !isSleepCoverWaking && !isBookEnd && !isBookError &&
-      !isBookErrorUnreadable && !isLowBattery && !isBatteryEmpty) {
+      !isBookErrorUnreadable && !isBookErrorMemory && !isLowBattery &&
+      !isBatteryEmpty) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
@@ -753,7 +755,8 @@ int main(int argc, char** argv) {
                  "'reader_menu', 'contents', 'typography', 'sleep_waking', "
                  "'sleep_cover', 'sleep_cover_details', 'sleep_cover_waking', "
                  "'library_opening', 'peek', 'book_end', 'book_error', "
-                 "'book_error_unreadable', 'low_battery', 'battery_empty' or "
+                 "'book_error_unreadable', 'book_error_memory', 'low_battery', "
+                 "'battery_empty' or "
                  "'app')\n",
                  argv[1]);
     return 3;
@@ -1213,7 +1216,7 @@ int main(int argc, char** argv) {
     // two boards drift apart in the one way the comparison could not see.
     for (const reader::InputEvent& ev : libraryEntry()) app.dispatch(ev);
   }
-  if (isBookError || isBookErrorUnreadable) {
+  if (isBookError || isBookErrorUnreadable || isBookErrorMemory) {
     // The board draws the LIBRARY under the veil with Dubliners focused -- the sixth
     // row, which is the same row the overlay boards focus and the same file the
     // dialog's paragraph names. Reached by pressing, as every other parent is.
@@ -1221,8 +1224,10 @@ int main(int argc, char** argv) {
     // NOT reached by pressing, for the sleep screen's reason: no gesture on a Library
     // row raises this dialog. The SHELL raises it, when the open it tried refuses --
     // so pushing it directly is the honest model of what happens on the device.
-    factory.setBookErrorFacts(isBookErrorUnreadable ? reader::demoBookErrorUnreadableFacts()
-                                                    : reader::demoBookErrorFacts());
+    factory.setBookErrorFacts(
+        isBookErrorMemory ? reader::demoBookErrorMemoryFacts()
+                          : isBookErrorUnreadable ? reader::demoBookErrorUnreadableFacts()
+                                                  : reader::demoBookErrorFacts());
     if (!app.pushScreen(reader::ScreenId::BookError)) {
       std::fprintf(stderr, "the factory refused ScreenId::BookError\n");
       return 1;

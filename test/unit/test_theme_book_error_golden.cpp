@@ -1,5 +1,5 @@
-// design/BookError.dc.html and design/BookErrorUnreadable.dc.html, pinned per pixel
-// at both panel geometries.
+// design/BookError.dc.html, design/BookErrorUnreadable.dc.html and
+// design/BookErrorMemory.dc.html, pinned per pixel at both panel geometries.
 //
 // BOTH GEOMETRIES, because a layout that fits one can clip the other and the X3 is
 // the dev device. This panel is 380 wide on a 480 canvas -- 50px of margin either
@@ -7,8 +7,8 @@
 // that is the same width on both, so the two differ in where the panel is CENTRED
 // and in how much veil surrounds it.
 //
-// BOTH SHAPES, because the only difference between them is a sentence, and a
-// sentence is exactly what a structural test cannot see: the two wrap to different
+// ALL THREE SHAPES, because the only difference between them is a sentence, and a
+// sentence is exactly what a structural test cannot see: they wrap to different
 // heights, which moves the panel, both slabs and the whole centring. Only a pixel
 // catches that.
 #include <string>
@@ -74,5 +74,11 @@ TEST_CASE("QuietTheme renders both corrupt-book shapes to golden at both geometr
   }
   SUBCASE("unreadable X3 528x792") {
     renderOne(reader::demoBookErrorUnreadableFacts(), 528, 792, "book_error_unreadable_x3");
+  }
+  SUBCASE("out of memory X4 480x800") {
+    renderOne(reader::demoBookErrorMemoryFacts(), 480, 800, "book_error_memory");
+  }
+  SUBCASE("out of memory X3 528x792") {
+    renderOne(reader::demoBookErrorMemoryFacts(), 528, 792, "book_error_memory_x3");
   }
 }

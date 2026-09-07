@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "reader/epub.h"
+#include "reader/heapguard.h"
 #include "reader/inflate_stream.h"
 #include "reader/xml.h"
 #include "reader/zip.h"
@@ -99,6 +100,14 @@ bool loadToc(FileSystem& fs, std::string_view bookPath, std::vector<TocEntry>& o
   // read, so `<navPoint>A<navPoint>B</navPoint></navPoint>` yielded B alone. A test
   // caught it; the comment here previously claimed the parent's label "has already been
   // read by the time an inner one begins", which was true and beside the point.
+  //
+  // WHY A COMMIT REFUSED, because there are now two reasons and they are not the
+  // same claim. `out.size() >= kMaxTocEntries` is the book's list being longer than
+  // this will read; a refused growth is the device being out of memory for a book
+  // that is fine. Both call sites reported the first, so the second would have
+  // arrived in the log as "the table of contents is too long" -- a false statement
+  // about the file, which is the one thing this project refuses everywhere.
+  const char* commitWhy = "";
   const auto commit = [&]() -> bool {
     if (label.empty() || target.empty()) return true;
     // RESOLVED AGAINST THE NCX'S OWN PATH, not the OPF's. An NCX at the archive root
@@ -127,7 +136,10 @@ bool loadToc(FileSystem& fs, std::string_view bookPath, std::vector<TocEntry>& o
       target.clear();
       return true;
     }
-    if (out.size() >= kMaxTocEntries) return false;
+    if (out.size() >= kMaxTocEntries) {
+      commitWhy = "the table of contents is too long";
+      return false;
+    }
     // AN IDENTICAL ROW TWICE IS NOISE; A DIFFERENT NAME FOR ONE TARGET IS CONTENT.
     //
     // Real books produce both. Le Fleau's NCX names `spine 3` twice with the SAME
@@ -145,7 +157,19 @@ bool loadToc(FileSystem& fs, std::string_view bookPath, std::vector<TocEntry>& o
       target.clear();
       return true;
     }
-    out.push_back(TocEntry{spine, depth < 1 ? 1 : depth, label});
+    // 32 bytes an entry against a 1,024-entry cap, and the corpus really does reach
+    // for it: one book's NCX has 299 entries, whose vector took a single
+    // 32,768-byte request -- the largest unguarded one in this phase, and this phase
+    // is the PEAK of a book open (measured at 47.6-91.8 KB across the user's own 16
+    // books, against a flat ~48-51 KB for the chapter walk).
+    //
+    // REFUSED THE WAY A TOO-LONG LIST IS, one clause up, because it is the same
+    // event from the reader's side: `loadToc`'s failure is not a book failure. The
+    // shell logs it and the book opens without chapter names.
+    if (!pushOrRefuse(out, TocEntry{spine, depth < 1 ? 1 : depth, label})) {
+      commitWhy = "not enough memory to read the table of contents";
+      return false;
+    }
     // CLEARED, so a close after a child's commit adds nothing. Without this the outer
     // point's close committed the CHILD's label a second time and the duplicate rule
     // happened to drop it -- correct by accident, and only while that rule exists.
@@ -165,7 +189,7 @@ bool loadToc(FileSystem& fs, std::string_view bookPath, std::vector<TocEntry>& o
         // the one it interrupts is committed first, so a parent keeps its own row. No
         // measured book nests, so a depth counter would be state kept for nothing --
         // but losing the parent silently would not be.
-        if (inNavPoint && !commit()) return say("the table of contents is too long");
+        if (inNavPoint && !commit()) return say(commitWhy);
         inNavPoint = true;
         ++depth;
         label.clear();
@@ -196,7 +220,7 @@ bool loadToc(FileSystem& fs, std::string_view bookPath, std::vector<TocEntry>& o
       // committed has been cleared, so this adds nothing -- see commit().
       // Committed BEFORE the depth drops, so the entry records the level it was
       // authored at rather than its parent's.
-      if (!commit()) return say("the table of contents is too long");
+      if (!commit()) return say(commitWhy);
       if (depth > 0) --depth;
       // Still inside a parent if one is open: a child's close returns to it, and the
       // parent may have siblings after this.
