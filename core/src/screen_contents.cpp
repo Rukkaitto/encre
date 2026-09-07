@@ -76,8 +76,12 @@ ContentsScreen::ContentsScreen(std::vector<TocEntry> toc, std::string bookTitle,
   // is looking for. Set, not moved: `set` CLAMPS where `move` wraps, and a spine the
   // contents do not mention should land as near as the list allows rather than at the
   // far end of it.
-  const int here = tocIndexForSpine(entries_, spine_);
-  if (here >= 0) setFocus(here);
+  //
+  // COMPUTED OVER THE WHOLE LIST AND HELD, which is what keeps the visible slice out
+  // of the question -- see the header. It is the same index the focus lands on and the
+  // one `syncVm` marks `NOW`, so the selection and the marker cannot disagree.
+  nowRow_ = rowForSpine();
+  if (nowRow_ >= 0) setFocus(nowRow_);
   syncVm();
 }
 
@@ -109,6 +113,30 @@ bool ContentsScreen::isHeaderAt(int index) const {
 bool ContentsScreen::focusable(int index) const { return index >= 0 && index < rowCount() &&
                                                          !isHeaderAt(index); }
 
+int ContentsScreen::rowForSpine() const {
+  // THE ROW THE READER IS ON, or -1. `tocIndexForSpine`'s rule -- the FIRST entry
+  // naming the spine entry, which is the only member of a group that can be proved not
+  // to be ahead of them; that header carries the whole argument and the corpus figures
+  // -- plus this screen's one drawing gate: a HEADER may not take the marker, because
+  // the board draws a header as a tracked-caps label with no value slot at all. The
+  // same gate is why `!row.isHeader` was already in `syncVm`.
+  //
+  // The gate cannot live in `toc.h`: a depth is a nesting level and not a role, and
+  // what counts as a header here is `isHeaderAt`'s lookahead. So this is a second walk
+  // rather than a second RULE, and `test_screen_contents.cpp` pins it to the shared
+  // function by an equivalence over lists with no headers -- the device `test_focus.cpp`
+  // uses to hold `Focus`'s gated walk to its ungated arithmetic.
+  //
+  // A SPINE ENTRY NAMED ONLY BY HEADERS ANSWERS -1, and that is a real shape rather
+  // than a defensive branch: a `Part I` with a file of its own, 108 spine entries
+  // across 62 corpus books. Nothing is marked, which is today's behaviour and the
+  // honest one -- an absent claim beats a false one, and the part's first child names
+  // the row directly beneath it anyway.
+  for (int i = 0; i < rowCount(); ++i)
+    if (entries_[static_cast<size_t>(i)].spine == spine_ && !isHeaderAt(i)) return i;
+  return -1;
+}
+
 int ContentsScreen::chosenSpine() const {
   const int f = focus();
   if (f < 0 || f >= rowCount()) return -1;
@@ -135,8 +163,14 @@ void ContentsScreen::syncVm() {
     // spine position, which is free and true and read WORSE on a real book -- chapter
     // names carry their own numbering, so a row said `Chapitre 1.        CH. 09`, two
     // numbering systems side by side with neither explaining the other. The board says
-    // so now.
-    if (!row.isHeader && e.spine == spine_) row.value = "NOW";
+    // so now, and it draws exactly ONE of these.
+    //
+    // AN ABSOLUTE INDEX, NEVER A TEST ON `e`. `at` is `s.first + i`, so asking
+    // `e.spine == spine_` here marked EVERY entry naming the open spine entry -- two of
+    // them on the reported book and 373 on the worst in the corpus -- and asking for
+    // the first match inside this loop would have marked the first one in the WINDOW,
+    // which moves as the list scrolls. `nowRow_` was decided once, over `entries_`.
+    if (at == nowRow_) row.value = "NOW";
     vm_.rows.push_back(std::move(row));
   }
   vm_.focusedRow = s.focused;
