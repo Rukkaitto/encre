@@ -770,6 +770,70 @@ USB is not the device's — and attaching after a sleep can reset the chip, turn
 the wake being investigated into a cold boot. **A fault that only happens unplugged
 is not observable over the wire at all.**
 
+**AND IT HAD NEVER RUN ONCE, THROUGH TWO PHASES OF THIS FILE DESCRIBING IT AS
+WORKING INFRASTRUCTURE (#47, #69).** `gLogToCard` was read at four sites in
+`shell/src/main.cpp` — the buffer append, the idle flush, the flush before sleep and
+the `[alive]` line — and **assigned at none**; `git log --all -S"gLogToCard =" --
+shell/` was empty for the whole life of the feature. `core/` parsed the key into
+`Settings::logToCard` and the shell never consulted it, so the 4 KB buffer, the idle
+flush, the dropped-byte counting and the 256 KB cap were all unreachable. Confirmed
+on an X3: `"logToCard": true` applying correctly on the `[boot] settings in force:`
+line and no `[log]` line on any `[alive]`, across a full session. **The same shape as
+`ListRow::trackingEm1000` and `readerBookTitle_` — a reader with no producer** — and
+it was found twice, from two directions, because a diagnostic nobody can turn on
+looks exactly like a device with nothing to report.
+
+- **THE FIX IS NOT THE ASSIGNMENT; IT IS WHEN THE QUESTION CAN BE ASKED.** The
+  setting is on the CARD, so `loadAndApplySettings()` cannot run before the mount —
+  and the lines this feature exists to capture all print before it: `[wake] refused`
+  / `[wake] held` (~470 lines earlier), the `[prev]` crumb record, `[boot] reset
+  reason=…`, and the storage bring-up itself. A tee armed at the load drops exactly
+  the boot it was wanted for. **Nothing can be WRITTEN that early either**, since
+  there is no mounted volume, so the only question is whether those lines are still
+  in RAM when a flush first becomes legal.
+- **SO THE TEE HAS THREE STATES AND STARTS ARMED**
+  (`reader::CardLogBuffer`, `core/include/reader/card_log.h`): `Pending` buffers and
+  may not write, `Enabled` keeps what `Pending` accumulated, `Disabled` discards it
+  and stops. **Buffering by default and discarding is the cheaper of the two
+  orderings** — a memcpy per line into a static array that exists either way, against
+  a second buffer or a replay mechanism — and it is the only one that can keep a line
+  printed before the file was read.
+- **AND THE BOOT PREAMBLE IS FLUSHED THE MOMENT THE SETTING IS KNOWN**, in
+  `loadAndApplySettings()`, rather than being left to `loop()`'s idle window. Boot
+  does not fit in 4 KB: the next legal flush is after the first paint, thousands more
+  bytes of stage lines, font timings, library scan and session restore later, so
+  without it the file would open with a HOLE precisely where the wake diagnostics
+  are. It is safe there for the settings file's own two reasons — the card is mounted
+  and nothing has been painted.
+- **IT IS `core/`'s LOGIC AND THE SHELL'S ARRAY.** Arming, appending, drop counting
+  and the flush threshold are bytes in and bytes out, and `shell/` has no harness —
+  five bugs have hidden there. The shell keeps the 4 KB (nothing in `core/`
+  allocates) and owns the card write, which is the only part a desktop test cannot
+  reach. `applySetting` is idempotent for the same answer, because
+  `loadAndApplySettings()` runs a **second** time on the RETRY path and a re-arm that
+  discarded would throw away the session so far.
+- **THE STATED LOSS IS THE RETRY PATH.** A device that booted with no card decided
+  *off* and threw the boot buffer away; if the card that then appears asks for a log,
+  the tee arms from that point and the preamble is gone. At the moment the question
+  was asked, the default was the only answer available — so the `[log] armed late`
+  line says which of the three transitions happened rather than leaving them alike.
+- **`logToCard` IS ON THE `[boot] settings in force:` LINE NOW**, and its absence was
+  the other half of #69: it was the one field in the struct with no line reporting
+  it, so a card asking for a log and a firmware ignoring the request looked
+  identical, which is how the request went unimplemented for two phases. **An
+  instrument that reports on less than it claims is worse than none** — the card
+  probe answered from cache, the `make compare` default that skipped four screens,
+  and this.
+- **A FLUSH SAYS WHETHER IT LANDED**, because `appendToCard` can fail on a card that
+  reads and refuses writes and the bytes are dropped either way: `[log] wrote NB` and
+  `[log] COULD NOT WRITE NB` are separate claims, and a line reporting a write that
+  did not happen is the false-claim shape this file refuses for the battery gauge and
+  the sleep badge.
+- **WHAT ONLY THE PANEL CAN ANSWER**, and it is the whole feature: that `/encre.log`
+  appears at all, that it opens with the pre-settings lines, and that the ~40 ms boot
+  flush does not cost anything visible. `shell/` has no harness, so 1,363 green test
+  cases say nothing about any of it.
+
 - **IT MUST NOT MAKE THE DELAY IT IS HUNTING**, which is the whole design. A card
   write costs ~40 ms and takes the DISPLAY'S SPI BUS, so one per line would put tens
   of milliseconds into every interaction and be indistinguishable from the fault. It
