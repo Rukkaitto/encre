@@ -2,8 +2,14 @@
 
 #include "reader/css.h"
 
+// `<memory>` for the nothrow probe's unique_ptr and `<utility>` for the swap in
+// take(). SPELLED OUT because a transitively-satisfied include is a bug only the other
+// toolchain can see: this project's first Linux CI run died on a `std::memcmp` with no
+// `<cstring>`, which libc++ pulls in and libstdc++ does not, after the file had
+// compiled on macOS for months.
 #include <memory>
 #include <new>
+#include <utility>
 
 #include "reader/xml.h"
 
@@ -348,7 +354,7 @@ bool BlockReader::next(Block& out) {
   // instead, which needs `next()` to hand the piece back while carrying an error, and
   // 1,920 bytes is not worth that control flow.
   //
-  // NOT A FRESH STRING SWAPPED IN, WHICH IS WHAT THIS SHIPPED FIRST AND IT LOST TEXT.
+  // NOT A FRESH STRING SWAPPED IN, WHICH IS HOW THIS WAS WRITTEN FIRST AND IT LOST TEXT.
   // `roomFor` runs once per text NODE, and a block spans many, so `st.cur.text` is
   // routinely non-empty here -- swapping a fresh buffer in threw away everything
   // accumulated since the last reserve. Two of #37's own tests caught it, one of them
@@ -415,6 +421,15 @@ bool BlockReader::next(Block& out) {
     // NOT `st.cur = Block{}`, which would throw the buffer away again. Every field
     // Block's default constructor sets, set by hand, so a field added to Block has to
     // be considered here -- the price of keeping the capacity.
+    //
+    // AND THE `kind` RESET IS DEAD TODAY, which is written down rather than left for
+    // someone to discover: commenting it out fails NOTHING, because `st.open` is set
+    // only by `beginBlock`, `take` emits only when `st.open`, and `beginBlock` re-reads
+    // the kind off the stack -- so no block can be emitted with a kind this line would
+    // have corrected. It stays because the reset has to be COMPLETE: the two lines
+    // below it are load-bearing (see the emphasis one, which needed a three-block
+    // fixture to catch at all), and a partial reset is what invites the next field
+    // added to Block to be forgotten.
     st.cur.kind = BlockKind::Paragraph;
     st.cur.text.clear();
     st.cur.emphasis.clear();

@@ -185,6 +185,44 @@ investigating into a cold boot that looks exactly like a bug.
       chapter is [#48](https://github.com/Rukkaitto/encre/issues/48) — known,
       not a new finding.
 
+## 6b. An over-long paragraph ([#37](https://github.com/Rukkaitto/encre/issues/37), [#90](https://github.com/Rukkaitto/encre/issues/90))
+
+**This is #37's on-glass validation, and #90 is why it could not be done before.**
+`kMaxBlockBytes` was 64 KB against a 42,152-byte reading floor, so a block anywhere
+near it was an `abort()` — and under `-fno-exceptions` that is a reboot with no
+diagnostic, which this project has twice had reported as *"opening a book goes back to
+Home"*. The cap is 8 KB now and the buffer is reserved rather than grown, so the peak
+is 18,308 bytes whatever the book says. **All of that is desktop arithmetic and a
+desktop corpus; the heap is the one thing only the device can answer**, and this repo
+has measured cover decode peaking **17–25 KB above its desktop figure** because the
+allocator differs.
+
+Put a book with an over-long paragraph on the card. Two of the 225-book corpus have
+one over 64 KB (`The Number "e"`, `The 32nd Mersenne Prime`) and seven have one over
+16 KB — `Paradise Lost` is the easiest to read, since one whole book of the poem is a
+single 50,983-byte block.
+
+- [ ] **6b.1** The book **opens and reads to the end**, through the **Library**
+      (the smaller heap: 203 books resident, ~42 KB free). Before #90 this was
+      the case that rebooted.
+- [ ] **6b.2** `[stack]` and the `min` figure on `[alive]` after reading through
+      the long paragraph. **Read `mark()`'s stage trail, not `getFreeHeap()`** —
+      only `ESP.getMinFreeHeap()` sees a transient. The block builder should cost
+      ~18 KB at its peak; the number to compare is the floor **with the long
+      paragraph read** against the floor of an ordinary book.
+- [ ] **6b.3** No `abort()`, no `MCAUSE 0x2`, no boot landing on Home mid-book.
+      That failure is silent by construction, so the serial log is the evidence.
+- [ ] **6b.4** The seam is **visible and harmless**: the paragraph continues with
+      a 1.5em indent, once per ~15 pages of unbroken text. It must not look like
+      a lost line or a repeated one.
+- [ ] **6b.5** An ordinary novel is **unchanged**. 208 of the 225 corpus books
+      are byte-identical including their block count, so a difference you can see
+      on a normal book is a regression, not this change.
+- [ ] **6b.6** *(needs a nearly-full heap, and there may be no way to force it)*
+      If the reserve ever fails, the chapter is refused with **"not enough memory
+      to read this chapter"** on `BookError.dc.html` — the existing copy shape,
+      no new one. Nothing in the corpus can produce it on the desktop.
+
 ## 7. Grayscale refinement
 
 - [ ] **7.1** Turn a page. Text appears in about half a second, dithered.

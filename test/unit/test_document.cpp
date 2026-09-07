@@ -798,3 +798,43 @@ TEST_CASE("ChapterReader reports the cuts its BlockReader made") {
   cr.release();
   CHECK(cr.blocksSplit() == 0);
 }
+
+TEST_CASE("the swap hands the previous block back, so it has to be cleared") {
+  // `take()` SWAPS rather than moves, so the reserved buffer comes back -- and what
+  // comes back with it is the block the caller was handed LAST time, whose text and
+  // emphasis are still in it. Both are cleared; this is what says so.
+  //
+  // TWO THINGS THE FIXTURE HAD TO GET RIGHT, and the mutation found both.
+  //
+  // THREE BLOCKS, WITH THE EMPHASIS ON THE FIRST. Stale spans arrive one block LATE:
+  // block 0's go out with block 0, come back to the reader when block 1 is taken, and
+  // can only be emitted on block 2. Every other fixture in this file has two blocks and
+  // cannot reach the line at all.
+  //
+  // AND THE WALKER MUST KEEP ITS Block, WHICH `buildDocument` DOES NOT. It does
+  // `push_back(std::move(b))`, so `b` comes back empty every time and the swap hands
+  // the reader nothing to carry -- the first version of this test used it and passed
+  // against the mutation. `ReaderScreen` holds one `Block b` and hands it to
+  // `PageBuilder::add` by reference, so COPYING out of it is the device's own shape.
+  const std::string doc =
+      "<body><p>a<em>b</em></p><p>plain two</p><p>plain three</p></body>";
+  Grained src(doc, 64);
+  reader::BlockReader r(src);
+  reader::Block b;
+  std::vector<reader::Block> got;
+  while (r.next(b)) got.push_back(b);  // a COPY, so `b` keeps what it was handed
+  CHECK(r.ok());
+  REQUIRE(got.size() == 3);
+
+  CHECK(got[0].emphasis.size() == 1);
+  CHECK(got[1].emphasis.empty());
+  // The one that bites: with the clear removed this carries block 0's span, whose
+  // offsets index a string it does not belong to -- and that is how a run comes out
+  // italic in a paragraph nobody emphasised.
+  CHECK(got[2].emphasis.empty());
+
+  // ...and the same for the text, which is the half every fixture here already covers:
+  // a block that kept the previous one's bytes is prefixed by them.
+  CHECK(got[1].text == "plain two");
+  CHECK(got[2].text == "plain three");
+}
