@@ -20,18 +20,24 @@ namespace reader {
 // those frames, which is the trade: it is under a veil and the menu is chrome, where
 // the page is the one thing on this device that wanted four levels.
 //
-// ONE OF ITS FOUR ROWS IS NOT BUILT and is drawn anyway, with the focus skipping it --
-// Settings' rule, and its reasoning verbatim: a row that cannot be reached cannot
-// mislead, where a row that focuses and then ignores SELECT is the silent no-op this
-// project has been bitten by twice. An inert row is drawn EXACTLY as an unfocused live
-// one; `ListRow::focusable` is about input, not appearance.
+// EVERY ONE OF ITS THREE ROWS RESPONDS, and that took two rows leaving rather than
+// arriving. Settings' rule -- every board row is DRAWN and the focus SKIPS the ones
+// that cannot act, because a row that cannot be reached cannot mislead where a row
+// that focuses and then ignores SELECT is the silent no-op this project has been
+// bitten by twice -- has no instance left on this screen. `focusable()` and
+// `ListRow::focusable` stay, because the rule is the screen's and the next unbuilt
+// V1 row gets it for free.
 //
-// THAT RULE HAS A LIMIT, AND `Bookmarks` IS WHERE IT WAS REACHED. Skipping the focus
-// keeps an unbuilt row from misleading a reader who presses it; it does not keep the
-// row itself from promising a feature the release does not have. Bookmarks moved to
-// V1.1 (#3), so the row was cut from the board and from here rather than left drawn
-// and dead -- the distinction being that Names is a row waiting on its own screen in
-// this release, where Bookmarks is a row waiting on the next one.
+// THAT RULE HAS A LIMIT, AND IT WAS REACHED TWICE: `Bookmarks` (#3) and then `Names`
+// (#73). Skipping the focus keeps an unbuilt row from misleading a reader who presses
+// it; it does nothing about the row itself promising a feature the release does not
+// have. WHICH RELEASE THE ROW IS WAITING ON is the whole distinction -- a row whose
+// screen lands inside this release is drawn and skipped, and a row whose screen moved
+// out of it is cut from the board and from here. Bookmarks moved to V1.1; the whole
+// Names family is V2 (three boarded cards -- the per-chapter index, the list screen,
+// and the alias-row overflow). Names was drawn and inert under the FIRST reading of
+// that rule, on the belief that it was waiting on a screen inside V1; it was not, so
+// it is Bookmarks' case and not Typography's, and it comes back with its screen.
 class ReaderMenuScreen : public FocusScreen {
  public:
   // `bookTitle` and `progress` are the panel's header -- the book's name and how far
@@ -47,36 +53,45 @@ class ReaderMenuScreen : public FocusScreen {
 
   const ReaderMenuViewModel& vm() const { return vm_; }
 
-  // THE PANEL'S HEIGHT IS THE SUM OF ITS ROWS AND THEY ARE ALL ONE HEIGHT, so it does
-  // not move when the focus does -- unlike the actions panel, whose focused row loses
-  // its rule and makes the panel a pixel shorter. So a constant token is a true
-  // promise here and every focus move takes the partial-repaint path.
+  // THE PANEL'S ROWS ARE ALL ONE HEIGHT, so this claims a constant footprint and every
+  // focus move takes the partial-repaint path. `1` rather than `0`: zero means "no
+  // promise" (Screen's default) and would refuse the fast path outright.
   //
-  // `1` rather than `0`: zero means "no promise" (Screen's default) and would refuse
-  // the fast path for a panel that genuinely never moves.
+  // THE CLAIM IS NOT ACTUALLY TRUE AND #68 IS THE OPEN CARD FOR IT. The rows are one
+  // height, but `renderReaderMenu` sizes the panel through
+  // `panelRowHeight(rowRuleFor(i, rows, focused))`, and `rowRuleFor` suppresses the
+  // rule for the focused row AND for the last row -- so focusing the LAST row is the
+  // one case where two suppressions coincide and the centred panel moves a pixel.
+  // Measured on the X3: panel top 213 on Contents and Typography, 212 on About this
+  // book. That is the actions panel's own defect, which `ItemActions::paintFootprint`
+  // counts borderless rows for and this does not.
+  //
+  // CUTTING `Names` DID NOT MOVE THAT. It was never focusable and was never last, so
+  // it always drew its rule: removing it takes 72px off the panel in every state and
+  // leaves the focusable set, and therefore every per-state delta, exactly as it was.
   uint32_t paintFootprint() const override { return 1; }
 
   // The board's rows, in the board's order.
   //
-  // `kNames` arrived from another branch's board edit (the character index it boards as
-  // Names.dc.html), and this screen was built before it: six rows against the board's
-  // seven, which `make compare` reported as "firmware ok" because it RENDERED. Measured
-  // per pixel it was 13.02% against 3.02% before -- "ok" means the sim produced a frame,
-  // not that the frame matches, and only the mismatch number says which.
+  // `kGoToPage`, `kCloseBook`, `kBookmarks` and `kNames` are GONE, and the board states
+  // why: a reflowable book has no stable page to go to, Back from the page already
+  // closes the book, bookmarks are V1.1, and the whole Names family is V2. The enum is
+  // not a stable numbering to be preserved -- the ONE thing that persists a row index
+  // is FocusScreen's restore, and it refuses an index it cannot land on, which is
+  // exactly the case a shrunk table creates. This is the third cut for that reason and
+  // it needed no more care than the first two.
   //
-  // `kGoToPage`, `kCloseBook` and `kBookmarks` are GONE, and the board states why: a
-  // reflowable book has no stable page to go to, Back from the page already closes the
-  // book, and bookmarks are V1.1. The enum is not a stable numbering to be preserved --
-  // the ONE thing that persists a row index is FocusScreen's restore, and it refuses an
-  // index it cannot land on, which is exactly the case a shrunk table creates. This is
-  // the second cut for that reason and it needed no more care than the first.
+  // `kNames` IS ALSO THE ROW THAT PROVED "ok" IS NOT A FIDELITY CHECK, on the way in
+  // and again on the way out. It arrived from another branch's board edit and this
+  // screen was built before it -- six rows against the board's seven -- and `make
+  // compare` reported "firmware ok" because the simulator RENDERED, at 13.02%
+  // per pixel against 3.02%. Cutting it needed the same measurement in reverse.
   enum Row : int {
     kContents,
     kTypography,
-    kNames,
     kAboutBook,
   };
-  static constexpr int kRowCount = 4;
+  static constexpr int kRowCount = 3;
 
  protected:
   void syncVm() override;

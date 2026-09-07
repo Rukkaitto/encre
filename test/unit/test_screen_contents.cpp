@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "doctest.h"
+#include "golden.h"
 #include "ramp.h"
 #include "reader/framebuffer.h"
 #include "reader/theme_quiet.h"
@@ -33,6 +34,24 @@ std::vector<TocEntry> sectioned() {
 // Both Dexter editions' shape: no depth at all.
 std::vector<TocEntry> flat() {
   return {{0, 1, "One"}, {1, 1, "Two"}, {2, 1, "Three"}, {3, 1, "Four"}};
+}
+
+// `Amusing Ourselves to Death`'s shape, reduced -- the reported book's, and the
+// commonest shape in the corpus by a wide margin (98 of its 103 sectioned books).
+// Front and back matter sit at depth 1 with NOTHING BENEATH THEM, alongside `Part I`
+// and `Part II`, which really do group the chapters under them.
+//
+// Measured, not supposed: the real file's own list is
+//   d1 Cover / d1 Title Page / d1 Copyright / d1 Contents
+//   d1 Introduction to the Twentieth Anniversary Edition / d1 In 1985. . . / d1 Foreword
+//   d1 Part I  -> d2 Chapter 1 .. d2 Chapter 5
+//   d1 Part II -> d2 Chapter 6 .. d2 Chapter 11
+//   d1 Notes / d1 Bibliography / d1 Index
+// so ten of its twenty-three entries are childless depth-1 entries.
+std::vector<TocEntry> mixedDepths() {
+  return {{0, 1, "Introduction"}, {1, 1, "Part I"},  {2, 2, "Chapter 1"},
+          {3, 2, "Chapter 2"},    {4, 1, "Part II"}, {5, 2, "Chapter 3"},
+          {6, 1, "Notes"}};
 }
 
 }  // namespace
@@ -119,6 +138,177 @@ TEST_CASE("A SECTIONED BOOK ALWAYS HAS A FOCUSABLE ROW, by construction") {
   // An EMPTY contents is the only nothing-to-select case, and it is covered above.
 }
 
+TEST_CASE("A CHILDLESS TOP-LEVEL ENTRY IS A ROW, NOT A SECTION HEADER") {
+  // ISSUE #75, reported off glass: in `Digital Minimalism` the chapter labelled
+  // INTRODUCTION is drawn in the contents and cannot be selected.
+  //
+  // The mapping keyed on DEPTH ALONE -- any depth-1 entry in a sectioned book was a
+  // header -- so a top-level entry with nothing nested inside it became a tracked-caps
+  // label the focus skips. `screen_contents.h` recorded the cost as "one unreachable
+  // target per section", and consoled itself that "its first child usually names the
+  // same spine entry". A CHILDLESS ENTRY HAS NO FIRST CHILD, so for exactly this shape
+  // the consolation is false and the row is simply gone.
+  //
+  // What decides a header is whether an entry GROUPS others, which in a list walked in
+  // document order is "does the next entry sit deeper than this one".
+  ContentsScreen s(mixedDepths(), "Amusing Ourselves to Death", 0, 8);
+  REQUIRE(s.sectioned());
+  const auto& rows = s.vm().rows;
+  REQUIRE(rows.size() == 7);
+
+  // `Part I` and `Part II` group chapters and stay headers; the three that group
+  // nothing are rows.
+  CHECK_FALSE(rows[0].isHeader);  // Introduction
+  CHECK(rows[1].isHeader);        // Part I
+  CHECK_FALSE(rows[2].isHeader);  // Chapter 1
+  CHECK_FALSE(rows[3].isHeader);  // Chapter 2
+  CHECK(rows[4].isHeader);        // Part II
+  CHECK_FALSE(rows[5].isHeader);  // Chapter 3
+  CHECK_FALSE(rows[6].isHeader);  // Notes
+
+  // AND THE FOCUS CAN REACH THEM. The reported symptom is the focus, not the type:
+  // the screen opens on spine 0, which is the Introduction, and GO must name it.
+  CHECK(s.focus() == 0);
+  CHECK(s.chosenSpine() == 0);
+  CHECK(s.onEvent(kGo).kind == Action::Kind::PopTo);
+
+  // Stepping down from the last chapter of Part II crosses no header and lands on
+  // `Notes`, the back matter that was unreachable.
+  ContentsScreen t(mixedDepths(), "Amusing Ourselves to Death", 5, 8);
+  REQUIRE(t.focus() == 5);
+  t.onEvent(kDown);
+  CHECK(t.focus() == 6);
+  CHECK(t.chosenSpine() == 6);
+}
+
+TEST_CASE("every entry of a sectioned book is reachable unless it groups others") {
+  // The property behind the case above, stated once so a future change to the mapping
+  // has to keep it: in a sectioned book the ONLY unreachable rows are the ones that
+  // group something, and every group is non-empty. Walked over the whole list rather
+  // than indexed, because an off-by-one in the lookahead would still pass the case
+  // above's hand-written expectations if it moved only the last entry.
+  const std::vector<TocEntry> toc = mixedDepths();
+  ContentsScreen s(toc, "Book", 0, 16);
+  const auto& rows = s.vm().rows;
+  REQUIRE(rows.size() == toc.size());
+  for (size_t i = 0; i < rows.size(); ++i) {
+    const bool groups = i + 1 < toc.size() && toc[i + 1].depth > toc[i].depth;
+    CHECK(rows[i].isHeader == (groups && toc[i].depth <= 1));
+    CHECK(rows[i].focusable == !rows[i].isHeader);
+  }
+  // A HEADER IS ALWAYS FOLLOWED BY A ROW, which is what makes "a sectioned book always
+  // has a focusable row" structural rather than an argument about depth-2 entries: a
+  // header exists only because something deeper follows it, and that something is a
+  // row.
+  for (size_t i = 0; i < rows.size(); ++i)
+    if (rows[i].isHeader) {
+      REQUIRE(i + 1 < rows.size());
+      CHECK_FALSE(rows[i + 1].isHeader);
+    }
+}
+
+TEST_CASE("QuietTheme renders a mixed-depth chapter list to golden") {
+  // THE SHAPE #75 WAS REPORTED ON, GIVEN PIXELS. `demoContents()` is two parts over
+  // eight chapters and every one of its top-level entries GROUPS something, so neither
+  // board nor golden could show a childless top-level entry -- which is why the defect
+  // reached a device rather than a test. `home_long_title` exists for the same reason.
+  //
+  // It is not boarded and `make compare` never sees it: `demoContents()` lives in
+  // core/src/screens.cpp and adding a row to the board without adding one there would
+  // desynchronise the two columns of the sheet. So this is a regression baseline, not a
+  // fidelity check -- and it is the ONLY thing here that can see the y-accumulation,
+  // which is where a mixed sequence of headers and rows goes wrong: `drawSectionHeader`
+  // returns the height it ACTUALLY drew (a first header is shorter by its missing rule)
+  // and a caller advancing by the nominal height puts every row below it 2px low.
+  // Settings shipped exactly that bug once.
+  //
+  // THE Y-ACCUMULATION IS WHAT WAS CHECKED BEFORE THIS WAS BLESSED, numerically rather
+  // than by eye: full-width ink bands at y 64-65 (the band's border), then an ordinary
+  // row every 65px (64 of content plus a 1px rule), the focused row 64px with no rule,
+  // each header 53px INCLUDING its 2px border-top, no rule under the last drawn row,
+  // and the hint bar's border at 736 (X4) / 728 (X3). Identical at both geometries, no
+  // 2px drift anywhere. The "a first header is shorter by its missing rule" branch is
+  // NOT exercised here -- this list starts on a row -- and the boarded `contents` golden
+  // covers it, where `BOOK I` sits at index 0.
+  //
+  // TWO THINGS IN THESE PIXELS LOOK WRONG AND NEITHER IS THIS CHANGE'S. Said out loud
+  // rather than blessed quietly, which is the rule for inspecting a candidate:
+  //
+  //  - A 3px FULL-WIDTH LINE above each mid-list header, where the board draws NONE: the
+  //    row above draws its own 1px bottom rule and the header draws its 2px border-top.
+  //    `renderSettings` suppresses that row rule with a `nextIsHeader` term
+  //    `renderContents` never had, and `Contents.dc.html`'s headers carry no border-top
+  //    at all where `Settings.dc.html`'s do. Measured on the BOARDED state, whose render
+  //    is byte-identical across this change: 1,440 of its 13,274 differing pixels at X4
+  //    (3 rows x 480) and 1,584 of 13,514 at X3. Pre-existing, and filed rather than
+  //    fixed here, because whether the board grows a rule or the render drops one is a
+  //    design decision and not #75.
+  //  - THE BAND'S OWN LABEL ELIDES TO `C ...` (X4) / `C O N T ...` (X3), because
+  //    `drawHeaderBand` gives the value its width first and this book's title is long.
+  //    No board shows it -- `Contents.dc.html`'s book is `MIDDLEMARCH` -- and the
+  //    screen's own name is the one run on the band that should never elide. Also
+  //    pre-existing, also filed, and deliberately left IN this golden: it is what a real
+  //    long title does, and a fixture trimmed to hide it would be a fixture chosen to
+  //    look tidy.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+
+  // `Amusing Ourselves to Death`'s own list, trimmed to what one panel holds -- the
+  // closest analogue on the user's card to the reported `Digital Minimalism`, and
+  // measured rather than invented: front matter and back matter at depth 1 with nothing
+  // beneath them, two parts at depth 1 that really do group their chapters.
+  const std::vector<TocEntry> toc = {
+      {0, 1, "Introduction"},       {1, 1, "Foreword"},
+      {2, 1, "Part I"},             {3, 2, "The Medium Is the Metaphor"},
+      {4, 2, "Media as Epistemology"}, {5, 1, "Part II"},
+      {6, 2, "The Age of Show Business"}, {7, 2, "Shuffle Off to Bethlehem"},
+      {8, 1, "Notes"},              {9, 1, "Index"},
+  };
+
+  auto renderOne = [&](int w, int h, const std::string& name) {
+    const int rows = theme.contentsVisibleRows(h, ramp.fonts);
+    // The fixture is sized to fit, so no rail draws and the golden is about the
+    // header/row mapping rather than about the gutter.
+    REQUIRE(rows >= static_cast<int>(toc.size()));
+    // Spine 3 is the first chapter of Part I: a focused, inverted, `NOW`-marked row
+    // sitting directly under a mid-list header.
+    ContentsScreen s(toc, "Amusing Ourselves to Death", 3, rows);
+    REQUIRE_FALSE(s.vm().scrollable);
+    reader::Framebuffer fb(w, h);
+    theme.renderContents(fb, ramp.fonts, s.vm(), reader::Plane::Bw);
+    golden::checkGolden(fb, name);
+  };
+
+  SUBCASE("X4 480x800") { renderOne(480, 800, "contents_mixed_depths"); }
+  SUBCASE("X3 528x792") { renderOne(528, 792, "contents_mixed_depths_x3"); }
+}
+
+TEST_CASE("a contents that OPENS on a section header still selects a row") {
+  // `Focus::set` DOCUMENTS ITSELF AS REFUSING a landing the gate declines -- it
+  // restores the index it already had, and a freshly built Focus already holds 0 -- so
+  // the constructor's `setFocus(0)` could not reach "the first focusable row" that the
+  // comment above it claimed. A book whose contents open on a part rather than on
+  // front matter therefore opened with its selection resting on a header, which
+  // `renderContents` draws with no inversion at all: a list with nothing visibly
+  // selected, and a GO that jumps somewhere the reader was never shown.
+  //
+  // Measured across the corpus: 5 of the 103 sectioned books still begin with a
+  // grouping entry once a childless one is a row, so this is reachable rather than
+  // hypothetical. `Focus::move` is the overload that steps OVER a refused position
+  // without consuming its distance, and that is the walk this wanted.
+  const std::vector<TocEntry> opensOnAPart = {
+      {0, 1, "Part I"}, {1, 2, "Chapter 1"}, {2, 2, "Chapter 2"}};
+  // A spine the contents do not mention, so nothing after the walk moves the focus.
+  ContentsScreen s(opensOnAPart, "Big Dummy's Guide", 99, 8);
+  REQUIRE(s.sectioned());
+  REQUIRE(s.vm().rows.size() == 3);
+  REQUIRE(s.vm().rows[0].isHeader);
+  CHECK(s.focus() == 1);
+  CHECK(s.vm().focusedRow == 1);
+  CHECK_FALSE(s.vm().rows[static_cast<size_t>(s.vm().focusedRow)].isHeader);
+  CHECK(s.chosenSpine() == 1);
+}
+
 TEST_CASE("the visible slice never names a row that was not drawn") {
   // ScrollWindow::slice's contract, and the reason the view model holds a slice rather
   // than the whole book: a 96-entry contents would otherwise hand the theme every row.
@@ -148,7 +338,7 @@ TEST_CASE("the row being read is the only one marked NOW") {
 
 // --- The menu ----------------------------------------------------------------
 
-TEST_CASE("the reader menu focuses Contents, skipping the rows that do nothing") {
+TEST_CASE("the reader menu focuses Contents, and now nothing is skipped on the way down") {
   reader::ReaderMenuScreen m("Middlemarch", "6%");
   CHECK(m.id() == ScreenId::ReaderMenu);
   CHECK(m.isOverlay());
@@ -157,9 +347,10 @@ TEST_CASE("the reader menu focuses Contents, skipping the rows that do nothing")
   // Down from Contents reaches Typography, which is the row next to it and is live.
   m.onEvent(kDown);
   CHECK(m.focus() == reader::ReaderMenuScreen::kTypography);
-  // Down from Typography skips Names -- the one inert row left, now that Bookmarks is
-  // cut -- and lands on About this book, which is live because Book details takes facts
-  // now rather than a Library row.
+  // Down from Typography reaches About this book with NO row skipped between them.
+  // `Names` sat there and was skipped, and is cut (#73) -- so the gated walk and the
+  // ungated arithmetic now agree on this screen, which is why the wrap cases below are
+  // the only interesting movement left here.
   m.onEvent(kDown);
   CHECK(m.focus() == reader::ReaderMenuScreen::kAboutBook);
   // ...and wraps back round to Contents rather than sticking. About this book is the
@@ -167,10 +358,15 @@ TEST_CASE("the reader menu focuses Contents, skipping the rows that do nothing")
   // stand in for.
   m.onEvent(kDown);
   CHECK(m.focus() == reader::ReaderMenuScreen::kContents);
-  // Up from Contents wraps the other way over that same skipped row, to the same live
-  // one.
+  // Up from Contents wraps the other way, to the same last row.
   m.onEvent(kUp);
   CHECK(m.focus() == reader::ReaderMenuScreen::kAboutBook);
+  // AND THE WALK IS EXHAUSTIVE, which is the property the three CHECKs above are only
+  // a sample of: every index is landable, so stepping kRowCount times returns the focus
+  // to where it started whatever the table's length becomes.
+  const int start = m.focus();
+  for (int i = 0; i < reader::ReaderMenuScreen::kRowCount; ++i) m.onEvent(kDown);
+  CHECK(m.focus() == start);
 }
 
 TEST_CASE("the menu's Typography row opens the panel") {
@@ -188,30 +384,36 @@ TEST_CASE("the menu's Typography row opens the panel") {
   CHECK(a.target == ScreenId::Typography);
 }
 
-TEST_CASE("making the Typography row live changed no row's appearance") {
+TEST_CASE("every row on this sheet responds, and the flag still means only input") {
   // `ListRow::focusable` IS ABOUT INPUT, NOT APPEARANCE. An inert row is drawn exactly
-  // as an unfocused live one, which is why the reader_menu goldens do not move for
-  // this change -- a theme that dimmed on the flag would be inventing a design
-  // decision nobody made. Pinned here as well as in the goldens, because a golden
-  // says the pixels are the same and this says which field is allowed to differ.
+  // as an unfocused live one -- a theme that dimmed on the flag would be inventing a
+  // design decision nobody made. Pinned here as well as in the goldens, because a
+  // golden says the pixels are the same and this says which field is allowed to differ.
   const reader::ReaderMenuScreen m("Middlemarch", "6%");
   const auto& rows = m.vm().rows;
-  REQUIRE(rows.size() == 4);
+  REQUIRE(rows.size() == reader::ReaderMenuScreen::kRowCount);
   CHECK(rows[reader::ReaderMenuScreen::kTypography].label == "Typography");
   // The board draws it with a chevron and no value, unchanged by going live.
   CHECK(rows[reader::ReaderMenuScreen::kTypography].value.empty());
   CHECK(rows[reader::ReaderMenuScreen::kTypography].discloses);
-  // ONE INERT ROW LEFT: Names. Bookmarks was the other and is cut, because skipping the
-  // focus keeps an unbuilt row from misleading a press and does NOT keep it from
-  // promising a feature the release does not have. Counted rather than named, so the
-  // next row to go live fails this and has to say so.
-  int inert = 0;
-  for (const auto& r : rows)
-    if (!r.focusable) ++inert;
-  CHECK(inert == 1);
+  // NO INERT ROW IS LEFT. Bookmarks and Names were the last two, and both were cut for
+  // one reason: skipping the focus keeps an unbuilt row from misleading a press and
+  // does NOT keep it from promising a feature the release does not have -- and both
+  // rows' screens are out of V1. Asserted as the PROPERTY rather than as a count of
+  // inert rows, which is what a screen with none of them can actually say; the count
+  // this file used to pin has been 1 and 2 and would be 0 now, and the reader-menu
+  // comments have already been wrong about a row count twice.
+  for (const auto& r : rows) CHECK(r.focusable);
+  // ...and the two halves agree: the screen's own landing gate says the same thing the
+  // view model does, for every index, so a row cannot be drawn live and refuse a press.
+  for (int i = 0; i < reader::ReaderMenuScreen::kRowCount; ++i) {
+    reader::ReaderMenuScreen n("Middlemarch", "6%");
+    n.setFocus(i);
+    CHECK(n.focus() == i);
+  }
 }
 
-TEST_CASE("the menu has four rows, and none of the three cut ones is among them") {
+TEST_CASE("the menu draws its enum and nothing else, and no cut row came back") {
   // GO TO PAGE AND CLOSE BOOK ARE GONE, for reasons that are about reading rather than
   // about room: a reflowable book has no stable page to go to -- the number a picker
   // would offer moves with the type size -- so the honest jump is the chapter name,
@@ -219,20 +421,30 @@ TEST_CASE("the menu has four rows, and none of the three cut ones is among them"
   // was a second door to a room with one, and had to carry its own save edge to stay
   // correct.
   //
-  // BOOKMARKS IS THE THIRD, and it went with a scope call rather than a design one:
-  // the feature moved to V1.1 (#3), and a row that discloses a screen this release does
-  // not have is a control that cannot act -- which this project has shipped twice and
-  // refuses a third time. It comes back with the screen.
+  // BOOKMARKS AND NAMES ARE THE OTHER TWO, and both went with a scope call rather than
+  // a design one: Bookmarks moved to V1.1 (#3) and the whole Names family to V2 (#73).
+  // A row that discloses a screen this release does not have is a control that cannot
+  // act -- which this project has shipped twice and refuses again. Both come back with
+  // their screens.
   const reader::ReaderMenuScreen m("Middlemarch", "6%");
   const auto& rows = m.vm().rows;
-  REQUIRE(rows.size() == 4);
-  REQUIRE(reader::ReaderMenuScreen::kRowCount == 4);
+  // THE PROPERTY, NOT A MAGIC NUMBER: the drawn rows, the declared count and the enum's
+  // last member are three spellings of one length, and this asserts they agree rather
+  // than pinning what they agree ON. The count in this screen's own comments has been
+  // wrong twice, and re-pinning `== 4` here is what made a shrunk table a two-line edit
+  // in a file that says nothing about which row went.
+  CHECK(rows.size() == static_cast<size_t>(reader::ReaderMenuScreen::kRowCount));
+  CHECK(reader::ReaderMenuScreen::kAboutBook + 1 == reader::ReaderMenuScreen::kRowCount);
   for (const auto& r : rows) {
     CHECK(r.label.find("Go to page") == std::string::npos);
     CHECK(r.label.find("Close book") == std::string::npos);
     CHECK(r.label.find("Bookmarks") == std::string::npos);
+    CHECK(r.label.find("Names") == std::string::npos);
   }
+  // The board's order, first and last, so the enum cannot be reordered silently.
+  CHECK(rows.front().label == "Contents");
   CHECK(rows[reader::ReaderMenuScreen::kAboutBook].label == "About this book");
+  CHECK(rows.back().label == "About this book");
 }
 
 TEST_CASE("About this book opens Book details") {
@@ -241,7 +453,9 @@ TEST_CASE("About this book opens Book details") {
   // is no Library on the stack. Making it focusable without fixing that would have been
   // a button that works only sometimes, which nobody can learn.
   reader::ReaderMenuScreen m("Middlemarch", "6%");
-  // TWO Downs, not one: Typography sits between Contents and here and is live now.
+  // TWO Downs, not one: Typography sits between Contents and here and is live. It is
+  // also exactly two now that `Names` is cut -- it was two before as well, because the
+  // gate skipped it, so this is the one movement the cut left numerically unchanged.
   m.onEvent(kDown);
   m.onEvent(kDown);
   REQUIRE(m.focus() == reader::ReaderMenuScreen::kAboutBook);
@@ -267,7 +481,15 @@ TEST_CASE("the menu's only way out is CLOSE, and it dismisses the panel not the 
     ++seen;
     n.onEvent(kDown);
   } while (n.focus() != first && seen < reader::ReaderMenuScreen::kRowCount);
-  CHECK(seen == 3);  // Contents, Typography and About this book
+  // AS MANY PRESSES AS THERE ARE LANDABLE ROWS, derived rather than pinned: the walk
+  // has to visit every row a reader can reach and stop, and counting the focusable rows
+  // is what says that whatever the table's length is. `== 3` was the number when this
+  // sheet had a skipped row; with `Names` cut it is also kRowCount, and hardcoding
+  // either would have hidden a walk that stopped one row short.
+  size_t landable = 0;
+  for (const auto& r : n.vm().rows)
+    if (r.focusable) ++landable;
+  CHECK(static_cast<size_t>(seen) == landable);
 }
 
 TEST_CASE("no menu row states a quantity, and every one of them discloses") {
@@ -292,10 +514,16 @@ TEST_CASE("no menu row states a quantity, and every one of them discloses") {
   for (const auto& r : rows) CHECK(r.trackingEm1000 == 0);
 }
 
-TEST_CASE("the menu's panel never changes height, so every focus move is partial") {
-  // Unlike the actions panel, whose focused row loses its rule and makes the panel a
-  // pixel shorter -- so two of its four focus moves refuse the fast path. All four rows
-  // here are one height, which is what makes a constant footprint a true promise.
+TEST_CASE("the menu promises a constant paint footprint on every focus move") {
+  // WHAT THIS PINS IS THE PROMISE, NOT THE PIXELS, and the distinction is #68: the rows
+  // are all one height, but `renderReaderMenu` sizes the panel through
+  // `rowRuleFor`, which suppresses the rule for the focused row AND for the last row --
+  // so focusing the LAST row is the one state where the centred panel moves a pixel
+  // (measured on the X3: top 213, 213, 212). `ItemActions::paintFootprint` counts
+  // borderless rows for exactly that and this does not, so the promise is currently
+  // stronger than the render. Cutting `Names` (#73) did not touch it either way: that
+  // row was never focusable and never last, so the focusable set and every per-state
+  // delta are unchanged and only the panel's overall height moved, by one row.
   reader::ReaderMenuScreen m("Middlemarch", "6%");
   const uint32_t before = m.paintFootprint();
   m.onEvent(kDown);

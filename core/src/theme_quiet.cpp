@@ -1162,6 +1162,22 @@ constexpr int kSleepLabelEm = 260;   // NOW READING, 0.26em
 constexpr int kSleepAuthorEm = 220;  // 0.22em
 constexpr int kSleepProgressEm = 140;
 
+// The board's `line-height: 1.1` on `--t-title`, resolved -- and it is the number
+// the FACE would not have given: Title700's own lineHeight() is 53px at ppem 42,
+// which is what this screen drew its single line in before it could wrap, 7px
+// looser than the board's box. A wrap forces the question (a lead is an argument
+// to wrapProseLead, so there is no way to not answer it) and the board had already
+// answered it.
+//
+// A SECOND COPY OF kDetailsTitleLineH, DELIBERATELY, WITH THE REASON WRITTEN DOWN.
+// BookDetails.dc.html states the identical `--t-title` at `line-height: 1.1`, so
+// this is the same fact and by this project's own rule the second copy is the
+// extraction point. It is not extracted here because the two constants live in two
+// screens' anonymous namespaces in a file several people edit at once, and the
+// extraction is a rename reaching a screen this change does not own. The pair is
+// worth one line of a future tidy-up, not a cross-screen edit now.
+constexpr int kSleepTitleLineH = 46;  // round(1.1 * 42)
+
 }  // namespace
 
 void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepViewModel& vm,
@@ -1214,16 +1230,51 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   const Font& progress = fonts[Role::Label500];
   const Font& note = fonts[Role::Meta400];
 
-  // THE BADGE ALONE when no book is open -- design/SleepIdle.dc.html. The card IS the
-  // reading state, so with nothing to read there is nothing to put in it; the badge is
-  // the half that carries this screen's whole purpose, which is telling the user the
-  // device is asleep rather than frozen. Drawn by the shared tail below, so the two
-  // states cannot disagree about where it sits.
+  // THE THREE STATES, IN ORDER OF HOW LITTLE THEY DRAW, and the badge is hoisted
+  // ABOVE the card because the card's line budget is measured against it -- see
+  // below. Nothing about the pixels moved with it: the bound makes the two boxes
+  // disjoint by construction, so which is drawn first cannot matter, and
+  // test_theme_sleep_golden.cpp asserts that disjointness rather than trusting it.
   //
-  // `coverOnly` is the OTHER way this block goes away -- see the predicate above.
-  // design/SleepCover.dc.html drops the card and the badge together, so they hang
-  // off the one flag rather than off two that could drift apart.
-  if (!coverOnly && !vm.nothingToContinue) {
+  // design/SleepCover.dc.html drops the card and the badge TOGETHER -- see the
+  // predicate above -- so this is the state that draws nothing but the picture.
+  //
+  // `!vm.waking` IS THE ONE EXCEPTION TO `coverOnly`, AND IT IS NOT A SECOND
+  // CONDITION FOR THE CARD. The predicate above may drop the badge because a
+  // full-bleed cover is not a screen this device can otherwise be in -- the
+  // picture says "asleep" unaided. A WAKING screen is making a different claim,
+  // and the cover is byte-identical in both states, so without these words a
+  // COVER-mode wake would paint something indistinguishable from the sleep it is
+  // waking from. The card stays suppressed by `coverOnly` alone: waking shows the
+  // cover and the words, never the cover and the reading card. See
+  // SleepViewModel::waking, which carries the whole of this reasoning.
+  if (coverOnly && !vm.waking) return;
+
+  // The badge, measured from the BOTTOM as the board positions it, and drawn in
+  // BOTH remaining states -- which is what makes design/SleepIdle.dc.html one
+  // screen with its content removed rather than a second screen.
+  //
+  // ITS TOP IS THE CARD'S BOUND, asked of the function that placed it rather than
+  // recomputed from the board's 34px and the note face's line box. Deriving a
+  // shared edge twice is how the header band ended up 6px out, and it is why
+  // drawStatusBar asks hintBarHeight instead of measuring its own bar.
+  const int badgeTop = drawBadge(fb, note, vm.note, plane);
+
+  // THE BADGE ALONE, for either of two reasons, and BOTH of them are here.
+  //
+  // `nothingToContinue` is design/SleepIdle.dc.html: the card IS the reading state,
+  // so with nothing to read there is nothing to put in it, and the badge is the half
+  // that carries this screen's whole purpose -- telling the user the device is asleep
+  // rather than frozen.
+  //
+  // `coverOnly` is the WAKING cover screen, and it must be tested again HERE rather
+  // than only in the early return above. `vm.waking` suppresses the suppression for
+  // the BADGE and must not reach the CARD: a waking cover screen is the cover and the
+  // words, never the cover and the reading card. Dropping this term draws the card
+  // over the picture, which is what test_theme_sleep_cover_golden.cpp's "a WAKING
+  // cover screen keeps the badge and still drops the card" fails on -- and did, when
+  // this function was restructured to hoist the badge.
+  if (coverOnly || vm.nothingToContinue) return;
 
   // The card's width is the board's max, or the panel less a margin on the
   // narrower X4 -- `max-width` is a ceiling, not a pin.
@@ -1231,15 +1282,67 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   const int cardW = roomy < kSleepCardMaxW ? roomy : kSleepCardMaxW;
   const int contentW = cardW - 2 * (kSleepCardBorder + kSleepCardPadX);
 
+  // THE TITLE WRAPS, AND IT USED TO ELIDE. This is Home's arc and Home's reason
+  // (renderHome says it at length): an ellipsis on a LIST ROW hides only which of
+  // seven rows this is, and here it hides the one fact the screen exists to state.
+  // This screen holds the glass for HOURS, so a name cut short is not a truncation
+  // the reader presses past -- it is the truncation they live with.
+  //
+  // `WordBreak::Anywhere` for Home's reason too: a title that fell back to a
+  // filename is usually one word, and there is no break opportunity at an
+  // underscore or a hyphen.
+  //
+  // THE WRAP IS BOUNDED, AND THE BADGE IS WHAT BOUNDS IT. Everything else on this
+  // screen is fixed, so the NAME is what yields -- but the thing a growing card
+  // collides with is not the edge of the glass, it is the badge: an overrunning
+  // title would run UNDER an opaque white box and be hidden by it, which is an
+  // ellipsis by another name.
+  //
+  // AND THE RESERVE IS TAKEN TWICE, which is the whole subtlety. The card is
+  // CENTRED, so centreIn splits the slack evenly: reserving the badge once still
+  // leaves a tall card hanging half a badge into it. renderDeleteConfirm and
+  // renderBookError both shipped exactly that defect -- a panel budgeted against
+  // the whole canvas, sliced by the hint bar -- and this is the same arithmetic
+  // one screen on. `fb.height() - badgeTop` IS the badge's footprint plus its
+  // 34px offset, so this needs no number of its own.
+  const int badgeReserve = fb.height() - badgeTop;
+  const int cardRoom = badgeTop - badgeReserve;
+  // Every child but the title, plus both of the board's paddings and its border:
+  // five gaps, the label, the little rule, the author, the bar with its own
+  // margin-top, and the progress line. A constant here would be a second copy of
+  // the box model six lines below.
+  const int cardFixedH = 2 * (kSleepCardBorder + kSleepCardPadY) + label.lineHeight() +
+                         kSleepGap + kSleepRuleH + kSleepGap + kSleepGap + author.lineHeight() +
+                         kSleepGap + kSleepBarTopGap + kSleepBarH + kSleepGap +
+                         progress.lineHeight();
+  int maxTitleLines = (cardRoom - cardFixedH) / kSleepTitleLineH;
+  if (maxTitleLines < 1) maxTitleLines = 1;
+
+  // THE SHOUTED STRING AND THE ELIDED TAIL ARE BOTH NAMED, and they have to be:
+  // `Prose::lines` are string_VIEWS into the text handed to the wrap, "which must
+  // outlive the Prose" (components.h says so), and clampProse's last line is a NEW
+  // string that is not in that text. Home passed `upperLatin1(vm.title)` inline
+  // once: the temporary died at the end of the expression and drawProse read freed
+  // memory, which rendered as a column of NOTDEF BOXES for a title long enough to
+  // wrap and rendered correctly for a short one, because the freed bytes were still
+  // there. Silently right in exactly the case every golden covered.
+  //
+  // Casing is applied before the wrap, not after: the caps run is wider than the
+  // mixed-case one, so wrapping the original would break in the wrong places.
+  const std::string shouted = upperLatin1(vm.title);
+  std::string titleTail;
+  Prose titleProse = wrapProseLead(title, shouted, contentW, pxToF26(kSleepTitleLineH), {},
+                                   WordBreak::Anywhere);
+  clampProse(title, titleProse, maxTitleLines, contentW, titleTail);
+
   // HEIGHT IS A RESULT, not a number the board states: it is the sum of six
   // children and five gaps, and pinning it would be the mistake the header band
-  // and the menu rows both taught. The title is measured elided, so a long book
-  // cannot make the card taller than it was laid out to be.
-  const std::string shownTitle = elideToWidth(title, upperLatin1(vm.title), contentW);
-  const int contentH = label.lineHeight() + kSleepGap + kSleepRuleH + kSleepGap +
-                       title.lineHeight() + kSleepGap + author.lineHeight() + kSleepGap +
-                       kSleepBarTopGap + kSleepBarH + kSleepGap + progress.lineHeight();
-  const int cardH = contentH + 2 * (kSleepCardBorder + kSleepCardPadY);
+  // and the menu rows both taught. The title's term is the wrap's OWN height rather
+  // than one line, which is what lets the card grow with the name -- and it is asked
+  // of the Prose rather than multiplied out here, so the height the card reserves
+  // and the height drawProse consumes are ONE expression. `cardFixedH` is the same
+  // sum the line budget above was measured against, for the same reason.
+  const int cardH = cardFixedH + f26ToPx(titleProse.heightF26());
 
   const int cardX = centreIn(0, fb.width(), cardW);
   const int cardY = centreIn(0, fb.height(), cardH);
@@ -1259,9 +1362,14 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   fb.fillRect(cx + centreIn(0, contentW, kSleepRuleW), y, kSleepRuleW, kSleepRuleH, false);
   y += kSleepRuleH + kSleepGap;
 
-  drawCentredText(fb, title, cx, contentW, baselineIn(title, y, title.lineHeight()), shownTitle,
-                  Ink::Black, {}, plane);
-  y += title.lineHeight() + kSleepGap;
+  // `ProseAlign::Centre` is the board's `text-align: center`, and drawProse centres
+  // each line on its OWN measured width -- which is what drawCentredText did for
+  // the one line this used to draw, through the identical centreIn call. So the
+  // only thing that moved for a short title is the line BOX: 46px, the board's
+  // `line-height: 1.1`, where this drew the face's own 53.
+  y += f26ToPx(drawProse(fb, title, titleProse, cx, contentW, pxToF26(y), Ink::Black, plane,
+                         ProseAlign::Centre));
+  y += kSleepGap;
 
   drawCentredText(fb, author, cx, contentW, baselineIn(author, y, author.lineHeight()),
                   upperLatin1(vm.author), Ink::Black, trackingEm(author, kSleepAuthorEm), plane);
@@ -1276,23 +1384,6 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
 
   drawCentredText(fb, progress, cx, contentW, baselineIn(progress, y, progress.lineHeight()),
                   vm.progress, Ink::Black, trackingEm(progress, kSleepProgressEm), plane);
-  }
-
-  // The badge, measured from the BOTTOM as the board positions it -- and OUTSIDE the
-  // branch above, because both states draw it in the same place. That is what makes
-  // SleepIdle one screen with its content removed rather than a second screen.
-  //
-  // `!vm.waking` IS THE ONE EXCEPTION TO `coverOnly`, AND IT IS NOT A SECOND
-  // CONDITION FOR THE CARD. The predicate above may drop the badge because a
-  // full-bleed cover is not a screen this device can otherwise be in -- the
-  // picture says "asleep" unaided. A WAKING screen is making a different claim,
-  // and the cover is byte-identical in both states, so without these words a
-  // COVER-mode wake would paint something indistinguishable from the sleep it is
-  // waking from. The card stays suppressed by `coverOnly` alone: waking shows the
-  // cover and the words, never the cover and the reading card. See
-  // SleepViewModel::waking, which carries the whole of this reasoning.
-  if (coverOnly && !vm.waking) return;
-  drawBadge(fb, note, vm.note, plane);
 }
 
 // --- Settings ----------------------------------------------------------------
@@ -1609,8 +1700,15 @@ void QuietTheme::renderReader(Framebuffer& fb, const FontSet& fonts, const Glyph
 //
 // design/ReaderMenu.dc.html. The SAME 340px panel the actions overlay draws -- eight
 // boards share that box (components.h lists them) -- with a header that names the book
-// and six 72px rows. So this is assembly, not new geometry: the only thing it adds to
-// the shared primitives is a row that states a value.
+// and a column of 72px rows. So this is assembly and not new geometry, and it adds
+// nothing at all to the shared primitives now: the one thing it used to add was a row
+// that states a value, and with `Bookmarks` cut (#3) and `Names` after it (#73) no row
+// on this sheet states a quantity. `drawPanelRow`'s value slot is pinned by
+// test_components.cpp instead of by a caller here.
+//
+// THE ROW COUNT IS READ OFF THE VIEW MODEL, never written down. This comment has stated
+// it as six and as four and been wrong both times; `vm.rows.size()` is the only place
+// it lives, and the screen's own tests assert the property rather than the number.
 constexpr int kReaderMenuPanelW = 340;
 
 void QuietTheme::renderReaderMenu(Framebuffer& fb, const FontSet& fonts,

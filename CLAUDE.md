@@ -24,7 +24,7 @@ make sim        # render Home to build/home.png
 make firmware   # build for the ESP32-C3
 make fonts      # regenerate the .rfnt type ramp and embedded headers
 make icons      # regenerate icon bitmaps from the design boards' SVG
-make compare    # design-vs-firmware contact sheet, all 32 boards (~2.8 min)
+make compare    # design-vs-firmware contact sheet, all 36 boards (~2.8 min)
                 # ...and it prints `ok`, NOT a percentage -- see #41
 ```
 
@@ -58,11 +58,15 @@ directory`, which names neither the submodule nor the fix) and caches the ~1 GB
 toolchain.
 
 **THE `compare` JOB IS A NARROW GATE AND IS NOT A FIDELITY CHECK.** It fails on
-two things: a board named in `compare-design.py` and absent from disk, and a
-screen the SIMULATOR KNOWS that will not render. It does **not** measure how
-close the render is -- the sheet still prints `ok` rather than a percentage,
-which is #41. A board with no screen behind it stays fine; that is nine of the
-32.
+three things: a board named in `compare-design.py` and absent from disk, a screen
+id named by **two** rows of those tables (#77 — it would be rendered and counted
+twice), and a screen the SIMULATOR KNOWS that will not render. It does **not**
+measure how close the render is -- the sheet still prints `ok` rather than a
+percentage, which is #41. A board with no screen behind it stays fine; that is
+**five of the 36** — measured, not inherited: a full run with the gate on reports
+`31/36 screens implemented` and exits 0 (Bookmarks, Boot, Home / missing book,
+Names, Names / empty). It read **37** before #77, and the extra row was the same
+board counted twice.
 
 **Wiring it at all needed the script to be able to fail.** `render_sim` returned
 a bare `None` for both "the simulator has never heard of this id" and "the
@@ -215,6 +219,44 @@ The list is checked against the disk up front now, so it fails in a second
 instead of after three minutes. **A check that reports on less than it
 claims is worse than no check, because it is trusted** — the same shape as the
 card probe that was answered from cache and kept reporting success.
+
+**`--only` TAKES A LIST, IN BOTH SPELLINGS: `--only home,reader` and
+`--only home --only reader` are the same run**, and the unrecognised-id error
+applies to **every** element, so an id's position cannot decide whether a typo is
+caught. The comma form is primary because it is the one that survives
+`make compare COMPARE_ARGS=...`, where `$(COMPARE_ARGS)` is expanded **unquoted**
+by make — a spelling needing shell quoting inside a make variable would be a worse
+tool. `action="append"` sits under it because **argparse's default for a plain
+option is to OVERWRITE**: `--only home --only library` kept only `library`,
+dropped `home` without a word, and printed a confident `1/1 screens implemented`.
+An **empty** `--only` (`--only ""`, `--only ,`) is an error too, because selecting
+nothing finds nothing missing and exits 0 on `0/0` — the same quiet pass reached by
+an empty argument instead of an unknown one. Issue #77 reported this against the
+COMMA form, which had worked since 2026-08-20; the repeated flag is where the
+defect actually was, and it produces the identical `1/1`.
+
+**AND THE SAME COUNT WAS INFLATED FROM THE OTHER SIDE, WHICH NOTHING HAD
+REPORTED: `reader_anchored` WAS LISTED TWICE.** Its board was added to
+`FLOW_SCREENS` design-first, then the implementation commit added a second row
+beside the other styled reader specimens — same id, same board, a **different
+label** — so every default `make compare` rendered that board four times instead
+of twice, showed the same screen twice under two names, and printed a denominator
+of **37 for the 36 screens that exist**. That is the exact mirror of the absent
+board that shrank the denominator: in both cases the ratio is over something other
+than the set of screens it claims to measure, and here **both halves moved
+together**, which is why no ratio ever looked wrong. The tables are checked for a
+repeated id up front now, over all three of them on every run rather than over the
+selection — a duplicate is an authoring mistake in the table and should not need
+the right `--only` to surface. It **errors rather than de-duplicating**, because
+the two rows carried different labels: there is a real question about which was
+meant, and this tool must not answer it by guessing.
+
+**THE SCRIPT HAS ITS OWN TESTS NOW** — `tools/test_compare_design.py`, plain
+`python3`, Chrome and the simulator stubbed out. They assert the **set and the
+count**, never a pixel, because that is where all six of these defects lived.
+**Deliberately NOT wired into `make test`**, which builds on a bare checkout with
+no Python and no submodule; so it is a test that has to be remembered, which is
+the honest cost of keeping the fast loop interpreter-free.
 
 ## Hardware facts
 
@@ -769,6 +811,70 @@ short-circuit unplugged and BLOCK when a host is attached, so a timing taken ove
 USB is not the device's — and attaching after a sleep can reset the chip, turning
 the wake being investigated into a cold boot. **A fault that only happens unplugged
 is not observable over the wire at all.**
+
+**AND IT HAD NEVER RUN ONCE, THROUGH TWO PHASES OF THIS FILE DESCRIBING IT AS
+WORKING INFRASTRUCTURE (#47, #69).** `gLogToCard` was read at four sites in
+`shell/src/main.cpp` — the buffer append, the idle flush, the flush before sleep and
+the `[alive]` line — and **assigned at none**; `git log --all -S"gLogToCard =" --
+shell/` was empty for the whole life of the feature. `core/` parsed the key into
+`Settings::logToCard` and the shell never consulted it, so the 4 KB buffer, the idle
+flush, the dropped-byte counting and the 256 KB cap were all unreachable. Confirmed
+on an X3: `"logToCard": true` applying correctly on the `[boot] settings in force:`
+line and no `[log]` line on any `[alive]`, across a full session. **The same shape as
+`ListRow::trackingEm1000` and `readerBookTitle_` — a reader with no producer** — and
+it was found twice, from two directions, because a diagnostic nobody can turn on
+looks exactly like a device with nothing to report.
+
+- **THE FIX IS NOT THE ASSIGNMENT; IT IS WHEN THE QUESTION CAN BE ASKED.** The
+  setting is on the CARD, so `loadAndApplySettings()` cannot run before the mount —
+  and the lines this feature exists to capture all print before it: `[wake] refused`
+  / `[wake] held` (~470 lines earlier), the `[prev]` crumb record, `[boot] reset
+  reason=…`, and the storage bring-up itself. A tee armed at the load drops exactly
+  the boot it was wanted for. **Nothing can be WRITTEN that early either**, since
+  there is no mounted volume, so the only question is whether those lines are still
+  in RAM when a flush first becomes legal.
+- **SO THE TEE HAS THREE STATES AND STARTS ARMED**
+  (`reader::CardLogBuffer`, `core/include/reader/card_log.h`): `Pending` buffers and
+  may not write, `Enabled` keeps what `Pending` accumulated, `Disabled` discards it
+  and stops. **Buffering by default and discarding is the cheaper of the two
+  orderings** — a memcpy per line into a static array that exists either way, against
+  a second buffer or a replay mechanism — and it is the only one that can keep a line
+  printed before the file was read.
+- **AND THE BOOT PREAMBLE IS FLUSHED THE MOMENT THE SETTING IS KNOWN**, in
+  `loadAndApplySettings()`, rather than being left to `loop()`'s idle window. Boot
+  does not fit in 4 KB: the next legal flush is after the first paint, thousands more
+  bytes of stage lines, font timings, library scan and session restore later, so
+  without it the file would open with a HOLE precisely where the wake diagnostics
+  are. It is safe there for the settings file's own two reasons — the card is mounted
+  and nothing has been painted.
+- **IT IS `core/`'s LOGIC AND THE SHELL'S ARRAY.** Arming, appending, drop counting
+  and the flush threshold are bytes in and bytes out, and `shell/` has no harness —
+  five bugs have hidden there. The shell keeps the 4 KB (nothing in `core/`
+  allocates) and owns the card write, which is the only part a desktop test cannot
+  reach. `applySetting` is idempotent for the same answer, because
+  `loadAndApplySettings()` runs a **second** time on the RETRY path and a re-arm that
+  discarded would throw away the session so far.
+- **THE STATED LOSS IS THE RETRY PATH.** A device that booted with no card decided
+  *off* and threw the boot buffer away; if the card that then appears asks for a log,
+  the tee arms from that point and the preamble is gone. At the moment the question
+  was asked, the default was the only answer available — so the `[log] armed late`
+  line says which of the three transitions happened rather than leaving them alike.
+- **`logToCard` IS ON THE `[boot] settings in force:` LINE NOW**, and its absence was
+  the other half of #69: it was the one field in the struct with no line reporting
+  it, so a card asking for a log and a firmware ignoring the request looked
+  identical, which is how the request went unimplemented for two phases. **An
+  instrument that reports on less than it claims is worse than none** — the card
+  probe answered from cache, the `make compare` default that skipped four screens,
+  and this.
+- **A FLUSH SAYS WHETHER IT LANDED**, because `appendToCard` can fail on a card that
+  reads and refuses writes and the bytes are dropped either way: `[log] wrote NB` and
+  `[log] COULD NOT WRITE NB` are separate claims, and a line reporting a write that
+  did not happen is the false-claim shape this file refuses for the battery gauge and
+  the sleep badge.
+- **WHAT ONLY THE PANEL CAN ANSWER**, and it is the whole feature: that `/encre.log`
+  appears at all, that it opens with the pre-settings lines, and that the ~40 ms boot
+  flush does not cost anything visible. `shell/` has no harness, so 1,363 green test
+  cases say nothing about any of it.
 
 - **IT MUST NOT MAKE THE DELAY IT IS HUNTING**, which is the whole design. A card
   write costs ~40 ms and takes the DISPLAY'S SPI BUS, so one per line would put tens
@@ -1935,10 +2041,10 @@ worth knowing before changing it:
 | Item actions, Delete confirm | their own boards | Overlays; a focus move repaints the overlay alone. |
 | Book details | `BookDetails.dc.html` | Not an overlay, despite covering the Library. Its title **wraps**; everywhere else elides. |
 | Settings | `Settings.dc.html` | Nine items, three sections, and every drawn row responds. |
-| Sleep | `Sleep.dc.html` | Painted directly, never pushed — a push would make the wake restore into it. |
+| Sleep | `Sleep.dc.html` | Painted directly, never pushed — a push would make the wake restore into it. Its title **wraps**; the badge is drawn first, because its top is the card's bound. |
 | Sleep / nothing open | `SleepIdle.dc.html` | The badge alone. Same screen with its card removed. |
 | Sleep / cover | `SleepCover.dc.html` | The cover full-bleed, and **the one screen that drops the badge**. `Grayscale`, decided per paint. |
-| Sleep / cover + details | `SleepCoverDetails.dc.html` | The same cover with the reading card and the badge over it. Keeps both. |
+| Sleep / cover + details | `SleepCoverDetails.dc.html` | The same cover with the reading card and the badge over it. Keeps both. Its golden pinned a **truncated** title for two phases. |
 | Reader | `Reader.dc.html` | The only screen whose content is the BOOK's — but no longer the only `Fidelity::Grayscale` one. |
 | Book error | `BookError.dc.html` | An overlay whose parent may be Home — **the only one whose parent is not a list**, so it is the only veil no board draws. Two copy shapes, because one of its four refusals is not damage. |
 | Book end | `BookEnd.dc.html` | **The only screen a PAGE TURN opens rather than a press** — off the last page, so it must be reachable with no button bound to it. Its leaving slab's LABEL follows what is under the Reader; its ACTION does not. |
@@ -2073,7 +2179,55 @@ OVERRIDES THAT RULE AND IT IS THE ONLY THING THAT MAY** — see **Covers**, whic
 records why the override cannot be generalised. One screen with and
 without its content, not two screens. `SleepViewModel::nothingToContinue` is spelled
 exactly as `HomeViewModel`'s, because it is the same fact and one rule should have one
-spelling. Measured against its board at **0.27%**, the closest panel on the sheet.
+spelling.
+
+**THE TITLE WRAPS NOW, AND IT USED TO ELIDE (#74).** Home's arc, Home's reason and
+Home's mechanism — `wrapProseLead(..., WordBreak::Anywhere)` → `clampProse` →
+`drawProse` — because an ellipsis on a *list row* hides only which of seven rows this
+is, and here it hides the one fact the screen exists to state. What makes it worse
+here than on Home: **this screen holds the glass for HOURS**, so a name cut short is
+not a truncation the reader presses past, it is the one they live with.
+`Sleep.dc.html`, `SleepWaking.dc.html` and `SleepCoverDetails.dc.html` all gained
+`overflow-wrap: anywhere`; the other three sleep boards do not draw the card.
+
+- **THE DEFECT WAS BLESSED INTO A GOLDEN, which is how long it had been there.**
+  `test/golden/sleep_cover_details.png` read **`GULLIBLE'S T…`** — its fixture's
+  title has never fitted the card — so the repo's own baseline pinned the truncation
+  and every run was green. It reads `GULLIBLE'S / TRAVELS` now.
+- **THE BADGE IS WHAT BOUNDS THE CARD, AND THE RESERVE IS TAKEN TWICE.** The thing a
+  growing card collides with is not the edge of the glass, it is the badge — an
+  overrunning title runs UNDER an opaque white box and is hidden by it, an ellipsis
+  by another name. And the card is CENTRED, so `centreIn` splits the slack evenly and
+  reserving the badge *once* still leaves a tall card hanging half a badge into it:
+  the same arithmetic `renderDeleteConfirm` and `renderBookError` each shipped wrong.
+  It comes from **`drawBadge`'s own returned top**, not from a second copy of its
+  private 34px and note-face line box — deriving a shared edge twice is how the
+  header band ended up 6px out. **That is why the badge is now drawn BEFORE the
+  card**, and the reorder is pixel-neutral: `sleep_idle` and `sleep_cover` are
+  byte-identical across it.
+- **THE TITLE'S LINE BOX IS THE BOARD'S `1.1`, NOT THE FACE'S 53px.** `Title700`'s
+  own `lineHeight()` is 53 at ppem 42 and the board says 46, and the single line this
+  screen used to draw took the face's. A wrap has to be *handed* a lead, so there was
+  no way to leave the question unanswered — and `BookDetails.dc.html` states the
+  identical `--t-title` at `line-height: 1.1` and already resolves it to 46, so
+  `kSleepTitleLineH` is a **documented second copy** of `kDetailsTitleLineH` rather
+  than a new number.
+- **The card's height is still a RESULT**, now a sum whose title term is the wrap's
+  own height. The budget derives to **8 lines on both panels** — X4 `800 − 2×79 =
+  642` and X3 `792 − 2×79 = 634`, less the 253px of card that is not the title, over
+  46 — where 79 is the badge's 34px offset plus its 45px box.
+
+**MEASURED AGAINST ITS BOARD: 3.28% → 2.42% (X4) and 3.01% → 2.22% (X3)**, and the
+board's own render is **byte-identical** before and after, so the whole gain is the
+firmware moving toward an unchanged board (honouring the 1.1 closed most of the 7px
+card-height gap). `sleep_cover_details` went **3.48% → 2.86%** and **3.18% → 2.62%**.
+**THIS LINE USED TO SAY `0.27%`, "the closest panel on the sheet", AND THAT FIGURE IS
+NOT REPRODUCIBLE** — a threshold-at-128 count over the `--export` panels puts the
+pre-change screen at 3.28%/3.01%, and the same instrument reproduces this file's
+recorded `sleep_cover_details` pair (3.48%/3.18%) **to the digit**, which is what says
+the instrument is the one this file uses elsewhere and the 0.27% is the outlier. The
+sheet still prints `ok` rather than a percentage (#41), so any figure here is a count
+someone ran by hand: **quote the method with the number.**
 
 The `6% · CH. 01` line is the percentage and the SPINE POSITION. A chapter *name* would
 need a table of contents, which is not built — the same reason the Reader's own footer
@@ -4266,12 +4420,37 @@ the board was right. `TocEntry::depth` carries it. **The list stays LINEAR**, no
 tree: a tree needs allocation per node and a traversal to draw, where a screen wants
 "the Nth visible row", and a depth is all the board's grouping needs. Every entry is a
 real target either way, because a section header in an NCX carries its own
-`content src`.
+`content src`. **The linear form keeps the parent/child relation recoverable and that
+is now load-bearing**: children immediately follow their parent, so "does this entry
+group others" is `entries[i + 1].depth > entries[i].depth` — which is what #75's fix
+asks, and what a flattened list could not have answered.
 
 **A LOOSE REGEX IS NOT A MEASUREMENT.** This project's habit of measuring before
 designing is what caught the nav-document question; the same habit applied carelessly
 got the nesting question backwards and wrote the wrong claim into a header. Where the
 answer decides a design, parse the thing.
+
+**AND FOUR BOOKS IS NOT A DISTRIBUTION, WHICH IS THE SECOND HALF OF THAT LESSON AND
+COST 1,635 ROWS (#75).** The table above is right and it is a SAMPLE, and the design
+built on it read a `depth` as a level in a hierarchy: `ContentsScreen` made every
+depth-1 entry of a sectioned book a section header. Re-measured by parsing all 225 NCXs
+in `~/.cache/encre-corpus` — 19 have no usable NCX, **103 are flat and 103 are
+sectioned**, an even split, and **98 of the 103 sectioned ones mix entries that GROUP
+others with top-level entries that group nothing**. That second shape is what Standard
+Ebooks emits for every book with parts (`Titlepage`, `Imprint`, `Colophon`,
+`Uncopyright` sitting at depth 1 beside a real `Part I`), it is **9 of the 9 sectioned
+books on the user's own shelf**, and the worst case in the corpus loses **362 rows of
+384**. So the childless top-level entry is not a tail case; it is the common case, and
+the four-book sample happened to contain none of it. **The fix is in
+`screen_contents.h`** — a header is an entry that groups others, one lookahead in a list
+already walked in document order — and the reachability rule now lives there rather than
+being inferred from a depth here.
+
+**A DEPTH IS A NESTING LEVEL, NOT A ROLE.** `toc.h` reports what the NCX authored;
+what a level MEANS on a screen is the screen's decision, and the two were conflated for
+two phases. This layer is deliberately unchanged by that fix: `TocEntry::depth` is still
+the navPoint nesting depth, and nothing here needs to know which entries a screen will
+draw as headers.
 
 **COMMITTING AN ENTRY HAPPENS AT TWO MOMENTS**, and only handling one lost every
 parent: a `navPoint` is complete when it closes AND when a CHILD opens, because the
@@ -4282,8 +4461,10 @@ only by accident of that rule.
 
 **AN IDENTICAL ROW TWICE IS NOISE; A DIFFERENT NAME FOR ONE TARGET IS CONTENT.** Real
 books produce both, and only the PREVIOUS entry is compared — an NCX is authored in
-reading order (0 out-of-order entries across all four), so a repeat is adjacent and a
-full scan would be quadratic for a case that cannot happen far apart.
+reading order (0 out-of-order entries across all four measured), so a repeat is adjacent
+and a full scan would be quadratic for a case that cannot happen far apart. **That
+premise is also what makes #75's lookahead sound**: an entry's children are the entries
+immediately after it, so a document-order list carries the hierarchy without a tree.
 
 **THE LIMITATION WORTH KNOWING:** an NCX target is a file plus an optional fragment
 (`ch3.xhtml#part2`) and the reader positions by spine entry only, so several entries
@@ -4309,7 +4490,8 @@ and `drawPanelRow` was already "72 tall, inset on a panel's own 20px padding, di
 with a chevron". The only thing the menu added to the primitives is a row that states a
 VALUE — its `Bookmarks` count — which is the other half of Home's "a row states a
 quantity or discloses a screen, never both". **THAT ROW IS CUT AND THE PARAMETER IS
-NOT** — see the trackingEm1000 paragraph below, which is where this went next.
+NOT** — see the trackingEm1000 paragraph below, which is where this went next. With
+`Names` cut too (#73) the menu now adds **nothing at all** to the shared primitives.
 
 **IT DECLARES `Mono` WHERE THE READER DECLARES `Grayscale`.** Fidelity comes from the
 top screen, so the menu paints in one waveform instead of three and its focus moves are
@@ -4319,7 +4501,17 @@ is chrome and the page is the one thing here that wanted four levels. Its
 `paintFootprint` is a constant, unlike the actions panel's: every row is one height, so
 the panel cannot change height when the focus moves and every move takes the fast path.
 (That sentence counted the rows twice and the count was wrong twice; the property is
-"one height", and the number belongs in the test.)
+"one height", and the number belongs in the test.) **AND THE CLAIM IS FALSE — #68 IS THE
+OPEN CARD.** The rows really are one height, but `renderReaderMenu` sizes the panel
+through `panelRowHeight(rowRuleFor(i, rows, focused))`, and `rowRuleFor` suppresses the
+rule for the focused row **and** for the last row — so focusing the LAST row is the one
+state where two suppressions coincide and the centred panel moves a pixel. Measured on
+the X3: panel top 213 on Contents and Typography, **212** on About this book. That is
+the actions panel's own defect, which `ItemActions::paintFootprint` counts borderless
+rows for and this does not. **Cutting `Names` did not touch it**: that row was never
+focusable and never last, so it always drew its rule — the cut takes 73px off the panel
+in every state and leaves the focusable set, and therefore every per-state delta,
+exactly as it was.
 
 **`discloses` CANNOT BE DERIVED FROM AN EMPTY VALUE**, and deriving it drew a chevron on
 `Close book` promising a screen that does not exist — that row had neither a value nor a
@@ -4386,20 +4578,31 @@ it has open, and neither has to know how the other is shaped. Two details worth 
   after opening them from a book would show the book — a stale answer that looks like the
   right screen.
 
-**ONE OF THE MENU'S FOUR ROWS DOES NOTHING AND IS DRAWN ANYWAY** — Settings' rule, and
-the board was edited to match before the screen was written: it had focused Typography,
-which was not built then, so implementing it faithfully would have drawn a selection on a
-dead row. `Contents`, `Typography` and `About this book` respond; `Names` does not.
+**EVERY ROW ON THE MENU RESPONDS NOW, AND SETTINGS' RULE HAS NO INSTANCE LEFT HERE.**
+The board was edited to match the rule before the screen was written — it had focused
+Typography, which was not built then, so implementing it faithfully would have drawn a
+selection on a dead row — and the last drawn-and-skipped row was `Names`, which is cut
+(#73). `Contents`, `Typography` and `About this book` are all that is left and all three
+act. `ReaderMenuScreen::focusable()` and `ListRow::focusable` stay, because the rule is
+the screen's and the next unbuilt **V1** row gets it by setting one word.
 
-**AND THAT RULE HAS A LIMIT, WHICH `Bookmarks` IS WHERE IT WAS REACHED (#55).** Skipping
-the focus stops an unbuilt row misleading a reader who PRESSES it; it does nothing about
-the row itself promising a feature the release does not have. The distinction that
-decides it is **which release the row is waiting on**: `Names` waits on its own screen
-inside V1, so it is drawn and skipped, where `Bookmarks` moved to V1.1 (#3) and was cut
-from the board and the enum instead. It comes back with the screen.
+**AND THAT RULE'S LIMIT HAS NOW BEEN REACHED TWICE — `Bookmarks` (#55/#3) AND `Names`
+(#73) — AND THIS PARAGRAPH GOT THE SECOND ONE WRONG WHILE STATING THE TEST FOR IT.**
+Skipping the focus stops an unbuilt row misleading a reader who PRESSES it; it does
+nothing about the row itself promising a feature the release does not have. The
+distinction that decides it is **which release the row is waiting on** — and this file
+wrote that sentence down and then applied it to `Names` from memory rather than from the
+board: it said "`Names` waits on its own screen inside V1, so it is drawn and skipped".
+**The Names family is V2**, three `Boarded` cards (the per-chapter index, the list
+screen, and the alias-row overflow), so it was `Bookmarks`' case from the moment those
+cards were filed and the row should have gone with it. **A rule and its worked example
+drifted apart inside one paragraph**, which is the same shape as the guards that named a
+member instead of `ScreenId::Count`: the rule was right, the instance was stale, and
+nothing but the board could tell them apart. `Names.dc.html` and `NamesEmpty.dc.html`
+stay; the row returns with the screen.
 
-**THREE ROWS HAVE BEEN CUT ENTIRELY, AND NOT ONE OF THEM FOR ROOM** — two of them on
-2026-08-24 and `Bookmarks` above. `Go to page…` because
+**FOUR ROWS HAVE BEEN CUT ENTIRELY, AND NOT ONE OF THEM FOR ROOM** — two of them on
+2026-08-24, then `Bookmarks` and `Names` above. `Go to page…` because
 **nobody navigates an EPUB by page number**: a reflowable book has no stable page to go
 to and the number a picker offers moves with the type size, so the honest jump is the
 chapter name `Contents` already gives. (Its board and its roadmap entry went too; the
@@ -4410,7 +4613,7 @@ one, and it cost a fourth save edge to stay correct. Removing it deleted that ed
 tracking in the firmware. The enum shrank with it: **a row index is not a stable
 numbering** here, because the one thing that persists one is `FocusScreen`'s restore,
 and that refuses an index it cannot land on — exactly what a shrunk table produces. It
-has now shrunk twice on that argument with nothing to migrate either time.
+has now shrunk three times on that argument with nothing to migrate any of them.
 
 The menu measured **3.10% / 3.60%** against the board after that cut, against 3.06% /
 3.60% before: the panel shrank consistently on both sides, so the residual was the same
@@ -4426,6 +4629,43 @@ threshold-at-128 count over the bare panel PNGs `--export` writes. Measured in t
 tree, the untouched `reader` reads 5.24% / 6.29% against the 5.34% / 6.38% recorded
 elsewhere here — the same ~0.1pp offset this file already notes for the peek, which is
 what makes the before and after comparable rather than two instruments.
+
+**AFTER THE `Names` CUT IT IS 3.00% / 3.56%, AND THAT NUMBER WENT THE WRONG WAY FOR A
+REASON THAT IS NOT DRIFT.** The panel lost a 72px row and its 1px rule, so it got
+*smaller* and *closer* to nothing — and the strict figure ROSE by 0.54pp on both
+geometries. **This is the first time on this project that a threshold-at-128 count has
+been read as a regression and been an artefact of the count itself**, and the mechanism
+is worth having written down because it will happen to the next row anybody cuts from a
+centred panel:
+
+- **The board's panel is a HALF PIXEL out of phase now.** Chrome derives the panel's
+  height as `2 * border + caption + rows` and its caption block's content height is
+  FRACTIONAL, so the sum is fractional. Removing one 73px row flipped the *parity* of a
+  centred panel's top edge: the board's panel used to land on an integer y and now lands
+  on a half-integer. Chrome then rasterises every 1px rule inside it across **two rows
+  of grey 127**, and 127 is under the threshold, so the count scores **both** as ink
+  where the firmware inks exactly one. ~340 spurious mismatches per full-width edge,
+  five edges, and the +2,062 (X4) / +2,276 (X3) is accounted for.
+- **NOTHING MOVED, and that was checked per band rather than argued.** Every full-width
+  edge of the design's panel BRACKETS the firmware's: top border design 252(127) /
+  253(0) / 254(127) against firmware 253 / 254; the rule design 472(127) / 473(127)
+  against firmware 472; bottom border design 545(128) / 546(0) / 547(127) against
+  firmware 545 / 546; and the focused row's black block spans the same 74px, offset by
+  half of one. Identical story at 528×792. A rule that had really moved would sit
+  *beside* the firmware's, not straddle it.
+- **A ±1-ROW-TOLERANT COUNT IS WHAT THE FIGURE WOULD BE WITHOUT THE PHASE**, and it
+  moves the way a smaller panel should: **1.66% → 1.76% (X4) and 2.11% → 2.20% (X3)**,
+  +0.10pp, consistent across both geometries. That is the same order as every other row
+  cut here. It is quoted as a second reading and **not** as a replacement — the
+  threshold-at-128 number is this project's instrument and swapping instruments to make
+  a figure look better is how a real regression gets hidden.
+- **THE FIX IS NOT TO PIN THE PANEL'S HEIGHT ON THE BOARD.** That is what
+  `Peek.dc.html` did, and it was right *there* because the peek's box is a fixed
+  constant by design; this panel's height is the sum of its rows, which is exactly the
+  box model CLAUDE.md's first invariant says to derive from and never pin. The
+  fractional part lives in the shared overlay caption that **eight boards** draw, so it
+  is a `components.h`-level question and not this screen's — and it is worth a card
+  rather than a paragraph.
 
 **THE ROW'S RIGHT SLOT HAS HELD TWO WRONG THINGS.** It was `P. 21`, a page number for a
 place in the book, which needs every chapter paginated (~49 s). That became `CH. 01`, the

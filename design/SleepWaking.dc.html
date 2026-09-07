@@ -28,7 +28,23 @@
 </helmet>
 <div class="dither-field" style="width: 480px; height: 800px; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; box-sizing: border-box; position: relative;">
 
-  <div style="background: #ffffff; border: 2px solid #000000; padding: 38px 42px; display: flex; flex-direction: column; align-items: center; gap: 14px; max-width: 400px;">
+  <!-- THE CARD'S `max-height` IS THE BOUND, and it is the badge's own footprint
+       reserved TWICE. The card is centred in the panel and the badge is anchored
+       34px off the bottom, so `centreIn` splits whatever slack there is EVENLY:
+       reserving the badge once still leaves a tall card hanging half a badge into
+       it. 158px is 2 x (34px of offset + the badge's own 45px box: --t-meta's 27px
+       line, 8px of padding and a 1px border, each side). renderSleep derives it
+       from drawBadge's returned top rather than pinning it, so a change to the
+       note's role moves both together; the number is spelled here because CSS has
+       no way to ask the badge how tall it is.
+
+       This is DeleteConfirm.dc.html's and BookError.dc.html's rule -- a board that
+       declares a wrap declares its bound in the same breath -- one screen further
+       on: there the panel is bounded by the glass, and here by the badge, which is
+       the thing a growing card actually collides with. Without it a long enough
+       title runs UNDER the badge, and the badge's white background hides it: an
+       ellipsis by another name, on the screen this wrap exists to keep honest. -->
+  <div style="background: #ffffff; border: 2px solid #000000; padding: 38px 42px; display: flex; flex-direction: column; align-items: center; gap: 14px; max-width: 400px; max-height: calc(100% - 158px); overflow: hidden;">
     <div style="font-size: var(--t-meta); letter-spacing: 0.26em; font-weight: 500;">NOW READING</div>
     <div style="width: 44px; border-top: 2px solid #000000;"></div>
     <!-- ON THE RAMP, at `--t-title`. This said `font-size: 53px`, which is in no
@@ -46,8 +62,24 @@
          than it was drawn. If it reads as too quiet on glass, the fix is a new
          role and a wrap that honours a soft hyphen -- both real work, and neither
          worth it for a screen shown while the device is asleep until the panel
-         says so. -->
-    <div style="font-size: var(--t-title); font-weight: 700; text-align: center; line-height: 1.1; text-transform: uppercase;">Middlemarch</div>
+         says so.
+
+         IT WRAPS, AND IT USED TO ELIDE. This comment ended "a longer title
+         elides, which is the rule for every screen but Book details", and that
+         rule is wrong HERE for Main.dc.html's reason: an ellipsis on a LIST ROW
+         hides only which of seven rows this is, and on this screen it hides the
+         one fact the screen exists to state. This is the last thing on the glass
+         for hours -- longer than any other screen is looked at -- so a name cut
+         short is the defect a reader lives with, not one they press past.
+
+         `overflow-wrap: anywhere` because the break has to be allowed inside a
+         word: a title falling back to a filename is usually one word, and CSS
+         offers no break opportunity at an underscore or a hyphen. Same two words
+         as Main.dc.html's title and BookDetails.dc.html's, for the same reason.
+
+         The bound is the CARD's `max-height` above, not a line count here: the
+         card's height is a result and it is what collides with the badge. -->
+    <div style="font-size: var(--t-title); font-weight: 700; text-align: center; line-height: 1.1; text-transform: uppercase; overflow-wrap: anywhere;">Middlemarch</div>
     <div style="font-size: var(--t-label); letter-spacing: 0.22em;">GEORGE ELIOT</div>
     <div style="width: 170px; height: 8px; border: 1px solid #000000; box-sizing: border-box; margin-top: 8px;">
       <div style="width: 6%; height: 100%; background: #000000;"></div>

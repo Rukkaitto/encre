@@ -19,7 +19,12 @@ Not part of the build. Requires Google Chrome and Pillow.
     python3 tools/compare-design.py                   # V1 screens, both geometries
     python3 tools/compare-design.py --all              # + flows and states
     python3 tools/compare-design.py --only home,reader
+    python3 tools/compare-design.py --only home --only reader   # same run
     python3 tools/compare-design.py --geometry x3      # X3 (528x792) only
+
+Its own tests are tools/test_compare_design.py, run with plain python3 and
+deliberately not wired into `make test` -- which builds on a bare checkout with
+no Python at all.
 
 The design board is served over a throwaway localhost server because Chrome
 does not load file:// subresources reliably.
@@ -95,9 +100,11 @@ V1_SCREENS = [
     ("library",      "Library.dc.html",    "Library"),
     ("reader",       "Reader.dc.html",     "Reader"),
     ("reader_menu",  "ReaderMenu.dc.html", "Reader menu"),
-    # The two styled specimens. Their own rows rather than variants of `reader`,
+    # The three styled specimens. Their own rows rather than variants of `reader`,
     # because the mismatch percentage is per screen and folding them in would average
     # a styling regression away against a board that has no styles on it.
+    # `reader_anchored` belongs here and NOWHERE ELSE -- it was also listed in
+    # FLOW_SCREENS beside `peek`, which double-counted it on every run.
     ("reader_anchored",     "ReaderAnchored.dc.html",    "Reader - with a way back"),
     ("reader_chapter_open", "ReaderChapterOpen.dc.html", "Reader - chapter open"),
     ("reader_list",         "ReaderList.dc.html",        "Reader - list"),
@@ -159,8 +166,11 @@ FLOW_SCREENS = [
     ("typography",      "Typography.dc.html",     "Typography"),
     ("contents",        "Contents.dc.html",       "Contents"),
     # Peek and return (3D). `peek` is the overlay -- book text over the veiled page
-    # you are on -- and `reader_anchored` is the Reader with somewhere to go back to,
-    # its own board so that Reader.dc.html stays pinned as the no-anchor common case.
+    # you are on. Its sibling `reader_anchored` -- the Reader with somewhere to go
+    # back to, boarded separately so Reader.dc.html stays pinned as the no-anchor
+    # common case -- is listed ONCE, up in V1_SCREENS with the other styled reader
+    # specimens. It was in both lists for a while; see the duplicate-id guard in
+    # main() for what that cost.
     # NAMES (3E). `names` is the alphabetical list -- two row heights, a rail -- and
     # `names_empty` is the same screen before reading has filled it, a variant rather
     # than a second screen. Selecting a row opens the peek, so there is no name
@@ -168,7 +178,6 @@ FLOW_SCREENS = [
     ("names",           "Names.dc.html",          "Names"),
     ("names_empty",     "NamesEmpty.dc.html",     "Names / empty"),
     ("peek",            "Peek.dc.html",           "Peek"),
-    ("reader_anchored", "ReaderAnchored.dc.html", "Reader / anchored"),
     ("bookmarks",       "Bookmarks.dc.html",      "Bookmarks"),
     ("book_end",        "BookEnd.dc.html",        "Book finished"),
     ("sd_missing",      "SdMissing.dc.html",      "No SD card"),
@@ -412,8 +421,23 @@ def main():
     ap.add_argument("--all", action="store_true",
                     help="accepted and ignored; every screen is the default now. "
                          "Kept so existing invocations and docs do not break.")
-    ap.add_argument("--only", help="comma-separated screen ids; errors on an "
-                                   "id that matches nothing")
+    # BOTH SPELLINGS, and the comma one is primary because it is the one that
+    # was always documented (this module's docstring, and CLAUDE.md's rule on UI
+    # work) and the only one that survives `make compare COMPARE_ARGS=...`,
+    # where $(COMPARE_ARGS) is expanded UNQUOTED -- so a spelling needing shell
+    # quoting inside a make variable would be a worse tool than this one.
+    # `action="append"` is layered under it because argparse's default for a
+    # plain option is to OVERWRITE: `--only home --only library` kept only
+    # `library`, dropped `home` without a word, and printed a confident
+    # "1/1 screens implemented" -- the exact reports-on-less-than-it-claims
+    # shape as the card probe answered from cache and the default that compared
+    # seven boards of thirty-odd. Accumulating cannot be wrong here: there is no
+    # reading of a second --only under which the first was meant to be discarded.
+    ap.add_argument("--only", action="append", metavar="IDS",
+                    help="screen ids to compare, as a comma-separated list and/or "
+                         "a repeated flag: `--only home,reader` and "
+                         "`--only home --only reader` are the same run. Errors on "
+                         "an id that matches nothing.")
     ap.add_argument("--geometry", choices=["x4", "x3", "both"], default="both",
                      help="device panel geometry to render: x4 (480x800), "
                           "x3 (528x792), or both (default)")
@@ -450,14 +474,57 @@ def main():
     # putting it back in the count that measures V1.
     if args.only:
         screens = screens + V2_SCREENS
-    if args.only:
-        want = {s.strip() for s in args.only.split(",")}
+        # Every --only, then every comma inside each -- so the two spellings mix
+        # and neither position nor spelling decides which ids a run honours.
+        want = {piece.strip() for group in args.only
+                for piece in group.split(",") if piece.strip()}
+        if not want:
+            # `--only ""` or `--only ,` would otherwise select nothing, find
+            # nothing missing, and exit 0 reporting "0/0 screens implemented" --
+            # the same quiet pass the guard below closes, reached by an empty
+            # argument instead of an unknown one.
+            raise SystemExit("--only was given but names no screen ids")
         screens = [s for s in screens if s[0] in want]
         missing = want - {s[0] for s in screens}
         if missing:
             # A typo used to render zero screens and report "0/0 implemented",
-            # which reads like a pass.
+            # which reads like a pass. EVERY element is checked, so an id's
+            # position in the list cannot decide whether a typo is caught: with
+            # the old overwriting --only, a wrong id in any but the last flag
+            # was discarded before it could be checked and the run exited 0.
             raise SystemExit(f"--only names no such screen: {', '.join(sorted(missing))}")
+
+    # THE TABLES ARE A SET, NOT A BAG, and this is checked over all three of them
+    # on every run rather than over the selection -- a duplicate is an authoring
+    # mistake in the table, so it should not need the right --only to surface.
+    #
+    # `reader_anchored` was listed in V1_SCREENS and in FLOW_SCREENS at once (its
+    # board was added FLOW-side design-first, then the implementation commit added
+    # a second row beside the other styled specimens without noticing). Every
+    # default `make compare` therefore rendered that board four times instead of
+    # twice, counted it as two screens, and printed a denominator of 37 for the 36
+    # screens that exist -- so both halves of the ratio were inflated, and a sheet
+    # showed the same screen twice under two different labels. That is the mirror
+    # of the absent board that shrank the denominator: in both cases the count is
+    # over something other than the set of screens it claims to measure.
+    #
+    # ERRORING RATHER THAN DE-DUPLICATING, deliberately. Quietly collapsing the
+    # rows would leave the second one in the file to be read as intentional, and
+    # the two rows carried DIFFERENT labels -- so there is a real question about
+    # which was meant, and this tool must not answer it by guessing.
+    all_rows = V1_SCREENS + FLOW_SCREENS + V2_SCREENS
+    seen = {}
+    for sid, board, label in all_rows:
+        seen.setdefault(sid, []).append((board, label))
+    repeated = {sid: rows for sid, rows in seen.items() if len(rows) > 1}
+    if repeated:
+        raise SystemExit(
+            "%d screen id(s) are listed more than once in compare-design.py, so "
+            "the sheet would render and COUNT them twice -- keep one row:\n%s"
+            % (len(repeated),
+               "\n".join("  %s: %s" % (sid, ", ".join(f"design/{b} as {l!r}"
+                                                      for b, l in rows))
+                         for sid, rows in sorted(repeated.items()))))
 
     # A BOARD NAMED IN THIS LIST AND ABSENT FROM DISK IS A HARD ERROR, for exactly
     # the reason `--only` errors on an id it does not recognise. The render loop used

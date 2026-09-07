@@ -6,13 +6,16 @@ namespace reader {
 
 namespace {
 
-// The board's four rows. `value` is the row's right slot where the board puts one and
+// The board's three rows. `value` is the row's right slot where the board puts one and
 // empty where it draws a chevron -- the same "a row states a quantity or discloses a
 // screen, never both" rule the menu rows on Home follow.
 //
-// WHAT RESPONDS is the second flag, and it is a statement about what exists rather
-// than about the design: Names has a board and no screen. It becomes focusable in the
-// commit that gives it something to do, exactly as Typography's did.
+// WHAT RESPONDS is the third flag, and it is a statement about what exists rather than
+// about the design. EVERY ROW HERE IS `true` NOW, and this table had the last `false`
+// in the screen: Names had a board and no screen, and the screen it was waiting for
+// turned out to be V2's rather than V1's, so it was cut (#73) instead of going live the
+// way Typography's did. The flag stays because the rule is the screen's, not this
+// table's -- the next unbuilt V1 row is drawn and skipped by setting one word.
 //
 // NEITHER A TRACKING COLUMN NOR A VALUE ONE. `Close book` was the only row on any panel
 // in this firmware that the boards letter-spaced, and `Bookmarks` was the only one that
@@ -37,11 +40,6 @@ struct Item {
 constexpr Item kItems[ReaderMenuScreen::kRowCount] = {
     {"Contents", "", true, true},
     {"Typography", "", true, true},
-    // The character index another branch boards as Names.dc.html. Drawn and inert -- it
-    // becomes focusable in the commit that gives it a screen, and needs no change here
-    // when it does. It is the LAST row that may be, too: a row waits on its own screen
-    // within a release, where `Bookmarks` was waiting on the next one and was cut.
-    {"Names", "", false, true},
     // ABOUT THIS BOOK OPENS BOOK DETAILS, and it was inert because that screen used to be
     // built from the LIBRARY's focused row -- fine from the Library and wrong from a
     // Reader opened through Home's CONTINUE, where there is no Library on the stack. It
@@ -100,10 +98,12 @@ Action ReaderMenuScreen::onGesture(const GestureEvent& g) {
         case kAboutBook:
           return Action::push(ScreenId::BookDetails);
         default:
-          // An inert row cannot be focused, so this is unreachable by a press. It
-          // answers none() rather than asserting, because a restored focus is the one
-          // way a number could arrive here from outside -- and FocusScreen refuses an
-          // unlandable restore for exactly that reason.
+          // EVERY ROW IS NAMED ABOVE NOW, so a press cannot reach this at all -- with
+          // `Names` cut there is no inert row for the focus to be sitting on. What is
+          // left is a focus OUT OF RANGE, and the one way a number arrives here from
+          // outside is a restore: FocusScreen refuses an index it cannot land on, so
+          // this answers none() rather than asserting, and it keeps working as the
+          // landing pad if an unbuilt V1 row is ever drawn and skipped here again.
           return Action::none();
       }
     default:
