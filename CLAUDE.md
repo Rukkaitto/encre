@@ -2461,11 +2461,44 @@ the panel can answer is reachable. **It overrides the percent and nothing else**
 X3 on the cable still suppresses `Critical` — which is what makes the on-cable check a
 real test rather than a tautology. `docs/on-device-smoke-checklist.md` §10 is the list.
 
+**CONFIRMED ON GLASS (2026-09-07), WHICH IS THE ONLY PLACE MOST OF IT COULD BE.** The
+whole ladder was walked on an X3 with `ENCRE_BATTERY_FAKE_PERCENT`: the banner over a
+page, the shutdown's paint completing before the rails go down, the resume gate refusing
+three times in a row and repainting nothing, the restore of the reader's page once
+charged, and `charging` suppressing `Critical` on the cable. **1,319 green test cases
+said nothing about any of it** — `shell/` has no harness, so not one line of the two
+gates or the shutdown's ordering is executed by the desktop suite.
+
+**AND THE GLASS FOUND TWO FALSE CLAIMS NOTHING ELSE COULD**, both in this screen's copy
+and both the defect class this file already refuses for an unread gauge (`-1`, not `0%`):
+
+- **`CHARGE TO WAKE` promised what the hardware cannot do.** There is no charge-detect
+  wake source — `usbDetect` is a field declaration nothing in the SDK reads, and on the
+  X3 it names the fuel gauge's own SDA — and no timer wake can substitute, because on
+  battery the sleep leaves the chip **fully powered down** (which is why a resume reports
+  `POWERON`). It also omitted the hold, which `requireHeldPowerButtonOrSleepAgain`
+  requires and which runs FIRST, so a tap refuses for the *other* reason and never
+  reaches the charge gate at all. The badge is `CHARGE · HOLD POWER TO WAKE` now, 27
+  characters — the width is proven by `Sleep.dc.html`'s shipping badge of exactly that
+  length rather than by a fresh measurement.
+- **The prose named USB-C, which the X3 does not have.** One binary serves both models
+  and nothing in the board profile knows the connector, so the copy may not name one:
+  *"connect a charger to continue"*. Both engines still break the paragraph at the same
+  four places, so `max-width` did not move.
+
+**Four live comments still asserted the old promise**, one of them verbatim —
+`battery_tracker.h` said *"the glass says CHARGE TO WAKE, and it does"*, inside the
+header that owns the thresholds. A rule restated at several sites is one that drifts, so
+all four were corrected rather than just the string.
+
 **MEASURED AGAINST THE BOARDS:** `low_battery` 5.03% (X4) / 6.02% (X3) against the
 untouched `reader`'s 5.34%/6.38% — compare it against the other **grayscale** screens,
-for the reason recorded under the peek. `battery_empty` is 1.81%/1.66% against
+for the reason recorded under the peek. `battery_empty` is **2.08%/1.91%** against
 `sd_missing`'s 1.83%/1.67%, measured as a control in the same tree with the same
-instrument. `make compare` reports 30/36 implemented and both ids `firmware ok`.
+instrument. It read 1.81%/1.66% before the badge's copy changed, and the increase is
+accounted for row by row: **the badge's box agrees with Chrome's to 1px**, so what moved
+is a wider tracked-caps run rasterising differently, not geometry drifting. `make
+compare` reports 30/36 implemented and both ids `firmware ok`.
 
 **ONE STATED LIMIT, PRE-EXISTING RATHER THAN INTRODUCED:** `criticalShutdown()` flushes
 the card log **after** `powerDownRailsForSleep()` has cut the X3's SD rail. That is
