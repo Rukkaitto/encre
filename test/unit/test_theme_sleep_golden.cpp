@@ -7,10 +7,12 @@
 // goldens caught the same defect on Home in six pixels. This is the pair Sleep
 // was missing.
 #include <string>
+#include <vector>
 
 #include "doctest.h"
 #include "golden.h"
 #include "ramp.h"
+#include "reader/components.h"
 #include "reader/framebuffer.h"
 #include "reader/screen_sleep.h"
 #include "reader/screens.h"
@@ -167,4 +169,302 @@ TEST_CASE("the idle view model says nothing about a book") {
   CHECK(vm.progress.empty());
   CHECK(vm.progressPercent == 0);
   CHECK_FALSE(vm.note.empty());  // ...except the one that does not
+}
+
+// --- A title too long for one line ---------------------------------------------
+//
+// design/Sleep.dc.html's title WRAPS, and it used to elide (issue #74). This screen
+// holds the glass for HOURS, so a name cut short is not a truncation the reader
+// presses past -- it is the one they live with, on the screen whose whole job is to
+// say which book they are reading.
+//
+// IT NEEDS HOME'S GOLDEN FOR HOME'S REASON. Home shipped a USE-AFTER-FREE on this
+// exact mechanism: `Prose::lines` are string_views into the text handed to the wrap,
+// the shouted string was passed inline as a temporary, and a title long enough to
+// WRAP drew from freed memory as a column of notdef boxes -- while a short one
+// rendered correctly, because the freed bytes were still there. Every golden passed,
+// because a notdef box inks rows exactly like a letter does and the demo title is one
+// line. What caught it was rendering a long title and LOOKING at it, so that is what
+// `sleep_long_title` is: the check that distinguishes ink that spells something from
+// ink that does not. The tests below cannot make that judgement and do not pretend
+// to; they pin the geometry the wrap has to obey.
+
+namespace {
+
+// Three lines at both geometries, against the card's 312px content column at ppem
+// 42 where MIDDLEMARCH's eleven characters measure 294. A real book's name rather
+// than a synthetic run, and with spaces in it, so what is pinned is the ORDINARY
+// word wrap and `WordBreak::Anywhere` is only the fallback -- which is the way round
+// a reader meets them.
+//
+// AND IT IS OFF THE WRAP BOUNDARY BY DESIGN, which the first choice was not. "The
+// Strange Case of Dr Jekyll and Mr Hyde" wraps its third line to "JEKYLL AND MR" at
+// exactly 312px against a 312px column: it fits by ZERO pixels, so any change to the
+// face, the ramp or the kern table would move a line and the golden would report a
+// wrap change as a rendering regression. This project has a rule about it (a
+// specimen must not put a line on the wrap boundary) and the test below is what
+// makes the rule mechanical for this fixture rather than a thing to remember.
+reader::SleepViewModel longTitleSleep() {
+  reader::SleepViewModel vm;
+  vm.label = "NOW READING";
+  vm.title = "Far from the Madding Crowd";
+  vm.author = "Thomas Hardy";
+  vm.progressPercent = 41;
+  vm.progress = "41% \xC2\xB7 CH. 07";
+  vm.note = "ASLEEP \xC2\xB7 HOLD POWER TO WAKE";
+  return vm;
+}
+
+struct Box {
+  int top = -1, bottom = -1;
+  int height() const { return bottom - top + 1; }
+};
+
+// The card's border box, found by the rows carrying a CONTIGUOUS black run of
+// exactly the card's width -- its own top and bottom borders, two rows each.
+//
+// That discriminator is the one test_book_error_copy.cpp had to learn. "The first
+// and last row with a wide black run" resolves to a rule INSIDE the panel the moment
+// the real border leaves the canvas, which is how the delete panel's off-glass bound
+// passed a test written to catch it. Here the trap is sharper still: the dither field
+// covers the WHOLE panel, so every row of this screen has black pixels at both
+// margins and any leftmost-to-rightmost measure returns the panel's width.
+//
+// The little rule (44px) and the progress bar (170px) are too narrow to be mistaken
+// for a border, and the badge is WIDER than the card on both panels -- so this asks
+// for exactly four rows and treats any other answer as a failure rather than
+// quietly returning the wrong box.
+Box cardBox(const reader::Framebuffer& fb, int cardW) {
+  std::vector<int> borders;
+  for (int y = 0; y < fb.height(); ++y) {
+    int run = 0, best = 0;
+    for (int x = 0; x < fb.width(); ++x) {
+      if (!fb.getPixel(x, y)) {  // getPixel reports WHITE, so black is its negation
+        ++run;
+        if (run > best) best = run;
+      } else {
+        run = 0;
+      }
+    }
+    if (best == cardW) borders.push_back(y);
+  }
+  REQUIRE_MESSAGE(borders.size() == 4,
+                  "expected two 2px card borders, found " << borders.size() << " rows");
+  Box b;
+  b.top = borders.front();
+  b.bottom = borders.back();
+  return b;
+}
+
+// The badge's top edge, taken from a render that has NO CARD -- the idle state,
+// which is this same screen with its content removed, so the badge is the same box
+// in the same place. The field's own dots are one pixel wide, so the badge's border
+// is the first long run on the frame.
+//
+// IT MUST NOT BE MEASURED RELATIVE TO THE CARD, and the first version of this file
+// did exactly that: "the topmost inked row below the card's bottom". The badge is
+// drawn FIRST now, so a card that overruns fills white across it -- and that search
+// then finds the REMAINS of a badge the card has already destroyed, its surviving
+// bottom border, and reports it as a badge the card stopped short of. Proved by
+// mutation: reserving the badge once instead of twice overruns it by 35 rows, and
+// the relative form passed all 24 assertions.
+int badgeTopOf(const reader::Framebuffer& fb) {
+  for (int y = 0; y < fb.height(); ++y) {
+    int run = 0, best = 0;
+    for (int x = 0; x < fb.width(); ++x) {
+      if (!fb.getPixel(x, y)) {
+        ++run;
+        if (run > best) best = run;
+      } else {
+        run = 0;
+      }
+    }
+    if (best > 100) return y;
+  }
+  return fb.height();
+}
+
+}  // namespace
+
+TEST_CASE("QuietTheme renders a wrapping Sleep title to golden at both geometries") {
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  auto renderOne = [&](int w, int h, const std::string& name) {
+    reader::Framebuffer fb(w, h);
+    theme.renderSleep(fb, ramp.fonts, longTitleSleep(), reader::Plane::Bw, nullptr);
+    golden::checkGolden(fb, name);
+  };
+  SUBCASE("X4 480x800") { renderOne(480, 800, "sleep_long_title"); }
+  SUBCASE("X3 528x792") { renderOne(528, 792, "sleep_long_title_x3"); }
+}
+
+TEST_CASE("a long Sleep title makes the CARD taller rather than losing its end") {
+  // The behaviour the issue asked for, asserted on geometry so a re-bless cannot
+  // quietly take it back. The card's height is a RESULT, so a title needing four line
+  // boxes buys three more of them and the card grows by exactly that -- 46px a line,
+  // design/Sleep.dc.html's `line-height: 1.1` on `--t-title`, and no other term.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  for (int i = 0; i < 2; ++i) {
+    const int w = i == 0 ? 480 : 528;
+    const int h = i == 0 ? 800 : 792;
+    reader::Framebuffer one(w, h), many(w, h);
+    theme.renderSleep(one, ramp.fonts, sampleSleep(), reader::Plane::Bw, nullptr);
+    theme.renderSleep(many, ramp.fonts, longTitleSleep(), reader::Plane::Bw, nullptr);
+    const Box a = cardBox(one, 400), b = cardBox(many, 400);
+    const int grew = b.height() - a.height();
+    CHECK(grew == 2 * 46);  // three lines against one
+    // ...and it is still CENTRED, which is what makes the growth symmetric.
+    CHECK(b.top < a.top);
+    CHECK(b.bottom > a.bottom);
+  }
+}
+
+TEST_CASE("THE CARD NEVER REACHES THE BADGE, and the reserve is taken TWICE") {
+  // The defect renderDeleteConfirm and renderBookError each shipped once: a CENTRED
+  // panel budgeted against the whole canvas is sliced by whatever is anchored to the
+  // bottom, because centreIn splits the slack EVENLY -- so reserving the badge once
+  // still leaves a tall card hanging half a badge into it.
+  //
+  // Here the consequence is worse than a sliced border. The badge is opaque white, so
+  // a title that ran under it would be HIDDEN by it: an ellipsis by another name, on
+  // the screen this wrap exists to keep honest.
+  //
+  // Driven at FAT's long-name maximum as one unbreakable word, which is the title a
+  // real card can hold once a book has no metadata and the name falls back to its
+  // filename. Nothing shorter reaches the bound.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  reader::SleepViewModel vm = sampleSleep();
+  vm.title = std::string(255, 'W');  // the widest cap in the face, 255 of them
+
+  // The badge alone, which is the same box in the same place: design/SleepIdle.dc.html
+  // is this screen with its content removed, drawn by the same tail.
+  reader::SleepViewModel idle;
+  idle.nothingToContinue = true;
+  idle.note = vm.note;
+
+  for (int i = 0; i < 2; ++i) {
+    const int w = i == 0 ? 480 : 528;
+    const int h = i == 0 ? 800 : 792;
+    reader::Framebuffer bare(w, h), fb(w, h);
+    theme.renderSleep(bare, ramp.fonts, idle, reader::Plane::Bw, nullptr);
+    theme.renderSleep(fb, ramp.fonts, vm, reader::Plane::Bw, nullptr);
+
+    const int badge = badgeTopOf(bare);
+    REQUIRE(badge < h);  // the badge really is down there to collide with
+
+    const Box b = cardBox(fb, 400);
+    // On the glass at all, both borders included.
+    CHECK(b.top > 0);
+    CHECK(b.bottom < h - 1);
+    // ...and clear of the badge, which is the bound that actually binds.
+    CHECK(b.bottom < badge);
+
+    // THE BADGE IS INTACT, which is the assertion a mutant cannot slip past.
+    // "The card stopped above where the badge starts" can also be satisfied by a
+    // card that PAINTED OVER the badge and left only its bottom border behind,
+    // because the badge is drawn first. This says the badge's whole band is
+    // byte-identical to the render that has no card in it at all.
+    CHECK(golden::rowsIdentical(fb, bare, badge, h));
+  }
+}
+
+TEST_CASE("the wrapped Sleep title survives the heap moving under it") {
+  // A BELT TO sleep_long_title's BRACES, and stated as exactly that: this cannot see
+  // a notdef box, and only a person looking at the golden can. What it can see is the
+  // lifetime bug that PRODUCES one -- a Prose whose string_views outlived their text
+  // reads freed memory, and freed memory that has since been reused reads differently.
+  //
+  // So the same screen is rendered twice with a large allocation scribbled between
+  // the two, and the frames must be byte-identical. It is a one-sided check: passing
+  // does not prove the lifetimes are right, but a failure is unambiguous, and it
+  // cannot flake, because a correct render is deterministic.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  reader::Framebuffer first(480, 800), second(480, 800);
+  theme.renderSleep(first, ramp.fonts, longTitleSleep(), reader::Plane::Bw, nullptr);
+  {
+    std::vector<char> churn(1 << 20, '\xA5');
+    CHECK(churn.front() == '\xA5');
+  }
+  theme.renderSleep(second, ramp.fonts, longTitleSleep(), reader::Plane::Bw, nullptr);
+  bool same = true;
+  for (int y = 0; y < 800 && same; ++y)
+    for (int x = 0; x < 480; ++x)
+      if (first.getPixel(x, y) != second.getPixel(x, y)) {
+        CHECK_MESSAGE(false, "the render moved with the heap at (" << x << ", " << y << ")");
+        same = false;
+        break;
+      }
+}
+
+TEST_CASE("the wrapping-title specimen is OFF the wrap boundary") {
+  // CLAUDE.md's rule, made mechanical for this fixture the way
+  // test_book_error_copy.cpp made it mechanical for the corrupt-book copy: a
+  // specimen line that fits its column by a pixel or two agrees with Chrome by luck,
+  // and flips on any change to the face, the ramp or the kern table -- at which point
+  // a golden reports a wrap change as a rendering regression and the real defect is
+  // in the fixture.
+  //
+  // THE SLACK IS THE WRONG METRIC AND IS NOT WHAT THIS MEASURES. A line with 15px
+  // left over is perfectly safe when the next word is 130px wide and on a knife edge
+  // when the next word is 14px; what decides a break is by how much the NEXT WORD
+  // overflowed. So this measures the overflow, and asks for at least 12px of it --
+  // ~3% of the column, which is about how much wider the firmware's whole-pixel
+  // advances measure than Chrome's subpixel ones, plus a little.
+  //
+  // The first choice of specimen FAILED this at 0px: "The Strange Case of Dr Jekyll
+  // and Mr Hyde" puts "JEKYLL AND MR" at exactly 312 in a 312px column.
+  ramp::Ramp ramp;
+  const reader::Font& title = ramp.fonts[reader::Role::Title700];
+  const int contentW = 400 - 2 * (2 + 42);  // the card's own content column, both panels
+
+  const std::string shouted = reader::upperLatin1(longTitleSleep().title);
+  reader::Prose p = reader::wrapProseLead(title, shouted, contentW, reader::pxToF26(46),
+                                          reader::Tracking{}, reader::WordBreak::Anywhere);
+  // THAT IT WRAPS AT ALL, and no more than that: pinning the exact line count here
+  // would pre-empt the clearance loop below, which is the thing this case exists to
+  // run. Proved by mutation -- putting the rejected specimen back made this REQUIRE
+  // fire on "4 == 3" and the clearance was never measured. The count is pinned where
+  // it belongs, by the card's growth above.
+  REQUIRE(p.lineCount() >= 2);
+
+  // A BREAK HAS TWO DIRECTIONS AND BOTH ARE CHECKED, which the first version of this
+  // case got wrong -- it measured one and passed the very specimen it was written to
+  // reject. A line sits on the wrap boundary if a small change to the face could make
+  // it either GAIN its next word or LOSE its last one:
+  //
+  //   gain -- the next word only just failed to fit, so a slightly NARROWER measure
+  //           pulls it up. That is the direction CLAUDE.md's rule names and the one
+  //           test_book_error_copy.cpp measures: by how much did the next word
+  //           overflow. Slack is the wrong metric for it, because a line with 15px
+  //           left over is safe when the next word is 130px wide and on a knife edge
+  //           when it is 14px.
+  //   lose -- the line itself only just fitted, so a slightly WIDER measure pushes
+  //           its last word down. Here slack IS the metric, and it is the direction
+  //           the rejected specimen failed on: "JEKYLL AND MR" measures 312 in a
+  //           312px column -- it fits by ZERO pixels -- while its next word
+  //           overflowed by more than 100, so a next-word check alone called it safe.
+  for (int i = 0; i < p.lineCount(); ++i) {
+    const std::string_view line = p.lines[static_cast<size_t>(i)];
+    const int slack = contentW - title.measure(line, p.tracking);
+    CHECK_MESSAGE(slack >= 12, "line " << i << " (\"" << std::string(line) << "\") fits by "
+                                       << slack
+                                       << "px: a wider face would push its last word down");
+    if (i + 1 >= p.lineCount()) continue;
+    const std::string_view next = p.lines[static_cast<size_t>(i + 1)];
+    // EVERY BREAK HERE FALLS AT A SPACE, which is the premise of the measurement
+    // below: `WordBreak::Anywhere` may split a word, and a split has no "next word"
+    // to weigh. It is also the property the specimen is chosen for -- an ordinary
+    // word wrap is what a reader meets, and the mid-word break is the fallback.
+    const size_t sp = next.find(' ');
+    const std::string word(next.substr(0, sp == std::string_view::npos ? next.size() : sp));
+    const std::string with = std::string(line) + " " + word;
+    const int over = title.measure(with, p.tracking) - contentW;
+    CHECK_MESSAGE(over >= 12, "line " << i << " (\"" << std::string(line) << "\") is within "
+                                      << over
+                                      << "px of taking its next word: a narrower face would "
+                                         "pull that word up");
+  }
 }
