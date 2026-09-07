@@ -44,6 +44,7 @@
 #include "reader/app.h"
 #include "reader/battery_tracker.h"
 #include "reader/booklist.h"
+#include "reader/card_log.h"
 #include "reader/cover.h"
 #include "reader/font_manifest.h"
 #include "reader/fontset.h"
@@ -845,39 +846,48 @@ constexpr size_t kLogFlushAtBytes = 3072;
 constexpr uint32_t kLogFileCapBytes = 256u * 1024u;
 constexpr const char* kLogPath = "/encre.log";
 
-static bool gLogToCard = false;
+// THE ARRAY IS THE SHELL'S AND THE RULES ARE core/'s. reader::CardLogBuffer holds
+// the three-state arming, the append, the drop counting and the flush threshold --
+// all of it bytes in and bytes out, and all of it the kind of logic `shell/` has no
+// harness to check. This file keeps the 4 KB itself (nothing in `core/` allocates)
+// and owns the one part a desktop test cannot reach: the card write.
+//
+// THE STATE STARTS AS `Pending`, WHICH IS THE WHOLE FIX FOR #47/#69. The setting
+// lives on the card, so it cannot be read until the card is mounted -- hundreds of
+// lines below here -- and the lines this feature exists to capture are all printed
+// before that: [wake] refused / [wake] held, the [prev] crumb record, the reset
+// reason, the storage bring-up. So the tee is armed from the first line of boot and
+// the setting decides, afterwards, whether what it holds is kept (Enabled) or thrown
+// away (Disabled). Nothing may be WRITTEN while Pending, which costs nothing: there
+// is no mounted volume to write to that early anyway.
 static char gLogBuf[kLogBufBytes];
-static size_t gLogLen = 0;
-static uint32_t gLogDropped = 0;  // bytes the buffer could not hold
-static uint32_t gLogSdMs = 0;     // time spent writing the card, cumulative
+static reader::CardLogBuffer gCardLog(gLogBuf, sizeof(gLogBuf));
+static uint32_t gLogSdMs = 0;  // time spent writing the card, cumulative
 
 // Append into the buffer. Never blocks, never allocates, never touches the card.
-static void logTee(const char* s, size_t n) {
-  if (!gLogToCard || n == 0) return;
-  if (gLogLen + n > kLogBufBytes) {
-    // DROPPED, AND COUNTED. Silently losing lines would make a gap in the log look
-    // like a gap in the device's behaviour, which is the worst thing a diagnostic
-    // can do.
-    gLogDropped += static_cast<uint32_t>(n);
-    return;
-  }
-  for (size_t i = 0; i < n; ++i) gLogBuf[gLogLen + i] = s[i];
-  gLogLen += n;
-}
+static void logTee(const char* s, size_t n) { gCardLog.append(s, n); }
 
 // Write what is buffered. Returns the milliseconds it cost, which the caller logs
 // -- see the header note: an instrument that hides its own weight lets you
 // attribute it to the device.
-static uint32_t flushLogToCard() {
-  if (!gLogToCard || gLogLen == 0) return 0;
+//
+// `landed` IS AN OUT-PARAM RATHER THAN NOTHING, because the alternative is a line
+// that says `wrote 3072B in 2ms` about a write-protected card that took nothing.
+// The bytes really are gone either way (see CardLogBuffer::wrote), so the only
+// question is whether the log lies about where they went -- and a false claim is
+// worse than an absent one. Defaulted to null so the two sleep-path callers, which
+// have nobody left to tell, are unchanged.
+static uint32_t flushLogToCard(bool* landed = nullptr) {
+  if (landed != nullptr) *landed = false;
+  if (!gCardLog.enabled() || gCardLog.size() == 0) return 0;
   const uint32_t t0 = millis();
-  const bool ok = appendToCard(kLogPath, gLogBuf, gLogLen, kLogFileCapBytes);
-  // DROPPED EITHER WAY. A card that refuses the write must not make the buffer grow
-  // until it starts losing lines silently -- and a log that stops the device
-  // working is worse than no log. The failure shows up as a gap plus the dropped
-  // count on the next line that does land.
-  if (!ok) gLogDropped += static_cast<uint32_t>(gLogLen);
-  gLogLen = 0;
+  const bool ok = appendToCard(kLogPath, gCardLog.data(), gCardLog.size(), kLogFileCapBytes);
+  if (landed != nullptr) *landed = ok;
+  // DROPPED EITHER WAY, and CardLogBuffer::wrote is what does it. A card that
+  // refuses the write must not make the buffer grow until it starts losing lines
+  // silently -- and a log that stops the device working is worse than no log. The
+  // failure shows up as a gap plus the dropped count on the next line that lands.
+  gCardLog.wrote(ok);
   const uint32_t took = millis() - t0;
   gLogSdMs += took;
   return took;
@@ -1252,12 +1262,83 @@ static void loadAndApplySettings() {
   // THE FOUR TYPOGRAPHY FIELDS ARE ON THIS LINE TOO, because a device booting with a
   // hand-edited size must say so -- and because `bodyPpem` here is what the FILE says,
   // which is not necessarily what gBody was inited at (see applySettings).
+  //
+  // AND `logToCard`, WHICH WAS MISSING AND IS HALF OF #69. It was the one field in
+  // the struct with no line reporting it, so a card asking for a card log and a
+  // firmware ignoring the request looked identical -- which is exactly how the
+  // request went unimplemented for two phases. An instrument that reports on less
+  // than it claims is worse than none.
   logf("[boot] settings in force: sleepAfterMs=%lu fullRefreshEvery=%d "
-       "fullOnTransition=%d ppem=%d margins=%d lead=%d justify=%d\n",
+       "fullOnTransition=%d ppem=%d margins=%d lead=%d justify=%d logToCard=%d\n",
        (unsigned long)gSettings.sleepAfterMs, gSettings.fullRefreshEvery,
        (int)gSettings.fullOnTransition, gSettings.bodyPpem, gSettings.margins,
-       gSettings.lineSpacing, (int)gSettings.justify);
+       gSettings.lineSpacing, (int)gSettings.justify, (int)gSettings.logToCard);
   logFlush();
+
+  // THE ONE PRODUCER OF THE CARD LOG'S ARMING, AND #47 IS THAT IT DID NOT EXIST:
+  // gLogToCard was read at four sites and assigned at none, so the buffer, the idle
+  // flush, the dropped-byte counting and the 256 KB cap had never run on any device.
+  //
+  // ARMED HERE AND NOWHERE ELSE, from the FILE. Not in applySettings(), which the
+  // Settings screen's sink also calls: `logToCard` is a diagnostic rather than a
+  // preference and has no Settings row, so the screen is not its author, and routing
+  // it through there would let a commit whose copy of the struct had lost the field
+  // silently switch the log off mid-session.
+  //
+  // Called twice per device life at most: here at boot, and again from handleRetry()
+  // when a card that was absent at boot has appeared. applySetting() is idempotent
+  // for the same answer precisely so the second call cannot discard what the first
+  // one has been accumulating.
+  //
+  // THE RETRY PATH IS ALSO THE ONE STATED LOSS. A device that booted with no card
+  // decided `off` and threw the boot buffer away; if the card that then appears asks
+  // for a log, the tee arms from that point and the boot preamble is gone. It is not
+  // recoverable and it is not worth recovering -- at the moment the question was
+  // asked, the only answer available was the default -- so the line below says which
+  // of the three transitions this was rather than leaving them to look alike.
+  using LogState = reader::CardLogBuffer::State;
+  const LogState before = gCardLog.state();
+  gCardLog.applySetting(gSettings.logToCard);
+  if (gCardLog.enabled()) {
+    // FLUSH THE BOOT PREAMBLE NOW, and this is not merely tidy. Every line from
+    // Serial.begin() to here is in the 4 KB buffer, and the next legal flush is a
+    // quiet window in loop() -- which is after the first paint, several thousand
+    // more bytes of stage lines, font timings, library scan and session restore
+    // later. Boot does not fit in 4 KB, so without this the log would open with a
+    // HOLE exactly where the wake diagnostics are, and a hole is the one thing this
+    // design says a diagnostic must never have.
+    //
+    // It is safe here for the same two reasons the settings file's own creation is:
+    // the card is mounted (loadSettings just read it) and, at BOOT, nothing has been
+    // painted -- so the display's bus is idle and there is no frame the user is
+    // waiting for. On the RETRY path there IS a repaint owed, and this puts ~40 ms in
+    // front of it; that is the same bus the settings read on the line above just
+    // took, on a press whose whole point is re-reading the card, so it buys the boot
+    // log at a cost the retry was already paying. The guard is recursive and taken
+    // anyway, structurally, as every other user of that bus does.
+    if (gCardLog.size() > 0) {
+      SpiBusGuard bus;
+      const unsigned buffered = static_cast<unsigned>(gCardLog.size());
+      bool landed = false;
+      const uint32_t took = flushLogToCard(&landed);
+      logf("[log] %s, teeing to %s: %s %uB in %lums\n",
+           before == LogState::Pending
+               ? "armed"
+               : (before == LogState::Disabled ? "armed late, so the boot preamble is "
+                                                 "not in the file"
+                                               : "still armed"),
+           kLogPath, landed ? "wrote" : "COULD NOT WRITE", buffered, (unsigned long)took);
+      logFlush();
+    }
+  } else if (before != LogState::Disabled) {
+    // SAID SO, because the alternative is silence in both directions: with the tee
+    // off there is no [log] line anywhere, which is indistinguishable from the
+    // firmware ignoring the setting -- the state #47 was reported from. Only on the
+    // transition, so a RETRY on a card that says no does not repeat it.
+    logf("[log] logToCard is off, so nothing is written to %s%s\n", kLogPath,
+         before == LogState::Enabled ? " from here on" : " and the boot buffer was discarded");
+    logFlush();
+  }
 }
 
 // --- /books ---------------------------------------------------------------
@@ -5721,7 +5802,7 @@ static void paintSleepScreen() {
   // sleeps after five minutes is most of what you wanted to read. It is after
   // markSleeping deliberately: the flag is what the next boot needs and this is only
   // what a human needs, so the ordering says which one may not be lost.
-  if (gLogToCard && gLogLen > 0) {
+  if (gCardLog.enabled() && gCardLog.size() > 0) {
     logf("[log] sleeping\n");
     flushLogToCard();
   }
@@ -5782,7 +5863,7 @@ static void paintBatteryEmptyScreen() {
 
   // THE LAST THING BEFORE THE CHIP STOPS, for sleepNow's reason: the buffer dies
   // with the RAM, and this is the one shutdown whose log a user will want.
-  if (gLogToCard && gLogLen > 0) {
+  if (gCardLog.enabled() && gCardLog.size() > 0) {
     logf("[log] battery empty\n");
     flushLogToCard();
   }
@@ -6761,8 +6842,8 @@ void loop() {
 
   // THE CARD LOG'S IDLE FLUSH. This is the call kLogFlushAtBytes was declared for
   // and did not have: the tee filled the 4 KB buffer, logTee then began counting
-  // into gLogDropped, and the log grew a HOLE -- which is the one thing the design
-  // note above says a diagnostic must never do, because a gap in the log is
+  // the overflow as dropped, and the log grew a HOLE -- which is the one thing the
+  // design note above says a diagnostic must never do, because a gap in the log is
   // indistinguishable from the device having gone quiet. Only the sleep path ever
   // wrote the card, so a device that was being used and had not yet slept lost
   // everything past the first 4 KB.
@@ -6783,16 +6864,24 @@ void loop() {
   // kind of thing worth having in the log.
   //
   // AND IT REPORTS ITS OWN WEIGHT, for the reason `ser=` exists: an instrument
-  // that hides its cost lets you attribute it to the device. gLogLen is read
-  // BEFORE the flush, which zeroes it.
-  if (quiet && gLogLen >= kLogFlushAtBytes) {
+  // that hides its cost lets you attribute it to the device. The buffered figure is
+  // read BEFORE the flush, which zeroes it.
+  //
+  // wantsFlush() ANSWERS THE ARMING TOO, so a card whose settings said no -- or a
+  // boot that never got as far as reading them -- can never put a byte in
+  // /encre.log. That is one question rather than the two this used to spell as
+  // `gLogToCard && gLogLen >= ...`, and two spellings of one condition is how this
+  // project has shipped a dead button twice.
+  if (quiet && gCardLog.wantsFlush(kLogFlushAtBytes)) {
     // Recursive, and appendToCard takes one of its own -- same reason the poll
     // takes one below: the write and the line reporting it are one atomic use of
     // the bus rather than two that could straddle a paint.
     SpiBusGuard bus;
-    const unsigned buffered = static_cast<unsigned>(gLogLen);
-    const uint32_t took = flushLogToCard();
-    logf("[log] wrote %uB in %lums\n", buffered, (unsigned long)took);
+    const unsigned buffered = static_cast<unsigned>(gCardLog.size());
+    bool landed = false;
+    const uint32_t took = flushLogToCard(&landed);
+    logf("[log] %s %uB in %lums\n", landed ? "wrote" : "COULD NOT WRITE", buffered,
+         (unsigned long)took);
     logFlush();
   }
 
@@ -6914,9 +7003,9 @@ void loop() {
     // windows and the log has a HOLE in it -- which must never be mistaken for the
     // device having gone quiet. `sdMs` is the instrument's own weight; subtract it
     // before believing any total measured with logging on.
-    if (gLogToCard)
-      logf("[log] buffered=%uB dropped=%luB sdTotal=%lums\n", (unsigned)gLogLen,
-           (unsigned long)gLogDropped, (unsigned long)gLogSdMs);
+    if (gCardLog.enabled())
+      logf("[log] buffered=%uB dropped=%luB sdTotal=%lums\n", (unsigned)gCardLog.size(),
+           (unsigned long)gCardLog.dropped(), (unsigned long)gLogSdMs);
     logFlush();
   }
   // IDLE ON THE QUEUE, NOT ON THE CLOCK. Identical to the delay(10) this replaces
