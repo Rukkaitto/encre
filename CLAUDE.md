@@ -3565,15 +3565,105 @@ loses no text, where truncation's magnitude is unbounded — a chapter that is o
   byte-identical in every field**.
 - **WHAT IT COSTS, stated rather than discovered:** `indentedAfter(Paragraph,
   Paragraph)` is true, so a continuation takes the 1.5em paragraph indent — one spurious
-  paragraph break per 64 KB of unbroken text, about once per 120 pages, against text
-  that is simply absent. **Raising the cap was refused for #35's reason twice over: the
-  failure mode was the bug and the number is fine.**
-- **THE SIBLING BOUNDS STILL HAVE THIS SHAPE and are cards rather than paragraphs.**
-  `kMaxEmphasisPerBlock` (256) is the likeliest of them to meet a real converted book
+  paragraph break per cap's worth of unbroken text, against text that is simply absent.
+  **Raising the cap was refused for #35's reason twice over: the failure mode was the
+  bug and the number is fine** — the first half of which is still right and the second
+  half of which was wrong in the direction nobody checked. See #90 below.
+
+**AND THE NUMBER WAS NOT FINE: `kMaxBlockBytes` WAS 64 KB AGAINST A 42,152-BYTE FLOOR,
+SO THE CAP PROTECTED NOTHING AND THE HEAP GAVE OUT FIRST (#90).** It is **8 KB** now,
+and the growth is a **reserve** rather than a `push_back` ladder. #37 is not what
+introduced this — the string grew to 64 KB before it too, and only *then* set `error_`,
+so the peak was identical — but #37 put recoverable text behind the limit, which is
+what made the limit worth calibrating.
+
+- **IT WAS WORSE THAN THE 1.5× THE TICKET STATED, BECAUSE A CAP OF N DOES NOT COST N.**
+  `push_back` grows geometrically and libstdc++ — which is what the ESP32 toolchain
+  ships — climbs `15·2^k`, so a 64 KB block ended at a capacity of **122,880** and its
+  last reallocation held 61,440 and 122,880 **at once**: 184,320 bytes transient, and up
+  to 307,200 with the piece already handed to the caller. Under `-fno-exceptions` the
+  failing request is `abort()` with no diagnostic — **a reboot onto Home, which this
+  file already records as having been misreported twice as "opening a book goes back to
+  Home"**.
+- **AND BLOCKS FAR BELOW THE CAP WERE ALREADY IMPOSSIBLE, WHICH IS THE FINDING THE
+  TICKET DID NOT HAVE.** A natural **16,384**-byte block needs 76,800 bytes — 182% of
+  the floor — so the device's real ceiling was a paragraph of about 10 KB, **a sixth of
+  the cap**, and **7 of the 225 corpus books (3.1%) sat above it**, not the two #37
+  found: `Paradise Lost` (one 50,983-byte block), `The Online World`, `Poetry`, and the
+  two Gutenberg mathematics texts. **The cap named none of them**, which is what makes
+  this a bound that was fiction rather than a bound that was generous.
+- **THE 8 KB IS THREE BOUNDS THAT AGREE**, and `document.h` carries the table. (1) It is
+  the corpus's **99.99th percentile**: 69 of the **537,474** blocks 225 real books write
+  exceed it, and **208 of the 225 have no block over it at all**. (2) Reserved, the peak
+  is two buffers plus one 1,920-byte seam transient — **18,308 B, 43.4% of the floor**,
+  largest single request 8,194 B — where 16 KB would be 82% and *"the largest free
+  BLOCK decides, not the free total"* is not a rule you satisfy at 82% of a fragmented
+  heap. (3) It **is not a regression in the common case**: a caller's `out` keeps its
+  capacity between blocks and never shrinks, so a book already pays `2 × ladder(its
+  largest paragraph)` — the **median** corpus book pays 15,360 B today and the p90 book
+  30,720 B, so this is **+1,028 B on the median book and −475,132 B on the worst**. The
+  band was `(Xml::kTextBytes, ~8 KB]`: below 1,024 the one-cut-per-text-node invariant
+  `document.cpp` asserts breaks.
+- **THE RESERVE IS THE HALF THAT MAKES THE BOUND A BOUND**, not the cap. A cap that
+  holds only if the allocator's growth factor is 2 is an argument about a standard
+  library this project does not ship — libc++ lands the same block at 12,287 and
+  libstdc++ at 15,360. Reserved once, the capacity **is** the cap on both. It is
+  **nothrow-PROBED**, because there is no `std::nothrow` spelling of
+  `std::string::reserve`: the probe asks the heap the same question, then the reserve
+  takes the block it just released, which is `imagefit.cpp`'s shape. **The refusal needs
+  no new words** — it is the message `BlockReader`'s own `State` allocation already
+  answers with, so no new `BookErrorReason` and no new copy shape on
+  `BookError.dc.html`.
+- **`take()` SWAPS INSTEAD OF MOVING, so the reserved buffer comes back** and the
+  reserve is paid once per reader rather than once per paragraph — 537,474 times over
+  the corpus. That is also what `restart()`'s *"reusing the buffers"* has claimed since
+  it was written and did not do: `st.cur = Block{}` threw the buffer away every block.
+  Nothing can hold a view into the swapped-out value — `LaidLine::text` is OWNED
+  precisely so a Page can outlive its blocks — and the caller has by definition already
+  consumed it.
+- **THE FIRST VERSION LOST TEXT, AND TWO OF #37's OWN TESTS CAUGHT IT.** `roomFor` runs
+  once per text NODE and a block spans many, so it swapped a *fresh* reserved buffer
+  into a string that was not empty and threw away everything accumulated since the last
+  reserve — a **hole in the middle of a rejoined digit run**. `reserve` copies the
+  content across by definition, which is the whole reason to use it rather than a swap.
+- **MEASURED, IN #37's OWN IDIOM: 208 of 225 books are byte-identical in every field
+  INCLUDING the block count**, 225/225 still open, chapter rate still 100.00%. The 17
+  that moved take **190 cuts** and **+186 blocks**, and the corpus's text goes
+  126,614,534 → **126,614,498** — **36 bytes over 190 cuts, every one of them the single
+  space the cut landed on**, which `take()`'s trailing-space trim removes. That is right
+  (the pieces render as two paragraphs, so the paragraph break *is* the word boundary)
+  and it is now the ONLY thing a cut may lose: `test_document.cpp` pins it with a
+  fixture that puts the space **on** the cap, which a run of digits — every other case
+  in that file — cannot reach.
+- **THE VISIBLE COST: one spurious indent per 8 KB of unbroken text, about once per 15
+  pages OF IT**, against #37's once per 121 at 64 KB. **On 208 of the 225 books the rate
+  is zero**, because they write no paragraph that long; what is above 8 KB is Gutenberg
+  plain-text conversions, where a whole book of the poem is one block and an extra
+  indent is the least of it.
+- **`ChapterReader::blocksSplit()` EXISTS NOW, and it had to for the cut to be
+  observable at all.** `BlockReader::blocksSplit()` shipped with #37 as the
+  `Xml::attrsDropped()` counting idiom and **nothing outside `document.h` could reach
+  it** — a producer with no reader, the mirror of `ListRow::trackingEm1000`. The
+  pass-through is an observation point in `held()`'s sense, and it is **per WALK, not
+  per chapter**: a rewind calls `BlockReader::restart()`, which zeroes the counter.
+  **Nothing in the FIRMWARE reads it yet** — the corpus probe is its only caller — so a
+  cut is still invisible in a serial log, and `[chapter]`'s line is where it would go.
+**THE SIBLING BOUNDS STILL HAVE #37's SHAPE — and, after #90, the OTHER shape too: not
+one of them is calibrated against a device figure either.** They are cards rather than
+paragraphs.
+
+- `kMaxEmphasisPerBlock` (256) is the likeliest of them to meet a real converted book
   and the cheapest to fix — an emphasis run past the cap could be DROPPED, which costs
   one phrase its italics, where today it costs the rest of the chapter. `kMaxBlocks`,
   `kMaxNestDepth` and `kMaxTocEntries` end their stream the same way; 0 corpus hits
   each, which is "no evidence yet" and not "does not happen".
+- **AND THE HEAP QUESTION IS OPEN FOR ALL FOUR.** `kMaxEmphasisPerBlock` is 256 `Span`s
+  — 2,048 bytes, and it is a `std::vector`, so it climbs the same doubling ladder to
+  4,096 with both buffers live at the last step; `kMaxBlocks` (4,096) bounds a
+  `Document`, which the reader does not build but `buildDocument` does. Neither is
+  anywhere near the block string's old 122,880, which is why #90 stopped at
+  `kMaxBlockBytes` — but "small enough not to matter" is the argument that was wrong
+  once already, and none of the four has a measurement behind it.
 
 ### A grayscale screen is painted twice: fast, then four levels
 
