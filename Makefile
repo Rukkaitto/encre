@@ -22,6 +22,11 @@ test:
 # because a convention enforced only by CI is one you are told about after
 # pushing, which is the worst moment to be asked to rewrite a commit message.
 # Defaults to the current branch and origin/main..HEAD.
+#
+# The checker's own tests are `$(PYTHON) tools/test_check_conventions.py`, and
+# they are NOT a target for tools/test_compare_design.py's reason: `make test`
+# builds on a bare checkout with no Python. They drive the real .githooks/pre-push
+# against throwaway repositories, so run them when the hook or the checker changes.
 conventions:
 	$(PYTHON) tools/check_conventions.py
 # Install the commit-msg and pre-push hooks. One `git config` -- the hooks

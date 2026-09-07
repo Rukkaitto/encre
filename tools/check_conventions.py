@@ -32,6 +32,15 @@ WHAT IT ENFORCES, and what it deliberately does not:
 
   A merge commit is exempt. `git merge main` writes its own subject and the
   person merging did not choose it.
+
+  A PR TITLE is checked too, by `--subject`, and it is not a nicety: GitHub's
+  squash-merge writes the PR title as the merge commit's SUBJECT, so the title
+  is where a subject landing on `main` is actually authored. Checking commits
+  and not the title is a gate whose input arrives by a path it does not cover --
+  five subjects on `main` got there that way (issue #71). Its own mode rather
+  than --message-file because a title is a string and not a file, and because
+  --message-file SKIPS lines beginning with `#` as git comments: a PR titled
+  `#71 ...` would read as an empty message and pass without being examined.
 """
 import argparse
 import pathlib
@@ -152,6 +161,23 @@ def subject_of_message_file(path):
     return None
 
 
+def report_one_subject(subject, label, fix_hint, allow_fixup=False):
+    """Check one subject and print the verdict. 0 if it conforms, else 1.
+
+    Shared by --message-file and --subject so the two cannot drift into two
+    spellings of the same verdict.
+    """
+    problems = check_subject(subject, label, allow_fixup=allow_fixup)
+    if problems:
+        print(f"\n{len(problems)} convention problem(s):\n", file=sys.stderr)
+        for msg in problems:
+            print(f"  [commit] {msg}\n", file=sys.stderr)
+        print(f"  {fix_hint}", file=sys.stderr)
+        return 1
+    print("conventions ok")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -167,6 +193,15 @@ def main():
     ap.add_argument("--message-file",
                     help="validate the subject in this commit message file and "
                          "nothing else -- the commit-msg hook's argument.")
+    ap.add_argument("--subject",
+                    help="validate this ONE subject string and nothing else. "
+                         "For the PR-title job: squash-merge writes the PR "
+                         "title as the merge commit's subject, so the title is "
+                         "the last place that subject can still be edited. An "
+                         "empty or whitespace-only value is an ERROR, not a "
+                         "pass -- it means the caller was wired to the wrong "
+                         "field, and a check that examines nothing must not "
+                         "report success.")
     ap.add_argument("--allow-fixup", action="store_true",
                     help="accept fixup!/squash! subjects. For the commit-msg "
                          "hook only: `git commit --fixup` is a legitimate local "
@@ -182,23 +217,34 @@ def main():
 
     problems = []
 
+    if args.message_file and args.subject is not None:
+        ap.error("--message-file and --subject are two spellings of the same "
+                 "one-subject mode; pass one")
+
+    # --subject is its own mode: one string, no branch, no range, no git.
+    if args.subject is not None:
+        if not args.subject.strip():
+            print("\n1 convention problem(s):\n", file=sys.stderr)
+            print("  [commit] --subject is empty. Nothing was checked, so this "
+                  "would have passed\n    without examining anything -- "
+                  "refusing instead. Check the field it was\n    read from.\n",
+                  file=sys.stderr)
+            return 1
+        return report_one_subject(
+            args.subject, "the pull request title",
+            "a squash-merge writes this as the commit subject; edit the PR "
+            "title.")
+
     # --message-file is its own mode: one pending subject, no branch, no range.
     if args.message_file:
         subject = subject_of_message_file(args.message_file)
         if subject is None:
             print("note: empty commit message; git will abort on its own")
             return 0
-        problems = [("commit", p) for p in
-                    check_subject(subject, "the message you just wrote",
-                                  allow_fixup=args.allow_fixup)]
-        if problems:
-            print(f"\n{len(problems)} convention problem(s):\n", file=sys.stderr)
-            for kind, msg in problems:
-                print(f"  [{kind}] {msg}\n", file=sys.stderr)
-            print("  fix it with:  git commit --amend", file=sys.stderr)
-            return 1
-        print("conventions ok")
-        return 0
+        return report_one_subject(
+            subject, "the message you just wrote",
+            "fix it with:  git commit --amend",
+            allow_fixup=args.allow_fixup)
 
     if not args.skip_branch:
         branch = args.branch or git("rev-parse", "--abbrev-ref", "HEAD")

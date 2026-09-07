@@ -1,0 +1,55 @@
+# The PR title, checked as the commit subject it becomes.
+#
+# WHY THIS EXISTS: GitHub's squash-merge writes the PR TITLE as the merge
+# commit's subject. `tools/check_conventions.py` runs on commits, in CI and in
+# two git hooks, and the title reaches `main` by a path none of them covers --
+# so five non-conforming subjects are on `main` today, every one of them a PR
+# title (issue #71). The gate was honest; its input arrived around the side.
+#
+# WHY ITS OWN WORKFLOW rather than a fifth job in ci.yml, and both reasons are
+# about the `edited` trigger:
+#
+#   - A title can be fixed after the PR opens, and `edited` is NOT in
+#     `pull_request`'s default types (opened/synchronize/reopened). Without it a
+#     corrected title stays red and a title broken after opening stays green.
+#   - `types` can only be set once per workflow, and ci.yml's concurrency group
+#     is `cancel-in-progress`. Adding `edited` there would mean someone editing
+#     a title cancels a running firmware build or golden run.
+#
+# WHAT IT CANNOT DO: block the merge. Branch protection on this repo answers
+# `403: Upgrade to GitHub Pro or make this repository public`, so no check here
+# can be required -- a failure is a red X and the merge button still works. This
+# job puts the verdict in front of the one person who can still edit the title,
+# at the moment they can still edit it. The git hooks remain the only thing that
+# actually stops anything.
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+concurrency:
+  group: pr-title-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  title:
+    name: Squash-merge commit subject
+    runs-on: ubuntu-latest
+    steps:
+      # Shallow, no submodules: --subject reads one string and never calls git.
+      - uses: actions/checkout@v4
+
+      # Through the environment rather than interpolated into the run line: a
+      # PR title is attacker-controlled on a fork PR, and `${{ }}` inside `run:`
+      # is textual substitution, so a title containing shell metacharacters
+      # would execute. Same rule as the branch name in ci.yml's conventions job.
+      #
+      # An empty PR_TITLE is an ERROR rather than a pass -- see --subject's help.
+      - name: Check the PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: python3 tools/check_conventions.py --subject "$PR_TITLE"

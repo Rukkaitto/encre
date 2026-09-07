@@ -135,11 +135,60 @@ into the range -- where **128 of main's commits predate this rule** and would
 fail it. For a branch the remote does not have yet that sha is all zeros, and
 the fallback is "commits on no branch of this remote".
 
+**AND THE NEGOTIATED SHA ALONE WAS NOT ENOUGH: IT SAYS "SINCE THE REMOTE'S TIP OF
+THIS BRANCH", WHICH AFTER `git merge origin/main` INCLUDES EVERY COMMIT THE MERGE
+BROUGHT IN** (#71). One non-conforming subject on `main` therefore rejected the
+push of a branch that did not write it, and poisoned every future merge until the
+base moved past it -- while `make conventions` passed on the same tree at the same
+moment, because `origin/main..HEAD` excludes exactly what the merge brought. **The
+two arms of the range also DISAGREED**: a never-pushed branch took the `--remotes`
+fallback and passed, and the same graph after one push failed. Both arms now
+exclude what this remote already has (`$local_sha --not --remotes=$remote
+$remote_sha`), and the exchange is stated where it is made, in `.githooks/pre-push`:
+the negotiated sha is **still** an exclusion so nothing local can WIDEN the range
+back into merged history, a stale ref is one that is BEHIND and so excludes FEWER
+commits than the truth -- the direction that cannot hide anything -- and **a merge
+can only bring in what a local ref points at**, so excluding the tracking refs
+excludes exactly what was merged. What is given up: a tracking ref AHEAD of the real
+remote (the remote branch rewound since the last fetch) would exclude commits being
+pushed, which were on the remote once and were checked by the push that put them
+there.
+
+**THE PR TITLE IS THE SUBJECT SQUASH-MERGE ACTUALLY WRITES, AND NOTHING CHECKED IT.**
+The gate runs on commits; GitHub's squash-merge writes the PR **title** as the merge
+commit's subject, so the title reached `main` by a path none of the three checkers
+covered -- **five** of `main`'s subjects got there that way, and the issue was filed
+when there were two. `check_conventions.py --subject` is its own mode (a title is a
+string, and `--message-file` SKIPS lines beginning with `#`, so a PR titled `#71 …`
+would have read as an empty message and passed), an empty value is an **error**
+rather than a pass, and `--allow-fixup` does not reach it -- there is no later squash
+to absorb a `fixup!` when the squash IS the merge.
+`.github/workflows/pr-title.yml` runs it. **Its own workflow, not a fifth job in
+`ci.yml`**, and both reasons are the `edited` trigger type: a title is fixed after
+the PR opens and `edited` is not in `pull_request`'s defaults, so without it a
+corrected title stays red; and `types` is settable only per workflow, where `ci.yml`'s
+`cancel-in-progress` concurrency group would let a title edit cancel a running
+firmware build.
+
+**`tools/test_check_conventions.py` IS THE CHECKER'S OWN TEST**, plain `python3`,
+**deliberately not wired into `make test`** for `tools/test_compare_design.py`'s
+reason -- the fast loop builds on a bare checkout with no Python. It drives the real
+`.githooks/pre-push` against real throwaway repositories, because the defect was in
+the range the hook computes and not in the regex, and it carries the BEFORE range as
+a mutation with an `assert` that the line it patches still exists, so a reworded hook
+fails loudly instead of quietly measuring the shipped one twice. It also keeps the
+**blind** mutant -- a range selecting nothing -- because "let the merged commits
+through" and "let everything through" both make the symptom go away and only one of
+them is a fix.
+
 **AND NONE OF IT IS BLOCKING ON GITHUB TODAY.** Branch protection answers
 `403: Upgrade to GitHub Pro or make this repository public`, so the check cannot
 be made a required status check: a violation shows a red X on the PR and the
 merge button still works. **The hooks are currently the only thing that stops
-anything**, which is why they exist rather than being belt-and-braces.
+anything**, which is why they exist rather than being belt-and-braces. **That
+applies to the PR-title job too**: it cannot block a merge, so what it buys is the
+verdict in front of the one person who can still edit the title, at the moment they
+can still edit it.
 
 **AN EMPTY COMMIT RANGE IS AN ERROR IN CI** (`--require-commits`), because a
 wrong base ref would otherwise check nothing and pass -- the
