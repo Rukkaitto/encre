@@ -13,19 +13,32 @@ namespace reader {
 // A FULL SCREEN, not an overlay: it is a list you read and scroll, not a question
 // about the page behind it. Book details makes the same call for the same reason.
 //
-// --- ITS ROWS ARE THE NCX's, AND ITS SECTIONS ARE ITS DEPTHS ------------------
+// --- ITS ROWS ARE THE NCX's, AND A HEADER IS AN ENTRY THAT GROUPS OTHERS -------
 //
-// `toc.h` hands over a LINEAR list where each entry carries a `depth`. A depth-1 entry
-// becomes a SECTION HEADER and everything deeper becomes a row, which is what draws
-// the board's `BOOK I - MISS BROOKE` grouping. That mapping is the whole of the
-// hierarchy: no tree, no traversal, and a screen that wants "the Nth visible row" gets
-// it by indexing.
+// `toc.h` hands over a LINEAR list where each entry carries a `depth`. A top-level
+// entry that has entries NESTED INSIDE IT becomes a SECTION HEADER and everything else
+// becomes a row, which is what draws the board's `BOOK I - MISS BROOKE` grouping. That
+// mapping is the whole of the hierarchy: no tree, no traversal, and a screen that wants
+// "the Nth visible row" gets it by indexing. An NCX's children immediately follow their
+// parent in document order, so "does it group others" is one lookahead --
+// `entries[i + 1].depth > entries[i].depth`.
 //
-// A FLAT NCX HAS NO DEPTH-2 ENTRIES AT ALL, and two of the four books measured are
-// flat. So the mapping cannot be "depth 1 is a header" unconditionally -- that would
-// render a flat book as a list of headers and no rows, with nothing focusable and
-// nothing to select. `sectioned()` decides once, from the list: only a book that
-// HAS deeper entries gets headers.
+// TWO SHAPES FORCE THAT MAPPING AND EACH ONE BROKE THE SIMPLER ONE:
+//
+//  - A FLAT NCX HAS NO DEPTH-2 ENTRIES AT ALL, and two of the first four books measured
+//    are flat. So the mapping cannot be "depth 1 is a header" unconditionally -- that
+//    renders a flat book as a list of headers and no rows, with nothing focusable and
+//    nothing to select. `sectioned()` decides once, from the list: only a book that HAS
+//    deeper entries gets headers at all.
+//  - A CHILDLESS TOP-LEVEL ENTRY IS A CHAPTER, NOT A SECTION, and that is ISSUE #75:
+//    reported off glass as "the chapter labelled INTRODUCTION shows up in the contents
+//    but cannot be selected". Front and back matter sit at depth 1 beside the parts
+//    that really do group chapters, so keying on depth alone drew `Introduction`,
+//    `Foreword` and `Notes` as tracked-caps labels the focus skips, with no way to
+//    reach those chapters at all. Measured over ~/.cache/encre-corpus: 98 of its 103
+//    sectioned books carry at least one, 1,635 rows in total, 9 of the user's own 9
+//    sectioned books, and the worst case loses 362 rows of 384. It is what Standard
+//    Ebooks emits for every book with parts.
 //
 // --- A SECTION HEADER IS ALSO A TARGET, AND IS STILL NOT FOCUSABLE -------------
 //
@@ -33,8 +46,19 @@ namespace reader {
 // and jumping to it would work. It is drawn as a header anyway and skipped by the
 // focus, because the board draws it as one: a tracked caps label with its own rule and
 // no value, which is not a row a selection can sit on. What that costs is one
-// unreachable target per section -- and its first child usually names the same spine
-// entry, which is the row directly beneath it.
+// unreachable target per SECTION -- and a section, by the lookahead above, always has a
+// first child naming the row directly beneath it. That consolation is what was false
+// while a childless entry counted as a section: a childless entry HAS no first child,
+// so the target was not approximated by a neighbouring row, it was gone.
+//
+// --- THE INVARIANT, STRENGTHENED BY THAT FIX -----------------------------------
+//
+// A SECTIONED BOOK ALWAYS HAS A FOCUSABLE ROW, and it is now structural rather than an
+// argument about depth-2 entries: a header exists ONLY because something deeper follows
+// it, and that something is a row. So every header is immediately followed by a row,
+// which is stronger than the old form ("`sectioned()` requires a depth-2 entry and
+// every such entry is a row") and rules out the same state. The only nothing-to-select
+// case remains an EMPTY contents -- a book with no NCX.
 class ContentsScreen : public FocusScreen {
  public:
   // `toc` is the book's whole table of contents and `spine` is the entry being read,
@@ -53,7 +77,9 @@ class ContentsScreen : public FocusScreen {
   int chosenSpine() const;
 
   // Whether this book's contents have a hierarchy worth drawing as sections. False for
-  // a flat NCX, where every entry is a row.
+  // a flat NCX, where every entry is a row. TRUE IS NOT "EVERY TOP-LEVEL ENTRY IS A
+  // HEADER": a top-level entry is a header only where it groups others -- see the
+  // header comment and `isHeaderAt`.
   bool sectioned() const { return sectioned_; }
 
   int rowCount() const { return static_cast<int>(entries_.size()); }

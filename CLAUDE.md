@@ -4372,12 +4372,37 @@ the board was right. `TocEntry::depth` carries it. **The list stays LINEAR**, no
 tree: a tree needs allocation per node and a traversal to draw, where a screen wants
 "the Nth visible row", and a depth is all the board's grouping needs. Every entry is a
 real target either way, because a section header in an NCX carries its own
-`content src`.
+`content src`. **The linear form keeps the parent/child relation recoverable and that
+is now load-bearing**: children immediately follow their parent, so "does this entry
+group others" is `entries[i + 1].depth > entries[i].depth` — which is what #75's fix
+asks, and what a flattened list could not have answered.
 
 **A LOOSE REGEX IS NOT A MEASUREMENT.** This project's habit of measuring before
 designing is what caught the nav-document question; the same habit applied carelessly
 got the nesting question backwards and wrote the wrong claim into a header. Where the
 answer decides a design, parse the thing.
+
+**AND FOUR BOOKS IS NOT A DISTRIBUTION, WHICH IS THE SECOND HALF OF THAT LESSON AND
+COST 1,635 ROWS (#75).** The table above is right and it is a SAMPLE, and the design
+built on it read a `depth` as a level in a hierarchy: `ContentsScreen` made every
+depth-1 entry of a sectioned book a section header. Re-measured by parsing all 225 NCXs
+in `~/.cache/encre-corpus` — 19 have no usable NCX, **103 are flat and 103 are
+sectioned**, an even split, and **98 of the 103 sectioned ones mix entries that GROUP
+others with top-level entries that group nothing**. That second shape is what Standard
+Ebooks emits for every book with parts (`Titlepage`, `Imprint`, `Colophon`,
+`Uncopyright` sitting at depth 1 beside a real `Part I`), it is **9 of the 9 sectioned
+books on the user's own shelf**, and the worst case in the corpus loses **362 rows of
+384**. So the childless top-level entry is not a tail case; it is the common case, and
+the four-book sample happened to contain none of it. **The fix is in
+`screen_contents.h`** — a header is an entry that groups others, one lookahead in a list
+already walked in document order — and the reachability rule now lives there rather than
+being inferred from a depth here.
+
+**A DEPTH IS A NESTING LEVEL, NOT A ROLE.** `toc.h` reports what the NCX authored;
+what a level MEANS on a screen is the screen's decision, and the two were conflated for
+two phases. This layer is deliberately unchanged by that fix: `TocEntry::depth` is still
+the navPoint nesting depth, and nothing here needs to know which entries a screen will
+draw as headers.
 
 **COMMITTING AN ENTRY HAPPENS AT TWO MOMENTS**, and only handling one lost every
 parent: a `navPoint` is complete when it closes AND when a CHILD opens, because the
@@ -4388,8 +4413,10 @@ only by accident of that rule.
 
 **AN IDENTICAL ROW TWICE IS NOISE; A DIFFERENT NAME FOR ONE TARGET IS CONTENT.** Real
 books produce both, and only the PREVIOUS entry is compared — an NCX is authored in
-reading order (0 out-of-order entries across all four), so a repeat is adjacent and a
-full scan would be quadratic for a case that cannot happen far apart.
+reading order (0 out-of-order entries across all four measured), so a repeat is adjacent
+and a full scan would be quadratic for a case that cannot happen far apart. **That
+premise is also what makes #75's lookahead sound**: an entry's children are the entries
+immediately after it, so a document-order list carries the hierarchy without a tree.
 
 **THE LIMITATION WORTH KNOWING:** an NCX target is a file plus an optional fragment
 (`ch3.xhtml#part2`) and the reader positions by spine entry only, so several entries
