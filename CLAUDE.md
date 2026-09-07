@@ -4600,6 +4600,68 @@ pointing into one file all land at that file's start. They are kept rather than
 merged — their labels are real content — but selecting one is approximate. That is why
 Le Fléau has 96 entries for 92 spine entries.
 
+**AND THAT LIMITATION IS THE MAJORITY CASE, WHICH IS HOW IT MADE `NOW` A FALSE CLAIM.**
+Reported off an X3 on `Discourse on the Method`: **two rows** read `NOW` —
+`DISCOURSE ON THE METHOD OF RI…` and `Contents`, whose targets are
+`…59-h-0.htm.xhtml#pgepubid00000` and `#pgepubid00001`, both resolving to spine entry
+1. `renderContents`' source asked `!row.isHeader && e.spine == spine_` **per row**, so
+every entry naming the open spine entry got the marker. `NOW` is a claim about where
+the reader is, so more than one of them is the false-claim shape this file refuses for
+an unread gauge (`-1`, never `0%`) and for a badge promising a wake charging cannot
+deliver.
+
+- **MEASURED OVER `~/.cache/encre-corpus`, and the limitation above under-sells its own
+  incidence: 109 of the 206 books with a usable NCX (52.9%) have at least one spine
+  entry named twice or more** — **605** such groups, **4,526** rows that would have read
+  `NOW` at once. The worst is `standardebooks/f822606a92670aa1.epub`, whose spine entry
+  2 is named by **378** navPoints, **373** of them non-headers. **One of the affected
+  books is on the user's own shelf** (`local/6eff4fa621681282.epub`, 44 on one spine
+  entry), so two rows is the mild version.
+- **THE ROW CHOSEN IS THE FIRST OF THE GROUP, AND `tocIndexForSpine` ANSWERED THE LAST
+  FOR TWO PHASES.** Its argument — "the later ones are further into the file, so the
+  last is the closest thing to where you are" — is true in its premise and needs the
+  reader to be at the **END** of the file. The fragment is **stripped** before the
+  match, so every member of a group resolves to that file's **start** and nothing on
+  this path knows any offset within it: the first entry is the only one that can be
+  *proved* not to be **ahead** of the reader, and `reading_position.h` grades the same
+  trade the same way, degrading backwards. It was also wrong at the one moment it is
+  asked — `updateChapterLabel` runs when a chapter **opens**, which is its first page on
+  a jump and on a forward crossing. So the Reader's header band moved with the marker:
+  **one rule, because two screens naming the reader's chapter differently is two
+  spellings of one fact.** What it costs is stated rather than hidden — a reader deep
+  inside a 378-fragment file is named by that file's first fragment, which is stale
+  rather than false, and closing that needs a fragment-to-block map `document.h` cannot
+  supply.
+- **A HEADER MAY NOT TAKE IT, and that gate is the screen's rather than `toc.h`'s** — a
+  depth is a nesting level and not a role (#75), so `ContentsScreen::rowForSpine` is
+  `tocIndexForSpine`'s rule plus one lookahead, **pinned to it by an equivalence over
+  header-free lists**, which is `test_focus.cpp`'s device for `Focus`'s gated walk.
+  **A spine entry named ONLY by headers answers −1 and marks nothing** — a `Part I` with
+  a file of its own, **108 spine entries across 62 corpus books** — which is the
+  pre-existing behaviour and the honest one.
+- **THE TRAP IS THAT `syncVm` WALKS THE VISIBLE SLICE (`s.first + i`), NOT THE LIST.**
+  A "first match" computed inside that loop is the first match **on screen**: the marker
+  would hop between members of the group as the list scrolled and would appear on a row
+  that is not the reader's once the real one scrolled out of the window — strictly worse
+  than the defect, and **invisible to any single-screenful test**. It is decided **once,
+  in the constructor, over `entries_`**, and compared as an absolute index; `entries_`
+  and `spine_` have no setters, so there is nothing to invalidate. Proved by mutation: a
+  slice-local rule fails only the scrolling case, 11 assertions, while the
+  reported-book case stays green.
+- **NO FIXTURE COULD REACH IT, INCLUDING THE BOARD'S OWN.** `sectioned()`,
+  `mixedDepths()` and `demoContents()` **do** share spine indices, and in every one of
+  those pairs one member is a HEADER, which `!row.isHeader` already suppressed;
+  `flat()` gives every row a spine of its own. So the two Contents goldens, the
+  comparison sheet and a test literally named *the row being read is the only one marked
+  `NOW`* all agreed with a rule that marks every match. Same shape as "a stream of one
+  block kind is not a chapter". **What those goldens DO defend is the header gate** —
+  dropping it moves the marker onto `BOOK I · MISS BROOKE` and reddens both.
+- **`design/Contents.dc.html` NEEDED NO CHANGE**: it draws exactly one `NOW` and its own
+  copy says the marker is on "the row being read", singular. So the board was already
+  right and the firmware moved toward it. Nothing moved on the sheet either —
+  **2.30% / 2.11%, 8,814 differing pixels at both geometries**, which reproduces #81's
+  recorded figure to the digit.
+
 **It re-opens the archive**, deliberately: `OpenedBook` holds twelve bytes a spine entry
 and no hrefs, and matching an NCX target to a spine index needs the real paths on both
 sides. One central-directory parse and one OPF inflate (~32 KB transient) when Contents
@@ -4800,7 +4862,9 @@ place in the book, which needs every chapter paginated (~49 s). That became `CH.
 spine position — free, true, and WORSE on a real book: chapter names carry their own
 numbering, so a row read `Chapitre 1.        CH. 09`, two numbering systems side by side
 with neither explaining the other. It is `NOW` on the row being read and empty elsewhere:
-the NAME is the content of a table of contents, and the full width belongs to it.
+the NAME is the content of a table of contents, and the full width belongs to it. **On
+exactly ONE row** — it marked every entry naming the open spine entry, which is a group
+in the majority of real books; see the `NOW` bullets under **The table of contents**.
 
 **THE LABEL ELIDES, AND `drawDetailRow` DID NOT.** It drew the label at full length from
 the left margin, so a long one ran under the value and off the panel. Book details'
