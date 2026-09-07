@@ -22,9 +22,16 @@
 //   namespace: "encre_sess"   (session only -- settings get their own, so
 //                              clearSession() can clear the whole namespace
 //                              without collateral damage)
-//   keys:      "ver"    uint8   record version, currently 4
+//   keys:      "ver"    uint8   record version, currently 5
 //              "stack"  str     the whole stack, root first, as
-//                               `home:-1;library:7;item-actions:1`
+//                               `home:-1;library:7:/books;item-actions:1`
+//
+// AN ENTRY'S THIRD FIELD IS WHAT ITS FOCUS IS AN INDEX INTO -- the Library's
+// directory, percent-escaped for the two characters the format uses. Version 5 is
+// that field: without it, sleeping in /books/Classics on row 3 woke on /books row
+// 3, which looks exactly like a restore that worked (#14). Screens that can only
+// ever show one list -- every screen but the Library -- carry two fields as
+// before.
 //
 // e.g. from an esp-idf console: `nvs_get encre_sess stack str`
 //

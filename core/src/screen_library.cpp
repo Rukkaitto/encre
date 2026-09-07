@@ -1,5 +1,7 @@
 #include "reader/screen_library.h"
 
+#include <algorithm>  // std::min, for withinRoot's component walk
+
 #include "reader/reading_store.h"
 
 #include "reader/filesystem.h"
@@ -28,6 +30,31 @@ std::string_view leafOf(std::string_view path) {
   const size_t slash = path.rfind('/');
   if (slash == std::string_view::npos) return path;
   return path.substr(slash + 1);
+}
+
+// Is `p` the root itself or a directory inside it? The containment test
+// setPlace() needs, and the only one available at this layer: FileSystem
+// addresses paths and does not decompose or resolve them.
+//
+// A `..` COMPONENT IS REFUSED RATHER THAN RESOLVED, because it is textually under
+// the root and addresses somewhere else -- and nothing below here would notice:
+// FileSystem's contract normalises a redundant separator and says nothing about
+// walking up. A folder legitimately named `..` cannot exist, and one merely
+// CONTAINING two dots (`Vol..Two`) is untouched, because this compares whole
+// components.
+bool withinRoot(std::string_view root, std::string_view p) {
+  if (p.empty() || p.front() != '/') return false;
+  for (size_t at = 0; at < p.size();) {
+    const size_t end = std::min(p.find('/', at + 1), p.size());
+    if (p.substr(at, end - at) == "/..") return false;
+    at = end;
+  }
+  if (p == root) return true;
+  // A root that IS "/" is its own separator, which is the case a naive prefix
+  // test gets wrong -- exactly as join() does one function below.
+  if (root == "/") return p.size() > 1;
+  return p.size() > root.size() && p.compare(0, root.size(), root) == 0 &&
+         p[root.size()] == '/';
 }
 }  // namespace
 
@@ -254,14 +281,18 @@ void LibraryScreen::syncVm() {
   vm_.focusedRow = s.focused;
 }
 
-bool LibraryScreen::descend() {
-  const LibraryItem* item = focusedItem();
-  if (item == nullptr || !item->entry.isDir || fs_ == nullptr) return false;
-  path_ = join(item->entry.name);
+bool LibraryScreen::listAt(std::string p) {
+  path_ = std::move(p);
   // A fresh directory starts at its first row rather than inheriting the parent's
   // scroll position, which would open a folder half way down.
   window().setCount(0);
-  rescan();
+  return rescan();
+}
+
+bool LibraryScreen::descend() {
+  const LibraryItem* item = focusedItem();
+  if (item == nullptr || !item->entry.isDir || fs_ == nullptr) return false;
+  listAt(join(item->entry.name));
   return true;
 }
 
@@ -270,10 +301,25 @@ bool LibraryScreen::ascend() {
   const size_t slash = path_.rfind('/');
   // Never above the root the Library was given: `root_` is a prefix of `path_`
   // by construction, so this cannot walk off the top of the card.
-  path_ = (slash == std::string::npos || slash < root_.size()) ? root_ : path_.substr(0, slash);
-  window().setCount(0);
-  rescan();
+  listAt((slash == std::string::npos || slash < root_.size()) ? root_
+                                                             : path_.substr(0, slash));
   return true;
+}
+
+bool LibraryScreen::setPlace(std::string_view p) {
+  // Already listing it. The ordinary case -- the constructor lists the root, and
+  // the root is where most records were written -- and it must touch no card: a
+  // rescan here would put a directory listing on the wake path for nothing.
+  if (p == path_) return true;
+  if (!withinRoot(root_, p)) return false;
+  const std::string was = path_;
+  if (listAt(std::string(p))) return true;
+  // THE DIRECTORY DID NOT READ, which is a folder deleted or renamed while the
+  // device slept. Back to where we were -- which on the restore path is the root
+  // the constructor listed -- and false, so App::restore drops the row that came
+  // with it rather than applying it to a list it does not belong to.
+  listAt(was);
+  return false;
 }
 
 std::string LibraryScreen::focusedPath() const {

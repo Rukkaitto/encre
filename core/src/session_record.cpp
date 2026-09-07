@@ -49,6 +49,84 @@ static_assert(sizeof(kNames) / sizeof(kNames[0]) == static_cast<size_t>(ScreenId
 constexpr int kFocusMin = -1;
 constexpr int kFocusMax = 32767;
 
+// WHAT A PLACE MAY COST THE RECORD, in ESCAPED bytes, so the bound holds whatever
+// the path contains rather than whatever it happens to be made of.
+//
+// It bounds the record and nothing else: eight entries of a name, a focus, a
+// place and their separators is 1,193 bytes, which is a derived read buffer in
+// shell/src/session.cpp and comfortably inside NVS's 4,000-byte cap for a string.
+// A cap large enough for every path a card can hold would not be -- one FAT long
+// name is 255 characters and a path is components of them -- so this is a real
+// limit and it is stated as one in the header: the deep folder loses its row, not
+// its stack.
+//
+// 128 IS SIZED FROM WHAT THE LIBRARY ACTUALLY LISTS, not from the filesystem's
+// worst case. The Library starts at `/books` and descends by folder, and the
+// deepest arrangement a real card carries is a publisher-or-Calibre shaped
+// `/books/<author>/<title>` -- ~60 bytes, and 120 characters of path is already
+// generous for one. Nothing on the device produces a longer one today: `/books`
+// itself is 6.
+constexpr size_t kPlaceMaxBytes = 128;
+
+bool isHexDigit(char c) {
+  return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+int hexValue(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  return c - 'A' + 10;
+}
+
+// `%`, `;`, `:` and any control byte, as `%XX`; everything else verbatim -- see
+// the header for why UTF-8 is not escaped.
+std::string escapePlace(const std::string& place) {
+  static const char* const kHex = "0123456789ABCDEF";
+  std::string out;
+  out.reserve(place.size());
+  for (const char ch : place) {
+    const unsigned char c = static_cast<unsigned char>(ch);
+    if (c == '%' || c == ';' || c == ':' || c < 0x20 || c == 0x7F) {
+      out += '%';
+      out += kHex[c >> 4];
+      out += kHex[c & 0x0F];
+    } else {
+      out += static_cast<char>(c);
+    }
+  }
+  return out;
+}
+
+// False refuses the WHOLE record: a place this cannot decode was written by
+// something that is not this format. Empty is refused too -- encodeSessionStack
+// writes no field at all for a screen with no place, so `library:7:` is a record
+// with a third field and nothing in it, which is the trailing-separator rule.
+bool decodePlace(const char* start, size_t len, std::string& out) {
+  out.clear();
+  if (len == 0) return false;
+  out.reserve(len);
+  for (size_t i = 0; i < len; ++i) {
+    const char c = start[i];
+    if (c == '%') {
+      if (i + 2 >= len || !isHexDigit(start[i + 1]) || !isHexDigit(start[i + 2])) return false;
+      const int v = hexValue(start[i + 1]) * 16 + hexValue(start[i + 2]);
+      // A NUL cannot be in a path and would truncate this record's own string the
+      // next time it is written, so it is refused rather than carried.
+      if (v == 0) return false;
+      out += static_cast<char>(v);
+      i += 2;
+      continue;
+    }
+    // A RAW SEPARATOR HERE IS A FOURTH FIELD, and there is no fourth field: the
+    // escape puts `:` beyond the parser's reach, so `library:7:/books:extra` is
+    // malformed rather than a path with a colon in it. (`;` cannot reach here at
+    // all -- it ends the entry.)
+    if (c == ':' || c == ';') return false;
+    out += c;
+  }
+  return true;
+}
+
 bool decodeName(const char* start, size_t len, ScreenId& out) {
   if (len == 0) return false;
   for (int i = 0; i < static_cast<int>(ScreenId::Count); ++i) {
@@ -151,8 +229,20 @@ std::string encodeSessionStack(const std::vector<StackEntry>& stack) {
     if (!out.empty()) out += ';';
     out += sessionWireName(e.screen);
     out += ':';
-    const int focus = e.focus < kFocusMin ? kFocusMin : e.focus > kFocusMax ? kFocusMax : e.focus;
+    int focus = e.focus < kFocusMin ? kFocusMin : e.focus > kFocusMax ? kFocusMax : e.focus;
+    // THE PLACE AND THE FOCUS ARE ONE VALUE HERE. A place too long to hold is
+    // dropped whole rather than truncated -- a cut path addresses a different
+    // directory, not none -- and the row it indexes goes with it, because a row
+    // index without its folder is the defect this field exists to close. -1 is
+    // "nothing selected", a real position every focused screen accepts.
+    const std::string place = escapePlace(e.place);
+    const bool fits = !place.empty() && place.size() <= kPlaceMaxBytes;
+    if (!place.empty() && !fits) focus = kFocusMin;
     out += std::to_string(focus);
+    if (fits) {
+      out += ':';
+      out += place;
+    }
   }
   return out;
 }
@@ -170,9 +260,22 @@ bool decodeSessionStack(const char* raw, std::vector<StackEntry>& out) {
       out.clear();
       return false;
     }
+    // The SECOND colon, if the entry has one, ends the focus and begins the
+    // place. It cannot be a colon inside the place: escapePlace put every one of
+    // those beyond this search, which is what makes a path with a colon in it
+    // impossible rather than ambiguous.
+    const char* placeSep = static_cast<const char*>(
+        std::memchr(colon + 1, ':', static_cast<size_t>(entryEnd - colon - 1)));
+    const char* focusEnd = placeSep != nullptr ? placeSep : entryEnd;
+
     StackEntry e;
     if (!decodeName(p, static_cast<size_t>(colon - p), e.screen) ||
-        !decodeFocus(colon + 1, static_cast<size_t>(entryEnd - colon - 1), e.focus)) {
+        !decodeFocus(colon + 1, static_cast<size_t>(focusEnd - colon - 1), e.focus)) {
+      out.clear();
+      return false;
+    }
+    if (placeSep != nullptr &&
+        !decodePlace(placeSep + 1, static_cast<size_t>(entryEnd - placeSep - 1), e.place)) {
       out.clear();
       return false;
     }
@@ -190,11 +293,15 @@ bool decodeSessionStack(const char* raw, std::vector<StackEntry>& out) {
 }
 
 size_t sessionStackMaxBytes() {
-  // The longest name, a colon, "-32768"'s worth of digits and a separator, times
-  // the deepest stack, plus a terminator.
+  // The longest name, a colon, "-32768"'s worth of digits, a colon, the longest
+  // place the encoder will write and a separator, times the deepest stack, plus a
+  // terminator. Every term is the format's own, which is the point: the read
+  // buffer in shell/src/session.cpp is derived from this rather than kept in step
+  // by hand, and the place is the term that made that matter -- it is eight times
+  // larger than everything else in the entry put together.
   size_t longest = 0;
   for (const char* n : kNames) longest = std::max(longest, std::strlen(n));
-  return App::kMaxDepth * (longest + 1 + 6 + 1) + 1;
+  return App::kMaxDepth * (longest + 1 + 6 + 1 + kPlaceMaxBytes + 1) + 1;
 }
 
 }  // namespace reader

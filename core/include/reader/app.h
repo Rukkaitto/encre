@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include "reader/gesture.h"
@@ -300,6 +302,49 @@ class Screen {
     return false;
   }
 
+  // WHAT THE FOCUS IS AN INDEX INTO, when the screen's list is not the only list
+  // it could be showing. Empty means "there is only ever one", which is the
+  // default and true of every screen but the Library.
+  //
+  // THE DEFECT IT CLOSES (#14): the Library can be listing a SUBFOLDER of
+  // /books, and the record carried no way to say which -- so sleeping in
+  // /books/Classics on row 3 woke on /books row 3. That is worse than losing the
+  // position, because row 3 of the wrong folder looks exactly like a restore that
+  // worked. A focus is only meaningful relative to the list it indexes, so the
+  // list has to be part of the record.
+  //
+  // AN OPAQUE STRING, AND core/ NEVER LEARNS WHAT IS IN IT. The Library's is a
+  // directory path; nothing here knows that, and the record's format knows only
+  // how to carry bytes across a chip reset (see session_record.h, which escapes
+  // the two characters the wire uses). A `path` field on StackEntry would put a
+  // filesystem into App and name one screen in a format that names none -- the
+  // ladder-of-screen-names shape App::restore exists to have deleted.
+  //
+  // THE BOOL MEANS "YOU ARE THERE NOW", AND THAT IS NOT setFocus's BOOL. That
+  // difference is deliberate and it has one reader: App::restore, which applies
+  // the focus ONLY when the place was honoured. A place is not a coordinate you
+  // can be part of the way to -- either the screen is showing that list or it is
+  // showing a different one -- and asking for the place you are already on is a
+  // restore that landed, where an unchanged FOCUS genuinely means no repaint is
+  // owed. setFocus's "something moved" cannot answer this question, so it is not
+  // spelled that way here.
+  //
+  // FALSE IS THE DEFAULT, WHICH IS WHAT MAKES THE HALF-TAKEN PAIR DEGRADE RATHER
+  // THAN MISLEAD. Screen::focus/setFocus shipped one-way on three screens, each
+  // behind a comment arguing its own case was the exception, and the fix was
+  // FocusScreen making the pair final. There is no equivalent here -- one screen
+  // has a place, and a shared base for one caller is a header edge bought for
+  // nothing -- so the enforcement is at the one place that applies a focus: a
+  // screen that reports a place and forgets to accept one back has its restored
+  // focus DROPPED and lands at the top of its own list, which is the honest
+  // outcome rather than the plausible-looking wrong row. reading_position.h's
+  // fitOf grading is the same rule: degrade, never mislead.
+  virtual std::string_view place() const { return {}; }
+  virtual bool setPlace(std::string_view place) {
+    (void)place;
+    return false;
+  }
+
   // WHICH PIXELS THIS SCREEN'S PAINT COVERS, as a token rather than a rectangle.
   //
   // The promise: two paints of this screen whose tokens are EQUAL write exactly
@@ -367,9 +412,9 @@ class ScreenFactory {
   virtual std::unique_ptr<Screen> create(ScreenId id) = 0;
 };
 
-// ONE SCREEN'S PLACE ON THE STACK: which screen, and where its focus was. A
-// snapshot is a vector of these, ROOT FIRST, and it is everything a wake needs to
-// put the user back exactly where they were.
+// ONE SCREEN'S PLACE ON THE STACK: which screen, where its focus was, and WHAT
+// THAT FOCUS IS AN INDEX INTO. A snapshot is a vector of these, ROOT FIRST, and
+// it is everything a wake needs to put the user back exactly where they were.
 //
 // Deliberately not a Screen* or an index into anything: it survives a chip reset,
 // which is what deep sleep is, so it can only hold values.
@@ -378,9 +423,15 @@ struct StackEntry {
   // Screen::focus()'s number, and negative is a position (Home's CONTINUE block,
   // an empty Library), not an error. See Screen::focus.
   int focus = 0;
+  // Screen::place()'s string, OWNED -- the snapshot outlives the screens it
+  // describes by design, since the point of it is to survive their destruction.
+  // Empty for every screen but the Library, and short enough to fit a small
+  // string on both host libraries when it is not (`/books/Classics` is 15 bytes),
+  // so a snapshot per press costs no allocation for the folders a card carries.
+  std::string place;
 
   friend bool operator==(const StackEntry& a, const StackEntry& b) {
-    return a.screen == b.screen && a.focus == b.focus;
+    return a.screen == b.screen && a.focus == b.focus && a.place == b.place;
   }
   friend bool operator!=(const StackEntry& a, const StackEntry& b) { return !(a == b); }
 };
