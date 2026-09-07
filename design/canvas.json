@@ -451,6 +451,15 @@
       "page": "page-4"
     },
     {
+      "file": "BookErrorMemory.dc.html",
+      "title": "Book Error · Memory",
+      "x": 580,
+      "y": 4500,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
       "file": "WebUpload.dc.html",
       "title": "Web · Send Books",
       "x": 0,
