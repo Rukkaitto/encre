@@ -1609,8 +1609,15 @@ void QuietTheme::renderReader(Framebuffer& fb, const FontSet& fonts, const Glyph
 //
 // design/ReaderMenu.dc.html. The SAME 340px panel the actions overlay draws -- eight
 // boards share that box (components.h lists them) -- with a header that names the book
-// and six 72px rows. So this is assembly, not new geometry: the only thing it adds to
-// the shared primitives is a row that states a value.
+// and a column of 72px rows. So this is assembly and not new geometry, and it adds
+// nothing at all to the shared primitives now: the one thing it used to add was a row
+// that states a value, and with `Bookmarks` cut (#3) and `Names` after it (#73) no row
+// on this sheet states a quantity. `drawPanelRow`'s value slot is pinned by
+// test_components.cpp instead of by a caller here.
+//
+// THE ROW COUNT IS READ OFF THE VIEW MODEL, never written down. This comment has stated
+// it as six and as four and been wrong both times; `vm.rows.size()` is the only place
+// it lives, and the screen's own tests assert the property rather than the number.
 constexpr int kReaderMenuPanelW = 340;
 
 void QuietTheme::renderReaderMenu(Framebuffer& fb, const FontSet& fonts,

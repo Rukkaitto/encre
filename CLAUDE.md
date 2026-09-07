@@ -4415,7 +4415,8 @@ and `drawPanelRow` was already "72 tall, inset on a panel's own 20px padding, di
 with a chevron". The only thing the menu added to the primitives is a row that states a
 VALUE — its `Bookmarks` count — which is the other half of Home's "a row states a
 quantity or discloses a screen, never both". **THAT ROW IS CUT AND THE PARAMETER IS
-NOT** — see the trackingEm1000 paragraph below, which is where this went next.
+NOT** — see the trackingEm1000 paragraph below, which is where this went next. With
+`Names` cut too (#73) the menu now adds **nothing at all** to the shared primitives.
 
 **IT DECLARES `Mono` WHERE THE READER DECLARES `Grayscale`.** Fidelity comes from the
 top screen, so the menu paints in one waveform instead of three and its focus moves are
@@ -4425,7 +4426,17 @@ is chrome and the page is the one thing here that wanted four levels. Its
 `paintFootprint` is a constant, unlike the actions panel's: every row is one height, so
 the panel cannot change height when the focus moves and every move takes the fast path.
 (That sentence counted the rows twice and the count was wrong twice; the property is
-"one height", and the number belongs in the test.)
+"one height", and the number belongs in the test.) **AND THE CLAIM IS FALSE — #68 IS THE
+OPEN CARD.** The rows really are one height, but `renderReaderMenu` sizes the panel
+through `panelRowHeight(rowRuleFor(i, rows, focused))`, and `rowRuleFor` suppresses the
+rule for the focused row **and** for the last row — so focusing the LAST row is the one
+state where two suppressions coincide and the centred panel moves a pixel. Measured on
+the X3: panel top 213 on Contents and Typography, **212** on About this book. That is
+the actions panel's own defect, which `ItemActions::paintFootprint` counts borderless
+rows for and this does not. **Cutting `Names` did not touch it**: that row was never
+focusable and never last, so it always drew its rule — the cut takes 73px off the panel
+in every state and leaves the focusable set, and therefore every per-state delta,
+exactly as it was.
 
 **`discloses` CANNOT BE DERIVED FROM AN EMPTY VALUE**, and deriving it drew a chevron on
 `Close book` promising a screen that does not exist — that row had neither a value nor a
@@ -4492,20 +4503,31 @@ it has open, and neither has to know how the other is shaped. Two details worth 
   after opening them from a book would show the book — a stale answer that looks like the
   right screen.
 
-**ONE OF THE MENU'S FOUR ROWS DOES NOTHING AND IS DRAWN ANYWAY** — Settings' rule, and
-the board was edited to match before the screen was written: it had focused Typography,
-which was not built then, so implementing it faithfully would have drawn a selection on a
-dead row. `Contents`, `Typography` and `About this book` respond; `Names` does not.
+**EVERY ROW ON THE MENU RESPONDS NOW, AND SETTINGS' RULE HAS NO INSTANCE LEFT HERE.**
+The board was edited to match the rule before the screen was written — it had focused
+Typography, which was not built then, so implementing it faithfully would have drawn a
+selection on a dead row — and the last drawn-and-skipped row was `Names`, which is cut
+(#73). `Contents`, `Typography` and `About this book` are all that is left and all three
+act. `ReaderMenuScreen::focusable()` and `ListRow::focusable` stay, because the rule is
+the screen's and the next unbuilt **V1** row gets it by setting one word.
 
-**AND THAT RULE HAS A LIMIT, WHICH `Bookmarks` IS WHERE IT WAS REACHED (#55).** Skipping
-the focus stops an unbuilt row misleading a reader who PRESSES it; it does nothing about
-the row itself promising a feature the release does not have. The distinction that
-decides it is **which release the row is waiting on**: `Names` waits on its own screen
-inside V1, so it is drawn and skipped, where `Bookmarks` moved to V1.1 (#3) and was cut
-from the board and the enum instead. It comes back with the screen.
+**AND THAT RULE'S LIMIT HAS NOW BEEN REACHED TWICE — `Bookmarks` (#55/#3) AND `Names`
+(#73) — AND THIS PARAGRAPH GOT THE SECOND ONE WRONG WHILE STATING THE TEST FOR IT.**
+Skipping the focus stops an unbuilt row misleading a reader who PRESSES it; it does
+nothing about the row itself promising a feature the release does not have. The
+distinction that decides it is **which release the row is waiting on** — and this file
+wrote that sentence down and then applied it to `Names` from memory rather than from the
+board: it said "`Names` waits on its own screen inside V1, so it is drawn and skipped".
+**The Names family is V2**, three `Boarded` cards (the per-chapter index, the list
+screen, and the alias-row overflow), so it was `Bookmarks`' case from the moment those
+cards were filed and the row should have gone with it. **A rule and its worked example
+drifted apart inside one paragraph**, which is the same shape as the guards that named a
+member instead of `ScreenId::Count`: the rule was right, the instance was stale, and
+nothing but the board could tell them apart. `Names.dc.html` and `NamesEmpty.dc.html`
+stay; the row returns with the screen.
 
-**THREE ROWS HAVE BEEN CUT ENTIRELY, AND NOT ONE OF THEM FOR ROOM** — two of them on
-2026-08-24 and `Bookmarks` above. `Go to page…` because
+**FOUR ROWS HAVE BEEN CUT ENTIRELY, AND NOT ONE OF THEM FOR ROOM** — two of them on
+2026-08-24, then `Bookmarks` and `Names` above. `Go to page…` because
 **nobody navigates an EPUB by page number**: a reflowable book has no stable page to go
 to and the number a picker offers moves with the type size, so the honest jump is the
 chapter name `Contents` already gives. (Its board and its roadmap entry went too; the
@@ -4516,7 +4538,7 @@ one, and it cost a fourth save edge to stay correct. Removing it deleted that ed
 tracking in the firmware. The enum shrank with it: **a row index is not a stable
 numbering** here, because the one thing that persists one is `FocusScreen`'s restore,
 and that refuses an index it cannot land on — exactly what a shrunk table produces. It
-has now shrunk twice on that argument with nothing to migrate either time.
+has now shrunk three times on that argument with nothing to migrate any of them.
 
 The menu measured **3.10% / 3.60%** against the board after that cut, against 3.06% /
 3.60% before: the panel shrank consistently on both sides, so the residual was the same
@@ -4532,6 +4554,43 @@ threshold-at-128 count over the bare panel PNGs `--export` writes. Measured in t
 tree, the untouched `reader` reads 5.24% / 6.29% against the 5.34% / 6.38% recorded
 elsewhere here — the same ~0.1pp offset this file already notes for the peek, which is
 what makes the before and after comparable rather than two instruments.
+
+**AFTER THE `Names` CUT IT IS 3.00% / 3.56%, AND THAT NUMBER WENT THE WRONG WAY FOR A
+REASON THAT IS NOT DRIFT.** The panel lost a 72px row and its 1px rule, so it got
+*smaller* and *closer* to nothing — and the strict figure ROSE by 0.54pp on both
+geometries. **This is the first time on this project that a threshold-at-128 count has
+been read as a regression and been an artefact of the count itself**, and the mechanism
+is worth having written down because it will happen to the next row anybody cuts from a
+centred panel:
+
+- **The board's panel is a HALF PIXEL out of phase now.** Chrome derives the panel's
+  height as `2 * border + caption + rows` and its caption block's content height is
+  FRACTIONAL, so the sum is fractional. Removing one 73px row flipped the *parity* of a
+  centred panel's top edge: the board's panel used to land on an integer y and now lands
+  on a half-integer. Chrome then rasterises every 1px rule inside it across **two rows
+  of grey 127**, and 127 is under the threshold, so the count scores **both** as ink
+  where the firmware inks exactly one. ~340 spurious mismatches per full-width edge,
+  five edges, and the +2,062 (X4) / +2,276 (X3) is accounted for.
+- **NOTHING MOVED, and that was checked per band rather than argued.** Every full-width
+  edge of the design's panel BRACKETS the firmware's: top border design 252(127) /
+  253(0) / 254(127) against firmware 253 / 254; the rule design 472(127) / 473(127)
+  against firmware 472; bottom border design 545(128) / 546(0) / 547(127) against
+  firmware 545 / 546; and the focused row's black block spans the same 74px, offset by
+  half of one. Identical story at 528×792. A rule that had really moved would sit
+  *beside* the firmware's, not straddle it.
+- **A ±1-ROW-TOLERANT COUNT IS WHAT THE FIGURE WOULD BE WITHOUT THE PHASE**, and it
+  moves the way a smaller panel should: **1.66% → 1.76% (X4) and 2.11% → 2.20% (X3)**,
+  +0.10pp, consistent across both geometries. That is the same order as every other row
+  cut here. It is quoted as a second reading and **not** as a replacement — the
+  threshold-at-128 number is this project's instrument and swapping instruments to make
+  a figure look better is how a real regression gets hidden.
+- **THE FIX IS NOT TO PIN THE PANEL'S HEIGHT ON THE BOARD.** That is what
+  `Peek.dc.html` did, and it was right *there* because the peek's box is a fixed
+  constant by design; this panel's height is the sum of its rows, which is exactly the
+  box model CLAUDE.md's first invariant says to derive from and never pin. The
+  fractional part lives in the shared overlay caption that **eight boards** draw, so it
+  is a `components.h`-level question and not this screen's — and it is worth a card
+  rather than a paragraph.
 
 **THE ROW'S RIGHT SLOT HAS HELD TWO WRONG THINGS.** It was `P. 21`, a page number for a
 place in the book, which needs every chapter paginated (~49 s). That became `CH. 01`, the

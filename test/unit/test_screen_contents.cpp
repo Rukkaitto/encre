@@ -148,7 +148,7 @@ TEST_CASE("the row being read is the only one marked NOW") {
 
 // --- The menu ----------------------------------------------------------------
 
-TEST_CASE("the reader menu focuses Contents, skipping the rows that do nothing") {
+TEST_CASE("the reader menu focuses Contents, and now nothing is skipped on the way down") {
   reader::ReaderMenuScreen m("Middlemarch", "6%");
   CHECK(m.id() == ScreenId::ReaderMenu);
   CHECK(m.isOverlay());
@@ -157,9 +157,10 @@ TEST_CASE("the reader menu focuses Contents, skipping the rows that do nothing")
   // Down from Contents reaches Typography, which is the row next to it and is live.
   m.onEvent(kDown);
   CHECK(m.focus() == reader::ReaderMenuScreen::kTypography);
-  // Down from Typography skips Names -- the one inert row left, now that Bookmarks is
-  // cut -- and lands on About this book, which is live because Book details takes facts
-  // now rather than a Library row.
+  // Down from Typography reaches About this book with NO row skipped between them.
+  // `Names` sat there and was skipped, and is cut (#73) -- so the gated walk and the
+  // ungated arithmetic now agree on this screen, which is why the wrap cases below are
+  // the only interesting movement left here.
   m.onEvent(kDown);
   CHECK(m.focus() == reader::ReaderMenuScreen::kAboutBook);
   // ...and wraps back round to Contents rather than sticking. About this book is the
@@ -167,10 +168,15 @@ TEST_CASE("the reader menu focuses Contents, skipping the rows that do nothing")
   // stand in for.
   m.onEvent(kDown);
   CHECK(m.focus() == reader::ReaderMenuScreen::kContents);
-  // Up from Contents wraps the other way over that same skipped row, to the same live
-  // one.
+  // Up from Contents wraps the other way, to the same last row.
   m.onEvent(kUp);
   CHECK(m.focus() == reader::ReaderMenuScreen::kAboutBook);
+  // AND THE WALK IS EXHAUSTIVE, which is the property the three CHECKs above are only
+  // a sample of: every index is landable, so stepping kRowCount times returns the focus
+  // to where it started whatever the table's length becomes.
+  const int start = m.focus();
+  for (int i = 0; i < reader::ReaderMenuScreen::kRowCount; ++i) m.onEvent(kDown);
+  CHECK(m.focus() == start);
 }
 
 TEST_CASE("the menu's Typography row opens the panel") {
@@ -188,30 +194,36 @@ TEST_CASE("the menu's Typography row opens the panel") {
   CHECK(a.target == ScreenId::Typography);
 }
 
-TEST_CASE("making the Typography row live changed no row's appearance") {
+TEST_CASE("every row on this sheet responds, and the flag still means only input") {
   // `ListRow::focusable` IS ABOUT INPUT, NOT APPEARANCE. An inert row is drawn exactly
-  // as an unfocused live one, which is why the reader_menu goldens do not move for
-  // this change -- a theme that dimmed on the flag would be inventing a design
-  // decision nobody made. Pinned here as well as in the goldens, because a golden
-  // says the pixels are the same and this says which field is allowed to differ.
+  // as an unfocused live one -- a theme that dimmed on the flag would be inventing a
+  // design decision nobody made. Pinned here as well as in the goldens, because a
+  // golden says the pixels are the same and this says which field is allowed to differ.
   const reader::ReaderMenuScreen m("Middlemarch", "6%");
   const auto& rows = m.vm().rows;
-  REQUIRE(rows.size() == 4);
+  REQUIRE(rows.size() == reader::ReaderMenuScreen::kRowCount);
   CHECK(rows[reader::ReaderMenuScreen::kTypography].label == "Typography");
   // The board draws it with a chevron and no value, unchanged by going live.
   CHECK(rows[reader::ReaderMenuScreen::kTypography].value.empty());
   CHECK(rows[reader::ReaderMenuScreen::kTypography].discloses);
-  // ONE INERT ROW LEFT: Names. Bookmarks was the other and is cut, because skipping the
-  // focus keeps an unbuilt row from misleading a press and does NOT keep it from
-  // promising a feature the release does not have. Counted rather than named, so the
-  // next row to go live fails this and has to say so.
-  int inert = 0;
-  for (const auto& r : rows)
-    if (!r.focusable) ++inert;
-  CHECK(inert == 1);
+  // NO INERT ROW IS LEFT. Bookmarks and Names were the last two, and both were cut for
+  // one reason: skipping the focus keeps an unbuilt row from misleading a press and
+  // does NOT keep it from promising a feature the release does not have -- and both
+  // rows' screens are out of V1. Asserted as the PROPERTY rather than as a count of
+  // inert rows, which is what a screen with none of them can actually say; the count
+  // this file used to pin has been 1 and 2 and would be 0 now, and the reader-menu
+  // comments have already been wrong about a row count twice.
+  for (const auto& r : rows) CHECK(r.focusable);
+  // ...and the two halves agree: the screen's own landing gate says the same thing the
+  // view model does, for every index, so a row cannot be drawn live and refuse a press.
+  for (int i = 0; i < reader::ReaderMenuScreen::kRowCount; ++i) {
+    reader::ReaderMenuScreen n("Middlemarch", "6%");
+    n.setFocus(i);
+    CHECK(n.focus() == i);
+  }
 }
 
-TEST_CASE("the menu has four rows, and none of the three cut ones is among them") {
+TEST_CASE("the menu draws its enum and nothing else, and no cut row came back") {
   // GO TO PAGE AND CLOSE BOOK ARE GONE, for reasons that are about reading rather than
   // about room: a reflowable book has no stable page to go to -- the number a picker
   // would offer moves with the type size -- so the honest jump is the chapter name,
@@ -219,20 +231,30 @@ TEST_CASE("the menu has four rows, and none of the three cut ones is among them"
   // was a second door to a room with one, and had to carry its own save edge to stay
   // correct.
   //
-  // BOOKMARKS IS THE THIRD, and it went with a scope call rather than a design one:
-  // the feature moved to V1.1 (#3), and a row that discloses a screen this release does
-  // not have is a control that cannot act -- which this project has shipped twice and
-  // refuses a third time. It comes back with the screen.
+  // BOOKMARKS AND NAMES ARE THE OTHER TWO, and both went with a scope call rather than
+  // a design one: Bookmarks moved to V1.1 (#3) and the whole Names family to V2 (#73).
+  // A row that discloses a screen this release does not have is a control that cannot
+  // act -- which this project has shipped twice and refuses again. Both come back with
+  // their screens.
   const reader::ReaderMenuScreen m("Middlemarch", "6%");
   const auto& rows = m.vm().rows;
-  REQUIRE(rows.size() == 4);
-  REQUIRE(reader::ReaderMenuScreen::kRowCount == 4);
+  // THE PROPERTY, NOT A MAGIC NUMBER: the drawn rows, the declared count and the enum's
+  // last member are three spellings of one length, and this asserts they agree rather
+  // than pinning what they agree ON. The count in this screen's own comments has been
+  // wrong twice, and re-pinning `== 4` here is what made a shrunk table a two-line edit
+  // in a file that says nothing about which row went.
+  CHECK(rows.size() == static_cast<size_t>(reader::ReaderMenuScreen::kRowCount));
+  CHECK(reader::ReaderMenuScreen::kAboutBook + 1 == reader::ReaderMenuScreen::kRowCount);
   for (const auto& r : rows) {
     CHECK(r.label.find("Go to page") == std::string::npos);
     CHECK(r.label.find("Close book") == std::string::npos);
     CHECK(r.label.find("Bookmarks") == std::string::npos);
+    CHECK(r.label.find("Names") == std::string::npos);
   }
+  // The board's order, first and last, so the enum cannot be reordered silently.
+  CHECK(rows.front().label == "Contents");
   CHECK(rows[reader::ReaderMenuScreen::kAboutBook].label == "About this book");
+  CHECK(rows.back().label == "About this book");
 }
 
 TEST_CASE("About this book opens Book details") {
@@ -241,7 +263,9 @@ TEST_CASE("About this book opens Book details") {
   // is no Library on the stack. Making it focusable without fixing that would have been
   // a button that works only sometimes, which nobody can learn.
   reader::ReaderMenuScreen m("Middlemarch", "6%");
-  // TWO Downs, not one: Typography sits between Contents and here and is live now.
+  // TWO Downs, not one: Typography sits between Contents and here and is live. It is
+  // also exactly two now that `Names` is cut -- it was two before as well, because the
+  // gate skipped it, so this is the one movement the cut left numerically unchanged.
   m.onEvent(kDown);
   m.onEvent(kDown);
   REQUIRE(m.focus() == reader::ReaderMenuScreen::kAboutBook);
@@ -267,7 +291,15 @@ TEST_CASE("the menu's only way out is CLOSE, and it dismisses the panel not the 
     ++seen;
     n.onEvent(kDown);
   } while (n.focus() != first && seen < reader::ReaderMenuScreen::kRowCount);
-  CHECK(seen == 3);  // Contents, Typography and About this book
+  // AS MANY PRESSES AS THERE ARE LANDABLE ROWS, derived rather than pinned: the walk
+  // has to visit every row a reader can reach and stop, and counting the focusable rows
+  // is what says that whatever the table's length is. `== 3` was the number when this
+  // sheet had a skipped row; with `Names` cut it is also kRowCount, and hardcoding
+  // either would have hidden a walk that stopped one row short.
+  size_t landable = 0;
+  for (const auto& r : n.vm().rows)
+    if (r.focusable) ++landable;
+  CHECK(static_cast<size_t>(seen) == landable);
 }
 
 TEST_CASE("no menu row states a quantity, and every one of them discloses") {
@@ -292,10 +324,16 @@ TEST_CASE("no menu row states a quantity, and every one of them discloses") {
   for (const auto& r : rows) CHECK(r.trackingEm1000 == 0);
 }
 
-TEST_CASE("the menu's panel never changes height, so every focus move is partial") {
-  // Unlike the actions panel, whose focused row loses its rule and makes the panel a
-  // pixel shorter -- so two of its four focus moves refuse the fast path. All four rows
-  // here are one height, which is what makes a constant footprint a true promise.
+TEST_CASE("the menu promises a constant paint footprint on every focus move") {
+  // WHAT THIS PINS IS THE PROMISE, NOT THE PIXELS, and the distinction is #68: the rows
+  // are all one height, but `renderReaderMenu` sizes the panel through
+  // `rowRuleFor`, which suppresses the rule for the focused row AND for the last row --
+  // so focusing the LAST row is the one state where the centred panel moves a pixel
+  // (measured on the X3: top 213, 213, 212). `ItemActions::paintFootprint` counts
+  // borderless rows for exactly that and this does not, so the promise is currently
+  // stronger than the render. Cutting `Names` (#73) did not touch it either way: that
+  // row was never focusable and never last, so the focusable set and every per-state
+  // delta are unchanged and only the panel's overall height moved, by one row.
   reader::ReaderMenuScreen m("Middlemarch", "6%");
   const uint32_t before = m.paintFootprint();
   m.onEvent(kDown);
