@@ -49,10 +49,15 @@ class GlyphSource;
 //     a second copy of the chapter names -- plus a `Screen` used as a model, which is
 //     an odd thing for a screen to be.
 //
-// WHAT IT BUYS IS THE ONE PROPERTY THAT MATTERS: THE CURSOR THE PEEK COMMITS IS BY
+// WHAT IT BUYS IS THE ONE PROPERTY THAT MATTERS: THE BLOCK THE PEEK COMMITS IS BY
 // CONSTRUCTION THE ONE THE READER RESTORES. Both sides are `ReaderScreen::currentCursor`
-// over the same document, so there is no second spelling of a page position free to
-// disagree with the first -- which is precisely how a "go here" lands a page off.
+// over the same document, so there is no second spelling of a BLOCK free to disagree
+// with the first -- which is precisely how a "go here" lands in the wrong paragraph.
+//
+// AND IT SAID `THE CURSOR` HERE, WHICH WAS TRUE OF THE BLOCK AND FALSE OF THE LINE
+// (#48). A line is a line WITHIN A BLOCK AT ONE COLUMN WIDTH, and these are two column
+// widths -- so what crosses is the block, and `chosenCursor` is where the line is
+// dropped. See its definition in screen_peek.cpp, which prices both halves.
 //
 // --- THE MEMORY DANCE --------------------------------------------------------
 //
@@ -167,14 +172,19 @@ class PeekScreen : public Screen {
   // `chosenSpine()` on Contents already lives under.
   bool committed() const { return committed_; }
 
-  // WHERE `GO HERE` GOES: the spine entry and the start cursor of the page the panel was
-  // showing. A cursor and not a page number, for reading_position.h's reason -- a page
+  // WHERE `GO HERE` GOES: the spine entry, and the BLOCK the page the panel was showing
+  // began in. A cursor and not a page number, for reading_position.h's reason -- a page
   // index is a position at one column width, and this column is not the reader's.
   //
   // The reader may have paged several pages into the peek before committing, so page one
   // of the chapter is the wrong landing and ReaderScreen::goToPosition is what takes
   // both halves. The page NUMBER is then computed on arrival by counting boundaries,
-  // which is what lets the peek be honest about not having one while the commit is exact.
+  // which is what lets the peek be honest about not having one.
+  //
+  // ITS `line` IS ALWAYS ZERO, and that is the fix for #48 rather than an omission --
+  // exactly the field reading_position.h zeroes for a `Relaid` fit and relayout() drops
+  // one layer up, for exactly the same reason. The definition in screen_peek.cpp carries
+  // the measurements and the two alternatives that were refused.
   int chosenSpine() const;
   Cursor chosenCursor() const;
 
