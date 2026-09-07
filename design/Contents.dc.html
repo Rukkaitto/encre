@@ -32,6 +32,31 @@
   <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">CONTENTS</div>
   <div style="font-size: var(--t-value); font-weight: 700;">MIDDLEMARCH</div>
 </div>
+  <!-- NO `border-top` ON EITHER HEADER, AND NO `border-bottom` ON THE ROW ABOVE ONE.
+       Those two absences are ONE decision and they are paired deliberately, said out
+       loud here because nothing on this board said so and the implementation copied
+       Settings' shape instead: `renderContents` drew the row's 1px rule AND a 2px
+       `border-top`, a 3px full-width line where this board draws none, ~11% of the
+       screen's whole mismatch and the largest contiguous band on it (#81).
+
+       WHY THIS BOARD DIFFERS FROM ITS SETTINGS SIBLING, which does give every
+       non-first header a `border-top: 2px`: a section there is a change of SUBJECT --
+       READING, SLEEP SCREEN, DEVICE are three unrelated groups of controls, and a hard
+       divider is what says so. A part of a book is not. This is one continuous reading
+       sequence and its parts are a soft hierarchy over it, so the grouping is carried
+       by the label's own 18/6 padding and its tracked caps, which is separation enough
+       on this glass. A rule here would read as the list ending and restarting.
+
+       AND THIS LIST SCROLLS, where Settings today does not. Settings' rule is
+       POSITIONAL -- the first header in the window has none, because the band's own 2px
+       border is already the separation -- so a header that ruled at all would be a
+       first-versus-later question this screen has to get right at every scroll offset,
+       for a line it does not want anywhere. No rule, no question.
+
+       The section-final row's missing `border-bottom` is the other half: with the
+       header carrying no line, a row rule there would be the whole defect at 1px
+       instead of 3. `VI` and `VIII` both drop it -- `VIII` because it is also the last
+       row drawn, which is every list's rule here. -->
   <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">BOOK I &middot; MISS BROOKE</div>
   <div style="display: flex; justify-content: space-between; align-items: center; height: 64px; padding: 0 24px; background: #000000; color: #ffffff;">
   <div style="font-size: var(--t-value); font-weight: 700;">I &middot; Miss Brooke</div>

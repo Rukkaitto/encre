@@ -135,11 +135,60 @@ into the range -- where **128 of main's commits predate this rule** and would
 fail it. For a branch the remote does not have yet that sha is all zeros, and
 the fallback is "commits on no branch of this remote".
 
+**AND THE NEGOTIATED SHA ALONE WAS NOT ENOUGH: IT SAYS "SINCE THE REMOTE'S TIP OF
+THIS BRANCH", WHICH AFTER `git merge origin/main` INCLUDES EVERY COMMIT THE MERGE
+BROUGHT IN** (#71). One non-conforming subject on `main` therefore rejected the
+push of a branch that did not write it, and poisoned every future merge until the
+base moved past it -- while `make conventions` passed on the same tree at the same
+moment, because `origin/main..HEAD` excludes exactly what the merge brought. **The
+two arms of the range also DISAGREED**: a never-pushed branch took the `--remotes`
+fallback and passed, and the same graph after one push failed. Both arms now
+exclude what this remote already has (`$local_sha --not --remotes=$remote
+$remote_sha`), and the exchange is stated where it is made, in `.githooks/pre-push`:
+the negotiated sha is **still** an exclusion so nothing local can WIDEN the range
+back into merged history, a stale ref is one that is BEHIND and so excludes FEWER
+commits than the truth -- the direction that cannot hide anything -- and **a merge
+can only bring in what a local ref points at**, so excluding the tracking refs
+excludes exactly what was merged. What is given up: a tracking ref AHEAD of the real
+remote (the remote branch rewound since the last fetch) would exclude commits being
+pushed, which were on the remote once and were checked by the push that put them
+there.
+
+**THE PR TITLE IS THE SUBJECT SQUASH-MERGE ACTUALLY WRITES, AND NOTHING CHECKED IT.**
+The gate runs on commits; GitHub's squash-merge writes the PR **title** as the merge
+commit's subject, so the title reached `main` by a path none of the three checkers
+covered -- **five** of `main`'s subjects got there that way, and the issue was filed
+when there were two. `check_conventions.py --subject` is its own mode (a title is a
+string, and `--message-file` SKIPS lines beginning with `#`, so a PR titled `#71 …`
+would have read as an empty message and passed), an empty value is an **error**
+rather than a pass, and `--allow-fixup` does not reach it -- there is no later squash
+to absorb a `fixup!` when the squash IS the merge.
+`.github/workflows/pr-title.yml` runs it. **Its own workflow, not a fifth job in
+`ci.yml`**, and both reasons are the `edited` trigger type: a title is fixed after
+the PR opens and `edited` is not in `pull_request`'s defaults, so without it a
+corrected title stays red; and `types` is settable only per workflow, where `ci.yml`'s
+`cancel-in-progress` concurrency group would let a title edit cancel a running
+firmware build.
+
+**`tools/test_check_conventions.py` IS THE CHECKER'S OWN TEST**, plain `python3`,
+**deliberately not wired into `make test`** for `tools/test_compare_design.py`'s
+reason -- the fast loop builds on a bare checkout with no Python. It drives the real
+`.githooks/pre-push` against real throwaway repositories, because the defect was in
+the range the hook computes and not in the regex, and it carries the BEFORE range as
+a mutation with an `assert` that the line it patches still exists, so a reworded hook
+fails loudly instead of quietly measuring the shipped one twice. It also keeps the
+**blind** mutant -- a range selecting nothing -- because "let the merged commits
+through" and "let everything through" both make the symptom go away and only one of
+them is a fix.
+
 **AND NONE OF IT IS BLOCKING ON GITHUB TODAY.** Branch protection answers
 `403: Upgrade to GitHub Pro or make this repository public`, so the check cannot
 be made a required status check: a violation shows a red X on the PR and the
 merge button still works. **The hooks are currently the only thing that stops
-anything**, which is why they exist rather than being belt-and-braces.
+anything**, which is why they exist rather than being belt-and-braces. **That
+applies to the PR-title job too**: it cannot block a merge, so what it buys is the
+verdict in front of the one person who can still edit the title, at the moment they
+can still edit it.
 
 **AN EMPTY COMMIT RANGE IS AN ERROR IN CI** (`--require-commits`), because a
 wrong base ref would otherwise check nothing and pass -- the
@@ -3496,6 +3545,36 @@ best-effort now and **empty means the book did not say**, the same call the spin
     where "the unchanged thirteen are the check that matters". `Xml::attrsDropped()`
     is what keeps a drop from being silent.
 
+**AND A BLOCK OVER `kMaxBlockBytes` IS CUT IN TWO, WHICH IS THE THIRD MEMBER OF THE
+SAME FAMILY (#37).** 64 KB set `error_`, which stops `BlockReader`, which ends the
+chapter — and `next()` returning false is **also** how a chapter ends normally, so
+nothing reported it. It was found by the CORPUS and not by the audit, because the audit
+was read off the refusal sites and this is a truncation site. **Split rather than
+truncate-and-record**, the ticket's other candidate: what the cap protects is the size
+of ONE block and both halves are under it, so splitting keeps the bound exactly and
+loses no text, where truncation's magnitude is unbounded — a chapter that is one giant
+`<div>` with no `<p>` is one block. `BlockReader::blocksSplit()` counts the cuts, in
+`Xml::attrsDropped()`'s shape and for its reason.
+
+- **THE TICKET SAID "2 CHAPTERS" AND THE DAMAGE WAS 84–92% OF TWO WHOLE BOOKS**, which
+  is the corpus baseline's own stated blind spot arriving: *"`truncated` counts
+  chapters, not bytes"*. Measured before and after over all 225: `The 32nd Mersenne
+  Prime` 19,411 → **251,869** text bytes and `The Number "e"` 19,494 → **121,991**, so
+  the over-long paragraph was the second block of the FIRST chapter and everything after
+  it went. Chapter rate 99.97% → **100.00%**, +334,955 bytes, and **223 of 225 books
+  byte-identical in every field**.
+- **WHAT IT COSTS, stated rather than discovered:** `indentedAfter(Paragraph,
+  Paragraph)` is true, so a continuation takes the 1.5em paragraph indent — one spurious
+  paragraph break per 64 KB of unbroken text, about once per 120 pages, against text
+  that is simply absent. **Raising the cap was refused for #35's reason twice over: the
+  failure mode was the bug and the number is fine.**
+- **THE SIBLING BOUNDS STILL HAVE THIS SHAPE and are cards rather than paragraphs.**
+  `kMaxEmphasisPerBlock` (256) is the likeliest of them to meet a real converted book
+  and the cheapest to fix — an emphasis run past the cap could be DROPPED, which costs
+  one phrase its italics, where today it costs the rest of the chapter. `kMaxBlocks`,
+  `kMaxNestDepth` and `kMaxTocEntries` end their stream the same way; 0 corpus hits
+  each, which is "no evidence yet" and not "does not happen".
+
 ### A grayscale screen is painted twice: fast, then four levels
 
 `renderTop` paints a `Fidelity::Grayscale` screen with ONE waveform and `loop()`
@@ -4741,12 +4820,50 @@ and is dropped — worth deciding deliberately for both screens rather than chan
 **CONTENTS IS SETTINGS' SHAPE**: a header band, a list interleaving section headers with
 64px rows, a rail when it overflows, a hint bar. `drawDetailRow`'s own comment was
 written anticipating it — "`focused` inverts it, which BookDetails never does and
-Contents does on the chapter you are in". The section header turned out to be **byte
-identical on both boards** (`--t-meta`, 0.2em/500, `padding: 18px 24px 6px 24px`, a 2px
-`border-top` except the first), so it is `drawSectionHeader` now rather than a second
-copy — and it returns the height it ACTUALLY drew, because a first header is shorter by
-its missing rule and a caller advancing by the nominal height puts every row 2px low.
-Settings shipped that exact bug once.
+Contents does on the chapter you are in". The section header's **BOX** is byte identical
+on both boards (`--t-meta`, 0.2em/500, `padding: 18px 24px 6px 24px`), so it is
+`drawSectionHeader` now rather than a second copy — and it returns the height it ACTUALLY
+drew, because a header without its rule is 2px shorter and a caller advancing by the
+nominal height puts every row 2px low. Settings shipped that exact bug once.
+
+**ITS RULE IS NOT SHARED, AND THIS PARAGRAPH SAID IT WAS — "a 2px `border-top` except
+the first", which is SETTINGS' rule and not this board's (#81).** `Contents.dc.html`
+gives **neither** header a `border-top` and neither section-final row a `border-bottom`;
+`Settings.dc.html` gives every non-first header one. So `renderContents` drew a row's 1px
+rule straight into a 2px header rule — a **3px** full-width line where the board draws
+none, **1,440 of 13,274 differing pixels at X4 and 1,584 of 13,514 at X3**, ~11% of the
+screen's whole mismatch and the largest contiguous band on it. The same false claim stood
+in `drawSectionHeader`'s own doc comment, which is what licensed it: **a comment about a
+neighbouring file is not evidence about it**, the shape this file already records for the
+`book.cpp` comment describing `Epub::open`.
+
+- **THE BOARD WAS RIGHT AND THE TWO ABSENCES ARE ONE DECISION.** A Settings section is a
+  change of SUBJECT and a divider says so; a part of a book is a soft hierarchy over one
+  continuous reading sequence, carried by the label's own 18/6 padding and tracked caps.
+  **And Contents SCROLLS where Settings does not**, so a header that ruled at all would
+  make Settings' positional first-versus-later question something this screen has to
+  answer correctly at every scroll offset, for a line it wants nowhere. **WHETHER a
+  screen's headers rule at all stays at the call site** — Settings passes `i != 0`,
+  Contents passes `false` — and `Contents.dc.html` now carries the reasoning, because
+  nothing on it said the absences were deliberate and that is why the render copied
+  Settings' shape.
+- **THE ROW'S HALF IS `rowRuleFor`'s THIRD TERM NOW, AND IT ARRIVED ONE COPY LATE.**
+  `renderSettings` carried it hand-written as `rowRuleFor(...) && !nextIsHeader` and this
+  file's own primitive carried the rest of it in **PROSE** ("screens with extra reasons to
+  drop a rule … AND this together"). **A rule half in a constexpr and half in a sentence
+  is a primitive not yet finished, and the sentence is the half that does not get copied
+  to the next caller.** `nextIsHeader` defaults to false, which is the answer *by
+  construction* for every headerless list rather than merely convenient; the one-line
+  lookahead that answers it stays per-screen, because the two sectioned screens hold
+  different row types. Proved by mutation: dropping the term reddens both Contents
+  goldens, both mixed-depth goldens **and both Settings goldens**, which is what says the
+  extraction moved behaviour rather than leaving a dead parameter.
+- **MEASURED, and the gain is bigger than the band** because the 3px also put everything
+  below the header out of register with the board: **13,274 → 8,814 (3.46% → 2.30%) at X4
+  and 13,514 → 8,814 (3.23% → 2.11%) at X3**, no full-width differing row left on either
+  panel. Threshold-at-128 over the bare `--export` panels — the sheet still prints `ok`
+  rather than a percentage (#41). **Confined to the band and below, checked rather than
+  claimed: above y=505 the count is 6,733 before AND after, at both geometries.**
 
 **A DEPTH-1 ENTRY IS A HEADER ONLY IN A BOOK THAT HAS DEEPER ONES.** Two of the four
 measured books are flat, and treating depth 1 as a header unconditionally would render
@@ -4903,24 +5020,49 @@ worse: a bespoke pager is a second copy of open/advance/seek — the three routi
 project has spent the most effort on, each carrying rules a copy would have to re-earn —
 and extracting a `ChapterPager` is a large refactor of the most performance-critical
 code here for a screen that wants a fraction of it. **What owning a Reader buys is the
-one property that matters: the cursor the peek commits is by construction the one the
+one property that matters: the BLOCK the peek commits is by construction the one the
 Reader restores.** Both sides are `currentCursor` over the same document, so there is no
-second spelling of a page position free to disagree with the first — which is exactly
-how a "go here" lands a page off.
+second spelling of a *block* free to disagree with the first — which is exactly how a
+"go here" lands in the wrong paragraph.
 
-**THAT IS TRUE OF THE BLOCK AND FALSE OF THE LINE, and the paragraph above said it
-without the qualification** until the device produced
-`[peek] GO HERE spine=54 block=1 line=7: ok`. A `Cursor`'s line is a line *within a
-block at one ppem and one column width* — `reading_position.h` grades exactly that as
-`Relaid` and zeroes the field — and the peek's column is ~368px against the page's 444.
-So the two sides really are one spelling of a *block* and two spellings of a *line*.
+**AND IT SAID `the cursor` THERE, WHICH WAS TRUE OF THE BLOCK AND FALSE OF THE LINE
+(#48, closed).** A `Cursor`'s line is a line *within a block at one ppem and one column
+width* — `reading_position.h` grades exactly that as `Relaid` and zeroes the field, and
+`ReaderScreen::relayout` drops it one layer up for the same reason — so the two sides
+were one spelling of a block and **two spellings of a line**. `PeekScreen::chosenCursor`
+is the third place that question is asked and was the one answering it differently; it
+returns `{block, 0}` now, which is the rule the other two already applied to the same
+quantity.
 
-It looked right in the run that found it because a 17-line reading page swallows the
-difference: the peek's page 2 started at `(1, 7)`, which at the reading measure still
-falls on page 1. The error is sub-page for small offsets and grows with the line index,
-so **committing from deep inside a long chapter is where it lands a page off** — which
-is the case the peek exists for. Issue #48; no data loss, and the landing is always in
-the right chapter and the right block.
+**IT WAS WRONG FORWARD, AND THAT IS THE ONLY DIRECTION THAT MATTERED.** The panel is
+NARROWER, so a block has MORE lines there and panel line L has consumed LESS text than
+reading line L — so handing L across landed the reader **past the passage they pressed
+GO HERE on**, with nothing on the screen to say so. Measured over a 600-word paragraph:
+a commit from panel page 8 landed on reading page **5** with the peeked text on page
+**4**, and one from panel page 18 named **line 130 of a block with 120 reading lines**,
+which took `openAtCursor`'s documented "the end of the chapter is the closest honest
+answer" exit and put the reader in the **next paragraph** — not a page off, the wrong
+paragraph, from a commit made in the middle of the first one.
+
+**THE COST IS MEASURED, NOT ASSERTED, AND IT IS ONE PAGE.** Over real prose the two
+answers are the **same** reading page in 20 of `longChapter`'s 45 panel pages and one
+page apart in the other 25, because a paragraph is four or five panel lines and the
+disagreement is block-relative. What it costs is a long paragraph, where the landing is
+its top — the passage is then *ahead* of the reader rather than behind them and one press
+reaches it, which is `reading_position.h`'s own ordering: the top of the right paragraph
+beats the front of the book, which beats nothing.
+
+**IT LOOKED FINE ON THE DEVICE FOR THE SAME REASON IT LOOKED FINE IN 1,377 GREEN TESTS.**
+The run that found it read `[peek] GO HERE spine=54 block=1 line=7: ok` — the peek's
+page 2, at `(1, 7)`, which at the reading measure still falls on page 1, because a
+17-line page swallows a seven-line offset. And **every paging fixture in this file's
+suite was `longChapter`**, whose paragraphs are four or five lines, so its
+block-relative index never leaves single figures and no case could reach the defect at
+all: the same shape as the mutation that tells you about your INPUT before it tells you
+about your test. `test_screen_peek.cpp` now carries a **one-600-word-paragraph** fixture
+with a short second block after it, and the case is self-proving — the raw line is
+asserted to land strictly *past* the page holding the peeked token, so it cannot pass
+by being too shallow.
 
 **THE READER BENEATH RELEASES ITS CHAPTER**, because two live chapters do not fit:
 69,884 bytes peak with a 36,956-byte single allocation, against a measured 45,840-byte

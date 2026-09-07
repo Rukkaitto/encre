@@ -207,6 +207,110 @@ TEST_CASE("every entry of a sectioned book is reachable unless it groups others"
     }
 }
 
+TEST_CASE("no line at all above a mid-list section header") {
+  // #81, AND IT IS THE ONE PROPERTY THE GOLDENS CANNOT STATE. They are a baseline: they
+  // pin whatever is drawn, and for two phases what they pinned WAS the defect -- a 3px
+  // full-width line above `BOOK II`, ~11% of the boarded screen's whole mismatch, blessed
+  // and green. A named rule survives a re-bless; a baseline is only ever as right as the
+  // day it was taken.
+  //
+  // `Contents.dc.html` draws NO line between two sections: neither header carries a
+  // `border-top` and neither section-final row carries a `border-bottom`. Its Settings
+  // sibling genuinely differs -- every non-first header there has `border-top: 2px` --
+  // so this cannot be checked by pointing at the shared primitive, only at this screen.
+  //
+  // MEASURED AS RUN LENGTHS, not as y coordinates, deliberately: a test that accumulated
+  // header and row heights to find where the header sits would be a second copy of the
+  // arithmetic `renderContents` does, and the mixed-depth golden already exists to check
+  // that accumulation. What is asserted here is a shape the layout cannot hide.
+  //
+  // THE STRIP IS THE LEFT MARGIN, x IN [0, kMargin), AND THAT IS THE WHOLE TRICK. The
+  // only things that ink it are a row's rule, a header's rule and a focused row's
+  // full-bleed fill: every RUN on this screen starts at `kMargin`, so no glyph can
+  // reach it. `drawDetailRow`'s own overflow test already rests on that discriminator.
+  // Measuring full-WIDTH ink instead does not work and was tried first -- the focused
+  // row's label is drawn in WHITE over its fill, so a 64px fill reads as two shorter
+  // runs with the text band between them, and the run lengths become font metrics.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+
+  // The focused row is deliberately the LAST one, two rows clear of the header: a
+  // focused row's 64px fill ABUTS whatever is above it, so focusing the row under the
+  // header would fuse the defect's 3px into one long run where a length test cannot
+  // see it. That is this project's own "a mutation tells you about your INPUT first"
+  // trap, met while writing this rather than after it had passed for a year.
+  const std::vector<TocEntry> toc = {
+      {0, 1, "Front matter"},  // childless at depth 1 -> a ROW (#75), and the row
+                               // immediately above the header, so its own rule is the
+                               // half of the defect that belongs to `rowRuleFor`.
+      {1, 1, "Part I"},        // groups what follows -> a mid-list HEADER
+      {2, 2, "Chapter 1"}, {3, 2, "Chapter 2"}};
+
+  auto check = [&](int w, int h) {
+    const int rows = theme.contentsVisibleRows(h, ramp.fonts);
+    REQUIRE(rows >= static_cast<int>(toc.size()));
+    ContentsScreen s(toc, "A book with parts", /*spine=*/3, rows);
+    REQUIRE_FALSE(s.vm().scrollable);  // no rail, so a full-width run really is full width
+
+    // THE FIXTURE IS THE RIGHT SHAPE, asserted rather than assumed -- a list whose
+    // header landed at index 0 would make every assertion below pass for the wrong
+    // reason, since a FIRST header never drew a rule even before this.
+    const auto& vm = s.vm();
+    REQUIRE(vm.rows.size() == 4);
+    REQUIRE_FALSE(vm.rows[0].isHeader);
+    REQUIRE(vm.rows[1].isHeader);
+    REQUIRE(vm.focusedRow == 3);
+
+    reader::Framebuffer fb(w, h);
+    theme.renderContents(fb, ramp.fonts, vm, reader::Plane::Bw);
+
+    const int listTop = reader::headerBandHeight(ramp.fonts);
+    reader::Hint hints[4];
+    reader::buildHints(reader::kHintSlotMarks, vm.hints, vm.holds, hints);
+    const int listBottom = h - reader::hintBarHeight(ramp.fonts, hints);
+
+    auto inkedMargin = [&](int y) {
+      for (int x = 0; x < reader::kMargin; ++x)
+        if (fb.getPixel(x, y)) return false;  // true is paper
+      return true;
+    };
+
+    std::vector<int> runs;
+    for (int y = listTop; y < listBottom;) {
+      if (!inkedMargin(y)) {
+        ++y;
+        continue;
+      }
+      int n = 0;
+      while (y + n < listBottom && inkedMargin(y + n)) ++n;
+      runs.push_back(n);
+      y += n;
+    }
+
+    // ONE RUN, and it is Chapter 1's 1px rule followed by Chapter 2's full-bleed
+    // focused fill, contiguous because a focused row's fill runs to the previous
+    // rule's bottom edge. `Front matter` draws no rule (the next row is a header) and
+    // `Part I` draws none (this screen's headers never do), so between them there is
+    // nothing at all -- which is what makes this ONE run rather than two.
+    const std::vector<int> expected{reader::kDetailRowRuleH + reader::kDetailRowContentH};
+    CHECK(runs == expected);
+    // Stated separately so a failure names WHICH defect rather than just a vector
+    // mismatch: a lone 2 is a header rule, and a 3 is one drawn under a row rule that
+    // should also have been suppressed -- the shape that shipped.
+    for (int n : runs) {
+      CHECK(n != reader::kSectionRuleH);
+      CHECK(n != reader::kDetailRowRuleH + reader::kSectionRuleH);
+    }
+    // AND THE DETECTOR DEMONSTRABLY WORKS: it found the one rule that IS drawn. Without
+    // this an empty `runs` would satisfy the loop above vacuously -- the
+    // reports-on-less-than-it-claims shape this project keeps paying for.
+    REQUIRE(runs.size() == 1);
+  };
+
+  SUBCASE("X4 480x800") { check(480, 800); }
+  SUBCASE("X3 528x792") { check(528, 792); }
+}
+
 TEST_CASE("QuietTheme renders a mixed-depth chapter list to golden") {
   // THE SHAPE #75 WAS REPORTED ON, GIVEN PIXELS. `demoContents()` is two parts over
   // eight chapters and every one of its top-level entries GROUPS something, so neither

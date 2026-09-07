@@ -15,6 +15,12 @@
 #             as `make conventions`, which is the point -- a convention you only
 #             learn about after pushing is one you learn about too late.
 #
+# NOT HERE, deliberately: the PR TITLE. Squash-merge writes it as the merge
+# commit's subject, so it needs checking too -- but it needs the `edited`
+# trigger type, which is set per WORKFLOW and would drag every job above onto
+# title edits, where the concurrency group below would then cancel them. It is
+# .github/workflows/pr-title.yml.
+#
 # Deliberately absent: -Werror (CMakeLists.txt states why -- a newer compiler
 # must not be able to break the build), a format job (there is no .clang-format,
 # so gating on style would mean choosing one as a side effect), and anything

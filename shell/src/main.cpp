@@ -49,6 +49,7 @@
 #include "reader/font_manifest.h"
 #include "reader/fontset.h"
 #include "reader/framebuffer.h"
+#include "reader/home_rebuild.h"
 #include "reader/input.h"
 #include "reader/json.h"
 #include "reader/power.h"
@@ -647,9 +648,20 @@ static struct {
 // stays, because "cheap" is not "free" and the rule it encodes is still the honest
 // one: rebuild when the thing Home draws has changed, not on a timer.
 //
-// So it is set exactly when the thing Home draws has changed: a reading position was
-// saved. Nothing else on the device moves that block.
-static bool gHomeStale = false;
+// AND IT USED TO BE A BARE `bool`, WHICH MADE IT A CALLER LIST -- the shape this
+// project's own rule calls a function not yet written. It was set in exactly one place,
+// saveReadingPosition, on the stated grounds that "nothing else on the device moves
+// that block"; a DELETE moves it too, and set nothing, so Home kept the count it was
+// born with until a position was saved, a card was re-inserted, or the device rebooted
+// (#43, reported off an X3 with a 208-book card). The count's own cache was already
+// keyed on gSd.removals() -- the invalidation was right and nothing ever asked it.
+//
+// So the book-left half is DERIVED from that same counter now and only the
+// position-moved half is latched. See reader/home_rebuild.h, which holds the split and
+// its reasoning, and which lives in core/ because shell/ has no harness and the trap
+// here -- a rebuild that does not re-stamp the counter rebuilds Home on every loop
+// iteration for the rest of the session -- is invisible on a desktop.
+static reader::HomeRebuildGate gHomeRebuild;
 
 // THE SAME FACT, FOR THE OTHER SCREEN THAT DRAWS IT. The Library gives every row a
 // percentage or NEW, and it is built ONCE -- when it is pushed. The Reader is pushed
@@ -1597,7 +1609,7 @@ static ReadingPointer readingPointer() {
 // IT IS ONE DIRECTORY LISTING PLUS ONE PER FOLDER, AND IT IS CACHED, because the
 // sentence above this one used to say "at boot and after a retry only. Not on a
 // paint, and not on a timer" and that stopped being true the moment Home learned
-// to rebuild itself: gHomeStale puts this on the critical path of a Back from a
+// to rebuild itself: gHomeRebuild puts this on the critical path of a Back from a
 // book, which is ~1.1 s of directory listing on a 203-book card -- for one
 // integer -- with the user holding a button and nothing on the panel.
 //
@@ -1858,6 +1870,13 @@ static void replaceApp(std::unique_ptr<reader::Screen> root) {
 // message is no longer true. Replacing the App is the straightforward answer.
 static void buildHomeApp() {
   replaceApp(std::make_unique<reader::HomeScreen>(homeVmForCard(), reader::demoHomeTargets()));
+  // AND THE ONE FUNCTION THAT BUILDS HOME IS WHERE THE GATE IS ANSWERED, because a
+  // caller that had to remember this is exactly what #43 was. It clears the latch and
+  // re-stamps the removal counter together: without the re-stamp, the rebuild a delete
+  // asks for asks again on every loop iteration for the rest of the session, and each
+  // one replaces the App under the user. Taken AFTER homeVmForCard(), so the count the
+  // view model holds and the counter this records are the same card state.
+  gHomeRebuild.noteBuilt(gSd.removals());
 }
 
 // Store where the user is, so a wake can put them back. Cheap to call after every
@@ -2152,12 +2171,34 @@ static reader::SaveResult saveReadingPosition(const char* why,
   };
   // Logged at every outcome including `unchanged`, because "the save did nothing"
   // and "the save did not happen" look identical on a device and are not the same.
-  // Home now has something different to say, whether or not the card took the write:
-  // the pointer in hand is newer than the one Home was built from either way.
-  gHomeStale = true;
-  // ...and so does the Library's row for this book, whether or not the card took the
-  // write: the percentage in hand is newer than the one those rows were built from.
-  gLibraryStale = true;
+  //
+  // BUT `unchanged` DOES NOT LATCH HOME, and it did until a device run caught it. This
+  // block latched unconditionally, on the argument that "the pointer in hand is newer
+  // than the one Home was built from either way" -- which is true of `written` and of
+  // `FAILED`, and FALSE of `unchanged`: that answer means the card ALREADY held this
+  // record, so whichever earlier save actually wrote it has already latched, and Home
+  // was either rebuilt from it or is still latched from then. Nothing is newer.
+  //
+  // Two things it cost, both observed on an X3 (2026-09-07, #43's own validation run):
+  //   * A FALSE LOG LINE. Leaving a book without moving in it latched Home, so the next
+  //     rebuild -- whatever really caused it -- reported `the reading position has
+  //     moved`. In that run the real cause was a DELETE, and the line named the wrong
+  //     one of the two causes the strings exist to tell apart.
+  //   * A NEEDLESS REBUILD. `stale()` is `latched_ || the counter moved`, so a Back out
+  //     of a book the reader only looked at put a /books listing (~96 ms on a 14-entry
+  //     card) plus a repaint on the way to Home, for a block whose content is identical.
+  //     That is exactly the cost this gate exists to avoid.
+  //
+  // LATCHED rather than derived, because a save REWRITES the sidecar and leaves no
+  // counter behind for the gate to notice -- see reader/home_rebuild.h.
+  const bool wrote = a != reader::SaveResult::Unchanged || b != reader::SaveResult::Unchanged;
+  if (wrote) gHomeRebuild.markStale();
+  // ...and so does the Library's row for this book, on the same terms and for the same
+  // reason: `written` and `FAILED` both mean the percentage in hand is newer than the
+  // one those rows were built from, and `unchanged` means it is not. Gated by the SAME
+  // expression rather than by a second copy of the test -- the observed cost here was a
+  // `Library rows re-read: ok in 160ms` on every Back out of an unmoved book.
+  if (wrote) gLibraryStale = true;
   logf("[progress] %s: spine=%d block=%d line=%d %d%% -- position %s, pointer %s\n", why,
        p.spine, p.block, p.line, last.percent, outcome(a), outcome(b));
   logFlush();
@@ -2435,7 +2476,12 @@ static void handleFinish() {
   // shared flag would let Library, Back, Home clear it before Home ever used it. Both
   // blocks that consume these are BELOW this call in loop(), which is what puts the
   // refreshed row on the very paint this press causes.
-  gHomeStale = true;
+  //
+  // Home's is still LATCHED here even though forgetLastRead() above went through
+  // FileSystem::remove and so moved the counter the gate also watches: what changed is
+  // the reading position, the removal was incidental, and a fact that has a signal of
+  // its own should use it rather than rely on a second one that happens to fire too.
+  gHomeRebuild.markStale();
   gLibraryStale = true;
 
   // AND NOW LEAVE. Neither producer pops itself: BookEnd's slab and the overlay's row
@@ -2489,15 +2535,21 @@ static void handleDelete() {
   logf("[delete] %s -> %s\n", facts.path.c_str(), gone ? "gone" : "still there");
   logFlush();
 
-  // BOTH FLAGS, SEPARATELY. Each is consumed when ITS screen is reachable, and one
-  // shared flag lets Library, Back, Home clear it before Home has used it. Home's
-  // CONTINUE may name the file just removed, and its LIBRARY count is keyed on
-  // removals() -- which gSd.remove has just advanced.
+  // HOME NEEDS NO FLAG HERE, AND THAT IS THE POINT OF #43. Its LIBRARY count and its
+  // CONTINUE block are both keyed on gSd.removals(), which gSd.remove has just
+  // advanced above every one of its own refusals -- so HomeRebuildGate sees the
+  // removal whether or not this handler remembers to say anything, and so will the
+  // next door to a removal that somebody adds. A markStale() here would be a second
+  // spelling of one fact, and the first spelling is the one that cannot be forgotten.
+  //
+  // THE LIBRARY IS STILL TOLD, and it is not the same fact: its rows come from a
+  // listing taken when it was pushed, its consumer below re-derives PERCENTAGES only,
+  // and a row has gone -- so it is rescanned outright, on the press that removed the
+  // book. The flag is what covers the reachable stacks this handler does not land on.
   //
   // Both consumers are BELOW this call in loop(), which is handleFinish's placement
   // and its reason: this handler LEAVES a screen, so the screen it lands on has to be
   // repainted on the very press that caused the removal rather than one press later.
-  gHomeStale = true;
   gLibraryStale = true;
   // RESCANNED, not refreshed: a row has gone, and refreshProgress only re-derives the
   // percentages of rows that are already there. The listing cache was dropped by
@@ -4735,8 +4787,11 @@ void setup() {
         mark("waking-painted");
       }
     }
-    // The root is Home, built from the shared catalogue. Nothing rebuilds it, so
-    // popping back to Home returns this object with its focus intact.
+    // The root is Home, built from the shared catalogue. Popping back to Home returns
+    // this object with its focus intact -- and it is REBUILT when what it draws has
+    // changed, which the line above this one used to deny outright ("nothing rebuilds
+    // it"). That sentence was true when it was written and is how #43's count went
+    // stale; see gHomeRebuild, whose stamp this build takes.
     buildHomeApp();
     mark("root-home");
   } else {
@@ -6421,8 +6476,15 @@ void loop() {
       }
     }
 
-    // BACK AT HOME WITH A NEWER POINTER: rebuild it, so the reading column shows the
-    // book that was just being read instead of the state Home was born in.
+    // BACK AT HOME WITH A NEWER POINTER OR A BOOK FEWER: rebuild it, so the reading
+    // column shows the book that was just being read instead of the state Home was born
+    // in, and the LIBRARY row counts what is on the card rather than what was.
+    //
+    // THE SECOND HALF OF THAT SENTENCE IS #43. A delete set no flag, so Home kept the
+    // pre-delete count until something else happened to set one. The gate derives that
+    // half from gSd.removals() instead, so this asks the card rather than asking whether
+    // a caller remembered -- and buildHomeApp() re-stamps the counter, which is what
+    // stops one delete asking for a rebuild on every iteration from here on.
     //
     // The whole App is replaced rather than the view model swapped, because the two
     // Home states have different FOCUS RINGS -- WithNone where a CONTINUE block
@@ -6434,12 +6496,19 @@ void loop() {
     // whatever row the fresh view model names, so pressing Back from the Library
     // would move a selection they did not touch. setFocus clamps, which is what makes
     // this safe across a ring that changed shape.
-    if (gHomeStale && gApp->depth() == 1 && gApp->top().id() == reader::ScreenId::Home) {
+    if (gHomeRebuild.stale(gSd.removals()) && gApp->depth() == 1 &&
+        gApp->top().id() == reader::ScreenId::Home) {
+      // WHICH OF THE TWO IT WAS, read BEFORE buildHomeApp() clears the latch. "Home was
+      // rebuilt" has two causes and they are worth telling apart on a device: a
+      // position that moved, or a book that left. A rebuild reported with no cause is
+      // how a gate that has started firing every iteration would look like one working.
+      const bool position = gHomeRebuild.latched();
       const int was = gApp->top().focus();
-      buildHomeApp();
+      buildHomeApp();  // ...which is also what answers the gate; see buildHomeApp()
       gApp->top().setFocus(was);
-      gHomeStale = false;
-      logf("[progress] Home rebuilt with the current reading position\n");
+      logf("[progress] Home rebuilt: %s\n", position
+                                                ? "the reading position has moved"
+                                                : "a book has left the card");
       logFlush();
     }
 

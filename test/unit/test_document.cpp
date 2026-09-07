@@ -491,3 +491,176 @@ TEST_CASE("too much emphasis in one block is refused, not truncated") {
   CHECK_FALSE(reader::buildDocument(x, d, &why));
   CHECK(std::strstr(why, "emphasis") != nullptr);
 }
+
+// --- A BLOCK OVER kMaxBlockBytes (issue #37) ---------------------------------
+//
+// The cap used to set `error_`, which stops BlockReader, which ends the chapter --
+// and `next()` returning false is also how a chapter ends normally, so NOTHING
+// reported it. It is the named-entity bug's exact shape, and it cost two Gutenberg
+// mathematics texts in the 225-book corpus everything after one paragraph of a
+// hundred thousand digits.
+//
+// A run of digits is what those books really contain, and it is also the case with
+// no break opportunity anywhere in it -- so a split cannot be made to land on a
+// space, which is why it lands on the cap.
+namespace {
+
+std::string digits(size_t n) {
+  std::string s;
+  s.reserve(n);
+  for (size_t i = 0; i < n; ++i) s += static_cast<char>('0' + (i % 10));
+  return s;
+}
+
+// A chapter's blocks in order, their kinds, and how many splits it took -- what a
+// split must leave untouched apart from where one block becomes two.
+struct Walked {
+  std::vector<std::string> texts;
+  std::vector<reader::BlockKind> kinds;
+  bool ok = false;
+  size_t split = 0;
+};
+
+Walked walkBlocks(const std::string& doc, size_t grain = 4096) {
+  Walked w;
+  Grained src(doc, grain);
+  reader::BlockReader r(src);
+  reader::Block b;
+  while (r.next(b)) {
+    w.texts.push_back(b.text);
+    w.kinds.push_back(b.kind);
+  }
+  w.ok = r.ok();
+  w.split = r.blocksSplit();
+  return w;
+}
+
+}  // namespace
+
+TEST_CASE("A BLOCK OVER THE CAP DOES NOT END THE CHAPTER") {
+  // THE TEST THAT WOULD HAVE CAUGHT THE TWO CORPUS BOOKS. Everything after the
+  // over-long paragraph was discarded and the chapter read as though it had ended
+  // there, which no caller can tell from a chapter that really has.
+  const std::string doc = "<html><body><p>One</p><p>" +
+                          digits(reader::kMaxBlockBytes + 5000) +
+                          "</p><p>Last</p></body></html>";
+  reader::ChapterReader cr;
+  REQUIRE(cr.beginBuffer(doc));
+  std::vector<std::string> texts;
+  reader::Block b;
+  while (cr.next(b)) texts.push_back(b.text);
+  CHECK(cr.ok());
+  REQUIRE(texts.size() >= 3);
+  CHECK(texts.front() == "One");
+  CHECK(texts.back() == "Last");
+}
+
+TEST_CASE("THE OVER-LONG BLOCK IS SPLIT, so no byte of the book is lost") {
+  // Split rather than truncated, because what the cap protects is the size of ONE
+  // block and both halves are under it -- so the heap peak is unchanged and the text
+  // is all still there. Truncating would have kept the reporting and thrown the
+  // bytes away, and its magnitude is unbounded: a chapter that is one giant <div>
+  // with no <p> is ONE block, and a real book's longest chapter is 228,849 bytes of
+  // blocks.
+  const std::string run = digits(reader::kMaxBlockBytes + 5000);
+  const Walked w =
+      walkBlocks("<html><body><p>One</p><p>" + run + "</p><p>Last</p></body></html>");
+  CHECK(w.ok);
+  REQUIRE(w.texts.size() >= 4);  // One, two or more pieces of the run, Last
+
+  std::string joined;
+  for (size_t i = 1; i + 1 < w.texts.size(); ++i) joined += w.texts[i];
+  CHECK(joined == run);
+
+  // EVERY PIECE IS STILL UNDER THE CAP, which is the whole reason the cap exists and
+  // the whole reason a split preserves what a refusal was protecting. This fixture has
+  // no spaces and no dialogue dash, so the two bytes document.h allows an emitted block
+  // above the cap are not in play and the bound is exact here.
+  for (const std::string& t : w.texts) CHECK(t.size() <= reader::kMaxBlockBytes);
+
+  // ...and none of them turned into some other kind of block on the way.
+  for (const reader::BlockKind k : w.kinds) CHECK(k == reader::BlockKind::Paragraph);
+}
+
+TEST_CASE("A SPLIT IS COUNTED, so it is not silent") {
+  // Xml::attrsDropped()'s shape and its reason: a caller that finds more blocks than
+  // the book has paragraphs can tell "the book wrote them" from "we could not hold
+  // what it wrote". Zero for every corpus book but the two.
+  const Walked over =
+      walkBlocks("<body><p>" + digits(reader::kMaxBlockBytes + 5000) + "</p></body>");
+  CHECK(over.split == 1);
+  CHECK(over.texts.size() == 2);
+
+  const Walked twice = walkBlocks(
+      "<body><p>" + digits(2 * reader::kMaxBlockBytes + 5000) + "</p></body>");
+  CHECK(twice.split == 2);
+  CHECK(twice.texts.size() == 3);
+
+  // A RUN THAT IS AN EXACT MULTIPLE OF THE CAP makes no extra cut, and this is the
+  // assertion that pins WHERE the cut is made: it is made when a byte arrives with the
+  // block already full, never when the block merely becomes full, so the continuation
+  // always receives that byte and an exhausted element leaves nothing behind.
+  const Walked exact =
+      walkBlocks("<body><p>" + digits(2 * reader::kMaxBlockBytes) + "</p></body>");
+  CHECK(exact.split == 1);
+  // REQUIRE, NOT CHECK, BECAUSE THE NEXT TWO LINES INDEX. Found by mutating the cut
+  // back into a refusal: the vector came back EMPTY, the indexing segfaulted, and
+  // doctest reported one crashed case and SKIPPED the two after it -- so a regression
+  // would have reported on less than it claims. REQUIRE does end the case here.
+  REQUIRE(exact.texts.size() == 2);
+  CHECK(exact.texts[0].size() == reader::kMaxBlockBytes);
+  CHECK(exact.texts[1].size() == reader::kMaxBlockBytes);
+
+  const Walked under = walkBlocks("<body><p>One</p><p>Two</p></body>");
+  CHECK(under.split == 0);
+  CHECK(under.texts.size() == 2);
+}
+
+TEST_CASE("a split block keeps the kind the stack gave it") {
+  // The seam re-derives the kind from the tag stack rather than remembering it, so a
+  // split blockquote is two blockquotes and not a quote followed by prose -- which is
+  // how a quote's styling silently disappears from a book.
+  for (const char* tag : {"blockquote", "li", "h1"}) {
+    const std::string t = tag;
+    const Walked w = walkBlocks("<body><" + t + ">" +
+                                digits(reader::kMaxBlockBytes + 3000) + "</" + t +
+                                "></body>");
+    CHECK(w.ok);
+    REQUIRE(w.kinds.size() == 2);
+    CHECK(w.kinds[0] == w.kinds[1]);
+    CHECK(w.kinds[0] != reader::BlockKind::Paragraph);
+  }
+}
+
+TEST_CASE("emphasis open across a split closes at the seam and reopens") {
+  // The rule `<em><p>a</p><p>b</p></em>` already states, reached from the other
+  // direction: a span's offsets index the string they were measured against, so one
+  // carried across the seam would index a block it does not belong to.
+  //
+  // THE `abc` IS WHAT MAKES THIS TEST BITE, and its absence is how the fixture was
+  // caught being too weak: with the run starting at byte 0 the reopened span's offset
+  // is 0 either way, so a seam that failed to reset `emStart` was RIGHT BY ACCIDENT.
+  // Three bytes of roman in front of it put the first span at a non-zero offset, so
+  // the second one being 0 is a fact about the reset rather than about the fixture.
+  const std::string run = digits(reader::kMaxBlockBytes + 3000);
+  const std::string doc = "<body><p>abc<em>" + run + "</em></p></body>";
+  Grained src(doc, 4096);
+  reader::BlockReader r(src);
+  reader::Block b;
+  std::vector<reader::Block> got;
+  while (r.next(b)) got.push_back(b);
+  CHECK(r.ok());
+  REQUIRE(got.size() == 2);
+
+  REQUIRE(got[0].emphasis.size() == 1);
+  CHECK(got[0].text.compare(0, 3, "abc") == 0);
+  CHECK(got[0].emphasis[0].off == 3);
+  CHECK(got[0].emphasis[0].len == got[0].text.size() - 3);
+
+  REQUIRE(got[1].emphasis.size() == 1);
+  CHECK(got[1].emphasis[0].off == 0);
+  CHECK(got[1].emphasis[0].len == got[1].text.size());
+
+  // ...and the emphasised bytes are the run, whole, across the seam.
+  CHECK(got[0].text.substr(3) + got[1].text == run);
+}

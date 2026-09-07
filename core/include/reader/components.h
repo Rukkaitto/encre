@@ -312,13 +312,36 @@ void drawCentredText(Framebuffer& fb, const Font& font, int boxX, int boxW, int 
 
 // THE BOARDS' RULE FOR A LIST ROW'S BOTTOM RULE, positional rather than by
 // identity: every row carries a `border-bottom` EXCEPT the focused one, whose
-// fill runs to the next row's top edge, and the last one drawn, which leaves the
+// fill runs to the next row's top edge, the last one drawn, which leaves the
 // list's bottom edge open rather than hanging a hairline over the slack above
-// the hint bar. Stated once because it was restated at three call sites, and one
+// the hint bar, and the LAST ROW OF A SECTION, because whatever the next
+// section's header draws is the line between them and a row rule under it is a
+// second one. Stated once because it was restated at three call sites, and one
 // restatement once also advanced `y` -- the compounding kind of defect, every
-// row below it a pixel low. Screens with extra reasons to drop a rule (Settings'
-// section boundaries) AND this together.
-constexpr bool rowRuleFor(int i, int rows, bool focused) { return !focused && i != rows - 1; }
+// row below it a pixel low.
+//
+// `nextIsHeader` IS THE THIRD TERM AND IT ARRIVED ONE COPY LATE, which is this
+// file's own second-copy rule again: `renderSettings` carried it hand-written as
+// `rowRuleFor(...) && !nextIsHeader`, this comment carried the rest of it in
+// PROSE ("screens with extra reasons to drop a rule (Settings' section
+// boundaries) AND this together"), and `renderContents` -- the second sectioned
+// list -- had neither. A rule half in a constexpr and half in a sentence is a
+// primitive not yet finished, and the sentence is the half that does not get
+// copied to the next caller. It drew a row's 1px rule straight into a header's
+// 2px `border-top`: a 3px line where `Contents.dc.html` draws none, #81.
+//
+// It DEFAULTS to false, which is exactly right for every headerless list
+// (Library, both overlay panels, the reader menu, Book details) rather than
+// merely convenient: those view models cannot produce a header, so the answer is
+// false by construction and none of them moves a pixel.
+//
+// It is deliberately NOT "does the next row exist and is it a header" over a row
+// vector: the two sectioned screens hold DIFFERENT row types (`ListRow` and
+// `SettingsRow`), so the shared half is the RULE and the per-screen half is the
+// one-line lookahead that answers it.
+constexpr bool rowRuleFor(int i, int rows, bool focused, bool nextIsHeader = false) {
+  return !focused && i != rows - 1 && !nextIsHeader;
+}
 
 // --- A prompt button -------------------------------------------------------
 //
@@ -688,19 +711,28 @@ int detailRowHeight(bool rule);
 
 // --- A list's section header -------------------------------------------------
 //
-// `--t-meta` tracked caps at 0.2em/500 in an 18/6 padding box under a 2px rule, and
-// it is BYTE-IDENTICAL on two boards: Settings.dc.html's `DEVICE` and
-// Contents.dc.html's `BOOK I - MISS BROOKE` declare the same
-// `padding: 18px 24px 6px 24px` and the same `border-top: 2px`. One box on two boards
-// is a primitive, not a copy -- so this is shared rather than written twice, which is
-// this project's own rule about the second copy.
+// `--t-meta` tracked caps at 0.2em/500 in an 18/6 padding box, optionally under a 2px
+// rule. THE BOX is byte-identical on two boards -- Settings.dc.html's `DEVICE` and
+// Contents.dc.html's `BOOK I - MISS BROOKE` both declare
+// `padding: 18px 24px 6px 24px` -- which is what makes it a primitive rather than a
+// copy, this project's own rule about the second copy.
 //
-// THE RULE IS POSITIONAL: the FIRST header in a window has none, because the header
-// band's own 2px border is already the separation and a second doubles it into a 4px
-// slab. `drawSectionHeader` returns the height it ACTUALLY drew for that reason -- a
-// first header is shorter by its missing rule, and a caller that advanced by the
-// nominal height would put every row below it 2px low. Settings shipped exactly that
-// bug once, in its section-final rule.
+// THE RULE IS NOT SHARED, and this comment claimed it was: it said the two boards
+// declare "the same `border-top: 2px`", and Contents.dc.html declares NONE, on either
+// of its headers. A comment about a neighbouring file is not evidence about it -- the
+// same shape as the `book.cpp` comment that described `Epub::open` letting a broken
+// chapter through -- and this one licensed `renderContents` to draw a rule the board
+// does not, straight into the row rule above it: a 3px line where the board draws none
+// (#81). WHETHER a screen's headers rule at all is that screen's design and stays at
+// the call site: Settings passes `i != 0`, Contents passes `false`.
+//
+// WHERE IT IS DRAWN, THE RULE IS POSITIONAL: the FIRST header in a window has none,
+// because the header band's own 2px border is already the separation and a second
+// doubles it into a 4px slab. `drawSectionHeader` returns the height it ACTUALLY drew
+// for that reason -- a first header is shorter by its missing rule, and a caller that
+// advanced by the nominal height would put every row below it 2px low. Settings shipped
+// exactly that bug once, in its section-final rule. That return is also what makes
+// Contents' `false` cost nothing below it.
 inline constexpr int kSectionRuleH = 2;
 inline constexpr int kSectionPadTop = 18;
 inline constexpr int kSectionPadBottom = 6;
