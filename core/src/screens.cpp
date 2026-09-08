@@ -124,7 +124,11 @@ SleepViewModel demoSleepVm() {
   vm.title = "Middlemarch";
   vm.author = "George Eliot";
   vm.progressPercent = 6;
-  vm.progress = std::string("6%") + kDot + "CH. 01";
+  // The board's `I - Miss Brooke`, and it is design/Main.dc.html's specimen too:
+  // one book, one chapter, named the same on both boards. The percentage is NOT
+  // set here any more -- the theme composes it from progressPercent, so the figure
+  // under the bar cannot disagree with the length of the bar.
+  vm.chapter = std::string("I") + kDot + "Miss Brooke";
   vm.note = std::string("ASLEEP") + kDot + "HOLD POWER TO WAKE";
   return vm;
 }

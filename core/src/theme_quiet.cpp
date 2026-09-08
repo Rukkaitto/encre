@@ -1197,6 +1197,29 @@ constexpr int kSleepLabelEm = 260;   // NOW READING, 0.26em
 constexpr int kSleepAuthorEm = 220;  // 0.22em
 constexpr int kSleepProgressEm = 140;
 
+// The chapter NAME's tracking, and it is deliberately not kSleepProgressEm's
+// 0.14em -- design/Main.dc.html reached this conclusion for the identical string
+// one screen over: 0.14em is a COUNTER's tracking, and a name is not a counter.
+// It is also the narrower of the two on the one run whose width is the whole
+// problem: 34.54% of the corpus's 8,617 chapter labels overflow this column at
+// 0.10em against 37.60% at 0.14em.
+constexpr int kSleepChapterEm = 100;
+
+// HOW MANY LINES THE CHAPTER MAY TAKE -- design/Sleep.dc.html's
+// `-webkit-line-clamp: 2`, and the board carries the measurement and the decision.
+// In short: of this column's 8,617 corpus labels, 2,976 (34.54%) overflow one line,
+// and of THOSE 2,976, 2,274 (76.41%) fit two lines whole while 702 (23.59%) need
+// three or more. So two lines elide 702 of 8,617 labels (8.15%) where one line
+// elides 2,976 -- a 4.2x reduction in cut names, which is what earns the second
+// line, and the same shape of knee kSleepAuthorMaxLines was earned by (85% there).
+//
+// THIS RUN ELIDED ON ONE LINE AND THE DISTRIBUTION PERMITS THAT. It wraps because
+// this screen holds the glass for HOURS, so a cut name is one the reader lives with
+// rather than one they press past -- the argument that made the title wrap and then
+// the author, reaching the last run on the card. A third line was permitted and is
+// not taken: a smaller marginal gain out of another of the title's lines.
+constexpr int kSleepChapterMaxLines = 2;
+
 // The board's `line-height: 1.1` on `--t-title`, resolved -- and it is the number
 // the FACE would not have given: Title700's own lineHeight() is 53px at ppem 42,
 // which is what this screen drew its single line in before it could wrap, 7px
@@ -1371,6 +1394,41 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
                          kSleepGap + kSleepBarTopGap + kSleepBarH + kSleepGap +
                          progress.lineHeight();
 
+  // THE CHAPTER'S BAND, AND IT IS RESERVED WHETHER OR NOT THE NAME FILLS IT --
+  // which is the whole of how this run may wrap at all.
+  //
+  // A CHAPTER CHANGES WHILE THE BOOK IS BEING READ AND AN AUTHOR DOES NOT. The
+  // card's height is the sum below and the title takes what is left, so a chapter
+  // free to GROW would make the TITLE's line budget depend on where the reader is
+  // standing: cross a chapter boundary and the book's name could reflow, or newly
+  // acquire an ellipsis, because a page was turned. That is a visible defect with
+  // a baffling cause, and it is the reason this run shipped fixed at one line.
+  //
+  // RESERVING kSleepChapterMaxLines UNCONDITIONALLY IS WHAT KEEPS THAT ANSWERED
+  // while letting the name wrap. The band is two lines tall for a one-line name
+  // and a three-line one alike, so the title's budget is a CONSTANT and the card's
+  // layout is a function of the BOOK, exactly as it was at one line. Note what
+  // this expression does NOT do, because it is the point: unlike authorH below it
+  // never reads the wrap's own height. The Prose is built at DRAW time and cannot
+  // reach this sum, so there is no path by which the name's length moves the card.
+  //
+  // DO NOT MAKE IT CONDITIONAL ON THE WRAP'S ACTUAL LINE COUNT. Giving a one-line
+  // name a one-line band is the obvious tightening and it reintroduces the whole
+  // defect above -- while looking like a saving, because one line is the common
+  // case (65.46% of corpus labels) and the goldens' specimen is one. The card is
+  // CENTRED, so what the always-reserved second line costs is a slightly different
+  // centring of an opaque card on a dithered field and nothing a reader can point
+  // at. design/Sleep.dc.html says the same thing at its `min-height`, and
+  // test_theme_sleep_golden.cpp fails if this becomes conditional.
+  //
+  // ONE EXPRESSION, SPENT TWICE, because it is added to the title's budget AND to
+  // the card's height and renderBookError shipped exactly that pair as two copies
+  // that could disagree. Zero when there is no chapter: this is the card's LAST
+  // run, so nothing sits below it to step up, and an old pointer with no chapter
+  // gets a shorter card rather than two blank lines at its foot.
+  const int chapterH =
+      vm.chapter.empty() ? 0 : kSleepGap + kSleepChapterMaxLines * progress.lineHeight();
+
   // THE AUTHOR IS WRAPPED FIRST, AND THE ORDER IS THE WHOLE OF HOW THE BUDGET IS
   // SPLIT. Two runs on this card can grow, so one of them has to be measured
   // against a fixed rule and the other against what is left; the author takes the
@@ -1402,7 +1460,7 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   clampProse(author, authorProse, kSleepAuthorMaxLines, contentW, authorTail);
   const int authorH = f26ToPx(authorProse.heightF26());
 
-  int maxTitleLines = (cardRoom - cardFixedH - authorH) / kSleepTitleLineH;
+  int maxTitleLines = (cardRoom - cardFixedH - authorH - chapterH) / kSleepTitleLineH;
   if (maxTitleLines < 1) maxTitleLines = 1;
 
   // THE SHOUTED STRING AND THE ELIDED TAIL ARE BOTH NAMED, and they have to be:
@@ -1429,7 +1487,7 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   // of the Prose rather than multiplied out here, so the height the card reserves
   // and the height drawProse consumes are ONE expression. `cardFixedH` is the same
   // sum the line budget above was measured against, for the same reason.
-  const int cardH = cardFixedH + authorH + f26ToPx(titleProse.heightF26());
+  const int cardH = cardFixedH + authorH + chapterH + f26ToPx(titleProse.heightF26());
 
   const int cardX = centreIn(0, fb.width(), cardW);
   const int cardY = centreIn(0, fb.height(), cardH);
@@ -1474,8 +1532,63 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   drawProgressBar(fb, barX, y, kSleepBarW, kSleepBarH, vm.progressPercent);
   y += kSleepBarH + kSleepGap;
 
+  // THE PERCENTAGE, COMPOSED HERE FROM THE NUMBER THE BAR ABOVE IT READS. It was
+  // a string on the view model -- `6% - CH. 01`, built by the shell -- and that
+  // made the figure under the bar and the length of the bar two spellings of one
+  // fact, free to disagree. renderHome composes its own the same way from the same
+  // field. Not arithmetic the theme should not be doing: it is one integer and a
+  // per-cent sign, where the SPINE POSITION this run used to carry was.
   drawCentredText(fb, progress, cx, contentW, baselineIn(progress, y, progress.lineHeight()),
-                  vm.progress, Ink::Black, trackingEm(progress, kSleepProgressEm), plane);
+                  std::to_string(vm.progressPercent) + "%", Ink::Black,
+                  trackingEm(progress, kSleepProgressEm), plane);
+
+  // THE CHAPTER, ON ITS OWN TWO LINES -- design/Sleep.dc.html carries the
+  // measurement and the decision, and both matter here.
+  //
+  // IT MAY NOT GO THROUGH drawCentredText, which is what the run above it does and
+  // what this run did while it was a spine position. That function places a run at
+  // `centreIn(0, contentW, w)`, and centreIn returns a NEGATIVE half for a run
+  // WIDER than its box: the name would begin left of the card's padding, paint over
+  // both 2px borders onto the dither field, and be clipped by the panel edge with
+  // no ellipsis to say so. That is not a hypothetical -- it is precisely the defect
+  // the AUTHOR line above was fixed for, and every golden passed through it because
+  // every golden's author was short. A chapter name off a real card is 34.54% likely
+  // to be wider than this column, so it would have been the common case.
+  //
+  // THE WRAP IS WHAT KEEPS IT IN THE COLUMN NOW, and clampProse is the last resort
+  // rather than the mechanism: `WordBreak::Anywhere` means every line the wrap
+  // emits is at most contentW wide, so centreIn's half cannot go negative for any
+  // of them -- and that holds for a name with no space in it, which is what
+  // `Anywhere` is for. clampProse then elides the SECOND line for the 8.15% of
+  // labels that need a third. `test_theme_sleep_golden.cpp` watches the card's
+  // PADDING for an escape, and on this screen that is the only place ink is
+  // evidence at all -- the dither field inks every row of the panel and the card's
+  // own side borders ink every row of the card, so neither a full-row scan nor an
+  // in-card extent can separate this run's ink from furniture that belongs there.
+  //
+  // IT IS DRAWN AT THE TOP OF THE BAND chapterH RESERVED, not centred in it, which
+  // is what the board's `min-height` on a block does: a one-line name leaves its
+  // slack at the FOOT of the card, above the bottom padding. So a short name and a
+  // two-line name share a first baseline, and the card does not move under a
+  // chapter crossing.
+  //
+  // The lead is the FACE's own line height, which is the 29px the board states on
+  // this run -- one number, reached from both sides. `vm.chapter` needs no local
+  // of its own because it is NOT shouted (three other screens name this string as
+  // the publisher wrote it), so unlike the title and the author there is no
+  // temporary here to dangle; `chapterTail` still must be named, because
+  // clampProse's elided last line is a NEW string that is not in the source text.
+  if (!vm.chapter.empty()) {
+    y += progress.lineHeight() + kSleepGap;
+    const Tracking chapterTrack = trackingEm(progress, kSleepChapterEm);
+    std::string chapterTail;
+    Prose chapterProse =
+        wrapProseLead(progress, vm.chapter, contentW, pxToF26(progress.lineHeight()),
+                      chapterTrack, WordBreak::Anywhere);
+    clampProse(progress, chapterProse, kSleepChapterMaxLines, contentW, chapterTail);
+    drawProse(fb, progress, chapterProse, cx, contentW, pxToF26(y), Ink::Black, plane,
+              ProseAlign::Centre);
+  }
 }
 
 // --- Settings ----------------------------------------------------------------
