@@ -145,9 +145,10 @@ investigating into a cold boot that looks exactly like a bug.
       that has been wrong.** Set Settings › SLEEP SCREEN › `Shows` to **DETAILS**,
       sleep on a book, wake. Then set it to **COVER + DETAILS**, sleep on the same
       book twice (so the cover is cached — see 8.2), and wake again. **A pass is the
-      same thing both times**: one clean black flash, resolving directly to the
-      reading card with `WAKING` on it. Nothing between the flash and the settled
-      frame.
+      same REFRESH both times**: one clean black flash resolving directly to the
+      settled frame, with nothing in between. What that frame holds differs by mode
+      and both are correct — DETAILS gives the reading card with `WAKING` on it,
+      COVER gives the cover repainted in one bit with the waking badge over it.
       **A fail is a band pattern that settles**, and the tell is that the two
       settings differ — DETAILS banding while the cover flashes cleanly was #94, and
       it is the controller's DTM1 baseline going unseeded, not a panel fault (7.4 is
