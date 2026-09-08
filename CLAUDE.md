@@ -465,6 +465,52 @@ boards say, and names what drifted.
   banding on every wake. Conflating the two is easy and it looks like a panel
   fault rather than a state bug. It has disguised a crash loop and a bootloader hang as
   "nothing happened". Read the serial log before believing the panel.
+  - **AND IT CAME BACK, ON THE ONE SLEEP MODE THAT DOES NOT PAINT A COVER (#94).**
+    Reported off an X3 after a week of use: with Settings' `Shows` on **DETAILS** a
+    wake showed noisy banding where a cover showed a clean black flash. The
+    waking-paint block in `setup()` had re-introduced the call this bullet warns
+    about, as `if (!coverOnGlass) display.skipInitialResync();`, and **its argument
+    for the no-cover case was backwards**: it reasoned that the frame is the sleep
+    screen with one line changed, so "almost every pixel the garbage baseline calls
+    unchanged really is unchanged". **Which pixels a refresh calls unchanged is
+    decided by DTM1, not by the glass** — with DTM1 holding power-up garbage, the
+    set of pixels re-driven is unrelated to the set that differs, whatever the
+    frame is. `Uc8279Driver.cpp` says so where it picks the bank: **both** banks
+    diff against "the REAL previous frame in DTM1", and `BW_GC` "clears via the
+    true old->new transition, not a white baseline".
+  - **THE ASYMMETRY WAS NOT THE GRAYSCALE REBASE, WHICH IS THE FIRST THING TO
+    SUSPECT AND IS WRONG.** `cleanupGrayscaleBuffers` really does leave the
+    controller on a valid B/W baseline after a cover sleep, so a cover sleep and a
+    DETAILS sleep end in different controller states — and **neither survives**, because
+    a wake is a chip reset and `initController()` resets every one of those flags.
+    **No controller state crosses a sleep in either mode.** The whole asymmetry was
+    which branch of the wake paint ran.
+  - **AND THE CALL BOUGHT NOTHING, which is what made removing it a pure win rather
+    than a trade.** What it was for was a DU, and the DU was never reachable:
+    `displayStart`'s `useGc` is `(mode != Fast) || !_oldPlaneValid ||
+    _forceFullSyncNext || _initialFullsRemaining > 0`, an **OR** — and
+    `display.requestResync()` sets `_forceFullSyncNext` ~540 lines earlier in the
+    same `setup()`, with **no panel refresh in between** to clear it. So the GC bank
+    loaded either way and the assertion's only effect was to make `if
+    (!_oldPlaneValid)` false and **skip the DTM1 white seed**. It spent the one thing
+    that makes the clear clean and got no cheaper refresh for it. The
+    `_darkBackground` rewrite that would otherwise cover for a missing seed cannot
+    help: **`setBackgroundHint()` has no call site anywhere in this firmware**, so
+    that flag is false for its whole life.
+  - **NEITHER MODE ASSERTS A BASELINE BEFORE THAT PAINT NOW, AND BOTH ASSERT ONE
+    AFTER IT.** `skipInitialResync()` is right for a caller that has restored the
+    baseline first, and after `showOnePass` we have — we wrote the frame ourselves,
+    and `displayFinish` has already synced DTM1 to it. It goes there in both modes,
+    and `requestResync()` goes nowhere: zeroing the rest of the boot clear budget is
+    what keeps a wake to **one** flash, where forcing Home's GC as well would buy a
+    second. **A card with `fullOnTransition` on still gets two**, from Home's own
+    transition, and that is the pre-existing price rather than a new one.
+  - **NOTHING ON THE DESKTOP TOUCHES ANY OF IT.** All of it is driver state driven
+    from `shell/src/main.cpp`, which has no harness; `core/` has no notion of
+    `_oldPlaneValid`, and the wake paint does not even consult `fidelity()`. So the
+    suite says nothing, and **the mode asymmetry is the diagnostic** — see
+    `docs/on-device-smoke-checklist.md` §4.5, which walks both `Shows` settings
+    precisely because one of them passing is not evidence about the other.
 - **The SD card shares the display's SPI bus** (X3: MISO 7, CS 12) and
   `SDCardManager` does **no locking** — there is no mutex or semaphore anywhere in
   it. Its only shared-bus handling is in `begin()`, which drives the display CS

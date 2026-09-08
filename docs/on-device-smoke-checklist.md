@@ -141,7 +141,27 @@ investigating into a cold boot that looks exactly like a bug.
       wakes back to where it was, focus included.
 - [ ] **4.4** Sleep with a peek open. Waking to the **page underneath** is
       correct and deliberate — a peek is a transient "am I sure?".
-- [ ] **4.5** Now plug in and read the log: `[boot] reset reason=... slept-flag=...`
+- [ ] **4.5** **The wake's first frame, at both `Shows` settings — this is the one
+      that has been wrong.** Set Settings › SLEEP SCREEN › `Shows` to **DETAILS**,
+      sleep on a book, wake. Then set it to **COVER + DETAILS**, sleep on the same
+      book twice (so the cover is cached — see 8.2), and wake again. **A pass is the
+      same REFRESH both times**: one clean black flash resolving directly to the
+      settled frame, with nothing in between. What that frame holds differs by mode
+      and both are correct — DETAILS gives the reading card with `WAKING` on it,
+      COVER gives the cover repainted in one bit with the waking badge over it.
+      **A fail is a band pattern that settles**, and the tell is that the two
+      settings differ — DETAILS banding while the cover flashes cleanly was #94, and
+      it is the controller's DTM1 baseline going unseeded, not a panel fault (7.4 is
+      the same symptom stated generically). The panel keeps its image with no power
+      and the controller's baseline does not, so nothing may assert one before this
+      paint; both modes let the driver seed DTM1 white and take the GC. If it
+      returns, the suspect is a `skipInitialResync()` reached **before**
+      `showOnePass` in `setup()`'s waking-paint block, not after it.
+      **Count the flashes while you are here**: a wake should show one, or two on a
+      card with `fullOnTransition` left on (Home's own transition GC). Three means
+      the boot clear budget is not being spent — `[power] waking paint:` names which
+      mode it took.
+- [ ] **4.6** Now plug in and read the log: `[boot] reset reason=... slept-flag=...`
       prints the whole decision. On battery a resume is a `POWERON`, so the
       slept flag is what distinguishes it from a first-ever boot.
 
