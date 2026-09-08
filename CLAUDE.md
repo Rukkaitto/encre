@@ -2579,38 +2579,68 @@ line was permitted by the owner and is not taken**: a smaller marginal gain boug
 of another of the title's lines. **Elision is moved, not removed** — `clampProse` cuts
 the SECOND line for that 8.15%, so this is a change of degree.
 
-**AND THE TWO LINES ARE RESERVED WHETHER OR NOT THE NAME USES THEM, which is the whole
-of how a growable run is safe here.** The objection this run elided for is real and is
-**not** answered by the rate: **A CHAPTER CHANGES WHILE THE BOOK IS BEING READ AND AN
-AUTHOR DOES NOT.** The card's height is a sum and the title takes the remainder, so a
-chapter free to *grow* would make the **title's** budget depend on where the reader is
-standing — cross a chapter boundary and the book's name reflows, or newly acquires an
-ellipsis, *because a page was turned*. That is a visible defect with a baffling cause.
-Reserved either way, the title's budget is a **constant** and the card's layout is a
-function of the **book alone**, exactly as it was at one line.
+**THE TWO LINES ARE RESERVED IN THE TITLE'S BUDGET WHETHER OR NOT THE NAME USES THEM,
+AND THE CARD'S HEIGHT IS WHAT THE NAME ACTUALLY TOOK.** Those are **two quantities and
+nothing requires them to be one number**, which is the whole of how a growable run is
+safe here — and the first shape of this shipped them as one, so the reserve had to be
+the height too.
 
-- **`chapterH` NEVER READS THE WRAP, and that is the property stated as code.** It is
-  `kSleepGap + kSleepChapterMaxLines * lineHeight()` — unlike `authorH` just below it,
-  which *is* the wrap's own height. The `Prose` is built at DRAW time and
-  cannot reach the sum, so there is no path by which a name's length moves the card.
-- **DO NOT MAKE IT CONDITIONAL ON THE ACTUAL LINE COUNT.** Giving a one-line name a
-  one-line band is the obvious tightening, it reintroduces the whole defect, and it
-  **looks like a saving** because one line is the common case (65.46% of labels) and
-  every fixture's specimen is one. The card is CENTRED, so what the always-reserved
-  second line costs is a slightly different centring of an opaque card on a dithered
-  field — nothing a reader can point at. Both the board's `min-height` and the theme
-  say so at the site, and the test below fails on it.
-- **The name is drawn at the TOP of the band, not centred in it**, which is what the
-  board's `min-height` on a block does: a one-line name leaves its slack at the foot of
-  the card, so a short name and a two-line name share a first baseline.
+- **`chapterReserveH` IS THE BUDGET'S**, and the objection it answers is real and is not
+  answered by the rate: **A CHAPTER CHANGES WHILE THE BOOK IS BEING READ AND AN AUTHOR
+  DOES NOT.** The title takes what the card's room leaves, so a budget counting
+  this run's second line only when the name *used* it would make the **title's** budget
+  depend on where the reader is standing — cross a chapter boundary and the book's name
+  reflows, or newly acquires an ellipsis, *because a page was turned*. A visible defect
+  with a baffling cause. Reserved either way, the title's budget is a **constant** and
+  the card's LAYOUT is a function of the **book alone**, exactly as it was at one line.
+  It is `kSleepGap + kSleepChapterMaxLines * lineHeight()` and it never reads the wrap.
+- **`chapterH` IS THE CARD'S, and it is the wrap's own height** —
+  `kSleepGap + f26ToPx(chapterProse.heightF26())`, `authorH`'s shape one run down. The
+  reserve bought **nothing** in the height: this is the card's LAST run, so nothing
+  below it steps up, and a one-line name left **29px of empty box** standing at the foot
+  of a card that holds the glass for **hours**. Dead space, not spacing — and the common
+  case, at 65.46% of corpus labels and every fixture's own specimen. The wrap is
+  therefore **hoisted above `cardH`** rather than built at draw time; that placement is
+  the mechanism, and building it at the draw is what made the reserve the only number
+  the height could have.
+- **THE BOUND HOLDS A FORTIORI**, which is worth saying rather than leaving implied:
+  `cardH` can only be **shorter** than the room the budget was divided against, never
+  taller, so `cardH <= cardRoom` is satisfied with 29px to spare on a one-line name. The
+  card is CENTRED, so what a shorter card does is **re-centre** — no type moves relative
+  to any other type.
+- **DO NOT MAKE THEM ONE EXPRESSION AGAIN, IN EITHER DIRECTION.** They will read as one
+  thing spelled twice. Giving the HEIGHT the reserve puts the dead space back; giving the
+  BUDGET the actual reintroduces the reflow. Both sites say which quantity they hold and
+  name the other, `design/Sleep.dc.html` says the same thing where its `min-height: 58px`
+  used to be, and **each swap has its own test** — see the mutations below, which are the
+  whole specification of the split.
+- **The name is drawn at the TOP of the room `chapterH` gave it**, which for a one-line
+  name is exactly one line: there is no slack under it any more. A short name and a
+  two-line name still share a first baseline *relative to the run above them*; what a
+  chapter crossing moves is the whole **card**, by 29px, re-centred.
+
+**AND THE TITLE IS THEREFORE CONSERVATIVE BY UP TO ONE LINE, which is the stated cost of
+the trade and is measured rather than argued.** A one-line chapter buys the title
+nothing, so the only title that can notice is one needing exactly `budget + 1` lines —
+and `sleep_chapter_probe` says that is **3 of 225 (1.33%)**: `The Fables of Aesop`, `The
+Declaration of Independence of the United States of America` and `The Hacker Crackdown`.
+**All three have one-line labels and none has only one-line labels** (39 of 90, 2 of 6,
+4 of 23), so in those three books the seventh title line is given up in **45 of their 119
+chapters** and kept in the other 74. Every other corpus title either fits its six lines
+or would elide at seven as well. The probe answers this jointly — a title's line count
+*and* that same book's labels — because the tail alone cannot: read it off
+`the conservative budget's cost` at the end of a run.
 
 **THE YIELD ORDER IS THREE-STAGE AND IS STILL THE ORDER OF THE STATEMENTS.** The
-chapter yields first and absolutely (two lines, always, wrapped then elided), the
-author second by its fixed cap of two, and the title takes every line left over.
-`chapterH` is **one expression spent twice**, on the title's budget and on the card's
-height, because `renderBookError` shipped exactly that pair as two copies free to
-disagree — and a mutation that reserves it in the height only is caught by the
-*pre-existing* badge-bound tests, with the card overrunning the badge.
+chapter yields first and absolutely (two lines *of budget*, always), the author second
+by its fixed cap of two, and the title takes every line left over. **This entry used to
+add that `chapterH` was "one expression spent twice", on `renderBookError`'s
+two-copies-free-to-disagree argument, and that was the defect rather than the safeguard**
+— the two spends want different numbers, and collapsing them is what put the dead space
+in the card. What they really share is `cardFixedH`, which is one expression for that
+reason. The claim that "a mutation that reserves it in the height only is caught by the
+*pre-existing* badge-bound tests" was also **false in the direction that matters**: the
+card gets SHORTER, so nothing overruns the badge and no bound test can see it.
 
 - **WHAT IT COSTS: the title's derived budget goes 8 lines → 6 on both panels** — X4
   642px of card room and X3 634px, less the 325px that is not the title when the author
@@ -2643,6 +2673,19 @@ flips sign when a neighbouring run takes one more line was an artefact both time
 replaced by the remainder-independent statement — **the card never leaves a whole title
 line box unused** — and the order itself is asserted where it is observable, by the cap
 costing exactly one extra line box where there IS slack.
+
+**AND THAT STATEMENT NEEDED THE CHAPTER'S UNSPENT RESERVE ADDED BACK ONCE THE HEIGHT
+STOPPED TAKING IT.** With a one-line chapter the card is 29px shorter than the division
+it was budgeted by, so the bare form reads that 29px as room the hero was shortchanged
+out of and fails at **70px (X4) / 62px (X3)** — measuring the *conservative budget*,
+which is a deliberate trade with its own figures above, rather than the division the
+assertion is about. `chapterSlackOf` is an **exact term and not a tolerance**: what is
+compared is still the budget's own remainder, still required under one whole title line.
+**The table's two rows are now the ONE-LINE and TWO-LINE AUTHOR against a reserve that is
+always two**, so the reachable remainder is 41px (X4) / 33px (X3) with a one-line author
+and 12px / 4px with a two-line one — and that pair is load-bearing for a *test* now: a
+budget change is only visible where the remainder is at least `46 − 29 = 17px`, so the
+two-line-author fixture cannot see it and the one-line-author one can.
 - **`SleepViewModel::progress` IS GONE RATHER THAN RENAMED.** It held the whole
   composed string, so the figure under the bar and the length of the bar were two
   spellings of one fact that the shell could set independently. The theme composes the
@@ -2692,6 +2735,42 @@ and 742**, which is the case a real label with spaces cannot reach. Its four nam
 two real labels either side of the two-line cap plus a 120-byte token and FAT's 255-byte
 maximum, so the wrap and the clamp are both covered and nothing depends on where a space
 happens to fall.
+
+**AND THE RESERVE/ACTUAL SPLIT IS PROVED BY TWO MORE, ONE PER DIRECTION, EACH FAILING A
+TEST THE OTHER DOES NOT.** Those two mutations *are* the specification: if either passes,
+the distinction is not enforced.
+
+| swap | fails |
+|---|---|
+| `cardH` takes `chapterReserveH` | **14** assertions over 6 cases — **4** in `the card's HEIGHT follows the chapter's actual wrap` plus the **10** sleep goldens. Budget test: **0**. |
+| `maxTitleLines` takes `chapterH` | **4** assertions over **1** case, all in `the TITLE's budget does NOT follow it`, reporting the bar moved **46px** — one whole title line — between a one-line chapter and a two-line one. Height test: **0**, **and nothing else in the suite moves, goldens included.** |
+
+- **THE BUDGET SWAP IS INVISIBLE TO EVERY GOLDEN**, which is why it needed a test of its
+  own rather than a re-render: every golden's title fits inside its budget's slack, so an
+  extra line of budget changes nothing that is drawn. **1,325,843 assertions stayed green
+  under it** before the test existed.
+- **AND THE BUDGET TEST'S FIRST FIXTURE COULD NOT SEE IT EITHER** — the recorded lesson
+  again, that *a mutation tells you about your INPUT before it tells you about your
+  test*. It copied `THE AUTHOR IS CAPPED AT TWO LINES`', which maximises the **author**
+  too, and a two-line author leaves a remainder of 12px / 4px: 29px more budget still
+  floors to the same six lines. With the board's one-line author the remainder is
+  41px / 33px and the crossing happens. **Both conditions are asserted now** — the title
+  fills its budget, and the remainder is at least `46 − 29` — so the test says so instead
+  of going quiet.
+- **A FIXTURE GUARD HAS TO BE BLIND TO THE DEFECT IT GUARDS.** Those two `REQUIRE`s are
+  measured on the **two-line** chapter render, where the reserve is exactly what the name
+  takes and both spellings of the budget give the same card. Taken from the one-line
+  render the mutation moves them itself, the remainder goes to **−5px**, and the guard
+  fires with *"this fixture cannot see the defect"* about a fixture that sees it
+  perfectly well — **a guard that accuses the fixture when the code is wrong is worse
+  than no guard.**
+- **THE HEIGHT TEST HAD TO BE BLIND TO THE BUDGET AND VICE VERSA**, and the two are made
+  so differently. The height test uses the board's **one-line title**, so the division
+  above it has slack and cannot change what is drawn however the chapter is counted into
+  it. The budget test cannot use the card's height at all — the height is *supposed* to
+  move there — so it reads the title's line count off the frame as
+  **`barTopOf − cardBox().top`**, the bar's distance below the card's own top, which is
+  every fixed term plus the author's height plus the title's with the author held still.
 
 **THE MIDDLE DOT'S TRAP OUTLIVED THE LITERAL THAT CARRIED IT, and the duplicated note
 was the tell.** `"%d%%\xC2\xB7CH. %02d"` parses `\xB7C` as ONE hex escape, because a C++
@@ -2743,6 +2822,19 @@ person who changes a run's height on a centred card:
   boundary bands, where the same offset over the field costs far less. Growing a centred
   card by an ODD number of pixels over a dithered photograph is what the design decision
   buys; there is no even-sized line box to grow it by.
+- **AND THE PARITY MOVED ONCE MORE, WHEN THE HEIGHT STOPPED TAKING THE RESERVE — the
+  same odd 29px, in the other direction, and it did NOT redden the register.** The board
+  dropped `min-height: 58px` and Chrome's card shrank by exactly the 29px the firmware's
+  did, so the design's card top sits **1px above** the firmware's before *and* after,
+  measured. What the strict count does is what this bullet's own lesson predicts:
+  `sleep` **2.30%/2.11% → 2.32%/2.13%** (+64 px, +0.02pp) while the **±1-row-tolerant**
+  count *falls* 4,326 → 4,152, and `sleep_waking` the same +64/−174. So the rise is the
+  half-pixel phase and not drift — **both discriminators point the same way**, which is
+  what makes that verdict safe here as it did for the `Names` cut. `sleep_cover_details`
+  improves on **both** counts (2.87%/2.63% → **2.74%/2.50%**, −516 strict, −437
+  tolerant), which is this bullet above being paid back: the card it centres over that
+  dithered cover is 29px smaller. `sleep_cover` stays **0.00%** and `sleep_idle`
+  **0.26%/0.24%** to the pixel — neither draws the card.
 
 - **IT READ AS A REGRESSION FIRST, AND IT WAS NOT THE PHASE ARTEFACT IT LOOKED LIKE.**
   With the chapter run's line box left at `line-height: normal` the Sleep board went to
