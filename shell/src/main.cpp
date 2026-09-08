@@ -1827,6 +1827,12 @@ static reader::HomeViewModel homeVmForCard() {
       // contents stores `CH. 08` -- a position with no total, the Reader's own fallback
       // -- so this is empty only for a pointer written before the key existed, and the
       // theme then draws the line blank. An absent claim beats a false one.
+      //
+      // ASSIGNED UNCONDITIONALLY, and a `if (!p.chapter.empty())` here would be the
+      // substitution defect this file already records: `vm` is `demoHomeVm()` two
+      // lines up, so a guarded assignment leaves the BOARD's `I - Miss Brooke` on the
+      // glass of a device reading something else -- Middlemarch fiction, which is how
+      // this device once woke into a book nobody was reading.
       vm.chapterLabel = p.chapter;
       vm.focusedMenuIndex = -1;  // the CONTINUE block, which exists again
       vm.hints = {"READ", "SELECT", "UP", "DOWN"};
