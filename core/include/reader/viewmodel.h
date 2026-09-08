@@ -17,13 +17,32 @@ struct MenuEntry {
 struct HomeViewModel {
   std::string title;
   std::string author;
+  // THE CHAPTER'S NAME, and it is ReaderViewModel::chapter's own string rather than
+  // a second derivation of the same fact -- the Reader's header band, Contents' `NOW`
+  // row and this line all name the reader's chapter, and two screens naming it
+  // differently would be two spellings of one thing.
+  //
+  // IT WAS `CH. 14 OF 36`, A SPINE POSITION OF A SPINE COUNT, AND THAT WAS FALSE. A
+  // spine counts the cover, the title page, the copyright, the contents, the part
+  // dividers, the notes and the colophon alongside the chapters, so the pair invited
+  // an arithmetic the numbers do not support -- and a reader did it, then found
+  // Contents disagreeing. 183 of 206 corpus books with a usable NCX (88.8%) have a
+  // spine count that is not the count of chapters their TOC offers, so there is no
+  // total to substitute; see design/Main.dc.html for the figures and the report.
+  //
+  // EMPTY IS A LEGAL STATE and the line is then blank: a pointer written before
+  // last.json carried this key cannot say, and an absent claim beats a false one. It
+  // is NOT empty for a book with no contents -- the Reader falls back to `CH. 08`
+  // there, a position with no total, which is the only handle such a book offers.
+  //
+  // The theme ELIDES it: the words come off the card and a chapter name runs long,
+  // where this line has one line of a 304px column.
   std::string chapterLabel;
   int percent = 0;
   // NO PAGE COUNTER HERE, and design/Main.dc.html states why: a page count for the
   // BOOK means paginating every chapter -- ~49 s of decode on this device for a real
-  // novel -- and `chapterLabel` carries the free counter instead (`CH. 08 OF 92`).
-  // The Reader's own footer is a different question: that counter is within ONE
-  // chapter, which is affordable, and it lives in ReaderViewModel.
+  // novel. The Reader's own footer is a different question: that counter is within
+  // ONE chapter, which is affordable, and it lives in ReaderViewModel.
   // -1 = THE GAUGE DID NOT ANSWER, and the band then draws its mark alone.
   //
   // Not 0, and the distinction is the whole point: BatteryMonitor answers a

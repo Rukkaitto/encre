@@ -17,9 +17,16 @@ HomeViewModel demoHomeVm() {
   HomeViewModel vm;
   vm.title = "Middlemarch";
   vm.author = "George Eliot";
-  // THE BOARD'S OWN COUNTER, spine position of spine count -- not a chapter name,
-  // which would need a table of contents. See design/Main.dc.html.
-  vm.chapterLabel = "CH. 01 OF 24";
+  // THE CHAPTER'S NAME, which is design/Main.dc.html's specimen and is deliberately
+  // the same string Contents.dc.html marks `NOW` -- the two screens name the reader's
+  // chapter in the same words, so the board shows them agreeing. It replaced
+  // `CH. 01 OF 24`, a spine position of a spine count, which was a false claim.
+  //
+  // The middle dot needs no split literal HERE, and the reason is worth stating
+  // rather than copying the rule blind: a C++ hex escape is unbounded, so it swallows
+  // the next character only when that character is a HEX DIGIT -- which is what bit
+  // `"\xB7CH. %02d"` twice in this repo. A space follows this one.
+  vm.chapterLabel = "I \xC2\xB7 Miss Brooke";
   vm.percent = 6;
   vm.batteryPercent = 87;
   vm.hasCover = false;

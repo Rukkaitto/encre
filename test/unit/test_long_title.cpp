@@ -32,6 +32,7 @@
 #include "reader/screen_book_end.h"
 #include "reader/screen_book_error.h"
 #include "reader/screen_home.h"
+#include "reader/text.h"
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
 
@@ -303,7 +304,164 @@ reader::HomeViewModel longHome() {
   return vm;
 }
 
+// A REAL CHAPTER NAME, and the reason this file gained a case that is not a title:
+// Home's chapter line is a second run whose words come off the CARD, and it is drawn
+// with a one-line primitive -- which is character for character how Home's title, and
+// then BookEnd's byline, got here. This one is quoted in CLAUDE.md as the long-name
+// case for the Reader's own header band, so it is a publisher's string and not an
+// invention.
+const char* const kLongChapter = "PREMI\xC3\x88RE PARTIE : \xC3\x80 LIRE AVANT L'ACHAT";
+
+reader::HomeViewModel homeWithChapter(const std::string& chapter) {
+  reader::HomeViewModel vm = reader::demoHomeVm();
+  vm.chapterLabel = chapter;
+  return vm;
+}
+
+// The rows and columns in which two Home renders differ. Used instead of the theme's
+// own geometry because `rightX` is file-local to theme_quiet.cpp: diffing against a
+// render with an EMPTY chapter label isolates that one run without this file holding
+// a second copy of the cover width and the gutter.
+struct Band {
+  int firstRow = -1, lastRow = -1, firstCol = -1, lastCol = -1;
+  bool any() const { return firstRow >= 0; }
+  int rows() const { return lastRow - firstRow + 1; }
+  int inkWidth() const { return lastCol - firstCol + 1; }
+};
+
+Band diffBand(const reader::Framebuffer& a, const reader::Framebuffer& b) {
+  Band d;
+  for (int y = 0; y < a.height(); ++y) {
+    for (int x = 0; x < a.width(); ++x) {
+      if (a.getPixel(x, y) == b.getPixel(x, y)) continue;
+      if (d.firstRow < 0) d.firstRow = y;
+      d.lastRow = y;
+      if (d.firstCol < 0 || x < d.firstCol) d.firstCol = x;
+      if (x > d.lastCol) d.lastCol = x;
+    }
+  }
+  return d;
+}
+
 }  // namespace
+
+// --- Home's chapter line ------------------------------------------------------
+//
+// It held `CH. 14 OF 36` -- a spine position of a spine count -- which was a false
+// claim reported off an X3, and it holds the chapter's NAME now. That is a run of
+// arbitrary length arriving from a card, on a screen whose every board specimen is
+// short, which is exactly the shape this file exists for.
+
+TEST_CASE("a long chapter name on Home elides inside its column") {
+  Ramp r;
+  reader::QuietTheme theme;
+  const reader::Font& meta = r.fonts[reader::Role::Meta400];
+  for (const int w : {480, 528}) {
+    const int h = w == 480 ? 800 : 792;
+    reader::Framebuffer blank(w, h), lng(w, h);
+    theme.renderHome(blank, r.fonts, homeWithChapter(""), reader::Plane::Bw);
+    theme.renderHome(lng, r.fonts, homeWithChapter(kLongChapter), reader::Plane::Bw);
+
+    // THE NAME REALLY DOES OVERFLOW at this geometry, or the case below proves
+    // nothing about eliding -- a mutation that fails nothing tells you about your
+    // input first.
+    const int natural = meta.measure(kLongChapter, reader::trackingEm(meta, reader::kTightMetaEm));
+    REQUIRE(natural > w - 2 * reader::kMargin);
+
+    const Band d = diffBand(blank, lng);
+    REQUIRE(d.any());
+    // THE RUN'S OWN INK STOPS INSIDE THE MARGIN. Asserted on the DIFF's extent rather
+    // than on the whole frame's right margin, which is not paper: the header band's
+    // rule is full-bleed. What the unelided drawText did was carry this run to the
+    // panel edge, and the diff is exactly this run.
+    CHECK_MESSAGE(d.lastCol < w - reader::kMargin,
+                  "chapter name reaches " << d.lastCol << " of " << w << ", margin at "
+                                          << w - reader::kMargin);
+    // ONE LINE BOX, not two: this run may not wrap. The title above it grows into a
+    // budget derived from everything below the block, and a second growable run in
+    // that column would have to be told which of the two yields.
+    //
+    // IT ALSO PINS THE BLANK STATE, which is why the comparison is against an EMPTY
+    // label rather than against the demo one. An empty chapter is legal -- a pointer
+    // written before last.json carried the key cannot say -- and it must still cost
+    // its line: skipping the `ry` advance for it would make every run BELOW this one
+    // differ between the two frames, and the band would run to the bottom of the block
+    // instead of holding to one line.
+    CHECK(d.rows() <= meta.lineHeight());
+  }
+}
+
+TEST_CASE("a long chapter name on Home matches its golden") {
+  // THE CHECK THE CASE ABOVE CANNOT MAKE. It proves the run stops inside its column,
+  // and a column of notdef boxes stops inside a column too -- Home's title shipped
+  // exactly that, a `Prose` over a temporary that had already died, and every
+  // row-counting assertion passed because a notdef box inks rows like a letter does.
+  // A golden is what distinguishes ink that spells something from ink that does not,
+  // and it is also what pins the ellipsis being there at all.
+  Ramp r;
+  reader::QuietTheme theme;
+  for (const int w : {480, 528}) {
+    const int h = w == 480 ? 800 : 792;
+    reader::Framebuffer fb(w, h);
+    theme.renderHome(fb, r.fonts, homeWithChapter(kLongChapter), reader::Plane::Bw);
+    golden::checkGolden(fb, w == 480 ? "home_long_chapter" : "home_long_chapter_x3");
+  }
+}
+
+TEST_CASE("Home's chapter name is drawn at the board's 0.10em, not the counter's 0.16em") {
+  // THE TRACKING AND THE ELIDE ARE ONE FACT, which is why this is here rather than in
+  // a typography test: elideToWidth decides the cut by MEASURING, and text.h says the
+  // tracking handed to it "must be the same value the run will be drawn with" -- a
+  // measurement taken at different spacing is a different answer, and the failure mode
+  // is the overhang the elide exists to remove.
+  //
+  // 0.10em is design/Main.dc.html's own number for a chapter name: it is what this
+  // board gave the chapter line it drew before `CH. 01 OF 24` displaced it, and
+  // `kMetaEm`'s 0.16em belonged to the counter.
+  // COMPARED AGAINST THE RUN DRAWN BOTH WAYS rather than against a slack around a
+  // measured advance: an ink extent is the advance less the trailing tracking and two
+  // side bearings, so a tolerance wide enough to absorb those is wide enough to absorb
+  // part of the 0.06em under test. drawTextElided short-circuits when the text fits,
+  // so the reference here is exactly what a correct Home draws.
+  Ramp r;
+  reader::QuietTheme theme;
+  const reader::Font& meta = r.fonts[reader::Role::Meta400];
+  const std::string label = "I \xC2\xB7 Miss Brooke";
+  auto inkWidthOf = [&](int em1000) {
+    reader::Framebuffer fb(480, 800);
+    fb.clear();
+    reader::drawText(fb, meta, 0, meta.lineHeight(), label, reader::Ink::Black,
+                     reader::trackingEm(meta, em1000), reader::Plane::Bw);
+    int first = -1, last = -1;
+    for (int x = 0; x < 480; ++x) {
+      for (int y = 0; y < 800; ++y) {
+        if (fb.getPixel(x, y)) continue;
+        if (first < 0) first = x;
+        last = x;
+        break;
+      }
+    }
+    REQUIRE(first >= 0);
+    return last - first + 1;
+  };
+  const int tightInk = inkWidthOf(reader::kTightMetaEm);
+  const int wideInk = inkWidthOf(reader::kMetaEm);
+  // The two candidate trackings have to be far enough apart to tell apart at all, or
+  // the checks below pass whichever one the theme used.
+  REQUIRE(wideInk - tightInk > 12);
+  for (const int w : {480, 528}) {
+    const int h = w == 480 ? 800 : 792;
+    reader::Framebuffer blank(w, h), named(w, h);
+    theme.renderHome(blank, r.fonts, homeWithChapter(""), reader::Plane::Bw);
+    theme.renderHome(named, r.fonts, homeWithChapter(label), reader::Plane::Bw);
+    const Band d = diffBand(blank, named);
+    REQUIRE(d.any());
+    // The board's specimen fits both columns, so it is drawn whole -- and drawn whole
+    // it is exactly as wide as the same run at the same tracking, to the pixel.
+    CHECK(d.inkWidth() == tightInk);
+    CHECK(d.inkWidth() != wideInk);
+  }
+}
 
 TEST_CASE("a long title on Home matches its golden") {
   // THE ONLY CHECK HERE THAT WOULD HAVE CAUGHT THE BUG THIS CODE SHIPPED WITH.

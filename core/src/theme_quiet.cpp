@@ -315,13 +315,31 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
            std::to_string(vm.percent) + "%", Ink::Black, {}, plane);
   ry += kDisplayLineH + kMetaGap;
 
-  // ONE meta line at the counter tracking, 0.16em. The board carried two -- a page
-  // counter above a named chapter -- and neither was obtainable: a book-wide page
-  // count is ~49 s of decode on this device, and a chapter's name needs a table of
-  // contents that is not built. `chapterLabel` carries what IS free, the spine
-  // position and count, and the 0.16em belongs to it because it is a counter.
-  drawText(fb, meta, rightX, baselineIn(meta, ry, meta.lineHeight()), vm.chapterLabel, Ink::Black,
-           trackingEm(meta, kMetaEm), plane);
+  // ONE META LINE, AND IT NAMES THE CHAPTER. It held a spine position of a spine
+  // count (`CH. 14 OF 36`) and that was a false claim -- a spine counts the front and
+  // back matter and the part dividers with the chapters, so the pair invites an
+  // arithmetic it does not support. See design/Main.dc.html for the corpus figures.
+  //
+  // AT THE BOARD'S 0.10em, WHICH IS THE TRACKING THIS BOARD ALREADY GAVE A CHAPTER
+  // NAME before the counter displaced it -- `kMetaEm`'s 0.16em was the counter's, and
+  // a name is not a counter.
+  //
+  // ELIDED, NOT WRAPPED, AND THE BUDGET IS THE TITLE'S OWN COLUMN. The words come off
+  // the card, so this run is as long as a publisher made it; the Reader's header band
+  // elides the identical string against the identical hazard. It may not wrap: the
+  // title above it already grows into a budget derived from everything below this
+  // block, and one budget cannot serve two growable runs without saying which yields
+  // -- so the run that names the BOOK keeps every line, and the run that names where
+  // you are in it takes one. That is also what keeps `columnFixedH` above honest,
+  // since it reserves exactly one `meta.lineHeight()` for this line.
+  //
+  // AN EMPTY LABEL DRAWS NOTHING AND STILL COSTS ITS LINE, deliberately: a pointer
+  // from before last.json carried a chapter cannot say which one this is, and the
+  // line goes blank rather than falling back to the position it was reported for.
+  // `ry` advances either way, so the runs below do not step up under a blank -- which
+  // is the property the `whichever is taller` note below already rests on.
+  drawTextElided(fb, meta, rightX, baselineIn(meta, ry, meta.lineHeight()), vm.chapterLabel,
+                 titleW, Ink::Black, trackingEm(meta, kTightMetaEm), plane);
   ry += meta.lineHeight();
 
   // The block is as tall as its taller column. The stats column now normally
