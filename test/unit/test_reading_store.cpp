@@ -34,7 +34,7 @@ LastRead last() {
   l.author = "Stephen King";
   l.percent = 42;
   l.spine = 7;
-  l.spineCount = 92;
+  l.chapter = "PREMI\xC3\x88RE PARTIE";
   return l;
 }
 
@@ -187,7 +187,44 @@ TEST_CASE("the last-read pointer round-trips, accents included") {
   CHECK(got.author == l.author);
   CHECK(got.percent == l.percent);
   CHECK(got.spine == l.spine);
-  CHECK(got.spineCount == l.spineCount);
+  CHECK(got.chapter == l.chapter);
+}
+
+TEST_CASE("a pointer written before the chapter key still loads, with no chapter") {
+  // THE STATED PRICE OF NOT BUMPING kLastReadVersion. Every card in the world holds a
+  // pointer without this key, and the alternative to reading it as absent is refusing
+  // the record -- which costs the reader their whole CONTINUE block, title and author
+  // and percentage together, to gain a chapter name one save earlier than it arrives
+  // anyway. So the key is OPTIONAL and empty is a legal answer; Home draws that line
+  // blank rather than falling back to the spine position it was reported for.
+  FakeFileSystem fs;
+  REQUIRE(fs.writeAll("/.reader/last.json",
+                      "{\"author\":\"Stephen King\",\"path\":\"/books/a.epub\",\"percent\":42,"
+                      "\"spine\":7,\"spineCount\":92,\"title\":\"Le Fleau\",\"version\":1}"));
+  LastRead got;
+  REQUIRE(reader::loadLastRead(fs, got));
+  // Everything the old pointer DID carry survives -- this is a degradation, not a
+  // rejection -- including the `spineCount` key nothing reads any more.
+  CHECK(got.bookPath == "/books/a.epub");
+  CHECK(got.title == "Le Fleau");
+  CHECK(got.percent == 42);
+  CHECK(got.spine == 7);
+  CHECK(got.chapter.empty());
+}
+
+TEST_CASE("a book with no contents stores the Reader's position fallback, not nothing") {
+  // updateChapterLabel falls back to `CH. 08` for a book with no NCX, so the pointer
+  // carries that string and Home shows it -- a position with NO TOTAL, which is what
+  // the Reader's own footer says and the only handle such a book offers. The empty
+  // case above is therefore an OLD POINTER and never a book without contents, and the
+  // two must not be conflated: one is a blank line, the other is a real answer.
+  FakeFileSystem fs;
+  LastRead l = last();
+  l.chapter = "CH. 08";
+  REQUIRE(reader::saveLastRead(fs, l) == SaveResult::Written);
+  LastRead got;
+  REQUIRE(reader::loadLastRead(fs, got));
+  CHECK(got.chapter == "CH. 08");
 }
 
 TEST_CASE("a book with no author still gives a usable pointer") {

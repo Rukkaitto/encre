@@ -1568,7 +1568,10 @@ struct ReadingPointer {
   std::string author;
   int percent = 0;
   int spine = 0;
-  int spineCount = 0;
+  // The chapter's NAME, or empty when the pointer predates the key -- see
+  // reader::LastRead::chapter. Home draws that line blank rather than substituting
+  // the spine position it used to compose a false `CH. n OF N` from.
+  std::string chapter;
 };
 
 static ReadingPointer readingPointer() {
@@ -1589,7 +1592,7 @@ static ReadingPointer readingPointer() {
   p.author = last.author;
   p.percent = last.percent;
   p.spine = last.spine;
-  p.spineCount = last.spineCount;
+  p.chapter = last.chapter;
   return p;
 }
 
@@ -1802,20 +1805,42 @@ static reader::HomeViewModel homeVmForCard() {
       vm.title = p.title;
       vm.author = p.author;
       vm.percent = p.percent;
-      // THE BOARD'S COUNTER: spine position of spine count, which is what
-      // Main.dc.html draws now -- a page counter for the book would mean
-      // paginating all of it. A book whose count is unknown says just the
-      // position rather than inventing a total.
-      char label[24];
-      if (p.spineCount > 0)
-        std::snprintf(label, sizeof(label), "CH. %02d OF %d", p.spine + 1, p.spineCount);
-      else
-        std::snprintf(label, sizeof(label), "CH. %02d", p.spine + 1);
-      vm.chapterLabel = label;
+      // THE CHAPTER'S NAME, STRAIGHT OFF THE POINTER AND NOT COMPOSED HERE.
+      //
+      // This line built `CH. %02d OF %d` out of the spine position and the spine
+      // count, and it was a FALSE CLAIM reported off an X3: a spine counts the cover,
+      // the title page, the copyright, the contents, the part dividers, the notes and
+      // the colophon alongside the chapters, so the two numbers invite an arithmetic
+      // they do not support. `47% - CH. 14 OF 36` for a book of 7 chapters in 2 parts,
+      // and Contents then put the reader at part 2 with five selectable rows left.
+      //
+      // AND NO BETTER TOTAL EXISTS. Measured over the 206 corpus books with a usable
+      // NCX: 126 (61.2%) have a spine count above the spine entries their TOC names at
+      // all, worst 164 against 26, and 183 (88.8%) have one differing from the count of
+      // entries the TOC names as selectable chapters. Numbering the TOC's own entries
+      // would be a third numbering system -- the mistake Contents' right-hand slot was
+      // already fixed for -- so the NAME is the answer and there is no total.
+      //
+      // IT IS NOT DERIVED HERE, which is the load-bearing part: it is the Reader's own
+      // header label, cached by saveReadingPosition, so Home, the Reader's band and
+      // Contents' `NOW` row name the reader's chapter in the same words. A book with no
+      // contents stores `CH. 08` -- a position with no total, the Reader's own fallback
+      // -- so this is empty only for a pointer written before the key existed, and the
+      // theme then draws the line blank. An absent claim beats a false one.
+      //
+      // ASSIGNED UNCONDITIONALLY, and a `if (!p.chapter.empty())` here would be the
+      // substitution defect this file already records: `vm` is `demoHomeVm()` two
+      // lines up, so a guarded assignment leaves the BOARD's `I - Miss Brooke` on the
+      // glass of a device reading something else -- Middlemarch fiction, which is how
+      // this device once woke into a book nobody was reading.
+      vm.chapterLabel = p.chapter;
       vm.focusedMenuIndex = -1;  // the CONTINUE block, which exists again
       vm.hints = {"READ", "SELECT", "UP", "DOWN"};
-      logf("[progress] Home continues \"%s\" at %d%%, spine %d of %d\n", vm.title.c_str(),
-           p.percent, p.spine + 1, p.spineCount);
+      // The chapter is quoted so an EMPTY one is visible as empty in the log: this is
+      // the one field the pointer can legitimately fail to carry, and a bare %s makes
+      // "the pointer predates the key" indistinguishable from "the line was drawn".
+      logf("[progress] Home continues \"%s\" at %d%%, spine %d, chapter \"%s\"\n",
+           vm.title.c_str(), p.percent, p.spine + 1, p.chapter.c_str());
       logFlush();
     }
   }
@@ -2156,7 +2181,19 @@ static reader::SaveResult saveReadingPosition(const char* why,
   last.title = gReading.title;
   last.author = gReading.author;
   last.spine = rd->chapterIndex();
-  last.spineCount = rd->chapterCount();
+  // THE SAME STRING THE SIDECAR TAKES, from the same expression one field up, so Home
+  // and the Reader's header band cannot disagree about which chapter this is. It is
+  // cached here rather than read back out of the sidecar because Home's reading column
+  // is built at boot and on every rebuild, and a second small-file read there would be
+  // on the critical path of a Back out of a book -- the path the listing cache and the
+  // folder-count memo were both written to keep clear.
+  //
+  // `spineCount` WENT WITH THE LABEL IT EXISTED FOR. It was written here, read in
+  // readingPointer() and spent composing `CH. n OF N`; with that gone it had no reader
+  // anywhere, which is the shape this project has twice shipped as a field outliving
+  // its producer. Dropping the key rewrites every card's pointer once and nothing
+  // reads it on the way in, so an older pointer still loads.
+  last.chapter = p.chapter;
   // By BYTES through the book, because a page-based percentage would need every
   // chapter counted -- ~49 s of decode on this device. See progressPercent.
   last.percent = p.percent;
@@ -5492,9 +5529,28 @@ static reader::SleepViewModel sleepVmFromCard(std::string note) {
     vm.title = last.title.empty() ? last.bookPath : last.title;
     vm.author = last.author;
     vm.progressPercent = last.percent;
-    // The board's `6% - CH. 01`, from the two facts the pointer has. A chapter NAME
-    // would need a table of contents, which is not built -- the same reason the
-    // Reader's own footer says a bare `CH. 03`.
+    // The board's `6% - CH. 01`, from two facts the pointer has.
+    //
+    // THIS COMMENT SAID A CHAPTER NAME "would need a table of contents, which is not
+    // built", AND THAT HAS BEEN FALSE SINCE Contents SHIPPED -- the pointer carries the
+    // name now (LastRead::chapter) and Home draws it. The card still shows the POSITION,
+    // and that is a decision with a price rather than a limit:
+    //
+    //   * `CH. 01` alone is the Reader's own fallback form -- a position with no total
+    //     -- so it is less informative than a name and is not the false claim Home's
+    //     `CH. 14 OF 36` was. Nothing here invites an arithmetic.
+    //   * A NAME IN THIS RUN NEEDS A BOUND FIRST. renderSleep draws vm.progress with
+    //     drawCentredText, which is unelided, and centreIn returns a NEGATIVE half for
+    //     a run wider than its box -- which is exactly the defect the author line one
+    //     run above was fixed for, text painted over both card borders onto the dither
+    //     field. A card-sourced chapter name here is that bug again.
+    //   * And it is a COMBINED run, `percent - position`, so what it becomes is a
+    //     design question for Sleep.dc.html rather than a substitution here.
+    //
+    // THE LITERAL IS SPLIT, and it has to be: a C++ hex escape is UNBOUNDED, so
+    // "\xC2\xB7CH." parses \xB7C as one value -- clang rejects it outright and the
+    // ESP32's GCC accepted it as something that is not U+00B7. This project already
+    // recorded the same trap once ("\xA0b" is 0xA0B); adjacent literals end the escape.
     // THE LITERAL IS SPLIT, and it has to be: a C++ hex escape is UNBOUNDED, so
     // "\xC2\xB7CH." parses \xB7C as one value -- clang rejects it outright and the
     // ESP32's GCC accepted it as something that is not U+00B7. This project already
