@@ -1526,9 +1526,11 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   //
   // So it is drawn ELIDED against `contentW`, which cannot leave the column: the
   // run is at most as wide as the box it is centred in, so centreIn's half cannot
-  // go negative. `test_theme_sleep_golden.cpp` watches the card's PADDING for that
-  // rather than the panel edge, because a run that merely eats the frame is already
-  // wrong and the edge is only where the damage ends.
+  // go negative. `test_theme_sleep_golden.cpp` watches the card's PADDING for that,
+  // and on this screen that is the only place ink is evidence at all -- the dither
+  // field inks every row of the panel and the card's own side borders ink every row
+  // of the card, so neither a full-row scan nor an in-card extent can separate this
+  // run's ink from furniture that belongs there.
   if (!vm.chapter.empty()) {
     y += progress.lineHeight() + kSleepGap;
     const Tracking chapterTrack = trackingEm(progress, kSleepChapterEm);
