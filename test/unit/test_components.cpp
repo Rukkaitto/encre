@@ -1388,44 +1388,149 @@ TEST_CASE("a book row's rule is a hairline along its BOTTOM edge, full bleed") {
 
 TEST_CASE("a book row's ink is level 0 or 3 outside the glyphs and the mark") {
   Ramp f;
-  // The cover placeholder's dither, the cover's border and the row's rule are
-  // opaque by construction, so they must be identical in every plane. Only the
-  // glyph and chevron edges may differ -- which is the property that makes a
-  // plane bug show up as fringing rather than as missing furniture.
+  // The row's rule and its focused fill have coverage 0 or 3, so they must be
+  // identical in every plane. Only the glyph, chevron and thumbnail-mark edges may
+  // differ -- which is the property that makes a plane bug show up as fringing
+  // rather than as missing furniture.
+  //
+  // THE PLACEHOLDER COVER USED TO BE IN THAT SET and no longer is: its ditherRect
+  // and its 1px border were opaque by construction, where the MARK that replaced
+  // it is a 2 bpp icon and legitimately carries partial coverage at its edges.
+  // That is why this scan stays on column 0 -- the row's own left edge, outside
+  // the 44px slot entirely, which the rule crosses and no mark reaches.
   reader::Framebuffer bw(480, 200), dithered(480, 200);
   bw.clear(true);
   dithered.clear(true);
   const reader::BookRowContent row{"Classics", "FOLDER - 6 BOOKS", "", true};
   reader::drawBookRow(bw, f.fonts, 0, row, false, true, reader::Plane::Bw);
   reader::drawBookRow(dithered, f.fonts, 0, row, false, true, reader::Plane::BwDithered);
-  // The cover column is not drawn on a folder row, so scan the thumbnail box and
-  // the rule, both of which are furniture in either case.
   for (int y = 0; y < 90; ++y)
     CHECK(bw.getPixel(0, y) == dithered.getPixel(0, y));
 }
 
-TEST_CASE("a focused book row reverses its cover out of the fill") {
+// The ink bounding box inside the row's thumbnail slot, as (x0, y0, x1, y1), or
+// all -1 for a slot with no ink at all. `want` is which value counts as the mark:
+// on an unfocused row the mark is ink on paper, on a focused row it is paper on
+// the fill, so the same walk serves both by being told what to look for.
+struct SlotInk {
+  int x0 = -1, y0 = -1, x1 = -1, y1 = -1;
+  int count = 0;
+};
+SlotInk slotInkOf(const reader::Framebuffer& fb, int slotTop, bool want) {
+  SlotInk b;
+  for (int y = slotTop; y < slotTop + reader::kBookThumbH; ++y) {
+    for (int x = reader::kMargin; x < reader::kMargin + reader::kBookThumbW; ++x) {
+      if (fb.getPixel(x, y) != want) continue;
+      ++b.count;
+      if (b.x0 < 0 || x < b.x0) b.x0 = x;
+      if (b.x1 < 0 || x > b.x1) b.x1 = x;
+      if (b.y0 < 0 || y < b.y0) b.y0 = y;
+      if (b.y1 < 0 || y > b.y1) b.y1 = y;
+    }
+  }
+  return b;
+}
+
+// THIS REPLACES "a focused book row reverses its cover out of the fill", which
+// asserted the placeholder's 2px white border and its reversed dots. Both are
+// gone -- design/Library.dc.html dropped the placeholder cover -- so the test is
+// rewritten to the property that replaced them rather than deleted: the mark
+// reverses, and NOTHING ELSE in the slot inks.
+TEST_CASE("a book row's slot holds the book mark and nothing else") {
   Ramp f;
-  reader::Framebuffer fb(480, 200);
-  fb.clear(true);
-  reader::drawBookRow(fb, f.fonts, 0, {"Dubliners", "JAMES JOYCE", "31%", false}, true, false);
-  // The board's `.dither-dots-inv` with a 2px white border: the cover's own
-  // outline is PAPER on a black row, where an unfocused row's is a 1px black
-  // outline on white.
-  const int coverY = reader::iconTopIn(reader::kBookRowPadY, reader::bookRowContentH(f.fonts),
-                                       reader::kBookThumbH);
-  CHECK(fb.getPixel(reader::kMargin, coverY));
-  CHECK(fb.getPixel(reader::kMargin + reader::kBookThumbW - 1, coverY));
-  // The fill itself is ink, immediately outside the cover's box.
-  CHECK_FALSE(fb.getPixel(reader::kMargin - 2, coverY));
-  // ...and the dots inside are paper, on the same 4px grid an unfocused cover
-  // inks. Count them rather than name one: the grid is keyed on absolute
-  // coordinates, so which cell is which depends on where the row landed.
-  int paperInside = 0;
-  for (int y = coverY + 3; y < coverY + reader::kBookThumbH - 3; ++y)
-    for (int x = reader::kMargin + 3; x < reader::kMargin + reader::kBookThumbW - 3; ++x)
-      if (fb.getPixel(x, y)) ++paperInside;
-  CHECK(paperInside > 0);
+  const int contentH = reader::bookRowContentH(f.fonts);
+  const int slotTop = reader::iconTopIn(reader::kBookRowPadY, contentH, reader::kBookThumbH);
+  const reader::BookRowContent book{"Dubliners", "JAMES JOYCE", "31%", false};
+
+  SUBCASE("unfocused: the mark is ink, and the slot's whole border is paper") {
+    reader::Framebuffer fb(480, 200);
+    fb.clear(true);
+    reader::drawBookRow(fb, f.fonts, 0, book, false, false);
+    const SlotInk b = slotInkOf(fb, slotTop, false /*ink*/);
+    REQUIRE(b.count > 0);
+    // THE DIRECT PROOF THAT THE PLACEHOLDER IS GONE, and it is the whole ring
+    // rather than one pixel of it: the placeholder was a 44x64 ditherRect plus a
+    // 1px outlineRect, so it inked every pixel of the slot's outermost row and
+    // column by construction. kBook is 25x25 in a 44x64 slot, so a centred mark
+    // cannot reach any edge -- a statement the old drawing could not make.
+    for (int x = reader::kMargin; x < reader::kMargin + reader::kBookThumbW; ++x) {
+      CHECK(fb.getPixel(x, slotTop));
+      CHECK(fb.getPixel(x, slotTop + reader::kBookThumbH - 1));
+    }
+    for (int y = slotTop; y < slotTop + reader::kBookThumbH; ++y) {
+      CHECK(fb.getPixel(reader::kMargin, y));
+      CHECK(fb.getPixel(reader::kMargin + reader::kBookThumbW - 1, y));
+    }
+  }
+
+  SUBCASE("focused: the mark is paper, and the slot's border is all fill") {
+    reader::Framebuffer fb(480, 200);
+    fb.clear(true);
+    reader::drawBookRow(fb, f.fonts, 0, book, true, false);
+    // The mark reverses out of the fill, exactly as the folder mark does -- both
+    // go through one `drawIcon` with `ink = focused ? White : Black`.
+    const SlotInk b = slotInkOf(fb, slotTop, true /*paper*/);
+    REQUIRE(b.count > 0);
+    // AND THERE IS NO WHITE OUTLINE ROUND THE SLOT ANY MORE. The placeholder's
+    // focused form was `border: 2px solid #ffffff`, so the slot's outermost ring
+    // was paper; with the placeholder gone it is the row's own fill.
+    for (int x = reader::kMargin; x < reader::kMargin + reader::kBookThumbW; ++x) {
+      CHECK_FALSE(fb.getPixel(x, slotTop));
+      CHECK_FALSE(fb.getPixel(x, slotTop + reader::kBookThumbH - 1));
+    }
+    for (int y = slotTop; y < slotTop + reader::kBookThumbH; ++y) {
+      CHECK_FALSE(fb.getPixel(reader::kMargin, y));
+      CHECK_FALSE(fb.getPixel(reader::kMargin + reader::kBookThumbW - 1, y));
+    }
+  }
+}
+
+// WHAT THE ONE-EXPRESSION COLLAPSE BUYS, asserted rather than trusted. A book row
+// used to draw a ditherRect at `iconTopIn(contentTop, contentH, kBookThumbH)`
+// while a folder row drew a mark at `iconTopIn(contentTop, contentH, mark.h)` --
+// two pieces of arithmetic over two different heights, free to drift. They are one
+// expression now, and the property that says so is that BOTH marks sit centred in
+// the slot.
+//
+// MEASURED FROM PIXELS, NOT BY RE-RUNNING centreIn. Recomputing the helpers here
+// would transcribe the code and pass however the code was wrong; the clearance
+// either side of the mark's real ink is an independent statement of the same
+// thing. It is `<= 1` because `centreIn` divides by two in integers: kBook leaves
+// 19 columns to split and takes 9 on the left, and the mark's own ink need not be
+// symmetric within its box -- kFolder's is not, vertically.
+TEST_CASE("both kinds of row centre their mark in the 44x64 slot") {
+  Ramp f;
+  const int contentH = reader::bookRowContentH(f.fonts);
+  const int slotTop = reader::iconTopIn(reader::kBookRowPadY, contentH, reader::kBookThumbH);
+
+  struct Kind {
+    const char* what;
+    reader::BookRowContent row;
+  } kinds[] = {
+      {"book", {"Dubliners", "JAMES JOYCE", "31%", false}},
+      {"folder", {"Classics", "FOLDER - 6 BOOKS", "", true}},
+  };
+
+  for (const Kind& k : kinds) {
+    CAPTURE(k.what);
+    reader::Framebuffer fb(480, 200);
+    fb.clear(true);
+    reader::drawBookRow(fb, f.fonts, 0, k.row, false, false);
+    const SlotInk b = slotInkOf(fb, slotTop, false);
+    REQUIRE(b.count > 0);
+    const int left = b.x0 - reader::kMargin;
+    const int right = (reader::kMargin + reader::kBookThumbW - 1) - b.x1;
+    const int top = b.y0 - slotTop;
+    const int bottom = (slotTop + reader::kBookThumbH - 1) - b.y1;
+    CHECK(left >= 0);
+    CHECK(right >= 0);
+    CHECK(top >= 0);
+    CHECK(bottom >= 0);
+    CHECK(left - right <= 1);
+    CHECK(right - left <= 1);
+    CHECK(top - bottom <= 1);
+    CHECK(bottom - top <= 1);
+  }
 }
 
 TEST_CASE("an outlined action button is a border and a DIFFERENT face") {

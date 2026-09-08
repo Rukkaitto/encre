@@ -13,12 +13,13 @@
 namespace reader {
 
 namespace {
-// The board's own numbers. The cover shrank from 156x234 to 128x192 when the pt
-// type ramp landed: at legible sizes the stats column beside it needs the width,
-// and a 234px-tall cover no longer bounded that column's height anyway.
-constexpr int kCoverW = 112;
-constexpr int kCoverH = 168;
-constexpr int kGutter = 16;
+// HOME HAS NO COVER. `kCoverW`/`kCoverH` (112x168) and `kGutter` (16) were the
+// board's numbers for a `.dither-dots` panel standing in for a cover image, and
+// design/Main.dc.html has dropped it -- so they are gone rather than left with no
+// reader, which is the shape this project has found twice from two directions
+// (ListRow::trackingEm1000, readerBookTitle_). The reading column now takes the
+// whole content width; `kCoverTopGap` stays, because it is the block's own top
+// padding and not the cover's.
 constexpr int kBlockH = 72;
 // The action block's own `padding: 0 20px`, which insets its label and its mark
 // from the block's edges rather than from the screen margin.
@@ -120,15 +121,26 @@ std::string bookCountLabel(int n) {
   return std::to_string(n) + (n == 1 ? " BOOK" : " BOOKS");
 }
 
-// A dithered stand-in until Phase 3 decodes real cover images: a bordered panel,
+// A dithered stand-in until a real cover image is decoded here: a bordered panel,
 // and nothing else. The board used to reverse the title out of a filled strip
 // along the bottom; at the pt ramp's sizes that strip duplicated the title
 // already set beside the cover and ran into the stats column, so the board
 // dropped it and the cover is now a plain panel.
 //
-// The size is the caller's: Home draws 112x168 and Book details 120x180, both
-// with the same 2px border and the same tint, so this takes the box rather than
-// each screen growing its own copy of the border-and-dither.
+// ONE CALLER NOW, AND IT IS BOOK DETAILS AT 120x180. Home drew 112x168 through
+// this same function and no longer draws a cover at all -- so the box is still a
+// parameter rather than a constant, which is this project's rule the other way
+// round: a shared home for a single caller is a header edge bought for nothing
+// (the Typography formatters' extraction was undone for exactly that), and the
+// argument for keeping it here is that the box is a NUMBER a second screen would
+// legitimately differ on, not that a second screen exists.
+//
+// WHY BOOK DETAILS KEEPS IT while Home and the Library rows do not: this is the
+// one screen whose whole job is to describe a single book at length, so a slot
+// where its cover will go is the slot a decoded cover lands in -- and the block's
+// height IS the cover's 180px (the field column is shorter), so removing it moves
+// every rule below it. That is a separate design decision with a separate answer,
+// and it is not this change's to make.
 void drawCoverPlaceholder(Framebuffer& fb, int x, int y, int w, int h) {
   // Level 1, not 2: the board's `.dither-dots` is a 4px-pitch radial-gradient
   // dot, roughly a fifth coverage. Level 2 is a 50% checkerboard, which reads as
@@ -218,11 +230,17 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
 
   int y = drawHeaderBand(fb, fonts, "NOW READING", charge, &batteryMark, plane);
 
-  // Two columns: cover on the left, the reading state stacked on the right.
+  // ONE COLUMN. This was two -- a 112x168 placeholder cover on the left and the
+  // reading state stacked to its right -- and design/Main.dc.html has dropped the
+  // cover: it claimed a picture this screen does not have, in the most prominent
+  // slot on the screen whose whole job is to name the book being read, and it took
+  // 128px of a 480px panel away from the name to do it.
   y += kCoverTopGap;
-  drawCoverPlaceholder(fb, kMargin, y, kCoverW, kCoverH);
 
-  const int rightX = kMargin + kCoverW + kGutter;
+  // The column starts on the margin now, so `titleW` below picks up the cover's
+  // 112 and the gutter's 16. Derived from the margin rather than pinned, exactly
+  // as it was derived from the cover before.
+  const int rightX = kMargin;
   const Font& title = fonts[Role::Title700];
   // Body400, not Body500: the board's author line is `font-size: var(--t-body)`
   // with no font-weight, so it is CSS default 400. The ramp used to carry one
@@ -237,8 +255,9 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   // The stats column flows downward from its own top, with the board's gaps
   // between runs. It used to hang the numeral off the cover's *bottom* edge,
   // which worked only while the cover was the taller of the two columns: at the
-  // pt ramp the column is ~239px against a 192px cover, so that anchor drove the
-  // numeral up into the author line. Nothing here positions a run off kCoverH.
+  // pt ramp the column was ~239px against a 192px cover, so that anchor drove the
+  // numeral up into the author line. With the cover gone there is nothing left to
+  // anchor to even by mistake, which is worth knowing before adding a run here.
   int ry = y + kColPadTop;
   // The board sets the title in caps (text-transform: uppercase). Casing is a
   // presentation decision, so the theme applies it rather than the view-model
@@ -342,16 +361,20 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
                  titleW, Ink::Black, trackingEm(meta, kTightMetaEm), plane);
   ry += meta.lineHeight();
 
-  // The block is as tall as its taller column. The stats column now normally
-  // wins, but keying off whichever is taller keeps a short view model (no
-  // chapter label, a one-digit percentage) from letting the progress bar ride up
-  // over the cover's bottom edge.
-  // The board gives the stats column `padding: 2px 0` -- both edges, not just the
-  // top -- and that column is the taller of the two, so it sets the section's
-  // height. Omitting the bottom padding lands everything below it 2px high.
+  // The block is as tall as its ONE column, where it used to be as tall as
+  // whichever of two was taller. With the cover gone there is no second column to
+  // compare against and no 168px floor under the block: a short view model (no
+  // chapter label, a one-digit percentage) simply makes the block shorter, and
+  // everything below it moves up with it. That floor was never reached in
+  // practice anyway -- the comment above records the column at ~239px against a
+  // 192px cover -- so this is the removal of an inert `max`, not a behaviour
+  // change dressed as one.
+  //
+  // The board gives the column `padding: 2px 0` -- both edges, not just the top --
+  // so the bottom 2px is charged here. Omitting it lands everything below 2px
+  // high, which is a defect this screen has shipped once.
   ry += kColPadTop;
-  const int coverBottom = y + kCoverH;
-  y = (ry > coverBottom ? ry : coverBottom) + kBlockGap;
+  y = ry + kBlockGap;
 
   // Progress bar spans the usable width.
   const int barW = fb.width() - 2 * kMargin;

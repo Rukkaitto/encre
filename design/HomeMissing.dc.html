@@ -23,8 +23,6 @@
     }
     body { margin: 0; background: #ffffff; }
     a { color: #000000; } a:hover { color: #000000; }
-    .dither-dots { background-color: #ffffff; background-image: radial-gradient(circle, #000000 1.1px, transparent 1.3px); background-size: 4px 4px; }
-    .dither-dots-inv { background-color: #000000; background-image: radial-gradient(circle, #ffffff 1.1px, transparent 1.3px); background-size: 4px 4px; }
     .dim-veil { background-image: radial-gradient(circle, #ffffff 1.3px, transparent 1.5px); background-size: 3px 3px; }
   </style>
 </helmet>
@@ -38,8 +36,14 @@
     <svg width="32" height="28" viewBox="0 0 18 16" fill="none"><path d="M9 1 17 15H1z" stroke="#000000" stroke-width="1.6"></path><path d="M9 6v4" stroke="#000000" stroke-width="1.6"></path><rect x="8.3" y="11.6" width="1.4" height="1.4" fill="#000000"></rect></svg>
     <div style="font-size: var(--t-meta); letter-spacing: 0.1em; line-height: 1.35;">&ldquo;MIDDLEMARCH&rdquo; IS GONE FROM THE SD CARD. SHOWING YOUR LAST BOOK.</div>
   </div>
-  <div style="display: flex; gap: 16px; padding: 22px 24px 0 24px;">
-    <div class="dither-dots" style="width: 112px; height: 168px; border: 2px solid #000000; box-sizing: border-box; flex-shrink: 0;"></div>
+  <!-- NO COVER, and the `gap` went with it -- Main.dc.html's decision, which this
+       board follows for the reason HomeCharging does: this is the same block in a
+       different state, not a different block. THIS BOARD IS NOT BUILT (a stale
+       last.json currently falls back to HomeUnopened), so nothing on the sheet
+       measures it; it is edited anyway, because the board is what the screen will
+       be implemented FROM, and a board left behind is how a screen gets built to
+       a design that was superseded. -->
+  <div style="display: flex; padding: 22px 24px 0 24px;">
     <div style="display: flex; flex-direction: column; justify-content: flex-start; gap: 22px; flex-grow: 1; padding: 2px 0;">
       <div style="display: flex; flex-direction: column; gap: 5px;">
                 <!-- IT WRAPS, and it used to elide. `text-overflow: ellipsis` with
