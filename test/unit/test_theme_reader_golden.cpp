@@ -391,7 +391,11 @@ TEST_CASE("A CHAPTER THAT PAGINATES TO NOTHING IS SKIPPED, not shown blank") {
   CHECK(empty.page().lines.empty());
   // And it does not claim a page it does not have.
   CHECK(empty.vm().page == 0);
-  CHECK(empty.vm().progressPercent == 0);
+  // NOR A PERCENTAGE, and this line asserted 0 until #93. There is no denominator, so
+  // there is no fraction -- the counter beside it already reads `0 / —` for exactly
+  // this state, and the number now agrees with it instead of claiming the top of a
+  // chapter that has no pages at all.
+  CHECK(empty.vm().progressPercent == reader::ReaderViewModel::kProgressUnknown);
 }
 
 TEST_CASE("A REFUSED CHAPTER TURN LEAVES THE SCREEN WHERE IT WAS") {
@@ -481,7 +485,11 @@ TEST_CASE("A CHAPTER OPENS WITH ITS TOTAL UNKNOWN, and completeIndex fills it in
   REQUIRE(r.scr->pageCount() >= 1);
   CHECK(r.scr->indexPending());
   CHECK(r.scr->vm().pageTotal == 0);
-  CHECK(r.scr->vm().progressPercent == 0);  // a percentage of an unknown is not a number
+  // A PERCENTAGE OF AN UNKNOWN IS NOT A NUMBER -- which this line said in a comment
+  // while asserting `== 0` for two phases, pinning the defect #93 reported. 0 is a
+  // value the arithmetic legitimately reaches (see the settled case below, page 1 of
+  // ~300), so it could not also mean "not known".
+  CHECK(r.scr->vm().progressPercent == reader::ReaderViewModel::kProgressUnknown);
   CHECK(r.scr->vm().page == 1);
   CHECK_FALSE(r.scr->page().lines.empty());
 
@@ -500,6 +508,129 @@ TEST_CASE("A CHAPTER OPENS WITH ITS TOTAL UNKNOWN, and completeIndex fills it in
   CHECK(r.scr->vm().progressPercent <= 100);
   // And it is idempotent.
   CHECK_FALSE(r.scr->completeIndex());
+}
+
+TEST_CASE("A SETTLED PAGE 1 CAN READ 0%, which is why the unknown may not") {
+  // THE FACT THAT DECIDES #93's SENTINEL, and it is worth a case of its own because it
+  // is the whole argument: `kProgressUnknown` is -1 rather than 0 only because 0 is a
+  // value this screen legitimately REACHES. If it were unreachable, 0 would have been a
+  // perfectly good "not known" and the fix would have been the theme's alone.
+  //
+  // The arithmetic says where: `(page * 100 + total / 2) / total` is 0 for page 1 once
+  // `100 + total / 2 < total`, so from 201 pages up. Asserted on a real chapter rather
+  // than restated as algebra, because the formula is the thing under test -- and the
+  // fixture is guarded, so a chapter that stops being long enough says so instead of
+  // quietly measuring nothing.
+  //
+  // 1024 paragraphs is ~8x `deferredChapter()`, which is the smallest doubling of that
+  // fixture's own ladder that clears 201 pages at both geometries. The X3's column is
+  // 48px wider and 36px shorter, so it paginates differently and is checked too -- this
+  // is a threshold and a threshold is exactly what one geometry can sit the wrong side
+  // of.
+  auto atBothEnds = [](int w, int h) {
+    Reading r(longChapter(1024), /*settled=*/true, w, h);
+    REQUIRE_FALSE(r.scr->indexPending());
+    REQUIRE(r.scr->vm().page == 1);
+    REQUIRE_MESSAGE(r.scr->vm().pageTotal >= 201,
+                    "fixture too short to reach 0% at " << w << "x" << h << ": "
+                                                        << r.scr->vm().pageTotal);
+    CHECK(r.scr->vm().progressPercent == 0);
+    // And it is a KNOWN 0, distinguishable from the unknown by the sentinel alone --
+    // which is the distinction the theme draws `0%` and `—%` from.
+    CHECK(r.scr->vm().progressPercent != reader::ReaderViewModel::kProgressUnknown);
+  };
+
+  SUBCASE("X4 480x800") { atBothEnds(480, 800); }
+  SUBCASE("X3 528x792") { atBothEnds(528, 792); }
+}
+
+TEST_CASE("THE FOOTER'S BAR IS NOT DRAWN WHILE THE PERCENTAGE IS UNKNOWN") {
+  // #93, the half a golden reports as "pixels moved" rather than as a claim.
+  //
+  // A bar is a LENGTH stating the same fraction the number states, and unlike the
+  // number it has no dash to fall back on -- `drawProgressBar(..., 0)` paints the exact
+  // outline a settled 0% paints. So an empty track for an unknown is pixel-identical to
+  // the top of the chapter, which is the ambiguity the sentinel exists to remove. It is
+  // omitted instead, and design/Reader.dc.html's footer states that.
+  //
+  // THE BAR IS FOUND WITHOUT ANY THEME CONSTANT, which is what keeps this a test of the
+  // decision rather than a transcription of the geometry: it is 210px wide and centred,
+  // and the footer's other two runs are placed off the left padding and off fb.width(),
+  // so the centre of the bottom band is ink the bar alone can put there. A band 80px
+  // wide is well inside the bar and nowhere near either neighbour.
+  auto inkInCentreOfFooter = [](const reader::Framebuffer& fb) {
+    int n = 0;
+    for (int y = fb.height() - 40; y < fb.height(); ++y)
+      for (int x = fb.width() / 2 - 40; x < fb.width() / 2 + 40; ++x)
+        if (!fb.getPixel(x, y)) ++n;  // getPixel is TRUE for white, so ink is !it
+    return n;
+  };
+
+  auto both = [&](int w, int h) {
+    // PENDING AND SETTLED FROM THE SAME CHAPTER, so the only difference between the two
+    // frames is what the count is known to be -- the page on glass is page 1 of the
+    // same document either way.
+    Reading pending(deferredChapter(), /*settled=*/false, w, h);
+    REQUIRE(pending.scr->indexPending());
+    REQUIRE(pending.scr->vm().progressPercent ==
+            reader::ReaderViewModel::kProgressUnknown);
+    reader::Framebuffer a(w, h);
+    pending.scr->render(a, pending.ramp.fonts, pending.theme, reader::Plane::Bw);
+
+    Reading settled(deferredChapter(), /*settled=*/true, w, h);
+    REQUIRE_FALSE(settled.scr->indexPending());
+    // WHAT THE CONTROL MUST HAVE IS THE OUTLINE, NOT A FILL. `drawProgressBar` draws
+    // its 1px outline at every percentage, including 0, so the ink this finds in the
+    // settled frame is furniture the pending frame would show too if the bar were drawn
+    // at all -- which is what makes "an unknown draws only the empty track" unable to
+    // hide here. A low percentage is therefore the useful control, not a high one.
+    REQUIRE(settled.scr->vm().progressPercent >= 0);
+    REQUIRE(settled.scr->vm().progressPercent < 10);
+    reader::Framebuffer b(w, h);
+    settled.scr->render(b, settled.ramp.fonts, settled.theme, reader::Plane::Bw);
+
+    CHECK(inkInCentreOfFooter(a) == 0);
+    CHECK(inkInCentreOfFooter(b) > 100);
+  };
+
+  SUBCASE("X4 480x800") { both(480, 800); }
+  SUBCASE("X3 528x792") { both(528, 792); }
+}
+
+TEST_CASE("QuietTheme renders the Reader MID-COUNT to golden, dash and all") {
+  // THE ONLY THING THAT CAN PROVE `—%` IS AN EM DASH AND NOT A NOTDEF BOX. Every
+  // assertion above compares numbers or counts inked pixels, and this project has
+  // already shipped a column of notdef boxes past a row-counting test that was written
+  // to defend the very run that was broken -- ink that spells nothing inks rows exactly
+  // like ink that does. The percentage is drawn in `Role::Meta700`, a different asset
+  // from the `Role::Meta400` the counter's em dash goes through, so the glyph's presence
+  // in that face is a fact about a generated file rather than about this code.
+  //
+  // THE TRANSIENT STATE, WHICH THE OTHER READER GOLDENS DELIBERATELY ARE NOT: they call
+  // completeIndex() first, because the board draws `53 / 890` and pinning `1 / —` as the
+  // baseline for a settled screen would be pinning the wrong frame. This one is the
+  // moment before, and it exists because that moment now draws two things nothing else
+  // in the suite draws -- the dash in the percent slot, and no bar at all.
+  //
+  // No board renders it: design/Reader.dc.html's footer says outright that it shows the
+  // settled state and that the transient one would want its own board file. So this is a
+  // firmware baseline, not a fidelity comparison, and the board carries the rule in prose
+  // beside the specimen it does draw.
+  auto renderOne = [&](int w, int h, const std::string& name) {
+    Reading r(deferredChapter(), /*settled=*/false, w, h);
+    REQUIRE(r.scr->fidelity() == reader::Fidelity::Grayscale);
+    REQUIRE(r.scr->indexPending());
+    REQUIRE(r.scr->vm().pageTotal == 0);
+    REQUIRE(r.scr->vm().page == 1);
+    REQUIRE(r.scr->vm().progressPercent == reader::ReaderViewModel::kProgressUnknown);
+    reader::Framebuffer lsb(w, h), msb(w, h);
+    r.scr->render(lsb, r.ramp.fonts, r.theme, reader::Plane::Lsb);
+    r.scr->render(msb, r.ramp.fonts, r.theme, reader::Plane::Msb);
+    golden::checkGoldenGray(lsb, msb, name);
+  };
+
+  SUBCASE("X4 480x800") { renderOne(480, 800, "reader_counting"); }
+  SUBCASE("X3 528x792") { renderOne(528, 792, "reader_counting_x3"); }
 }
 
 TEST_CASE("THE INDEX GROWS BY READING, and the pages are the same either way") {

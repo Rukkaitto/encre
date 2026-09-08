@@ -1832,7 +1832,15 @@ void QuietTheme::renderReader(Framebuffer& fb, const FontSet& fonts, const Glyph
   const int footerTop = fb.height() - kReadFooterPadBottom - meta.lineHeight();
   const int base = baselineIn(metaPct, footerTop, meta.lineHeight());
 
-  const std::string pct = std::to_string(vm.progressPercent) + "%";
+  // AN EM DASH FOR AN UNKNOWN PERCENTAGE TOO, and it is the SAME em dash the counter
+  // draws for the same missing total -- this number is that counter as a fraction, so
+  // two glyphs for one unknown would be two spellings of one fact. `0%` was the old
+  // answer and 0 is a value the arithmetic reaches honestly (page 1 of a long chapter),
+  // which is what made the unknown indistinguishable from the top of the chapter. See
+  // design/Reader.dc.html's footer and ReaderViewModel::kProgressUnknown.
+  const std::string pct =
+      vm.progressPercent < 0 ? std::string(kEmDash) + "%"
+                             : std::to_string(vm.progressPercent) + "%";
   const Tracking pctTrack = trackingEm(metaPct, kReadMetaEm);
   drawText(fb, metaPct, kReadPadX, base, pct, Ink::Black, pctTrack, plane);
 
@@ -1885,7 +1893,18 @@ void QuietTheme::renderReader(Framebuffer& fb, const FontSet& fonts, const Glyph
              Ink::Black, plane);
     drawText(fb, anchorFont, groupX + icons::kUp.w + kAnchorGap, base, vm.anchorLabel,
              Ink::Black, anchorTrack, plane);
-  } else {
+  } else if (vm.progressPercent >= 0) {
+    // AND NOTHING AT ALL WHILE THE PERCENTAGE IS UNKNOWN, which is the second half of
+    // #93. A bar is a LENGTH stating the same fraction, and it has no dash to fall back
+    // on: `drawProgressBar(..., 0)` is pixel-identical to the settled 0% the arithmetic
+    // legitimately reaches, so drawing an empty track for an unknown reintroduces
+    // exactly the ambiguity the run on the left was just fixed for. An absent claim
+    // beats a false one -- the call this project already makes for an unread gauge
+    // (-1, never 0%) and for the sleep card's absent chapter.
+    //
+    // Nothing reflows: this is the only slot that changes, and its two neighbours are
+    // placed off the padding and off fb.width() rather than off each other. That is
+    // the property the anchor branch above already relies on.
     const int barX = centreIn(kReadPadX, fb.width() - 2 * kReadPadX, kReadBarW);
     const int barY = iconTopIn(footerTop, meta.lineHeight(), kReadBarH);
     drawProgressBar(fb, barX, barY, kReadBarW, kReadBarH, vm.progressPercent);
