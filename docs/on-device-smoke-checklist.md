@@ -368,6 +368,28 @@ figure, kept deliberately so this can be moved *back* with evidence.
       (I2C gauge|ADC backend)` says which backend answered; an X4 reports in
       multiples of ten and that is not a bug.
 - [ ] **9.4** A gauge that does not answer draws the mark **alone**, never `0%`.
+- [ ] **9.5** **The cadence is the one you think (#96).** There are two intervals now,
+      15× apart, and `[alive] battery ... polls=N pollMs=M` is the only thing that
+      says which is in force — a device wrongly pinned to the fast one and a device
+      correctly on the slow one differ in `polls=` and in nothing else. Read `pollMs=`
+      in each of three states and expect:
+
+      | where you are | X3 | X4 |
+      |---|--:|--:|
+      | Home, pack `Normal` | **2000** | **30000** |
+      | in a book, pack `Normal` | **30000** | **30000** |
+      | anywhere, `level=1` or `2` | **2000** | **2000** |
+
+      The X4 column is not a defect: `gChargingObservable` never arms there (no
+      charge-status pin), so no bolt can ever appear or clear and the fast cadence
+      would be held for a repaint that cannot happen. `observable=0` on the same line
+      is what confirms that is the reason. **A `pollMs=2000` in a book with
+      `level=0` is the regression to report** — it means `bandRepaintPossible()` and
+      the interval have drifted apart, and the whole saving is gone.
+- [ ] **9.6** **The count actually falls.** Note `polls=` on two `[alive]` lines while
+      **reading** — the state that used to accumulate them — and confirm the rate is
+      roughly one per 30 s rather than one per 2 s. This is the only place the change
+      is observable at all; nothing on the panel moves.
 
 ## 10. Battery states — the safety ladder (#9, #10)
 
@@ -382,6 +404,20 @@ to reach each rung. `[alive] battery ... level=N` reports which rung the device
 thinks it is on (`0` Normal, `1` Low, `2` Critical), and **a silent shutdown with
 no `[power] CRITICAL` line is a poll that stopped running, not a ladder that
 fired** — the poll is the one part of this that is otherwise invisible.
+
+**EVERY TIMING BELOW IS UNCHANGED BY #96, AND THAT IS WHAT THIS SECTION IS NOW ALSO
+TESTING.** The poll has two cadences, but **every rung below `Normal` selects the fast
+one**, so once a faked percent has put the device on `level=1` the whole ladder runs at
+the 2 s interval it shipped at. Two consequences for how you walk it:
+
+- **A faked build reaches the fast cadence on the very first reading**, because the
+  device boots onto Home and that paint feeds the tracker. So none of 10.1–10.6 asks
+  you to wait longer than it used to, and `pollMs=2000` on `[alive]` is what confirms
+  you are testing the ladder rather than the cadence.
+- **What IS up to 30 s slower is the `Normal` → `Low` crossing on a REAL pack**, off
+  Home. That is the entire latency the change buys and it is not walkable with a fixed
+  fake percent — the flag does not move — so treat 10.1's banner as immediate when
+  faked, and expect up to half a minute if you ever see it happen for real in a book.
 
 - [ ] **10.1** `=8`, in a book. The banner appears over the page **without moving
       the text** — count the lines: a default page holds twelve under the band, and
@@ -422,6 +458,14 @@ fired** — the poll is the one part of this that is otherwise invisible.
 - [ ] **10.6** X3 only, `=2` **on the cable**: the device does **not** shut down.
       `charging` suppresses `Critical` and not `Low`, so the banner is still right
       to be up. An X4 has no charge-status pin and cannot show this.
+- [ ] **10.7** `=2`, **in a book, on the cable, X3, and leave it for a few minutes**
+      (#96). `charging` clears the critical run, so the level rests at `1` — which
+      still selects the **fast** cadence, so `pollMs=2000` on `[alive]` even though
+      the Reader is on glass and the band's repaint is unreachable. That is the arm
+      of `pollIntervalMs()` that keeps the shutdown honest, and this is the only
+      state on the device where you can see it hold the fast interval for the
+      **ladder** rather than for the bolt. `pollMs=30000` here would mean a flat pack
+      is being watched at a cadence three times its own dwell.
 
 ## 11. Every hint slot does what it says
 

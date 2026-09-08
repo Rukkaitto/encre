@@ -413,10 +413,14 @@ static IdleWalkStuck gWarmStuck;
 // press absorbs, and being LATE costs durability, which is the whole feature.
 constexpr uint32_t kSaveQuietMs = 2000;
 
-// Fast enough that plugging in feels immediate, and affordable because the read is
-// I2C and never touches the display's bus. It is gated on Home being on glass, so
-// it does not run while reading.
-static constexpr uint32_t kBatteryPollMs = 2000;
+// THE BATTERY POLL'S CADENCE IS NOT A CONSTANT HERE ANY MORE (#96). It is
+// BatteryTracker::pollIntervalMs(), because the two intervals are justified entirely
+// by their ratio to kUnlatchMs and kCriticalDwellMs and those live in
+// battery_tracker.h with their derivations -- a cadence spelled here would be a number
+// whose reason is in another file. It is also logic, and `shell/` has no harness.
+//
+// What is still this file's is the PREDICATE the interval is chosen with. See
+// bandRepaintPossible() beside homeOnGlass().
 
 // WHETHER THE POSITION ON SCREEN IS WORTH THE BUS. See progress_save_gate.h: it holds
 // the last point actually stored, so the quiet window cannot re-save the same page on
@@ -484,17 +488,22 @@ static reader::IdleTimer gIdle(gSettings.sleepAfterMs);
 static BatteryMonitor gBatteryMonitor;
 static reader::BatteryTracker gBattery;
 // Whether the active board can observe charging at all. Set from the FIRST
-// reading, and it is what keeps the 2 s poll off an X4: that profile declares no
-// gauge and no charge-status pin, so isCharging() is false there for ever and a
-// poll could never see a change. Battery spent for nothing on a device built to
-// sit idle.
+// reading, and it is what keeps the band's repaint -- and, since #96, the FAST
+// cadence -- off an X4: that profile declares no gauge and no charge-status pin, so
+// isCharging() is false there for ever and a poll could never see a change. Battery
+// spent for nothing on a device built to sit idle.
 static bool gChargingObservable = false;
 static bool gBatteryEverRead = false;
-// How many times the 2 s poll has actually run. The poll's only other trace is
-// the one-shot [battery] boot line and an occasional "-> repainting Home", so
-// without this a disarmed poll, a poll pinned by kMaxGrantsPerSession and a
-// poll quietly working are all silent in the same way -- reported on [alive]
-// below for the same reason the listing cache's hit=/miss= is.
+// How many times the periodic poll has actually run. Its only other trace is the
+// one-shot [battery] boot line and an occasional "-> repainting Home", so without
+// this a disarmed poll, a poll pinned by kMaxGrantsPerSession and a poll quietly
+// working are all silent in the same way -- reported on [alive] below for the same
+// reason the listing cache's hit=/miss= is.
+//
+// AND SINCE #96 THE COUNT ALONE IS NOT ENOUGH, because there are now two cadences
+// and this number cannot say which one produced it: a device stuck on the fast
+// interval and one correctly on the slow one differ by 15x in this figure and by
+// nothing else. [alive] carries the interval beside it for that reason.
 static uint32_t gBatteryPolls = 0;
 // When the cadence last had a reason to reset -- file scope because BOTH the
 // paint-time read (renderTop) and the periodic poll (loop) stamp it, so a Home
@@ -503,6 +512,14 @@ static uint32_t gBatteryPolls = 0;
 // quiet iteration to re-read what the boot paint just read a moment earlier --
 // harmless (the tracker will not double-fire a request), but an avoidable I2C
 // transaction.
+//
+// ONLY A PAINT THAT TOOK A READING MAY STAMP IT, and that is the rule #96 must not
+// break: the stamp used to be unconditional, which starved the ladder on the one
+// screen the banner is drawn on -- a reader turning pages faster than the interval
+// pushed the next reading out for ever. It is inside homeOnGlass() in renderTop for
+// that reason, and it stays legal there because a Home paint really does feed
+// gBattery.update() through refreshBatteryOnHome(). The stamp and the reading are the
+// same event; anywhere they are not, there must be no stamp.
 static uint32_t gLastBatteryPollMs = 0;
 static InputManager gInput;
 // The card. One instance: SDCardManager is a singleton underneath, so a second
@@ -3522,7 +3539,7 @@ static reader::BatteryReading readBattery() {
 }
 
 // HOME IS THE SCREEN ABOUT TO BE PAINTED. One predicate, because two sites ask it
-// -- the paint-time read and the 2 s poll -- and a poll that thought Home was
+// -- the paint-time read and the periodic poll -- and a poll that thought Home was
 // showing while the paint site did not would repaint a screen with no battery on it.
 //
 // top() is sufficient and App::render's walk is not needed: nothing is ever pushed
@@ -3533,6 +3550,21 @@ static reader::BatteryReading readBattery() {
 static bool homeOnGlass() {
   return gApp && gApp->top().id() == reader::ScreenId::Home;
 }
+
+// COULD THE CHARGE LATCH'S REPAINT REACH THE GLASS FROM HERE. Two callers, and they
+// must not be two copies: the poll's repaint site spends a refresh on it, and
+// BatteryTracker::pollIntervalMs() asks it to decide whether kUnlatchMs's 60 s dwell
+// is being sampled often enough to mean "continuous". Two spellings of one condition
+// is the shape that has shipped a dead button twice in this project -- and here the
+// drift would be silent in the worse direction: a cadence that thought the repaint
+// reachable while the repaint site did not would keep the fast interval for nothing,
+// which is exactly the battery #96 is about.
+//
+// gChargingObservable is STICKY and never arms on an X4 (no charge-status pin), so on
+// that model this is false for the whole session and the band is served by the
+// paint-time read alone -- which is correct, because an X4 cannot report charging and
+// has no bolt to put up or take down.
+static bool bandRepaintPossible() { return gChargingObservable && homeOnGlass(); }
 
 // Take a reading and hand it to the screen. Returns whether the tracker asked for
 // a repaint, which only the POLL acts on.
@@ -3553,8 +3585,10 @@ static bool refreshBatteryOnHome() {
 // It goes through the SAME gBattery.update(), so the level and the band can never
 // disagree about the percent.
 //
-// NO SpiBusGuard, and that is what makes 2 s affordable: this is I2C on the sensor
-// bus and cannot race a panel refresh.
+// NO SpiBusGuard, and that is what makes even the fast cadence affordable: this is
+// I2C on the sensor bus and cannot race a panel refresh. Three register reads at
+// 400 kHz on the X3's BQ27220 (SoC, voltage, Current), ~450 us; one ADC conversion on
+// the X4.
 static void pollBatteryLevel() { gBattery.update(readBattery(), millis()); }
 
 // ARM THE BANNER ON A FRESH ENTRY INTO Low, and only while the Reader is on TOP.
@@ -3642,11 +3676,20 @@ static void renderTop() {
     // used to be unconditional, which was harmless while the timer's only consumer
     // was itself gated on Home: a Reader paint reset a cadence nothing outside Home
     // was waiting on. The ladder's poll is not gated, so an unconditional stamp
-    // means every page turn pushes the next reading out by another kBatteryPollMs
+    // means every page turn pushes the next reading out by another poll interval
     // -- and a reader turning pages faster than that starves the safety mechanism
     // on the one screen the banner is drawn on. A paint that is not Home's takes no
     // reading at all, so it must not claim one; this makes the stamp say what the
     // comment above it always said.
+    //
+    // #96 DID NOT WEAKEN THAT, and the reason is that this stamp and a reading are
+    // the same event: refreshBatteryOnHome() two lines up feeds gBattery.update(), so
+    // a Home paint really has taken the reading it is claiming. On an X4 -- where
+    // bandRepaintPossible() is false for ever and Home therefore polls at the SLOW
+    // cadence -- a user pressing on Home faster than that interval pushes the periodic
+    // poll out indefinitely, and the ladder is fed by these paints instead, at exactly
+    // the rate the presses arrive. It is the unconditional stamp that starved it,
+    // never the interval.
     gLastBatteryPollMs = millis();
   }
   // EVERY PAINT, not just the first. The frame is the driver's, and the driver
@@ -7050,17 +7093,36 @@ void loop() {
   // are making will hit the card itself soon enough.
   if (quiet) pollCardPresence(millis());
 
-  // TWO JOBS OFF ONE TIMER, and the gates are what separate them. The cadence, the
+  // TWO JOBS OFF ONE TIMER, and the gates are what separate them. The timer, the
   // `quiet` gate and the I2C transaction are shared; what is NOT shared is who may
   // be refused. The safety ladder must be read on every screen and on both models,
   // so it sits in the outer block with no gate but the clock; the band's repaint
   // keeps the two gates it has always had, below.
   //
+  // AND SINCE #96 THE TIMER'S INTERVAL IS ASKED FOR RATHER THAN FIXED. The two jobs
+  // want different cadences -- the band's repaint has to feel immediate and its dwell
+  // has to stay a run, while the ladder tolerates minutes for as long as the pack is
+  // Normal -- so the tracker is asked which one is due, from the rung it is on plus
+  // the one predicate that says whether the band's repaint could fire at all. See
+  // BatteryTracker::pollIntervalMs(), which carries the derivation and the structural
+  // argument that the critical dwell is never sampled slowly.
+  //
+  // IT IS ASKED FOR AFRESH AND NOT CACHED, deliberately: the rung and the screen both
+  // change under this loop, and a remembered interval would be a second copy of a
+  // state that is a load and a virtual call away.
+  //
+  // AND IT SITS LAST IN THE CONDITION rather than in a local above it, so `quiet`
+  // short-circuits it. `bandRepaintPossible()` reaches App::top(), which is a virtual
+  // id() -- nothing beside a 439 ms panel, but this loop runs every 10 ms and a
+  // battery-life change that spent a virtual call per iteration to save an I2C
+  // transaction per 30 s would be an odd trade to make silently.
+  //
   // Same gate as pollCardPresence -- after the paint block, nothing owed to the
   // panel -- but for a different reason: this needs no SpiBusGuard, because it is
   // I2C on the sensor bus and cannot race a refresh. What the gate buys is only
   // that a repaint it asks for does not jump a frame the user is waiting for.
-  if (quiet && static_cast<uint32_t>(millis() - gLastBatteryPollMs) >= kBatteryPollMs) {
+  if (quiet && static_cast<uint32_t>(millis() - gLastBatteryPollMs) >=
+                   gBattery.pollIntervalMs(bandRepaintPossible())) {
     gLastBatteryPollMs = millis();
     ++gBatteryPolls;
     // THE LADDER FIRST AND UNCONDITIONALLY. It is the safety mechanism and must not
@@ -7087,7 +7149,11 @@ void loop() {
     // for ever. A mark claiming the device is charging when it is not is the same
     // class of lie as a 0% for a gauge that did not answer.
     //
-    // Skipped entirely where charging cannot be observed, which is every X4.
+    // Skipped entirely where charging cannot be observed, which is every X4. That
+    // condition is bandRepaintPossible(), the SAME predicate the interval above was
+    // chosen with -- so the cadence and the repaint cannot disagree about whether this
+    // can fire, which since #96 is what keeps the fast interval from being held for a
+    // repaint that could never happen.
     // BatteryTracker owns everything that makes this safe: an edge in either
     // direction, a first reading that seeds without firing, a latch that clears only
     // after 60 s of continuous not-charging, and three grants a session. The dwell is
@@ -7095,7 +7161,7 @@ void loop() {
     // Current() sign dithers around zero -- repainting the panel all night, and it is
     // also what tells a real unplug from that dither, which is why CLEARING the bolt
     // rides the same timer rather than a second constant.
-    if (gChargingObservable && homeOnGlass() && refreshBatteryOnHome()) {
+    if (bandRepaintPossible() && refreshBatteryOnHome()) {
       gApp->markDirty();
       // WHICH EDGE, because both grant a repaint now and a line that says only
       // "charging" would misreport half of them -- on glass this is the one
@@ -7133,16 +7199,24 @@ void loop() {
     // in front of it, would both be unattributable. Straight off level() -- 0
     // Normal, 1 Low, 2 Critical -- never re-thresholded from pct, which would be
     // a second spelling of the ladder free to disagree with the first.
+    //
+    // pollMs= IS THE CADENCE THAT IS CURRENTLY DUE (#96), and polls= cannot stand
+    // without it: there are two intervals now, 15x apart, so a device wrongly pinned
+    // to the fast one and a device correctly on the slow one differ in polls= and in
+    // NOTHING ELSE that reaches a log. Read straight off pollIntervalMs() with the
+    // same predicate the loop uses, never re-derived from level= -- which would be a
+    // second spelling of the choice, free to disagree with the one actually made.
     logf("[alive] last-stage=%s heap=%u minHeap=%u screen=%s depth=%d "
          "dropped=%lu/%lu listings=%u slots/%uB hit=%u miss=%u "
-         "battery observable=%d pct=%d charging=%d level=%d polls=%lu\n",
+         "battery observable=%d pct=%d charging=%d level=%d polls=%lu pollMs=%lu\n",
          stage, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
          reader::screenName(gApp->top().id()), gApp->depth(),
          (unsigned long)rawSamplesDropped(), (unsigned long)gPresses.dropped(),
          (unsigned)gSd.listings().slotsHeld(), (unsigned)gSd.listings().residentBytes(),
          (unsigned)gSd.listings().hits(), (unsigned)gSd.listings().misses(),
          (int)gChargingObservable, gBattery.percent(), (int)gBattery.charging(),
-         (int)gBattery.level(), (unsigned long)gBatteryPolls);
+         (int)gBattery.level(), (unsigned long)gBatteryPolls,
+         (unsigned long)gBattery.pollIntervalMs(bandRepaintPossible()));
     // WHAT THE CARD LOG HAS COST AND WHAT IT HAS LOST, on the heartbeat rather than
     // per flush. `dropped` non-zero means the buffer overran between two idle
     // windows and the log has a HOLE in it -- which must never be mistaken for the

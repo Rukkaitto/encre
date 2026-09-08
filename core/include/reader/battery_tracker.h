@@ -109,7 +109,100 @@ class BatteryTracker {
   // sample taken mid-waveform; this is the belt to that braces.
   static constexpr uint32_t kCriticalDwellMs = 10u * 1000u;
 
+  // --- The cadence (#96) --------------------------------------------------------
+  //
+  // TWO INTERVALS, BECAUSE THE THREE CONSUMERS OF update() DO NOT WANT ONE. #96
+  // asked for "minutes", on the premise that polling exists only to show the low
+  // banner. It does not, and the parts the premise omits are the parts that make a
+  // single longer interval unsafe -- the same update() drives:
+  //
+  //   1. the Low banner, which genuinely tolerates minutes;
+  //   2. the Critical rung, which is [[noreturn]] criticalShutdown() -- it saves
+  //      the reader's page to the card, paints BATTERY EMPTY and cuts the rails, so
+  //      detecting it later is a longer window in which a brownout beats the save;
+  //   3. the charge latch, whose repaint puts the bolt on Home and whose whole
+  //      design is kUnlatchMs's dwell below.
+  //
+  // AND THE INTERVAL IS WHAT BOTH DWELLS ARE MEASURED ACROSS. They are timestamp
+  // arithmetic over a sequence of samples, so a coarser cadence does not lengthen a
+  // dwell -- it THINS it. At an interval equal to the dwell, "60 s of unbroken
+  // not-charging" degenerates into "two samples 60 s apart", which is a claim about
+  // two instants rather than about a minute, and `CONTINUOUS` stops meaning what it
+  // says. That is the bound, and it is what kPollSlowMs is derived from.
+  //
+  // So the interval is chosen from the STATE rather than fixed, and the split is the
+  // one the states already make -- see pollIntervalMs() below.
+  //
+  // WHY THAT IS NOT A COMPROMISE: the readings only accumulate in the case this
+  // slows down. A device idling on Home sleeps after sleepAfterMs (300 s by
+  // default), so it can never take more than ~150 readings before the chip resets.
+  // A device awake for an HOUR is one whose buttons are being pressed -- somebody
+  // reading -- and then the Reader is on glass rather than Home, and the ladder is
+  // the only consumer that wants the gauge at all.
+
+  // THE FAST CADENCE IS THE ONE THAT SHIPPED and is not re-derived here: 2 s is what
+  // makes plugging in feel immediate, and it puts five samples inside
+  // kCriticalDwellMs so that dwell is a run rather than a pair.
+  static constexpr uint32_t kPollFastMs = 2u * 1000u;
+
+  // THE SLOW CADENCE, BOUNDED BY kUnlatchMs RATHER THAN CHOSEN -- and this is where
+  // #96's "minutes" is declined. Minutes start at 60 s and kUnlatchMs IS 60 s, so a
+  // minute-long interval makes the longest dwell in this file satisfiable by a single
+  // gap between two samples. Half of it is the coarsest cadence at which no one
+  // interval can span that dwell, which is the property the word is claiming.
+  //
+  // It gives up almost nothing to the minutes asked for, because the benefit
+  // saturates and the guarantee does not: 2 s -> 30 s removes 93.3% of the readings,
+  // and the next doubling to 60 s buys 3.4 points more while halving the samples both
+  // dwells rest on. If minutes are ever wanted anyway, the honest route is to lengthen
+  // kUnlatchMs with it rather than to move this number alone.
+  //
+  // WHAT IT COSTS is that a real Low crossing is noticed up to 30 s late, and the pack
+  // absorbs it: the Low band runs from kLowPercent down to kCriticalPercent, and on an
+  // X4 -- which reports 10% notches -- it is a whole notch. Either way that is hours of
+  // discharge, so 30 s cannot skip it, and everything downstream of the crossing runs
+  // at kPollFastMs.
+  static constexpr uint32_t kPollSlowMs = 30u * 1000u;
+
+  static_assert(kPollFastMs < kPollSlowMs, "the slow cadence must be the slower one");
+  // No single slow gap may span the longest dwell here. This is the derivation above,
+  // as a build failure rather than as a paragraph.
+  static_assert(kPollSlowMs < kUnlatchMs, "a dwell spanned by one gap is not a dwell");
+  // And the fast cadence must fit more than one sample inside the critical dwell, for
+  // the same reason one reading is not a flat pack.
+  static_assert(kPollFastMs * 2 <= kCriticalDwellMs, "the critical dwell needs a run");
+
   BatteryLevel level() const { return level_; }
+
+  // WHICH CADENCE IS DUE.
+  //
+  // `bandRepaintPossible` is the caller's answer to "could the charge latch's repaint
+  // reach the glass from here" -- in the shell, gChargingObservable AND Home on top.
+  // It is PASSED IN rather than modelled, because this class knows nothing about
+  // screens; and it must be ONE predicate in the caller, asked here and at the repaint
+  // site, because two spellings of one condition is the shape that has shipped a dead
+  // button twice in this project.
+  //
+  // NOT Normal -> FAST, and that is the structural half of the design rather than a
+  // preference. The critical run can only be armed by a reading that has already set
+  // level_ = Low, so the interval chosen after it is fast BY CONSTRUCTION -- the
+  // critical dwell is therefore never sampled at kPollSlowMs, which it could not
+  // survive (kPollSlowMs > kCriticalDwellMs). test_battery_tracker.cpp drives the
+  // closed loop and asserts exactly that, because it is a fact about the loop rather
+  // than about either half of it.
+  //
+  // The band's case is the other half: kUnlatchMs's dwell is sampled at kPollFastMs in
+  // every state where its repaint can actually reach the panel, which is also where
+  // plugging in has to feel immediate. Off Home, and on an X4 -- which has no
+  // charge-status pin, so nothing there ever reports chargingKnown -- the latch's state
+  // still evolves at the slow cadence, and the stated cost is that a dithering signal
+  // could then clear it spuriously. It cannot flicker the panel doing so: the repaint
+  // is gated on the same predicate, so nothing reaches the glass, and the worst a
+  // spurious cycle costs is kMaxGrantsPerSession -- which is what that cap is for.
+  uint32_t pollIntervalMs(bool bandRepaintPossible) const {
+    if (level_ != BatteryLevel::Normal) return kPollFastMs;
+    return bandRepaintPossible ? kPollFastMs : kPollSlowMs;
+  }
 
   void update(const BatteryReading& r, uint32_t nowMs) {
     if (r.percentKnown) {
