@@ -171,15 +171,40 @@ TEST_CASE("book details matches its golden at both geometries") {
 TEST_CASE("book details' rules land where the board's do") {
   Ramp r;
   reader::QuietTheme theme;
-  // RE-MEASURED off design/BookDetails.dc.html after `Added` and the subtitle were
-  // removed: the band's 2px rule at 64-65, the 2px rule above the fields still at
-  // 290-291, then FOUR field rules (five rows, and the last has none), and the hint
-  // bar's at h-64.
+  // RE-DERIVED off design/BookDetails.dc.html after the placeholder cover was
+  // removed: the band's 2px rule at 64-65, the 2px rule above the fields at
+  // 203-204, then FOUR field rules (five rows, and the last has none), and the
+  // hint bar's at h-64.
   //
-  // The block above did NOT move when the subtitle went, and that is worth knowing
-  // rather than assuming: the cover is 180px tall and the column was shorter than it,
-  // so the block's height is the COVER's and losing a column run changed nothing above
-  // the fields.
+  // WHERE 203 COMES FROM, term by term, and it is the BOARD's box model rather
+  // than whatever the code happens to produce:
+  //
+  //     66  the header band, `padding: 18px .. 14px` + its 2px border-bottom
+  //   + 24  kDetailsPadTop      the block's `padding-top`
+  //   +  4  kDetailsColPadTop   the column's `padding-top`
+  //   + 46  kDetailsTitleLineH  ONE title line -- `Dubliners` fits
+  //   +  6  kDetailsColGap      the column's `gap`, ONCE: a gap is between items
+  //   + 37  Body400's line box  the author, at the board's `--t-body`
+  //   + 20  kDetailsPadBottom   the block's `padding-bottom`
+  //   = 203
+  //
+  // Then the 2px rule, and 65px per field row (64 of content and a 1px border):
+  // 205 + 64 = 269, and 334, 399, 464.
+  //
+  // CONFIRMED INDEPENDENTLY ON BOTH SIDES rather than fitted to one: Chrome's own
+  // render of the board (`make compare --export`) inks full-width rows at exactly
+  // 64, 65, 203, 204, 269, 334, 399, 464 at BOTH geometries, and so does this.
+  //
+  // THE BLOCK'S HEIGHT IS THE COLUMN'S NOW, WHICH IS WHY THESE MOVED AT ALL. It
+  // was `max(column, cover)` and the cover's 180px won for every title this
+  // screen can draw -- so the height was a CONSTANT, the column's runs were free,
+  // and losing the subtitle moved nothing. That is also what hid a spare
+  // kDetailsColGap in the column's arithmetic for as long as it was slack.
+  //
+  // The positions do NOT depend on the canvas height: the block hangs off the
+  // band at the top, and only the hint bar's rule is measured from the bottom.
+  const int bandBottom = 66;  // the band's own 2px rule ends at 65
+  const int blockRule = 203;
   for (const int h : {800, 792}) {
     libapp::LibraryApp app = detailsOf(theme, r.fonts, h);
     reader::Framebuffer fb(480, h);
@@ -189,11 +214,31 @@ TEST_CASE("book details' rules land where the board's do") {
         if (fb.getPixel(x, y)) return false;
       return true;
     };
-    for (const int y : {64, 65, 290, 291, 356, 421, 486, 551}) CHECK(fullWidthRule(y));
+    for (const int y : {64, 65, 203, 204, 269, 334, 399, 464}) CHECK(fullWidthRule(y));
     CHECK(fullWidthRule(h - 64));
     // The last field row has no rule: the board leaves the list's bottom edge
-    // open above the slack, as the Library's does.
-    CHECK_FALSE(fullWidthRule(616));
+    // open above the slack, as the Library's does. 529 is where a fifth rule
+    // would land, 464 + 65.
+    CHECK_FALSE(fullWidthRule(529));
+    // AND NOTHING IN THE BLOCK DRAWS A TALL VERTICAL EDGE, which is what the
+    // placeholder cover was and what the column's type can never be. The cover
+    // was a 120x180 box at (24, 90): a level-1 stipple inside a 2px border, so
+    // its left and right borders are 180 CONTIGUOUS inked pixels in one column.
+    //
+    // THE OBVIOUS DISCRIMINATOR IS BLIND AND WAS TRIED FIRST: "no ink at all in
+    // x=24..143" fails on the honest render, because the column now starts at
+    // kMargin and `Dubliners` puts its D's stem at exactly x=24. Ink there is
+    // expected; a 180-tall RUN of it is not. Type's tallest possible stem is one
+    // line box, so 100 separates the two by a wide margin either way.
+    int longestRun = 0;
+    for (int xx = 0; xx < fb.width(); ++xx) {
+      int run = 0;
+      for (int yy = bandBottom; yy < blockRule; ++yy) {
+        run = fb.getPixel(xx, yy) ? 0 : run + 1;
+        if (run > longestRun) longestRun = run;
+      }
+    }
+    CHECK(longestRun < 100);
   }
 }
 

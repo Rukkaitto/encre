@@ -2423,7 +2423,13 @@ TEST_CASE("outlineRect inks a border of the stated thickness and leaves the inte
   CHECK(fb.getPixel(24, 17));
 }
 
-TEST_CASE("outlineRect's white variant is the focused book thumb's border") {
+TEST_CASE("outlineRect's white variant is tested capability with no caller left") {
+  // THIS SAID "is the focused book thumb's border" AND THAT CALLER IS GONE -- the
+  // Library row's placeholder cover went with #95, and it was the only thing in
+  // the firmware that drew a paper border on an inked ground. All eight surviving
+  // outlineRect call sites in core/src take the default, so this case is the only
+  // producer of `white` anywhere. Kept for ditherRect's `Ink` reason: a treatment
+  // the boards will ask for again, pinned so it still works when they do.
   reader::Framebuffer fb(16, 16);
   fb.clear(false);  // an inked field, as a focused row's fill is
   reader::outlineRect(fb, 2, 2, 10, 10, 1, /*white=*/true);

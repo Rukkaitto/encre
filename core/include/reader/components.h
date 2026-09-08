@@ -267,10 +267,16 @@ int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4],
 
 // A rectangular outline of thickness `t`, as four fills, interior untouched --
 // the treatment every bordered box on the boards shares: the sleep card and its
-// badge, the cover placeholder, an unfocused action block, the outlined prompt
-// button, the scroll rail's track, a book thumb's border, an overlay panel's
-// border. `white` is the focused book thumb's case, a paper border on an inked
-// row. NOT for a box whose interior must be painted (Home's progress bar fills
+// badge, an unfocused action block, the outlined prompt button, the scroll
+// rail's track and an overlay panel's border. It also drew the three placeholder
+// covers' 1px and 2px borders and a focused book thumb's paper border on an
+// inked row, and all four of those callers are gone -- so `white` has NO
+// PRODUCTION CALLER LEFT, in the shape ditherRect's `Ink` is recorded in.
+// Checked rather than assumed: all eight surviving call sites in core/src take
+// the default, and test_components.cpp is the only thing that passes true. Kept
+// as tested capability, since a paper border on an inked ground is a treatment
+// the boards will ask for again.
+// NOT for a box whose interior must be painted (Home's progress bar fills
 // then hollows): an outline deliberately leaves the middle alone.
 void outlineRect(Framebuffer& fb, int x, int y, int w, int h, int t, bool white = false);
 
@@ -464,7 +470,7 @@ int drawBadge(Framebuffer& fb, const GlyphSource& font, std::string_view label, 
 // then either a right-aligned value or a disclosure chevron.
 //
 //   padding: 11px 24px; gap: 16px; border-bottom: 1px solid
-//   thumbnail  44x64      the dithered cover placeholder, or the folder mark
+//   thumbnail  44x64      the 44x44 book or folder mark, centred in the slot
 //   line 1     --t-body   500, or 700 when the row is focused; no tracking
 //   line 2     --t-meta   400 at letter-spacing 0.10em
 //   value      --t-value  700, right-aligned on the margin

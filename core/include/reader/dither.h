@@ -8,20 +8,30 @@ class Framebuffer;
 // Bayer matrix -- see the comment in dither.cpp for the measurement that settled
 // it. `level` is 0 (white) to 4 (solid black); the panel has no real greys, so
 // apparent tone comes from a stipple the eye integrates at reading distance.
-// Used for cover placeholders and sleep-screen fields.
 //
-// `ink` is which colour the dots are, and it is a real design case rather than
-// generality for its own sake: the boards declare the tint twice, once each way.
+// ONE PRODUCTION CALLER: renderSleep's full-panel field. This line said "cover
+// placeholders and sleep-screen fields" and the placeholders are all three gone
+// -- Home's, the Library row's and Book details' -- so the plural was the last of
+// them outliving the sentence. Naming the caller is deliberate: it goes stale
+// loudly where a category does not.
+//
+// `ink` IS TESTED CAPABILITY AND NOT WORKING BEHAVIOUR, which is the honest
+// version of what this comment used to claim. The boards declare the tint twice,
+// once each way:
 //
 //   .dither-dots     { background-color: #ffffff; ... circle, #000000 1.1px ... }
 //   .dither-dots-inv { background-color: #000000; ... circle, #ffffff 1.1px ... }
 //
-// Same dot, same 4px grid, colours swapped -- the second is what a Library row's
-// cover placeholder becomes when the row is focused and the ground under it is
-// already filled black. Ink::White therefore SETS PAPER where Ink::Black sets
-// ink, on identical cells, so a focused and an unfocused cover are the same
-// stipple seen against opposite grounds rather than two patterns that have to be
-// kept in step.
+// Same dot, same 4px grid, colours swapped -- and Ink::White SETS PAPER where
+// Ink::Black sets ink, on identical cells, so a tint on a filled ground and one
+// on paper are the same stipple seen against opposite grounds rather than two
+// patterns to keep in step. The instance was a FOCUSED Library row's placeholder
+// cover, reversed out of the row's black fill, and that placeholder is gone: the
+// one surviving caller passes black. Kept the way ListRow::trackingEm1000 is
+// kept -- test_dither.cpp drives both inks across 30 rectangles x both rotations
+// x all four levels, and Bookmarks.dc.html is a board that asks for a reversed
+// tint again -- and stated rather than assumed, because a reader with no producer
+// is the shape this project has been bitten by from two directions.
 //
 // NOT for the veil behind an overlay, which is a different board declaration and
 // a different pattern -- see veilRect. (A white-inked ditherRect is not that

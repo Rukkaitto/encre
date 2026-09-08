@@ -660,12 +660,16 @@ single-pixel whiskers. Thresholding **improved** all three, measurably and
 visibly. Same for `kForward`, whose dithered arrowhead was frayed.
 
 **The two dither matrices are deliberately different, and `dither.cpp` says
-why** — and `kClustered` still ships, whatever the screen's fidelity, on **Book
-details' cover slot and `renderSleep`'s full-panel field**. Those are the two
-callers by name rather than "the cover placeholder", which was three placeholders
-until #95 took Home's and the Library rows' away and would have read as still
-naming them. `kClustered` is for *tints*: a cover slot is one round dot repeated
-on a 4px grid, and dispersing that area into isolated
+why** — and `kClustered` still ships, whatever the screen's fidelity, on
+**`renderSleep`'s full-panel field, which is now its ONLY production caller**.
+This line has named its callers three times and been overtaken twice: it said
+"the cover placeholder" while there were three of them, then "Book details' cover
+slot and `renderSleep`'s field" once #95 had taken Home's and the Library rows',
+and Book details' went too. **Naming the callers is still right — it is what made
+each of those revisions loud** — and the argument was never a fact about which
+caller draws the tint. `kClustered` is for *tints*: the sleep board's
+`.dither-field` is one round dot repeated on a 4px grid, and dispersing that area
+into isolated
 pixels reads denser and grainier than the blob it is meant to be. `kBayer` is for
 *edges*, and is what `Plane::BwDithered` uses — clustering a stroke's edge
 coverage would pile the ink against the stroke and read as the stroke thickening,
@@ -2009,6 +2013,35 @@ case to look at if one ever appears.
   out), menu rows (content-box 80 + 1px border = 81, compounding a pixel per
   row), and the hint bar's asymmetric padding. `headerBandHeight()` and
   `hintBarHeight()` derive and return their height.
+  - **A `max()` OVER TWO HEIGHTS WHERE ONE ALWAYS WINS IS A PINNED NUMBER
+    WEARING A DERIVATION'S CLOTHES, AND EVERYTHING UNDER IT IS THEN UNTESTED
+    SLACK (#95).** Book details' block was `max(column, cover)` and the cover's
+    180px won for **every title the screen can draw** — so the height was a
+    constant, the column's runs cost nothing, and this file recorded the
+    consequence approvingly: *"the block above did NOT move when the subtitle
+    went"*. What was hiding in that slack was a **second `kDetailsColGap`**. A
+    flex `gap` sits BETWEEN items, so a title and an author cost one gap and the
+    arithmetic charged two; over-reserving 6px only made the title's budget
+    conservative, and nothing on the glass could see it. Removing the cover made
+    the column the height, and the spare gap would have drawn **every rule on the
+    screen 6px below the board's**.
+    - **The tell is the losing branch, not the bug.** A `max` whose other arm
+      cannot win is a branch no test exercises, so every number feeding it is
+      unverified — and the day the winner goes, all of them become load-bearing
+      at once. Grep for the *loser* when a height changes.
+    - **It also hid an ELISION.** The cover took 140px (120 plus its gutter) off
+      the title's measure, so a 67-character real-card filename wrapped to five
+      lines and was cut; on the full width it is four lines and **complete**. A
+      screen whose whole argument is that the name is the content had been paying
+      for an empty box with the name.
+    - **The BUDGET and the HEIGHT are two quantities and must not be collapsed**,
+      which is the sleep card's chapter reserve one screen over. `blockRoom` is a
+      budget and comes from the CANVAS — the band above, the rule, rows and bar
+      below — so the title's line count is **not** self-referential even though
+      the height is now the column's. The height is a *result*, `<= blockRoom` by
+      construction. A budget from the height is a circle; a height from the
+      budget leaves the field rules wherever the tallest possible title would
+      have put them.
 - **Round once.** Positions accumulate in fixed point and round at the end.
   Three truncating divisions put an icon 1.5px low; pre-rounding 2.52px tracking
   to 3 drifted a label ~3px.
@@ -2251,14 +2284,20 @@ case to look at if one ever appears.
   - **`ditherRect`'s `Ink` PARAMETER HAS NO SCREEN CALLER ANY MORE, and this line
     used to name its one instance.** `.dither-dots-inv` was the FOCUSED Library
     row's placeholder cover — the tint reversed out of the black fill — and #95
-    removed the placeholder from the rows. Both surviving callers pass black
-    (Book details' cover slot, and `renderSleep`'s full-panel field). It is kept
-    as `ListRow::trackingEm1000` is kept: `test_dither.cpp` drives both inks
+    removed the placeholder from the rows. **The description is still accurate and
+    `ditherRect` is now down to ONE caller rather than two**: this bullet said
+    "both surviving callers pass black (Book details' cover slot, and
+    `renderSleep`'s full-panel field)" and Book details' slot went with the rest of
+    #95, so the surviving caller is the sleep field, and it passes black. It is
+    kept as `ListRow::trackingEm1000` is kept: `test_dither.cpp` drives both inks
     across 30 rectangles × both rotations × all four levels, so this is **tested
     capability rather than working behaviour**, and `Bookmarks.dc.html` is a
     board that asks for a reversed tint again. Stated rather than assumed,
     because a producerless reader is the shape this file has been bitten by from
-    two directions.
+    two directions. **`core/include/reader/dither.h` said the same thing in the
+    present tense and was corrected with this**, which is the half a CLAUDE.md-only
+    fix leaves behind — a rule stated in two places is enforced in neither if only
+    one is revised.
 - **The veil was the most expensive thing on the screen, and it is now byte-wise.**
   A veil covers the WHOLE frame, and the per-pixel form cost four integer
   divisions and a bit-addressed read-modify-write per pixel: 2.33 ms at 528×792
@@ -2353,7 +2392,7 @@ worth knowing before changing it:
 | Library | `Library.dc.html` | The only list that scrolls today, and the only screen with a rail. A book row is the FOLDER row with a different mark (#95) — one expression picking `kBook` or `kFolder`, and the 44×64 slot stays because `bookRowContentH` takes the max with it. |
 | Library / scrolled | `LibraryScrolled.dc.html` | Reached by pressing PAST the focused row and back — arriving from above windows it differently. |
 | Item actions, Delete confirm | their own boards | Overlays; a focus move repaints the overlay alone. |
-| Book details | `BookDetails.dc.html` | Not an overlay, despite covering the Library. Its title **wraps**; everywhere else elides. **The last placeholder cover in the firmware** — kept when #95 took Home's and the rows', because this is the screen whose job is to describe one book at length and its block's height IS the cover's 180px, so removing it moves every rule below. Its own decision, unmade. |
+| Book details | `BookDetails.dc.html` | Not an overlay, despite covering the Library. Its title **wraps**; everywhere else elides. **NO COVER, and its block's height is the COLUMN's now** — the third and last placeholder to go (#95). The height was `max(column, cover)` and the cover's 180px won for every title the screen can draw, so it was a CONSTANT and the column's runs were free; each run costs its line box now and the 2px rule below moves from 290 to 203. |
 | Settings | `Settings.dc.html` | Nine items, three sections, and every drawn row responds. |
 | Sleep | `Sleep.dc.html` | Painted directly, never pushed — a push would make the wake restore into it. Its title, author and chapter **all wrap**; the chapter's two lines are reserved UNCONDITIONALLY, so the title's budget cannot move when the reader crosses a chapter. The badge is drawn first, because its top is the card's bound. |
 | Sleep / nothing open | `SleepIdle.dc.html` | The badge alone. Same screen with its card removed. |
