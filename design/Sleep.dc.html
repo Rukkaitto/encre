@@ -184,9 +184,27 @@
          asked for a pre-rendered asset nobody has -- unbuildable, which is the
          same thing LowBattery.dc.html's band label was corrected for. The
          firmware has always drawn Role::Label500 on this run, so this moves the
-         BOARD onto what is drawable and no golden with it. -->
+         BOARD onto what is drawable and no golden with it.
+
+         AND THE NAME'S LINE BOX IS STATED, WHERE THIS RUN LEFT IT AT `normal`.
+         29px is the face's own line height at this ppem, which is what the
+         firmware derives -- and Chrome's `normal` resolves it to 30, so a card
+         with one more unstated run came out a pixel taller in the browser than on
+         the panel. That is the Sleep TITLE's lesson (its `line-height: 1.1`
+         exists because the face would have given 53 where the board wanted 46)
+         and Peek.dc.html's (stating the panel's own height "closed a
+         disagreement rather than documenting it"), and it is worth stating even
+         though it is only a pixel: the card is CENTRED, so a pixel of height is
+         half a pixel of offset at both ends, and every rule inside it goes out of
+         register with the board.
+
+         Measured: with the box unstated this screen went 2.42%/2.22% to
+         3.03%/2.78% against the board -- the whole of that regression was this one
+         line -- and with it stated it is 2.32%/2.13%, which is better than before
+         the chapter arrived. The card's borders go from 2px out of register to
+         1px. -->
     <div style="font-size: var(--t-label); letter-spacing: 0.14em; font-weight: 500;">6%</div>
-    <div style="font-size: var(--t-label); letter-spacing: 0.1em; font-weight: 500; align-self: stretch; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">I &middot; Miss Brooke</div>
+    <div style="font-size: var(--t-label); letter-spacing: 0.1em; font-weight: 500; line-height: 29px; align-self: stretch; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">I &middot; Miss Brooke</div>
   </div>
 
   <div style="position: absolute; bottom: 34px; background: #ffffff; border: 1px solid #000000; padding: 8px 18px;">
