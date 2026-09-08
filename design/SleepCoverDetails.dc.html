@@ -255,35 +255,55 @@
          change of DEGREE -- how much of a name survives -- and not the departure
          of truncation.
 
-         AND THE TWO LINES ARE RESERVED WHETHER OR NOT THE NAME USES THEM, which
-         is the whole of how this stays safe. The objection this run elided for is
-         real, and it is NOT answered by the rate: A CHAPTER CHANGES WHILE THE
-         BOOK IS BEING READ AND AN AUTHOR DOES NOT. This card's height is a sum
-         and the title takes whatever is left, so a chapter free to GROW would
-         make the TITLE's budget depend on where the reader is STANDING -- cross a
-         chapter boundary and the book's name could reflow, or newly acquire an
-         ellipsis, because a page was turned. That is a visible defect with a
-         baffling cause. `min-height: 58px` -- two of this run's own stated 29px
-         lines -- is what removes it: the run is 58px tall for a one-line name and
-         a three-line one alike, so the title's budget is a CONSTANT and the
-         card's layout is a function of the BOOK, exactly as it was at one line.
+         AND THE TWO LINES ARE RESERVED IN THE TITLE'S BUDGET WHETHER OR NOT THE
+         NAME USES THEM -- the BUDGET, which is not this box's HEIGHT: they are two
+         different quantities and nothing requires them to be the same number. The
+         objection this run elided for is real, and it is NOT answered by the rate:
+         A CHAPTER CHANGES WHILE THE BOOK IS BEING READ AND AN AUTHOR DOES NOT. The
+         title takes whatever the card's room leaves, so a chapter counted into that
+         division only when it USED its second line would make the TITLE's budget
+         depend on where the reader is STANDING -- cross a chapter boundary and the
+         book's name could reflow, or newly acquire an ellipsis, because a page was
+         turned. That is a visible defect with a baffling cause, and the reserve is
+         what removes it: the title is measured against two of this run's own 29px
+         lines for a one-line name and a three-line one alike, so its budget is a
+         CONSTANT and the card's layout is a function of the BOOK, exactly as it was
+         at one line.
 
-         DO NOT MAKE THE RESERVATION CONDITIONAL. Giving a one-line name a
-         one-line box is the obvious tightening, and it reintroduces the whole
-         defect above -- while LOOKING like a saving, because the specimen on this
-         board is one line and so is the common case. What the always-reserved
-         second line actually costs is a slightly different centring of an opaque
-         card on a dithered field, since the card is CENTRED: there is nothing a
-         reader can point at.
+         THE BOX ITSELF SIZES TO ITS CONTENT, WHERE IT ONCE SAID `min-height: 58px`.
+         That declaration put the reserve into the card's HEIGHT as well, and there
+         it bought nothing: this is the card's LAST run, so nothing below it steps
+         up, and a one-line name -- 65.46% of corpus labels, and the specimen on this
+         board -- left 29px of empty box standing at the foot of a card that holds
+         this glass for HOURS. Dead space, not spacing. The card is CENTRED, so what
+         a shorter card does is re-centre; no type moves relative to any other type.
 
-         WHAT IT COSTS, stated rather than discovered: two lines in the card's
-         fixed sum, so the title's derived budget goes from 8 lines to 6 on both
-         panels -- 642px of card room on the X4 and 634px on the X3, less the
+         SO THE TWO NUMBERS ARE DELIBERATELY DIFFERENT AND MUST STAY SO. The
+         title's budget takes the RESERVE, always two lines; the card's height takes
+         the ACTUAL wrap. Making the height use the reserve again puts the dead space
+         back, and making the budget use the actual reintroduces the reflow above --
+         each is a one-line change in `renderSleep`, and test_theme_sleep_golden.cpp
+         fails on each of them, separately and by name.
+
+         WHAT THE RESERVE COSTS, stated rather than discovered: two lines in the
+         TITLE's division, so the title's derived budget goes from 8 lines to 6 on
+         both panels -- 642px of card room on the X4 and 634px on the X3, less the
          325px that is not the title when the author takes one line, over the
          title's own 46px line box. 9 of the 225 corpus titles (4.00%) elide at a
          budget of 6, against 6 at 7 and 4 at 8, so the second reserved line costs
          3 titles and this whole run costs 5. The title still keeps six times what
          this run takes.
+
+         AND KEEPING THE BUDGET AGAINST THE RESERVE MAKES THE TITLE CONSERVATIVE BY
+         UP TO ONE LINE, which costs those same 3 titles and no others -- measured,
+         not reasoned about. A one-line chapter buys the title nothing, so the only
+         title that can notice is one needing exactly `budget + 1` lines, and
+         `sleep_chapter_probe` says that is 3 of 225 (1.33%): `The Fables of Aesop`,
+         `The Declaration of Independence of the United States of America` and `The
+         Hacker Crackdown`. All three HAVE one-line labels and none has ONLY one-line
+         labels (39 of 90, 2 of 6, 4 of 23), so in those books the seventh title line
+         is given up in 45 of their 119 chapters and kept in the other 74. Every
+         other corpus title either fits its 6 lines or would elide at 7 as well.
 
          THE NAME TAKES 0.10em AND THE PERCENTAGE KEEPS 0.14em, which is
          Main.dc.html's split and its reason: 0.14em is a COUNTER's tracking and a
@@ -322,7 +342,7 @@
          the chapter arrived. The card's borders go from 2px out of register to
          1px. -->
     <div style="font-size: var(--t-label); letter-spacing: 0.14em; font-weight: 500;">6%</div>
-    <div style="font-size: var(--t-label); letter-spacing: 0.1em; font-weight: 500; line-height: 29px; align-self: stretch; text-align: center; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; min-height: 58px;">I &middot; Miss Brooke</div>
+    <div style="font-size: var(--t-label); letter-spacing: 0.1em; font-weight: 500; line-height: 29px; align-self: stretch; text-align: center; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;">I &middot; Miss Brooke</div>
   </div>
 
   <!-- THE BADGE STAYS HERE, AND IT IS THE HALF THAT CANNOT GO. CLAUDE.md's rule
