@@ -329,6 +329,10 @@ int main(int argc, char** argv) {
   {
     const reader::Font& tf = ramp.fonts[reader::Role::Title700];
     std::vector<size_t> lines;
+    // The PATH beside the line count, which the tail below needs: the conservative
+    // budget's cost is a joint question about a title AND that same book's chapter
+    // labels, so a bare distribution cannot answer it.
+    std::vector<std::pair<size_t, std::string>> perTitle;
     for (int i = 2; i < argc; ++i) {
       reader::OpenedBook b;
       const char* why = nullptr;
@@ -338,6 +342,7 @@ int main(int argc, char** argv) {
           reader::wrapProseLead(tf, shouted, kContentW, reader::pxToF26(kTitleLineH), {},
                                 reader::WordBreak::Anywhere);
       lines.push_back(p.lines.size());
+      perTitle.emplace_back(p.lines.size(), argv[i]);
     }
     std::sort(lines.begin(), lines.end());
     std::printf("\ntitles wrapped at %dpx over the same column: n=%zu p50=%zu p90=%zu max=%zu\n",
@@ -366,6 +371,53 @@ int main(int argc, char** argv) {
                   atLeast, lines.empty() ? 0.0
                                          : 100.0 * static_cast<double>(atLeast) /
                                                static_cast<double>(lines.size()));
+    }
+
+    // --- WHAT THE CONSERVATIVE BUDGET COSTS ----------------------------------
+    //
+    // THE CARD'S HEIGHT FOLLOWS THE CHAPTER'S ACTUAL WRAP AND THE TITLE'S BUDGET
+    // DOES NOT, which is a deliberate asymmetry (design/Sleep.dc.html carries the
+    // reason) and which makes the title CONSERVATIVE BY UP TO ONE LINE: the budget
+    // is measured against the two-line reserve even for a one-line name, so a book
+    // whose title needs exactly `budget + 1` lines elides where a chapter-aware
+    // budget would not have.
+    //
+    // THAT IS A JOINT QUESTION AND THE DISTRIBUTION ABOVE CANNOT ANSWER IT. The
+    // loss is only real while the reader is standing in a chapter whose label fits
+    // ONE line -- in a two-line chapter the reserve is exact and nothing is given
+    // up -- so the figure is: of the titles in the (budget, budget+1] band, how
+    // many have chapter labels that fit one line, and how many of that book's own
+    // labels do.
+    //
+    // `kBudget` is the derived budget with the two-line reserve, which the board
+    // computes as 6 on both panels. A title needing exactly kBudget + 1 lines is
+    // the only one the extra line would have completed.
+    {
+      const size_t kBudget = 6;
+      const reader::Font& cf = ramp.fonts[reader::Role::Label500];
+      const reader::Tracking ctr = reader::trackingEm(cf, kNameEm);
+      std::printf(
+          "\nthe conservative budget's cost: titles needing exactly %zu lines (budget %zu),\n"
+          "and how many of each book's own chapter labels fit ONE line:\n",
+          kBudget + 1, kBudget);
+      size_t band = 0, costly = 0;
+      for (const std::pair<size_t, std::string>& t : perTitle) {
+        if (t.first != kBudget + 1) continue;
+        ++band;
+        std::vector<reader::TocEntry> toc;
+        const char* reason = nullptr;
+        size_t one = 0, total = 0;
+        if (reader::loadToc(fs, t.second.c_str(), toc, &reason)) {
+          for (const reader::TocEntry& e : toc) {
+            ++total;
+            if (cf.measure(e.label, ctr) <= kContentW) ++one;
+          }
+        }
+        if (one > 0) ++costly;
+        std::printf("  %s\n    one-line labels %zu / %zu\n", t.second.c_str(), one, total);
+      }
+      std::printf("  %zu title(s) in the band, %zu of them with any one-line chapter label\n",
+                  band, costly);
     }
   }
   return 0;
