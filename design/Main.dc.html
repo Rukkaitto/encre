@@ -60,25 +60,44 @@
       </div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
         <div style="font-size: var(--t-display); font-weight: 700; line-height: 1;">6%</div>
-        <!-- ONE COUNTER LINE, where this board had two meta lines -- `PAGE 53 / 890`
-             above `CH. 01 &mdash; MISS BROOKE`. NEITHER WAS OBTAINABLE:
+        <!-- THE CHAPTER'S NAME, AND THIS LINE HAS NOW HELD THREE THINGS. It was two
+             meta lines, `PAGE 53 / 890` above `CH. 01 &mdash; MISS BROOKE`, and
+             neither was obtainable then: a page counter for the BOOK needs every
+             chapter paginated (6.94 MB of inflated XHTML on a real novel, ~49 s of
+             decode at this device's 7.2 ms/KB), and a chapter's name needed a table
+             of contents that was not built.
 
-               * A page counter for the BOOK needs every chapter paginated. Measured
-                 on a real novel that is 6.94 MB of inflated XHTML, ~49 s of decode
-                 at this device's 7.2 ms/KB -- paid on a first open, with the panel
-                 blocked and no background thread to hide it in.
-               * The chapter's NAME needs a table of contents. Contents.dc.html is
-                 not built, and the Reader's own footer already shows a bare
-                 `CH. 03` for exactly this reason.
+             SO IT BECAME `CH. 01 OF 24` -- the spine position of the spine count --
+             and that was a FALSE CLAIM, reported off an X3. A spine counts the cover,
+             the title page, the copyright, the contents, the part dividers, the
+             acknowledgements, the notes, the index and the about-the-author alongside
+             the chapters, so the two numbers invite the reader to compute progress
+             from quantities that are not chapters. One did: `47% &middot; CH. 14 OF 36`
+             for a book of 7 chapters in 2 parts, and then Contents put them at part 2
+             with five selectable rows left. Both readings cannot be true.
 
-             What IS free is the spine position and the spine count, both of which
-             the Home pointer already caches. So the two lines become one that is
-             true, rather than one that is drawn and wrong -- `PAGE 0 / 0` was the
-             alternative and it is the kind of claim this firmware refuses.
+             Measured over 206 corpus books with a usable NCX: 126 (61.2%) have a
+             spine count exceeding the spine entries their TOC names at all, worst
+             164 against 26. And 183 (88.8%) have a spine count differing from the
+             count of entries their TOC names as SELECTABLE chapters -- so no total
+             this device can derive is a chapter count, which is why there is no
+             total here rather than a better one.
 
-             It keeps the 0.16em of the line it replaces, not the 0.10em of the one
-             below it: this is a COUNTER, which is what that tracking was for. -->
-        <div style="font-size: var(--t-meta); letter-spacing: 0.16em;">CH. 01 OF 24</div>
+             THE NAME IS THE ONLY HONEST ANSWER AND IT IS FREE NOW. Contents.dc.html
+             is built and the Reader's header band already draws this exact string;
+             the reading position stores it, so Home names the reader's chapter with
+             the SAME words the Reader and Contents do. Numbering the TOC's own
+             entries would be a third numbering system, which is the mistake the
+             Contents row's right-hand slot was already fixed for.
+
+             It takes the 0.10em this board gave the chapter line it used to draw,
+             not the 0.16em of the counter that displaced it: a name is not a counter.
+             AND IT ELIDES, because the words come off the CARD -- a real chapter name
+             runs long ("PREMIERE PARTIE : A LIRE AVANT L'ACHAT") and this run has one
+             line of a 304px column. That is the Reader header's own rule for the same
+             string; the TITLE above is the run that wraps, because it is the thing the
+             screen exists to say and a name here is a name for where you are. -->
+        <div style="font-size: var(--t-meta); letter-spacing: 0.1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">I &middot; Miss Brooke</div>
       </div>
     </div>
   </div>

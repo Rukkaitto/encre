@@ -31,9 +31,39 @@ struct LastRead {
   std::string bookPath;
   std::string title;
   std::string author;
-  int percent = 0;    // 0..100, by BYTES through the book -- see progressPercent
-  int spine = 0;      // for the `CH. 03` label, which is a spine position
-  int spineCount = 0;
+  int percent = 0;  // 0..100, by BYTES through the book -- see progressPercent
+  // The spine position, for the Sleep card's `6% - CH. 01`. NOT a chapter number:
+  // see `chapter` below, and design/Main.dc.html for what reading it as one cost.
+  int spine = 0;
+  // THE CHAPTER'S NAME AT THIS POSITION, cached here for the reason `title`,
+  // `author` and `percent` are: Home's reading column is built at boot, before
+  // anything is on the panel, and getting this from the book would mean a central
+  // directory, an OPF parse AND an NCX parse -- ~100 ms and ~32 KB of transient for
+  // a block the user may not be looking at. It is free at the moment the pointer is
+  // written, because the Reader has the string in hand: it is the header band's own
+  // label, so Home, the Reader and Contents name the reader's chapter identically
+  // rather than each deriving it.
+  //
+  // THE ALTERNATIVE WAS READING THE PER-BOOK SIDECAR, which has carried this field
+  // since it shipped (ReadingPosition::chapter) -- so it needs no new key and no
+  // first-run gap. It costs one more small-file read on the SPI bus in
+  // readingPointer(), which is on the critical path of a boot AND of a Home rebuild
+  // -- the path this firmware has just spent two fixes taking a directory listing
+  // off. Caching it here costs one string in a file already read and no card work at
+  // all, so that is the trade taken.
+  //
+  // THE PRICE IS STATED RATHER THAN HIDDEN: a pointer written by an older firmware
+  // has no such key, so it reads EMPTY, and Home then draws that line blank until
+  // the book is saved once more -- which is the first time the reader leaves it,
+  // sleeps in it or crosses a chapter. Blank rather than a substitute, because the
+  // substitutes available are the spine position (the claim this replaced) and
+  // nothing: an absent claim beats a false one.
+  //
+  // A BOOK WITH NO CONTENTS STILL FILLS IT. ReaderScreen::updateChapterLabel falls
+  // back to `CH. 08` -- a spine position with no total, which is what the Reader's
+  // own footer says and the only handle a book with no NCX offers -- so this is
+  // empty only for a pointer that predates the field.
+  std::string chapter;
 };
 
 // --- Reading ------------------------------------------------------------------

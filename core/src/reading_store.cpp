@@ -12,10 +12,19 @@ constexpr const char* kKeyTitle = "title";
 constexpr const char* kKeyAuthor = "author";
 constexpr const char* kKeyPercent = "percent";
 constexpr const char* kKeySpine = "spine";
-constexpr const char* kKeySpineCount = "spineCount";
+constexpr const char* kKeyChapter = "chapter";
 
 // The pointer's own version, separate from the position record's: they are two files
 // with two formats and either can change without the other.
+//
+// IT DID NOT MOVE FOR `chapter`, AND THAT IS A DECISION. A bump makes loadLastRead
+// refuse the whole record, so every device would lose its CONTINUE block entirely on
+// the first boot after this firmware -- title, author and percentage with it -- to
+// gain a chapter name one save earlier than it arrives anyway. An added key that is
+// OPTIONAL on the way in degrades to exactly one blank line instead, which is the
+// same trade `title` and `author` already take. `spineCount` leaving is the same
+// question from the other side: an extra key a reader ignores costs nothing, so a
+// pointer written before this still loads.
 constexpr int kLastReadVersion = 1;
 
 int clampPercent(int64_t v) { return v < 0 ? 0 : (v > 100 ? 100 : static_cast<int>(v)); }
@@ -68,10 +77,15 @@ bool loadLastRead(FileSystem& fs, LastRead& out) {
   // line blank rather than refusing to name the book at all.
   o.getString(kKeyTitle, l.title);
   o.getString(kKeyAuthor, l.author);
+  // AND SO IS THE CHAPTER, for one more reason than those two: a pointer written
+  // before this key existed has none, and refusing it would cost the reader their
+  // whole CONTINUE block to gain one line. Empty means "this pointer cannot say",
+  // and Home draws that line blank rather than falling back to the spine position
+  // it was reported for.
+  o.getString(kKeyChapter, l.chapter);
   int64_t v = 0;
   if (o.getInt(kKeyPercent, v)) l.percent = clampPercent(v);
   if (o.getInt(kKeySpine, v)) l.spine = v < 0 ? 0 : static_cast<int>(v);
-  if (o.getInt(kKeySpineCount, v)) l.spineCount = v < 0 ? 0 : static_cast<int>(v);
   out = l;
   return true;
 }
@@ -85,7 +99,7 @@ SaveResult saveLastRead(FileSystem& fs, const LastRead& l) {
   o.setString(kKeyAuthor, l.author);
   o.setInt(kKeyPercent, clampPercent(l.percent));
   o.setInt(kKeySpine, l.spine);
-  o.setInt(kKeySpineCount, l.spineCount);
+  o.setString(kKeyChapter, l.chapter);
   return writeIfChanged(fs, kLastReadPath, o.dump());
 }
 
