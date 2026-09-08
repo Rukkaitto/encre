@@ -113,7 +113,36 @@
   </div>
 
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0 16px 0; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;">
+    <!-- THIS PERCENTAGE IS THE COUNTER BESIDE IT, AS A FRACTION: 53 of 890 is 5.955%,
+         shown as 6%. So it is divided by the SAME total, and it is unknown in exactly
+         the same moments -- which means the em-dash rule stated three slots along
+         governs this slot too, and for two whole phases it did not: the firmware drew
+         a flat `0%` here while the counter beside it honestly said `53 / —`.
+
+         `0%` IS A REACHABLE SETTLED STATE, which is what makes that worse than merely
+         terse. Page 1 of a 300-page chapter rounds to 0% and is correct, so an unknown
+         drawn as `0%` is indistinguishable from a reader standing at the top of the
+         chapter -- and while a count is deferred a reader flipping steadily never lets
+         the quiet window fire, so they can be thirty pages in and still be told 0%.
+         Reported after a week of real use.
+
+         SO IT IS `—%`, and the em dash is the counter's own glyph rather than a hyphen:
+         one unknown, drawn one way, in one footer. Same three reasons the counter gives
+         -- something has to precede the sign or the run reads as broken, `0` is a lie,
+         nothing here animates -- plus the counter's fourth, that an em dash is the same
+         width every time, so this slot does not reflow when the number arrives. -->
     <div style="font-size: var(--t-meta); letter-spacing: 0.12em; font-weight: 700;">6%</div>
+    <!-- AND THE BAR IS NOT DRAWN AT ALL WHILE THE TOTAL IS UNKNOWN. A bar is a LENGTH
+         that states the same fraction, so it cannot be honest where the number is not
+         -- and it has no dash to fall back on: a bar at 0% is pixel-identical to the
+         settled 0% above, which is the one thing this slot must not be. An absent claim
+         beats a false one, the call this project already makes for an unread battery
+         gauge (-1, never 0%) and for the sleep card's absent chapter.
+
+         Nothing reflows when it returns: the percentage is placed off the left padding
+         and the counter off the right, so the centre is the only slot that changes and
+         both neighbours hold their columns. That is the same property that lets
+         ReaderAnchored.dc.html put the return arrow in this slot instead of the bar. -->
     <div style="width: 210px; height: 5px; border: 1px solid #000000; box-sizing: border-box;">
       <div style="width: 6%; height: 100%; background: #000000;"></div>
     </div>

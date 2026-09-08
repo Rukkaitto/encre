@@ -992,8 +992,24 @@ void ReaderScreen::syncVm() {
   vm_.page = known == 0 ? 0 : at_ + 1;
   // Rounded once, and off the page just READ rather than the one about to be: the
   // board's 53 of 890 is 5.955%, shown as 6%, so the number is the position reached
-  // and not the position started from. Unknown while the total is.
-  vm_.progressPercent = vm_.pageTotal == 0 ? 0 : (vm_.page * 100 + vm_.pageTotal / 2) / vm_.pageTotal;
+  // and not the position started from.
+  //
+  // UNKNOWN WHILE THE TOTAL IS, AND `kProgressUnknown` RATHER THAN 0 -- which is the
+  // whole of #93. This line answered 0, and 0 is a value this expression legitimately
+  // REACHES: page 1 of a 300-page chapter is (100 + 150) / 300, which is 0 and is
+  // right. So the unknown was pixel-identical to the top of the chapter, on a screen
+  // whose counter one slot over already said `53 / —` about the same missing number.
+  // On the device a reader turning pages faster than `kCountQuietMs` never lets the
+  // count run, so they can be well into a chapter and still be told 0%.
+  //
+  // THE CONDITION IS THE COUNTER'S OWN, deliberately: `pageTotal == 0` is what makes
+  // the counter draw its em dash, and this number is that counter as a fraction, so
+  // one test decides both slots and they cannot disagree about what is known. It also
+  // covers the degenerate complete-but-empty chapter, where there is no denominator
+  // and the counter already reads `0 / —`.
+  vm_.progressPercent = vm_.pageTotal == 0
+                            ? ReaderViewModel::kProgressUnknown
+                            : (vm_.page * 100 + vm_.pageTotal / 2) / vm_.pageTotal;
   // THE ONE PLACE THE HIGH-WATER MARK IS RAISED, and syncVm is the right home for a
   // checked reason rather than a convenient one: every movement of the reading
   // position in this class ends in a syncVm -- the two constructors, setMetrics,

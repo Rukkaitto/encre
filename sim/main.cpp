@@ -1028,9 +1028,15 @@ int main(int argc, char** argv) {
     static_cast<reader::ReaderScreen*>(scr.get())->completeIndex();
     if (!renderToPng(*scr, fonts, theme, w, h, argv[2])) return 1;
     const auto& rd = static_cast<const reader::ReaderScreen&>(*scr);
-    std::printf("wrote %s (%dx%d) page %d/%d, %zu lines, column %dx%d, %d%%\n", argv[2], w,
+    // `kProgressUnknown` PRINTED AS A DASH, not as `-1%`. Unreachable here -- the
+    // completeIndex() above is what makes this the settled state the board shows -- and
+    // spelled out anyway, because a diagnostic that reports a sentinel as a quantity is
+    // the same false claim the screen itself was just fixed for.
+    const std::string pctOut =
+        rd.vm().progressPercent < 0 ? std::string("-") : std::to_string(rd.vm().progressPercent);
+    std::printf("wrote %s (%dx%d) page %d/%d, %zu lines, column %dx%d, %s%%\n", argv[2], w,
                 h, rd.vm().page, rd.vm().pageTotal, rd.page().lines.size(), m.columnW,
-                m.columnH, rd.vm().progressPercent);
+                m.columnH, pctOut.c_str());
     return 0;
   }
 

@@ -410,7 +410,26 @@ struct SleepViewModel {
 struct ReaderViewModel {
   std::string bookTitle;  // "Middlemarch" -- the board shouts it, the theme does that
   std::string chapter;    // "CH. 01", already composed: the theme does not do arithmetic
-  int progressPercent = 0;
+
+  // NEGATIVE MEANS NOT KNOWN, and `kProgressUnknown` is the value the producer writes.
+  //
+  // This is `pageTotal`'s unknown, not a second one: the number IS the counter below
+  // as a fraction (53 of 890 is 5.955%, drawn as 6%), so it is divided by that total
+  // and is unknown in exactly the moments the total is. One condition, two slots.
+  //
+  // IT WAS `0` FOR TWO PHASES, and 0 is a REACHABLE SETTLED VALUE here -- page 1 of a
+  // 300-page chapter rounds to it and is right -- so the unknown was drawn identically
+  // to the top of the chapter while the counter beside it honestly said `53 / —`. A
+  // reader turning pages steadily never lets the count's quiet window fire, so they
+  // could be thirty pages into a chapter and still be told 0%. Reported off a device
+  // after a week of use. `percentFor`'s -1 for "not started" and BatteryTracker's
+  // `kUnknownPercent` are the same sentinel for the same reason: a false claim is worse
+  // than an absent one.
+  //
+  // The theme draws `—%` for it and omits the progress bar, which cannot hold a dash
+  // -- see design/Reader.dc.html's footer, which states both.
+  static constexpr int kProgressUnknown = -1;
+  int progressPercent = kProgressUnknown;
   // The footer's "53 / 890". CHAPTER-RELATIVE, not book-wide -- a book-wide page
   // number needs an index of every chapter, which is a pass over the whole EPUB.
   // Carried as two plain numbers so that pass can fill them in later without this
