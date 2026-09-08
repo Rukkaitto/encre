@@ -2287,7 +2287,7 @@ worth knowing before changing it:
 
 | Screen | Board | The thing |
 |---|---|---|
-| Home | `Main.dc.html` | Focus starts on the CONTINUE block (`-1`), not the menu. Its title WRAPS. |
+| Home | `Main.dc.html` | Focus starts on the CONTINUE block (`-1`), not the menu. Its title WRAPS and its chapter NAME elides — two card-sourced runs in one column, and only the title may grow. |
 | Home / empty | `HomeEmpty.dc.html` | A **variant**, not a screen: same `ScreenId`, same view model, same menu. |
 | Home / nothing open | `HomeUnopened.dc.html` | The same variant with different words. What the device actually shows today. |
 | Library | `Library.dc.html` | The only list that scrolls today, and the only screen with a rail. |
@@ -2532,9 +2532,25 @@ short.**
   long-author *specimen* would land differently in the two engines, the same ~3% the
   `.rfnt` faces measure wider everywhere else.
 
-The `6% · CH. 01` line is the percentage and the SPINE POSITION. A chapter *name* would
-need a table of contents, which is not built — the same reason the Reader's own footer
-says a bare `CH. 03`.
+The `6% · CH. 01` line is the percentage and the SPINE POSITION. **THIS SAID A CHAPTER
+NAME "would need a table of contents, which is not built", AND THAT HAS BEEN FALSE
+SINCE `Contents` SHIPPED** — the pointer carries the name now (`LastRead::chapter`) and
+Home draws it. The card still shows the position, and it is a **decision with a price**
+rather than a limit:
+
+- **`CH. 01` alone is not the defect Home's `CH. 14 OF 36` was.** It is a position with
+  no total — the Reader's own footer's form — so it is *less informative* than a name
+  and invites no arithmetic. That distinction is what keeps this out of scope of the
+  Home fix rather than left undone by it.
+- **A NAME IN THIS RUN NEEDS A BOUND FIRST, and putting one there unbounded is a
+  just-fixed bug reintroduced.** `renderSleep` draws `vm.progress` through
+  `drawCentredText`, which does not elide, and `centreIn` returns a **negative** half
+  for a run wider than its box — which is exactly what put the sleep card's AUTHOR over
+  both borders onto the dither field. A card-sourced chapter name here is that, one run
+  lower.
+- **And it is a COMBINED run**, `percent · position`, so what it becomes (a second
+  middot? the name alone?) is a question for `Sleep.dc.html` and its eight goldens, not
+  a substitution in the shell.
 
 **AND THE MIDDLE DOT CAUGHT THIS PROJECT'S OWN RECORDED TRAP AGAIN.**
 `"%d%%\xC2\xB7CH. %02d"` parses `\xB7C` as ONE hex escape, because a C++ hex escape is
@@ -4453,13 +4469,98 @@ opposite choice would be a focus jump nobody asked for.
 **HOME'S CONTINUE BLOCK LOST ITS PAGE COUNTER, and the board says why.** It drew
 `PAGE 53 / 890` over `CH. 01 — MISS BROOKE` and **neither was obtainable**: the first
 needs the ~49 s book-wide count, the second needs a table of contents
-(`Contents.dc.html`, not built — which is also why the Reader's own footer says a bare
-`CH. 03`). Both lines became one that is free and true, `CH. 08 OF 92`, at the 0.16em
-counter tracking of the line it replaces. `HomeViewModel::currentPage`/`pageCount` are
-gone with it. Re-blessing the four Home goldens was verified the strong way: the change
-is confined to rows 283–468 with **0 pixels differing** above or below, so the header
+(`Contents.dc.html`, not built at the time — which is also why the Reader's own footer
+says a bare `CH. 03`). Both lines became one, `CH. 08 OF 92`, at the 0.16em counter
+tracking of the line it replaces. `HomeViewModel::currentPage`/`pageCount` are gone
+with it. Re-blessing the four Home goldens was verified the strong way: the change is
+confined to rows 283–468 with **0 pixels differing** above or below, so the header
 band, cover dither, title, author, the 67px numeral, both menu rows and the hint bar
 are bit-identical.
+
+**AND THIS LINE CALLED THAT COUNTER "FREE AND TRUE". IT WAS FREE AND IT WAS FALSE.**
+Reported off an X3: `47% · CH. 14 OF 36` on the CONTINUE block, and Contents then put
+the reader at part 2 of a book with **7 chapters in 2 parts** and five selectable rows
+left. **A spine is not a chapter list** — it counts the cover, the title page, the
+copyright, the contents, the part dividers, the acknowledgements, the notes, the index
+and the about-the-author alongside the chapters — so the pair invited an arithmetic the
+numbers do not support, and the reader did it. **It is the chapter's NAME now**, and
+the sentence above is corrected rather than deleted because *"free and true"* is
+exactly the shape this file records as its most expensive recurring defect: a claim
+that was checked for obtainability and never for truth.
+
+- **NO BETTER TOTAL EXISTS, and that is why there is none rather than a fixed one.**
+  Measured over the 206 corpus books with a usable NCX: **126 (61.2%)** have a spine
+  count exceeding the spine entries their TOC names at all — worst **164 against 26**,
+  and `Dune - Tome 3` on the reporting user's own shelf is **73 against 38** — and
+  **183 (88.8%)** have a spine count differing from the count of entries their TOC
+  names as *selectable* chapters (`ContentsScreen`'s own header rule). Only **23
+  (11.2%)** have spine, named and selectable all agreeing. **The reported book is not
+  even in the 126**: 36 spine entries and 36 named, of which 26 are chapters — so a
+  count that matches the TOC exactly is still not a chapter count, which is what makes
+  this a fact about spines rather than about untidy books.
+- **NUMBERING THE TOC'S OWN ENTRIES WAS REFUSED**, because it is a third numbering
+  system beside the book's own — the mistake `Contents`' right-hand slot was already
+  fixed for when `Chapitre 1.        CH. 09` shipped. If a name is shown, the name is
+  what is shown.
+- **IT IS THE READER'S OWN LABEL, NOT A SECOND DERIVATION OF IT.** `ReaderScreen`'s
+  header band, Contents' `NOW` row and this line now name the reader's chapter in the
+  same words, which is the rule this file already states for the `NOW` marker: two
+  screens naming one fact differently is two spellings of it. **A book with no contents
+  fills it with `CH. 08`** — `updateChapterLabel`'s fallback, a position with **no
+  total**, which is what the Reader's footer says and the only handle such a book
+  offers — so the no-TOC case needed no new answer and cannot disagree with the Reader.
+- **`LastRead` CACHES IT, AND THE SIDECAR ROUTE WAS PRICED AND REFUSED.**
+  `ReadingPosition::chapter` has carried this string since it shipped, so reading the
+  per-book sidecar in `readingPointer()` would need no new key and have no first-run
+  gap — and it puts a small-file read on the SPI bus at boot **and on every Home
+  rebuild**, which is the critical path of a Back out of a book that
+  `libraryCountForHome` and `DirCountCache` were both written to clear. Caching it
+  costs one string in a file already read and **no card work at all**: the save site
+  already has `rd->vm().chapter` in hand for the sidecar, one field up.
+- **THE PRICE IS ONE BLANK LINE, ONCE.** `kLastReadVersion` did **not** move — a bump
+  makes `loadLastRead` refuse the whole record, so every device would lose its CONTINUE
+  block, title, author and percentage together on the first boot after this firmware —
+  so the key is optional and an older pointer reads **empty**. Home draws that line
+  blank until the book's next save, which is the first time the reader leaves it,
+  sleeps in it or crosses a chapter. **Blank rather than the spine position**, because
+  the only substitutes available are the claim this replaced and nothing: an absent
+  claim beats a false one, which is the call this file already makes for an unread
+  gauge (`-1`, never `0%`) and for a badge promising a wake charging cannot deliver.
+- **`spineCount` WENT WITH THE LABEL IT EXISTED FOR**, from `LastRead` and from the
+  shell's `ReadingPointer`. It was written, read and spent composing `CH. n OF N`;
+  keeping it would have left a field with no reader, which is `ListRow::trackingEm1000`
+  and `readerBookTitle_` a third time. Dropping the key rewrites every card's pointer
+  once and nothing reads it on the way in, so an older pointer still loads.
+- **THE RUN ELIDES AT 0.10em, AND BOTH HALVES CAME OFF THE BOARD.** 0.10em is the
+  tracking `Main.dc.html` gave the chapter line it drew *before* the counter displaced
+  it (`kMetaEm`'s 0.16em was the counter's, and `kTightMetaEm` already existed) — a
+  name is not a counter. It elides because the words come off the **card**: unelided,
+  `PREMIÈRE PARTIE : À LIRE AVANT L'ACHAT` reached column **479 of 480** and **527 of
+  528**, off the panel at both geometries. **It may not WRAP**, and that is the Sleep
+  card's lesson one screen over: the title above it already grows into a budget derived
+  from everything below the block, and one budget cannot serve two growable runs
+  without saying which yields. So the run naming the BOOK keeps every line and the run
+  naming where you are in it takes one — which is also what keeps `columnFixedH`
+  honest, since it reserves exactly one `meta.lineHeight()`.
+- **AN EMPTY LABEL STILL COSTS ITS LINE**, so nothing below it steps up; that is the
+  property `test_long_title.cpp` pins by diffing every case against a **blank** render
+  rather than against the demo one, and a `ry` advance skipped for the blank fails it
+  at both geometries.
+- **RE-BLESSED PER PIXEL: all ten Home goldens differ by exactly 1005 pixels, in
+  exactly 15 contiguous rows, in columns 153–320** — one line of text in the stats
+  column, nothing else, identical column extent at both geometries. The row band is
+  283–297 for every state except `home_long_title`, where the wrapped title pushes it
+  to 415–429 (X4) and 371–385 (X3) — the derived budget's two branches, moving as they
+  should. `home_long_chapter` and `home_long_chapter_x3` are **new**, and they exist
+  for `home_long_title`'s reason: the elide test proves the run stops inside its
+  column, and a column of notdef boxes stops inside a column too. They read
+  `PREMIÈRE PARTIE : À LIR…` and `… À LIRE AV…`, accented capitals and the real
+  ellipsis, cut differently at the two widths.
+- **WHAT ONLY THE PANEL CAN SAY: whether an unshouted name reads right there.** The
+  string is drawn as the book wrote it, which is what the Reader's band, Contents' rows
+  and Book details' `Current chapter` all do — so mixed case is the consistent answer —
+  but it makes this line quieter than the caps runs around it (`NOW READING`,
+  `CONTINUE`, `LIBRARY`), and no golden can judge that on glass.
 
 **CONTINUE AND THE BOARD'S `READ` HINT BOTH ANSWER `Action::open()`** — they used to
 answer `none()` behind a "the Reader is Phase 3" comment, and a slab that draws and
@@ -5427,6 +5528,16 @@ with neither explaining the other. It is `NOW` on the row being read and empty e
 the NAME is the content of a table of contents, and the full width belongs to it. **On
 exactly ONE row** — it marked every entry naming the open spine entry, which is a group
 in the majority of real books; see the `NOW` bullets under **The table of contents**.
+
+**HOME'S COUNTER WAS THE SURVIVING INSTANCE OF THE SAME DEFECT AND IT IS CLOSED.** Its
+CONTINUE block drew `CH. 14 OF 36` — the identical spine position, with a spine COUNT
+beside it, which is the worse form because two numbers invite an arithmetic one does
+not. It draws the chapter's name now, from the same `toc.h` label this row's `NOW`
+follows; see **Home's CONTINUE block** for the corpus figures. **What made it survive
+is worth keeping: this paragraph called the position "free, true, and WORSE on a real
+book" and Home's own paragraph called the same quantity "free and true"** — the same
+fact, judged in two places, and the sentence that got it right was not the one next to
+the code.
 
 **THE LABEL ELIDES, AND `drawDetailRow` DID NOT.** It drew the label at full length from
 the left margin, so a long one ran under the value and off the panel. Book details'
