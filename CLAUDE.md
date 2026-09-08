@@ -2532,31 +2532,147 @@ short.**
   long-author *specimen* would land differently in the two engines, the same ~3% the
   `.rfnt` faces measure wider everywhere else.
 
-The `6% · CH. 01` line is the percentage and the SPINE POSITION. **THIS SAID A CHAPTER
-NAME "would need a table of contents, which is not built", AND THAT HAS BEEN FALSE
-SINCE `Contents` SHIPPED** — the pointer carries the name now (`LastRead::chapter`) and
-Home draws it. The card still shows the position, and it is a **decision with a price**
-rather than a limit:
+**THE CARD'S LAST LINE NAMES THE CHAPTER NOW, AND IT WAS THE LAST PLACE ON THE DEVICE
+SHOWING A SPINE POSITION.** It read `6% · CH. 01` — a percentage and `last.spine + 1`,
+composed in the shell — and this entry twice recorded a reason for that which had
+expired: first that a chapter name "would need a table of contents, which is not
+built", false since `Contents` shipped, and then that the run needed a bound and a
+design decision, which is what this change made. **It was never Home's false claim**:
+`CH. 01` quotes no total, so it invited no arithmetic and was merely *less
+informative* than a name. So this was an improvement rather than a fix, and the
+constraint was that it must not be bought with a regression.
 
-- **`CH. 01` alone is not the defect Home's `CH. 14 OF 36` was.** It is a position with
-  no total — the Reader's own footer's form — so it is *less informative* than a name
-  and invites no arithmetic. That distinction is what keeps this out of scope of the
-  Home fix rather than left undone by it.
-- **A NAME IN THIS RUN NEEDS A BOUND FIRST, and putting one there unbounded is a
-  just-fixed bug reintroduced.** `renderSleep` draws `vm.progress` through
-  `drawCentredText`, which does not elide, and `centreIn` returns a **negative** half
-  for a run wider than its box — which is exactly what put the sleep card's AUTHOR over
-  both borders onto the dither field. A card-sourced chapter name here is that, one run
-  lower.
-- **And it is a COMBINED run**, `percent · position`, so what it becomes (a second
-  middot? the name alone?) is a question for `Sleep.dc.html` and its eight goldens, not
-  a substitution in the shell.
+**THE RUN IS TWO RUNS, BECAUSE A CHAPTER NAME DOES NOT FIT AND DOES NOT NEARLY FIT.**
+Measured over 225 real books — 205 with a usable NCX, **8,617 chapter labels**, at the
+shipped `Role::Label500` against the card's **312px** content column, which is 312 on
+*both* panels because `max-width: 400` is under the X4's `480 - 2·kMargin` as well.
+`tools/sleep_chapter_probe.cpp` is that measurement, tracked and re-runnable for
+`name_probe`'s reason:
 
-**AND THE MIDDLE DOT CAUGHT THIS PROJECT'S OWN RECORDED TRAP AGAIN.**
-`"%d%%\xC2\xB7CH. %02d"` parses `\xB7C` as ONE hex escape, because a C++ hex escape is
-unbounded. clang rejects it outright; the ESP32's GCC **accepted it** and would have
-emitted a byte that is not U+00B7. This file already recorded the same shape once
-(`"\xA0b"` is 0xA0B). Adjacent string literals end the escape.
+| the name gets | elides |
+|---|--:|
+| the row, beside `100% · ` (213px) | **52.51%** |
+| the row, beside `6% · ` (246px) | 47.82% |
+| its own line, 312px at 0.14em | 37.60% |
+| **its own line, 312px at 0.10em** | **34.54%** |
+| its own line, 0.10em, *shouted* | 36.73% |
+| *Home's control*, `Meta400`/0.10em at 304 / 352px | 30.70% / 23.69% |
+
+p50 **217px**, p90 536px, max 1887px, and only **33 of the 205** books have every
+label fitting. So the median label overflows the combined run, and sharing that row
+would show a cut name **more often than a whole one** — where its own line lands in
+the band this project already accepted for the identical string.
+
+**IT ELIDES RATHER THAN WRAPPING, AND THE REASON IS THIS RUN AND NOT ITS WIDTH: A
+CHAPTER CHANGES WHILE THE BOOK IS BEING READ AND AN AUTHOR DOES NOT.** The card's
+height is a sum and the title takes the remainder, so a chapter free to grow makes the
+**title's** line budget depend on where the reader is standing — cross a chapter and
+the book's name reflows, or newly acquires an ellipsis, *because a page was turned*.
+Fixed at one line the card's layout is a function of the **book alone**, which is also
+the licence the author has to wrap: one book has one author for as long as it is open.
+**And two lines would not have closed it anyway** — 23.59% of the overflows need three
+or more, so a two-line cap still elides **8.15% of all labels** while spending up to
+another title line. The author's cap was earned by 85% of *its* overflows fitting two;
+this distribution has no such knee.
+
+**THE YIELD ORDER IS THREE-STAGE AND IS STILL THE ORDER OF THE STATEMENTS.** The
+chapter yields first and absolutely (one line, always, elided), the author second by
+its fixed cap of two, and the title takes every line left over. `chapterH` is **one
+expression spent twice**, on the title's budget and on the card's height, because
+`renderBookError` shipped exactly that pair as two copies free to disagree — and a
+mutation that reserves it in the height only is caught by the *pre-existing*
+badge-bound tests, with the card overrunning the badge.
+
+- **WHAT IT COSTS: the title's derived budget goes 8 lines → 7 on both panels.** 2 of
+  the 225 corpus titles need exactly 8 and so newly elide; 4 were already eliding at 8.
+- **`SleepViewModel::progress` IS GONE RATHER THAN RENAMED.** It held the whole
+  composed string, so the figure under the bar and the length of the bar were two
+  spellings of one fact that the shell could set independently. The theme composes the
+  percentage from `progressPercent` — the field `drawProgressBar` already takes —
+  exactly as `renderHome` does, and `chapter` carries `last.chapter`, the string the
+  Reader's band, Contents' `NOW` row and Home's meta line all draw.
+- **AN EMPTY CHAPTER COSTS NO LINE**, unlike Home's, which reserves its line because
+  runs sit below it. This is the card's *last* run, so an absent chapter simply
+  shortens the card — and an absent claim beats a false one: a pointer written before
+  `last.json` carried a chapter must not fall back to the position this run has just
+  stopped showing.
+- **0.10em ON THE NAME AND 0.14em ON THE PERCENTAGE**, which is Home's split and its
+  reason (0.14em is a *counter's* tracking and a name is not a counter) and is 3.06
+  points narrower on the one run whose width is the whole problem. **Not shouted**,
+  although the title and author on this card are: three screens already name this
+  string as authored, `toc.h` hands it over "as authored" for that reason, and shouting
+  measures **2.19 points wider**.
+- **WEIGHT 500, WHERE THE BOARD SAID 700.** The ramp carries `Label400`/`Label500` at
+  11pt and **no `Label700`**, so 700 asked for an asset nobody has — `LowBattery`'s
+  band label's defect exactly — and the firmware has always drawn `Label500` here.
+
+**AND THE NAME MAY NOT GO THROUGH `drawCentredText`, which is what this run did while
+it was a position.** That function places a run at `centreIn(0, contentW, w)` and
+`centreIn` returns a **negative** half for a run wider than its box: an unbounded name
+begins left of the card's padding, paints over both 2px borders onto the dither field,
+and is clipped by the panel edge with no ellipsis to say so — the defect the AUTHOR
+line one run above was fixed for, and at 34.54% it would have been the **common case**.
+It is elided against `contentW` instead, which cannot leave the column.
+
+**THE TEST WATCHES THE CARD'S PADDING, AND ON THIS SCREEN THAT IS THE ONLY PLACE INK IS
+EVIDENCE AT ALL.** The 42px band between each border and the content column is paper by
+construction. The two obvious alternatives were *tried against the mutation and both
+are blind*: the panel EDGE is inked on every row by the dither field, and the card's own
+side BORDERS are inked on every row of the card, so neither a full-row scan nor an
+in-card extent separates the run's ink from furniture that belongs there. Measured with
+the elide removed, a 385px name leaves the content column and reaches neither, while a
+526px one reaches the glass — so an edge test passes for the first, and the padding
+test fails for both with **508 and 742 stray pixels**.
+
+**THE MIDDLE DOT'S TRAP OUTLIVED THE LITERAL THAT CARRIED IT, and the duplicated note
+was the tell.** `"%d%%\xC2\xB7CH. %02d"` parses `\xB7C` as ONE hex escape, because a C++
+hex escape is **unbounded**: clang rejects it outright and the ESP32's GCC **accepted
+it** and emitted a byte that is not U+00B7 (this file records the same shape for
+`"\xA0b"`, which is 0xA0B). Adjacent literals end the escape. That `snprintf` is gone
+with the composition, and **the note describing it stood in `main.cpp` twice, verbatim**
+— which is this file's own rule arriving: when a replacement leaves a condition stated
+twice, one of them is stale. The trap is real and now lives only where the middot does,
+`screens.cpp`'s `kDot` and the badge's own literals, where the bytes are their own
+adjacent literal by construction.
+
+**MEASURED AGAINST THE BOARDS, and all three moved the right way**: `sleep`
+2.42%/2.22% → **2.32%/2.13%**, `sleep_waking` 2.27%/2.08% → **2.16%/1.99%**,
+`sleep_cover_details` 2.86%/2.62% → **2.74%/2.50%**. Threshold-at-128 counts over the
+bare `--export` panels, since the sheet still prints `ok` (#41) — and the instrument was
+validated first by reproducing this file's recorded pre-change pair **to the pixel**,
+9301 differing pixels at both geometries.
+
+- **IT READ AS A REGRESSION FIRST, AND IT WAS NOT THE PHASE ARTEFACT IT LOOKED LIKE.**
+  With the chapter run's line box left at `line-height: normal` the Sleep board went to
+  **3.03%/2.78%** — worse than before the change — because Chrome resolves `normal` to
+  **30px** where the face's own line height at this ppem, which the firmware derives, is
+  **29**. The card is CENTRED, so one pixel of height is half a pixel at both ends and
+  every rule inside it goes out of register.
+- **THE DISCRIMINATOR IS THIS FILE'S OWN, AND IT ANSWERED THE OTHER WAY THIS TIME.**
+  The `Names` cut records a rise in this same count caused by a half-pixel phase flip,
+  where Chrome rasterises a rule across two rows of grey 127 and the count scores both
+  as ink; the test given there is whether the design's rule **straddles** the firmware's
+  or sits **beside** it. Here both borders were **solid black two pixels apart**, so it
+  was a real geometry disagreement — and the fix was to state the number, not to swap
+  instruments. The three boards declare `line-height: 29px`, the card's borders go from
+  2px out of register to 1px, and the rows differing over half the panel go **8 → 4**.
+  This is the Sleep TITLE's own lesson one run lower (its `1.1` exists because the face
+  would have given 53 where the board wanted 46) and `Peek.dc.html`'s, where stating the
+  panel's own height "closed a disagreement rather than documenting it".
+
+**TWELVE GOLDENS TOUCHED — TEN RE-BLESSED AND TWO ADDED — WITH THE EVIDENCE PER
+PIXEL.** Every
+differing pixel in all ten sits inside the card's own 400px column — x 40..439 on the
+X4 and 64..463 on the X3, not one pixel outside — and inside a single contiguous row
+band, so the dither field, the badge and (on `sleep_cover_details`) the **four-level
+cover behind the card** are byte-identical. `sleep_idle`, `sleep_cover` and
+`sleep_cover_waking` produced **no candidate at all**, which is what says the
+badge-only and cover-only screens were untouched. `sleep_long_chapter` is the new pair
+and it exists to be **looked at**: Home shipped a use-after-free on the neighbouring run
+whose only symptom was a column of notdef boxes, and ink that spells nothing inks rows
+exactly like ink that does. Its specimen is Home's own
+`PREMIÈRE PARTIE : À LIRE AVANT L'ACHAT`, so the two screens that draw this string test
+it with one string, and it carries the accented-capital path through this run as well.
 
 **IT TAKES NO INPUT AND DRAWS NO HINT BAR**, and neither is an
 omission: the shell paints it and then calls deep sleep, so there is nobody left to

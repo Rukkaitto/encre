@@ -757,11 +757,21 @@ TEST_CASE("A LONG CHAPTER STAYS INSIDE THE CARD, which is the defect this run co
   // of the corpus's 8,617 chapter labels are wider than this column, so it would have
   // been the COMMON case rather than an edge one.
   //
-  // THE INVARIANT IS THE CARD'S PADDING, NOT THE PANEL EDGE. The card is opaque white
-  // and everything drawn inside it is drawn in the content column, so the 42px band
-  // between each border and that column is paper by construction; ink there means a
-  // run escaped. The panel edge is only where the damage ENDED -- a test watching it
-  // would pass for a name that merely ate the frame.
+  // THE INVARIANT IS THE CARD'S PADDING, AND ON THIS SCREEN IT IS THE ONLY PLACE INK
+  // IS EVIDENCE AT ALL. The card is opaque white and everything drawn inside it is
+  // drawn in the content column, so the 42px band between each border and that column
+  // is paper by construction: ink there means a run escaped.
+  //
+  // Nothing else on this screen can answer the question, which is worth stating
+  // because the obvious alternatives were tried against the mutation and both are
+  // blind. The panel EDGE is inked on every row by the dither field, and the card's
+  // own left and right BORDERS are inked on every row of the card -- so neither a
+  // full-row scan nor an in-card extent can separate the run's ink from furniture
+  // that is legitimately there. Measured with the elide removed: a 385px name (`VI -
+  // The Flight in the Heather`, an ordinary chapter of a real novel) leaves the
+  // content column and reaches neither, while a 526px one reaches the glass edge --
+  // so a test watching the edge would have passed for the first and this one fails
+  // for both, with 508 and 742 stray pixels.
   ramp::Ramp ramp;
   reader::QuietTheme theme;
   // Three shapes of over-wide name: a real label with spaces, one unbreakable token
