@@ -3966,6 +3966,53 @@ a time as pages are passed. Three consequences, each load-bearing:
   form and why: a blank makes the slash read as broken, `0` would be a lie, nothing
   here animates, and a dash is the same width every time so the counter does not
   reflow when the number arrives.
+- **AND THE PERCENTAGE BESIDE IT SAID `0%` THROUGH THAT WHOLE WINDOW, FOR TWO PHASES,
+  BECAUSE THE EM-DASH RULE WAS APPLIED TO ONE SLOT OF THE TWO IT GOVERNS (#93).** That
+  number **is** this counter as a fraction — the board's 53 of 890 is 5.955%, drawn as
+  `6%` — so it is divided by the same total and is unknown in exactly the same moments,
+  and `syncVm` answered the unknown with a literal `0`. Reported off a device after a
+  week of real use. It is `ReaderViewModel::kProgressUnknown` (**-1**) now, drawn `—%`,
+  and the fix is at the **producer** because that is where the other two spellings of
+  this already are: `pageTotal`'s 0 and `percentFor`'s -1 for "not started".
+  - **`0` IS A VALUE THE ARITHMETIC REACHES, which is the whole of why the sentinel is
+    not 0.** `(page * 100 + total / 2) / total` is 0 for page 1 from **201 pages up**,
+    and that is right — so the unknown was **pixel-identical** to a reader standing at
+    the top of the chapter. Not a bounded wrong, either: the count runs only in a quiet
+    window, so **a reader turning pages faster than `kCountQuietMs` never lets it fire**
+    and can be well into a chapter still being told 0%.
+  - **THE CONDITION IS THE COUNTER'S OWN `pageTotal == 0`**, so one test decides both
+    slots and they cannot disagree about what is known — and it picks up the degenerate
+    complete-but-empty chapter for free, where there is no denominator and the counter
+    already read `0 / —`.
+  - **THE PROGRESS BAR IS OMITTED RATHER THAN DRAWN EMPTY**, and that is the half a
+    dash cannot fix: a bar is a **length** stating the same fraction, and
+    `drawProgressBar(..., 0)` paints the exact outline a settled 0% paints. An absent
+    claim beats a false one, the call this file already makes for an unread gauge (`-1`,
+    never `0%`). **Nothing reflows** — the percentage is placed off the left padding and
+    the counter off `fb.width()`, which is the same property that lets
+    `ReaderAnchored.dc.html` put the return arrow in that slot.
+  - **NO SURFACE BUT THIS ONE WAS AFFECTED, checked rather than assumed.** Every other
+    percentage on the device is the **byte-based** `reading_store.h::progressPercent` or
+    a value stored from it — the sleep card and Home read `last.percent`, a Library row
+    and Book details read the sidecar (and `percentFor`'s -1 draws `NEW`), the reader
+    menu's header and the peek's band call the free function. Only
+    `ReaderViewModel::progressPercent` is derived from the page count, so only the
+    Reader's own footer could say this.
+  - **TWO EXISTING ASSERTIONS HAD BLESSED IT, one of them under the comment *"a
+    percentage of an unknown is not a number"* while asserting `== 0`** — the rule
+    written down beside the defect it forbids, which is this file's most expensive
+    recurring shape. **Every golden passed** and could not have failed: they all call
+    `completeIndex()` first, because the board draws the settled state.
+    `reader_counting{,_x3}` are the transient state's own goldens and are the only thing
+    in the suite that can prove `—%` is an em dash rather than a **notdef box** — the
+    percentage is `Role::Meta700`, a different generated asset from the counter's
+    `Role::Meta400`. Reverting just the theme's half draws a literal **`-1%`**, which
+    those two goldens catch and nothing else does.
+  - **The board's rendered specimen did not move**: the rule went into
+    `design/Reader.dc.html`'s footer as prose beside the settled state it draws, whose
+    own note already said the transient state would want its own board file. All four
+    `--only reader` panels are byte-identical across the change and `reader` still
+    measures **5.24% / 6.29%**.
 - **`pageCount()` is pages KNOWN, not pages total.** Reporting it as the total would
   count up as the reader advanced — `1 / 1`, `2 / 2` — which is worse than admitting
   it is not known. `indexPending()` is what distinguishes them.
