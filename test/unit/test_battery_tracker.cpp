@@ -542,7 +542,13 @@ TEST_CASE("one sagging reading cannot shut the device down at either cadence") {
   // draws and the 0% anchor leaves headroom for that sag, so ONE low reading is not
   // a flat pack. Asserted at BOTH cadences, because a cadence coarser than the dwell
   // would let the sample after a sag complete a dwell the sag itself started.
-  for (const uint32_t cadence : {BatteryTracker::kPollFastMs, BatteryTracker::kPollSlowMs}) {
+  // A plain array rather than a braced range-for: that form is specified in terms of
+  // std::initializer_list, so it wants <initializer_list> included, and this project
+  // has already paid once for an include that libc++ satisfies transitively and
+  // libstdc++ does not -- test_scalablefont.cpp's <cstring>, which compiled on macOS
+  // for months and failed on the first Linux build.
+  const uint32_t cadences[2] = {BatteryTracker::kPollFastMs, BatteryTracker::kPollSlowMs};
+  for (const uint32_t cadence : cadences) {
     BatteryTracker t;
     t.update(good(64), 0);
     // The sag: one reading at the bottom of the ladder, taken under a waveform.
