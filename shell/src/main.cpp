@@ -7084,16 +7084,22 @@ void loop() {
   // BatteryTracker::pollIntervalMs(), which carries the derivation and the structural
   // argument that the critical dwell is never sampled slowly.
   //
-  // IT IS READ ONCE PER ITERATION AND NOT CACHED, deliberately: the rung and the
-  // screen both change under this loop, and a remembered interval would be a second
-  // copy of a state this asks for in a pointer test.
+  // IT IS ASKED FOR AFRESH AND NOT CACHED, deliberately: the rung and the screen both
+  // change under this loop, and a remembered interval would be a second copy of a
+  // state that is a load and a virtual call away.
+  //
+  // AND IT SITS LAST IN THE CONDITION rather than in a local above it, so `quiet`
+  // short-circuits it. `bandRepaintPossible()` reaches App::top(), which is a virtual
+  // id() -- nothing beside a 439 ms panel, but this loop runs every 10 ms and a
+  // battery-life change that spent a virtual call per iteration to save an I2C
+  // transaction per 30 s would be an odd trade to make silently.
   //
   // Same gate as pollCardPresence -- after the paint block, nothing owed to the
   // panel -- but for a different reason: this needs no SpiBusGuard, because it is
   // I2C on the sensor bus and cannot race a refresh. What the gate buys is only
   // that a repaint it asks for does not jump a frame the user is waiting for.
-  const uint32_t batteryPollMs = gBattery.pollIntervalMs(bandRepaintPossible());
-  if (quiet && static_cast<uint32_t>(millis() - gLastBatteryPollMs) >= batteryPollMs) {
+  if (quiet && static_cast<uint32_t>(millis() - gLastBatteryPollMs) >=
+                   gBattery.pollIntervalMs(bandRepaintPossible())) {
     gLastBatteryPollMs = millis();
     ++gBatteryPolls;
     // THE LADDER FIRST AND UNCONDITIONALLY. It is the safety mechanism and must not
