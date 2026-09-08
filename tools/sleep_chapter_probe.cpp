@@ -10,7 +10,10 @@
 // exactly this shape -- that cap is two lines because 68 of 221 corpus authors
 // overflow one and 58 of those 68 fit WHOLE in two -- and a cap picked without
 // those two figures is not a cap. This is the same question one run lower, and it
-// came back with a DIFFERENT answer: see WHAT IT FOUND.
+// came back with the same ANSWER off a different distribution: two lines, earned by
+// 76.41% of this run's overflows fitting two against the author's 85%. See WHAT IT
+// FOUND -- and note that the same numbers were once read as refusing a second line,
+// which is the paragraph below the list.
 //
 // WHAT IT MEASURES, and every choice is the shipped renderer's rather than a
 // convenient approximation:
@@ -43,20 +46,40 @@
 //
 // WHAT IT FOUND, over 225 books (205 with a usable NCX, 8,617 labels):
 //
-//   * A CHAPTER NAME DOES NOT FIT, AND IT IS NOT CLOSE. p50 231px, p90 571px,
-//     max 2005px against a 312px column -- so the MEDIAN label overflows the
-//     combined run and the 90th percentile is 1.8x the whole card.
+//   * A CHAPTER NAME DOES NOT FIT, AND IT IS NOT CLOSE. p50 217px, p90 536px,
+//     max 1887px against a 312px column -- so the MEDIAN label overflows the
+//     combined run and the 90th percentile is 1.7x the whole card.
 //   * SO THE RUN HAD TO SPLIT. The name elides on 52.51% of labels when it shares
 //     the row with `100% - `, and on 34.54% given its own line at 0.10em. 34.54%
 //     is the band Home already accepted for the same string (30.70% on the X4);
 //     more than half is not.
-//   * AND IT MAY NOT WRAP, which is where this diverges from the author. Of the
-//     labels over the full column, 26.76% need THREE lines or more, so a two-line
-//     cap would still elide 10.06% of all labels and would spend up to two of the
-//     title's lines doing it. The author's cap was earned by 85% of its overflows
-//     fitting two; this distribution has no such knee.
-//   * THE TITLE CAN AFFORD THE ONE LINE IT COSTS: 2 of 225 titles need exactly 8
-//     lines and so newly elide at a 7-line budget, and 4 already elided at 8.
+//   * AND IT WRAPS TO TWO LINES. Of the 2,976 labels over the full column, 2,274
+//     (76.41%) fit two lines WHOLE and 702 (23.59%) need three or more -- so a
+//     two-line cap elides 702 of 8,617 labels (8.15%) where one line elides 2,976
+//     (34.54%). That is a 4.2x reduction in cut names, and it is what earns the
+//     second line.
+//   * ELISION IS NOT REMOVED, ONLY MADE RARE. 8.15% of labels still need it, so
+//     the eliding path is still the last resort -- it moved to the second line
+//     rather than going away, and this is a change of DEGREE.
+//   * THE TITLE CAN AFFORD THE TWO LINES IT COSTS: 9 of 225 titles (4.00%) elide
+//     at the resulting 6-line budget, against 6 at 7 lines and 4 at 8 -- so the
+//     second reserved line costs 3 titles and the whole chapter run costs 5.
+//     Read those off the tail printed at the end of a run rather than from here.
+//
+// THE FIGURES ABOVE WERE WRONG IN THIS COMMENT BEFORE THIS RUN, and that is worth
+// knowing about a probe: it said p50 231px, p90 571px, max 2005px and "26.76% need
+// THREE lines or more ... a two-line cap would still elide 10.06%", none of which
+// this binary prints.
+//
+// THEY ARE THE 0.14em MEASUREMENT, and that is arithmetic rather than a guess:
+// 0.14em - 0.10em is 0.04em, which at ppem 23 is 0.92px a gap, and the widest label
+// is 128 bytes (toc.h's kMaxTocLabelBytes caps it there) -- so 1887 + 128 * 0.92 is
+// 2004.8, which is the 2005 the header claimed, to the pixel. The run's tracking
+// then settled at 0.10em, the summary was not re-run, and the decision the header
+// argued for (MAY NOT WRAP) rested on the stale pair: 10.06% of labels still cut
+// reads like a cap that has not earned itself, where the real 8.15% against one
+// line's 34.54% is a 4.2x reduction. A probe's summary is a CACHE of its own output
+// and goes stale exactly like any other second copy; re-run before quoting it.
 //
 //   build: cmake --build build --target sleep_chapter_probe
 //   run:   build/sleep_chapter_probe assets/built ~/.cache/encre-corpus/*/*.epub
@@ -290,7 +313,12 @@ int main(int argc, char** argv) {
               [](const auto& a, const auto& b) { return a.first > b.first; });
     std::printf("widest label per book, top 10:\n");
     for (size_t i = 0; i < worst.size() && i < 10; ++i) {
-      std::printf("  %6d  %.90s\n", worst[i].first, worst[i].second.c_str());
+      // IN FULL, not truncated to the terminal's width. This printed `%.90s` and
+      // the labels it exists to show are all longer than 90 bytes -- so the one
+      // output a specimen can be lifted from was the one output that could not be
+      // lifted from. test_theme_sleep_golden.cpp's eliding fixture is a label off
+      // this list, copied verbatim.
+      std::printf("  %6d  %s\n", worst[i].first, worst[i].second.c_str());
     }
   }
 
@@ -312,16 +340,33 @@ int main(int argc, char** argv) {
       lines.push_back(p.lines.size());
     }
     std::sort(lines.begin(), lines.end());
-    size_t exactly8 = 0, over8 = 0;
-    for (const size_t k : lines) {
-      if (k == 8) ++exactly8;
-      if (k > 8) ++over8;
-    }
     std::printf("\ntitles wrapped at %dpx over the same column: n=%zu p50=%zu p90=%zu max=%zu\n",
                 kTitleLineH, lines.size(), lines.empty() ? 0 : lines[lines.size() / 2],
                 lines.empty() ? 0 : lines[lines.size() * 9 / 10], lines.empty() ? 0 : lines.back());
-    std::printf("  needing EXACTLY 8 lines: %zu  <- what an 8->7 budget newly elides\n", exactly8);
-    std::printf("  already over 8: %zu  <- these elided before this change too\n", over8);
+
+    // A TAIL, NOT ONE BUDGET'S ANSWER. This printed `needing EXACTLY 8 lines` and
+    // `already over 8`, hardcoded -- which answered the question the run was first
+    // written for (does the chapter's one line cost the title anything at 8?) and
+    // could answer no other. The chapter then went to TWO lines and the budget with
+    // it, so the two figures the decision needed were the two figures the probe
+    // could not print. A budget is a derived number and it has moved twice, so what
+    // this reports is the DISTRIBUTION and the reader picks the row.
+    //
+    // Read it as: a budget of B newly elides the titles in the rows above B that a
+    // budget of B+1 did not, and `over B` is the running total that elide at B.
+    std::printf("  titles needing exactly N lines, and the total eliding at a budget of N:\n");
+    size_t atLeast = lines.size();
+    for (size_t k = 1; k <= (lines.empty() ? 0 : lines.back()); ++k) {
+      size_t exact = 0;
+      for (const size_t v : lines)
+        if (v == k) ++exact;
+      atLeast -= exact;  // now the count of titles needing MORE than k lines
+      if (k < 4 && exact == 0) continue;
+      std::printf("    N=%2zu  exactly %3zu   elide at budget %2zu: %3zu (%.2f%%)\n", k, exact, k,
+                  atLeast, lines.empty() ? 0.0
+                                         : 100.0 * static_cast<double>(atLeast) /
+                                               static_cast<double>(lines.size()));
+    }
   }
   return 0;
 }
