@@ -4556,6 +4556,17 @@ that was checked for obtainability and never for truth.
   column, and a column of notdef boxes stops inside a column too. They read
   `PREMIÈRE PARTIE : À LIR…` and `… À LIRE AV…`, accented capitals and the real
   ellipsis, cut differently at the two widths.
+- **AGAINST THE BOARD: 3.59% → 3.54% (X4) and 3.30% → 3.25% (X3)**, 13,780 → 13,582
+  and 13,782 → 13,584 differing pixels — threshold-at-128 over the bare `--export`
+  panels, since the sheet still prints `ok` rather than a percentage (#41). Small and
+  in the right direction, which is what a change should measure when **both** sides move
+  to the same content: the residual is the same whole-pixel-versus-subpixel disagreement
+  on one line of text. **The instrument is pinned by its control**: `library` reads
+  **3.85% / 3.54%** in both trees, 14,800 and 14,801 pixels either side, which
+  reproduces this file's own recorded figure for that screen to the digit. And the
+  change is confined per row on both sides — the design panel differs only in rows
+  **282–298** and the firmware panel only in **283–297**, columns 153–321 and 153–320,
+  with **0 pixels differing** anywhere else on either.
 - **WHAT ONLY THE PANEL CAN SAY: whether an unshouted name reads right there.** The
   string is drawn as the book wrote it, which is what the Reader's band, Contents' rows
   and Book details' `Current chapter` all do — so mixed case is the consistent answer —
