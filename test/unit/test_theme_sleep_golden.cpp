@@ -375,6 +375,61 @@ int badgeTopOf(const reader::Framebuffer& fb) {
   return fb.height();
 }
 
+// The progress bar's top row: the first row carrying a black run of EXACTLY the
+// bar's 170px. The card's borders are 400 and the little rule is 44, so nothing
+// else on this screen can be mistaken for it -- the same discriminator cardBox
+// uses one width up, and `SLEEP'S BAR FILL IS INSIDE ITS BORDER` above finds the
+// bar the same way.
+//
+// IT EXISTS TO MEASURE THE TITLE WITHOUT MEASURING THE CARD. The bar sits below
+// the title and the author, so `barTopOf - cardBox().top` is the card's border,
+// its top padding, the label, the little rule, three gaps, the AUTHOR's height
+// and the TITLE's height -- every term but those two being a constant. With the
+// author held still it is therefore the title's LINE COUNT, read off the frame
+// and independent of how tall the card came out. That independence is the whole
+// point: the card's height and the title's budget are two different quantities
+// now, and a test that measured the title through the height could not tell one
+// from the other.
+int barTopOf(const reader::Framebuffer& fb) {
+  for (int y = 0; y < fb.height(); ++y) {
+    int run = 0;
+    for (int x = 0; x < fb.width(); ++x) {
+      if (!fb.getPixel(x, y)) {
+        ++run;
+        if (run == 170 && (x + 1 >= fb.width() || fb.getPixel(x + 1, y))) return y;
+      } else {
+        run = 0;
+      }
+    }
+  }
+  return -1;
+}
+
+// How many lines the chapter run wraps to, and how much of its two-line reserve
+// that leaves unused -- the renderer's own wrap, through the renderer's own face
+// and tracking, because a transcribed line count is a second copy of the wrap.
+int chapterLinesOf(const ramp::Ramp& ramp, const std::string& chapter) {
+  const reader::Font& f = ramp.fonts[reader::Role::Label500];
+  const int contentW = 400 - 2 * (2 + 42);
+  reader::Prose p =
+      reader::wrapProseLead(f, chapter, contentW, reader::pxToF26(f.lineHeight()),
+                            reader::trackingEm(f, 100), reader::WordBreak::Anywhere);
+  std::string tail;
+  reader::clampProse(f, p, 2, contentW, tail);  // kSleepChapterMaxLines
+  return p.lineCount();
+}
+
+// The reserve the card does NOT spend: `kSleepChapterMaxLines` line boxes less
+// what the name actually took. This is exactly the amount by which the title is
+// CONSERVATIVE -- the budget is measured against the reserve and the card is tall
+// by the actual -- so any assertion about room the card left unused has to add it
+// back before comparing, or it is measuring the trade rather than the division.
+int chapterSlackOf(const ramp::Ramp& ramp, const std::string& chapter) {
+  if (chapter.empty()) return 0;
+  const int line = ramp.fonts[reader::Role::Label500].lineHeight();
+  return (2 - chapterLinesOf(ramp, chapter)) * line;
+}
+
 }  // namespace
 
 TEST_CASE("QuietTheme renders a wrapping Sleep title to golden at both geometries") {
@@ -692,10 +747,24 @@ TEST_CASE("THE AUTHOR IS CAPPED AT TWO LINES AND THE TITLE KEEPS THE REMAINDER")
 
     const int cardRoom = 2 * badge - h;
     const int titleLine = 46;  // kSleepTitleLineH, the board's `line-height: 1.1`
+    // THE CHAPTER'S UNSPENT RESERVE IS ADDED BACK, and that term is the whole of
+    // this assertion's restatement. The title's budget is measured against
+    // kSleepChapterMaxLines and the card is tall by what the name TOOK, so a
+    // one-line chapter -- which is what these two fixtures carry -- leaves the card
+    // 29px shorter than the division it was budgeted by. Without this term the
+    // assertion reads that 29px as room the hero was shortchanged out of and fails
+    // at 70px (X4) / 62px (X3): it would be measuring the CONSERVATIVE BUDGET, which
+    // is a deliberate trade with its own test and its own measured cost, rather than
+    // the division this test is about.
+    //
+    // IT IS NOT A TOLERANCE. `chapterSlackOf` is the exact reserve the card declined
+    // to spend, so what is compared is still the budget's own remainder -- and it is
+    // still required to be under one whole title line.
+    const int slack = chapterSlackOf(ramp, vm.chapter);
     for (const Box& box : {b, t}) {
-      CHECK_MESSAGE(cardRoom - box.height() < titleLine,
-                    "the card left " << (cardRoom - box.height())
-                                     << "px of its room unused, which is a whole "
+      CHECK_MESSAGE(cardRoom - (box.height() + slack) < titleLine,
+                    "the card left " << (cardRoom - (box.height() + slack))
+                                     << "px of its budgeted room unused, which is a whole "
                                      << titleLine << "px title line the hero did not get");
     }
 
@@ -924,21 +993,29 @@ TEST_CASE("A LONG CHAPTER STAYS INSIDE THE CARD, which is the defect this run co
   }
 }
 
-TEST_CASE("the chapter costs the card TWO lines however long the name is") {
-  // THE WHOLE REASON THE TWO LINES ARE RESERVED UNCONDITIONALLY. A chapter changes
-  // while the book is being read and an author does not, so a chapter free to GROW
-  // would make the TITLE's line budget depend on where the reader is standing --
-  // cross a chapter boundary and the book's name reflows, or newly acquires an
-  // ellipsis, because a page was turned. Reserved either way, the card's layout is
-  // a function of the BOOK, which is the property it had at one line and keeps.
+TEST_CASE("the card's HEIGHT follows the chapter's actual wrap") {
+  // ONE OF THE TWO ASSERTIONS THAT ARE THIS SPLIT'S WHOLE SPECIFICATION. The card
+  // is tall by what the chapter name TOOK; the title's budget is measured against
+  // what it MIGHT take. Two different quantities, and this is the one that has to
+  // follow the name.
   //
-  // TWO ASSERTIONS, AND NEITHER IS SUFFICIENT ALONE. The first -- the card is the
-  // same height for a one-line name and a 255-byte one -- is the property a reader
-  // would notice, and it passes for a run FIXED at one line as happily as for one
-  // reserved at two, so it cannot see the cap's size. The second pins the size,
-  // against the no-chapter card, and it is the one that fails if the reservation is
-  // made conditional on the wrap's actual line count: the specimen is one line, so
-  // a conditional band would be 29px shorter and only this assertion would say so.
+  // IT REPLACES `the chapter costs the card TWO lines however long the name is`,
+  // which asserted the opposite -- and correctly, for a card whose height reserved
+  // the second line too. `min-height: 58px` came off design/Sleep.dc.html because
+  // that reserve bought nothing in the height: this is the card's LAST run, so
+  // nothing below it steps up, and a one-line name (65.46% of corpus labels) left
+  // 29px of empty box standing at the foot of a card that holds the glass for
+  // HOURS. Dead space, not spacing.
+  //
+  // THE FIXTURE IS THE BOARD'S OWN, AND ITS TITLE IS ONE LINE ON PURPOSE -- which
+  // is what makes this test blind to the budget question and therefore able to name
+  // the height one. `MIDDLEMARCH` is nowhere near its budget, so the division above
+  // it cannot change what is drawn however the chapter is counted into it; the only
+  // thing left that can move the card is the chapter's own wrap. The REQUIRE below
+  // says so rather than leaving it to be inferred.
+  //
+  // Reversing this -- giving `cardH` the reserve again -- fails every assertion
+  // here and none in `the TITLE's budget does NOT follow it`.
   ramp::Ramp ramp;
   reader::QuietTheme theme;
   const int chapterLine = ramp.fonts[reader::Role::Label500].lineHeight();
@@ -948,43 +1025,119 @@ TEST_CASE("the chapter costs the card TWO lines however long the name is") {
     return cardBox(fb, 400).height();
   };
 
+  // A mutation tells you about your INPUT before it tells you about your test: the
+  // three chapter shapes below only differ if the wrap really resolves them to one
+  // line, two lines and a clamp.
+  REQUIRE(chapterLinesOf(ramp, sampleSleep().chapter) == 1);
+  REQUIRE(chapterLinesOf(ramp, kLongChapter) == 2);
+  REQUIRE(chapterLinesOf(ramp, kElidedChapter) == 2);  // clamped TO the cap
+
   for (int i = 0; i < 2; ++i) {
     const int w = i == 0 ? 480 : 528;
     const int h = i == 0 ? 800 : 792;
-    // Three shapes, each of which the wrap resolves to a different line count: the
-    // board's one-line specimen, a name that fills two lines whole, and one long
-    // enough to be clamped. A card whose height is a constant has to be a constant
-    // across all three, not merely across the two extremes.
     reader::SleepViewModel one = sampleSleep(), two = sampleSleep(), many = sampleSleep();
     two.chapter = kLongChapter;
     many.chapter = std::string(255, 'M');
-    const int hOne = cardHeight(one, w, h);
-    CHECK_MESSAGE(cardHeight(two, w, h) == hOne,
-                  "a two-line chapter changed the card's height by "
-                      << (cardHeight(two, w, h) - hOne)
-                      << "px: this run is growing, and the title's budget moves with it");
-    CHECK_MESSAGE(cardHeight(many, w, h) == hOne,
-                  "a 255-byte chapter changed the card's height by "
-                      << (cardHeight(many, w, h) - hOne)
-                      << "px: this run is growing, and the title's budget moves with it");
-
-    // THE BAND IS TWO LINES AND NOT ONE. This is the assertion a conditional
-    // reservation fails, and the only one: kSleepGap is 14, the run's line box is
-    // Label500's own, and kSleepChapterMaxLines is 2.
     reader::SleepViewModel without = sampleSleep();
     without.chapter.clear();
-    CHECK_MESSAGE(hOne - cardHeight(without, w, h) == 2 * chapterLine + 14,
-                  "the chapter band is " << (hOne - cardHeight(without, w, h)) - 14
-                                         << "px of line box where two lines is "
-                                         << 2 * chapterLine
-                                         << ": the reservation is not unconditional");
+
+    const int hOne = cardHeight(one, w, h);
+
+    // A SECOND LINE OF NAME COSTS EXACTLY ONE LINE BOX AND NOTHING ELSE. Not zero,
+    // which is what a reserved height gives, and not more, which would mean some
+    // other term moved with it.
+    CHECK_MESSAGE(cardHeight(two, w, h) - hOne == chapterLine,
+                  "a two-line chapter made the card " << (cardHeight(two, w, h) - hOne)
+                                                      << "px taller where its second line box is "
+                                                      << chapterLine
+                                                      << ": the height is not following the wrap");
+
+    // ...AND A NAME OVER THE CAP COSTS THE CAP AND NO MORE, which is clampProse's
+    // half of it: 255 unbreakable characters is about eight lines of name into a
+    // two-line band, so a height that followed the wrap without the clamp would run
+    // the card off the glass.
+    CHECK_MESSAGE(cardHeight(many, w, h) == cardHeight(two, w, h),
+                  "a 255-byte chapter and a two-line one differ by "
+                      << (cardHeight(many, w, h) - cardHeight(two, w, h))
+                      << "px: the clamp is not bounding the height");
+
+    // AND A ONE-LINE NAME COSTS ONE LINE PLUS THE GAP, which is the assertion the
+    // reserved form fails: it gave this the same 2 * chapterLine + 14 the two-line
+    // name gets. kSleepGap is 14.
+    CHECK_MESSAGE(hOne - cardHeight(without, w, h) == chapterLine + 14,
+                  "a one-line chapter costs the card "
+                      << (hOne - cardHeight(without, w, h))
+                      << "px where one line box plus the gap is " << (chapterLine + 14)
+                      << ": the height is reserving a line the name did not take");
   }
 
   // AND AN EMPTY CHAPTER COSTS NO LINE AT ALL, which is what an old pointer -- one
-  // written before last.json carried a chapter -- gets. Not two blank lines at the
+  // written before last.json carried a chapter -- gets. Not a blank band at the
   // foot of the card: this is the card's LAST run, so nothing below it steps up, and
   // a shorter card is the honest rendering of an absent claim. (The arithmetic is
   // the assertion directly above; this is the claim it is making, named.)
+}
+
+TEST_CASE("the TITLE's budget does NOT follow it") {
+  // THE OTHER HALF OF THE SPECIFICATION, AND THE REASON THE RESERVE STILL EXISTS.
+  //
+  // A CHAPTER CHANGES WHILE THE BOOK IS BEING READ AND AN AUTHOR DOES NOT. The
+  // title takes what the card's room leaves, so a budget that counted this run's
+  // second line only when the name USED it would make the TITLE's line budget
+  // depend on where the reader is standing: cross a chapter boundary and the book's
+  // name reflows, or newly acquires an ellipsis, because a page was turned. That is
+  // a visible defect with a baffling cause, and `chapterReserveH` is what answers
+  // it -- the budget is measured against kSleepChapterMaxLines whatever the wrap
+  // does.
+  //
+  // IT IS MEASURED WITHOUT MEASURING THE CARD, which is the whole difficulty: the
+  // card's height is SUPPOSED to move here (by one chapter line box, asserted in the
+  // test above), so any observable derived from cardBox().height() cannot separate
+  // "the title reflowed" from "the card followed the chapter". `barTopOf` reads the
+  // title's line count off the frame instead -- the bar's distance below the card's
+  // own TOP is every fixed term of the card plus the author's height plus the
+  // title's, and the author is held still -- so this assertion is blind to the
+  // height question and fails only on the budget one.
+  //
+  // BOTH RUNS ARE MAXIMAL, which is the only state in which the budget is
+  // observable at all: with a short title the division has slack and one more line
+  // of budget changes nothing that is drawn. This is the fixture
+  // `THE AUTHOR IS CAPPED AT TWO LINES AND THE TITLE KEEPS THE REMAINDER` uses, for
+  // that reason.
+  //
+  // Reversing this -- giving `maxTitleLines` the ACTUAL -- fails here and nowhere
+  // else in this file.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  const int titleLine = 46;  // kSleepTitleLineH
+  reader::SleepViewModel base = sampleSleep();
+  base.title = std::string(255, 'W');
+  base.author = std::string(255, 'W');
+
+  auto titleBand = [&](const std::string& chapter, int w, int h) {
+    reader::SleepViewModel vm = base;
+    vm.chapter = chapter;
+    reader::Framebuffer fb(w, h);
+    theme.renderSleep(fb, ramp.fonts, vm, reader::Plane::Bw, nullptr);
+    const int bar = barTopOf(fb);
+    REQUIRE(bar > 0);
+    return bar - cardBox(fb, 400).top;
+  };
+
+  for (int i = 0; i < 2; ++i) {
+    const int w = i == 0 ? 480 : 528;
+    const int h = i == 0 ? 800 : 792;
+    const int oneLine = titleBand(sampleSleep().chapter, w, h);
+    for (const std::string& chapter :
+         {std::string(kLongChapter), std::string(kElidedChapter)}) {
+      CHECK_MESSAGE(titleBand(chapter, w, h) == oneLine,
+                    "the title moved the bar by " << (titleBand(chapter, w, h) - oneLine)
+                                                  << "px between a one-line chapter and this one ("
+                                                  << titleLine
+                                                  << "px is a whole title line): the budget is "
+                                                  << "following the chapter's wrap");
+    }
+  }
 }
 
 TEST_CASE("the figure under the bar is the number the BAR reads, not a second field") {
