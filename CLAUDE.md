@@ -2295,7 +2295,7 @@ worth knowing before changing it:
 | Item actions, Delete confirm | their own boards | Overlays; a focus move repaints the overlay alone. |
 | Book details | `BookDetails.dc.html` | Not an overlay, despite covering the Library. Its title **wraps**; everywhere else elides. |
 | Settings | `Settings.dc.html` | Nine items, three sections, and every drawn row responds. |
-| Sleep | `Sleep.dc.html` | Painted directly, never pushed — a push would make the wake restore into it. Its title **wraps**; the badge is drawn first, because its top is the card's bound. |
+| Sleep | `Sleep.dc.html` | Painted directly, never pushed — a push would make the wake restore into it. Its title, author and chapter **all wrap**; the chapter's two lines are reserved UNCONDITIONALLY, so the title's budget cannot move when the reader crosses a chapter. The badge is drawn first, because its top is the card's bound. |
 | Sleep / nothing open | `SleepIdle.dc.html` | The badge alone. Same screen with its card removed. |
 | Sleep / cover | `SleepCover.dc.html` | The cover full-bleed, and **the one screen that drops the badge**. `Grayscale`, decided per paint. |
 | Sleep / cover + details | `SleepCoverDetails.dc.html` | The same cover with the reading card and the badge over it. Keeps both. Its golden pinned a **truncated** title for two phases. |
@@ -2532,31 +2532,370 @@ short.**
   long-author *specimen* would land differently in the two engines, the same ~3% the
   `.rfnt` faces measure wider everywhere else.
 
-The `6% · CH. 01` line is the percentage and the SPINE POSITION. **THIS SAID A CHAPTER
-NAME "would need a table of contents, which is not built", AND THAT HAS BEEN FALSE
-SINCE `Contents` SHIPPED** — the pointer carries the name now (`LastRead::chapter`) and
-Home draws it. The card still shows the position, and it is a **decision with a price**
-rather than a limit:
+**THE CARD'S LAST LINE NAMES THE CHAPTER NOW, AND IT WAS THE LAST PLACE ON THE DEVICE
+SHOWING A SPINE POSITION.** It read `6% · CH. 01` — a percentage and `last.spine + 1`,
+composed in the shell — and this entry twice recorded a reason for that which had
+expired: first that a chapter name "would need a table of contents, which is not
+built", false since `Contents` shipped, and then that the run needed a bound and a
+design decision, which is what this change made. **It was never Home's false claim**:
+`CH. 01` quotes no total, so it invited no arithmetic and was merely *less
+informative* than a name. So this was an improvement rather than a fix, and the
+constraint was that it must not be bought with a regression.
 
-- **`CH. 01` alone is not the defect Home's `CH. 14 OF 36` was.** It is a position with
-  no total — the Reader's own footer's form — so it is *less informative* than a name
-  and invites no arithmetic. That distinction is what keeps this out of scope of the
-  Home fix rather than left undone by it.
-- **A NAME IN THIS RUN NEEDS A BOUND FIRST, and putting one there unbounded is a
-  just-fixed bug reintroduced.** `renderSleep` draws `vm.progress` through
-  `drawCentredText`, which does not elide, and `centreIn` returns a **negative** half
-  for a run wider than its box — which is exactly what put the sleep card's AUTHOR over
-  both borders onto the dither field. A card-sourced chapter name here is that, one run
-  lower.
-- **And it is a COMBINED run**, `percent · position`, so what it becomes (a second
-  middot? the name alone?) is a question for `Sleep.dc.html` and its eight goldens, not
-  a substitution in the shell.
+**THE RUN IS TWO RUNS, BECAUSE A CHAPTER NAME DOES NOT FIT AND DOES NOT NEARLY FIT.**
+Measured over 225 real books — 205 with a usable NCX, **8,617 chapter labels**, at the
+shipped `Role::Label500` against the card's **312px** content column, which is 312 on
+*both* panels because `max-width: 400` is under the X4's `480 - 2·kMargin` as well.
+`tools/sleep_chapter_probe.cpp` is that measurement, tracked and re-runnable for
+`name_probe`'s reason:
 
-**AND THE MIDDLE DOT CAUGHT THIS PROJECT'S OWN RECORDED TRAP AGAIN.**
-`"%d%%\xC2\xB7CH. %02d"` parses `\xB7C` as ONE hex escape, because a C++ hex escape is
-unbounded. clang rejects it outright; the ESP32's GCC **accepted it** and would have
-emitted a byte that is not U+00B7. This file already recorded the same shape once
-(`"\xA0b"` is 0xA0B). Adjacent string literals end the escape.
+| the name gets | elides |
+|---|--:|
+| the row, beside `100% · ` (213px) | **52.51%** |
+| the row, beside `6% · ` (246px) | 47.82% |
+| its own line, 312px at 0.14em | 37.60% |
+| **its own line, 312px at 0.10em** | **34.54%** |
+| its own line, 0.10em, *shouted* | 36.73% |
+| *Home's control*, `Meta400`/0.10em at 304 / 352px | 30.70% / 23.69% |
+
+p50 **217px**, p90 536px, max 1887px, and only **33 of the 205** books have every
+label fitting. So the median label overflows the combined run, and sharing that row
+would show a cut name **more often than a whole one** — where its own line lands in
+the band this project already accepted for the identical string.
+
+**IT WRAPS TO TWO LINES, AND IT SHIPPED ELIDING ON ONE — THIS IS AN OWNER'S DECISION
+AND NOT A NEW READING OF THE DATA.** The distribution permits either. What decides it
+is the screen: the card holds the glass for **hours**, longer than anything else the
+device draws, so a cut name is one the reader *lives with* rather than one they press
+past. That is the argument that made the title wrap (#74) and then the author (#86),
+arriving at the last run on the card.
+
+**TWO LINES, AND THE DATA STOPS THERE.** Of the 8,617 labels, **2,976 (34.54%)**
+overflow one line; of those 2,976, **2,274 (76.41%) fit two lines WHOLE** and 702
+(23.59%) need three or more. So two lines elide **702 of 8,617 (8.15%)** where one line
+elides 2,976 — a **4.2× reduction in cut names**, which is what earns the second line
+and is the same shape of knee the author's cap was earned by (85% there). **A third
+line was permitted by the owner and is not taken**: a smaller marginal gain bought out
+of another of the title's lines. **Elision is moved, not removed** — `clampProse` cuts
+the SECOND line for that 8.15%, so this is a change of degree.
+
+**THE TWO LINES ARE RESERVED IN THE TITLE'S BUDGET WHETHER OR NOT THE NAME USES THEM,
+AND THE CARD'S HEIGHT IS WHAT THE NAME ACTUALLY TOOK.** Those are **two quantities and
+nothing requires them to be one number**, which is the whole of how a growable run is
+safe here — and the first shape of this shipped them as one, so the reserve had to be
+the height too.
+
+- **`chapterReserveH` IS THE BUDGET'S**, and the objection it answers is real and is not
+  answered by the rate: **A CHAPTER CHANGES WHILE THE BOOK IS BEING READ AND AN AUTHOR
+  DOES NOT.** The title takes what the card's room leaves, so a budget counting
+  this run's second line only when the name *used* it would make the **title's** budget
+  depend on where the reader is standing — cross a chapter boundary and the book's name
+  reflows, or newly acquires an ellipsis, *because a page was turned*. A visible defect
+  with a baffling cause. Reserved either way, the title's budget is a **constant** and
+  the card's LAYOUT is a function of the **book alone**, exactly as it was at one line.
+  It is `kSleepGap + kSleepChapterMaxLines * lineHeight()` and it never reads the wrap.
+- **`chapterH` IS THE CARD'S, and it is the wrap's own height** —
+  `kSleepGap + f26ToPx(chapterProse.heightF26())`, `authorH`'s shape one run down. The
+  reserve bought **nothing** in the height: this is the card's LAST run, so nothing
+  below it steps up, and a one-line name left **29px of empty box** standing at the foot
+  of a card that holds the glass for **hours**. Dead space, not spacing — and the common
+  case, at 65.46% of corpus labels and every fixture's own specimen. The wrap is
+  therefore **hoisted above `cardH`** rather than built at draw time; that placement is
+  the mechanism, and building it at the draw is what made the reserve the only number
+  the height could have.
+- **THE BOUND HOLDS A FORTIORI**, which is worth saying rather than leaving implied:
+  `cardH` can only be **shorter** than the room the budget was divided against, never
+  taller, so `cardH <= cardRoom` is satisfied with 29px to spare on a one-line name. The
+  card is CENTRED, so what a shorter card does is **re-centre** — no type moves relative
+  to any other type.
+- **DO NOT MAKE THEM ONE EXPRESSION AGAIN, IN EITHER DIRECTION.** They will read as one
+  thing spelled twice. Giving the HEIGHT the reserve puts the dead space back; giving the
+  BUDGET the actual reintroduces the reflow. Both sites say which quantity they hold and
+  name the other, `design/Sleep.dc.html` says the same thing where its `min-height: 58px`
+  used to be, and **each swap has its own test** — see the mutations below, which are the
+  whole specification of the split.
+- **The name is drawn at the TOP of the room `chapterH` gave it**, which for a one-line
+  name is exactly one line: there is no slack under it any more. A short name and a
+  two-line name still share a first baseline *relative to the run above them*; what a
+  chapter crossing moves is the whole **card**, by 29px, re-centred.
+
+**AND THE TITLE IS THEREFORE CONSERVATIVE BY UP TO ONE LINE, which is the stated cost of
+the trade and is measured rather than argued.** A one-line chapter buys the title
+nothing, so the only title that can notice is one needing exactly `budget + 1` lines —
+and `sleep_chapter_probe` says that is **3 of 225 (1.33%)**: `The Fables of Aesop`, `The
+Declaration of Independence of the United States of America` and `The Hacker Crackdown`.
+**All three have one-line labels and none has only one-line labels** (39 of 90, 2 of 6,
+4 of 23), so in those three books the seventh title line is given up in **45 of their 119
+chapters** and kept in the other 74. Every other corpus title either fits its six lines
+or would elide at seven as well. The probe answers this jointly — a title's line count
+*and* that same book's labels — because the tail alone cannot: read it off
+`the conservative budget's cost` at the end of a run.
+
+**THE YIELD ORDER IS THREE-STAGE AND IS STILL THE ORDER OF THE STATEMENTS.** The
+chapter yields first and absolutely (two lines *of budget*, always), the author second
+by its fixed cap of two, and the title takes every line left over. **This entry used to
+add that `chapterH` was "one expression spent twice", on `renderBookError`'s
+two-copies-free-to-disagree argument, and that was the defect rather than the safeguard**
+— the two spends want different numbers, and collapsing them is what put the dead space
+in the card. What they really share is `cardFixedH`, which is one expression for that
+reason. The claim that "a mutation that reserves it in the height only is caught by the
+*pre-existing* badge-bound tests" was also **false in the direction that matters**: the
+card gets SHORTER, so nothing overruns the badge and no bound test can see it.
+
+- **WHAT IT COSTS: the title's derived budget goes 8 lines → 6 on both panels** — X4
+  642px of card room and X3 634px, less the 325px that is not the title when the author
+  takes one line, over the title's own 46px line box. **9 of the 225 corpus titles
+  (4.00%) elide at 6**, against **6 at a budget of 7** and **4 at 8** — so the second
+  reserved line costs **3** titles and the whole chapter run costs **5**. Read those off
+  the tail `sleep_chapter_probe` prints rather than from here; it printed only the
+  8-line answer until this change needed the 6-line one, which is the shape of a
+  hardcoded figure in an instrument.
+
+**AND ONE ASSERTION ON THIS CARD WAS MEASURING `mod 46` RATHER THAN THE DESIGN, WHICH
+IS WORTH KNOWING BEFORE TRUSTING ANY HEIGHT COMPARISON HERE.** *"At the bound the title
+pays"* was asserted as *a two-line author's card is no taller than a one-line author's*,
+and that is not a property of the yield order at all. The card's height is
+`F + A + C + 46·floor((cardRoom − F − A − C)/46)`, which **collapses to
+`cardRoom − (budget mod 46)`** — so whether the author's second line costs the title a
+line depends *only* on whether the one-line remainder reaches the 29px that line takes:
+
+| | one-line remainder | a two-line author then |
+|---|--:|---|
+| with a one-line chapter | 24 (X4) / 16 (X3) | forces a title line back, card **−17px** |
+| with a two-line chapter | 41 (X4) / 33 (X3) | fits the slack, card **+29px** |
+
+**Both are correct renders** — 12px (X4) and 4px (X3) inside the bound and clear of the
+badge — and the second is the *better* one, because the title keeps all six of its lines
+instead of dropping to six from seven. **That assertion has now been wrong in both
+directions**: its first version asserted the card GREW and failed at −17px, and the
+version that replaced it asserted the card SHRANK and failed at +29px. A property that
+flips sign when a neighbouring run takes one more line was an artefact both times. It is
+replaced by the remainder-independent statement — **the card never leaves a whole title
+line box unused** — and the order itself is asserted where it is observable, by the cap
+costing exactly one extra line box where there IS slack.
+
+**AND THAT STATEMENT NEEDED THE CHAPTER'S UNSPENT RESERVE ADDED BACK ONCE THE HEIGHT
+STOPPED TAKING IT.** With a one-line chapter the card is 29px shorter than the division
+it was budgeted by, so the bare form reads that 29px as room the hero was shortchanged
+out of and fails at **70px (X4) / 62px (X3)** — measuring the *conservative budget*,
+which is a deliberate trade with its own figures above, rather than the division the
+assertion is about. `chapterSlackOf` is an **exact term and not a tolerance**: what is
+compared is still the budget's own remainder, still required under one whole title line.
+**The table's two rows are now the ONE-LINE and TWO-LINE AUTHOR against a reserve that is
+always two**, so the reachable remainder is 41px (X4) / 33px (X3) with a one-line author
+and 12px / 4px with a two-line one — and that pair is load-bearing for a *test* now: a
+budget change is only visible where the remainder is at least `46 − 29 = 17px`, so the
+two-line-author fixture cannot see it and the one-line-author one can.
+- **`SleepViewModel::progress` IS GONE RATHER THAN RENAMED.** It held the whole
+  composed string, so the figure under the bar and the length of the bar were two
+  spellings of one fact that the shell could set independently. The theme composes the
+  percentage from `progressPercent` — the field `drawProgressBar` already takes —
+  exactly as `renderHome` does, and `chapter` carries `last.chapter`, the string the
+  Reader's band, Contents' `NOW` row and Home's meta line all draw.
+- **AN EMPTY CHAPTER COSTS NO LINE AT ALL** — not two blank ones — unlike Home's,
+  which reserves its line because runs sit below it. This is the card's *last* run, so
+  nothing below it steps up and an absent chapter simply shortens the card. An absent
+  claim beats a false one: a pointer written before `last.json` carried a chapter must
+  not fall back to the position this run has just stopped showing.
+- **0.10em ON THE NAME AND 0.14em ON THE PERCENTAGE**, which is Home's split and its
+  reason (0.14em is a *counter's* tracking and a name is not a counter) and is 3.06
+  points narrower on the one run whose width is the whole problem. **Not shouted**,
+  although the title and author on this card are: three screens already name this
+  string as authored, `toc.h` hands it over "as authored" for that reason, and shouting
+  measures **2.19 points wider**.
+- **WEIGHT 500, WHERE THE BOARD SAID 700.** The ramp carries `Label400`/`Label500` at
+  11pt and **no `Label700`**, so 700 asked for an asset nobody has — `LowBattery`'s
+  band label's defect exactly — and the firmware has always drawn `Label500` here.
+
+**AND THE NAME MAY NOT GO THROUGH `drawCentredText`, which is what this run did while
+it was a position.** That function places a run at `centreIn(0, contentW, w)` and
+`centreIn` returns a **negative** half for a run wider than its box: an unbounded name
+begins left of the card's padding, paints over both 2px borders onto the dither field,
+and is clipped by the panel edge with no ellipsis to say so — the defect the AUTHOR
+line one run above was fixed for, and at 34.54% it would have been the **common case**.
+
+**THE WRAP IS WHAT KEEPS IT IN THE COLUMN NOW, and `clampProse` is the last resort
+rather than the mechanism.** `WordBreak::Anywhere` means every line the wrap emits is at
+most `contentW` wide, so `centreIn`'s half cannot go negative for any of them — and that
+holds for a name with no space in it, which is what `Anywhere` is for. The clamp then
+cuts the second line for the 8.15% that need a third.
+
+**THE TEST WATCHES THE CARD'S PADDING, AND ON THIS SCREEN THAT IS THE ONLY PLACE INK IS
+EVIDENCE AT ALL.** The 42px band between each border and the content column is paper by
+construction. The two obvious alternatives were *tried against the mutation and both
+are blind*: the panel EDGE is inked on every row by the dither field, and the card's own
+side BORDERS are inked on every row of the card, so neither a full-row scan nor an
+in-card extent separates the run's ink from furniture that belongs there.
+
+**IT IS PROVED BY THREE MUTATIONS AND IT BITES ON ALL OF THEM.** Restoring
+`drawCentredText` on the raw name — the original defect — fails on **all four** of its
+specimens at both geometries, with **508, 440, 723 and 742** stray pixels; dropping
+`WordBreak::Anywhere` to `Normal` fails on the two unbreakable-token names with **723
+and 742**, which is the case a real label with spaces cannot reach. Its four names are
+two real labels either side of the two-line cap plus a 120-byte token and FAT's 255-byte
+maximum, so the wrap and the clamp are both covered and nothing depends on where a space
+happens to fall.
+
+**AND THE RESERVE/ACTUAL SPLIT IS PROVED BY TWO MORE, ONE PER DIRECTION, EACH FAILING A
+TEST THE OTHER DOES NOT.** Those two mutations *are* the specification: if either passes,
+the distinction is not enforced.
+
+| swap | fails |
+|---|---|
+| `cardH` takes `chapterReserveH` | **14** assertions over 6 cases — **4** in `the card's HEIGHT follows the chapter's actual wrap` plus the **10** sleep goldens. Budget test: **0**. |
+| `maxTitleLines` takes `chapterH` | **4** assertions over **1** case, all in `the TITLE's budget does NOT follow it`, reporting the bar moved **46px** — one whole title line — between a one-line chapter and a two-line one. Height test: **0**, **and nothing else in the suite moves, goldens included.** |
+
+- **THE BUDGET SWAP IS INVISIBLE TO EVERY GOLDEN**, which is why it needed a test of its
+  own rather than a re-render: every golden's title fits inside its budget's slack, so an
+  extra line of budget changes nothing that is drawn. **1,325,843 assertions stayed green
+  under it** before the test existed.
+- **AND THE BUDGET TEST'S FIRST FIXTURE COULD NOT SEE IT EITHER** — the recorded lesson
+  again, that *a mutation tells you about your INPUT before it tells you about your
+  test*. It copied `THE AUTHOR IS CAPPED AT TWO LINES`', which maximises the **author**
+  too, and a two-line author leaves a remainder of 12px / 4px: 29px more budget still
+  floors to the same six lines. With the board's one-line author the remainder is
+  41px / 33px and the crossing happens. **Both conditions are asserted now** — the title
+  fills its budget, and the remainder is at least `46 − 29` — so the test says so instead
+  of going quiet.
+- **A FIXTURE GUARD HAS TO BE BLIND TO THE DEFECT IT GUARDS.** Those two `REQUIRE`s are
+  measured on the **two-line** chapter render, where the reserve is exactly what the name
+  takes and both spellings of the budget give the same card. Taken from the one-line
+  render the mutation moves them itself, the remainder goes to **−5px**, and the guard
+  fires with *"this fixture cannot see the defect"* about a fixture that sees it
+  perfectly well — **a guard that accuses the fixture when the code is wrong is worse
+  than no guard.**
+- **THE HEIGHT TEST HAD TO BE BLIND TO THE BUDGET AND VICE VERSA**, and the two are made
+  so differently. The height test uses the board's **one-line title**, so the division
+  above it has slack and cannot change what is drawn however the chapter is counted into
+  it. The budget test cannot use the card's height at all — the height is *supposed* to
+  move there — so it reads the title's line count off the frame as
+  **`barTopOf − cardBox().top`**, the bar's distance below the card's own top, which is
+  every fixed term plus the author's height plus the title's with the author held still.
+
+**THE MIDDLE DOT'S TRAP OUTLIVED THE LITERAL THAT CARRIED IT, and the duplicated note
+was the tell.** `"%d%%\xC2\xB7CH. %02d"` parses `\xB7C` as ONE hex escape, because a C++
+hex escape is **unbounded**: clang rejects it outright and the ESP32's GCC **accepted
+it** and emitted a byte that is not U+00B7 (this file records the same shape for
+`"\xA0b"`, which is 0xA0B). Adjacent literals end the escape. That `snprintf` is gone
+with the composition, and **the note describing it stood in `main.cpp` twice, verbatim**
+— which is this file's own rule arriving: when a replacement leaves a condition stated
+twice, one of them is stale. The trap is real and now lives only where the middot does,
+`screens.cpp`'s `kDot` and the badge's own literals, where the bytes are their own
+adjacent literal by construction.
+
+**MEASURED AGAINST THE BOARDS: `sleep` 2.32%/2.13% → 2.30%/2.11%, `sleep_waking`
+2.16%/1.99% → 2.15%/1.97%, `sleep_cover_details` 2.74%/2.50% → 2.87%/2.63%.** Two of
+the three ended up *better* than before the run wrapped and the third is 0.13pp worse.
+Threshold-at-128 counts over the bare `--export` panels, since the sheet still prints
+`ok` (#41).
+
+**THE WRAP ALONE COST 1,500 PIXELS A BOARD, AND THE CAUSE WAS THE TITLE'S `1.1`.** With
+the wrap in and the title still declaring `line-height: 1.1`, `sleep` went to
+**2.71%/2.49%** — and the mechanism is worth keeping because it will catch the next
+person who changes a run's height on a centred card:
+
+- **Chrome resolves `1.1` on `--t-title` to a FRACTIONAL 46.2px** where the firmware
+  derives `round(1.1 * 42) = 46`. That was the only fraction on this card. It made the
+  card's own height fractional, and the card is **centred**, so `centreIn` halved the
+  fraction and the runs below the title painted at positions the firmware does not
+  compute.
+- **It cost nothing until the card changed PARITY.** The reserved second line is 29px —
+  **odd** — so it flipped the half pixel the centring had been absorbing, and the
+  author, the bar, the percentage and the chapter all went from 0–2px out of register
+  to 1–3px. Chrome's painted card grew **+30px** where the firmware's grew +29.
+- **IT WAS A REAL REGISTER REGRESSION AND NOT THE `Names` CUT'S COUNTING ARTEFACT, and
+  this file's own discriminator is what settled it.** A **±1-row-tolerant** count did
+  **not** absorb the rise (5,456 → 6,988), and the two card borders sat **beside** each
+  other two pixels apart rather than the design's **straddling** the firmware's. Both
+  tests point the same way, which is what makes the verdict safe.
+- **The fix was to state the number, not to swap instruments**: the three boards say
+  `line-height: 46px`, which is what `1.1` was chosen to mean. **No golden moved** —
+  `kSleepTitleLineH` was already 46, so only the board's render moved, toward the
+  firmware. Same lesson as the chapter run's own `normal`, and `Peek.dc.html`'s panel
+  height.
+- **The obvious symmetry is WRONG and was measured rather than assumed**: giving the
+  AUTHOR run `line-height: 29px` too makes the screen **worse** (2.45%/2.25% against
+  2.30%/2.11%), so Chrome's `normal` there is not the same disagreement. Left alone.
+- **`sleep_cover_details`'s residual 0.13pp is the stated cost and is inherent.** Its
+  card sits over a **four-level dithered cover** rather than the plain field, so the
+  1px the card's painted extent still differs by mismatches cover pixels along both
+  boundary bands, where the same offset over the field costs far less. Growing a centred
+  card by an ODD number of pixels over a dithered photograph is what the design decision
+  buys; there is no even-sized line box to grow it by.
+- **AND THE PARITY MOVED ONCE MORE, WHEN THE HEIGHT STOPPED TAKING THE RESERVE — the
+  same odd 29px, in the other direction, and it did NOT redden the register.** The board
+  dropped `min-height: 58px` and Chrome's card shrank by exactly the 29px the firmware's
+  did, so the design's card top sits **1px above** the firmware's before *and* after,
+  measured. What the strict count does is what this bullet's own lesson predicts:
+  `sleep` **2.30%/2.11% → 2.32%/2.13%** (+64 px, +0.02pp) while the **±1-row-tolerant**
+  count *falls* 4,326 → 4,152, and `sleep_waking` the same +64/−174. So the rise is the
+  half-pixel phase and not drift — **both discriminators point the same way**, which is
+  what makes that verdict safe here as it did for the `Names` cut. `sleep_cover_details`
+  improves on **both** counts (2.87%/2.63% → **2.74%/2.50%**, −516 strict, −437
+  tolerant), which is this bullet above being paid back: the card it centres over that
+  dithered cover is 29px smaller. `sleep_cover` stays **0.00%** and `sleep_idle`
+  **0.26%/0.24%** to the pixel — neither draws the card.
+
+- **IT READ AS A REGRESSION FIRST, AND IT WAS NOT THE PHASE ARTEFACT IT LOOKED LIKE.**
+  With the chapter run's line box left at `line-height: normal` the Sleep board went to
+  **3.03%/2.78%** — worse than before the change — because Chrome resolves `normal` to
+  **30px** where the face's own line height at this ppem, which the firmware derives, is
+  **29**. The card is CENTRED, so one pixel of height is half a pixel at both ends and
+  every rule inside it goes out of register.
+- **THE DISCRIMINATOR IS THIS FILE'S OWN, AND IT ANSWERED THE OTHER WAY THIS TIME.**
+  The `Names` cut records a rise in this same count caused by a half-pixel phase flip,
+  where Chrome rasterises a rule across two rows of grey 127 and the count scores both
+  as ink; the test given there is whether the design's rule **straddles** the firmware's
+  or sits **beside** it. Here both borders were **solid black two pixels apart**, so it
+  was a real geometry disagreement — and the fix was to state the number, not to swap
+  instruments. The three boards declare `line-height: 29px`, the card's borders go from
+  2px out of register to 1px, and the rows differing over half the panel go **8 → 4**.
+  This is the Sleep TITLE's own lesson one run lower (its `1.1` exists because the face
+  would have given 53 where the board wanted 46) and `Peek.dc.html`'s, where stating the
+  panel's own height "closed a disagreement rather than documenting it".
+
+**FOURTEEN GOLDENS TOUCHED — TWELVE RE-BLESSED AND TWO ADDED — WITH THE EVIDENCE PER
+PIXEL.** Every differing pixel sits inside the card's own 400px column — x 40..439 on
+the X4 and 64..463 on the X3, **not one pixel outside** — so the dither field, the badge
+and (on `sleep_cover_details`) the four-level cover are untouched outside it.
+`sleep_idle` and `sleep_cover` produced **no candidate at all**, which is what says the
+badge-only and cover-only screens were unaffected.
+
+**AND ON THE TEN WHOSE CHAPTER IS THE ONE-LINE SPECIMEN THE PROOF IS EXACT: the card's
+content is BIT-IDENTICAL with 29 blank rows of interior inserted above the bottom
+border.** Longest common prefix plus suffix covers **342 of 342** card rows on `sleep`
+and `sleep_waking`, 434 of 434 on `sleep_long_title`, 371 of 371 on `sleep_long_author`
+and 388 of 388 on `sleep_cover_details` — so nothing was redrawn, restyled or moved
+*relative to the card*: one band of paper was pushed in at the foot, the card grew by
+it, and being centred it then moved up by half of it (−14px, or −15 where the leftover
+is odd). That is a stronger statement than "the difference is confined", and it is the
+one worth reaching for when a change should be a pure insert.
+
+- **`sleep_long_chapter` IS THE WRAPPING SPECIMEN NOW, WHERE IT WAS THE ELIDING ONE.**
+  `PREMIÈRE PARTIE : À LIRE AVANT L'ACHAT` is 526px against a 312px column — 1.7 lines
+  — so it stopped exercising the ellipsis the moment the wrap landed, exactly as the
+  author's specimen would have if it had ever come in under two. It renders the whole
+  name on two centred lines, broken at the space, and it carries the **accented capital
+  path through a WRAP**, which is the case this file flags: the grave sits close to cap
+  height, and there is clear paper between it and the cap-tops of the line below.
+- **`sleep_elided_chapter` IS THE NEW PAIR, AND `chapterTail` IS WHY IT EARNS ONE.**
+  That local exists only on the clamping path — `clampProse`'s elided line is a NEW
+  string, not a view into the name — and Home shipped precisely that mistake inline
+  once and drew a column of **notdef boxes**: right for a short string and wrong for a
+  cut one, which is silently right in exactly the case every other fixture covers. Ink
+  that spells nothing inks rows exactly like ink that does, so no geometric assertion
+  can see it. **Proved by mutation: removing the clamp is caught by this golden and by
+  NOTHING else in the suite** — the padding test cannot see it, because the wrap keeps
+  every line inside the column and the overflow goes downward.
+  Its specimen is a real Verne heading off the probe's own widest-per-book list,
+  1887px, in capitals because the book authored it so and stopping mid-word at `SEEI`
+  because it is 128 bytes — `toc.h`'s `kMaxTocLabelBytes` doing its job, so the fixture
+  is what the device would actually put on the glass.
+- **A guard asserts one specimen wraps whole and the other is cut** (`== 1`, `== 2`,
+  `>= 3`), because this run now has TWO boundaries and a fixture either side, so there
+  are two ways to go quiet — and neither shows up as a failure anywhere else: both
+  goldens would simply be re-blessed onto a shorter render. Shortening the eliding
+  fixture fails it with `2 >= 3`.
 
 **IT TAKES NO INPUT AND DRAWS NO HINT BAR**, and neither is an
 omission: the shell paints it and then calls deep sleep, so there is nobody left to

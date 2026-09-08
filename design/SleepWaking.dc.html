@@ -78,8 +78,40 @@
          as Main.dc.html's title and BookDetails.dc.html's, for the same reason.
 
          The bound is the CARD's `max-height` above, not a line count here: the
-         card's height is a result and it is what collides with the badge. -->
-    <div style="font-size: var(--t-title); font-weight: 700; text-align: center; line-height: 1.1; text-transform: uppercase; overflow-wrap: anywhere;">Middlemarch</div>
+         card's height is a result and it is what collides with the badge.
+
+         AND THE LINE BOX IS STATED IN PIXELS, WHERE THIS SAID `1.1`. It is the
+         same number either way -- 1.1 was chosen to mean 46 (the face's own
+         lineHeight() at this ppem is 53, 7px looser than the board wants) and
+         the firmware has always derived `round(1.1 * 42)` -- but Chrome resolves
+         `1.1` to a FRACTIONAL 46.2px, and that fraction was the only one on this
+         card. It made the card's own height fractional, and the card is CENTRED,
+         so `centreIn` halved it and every run below this one rounded to a
+         position the firmware does not compute.
+
+         It cost nothing while the card's height never changed parity. The
+         chapter run's second reserved line is 29px -- ODD -- so it flipped the
+         half-pixel the centring had been absorbing, and all four runs below the
+         title went from 0-2px out of register with the firmware to 1-3px. That
+         is 1,500 more mismatched pixels on a screen whose whole card is 8,900,
+         and a +/-1-row-tolerant count does NOT absorb it, so it was a real
+         register regression rather than the counting artefact the `Names` cut
+         records.
+
+         Stating the box removes the fraction and more than pays for the wrap:
+         `sleep` 2.32%/2.13% before the chapter wrapped, 2.71%/2.49% with the
+         wrap and `1.1`, and 2.30%/2.11% with the wrap and this. It moves NO
+         golden, because the firmware's kSleepTitleLineH was already 46 -- only
+         the board's own render moves, toward the firmware. Same lesson the
+         chapter run below learned about `normal`, and Peek.dc.html's about its
+         panel height: stating the number closes a disagreement rather than
+         documenting it.
+
+         NOT DONE TO THE AUTHOR, and that was measured rather than assumed:
+         giving that run `line-height: 29px` makes this screen WORSE (2.45%/2.25%
+         against 2.30%/2.11%), so Chrome's `normal` there is not the same
+         disagreement and the obvious symmetry is the wrong move. -->
+    <div style="font-size: var(--t-title); font-weight: 700; text-align: center; line-height: 46px; text-transform: uppercase; overflow-wrap: anywhere;">Middlemarch</div>
     <!-- THE AUTHOR WRAPS TO TWO LINES AND THEN ELIDES, and it used to do NEITHER --
          so a long name escaped the card entirely. A centred run is placed at
          `centreIn(0, contentW, w)`, which returns a NEGATIVE half when the run is
@@ -120,7 +152,144 @@
     <div style="width: 170px; height: 8px; border: 1px solid #000000; box-sizing: border-box; margin-top: 8px;">
       <div style="width: 6%; height: 100%; background: #000000;"></div>
     </div>
-    <div style="font-size: var(--t-label); letter-spacing: 0.14em; font-weight: 700;">6% &middot; CH. 01</div>
+    <!-- THE PERCENTAGE AND THE CHAPTER ARE TWO RUNS NOW, AND THEY WERE ONE
+         (`6% &middot; CH. 01`) WITH THE CHAPTER AS A SPINE POSITION.
+
+         This was the last place on the device that showed a position where a NAME
+         is available. It was never Main.dc.html's false claim -- `CH. 01` with no
+         total invites no arithmetic, and it is the Reader's own fallback form --
+         so this is an improvement rather than a fix, and it may not be bought at
+         the price of a regression.
+
+         WHY IT SPLIT INTO TWO LINES: the name does not fit, and it does not
+         nearly fit. Measured over 225 real books -- 205 with a usable NCX, 8,617
+         chapter labels, at `--t-label`/500 against this card's 312px content
+         column (tools/sleep_chapter_probe.cpp, which is re-runnable on a new
+         book): p50 217px, p90 536px, max 1887px. The MEDIAN label overflows, and
+         only 33 of the 205 books have every label fitting.
+
+         So the two facts cannot share a row. The percentage is the QUANTITY and
+         may not shrink, and a name sharing the row with `100% &middot; ` gets 213
+         of the 312px and elides 52.51% of labels -- more of the time than not. On
+         its own line it gets all 312 and elides 34.54%, which is the band the
+         project has already accepted for this exact string: Main.dc.html's own
+         chapter line elides 30.70% of the same labels on the X4 and 23.69% on the
+         X3. Splitting also protects the percentage BY CONSTRUCTION rather than by
+         which end an ellipsis happens to eat.
+
+         AND IT WRAPS TO TWO LINES, WHICH THE AUTHOR TWO RUNS UP ALREADY DOES --
+         so both growable runs on this card now grow the same way, and this one
+         arrived at it second. It shipped ELIDING on one line, which the
+         distribution below permits, and the owner's call is that on THIS screen a
+         cut name is not good enough: the card holds the glass for HOURS, longer
+         than any other screen is looked at, so a truncated chapter is one the
+         reader lives with rather than one they press past. That is the identical
+         argument that made the title wrap and then the author, reaching the last
+         run on the card.
+
+         THE DATA CARRIES TWO LINES AND STOPS THERE. Of this column's 8,617
+         labels, 2,976 (34.54%) overflow one line; of those 2,976, 2,274 (76.41%)
+         fit two lines WHOLE and 702 (23.59%) need three or more. So a two-line
+         cap still elides 702 of 8,617 labels (8.15%) against one line's 34.54% --
+         a 4.2x reduction in cut names, which is what earns the second line, and
+         it is the same shape of knee the author's cap was earned by (85% there).
+         A THIRD line was permitted and is not taken: it buys a smaller marginal
+         gain out of another of the title's lines.
+
+         SO ELISION IS MOVED RATHER THAN REMOVED. 8.15% of labels still need it,
+         so `-webkit-line-clamp: 2` draws it on the SECOND line where it used to
+         draw on the first, and clampProse draws it in the firmware. This is a
+         change of DEGREE -- how much of a name survives -- and not the departure
+         of truncation.
+
+         AND THE TWO LINES ARE RESERVED IN THE TITLE'S BUDGET WHETHER OR NOT THE
+         NAME USES THEM -- the BUDGET, which is not this box's HEIGHT: they are two
+         different quantities and nothing requires them to be the same number. The
+         objection this run elided for is real, and it is NOT answered by the rate:
+         A CHAPTER CHANGES WHILE THE BOOK IS BEING READ AND AN AUTHOR DOES NOT. The
+         title takes whatever the card's room leaves, so a chapter counted into that
+         division only when it USED its second line would make the TITLE's budget
+         depend on where the reader is STANDING -- cross a chapter boundary and the
+         book's name could reflow, or newly acquire an ellipsis, because a page was
+         turned. That is a visible defect with a baffling cause, and the reserve is
+         what removes it: the title is measured against two of this run's own 29px
+         lines for a one-line name and a three-line one alike, so its budget is a
+         CONSTANT and the card's layout is a function of the BOOK, exactly as it was
+         at one line.
+
+         THE BOX ITSELF SIZES TO ITS CONTENT, WHERE IT ONCE SAID `min-height: 58px`.
+         That declaration put the reserve into the card's HEIGHT as well, and there
+         it bought nothing: this is the card's LAST run, so nothing below it steps
+         up, and a one-line name -- 65.46% of corpus labels, and the specimen on this
+         board -- left 29px of empty box standing at the foot of a card that holds
+         this glass for HOURS. Dead space, not spacing. The card is CENTRED, so what
+         a shorter card does is re-centre; no type moves relative to any other type.
+
+         SO THE TWO NUMBERS ARE DELIBERATELY DIFFERENT AND MUST STAY SO. The
+         title's budget takes the RESERVE, always two lines; the card's height takes
+         the ACTUAL wrap. Making the height use the reserve again puts the dead space
+         back, and making the budget use the actual reintroduces the reflow above --
+         each is a one-line change in `renderSleep`, and test_theme_sleep_golden.cpp
+         fails on each of them, separately and by name.
+
+         WHAT THE RESERVE COSTS, stated rather than discovered: two lines in the
+         TITLE's division, so the title's derived budget goes from 8 lines to 6 on
+         both panels -- 642px of card room on the X4 and 634px on the X3, less the
+         325px that is not the title when the author takes one line, over the
+         title's own 46px line box. 9 of the 225 corpus titles (4.00%) elide at a
+         budget of 6, against 6 at 7 and 4 at 8, so the second reserved line costs
+         3 titles and this whole run costs 5. The title still keeps six times what
+         this run takes.
+
+         AND KEEPING THE BUDGET AGAINST THE RESERVE MAKES THE TITLE CONSERVATIVE BY
+         UP TO ONE LINE, which costs those same 3 titles and no others -- measured,
+         not reasoned about. A one-line chapter buys the title nothing, so the only
+         title that can notice is one needing exactly `budget + 1` lines, and
+         `sleep_chapter_probe` says that is 3 of 225 (1.33%): `The Fables of Aesop`,
+         `The Declaration of Independence of the United States of America` and `The
+         Hacker Crackdown`. All three HAVE one-line labels and none has ONLY one-line
+         labels (39 of 90, 2 of 6, 4 of 23), so in those books the seventh title line
+         is given up in 45 of their 119 chapters and kept in the other 74. Every
+         other corpus title either fits its 6 lines or would elide at 7 as well.
+
+         THE NAME TAKES 0.10em AND THE PERCENTAGE KEEPS 0.14em, which is
+         Main.dc.html's split and its reason: 0.14em is a COUNTER's tracking and a
+         name is not a counter. It is also 3.06 percentage points narrower, on the
+         one run whose width is the whole problem.
+
+         NOT SHOUTED, although the title and the author on this card both are.
+         Three screens already name this string as the publisher wrote it -- the
+         Reader's band, Contents' rows and Main.dc.html's meta line -- and one
+         rule should have one spelling; `toc.h` hands the label over "as authored"
+         for exactly this reason. Shouting also measures 2.19 points WIDER
+         (36.73% against 34.54%), which is the wrong direction for this run.
+
+         WEIGHT 500, WHERE THIS RUN SAID 700. The ramp carries Label400 and
+         Label500 at 11pt and no Label700 (reader/font_manifest.h), so 700 here
+         asked for a pre-rendered asset nobody has -- unbuildable, which is the
+         same thing LowBattery.dc.html's band label was corrected for. The
+         firmware has always drawn Role::Label500 on this run, so this moves the
+         BOARD onto what is drawable and no golden with it.
+
+         AND THE NAME'S LINE BOX IS STATED, WHERE THIS RUN LEFT IT AT `normal`.
+         29px is the face's own line height at this ppem, which is what the
+         firmware derives -- and Chrome's `normal` resolves it to 30, so a card
+         with one more unstated run came out a pixel taller in the browser than on
+         the panel. That is the Sleep TITLE's lesson (its `line-height: 1.1`
+         exists because the face would have given 53 where the board wanted 46)
+         and Peek.dc.html's (stating the panel's own height "closed a
+         disagreement rather than documenting it"), and it is worth stating even
+         though it is only a pixel: the card is CENTRED, so a pixel of height is
+         half a pixel of offset at both ends, and every rule inside it goes out of
+         register with the board.
+
+         Measured: with the box unstated this screen went 2.42%/2.22% to
+         3.03%/2.78% against the board -- the whole of that regression was this one
+         line -- and with it stated it is 2.32%/2.13%, which is better than before
+         the chapter arrived. The card's borders go from 2px out of register to
+         1px. -->
+    <div style="font-size: var(--t-label); letter-spacing: 0.14em; font-weight: 500;">6%</div>
+    <div style="font-size: var(--t-label); letter-spacing: 0.1em; font-weight: 500; line-height: 29px; align-self: stretch; text-align: center; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;">I &middot; Miss Brooke</div>
   </div>
 
   <div style="position: absolute; bottom: 34px; background: #ffffff; border: 1px solid #000000; padding: 8px 18px;">

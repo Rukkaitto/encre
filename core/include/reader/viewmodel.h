@@ -329,7 +329,35 @@ struct SleepViewModel {
   std::string title;      // the book, shouted by the theme
   std::string author;
   int progressPercent = 0;
-  std::string progress;   // "6% - CH. 01", the line under the bar
+
+  // THE CHAPTER'S NAME, and the run it sits in used to be `6% - CH. 01` -- the
+  // percentage and a SPINE POSITION, composed by the shell into one string.
+  //
+  // IT IS THE NAME NOW, AND THE PERCENTAGE IS NO LONGER A FIELD. The theme
+  // composes that from `progressPercent`, which the bar directly above it already
+  // reads, so the number under the bar and the length of the bar cannot disagree
+  // -- they were two spellings of one fact and the shell was free to set them
+  // independently. HomeViewModel::percent is the same field doing the same job.
+  //
+  // ELIDED BY THE THEME ON ONE LINE, never wrapped, and the reason is this run
+  // rather than its width: a chapter CHANGES while a book is being read and an
+  // author does not. This card's height is a sum and the title takes whatever is
+  // left, so a chapter free to grow would make the BOOK's name reflow -- or newly
+  // acquire an ellipsis -- because the reader turned a page. Fixed at one line,
+  // the card's layout is a function of the book alone. design/Sleep.dc.html
+  // carries the corpus measurement behind that (8,617 real chapter labels).
+  //
+  // ReaderViewModel::chapter's own string, not a second derivation of it: the
+  // Reader's band, Contents' NOW row, Home's meta line and this all name the
+  // reader's chapter in the same words.
+  //
+  // EMPTY DRAWS NOTHING AND COSTS NO LINE -- unlike Home's, which reserves its
+  // line because runs sit below it. This is the card's LAST run, so an absent
+  // chapter simply shortens the card, and an absent claim beats a false one: a
+  // pointer written before last.json carried a chapter cannot say which one this
+  // is, and must not fall back to the position it used to show.
+  std::string chapter;
+
   std::string note;       // "ASLEEP - HOLD POWER TO WAKE"
 
   // WHICH OF THE THREE SLEEP BOARDS THIS IS -- design/Sleep.dc.html,
