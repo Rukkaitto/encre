@@ -30,7 +30,11 @@ reader::SleepViewModel sampleSleep() {
   vm.title = "Middlemarch";
   vm.author = "George Eliot";
   vm.progressPercent = 6;
-  vm.progress = "6% \xC2\xB7 CH. 01";
+  // design/Sleep.dc.html's own specimen, and design/Main.dc.html's: one book, one
+  // chapter, named identically on both boards. The percentage is not a field any
+  // more -- the theme composes it from progressPercent, which the bar reads too.
+  // 190px against the 312px column, so it clears the elide by 122.
+  vm.chapter = "I \xC2\xB7 Miss Brooke";
   vm.note = "ASLEEP \xC2\xB7 HOLD POWER TO WAKE";
   return vm;
 }
@@ -166,7 +170,7 @@ TEST_CASE("the idle view model says nothing about a book") {
   CHECK(vm.title.empty());
   CHECK(vm.author.empty());
   CHECK(vm.label.empty());
-  CHECK(vm.progress.empty());
+  CHECK(vm.chapter.empty());
   CHECK(vm.progressPercent == 0);
   CHECK_FALSE(vm.note.empty());  // ...except the one that does not
 }
@@ -210,7 +214,7 @@ reader::SleepViewModel longTitleSleep() {
   vm.title = "Far from the Madding Crowd";
   vm.author = "Thomas Hardy";
   vm.progressPercent = 41;
-  vm.progress = "41% \xC2\xB7 CH. 07";
+  vm.chapter = "VII \xC2\xB7 Recognition";  // 218px, clears the elide by 94
   vm.note = "ASLEEP \xC2\xB7 HOLD POWER TO WAKE";
   return vm;
 }
@@ -228,7 +232,7 @@ reader::SleepViewModel longAuthorSleep() {
   vm.title = "Kidnapped";
   vm.author = "Robert Louis Stevenson";
   vm.progressPercent = 22;
-  vm.progress = "22% \xC2\xB7 CH. 04";
+  vm.chapter = "XIV \xC2\xB7 The Islet";  // 182px, clears the elide by 130
   vm.note = "ASLEEP \xC2\xB7 HOLD POWER TO WAKE";
   return vm;
 }
@@ -242,6 +246,29 @@ reader::SleepViewModel longAuthorSleep() {
 // It is also the exact string that rendered as `ODOR MIKHAILOVICH DOSTOEVS` before
 // this change: centred at a NEGATIVE offset, painted over both card borders and out
 // onto the dither field, and clipped by the panel edge.
+// --- A chapter name too long for the column ------------------------------------
+//
+// THE CARD NAMES THE CHAPTER NOW, WHERE IT SHOWED A SPINE POSITION (`6% - CH. 01`),
+// and this is the specimen that exercises the one outcome the run has that the
+// position never did: being wider than the card.
+//
+// `PREMIERE PARTIE : A LIRE AVANT L'ACHAT` is design/Main.dc.html's own long-chapter
+// specimen -- a real label off a real French novel -- so the two screens that draw
+// this string test it with the same one. 526px against the 312px content column, so
+// it clears the elide boundary by 214px and no change to the face or the kern table
+// could turn this fixture into a non-eliding one.
+//
+// It also carries the ACCENTED CAPITALS path (E-grave, A-grave) through this run,
+// which is upperLatin1's business one layer down and which no other sleep fixture
+// reaches.
+const char* const kLongChapter = "PREMI\xC3\x88RE PARTIE : \xC3\x80 LIRE AVANT L'ACHAT";
+
+reader::SleepViewModel longChapterSleep() {
+  reader::SleepViewModel vm = sampleSleep();
+  vm.chapter = kLongChapter;
+  return vm;
+}
+
 reader::SleepViewModel clampedAuthorSleep() {
   reader::SleepViewModel vm = longAuthorSleep();
   vm.title = "Crime and Punishment";
@@ -696,4 +723,154 @@ TEST_CASE("the wrapping-author specimen is OFF the wrap boundary") {
                                           reader::pxToF26(author.lineHeight()), tr,
                                           reader::WordBreak::Anywhere);
   CHECK(c.lineCount() >= 3);
+}
+
+// --- The chapter run ------------------------------------------------------------
+
+TEST_CASE("QuietTheme renders an eliding Sleep chapter to golden at both geometries") {
+  // LOOKING AT THE PIXELS IS THE POINT, which is why this is a golden and not only
+  // the arithmetic below. Home shipped a use-after-free on a neighbouring run whose
+  // only symptom was a column of NOTDEF BOXES -- ink that spells nothing inks rows
+  // exactly like ink that spells something, so every geometric assertion passed. A
+  // rendered long chapter is the check that tells those apart.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  auto renderOne = [&](int w, int h, const std::string& name) {
+    reader::Framebuffer fb(w, h);
+    theme.renderSleep(fb, ramp.fonts, longChapterSleep(), reader::Plane::Bw, nullptr);
+    golden::checkGolden(fb, name);
+  };
+  SUBCASE("X4 480x800") { renderOne(480, 800, "sleep_long_chapter"); }
+  SUBCASE("X3 528x792") { renderOne(528, 792, "sleep_long_chapter_x3"); }
+}
+
+TEST_CASE("A LONG CHAPTER STAYS INSIDE THE CARD, which is the defect this run could have") {
+  // THE TEST THIS CHANGE NEEDED, and it is the author's test one run lower for the
+  // author's reason -- because it is literally the same latent defect.
+  //
+  // The run this replaced was a spine position, `CH. 01`, drawn by drawCentredText
+  // and never wider than the column. drawCentredText places a run at
+  // `centreIn(0, contentW, w)`, and centreIn returns a NEGATIVE half when the run is
+  // wider than its box: a card-sourced chapter name handed to it unbounded would
+  // begin LEFT of the card's padding, paint over both 2px borders out onto the
+  // dither field, and be clipped by the panel edge with no ellipsis to say so. 34.54%
+  // of the corpus's 8,617 chapter labels are wider than this column, so it would have
+  // been the COMMON case rather than an edge one.
+  //
+  // THE INVARIANT IS THE CARD'S PADDING, NOT THE PANEL EDGE. The card is opaque white
+  // and everything drawn inside it is drawn in the content column, so the 42px band
+  // between each border and that column is paper by construction; ink there means a
+  // run escaped. The panel edge is only where the damage ENDED -- a test watching it
+  // would pass for a name that merely ate the frame.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  // Three shapes of over-wide name: a real label with spaces, one unbreakable token
+  // (a filename fallback, which is what WordBreak::Anywhere exists for), and FAT's
+  // maximum long-name length, so nothing here depends on where a space happens to be.
+  const std::string names[] = {kLongChapter, std::string(120, 'W'), std::string(255, 'M')};
+  for (const std::string& name : names) {
+    for (int i = 0; i < 2; ++i) {
+      const int w = i == 0 ? 480 : 528;
+      const int h = i == 0 ? 800 : 792;
+      reader::SleepViewModel vm = sampleSleep();
+      vm.chapter = name;
+      reader::Framebuffer fb(w, h);
+      theme.renderSleep(fb, ramp.fonts, vm, reader::Plane::Bw, nullptr);
+
+      const Box b = cardBox(fb, 400);
+      const int cardX = (w - 400) / 2;  // centreIn of the card, both panels
+      const int border = 2, padX = 42;
+      int stray = 0;
+      for (int y = b.top + border; y <= b.bottom - border; ++y) {
+        for (int x = cardX + border; x < cardX + border + padX; ++x)
+          if (!fb.getPixel(x, y)) ++stray;
+        for (int x = cardX + 400 - border - padX; x < cardX + 400 - border; ++x)
+          if (!fb.getPixel(x, y)) ++stray;
+      }
+      CHECK_MESSAGE(stray == 0, "chapter of " << name.size() << " bytes at " << w << "x" << h
+                                              << ": " << stray
+                                              << " inked pixels in the card's padding");
+    }
+  }
+}
+
+TEST_CASE("the chapter costs the card ONE line however long the name is") {
+  // THE WHOLE REASON THIS RUN ELIDES RATHER THAN WRAPPING. A chapter changes while
+  // the book is being read and an author does not, so a chapter free to grow would
+  // make the TITLE's line budget depend on where the reader is standing -- cross a
+  // chapter and the book's name reflows, or newly acquires an ellipsis, because a
+  // page was turned. Fixed at one line, the card's layout is a function of the BOOK.
+  //
+  // Asserted as "the card is the same height for a short name and a 255-byte one",
+  // which is the property a reader would notice, rather than on the constant.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  const int chapterLine = ramp.fonts[reader::Role::Label500].lineHeight();
+  for (int i = 0; i < 2; ++i) {
+    const int w = i == 0 ? 480 : 528;
+    const int h = i == 0 ? 800 : 792;
+    reader::SleepViewModel shortName = sampleSleep(), longName = sampleSleep();
+    longName.chapter = std::string(255, 'M');
+    reader::Framebuffer a(w, h), c(w, h);
+    theme.renderSleep(a, ramp.fonts, shortName, reader::Plane::Bw, nullptr);
+    theme.renderSleep(c, ramp.fonts, longName, reader::Plane::Bw, nullptr);
+    CHECK_MESSAGE(cardBox(c, 400).height() == cardBox(a, 400).height(),
+                  "a 255-byte chapter changed the card's height by "
+                      << (cardBox(c, 400).height() - cardBox(a, 400).height())
+                      << "px: this run is growing, and the title's budget moves with it");
+  }
+
+  // AND AN EMPTY CHAPTER COSTS NO LINE AT ALL, which is what an old pointer -- one
+  // written before last.json carried a chapter -- gets. Not a blank line at the foot
+  // of the card: this is the card's LAST run, so nothing below it steps up, and a
+  // shorter card is the honest rendering of an absent claim.
+  for (int i = 0; i < 2; ++i) {
+    const int w = i == 0 ? 480 : 528;
+    const int h = i == 0 ? 800 : 792;
+    reader::SleepViewModel with = sampleSleep(), without = sampleSleep();
+    without.chapter.clear();
+    reader::Framebuffer a(w, h), c(w, h);
+    theme.renderSleep(a, ramp.fonts, with, reader::Plane::Bw, nullptr);
+    theme.renderSleep(c, ramp.fonts, without, reader::Plane::Bw, nullptr);
+    // kSleepGap is 14 and the run's line box is Label500's own.
+    CHECK(cardBox(a, 400).height() - cardBox(c, 400).height() == chapterLine + 14);
+  }
+}
+
+TEST_CASE("the figure under the bar is the number the BAR reads, not a second field") {
+  // It was a string on the view model -- `6% - CH. 01`, composed by the shell -- so
+  // the figure under the bar and the length of the bar were two spellings of one
+  // fact, and nothing stopped them disagreeing. The theme composes it from
+  // progressPercent now, which is the field drawProgressBar already takes.
+  //
+  // Asserted by MOVING the percentage and watching the run's ink change: a render
+  // that had kept a separate string would draw the same glyphs at 6% and at 87%.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  auto inkOfRun = [&](int percent) {
+    reader::SleepViewModel vm = sampleSleep();
+    vm.progressPercent = percent;
+    // The chapter is cleared so the band measured below holds the percentage alone.
+    vm.chapter.clear();
+    reader::Framebuffer fb(480, 800);
+    theme.renderSleep(fb, ramp.fonts, vm, reader::Plane::Bw, nullptr);
+    const Box b = cardBox(fb, 400);
+    // The percentage is the card's last run with the chapter cleared, so its line box
+    // is the one above the bottom padding: the border is 2 and kSleepCardPadY is 38,
+    // and BOTH have to come off or the band lands in the padding and inks nothing.
+    // (It did, first time round, and the REQUIRE below is what said so rather than
+    // the CHECK quietly comparing two zeroes.)
+    const int line = ramp.fonts[reader::Role::Label500].lineHeight();
+    const int runBottom = b.bottom - 2 - 38;
+    int n = 0;
+    for (int y = runBottom - line; y < runBottom; ++y)
+      for (int x = (480 - 400) / 2 + 2 + 42; x < (480 - 400) / 2 + 400 - 2 - 42; ++x)
+        if (!fb.getPixel(x, y)) ++n;
+    return n;
+  };
+  const int at6 = inkOfRun(6);
+  const int at87 = inkOfRun(87);
+  REQUIRE(at6 > 0);  // the run really is where this looked, or the case proves nothing
+  CHECK_MESSAGE(at6 != at87, "`6%` and `87%` inked the same "
+                                 << at6 << " pixels: the run is not reading progressPercent");
 }

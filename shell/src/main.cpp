@@ -5529,36 +5529,31 @@ static reader::SleepViewModel sleepVmFromCard(std::string note) {
     vm.title = last.title.empty() ? last.bookPath : last.title;
     vm.author = last.author;
     vm.progressPercent = last.percent;
-    // The board's `6% - CH. 01`, from two facts the pointer has.
+    // THE CHAPTER'S NAME, WHERE THIS RAN `6% - CH. 01` AND THE SECOND HALF WAS A
+    // SPINE POSITION. This was the last place on the device that showed a position
+    // with a name available, and the whole composition is gone with it:
     //
-    // THIS COMMENT SAID A CHAPTER NAME "would need a table of contents, which is not
-    // built", AND THAT HAS BEEN FALSE SINCE Contents SHIPPED -- the pointer carries the
-    // name now (LastRead::chapter) and Home draws it. The card still shows the POSITION,
-    // and that is a decision with a price rather than a limit:
+    //   * The PERCENTAGE is no longer built here. The theme composes it from
+    //     `progressPercent`, which the bar directly above it already reads, so the
+    //     figure and the bar cannot disagree -- they were two spellings of one fact
+    //     and this function was free to set them independently.
+    //   * The NAME is `last.chapter`, the same string Home's meta line, the
+    //     Reader's band and Contents' NOW row draw. Not composed, not derived: one
+    //     fact, one spelling.
+    //   * SO THERE IS NO LITERAL LEFT TO SPLIT. The note that stood here -- twice,
+    //     verbatim, which is the tell that one copy was stale -- warned that a C++
+    //     hex escape is UNBOUNDED, so `"\xC2\xB7CH."` parses `\xB7C` as one value:
+    //     clang rejects it and the ESP32's GCC accepts it and emits a byte that is
+    //     not U+00B7. That trap is real and it now lives where the middot still
+    //     does, `screens.cpp`'s `kDot` and this file's own note literals, where the
+    //     bytes are their own adjacent literal by construction.
     //
-    //   * `CH. 01` alone is the Reader's own fallback form -- a position with no total
-    //     -- so it is less informative than a name and is not the false claim Home's
-    //     `CH. 14 OF 36` was. Nothing here invites an arithmetic.
-    //   * A NAME IN THIS RUN NEEDS A BOUND FIRST. renderSleep draws vm.progress with
-    //     drawCentredText, which is unelided, and centreIn returns a NEGATIVE half for
-    //     a run wider than its box -- which is exactly the defect the author line one
-    //     run above was fixed for, text painted over both card borders onto the dither
-    //     field. A card-sourced chapter name here is that bug again.
-    //   * And it is a COMBINED run, `percent - position`, so what it becomes is a
-    //     design question for Sleep.dc.html rather than a substitution here.
-    //
-    // THE LITERAL IS SPLIT, and it has to be: a C++ hex escape is UNBOUNDED, so
-    // "\xC2\xB7CH." parses \xB7C as one value -- clang rejects it outright and the
-    // ESP32's GCC accepted it as something that is not U+00B7. This project already
-    // recorded the same trap once ("\xA0b" is 0xA0B); adjacent literals end the escape.
-    // THE LITERAL IS SPLIT, and it has to be: a C++ hex escape is UNBOUNDED, so
-    // "\xC2\xB7CH." parses \xB7C as one value -- clang rejects it outright and the
-    // ESP32's GCC accepted it as something that is not U+00B7. This project already
-    // recorded the same trap once ("\xA0b" is 0xA0B); adjacent literals end the escape.
-    char line[32];
-    std::snprintf(line, sizeof(line), "%d%%\xC2\xB7" "CH. %02d", last.percent,
-                  last.spine + 1);
-    vm.progress = line;
+    // UNGUARDED, deliberately, exactly as Home's assignment is: an empty chapter
+    // must reach the view model as empty. A `if (!last.chapter.empty())` would leave
+    // whatever the field already held -- and for a pointer written before last.json
+    // carried a chapter, the honest answer is a card with no chapter line, not a
+    // fallback to the position this run has just stopped showing.
+    vm.chapter = last.chapter;
   }
 
   // WHAT THIS SLEEP IS ALLOWED TO SHOW -- design/Settings.dc.html's `Shows` row --

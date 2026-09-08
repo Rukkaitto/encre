@@ -120,7 +120,73 @@
     <div style="width: 170px; height: 8px; border: 1px solid #000000; box-sizing: border-box; margin-top: 8px;">
       <div style="width: 6%; height: 100%; background: #000000;"></div>
     </div>
-    <div style="font-size: var(--t-label); letter-spacing: 0.14em; font-weight: 700;">6% &middot; CH. 01</div>
+    <!-- THE PERCENTAGE AND THE CHAPTER ARE TWO RUNS NOW, AND THEY WERE ONE
+         (`6% &middot; CH. 01`) WITH THE CHAPTER AS A SPINE POSITION.
+
+         This was the last place on the device that showed a position where a NAME
+         is available. It was never Main.dc.html's false claim -- `CH. 01` with no
+         total invites no arithmetic, and it is the Reader's own fallback form --
+         so this is an improvement rather than a fix, and it may not be bought at
+         the price of a regression.
+
+         WHY IT SPLIT INTO TWO LINES: the name does not fit, and it does not
+         nearly fit. Measured over 225 real books -- 205 with a usable NCX, 8,617
+         chapter labels, at `--t-label`/500 against this card's 312px content
+         column (tools/sleep_chapter_probe.cpp, which is re-runnable on a new
+         book): p50 217px, p90 536px, max 1887px. The MEDIAN label overflows, and
+         only 33 of the 205 books have every label fitting.
+
+         So the two facts cannot share a row. The percentage is the QUANTITY and
+         may not shrink, and a name sharing the row with `100% &middot; ` gets 213
+         of the 312px and elides 52.51% of labels -- more of the time than not. On
+         its own line it gets all 312 and elides 34.54%, which is the band the
+         project has already accepted for this exact string: Main.dc.html's own
+         chapter line elides 30.70% of the same labels on the X4 and 23.69% on the
+         X3. Splitting also protects the percentage BY CONSTRUCTION rather than by
+         which end an ellipsis happens to eat.
+
+         AND IT ELIDES RATHER THAN WRAPPING, WHICH IS WHERE IT PARTS COMPANY WITH
+         THE AUTHOR TWO RUNS UP. The author wraps to two lines and this does not,
+         and the reason is not the rate -- it is that A CHAPTER CHANGES WHILE THE
+         BOOK IS BEING READ AND AN AUTHOR DOES NOT. This card's height is a sum
+         and the title takes whatever is left, so a chapter run free to grow makes
+         the TITLE's line budget depend on where the reader is: cross a chapter
+         and the book's name could reflow, or newly acquire an ellipsis, because a
+         page was turned. Fixed at one line, the card's layout is a function of
+         the BOOK alone. That is why the author may grow -- one book, one card --
+         and this may not.
+
+         Two lines would not even close it. Of the labels over this column, 23.59%
+         need THREE or more, so a two-line cap would still elide 8.15% of all
+         labels while spending up to another of the title's lines. The author's
+         cap was earned by 85% of ITS overflows fitting two; this distribution has
+         no such knee.
+
+         WHAT IT COSTS, stated rather than discovered: one more run in the card's
+         fixed sum, so the title's derived budget goes from 8 lines to 7 on both
+         panels. 2 of the 225 corpus titles need exactly 8 and so newly elide; 4
+         were already eliding at 8.
+
+         THE NAME TAKES 0.10em AND THE PERCENTAGE KEEPS 0.14em, which is
+         Main.dc.html's split and its reason: 0.14em is a COUNTER's tracking and a
+         name is not a counter. It is also 3.06 percentage points narrower, on the
+         one run whose width is the whole problem.
+
+         NOT SHOUTED, although the title and the author on this card both are.
+         Three screens already name this string as the publisher wrote it -- the
+         Reader's band, Contents' rows and Main.dc.html's meta line -- and one
+         rule should have one spelling; `toc.h` hands the label over "as authored"
+         for exactly this reason. Shouting also measures 2.19 points WIDER
+         (36.73% against 34.54%), which is the wrong direction for this run.
+
+         WEIGHT 500, WHERE THIS RUN SAID 700. The ramp carries Label400 and
+         Label500 at 11pt and no Label700 (reader/font_manifest.h), so 700 here
+         asked for a pre-rendered asset nobody has -- unbuildable, which is the
+         same thing LowBattery.dc.html's band label was corrected for. The
+         firmware has always drawn Role::Label500 on this run, so this moves the
+         BOARD onto what is drawable and no golden with it. -->
+    <div style="font-size: var(--t-label); letter-spacing: 0.14em; font-weight: 500;">6%</div>
+    <div style="font-size: var(--t-label); letter-spacing: 0.1em; font-weight: 500; align-self: stretch; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">I &middot; Miss Brooke</div>
   </div>
 
   <div style="position: absolute; bottom: 34px; background: #ffffff; border: 1px solid #000000; padding: 8px 18px;">

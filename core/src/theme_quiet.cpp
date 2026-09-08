@@ -1197,6 +1197,14 @@ constexpr int kSleepLabelEm = 260;   // NOW READING, 0.26em
 constexpr int kSleepAuthorEm = 220;  // 0.22em
 constexpr int kSleepProgressEm = 140;
 
+// The chapter NAME's tracking, and it is deliberately not kSleepProgressEm's
+// 0.14em -- design/Main.dc.html reached this conclusion for the identical string
+// one screen over: 0.14em is a COUNTER's tracking, and a name is not a counter.
+// It is also the narrower of the two on the one run whose width is the whole
+// problem: 34.54% of the corpus's 8,617 chapter labels overflow this column at
+// 0.10em against 37.60% at 0.14em.
+constexpr int kSleepChapterEm = 100;
+
 // The board's `line-height: 1.1` on `--t-title`, resolved -- and it is the number
 // the FACE would not have given: Title700's own lineHeight() is 53px at ppem 42,
 // which is what this screen drew its single line in before it could wrap, 7px
@@ -1371,6 +1379,25 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
                          kSleepGap + kSleepBarTopGap + kSleepBarH + kSleepGap +
                          progress.lineHeight();
 
+  // THE CHAPTER'S LINE, AND IT IS A TERM RATHER THAN A GROWABLE RUN -- which is
+  // the whole of why this run elides where the author two runs up wraps.
+  //
+  // A CHAPTER CHANGES WHILE THE BOOK IS BEING READ AND AN AUTHOR DOES NOT. The
+  // card's height is the sum below and the title takes what is left, so a chapter
+  // free to grow would make the TITLE's line budget depend on where the reader is
+  // standing: cross a chapter and the book's name could reflow, or newly acquire
+  // an ellipsis, because a page was turned. At exactly one line the card's layout
+  // is a function of the BOOK alone -- which is also the licence the author has to
+  // grow, since one book has one author for as long as it is open.
+  //
+  // ONE EXPRESSION, SPENT TWICE, because it is added to the title's budget AND to
+  // the card's height and renderBookError shipped exactly that pair as two copies
+  // that could disagree. Zero when there is no chapter: this is the card's LAST
+  // run, so nothing sits below it to step up, and an old pointer with no chapter
+  // gets a card one line shorter rather than a blank line at its foot.
+  const int chapterH =
+      vm.chapter.empty() ? 0 : kSleepGap + progress.lineHeight();
+
   // THE AUTHOR IS WRAPPED FIRST, AND THE ORDER IS THE WHOLE OF HOW THE BUDGET IS
   // SPLIT. Two runs on this card can grow, so one of them has to be measured
   // against a fixed rule and the other against what is left; the author takes the
@@ -1402,7 +1429,7 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   clampProse(author, authorProse, kSleepAuthorMaxLines, contentW, authorTail);
   const int authorH = f26ToPx(authorProse.heightF26());
 
-  int maxTitleLines = (cardRoom - cardFixedH - authorH) / kSleepTitleLineH;
+  int maxTitleLines = (cardRoom - cardFixedH - authorH - chapterH) / kSleepTitleLineH;
   if (maxTitleLines < 1) maxTitleLines = 1;
 
   // THE SHOUTED STRING AND THE ELIDED TAIL ARE BOTH NAMED, and they have to be:
@@ -1429,7 +1456,7 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   // of the Prose rather than multiplied out here, so the height the card reserves
   // and the height drawProse consumes are ONE expression. `cardFixedH` is the same
   // sum the line budget above was measured against, for the same reason.
-  const int cardH = cardFixedH + authorH + f26ToPx(titleProse.heightF26());
+  const int cardH = cardFixedH + authorH + chapterH + f26ToPx(titleProse.heightF26());
 
   const int cardX = centreIn(0, fb.width(), cardW);
   const int cardY = centreIn(0, fb.height(), cardH);
@@ -1474,8 +1501,42 @@ void QuietTheme::renderSleep(Framebuffer& fb, const FontSet& fonts, const SleepV
   drawProgressBar(fb, barX, y, kSleepBarW, kSleepBarH, vm.progressPercent);
   y += kSleepBarH + kSleepGap;
 
+  // THE PERCENTAGE, COMPOSED HERE FROM THE NUMBER THE BAR ABOVE IT READS. It was
+  // a string on the view model -- `6% - CH. 01`, built by the shell -- and that
+  // made the figure under the bar and the length of the bar two spellings of one
+  // fact, free to disagree. renderHome composes its own the same way from the same
+  // field. Not arithmetic the theme should not be doing: it is one integer and a
+  // per-cent sign, where the SPINE POSITION this run used to carry was.
   drawCentredText(fb, progress, cx, contentW, baselineIn(progress, y, progress.lineHeight()),
-                  vm.progress, Ink::Black, trackingEm(progress, kSleepProgressEm), plane);
+                  std::to_string(vm.progressPercent) + "%", Ink::Black,
+                  trackingEm(progress, kSleepProgressEm), plane);
+
+  // THE CHAPTER, ON ITS OWN LINE AND ELIDED -- design/Sleep.dc.html carries the
+  // measurement and the argument, and both matter here.
+  //
+  // IT MAY NOT GO THROUGH drawCentredText, which is what the run above it does and
+  // what this run did while it was a spine position. That function places a run at
+  // `centreIn(0, contentW, w)`, and centreIn returns a NEGATIVE half for a run
+  // WIDER than its box: the name would begin left of the card's padding, paint over
+  // both 2px borders onto the dither field, and be clipped by the panel edge with
+  // no ellipsis to say so. That is not a hypothetical -- it is precisely the defect
+  // the AUTHOR line above was fixed for, and every golden passed through it because
+  // every golden's author was short. A chapter name off a real card is 34.54% likely
+  // to be wider than this column, so it would have been the common case.
+  //
+  // So it is drawn ELIDED against `contentW`, which cannot leave the column: the
+  // run is at most as wide as the box it is centred in, so centreIn's half cannot
+  // go negative. `test_theme_sleep_golden.cpp` watches the card's PADDING for that
+  // rather than the panel edge, because a run that merely eats the frame is already
+  // wrong and the edge is only where the damage ends.
+  if (!vm.chapter.empty()) {
+    y += progress.lineHeight() + kSleepGap;
+    const Tracking chapterTrack = trackingEm(progress, kSleepChapterEm);
+    drawCentredText(fb, progress, cx, contentW,
+                    baselineIn(progress, y, progress.lineHeight()),
+                    elideToWidth(progress, vm.chapter, contentW, chapterTrack), Ink::Black,
+                    chapterTrack, plane);
+  }
 }
 
 // --- Settings ----------------------------------------------------------------

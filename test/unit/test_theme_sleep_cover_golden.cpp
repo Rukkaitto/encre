@@ -145,7 +145,7 @@ reader::SleepViewModel sampleWithCover(reader::SleepShows shows) {
   vm.title = "Gullible's Travels";
   vm.author = "Ring Lardner";
   vm.progressPercent = 34;
-  vm.progress = "34% \xC2\xB7 CH. 07";
+  vm.chapter = "VII \xC2\xB7 The Water Cure";  // 260px, clears the elide by 52
   vm.note = "ASLEEP \xC2\xB7 HOLD POWER TO WAKE";
   vm.shows = shows;
   return vm;
