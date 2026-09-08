@@ -985,9 +985,20 @@ void QuietTheme::renderBookError(Framebuffer& fb, const FontSet& fonts,
   // a name a real card can hold -- grew the panel until `DELETE FILE...` was sliced
   // in half by the bar and the panel's bottom border went off the glass. See
   // centredPanelRoom for why reserving the bar ONCE would not have been enough.
+  // THE ACTIONS BLOCK, ONCE. It is a term of the paragraph's budget AND of the
+  // panel's height, and those two spellings shipped as two copies of the same
+  // expression -- which is the shape that lets a budget and a height disagree, and a
+  // panel whose parts do not add up to its box is a panel drawn off centre.
+  //
+  // THE GAP GOES WITH THE SLAB IT SEPARATED. The board's actions block is a flex
+  // COLUMN with `gap: 12px`, and a gap is BETWEEN items: with one slab there is
+  // nothing for it to separate, so the memory shape's block is one kActionH plus the
+  // block's own 20px bottom padding. Keeping the gap would leave 12px of dead air
+  // under the only slab and put the whole centred panel 6px high.
+  const int actionsH = (vm.offersDelete ? 2 * kActionH + kConfirmButtonGap : kActionH) +
+                       kConfirmButtonPadBottom;
   const int panelFixedH = 2 * kPanelBorder + captionH +
-                          (2 * kConfirmProsePadY + mark.h + kBookErrorIconGap) +
-                          (2 * kActionH + kConfirmButtonGap + kConfirmButtonPadBottom);
+                          (2 * kConfirmProsePadY + mark.h + kBookErrorIconGap) + actionsH;
   const int proseRoom = centredPanelRoom(fb, fonts, bookErrorHints) - panelFixedH;
   int maxProseLines = 1;
   while (maxProseLines < prose.lineCount() &&
@@ -999,7 +1010,7 @@ void QuietTheme::renderBookError(Framebuffer& fb, const FontSet& fonts,
   const int panelH = 2 * kPanelBorder + captionH +
                      (kConfirmProsePadY + mark.h + kBookErrorIconGap + proseH +
                       kConfirmProsePadY) +
-                     (2 * kActionH + kConfirmButtonGap + kConfirmButtonPadBottom);
+                     actionsH;
 
   const int x = panelLeft(fb.width(), kConfirmPanelW);
   const int y = centreIn(0, fb.height(), panelH);
@@ -1026,9 +1037,15 @@ void QuietTheme::renderBookError(Framebuffer& fb, const FontSet& fonts,
   // wherever they pair the two. Focus starts on OK.
   drawActionButton(fb, fonts, cx + kPanelPadX, cy, colW, vm.okLabel, vm.focusedAction == 0,
                    plane);
-  cy += kActionH + kConfirmButtonGap;
-  drawActionButton(fb, fonts, cx + kPanelPadX, cy, colW, vm.deleteLabel,
-                   vm.focusedAction == 1, plane);
+  // ONE SLAB ON THE OutOfMemory SHAPE (design/BookErrorMemory.dc.html). Absent, not
+  // inert: the file is fine, so offering to delete it over a transient shortage is
+  // the wrong nudge -- HomeEmpty's cut slab is the precedent. The screen gives that
+  // shape ONE row, so the OK slab above is always the focused, filled one here.
+  if (vm.offersDelete) {
+    cy += kActionH + kConfirmButtonGap;
+    drawActionButton(fb, fonts, cx + kPanelPadX, cy, colW, vm.deleteLabel,
+                     vm.focusedAction == 1, plane);
+  }
 
   drawOverlayHintBar(fb, fonts, bookErrorHints, plane);
 }

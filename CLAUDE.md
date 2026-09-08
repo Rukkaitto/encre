@@ -6009,8 +6009,9 @@ inflate, and this file's ~135× ratio warning applies to that walk.
 
 ## The corrupt-book dialog
 
-`BookError.dc.html`, and `BookErrorUnreadable.dc.html` for the refusal that is not
-damage. Issue #5.
+`BookError.dc.html`, `BookErrorUnreadable.dc.html` for the refusal that is not
+damage, and `BookErrorMemory.dc.html` for the refusal that is not about the file at
+all — **the one shape with no `DELETE FILE…` slab.** Issue #5.
 
 **WHAT IT CLOSES IS A PRESS THAT DID NOTHING.** `openBookAt` refused a book with a
 log line and **nothing on the panel**, so Confirm on a damaged book produced no
@@ -6064,15 +6065,70 @@ screen over and the reason that enum has six values rather than a bool.
 - **It clears the wrap boundary by 30px** against `test_book_error_copy.cpp`'s 12px
   floor (`Damaged` 19, `Unreadable` 39), so #76's rule was satisfied at authoring time
   rather than measured after the fact — which is what having made that rule mechanical
-  for one screen buys. Measured against its board at **3.45% / 3.54%**, against
-  `book_error`'s 3.44% / 3.53% in the same tree: the two wrap to five lines each, so
-  the panel is the same height and the residual is the same rasteriser difference.
-- **THE `DELETE FILE…` SLAB IS STILL DRAWN AND STILL ACTS, and that is the one thing
-  here worth an owner's opinion.** Deleting a perfectly good book over a transient
-  shortage is not what the reader wants. It stays because the alternative is the
-  `works only sometimes` trap this screen already refuses for `Unreadable`, and
-  because a row removed on one shape alone is a fourth board plus a panel whose height
-  depends on which refusal it is reporting.
+  for one screen buys.
+
+**AND THIS SHAPE HAS NO `DELETE FILE…` SLAB, WHICH REVERSES THE DECISION THAT SHIPPED
+WITH IT.** The slab was drawn and live on all three shapes, and both the header and
+this file recorded that as **owed an owner's opinion rather than settled**. The owner
+has settled it: **the file is fine.** Offering to delete a good book to fix a
+transient shortage is a nudge in the wrong direction, and a reader might take it.
+`Damaged` and `Unreadable` keep theirs exactly as they were — on those two, wanting
+the file gone is reasonable.
+
+- **THE PRECEDENT IS EXACT AND ALREADY IN THIS FILE: `HomeEmpty` HAS NO ACTION SLAB**,
+  because its `SEND BOOKS OVER WI-FI` could not work once Wi-Fi was cut — *"a primary
+  action that cannot work is worse than none"*. Same shape one screen over.
+- **ABSENT, NOT INERT, AND THAT DISTINCTION IS THE WHOLE LICENCE.** A slab that
+  **draws and does nothing** is the `works only sometimes` trap this project has
+  shipped twice, and it is the recorded reason the slab is live on `Unreadable` — two
+  shapes differing only by a sentence, so a reader meeting a dead slab has nothing to
+  learn the rule from. A slab that **is not there** teaches nothing because there is
+  nothing to press: the panel simply has one action, as `SdMissing` does. **Do not
+  make it inert.**
+- **TWO OF THE THREE OBJECTIONS RECORDED AGAINST THIS WERE ALREADY FALSE WHEN WRITTEN.**
+  "A fourth board" — the third board exists and is the one edited; nothing was added.
+  "A panel whose height depends on which refusal it is reporting" — it already did,
+  and `paintFootprint`'s own comment says so: the shapes wrap to different heights, so
+  `book_error_unreadable` is a 490px panel against `book_error`'s 531. Height varying
+  by shape was the status quo, not a cost of this change.
+- **THE ROW COUNT IS THE ONLY GATE.** `rowsFor()` gives this shape **one** row, so the
+  focus cannot reach `kDelete` and `onGesture` is deliberately **not** also gated on
+  `offersDelete` — a second condition is free to drift from the first, which is the
+  class of bug `Focus` was extracted to delete. The view-model flag is what the
+  RENDERER asks, and it is an explicit `bool` rather than `deleteLabel.empty()`:
+  `ListRow::discloses` is the recorded precedent for why deriving this from an empty
+  value is wrong, and a slab is a bigger claim than a chevron.
+- **THE PANEL IS 451px, WAS 531px, AND THE 80 IS `kActionH` PLUS THE GAP THAT
+  SEPARATED THE TWO SLABS.** Derived, never pinned: `4 + 73 + (18 + 28 + 12 + 210 + 18)
+  + actionsH`, where `actionsH` is `2·68 + 12 + 20 = 168` with the slab and
+  `68 + 20 = 88` without it. **The gap goes with the slab it separated** — the board's
+  actions block is a flex column and a `gap` is BETWEEN items, so one slab has nothing
+  for it to separate; keeping it would leave 12px of dead air and put the centred panel
+  6px high. `actionsH` is now computed **once** and spent on both the paragraph's
+  clamp budget and the panel's height, which had shipped as two copies of one
+  expression — the shape that lets a budget and a height disagree.
+- **THE BAR FOLLOWS THE PANEL: `CLOSE · OK` and two dead slots.** `SELECT` promises a
+  choice and there is nothing to choose between; Up and Down have no second row. The
+  Confirm slot is named after the slab it activates, which is `SdMissingScreen`'s own
+  rule (`{"", "RETRY", "", ""}`). An empty slot is **36px, not zero**
+  (`kHintEmptySlotW`), and the board authors both as the spacer eight other boards use
+  — measuring one as nothing draws the two live slots in the wrong places. The bar's
+  height did not move: its top rule is row 736 at both geometries, before and after.
+- **MEASURED: 3.37% / 3.41%**, from 3.45% / 3.54%. The controls in the same tree are
+  `book_error` **3.44% / 3.53%** and `book_error_unreadable` **2.99% / 3.17%**, which
+  reproduce this file's recorded figures **to the digit** — that is what says the before
+  and after are one instrument rather than two. The sheet still prints `ok` and not a
+  percentage (#41), so these are threshold-at-128 counts over the bare `--export`
+  panels. It improved because what left the panel is a tracked-caps label, which is
+  where Chrome's subpixel advances and the firmware's whole-pixel ones disagree most per
+  pixel of ink.
+- **THE TWO RE-BLESSED GOLDENS MOVED A LOT AND IN EXACTLY TWO BANDS.** 49,629 px (X4)
+  and 49,404 (X3): the panel band (old ∪ new, rows 135–665 / 131–661) and the hint
+  bar's label rows (761–779 / 753–771, 1,414 px at both geometries). **Zero differing
+  pixels anywhere else** — the veiled Library above and below the panel and the bar's
+  own top rule are byte-identical. And `book_error` and `book_error_unreadable` did not
+  move by a pixel at either geometry, which is what says the change is in the one shape
+  and not in the shared path.
 
 The screen takes a bounded `BookErrorReason`, **never the `why` string**, which is
 developer English (`"the spine names no chapters"`), unstyled, unbounded and with no

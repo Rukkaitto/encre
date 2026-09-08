@@ -1,5 +1,8 @@
-// design/BookError.dc.html and design/BookErrorUnreadable.dc.html -- one screen,
-// two copy shapes.
+// design/BookError.dc.html, design/BookErrorUnreadable.dc.html and
+// design/BookErrorMemory.dc.html -- one screen, three copy shapes, and the third
+// one has no `DELETE FILE...` slab.
+#include <string>
+
 #include "doctest.h"
 #include "reader/screen_book_error.h"
 
@@ -18,6 +21,10 @@ BookErrorScreen::Facts damaged() {
 BookErrorScreen::Facts unreadable() {
   return {"/books/dubliners.epub", "dubliners.epub", BookErrorReason::Unreadable,
           ScreenId::Home};
+}
+BookErrorScreen::Facts outOfMemory() {
+  return {"/books/dubliners.epub", "dubliners.epub", BookErrorReason::OutOfMemory,
+          ScreenId::Library};
 }
 }  // namespace
 
@@ -86,14 +93,74 @@ TEST_CASE("DELETE FILE... opens the confirmation") {
   CHECK(a.target == ScreenId::DeleteConfirm);
 }
 
-TEST_CASE("the delete slab is reachable on BOTH shapes") {
+TEST_CASE("the delete slab is reachable on BOTH shapes that draw it") {
   // Making it inert on the unreadable shape was considered and rejected: the two
   // shapes differ only by a sentence of prose, so a reader meeting an inert slab
   // has nothing to learn the rule from. That is the `works only sometimes` trap.
   BookErrorScreen s(unreadable());
+  CHECK(s.vm().offersDelete);
   REQUIRE(s.onGesture({Gesture::Next}).kind != Action::Kind::None);
   CHECK(s.focus() == 1);
   CHECK(s.onGesture({Gesture::Activate}).target == ScreenId::DeleteConfirm);
+}
+
+TEST_CASE("the out-of-memory shape draws no delete slab at all") {
+  // THE FILE IS FINE and the device was momentarily short of heap, so offering to
+  // delete a good book to fix a transient shortage is a nudge in the wrong
+  // direction -- and a reader might take it. HomeEmpty's cut action slab is the
+  // precedent: `a primary action that cannot work is worse than none`.
+  //
+  // ABSENT, NOT INERT. An inert slab is the `works only sometimes` trap, which is
+  // why the slab is live on `Unreadable`; a slab that is not drawn teaches nothing
+  // because there is nothing to press.
+  BookErrorScreen s(outOfMemory());
+  CHECK_FALSE(s.vm().offersDelete);
+  // The label goes with the box. The FLAG is the authority -- see viewmodel.h for
+  // why this is not spelled `deleteLabel.empty()` at the reading end.
+  CHECK(s.vm().deleteLabel.empty());
+  // Still names the file, and still says the file was left alone -- the two things
+  // every shape of this dialog owes the reader.
+  CHECK(s.vm().message.find("dubliners.epub") != std::string::npos);
+  CHECK(s.vm().message.find("left untouched") != std::string::npos);
+  // And it does not claim damage: the bytes are a perfectly good book.
+  CHECK(s.vm().message.find("damaged") == std::string::npos);
+}
+
+TEST_CASE("the out-of-memory shape has ONE row, so no press can reach a delete") {
+  // The row count is the single source of truth for reachability: `onGesture` is
+  // NOT gated on `offersDelete`, because a second condition is free to drift from
+  // the first. So the proof is that the focus cannot move off OK -- pressing Down,
+  // Up, and Down again all leave it on row 0, and Activate always dismisses.
+  BookErrorScreen s(outOfMemory());
+  REQUIRE(s.focus() == 0);
+  for (const Gesture g : {Gesture::Next, Gesture::Prev, Gesture::Next}) {
+    s.onGesture({g});
+    CHECK(s.focus() == 0);
+    CHECK(s.vm().focusedAction == 0);
+  }
+  // Whatever was pressed, Confirm dismisses -- it can never open the confirmation.
+  CHECK(s.onGesture({Gesture::Activate}).kind == Action::Kind::Pop);
+  CHECK(s.onGesture({Gesture::Back}).kind == Action::Kind::Pop);
+}
+
+TEST_CASE("the out-of-memory bar promises only what it binds") {
+  // The hint bar and the binding read one field, so a screen cannot promise a hold
+  // it has not bound -- and it must not promise a MOVE it cannot make either.
+  // `SELECT` would offer a choice between rows that do not exist; the Confirm slot
+  // is named after the slab it activates, which is SdMissingScreen's rule
+  // (`{"", "RETRY", "", ""}`).
+  BookErrorScreen s(outOfMemory());
+  CHECK(s.vm().hints[0] == "CLOSE");
+  CHECK(s.vm().hints[1] == "OK");
+  // EMPTY, not "UP"/"DOWN". An empty slot is still 36px wide in the bar
+  // (kHintEmptySlotW) -- the boards author a dead button as a spacer, and measuring
+  // it as zero draws the two live slots in the wrong places.
+  CHECK(s.vm().hints[2].empty());
+  CHECK(s.vm().hints[3].empty());
+  for (const bool h : s.vm().holds) CHECK_FALSE(h);
+  // The other two shapes are untouched: they keep the board's four labels.
+  CHECK(BookErrorScreen(unreadable()).vm().hints[1] == "SELECT");
+  CHECK(BookErrorScreen(unreadable()).vm().hints[2] == "UP");
 }
 
 TEST_CASE("the focus wraps, as every list here does") {

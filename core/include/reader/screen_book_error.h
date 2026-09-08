@@ -37,15 +37,25 @@ namespace reader {
 // than a bool. So it gets its own board (design/BookErrorMemory.dc.html) and its own
 // sentence.
 //
-// THE `DELETE FILE...` SLAB IS STILL DRAWN AND STILL ACTS, and that is the one thing
-// here worth arguing about: deleting a perfectly good book over a transient shortage
-// is not what the reader wants, and offering it is a nudge in the wrong direction.
-// It stays because the alternative is worse in a way this project has already paid
-// for -- a slab that is inert on one shape of a screen and live on the other two is
-// the `works only sometimes` trap, which is the recorded reason it is live on
-// `Unreadable` too. A row REMOVED on this shape alone would be a fourth board and a
-// panel whose height depends on which refusal it is reporting. Worth an owner's
-// decision rather than a silent one.
+// AND THIS SHAPE HAS NO `DELETE FILE...` SLAB. It shipped with one, drawn and live on
+// all three shapes, and this comment recorded that as owed an owner's opinion rather
+// than settled. It is settled: the file is FINE, so offering to delete a good book to
+// fix a transient shortage is a nudge in the wrong direction and a reader might take
+// it. `Damaged` and `Unreadable` keep theirs -- on those two, wanting the file gone is
+// a reasonable thing to want. `HomeEmpty` is the precedent, whose action slab was
+// removed rather than left standing when Wi-Fi was cut: `a primary action that cannot
+// work is worse than none`.
+//
+// ABSENT, NOT INERT, AND THAT IS THE WHOLE LICENCE. A slab that DRAWS and does
+// nothing is the `works only sometimes` trap, which is the recorded reason the slab is
+// live on `Unreadable` -- those two shapes differ only by a sentence, so a reader
+// meeting a dead slab has nothing to learn the rule from. A slab that is not there
+// teaches nothing because there is nothing to press.
+//
+// TWO OF THE THREE OBJECTIONS THIS COMMENT USED TO RAISE WERE ALREADY FALSE. `a fourth
+// board` -- the third board is the one edited, and nothing was added. `a panel whose
+// height depends on which refusal it is reporting` -- it already did, and
+// paintFootprint's own comment below says so.
 enum class BookErrorReason : uint8_t { Damaged, Unreadable, OutOfMemory };
 
 // WHICH SHAPE `openBook`'s REASON IS, and it lives here rather than in the shell
@@ -95,18 +105,29 @@ class BookErrorScreen : public FocusScreen {
   // CONSTANT, so every focus move here is a partial repaint -- DeleteConfirmScreen's
   // reasoning verbatim. Nothing this screen draws changes shape with the focus: the
   // panel is sized from the caption's wrap and the paragraph's, both fixed once the
-  // screen exists, plus two kActionH slabs that are both always drawn. Focus only
-  // decides which is filled and which is outlined, in the same box.
+  // screen exists, plus the slabs this shape draws -- one or two, decided at
+  // construction and never after. Focus only decides which is filled and which is
+  // outlined, in the same box; on the one-slab shape it cannot move at all.
   //
-  // The two copy shapes wrap to different heights, and that does not matter: a push
-  // is never a partial repaint (App::transition() is the signal), so two instances
-  // can never be compared against one frame record. The token only has to hold
-  // across focus moves within one screen's life -- which is also why DeleteConfirm
-  // is constant while its caption carries a book title of any length.
+  // The three copy shapes have different panel heights -- they wrap to different
+  // numbers of lines, and the OutOfMemory shape draws one slab where the others draw
+  // two -- and that does not matter: a push is never a partial repaint
+  // (App::transition() is the signal), so two instances can never be compared against
+  // one frame record. The token only has to hold across focus moves within one
+  // screen's life -- which is also why DeleteConfirm is constant while its caption
+  // carries a book title of any length.
   uint32_t paintFootprint() const override { return 1; }
 
  private:
   enum Row { kOk = 0, kDelete, kRowCount };
+
+  // HOW MANY ROWS THIS SHAPE HAS, and the ONE place reachability is decided. The
+  // OutOfMemory shape draws no `DELETE FILE...` slab, so it has one row -- and
+  // saying it here rather than gating `onGesture` keeps a single source of truth:
+  // the focus cannot reach a row that does not exist, so there is no second
+  // condition free to drift from the first. That is the class of mistake `Focus`
+  // was extracted to delete.
+  static int rowsFor(BookErrorReason reason);
 
   void syncVm() override;
 

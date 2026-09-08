@@ -109,20 +109,47 @@
     <svg width="32" height="28" viewBox="0 0 18 16" fill="none"><path d="M9 1 17 15H1z" stroke="#000000" stroke-width="1.6"></path><path d="M9 6v4" stroke="#000000" stroke-width="1.6"></path><rect x="8.3" y="11.6" width="1.4" height="1.4" fill="#000000"></rect></svg>
     <div style="font-size: var(--t-body); line-height: 1.45; overflow-wrap: anywhere;">&ldquo;dubliners.epub&rdquo; needs more memory than is free right now. The file was left untouched on the card.</div>
   </div>
-  <div style="display: flex; flex-direction: column; gap: 12px; padding: 0 20px 20px 20px;">
+  <!-- NO `DELETE FILE...` SLAB ON THIS SHAPE, AND THE ABSENCE IS THE DESIGN.
+       The other two shapes draw one and keep it: `BookError.dc.html` says the bytes
+       are not a book and `BookErrorUnreadable.dc.html` says the card would not
+       answer, so on both of those removing the file is a reasonable thing to want.
+       Here the file is FINE -- the device was momentarily short of heap -- so
+       offering to delete a good book to fix a transient shortage is a nudge in the
+       wrong direction, and a reader might take it.
+
+       THE PRECEDENT IS `HomeEmpty.dc.html`, whose `SEND BOOKS OVER WI-FI` slab was
+       removed rather than left standing when Wi-Fi was cut from V1: `a primary
+       action that cannot work is worse than none`.
+
+       ABSENT, NOT INERT, and that distinction is what licenses this. A slab that
+       DRAWS and does nothing is the `works only sometimes` trap this project has
+       shipped twice -- a reader meeting it has nothing to learn the rule from. A
+       slab that is not there teaches nothing because there is nothing to learn:
+       the panel simply has one action, as `SdMissing.dc.html` does.
+
+       ONE CHILD, SO NO `gap`. The 12px gap on the other two boards is BETWEEN the
+       two slabs; with one slab there is nothing for it to separate, and leaving it
+       declared would invite the next reader to derive a height that includes it.
+       The 20px bottom padding is the block's own and is unchanged. -->
+  <div style="display: flex; flex-direction: column; padding: 0 20px 20px 20px;">
     <div style="background: #000000; color: #ffffff; height: 68px; display: flex; align-items: center; justify-content: center;">
   <div style="font-size: var(--t-value); letter-spacing: 0.18em; font-weight: 700;">OK</div>
-</div>
-    <div style="border: 2px solid #000000; box-sizing: border-box; height: 68px; display: flex; align-items: center; justify-content: center;">
-  <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">DELETE FILE&hellip;</div>
 </div>
   </div>
   </div>
 <div style="position: absolute; bottom: 0; left: 0; width: 100%; background: #ffffff; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
   <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">CLOSE</div></div>
-  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">SELECT</div></div>
-  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">UP</div></div>
-  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M4 9l4 4 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">DOWN</div></div>
+  <!-- `OK`, NOT `SELECT`, AND TWO DEAD SLOTS -- the bar follows the panel.
+       `SELECT` promises a choice, and with one slab there is nothing to choose
+       between; the slot is named after the slab it activates, which is
+       `SdMissing.dc.html`'s own rule (its Confirm slot says `RETRY`, the label on
+       its slab). Up and Down have no second row to move to, so they are authored as
+       36px spacers -- the width EIGHT boards already use for a dead button, and not
+       zero: `space-between` divides the leftover around them, so measuring one as
+       nothing draws the two live slots in the wrong places. -->
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">OK</div></div>
+  <div style="width: 36px;"></div>
+  <div style="width: 36px;"></div>
 </div>
 </div>
 </x-dc>

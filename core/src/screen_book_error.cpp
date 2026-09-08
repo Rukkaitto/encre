@@ -1,6 +1,8 @@
 #include "reader/screen_book_error.h"
 
+#include <array>
 #include <cstring>
+#include <string>
 #include <utility>
 
 #include "reader/book.h"
@@ -19,8 +21,16 @@ BookErrorReason bookErrorReasonFor(const char* why) {
   return BookErrorReason::Damaged;
 }
 
+int BookErrorScreen::rowsFor(BookErrorReason reason) {
+  return reason == BookErrorReason::OutOfMemory ? 1 : kRowCount;
+}
+
+// `facts` IS READ BEFORE IT IS MOVED, which is safe and not a coincidence: a base
+// class is initialised before any member, so `facts.reason` here runs strictly
+// before `facts_(std::move(facts))` below.
 BookErrorScreen::BookErrorScreen(Facts facts)
-    : FocusScreen(kRowCount, kRowCount), facts_(std::move(facts)) {
+    : FocusScreen(rowsFor(facts.reason), rowsFor(facts.reason)),
+      facts_(std::move(facts)) {
   // The board's caption, fixed. It does NOT carry the book's name, unlike
   // DeleteConfirm's -- the name is in the prose here, and following the board is the
   // rule. U+2019 as the board spells it (&rsquo;).
@@ -59,8 +69,28 @@ BookErrorScreen::BookErrorScreen(Facts facts)
   }
 
   vm_.okLabel = "OK";
-  vm_.deleteLabel = "DELETE FILE\xE2\x80\xA6";  // U+2026, the board's &hellip;
-  vm_.hints = {"CLOSE", "SELECT", "UP", "DOWN"};
+  // THE SECOND SLAB IS GONE ON THE OutOfMemory SHAPE, and it is REMOVED rather than
+  // made inert -- design/BookErrorMemory.dc.html carries the reasoning and
+  // HomeEmpty's cut action slab is the precedent. The file is fine; offering to
+  // delete a good book to fix a transient shortage is a nudge in the wrong
+  // direction, and a reader might take it. An inert slab would be the `works only
+  // sometimes` trap instead, which is the recorded reason the slab is live on
+  // `Unreadable` -- there the shapes differ only by a sentence, so a reader meeting
+  // a dead slab would have nothing to learn the rule from. Nothing to press is
+  // nothing to learn.
+  vm_.offersDelete = facts_.reason != BookErrorReason::OutOfMemory;
+  // U+2026, the board's &hellip;. Cleared with the flag because there is no box left
+  // to draw it in -- but the FLAG is what the renderer asks; see viewmodel.h for why
+  // this is not `deleteLabel.empty()`.
+  vm_.deleteLabel = vm_.offersDelete ? "DELETE FILE\xE2\x80\xA6" : "";
+  // THE BAR FOLLOWS THE PANEL. With one slab there is nothing to choose between, so
+  // `SELECT` would promise a choice that does not exist and Up/Down would promise a
+  // second row -- the hint bar and the binding read one field for exactly this
+  // reason. The Confirm slot is named after the slab it activates, which is
+  // SdMissingScreen's own rule (`{"", "RETRY", "", ""}`), and the two movers get
+  // empty slots -- 36px each in the bar, never zero.
+  vm_.hints = vm_.offersDelete ? std::array<std::string, 4>{"CLOSE", "SELECT", "UP", "DOWN"}
+                               : std::array<std::string, 4>{"CLOSE", "OK", "", ""};
   vm_.holds = {false, false, false, false};
   declareHints(vm_.holds);
   // The base's focus starts on the first row, which is kOk -- the board's filled
@@ -84,10 +114,17 @@ Action BookErrorScreen::onGesture(const GestureEvent& g) {
     case Gesture::Activate:
       if (vm_.focusedAction == kOk) return Action::pop();
       // The confirmation owns the deleting. This screen owns saying what went wrong.
-      // It is reachable on BOTH copy shapes: making it inert on `Unreadable` was
-      // considered and rejected, because the shapes differ only by a sentence and a
-      // reader meeting an inert slab would have nothing to learn the rule from --
-      // the `works only sometimes` trap. If the card really is gone the removal
+      // REACHED ON THE TWO SHAPES THAT DRAW THE SLAB, and unreachable on the third
+      // WITHOUT A TEST HERE: the OutOfMemory shape has one row, so the focus can
+      // never be kDelete and this line cannot run. Gating it on `offersDelete` as
+      // well would be a second spelling of the same fact, free to disagree with the
+      // row count -- see rowsFor().
+      //
+      // Making it INERT on `Unreadable` was considered and rejected, because those
+      // two shapes differ only by a sentence and a reader meeting an inert slab
+      // would have nothing to learn the rule from -- the `works only sometimes`
+      // trap. That argument is about a slab that DRAWS; it does not reach a shape
+      // whose slab is absent. If the card really is gone the removal
       // simply fails, which needs no branch here: FileSystem::remove reports the END
       // STATE and the list the reader lands on already says which it was.
       // REPLACE, NOT PUSH. Both screens are overlays and App::render draws every
