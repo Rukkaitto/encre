@@ -34,6 +34,13 @@ def summarise(rows):
         "spine": spine,
         "chapterRate": 100.0 * (spine - unreadable - truncated) / max(1, spine),
         "textBytes": sum(r["textBytes"] for r in opened),
+        "blocks": sum(r["blocks"] for r in opened),
+        # #90's numbers. `splits` and `maxBlock` are absent from a run made before the
+        # probe reported them, so both default rather than raising -- a delta against
+        # an older baseline is the commonest use of this script.
+        "splits": sum(r.get("splits", 0) for r in opened),
+        "cutBooks": sum(1 for r in opened if r.get("splits", 0)),
+        "maxBlock": max([r.get("maxBlock", 0) for r in opened] or [0]),
     }
 
 
@@ -51,7 +58,13 @@ def report(path):
     print("  whole books  %6.2f%%  (%d opened with nothing missing)"
           % (100.0 * s["clean"] / max(1, s["books"]), s["clean"]))
     print("  chapter rate %6.2f%%  (%d spine entries)" % (s["chapterRate"], s["spine"]))
-    print("  text         %d bytes" % s["textBytes"])
+    print("  text         %d bytes in %d blocks" % (s["textBytes"], s["blocks"]))
+    # WHAT THE BLOCK CAP COST, and the two numbers are separate claims: a cut loses no
+    # text, so what it moves is the BLOCK count and one paragraph indent per cut. The
+    # largest emitted block is the bound itself, observed rather than asserted -- if it
+    # ever reads above `kMaxBlockBytes + 2` the cut is not firing where it says.
+    print("  cuts         %d across %d books (largest emitted block %d bytes)"
+          % (s["splits"], s["cutBooks"], s["maxBlock"]))
 
     refusals = collections.Counter(r["reason"] for r in rows if not r["opened"])
     if refusals:
@@ -95,8 +108,8 @@ def main():
         print("                 before     after     delta")
         for k in ("openRate", "chapterRate"):
             print("  %-12s %8.2f%% %8.2f%% %8.2f%%" % (k, before[k], after[k], after[k] - before[k]))
-        print("  %-12s %9d %9d %9d" % ("textBytes", before["textBytes"], after["textBytes"],
-                                       after["textBytes"] - before["textBytes"]))
+        for k in ("textBytes", "blocks", "splits", "cutBooks", "maxBlock"):
+            print("  %-12s %9d %9d %+9d" % (k, before[k], after[k], after[k] - before[k]))
         return 0
     print(__doc__)
     return 2

@@ -159,14 +159,24 @@ TEST_CASE("a missing book file is refused") {
   CHECK_FALSE(std::string(why).empty());
 }
 
-TEST_CASE("the entry for a spine index is the LAST one naming it") {
-  // Where several entries share a spine index, the later ones are further into the
-  // file -- so the last is the closest thing to "where you are" that a spine-granular
-  // position can name. What the Reader's footer and Contents' NOW marker both need.
+TEST_CASE("the entry for a spine index is the FIRST one naming it") {
+  // IT WAS THE LAST FOR TWO PHASES, on the argument that "the later ones are further
+  // into the file, so the last is the closest thing to where you are". The premise is
+  // true and the conclusion needs the reader to be at the END of the file, which is
+  // not where they are: a fragment is STRIPPED before the match, so every entry in a
+  // group resolves to that file's start and nothing here knows any offsets. The first
+  // entry is the only one that can be proved not to be AHEAD of the reader, and naming
+  // a landmark they have not reached is the error that misleads -- reading_position.h
+  // grades the same trade the same way ("the top of the right paragraph beats the
+  // front of the book, which beats nothing").
+  //
+  // What the Reader's header band and Contents' NOW marker both need, and they must
+  // agree: two screens naming the reader's chapter differently is two spellings of one
+  // fact.
   const std::vector<reader::TocEntry> toc = {
       {0, 1, "Cover"}, {1, 1, "Part one"}, {1, 2, "Part two"}};
   CHECK(reader::tocIndexForSpine(toc, 0) == 0);
-  CHECK(reader::tocIndexForSpine(toc, 1) == 2);
+  CHECK(reader::tocIndexForSpine(toc, 1) == 1);
   CHECK(reader::tocIndexForSpine(toc, 9) == -1);
   CHECK(reader::tocIndexForSpine({}, 0) == -1);
 }

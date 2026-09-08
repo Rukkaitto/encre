@@ -59,6 +59,31 @@ namespace reader {
 // which is stronger than the old form ("`sectioned()` requires a depth-2 entry and
 // every such entry is a row") and rules out the same state. The only nothing-to-select
 // case remains an EMPTY contents -- a book with no NCX.
+//
+// --- `NOW` MARKS AT MOST ONE ROW, AND IT IS DECIDED ONCE ------------------------
+//
+// Reported off an X3 on `Discourse on the Method`: TWO rows read `NOW`. The rule was
+// `!row.isHeader && e.spine == spine_` per row, so every entry naming the open spine
+// entry got the marker -- and a group of entries on one spine entry is the MAJORITY
+// case, since an NCX target is a file plus an optional fragment while the reader
+// positions by spine entry only (109 of the corpus's 206 books with a usable NCX, and
+// 373 rows at once in the worst of them). `NOW` is a claim about where the reader is,
+// so more than one of them is a false claim -- the shape this project refuses for an
+// unread gauge (-1, never 0%) and for a badge promising a wake charging cannot deliver.
+//
+// The ROWS are kept: their labels are real content and `toc.h` says so. Only the
+// marker is single, and it goes on `rowForSpine()` -- `tocIndexForSpine`'s first match,
+// stepped past a header, since the board gives a header no value slot.
+//
+// IT IS COMPUTED ONCE, IN THE CONSTRUCTOR, OVER `entries_`, and that is structural
+// rather than an optimisation. `syncVm` walks the VISIBLE SLICE, so a rule evaluated
+// inside that loop would answer "the first match ON SCREEN": the marker would hop
+// between members of the group as the list scrolled, and would land on a row that is
+// not the reader's as soon as the real one scrolled out of the window. That is worse
+// than the defect above and no single-screenful test can see it. An absolute index
+// compared against `s.first + i` cannot have the question. The inputs are immutable
+// after construction -- `entries_` and `spine_` have no setters -- so there is nothing
+// to invalidate.
 class ContentsScreen : public FocusScreen {
  public:
   // `toc` is the book's whole table of contents and `spine` is the entry being read,
@@ -84,17 +109,23 @@ class ContentsScreen : public FocusScreen {
 
   int rowCount() const { return static_cast<int>(entries_.size()); }
 
+  // THE ONE ROW MARKED `NOW`, as an index into the whole list, or -1 for none. See the
+  // paragraph above and `rowForSpine`.
+  int nowRow() const { return nowRow_; }
+
  protected:
   void syncVm() override;
   bool focusable(int index) const override;
 
  private:
   bool isHeaderAt(int index) const;
+  int rowForSpine() const;
 
   std::vector<TocEntry> entries_;
   bool sectioned_ = false;
   ContentsViewModel vm_{};
   int spine_ = 0;
+  int nowRow_ = -1;
 };
 
 }  // namespace reader

@@ -47,9 +47,10 @@ FitBox fitCover(int srcW, int srcH, int panelW, int panelH, CoverFit fit) {
 
   if (fit == CoverFit::Fill) {
     // COVER: the destination is the whole panel and the SOURCE gives way. The
-    // crop rectangle carries the panel's aspect, which is what makes the
-    // "never upscale" test below a single comparison -- if it is smaller than
-    // the panel in one axis it is smaller in both.
+    // crop rectangle carries the panel's aspect, so the two scales are equal up
+    // to one rounding step -- which is why the upscale-cap test below would
+    // almost always answer the same from either axis, and why it asks both
+    // anyway: "almost" is not a property to rest a bound on.
     b.dstW = panelW;
     b.dstH = panelH;
     if (srcSpread > panelSpread) {
@@ -82,11 +83,26 @@ FitBox fitCover(int srcW, int srcH, int panelW, int panelH, CoverFit fit) {
     }
   }
 
-  // NEVER UPSCALE, and the header says why it is a hard property rather than a
-  // preference: a box filter cannot enlarge, and CoverFitter's one-source-row-
-  // to-one-destination-row streaming cannot either. How few covers reach this
-  // is in the census in reader/cover_fit.h.
-  if (b.dstW > b.srcW || b.dstH > b.srcH) {
+  // UPSCALE UP TO kMaxCoverUpscalePercent, AND FALL BACK TO 1:1 BEYOND IT. The
+  // header carries the derivation of the cap and the arc of the property this
+  // replaced; what matters here is that the fallback geometry is EXACTLY what
+  // this function used to return for such a cover, so `tooSmall` is the only
+  // observable that moved for a caller that does not enlarge.
+  //
+  // BOTH AXES, OR-ed, WHICH IS THE STRICT READING. Fill's crop carries the
+  // panel's aspect and Whole's box does too, so the two scales are equal up to
+  // one rounding step and either axis would almost always answer the same -- the
+  // `||` is what makes "almost" not matter.
+  //
+  // The comparison is cross-multiplied rather than divided for fitCover's own
+  // reason two dozen lines up: a cover asking for exactly the cap must be
+  // ADMITTED, and a double deciding that by rounding is not a boundary anybody
+  // can reason about. In long long because dst * 250 on a nonsense panel would
+  // otherwise overflow before the guards could look at it.
+  const long long cap = kMaxCoverUpscalePercent;
+  if (static_cast<long long>(b.dstW) * 100 > static_cast<long long>(b.srcW) * cap ||
+      static_cast<long long>(b.dstH) * 100 > static_cast<long long>(b.srcH) * cap) {
+    b.tooSmall = true;
     b.dstW = b.srcW;
     b.dstH = b.srcH;
   }
@@ -112,7 +128,8 @@ bool CoverFitter::begin(int srcW, int srcH, int panelW, int panelH, CoverFit fit
   box_ = FitBox{};
   planeBytes_ = 0;
   srcH_ = 0;
-  srcRow_ = dstRow_ = 0;
+  srcRow_ = dstRow_ = readyRow_ = 0;
+  upCols_ = upRows_ = false;
   acc_.clear();
   count_.clear();
   err_.clear();
@@ -122,9 +139,15 @@ bool CoverFitter::begin(int srcW, int srcH, int panelW, int panelH, CoverFit fit
   if (srcW <= 0 || srcH <= 0 || panelW <= 0 || panelH <= 0) return false;
   const FitBox b = fitCover(srcW, srcH, panelW, panelH, fit);
   if (b.dstW <= 0 || b.dstH <= 0 || b.srcW <= 0 || b.srcH <= 0) return false;
-  // fitCover guarantees this; asserting it here is what lets addRow below say
-  // "a source row completes at most one destination row" without a loop.
-  if (b.dstW > b.srcW || b.dstH > b.srcH) return false;
+  // A COVER TOO SMALL TO REACH THE PANEL IS REFUSED HERE, WHICH IS WHAT MAKES THE
+  // FLAG WORTH HAVING. fitCover still hands back the 1:1 centred box for such a
+  // cover -- it is a total function and that geometry is informative for a log
+  // line -- but nothing may DRAW it: a small picture in the middle of the glass
+  // for hours is #64, and this is the one place that can make it unreachable for
+  // every caller at once. decodeCover asks fitCover itself so it can report
+  // CoverResult::TooSmall rather than the OutOfMemory this false would otherwise
+  // read as.
+  if (b.tooSmall) return false;
   // AND THIS ONE IS MEMORY SAFETY, NOT CORRECTNESS, which is why it is a guard
   // and not a comment. emitRow() writes bit `0x80 >> ((dstX + c) & 7)` into
   // byte `(dstX + c) >> 3` of a (panelW + 7) / 8 buffer, so what keeps it in
@@ -157,6 +180,11 @@ bool CoverFitter::begin(int srcW, int srcH, int panelW, int panelH, CoverFit fit
   // rather than per pixel, so it cost nothing measurable, but adding them back
   // in the change that removes them from addRow is not a thing to do by
   // accident. Only the PRODUCT needs 64 bits.
+  //
+  // AN ENLARGEMENT MAKES BOTH CEILINGS 1 and cannot come near the bound -- with
+  // dstW > srcW, `(srcW - 1) / dstW` is 0. So this guard is still exactly the
+  // downscale's, which is the direction that can pile millions of samples into
+  // one cell.
   {
     const int perCol = (b.srcW - 1) / b.dstW + 1;
     const int perRow = (b.srcH - 1) / b.dstH + 1;
@@ -197,6 +225,8 @@ bool CoverFitter::begin(int srcW, int srcH, int panelW, int panelH, CoverFit fit
   box_ = b;
   planeBytes_ = planeBytes;
   srcH_ = srcH;
+  upCols_ = b.dstW > b.srcW;
+  upRows_ = b.dstH > b.srcH;
   acc_.assign(static_cast<size_t>(b.dstW), 0u);
   count_.assign(static_cast<size_t>(b.dstW), 0u);
   err_.assign(static_cast<size_t>(b.dstW), 0);
@@ -205,11 +235,17 @@ bool CoverFitter::begin(int srcW, int srcH, int panelW, int panelH, CoverFit fit
   return true;
 }
 
-bool CoverFitter::addRow(const uint8_t* src, bool& emitted) {
-  emitted = false;
+bool CoverFitter::addRow(const uint8_t* src) {
   if (planeBytes_ == 0) return false;   // never begun, or begin() refused
   if (src == nullptr) return false;
   if (srcRow_ >= srcH_) return false;   // more rows than the source declared
+  // AN UNDRAINED PUSH IS MISUSE, AND IT IS THE ONE THE NEW INTERFACE INTRODUCES.
+  // Under a downscale nothing is ever pending on entry, so this cannot fire for
+  // any geometry that shipped; under an enlargement a caller that kept the old
+  // `if (emitted)` shape would drop every second destination row AND add the next
+  // source row on top of an accumulator still holding the last one. That is a
+  // blended picture rather than a missing one, so it must not be silent.
+  if (readyRow_ != dstRow_) return false;
 
   const int sr = srcRow_++;
   // ROWS OUTSIDE THE CROP ARE CONSUMED AND DISCARDED. That is what lets the
@@ -226,9 +262,40 @@ bool CoverFitter::addRow(const uint8_t* src, bool& emitted) {
 
   const int i = sr - box_.srcY;
   const uint8_t* const row = src + box_.srcX;
+  if (upCols_) {
+    // THE INVERSE MAP, FOR AN ENLARGEMENT: walk the DESTINATION and read the one
+    // source pixel each cell sits on. That is nearest-neighbour, and the header
+    // says why nothing else is available to a box filter and why the upscale cap
+    // is what makes it sufficient.
+    //
+    // STEPPED FOR THE FORWARD MAP'S REASON, WHICH IS RV32IMC'S MISSING 64-BIT
+    // DIVIDER. `sj` is `floor(c * srcW / dstW)` exactly: it advances by
+    // `srcW / dstW`, which with `dstW > srcW` is below one, so carrying the
+    // remainder reproduces the floor -- `rem` is `(c * srcW) % dstW` by
+    // construction and the advance happens AFTER the read, so c == 0 reads
+    // source pixel 0. Cross-compiled and read: no `call` of any kind in this
+    // loop body. `while` rather than `if` because the invariant that bounds the
+    // carry to one step is `dstW > srcW`, which is upCols_'s own condition -- a
+    // relaxation of it would make an `if` drop pixels silently.
+    //
+    // `sj` CANNOT LEAVE THE ROW: its largest value is
+    // floor((dstW - 1) * srcW / dstW), which is at most srcW - 1.
+    int sj = 0, rem = 0;
+    for (int c = 0; c < box_.dstW; ++c) {
+      acc_[static_cast<size_t>(c)] += row[sj];
+      count_[static_cast<size_t>(c)] += 1u;
+      rem += box_.srcW;
+      while (rem >= box_.dstW) {
+        rem -= box_.dstW;
+        ++sj;
+      }
+    }
+    return markReady(i);
+  }
   // The box filter: every source pixel is added to the one destination cell it
-  // lands in. `dstW <= srcW` (fitCover's clamp) makes the map onto 0..dstW-1
-  // surjective, so no destination column can end up with an empty accumulator.
+  // lands in. `dstW <= srcW` here (upCols_ took the branch above) makes the map
+  // onto 0..dstW-1 surjective, so no destination column can end up with an empty
+  // accumulator.
   //
   // THE COLUMN IS STEPPED, NOT DIVIDED, AND THAT IS A DEVICE FACT NO DESKTOP
   // MEASUREMENT CAN SEE. The obvious spelling of this map is
@@ -266,18 +333,65 @@ bool CoverFitter::addRow(const uint8_t* src, bool& emitted) {
     }
   }
 
-  // A destination row is finished when the NEXT source row would land past it,
-  // which includes the source running out.
-  const int nextDr = (i + 1 >= box_.srcH)
-                         ? box_.dstH
-                         : static_cast<int>(static_cast<long long>(i + 1) * box_.dstH / box_.srcH);
-  if (nextDr == dstRow_) return true;
-  emitRow();
-  emitted = true;
+  return markReady(i);
+}
+
+bool CoverFitter::markReady(int i) {
+  // WHICH DESTINATION ROWS ARE NOW FINISHED, and this is the one place the two
+  // directions need DIFFERENT arithmetic rather than the same expression read
+  // twice.
+  //
+  // THE ROW MAP MUST BE THE COLUMN MAP'S INVERSE ON THE SAME AXIS CONVENTION, and
+  // getting that wrong is a real defect rather than a taste -- it was caught here
+  // by the reference disagreeing, and it would have shipped as a picture whose
+  // rows are sampled a step out of phase with its columns. That is a cover
+  // sheared by one source pixel down its whole height: still a picture, so
+  // nothing but a reference comparison could see it.
+  //
+  //   DOWNSCALING, the columns SCATTER: source pixel j lands in cell
+  //   floor(j * dstW / srcW), so cell c holds the j that map to it, and a
+  //   destination row is finished when the NEXT source row lands past it --
+  //   floor((i + 1) * dstH / srcH), which is the expression this function's
+  //   predecessor inlined. Identical boundaries, so nothing downscaling moved.
+  //
+  //   ENLARGING, the columns GATHER: cell c reads source pixel
+  //   floor(c * srcW / dstW). The rows have to say the same thing, so source row
+  //   i owes the destination rows r with floor(r * srcH / dstH) == i, which is
+  //   r < CEIL((i + 1) * dstH / srcH). A floor there would have handed
+  //   destination row 1 of a 33-to-64 enlargement to source row 1 where its
+  //   COLUMNS were reading source row 0.
+  //
+  // THE ONLY OTHER THING THAT CHANGED IS THAT THIS IS A COUNT RATHER THAN A
+  // YES/NO. Downscaling, `readyRow_` is at most one past `dstRow_`, so nextRow()
+  // answers true once and the caller's drain loop is the old `if (emitted)`.
+  //
+  // The row map keeps its divide: it runs once per source ROW, not per pixel, so
+  // the `__divdi3` the column map exists to avoid costs nothing here.
+  if (i + 1 >= box_.srcH) {
+    readyRow_ = box_.dstH;
+  } else {
+    const long long num = static_cast<long long>(i + 1) * box_.dstH;
+    readyRow_ = static_cast<int>(upRows_ ? (num + box_.srcH - 1) / box_.srcH
+                                         : num / box_.srcH);
+  }
+  // UNREACHABLE with a monotonic map, and it is the mirror of the `dstRow_ >=
+  // dstH` early-out above: what it guards is emitRow() being invited past the box
+  // the caller was told about.
+  if (readyRow_ > box_.dstH) readyRow_ = box_.dstH;
   return true;
 }
 
-void CoverFitter::emitRow() {
+bool CoverFitter::nextRow() {
+  if (dstRow_ >= readyRow_) return false;
+  // KEEP THE ACCUMULATOR WHILE MORE ROWS ARE OWED FROM IT, which is the whole of
+  // the vertical replication: an enlargement's several destination rows all mean
+  // the same source row. err_ still advances per emitted row, so they are the
+  // same tone in DIFFERENT dither patterns rather than duplicate rows.
+  emitRow(dstRow_ + 1 < readyRow_);
+  return true;
+}
+
+void CoverFitter::emitRow(bool keepAccumulator) {
   // THE BANDS ARE PAPER. A Whole fit leaves columns outside the box and every
   // row leaves them; starting from paper rather than from whatever the last row
   // left is also what keeps a plane row a complete statement rather than a
@@ -362,8 +476,10 @@ void CoverFitter::emitRow() {
     if (level & 2) msb_[byte] = static_cast<uint8_t>(msb_[byte] & ~bit);
     if (level & 1) lsb_[byte] = static_cast<uint8_t>(lsb_[byte] & ~bit);
 
-    acc_[at] = 0u;
-    count_[at] = 0u;
+    if (!keepAccumulator) {
+      acc_[at] = 0u;
+      count_[at] = 0u;
+    }
   }
   ++dstRow_;
 }

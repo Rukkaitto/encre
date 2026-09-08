@@ -15,9 +15,12 @@
 #include <vector>
 
 #include "doctest.h"
+#include "fake_fs.h"
 #include "home_vm.h"
 #include "reader/app.h"
 #include "reader/screen_home.h"
+#include "reader/screen_item_actions.h"
+#include "reader/screen_library.h"
 #include "reader/screen_sd_missing.h"
 #include "reader/screens.h"
 
@@ -158,4 +161,236 @@ TEST_CASE("a restored stack still needs painting, and paints as a screen change"
   f.app.restore({{ScreenId::Home, 1}, {ScreenId::Settings, 1}});
   CHECK(f.app.dirty());
   CHECK(f.app.transition());
+}
+
+// --- THE FOLDER THE LIBRARY WAS IN (#14) -------------------------------------
+//
+// A focus is an index into a list, and the Library can be listing a SUBFOLDER of
+// /books. The record used to carry only the index, so sleeping in
+// /books/Classics on row 2 woke on /books row 2 -- a plausible-looking wrong row,
+// which is worse than losing the position: nothing on the glass says the restore
+// went wrong, and the row opens a book the reader never chose.
+//
+// OVER A CARD, because that is the only place the defect lives: the sample
+// Library the goldens use has one directory and cannot descend. FakeFileSystem is
+// what makes that testable in core/ at all -- shell/ has no harness.
+
+namespace {
+
+// /books with three books and two folders, one of which holds three more. Deep
+// enough that a row index valid inside the subfolder is ALSO valid at the root,
+// which is the whole hazard: a restore that lands on the wrong list still finds
+// a row there and looks like it worked.
+FakeFileSystem cardWithFolders() {
+  FakeFileSystem fs;
+  fs.mkdirs("/books/Classics");
+  fs.mkdirs("/books/Poetry");
+  fs.writeAll("/books/Middlemarch.epub", "m");
+  fs.writeAll("/books/Walden.epub", "w");
+  fs.writeAll("/books/Ulysses.epub", "u");
+  fs.writeAll("/books/Classics/Dubliners.epub", "d");
+  fs.writeAll("/books/Classics/Iliad.epub", "i");
+  fs.writeAll("/books/Classics/Odyssey.epub", "o");
+  return fs;
+}
+
+// Home over a card, and a factory that builds its Library through the real
+// filesystem interface rather than over sample rows.
+//
+// THE FILESYSTEM IS DECLARED FIRST ON PURPOSE: the factory holds a reference to
+// it and the App holds a reference to the factory, so destruction runs the other
+// way round.
+struct CardApp {
+  FakeFileSystem fs;
+  DemoScreenFactory factory;
+  App app;
+
+  explicit CardApp(FakeFileSystem card)
+      : fs(std::move(card)),
+        factory(fs, "/books"),
+        app(std::make_unique<HomeScreen>(demoHomeVm(), demoHomeTargets()), factory) {
+    factory.setLibraryVisibleRows(7);
+  }
+
+  LibraryScreen& library() {
+    LibraryScreen* lib = factory.library();
+    REQUIRE(lib != nullptr);
+    return *lib;
+  }
+};
+
+// Home > Library > into /books/Classics > down to its second book. Folders sort
+// first and Classics before Poetry, so row 0 of /books is the folder to descend
+// into.
+std::vector<StackEntry> inTheSubfolder(CardApp& live, int downsInside) {
+  live.app.dispatch(kDown);     // Home: CONTINUE -> the LIBRARY row
+  live.app.dispatch(kConfirm);  // open it
+  REQUIRE(live.app.top().id() == ScreenId::Library);
+  REQUIRE(live.library().path() == "/books");
+  live.app.dispatch(kConfirm);  // descend into row 0, which is Classics
+  REQUIRE(live.library().path() == "/books/Classics");
+  for (int i = 0; i < downsInside; ++i) live.app.dispatch(kDown);
+  return live.app.snapshot();
+}
+
+}  // namespace
+
+TEST_CASE("a snapshot says WHICH list each focus indexes, not just where in it") {
+  CardApp live(cardWithFolders());
+  const std::vector<StackEntry> snap = inTheSubfolder(live, 2);
+
+  REQUIRE(snap.size() == 2);
+  CHECK(snap[0].place.empty());  // Home has one list and needs no place
+  CHECK(snap[1].screen == ScreenId::Library);
+  CHECK(snap[1].focus == 2);
+  CHECK(snap[1].place == "/books/Classics");
+}
+
+TEST_CASE("a wake comes back to the folder the Library was in, on the row it was on") {
+  CardApp live(cardWithFolders());
+  const std::vector<StackEntry> snap = inTheSubfolder(live, 2);
+  const std::string was = live.library().focusedPath();
+  REQUIRE(was == "/books/Classics/Odyssey.epub");
+
+  // A SECOND App over the same card, as a wake gets.
+  CardApp woken(cardWithFolders());
+  const App::RestoreReport r = woken.app.restore(snap);
+  CHECK(r.restored == 2);
+  CHECK(woken.library().path() == "/books/Classics");
+  CHECK(woken.library().focus() == 2);
+  // The row is the same BOOK, which is the thing the reader would notice. Before
+  // this field existed the path came back /books and the focus came back 2, which
+  // is Ulysses -- a book they had not opened, on a screen that looked right.
+  CHECK(woken.library().focusedPath() == was);
+  CHECK(woken.app.snapshot() == snap);
+}
+
+TEST_CASE("a folder deleted while the device slept costs the ROW as well") {
+  // The commonest way a place fails, and the case the whole design turns on: the
+  // place cannot be honoured, so the focus that indexed it is not applied either.
+  // Landing at the top of /books is honest; landing on row 2 of /books is the
+  // plausible-looking wrong row this closes.
+  CardApp live(cardWithFolders());
+  const std::vector<StackEntry> snap = inTheSubfolder(live, 2);
+
+  // The same card with the folder gone. Built rather than deleted from, because
+  // FileSystem::remove is files-only by contract -- which is also why the device
+  // itself cannot produce this state and a computer with the card in it can.
+  FakeFileSystem thinner;
+  thinner.mkdirs("/books/Poetry");
+  thinner.writeAll("/books/Middlemarch.epub", "m");
+  thinner.writeAll("/books/Walden.epub", "w");
+  thinner.writeAll("/books/Ulysses.epub", "u");
+  CardApp woken(std::move(thinner));
+
+  const App::RestoreReport r = woken.app.restore(snap);
+  CHECK(r.restored == 2);  // the SCREEN still comes back; only its position does not
+  // Row 2 EXISTS at the root, which is what makes the wrong answer plausible: it
+  // is Ulysses, a book the reader never opened. A test on a card too short to
+  // hold the row would pass on the clamp instead of on the drop.
+  REQUIRE(woken.library().itemCount() > snap[1].focus);
+  CHECK(woken.library().path() == "/books");
+  CHECK(woken.library().focus() == 0);
+  // Said the other way round, because this is the assertion that is really about
+  // the defect: the row the record named must NOT be applied to another list.
+  CHECK(woken.library().focus() != snap[1].focus);
+}
+
+TEST_CASE("a place outside the Library's own root is refused, before any listing") {
+  // A record is written by a device and read by a device, but not necessarily
+  // with the same card in the slot or the same --root on the command line, so a
+  // prefix test is the containment this layer performs.
+  //
+  // AND THE ASSERTION THAT MATTERS IS THAT NO LISTING WAS ATTEMPTED, not that
+  // setPlace answered false. The fake compares literal keys, so `/books/../etc`
+  // fails to list whatever this code does -- a case that asserted only the bool
+  // passed with the whole check deleted, which is this project's own rule about a
+  // mutation telling you about your INPUT first. Whether a `..` resolves is a
+  // property of what is behind the interface (SdFat skips dot entries and does
+  // not; HostFileSystem hands the path to the OS and does), so the refusal has to
+  // happen HERE, on the path, and the way to see that is that the card is never
+  // touched.
+  FakeFileSystem fs = cardWithFolders();
+  LibraryScreen lib(fs, "/books");
+  const size_t before = fs.listCalls();
+  CHECK_FALSE(lib.setPlace("/elsewhere/Classics"));
+  CHECK_FALSE(lib.setPlace("/booksmith"));  // a prefix, not a parent
+  CHECK_FALSE(lib.setPlace("/books/../etc"));
+  CHECK_FALSE(lib.setPlace("books/Classics"));  // not absolute
+  CHECK_FALSE(lib.setPlace(""));               // no place at all is not a place
+  CHECK(fs.listCalls() == before);
+  CHECK(lib.path() == "/books");
+
+  // And the same thing through the restore, where it costs the row: /books row 2
+  // is a real row, so this is refused on the path and not on the index.
+  CardApp other(cardWithFolders());
+  other.app.restore({{ScreenId::Home, 0, ""}, {ScreenId::Library, 2, "/elsewhere"}});
+  CHECK(other.library().path() == "/books");
+  CHECK(other.library().focus() == 0);
+}
+
+TEST_CASE("asking for the directory already listed costs no listing") {
+  // The ordinary case -- the constructor lists the root, and the root is where
+  // most records were written -- and it must touch no card: a rescan on the wake
+  // path would be a directory listing for nothing, at ~2.9 ms an entry on the
+  // device.
+  FakeFileSystem fs = cardWithFolders();
+  LibraryScreen lib(fs, "/books");
+  const size_t before = fs.listCalls();
+  CHECK(lib.setPlace("/books"));
+  CHECK(fs.listCalls() == before);
+  // ...and a real move does list, which is what says the check above measures
+  // something. Without it, a setPlace that had quietly stopped listing anything
+  // would pass here and hand the record's row to a stale directory.
+  CHECK(lib.setPlace("/books/Classics"));
+  CHECK(fs.listCalls() > before);
+}
+
+TEST_CASE("the place lands before the overlay above it is built") {
+  // The ordering App::restore already had for the focus, now with something in
+  // front of it: an overlay reads the focused ROW of the screen underneath it AT
+  // CONSTRUCTION, so a Library restored to the right folder only afterwards would
+  // caption the panel with a book from the wrong directory.
+  CardApp live(cardWithFolders());
+  const std::vector<StackEntry> snap = inTheSubfolder(live, 2);
+
+  std::vector<StackEntry> withOverlay = snap;
+  withOverlay.push_back({ScreenId::ItemActions, 0, ""});
+
+  CardApp woken(cardWithFolders());
+  const App::RestoreReport r = woken.app.restore(withOverlay);
+  REQUIRE(r.restored == 3);
+  REQUIRE(woken.app.top().id() == ScreenId::ItemActions);
+  const ItemActionsScreen& panel = static_cast<const ItemActionsScreen&>(woken.app.top());
+  CHECK(panel.vm().title == "Odyssey");
+}
+
+TEST_CASE("what a wake into a subfolder costs in directory listings") {
+  // MEASURED, because the figure is in CLAUDE.md and this project's rule is to
+  // measure rather than argue. The screen is built before it is told where it
+  // was, so the root is listed and then the subfolder is: the constructor's
+  // rescan, one countBooks per folder for the board's `FOLDER - 6 BOOKS` line
+  // (memoised per card state by DirCountCache, so a repeat is free), and
+  // setPlace's own listing of the directory the record named.
+  //
+  // A listing is ~2.9 ms an ENTRY on the device, so this is the honest cost of
+  // the fix and the reason setPlace refuses to re-list a directory it is already
+  // showing -- which is the common case, since most records name the root.
+  CardApp live(cardWithFolders());
+  const std::vector<StackEntry> snap = inTheSubfolder(live, 2);
+
+  CardApp woken(cardWithFolders());
+  const size_t before = woken.fs.listCalls();
+  woken.app.restore(snap);
+  const size_t spent = woken.fs.listCalls() - before;
+  CAPTURE(spent);
+  // /books, its two folders' counts, and /books/Classics.
+  CHECK(spent == 4);
+  // AND THE PLACE IS ONE OF THEM, not all of them: a record naming the root pays
+  // what a Library push has always paid and nothing more.
+  CardApp atRoot(cardWithFolders());
+  const size_t rootBefore = atRoot.fs.listCalls();
+  atRoot.app.restore({{ScreenId::Home, 0, ""}, {ScreenId::Library, 1, "/books"}});
+  CHECK(atRoot.fs.listCalls() - rootBefore == spent - 1);
+  CHECK(atRoot.library().focus() == 1);
 }

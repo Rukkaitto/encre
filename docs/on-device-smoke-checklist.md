@@ -185,6 +185,95 @@ investigating into a cold boot that looks exactly like a bug.
       chapter is [#48](https://github.com/Rukkaitto/encre/issues/48) — known,
       not a new finding.
 
+## 6b. An over-long paragraph ([#37](https://github.com/Rukkaitto/encre/issues/37), [#90](https://github.com/Rukkaitto/encre/issues/90))
+
+**This is #37's on-glass validation, and #90 is why it could not be done before.**
+`kMaxBlockBytes` was 64 KB against a 42,152-byte reading floor, so a block anywhere
+near it was an `abort()` — and under `-fno-exceptions` that is a reboot with no
+diagnostic, which this project has twice had reported as *"opening a book goes back to
+Home"*. The cap is 8 KB now and the buffer is reserved rather than grown, so the peak
+is 18,308 bytes whatever the book says. **All of that is desktop arithmetic and a
+desktop corpus; the heap is the one thing only the device can answer**, and this repo
+has measured cover decode peaking **17–25 KB above its desktop figure** because the
+allocator differs.
+
+Put a book with an over-long paragraph on the card. Two of the 225-book corpus have
+one over 64 KB (`The Number "e"`, `The 32nd Mersenne Prime`) and seven have one over
+16 KB — `Paradise Lost` is the easiest to read, since one whole book of the poem is a
+single 50,983-byte block.
+
+- [ ] **6b.1** The book **opens and reads to the end**, through the **Library**
+      (the smaller heap: 203 books resident, ~42 KB free). Before #90 this was
+      the case that rebooted.
+- [ ] **6b.2** `[stack]` and the `min` figure on `[alive]` after reading through
+      the long paragraph. **Read `mark()`'s stage trail, not `getFreeHeap()`** —
+      only `ESP.getMinFreeHeap()` sees a transient. The block builder should cost
+      ~18 KB at its peak; the number to compare is the floor **with the long
+      paragraph read** against the floor of an ordinary book.
+- [ ] **6b.3** No `abort()`, no `MCAUSE 0x2`, no boot landing on Home mid-book.
+      That failure is silent by construction, so the serial log is the evidence.
+- [ ] **6b.4** The seam is **visible and harmless**: the paragraph continues with
+      a 1.5em indent, once per ~15 pages of unbroken text. It must not look like
+      a lost line or a repeated one.
+- [ ] **6b.5** An ordinary novel is **unchanged**. 208 of the 225 corpus books
+      are byte-identical including their block count, so a difference you can see
+      on a normal book is a regression, not this change.
+- [ ] **6b.6** If the reserve ever fails, the chapter is refused with **"not
+      enough memory to read this chapter"** on `BookError.dc.html` — the existing
+      copy shape, no new one. Nothing in the corpus can produce it on the desktop.
+      **This used to say there was no way to force it, and there is: §6c.**
+
+## 6c. A big library plus a big chapter — how to force a nearly-full heap
+
+**Found the hard way on 2026-09-07: this is a `reason=4 PANIC`, three times.** It is
+not a defect in any one book — it is the heap budget, and the Library's residency is
+what spends it. Measured on an X3 opening `Digital Minimalism` (chapter 12 is 66,843
+bytes) from the Library:
+
+| `/books` entries | heap at the Library | cost of the open | left over |
+|---|--:|--:|--:|
+| 7 | ~168,300 | 63,552 | ~105 KB |
+| **232** | **96,272** | 63,552 | **13,696** |
+
+So the *same* open is comfortable on a small card and 8% from the edge on a large
+one. **This is the recipe §6b.6 said did not exist**, and it is the only way this
+project has found to drive the reading path to the edge of the heap on purpose.
+
+**Staging it — and the warning is the important half.** Copy the corpus in under a
+prefix so removal cannot touch a real book, and `dot_clean` after, or macOS's `._`
+sidecars **double** the listing at ~2.7 ms an entry:
+
+    card=/Volumes/<card>
+    find ~/.cache/encre-corpus -name '*.epub' | while read f; do \
+      cp "$f" "$card/books/zzbulk-$(basename "$f")"; done
+    dot_clean "$card/books"
+    # afterwards, and this cannot take a real book with it:
+    rm -f "$card/books/zzbulk-"*.epub
+
+**A RIG BUILT FOR ONE CHECK CONDITIONS EVERY OTHER CHECK ON THE SAME CARD.** That is
+how this was found: the bulk library was staged for §6b and manufactured a crash in an
+unrelated book open, which read as a regression in work that had nothing to do with it.
+**Bisect the rig before the firmware** — removing the bulk books is one command and no
+reflash, where a firmware bisect costs a flash cycle. Do not judge a fault found under
+this rig until it has been reproduced without it.
+
+- [ ] **6c.1** With the bulk library staged, open a book with a large chapter from
+      the **Library** (not from Home's CONTINUE — that route leaves ~34 KB more).
+      `[open]`'s `heap A -> B (cost N) min=M` is the line to read.
+- [ ] **6c.2** **It refuses rather than panicking.** `BookError.dc.html`, "not
+      enough memory to read this chapter", and the device still usable. A
+      `reason=4 PANIC` on the next `[boot]` line is the failure — and it is silent
+      by construction, so that line is the only evidence.
+- [ ] **6c.3** `[boot] reset reason=` across the whole session names no `4 PANIC`.
+      Grep it rather than trusting the screen: the reboot lands on Home and looks
+      exactly like a navigation bug, which this project has had reported as one
+      **twice**.
+- [ ] **6c.4** Remove the bulk books and repeat. The same open must now be
+      comfortable — if it is not, the fault is real and is not the rig.
+- [ ] **6c.5** *(if a coredump is wanted)* `pio ... -t coredump` needs `gdb`
+      installed and the **flashed** ELF, so pull it before rebuilding or the
+      SHA256 will not match.
+
 ## 7. Grayscale refinement
 
 - [ ] **7.1** Turn a page. Text appears in about half a second, dithered.
@@ -206,10 +295,47 @@ investigating into a cold boot that looks exactly like a bug.
 - [ ] **8.3** `[power] sleep cost save= paint1= probe= decode=` adds up to what
       you watched.
 - [ ] **8.4** A book whose cover is refused falls back to the reading card **with
-      the badge shown**, and `[cover]` names which of the five refusals it was.
+      the badge shown**, and `[cover]` names which of the six refusals it was.
       A progressive JPEG is a stated refusal.
 - [ ] **8.5** In Settings, switch `Shows` to `DETAILS` and confirm `Cover fit`
       becomes unreachable — a fit is meaningless with no cover on the glass.
+
+### The upscale cap ([#64](https://github.com/Rukkaitto/encre/issues/64))
+
+**This is the one item on this list that is being asked to settle a question the
+desktop cannot even pose.** `kMaxCoverUpscalePercent` is **250**, and that is an
+owner override of a bound two measurements put at **200** — the pipeline's own
+diffusion grain and this project's measured legibility floor both land on 2 panel
+pixels, and at k = 2.5 a source pixel becomes a run of 2 or 3. So past 200 the
+sufficiency of nearest-neighbour is **assumed, not measured**. Neither the
+simulator nor the goldens can arbitrate: they run this same arithmetic, so they
+agree with it by construction. `imagefit.h` carries the whole derivation and every
+figure, kept deliberately so this can be moved *back* with evidence.
+
+- [ ] **8.6 A cover that used to sit small now fills the panel.** Any cover
+      smaller than the glass on an axis. Before this it was drawn at 1:1 and
+      centred; it should now be full-bleed, which is what `SleepCover.dc.html`
+      draws. `[cover]` reports the source and destination rectangles.
+- [ ] **8.7 THE DECISIVE ONE — does a x2+ enlargement read as a photograph or as
+      blocks?** A small cover on the X3 (~260x346 asks x2.29). Look for countable
+      2–3px steps on curves and type, the way this file's rotation items look for
+      a smear. **If it reads as blocks, 200 is the number the measurements
+      support and it is a one-line change back** — say so on
+      [#64](https://github.com/Rukkaitto/encre/issues/64) rather than tuning it
+      quietly, because the constant is now carrying a judgement and not a
+      measurement.
+- [ ] **8.8 A cover too small to enlarge is `TooSmall`, and nothing is drawn.**
+      Past the cap the reading card comes up behind it and `[cover]` says
+      `TooSmall` — **not** `OutOfMemory`, which is the false answer it used to
+      arrive as.
+- [ ] **8.9 The `FILL` crop of an *enlarged* cover.** The crop arithmetic did not
+      change, but the raise widened the set of covers it bites on, so a title or
+      author line can now be cut on a book that used to be shown whole.
+      `Cover fit = WHOLE` is the existing escape.
+- [ ] **8.10 The one-bit cover the WAKE paints**, at these ratios. The `Msb`
+      plane is a threshold *through* an already-dithered picture, and hard
+      thresholding a photograph is what this project warns about. Pre-existing,
+      and reachable by more covers now.
 
 ## 9. The battery
 

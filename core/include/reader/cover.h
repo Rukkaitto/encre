@@ -69,13 +69,26 @@ enum class CoverResult {
   ReadFailed,     // the card, the zip, or a truncated entry
   OutOfMemory,    // a window or a buffer could not be allocated
   Abandoned,      // the stop predicate said so
+  // The picture is fine and too small to enlarge to the panel within
+  // kMaxCoverUpscalePercent (imagefit.h, which carries the derivation).
+  //
+  // A SIXTH REFUSAL RATHER THAN THE NEAREST EXISTING ONE, and the choice is this
+  // file's own rule about the five above it. `Unsupported` is "not an image we
+  // read" and this is an image we read perfectly; `OutOfMemory` is the false this
+  // refusal used to arrive as, and there is nothing wrong with the memory. Both
+  // would be a log line asserting something untrue about a book, which is the
+  // shape this project already refuses for an unread battery gauge (-1, never
+  // 0%) and for a badge promising a wake charging cannot deliver. A FALSE CLAIM
+  // IS WORSE THAN AN ABSENT ONE, and it is worse still when it is the one
+  // sentence anybody diagnosing a missing cover will read.
+  TooSmall,
 };
 
 const char* coverResultName(CoverResult r);
 
 // WHAT A DECODE SAW, for a log line and for a corpus probe.
 //
-// THE REASON IS HERE BECAUSE THE SIX RESULTS CANNOT CARRY THE WHOLE TRUTH. The
+// THE REASON IS HERE BECAUSE THE SEVEN RESULTS CANNOT CARRY THE WHOLE TRUTH. The
 // result is what a caller branches on and what tools/covers.py counts; the reason
 // is the sentence from whichever layer refused -- which of the four PNG colour
 // types, which axis of the IHDR, where the entry ran out.
@@ -116,6 +129,11 @@ struct CoverReport {
   // Zero until the source's dimensions are known. Four ints rather than a FitBox
   // so this header stays clear of imagefit.h and its <vector>, for the reason
   // reader/cover_fit.h exists.
+  //
+  // ON A `TooSmall` REFUSAL IT IS WHERE THE COVER WOULD HAVE LANDED -- the 1:1
+  // centred box, which is what fitCover answers for a cover it cannot enlarge.
+  // The reason is a fixed sentence, so this is the half of the log line that says
+  // by HOW MUCH the picture missed the panel.
   int dstX = 0, dstY = 0, dstW = 0, dstH = 0;
 };
 

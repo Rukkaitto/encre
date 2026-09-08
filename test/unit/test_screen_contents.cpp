@@ -54,6 +54,63 @@ std::vector<TocEntry> mixedDepths() {
           {6, 1, "Notes"}};
 }
 
+// SEVERAL NON-HEADER ROWS ON ONE SPINE ENTRY, which is the shape every fixture above
+// is unable to reach -- and that is why two rows said `NOW` on a real device with the
+// suite green. `sectioned()` and `mixedDepths()` DO share spine indices (`PART ONE`
+// with `One`, `Part I` with nothing), and in every one of those pairs one member is a
+// HEADER, which `!row.isHeader` already suppressed; `flat()` and `demoContents()` give
+// every row a spine of its own. So the boarded specimen, the two Contents goldens and
+// the old NOW test all agreed with a rule that marks every match.
+//
+// This is `Discourse on the Method` (Project Gutenberg, corpus
+// gutenberg/764311fc1dfedc79.epub), reduced: a FLAT NCX -- so nothing here is a header
+// at all -- whose first two entries are two FRAGMENTS of one file,
+// `...59-h-0.htm.xhtml#pgepubid00000` and `#pgepubid00001`. `toc.cpp` strips the
+// fragment and matches the file, so both resolve to spine entry 1.
+std::vector<TocEntry> sharedSpine() {
+  return {{0, 1, "Cover"},
+          {1, 1, "DISCOURSE ON THE METHOD OF RIGHTLY CONDUCTING THE REASON"},
+          {1, 1, "Contents"},
+          {2, 1, "PREFATORY NOTE BY THE AUTHOR"},
+          {3, 1, "PART I"}};
+}
+
+// The corpus's worst shape, reduced: one file carrying a dozen fragments, in a list
+// long enough to scroll. The real one is standardebooks/f822606a92670aa1.epub, whose
+// spine entry 2 is named by 378 navPoints -- 373 of them non-headers, so 373 rows
+// would have read `NOW` at once.
+std::vector<TocEntry> manyInOneFile() {
+  std::vector<TocEntry> toc{{0, 1, "Cover"}};
+  for (int i = 1; i <= 12; ++i)
+    toc.push_back({1, 1, "Section " + std::to_string(i)});
+  for (int s = 2; s <= 5; ++s)
+    toc.push_back({s, 1, "Chapter " + std::to_string(s)});
+  return toc;
+}
+
+// A HEADER WITH A FILE OF ITS OWN: `Part I` names one spine entry and its chapters
+// name others, so that entry is named by NOTHING BUT A HEADER. 108 spine entries
+// across 62 corpus books are shaped this way, so it is not hypothetical.
+std::vector<TocEntry> headerOwnFile() {
+  return {{0, 1, "Cover"}, {1, 1, "Part I"}, {2, 2, "One"}, {3, 2, "Two"}};
+}
+
+// The absolute index of the row marked `NOW`, or -1, recovered from the VIEW MODEL
+// alone -- which is what a slice-local rule would get wrong. `scrollFirst` is the
+// window's own offset, so this is the row the theme actually drew the value on.
+int markedAbsoluteIndex(const ContentsScreen& s, int* markedOut) {
+  int marked = 0;
+  int at = -1;
+  const auto& rows = s.vm().rows;
+  for (size_t i = 0; i < rows.size(); ++i)
+    if (rows[i].value == "NOW") {
+      ++marked;
+      at = s.vm().scrollFirst + static_cast<int>(i);
+    }
+  if (markedOut != nullptr) *markedOut = marked;
+  return at;
+}
+
 }  // namespace
 
 TEST_CASE("a sectioned book draws headers; a flat one draws none") {
@@ -347,13 +404,16 @@ TEST_CASE("QuietTheme renders a mixed-depth chapter list to golden") {
   //    (3 rows x 480) and 1,584 of 13,514 at X3. Pre-existing, and filed rather than
   //    fixed here, because whether the board grows a rule or the render drops one is a
   //    design decision and not #75.
-  //  - THE BAND'S OWN LABEL ELIDES TO `C ...` (X4) / `C O N T ...` (X3), because
-  //    `drawHeaderBand` gives the value its width first and this book's title is long.
-  //    No board shows it -- `Contents.dc.html`'s book is `MIDDLEMARCH` -- and the
-  //    screen's own name is the one run on the band that should never elide. Also
-  //    pre-existing, also filed, and deliberately left IN this golden: it is what a real
-  //    long title does, and a fixture trimmed to hide it would be a fixture chosen to
-  //    look tidy.
+  //  - THE BAND'S OWN LABEL ELIDED TO `C ...` (X4) / `C O N T ...` (X3), because
+  //    `drawHeaderBand` gave the value its width first and this book's title is long.
+  //    FIXED (#82), and this golden is where it was visible: the band reads
+  //    `C O N T E N T S` whole with the title cut instead, which is what
+  //    `Contents.dc.html` now declares by marking the title as the run that yields.
+  //    Every differing pixel of the re-bless is in rows 25-42, the band's one text
+  //    line, at both geometries -- 0 outside it -- so the band's 2px border, every
+  //    header, every row, the focused inverted row and the hint bar are byte-identical.
+  //    The long title stays IN this fixture deliberately: it is what a real card holds,
+  //    and a fixture trimmed to fit would be a fixture chosen to look tidy.
   ramp::Ramp ramp;
   reader::QuietTheme theme;
 
@@ -438,6 +498,107 @@ TEST_CASE("the row being read is the only one marked NOW") {
   for (const reader::ListRow& r : s.vm().rows)
     if (r.value.find("NOW") != std::string::npos) ++marked;
   CHECK(marked == 1);
+}
+
+TEST_CASE("SEVERAL ENTRIES ON ONE SPINE ENTRY STILL MARK EXACTLY ONE ROW") {
+  // Reported off an X3: on `Discourse on the Method` both `DISCOURSE ON THE METHOD OF
+  // RI...` and `Contents` read `NOW`. `NOW` is a claim about where the reader is, so
+  // two of them is a false claim -- and this project refuses that shape everywhere
+  // else (an unread gauge answers -1 and never 0%).
+  //
+  // THE CAUSE IS NOT A BUG IN toc.h. An NCX target is a file plus an optional
+  // FRAGMENT and the reader positions by spine entry only, so several entries
+  // legitimately resolve to one spine index -- 109 of the corpus's 206 books with a
+  // usable NCX (52.9%) have at least one such group, 605 groups in all. Those rows are
+  // real content and are kept; what may not be repeated is the MARKER.
+  ContentsScreen s(sharedSpine(), "Discourse on the Method", 1, 8);
+  REQUIRE(s.rowCount() == 5);
+  REQUIRE_FALSE(s.sectioned());  // flat, so no row here is a header
+  int marked = 0;
+  const int at = markedAbsoluteIndex(s, &marked);
+  CHECK(marked == 1);
+  // THE FIRST OF THE GROUP, not the last: see tocIndexForSpine's own header. Every
+  // fragment into a file resolves to that file's START, and the reader is somewhere
+  // inside the file -- so the first entry is the only one that can be proved not to
+  // be AHEAD of them.
+  CHECK(at == 1);
+  CHECK(s.vm().rows[1].value == "NOW");
+  CHECK(s.vm().rows[2].value.empty());
+}
+
+TEST_CASE("the NOW row is decided over the WHOLE list, so scrolling cannot move it") {
+  // THE TRAP: syncVm walks the VISIBLE SLICE (`s.first + i`), so a "first match"
+  // computed inside that loop is the first match ON SCREEN -- the marker would hop to
+  // whichever member of the group happened to be at the top of the window, and would
+  // appear on a row that is not the reader's once the real one scrolled away. That is
+  // strictly worse than the defect being fixed, and no single-screenful test can see
+  // it. Contents scrolls (it draws a rail), and the corpus's worst book puts 373
+  // non-header rows on one spine entry, so this is reachable on a real card.
+  const int rows = 5;
+  ContentsScreen s(manyInOneFile(), "One big file", 1, rows);
+  REQUIRE(s.rowCount() == 17);
+  REQUIRE(s.vm().scrollable);
+  const int nowAt = s.nowRow();
+  REQUIRE(nowAt == 1);
+
+  int sawVisible = 0;
+  int sawScrolledAway = 0;
+  // Once round the whole list, a row at a time. `move` wraps, so this returns.
+  for (int step = 0; step <= s.rowCount(); ++step) {
+    const bool inWindow =
+        nowAt >= s.vm().scrollFirst && nowAt < s.vm().scrollFirst + s.vm().scrollCount;
+    int marked = 0;
+    const int at = markedAbsoluteIndex(s, &marked);
+    if (inWindow) {
+      ++sawVisible;
+      CHECK(marked == 1);
+      CHECK(at == nowAt);
+    } else {
+      ++sawScrolledAway;
+      CHECK(marked == 0);  // NOT "the first one still on screen"
+    }
+    s.onEvent(kDown);
+  }
+  // The walk really did leave the window in both states -- otherwise the branch above
+  // that matters was never taken and this case would pass by not looking.
+  CHECK(sawVisible > 0);
+  CHECK(sawScrolledAway > 0);
+}
+
+TEST_CASE("a spine entry named only by a header marks nothing at all") {
+  // A header is not a row a value can sit on -- the board draws it as a tracked-caps
+  // label with no value slot -- so where `Part I` has a file of its own there is
+  // nothing to mark, and an absent claim beats a false one. 108 spine entries across
+  // 62 corpus books are shaped this way.
+  ContentsScreen s(headerOwnFile(), "Book", 1, 8);
+  REQUIRE(s.sectioned());
+  REQUIRE(s.vm().rows[1].isHeader);
+  int marked = 0;
+  markedAbsoluteIndex(s, &marked);
+  CHECK(marked == 0);
+  CHECK(s.nowRow() == -1);
+  // ...and the screen is still usable: the focus is on a row that can act.
+  CHECK(s.focus() >= 0);
+  CHECK(s.chosenSpine() >= 0);
+}
+
+TEST_CASE("the screen's NOW row is tocIndexForSpine's answer, gated on headers") {
+  // ONE FACT, ONE SPELLING. `tocIndexForSpine` is what the Reader's header band uses
+  // to name the chapter, and the two must not drift -- a screen marking one row `NOW`
+  // while the band under it names another is the two-spellings defect this project has
+  // a rule about. The screen adds exactly one thing, which `toc.h` deliberately cannot
+  // know (a depth is a nesting level, not a role): a header may not carry the value.
+  //
+  // Pinned as an equivalence over lists with NO headers, which is the same device
+  // test_focus.cpp uses to hold `Focus`'s gated walk to its ungated arithmetic.
+  for (const std::vector<TocEntry>& toc : {flat(), sharedSpine(), manyInOneFile()}) {
+    ContentsScreen probe(toc, "Book", 0, 8);
+    REQUIRE_FALSE(probe.sectioned());  // no headers, so the gate cannot bite
+    for (int spine = -1; spine <= 8; ++spine) {
+      ContentsScreen s(toc, "Book", spine, 8);
+      CHECK(s.nowRow() == reader::tocIndexForSpine(toc, spine));
+    }
+  }
 }
 
 // --- The menu ----------------------------------------------------------------

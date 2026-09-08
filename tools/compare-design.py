@@ -163,6 +163,7 @@ FLOW_SCREENS = [
     ("book_details",    "BookDetails.dc.html",    "Book details"),
     ("book_error",      "BookError.dc.html",      "Book error"),
     ("book_error_unreadable", "BookErrorUnreadable.dc.html", "Book error (unreadable)"),
+    ("book_error_memory", "BookErrorMemory.dc.html", "Book error (out of memory)"),
     ("typography",      "Typography.dc.html",     "Typography"),
     ("contents",        "Contents.dc.html",       "Contents"),
     # Peek and return (3D). `peek` is the overlay -- book text over the veiled page
@@ -450,6 +451,15 @@ def main():
                          "comparing mid-implementation is unaffected; CI passes it, "
                          "because otherwise a crashed subcommand reads as "
                          "'not implemented' and the run exits 0.")
+    ap.add_argument("--require-canvas-current", action="store_true",
+                    help="exit non-zero if design/ereader-v1-ui.html -- the published "
+                         "design canvas, which is a GENERATED file -- is not what the "
+                         "boards say it should be. Off by default so a human comparing "
+                         "mid-board-edit is unaffected, exactly as --require-implemented "
+                         "is; CI passes it. Delegates to `make canvas-check`'s generator "
+                         "rather than reimplementing the comparison, and is independent "
+                         "of --only, because whether a board reached the canvas is not a "
+                         "fact about the screens this run happens to have selected.")
     ap.add_argument("--export", metavar="DIR",
                     help="also write every render as a bare panel-size PNG into DIR, "
                          "named <screen>_<x4|x3>_<design|firmware>.png. No labels, "
@@ -547,6 +557,54 @@ def main():
             "the row from compare-design.py:\n%s"
             % (len(absent),
                "\n".join(f"  {sid}: design/{board}" for sid, board in absent)))
+    # THE PUBLISHED CANVAS IS A GENERATED FILE AND NOTHING CHECKED IT. Every board
+    # here is reviewed on design/ereader-v1-ui.html, which is seeded from these same
+    # boards -- so a board that never reached it is a review surface covering less
+    # than it appears to, which is this tool's own recurring defect one file over.
+    # It was six boards behind when #60 was filed, five of them CARRIED but with no
+    # artboard entry, so they were loaded and never shown. Nothing said so, because
+    # the canvas is one 526 KB line: every commit touching it is an identical
+    # "1 insertion, 1 deletion" in a diffstat.
+    #
+    # OFF BY DEFAULT, AND CI PASSES IT -- --require-implemented's bargain exactly,
+    # for its reason: a developer comparing a board mid-edit must not be blocked by
+    # a 3 MB reseed, and a red X in front of the one person who can still fix it is
+    # what the check is for. Checked up front, before two minutes of rendering.
+    #
+    # DELEGATED, NOT REIMPLEMENTED. seed-canvas.mjs already answers this by
+    # rebuilding the page and comparing bytes, which is stricter than any file-set
+    # comparison written here could be -- and a second implementation of "is the
+    # canvas current" is a second thing to keep in step. A missing `node` is an
+    # ERROR rather than a pass, exactly as --require-implemented errors when there
+    # is no simulator: the alternative is the quiet green this flag exists to close.
+    if args.require_canvas_current:
+        seed = ROOT / "tools" / "design-canvas" / "seed-canvas.mjs"
+        if not seed.exists():
+            raise SystemExit(
+                f"--require-canvas-current, but there is no generator at {seed}. "
+                "That is issue #60 recurring -- the canvas cannot be checked or "
+                "reseeded without it.")
+        try:
+            proc = subprocess.run(
+                ["node", str(seed),
+                 "--template", str(ROOT / "tools" / "design-canvas" / "payload.template.html"),
+                 "--out", str(ROOT / "design" / "ereader-v1-ui.html"),
+                 "--title", "Encre UI",
+                 "--canvas", str(ROOT / "design" / "canvas.json"),
+                 "--boards-dir", str(ROOT / "design"),
+                 "--check"],
+                capture_output=True, text=True)
+        except FileNotFoundError:
+            raise SystemExit(
+                "--require-canvas-current needs `node` on PATH to run the canvas "
+                "generator, and it is not there. Install node, or drop the flag "
+                "(the canvas then goes unchecked, which is what #60 was).")
+        if proc.returncode != 0:
+            raise SystemExit(
+                "the published design canvas is not current:\n"
+                + (proc.stderr or proc.stdout).rstrip())
+        print(proc.stdout.rstrip())
+
     if CHROME is None or not pathlib.Path(CHROME).exists():
         raise SystemExit(
             "Chrome not found%s. Set $CHROME to the binary, or install it at one of:\n%s"

@@ -175,11 +175,20 @@ jobs:
       # Without --require-implemented this job would be green-always: a crashed
       # subcommand makes the sheet print "not implemented" and the run exit 0,
       # which is the shape this repo has been bitten by three times.
+      # --require-canvas-current is the same bargain one file over:
+      # design/ereader-v1-ui.html is the published review surface and is a GENERATED
+      # file, so a board that never reached it is a canvas covering less than it
+      # appears to. It went six boards stale exactly that way and nothing said so --
+      # the doc is one 526 KB line, so every commit touching it is an identical
+      # "1 insertion, 1 deletion" in a diffstat. Off by default (a human comparing
+      # mid-board-edit must not owe a 3 MB reseed), passed here. It needs `node`,
+      # which ubuntu-latest has, and a missing node is an error rather than a pass.
+      # `make canvas` is the fix, and the failure message says so.
       - name: Compare
         env:
           CHROME: ${{ steps.chrome.outputs.chrome-path }}
           CHROME_FLAGS: --no-sandbox
-        run: make compare COMPARE_ARGS="--require-implemented"
+        run: make compare COMPARE_ARGS="--require-implemented --require-canvas-current"
 
       # Uploaded pass or fail: when it is red the sheet is the evidence, and when
       # it is green it is the only rendered look at all 30-odd boards beside their

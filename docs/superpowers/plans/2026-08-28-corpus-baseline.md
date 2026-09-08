@@ -85,6 +85,20 @@ publisher output.
 `The Number "e"` and `The 32nd Mersenne Prime` — where one paragraph is a hundred
 thousand digits.
 
+**AND THAT ROW COUNTED THE WRONG THING TWICE — THE SECOND TIME BEING #90.** This
+document went on to record the first (`truncated` counts chapters, not bytes, so the
+loss was 84–92% of two whole books). The second is that **64 KB was never the limit on
+this device**: the block is a `std::string` grown by `push_back`, so a cap of N costs
+~2.5N in flight, and the measured reading floor is **42,152 bytes** — the real ceiling
+was a paragraph of about 10 KB, and **7 of these 225 books have one above it**, not 2.
+The cap named none of them, so the corpus could not see them either: a probe on the
+desktop has gigabytes and reports `Ok`. **The corpus is the right instrument for what a
+book CONTAINS and the wrong one for what the device can HOLD** — that number has to be
+derived against a device floor, which is what #90 did (`kMaxBlockBytes` is 8 KB now,
+and the growth is a reserve). `corpus_probe` reports `maxBlock` and `splits` for
+exactly this reason: the block-size distribution is the input that decision needed and
+this baseline did not collect it.
+
 **It is the entity bug's exact shape**: an error that reports nothing, because
 `next()` returning false is also how a chapter ends. It was not in the audit because
 the audit was read off the refusal sites, and this one is a truncation site. That is
@@ -135,7 +149,11 @@ statement is "no evidence yet", not "does not happen".**
    the two were losing **84–92% of the whole book**, not a trailing paragraph:
    `The 32nd Mersenne Prime` 19,411 → **251,869** text bytes, `The Number "e"`
    19,494 → **121,991**. Chapter rate 99.97% → **100.00%**, +334,955 bytes, with
-   **223 of 225 byte-identical in every field**.
+   **223 of 225 byte-identical in every field**. **The cap itself was then re-derived
+   as #90** — 64 KB was above what the heap can serve, so it protected nothing — and is
+   8 KB: 190 cuts across 17 books, **208 of 225 byte-identical including the block
+   count**, text 126,614,534 → 126,614,498 (36 bytes, all of them the single space a
+   cut lands on).
 3. **Nothing else, until a book demands it.** Grow the corpus toward the population
    that complains — Kobo files, Kindle conversions, publisher output — before spending
    a round on the ten unproven rows.

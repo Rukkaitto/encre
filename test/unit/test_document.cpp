@@ -664,3 +664,177 @@ TEST_CASE("emphasis open across a split closes at the seam and reopens") {
   // ...and the emphasised bytes are the run, whole, across the seam.
   CHECK(got[0].text.substr(3) + got[1].text == run);
 }
+
+// --- WHAT THE CAP COSTS IN HEAP (issue #90) ----------------------------------
+//
+// `kMaxBlockBytes` bounds one block's `std::string`, and that string is the largest
+// contiguous allocation this layer makes -- so the cap is a HEAP number, and it was
+// set to one the heap could not honour: 64 KB against a measured reading floor of
+// 42,152 bytes, with `push_back`'s geometric growth turning the 64 KB into a 122,880-
+// byte capacity and a 184,320-byte peak. Seven of the 225-book corpus had a block big
+// enough to abort on device, and under -fno-exceptions an abort is a reboot onto Home
+// with no diagnostic.
+//
+// These are the two halves of the fix: the cap is derived (document.h has the three
+// bounds), and the growth is a RESERVE so the peak is two buffers rather than 2.5x
+// whatever the standard library's growth factor happens to be.
+namespace {
+
+// The measured minimum free heap with a book open through the Library, 203 books
+// resident -- CLAUDE.md's binding floor and the number the cap is derived against.
+// Here rather than in core/ because it is a fact about a device, not about this
+// layer: nothing in the firmware may branch on it.
+constexpr size_t kReadingFloorBytes = 42152;
+
+// What the block can add between the first cut and the next text node, when the swap
+// in take() has handed it the caller's short buffer back: the remainder of ONE text
+// node, so at most `Xml::kTextBytes`, whose capacity rounds up to 1,920 on the
+// libstdc++ the ESP32 toolchain ships.
+constexpr size_t kSeamTransientBytes = 1920;
+
+}  // namespace
+
+TEST_CASE("the block's buffer is RESERVED, not grown") {
+  // THE ASSERTION IS ON `capacity()`, WHICH IS THE WHOLE POINT. A cap of N does not
+  // cost N: growing to 8,194 bytes one push_back at a time ends at a capacity of
+  // 12,287 under libc++ and 15,360 under libstdc++, and the reallocation that gets
+  // there holds the old buffer at the same time. Reserved, the capacity is the cap and
+  // nothing more, on both -- which is what makes the heap argument in document.h
+  // independent of a standard library this project does not ship.
+  const Walked w =
+      walkBlocks("<body><p>" + digits(reader::kMaxBlockBytes + 5000) + "</p></body>");
+  REQUIRE(w.texts.size() == 2);
+
+  reader::Block b;
+  Grained src("<body><p>" + digits(reader::kMaxBlockBytes + 5000) + "</p></body>", 4096);
+  reader::BlockReader r(src);
+  REQUIRE(r.next(b));
+  CHECK(b.text.size() == reader::kMaxBlockBytes);
+  INFO("emitted capacity " << b.text.capacity() << " for a cap of "
+                           << reader::kMaxBlockBytes);
+  CHECK(b.text.capacity() >= reader::kMaxBlockBytes + 2);
+  // +64 is allocator rounding, not slack: libstdc++ reserves exactly 8,194 and libc++
+  // rounds to its 16-byte granularity (8,199). Anything a doubling ladder produces is
+  // thousands of bytes above this, which is what makes the bound bite.
+  CHECK(b.text.capacity() <= reader::kMaxBlockBytes + 64);
+}
+
+TEST_CASE("the block-building peak is what the reading floor can serve") {
+  // TWO BUFFERS AND ONE TRANSIENT, and no term in it comes from the book -- which is
+  // the property the old cap did not have: there, the peak was 2.5x a capacity that
+  // was itself twice whatever paragraph the book happened to write, so a 232,388-byte
+  // block (`The 32nd Mersenne Prime`, and it is real) asked for 614,400 bytes.
+  const size_t steady = 2 * (reader::kMaxBlockBytes + 2);
+  const size_t peak = steady + kSeamTransientBytes;
+  INFO("steady " << steady << " B, peak " << peak << " B, floor " << kReadingFloorBytes
+                 << " B (" << (100 * peak / kReadingFloorBytes) << "%)");
+  // UNDER HALF THE FLOOR, and the fraction is the assertion rather than the bytes:
+  // "the largest free BLOCK decides, not the free total", so a peak that is most of a
+  // fragmented heap is not a bound. At 16 KB the cap would be 82% of it; at 64 KB it
+  // was 316%.
+  CHECK(peak < kReadingFloorBytes / 2);
+  // ...and one request is a fifth of the floor, which is the number fragmentation
+  // actually decides.
+  CHECK(reader::kMaxBlockBytes + 2 < kReadingFloorBytes / 4);
+}
+
+TEST_CASE("a cut drops the space it lands on and never anything else") {
+  // MEASURED OVER THE CORPUS AND THEN PINNED HERE. Lowering the cap took the corpus
+  // from 4 cuts to 190 and its text from 126,614,534 bytes to 126,614,498 -- 36 bytes,
+  // all of them a single space at a seam, because take() trims a trailing space before
+  // it hands the piece over. That is right (the pieces render as two paragraphs, so
+  // the paragraph break IS the word boundary) and it must stay the ONLY thing a cut
+  // can lose, which is what nothing asserted while there were four of them.
+  //
+  // THE FIXTURE PUTS THE SPACE ON THE CAP DELIBERATELY: `kMaxBlockBytes - 1` digits
+  // fill the block to one byte short, the space takes it to exactly the cap, and the
+  // next byte is what fires the cut. A run of digits -- which is every other case in
+  // this file -- cannot reach this line at all.
+  const std::string run = digits(reader::kMaxBlockBytes - 1) + " tail";
+  const Walked w = walkBlocks("<body><p>" + run + "</p></body>");
+  CHECK(w.ok);
+  REQUIRE(w.texts.size() == 2);
+  CHECK(w.split == 1);
+
+  CHECK(w.texts[0] == digits(reader::kMaxBlockBytes - 1));
+  CHECK(w.texts[1] == "tail");
+
+  // ONE SPACE, AND NOT ONE BYTE MORE. Both halves matter: the count says the loss is
+  // bounded by the cuts, and the space-stripped comparison says every byte that is not
+  // a space survived -- which is what a truncation would fail.
+  std::string joined;
+  for (const std::string& t : w.texts) joined += t;
+  CHECK(run.size() - joined.size() == w.split);
+  const auto strip = [](std::string s) {
+    std::string o;
+    for (const char c : s)
+      if (c != ' ') o += c;
+    return o;
+  };
+  CHECK(strip(joined) == strip(run));
+}
+
+TEST_CASE("ChapterReader reports the cuts its BlockReader made") {
+  // The pass-through, in `held()`'s and `bytesRead()`'s sense: an observation point,
+  // and the layer every caller actually holds. `BlockReader::blocksSplit()` has been
+  // there since #37 with no route to it from outside document.h, so a cut was
+  // observable only by a test that built a BlockReader by hand.
+  reader::ChapterReader cr;
+  REQUIRE(cr.beginBuffer("<body><p>One</p><p>Two</p></body>"));
+  reader::Block b;
+  while (cr.next(b)) {
+  }
+  CHECK(cr.blocksSplit() == 0);
+
+  REQUIRE(cr.beginBuffer("<body><p>" + digits(2 * reader::kMaxBlockBytes + 5000) +
+                         "</p></body>"));
+  while (cr.next(b)) {
+  }
+  CHECK(cr.ok());
+  CHECK(cr.blocksSplit() == 2);
+
+  // AND IT IS ZERO WITH NO STREAM, rather than reaching through a null BlockReader --
+  // release() is reached on the peek's path with the screen still able to ask.
+  cr.release();
+  CHECK(cr.blocksSplit() == 0);
+}
+
+TEST_CASE("the swap hands the previous block back, so it has to be cleared") {
+  // `take()` SWAPS rather than moves, so the reserved buffer comes back -- and what
+  // comes back with it is the block the caller was handed LAST time, whose text and
+  // emphasis are still in it. Both are cleared; this is what says so.
+  //
+  // TWO THINGS THE FIXTURE HAD TO GET RIGHT, and the mutation found both.
+  //
+  // THREE BLOCKS, WITH THE EMPHASIS ON THE FIRST. Stale spans arrive one block LATE:
+  // block 0's go out with block 0, come back to the reader when block 1 is taken, and
+  // can only be emitted on block 2. Every other fixture in this file has two blocks and
+  // cannot reach the line at all.
+  //
+  // AND THE WALKER MUST KEEP ITS Block, WHICH `buildDocument` DOES NOT. It does
+  // `push_back(std::move(b))`, so `b` comes back empty every time and the swap hands
+  // the reader nothing to carry -- the first version of this test used it and passed
+  // against the mutation. `ReaderScreen` holds one `Block b` and hands it to
+  // `PageBuilder::add` by reference, so COPYING out of it is the device's own shape.
+  const std::string doc =
+      "<body><p>a<em>b</em></p><p>plain two</p><p>plain three</p></body>";
+  Grained src(doc, 64);
+  reader::BlockReader r(src);
+  reader::Block b;
+  std::vector<reader::Block> got;
+  while (r.next(b)) got.push_back(b);  // a COPY, so `b` keeps what it was handed
+  CHECK(r.ok());
+  REQUIRE(got.size() == 3);
+
+  CHECK(got[0].emphasis.size() == 1);
+  CHECK(got[1].emphasis.empty());
+  // The one that bites: with the clear removed this carries block 0's span, whose
+  // offsets index a string it does not belong to -- and that is how a run comes out
+  // italic in a paragraph nobody emphasised.
+  CHECK(got[2].emphasis.empty());
+
+  // ...and the same for the text, which is the half every fixture here already covers:
+  // a block that kept the previous one's bytes is prefixed by them.
+  CHECK(got[1].text == "plain two");
+  CHECK(got[2].text == "plain three");
+}

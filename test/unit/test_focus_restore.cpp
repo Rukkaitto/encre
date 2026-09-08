@@ -250,3 +250,47 @@ TEST_CASE("restoring the focus a screen is already on is a no-op, not a failure"
     CHECK(s->get().focus() == where);
   }
 }
+
+TEST_CASE("every screen that reports a place accepts that place back") {
+  // THE FOCUS ROUND TRIP'S SECOND HALF (#14). A focus is an index into a list,
+  // and the Library can be listing a SUBFOLDER of /books -- so the record stores
+  // WHICH list beside the index into it, and the pair has the same obligation the
+  // focus pair does: a screen that reports a place and cannot accept one back
+  // hands the wake a row with nothing to index.
+  //
+  // WHY THIS WALKS THE CATALOGUE RATHER THAN ASKING THE LIBRARY. Screen::focus/
+  // setFocus shipped one-way on three screens, each behind a comment arguing its
+  // own case was the exception, and FocusScreen's final pair is what made that
+  // unwritable. There is no equivalent here on purpose -- one screen has a place,
+  // and a shared base for one caller is a header edge bought for nothing -- so
+  // this walk plus App::restore's refusal to apply a focus whose place was
+  // refused are what stand in for it. The second screen to want a place is the
+  // extraction point.
+  //
+  // COUNTED, so the loop cannot quietly end up testing nothing: ONE screen has a
+  // place today, the Library, whose place is the directory it is listing.
+  int placed = 0;
+  for (const ScreenId id : kAllScreens) {
+    CAPTURE(std::string(screenName(id)));
+    auto s = build(id);
+    REQUIRE(s->screen != nullptr);
+    const std::string where(s->get().place());
+    if (where.empty()) {
+      // A SCREEN WITH NO PLACE REFUSES EVERY PLACE, and that default is what
+      // makes the whole mechanism degrade rather than mislead: a record naming a
+      // place for a screen that has none is a record from a build whose lists are
+      // not this build's, and App::restore drops the row rather than applying it.
+      CHECK_FALSE(s->get().setPlace("/books/Classics"));
+      continue;
+    }
+    ++placed;
+
+    // A SECOND instance, as a wake gets: the shell builds the screen from scratch
+    // and then restores. Asking the one that is already there would prove nothing.
+    auto restored = build(id);
+    REQUIRE(restored->screen != nullptr);
+    CHECK(restored->get().setPlace(where));
+    CHECK(restored->get().place() == where);
+  }
+  CHECK(placed == 1);
+}

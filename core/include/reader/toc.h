@@ -108,11 +108,43 @@ bool loadToc(FileSystem& fs, std::string_view bookPath, std::vector<TocEntry>& o
              const char** reason, std::vector<std::string>* italicClassesOut = nullptr);
 
 // The entry naming `spine`, or -1. What the Reader needs to put a chapter's NAME in
-// its footer, and what Contents needs to mark the row the reader is on.
+// its header band, and what Contents needs to mark the row the reader is on -- ONE
+// answer for one question, because two screens naming the reader's chapter differently
+// is two spellings of one fact.
 //
-// The LAST match, not the first: where several entries share a spine index (a file
-// with fragments), the later ones are further into it, so the last is the closest
-// thing to "where you are" that a spine-granular position can name.
+// --- THE FIRST MATCH, AND IT WAS THE LAST FOR TWO PHASES -----------------------
+//
+// A GROUP IS THE MAJORITY CASE, not an edge one. An NCX target is a file plus an
+// optional FRAGMENT (`ch3.xhtml#part2`) and the reader positions by spine entry only,
+// so several entries legitimately name one spine index. Measured over
+// ~/.cache/encre-corpus: of the 206 books with a usable NCX, 109 (52.9%) have at least
+// one spine entry named twice or more -- 605 such groups -- and the worst is
+// standardebooks/f822606a92670aa1.epub, whose spine entry 2 is named by 378 navPoints.
+//
+// The rule was "the last match, because the later ones are further into the file, so
+// the last is the closest thing to where you are". The premise is true; the conclusion
+// needs the reader to be at the END of the file, which is not where they are. The
+// fragment is STRIPPED before the match (see the resolver above), so every entry in a
+// group resolves to that file's START and nothing on this path knows any offset within
+// it -- the first entry is the only member that can be PROVED not to be ahead of the
+// reader, since the reader is somewhere inside the file. Naming a landmark they have
+// not reached is the error that misleads: `reading_position.h` grades the same trade
+// the same way, degrading backwards ("the top of the right paragraph beats the front of
+// the book, which beats nothing").
+//
+// It is also right at the one moment either rule can be checked. The Reader recomputes
+// its label when a chapter OPENS and not as pages turn, and a chapter is entered at
+// its first page by a jump and by a forward crossing -- where the first entry is
+// exactly right and the last is exactly wrong.
+//
+// WHAT IT COSTS: a reader deep inside a 378-fragment file is named by that file's first
+// fragment, which is stale rather than false. Closing that needs a fragment-to-block
+// map, and `document.h` drops ids -- so it is not a tuning question.
+//
+// A CALLER WITH A DRAWING RULE OF ITS OWN LAYERS IT ON TOP: Contents will not put the
+// marker on a section HEADER, because the board gives a header no value slot. That gate
+// cannot live here -- a depth is a nesting level and not a role -- and it is pinned to
+// this function by an equivalence in test_screen_contents.cpp.
 int tocIndexForSpine(const std::vector<TocEntry>& toc, int spine);
 
 }  // namespace reader

@@ -2,7 +2,14 @@
 
 #include "reader/css.h"
 
+// `<memory>` for the nothrow probe's unique_ptr and `<utility>` for the swap in
+// take(). SPELLED OUT because a transitively-satisfied include is a bug only the other
+// toolchain can see: this project's first Linux CI run died on a `std::memcmp` with no
+// `<cstring>`, which libc++ pulls in and libstdc++ does not, after the file had
+// compiled on macOS for months.
+#include <memory>
 #include <new>
+#include <utility>
 
 #include "reader/xml.h"
 
@@ -304,6 +311,68 @@ bool BlockReader::next(Block& out) {
     return true;
   };
 
+  // THE BLOCK'S BUFFER IS RESERVED, NOT GROWN -- issue #90, and it is what makes
+  // `kMaxBlockBytes` a bound the heap can honour rather than an argument about the
+  // growth factor of a standard library this project does not ship.
+  //
+  // `push_back` grows GEOMETRICALLY, so a cap of N costs far more than N in flight:
+  // libstdc++'s ladder is 15*2^k, so the block's last reallocation holds the old
+  // buffer and a new one of twice the size at once, and the peak is ~2.5x the final
+  // capacity. document.h has the table; the short version is that seven of the
+  // corpus's 225 books could not be read on this device and none of them was near the
+  // cap. Reserved once and never grown, the peak is exactly two buffers -- the piece
+  // handed to the caller and the one being built.
+  //
+  // NOTHROW-PROBED, BECAUSE `reserve` CANNOT BE. There is no std::nothrow spelling of
+  // std::string::reserve, and under -fno-exceptions a request the heap cannot serve is
+  // `abort()` with no diagnostic. So the probe asks the heap the same question first
+  // and the reserve that follows takes the block it just released -- imagefit.cpp's
+  // shape, and legal here for its reason: this is the single-threaded loop task, and
+  // the request is the same size, issued immediately.
+  //
+  // THE REFUSAL NEEDS NO NEW WORDS. It is the message BlockReader's own State
+  // allocation already answers with, so there is no new BookErrorReason and no new
+  // copy shape on BookError.dc.html: "this chapter needs more memory than this device
+  // has" is one fact however it is discovered.
+  //
+  // AND THE RESERVE IS EXACT, which needs an argument because libstdc++'s `_M_create`
+  // rounds a request up to twice the OLD capacity: reserving the cap on a buffer
+  // already half the cap would give twice the cap. It cannot happen here, and the
+  // reason is worth writing down rather than re-deriving. The reserve only ever fires
+  // on a buffer this function has not seen, and there are two of those: the caller's
+  // Block on the first block of a walk (its own internal buffer, 15 bytes on
+  // libstdc++), and the buffer handed back by the swap in take() after the FIRST cut,
+  // which likewise came from the caller. Between that cut and the next text node the
+  // block can only take the remainder of one text node, so it is at most
+  // `Xml::kTextBytes` and its capacity at most 1,920 -- a quarter of the cap, so the
+  // request is more than twice it and lands exactly.
+  //
+  // THAT 1,920 IS ALSO THE ONLY TERM ABOVE TWO BUFFERS, so the real peak is
+  // 2 * (kMaxBlockBytes + 2) + 1,920 = 18,308 bytes, reached at the one moment after
+  // the first cut when the piece just handed over, the short buffer and its
+  // replacement are all live. It could be removed by reserving at the cut site
+  // instead, which needs `next()` to hand the piece back while carrying an error, and
+  // 1,920 bytes is not worth that control flow.
+  //
+  // NOT A FRESH STRING SWAPPED IN, WHICH IS HOW THIS WAS WRITTEN FIRST AND IT LOST TEXT.
+  // `roomFor` runs once per text NODE, and a block spans many, so `st.cur.text` is
+  // routinely non-empty here -- swapping a fresh buffer in threw away everything
+  // accumulated since the last reserve. Two of #37's own tests caught it, one of them
+  // as a hole in the middle of a rejoined digit run. `reserve` copies the content
+  // across by definition, which is the whole reason to use it.
+  const auto roomFor = [&]() -> bool {
+    if (st.cur.text.capacity() >= kMaxBlockBytes + 2) return true;
+    {
+      std::unique_ptr<char[]> probe(new (std::nothrow) char[kMaxBlockBytes + 2]);
+      if (probe == nullptr) {
+        error_ = "not enough memory to read this chapter";
+        return false;
+      }
+    }
+    st.cur.text.reserve(kMaxBlockBytes + 2);
+    return true;
+  };
+
   // Moves the block being built into `out`, if it has anything in it. An empty
   // block is DROPPED, not emitted blank: `<p></p>` between chapters is a
   // generator's artifact and a blank block would take a line of the page.
@@ -330,12 +399,40 @@ bool BlockReader::next(Block& out) {
           error_ = "too many blocks";
           return false;
         }
-        out = std::move(st.cur);
+        // SWAPPED, NOT MOVED, so the reserved buffer COMES BACK. A move hands the
+        // buffer to the caller and leaves `st.cur` on its small internal one, so the
+        // next block would have to reserve again -- once per paragraph, 537,474 times
+        // over the corpus. A caller that reuses one Block (which is every caller in
+        // this repo: `Block b; while (cr.next(b))`) therefore reserves ONCE per
+        // reader, and one that moves out of `out` gets a fresh reserve per block,
+        // which is still fewer allocations than the nine-step ladder this replaces.
+        //
+        // WHAT THE CALLER GIVES UP: `out`'s previous value is handed to the reader
+        // rather than destroyed, and is cleared below. Nothing can be holding a view
+        // into it -- `LaidLine::text` is OWNED precisely so a Page can outlive the
+        // blocks it was laid from -- and the caller has by definition already consumed
+        // it, because it is what the previous next() returned. This is also what
+        // restart()'s "reusing the buffers" has claimed since it was written.
+        std::swap(out, st.cur);
         ++emitted_;
         have = true;
       }
     }
-    st.cur = Block{};
+    // NOT `st.cur = Block{}`, which would throw the buffer away again. Every field
+    // Block's default constructor sets, set by hand, so a field added to Block has to
+    // be considered here -- the price of keeping the capacity.
+    //
+    // AND THE `kind` RESET IS DEAD TODAY, which is written down rather than left for
+    // someone to discover: commenting it out fails NOTHING, because `st.open` is set
+    // only by `beginBlock`, `take` emits only when `st.open`, and `beginBlock` re-reads
+    // the kind off the stack -- so no block can be emitted with a kind this line would
+    // have corrected. It stays because the reset has to be COMPLETE: the two lines
+    // below it are load-bearing (see the emphasis one, which needed a three-block
+    // fixture to catch at all), and a partial reset is what invites the next field
+    // added to Block to be forgotten.
+    st.cur.kind = BlockKind::Paragraph;
+    st.cur.text.clear();
+    st.cur.emphasis.clear();
     st.open = false;
     return true;
   };
@@ -482,6 +579,13 @@ bool BlockReader::next(Block& out) {
     // A bare text node with no block around it is still the book's words, so it
     // opens one rather than being lost.
     if (!st.open) beginBlock();
+    // ONE SITE, AND IT IS ENOUGH BECAUSE IT IS THE ONLY PLACE TEXT CAN START. The
+    // push_back below is one of two writers; the other is `appendSpace`, which refuses
+    // an empty string, so a space can only ever follow a text node that came through
+    // here -- and `glueDialogueDash`'s extra byte in take() likewise needs text to
+    // already be there. Per text NODE rather than per character: a capacity comparison
+    // and an early return, and a node is at most Xml::kTextBytes.
+    if (!roomFor()) return false;
     // WHETHER A CUT PUT A FINISHED BLOCK IN `out`. The return is deferred to the end
     // of the text node so the bytes AFTER the cut land in the continuation instead of
     // being dropped -- returning from inside the loop would lose the rest of the node,
@@ -512,10 +616,16 @@ bool BlockReader::next(Block& out) {
       //
       // WHAT IT COSTS, stated rather than discovered: `indentedAfter(Paragraph,
       // Paragraph)` is true, so a continuation gets the 1.5em paragraph indent and a
-      // split blockquote or heading gets a blank row above its second half. That is one
-      // spurious paragraph break per 64 KB of unbroken text -- about once per 120 pages
-      // -- against text that is simply absent. RAISING THE CAP IS NOT THE FIX: the
-      // failure mode was the bug and the number is fine, which is #35's finding twice.
+      // split blockquote or heading gets a blank row above its second half. At the cap
+      // #90 derived that is one spurious paragraph break per 8 KB of unbroken text --
+      // once per ~15 pages of it, against #37's once per ~121 at 64 KB -- and 190 cuts
+      // across 17 of the corpus's 225 books, against 4 cuts in 2. On the other 208 the
+      // rate is zero: they write no paragraph that long.
+      //
+      // RAISING THE CAP IS STILL NOT THE FIX -- "the failure mode was the bug and the
+      // number is fine" was #35's finding twice, and #90 is the case where the NUMBER
+      // was also wrong, in the other direction. It was above what the heap can serve,
+      // so it protected nothing: see document.h.
       if (st.cur.text.size() >= kMaxBlockBytes) {
         bool have = false;
         if (!take(have)) return false;

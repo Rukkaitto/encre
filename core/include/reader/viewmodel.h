@@ -238,6 +238,20 @@ struct BookErrorViewModel {
   std::string message;  // the paragraph, with the file's name in it
   std::string okLabel;
   std::string deleteLabel;
+  // WHETHER THE SECOND SLAB IS DRAWN AT ALL. False on the OutOfMemory shape alone
+  // (design/BookErrorMemory.dc.html): that file is fine and the device was
+  // momentarily short, so offering to delete a good book is a nudge in the wrong
+  // direction. HomeEmpty's cut action slab is the precedent -- `a primary action
+  // that cannot work is worse than none` -- and the slab is ABSENT rather than
+  // inert, because a slab that draws and does nothing is the `works only sometimes`
+  // trap.
+  //
+  // AN EXPLICIT FLAG, NOT `deleteLabel.empty()`. `ListRow::discloses` is the
+  // recorded precedent for exactly this: deriving it from an empty value drew a
+  // chevron on a row that acted in place, and a slab is a bigger claim than a
+  // chevron. The label IS cleared with it -- there is nothing left to draw -- but
+  // the flag is the authority and the emptiness is the consequence.
+  bool offersDelete = true;
   // 0 = OK, 1 = delete, in the board's own top-to-bottom order. Spelled exactly as
   // DeleteConfirmViewModel::focusedAction because it is the same fact, and one rule
   // should have one spelling.

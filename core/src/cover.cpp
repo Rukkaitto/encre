@@ -117,6 +117,18 @@ class PlaneAdapter : public ImageRowSink {
     width_ = width;
     height_ = height;
 
+    // THE GEOMETRY BEFORE THE FITTER, BECAUSE ONE `false` CANNOT CARRY TWO
+    // ANSWERS. CoverFitter::begin refuses a cover too small to enlarge with the
+    // same false it uses for a block it could not take, and reporting the first
+    // as OutOfMemory is a log line that blames the device for a small picture.
+    // fitCover is pure arithmetic on two pairs of integers, so asking it here
+    // costs nothing and cannot disagree with the box begin() derives from the
+    // same four arguments a line below.
+    planned_ = fitCover(width, height, panelW_, panelH_, fit_);
+    if (planned_.tooSmall) {
+      tooSmall_ = true;
+      return false;
+    }
     // THE FITTER FIRST, THE SINK SECOND, and the order is deliberate: the fitter
     // is the allocation that can fail on device, and a sink that opens a file
     // should not have been asked to do it for a cover that was never going to be
@@ -143,7 +155,7 @@ class PlaneAdapter : public ImageRowSink {
       sinkRefused_ = true;
       return false;
     }
-    return pushPaper(fitter_.box().dstY);
+    return pushPaper(planned_.dstY);
   }
 
   bool row(const uint8_t* px) override {
@@ -152,8 +164,7 @@ class PlaneAdapter : public ImageRowSink {
       return false;
     }
     ++srcRows_;
-    bool emitted = false;
-    if (!fitter_.addRow(px, emitted)) {
+    if (!fitter_.addRow(px)) {
       // UNREACHABLE while a decoder pushes exactly the height it declared, which
       // both of ours do -- pngd's loop runs `height` times and jpegd refuses a
       // band count that disagrees with its own. Kept because what it guards is a
@@ -162,12 +173,17 @@ class PlaneAdapter : public ImageRowSink {
       fitFailed_ = true;
       return false;
     }
-    if (!emitted) return true;
-    if (!out_->row(fitter_.msbRow(), fitter_.lsbRow())) {
-      sinkRefused_ = true;
-      return false;
+    // DRAINED, NOT TESTED ONCE. One source row completes several destination rows
+    // when the cover is being enlarged (imagefit.h), and this is the whole of
+    // what that costs the adapter -- a `while` where the old interface's
+    // `if (emitted)` stood.
+    while (fitter_.nextRow()) {
+      if (!out_->row(fitter_.msbRow(), fitter_.lsbRow())) {
+        sinkRefused_ = true;
+        return false;
+      }
+      ++written_;
     }
-    ++written_;
     return true;
   }
 
@@ -180,9 +196,16 @@ class PlaneAdapter : public ImageRowSink {
   // own dimensions come from JpegDecoder, which is the only layer that knows them.
   int width() const { return width_; }
   int height() const { return height_; }
-  const FitBox& box() const { return fitter_.box(); }
+  // WHERE THE COVER LANDED, OR WOULD HAVE. `planned_` rather than `fitter_.box()`
+  // because the fitter resets its box on a refusal, and a TooSmall refusal is
+  // exactly the case where the box is the interesting half of the diagnosis: the
+  // reason is a fixed sentence, so `dst=260x346+134+223` in the log line is what
+  // says by how much the cover missed. The two are the same box whenever begin()
+  // succeeded -- one pure function, the same four arguments.
+  const FitBox& box() const { return planned_; }
   bool stopped() const { return stopped_; }
   bool outOfMemory() const { return oom_; }
+  bool tooSmall() const { return tooSmall_; }
   bool sinkRefused() const { return sinkRefused_; }
   bool fitFailed() const { return fitFailed_; }
 
@@ -202,6 +225,7 @@ class PlaneAdapter : public ImageRowSink {
 
   CoverPlaneSink* out_;
   CoverFitter fitter_;
+  FitBox planned_;
   std::unique_ptr<uint8_t[]> paper_;
   int panelW_ = 0, panelH_ = 0, planeBytes_ = 0;
   CoverFit fit_ = CoverFit::Fill;
@@ -211,7 +235,7 @@ class PlaneAdapter : public ImageRowSink {
   int srcRows_ = 0;   // source rows offered, which is what the stop predicate paces on
   int written_ = 0;   // rows pushed to the sink, letterbox included
   bool declared_ = false, stopped_ = false, oom_ = false;
-  bool sinkRefused_ = false, fitFailed_ = false;
+  bool sinkRefused_ = false, fitFailed_ = false, tooSmall_ = false;
 };
 
 }  // namespace
@@ -224,6 +248,7 @@ const char* coverResultName(CoverResult r) {
     case CoverResult::ReadFailed: return "ReadFailed";
     case CoverResult::OutOfMemory: return "OutOfMemory";
     case CoverResult::Abandoned: return "Abandoned";
+    case CoverResult::TooSmall: return "TooSmall";
   }
   return "?";
 }
@@ -249,7 +274,7 @@ CoverResult decodeCover(FileSystem& fs, const OpenedBook& book, int panelW, int 
     return deliver(r, why);
   };
 
-  // A caller-side error rather than anything about the book. The six results have
+  // A caller-side error rather than anything about the book. The seven results have
   // no name for one, so it borrows the nearest and the reason carries the truth;
   // what matters is refusing HERE, before the card is touched and before
   // CoverFitter is handed a geometry it would report as OutOfMemory.
@@ -367,6 +392,15 @@ CoverResult decodeCover(FileSystem& fs, const OpenedBook& book, int panelW, int 
   // only the adapter knows which of its own returns was the false.
   if (adapter.stopped())
     return refuse(CoverResult::Abandoned, nullptr);  // nothing was wrong; nothing to say
+  // AND A PICTURE TOO SMALL TO ENLARGE IS ASKED BEFORE EVERY ALLOCATION QUESTION,
+  // because it is not one: nothing failed, and the file is fine. It is above the
+  // OutOfMemory line rather than below it because that is the false it used to
+  // arrive as -- CoverFitter::begin refuses both with one bool, so the order here
+  // is what keeps a small cover from being logged as a device that ran out of
+  // room. `report.dst*` carries the 1:1 box the picture would have occupied, so
+  // the line says by how much it missed.
+  if (adapter.tooSmall())
+    return refuse(CoverResult::TooSmall, "this cover is too small to fill the panel");
   // WHICH OF THIS FUNCTION'S FIVE OutOfMemory SITES A TEST CAN REACH, written down
   // rather than left to be rediscovered. They are: the zip's inflate window above,
   // CoverFitter::begin, the paper row, and each decoder's own (below). FOUR OF THE

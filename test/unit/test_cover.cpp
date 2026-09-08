@@ -210,7 +210,18 @@ TEST_CASE("the cover's BYTES pick the decoder, not the manifest's media type") {
   FakeFileSystem fs;
   putBook(fs, epubbuild::withCoverImage(imgfix::loadFixture("grey8.png")));
   VectorSink sink;
-  CHECK(reader::decodeCover(fs, openIt(fs), 480, 800, reader::CoverFit::Whole, sink) ==
+  // 300x450 RATHER THAN A REAL PANEL, and the reason is worth a line: grey8.png
+  // is 200x300, and a case whose fit box sits anywhere near the cap can start
+  // passing for the wrong reason -- refused before either decoder runs, so the
+  // sniff this case exists for is never exercised. 300x450 is x1.50 on both axes,
+  // which no plausible kMaxCoverUpscalePercent refuses.
+  //
+  // THAT LINE USED TO ARGUE THE OPPOSITE FACT: it said the X4 "would ask for x2.4
+  // and be refused", which was true at the cap of 200 and is not at 250 -- Whole
+  // on the X4 asks exactly x2.40 and is now served. The panel choice was right and
+  // its stated reason had an expiry date, so the reason is now the one that does
+  // not: pick a ratio far from the cap, whatever the cap is.
+  CHECK(reader::decodeCover(fs, openIt(fs), 300, 450, reader::CoverFit::Whole, sink) ==
         reader::CoverResult::Ok);
   CHECK(anyInk(sink.msb));
 }
@@ -332,30 +343,80 @@ TEST_CASE("Whole letterboxes with PAPER ROWS, and the panel is still filled") {
   CHECK(inked > rep.dstH / 2);
 }
 
-TEST_CASE("a cover smaller than the panel is centred, never enlarged") {
-  // tiny_444.jpg is 33x9. fitCover refuses to upscale, so Whole degrades to 1:1
-  // and almost the whole panel is band -- which is the case that proves the
-  // padding is computed from the BOX and not from a Fill-shaped assumption.
+TEST_CASE("a cover smaller than the panel is ENLARGED to fill it") {
+  // #64. This case read "a cover smaller than the panel is centred, never
+  // enlarged" and pinned tiny_444.jpg's 33x9 landing as 33x9 in the middle of an
+  // otherwise blank 480x800 panel -- which is precisely what a reader reported
+  // off an X3, against a board that says full-bleed.
+  //
+  // grey8.png is 200x300, so a 300x450 panel is x1.50: inside
+  // kMaxCoverUpscalePercent, and enough of an enlargement that a fitter still
+  // refusing to upscale would leave two thirds of the panel as band.
+  FakeFileSystem fs;
+  putBook(fs, epubbuild::withCoverImage(imgfix::loadFixture("grey8.png")));
+
+  VectorSink sink;
+  reader::CoverReport rep;
+  REQUIRE(reader::decodeCover(fs, openIt(fs), 300, 450, reader::CoverFit::Fill, sink,
+                              nullptr, nullptr, &rep) == reader::CoverResult::Ok);
+  CHECK(rep.sourceWidth == 200);
+  CHECK(rep.sourceHeight == 300);
+  // THE WHOLE PANEL, which is what Fill means and what the board draws.
+  CHECK(rep.dstW == 300);
+  CHECK(rep.dstH == 450);
+  CHECK(rep.dstX == 0);
+  CHECK(rep.dstY == 0);
+  CHECK(sink.rows == 450);
+  CHECK(sink.declaredRows == 450);
+  // NOT ONE PAPER ROW, top, middle or bottom -- the letterbox is gone, which is
+  // the defect closing. At 1:1 this picture would have inked 300 of 450 rows and
+  // left 150 as band.
+  CHECK_FALSE(rowIsPaper(sink, 0));
+  CHECK_FALSE(rowIsPaper(sink, 225));
+  CHECK_FALSE(rowIsPaper(sink, 449));
+}
+
+TEST_CASE("a cover too small to enlarge is TooSmall, and nothing is drawn") {
+  // tiny_444.jpg is 33x9. On the X4 with Whole -- which is the fit this case
+  // calls -- the width binds, so the box is 480x131 and the ask is x14.6; with
+  // Fill it would be x96. Either is far past kMaxCoverUpscalePercent at any value
+  // it has held, and this is the case imagefit.h says replication would render as
+  // mush. So the refusal IS the answer, and the sleep screen falls back to its
+  // reading card: a boarded screen, where the small centred picture this used to
+  // draw was not.
+  //
+  // (This read "x88 on the X4", which is neither fit's figure -- it is 800/9, the
+  // Fill box's HEIGHT ratio taken alone, and Fill's binding axis is its width at
+  // x96. Recomputed while confirming this case was unaffected by the cap moving
+  // to 250, which it is: nothing about x14.6 was ever close to the boundary.)
   FakeFileSystem fs;
   putBook(fs, epubbuild::withCoverImage(imgfix::loadFixture("tiny_444.jpg")));
 
   VectorSink sink;
   reader::CoverReport rep;
-  REQUIRE(reader::decodeCover(fs, openIt(fs), 480, 800, reader::CoverFit::Whole, sink,
-                              nullptr, nullptr, &rep) == reader::CoverResult::Ok);
+  CHECK(reader::decodeCover(fs, openIt(fs), 480, 800, reader::CoverFit::Whole, sink,
+                            nullptr, nullptr, &rep) == reader::CoverResult::TooSmall);
+  // NOT OutOfMemory, WHICH IS THE FALSE IT WOULD OTHERWISE ARRIVE AS.
+  // CoverFitter::begin refuses this and a block it could not take with the same
+  // bool, so without the geometry being asked FIRST this is a log line blaming
+  // the device for a small picture.
+  CHECK(rep.reason != nullptr);
+  // THE PICTURE DECLARED ITSELF and the report says where it would have gone --
+  // the 1:1 centred box, which is the half of the line that says by how much it
+  // missed. The reason is a fixed sentence and cannot.
   CHECK(rep.sourceWidth == 33);
   CHECK(rep.sourceHeight == 9);
-  REQUIRE(rep.dstW == 33);
-  REQUIRE(rep.dstH == 9);
-  REQUIRE(rep.dstX == 223);
-  REQUIRE(rep.dstY == 395);
-  CHECK(sink.rows == 800);
-  CHECK(sink.declaredRows == 800);   // nine rows of cover, eight hundred promised
-  CHECK(rowIsPaper(sink, rep.dstY - 1));
-  CHECK(rowIsPaper(sink, rep.dstY + rep.dstH));
-  CHECK(rowIsPaper(sink, 0));
-  CHECK(rowIsPaper(sink, 799));
-  CHECK_FALSE(rowIsPaper(sink, rep.dstY + rep.dstH / 2));
+  CHECK(rep.dstW == 33);
+  CHECK(rep.dstH == 9);
+  CHECK(rep.dstX == 223);
+  CHECK(rep.dstY == 395);
+  // And the sink was never begun, so nothing opened a file for a cover that was
+  // never going to be drawn -- the fitter-before-the-sink ordering holding for
+  // one more refusal.
+  CHECK(sink.begins == 0);
+  CHECK(sink.rows == 0);
+  CHECK(sink.finishes == 1);
+  CHECK_FALSE(sink.finishedOk);
 }
 
 TEST_CASE("a cover much larger than the panel is decoded at a smaller scale") {
@@ -572,15 +633,23 @@ TEST_CASE("a panel too large to address is refused, not overflowed") {
 
 TEST_CASE("every result has a name") {
   using reader::CoverResult;
-  const CoverResult all[] = {CoverResult::Ok,         CoverResult::NoCover,
-                             CoverResult::Unsupported, CoverResult::ReadFailed,
-                             CoverResult::OutOfMemory, CoverResult::Abandoned};
+  const CoverResult all[] = {CoverResult::Ok,          CoverResult::NoCover,
+                             CoverResult::Unsupported,  CoverResult::ReadFailed,
+                             CoverResult::OutOfMemory,  CoverResult::Abandoned,
+                             CoverResult::TooSmall};
   for (CoverResult r : all) {
     CAPTURE(static_cast<int>(r));
     const char* n = reader::coverResultName(r);
     REQUIRE(n != nullptr);
     CHECK(n[0] != '\0');
+    // NOT THE FALL-THROUGH, which is what a missing switch case answers. The
+    // list above is hand-maintained -- there is no Count sentinel on this enum --
+    // so this is what stops a seventh result printing as `?` in the one log line
+    // anybody diagnosing a missing cover reads. tools/covers.py's RESULTS list is
+    // the same hand-maintained fact one layer out.
+    CHECK(std::string(n) != "?");
   }
   CHECK(std::string(reader::coverResultName(CoverResult::Ok)) == "Ok");
   CHECK(std::string(reader::coverResultName(CoverResult::Abandoned)) == "Abandoned");
+  CHECK(std::string(reader::coverResultName(CoverResult::TooSmall)) == "TooSmall");
 }

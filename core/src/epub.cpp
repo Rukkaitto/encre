@@ -1,5 +1,6 @@
 #include "reader/epub.h"
 
+#include "reader/heapguard.h"
 #include "reader/xml.h"
 
 namespace reader {
@@ -9,10 +10,25 @@ constexpr std::string_view kContainerPath = "META-INF/container.xml";
 
 // Read one archive entry as a string, or fail. Every step of this layer is
 // "find an entry, read it, parse it", so the repetition is worth a name.
-bool readEntry(FileHandle& file, Zip& zip, std::string_view path, std::string& out) {
+//
+// ABSENT AND UNREADABLE ARE TWO ANSWERS, and collapsing them was a false claim about
+// the file. `zip.read` refuses an entry it cannot hold -- a nothrow buffer and a
+// probe, both there since 3A -- and both call sites below reported that as "this is
+// not an EPUB" / "names an OPF that is not in the archive", so an out-of-memory
+// inside the container read arrived on the panel as `appears damaged`. `*why` is null
+// when the entry is simply not there and the archive's own reason otherwise.
+bool readEntry(FileHandle& file, Zip& zip, std::string_view path, std::string& out,
+               const char** why) {
+  *why = nullptr;
   const Zip::Entry* e = zip.find(path);
   if (e == nullptr) return false;
-  return zip.read(file, *e, out);
+  if (zip.read(file, *e, out)) return true;
+  // Zip::read leaves `reason()` empty on some refusals (a local header that will not
+  // parse, an entry over kMaxEntryBytes), so reporting it blindly could report
+  // nothing at all.
+  const char* r = zip.reason();
+  *why = (r != nullptr && r[0] != '\0') ? r : "an archive entry would not read";
+  return false;
 }
 
 // Does a space-separated attribute value carry this exact token?
@@ -115,8 +131,10 @@ bool Epub::open(FileHandle& file, Zip& zip) {
   // 1. The container names the OPF. This is the one path in an EPUB that is fixed
   //    by the specification; everything else is discovered.
   std::string container;
-  if (!readEntry(file, zip, kContainerPath, container))
-    return fail("no META-INF/container.xml, so this is not an EPUB");
+  const char* readWhy = nullptr;
+  if (!readEntry(file, zip, kContainerPath, container, &readWhy))
+    return fail(readWhy != nullptr ? readWhy
+                                   : "no META-INF/container.xml, so this is not an EPUB");
 
   std::string opfPath;
   {
@@ -135,8 +153,9 @@ bool Epub::open(FileHandle& file, Zip& zip) {
   if (opfPath.empty()) return fail("container.xml names no rootfile");
 
   std::string opf;
-  if (!readEntry(file, zip, opfPath, opf))
-    return fail("container.xml names an OPF that is not in the archive");
+  if (!readEntry(file, zip, opfPath, opf, &readWhy))
+    return fail(readWhy != nullptr ? readWhy
+                                   : "container.xml names an OPF that is not in the archive");
 
   // 2. The OPF. One pass, gathering four things at once: the metadata, the
   //    manifest (id -> resolved path), the spine order, and the id that the
@@ -211,7 +230,15 @@ bool Epub::open(FileHandle& file, Zip& zip) {
           // noted-in-passing fields next to each other do not answer that differently.
           if (coverPath_.empty() && hasToken(x.attr("properties"), "cover-image"))
             coverPath_ = resolved;
-          manifest.emplace_back(std::string(x.attr("id")), std::move(resolved));
+          // THE LARGEST UNGUARDED ALLOCATION THIS FUNCTION MADE, measured: the
+          // manifest is 48 bytes an entry plus two path strings, capped at
+          // kMaxChapters, and over 225 real EPUBs its vector reached a single
+          // 24,576-byte request -- second only to the OPF string that `Zip::read`
+          // has probed since 3A. `push_back` cannot refuse; this can.
+          if (!pushOrRefuse(manifest,
+                            std::pair<std::string, std::string>(std::string(x.attr("id")),
+                                                                std::move(resolved))))
+            return fail("not enough memory to read the manifest");
         } else if (tag == "meta" && x.attr("name") == "cover") {
           // EPUB 2'S ROUTE, and the one the corpus overwhelmingly uses: a bare
           // convention, in no specification, naming a manifest id. Resolved after the
@@ -226,7 +253,8 @@ bool Epub::open(FileHandle& file, Zip& zip) {
           if (x.hasAttr("toc")) tocId.assign(x.attr("toc"));
         } else if (tag == "itemref" && x.hasAttr("idref")) {
           if (spine.size() >= kMaxChapters) return fail("the spine is too long");
-          spine.emplace_back(x.attr("idref"));
+          if (!pushOrRefuse(spine, std::string(x.attr("idref"))))
+            return fail("not enough memory to read the spine");
         }
         continue;
       }
@@ -309,7 +337,15 @@ bool Epub::open(FileHandle& file, Zip& zip) {
   }
 
   if (spine.empty()) return fail("the spine is empty, so there is nothing to read");
-  chapters_.reserve(spine.size());
+  // ONE ALLOCATION FOR THE WHOLE LIST, taken while `manifest` and `spine` are both
+  // still held -- which is the state that decides whether it fits, and the state the
+  // probe therefore runs in. 48 bytes an entry: 15,408 for the longest spine in a
+  // 225-book corpus.
+  //
+  // `ensureRoom` RESERVES as well as asking, so there is no second `reserve` under
+  // it -- one that stayed would be a second, unguarded request for the same block.
+  if (!ensureRoom(chapters_, spine.size()))
+    return fail("not enough memory to hold the spine");
   for (const std::string& idref : spine) {
     const std::string* path = nullptr;
     for (const auto& item : manifest)

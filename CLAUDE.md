@@ -24,7 +24,7 @@ make sim        # render Home to build/home.png
 make firmware   # build for the ESP32-C3
 make fonts      # regenerate the .rfnt type ramp and embedded headers
 make icons      # regenerate icon bitmaps from the design boards' SVG
-make compare    # design-vs-firmware contact sheet, all 36 boards (~2.8 min)
+make compare    # design-vs-firmware contact sheet, all 37 boards (~2.8 min)
                 # ...and it prints `ok`, NOT a percentage -- see #41
 ```
 
@@ -63,10 +63,13 @@ id named by **two** rows of those tables (#77 — it would be rendered and count
 twice), and a screen the SIMULATOR KNOWS that will not render. It does **not**
 measure how close the render is -- the sheet still prints `ok` rather than a
 percentage, which is #41. A board with no screen behind it stays fine; that is
-**five of the 36** — measured, not inherited: a full run with the gate on reports
-`31/36 screens implemented` and exits 0 (Bookmarks, Boot, Home / missing book,
-Names, Names / empty). It read **37** before #77, and the extra row was the same
-board counted twice.
+**five of the 37** — measured, not inherited: a full run with the gate on reports
+`32/37 screens implemented` and exits 0 (Bookmarks, Boot, Home / missing book,
+Names, Names / empty). **Both figures move whenever a board lands** — this line has
+said 36 and 31; `BookErrorMemory.dc.html` is what took them to 37 and 32, and the
+five with nothing behind them are unchanged. Note the denominator read **37 before
+#77 as well**, and for the opposite reason: the extra row there was one board counted
+twice, not a thirty-seventh board.
 
 **Wiring it at all needed the script to be able to fail.** `render_sim` returned
 a bare `None` for both "the simulator has never heard of this id" and "the
@@ -306,6 +309,61 @@ count**, never a pixel, because that is where all six of these defects lived.
 **Deliberately NOT wired into `make test`**, which builds on a bare checkout with
 no Python and no submodule; so it is a test that has to be remembered, which is
 the honest cost of keeping the fast loop interpreter-free.
+
+**AND THE SAME SHAPE HAD THE REVIEW SURFACE ITSELF: `design/ereader-v1-ui.html`
+IS A GENERATED FILE AND ITS GENERATOR WAS LOST** (#60). It is the published design
+canvas — one artifact URL, the compiled Claude Design editor plus every
+`design/*.dc.html` and `design/canvas.json` seeded into its `appifact-doc` block
+— and it is what the design is reviewed from. `seed-canvas.mjs` and
+`payload.template.html` lived beside the skill that documented them, in
+`.claude/skills/design-change/`, **untracked**: only `SKILL.md` was ever added to
+git, so a fresh clone or worktree materialised the instructions and not the tool,
+the documented reseed could not be run at all, and the canvas could only be
+hand-edited — the wrong operation on a generated file. Reseed with **`make
+canvas`**; **`make canvas-check`** says whether the committed file is what the
+boards say, and names what drifted.
+
+- **IT WENT SIX BOARDS BEHIND, AND FIVE OF THE SIX WERE *CARRIED*.** Being in the
+  file record is **not** being on the canvas: with no `canvas.json` `artboards`
+  entry the editor loads a board and never shows it, so `SleepCover`,
+  `SleepCoverDetails`, `SleepCoverWaking`, `SleepWaking` and `LibraryOpening` were
+  present and invisible, and `BookErrorUnreadable` was absent outright. **Two
+  staleness axes, and the quieter one is the layout.** `make canvas` refuses
+  rather than placing a board itself — which page it belongs on is a design
+  decision — and prints the next free slot in the layout's own 580/900 row-major
+  grid. Every state board is on `page-4`.
+- **NOTHING COULD HAVE NOTICED, because the doc is ONE 526 KB LINE.** Every commit
+  that has ever touched this file is an identical `1 insertion, 1 deletion` in a
+  diffstat, so `git diff --stat` — this file's own rule for catching a scripted
+  edit gone wrong — is blind to it, and so is review. That is why the check had to
+  be a program.
+- **`make compare COMPARE_ARGS=--require-canvas-current` IS WHAT MAKES IT LOUD,
+  off by default, and CI passes it** — `--require-implemented`'s bargain exactly,
+  for its reason: a developer comparing a board mid-edit must not owe a 3 MB
+  reseed, and what the flag buys is a red X in front of the one person who can
+  still fix it. It is independent of `--only`, because whether a board reached the
+  canvas is not a fact about the screens a run selected. It **delegates** to the
+  generator rather than reimplementing the comparison, so there is no second
+  answer to keep in step, and a missing `node` is an **error rather than a pass**.
+- **THE TOOL IS IN `tools/design-canvas/`, TRACKED**, with every other generator
+  here, and that placement *is* the fix — the code was never the thing that was
+  missing, version control was. It carries `test_seed_canvas.mjs`, plain `node`,
+  not wired into `make test` for `test_compare_design.py`'s reason; **its first
+  case is the whole proof**: the original's only surviving specification was its
+  3 MB output, so the test rebuilds the committed canvas from the content that
+  canvas itself carries and demands **byte-identity**. It reproduces it exactly,
+  which is what says this is *the* generator and not merely *a* generator. The
+  layout guards are proved by driving the CLI against throwaway trees, because a
+  guard that has stopped firing looks exactly like a repository with nothing wrong.
+- **`payload.template.html` is 2.4 MB of compiled editor this repo cannot
+  rebuild**, kept verbatim with the doc block and the title as its only
+  placeholders. So a reseed changes content and never the editor — asserted by
+  comparing every byte outside the doc block against the published page. **`<` is
+  escaped, as a `\u003c` sequence, and nothing else is**: the JSON sits inside a
+  `<script>`, so one literal `</script>` in a board would close the block early
+  and truncate the canvas at that byte, and every board is HTML.
+- **Publishing is still a separate, human step**, with `contract: "0.1.31"` and
+  the canvas's own `url` — publishing without it creates a stray duplicate.
 
 ## Hardware facts
 
@@ -1414,9 +1472,91 @@ held only for a namespace's FIRST write, since an update's previous version key 
 already valid. One payload plus a version written after it has no such gap.
 
 The wire format is `core/include/reader/session_record.h` —
-`home:-1;library:7;item-actions:1`, root first — and it lives in `core/` because
-`shell/` has no test harness and this is the only pure logic on the resume path.
-Record version is **4**.
+`home:-1;library:7:/books;item-actions:1`, root first — and it lives in `core/`
+because `shell/` has no test harness and this is the only pure logic on the
+resume path. An entry is `name:focus` or `name:focus:place`. Record version is
+**5**.
+
+**AN ENTRY'S THIRD FIELD IS WHAT ITS FOCUS IS AN INDEX INTO, AND WITHOUT IT THE
+RECORD PRODUCED A WRONG ROW THAT LOOKED RIGHT (#14).** The Library can be listing
+a **subfolder** of `/books` and the record could not say which, so sleeping in
+`/books/Classics` on row 3 woke on `/books` row 3 — which is worse than losing
+the position, because nothing on the glass says the restore went wrong and the row
+opens a book the reader never chose. A focus is only meaningful relative to the
+list it indexes, so the list is stored beside the index into it: `Screen::place()`
+/ `setPlace()`, mirrored into `StackEntry::place`.
+
+- **`core/` NEVER LEARNS WHAT A PLACE IS.** The Library's is a directory path;
+  `session_record.cpp` knows only that it is bytes and what may not appear in them
+  raw. A `path` field would put a filesystem into `App` and name one screen in a
+  format that names none — the ladder-of-screen-names shape `App::restore` exists
+  to have deleted. **One screen has a place today**, and a count in
+  `test_focus_restore.cpp` says so, so the loop cannot quietly test nothing.
+- **PERCENT-ESCAPED, BECAUSE A LEGAL FILENAME MUST NOT BREAK THE FORMAT.** `%`,
+  `;`, `:` and every control byte become `%XX` — **`;` and `%` are both legal in a
+  FAT long name**, so a format that trusted them is not a fix. Everything else
+  passes through, **UTF-8 included**, because `nvs_get encre_sess stack str`
+  printing `library:7:/books/Le Fléau` is the same property that made the screen a
+  NAME rather than an ordinal: a record a person can read off a device is one they
+  can diagnose. (`:` cannot occur in a FAT or exFAT name at all, so the only
+  escapes a real card produces are `%` and `;`.)
+- **A MALFORMED ESCAPE REFUSES THE WHOLE RECORD**, on the unknown-name rule; a
+  place TOO LONG is a different question with a different answer. `kPlaceMaxBytes`
+  is **128 escaped bytes** — enough for the `/books/<author>/<title>` a real card
+  carries, and not enough for what FAT permits, which is stated as a limit rather
+  than hidden — and a place over it is **dropped whole, never truncated**, because
+  a cut path addresses a *different* directory rather than none. That is
+  `Xml::kMaxAttrBytes`'s rule reached from the other side. **The entry's focus goes
+  with it, written as `-1`**: a row index without the folder it indexes is the whole
+  of #14, and -1 is not a marker but the real "nothing selected" every focused
+  screen already accepts.
+- **THE BOUND IS ENFORCED ON THE WAY OUT ONLY**, which is what lets
+  `sessionStackMaxBytes()` stay derived (1,209 bytes at `kMaxDepth` 8, inside NVS's
+  4,000-byte cap for a string, and the read buffer in `shell/src/session.cpp` comes
+  from it). Anything that fit that buffer is by definition within the bound on the
+  way in, and the SCREEN is the thing entitled to refuse a place — which it does.
+- **THE FOCUS IS APPLIED ONLY WHEN THE PLACE WAS HONOURED**, in `App::restore`,
+  and that one branch is what makes every failure degrade instead of mislead: a
+  folder deleted while the device slept, a card that is not the card the record was
+  written on, a `..` component, or **a screen that reports a place and never learned
+  to accept one back** all land the user at the top of the list the screen did
+  build. `reading_position.h`'s `fitOf` grading is the same rule over
+  a different quantity — a book's block rather than a screen's list.
+  There is deliberately no `FocusScreen`-style `final` pair here: one screen has a
+  place, and a shared base for a single caller is a header edge bought for nothing
+  (the Typography formatters' extraction was undone for that reason), so the
+  **default `setPlace` returns false** and the half-taken pair costs a row rather
+  than putting one in the wrong folder. The second screen to want a place is the
+  extraction point.
+- **`setPlace`'s BOOL IS NOT `setFocus`'s BOOL**, and the difference is stated at
+  the one site: a place is not a coordinate you can be part of the way to, so it
+  answers "you are there now", where `setFocus` answers "something moved" because
+  `moveFocus` needs to know whether a 520 ms refresh is owed. Asking for the place
+  already listed is honoured and **touches no card** — the ordinary case, since the
+  constructor lists the root.
+- **THE VERSION BUMP IS A DECISION, NOT A NECESSITY.** A version-4 record still
+  parses under the new decoder — two fields is the no-place form — and it is
+  discarded anyway, because its `library:7` means "row 7 of some directory" and
+  honouring that is exactly the wrong row the field exists to stop claiming. The
+  cost is the documented one: one wake per device, the first after this firmware
+  lands, which starts at Home.
+- **A REFUSED PLACE IS VISIBLE IN THE LOG WITHOUT A NEW LINE**, because the restore
+  already prints where it LANDED and compares it against what the record named
+  (`encodeSessionStack(gApp->snapshot())` against the record's own string) — a
+  dropped folder makes those differ, and the parenthetical now names it as one of
+  the three reasons they can.
+- **WHAT ONLY A CARD CAN EXERCISE, and therefore where this was untestable
+  before:** the sample Library the goldens and the comparison sheet use has ONE
+  directory and cannot descend, so nothing on the desktop could reach the defect
+  until `test_session_restore.cpp` grew a `FakeFileSystem`-backed App. **The
+  listing cost is measured there rather than argued**: a wake into a subfolder
+  spends **4** listings against **3** for one at the root — `/books`, one
+  `countBooks` per folder for the board's `FOLDER · 6 BOOKS` line, and then the
+  subfolder — so the place costs exactly one more listing than a Library push
+  always has. That is the honest price of the screen being built before it is told
+  where it was, and it is why `setPlace` refuses to re-list a directory it is
+  already showing. (This line first said "two", from reading the code rather than
+  running it, and the folder counts are what it missed.)
 
 **The stored focus is real**, and this paragraph twice said otherwise: it claimed
 "always 0" after 2C-2 made that false, and the roadmap said the same. An
@@ -1574,7 +1714,10 @@ things about the fix are worth keeping:
 
 - **Order is load-bearing.** Each entry's focus is set BEFORE the next push,
   because an overlay reads its parent's focused row *at construction*. That is
-  also what makes an overlay restorable at all.
+  also what makes an overlay restorable at all. **The place now goes in front of
+  the focus for the same reason one layer down** — the row is an index into the
+  directory, so a Library told which folder only afterwards would caption the
+  overlay above it with a book from the wrong one.
 - **It deleted the special cases.** The shell's restore was a ladder naming Home
   ("already the root, nothing to push") and SD-missing ("the card mounted, so the
   message is no longer true"), and every screen not in the ladder was handled by
@@ -1583,7 +1726,7 @@ things about the fix are worth keeping:
   screen at all. **A restore that stops early keeps what already stands**: a
   record from a newer firmware should not cost the user the Library they were in.
 - **The wire format is in `core/`** (`reader/session_record.h`), as
-  `home:-1;library:7;item-actions:1`, because `shell/` has no test harness and
+  `home:-1;library:7:/books;item-actions:1`, because `shell/` has no test harness and
   that is the only part of the resume path that is pure logic. One payload key
   also makes the version key a real commit record — with `scr` and `focus` as two
   keys, a cut between them left a valid-looking mixed record.
@@ -1824,6 +1967,68 @@ case to look at if one ever appears.
   found on one screen and belonged in `components.cpp` / `text.cpp` /
   `dither.cpp` / a generator. Special-casing a screen means the next screen
   inherits the bug.
+- **WHEN TWO RUNS SHARE A ROW, WHICH ONE TRUNCATES IS A DESIGN DECISION AND IT
+  MUST NOT BE THE ONE THE FIRST CALLER HAPPENED TO NEED (#82).**
+  `drawHeaderBand` gave the right-hand **value** its measured width first and
+  handed the **label** the remainder, which is right for the Library — whose
+  label is a subfolder's own name and whose value is a derived count — and
+  exactly wrong for Contents, whose value is the **book title**: with `Amusing
+  Ourselves to Death` on a real card the screen's own name came out as `C …` at
+  480×800 and `C O N T …` at 528×792. **The run that names the screen is the one
+  that may never elide**, because unlike a chapter name it is not content, and a
+  band that cannot say which screen you are on is worse than a title cut short.
+  It is the *third* instance of this shape: the reader header had the priority
+  inverted when `CH. 01` became a chapter name, and `drawDetailRow`'s label
+  elided at full length until real chapter names went through it.
+  - **`labelShare` (`reader/components.h`) IS THE ONE RULE, AND IT IS DECIDED BY
+    MEASUREMENT RATHER THAN BY A FLAG**: each run keeps its natural width for as
+    long as the other's natural width leaves room for it, and neither may be
+    squeezed below half the row they share. That is "the run with slack to give
+    up is the one that has more of it", which reproduces what **both** boards
+    declare — `Library.dc.html` marks its label as the yielding run,
+    `Contents.dc.html` marks its value — with nothing for a caller to remember.
+    **A `bool` parameter would be a caller list**, which this file has a rule
+    about: seven band call sites, and **five of them have no yielding question at
+    all** because both their runs are literals that fit, so five of the seven
+    answers would be unverifiable and the sixth would be this defect
+    reintroduced. `drawDetailRow` held the second spelling of the old rule and
+    shares this one now, pixel-identical for every input a screen can produce.
+  - **THE HALF-ROW FLOOR IS THE DERIVED FORM OF `kReadChapterFloor`**, which is
+    the same fix one band up and is a **pinned 96** justified by knowing the
+    shortest fallback label. A primitive knows neither run's content, so the only
+    floor it can derive is an equal division of the row it is dividing. It is a
+    **bound, not a rendered behaviour**: it engages only where BOTH runs exceed
+    half the row, which no board declares and no screen reaches — the widest band
+    label in the firmware is `ABOUT THIS BOOK` at 268px and the value beside it
+    is `EPUB`.
+  - **`min-width: 0` IS HOW A BOARD SAYS WHICH RUN YIELDS**, and it is the
+    vocabulary `Library.dc.html` and `Reader.dc.html` already used: a flex item's
+    automatic minimum size is its min-content width, so a `nowrap` run *without*
+    `min-width: 0` cannot be shrunk below its text and one with it can. Marking
+    one run is the whole of the priority. `Contents.dc.html` declared **neither**,
+    so Chrome wrapped the title to two lines into the label while the firmware cut
+    the label instead — **both wrong, differently, and invisible on the sheet**
+    because the specimen is `MIDDLEMARCH`, which fits. Its `gap: 7px` was missing
+    for the same reason and becomes load-bearing the moment the title fills its
+    budget. `Bookmarks.dc.html` is the only other board whose value is a book
+    title and now declares the same thing, although its screen is V1.1.
+  - **THE ONE PLACE THE FIRMWARE DOES NOT FOLLOW THE BOARD IS THE CUT RUN'S
+    ALIGNMENT**, and it is deliberate: Chrome keeps the box at the budget and
+    left-aligns the truncated text in it, leaving the ellipsis a few pixels short
+    of the margin, where the firmware right-aligns the cut run **on** the margin —
+    the reader header's own rule for the same run (`right - measure(chapter)`),
+    and what keeps a band's right slot flush whatever it holds. It exists only in
+    the truncating state, which no board's committed specimen shows.
+  - **The proof is a golden and an arithmetic test, not a board state.** The
+    boards' committed renders are byte-identical (0 differing pixels, both
+    geometries), so `contents` measures **2.30% / 2.11%** before and after —
+    8,814 pixels to the digit, the same figure #81 recorded — with `library`
+    3.85%/3.54%, `settings` 1.91%/1.76% and `book_details` 3.57%/3.28% as
+    controls in the same tree, threshold-at-128 over the `--export` panels. What
+    moved is the two `contents_mixed_depths` goldens, whose fixture is a real long
+    title, and **every differing pixel is in rows 25–42, the band's one text line,
+    with 0 outside it at either geometry**. Same shape as #74's Home wrap, which
+    also shipped with goldens and a board declaration and no board state.
 - **...AND NOT THE FIRST, EITHER.** The Typography panel's value formatters were
   extracted into `settings.h` while Settings was going to read the same five values
   out; Settings became a single disclosing row instead, leaving one caller, and the
@@ -2095,7 +2300,7 @@ worth knowing before changing it:
 | Sleep / cover | `SleepCover.dc.html` | The cover full-bleed, and **the one screen that drops the badge**. `Grayscale`, decided per paint. |
 | Sleep / cover + details | `SleepCoverDetails.dc.html` | The same cover with the reading card and the badge over it. Keeps both. Its golden pinned a **truncated** title for two phases. |
 | Reader | `Reader.dc.html` | The only screen whose content is the BOOK's — but no longer the only `Fidelity::Grayscale` one. |
-| Book error | `BookError.dc.html` | An overlay whose parent may be Home — **the only one whose parent is not a list**, so it is the only veil no board draws. Two copy shapes, because one of its four refusals is not damage. |
+| Book error | `BookError.dc.html` | An overlay whose parent may be Home — **the only one whose parent is not a list**, so it is the only veil no board draws. THREE copy shapes: damaged, unreadable, and a book that is fine and did not fit. |
 | Book end | `BookEnd.dc.html` | **The only screen a PAGE TURN opens rather than a press** — off the last page, so it must be reachable with no button bound to it. Its leaving slab's LABEL follows what is under the Reader; its ACTION does not. |
 | Typography | `Typography.dc.html` | Two doors, and it needs nothing from the book. `CHANGE` cycles in place; `Font` is drawn and unreachable. |
 | Reader / battery low | `LowBattery.dc.html` | A **variant**, not a screen: the same Reader with one 78px band drawn OVER the page. `columnH` is untouched, so no chapter re-paginates, and **any** button dismisses it. |
@@ -2482,6 +2687,15 @@ it 7px PAST the margin on every screen that draws a band. The only real effect i
 `labelMaxW` 380 against 387 at 480 wide, for a label that on Home is the literal
 `NOW READING` and never elides. Left alone deliberately; see
 `docs/superpowers/specs/2026-08-29-home-battery-design.md`.
+
+**#82 SPLIT THAT EXPRESSION AND CHANGED NEITHER HALF OF IT.** The mark's
+reservation is `markW` now and it comes out of the row **before** either run is
+measured (`avail`), so the two runs divide what is left; the icon still draws at
+`groupX + vw + kBandGap` and the phantom gap still cancels. Home's shared row is
+still the 380 above, and `NOW READING` (207px) still takes its natural width
+beside a percentage. Nothing on this paragraph became false — read it before
+touching that arithmetic, and see the `labelShare` bullet under **Invariants
+worth not relearning** for what the runs do with the row once it is theirs.
 
 **`BatteryMonitor`'s CONSTRUCTOR CAPTURES THE BOARD PROFILE BEFORE THE PROBE HAS
 RUN, and it is harmless for a reason worth writing down rather than re-deriving.**
@@ -2914,6 +3128,164 @@ cross-compile it and read the assembly** — `riscv32-esp-elf-g++ -Os -S`, then 
 is always worth a look; `__divdi3`, `__udivdi3`, `__moddi3` and the soft-float family
 are what to expect on a part with no FPU and a 32-bit divider.
 
+### A small cover is enlarged — to a measured ×2, then to an overridden ×2.5 (#64)
+
+**`fitCover` USED TO NEVER UPSCALE, AND `imagefit.h` STATED THAT AS A PROPERTY RATHER
+THAN A TASTE.** Every word of the argument was true — a box filter's support is the
+destination pixel's footprint, which when enlarging is *smaller* than a source pixel, so
+area-averaging an enlargement is nearest-neighbour however it is spelled; and
+one-source-row-to-one-destination-row streaming cannot complete two rows from one push.
+**What was written down is what the reader saw as a defect**: a 260×346 cover sat on the
+X3's 528×792 as a small picture covering **22% of the glass**, for hours, and
+`design/SleepCover.dc.html` says full-bleed. That state matched no board at all — it drew
+neither the picture nor the reading card.
+
+**THE CAP WAS MEASURED TWICE AT ×2, AND THE SHIPPED CAP IS ×2.5 — AN OWNER OVERRIDE OF
+THAT DERIVATION AND NOT A CORRECTION OF IT.** Both halves have to be read together, and
+they are kept apart on purpose: the measurements below bound **200**, they are unchanged
+and nothing has falsified either, and `kMaxCoverUpscalePercent` is **250**. Restating the
+derivation under the larger number — letting the argument for 200 read as though it had
+produced 250 — is the comment-drifted-from-code defect this file records over and over,
+and the figures are kept whole so the constant can be moved **back** with evidence.
+Both measurements are against the smallest structure this glass carries. Nearest-neighbour
+replication at scale *k* introduces structure of period *k* pixels, so the question is
+where that stops being absorbed:
+
+- **THE PIPELINE'S OWN GRAIN, off the shipped `CoverFitter`.** A flat field at each of the
+  three level midpoints — grey 42/43, 127/128, 212/213, the tones four levels carry worst
+  and therefore the patterns with the most contrast — comes out of `emitRow` as a run
+  length of **exactly one**, which is a period-**two** alternation. Over all 234 greys that
+  need a pattern at all the mean run is **3.20 px**, so 2 px is the floor of that
+  distribution and its highest-contrast end. **That picture is confirmed on the X3 to read
+  as a photograph** (2026-08-29, at the head of this section), so 2 px is structure this
+  panel is *known* to accept.
+- **THE PROJECT'S OWN LEGIBILITY FLOOR, already in the repo.** "Below ~10pt is not legible
+  on this glass, measured"; 10 pt at 150 DPI is a 21 px ppem whose stem is ~2 px, and the
+  whole `Mono` argument is about "a 2px stem fully inked". 2 px is the smallest structure
+  this project has measured as carrying meaning here.
+
+Two independent measurements landing on the same number is what makes **200** a derivation
+rather than a pick. At *k* ≤ 2 the introduced structure is no coarser than the dither grain
+beside it and is absorbed into the diffusion; **at *k* = 2.5 it is not** — a source pixel
+becomes a run of **2 or 3** destination pixels, mean 2.5 — so past 200 the sufficiency of
+nearest-neighbour is **assumed rather than measured**. That is the stated cost of the
+override. Anything smoother needs a reconstruction filter wider than the destination
+pixel — real interpolation, a new hot loop, ~520 bytes of held source rows — and that is
+the named next step if the glass says the replication reads blocky, which is now a
+sharper question than it was at ×2.
+
+**WHY IT WAS RAISED, WHICH IS A DECISION AND NOT A FINDING.** The reporting book —
+`Walden ou la vie dans les bois`, 260×346 — asks **×2.29** on the X3 and **×2.31** on the
+X4, so 200 refused it and the sleep screen showed the reading card. Both states are
+boarded, and the owner's call is that a **soft full-bleed cover beats a card**:
+`SleepCover.dc.html` draws a picture, and the card is what the screen falls back to when
+there is *none*. The refusal was not a wrong answer, it was the *derived* answer, and it
+was overruled on a judgement no measurement in this repo can make. All four of that
+shape's combinations are now served, verified through the real `decodeCover` at both
+panels: `Ok`, `dst=528×792+0+0` and `480×800+0+0` at `FILL`, `528×703+0+44` and
+`480×639+0+80` at `WHOLE`, against the pre-#64 binary's `231×346+148+223`.
+
+**WHAT THE CORPUS SAYS AND WHERE IT IS THE WRONG INSTRUMENT.** Run through the real
+`decodeCover` at both panels: 223 of 225 covers have dimensions that parse, and the worst
+enlargement any of them asks for is **×1.32** (400×662 on the X3). So **the cap admits
+every corpus cover** — `tools/covers.py` reports 223 `Ok` and **0 `TooSmall`** at both
+geometries — and the change fills the panel for the **3 (X4) / 4 (X3)** covers that used
+to sit centred.
+
+**AND THAT IS WHY THE RAISE TO ×2.5 MOVES NO CORPUS COVER AT ALL.** 200 already admitted
+every one of them, so the corpus reports the identical 223 `Ok` / 0 `TooSmall` at both
+caps and **all 892 cover renders are byte-identical across the change** — measured, not
+argued, by keeping both runs' PNGs. Against the pre-#64 binary the count is unchanged at
+either cap: **10 of 892 renders differ** (7 `FILL`, 3 `WHOLE`, four distinct books), which
+is exactly the 3/4-per-panel set #64 itself moved. So the corpus has nothing to say for or
+against the override, **which is the point rather than a gap**: the case it is for is the
+one the corpus does not contain. 260×346 is far smaller than anything in it, the corpus
+under-counts this the way it under-counted #35, and **both of the books #35 made openable
+are small-cover cases**, so that fix raised this one's incidence.
+
+**A REFUSAL IS `CoverResult::TooSmall`, WHICH IS A SIXTH VALUE AND NOT THE NEAREST
+EXISTING ONE.** `Unsupported` is "not an image we read" and this is an image we read
+perfectly; `OutOfMemory` is the false `CoverFitter::begin` used to answer, and nothing is
+wrong with the memory. Both would be a log line asserting something untrue about a book —
+the shape this file already refuses for an unread gauge (`-1`, never `0%`) and for a badge
+promising a wake charging cannot deliver. `CoverReport` carries the **1:1 box the cover
+would have occupied**, because the reason is a fixed sentence and the geometry is the half
+that says by how much it missed.
+
+**NO BOARD CHANGED, AND THAT IS THE ARGUMENT FOR THIS SHAPE.** Both outcomes are already
+boarded — full-bleed (`SleepCover.dc.html`) or the reading card (`Sleep.dc.html`) — so the
+firmware moved *toward* a board it had been failing rather than a board moving toward it.
+The small centred picture was the only unboarded state and it is gone.
+
+**THE INTERFACE HAD TO WIDEN, AND IT WIDENED HONESTLY.** `addRow(src, bool& emitted)` is
+now `addRow(src)` plus `nextRow()`, drained in a loop. A bool can say "zero or one"; an
+enlargement completes several rows from one push, and a contract promising "at most two"
+would have been true only while the cap happened to be 200% — **which it stopped being one
+ticket later**, so the honest shape earned itself faster than expected. The one misuse it
+introduces —
+pushing with rows still pending, which would blend two source rows into one accumulator —
+is **refused rather than silent**, and no downscale can reach it, which is why every
+shipped caller changed by exactly one `if` becoming a `while`.
+
+**THE ACCUMULATE PATH IS A SECOND PATH AND NOT A SECOND COPY.** A downscale is a forward
+**scatter** (walk the source, add each pixel to the cell it lands in) and an enlargement is
+an inverse **gather** (walk the destination, read the pixel it sits on): different
+operations over one accumulator, with the mean, the diffusion, the packing and every guard
+shared. The forward form is kept **verbatim** rather than generalised, because a gather
+with the same boundaries rounds its cell edges the other way and would move a byte of
+every cover the device has ever drawn.
+
+**AND THE ROW MAP HAD TO CHANGE WITH IT — THE DEFECT THIS NEARLY SHIPPED.** The columns
+gather with `floor(c·srcW/dstW)`, so the rows must say the same thing: source row *i* owes
+the destination rows *r* with `floor(r·srcH/dstH) == i`, which is `r < CEIL((i+1)·dstH/srcH)`.
+Reusing the downscale's **floor** there handed destination row 1 of a 33-to-64 enlargement
+to source row 1 while its *columns* were reading source row 0 — **a picture sheared by one
+source pixel down its whole height**, still a picture, so nothing but a reference
+comparison could see it. It was caught by the reference disagreeing, which is what that
+file is for.
+
+**A REPLICATED ROW IS NOT A DUPLICATED ROW**, and this is worth knowing before predicting
+what an enlargement looks like. The accumulator is held across the rows one source row
+completes, but `err_` advances **per emitted row** — so the copies are the same tone in
+*different* dither patterns. Asserted as **zero** identical adjacent destination rows over
+a flat midtone at ×1.94 (33 source rows into 64), where 31 of those rows are second
+copies. Clearing the accumulator on every emit instead — the obvious spelling — makes the
+second copy **paper**, and fails that case with the tone as well as the pattern.
+
+**WHAT IT COSTS: NOTHING NEW IN MEMORY, AND IT IS THE CHEAP DIRECTION IN TIME.** `acc_`,
+`count_` and `err_` are sized by `dstW`, which for `FILL` is the panel width — the same
+bound a full-panel downscale already pays, so at most **+1,280 bytes** against what a
+small cover used to take and **nothing** against the worst case that already ships. The
+device's 81,088-byte deflated-JPEG peak is untouched. The gather runs `dstW` times per
+source row, so **349,536 iterations** for 400×662 → 528×792 against the **2.65 M** a
+median cover's downscale walks. Desktop, three runs each: that cover's decode goes
+**4.4 → 5.9 ms** against a median cover's 21 ms.
+
+**WHAT ONLY THE PANEL CAN ANSWER, AND THE OVERRIDE MADE IT THE WHOLE TICKET.** The two
+measurements bound the *introduced structure* at the grain the glass has accepted; they do
+not say a ×2 enlargement of a photograph reads well, and at ×2.5 they do not reach it at
+all. **This panel has corrected desktop reasoning three times**, and nothing on the desktop
+can arbitrate here by construction — the simulator and the goldens run this same
+arithmetic, so they agree with it whatever it says. So:
+
+1. ~~Whether ×2.29 replication of a 260 px cover across 528 px reads as a photograph or as
+   BLOCKS.~~ **ANSWERED ON GLASS (2026-09-07): CONFIRMED on an X3**, on the real book the
+   raise was made for — `Walden ou la vie dans les bois`, 260×346, a **deflated PNG**, the
+   one corpus format this file says *may* refuse on heap. The verdict was that it *"looks
+   good enough"*, and **that wording is the finding rather than a rough note**: it is an
+   ACCEPTANCE, not a measurement, so it does not extend the two measurements to ×2.5 —
+   they still bound 200. `kMaxCoverUpscalePercent` remains a **one-constant** change in
+   either direction and **200 is still the number the measurements support**, so the way
+   back stays open and cheap.
+2. Whether the `FILL` crop of an *enlarged* cover cuts type the reader wanted — the crop is
+   unchanged arithmetic, but it now bites on covers that used to be shown whole, and the
+   raise widened the set it bites on.
+
+**Question (2) of the original three is closed, by decision and not by evidence**: it asked
+whether refusing at ×2.29 beats a soft full-bleed picture, and the owner answered *no*,
+which is what this constant now records. `[cover] TooSmall … dst=…` is still the line that
+makes a refusal readable off a device — there is simply less that reaches it.
+
 ### Sleep releases the whole `App`, not just the chapter
 
 `ReaderScreen::releaseChapter()` already existed, built for the peek, and it frees the
@@ -3068,6 +3440,7 @@ expensive one, and the first sleep of a new book is always it.**
 | one cached cover; alternating books re-decode | by design |
 | X4 crops ~10% of a 2:3 cover's **width** at `FILL` | default, reversible in Settings |
 | first sleep of a new book shows the card for a few seconds | by design |
+| a cover needing more than **×2.5** to fill the panel is refused `TooSmall` | 0 / 225 |
 
 **WHAT THE CORPUS ACTUALLY YIELDS, run through the built pipeline: `Ok` for 223**,
 `Unsupported` for 2 (both progressive JPEGs), and `NoCover` / `ReadFailed` /
@@ -3083,9 +3456,11 @@ a book that cannot be opened is not a book whose cover failed.
 
 **Every one falls back to `DETAILS` with the badge shown, and logs the reason.** That
 is the whole reason `CoverResult` distinguishes `NoCover` / `Unsupported` /
-`ReadFailed` / `OutOfMemory` / `Abandoned` rather than answering a bool: a refusal that
-cannot say which of the five it was is indistinguishable from a decoder that does not
-work, and this file has paid for that shape more than once.
+`ReadFailed` / `OutOfMemory` / `Abandoned` / `TooSmall` rather than answering a bool: a
+refusal that cannot say which of the six it was is indistinguishable from a decoder
+that does not work, and this file has paid for that shape more than once. **`TooSmall`
+is the sixth and it was added rather than borrowed** — see **A small cover is enlarged**
+below, which is exactly this rule applied one refusal later.
 
 **PROGRESSIVE JPEG MATTERS MORE THAN 2/225 SUGGESTS.** It is **12.5% of the user's own
 library**, and no small streaming decoder handles it. It is a **stated refusal**, not
@@ -3565,15 +3940,105 @@ loses no text, where truncation's magnitude is unbounded — a chapter that is o
   byte-identical in every field**.
 - **WHAT IT COSTS, stated rather than discovered:** `indentedAfter(Paragraph,
   Paragraph)` is true, so a continuation takes the 1.5em paragraph indent — one spurious
-  paragraph break per 64 KB of unbroken text, about once per 120 pages, against text
-  that is simply absent. **Raising the cap was refused for #35's reason twice over: the
-  failure mode was the bug and the number is fine.**
-- **THE SIBLING BOUNDS STILL HAVE THIS SHAPE and are cards rather than paragraphs.**
-  `kMaxEmphasisPerBlock` (256) is the likeliest of them to meet a real converted book
+  paragraph break per cap's worth of unbroken text, against text that is simply absent.
+  **Raising the cap was refused for #35's reason twice over: the failure mode was the
+  bug and the number is fine** — the first half of which is still right and the second
+  half of which was wrong in the direction nobody checked. See #90 below.
+
+**AND THE NUMBER WAS NOT FINE: `kMaxBlockBytes` WAS 64 KB AGAINST A 42,152-BYTE FLOOR,
+SO THE CAP PROTECTED NOTHING AND THE HEAP GAVE OUT FIRST (#90).** It is **8 KB** now,
+and the growth is a **reserve** rather than a `push_back` ladder. #37 is not what
+introduced this — the string grew to 64 KB before it too, and only *then* set `error_`,
+so the peak was identical — but #37 put recoverable text behind the limit, which is
+what made the limit worth calibrating.
+
+- **IT WAS WORSE THAN THE 1.5× THE TICKET STATED, BECAUSE A CAP OF N DOES NOT COST N.**
+  `push_back` grows geometrically and libstdc++ — which is what the ESP32 toolchain
+  ships — climbs `15·2^k`, so a 64 KB block ended at a capacity of **122,880** and its
+  last reallocation held 61,440 and 122,880 **at once**: 184,320 bytes transient, and up
+  to 307,200 with the piece already handed to the caller. Under `-fno-exceptions` the
+  failing request is `abort()` with no diagnostic — **a reboot onto Home, which this
+  file already records as having been misreported twice as "opening a book goes back to
+  Home"**.
+- **AND BLOCKS FAR BELOW THE CAP WERE ALREADY IMPOSSIBLE, WHICH IS THE FINDING THE
+  TICKET DID NOT HAVE.** A natural **16,384**-byte block needs 76,800 bytes — 182% of
+  the floor — so the device's real ceiling was a paragraph of about 10 KB, **a sixth of
+  the cap**, and **7 of the 225 corpus books (3.1%) sat above it**, not the two #37
+  found: `Paradise Lost` (one 50,983-byte block), `The Online World`, `Poetry`, and the
+  two Gutenberg mathematics texts. **The cap named none of them**, which is what makes
+  this a bound that was fiction rather than a bound that was generous.
+- **THE 8 KB IS THREE BOUNDS THAT AGREE**, and `document.h` carries the table. (1) It is
+  the corpus's **99.99th percentile**: 69 of the **537,474** blocks 225 real books write
+  exceed it, and **208 of the 225 have no block over it at all**. (2) Reserved, the peak
+  is two buffers plus one 1,920-byte seam transient — **18,308 B, 43.4% of the floor**,
+  largest single request 8,194 B — where 16 KB would be 82% and *"the largest free
+  BLOCK decides, not the free total"* is not a rule you satisfy at 82% of a fragmented
+  heap. (3) It **is not a regression in the common case**: a caller's `out` keeps its
+  capacity between blocks and never shrinks, so a book already pays `2 × ladder(its
+  largest paragraph)` — the **median** corpus book pays 15,360 B today and the p90 book
+  30,720 B, so this is **+1,028 B on the median book and −475,132 B on the worst**. The
+  band was `(Xml::kTextBytes, ~8 KB]`: below 1,024 the one-cut-per-text-node invariant
+  `document.cpp` asserts breaks.
+- **THE RESERVE IS THE HALF THAT MAKES THE BOUND A BOUND**, not the cap. A cap that
+  holds only if the allocator's growth factor is 2 is an argument about a standard
+  library this project does not ship — libc++ lands the same block at 12,287 and
+  libstdc++ at 15,360. Reserved once, the capacity **is** the cap on both. It is
+  **nothrow-PROBED**, because there is no `std::nothrow` spelling of
+  `std::string::reserve`: the probe asks the heap the same question, then the reserve
+  takes the block it just released, which is `imagefit.cpp`'s shape. **The refusal needs
+  no new words** — it is the message `BlockReader`'s own `State` allocation already
+  answers with, so no new `BookErrorReason` and no new copy shape on
+  `BookError.dc.html`.
+- **`take()` SWAPS INSTEAD OF MOVING, so the reserved buffer comes back** and the
+  reserve is paid once per reader rather than once per paragraph — 537,474 times over
+  the corpus. That is also what `restart()`'s *"reusing the buffers"* has claimed since
+  it was written and did not do: `st.cur = Block{}` threw the buffer away every block.
+  Nothing can hold a view into the swapped-out value — `LaidLine::text` is OWNED
+  precisely so a Page can outlive its blocks — and the caller has by definition already
+  consumed it.
+- **THE FIRST VERSION LOST TEXT, AND TWO OF #37's OWN TESTS CAUGHT IT.** `roomFor` runs
+  once per text NODE and a block spans many, so it swapped a *fresh* reserved buffer
+  into a string that was not empty and threw away everything accumulated since the last
+  reserve — a **hole in the middle of a rejoined digit run**. `reserve` copies the
+  content across by definition, which is the whole reason to use it rather than a swap.
+- **MEASURED, IN #37's OWN IDIOM: 208 of 225 books are byte-identical in every field
+  INCLUDING the block count**, 225/225 still open, chapter rate still 100.00%. The 17
+  that moved take **190 cuts** and **+186 blocks**, and the corpus's text goes
+  126,614,534 → **126,614,498** — **36 bytes over 190 cuts, every one of them the single
+  space the cut landed on**, which `take()`'s trailing-space trim removes. That is right
+  (the pieces render as two paragraphs, so the paragraph break *is* the word boundary)
+  and it is now the ONLY thing a cut may lose: `test_document.cpp` pins it with a
+  fixture that puts the space **on** the cap, which a run of digits — every other case
+  in that file — cannot reach.
+- **THE VISIBLE COST: one spurious indent per 8 KB of unbroken text, about once per 15
+  pages OF IT**, against #37's once per 121 at 64 KB. **On 208 of the 225 books the rate
+  is zero**, because they write no paragraph that long; what is above 8 KB is Gutenberg
+  plain-text conversions, where a whole book of the poem is one block and an extra
+  indent is the least of it.
+- **`ChapterReader::blocksSplit()` EXISTS NOW, and it had to for the cut to be
+  observable at all.** `BlockReader::blocksSplit()` shipped with #37 as the
+  `Xml::attrsDropped()` counting idiom and **nothing outside `document.h` could reach
+  it** — a producer with no reader, the mirror of `ListRow::trackingEm1000`. The
+  pass-through is an observation point in `held()`'s sense, and it is **per WALK, not
+  per chapter**: a rewind calls `BlockReader::restart()`, which zeroes the counter.
+  **Nothing in the FIRMWARE reads it yet** — the corpus probe is its only caller — so a
+  cut is still invisible in a serial log, and `[chapter]`'s line is where it would go.
+**THE SIBLING BOUNDS STILL HAVE #37's SHAPE — and, after #90, the OTHER shape too: not
+one of them is calibrated against a device figure either.** They are cards rather than
+paragraphs.
+
+- `kMaxEmphasisPerBlock` (256) is the likeliest of them to meet a real converted book
   and the cheapest to fix — an emphasis run past the cap could be DROPPED, which costs
   one phrase its italics, where today it costs the rest of the chapter. `kMaxBlocks`,
   `kMaxNestDepth` and `kMaxTocEntries` end their stream the same way; 0 corpus hits
   each, which is "no evidence yet" and not "does not happen".
+- **AND THE HEAP QUESTION IS OPEN FOR ALL FOUR.** `kMaxEmphasisPerBlock` is 256 `Span`s
+  — 2,048 bytes, and it is a `std::vector`, so it climbs the same doubling ladder to
+  4,096 with both buffers live at the last step; `kMaxBlocks` (4,096) bounds a
+  `Document`, which the reader does not build but `buildDocument` does. Neither is
+  anywhere near the block string's old 122,880, which is why #90 stopped at
+  `kMaxBlockBytes` — but "small enough not to matter" is the argument that was wrong
+  once already, and none of the four has a measurement behind it.
 
 ### A grayscale screen is painted twice: fast, then four levels
 
@@ -4470,14 +4935,111 @@ worst case since boot, inflate included.
 ### Memory, which is what a real book runs into
 
 **`new` ABORTS under `-fno-exceptions`, with no message and no stack.** The reboot
-looks like a navigation bug — twice now it has been reported as "opening a book goes
-back to Home". `MCAUSE 0x2` plus `abort() was called` plus `addr2line` on the stack
-words is how you get from that to `operator new` → `std::bad_alloc` → `__terminate`.
+looks like a navigation bug — **three times now** it has been reported that way, twice
+as "opening a book goes back to Home" and once as a book that **crashed the firmware
+on the first press and opened normally on the second**. `MCAUSE 0x2` plus `abort() was
+called` plus `addr2line` on the stack words is how you get from that to
+`operator new` → `std::bad_alloc` → `__terminate`.
 
-So every sizeable allocation in the EPUB path is **`std::nothrow`-checked** and
-answers with a reason: `Zip`'s central directory and both of its read buffers, and a
+**THIS PARAGRAPH SAID "every sizeable allocation in the EPUB path is
+`std::nothrow`-checked and answers with a reason", AND IT WAS TRUE OF EVERY
+HAND-ROLLED BUFFER AND FALSE OF EVERY CONTAINER.** There is no nothrow spelling of
+`reserve` or `push_back`, and the open path grows five of them from numbers a **FILE**
+states — a zip's entry count, a manifest's length, a spine's length, an NCX's entry
+count, a stylesheet's size. So the sentence covered the allocations somebody had
+written a `Buf` for and silently exempted the ones the standard library makes, which
+is the class the third report was. **A comment that overclaims is this project's most
+expensive recurring defect** and this is the fourth instance of it recorded here.
+
+**MEASURED, NOT GREPPED**, by replacing global `operator new` and running the real
+`openBook` → `loadToc` → chapter walk over all 225 corpus books. Largest **single
+contiguous request** per site, which is the number that decides — see "the largest
+free BLOCK decides" below:
+
+| bytes | site | who guards it |
+|--:|---|---|
+| 64,080 | `Epub::open` → the OPF string | `Zip::read`'s probe, since 3A |
+| 39,610 | `Zip::open` → the central directory | nothrow `Buf`, since 3A |
+| 36,956 | `Inflater::begin` → the window | nothrow, since 3C |
+| 32,768 | `loadToc` → `vector<TocEntry>` | `pushOrRefuse` |
+| 24,576 | `Epub::open` → the manifest vector | `pushOrRefuse` |
+| 17,920 | `Zip::open` → `entries_.reserve(claimed)` | `ensureRoom` |
+| 16,640 | `readItalicClasses` → the stylesheet | `appendOrRefuse` |
+| 15,408 | `Epub::open` → `chapters_.reserve` | `ensureRoom` |
+| 12,288 | `Epub::open` → the spine vector | `pushOrRefuse` |
+| 8,194 | `BlockReader::next` → `Block::text` | nothrow probe + `reserve`, **#90** |
+| 5,136 | `openBook` → `out.chapters.reserve` | `ensureRoom` |
+
+**AND THE PHASE THAT PEAKS IS `loadToc`, NOT THE CHAPTER WALK**, which is where every
+one of those unguarded sites lived. Across the user's own 16 books the toc-and-styles
+phase peaks at **47.6–91.8 KB** against a flat **~48–51 KB** for a chapter walk of the
+book's longest chapter — so the expensive moment of a book open is the one that reads
+what the book says about itself, and the reader's own 36,956-byte window is the
+cheaper half. (Desktop figures. The device's cover work measured **17–25 KB above**
+its desktop twin for the same allocations, because the allocator is simply different,
+so treat these as a floor.)
+
+**`reader/heapguard.h` IS `Zip`'s OWN PROBE, MOVED BEFORE A FOURTH COPY OF IT WAS
+WRITTEN.** `canAllocate` had lived in that file's anonymous namespace since 3A with a
+comment saying it was "a poor substitute for an interface that could report failure";
+`Heap::hasBlock` is the same five lines, plus `ensureRoom` / `pushOrRefuse` /
+`appendOrRefuse` over it. Four things about it:
+
+- **It asks for a BLOCK and never a total**, and it asks while the container's OLD
+  buffer is still held — which is exactly the state a reallocation is in.
+  `getFreeHeap()` answers the wrong question, as this file already says two bullets
+  down.
+- **It grows GEOMETRICALLY and falls back to the exact size when a doubling is
+  refused.** Reserving what was asked for each time would make a 32 KB stylesheet read
+  64 reallocations; doubling asks for twice what is needed, so near the limit it would
+  refuse a book that fits. **The fallback is the half a mutation catches and nothing
+  else does** — the corpus never comes near the ceiling.
+- **Failure is INJECTED for the tests**, because the desktop cannot be made to fail an
+  8 KB allocation: `Heap::install` swaps the allocator question the way `Profile`
+  installs a clock `core/` must not acquire for itself.
+- **`test_heapguard.cpp` IS A PROPERTY AND A SITE SET, AND IT NEEDED BOTH.** The
+  property refuses every probe the open path makes, from the Nth onward, and demands a
+  refusal whose reason maps to `BookErrorReason::OutOfMemory`. That alone **cannot see
+  a REMOVED guard** — a deleted guard makes no probe, so the walk has one fewer element
+  and every remaining one still passes; deleting the entry-list guard passed all 1,403
+  cases. So each site's own words are asserted too. Per-site **words** rather than a
+  probe count, because a count is a fact about the standard library's growth ladder and
+  libc++ and libstdc++ double from different capacities.
+
+**WHAT IS DELIBERATELY LEFT UNGUARDED, stated rather than implied:**
+
+- **`Block::text` WAS the largest unguarded allocation here at 98,304 bytes, and on
+  this tree it is neither.** That figure was measured against a `kMaxBlockBytes` of
+  64 KB, which #90 has since derived down to **8 KB** and reserved once through a
+  nothrow probe — so the request is **8,194** and it refuses rather than aborting. The
+  two changes were written on separate branches and neither touched the other's file,
+  which is why the table above needed correcting on the merge rather than either half
+  being wrong. **The 98,304 is kept as the before figure**, because it is what #90
+  removed and it is the largest single number this path has ever asked for.
+- **Everything under ~2 KB**: `cssPaths_` at 8 entries, italic class names at 64,
+  `Epub::Chapter`'s two path strings, `Block::emphasis` at 256 `Span`s. They are
+  bounded and small, and a guard on each buys a branch rather than a refusal.
+- The nothrow sites above are **not** re-guarded. They already refuse.
+
+**TWO FALSE CLAIMS WENT WITH IT, BOTH PRE-EXISTING.** `Epub::open` collapsed "the
+entry is absent" and "the entry would not read" into one message, so an out-of-memory
+inside the container read arrived as *"this is not an EPUB"* — and would have reached
+the panel as `appears damaged`, about a book that is fine. And `Zip::read`'s own
+refusals said **"chapter"**, when its one caller is `Epub::readEntry` reading a
+container and an OPF, so the noun was wrong at every site it can fire from.
+
+**AND THE `book.cpp` HALF OF THIS SENTENCE HAD BEEN FALSE SINCE 3C.** It read "a
 pre-flight probe in `book.cpp` before `buildDocument` (whose `std::string`/`std::vector`
-growth cannot fail politely — that one is a bound, not a guarantee).
+growth cannot fail politely — that one is a bound, not a guarantee)". `openBook` has not
+called `buildDocument` since it stopped returning a chapter's blocks and started
+returning the spine's geometry; there is no probe in `book.cpp` and there is nothing
+there for one to guard. The **claim** it was making survived the move, though, and it
+moved down a layer with the work: the growth that cannot fail politely is
+`Block::text`'s `push_back`, and *"a bound, not a guarantee"* was exactly right about it
+— **a bound of 64 KB against a 42,152-byte floor, which is a bound that cannot be
+honoured.** #90 made it a guarantee: the buffer is reserved once through a nothrow
+probe, so the growth cannot allocate at all, and the cap is derived from the floor. See
+**The lifetime rules that changed**.
 
 **THE EOCD SCAN NO LONGER ALLOCATES.** It used to take the whole 64 KB comment
 window in one `std::string`, which was the largest single allocation in the reader
@@ -4599,6 +5161,68 @@ immediately after it, so a document-order list carries the hierarchy without a t
 pointing into one file all land at that file's start. They are kept rather than
 merged — their labels are real content — but selecting one is approximate. That is why
 Le Fléau has 96 entries for 92 spine entries.
+
+**AND THAT LIMITATION IS THE MAJORITY CASE, WHICH IS HOW IT MADE `NOW` A FALSE CLAIM.**
+Reported off an X3 on `Discourse on the Method`: **two rows** read `NOW` —
+`DISCOURSE ON THE METHOD OF RI…` and `Contents`, whose targets are
+`…59-h-0.htm.xhtml#pgepubid00000` and `#pgepubid00001`, both resolving to spine entry
+1. `renderContents`' source asked `!row.isHeader && e.spine == spine_` **per row**, so
+every entry naming the open spine entry got the marker. `NOW` is a claim about where
+the reader is, so more than one of them is the false-claim shape this file refuses for
+an unread gauge (`-1`, never `0%`) and for a badge promising a wake charging cannot
+deliver.
+
+- **MEASURED OVER `~/.cache/encre-corpus`, and the limitation above under-sells its own
+  incidence: 109 of the 206 books with a usable NCX (52.9%) have at least one spine
+  entry named twice or more** — **605** such groups, **4,526** rows that would have read
+  `NOW` at once. The worst is `standardebooks/f822606a92670aa1.epub`, whose spine entry
+  2 is named by **378** navPoints, **373** of them non-headers. **One of the affected
+  books is on the user's own shelf** (`local/6eff4fa621681282.epub`, 44 on one spine
+  entry), so two rows is the mild version.
+- **THE ROW CHOSEN IS THE FIRST OF THE GROUP, AND `tocIndexForSpine` ANSWERED THE LAST
+  FOR TWO PHASES.** Its argument — "the later ones are further into the file, so the
+  last is the closest thing to where you are" — is true in its premise and needs the
+  reader to be at the **END** of the file. The fragment is **stripped** before the
+  match, so every member of a group resolves to that file's **start** and nothing on
+  this path knows any offset within it: the first entry is the only one that can be
+  *proved* not to be **ahead** of the reader, and `reading_position.h` grades the same
+  trade the same way, degrading backwards. It was also wrong at the one moment it is
+  asked — `updateChapterLabel` runs when a chapter **opens**, which is its first page on
+  a jump and on a forward crossing. So the Reader's header band moved with the marker:
+  **one rule, because two screens naming the reader's chapter differently is two
+  spellings of one fact.** What it costs is stated rather than hidden — a reader deep
+  inside a 378-fragment file is named by that file's first fragment, which is stale
+  rather than false, and closing that needs a fragment-to-block map `document.h` cannot
+  supply.
+- **A HEADER MAY NOT TAKE IT, and that gate is the screen's rather than `toc.h`'s** — a
+  depth is a nesting level and not a role (#75), so `ContentsScreen::rowForSpine` is
+  `tocIndexForSpine`'s rule plus one lookahead, **pinned to it by an equivalence over
+  header-free lists**, which is `test_focus.cpp`'s device for `Focus`'s gated walk.
+  **A spine entry named ONLY by headers answers −1 and marks nothing** — a `Part I` with
+  a file of its own, **108 spine entries across 62 corpus books** — which is the
+  pre-existing behaviour and the honest one.
+- **THE TRAP IS THAT `syncVm` WALKS THE VISIBLE SLICE (`s.first + i`), NOT THE LIST.**
+  A "first match" computed inside that loop is the first match **on screen**: the marker
+  would hop between members of the group as the list scrolled and would appear on a row
+  that is not the reader's once the real one scrolled out of the window — strictly worse
+  than the defect, and **invisible to any single-screenful test**. It is decided **once,
+  in the constructor, over `entries_`**, and compared as an absolute index; `entries_`
+  and `spine_` have no setters, so there is nothing to invalidate. Proved by mutation: a
+  slice-local rule fails only the scrolling case, 11 assertions, while the
+  reported-book case stays green.
+- **NO FIXTURE COULD REACH IT, INCLUDING THE BOARD'S OWN.** `sectioned()`,
+  `mixedDepths()` and `demoContents()` **do** share spine indices, and in every one of
+  those pairs one member is a HEADER, which `!row.isHeader` already suppressed;
+  `flat()` gives every row a spine of its own. So the two Contents goldens, the
+  comparison sheet and a test literally named *the row being read is the only one marked
+  `NOW`* all agreed with a rule that marks every match. Same shape as "a stream of one
+  block kind is not a chapter". **What those goldens DO defend is the header gate** —
+  dropping it moves the marker onto `BOOK I · MISS BROOKE` and reddens both.
+- **`design/Contents.dc.html` NEEDED NO CHANGE**: it draws exactly one `NOW` and its own
+  copy says the marker is on "the row being read", singular. So the board was already
+  right and the firmware moved toward it. Nothing moved on the sheet either —
+  **2.30% / 2.11%, 8,814 differing pixels at both geometries**, which reproduces #81's
+  recorded figure to the digit.
 
 **It re-opens the archive**, deliberately: `OpenedBook` holds twelve bytes a spine entry
 and no hrefs, and matching an NCX target to a spine index needs the real paths on both
@@ -4800,7 +5424,9 @@ place in the book, which needs every chapter paginated (~49 s). That became `CH.
 spine position — free, true, and WORSE on a real book: chapter names carry their own
 numbering, so a row read `Chapitre 1.        CH. 09`, two numbering systems side by side
 with neither explaining the other. It is `NOW` on the row being read and empty elsewhere:
-the NAME is the content of a table of contents, and the full width belongs to it.
+the NAME is the content of a table of contents, and the full width belongs to it. **On
+exactly ONE row** — it marked every entry naming the open spine entry, which is a group
+in the majority of real books; see the `NOW` bullets under **The table of contents**.
 
 **THE LABEL ELIDES, AND `drawDetailRow` DID NOT.** It drew the label at full length from
 the left margin, so a long one ran under the value and off the panel. Book details'
@@ -5383,8 +6009,9 @@ inflate, and this file's ~135× ratio warning applies to that walk.
 
 ## The corrupt-book dialog
 
-`BookError.dc.html`, and `BookErrorUnreadable.dc.html` for the refusal that is not
-damage. Issue #5.
+`BookError.dc.html`, `BookErrorUnreadable.dc.html` for the refusal that is not
+damage, and `BookErrorMemory.dc.html` for the refusal that is not about the file at
+all — **the one shape with no `DELETE FILE…` slab.** Issue #5.
 
 **WHAT IT CLOSES IS A PRESS THAT DID NOTHING.** `openBookAt` refused a book with a
 log line and **nothing on the panel**, so Confirm on a damaged book produced no
@@ -5402,9 +6029,14 @@ the sleep-cover decode answers `CoverResult::ReadFailed` and falls back to the
 reading card, and Book details' author lookup is best-effort; neither is a reader
 asking to read a book.
 
-**TWO COPY SHAPES, BECAUSE ONE SENTENCE WOULD BE A LIE.** `openBook`'s four reasons
-are not one event: three are parse failures, and the fourth — `"cannot open the book
-file"` — is `openRead` returning null, a file that is gone or a card that is. And
+**THREE COPY SHAPES, BECAUSE ONE SENTENCE WOULD BE A LIE.** `openBook`'s refusals are
+not one event. Most are parse failures; `"cannot open the book file"` is `openRead`
+returning null, a file that is gone or a card that is; and the `"not enough memory
+to …"` family is a book that is fine on a device that is momentarily short. (This
+said "four reasons … the fourth" while there were four; the count moved when the heap
+guards added a class, which is why the shapes are named here and the reasons are
+not counted.)
+
 **`SdFileSystem::openRead` does not call `noteCardGone()`**; only a handle read that
 comes up short does. So a card pulled between the Library's listing and the press is
 noticed by `pollCardPresence` between 2 s (the fast probe) and 25 s (the FAT-scan
@@ -5413,11 +6045,113 @@ perfectly healthy book "appears to be damaged". **A false claim is worse than an
 absent one** — the same call this file already records for the unread battery gauge
 (`-1`, not `0%`) and for the charging bolt that spends a refresh on the unplug edge.
 
+**AND THE THIRD IS `OutOfMemory`, WHICH IS THE SAME ARGUMENT ARRIVING ONE REFUSAL
+LATER** — `design/BookErrorMemory.dc.html`, which is `BookError.dc.html` with one
+sentence changed exactly as `BookErrorUnreadable.dc.html` is. `openBook` can run out
+of memory (see **Memory, which is what a real book runs into**), and **neither
+existing shape may carry it**: `Damaged` says the bytes are not a book and they are,
+`Unreadable` says the card would not answer and it did. The book is fine and the
+device was momentarily short, which is `CoverResult::OutOfMemory`'s distinction one
+screen over and the reason that enum has six values rather than a bool.
+
+- **The copy says WHAT and not WHAT TO DO**, deliberately: *"…needs more memory than
+  is free right now. The file was left untouched on the card."* The reader has no way
+  to free memory on purpose — there is no second book to close and no restart control
+  — and the one thing that reliably helps, a power cycle, is a promise about the
+  resume path this screen is in no position to make. **`right now` is load-bearing the
+  way `appears` is**: what the firmware knows is that the heap was short at one
+  instant, not that this book is too big for the device. Its second sentence is
+  `Damaged`'s character for character.
+- **It clears the wrap boundary by 30px** against `test_book_error_copy.cpp`'s 12px
+  floor (`Damaged` 19, `Unreadable` 39), so #76's rule was satisfied at authoring time
+  rather than measured after the fact — which is what having made that rule mechanical
+  for one screen buys.
+
+**AND THIS SHAPE HAS NO `DELETE FILE…` SLAB, WHICH REVERSES THE DECISION THAT SHIPPED
+WITH IT.** The slab was drawn and live on all three shapes, and both the header and
+this file recorded that as **owed an owner's opinion rather than settled**. The owner
+has settled it: **the file is fine.** Offering to delete a good book to fix a
+transient shortage is a nudge in the wrong direction, and a reader might take it.
+`Damaged` and `Unreadable` keep theirs exactly as they were — on those two, wanting
+the file gone is reasonable.
+
+- **THE PRECEDENT IS EXACT AND ALREADY IN THIS FILE: `HomeEmpty` HAS NO ACTION SLAB**,
+  because its `SEND BOOKS OVER WI-FI` could not work once Wi-Fi was cut — *"a primary
+  action that cannot work is worse than none"*. Same shape one screen over.
+- **ABSENT, NOT INERT, AND THAT DISTINCTION IS THE WHOLE LICENCE.** A slab that
+  **draws and does nothing** is the `works only sometimes` trap this project has
+  shipped twice, and it is the recorded reason the slab is live on `Unreadable` — two
+  shapes differing only by a sentence, so a reader meeting a dead slab has nothing to
+  learn the rule from. A slab that **is not there** teaches nothing because there is
+  nothing to press: the panel simply has one action, as `SdMissing` does. **Do not
+  make it inert.**
+- **TWO OF THE THREE OBJECTIONS RECORDED AGAINST THIS WERE ALREADY FALSE WHEN WRITTEN.**
+  "A fourth board" — the third board exists and is the one edited; nothing was added.
+  "A panel whose height depends on which refusal it is reporting" — it already did,
+  and `paintFootprint`'s own comment says so: the shapes wrap to different heights, so
+  `book_error_unreadable` is a 490px panel against `book_error`'s 531. Height varying
+  by shape was the status quo, not a cost of this change.
+- **THE ROW COUNT IS THE ONLY GATE.** `rowsFor()` gives this shape **one** row, so the
+  focus cannot reach `kDelete` and `onGesture` is deliberately **not** also gated on
+  `offersDelete` — a second condition is free to drift from the first, which is the
+  class of bug `Focus` was extracted to delete. The view-model flag is what the
+  RENDERER asks, and it is an explicit `bool` rather than `deleteLabel.empty()`:
+  `ListRow::discloses` is the recorded precedent for why deriving this from an empty
+  value is wrong, and a slab is a bigger claim than a chevron.
+- **THE PANEL IS 451px, WAS 531px, AND THE 80 IS `kActionH` PLUS THE GAP THAT
+  SEPARATED THE TWO SLABS.** Derived, never pinned: `4 + 73 + (18 + 28 + 12 + 210 + 18)
+  + actionsH`, where `actionsH` is `2·68 + 12 + 20 = 168` with the slab and
+  `68 + 20 = 88` without it. **The gap goes with the slab it separated** — the board's
+  actions block is a flex column and a `gap` is BETWEEN items, so one slab has nothing
+  for it to separate; keeping it would leave 12px of dead air and put the centred panel
+  6px high. `actionsH` is now computed **once** and spent on both the paragraph's
+  clamp budget and the panel's height, which had shipped as two copies of one
+  expression — the shape that lets a budget and a height disagree.
+- **THE BAR FOLLOWS THE PANEL: `CLOSE · OK` and two dead slots.** `SELECT` promises a
+  choice and there is nothing to choose between; Up and Down have no second row. The
+  Confirm slot is named after the slab it activates, which is `SdMissingScreen`'s own
+  rule (`{"", "RETRY", "", ""}`). An empty slot is **36px, not zero**
+  (`kHintEmptySlotW`), and the board authors both as the spacer eight other boards use
+  — measuring one as nothing draws the two live slots in the wrong places. The bar's
+  height did not move: its top rule is row 736 at both geometries, before and after.
+- **MEASURED: 3.37% / 3.41%**, from 3.45% / 3.54%. The controls in the same tree are
+  `book_error` **3.44% / 3.53%** and `book_error_unreadable` **2.99% / 3.17%**, which
+  reproduce this file's recorded figures **to the digit** — that is what says the before
+  and after are one instrument rather than two. The sheet still prints `ok` and not a
+  percentage (#41), so these are threshold-at-128 counts over the bare `--export`
+  panels. It improved because what left the panel is a tracked-caps label, which is
+  where Chrome's subpixel advances and the firmware's whole-pixel ones disagree most per
+  pixel of ink.
+- **THE TWO RE-BLESSED GOLDENS MOVED A LOT AND IN EXACTLY TWO BANDS.** 49,629 px (X4)
+  and 49,404 (X3): the panel band (old ∪ new, rows 135–665 / 131–661) and the hint
+  bar's label rows (761–779 / 753–771, 1,414 px at both geometries). **Zero differing
+  pixels anywhere else** — the veiled Library above and below the panel and the bar's
+  own top rule are byte-identical. And `book_error` and `book_error_unreadable` did not
+  move by a pixel at either geometry, which is what says the change is in the one shape
+  and not in the shared path.
+
 The screen takes a bounded `BookErrorReason`, **never the `why` string**, which is
 developer English (`"the spine names no chapters"`), unstyled, unbounded and with no
-slot on any board. It still goes to the log, where it is actionable. **Which shape,
-and where a delete returns to, are both decided in the SHELL**, because that is the
-one place that knows the reason and knows which screen asked.
+slot on any board. It still goes to the log, where it is actionable.
+
+**WHICH SHAPE IS `core/`'s NOW, AND WHERE A DELETE RETURNS TO IS STILL THE SHELL'S.**
+That split used to read "both are decided in the SHELL", and the mapping half was a
+bare `strcmp` against a literal the shell spelled and `book.cpp` spelled again — in
+the one directory with no test harness, where five of this project's bugs have hidden.
+A third shape would have made it two comparisons; a fourth that nobody remembered to
+add reads as "damaged" on a healthy file. `bookErrorReasonFor` is the whole mapping
+from developer English to the only vocabulary the panel has, and it lives beside the
+enum. The `returnTo` stays the shell's, because only the shell knows which screen
+asked.
+
+**THE CLASS OF REFUSAL IS A PREFIX, NOT A CODE.** Every layer on the open path says
+`"not enough memory to …"` and then what it was doing, so the class is readable off
+`kOpenOutOfMemory` while the log keeps the site. That is a convention rather than a
+type, and `test_heapguard.cpp` is what stops it being a convention nobody kept — it
+drives real refusals out of every guarded site with an injected allocator and asserts
+each one lands on this board. The alternative was a reason code out through
+`openBook`'s signature and its five callers, which is worth it if a fourth class ever
+appears.
 
 **`DELETE FILE…` IS WHY `DeleteConfirmScreen` TOOK FACTS.** It held a
 `LibraryScreen&` and acted through `deleteFocused()`, so it was reachable only from

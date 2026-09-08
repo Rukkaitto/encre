@@ -120,12 +120,32 @@ struct OpenedBook {
   }
 };
 
+// THE ONE REFUSAL THAT IS NOT ABOUT THE BOOK'S CONTENT: `fs.openRead` answered null,
+// which is a file that is gone or a card that is. A constant rather than a literal
+// spelled twice, because the SHELL compares against it to choose which shape of the
+// corrupt-book dialog to draw -- see bookErrorReasonFor.
+inline constexpr const char* kOpenCannotOpen = "cannot open the book file";
+
+// AND THE ONE CLASS OF REFUSAL THAT IS NOT ABOUT THE BOOK AT ALL. Every layer on the
+// open path -- Zip, Epub, Inflater, BlockReader, this file -- says "not enough memory
+// to ..." and then what it was doing, so the class is readable off the prefix while
+// the log keeps the site. That is a convention rather than a type, and
+// test_heapguard.cpp is what stops it being a convention nobody kept: it drives real
+// refusals out of every guarded site with an injected allocator and asserts each one
+// lands here.
+//
+// The alternative was a reason CODE beside the string, out through `openBook`'s
+// signature and its five callers. Worth it if a fourth class ever appears; today
+// there are three and the third is a prefix.
+inline constexpr const char* kOpenOutOfMemory = "not enough memory";
+
 // `path` is the EPUB, absolute on `fs`.
 //
 // False with `*reason` set for a missing file, a zip that is not one, an OPF that
-// does not parse, a spine with nothing in it, or -- via Epub::open -- any spine
-// entry the manifest or the archive does not hold. NEVER an abort: this is bytes off
-// a user's card, and the caller has a screen it can put the reason on.
+// does not parse, a spine with nothing in it, a container this device is momentarily
+// too short of heap to hold, or -- via Epub::open -- any spine entry the manifest or
+// the archive does not hold. NEVER an abort: this is bytes off a user's card, and the
+// caller has a screen it can put the reason on.
 bool openBook(FileSystem& fs, std::string_view path, OpenedBook& out, const char** reason);
 
 }  // namespace reader
