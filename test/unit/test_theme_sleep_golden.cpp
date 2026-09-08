@@ -1091,47 +1091,113 @@ TEST_CASE("the TITLE's budget does NOT follow it") {
   // does.
   //
   // IT IS MEASURED WITHOUT MEASURING THE CARD, which is the whole difficulty: the
-  // card's height is SUPPOSED to move here (by one chapter line box, asserted in the
-  // test above), so any observable derived from cardBox().height() cannot separate
-  // "the title reflowed" from "the card followed the chapter". `barTopOf` reads the
-  // title's line count off the frame instead -- the bar's distance below the card's
-  // own TOP is every fixed term of the card plus the author's height plus the
-  // title's, and the author is held still -- so this assertion is blind to the
-  // height question and fails only on the budget one.
+  // card's height is SUPPOSED to move here -- by one chapter line box, which is what
+  // `the card's HEIGHT follows the chapter's actual wrap` asserts -- so any
+  // observable derived from cardBox().height() cannot separate "the title reflowed"
+  // from "the card followed the chapter". `barTopOf` reads the title's line count
+  // off the frame instead: the bar's distance below the card's own TOP is every
+  // fixed term of the card plus the author's height plus the title's, and the author
+  // is held still. So this assertion is blind to the height question and fails only
+  // on the budget one.
   //
-  // BOTH RUNS ARE MAXIMAL, which is the only state in which the budget is
-  // observable at all: with a short title the division has slack and one more line
-  // of budget changes nothing that is drawn. This is the fixture
-  // `THE AUTHOR IS CAPPED AT TWO LINES AND THE TITLE KEEPS THE REMAINDER` uses, for
-  // that reason.
+  // THE FIXTURE HAD TO BE CHOSEN AND NOT PICKED, AND THE FIRST ONE DID NOT BITE.
+  // Two conditions have to hold together for a budget change to be VISIBLE, and a
+  // maximal title alone gives only the first:
+  //
+  //   1. the title must FILL its budget, or one more line of budget changes nothing
+  //      that is drawn -- so 255 unbreakable characters, which wants ~45 lines;
+  //   2. the budget's own REMAINDER must be at least `titleLine - chapterLine`, or
+  //      the chapter's unspent 29px does not carry the floor over to another line.
+  //
+  // The first version of this test copied `THE AUTHOR IS CAPPED AT TWO LINES`'
+  // fixture, which maximises the author too -- and a two-line author leaves a
+  // remainder of 12px (X4) / 4px (X3), so 29px more budget still floored to the same
+  // 6 lines and the mutation passed all 30 assertions. A mutation tells you about
+  // your INPUT before it tells you about your test. With the board's own one-line
+  // author the remainder is 41px (X4) / 33px (X3) and the crossing happens, so the
+  // author here is deliberately SHORT while the title is deliberately maximal.
+  //
+  // BOTH CONDITIONS ARE ASSERTED RATHER THAN TRUSTED, off the frame and not from
+  // transcribed arithmetic: `cardRoom - height` is the budget's remainder, the same
+  // quantity `THE AUTHOR IS CAPPED AT TWO LINES` compares against a title line. If
+  // a future ramp or board change moves it out of [17, 46) this test goes quiet, and
+  // the REQUIREs are what make it say so instead.
+  //
+  // AND THEY ARE MEASURED ON THE TWO-LINE CHAPTER, WHICH IS THE ONLY PLACE THEY CAN
+  // BE. A fixture guard has to be blind to the defect it is guarding a test for.
+  // With a two-line name the reserve is exactly what the name takes, so both
+  // spellings of the budget give the same number and both give the same card -- the
+  // guards read 41px (X4) / 33px (X3) whichever expression `maxTitleLines` holds.
+  // Measured on the ONE-line render they do not: the mutation grows the card by a
+  // title line there, the remainder goes to -5px, and condition 2 fires with
+  // `this fixture cannot see the defect` about a fixture that can see it perfectly
+  // well. A guard that accuses the fixture when the code is wrong is worse than no
+  // guard, and that is how the first version of this read.
   //
   // Reversing this -- giving `maxTitleLines` the ACTUAL -- fails here and nowhere
   // else in this file.
   ramp::Ramp ramp;
   reader::QuietTheme theme;
   const int titleLine = 46;  // kSleepTitleLineH
+  const int chapterLine = ramp.fonts[reader::Role::Label500].lineHeight();
   reader::SleepViewModel base = sampleSleep();
-  base.title = std::string(255, 'W');
-  base.author = std::string(255, 'W');
+  base.title = std::string(255, 'W');  // fills any budget
+  // ...and the author stays the board's one-line `George Eliot`, on purpose. See above.
 
-  auto titleBand = [&](const std::string& chapter, int w, int h) {
+  auto render = [&](const std::string& chapter, reader::Framebuffer& fb) {
     reader::SleepViewModel vm = base;
     vm.chapter = chapter;
-    reader::Framebuffer fb(w, h);
     theme.renderSleep(fb, ramp.fonts, vm, reader::Plane::Bw, nullptr);
-    const int bar = barTopOf(fb);
-    REQUIRE(bar > 0);
-    return bar - cardBox(fb, 400).top;
   };
+
+  // The badge off a CARD-LESS render, never relative to the card -- badgeTopOf
+  // carries the reason, and cardRoom is the badge's footprint reserved twice.
+  reader::SleepViewModel idle = sampleSleep();
+  idle.nothingToContinue = true;
 
   for (int i = 0; i < 2; ++i) {
     const int w = i == 0 ? 480 : 528;
     const int h = i == 0 ? 800 : 792;
-    const int oneLine = titleBand(sampleSleep().chapter, w, h);
+
+    reader::Framebuffer bare(w, h);
+    theme.renderSleep(bare, ramp.fonts, idle, reader::Plane::Bw, nullptr);
+    const int cardRoom = 2 * badgeTopOf(bare) - h;
+
+    auto band = [&](const std::string& chapter) {
+      reader::Framebuffer fb(w, h);
+      render(chapter, fb);
+      const int bar = barTopOf(fb);
+      REQUIRE(bar > 0);
+      return bar - cardBox(fb, 400).top;
+    };
+
+    // The two guards, on the two-line render where the reserve is exact -- see above
+    // for why they may not be taken from the one-line one.
+    reader::Framebuffer probe(w, h);
+    render(kLongChapter, probe);
+    REQUIRE(chapterSlackOf(ramp, kLongChapter) == 0);  // the reserve really is exact here
+    const int remainder = cardRoom - cardBox(probe, 400).height();
+
+    // CONDITION 1: the title really is filling its budget, so the division is
+    // observable at all. The card leaves less than a whole title line unused.
+    REQUIRE_MESSAGE(remainder < titleLine,
+                    "the title is not filling its budget: " << remainder
+                                                            << "px of budgeted room unused");
+    // CONDITION 2: and the chapter's unspent reserve would carry the floor to one
+    // more title line if the budget were allowed to see it. Without this the
+    // mutation this test exists for is invisible -- which is exactly what happened
+    // to its first fixture.
+    REQUIRE_MESSAGE(remainder >= titleLine - chapterLine,
+                    "the budget's remainder is only "
+                        << remainder << "px, so a chapter's unspent " << chapterLine
+                        << "px could not buy a " << titleLine
+                        << "px title line: this fixture cannot see the defect");
+
+    const int oneLine = band(sampleSleep().chapter);
     for (const std::string& chapter :
          {std::string(kLongChapter), std::string(kElidedChapter)}) {
-      CHECK_MESSAGE(titleBand(chapter, w, h) == oneLine,
-                    "the title moved the bar by " << (titleBand(chapter, w, h) - oneLine)
+      CHECK_MESSAGE(band(chapter) == oneLine,
+                    "the title moved the bar by " << (band(chapter) - oneLine)
                                                   << "px between a one-line chapter and this one ("
                                                   << titleLine
                                                   << "px is a whole title line): the budget is "
