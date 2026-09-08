@@ -488,12 +488,21 @@ TEST_CASE("the corrupt-book dialog keeps a real card's name inside its panel") {
   // looking, which is what every board's one-word sample name prevents.
   Ramp r;
   reader::QuietTheme theme;
+  // ALL THREE SHAPES, because the bound is not the same arithmetic on each of them.
+  // The OutOfMemory shape draws no `DELETE FILE...` slab, so its fixed height is 80px
+  // smaller (one kActionH and the gap that separated the two slabs) -- which means its
+  // paragraph is allowed 80px MORE room before it is clamped, and a bound that holds
+  // for the two-slab shapes says nothing about the one that budgets differently.
+  const reader::BookErrorReason kReasons[] = {reader::BookErrorReason::Damaged,
+                                              reader::BookErrorReason::Unreadable,
+                                              reader::BookErrorReason::OutOfMemory};
   for (int width : {480, 528}) {
     const int height = width == 480 ? 800 : 792;
+    for (const reader::BookErrorReason reason : kReasons)
     for (const std::string& name : pathologicalNames()) {
       const size_t chars = name.size();  // reported by the messages below
-      reader::BookErrorScreen s({"/books/" + name, name, reader::BookErrorReason::Damaged,
-                                 reader::ScreenId::Library});
+      const int why = static_cast<int>(reason);  // reported alongside, so a failure names the shape
+      reader::BookErrorScreen s({"/books/" + name, name, reason, reader::ScreenId::Library});
 
       reader::Framebuffer fb(width, height);
       fb.clear(true);
@@ -512,8 +521,9 @@ TEST_CASE("the corrupt-book dialog keeps a real card's name inside its panel") {
           if ((x < panelX || x >= panelX + panelW) && !fb.getPixel(x, y)) ++outside;
       // The veil is white-on-paper, so it inks nothing here: any black outside the
       // panel is a glyph that escaped it.
-      CHECK_MESSAGE(outside == 0, "ink outside the panel, name of " << chars << " chars at "
-                                                                   << width);
+      CHECK_MESSAGE(outside == 0, "ink outside the panel, name of "
+                                       << chars << " chars at " << width
+                                       << " reason " << why);
 
       // VERTICAL: the same defect turned ninety degrees. The panel is centred, so one
       // taller than the canvas is cut off at BOTH ends.
@@ -542,14 +552,16 @@ TEST_CASE("the corrupt-book dialog keeps a real card's name inside its panel") {
           if (top < 0) top = y;
           bottom = y;
         }
-      CHECK_MESSAGE(top > 0, "no top border inside the canvas, name of " << chars << " chars at "
-                                                                        << width);
+      CHECK_MESSAGE(top > 0, "no top border inside the canvas, name of "
+                                 << chars << " chars at " << width << " reason " << why);
       CHECK_MESSAGE(bottom > top, "no bottom border inside the canvas, name of "
-                                      << chars << " chars at " << width);
+                                      << chars << " chars at " << width
+                                      << " reason " << why);
       // Strictly above the bar: the scan stops at barTop, so a panel that runs into
       // the bar reports bottom == barTop - 1 rather than where it really ends.
       CHECK_MESSAGE(bottom < barTop - 1,
-                    "panel reaches the hint bar, name of " << chars << " chars at " << width);
+                    "panel reaches the hint bar, name of "
+                        << chars << " chars at " << width << " reason " << why);
     }
   }
 }
