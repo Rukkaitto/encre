@@ -660,9 +660,12 @@ single-pixel whiskers. Thresholding **improved** all three, measurably and
 visibly. Same for `kForward`, whose dithered arrowhead was frayed.
 
 **The two dither matrices are deliberately different, and `dither.cpp` says
-why** — and `kClustered` still ships, on the cover placeholder, whatever the
-screen's fidelity. `kClustered` is for *tints*: the board's cover placeholder is
-one round dot repeated on a 4px grid, and dispersing that area into isolated
+why** — and `kClustered` still ships, whatever the screen's fidelity, on **Book
+details' cover slot and `renderSleep`'s full-panel field**. Those are the two
+callers by name rather than "the cover placeholder", which was three placeholders
+until #95 took Home's and the Library rows' away and would have read as still
+naming them. `kClustered` is for *tints*: a cover slot is one round dot repeated
+on a 4px grid, and dispersing that area into isolated
 pixels reads denser and grainier than the blob it is meant to be. `kBayer` is for
 *edges*, and is what `Plane::BwDithered` uses — clustering a stroke's edge
 coverage would pile the ink against the stroke and read as the stroke thickening,
@@ -2241,10 +2244,21 @@ case to look at if one ever appears.
     of both overlays' focus states through both paths and compares bytes.
 - **There are THREE dither patterns for three jobs**, each from its own board
   declaration, and `dither.cpp` explains why they cannot be shared:
-  `kClustered` black on a 4px grid for tints (`.dither-dots`, and an `Ink` for
-  `.dither-dots-inv`), `kBayer` dispersed for glyph and icon edges, and
+  `kClustered` black on a 4px grid for tints (`.dither-dots`), `kBayer` dispersed
+  for glyph and icon edges, and
   `veilRect`'s clustered **white** on a **3px** grid for the overlay veil. A 4px
   veil is half as dense and reads as a smudge.
+  - **`ditherRect`'s `Ink` PARAMETER HAS NO SCREEN CALLER ANY MORE, and this line
+    used to name its one instance.** `.dither-dots-inv` was the FOCUSED Library
+    row's placeholder cover — the tint reversed out of the black fill — and #95
+    removed the placeholder from the rows. Both surviving callers pass black
+    (Book details' cover slot, and `renderSleep`'s full-panel field). It is kept
+    as `ListRow::trackingEm1000` is kept: `test_dither.cpp` drives both inks
+    across 30 rectangles × both rotations × all four levels, so this is **tested
+    capability rather than working behaviour**, and `Bookmarks.dc.html` is a
+    board that asks for a reversed tint again. Stated rather than assumed,
+    because a producerless reader is the shape this file has been bitten by from
+    two directions.
 - **The veil was the most expensive thing on the screen, and it is now byte-wise.**
   A veil covers the WHOLE frame, and the per-pixel form cost four integer
   divisions and a bit-addressed read-modify-write per pixel: 2.33 ms at 528×792
@@ -2333,13 +2347,13 @@ worth knowing before changing it:
 
 | Screen | Board | The thing |
 |---|---|---|
-| Home | `Main.dc.html` | Focus starts on the CONTINUE block (`-1`), not the menu. Its title WRAPS and its chapter NAME elides — two card-sourced runs in one column, and only the title may grow. |
+| Home | `Main.dc.html` | Focus starts on the CONTINUE block (`-1`), not the menu. Its title WRAPS and its chapter NAME elides — two card-sourced runs in one column, and only the title may grow. **NO COVER: the reading column is the whole content width** (#95). |
 | Home / empty | `HomeEmpty.dc.html` | A **variant**, not a screen: same `ScreenId`, same view model, same menu. |
 | Home / nothing open | `HomeUnopened.dc.html` | The same variant with different words. What the device actually shows today. |
-| Library | `Library.dc.html` | The only list that scrolls today, and the only screen with a rail. |
+| Library | `Library.dc.html` | The only list that scrolls today, and the only screen with a rail. A book row is the FOLDER row with a different mark (#95) — one expression picking `kBook` or `kFolder`, and the 44×64 slot stays because `bookRowContentH` takes the max with it. |
 | Library / scrolled | `LibraryScrolled.dc.html` | Reached by pressing PAST the focused row and back — arriving from above windows it differently. |
 | Item actions, Delete confirm | their own boards | Overlays; a focus move repaints the overlay alone. |
-| Book details | `BookDetails.dc.html` | Not an overlay, despite covering the Library. Its title **wraps**; everywhere else elides. |
+| Book details | `BookDetails.dc.html` | Not an overlay, despite covering the Library. Its title **wraps**; everywhere else elides. **The last placeholder cover in the firmware** — kept when #95 took Home's and the rows', because this is the screen whose job is to describe one book at length and its block's height IS the cover's 180px, so removing it moves every rule below. Its own decision, unmade. |
 | Settings | `Settings.dc.html` | Nine items, three sections, and every drawn row responds. |
 | Sleep | `Sleep.dc.html` | Painted directly, never pushed — a push would make the wake restore into it. Its title, author and chapter **all wrap**; the chapter's two lines are reserved UNCONDITIONALLY, so the title's budget cannot move when the reader crosses a chapter. The badge is drawn first, because its top is the card's bound. |
 | Sleep / nothing open | `SleepIdle.dc.html` | The badge alone. Same screen with its card removed. |
