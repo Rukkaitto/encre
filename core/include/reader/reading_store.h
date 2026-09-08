@@ -32,8 +32,19 @@ struct LastRead {
   std::string title;
   std::string author;
   int percent = 0;  // 0..100, by BYTES through the book -- see progressPercent
-  // The spine position, for the Sleep card's `6% - CH. 01`. NOT a chapter number:
-  // see `chapter` below, and design/Main.dc.html for what reading it as one cost.
+  // The spine position. NOT a chapter number -- see `chapter` below, and
+  // design/Main.dc.html for what reading it as one cost.
+  //
+  // IT IS A DIAGNOSTIC NOW, AND ITS LAST SCREEN CONSUMER IS GONE. This said it was
+  // "for the Sleep card's `6% - CH. 01`", and that run names the chapter instead;
+  // nothing drawn on any panel reads this field any more. What keeps it is the
+  // `[progress] Home continues ... spine N, chapter "..."` boot line, which is the
+  // one place a device can be asked whether the NAME and the POSITION agree -- and
+  // they legitimately need not: `tocIndexForSpine` answers the FIRST entry naming a
+  // spine entry, and 52.9% of corpus books have a spine entry named more than once,
+  // so a reader deep inside a many-fragment file is named by that file's first
+  // fragment. Recorded rather than deleted for that reason, and recorded as
+  // log-only so the next person does not go looking for the screen that draws it.
   int spine = 0;
   // THE CHAPTER'S NAME AT THIS POSITION, cached here for the reason `title`,
   // `author` and `percent` are: Home's reading column is built at boot, before
