@@ -75,6 +75,14 @@ target_link_libraries(corpus_probe PRIVATE reader_core)
 target_compile_options(corpus_probe PRIVATE ${READER_WARNINGS})
 target_compile_definitions(corpus_probe PRIVATE READER_DESKTOP=1)
 
+# THE SLEEP CARD'S CHAPTER RUN, against every real chapter name in the corpus.
+# Not a test, for corpus_probe's reason: it needs real books, and the repo's
+# generated EPUBs have one-word chapter labels that fit everything.
+add_executable(sleep_chapter_probe ${CMAKE_SOURCE_DIR}/tools/sleep_chapter_probe.cpp)
+target_link_libraries(sleep_chapter_probe PRIVATE reader_core)
+target_compile_options(sleep_chapter_probe PRIVATE ${READER_WARNINGS})
+target_compile_definitions(sleep_chapter_probe PRIVATE READER_DESKTOP=1)
+
 add_executable(paging_probe ${CMAKE_SOURCE_DIR}/tools/paging_probe.cpp)
 target_link_libraries(paging_probe PRIVATE reader_core)
 target_compile_options(paging_probe PRIVATE ${READER_WARNINGS})
