@@ -410,7 +410,11 @@ class ReaderScreen : public Screen {
   // against. Exposed so the shell can report which branch an open actually took;
   // without it the device cannot say, and the eager path has no log line of its own.
   uint32_t chapterBytes() const { return chapter_.sizeBytes(); }
-  int chapterCount() const { return book_.chapterCount(); }
+  // `chapterCount()` WAS HERE AND WENT WITH ITS ONE CALLER. It existed to fill
+  // `LastRead::spineCount` for Home's `CH. n OF N`, which was a false claim and is
+  // gone; nothing else asked. `book().chapterCount()` is the same answer through the
+  // accessor just below, whose own comment already points at it -- so this was a
+  // second spelling as well as a dead one.
 
   // THE BOOK THIS SCREEN IS READING, for the one caller that has to ask a question
   // about the whole book rather than about the open chapter: progressPercent, which
