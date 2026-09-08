@@ -49,6 +49,12 @@ extern const Icon kBook;     // open book: the Read action
 // The SAME drawing at 112px, and a separate asset because these are pre-rendered
 // bitmaps -- there is no scaling a 25px mark up. HomeEmpty's mark.
 extern const Icon kBookLarge;
+// The same drawing a THIRD time, at 44px: a Library book row's mark, and a third
+// asset for kBookLarge's reason. It is not kBook resized, because kBook at 25px
+// is still the `READ` hint's mark on three Home boards -- so the two sizes have
+// two callers and are two bitmaps. Its stroke is matched to kFolder's, which is
+// the mark it sits under in the same list.
+extern const Icon kBookRow;
 extern const Icon kFolder;   // folder: a Library directory row
 extern const Icon kBattery;  // the header band's charge cell
 extern const Icon kBatteryCharging;  // ...with a bolt knocked out: charging

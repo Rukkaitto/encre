@@ -690,16 +690,24 @@ int drawBookRow(Framebuffer& fb, const FontSet& fonts, int y, const BookRowConte
   // information), which makes a book row the folder row with a different mark --
   // and that is now what the code says.
   //
-  // THE SLOT STAYS 44x64 EVEN THOUGH THE MARK IS 25x25. `bookRowContentH` is
-  // `max(kBookThumbH, the text column)`, so the slot sets the row's height and
-  // therefore the whole list's geometry; sizing it to the mark would move every row
-  // on every Library screen for a reason that has nothing to do with rows.
+  // THE SLOT STAYS 44x64 THOUGH NEITHER MARK IS THAT TALL -- kFolder is 44x39 and
+  // kBookRow 44x44. `bookRowContentH` is `max(kBookThumbH, the text column)`, so the
+  // slot sets the row's height and therefore the whole list's geometry; sizing it to
+  // whichever mark is taller would move every row on every Library screen for a
+  // reason that has nothing to do with rows.
+  //
+  // kBookRow, NOT kBook: the two marks in this column are matched in STROKE now, so
+  // a book does not read lighter than the folder one row above it. That is a second
+  // 44px asset rather than a resize of the 25px one, because kBook at 25px is still
+  // the `READ` hint's mark on three Home boards -- kBookLarge's split at 112px, one
+  // size down. See design/Library.dc.html for the stroke arithmetic and for which
+  // instance on that board the generator reads.
   //
   // The mark is centred in the row's CONTENT box directly rather than in the 44x64
   // box centred inside it. Concentric boxes compose exactly in real arithmetic --
   // the board's 91 is 78.5 + 12.5 and also 77 + 14 -- so nesting the two would only
   // add a second rounding for the same answer.
-  const Icon& mark = row.isFolder ? icons::kFolder : icons::kBook;
+  const Icon& mark = row.isFolder ? icons::kFolder : icons::kBookRow;
   drawIcon(fb, mark, centreIn(kMargin, kBookThumbW, mark.w),
            iconTopIn(contentTop, contentH, mark.h), ink, plane);
 

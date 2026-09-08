@@ -483,7 +483,8 @@ inline constexpr int kBookRowRuleH = 1;    // its `border-bottom: 1px solid`
 // The 44x64 SLOT, which both row kinds centre their mark in. It survives the
 // placeholder cover's removal because it is what `bookRowContentH` takes the max
 // with, so it sets the row's height and the whole list's geometry -- not because
-// anything is still drawn at that size.
+// anything is drawn at 64 tall. Both marks now fill its WIDTH exactly (kFolder is
+// 44x39, kBookRow 44x44), so the only slack they are centred in is vertical.
 inline constexpr int kBookThumbW = 44;     // `width: 44px; height: 64px`
 inline constexpr int kBookThumbH = 64;
 inline constexpr int kBookThumbGap = 16;   // the row's `gap: 16px`

@@ -1451,8 +1451,16 @@ TEST_CASE("a book row's slot holds the book mark and nothing else") {
     // THE DIRECT PROOF THAT THE PLACEHOLDER IS GONE, and it is the whole ring
     // rather than one pixel of it: the placeholder was a 44x64 ditherRect plus a
     // 1px outlineRect, so it inked every pixel of the slot's outermost row and
-    // column by construction. kBook is 25x25 in a 44x64 slot, so a centred mark
-    // cannot reach any edge -- a statement the old drawing could not make.
+    // column by construction. kBookRow is 44x44 in a 44x64 slot, so the mark has
+    // no horizontal slack to be centred in at all -- and it still reaches no edge,
+    // because the drawing insets itself: its path runs x 2..14 of a 16-unit
+    // viewBox, which at 44px leaves ~4px of clearance inside its own box. A
+    // statement the old drawing could not make at any size.
+    //
+    // WHICH MARK THE ROW DRAWS IS ASSERTED BELOW rather than here, and it has to be
+    // somewhere: this ring and the centring case both pass with the 25px kBook, so
+    // without it the caller could go back to the small asset and only a golden
+    // would notice.
     for (int x = reader::kMargin; x < reader::kMargin + reader::kBookThumbW; ++x) {
       CHECK(fb.getPixel(x, slotTop));
       CHECK(fb.getPixel(x, slotTop + reader::kBookThumbH - 1));
@@ -1483,6 +1491,27 @@ TEST_CASE("a book row's slot holds the book mark and nothing else") {
       CHECK_FALSE(fb.getPixel(reader::kMargin + reader::kBookThumbW - 1, y));
     }
   }
+
+  SUBCASE("the mark is the 44px asset, not the 25px one the READ hint draws") {
+    // THE ONE THING THE TWO CASES ABOVE AND THE CENTRING CASE BELOW ALL MISS. The
+    // book is drawn from a second asset now, matched in stroke to the folder above
+    // it in the same column (test_icons.cpp measures that match on the bitmaps);
+    // every other property this file asserts about the slot -- clear border,
+    // centred, reverses on focus -- is true of kBook at 25px as well, so nothing
+    // here would fail if the caller went back to it.
+    //
+    // MEASURED AS THE INK'S OWN EXTENT, not by asking the Icon its width: reading
+    // `icons::kBookRow.w` here would transcribe the choice being tested and pass
+    // however drawBookRow was wrong. kBookRow's path inks 36 of the slot's 44
+    // columns; kBook centred in the same slot inks 22. The bound sits between them
+    // with room either side, so a stroke retune on the board cannot trip it.
+    reader::Framebuffer fb(480, 200);
+    fb.clear(true);
+    reader::drawBookRow(fb, f.fonts, 0, book, false, false);
+    const SlotInk b = slotInkOf(fb, slotTop, false /*ink*/);
+    REQUIRE(b.count > 0);
+    CHECK(b.x1 - b.x0 + 1 >= 30);
+  }
 }
 
 // WHAT THE ONE-EXPRESSION COLLAPSE BUYS, asserted rather than trusted. A book row
@@ -1495,9 +1524,11 @@ TEST_CASE("a book row's slot holds the book mark and nothing else") {
 // MEASURED FROM PIXELS, NOT BY RE-RUNNING centreIn. Recomputing the helpers here
 // would transcribe the code and pass however the code was wrong; the clearance
 // either side of the mark's real ink is an independent statement of the same
-// thing. It is `<= 1` because `centreIn` divides by two in integers: kBook leaves
-// 19 columns to split and takes 9 on the left, and the mark's own ink need not be
-// symmetric within its box -- kFolder's is not, vertically.
+// thing. It is `<= 1` because `centreIn` divides by two in integers and because a
+// mark's own ink need not be symmetric within its box -- kFolder's is not,
+// vertically. Both marks are 44 wide in a 44-wide slot now, so the horizontal
+// slack centreIn splits is zero and what this measures there is the drawings' own
+// insets; the vertical slack is 25px for the folder and 20 for the book.
 TEST_CASE("both kinds of row centre their mark in the 44x64 slot") {
   Ramp f;
   const int contentH = reader::bookRowContentH(f.fonts);

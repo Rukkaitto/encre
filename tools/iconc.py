@@ -144,6 +144,34 @@ ICONS = {
         "source": "design/HomeEmpty.dc.html",
         "match": "M8 3.2C6.6 2",
     },
+    # THE THIRD SIZE OF THE SAME DRAWING, and a third entry for book_large's
+    # reason: these are pre-rendered bitmaps, so 25px, 44px and 112px are three
+    # assets. This one is the Library row's mark, matched in STROKE WEIGHT to the
+    # folder directly above it in the same list -- the folder's 1.8 over a 26-unit
+    # viewBox at 44px is 3.05 device px and this 1.1 over 16 units at 44px is 3.03,
+    # which is what "the same weight" means for two marks of different aspect.
+    #
+    # THE MATCH KEYS ON THE PAINT AS WELL AS THE PATH, AND HAS TO. Every Library
+    # board draws SIX identical book paths, so `source` alone cannot disambiguate
+    # this one the way it does book/book_large -- there is no board in that family
+    # where the mark appears once. The focused row's instance is authored in white
+    # for its inverted row and is the only all-white <svg> on Library.dc.html, so
+    # the spine path plus its stroke colour locates exactly one element. That is
+    # `hold`'s shape rather than a new idea: `r="3.2" fill="none"` is geometry plus
+    # a paint attribute, because paint is the thing that tells the hollow ring from
+    # the filled dot. extract() then re-colours it, kForward's precedent, since
+    # colour is reader::Ink's business at draw time and not an icon's.
+    #
+    # WHAT IT DEPENDS ON THE BOARD FOR, so it can be kept true: that the focused
+    # row stays white and stays the ONLY white mark on that board. Either failing
+    # makes the match non-unique and the run exits naming the lines -- loudly,
+    # which is the whole bargain of this generator.
+    "book_row": {
+        "symbol": "kBookRow",
+        "note": "open book at 44px: a Library book row's mark",
+        "source": "design/Library.dc.html",
+        "match": 'M8 3.2v11" stroke="#ffffff"',
+    },
     "folder": {
         "symbol": "kFolder",
         "note": "folder: a Library directory row",
