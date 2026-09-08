@@ -78,8 +78,40 @@
          as Main.dc.html's title and BookDetails.dc.html's, for the same reason.
 
          The bound is the CARD's `max-height` above, not a line count here: the
-         card's height is a result and it is what collides with the badge. -->
-    <div style="font-size: var(--t-title); font-weight: 700; text-align: center; line-height: 1.1; text-transform: uppercase; overflow-wrap: anywhere;">Middlemarch</div>
+         card's height is a result and it is what collides with the badge.
+
+         AND THE LINE BOX IS STATED IN PIXELS, WHERE THIS SAID `1.1`. It is the
+         same number either way -- 1.1 was chosen to mean 46 (the face's own
+         lineHeight() at this ppem is 53, 7px looser than the board wants) and
+         the firmware has always derived `round(1.1 * 42)` -- but Chrome resolves
+         `1.1` to a FRACTIONAL 46.2px, and that fraction was the only one on this
+         card. It made the card's own height fractional, and the card is CENTRED,
+         so `centreIn` halved it and every run below this one rounded to a
+         position the firmware does not compute.
+
+         It cost nothing while the card's height never changed parity. The
+         chapter run's second reserved line is 29px -- ODD -- so it flipped the
+         half-pixel the centring had been absorbing, and all four runs below the
+         title went from 0-2px out of register with the firmware to 1-3px. That
+         is 1,500 more mismatched pixels on a screen whose whole card is 8,900,
+         and a +/-1-row-tolerant count does NOT absorb it, so it was a real
+         register regression rather than the counting artefact the `Names` cut
+         records.
+
+         Stating the box removes the fraction and more than pays for the wrap:
+         `sleep` 2.32%/2.13% before the chapter wrapped, 2.71%/2.49% with the
+         wrap and `1.1`, and 2.30%/2.11% with the wrap and this. It moves NO
+         golden, because the firmware's kSleepTitleLineH was already 46 -- only
+         the board's own render moves, toward the firmware. Same lesson the
+         chapter run below learned about `normal`, and Peek.dc.html's about its
+         panel height: stating the number closes a disagreement rather than
+         documenting it.
+
+         NOT DONE TO THE AUTHOR, and that was measured rather than assumed:
+         giving that run `line-height: 29px` makes this screen WORSE (2.45%/2.25%
+         against 2.30%/2.11%), so Chrome's `normal` there is not the same
+         disagreement and the obvious symmetry is the wrong move. -->
+    <div style="font-size: var(--t-title); font-weight: 700; text-align: center; line-height: 46px; text-transform: uppercase; overflow-wrap: anywhere;">Middlemarch</div>
     <!-- THE AUTHOR WRAPS TO TWO LINES AND THEN ELIDES, and it used to do NEITHER --
          so a long name escaped the card entirely. A centred run is placed at
          `centreIn(0, contentW, w)`, which returns a NEGATIVE half when the run is
