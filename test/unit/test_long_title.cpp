@@ -155,8 +155,14 @@ TEST_CASE("Book details keeps every field row above the hint bar, however long t
   // and spec 4.1b says the screen is a fixed single-page summary -- so the thing
   // that must not happen is a title tall enough to push the last field row under
   // the hint bar. Both geometries, because the line budget is derived from the
-  // canvas (235px of block room on the X4 against 227 on the X3) and the two
+  // canvas (300px of block room on the X4 against 292 on the X3) and the two
   // therefore take different branches of the same arithmetic.
+  //
+  // THOSE TWO FIGURES READ 235 AND 227 AND WERE STALE BY TWO CHANGES: 235 is the
+  // SIX-row board's room and the `Added` row went, and the block room grew again
+  // when the placeholder cover stopped holding the block open. The bound this case
+  // asserts is unaffected either way -- more room means more title lines and the
+  // rows still cannot reach the bar, because the wrap is clamped to the room.
   struct Case {
     int w, h;
   };

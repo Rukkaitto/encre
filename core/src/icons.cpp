@@ -57,6 +57,7 @@ const Icon kDown{data::kDownW, data::kDownH, 2, data::kDownBits};
 const Icon kChevron{data::kChevronW, data::kChevronH, 2, data::kChevronBits};
 const Icon kBook{data::kBookW, data::kBookH, 2, data::kBookBits};
 const Icon kBookLarge{data::kBookLargeW, data::kBookLargeH, 2, data::kBookLargeBits};
+const Icon kBookRow{data::kBookRowW, data::kBookRowH, 2, data::kBookRowBits};
 const Icon kFolder{data::kFolderW, data::kFolderH, 2, data::kFolderBits};
 const Icon kBattery{data::kBatteryW, data::kBatteryH, 2, data::kBatteryBits};
 const Icon kBatteryCharging{data::kBatteryChargingW, data::kBatteryChargingH, 2, data::kBatteryChargingBits};

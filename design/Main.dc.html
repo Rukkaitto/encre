@@ -23,7 +23,6 @@
     }
     body { margin: 0; background: #ffffff; }
     a { color: #000000; } a:hover { color: #000000; }
-    .dither-dots { background-color: #ffffff; background-image: radial-gradient(circle, #000000 1.1px, transparent 1.3px); background-size: 4px 4px; }
   </style>
 </helmet>
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
@@ -36,8 +35,28 @@
     </div>
   </div>
 
-  <div style="display: flex; gap: 16px; padding: 30px 24px 0 24px;">
-    <div class="dither-dots" style="width: 112px; height: 168px; border: 2px solid #000000; box-sizing: border-box; flex-shrink: 0;"></div>
+  <!-- NO COVER, AND THE READING COLUMN TAKES THE WHOLE WIDTH. This block used to
+       open with a 112x168 `.dither-dots` panel: a stand-in for a cover image,
+       drawn as a grey tint because there was no cover to draw. It was never a
+       cover. It claimed a picture this screen does not have, in the most
+       prominent slot on the screen whose whole job is to name the book being
+       read -- and it took 128px of the 480px panel (112 plus the gap) away from
+       the name to do it. An absent claim beats a false one, which is the call
+       this design already makes for an unread battery gauge and for a badge
+       promising a wake charging cannot deliver.
+
+       THE `gap: 16px` WENT WITH IT, and that is not tidying. A flex `gap` sits
+       BETWEEN items, so with one item left it separates nothing --
+       BookErrorMemory.dc.html's own rule when its second slab was cut, where
+       keeping the gap would have left 12px of dead air and pushed a centred
+       panel off its centre. Here it would simply be a number with no meaning
+       for the next reader of this file to wonder about.
+
+       WHAT DOES *NOT* MOVE is the title's line budget. That budget is derived in
+       renderHome from the room BELOW this block -- the bar, CONTINUE, the menu
+       and the hint bar -- so it is a question about height, and the cover was a
+       question about width. The name gets a wider column, not more lines. -->
+  <div style="display: flex; padding: 30px 24px 0 24px;">
     <div style="display: flex; flex-direction: column; justify-content: flex-start; gap: 22px; flex-grow: 1; min-width: 0; padding: 2px 0;">
       <div style="display: flex; flex-direction: column; gap: 5px;">
                 <!-- IT WRAPS, and it used to elide. `text-overflow: ellipsis` with

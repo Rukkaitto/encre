@@ -23,8 +23,6 @@
     }
     body { margin: 0; background: #ffffff; }
     a { color: #000000; } a:hover { color: #000000; }
-    .dither-dots { background-color: #ffffff; background-image: radial-gradient(circle, #000000 1.1px, transparent 1.3px); background-size: 4px 4px; }
-    .dither-dots-inv { background-color: #000000; background-image: radial-gradient(circle, #ffffff 1.1px, transparent 1.3px); background-size: 4px 4px; }
   </style>
 </helmet>
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
@@ -66,6 +64,61 @@
     <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">12 BOOKS</div>
   </div>
 
+  <!-- A BOOK ROW GETS THE BOOK MARK, WHERE IT USED TO GET A PLACEHOLDER COVER.
+       Every book row opened with a 44x64 `.dither-dots` panel and a 1px border
+       (2px white when focused) -- a grey tint standing in for a cover image that
+       is never decoded here. Two things were wrong with it. It claimed a picture
+       the row does not have, and at 44x64 with a border it was the heaviest mark
+       on the screen: six near-identical grey blocks down the left edge, carrying
+       no information at all, since every book row had the same one.
+
+       THE TWO ROW KINDS NOW SHARE ONE SHAPE, which is the real gain. A folder row
+       has always drawn a bare centred mark in a 44x64 slot with no border, so the
+       book row is now the folder row with a different mark -- and renderLibrary
+       collapses to one expression choosing between them, where it had two
+       branches free to place their marks differently.
+
+       THE SLOT IS UNCHANGED AT 44x64, deliberately: `bookRowContentH` is
+       `max(kBookThumbH, the text column)`, so the row's height and therefore the
+       whole list's geometry are a function of that slot. Shrinking it to the
+       mark's own 25px would move every row on every Library screen for a reason
+       that has nothing to do with rows.
+
+       THE MARK IS 44x44, NOT THE 25x25 THE `READ` HINT DRAWS, AND THE FOLDER
+       BESIDE IT IS WHY. A folder row's mark is 44x39 -- it fills the slot's width
+       -- so a book at 25x25 read distinctly lighter than a folder in the same
+       column, one row above it, and that asymmetry was never designed: it was
+       which assets happened to exist. Matched by STROKE rather than by box, which
+       is what "the same weight" means for two marks of different aspect: the
+       folder's `stroke-width: 1.8` over a 26-unit viewBox at 44px is 3.05 device
+       px, and 1.1 over a 16-unit viewBox at 44px is 3.03. 1.1 is the two-decimal
+       value nearest the exact 1.108, and the two strokes land 0.02 px apart.
+
+       IT IS A SECOND ASSET, NOT A RESIZE, and the callers decide that rather than
+       taste: these are pre-rendered bitmaps, so 25px and 44px are two of them,
+       and `kBook` at 25px is still drawn by the `READ` hint on Main, HomeCharging
+       and HomeMissing. kBook/kBookLarge is the same split at 25 and 112, and
+       kBattery/kBatteryCharging is it for two states. 484 bytes of flash.
+
+       WHICH INSTANCE THE GENERATOR READS IS THE FOCUSED ROW'S, and it has to be:
+       iconc.py's `match` must locate exactly one vector element or it exits rather
+       than guessing, and this board draws SIX identical book paths. The focused
+       row's is the only one authored in white -- it is the one all-white mark on
+       this board -- so the match keys on the book's own spine path AND its paint.
+       That is `hold`'s shape rather than a new idea: it keys on the dot's radius
+       drawn hollow, geometry plus a paint attribute, because paint is what tells
+       the ring from the filled dot. extract() re-colours an all-white mark to
+       black, kForward's precedent, so the white authoring rasterises to the same
+       coverage bytes. Keep the focused row white and keep it the only white mark
+       here, or the match stops being unique and the run fails loudly.
+
+       AND DO NOT WRITE A LITERAL VECTOR OPEN TAG IN A COMMENT ON THIS BOARD. The
+       first draft of this note spelled one out in prose; iconc.py scans for that
+       tag with a non-greedy regex and no HTML parser, so the note itself became an
+       element that swallowed the real markup after it -- and the run failed on
+       `hold` matching twice, on a board nobody had touched. Same shape as the
+       replace that hit the note quoting the string it documented: a comment
+       quoting a token the tooling searches for IS an occurrence of it. -->
   <div style="display: flex; flex-direction: column; flex-grow: 1;">
 
     <div style="display: flex; align-items: center; gap: 16px; padding: 11px 24px; border-bottom: 1px solid #000000;">
@@ -80,7 +133,7 @@
     </div>
 
     <div style="display: flex; align-items: center; gap: 16px; padding: 11px 24px; background: #000000; color: #ffffff;">
-      <div class="dither-dots-inv" style="width: 44px; height: 64px; border: 2px solid #ffffff; box-sizing: border-box;"></div>
+      <div style="width: 44px; height: 64px; display: flex; align-items: center; justify-content: center;"><svg width="44" height="44" viewBox="0 0 16 16" fill="none"><path d="M8 3.2C6.6 2 4.3 1.7 2 2v11c2.3-.3 4.6 0 6 1.2 1.4-1.2 3.7-1.5 6-1.2V2c-2.3-.3-4.6 0-6 1.2z" stroke="#ffffff" stroke-width="1.1"></path><path d="M8 3.2v11" stroke="#ffffff" stroke-width="1.1"></path></svg></div>
       <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
         <div style="font-size: var(--t-body); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Middlemarch</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">GEORGE ELIOT</div>
@@ -89,7 +142,7 @@
     </div>
 
     <div style="display: flex; align-items: center; gap: 16px; padding: 11px 24px; border-bottom: 1px solid #000000;">
-      <div class="dither-dots" style="width: 44px; height: 64px; border: 1px solid #000000; box-sizing: border-box;"></div>
+      <div style="width: 44px; height: 64px; display: flex; align-items: center; justify-content: center;"><svg width="44" height="44" viewBox="0 0 16 16" fill="none"><path d="M8 3.2C6.6 2 4.3 1.7 2 2v11c2.3-.3 4.6 0 6 1.2 1.4-1.2 3.7-1.5 6-1.2V2c-2.3-.3-4.6 0-6 1.2z" stroke="#000000" stroke-width="1.1"></path><path d="M8 3.2v11" stroke="#000000" stroke-width="1.1"></path></svg></div>
       <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
         <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Jane Eyre</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">CHARLOTTE BRONT&Euml;</div>
@@ -98,7 +151,7 @@
     </div>
 
     <div style="display: flex; align-items: center; gap: 16px; padding: 11px 24px; border-bottom: 1px solid #000000;">
-      <div class="dither-dots" style="width: 44px; height: 64px; border: 1px solid #000000; box-sizing: border-box;"></div>
+      <div style="width: 44px; height: 64px; display: flex; align-items: center; justify-content: center;"><svg width="44" height="44" viewBox="0 0 16 16" fill="none"><path d="M8 3.2C6.6 2 4.3 1.7 2 2v11c2.3-.3 4.6 0 6 1.2 1.4-1.2 3.7-1.5 6-1.2V2c-2.3-.3-4.6 0-6 1.2z" stroke="#000000" stroke-width="1.1"></path><path d="M8 3.2v11" stroke="#000000" stroke-width="1.1"></path></svg></div>
       <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
         <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Walden</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">HENRY DAVID THOREAU</div>
@@ -107,7 +160,7 @@
     </div>
 
     <div style="display: flex; align-items: center; gap: 16px; padding: 11px 24px; border-bottom: 1px solid #000000;">
-      <div class="dither-dots" style="width: 44px; height: 64px; border: 1px solid #000000; box-sizing: border-box;"></div>
+      <div style="width: 44px; height: 64px; display: flex; align-items: center; justify-content: center;"><svg width="44" height="44" viewBox="0 0 16 16" fill="none"><path d="M8 3.2C6.6 2 4.3 1.7 2 2v11c2.3-.3 4.6 0 6 1.2 1.4-1.2 3.7-1.5 6-1.2V2c-2.3-.3-4.6 0-6 1.2z" stroke="#000000" stroke-width="1.1"></path><path d="M8 3.2v11" stroke="#000000" stroke-width="1.1"></path></svg></div>
       <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
         <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Meditations</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">MARCUS AURELIUS</div>
@@ -116,7 +169,7 @@
     </div>
 
     <div style="display: flex; align-items: center; gap: 16px; padding: 11px 24px; border-bottom: 1px solid #000000;">
-      <div class="dither-dots" style="width: 44px; height: 64px; border: 1px solid #000000; box-sizing: border-box;"></div>
+      <div style="width: 44px; height: 64px; display: flex; align-items: center; justify-content: center;"><svg width="44" height="44" viewBox="0 0 16 16" fill="none"><path d="M8 3.2C6.6 2 4.3 1.7 2 2v11c2.3-.3 4.6 0 6 1.2 1.4-1.2 3.7-1.5 6-1.2V2c-2.3-.3-4.6 0-6 1.2z" stroke="#000000" stroke-width="1.1"></path><path d="M8 3.2v11" stroke="#000000" stroke-width="1.1"></path></svg></div>
       <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
         <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Dubliners</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">JAMES JOYCE</div>
@@ -125,7 +178,7 @@
     </div>
 
     <div style="display: flex; align-items: center; gap: 16px; padding: 11px 24px;">
-      <div class="dither-dots" style="width: 44px; height: 64px; border: 1px solid #000000; box-sizing: border-box;"></div>
+      <div style="width: 44px; height: 64px; display: flex; align-items: center; justify-content: center;"><svg width="44" height="44" viewBox="0 0 16 16" fill="none"><path d="M8 3.2C6.6 2 4.3 1.7 2 2v11c2.3-.3 4.6 0 6 1.2 1.4-1.2 3.7-1.5 6-1.2V2c-2.3-.3-4.6 0-6 1.2z" stroke="#000000" stroke-width="1.1"></path><path d="M8 3.2v11" stroke="#000000" stroke-width="1.1"></path></svg></div>
       <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
         <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">The Odyssey</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">HOMER &middot; TR. BUTLER</div>

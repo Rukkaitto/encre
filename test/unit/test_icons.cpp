@@ -18,12 +18,13 @@ const Named kAll[] = {{"kBack", &reader::icons::kBack},
                       {"kDown", &reader::icons::kDown},
                       {"kChevron", &reader::icons::kChevron},
                       {"kBook", &reader::icons::kBook},
+                      {"kBookRow", &reader::icons::kBookRow},
                       {"kFolder", &reader::icons::kFolder},
                       {"kBattery", &reader::icons::kBattery},
                       {"kBatteryCharging", &reader::icons::kBatteryCharging}};
 
-// Big enough for the largest icon (kFolder, 46x39) plus the 8px offset every
-// case draws at, with room left over to catch a stray pixel on every side.
+// Big enough for the largest icon in kAll (kBookRow, 44x44) plus the 8px offset
+// every case draws at, with room left over to catch a stray pixel on every side.
 constexpr int kCanvas = 80;
 constexpr int kAt = 8;
 }  // namespace
@@ -81,6 +82,11 @@ TEST_CASE("icons are the sizes the design boards draw them at") {
   // it renders at; nothing about the board's pixels changed.
   CHECK(reader::icons::kFolder.w == 44);
   CHECK(reader::icons::kFolder.h == 39);
+  // The third size of the book, and it fills the row slot's 44px width exactly --
+  // which is the point of it: the folder above it in the same list is 44 wide and
+  // a 25px book read lighter beside it. Square, because the drawing's viewBox is.
+  CHECK(reader::icons::kBookRow.w == 44);
+  CHECK(reader::icons::kBookRow.h == 44);
   CHECK(reader::icons::kBattery.w == 38);
   CHECK(reader::icons::kBattery.h == 21);
   // The action block's mark is the one non-square mark in the button set: the
@@ -127,6 +133,59 @@ TEST_CASE("every mark that can appear in a hint bar shares one box") {
     CHECK(i->h == bar[0]->h);
     CHECK(i->w == i->h);  // and each is square
   }
+}
+
+TEST_CASE("the two marks a Library row can draw are matched in STROKE, not in box") {
+  // THE DESIGN CLAIM THAT EARNED kBookRow, and neither a size nor a placement
+  // assertion can see it. A folder row's mark fills the slot's 44px width and a
+  // book row's used to be kBook at 25px, so a book read distinctly lighter than
+  // the folder one row above it in the same column -- an asymmetry that was never
+  // designed, only which assets happened to exist.
+  //
+  // MATCHED BY STROKE RATHER THAN BY BOX, because these two marks have different
+  // aspects (44x39 against 44x44) and different viewBoxes (26 units against 16),
+  // so "the same weight" can only mean the stroke. The boards say
+  // `stroke-width: 1.8` over 26 units and `1.1` over 16, which at 44px is 3.05 and
+  // 3.03 device px.
+  //
+  // MEASURED ON THE BITMAPS, WHICH IS WHAT THE PANEL SHOWS, and in coverage rather
+  // than in inked cells: a 3.03px stroke that is not pixel-aligned lands on FOUR
+  // cells at partial coverage, so counting cells reports 4 for one mark and 3 for
+  // another that are really 0.02px apart. The mass of the leading inked run on a
+  // row -- summed coverage, in thirds of a whole ink pixel -- is the stroke's own
+  // width whatever phase it landed on. Taken over the middle half of the rows, so
+  // every sampled row crosses one vertical stroke and neither the tab on the
+  // folder nor the splay at the foot of the book is in it.
+  auto strokeThirds = [](const reader::Icon& i) {
+    const int y0 = i.h / 4, y1 = i.h - i.h / 4;
+    int total = 0;
+    for (int y = y0; y < y1; ++y) {
+      int x = 0;
+      while (x < i.w && reader::coverage(i, x, y) == 0) ++x;
+      while (x < i.w && reader::coverage(i, x, y) > 0) total += reader::coverage(i, x, y), ++x;
+    }
+    REQUIRE(y1 > y0);
+    return total / (y1 - y0);
+  };
+  const int folder = strokeThirds(reader::icons::kFolder);
+  const int bookRow = strokeThirds(reader::icons::kBookRow);
+  const int book = strokeThirds(reader::icons::kBook);
+  CAPTURE(folder);
+  CAPTURE(bookRow);
+  CAPTURE(book);
+  // Both are 9 thirds -- 3.0px -- on this instrument. The tolerance is one third of
+  // a pixel rather than zero, because the two strokes are 0.02px apart in the SVG
+  // and which cell phase they quantise onto is not something a board declares.
+  CHECK(bookRow - folder <= 1);
+  CHECK(folder - bookRow <= 1);
+  // AND THE 25px ASSET IS THE NEGATIVE CONTROL, so this test says something the
+  // tolerance above could otherwise be satisfied by accident: kBook's stroke is
+  // 2.19 device px, which is 7 thirds, so it misses the folder by more than the
+  // tolerance in the direction the reader could see. This is the assertion that
+  // fails if the row goes back to drawing the smaller asset -- and it is stated
+  // here, on the assets, because the row's own tests measure a mark's box and its
+  // centring, and kBook passes both of those.
+  CHECK(folder - book >= 2);
 }
 
 TEST_CASE("the hold ring is the dot drawn hollow, not the dot") {

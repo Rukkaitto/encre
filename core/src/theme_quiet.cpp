@@ -13,12 +13,13 @@
 namespace reader {
 
 namespace {
-// The board's own numbers. The cover shrank from 156x234 to 128x192 when the pt
-// type ramp landed: at legible sizes the stats column beside it needs the width,
-// and a 234px-tall cover no longer bounded that column's height anyway.
-constexpr int kCoverW = 112;
-constexpr int kCoverH = 168;
-constexpr int kGutter = 16;
+// HOME HAS NO COVER. `kCoverW`/`kCoverH` (112x168) and `kGutter` (16) were the
+// board's numbers for a `.dither-dots` panel standing in for a cover image, and
+// design/Main.dc.html has dropped it -- so they are gone rather than left with no
+// reader, which is the shape this project has found twice from two directions
+// (ListRow::trackingEm1000, readerBookTitle_). The reading column now takes the
+// whole content width; `kCoverTopGap` stays, because it is the block's own top
+// padding and not the cover's.
 constexpr int kBlockH = 72;
 // The action block's own `padding: 0 20px`, which insets its label and its mark
 // from the block's edges rather than from the screen margin.
@@ -120,22 +121,25 @@ std::string bookCountLabel(int n) {
   return std::to_string(n) + (n == 1 ? " BOOK" : " BOOKS");
 }
 
-// A dithered stand-in until Phase 3 decodes real cover images: a bordered panel,
-// and nothing else. The board used to reverse the title out of a filled strip
-// along the bottom; at the pt ramp's sizes that strip duplicated the title
-// already set beside the cover and ran into the stats column, so the board
-// dropped it and the cover is now a plain panel.
+// NO drawCoverPlaceholder ANY MORE, AND NO CALLER LEFT TO WANT ONE. It drew a
+// dithered stand-in for a cover image -- `ditherRect` at level 1 inside a 2px
+// `outlineRect` -- and it served all three of this firmware's placeholder slots
+// in turn: Home's 112x168, the Library row's 44x64 (which drew its own, inline)
+// and Book details' 120x180, the last to go. A slot with nothing in it is not a
+// promise the device keeps: nothing decodes a cover into one, and the one screen
+// that does decode a cover paints it FULL-BLEED (see renderSleep) rather than
+// into a box.
 //
-// The size is the caller's: Home draws 112x168 and Book details 120x180, both
-// with the same 2px border and the same tint, so this takes the box rather than
-// each screen growing its own copy of the border-and-dither.
-void drawCoverPlaceholder(Framebuffer& fb, int x, int y, int w, int h) {
-  // Level 1, not 2: the board's `.dither-dots` is a 4px-pitch radial-gradient
-  // dot, roughly a fifth coverage. Level 2 is a 50% checkerboard, which reads as
-  // grey mesh rather than a sparse tint.
-  ditherRect(fb, x, y, w, h, 1);
-  outlineRect(fb, x, y, w, h, 2);
-}
+// WHAT REMOVING BOOK DETAILS' COST, since it is the one that was defended and
+// deferred once: the block's height was the COVER's 180px, because the field
+// column is shorter -- so the column's runs were free and losing one (the
+// subtitle) moved nothing. The height is the COLUMN's now. That is
+// renderBookDetails' business and the arithmetic is stated there.
+//
+// AND `ditherRect` HAS ONE PRODUCTION CALLER LEFT: renderSleep's full-panel
+// field. That is the caller kClustered's own comment now has to name -- the
+// tint-versus-edge argument for a clustered matrix is unchanged, but the
+// placeholder cover it used to cite as its example is gone.
 }  // namespace
 
 void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeViewModel& vm,
@@ -218,11 +222,17 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
 
   int y = drawHeaderBand(fb, fonts, "NOW READING", charge, &batteryMark, plane);
 
-  // Two columns: cover on the left, the reading state stacked on the right.
+  // ONE COLUMN. This was two -- a 112x168 placeholder cover on the left and the
+  // reading state stacked to its right -- and design/Main.dc.html has dropped the
+  // cover: it claimed a picture this screen does not have, in the most prominent
+  // slot on the screen whose whole job is to name the book being read, and it took
+  // 128px of a 480px panel away from the name to do it.
   y += kCoverTopGap;
-  drawCoverPlaceholder(fb, kMargin, y, kCoverW, kCoverH);
 
-  const int rightX = kMargin + kCoverW + kGutter;
+  // The column starts on the margin now, so `titleW` below picks up the cover's
+  // 112 and the gutter's 16. Derived from the margin rather than pinned, exactly
+  // as it was derived from the cover before.
+  const int rightX = kMargin;
   const Font& title = fonts[Role::Title700];
   // Body400, not Body500: the board's author line is `font-size: var(--t-body)`
   // with no font-weight, so it is CSS default 400. The ramp used to carry one
@@ -237,8 +247,9 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   // The stats column flows downward from its own top, with the board's gaps
   // between runs. It used to hang the numeral off the cover's *bottom* edge,
   // which worked only while the cover was the taller of the two columns: at the
-  // pt ramp the column is ~239px against a 192px cover, so that anchor drove the
-  // numeral up into the author line. Nothing here positions a run off kCoverH.
+  // pt ramp the column was ~239px against a 192px cover, so that anchor drove the
+  // numeral up into the author line. With the cover gone there is nothing left to
+  // anchor to even by mistake, which is worth knowing before adding a run here.
   int ry = y + kColPadTop;
   // The board sets the title in caps (text-transform: uppercase). Casing is a
   // presentation decision, so the theme applies it rather than the view-model
@@ -342,16 +353,20 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
                  titleW, Ink::Black, trackingEm(meta, kTightMetaEm), plane);
   ry += meta.lineHeight();
 
-  // The block is as tall as its taller column. The stats column now normally
-  // wins, but keying off whichever is taller keeps a short view model (no
-  // chapter label, a one-digit percentage) from letting the progress bar ride up
-  // over the cover's bottom edge.
-  // The board gives the stats column `padding: 2px 0` -- both edges, not just the
-  // top -- and that column is the taller of the two, so it sets the section's
-  // height. Omitting the bottom padding lands everything below it 2px high.
+  // The block is as tall as its ONE column, where it used to be as tall as
+  // whichever of two was taller. With the cover gone there is no second column to
+  // compare against and no 168px floor under the block: a short view model (no
+  // chapter label, a one-digit percentage) simply makes the block shorter, and
+  // everything below it moves up with it. That floor was never reached in
+  // practice anyway -- the comment above records the column at ~239px against a
+  // 192px cover -- so this is the removal of an inert `max`, not a behaviour
+  // change dressed as one.
+  //
+  // The board gives the column `padding: 2px 0` -- both edges, not just the top --
+  // so the bottom 2px is charged here. Omitting it lands everything below 2px
+  // high, which is a defect this screen has shipped once.
   ry += kColPadTop;
-  const int coverBottom = y + kCoverH;
-  y = (ry > coverBottom ? ry : coverBottom) + kBlockGap;
+  y = ry + kBlockGap;
 
   // Progress bar spans the usable width.
   const int barW = fb.width() - 2 * kMargin;
@@ -748,16 +763,19 @@ constexpr int kBookErrorIconGap = 12;
 
 // --- design/BookDetails.dc.html ---------------------------------------------
 //
-// Its cover is bigger than Home's -- 120x180 against 112x168 -- because it is the
-// subject of the screen rather than a thumbnail beside a stats column. The rest
-// is the board's own box model: the block's `padding: 24px 24px 20px 24px` and
-// `gap: 20px`, the text column's `padding-top: 4px` and `gap: 6px`, the
-// `line-height: 1.1` on the title, and the `border-top: 2px` above the fields.
-constexpr int kDetailsCoverW = 120;
-constexpr int kDetailsCoverH = 180;
+// The board's own box model: the block's `padding: 24px 24px 20px 24px`, the text
+// column's `padding-top: 4px` and `gap: 6px`, the `line-height: 1.1` on the
+// title, and the `border-top: 2px` above the fields.
+//
+// NO kDetailsCoverW/H AND NO kDetailsGutter. They were the 120x180 placeholder
+// cover and the block's `gap: 20px` that separated it from the column; the cover
+// is gone from the board and the gap went with it, a flex gap having nothing to
+// separate once one child is left. Removed rather than left unused -- an unread
+// constant is the `ListRow::trackingEm1000` shape, a value with no consumer that
+// reads as capability. A real decoded cover here would be a new box on the board
+// first, so it would bring its own numbers.
 constexpr int kDetailsPadTop = 24;
 constexpr int kDetailsPadBottom = 20;
-constexpr int kDetailsGutter = 20;
 constexpr int kDetailsColPadTop = 4;
 constexpr int kDetailsColGap = 6;
 constexpr int kDetailsTitleLineH = 46;  // round(1.1 * 42)
@@ -1080,11 +1098,10 @@ void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
   const int bandH = drawHeaderBand(fb, fonts, "ABOUT THIS BOOK", vm.format, nullptr, plane);
   int y = bandH;
 
-  // The cover and the title column, `align-items: flex-start` -- so the column
-  // starts at the block's top rather than being centred against a cover more than
-  // twice its height.
+  // The title column, and it is the block's only child now -- the placeholder
+  // cover that used to open the row is gone, and `align-items: flex-start` no
+  // longer has a taller sibling to start the column against.
   y += kDetailsPadTop;
-  drawCoverPlaceholder(fb, kMargin, y, kDetailsCoverW, kDetailsCoverH);
 
   const Font& title = fonts[Role::Title700];
   // Body400 and Label400: both runs are `font-size: var(--t-...)` with no
@@ -1103,7 +1120,10 @@ void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
   int rowsH = 0;
   for (int i = 0; i < rows; ++i) rowsH += detailRowHeight(i != rows - 1);
 
-  const int colX = kMargin + kDetailsCoverW + kDetailsGutter;
+  // The full width now. The cover took `kDetailsGutter` with it, because a flex
+  // `gap` is BETWEEN items and one child has nothing for it to separate --
+  // renderBookError's cut slab took its own gap the same way.
+  const int colX = kMargin;
   const int colW = fb.width() - colX - kMargin;
   int cy = y + kDetailsColPadTop;
 
@@ -1118,16 +1138,36 @@ void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
   // details a fixed single-screen summary, so the field rows and the hint bar do
   // not move and the NAME yields. The bound is derived -- the room the block has
   // is the canvas less the band, the block's own padding, the rule, the rows and
-  // the bar; the column's other two lines and its padding are fixed; what is left,
+  // the bar; the column's other line and its padding are fixed; what is left,
   // divided by the title's line box, is how many lines the title may have. That is
-  // 3 on both panels today (235px of block room on the X4, 227 on the X3, against
-  // 82px of fixed column and a 46px line box), and it is 3 rather than 2 because
-  // the cover is 180px tall and absorbs the first two lines for free -- a 1- or
-  // 2-line title moves nothing on this screen at all.
+  // 5 on both panels today (300px of block room on the X4, 292 on the X3, against
+  // 47px of fixed column and a 46px line box).
+  //
+  // TWO QUANTITIES, AND THEY ARE NOT ONE NUMBER -- the same split the sleep card's
+  // chapter reserve is. `blockRoom` is a BUDGET and it comes from the CANVAS: the
+  // band above it and the rule, rows and bar below it, none of which depends on
+  // what the block ends up being. The block's actual HEIGHT is `cy`, what the
+  // column really took, and it is <= blockRoom by construction. So the title's
+  // budget is NOT self-referential even though the block's height is now the
+  // column's: the budget is measured against the canvas, and the height is a
+  // result. Do not collapse them -- a budget derived from the height would be a
+  // circle, and a height taking the budget would leave the field rules standing
+  // wherever the tallest possible title would have put them.
+  //
+  // THIS COMMENT SAID "3 on both panels today (235px ... 227)" AND BOTH FIGURES
+  // WERE STALE: 235 is the SIX-row board's room, and the `Added` row went. Read
+  // them off the arithmetic below rather than from here, which is why the terms
+  // are named.
   const int blockRoom = fb.height() - (bandH + kDetailsPadTop) -
                         (kDetailsPadBottom + kDetailsRuleH + rowsH + hintBarHeight(fonts, hints));
-  const int columnFixedH = kDetailsColPadTop + kDetailsColGap + author.lineHeight() +
-                           kDetailsColGap;
+  // ONE kDetailsColGap, NOT TWO, AND THAT CORRECTION IS LOAD-BEARING NOW. The
+  // board's column is a flex column with `gap: 6px`, and a gap is BETWEEN items --
+  // so a title and an author cost ONE gap, not one each. This expression carried
+  // two while the cover set the block's height, where over-reserving 6px only made
+  // the title's budget conservative and nothing on the glass could see it. With
+  // the height now the column's, the second gap would draw every rule below the
+  // block 6px lower than the board's.
+  const int columnFixedH = kDetailsColPadTop + kDetailsColGap + author.lineHeight();
   int maxTitleLines = (blockRoom - columnFixedH) / kDetailsTitleLineH;
   if (maxTitleLines < 1) maxTitleLines = 1;
 
@@ -1148,17 +1188,27 @@ void QuietTheme::renderBookDetails(Framebuffer& fb, const FontSet& fonts,
   cy += kDetailsColGap;
   drawText(fb, author, colX, baselineIn(author, cy, author.lineHeight()), vm.author, Ink::Black,
            {}, plane);
-  cy += author.lineHeight() + kDetailsColGap;
+  // NO TRAILING GAP. This read `cy += author.lineHeight() + kDetailsColGap`, and
+  // the author is the column's LAST run -- a flex gap sits between items, so there
+  // is nothing below it for a gap to separate. See columnFixedH above for why the
+  // spare 6px was invisible until now.
+  cy += author.lineHeight();
   // NO SUBTITLE RUN. It drew a field no book carries -- and removing it also gives the
   // TITLE its line back, because the budget below is the block's room less the column's
   // FIXED runs, and the subtitle was one of them.
 
-  // The block is as tall as its taller column plus the block's own bottom
-  // padding. Keyed on whichever is taller rather than on the cover, so a book
-  // with a long title -- or Phase 3's wrapped one -- pushes the fields down
-  // instead of running into them.
-  const int coverBottom = y + kDetailsCoverH;
-  y = (cy > coverBottom ? cy : coverBottom) + kDetailsPadBottom;
+  // THE BLOCK IS AS TALL AS ITS COLUMN, plus the block's own bottom padding, and
+  // that is the whole consequence of the placeholder cover going. It used to be
+  // `max(cy, coverBottom)` -- and the cover's 180px won for every title the screen
+  // can draw, so the block's height was a CONSTANT and the column's runs were free.
+  // Each run in it costs its line box now, and the rule below moves with them: the
+  // board puts it at 203 for a one-line title (66 band + 24 padTop + 4 colPadTop +
+  // 46 title + 6 gap + 37 author + 20 padBottom) where the cover put it at 290.
+  //
+  // A LONG TITLE STILL PUSHES THE FIELDS DOWN rather than running into them, which
+  // is what the max used to be credited with and is really maxTitleLines' doing:
+  // the wrap is clamped to the room the block has, so the fields cannot be reached.
+  y = cy + kDetailsPadBottom;
 
   fb.fillRect(0, y, fb.width(), kDetailsRuleH, false);
   y += kDetailsRuleH;

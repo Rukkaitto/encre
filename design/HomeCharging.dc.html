@@ -23,7 +23,6 @@
     }
     body { margin: 0; background: #ffffff; }
     a { color: #000000; } a:hover { color: #000000; }
-    .dither-dots { background-color: #ffffff; background-image: radial-gradient(circle, #000000 1.1px, transparent 1.3px); background-size: 4px 4px; }
   </style>
 </helmet>
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
@@ -61,8 +60,12 @@
     </div>
   </div>
 
-  <div style="display: flex; gap: 16px; padding: 30px 24px 0 24px;">
-    <div class="dither-dots" style="width: 112px; height: 168px; border: 2px solid #000000; box-sizing: border-box; flex-shrink: 0;"></div>
+  <!-- NO COVER, and the `gap` went with it. This is Main.dc.html's block with a
+       charging mark in the band, so it takes Main's decision verbatim -- see the
+       note there for why a placeholder cover is a false claim rather than a
+       missing feature. The two boards must agree: they are ONE screen and one
+       renderHome, differing only in which battery mark the band draws. -->
+  <div style="display: flex; padding: 30px 24px 0 24px;">
     <div style="display: flex; flex-direction: column; justify-content: flex-start; gap: 22px; flex-grow: 1; min-width: 0; padding: 2px 0;">
       <div style="display: flex; flex-direction: column; gap: 5px;">
                 <!-- IT WRAPS, and it used to elide. `text-overflow: ellipsis` with

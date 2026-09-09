@@ -267,10 +267,16 @@ int drawHintBar(Framebuffer& fb, const FontSet& fonts, const Hint hints[4],
 
 // A rectangular outline of thickness `t`, as four fills, interior untouched --
 // the treatment every bordered box on the boards shares: the sleep card and its
-// badge, the cover placeholder, an unfocused action block, the outlined prompt
-// button, the scroll rail's track, a book thumb's border, an overlay panel's
-// border. `white` is the focused book thumb's case, a paper border on an inked
-// row. NOT for a box whose interior must be painted (Home's progress bar fills
+// badge, an unfocused action block, the outlined prompt button, the scroll
+// rail's track and an overlay panel's border. It also drew the three placeholder
+// covers' 1px and 2px borders and a focused book thumb's paper border on an
+// inked row, and all four of those callers are gone -- so `white` has NO
+// PRODUCTION CALLER LEFT, in the shape ditherRect's `Ink` is recorded in.
+// Checked rather than assumed: all eight surviving call sites in core/src take
+// the default, and test_components.cpp is the only thing that passes true. Kept
+// as tested capability, since a paper border on an inked ground is a treatment
+// the boards will ask for again.
+// NOT for a box whose interior must be painted (Home's progress bar fills
 // then hollows): an outline deliberately leaves the middle alone.
 void outlineRect(Framebuffer& fb, int x, int y, int w, int h, int t, bool white = false);
 
@@ -464,7 +470,7 @@ int drawBadge(Framebuffer& fb, const GlyphSource& font, std::string_view label, 
 // then either a right-aligned value or a disclosure chevron.
 //
 //   padding: 11px 24px; gap: 16px; border-bottom: 1px solid
-//   thumbnail  44x64      the dithered cover placeholder, or the folder mark
+//   thumbnail  44x64      the 44x44 book or folder mark, centred in the slot
 //   line 1     --t-body   500, or 700 when the row is focused; no tracking
 //   line 2     --t-meta   400 at letter-spacing 0.10em
 //   value      --t-value  700, right-aligned on the margin
@@ -480,12 +486,19 @@ int drawBadge(Framebuffer& fb, const GlyphSource& font, std::string_view label, 
 // iconTopIn, centreIn -- and that is the part a fidelity bug lives in.
 inline constexpr int kBookRowPadY = 11;    // the board's `padding: 11px 24px`
 inline constexpr int kBookRowRuleH = 1;    // its `border-bottom: 1px solid`
+// The 44x64 SLOT, which both row kinds centre their mark in. It survives the
+// placeholder cover's removal because it is what `bookRowContentH` takes the max
+// with, so it sets the row's height and the whole list's geometry -- not because
+// anything is drawn at 64 tall. Both marks now fill its WIDTH exactly (kFolder is
+// 44x39, kBookRow 44x44), so the only slack they are centred in is vertical.
 inline constexpr int kBookThumbW = 44;     // `width: 44px; height: 64px`
 inline constexpr int kBookThumbH = 64;
 inline constexpr int kBookThumbGap = 16;   // the row's `gap: 16px`
 inline constexpr int kBookLineGap = 3;     // the text column's `gap: 3px`
-inline constexpr int kBookFocusBorder = 2;  // a focused cover's white border
-inline constexpr int kBookCoverBorder = 1;  // an unfocused one's black border
+// kBookFocusBorder (2) and kBookCoverBorder (1) were the placeholder cover's two
+// border widths -- the board's `border: 2px solid #ffffff` on a focused row against
+// `border: 1px solid #000000` elsewhere. The placeholder is gone and a mark has no
+// border, so they are gone with it rather than left as constants nothing reads.
 
 // What one row says. A struct because there are four content fields and two
 // pieces of state, and six positional arguments at a call site is how a title

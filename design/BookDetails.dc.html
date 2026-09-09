@@ -23,8 +23,10 @@
     }
     body { margin: 0; background: #ffffff; }
     a { color: #000000; } a:hover { color: #000000; }
-    .dither-dots { background-color: #ffffff; background-image: radial-gradient(circle, #000000 1.1px, transparent 1.3px); background-size: 4px 4px; }
-    .dither-dots-inv { background-color: #000000; background-image: radial-gradient(circle, #ffffff 1.1px, transparent 1.3px); background-size: 4px 4px; }
+    /* NO `.dither-dots` OR `.dither-dots-inv` HERE ANY MORE. They existed for the
+       placeholder cover below, which is gone -- Main.dc.html and Library.dc.html
+       dropped the same two declarations with theirs. `.dim-veil` stays: it was
+       declared and unused before any of this and is not this change's business. */
     .dim-veil { background-image: radial-gradient(circle, #ffffff 1.3px, transparent 1.5px); background-size: 3px 3px; }
   </style>
 </helmet>
@@ -36,15 +38,53 @@
 </div>
   <!-- The one screen where a long name WRAPS instead of truncating: this is the
        page about the book, so its name is the content and an ellipsis here hides
-       the thing the reader came to read. The column therefore takes the width the
-       cover leaves (`flex: 1; min-width: 0`) and the title breaks inside a word
-       when it has to -- a real filename is one unbreakable word.
+       the thing the reader came to read. The column takes the full width
+       (`flex: 1; min-width: 0`) and the title breaks inside a word when it has to
+       -- a real filename is one unbreakable word.
        `min-height: 0; overflow: hidden` on the block is the other half of that
        decision: Book details is a fixed one-screen summary (spec 4.1b), so when a
        name is tall enough to push the field rows off the bottom it is the NAME
-       that yields, not the rows and not the hint bar. -->
-  <div style="display: flex; gap: 20px; padding: 24px 24px 20px 24px; align-items: flex-start; min-height: 0; overflow: hidden;">
-    <div class="dither-dots" style="width: 120px; height: 180px; border: 2px solid #000000; box-sizing: border-box; flex-shrink: 0;"></div>
+       that yields, not the rows and not the hint bar.
+
+       NO PLACEHOLDER COVER, and it took the block's HEIGHT with it. A 120x180
+       `.dither-dots` panel opened this row -- a stand-in for a cover image -- and
+       it was the last of the three (Home's 112x168 and the Library row's 44x64
+       went first). A slot with nothing in it is not a promise the device keeps: no
+       screen decodes a cover here, and the one that does decode one (the sleep
+       screen) paints it full-bleed rather than into a slot.
+
+       WHAT SETS THIS BLOCK'S HEIGHT NOW IS THE COLUMN, which is the taller of the
+       two answers this block has ever had and is now the only one. The cover was
+       180px and the column is shorter, so the height used to be the COVER's and
+       every run in the column was free -- which is why removing the subtitle moved
+       nothing. It is the column's own content now, so each run in it costs its
+       line box and the rule below moves with it.
+
+       THE `gap: 20px` WENT WITH THE COVER. A flex `gap` is BETWEEN items, so one
+       child has nothing for it to separate; keeping it would leave 20px of dead
+       air. Same call as BookErrorMemory's cut slab, whose gap went with the slab.
+
+       BOTH LINE BOXES IN THIS COLUMN BECAME LOAD-BEARING AND NEITHER IS PINNED,
+       WHICH WAS MEASURED RATHER THAN ASSUMED. They were slack while the cover set
+       the height -- the block is what the rule below it sits on, so a pixel of
+       Chrome-versus-firmware disagreement here would now move every rule on the
+       screen. Sleep's card and Peek's panel both had to STATE their line box for
+       exactly that, so the same fix was tried here first: `line-height: 46px` on
+       the title (what `1.1` resolves to in the firmware, against Chrome's
+       fractional 46.2) and `line-height: 37px` on the author (the face's own at
+       14pt, against Chrome's `normal`). It moved **0 pixels at both geometries**.
+       So Chrome resolves `normal` on this face to the face's own 37, and 46.2
+       rasterises this block's edge exactly where 46 does -- there is no
+       disagreement to close, and pinning one would break this file's first
+       invariant (derive from the box model; never pin a number the board computes)
+       to buy nothing. Left as ratios deliberately.
+
+       WHAT IS NOT COVERED BY THAT MEASUREMENT, because no board state renders it:
+       the fraction ACCUMULATES on a multi-line title, so a 5-line name puts
+       Chrome's block edge ~1px below the firmware's. The specimen here is one line
+       and the wrapped case is pinned by goldens rather than by a board, which is
+       where a long title's register has always been checked. -->
+  <div style="display: flex; padding: 24px 24px 20px 24px; align-items: flex-start; min-height: 0; overflow: hidden;">
     <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 4px; flex: 1; min-width: 0;">
       <div style="font-size: var(--t-title); font-weight: 700; line-height: 1.1; overflow-wrap: anywhere;">Dubliners</div>
       <div style="font-size: var(--t-body);">James Joyce</div>

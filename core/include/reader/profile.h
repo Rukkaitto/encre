@@ -29,7 +29,7 @@ namespace reader {
 enum class Phase : uint8_t {
   Fill,    // Framebuffer::fillRect -- panels, bands, focus bars, rules
   Veil,    // veilRect -- the whole-frame stipple under an overlay
-  Dither,  // ditherRect -- tints, the cover placeholder
+  Dither,  // ditherRect -- tints; the sleep screen's full-panel field is the one caller
   Glyph,   // the coverage blit, one span per RUN of text
   Icon,    // drawIcon
   Count_

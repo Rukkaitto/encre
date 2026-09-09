@@ -1,6 +1,12 @@
 #include "reader/components.h"
 
-#include "reader/dither.h"
+// reader/dither.h is deliberately NOT included any more: the book row's
+// placeholder cover was this file's only ditherRect caller. Dropping it is safe
+// under both toolchains rather than only under this one -- dither.h's sole include
+// is reader/text.h, which this file includes directly two lines down -- which is
+// the check worth making here, since a transitively-satisfied include is a bug
+// only the OTHER compiler can see (test_scalablefont.cpp's missing <cstring>
+// compiled on macOS for months and failed on the first Linux build).
 #include "reader/framebuffer.h"
 #include "reader/text.h"
 
@@ -672,31 +678,38 @@ int drawBookRow(Framebuffer& fb, const FontSet& fonts, int y, const BookRowConte
 
   const int contentTop = y + kBookRowPadY;
 
-  // The thumbnail. A folder gets the mark, centred in the thumbnail's box on
-  // both axes; a book gets the dithered cover placeholder Home already draws,
-  // reversed out when the row is focused.
+  // The thumbnail slot: a folder gets the folder mark and a book gets the book
+  // mark, both centred in the slot on both axes and reversed out on a focused row.
   //
-  // The mark is centred in the row's CONTENT box directly rather than in the
-  // 44x64 box centred inside it. Concentric boxes compose exactly in real
-  // arithmetic -- the board's 91 is 78.5 + 12.5 and also 77 + 14 -- so nesting
-  // the two would only add a second rounding for the same answer.
-  if (row.isFolder) {
-    const Icon& mark = icons::kFolder;
-    drawIcon(fb, mark, centreIn(kMargin, kBookThumbW, mark.w),
-             iconTopIn(contentTop, contentH, mark.h), ink, plane);
-  } else {
-    const int coverY = iconTopIn(contentTop, contentH, kBookThumbH);
-    // Level 1, as Home's cover is: the board's `.dither-dots` is a 4px-pitch
-    // radial-gradient dot, about a fifth coverage. Ink::White on a focused row
-    // is the board's `.dither-dots-inv` -- the same dot on the same grid, drawn
-    // in paper on the fill that is already there.
-    ditherRect(fb, kMargin, coverY, kBookThumbW, kBookThumbH, 1, ink);
-    // 2px when focused, 1px otherwise, which is the board's own asymmetry
-    // (`border: 2px solid #ffffff` against `border: 1px solid #000000`): a white
-    // hairline on black needs the extra pixel to read at all on this glass.
-    const int b = focused ? kBookFocusBorder : kBookCoverBorder;
-    outlineRect(fb, kMargin, coverY, kBookThumbW, kBookThumbH, b, /*white=*/focused);
-  }
+  // ONE EXPRESSION CHOOSING THE MARK, NOT TWO BRANCHES DRAWING IT. A book row used
+  // to draw a 44x64 `ditherRect` plus an `outlineRect` -- the placeholder cover --
+  // where a folder row drew a bare centred mark, so the two kinds of row placed
+  // their contents by two different pieces of arithmetic that were free to drift.
+  // design/Library.dc.html has dropped the placeholder (it claimed a picture the
+  // row does not have, and six identical grey blocks down the left edge carried no
+  // information), which makes a book row the folder row with a different mark --
+  // and that is now what the code says.
+  //
+  // THE SLOT STAYS 44x64 THOUGH NEITHER MARK IS THAT TALL -- kFolder is 44x39 and
+  // kBookRow 44x44. `bookRowContentH` is `max(kBookThumbH, the text column)`, so the
+  // slot sets the row's height and therefore the whole list's geometry; sizing it to
+  // whichever mark is taller would move every row on every Library screen for a
+  // reason that has nothing to do with rows.
+  //
+  // kBookRow, NOT kBook: the two marks in this column are matched in STROKE now, so
+  // a book does not read lighter than the folder one row above it. That is a second
+  // 44px asset rather than a resize of the 25px one, because kBook at 25px is still
+  // the `READ` hint's mark on three Home boards -- kBookLarge's split at 112px, one
+  // size down. See design/Library.dc.html for the stroke arithmetic and for which
+  // instance on that board the generator reads.
+  //
+  // The mark is centred in the row's CONTENT box directly rather than in the 44x64
+  // box centred inside it. Concentric boxes compose exactly in real arithmetic --
+  // the board's 91 is 78.5 + 12.5 and also 77 + 14 -- so nesting the two would only
+  // add a second rounding for the same answer.
+  const Icon& mark = row.isFolder ? icons::kFolder : icons::kBookRow;
+  drawIcon(fb, mark, centreIn(kMargin, kBookThumbW, mark.w),
+           iconTopIn(contentTop, contentH, mark.h), ink, plane);
 
   // The text column, centred in the content box as its own flex item -- which is
   // a no-op while the column is the taller of the two, and is what keeps the

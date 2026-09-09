@@ -9,6 +9,13 @@ namespace reader {
 namespace {
 // A clustered-dot 4x4 halftone, not a Bayer matrix.
 //
+// ITS ONE PRODUCTION CALLER IS renderSleep's FULL-PANEL FIELD, and this comment
+// used to justify itself by the placeholder COVER instead -- which is gone
+// (Home's, the Library row's and Book details' in turn), so the example is
+// corrected here rather than the argument, which never depended on which caller
+// draws the tint. The sleep board declares the identical `.dither-field`, and at
+// 418,176 pixels it is by some distance the widest tint this firmware paints.
+//
 // The design's tint is one shape repeated on a grid:
 //
 //   radial-gradient(circle, #000 1.1px, transparent 1.3px); background-size: 4px 4px
@@ -19,8 +26,8 @@ namespace {
 // the wrong one here: at a quarter coverage Bayer inks four isolated single
 // pixels per 4x4 tile where the board inks one 2x2 blob. Isolated pixels read
 // heavier than a clustered dot of the same area (each one is surrounded by
-// contrast on all four sides), so the placeholder cover came out visibly denser
-// and grainier than the board's, at identical arithmetic coverage.
+// contrast on all four sides), so a dispersed tint came out visibly denser and
+// grainier than the board's, at identical arithmetic coverage.
 //
 // The cells are therefore ranked by distance from the tile's centre instead of
 // dispersed away from it, so ink grows outward as one dot:
