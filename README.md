@@ -207,6 +207,39 @@ after:
     make hooks         # commit-msg + pre-push, both bypassable with --no-verify
     make conventions   # run the same check by hand
 
+[Graft](https://github.com/trailhq/Graft) indexes this repo for coding agents.
+The graph is a local cache like `build/`, gitignored and regenerable; what is
+committed is the wiring in `.claude/`. On a fresh clone:
+
+    npm install -g @nanonets/graft
+    graft build
+
+**One of its six tools does not work here, and it is the one you would want
+most.** `graft callers <symbol>` answers nothing across files on this tree: a C++
+free function is declared in a header and defined in a `.cpp`, which makes the
+name ambiguous, and graft drops an ambiguous cross-file edge rather than guessing
+at it. Same-file edges are fine. So `callers` cannot give you a blast radius
+before a rename here — use `graft grep`, which is exhaustive and groups hits by
+the enclosing symbol. Measured against `drawBadge`, whose two call sites
+`CLAUDE.md` names: `grep` found both, `callers` found neither.
+
+**It says so rather than reporting a clean zero**, which is the only reason it is
+worth having: every such answer names the ambiguity and points at `graft grep`.
+An instrument that reports on less than it claims is worse than none, and this
+one does not.
+
+`graft build --lsp` is the documented fix for exactly this and **does not help**,
+so it is not worth rediscovering: `clangd` is on `PATH` and a
+`compile_commands.json` for the desktop build comes from
+`cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, and the edges were
+unchanged either way. The ambiguity rule sits above the LSP layer. `shell/` has
+no desktop compile database at all, so nothing there could have been covered.
+
+What does work is the rest of it — `graft ask "<question>" --source` locates a
+flow and inlines the code, `graft skeleton <file>` gives a file's API, `graft
+map` orients. Telemetry is anonymous and on by default, a machine-level setting
+rather than anything committed here; `graft telemetry disable` turns it off.
+
 Where to read next: `CLAUDE.md` for how the thing actually behaves and why,
 `docs/superpowers/plans/2026-08-20-v1-roadmap.md` for the phases, and
 `docs/superpowers/specs/2026-08-20-ereader-firmware-v1-design.md` for the spec.
