@@ -428,3 +428,179 @@ TEST_CASE("the ladder's thresholds are ordered and X4-reachable") {
   static_assert(BatteryTracker::kResumePercent <= 20, "");
   CHECK(true);
 }
+
+// --- The cadence (#96) --------------------------------------------------------
+//
+// WHAT THESE DEFEND IS THE WORD `CONTINUOUS`. Both dwells above are timestamp
+// arithmetic over a sequence of samples, so a longer interval between samples does
+// not lengthen a dwell -- it thins it. At a cadence equal to the dwell, "60 s of
+// unbroken not-charging" becomes "two samples 60 s apart", which is a claim about
+// two instants and not about a minute. So the cadence is not a free parameter: it
+// is bounded by the dwells, and these cases are what say so.
+//
+// The interval also has to be tested as a CLOSED LOOP -- the tracker choosing the
+// cadence at which it is next fed -- because that is what the shell does, and the
+// property the design rests on (the critical dwell is never sampled slowly) is a
+// fact about the loop rather than about either half of it.
+
+TEST_CASE("the slow cadence cannot span either dwell in one gap") {
+  // THE BOUND ON kPollSlowMs, and the reason #96's "minutes" is not taken: 60 s is
+  // where minutes start and kUnlatchMs IS 60 s, so a minute-long interval makes the
+  // longest dwell here satisfiable by a single gap between two samples.
+  static_assert(BatteryTracker::kPollSlowMs < BatteryTracker::kUnlatchMs, "");
+  static_assert(BatteryTracker::kPollFastMs < BatteryTracker::kPollSlowMs, "");
+  // And the fast cadence must put more than one sample inside the critical dwell,
+  // for the same reason one reading is not a flat pack.
+  static_assert(BatteryTracker::kPollFastMs * 2 <= BatteryTracker::kCriticalDwellMs, "");
+  CHECK(true);
+}
+
+TEST_CASE("slow is returned only while Normal with no band repaint to make") {
+  BatteryTracker t;
+  // A tracker that has never read anything is Normal, which is the boot state --
+  // and the boot paints Home, so the shell's first reading arrives with the band
+  // reachable and the fast cadence chosen.
+  CHECK(t.pollIntervalMs(true) == BatteryTracker::kPollFastMs);
+  CHECK(t.pollIntervalMs(false) == BatteryTracker::kPollSlowMs);
+
+  t.update(good(64), 0);
+  REQUIRE(t.level() == BatteryLevel::Normal);
+  CHECK(t.pollIntervalMs(true) == BatteryTracker::kPollFastMs);
+  CHECK(t.pollIntervalMs(false) == BatteryTracker::kPollSlowMs);
+}
+
+TEST_CASE("every rung below Normal polls at the cadence that shipped") {
+  // The banner, the critical dwell and the shutdown all sit downstream of the Low
+  // crossing, so none of them is slowed by this change -- whatever the caller says
+  // about the band.
+  BatteryTracker t;
+  t.update(good(BatteryTracker::kLowPercent), 0);
+  REQUIRE(t.level() == BatteryLevel::Low);
+  CHECK(t.pollIntervalMs(false) == BatteryTracker::kPollFastMs);
+  CHECK(t.pollIntervalMs(true) == BatteryTracker::kPollFastMs);
+
+  t.update(good(1), BatteryTracker::kPollFastMs);
+  t.update(good(1), BatteryTracker::kPollFastMs + BatteryTracker::kCriticalDwellMs);
+  REQUIRE(t.level() == BatteryLevel::Critical);
+  CHECK(t.pollIntervalMs(false) == BatteryTracker::kPollFastMs);
+  CHECK(t.pollIntervalMs(true) == BatteryTracker::kPollFastMs);
+}
+
+TEST_CASE("the critical dwell is never sampled at the slow cadence") {
+  // THE CLOSED LOOP, and the structural claim it proves: the critical run can only
+  // be armed by a reading that has already set level_ = Low, so the interval chosen
+  // AFTER it is fast by construction. Driven with the band unreachable throughout --
+  // a reader in a book on an X4, the slowest state there is -- and from a pack that
+  // is flat from the first reading, which is the worst case for the arming step.
+  BatteryTracker t;
+  uint32_t now = 0;
+  int steps = 0;
+  uint32_t armedAt = 0;
+  bool armed = false;
+  int slowGapsAfterArming = 0;
+  while (t.level() != BatteryLevel::Critical) {
+    REQUIRE(steps < 100);  // the loop must terminate, not merely not fail
+    const uint32_t interval = t.pollIntervalMs(/*bandRepaintPossible=*/false);
+    if (armed && interval != BatteryTracker::kPollFastMs) ++slowGapsAfterArming;
+    now += interval;
+    t.update(good(BatteryTracker::kCriticalPercent), now);
+    if (!armed && t.level() == BatteryLevel::Low) {
+      armed = true;
+      armedAt = now;
+    }
+    ++steps;
+  }
+  // NOT ONE SLOW GAP once the run is armed. This is the assertion the whole design
+  // rests on; if it ever fails, kCriticalDwellMs's "continuous" is being measured
+  // across intervals longer than the dwell itself (kPollSlowMs > kCriticalDwellMs).
+  CHECK(slowGapsAfterArming == 0);
+  // And the dwell itself is unchanged -- Critical lands exactly kCriticalDwellMs
+  // after the reading that armed the run, not sooner and not a slow interval later.
+  CHECK(now - armedAt == BatteryTracker::kCriticalDwellMs);
+  // The whole walk costs one slow interval (noticing Low) plus the dwell. That one
+  // interval is the entire latency #96 buys, and it is absorbed by the pack: the Low
+  // band runs from kLowPercent to kCriticalPercent, and on an X4 it is a whole 10%
+  // notch -- hours of discharge, which 30 s cannot skip.
+  CHECK(now == BatteryTracker::kPollSlowMs + BatteryTracker::kCriticalDwellMs);
+}
+
+TEST_CASE("a flat pack still reaches Critical if the cadence never speeds up") {
+  // FAIL-SAFE, NOT FAIL-DEPENDENT. The adaptive cadence is an optimisation, so a
+  // caller that ignored pollIntervalMs and polled slowly for ever must still shut
+  // the device down -- later, never not at all. Without this the safety mechanism
+  // would rest on the shell obeying an interval, which is the caller-list shape this
+  // project turns into a function rather than a rule someone remembers.
+  BatteryTracker t;
+  t.update(good(1), 0);
+  CHECK(t.level() == BatteryLevel::Low);
+  t.update(good(1), BatteryTracker::kPollSlowMs);
+  CHECK(t.level() == BatteryLevel::Critical);
+}
+
+TEST_CASE("one sagging reading cannot shut the device down at either cadence") {
+  // kCriticalDwellMs's own reason: a panel refresh is the heaviest load this device
+  // draws and the 0% anchor leaves headroom for that sag, so ONE low reading is not
+  // a flat pack. Asserted at BOTH cadences, because a cadence coarser than the dwell
+  // would let the sample after a sag complete a dwell the sag itself started.
+  // A plain array rather than a braced range-for: that form is specified in terms of
+  // std::initializer_list, so it wants <initializer_list> included, and this project
+  // has already paid once for an include that libc++ satisfies transitively and
+  // libstdc++ does not -- test_scalablefont.cpp's <cstring>, which compiled on macOS
+  // for months and failed on the first Linux build.
+  const uint32_t cadences[2] = {BatteryTracker::kPollFastMs, BatteryTracker::kPollSlowMs};
+  for (const uint32_t cadence : cadences) {
+    BatteryTracker t;
+    t.update(good(64), 0);
+    // The sag: one reading at the bottom of the ladder, taken under a waveform.
+    t.update(good(1), cadence);
+    CHECK(t.level() == BatteryLevel::Low);
+    // And the pack was fine all along.
+    t.update(good(64), cadence * 2);
+    CHECK(t.level() == BatteryLevel::Normal);
+    t.update(good(64), cadence * 3);
+    CHECK(t.level() == BatteryLevel::Normal);
+  }
+}
+
+TEST_CASE("the unlatch dwell needs more than one slow gap") {
+  // A CONFIRMED UNPLUG AT THE SLOW CADENCE, which is reachable: the shell chooses
+  // fast whenever the repaint could fire, but the latch's STATE keeps evolving off
+  // Home, where it cannot. Two gaps of kPollSlowMs, not one -- the first stamps the
+  // run and the second is still inside the dwell.
+  BatteryTracker t;
+  uint32_t now = 0;
+  t.update(good(64, false), now);  // seed: not charging
+  now += BatteryTracker::kPollSlowMs;
+  t.update(good(64, true), now);  // plug in -> latch
+  REQUIRE(t.takeRepaintRequest());
+  now += BatteryTracker::kPollSlowMs;
+  t.update(good(64, false), now);  // unplug seen; stamps the run
+  CHECK_FALSE(t.takeRepaintRequest());
+  now += BatteryTracker::kPollSlowMs;  // one slow gap: still short of 60 s
+  t.update(good(64, false), now);
+  CHECK_FALSE(t.takeRepaintRequest());
+  now += BatteryTracker::kPollSlowMs;  // two gaps: 60 s reached
+  t.update(good(64, false), now);
+  CHECK(t.takeRepaintRequest());
+}
+
+TEST_CASE("a dithering charge signal cannot unlatch at the slow cadence either") {
+  // The existing case for this runs at 2 s. At 30 s a PAIR of samples could
+  // legitimately both land on the not-charging side of a signal that flips every few
+  // seconds -- what stops the flicker there is that the run is BROKEN by any
+  // charging sample, and a dither produces those. Asserted rather than argued,
+  // because it is the one guarantee the slow cadence weakens by construction.
+  BatteryTracker t;
+  uint32_t now = 0;
+  t.update(good(100, false), now);
+  now += BatteryTracker::kPollSlowMs;
+  t.update(good(100, true), now);
+  REQUIRE(t.takeRepaintRequest());
+  // Alternating at the slow cadence, well past kUnlatchMs in wall-clock terms.
+  for (int i = 0; i < 20; ++i) {
+    now += BatteryTracker::kPollSlowMs;
+    t.update(good(100, i % 2 == 0), now);
+    CHECK_FALSE(t.takeRepaintRequest());
+  }
+  CHECK(now > BatteryTracker::kUnlatchMs);
+}

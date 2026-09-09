@@ -465,6 +465,52 @@ boards say, and names what drifted.
   banding on every wake. Conflating the two is easy and it looks like a panel
   fault rather than a state bug. It has disguised a crash loop and a bootloader hang as
   "nothing happened". Read the serial log before believing the panel.
+  - **AND IT CAME BACK, ON THE ONE SLEEP MODE THAT DOES NOT PAINT A COVER (#94).**
+    Reported off an X3 after a week of use: with Settings' `Shows` on **DETAILS** a
+    wake showed noisy banding where a cover showed a clean black flash. The
+    waking-paint block in `setup()` had re-introduced the call this bullet warns
+    about, as `if (!coverOnGlass) display.skipInitialResync();`, and **its argument
+    for the no-cover case was backwards**: it reasoned that the frame is the sleep
+    screen with one line changed, so "almost every pixel the garbage baseline calls
+    unchanged really is unchanged". **Which pixels a refresh calls unchanged is
+    decided by DTM1, not by the glass** — with DTM1 holding power-up garbage, the
+    set of pixels re-driven is unrelated to the set that differs, whatever the
+    frame is. `Uc8279Driver.cpp` says so where it picks the bank: **both** banks
+    diff against "the REAL previous frame in DTM1", and `BW_GC` "clears via the
+    true old->new transition, not a white baseline".
+  - **THE ASYMMETRY WAS NOT THE GRAYSCALE REBASE, WHICH IS THE FIRST THING TO
+    SUSPECT AND IS WRONG.** `cleanupGrayscaleBuffers` really does leave the
+    controller on a valid B/W baseline after a cover sleep, so a cover sleep and a
+    DETAILS sleep end in different controller states — and **neither survives**, because
+    a wake is a chip reset and `initController()` resets every one of those flags.
+    **No controller state crosses a sleep in either mode.** The whole asymmetry was
+    which branch of the wake paint ran.
+  - **AND THE CALL BOUGHT NOTHING, which is what made removing it a pure win rather
+    than a trade.** What it was for was a DU, and the DU was never reachable:
+    `displayStart`'s `useGc` is `(mode != Fast) || !_oldPlaneValid ||
+    _forceFullSyncNext || _initialFullsRemaining > 0`, an **OR** — and
+    `display.requestResync()` sets `_forceFullSyncNext` ~540 lines earlier in the
+    same `setup()`, with **no panel refresh in between** to clear it. So the GC bank
+    loaded either way and the assertion's only effect was to make `if
+    (!_oldPlaneValid)` false and **skip the DTM1 white seed**. It spent the one thing
+    that makes the clear clean and got no cheaper refresh for it. The
+    `_darkBackground` rewrite that would otherwise cover for a missing seed cannot
+    help: **`setBackgroundHint()` has no call site anywhere in this firmware**, so
+    that flag is false for its whole life.
+  - **NEITHER MODE ASSERTS A BASELINE BEFORE THAT PAINT NOW, AND BOTH ASSERT ONE
+    AFTER IT.** `skipInitialResync()` is right for a caller that has restored the
+    baseline first, and after `showOnePass` we have — we wrote the frame ourselves,
+    and `displayFinish` has already synced DTM1 to it. It goes there in both modes,
+    and `requestResync()` goes nowhere: zeroing the rest of the boot clear budget is
+    what keeps a wake to **one** flash, where forcing Home's GC as well would buy a
+    second. **A card with `fullOnTransition` on still gets two**, from Home's own
+    transition, and that is the pre-existing price rather than a new one.
+  - **NOTHING ON THE DESKTOP TOUCHES ANY OF IT.** All of it is driver state driven
+    from `shell/src/main.cpp`, which has no harness; `core/` has no notion of
+    `_oldPlaneValid`, and the wake paint does not even consult `fidelity()`. So the
+    suite says nothing, and **the mode asymmetry is the diagnostic** — see
+    `docs/on-device-smoke-checklist.md` §4.5, which walks both `Shows` settings
+    precisely because one of them passing is not evidence about the other.
 - **The SD card shares the display's SPI bus** (X3: MISO 7, CS 12) and
   `SDCardManager` does **no locking** — there is no mutex or semaphore anywhere in
   it. Its only shared-bus handling is in `begin()`, which drives the display CS
@@ -2972,7 +3018,12 @@ eventually be made differently in the two places.
 plug-in event to hook: `BoardProfile::usbDetect` is `20` on both Xteink profiles, set
 positionally with no comment, **nothing in the SDK reads it**, and on the X3 GPIO20 is
 the gauge's own SDA. So the shell polls `isCharging()` every 2 s while Home is on
-glass. The hazard is that the X3 has no charger IC, so `isCharging()` is
+glass — **and "while Home is on glass" is now also what BUYS the 2 s**, since #96
+made the cadence follow the state: `bandRepaintPossible()` is one of the two things
+that select `kPollFastMs`, so this latch is sampled at exactly the interval it was
+designed at wherever its repaint can reach the panel, and at `kPollSlowMs` where it
+cannot. See **the cadence** under the safety ladder for what that costs. The hazard
+is that the X3 has no charger IC, so `isCharging()` is
 `(int16_t)Current() > 0` -- **a bare sign test with no deadband** -- and plugged in at
 full charge is ~0 mA with a dithering sign, which is the state a device spends all
 night in. `BatteryTracker` answers it four ways: a rising edge (a plug-in), a first
@@ -3009,8 +3060,8 @@ refused as "already latched". Only the repaint itself is gated on
 deliberately: three grants was already a backstop against a hardware quirk this
 project cannot bench-test, not a promise of exactly one refresh per cycle.
 
-**The poll needs no `SpiBusGuard`**, and that is what makes 2 s affordable: it is I2C
-on the sensor bus and cannot race a panel refresh. It is gated on
+**The poll needs no `SpiBusGuard`**, and that is what makes even the fast cadence
+affordable: it is I2C on the sensor bus and cannot race a panel refresh. It is gated on
 `gChargingObservable`, which is **STICKY, NOT DECIDED FROM THE FIRST READING**: it is
 set by ANY reading that reports `chargingKnown`, because `readStatus()` reads SoC and
 charging as two independent I2C transactions, and deciding this from one sample would
@@ -3129,7 +3180,7 @@ succeed. See the badge paragraph under `ScreenId::BatteryEmpty`. **A reading wit
 `Low` has no dwell — the cost of being wrong there is one banner.
 
 **THE POLL RUNS ON EVERY SCREEN, WITH NO `gChargingObservable` GATE.**
-`pollBatteryLevel()` is `readBattery()`'s second caller, every 2 s in `loop()`'s
+`pollBatteryLevel()` is `readBattery()`'s second caller, in `loop()`'s
 `quiet` window; `refreshBatteryOnHome()` keeps both of its gates unchanged, because
 what it drives is Home's band and the charge-latch repaint. Neither of those gates can
 serve a safety mechanism: `homeOnGlass()` means a reader an hour into a book has had no
@@ -3137,14 +3188,136 @@ reading taken at all, and `gChargingObservable` is never true on an X4, so on th
 model nothing would ever read the gauge. Both callers go through one `gBattery.update()`,
 so the level and the band cannot disagree about the percent.
 
+**AND ITS CADENCE IS NOW ASKED FOR RATHER THAN FIXED (#96) — BECAUSE THE THREE
+CONSUMERS OF ONE `update()` DO NOT WANT ONE INTERVAL.** The ticket asked to push the
+interval "into the minutes" on the premise that *"polling is only used to show the low
+battery banner"*, and **that premise is incomplete in the way that decides the fix**.
+The same `gBattery.update()` serves:
+
+| consumer | tolerates |
+|---|---|
+| the `Low` banner | **minutes.** Being late costs one warning arriving late. |
+| `Critical` → `criticalShutdown()` | **not minutes.** It is `[[noreturn]]`: `saveReadingPosition("battery")`, paint `BatteryEmpty`, cut the rails. Every second of extra detection latency is a second in which a brownout beats the save, and the save is what `markSleeping()` then redeems. |
+| the charge latch | **not minutes.** Plugging in has to feel immediate, and `kUnlatchMs`'s dwell is the whole anti-flap design. |
+
+**AND THE INTERVAL IS WHAT BOTH DWELLS ARE MEASURED ACROSS, so a coarser cadence does
+not lengthen a dwell — it THINS it.** `kCriticalDwellMs` and `kUnlatchMs` are
+timestamp arithmetic over a *sequence of samples*, not sample counts: at a 60 s
+interval, `kUnlatchMs`'s "60 s of **CONTINUOUS** not-charging" degenerates into "two
+samples 60 s apart", which is a claim about two instants rather than about a minute.
+**That is the bound, and it is what the slow interval is derived from rather than
+picked.**
+
+So `BatteryTracker::pollIntervalMs(bandRepaintPossible)` answers from the STATE:
+
+- **`level() != Normal` → `kPollFastMs` (2000).** Everything downstream of the `Low`
+  crossing — the banner, the critical dwell, the shutdown — runs at exactly the
+  cadence that shipped. **THIS ARM IS STRUCTURAL, NOT A PREFERENCE:** the critical run
+  can only be armed by a reading that has already set `level_ = Low`, so the interval
+  chosen after it is fast **by construction** — and the critical dwell is therefore
+  never sampled at an interval longer than itself, which it could not survive
+  (`kPollSlowMs` is 30 s against a 10 s dwell).
+- **the band's repaint could reach the glass → `kPollFastMs`.** That is
+  `bandRepaintPossible()` — `gChargingObservable && homeOnGlass()` — so `kUnlatchMs`'s
+  dwell is sampled at 2 s in every state where its repaint can actually reach the
+  panel, which is also where plugging in has to feel immediate.
+- **otherwise → `kPollSlowMs` (30000).**
+
+**`kPollSlowMs` IS `kUnlatchMs / 2`, AND THAT IS WHY THE TICKET'S "MINUTES" IS
+DECLINED.** Minutes start at 60 s and `kUnlatchMs` **is** 60 s, so a minute-long
+interval is exactly the degenerate case above; half of it is the coarsest cadence at
+which no single interval can span that dwell. **It concedes almost nothing, because
+the benefit saturates and the guarantee does not**: 2 s → 30 s removes **93.3%** of
+the readings and the next doubling to 60 s buys **3.4 points more** while halving the
+samples both dwells rest on. If minutes are ever wanted anyway, the honest route is to
+lengthen `kUnlatchMs` with it — not to move one number.
+
+**AND SLOWING ONLY THAT CASE IS NOT A COMPROMISE, BECAUSE IT IS WHERE THE READINGS
+ACTUALLY ACCUMULATE.** A device idling on Home sleeps after `sleepAfterMs` (300 s by
+default), so it can never take more than **~150** readings before the chip resets. A
+device awake for an HOUR is one whose buttons are being pressed — somebody reading —
+and then the **Reader** is on glass rather than Home, the band's repaint is
+unreachable, and the ladder is the only consumer that wants the gauge at all. So the
+slow arm catches the long session and the fast arm keeps the short one.
+
+**WHAT IT COSTS, and it is one interval and no more:** a real `Low` crossing is
+noticed up to 30 s late. The pack absorbs that — the `Low` band runs from
+`kLowPercent` down to `kCriticalPercent`, and on an X4, which reports **10% notches**,
+it is a whole notch. Either way it is hours of discharge, so 30 s cannot skip it.
+`test_battery_tracker.cpp` drives the **closed loop** — the tracker choosing the
+cadence at which it is next fed — and pins the whole bill: a flat pack reaches
+`Critical` at `kPollSlowMs + kCriticalDwellMs` with **zero** slow gaps after the run
+is armed. Sampling it slowly instead puts the shutdown at 60,000 ms against 40,000 ms,
+with the dwell spanned by a single gap; that is the mutation, and it is the naive
+one-interval-made-bigger fix.
+
+**AND THE TRACKER DOES NOT DEPEND ON THE SHELL OBEYING IT.** A caller that ignored
+`pollIntervalMs` and polled slowly for ever must still shut the device down — later,
+never not at all — which is asserted, because a safety mechanism resting on an
+interval a caller remembers to ask for is the caller-list shape this file turns into a
+function. The one guarantee the slow cadence genuinely weakens is stated rather than
+hidden: a dithering `Current()` sign sampled at 30 s could clear the latch spuriously
+off Home. **It cannot flicker the panel doing so** — the repaint is gated on the same
+predicate, so nothing reaches the glass — and the worst a spurious cycle costs is
+`kMaxGrantsPerSession`, which is what that cap is for.
+
+**`bandRepaintPossible()` IS ONE PREDICATE BECAUSE IT HAS TWO CALLERS.** It was
+already spelled at the repaint site; the interval chooser needs the same answer, and
+two spellings would drift **silently in the worse direction** — a cadence that
+believed the repaint reachable while the repaint site did not would hold the fast
+interval for a refresh that can never fire, which is precisely the battery this ticket
+is about. Same rule as `homeOnGlass()` one line above it.
+
+**WHAT A READING COSTS, DERIVED FROM THE REGISTER MAP AND THE PROFILE — NOT
+MEASURED.** On the **X3** `readStatus()` is **three** BQ27220 reads over I2C at
+400 kHz (`StateOfCharge` 0x2C, `Voltage` 0x08, `Current` 0x0C), each moving five
+address/data bytes with a repeated start — ~115–130 µs of bus time apiece, so
+~350–400 µs, and `readBattery`'s own **~450 µs** includes the Wire driver. On the
+**X4** it is `NO_GAUGE`, so **one** `analogReadMilliVolts` on GPIO0 and no charge pin
+at all. At 2 s that is a **0.02%** duty cycle.
+
+**AND THE HONEST ANSWER TO "WHAT FRACTION OF AN IDLE DEVICE'S POWER" IS THAT IT IS NOT
+MEASURABLE FROM HERE, WHICH IS ITSELF THE FINDING.** The only instrument the device
+carries is the gauge's own `Current()`, whose resolution is 1 mA against a ~20 mA
+awake baseline — roughly **200× coarser** than the effect — and reading it is the thing
+being measured. So this needs a **bench current meter in series with the pack, poll at
+2 s against the poll stubbed out**, and nothing short of that can produce a figure;
+**do not quote one until somebody has.** What settles the decision without it is the
+comparison this file already made once: the input task calls `input->update()` every
+`kPollMs` (10 ms) and each call is **two `analogRead`s**, so an awake device already
+takes **400 ADC conversions per 2-second battery interval against 3 I2C register
+reads** — and `kPollMs` is the constant this project **refused to halve** on a
+duty-cycle argument. The poll #96 is about is two orders of magnitude below the
+sampler that argument was made about, which is why the case for this change is the
+*long reading session*, not the idle device.
+
+**THE `gLastBatteryPollMs` DISCIPLINE SURVIVED IT, AND HAD TO.** The stamp stays inside
+`homeOnGlass()`, because that stamp and a reading are the **same event** —
+`refreshBatteryOnHome()` feeds `gBattery.update()` two lines above it — so a Home paint
+really has taken the reading it claims. On an X4, where `bandRepaintPossible()` is
+false for ever and Home therefore polls **slowly**, presses on Home feed the ladder at
+exactly the rate they arrive. **It was the unconditional stamp that starved the
+mechanism, never the interval.**
+
+**AND `polls=` ON `[alive]` CANNOT STAND ALONE ANY MORE, so `pollMs=` is beside it.**
+With two intervals 15× apart, a device wrongly pinned to the fast one and a device
+correctly on the slow one differ in that count and in **nothing else that reaches a
+log** — the same "an instrument that reports on less than it claims" shape this file
+records for the listing cache and the ring warm. It is read off `pollIntervalMs()` with
+the predicate the loop uses, never re-derived from `level=`, which would be a second
+spelling of the choice free to disagree with the one actually made.
+
 **AND WIRING THAT FOUND A REAL DEFECT IN `renderTop()`, WHICH IS EXACTLY THE CLASS THIS
 FILE EXISTS TO RECORD.** The stamp `gLastBatteryPollMs = millis()` was unconditional —
 harmless while the timer's only consumer was itself gated on Home, since a Reader paint
 reset a cadence nothing outside Home was waiting on. With an ungated poll it means every
-paint pushes the next reading out by another `kBatteryPollMs`, so **a reader turning
+paint pushes the next reading out by another poll interval, so **a reader turning
 pages faster than 2 s starves the safety mechanism on the one screen the banner is drawn
 on**. The stamp is inside `homeOnGlass()` now: a paint that takes no reading must not
-claim one, which is what the comment above it always said.
+claim one, which is what the comment above it always said. (The `kBatteryPollMs` this
+paragraph used to name **no longer exists** — #96 replaced it with
+`BatteryTracker::pollIntervalMs()`, and the 2 s the defect was measured against is
+`kPollFastMs`. The rule is unchanged and the paragraph above says how it survived.)
 
 **THE BANNER DRAWS OVER THE PAGE AND NEVER INTO THE COLUMN, AND THAT IS THE WHOLE
 DESIGN.** `readerMetrics` derives `columnH` and `PageBuilder` seats
@@ -3966,6 +4139,53 @@ a time as pages are passed. Three consequences, each load-bearing:
   form and why: a blank makes the slash read as broken, `0` would be a lie, nothing
   here animates, and a dash is the same width every time so the counter does not
   reflow when the number arrives.
+- **AND THE PERCENTAGE BESIDE IT SAID `0%` THROUGH THAT WHOLE WINDOW, FOR TWO PHASES,
+  BECAUSE THE EM-DASH RULE WAS APPLIED TO ONE SLOT OF THE TWO IT GOVERNS (#93).** That
+  number **is** this counter as a fraction — the board's 53 of 890 is 5.955%, drawn as
+  `6%` — so it is divided by the same total and is unknown in exactly the same moments,
+  and `syncVm` answered the unknown with a literal `0`. Reported off a device after a
+  week of real use. It is `ReaderViewModel::kProgressUnknown` (**-1**) now, drawn `—%`,
+  and the fix is at the **producer** because that is where the other two spellings of
+  this already are: `pageTotal`'s 0 and `percentFor`'s -1 for "not started".
+  - **`0` IS A VALUE THE ARITHMETIC REACHES, which is the whole of why the sentinel is
+    not 0.** `(page * 100 + total / 2) / total` is 0 for page 1 from **201 pages up**,
+    and that is right — so the unknown was **pixel-identical** to a reader standing at
+    the top of the chapter. Not a bounded wrong, either: the count runs only in a quiet
+    window, so **a reader turning pages faster than `kCountQuietMs` never lets it fire**
+    and can be well into a chapter still being told 0%.
+  - **THE CONDITION IS THE COUNTER'S OWN `pageTotal == 0`**, so one test decides both
+    slots and they cannot disagree about what is known — and it picks up the degenerate
+    complete-but-empty chapter for free, where there is no denominator and the counter
+    already read `0 / —`.
+  - **THE PROGRESS BAR IS OMITTED RATHER THAN DRAWN EMPTY**, and that is the half a
+    dash cannot fix: a bar is a **length** stating the same fraction, and
+    `drawProgressBar(..., 0)` paints the exact outline a settled 0% paints. An absent
+    claim beats a false one, the call this file already makes for an unread gauge (`-1`,
+    never `0%`). **Nothing reflows** — the percentage is placed off the left padding and
+    the counter off `fb.width()`, which is the same property that lets
+    `ReaderAnchored.dc.html` put the return arrow in that slot.
+  - **NO SURFACE BUT THIS ONE WAS AFFECTED, checked rather than assumed.** Every other
+    percentage on the device is the **byte-based** `reading_store.h::progressPercent` or
+    a value stored from it — the sleep card and Home read `last.percent`, a Library row
+    and Book details read the sidecar (and `percentFor`'s -1 draws `NEW`), the reader
+    menu's header and the peek's band call the free function. Only
+    `ReaderViewModel::progressPercent` is derived from the page count, so only the
+    Reader's own footer could say this.
+  - **TWO EXISTING ASSERTIONS HAD BLESSED IT, one of them under the comment *"a
+    percentage of an unknown is not a number"* while asserting `== 0`** — the rule
+    written down beside the defect it forbids, which is this file's most expensive
+    recurring shape. **Every golden passed** and could not have failed: they all call
+    `completeIndex()` first, because the board draws the settled state.
+    `reader_counting{,_x3}` are the transient state's own goldens and are the only thing
+    in the suite that can prove `—%` is an em dash rather than a **notdef box** — the
+    percentage is `Role::Meta700`, a different generated asset from the counter's
+    `Role::Meta400`. Reverting just the theme's half draws a literal **`-1%`**, which
+    those two goldens catch and nothing else does.
+  - **The board's rendered specimen did not move**: the rule went into
+    `design/Reader.dc.html`'s footer as prose beside the settled state it draws, whose
+    own note already said the transient state would want its own board file. All four
+    `--only reader` panels are byte-identical across the change and `reader` still
+    measures **5.24% / 6.29%**.
 - **`pageCount()` is pages KNOWN, not pages total.** Reporting it as the total would
   count up as the reader advanced — `1 / 1`, `2 / 2` — which is worse than admitting
   it is not known. `indexPending()` is what distinguishes them.
