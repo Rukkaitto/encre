@@ -7396,6 +7396,37 @@ Moving one card is `gh project item-edit --id <item> --project-id <project>
 `gh project item-list 1 --owner Rukkaitto --format json`, matched on
 `.content.number` for an issue.
 
+## Graft, and the one query it cannot answer here
+
+`graft/` indexes this repo and `.claude/skills/graft/SKILL.md` tells you to reach
+for it before grepping. Do — `ask`, `grep`, `skeleton` and `map` all earn their
+place on this tree. **But `graft callers` returns nothing across files here, and
+it is the query this project's own rules ask for most** (`--depth all` before a
+refactor, `--depth 2` before a rename).
+
+The cause is C++ rather than the tool: a free function is DECLARED in a header
+and DEFINED in a `.cpp`, so its name is ambiguous, and graft drops an ambiguous
+cross-file edge instead of guessing. Same-file edges resolve fine —
+`PageBuilder::add` correctly shows `layoutPage` calling it, both being in
+`layout.cpp`. `drawBadge` shows neither of the two callers this file names, and
+neither does `veilRect`, `Focus::move` or `ScrollWindow::slice`.
+
+**Use `graft grep <symbol>` for a blast radius.** It is exhaustive and groups
+hits by enclosing symbol, which is the shape a caller list wants anyway.
+
+**`--lsp` does NOT fix it and the lever is spent** — `clangd` is on `PATH`,
+`cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` writes the 164-entry
+desktop compile database, and the edges are unchanged, because the ambiguity rule
+sits above the LSP layer. `shell/` has no desktop compile database at all, so
+`main.cpp` was never in reach of it either way.
+
+**What makes it usable anyway is that it refuses out loud**: every empty answer
+names the ambiguity, says it may undercount, and points at `graft grep`. That is
+the distinction this file draws everywhere else — an absent claim beats a false
+one — and it is why the tool is wired in rather than removed. A `callers` that
+had answered a confident empty set would be the card probe answered from cache
+again.
+
 ## Where to look
 
 `docs/superpowers/plans/2026-08-20-v1-roadmap.md` — phases, and two sections
