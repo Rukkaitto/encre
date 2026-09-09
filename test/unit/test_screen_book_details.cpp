@@ -242,6 +242,71 @@ TEST_CASE("book details' rules land where the board's do") {
   }
 }
 
+TEST_CASE("the title's budget charges ONE column gap, not two") {
+  // THE COLUMN'S FIXED HEIGHT IS SPELLED TWICE -- once as the block's actual
+  // height (`cy`, which every rule position above pins) and once as the title's
+  // BUDGET (`columnFixedH`) -- and only the first of those is a rendered
+  // position. So the budget needs a case of its own, exactly as the sleep card's
+  // chapter reserve does: the two are different quantities and a mutation to one
+  // must not be measurable only through the other.
+  //
+  // The board's column is a flex column with `gap: 6px`, and a gap sits BETWEEN
+  // items, so a title and an author cost ONE. The budget charged TWO while the
+  // placeholder cover held the block open, where over-reserving 6px only made
+  // the title conservative and no test could see it.
+  //
+  // AND AT THE BOARD'S FIVE FIELD ROWS IT STILL CANNOT BE SEEN, which is why
+  // this fixture has SIX. Walked rather than assumed: block room is 300px on the
+  // X4 at five rows, and (300 - 47) / 46 and (300 - 53) / 46 both floor to 5, so
+  // the spare gap changes nothing that is drawn. At six rows the room is 235 and
+  // the two spellings give FOUR lines and THREE. A mutation tells you about your
+  // INPUT before it tells you about your test.
+  //
+  // X4 ONLY, and deliberately: at 528x792 six rows leave 227px and both
+  // spellings floor to 3, so the X3 fixture would be blind for the same reason
+  // the five-row one is. That the two panels take different branches of this
+  // arithmetic is the point rather than a gap in the case.
+  Ramp r;
+  reader::QuietTheme theme;
+  reader::BookDetailsViewModel vm;
+  vm.author = "George Eliot";
+  vm.format = "EPUB";
+  vm.hints = {"BACK", "", "", ""};
+  // SIX rows -- the board has five since `Added` went, so this is one more than
+  // ships, chosen because it is the row count at which the budget is visible.
+  vm.fields = {{"Progress", "31%"},   {"Current chapter", "ARABY"}, {"Bookmarks", "0"},
+               {"File size", "0.4 MB"}, {"Location", "/BOOKS/"},    {"Added", "1914"}};
+  // A name whose NATURAL wrap is longer than any budget under test, so the clamp
+  // is what decides the line count. Guarded below rather than assumed.
+  vm.title = "Middlemarch_A_Study_of_Provincial_Life_George_Eliot_1871_unabridged"
+             "_and_then_some_more_words_to_be_sure_it_overflows_every_budget_here";
+
+  reader::Framebuffer fb(480, 800);
+  theme.renderBookDetails(fb, r.fonts, vm, reader::Plane::Bw);
+
+  // FIXTURE GUARDS, and each is blind to the defect: they are facts about the
+  // input, not about the arithmetic under test.
+  REQUIRE(vm.fields.size() == 6);
+  const int colW = 480 - 2 * reader::kMargin;
+  std::string tail;
+  reader::Prose natural = reader::wrapProseLead(r.fonts[reader::Role::Title700], vm.title, colW,
+                                                reader::pxToF26(46), {},
+                                                reader::WordBreak::Anywhere);
+  REQUIRE(natural.lineCount() > 4);  // so four lines is a clamp, not a fit
+
+  auto fullWidthRule = [&](int y) {
+    for (int x = 0; x < fb.width(); ++x)
+      if (fb.getPixel(x, y)) return false;
+    return true;
+  };
+  // FOUR title lines: 66 band + 24 padTop + 4 colPadTop + 4*46 + 6 gap + 37
+  // author + 20 padBottom. Charging the gap twice gives three lines and puts the
+  // rule at 295 instead.
+  CHECK(fullWidthRule(341));
+  CHECK(fullWidthRule(342));
+  CHECK_FALSE(fullWidthRule(295));
+}
+
 // --- Built from facts, with no Library anywhere ---------------------------------
 
 TEST_CASE("BOOK DETAILS BUILDS FROM FACTS WITH NO LIBRARY ON THE STACK") {
