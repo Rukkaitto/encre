@@ -7448,3 +7448,20 @@ It also records why there is deliberately no `CHANGELOG.md`.
 `README.md` — the outward-facing one: what works, what is stated-refused, how to
 back up the stock firmware before flashing, and what "written with Claude Code"
 means for someone about to run this on their own reader.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `Rukkaitto/encre`, via the `gh` CLI — with the project board's
+own rules about what an agent may close. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` and `docs/adr/` at the repo root, neither of which
+exists yet. See `docs/agents/domain.md`.
