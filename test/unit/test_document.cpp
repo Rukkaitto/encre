@@ -706,7 +706,17 @@ TEST_CASE("the block's buffer is RESERVED, not grown") {
   REQUIRE(w.texts.size() == 2);
 
   reader::Block b;
-  Grained src("<body><p>" + digits(reader::kMaxBlockBytes + 5000) + "</p></body>", 4096);
+  // NAMED, because `Grained` does not own its bytes. Inline, the `operator+`
+  // temporary died at the end of the constructor's full-expression and every
+  // read() after it copied from freed heap -- ASan: heap-use-after-free on a
+  // 26,400-byte region, reading 512 bytes a grain. It passed alone and failed
+  // about one full-suite run in ten, because freeing a 13 KB block writes only
+  // 8 of its bytes: the document survived intact unless another test's
+  // allocation happened to reuse it. `Grained` now refuses an rvalue string
+  // outright, so this line cannot be written the short way again.
+  const std::string doc =
+      "<body><p>" + digits(reader::kMaxBlockBytes + 5000) + "</p></body>";
+  Grained src(doc, 4096);
   reader::BlockReader r(src);
   REQUIRE(r.next(b));
   CHECK(b.text.size() == reader::kMaxBlockBytes);

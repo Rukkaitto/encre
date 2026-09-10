@@ -1,0 +1,10 @@
+/Users/lucasgoudin/dev/encre/.claude/worktrees/github-release-ci-workflow-e86e00/build-asan/CMakeFiles/reader_core.dir
+/Users/lucasgoudin/dev/encre/.claude/worktrees/github-release-ci-workflow-e86e00/build-asan/CMakeFiles/unit_tests.dir
+/Users/lucasgoudin/dev/encre/.claude/worktrees/github-release-ci-workflow-e86e00/build-asan/CMakeFiles/name_probe.dir
+/Users/lucasgoudin/dev/encre/.claude/worktrees/github-release-ci-workflow-e86e00/build-asan/CMakeFiles/corpus_probe.dir
+/Users/lucasgoudin/dev/encre/.claude/worktrees/github-release-ci-workflow-e86e00/build-asan/CMakeFiles/sleep_chapter_probe.dir
+/Users/lucasgoudin/dev/encre/.claude/worktrees/github-release-ci-workflow-e86e00/build-asan/CMakeFiles/paging_probe.dir
+/Users/lucasgoudin/dev/encre/.claude/worktrees/github-release-ci-workflow-e86e00/build-asan/CMakeFiles/reader_sim.dir
+/Users/lucasgoudin/dev/encre/.claude/worktrees/github-release-ci-workflow-e86e00/build-asan/CMakeFiles/test.dir
+/Users/lucasgoudin/dev/encre/.claude/worktrees/github-release-ci-workflow-e86e00/build-asan/CMakeFiles/edit_cache.dir
+/Users/lucasgoudin/dev/encre/.claude/worktrees/github-release-ci-workflow-e86e00/build-asan/CMakeFiles/rebuild_cache.dir
