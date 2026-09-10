@@ -1,0 +1,259 @@
+# A GitHub release, cut by pushing an annotated tag onto main.
+#
+# docs/releasing.md is the gate this sits at the end of, and it is worth reading
+# before touching this file: steps 1-5 there are the owner's, and two of them
+# (the on-device smoke checklist, and a week of daily-driver reading) cannot be
+# produced on a desktop at all. So this workflow does NOT decide whether the
+# work is releasable. That decision is the tag. This turns it into a release.
+#
+# WHY ITS OWN WORKFLOW rather than a job in ci.yml, which is pr-title.yml's
+# reason one trigger over: `on: push: tags:` would drag `test`, `firmware` and
+# `compare` onto every tag as well, and ci.yml's `cancel-in-progress`
+# concurrency group is keyed on the ref, so a tag push would sit alongside them
+# rather than replacing this. It is also a different permission -- everything
+# else in .github/ is `contents: read`, and this one writes.
+#
+# WHAT IT DOES NOT RE-RUN, deliberately: the tests. CI already ran `test`,
+# `firmware` and `compare` against this exact commit when it landed on main, so
+# re-running is ten minutes to re-answer an answered question -- and it cannot
+# answer the two that decide a release, both of which need the hardware. The
+# firmware build below is here to produce an ARTIFACT, not to gate; that it also
+# proves shell/ still compiles is a side effect and not the reason.
+#
+# TWO REFUSALS BEFORE ANYTHING IS PUBLISHED, because a release is not
+# retractable in any way that matters -- somebody may already have downloaded
+# it:
+#
+#   the tag must be ANNOTATED. docs/releasing.md says a release here *is* an
+#   annotated tag; nothing enforced that, and `git tag v0.1.0` without -a is the
+#   easy slip.
+#
+#   the tag must be on MAIN. This is the one worth spelling out: GitHub's tag
+#   trigger has NO branch filter -- `on: push: tags:` fires for a tag pushed
+#   onto any commit in the repository, including one on a branch that never
+#   merged. Without the containment check below, "creates a release when a tag
+#   is pushed on main" would be a claim this file does not check, which is the
+#   reports-on-less-than-it-claims shape CLAUDE.md records for the card probe
+#   answered from cache and the `make compare` default that skipped four
+#   screens. It is a hard failure rather than a quiet skip: tagging a stale
+#   commit is a mistake somebody wants to hear about, and a silent no-op is
+#   indistinguishable from a workflow that did not run.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+# A tag is unique, so this only ever matters when one is force-moved -- where
+# two runs racing to create the same release would have one fail confusingly.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # create the release and upload its assets
+  issues: read      # release_notes.py asks whether the X4 caveat still applies
+
+jobs:
+  release:
+    name: Publish
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 because the notes are a commit range and the containment
+      # check is a merge-base -- both are empty on a shallow clone, and an empty
+      # range must not read as a pass.
+      #
+      # Submodules because the firmware build needs freeink-sdk/. An empty one
+      # fails with `PackageException: not a directory`, naming neither the
+      # submodule nor the fix.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      # Through the environment rather than interpolated into a run line: `${{ }}`
+      # inside `run:` is textual substitution, and a ref name is not a value this
+      # file gets to assume is well-formed. Same rule as the branch name in
+      # ci.yml and the PR title in pr-title.yml.
+      - name: Refuse a lightweight tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # checkout fetches the ref it is building; ask for the tag OBJECT
+          # explicitly, because a lightweight tag has none and that is the
+          # distinction being made.
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          kind=$(git cat-file -t "refs/tags/$TAG")
+          if [ "$kind" != "tag" ]; then
+            echo "::error::$TAG is a lightweight tag ($kind). A release here is" \
+                 "an ANNOTATED tag -- see docs/releasing.md. Re-cut it with:" \
+                 "git tag -d $TAG && git push --delete origin $TAG &&" \
+                 "git tag -a $TAG -m 'Encre $TAG' && git push origin $TAG"
+            exit 1
+          fi
+          echo "$TAG is annotated."
+
+      - name: Refuse a tag that is not on main
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Fetched explicitly rather than trusted to be present: what checkout
+          # was asked for is a tag, and a merge-base against a ref that is
+          # missing is an error that looks like a verdict.
+          git fetch --force --no-tags origin \
+            "+refs/heads/main:refs/remotes/origin/main"
+          # PEELED HERE RATHER THAN TAKEN FROM $GITHUB_SHA, which on an
+          # ANNOTATED tag push is the SHA of the tag OBJECT and not of the
+          # commit. `merge-base` peels it either way, so this is not what makes
+          # the check correct -- it is what makes the failure message name a
+          # commit somebody can actually look up.
+          commit=$(git rev-parse "refs/tags/$TAG^{commit}")
+          # --is-ancestor, not equality: main moves on after a tag is cut, and a
+          # commit is its own ancestor, so this accepts both the tip and any
+          # commit main has since built on.
+          if ! git merge-base --is-ancestor "$commit" origin/main; then
+            echo "::error::$TAG points at commit $commit, which is not" \
+                 "contained in main. No release was created. Either it has not" \
+                 "merged yet, or main was rewritten after the tag was cut."
+            exit 1
+          fi
+          echo "$TAG -> $commit, contained in main."
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Same key as ci.yml's firmware job, so a tag build reuses the toolchain
+      # that job already downloaded. Cold ~8-10 min, warm ~3.
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini', 'partitions.csv') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      # esptool is pinned to a major: `merge_bin` was renamed `merge-bin` in
+      # esptool 5, and CLAUDE.md already records that this toolchain's Python
+      # side moves under the project on any build with a network. A release that
+      # fails on a CLI rename is a release that fails at the worst moment.
+      - name: Install PlatformIO and esptool
+        run: pip install --upgrade platformio "esptool~=4.8"
+
+      # Not `make firmware`: that resolves PIO through ~/.platformio/penv, which
+      # is the local install layout rather than this runner's. Same as ci.yml.
+      - name: Build the firmware
+        run: pio run -e xteink
+
+      # WHAT THE TWO IMAGES ARE, since shipping only the first would be a
+      # download that looks flashable and is not:
+      #
+      #   <tag>-xteink.bin        the app partition alone. What `pio run -t
+      #                           upload` writes to 0x10000 on a device that is
+      #                           already partitioned -- an update, not an
+      #                           install.
+      #   <tag>-xteink-full.bin   bootloader, partition table, otadata and app
+      #                           in one image, flashable at offset 0 on a bare
+      #                           chip.
+      #
+      # THE OFFSETS ARE READ FROM partitions.csv, not pinned here. That file is
+      # this project's own table (the board default's 1.31 MB app was already
+      # half spent), and it says outright that app0 staying at 0x10000 is what
+      # keeps an ordinary upload landing correctly -- so a second copy of these
+      # numbers in a workflow is exactly the drift CLAUDE.md's first invariant
+      # is about. The two that are NOT in that file are platform constants and
+      # are commented as such where they are used.
+      - name: Merge a flashable image
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          build=.pio/build/xteink
+
+          offset_of () {  # the Offset column for a named partition row
+            awk -F',' -v want="$1" '
+              $1 !~ /^[[:space:]]*#/ && $1 ~ "^[[:space:]]*"want"[[:space:]]*$" {
+                gsub(/[[:space:]]/, "", $4); print $4; exit }' partitions.csv
+          }
+          otadata=$(offset_of otadata)
+          app0=$(offset_of app0)
+          if [ -z "$otadata" ] || [ -z "$app0" ]; then
+            echo "::error::could not read otadata/app0 offsets from" \
+                 "partitions.csv. The table's shape changed; this step reads it" \
+                 "rather than pinning the numbers, so it must be taught the new one."
+            exit 1
+          fi
+
+          # boot_app0.bin ships with the Arduino framework package and points
+          # otadata at the first OTA slot. Not strictly required -- a bare chip's
+          # blank otadata makes the bootloader pick ota_0 anyway -- but it is
+          # what a real `pio run -t upload` writes, and a merged image that
+          # differs from the upload path is a second thing to debug.
+          # `-print -quit` rather than `| head -n1`: under `set -o pipefail`,
+          # head exiting first sends find a SIGPIPE and the step fails on a
+          # search that SUCCEEDED. find stopping itself has no pipe to break.
+          boot_app0=$(find ~/.platformio/packages -name boot_app0.bin \
+                        -print -quit)
+          if [ -z "$boot_app0" ]; then
+            echo "::error::boot_app0.bin not found in the framework package."
+            exit 1
+          fi
+
+          # 0x0 is the ESP32-C3's bootloader offset (the C3 differs from the
+          # ESP32, which is 0x1000), and 0x8000 is ESP-IDF's default partition
+          # table offset. Both are the platform's, not this project's, which is
+          # why they are not in partitions.csv to be read from.
+          #
+          # --flash_mode/--flash_size restate platformio.ini's dio/16MB: merge_bin
+          # rewrites the image header, so an image merged with other values would
+          # boot-loop on hardware that builds fine.
+          python -m esptool --chip esp32c3 merge_bin \
+            --output "$build/merged.bin" \
+            --flash_mode dio --flash_size 16MB \
+            0x0      "$build/bootloader.bin" \
+            0x8000   "$build/partitions.bin" \
+            "$otadata" "$boot_app0" \
+            "$app0"  "$build/firmware.bin"
+
+          mkdir -p dist
+          cp "$build/firmware.bin" "dist/encre-$TAG-xteink.bin"
+          cp "$build/merged.bin"   "dist/encre-$TAG-xteink-full.bin"
+          # The ELF, because a panic from a RELEASED build is undebuggable
+          # without the exact one. CLAUDE.md's crash procedure opens by checking
+          # the report's `ELF file SHA256` against this file and then running
+          # addr2line on MEPC and RA -- and nobody can produce a byte-identical
+          # rebuild months later to match it.
+          cp "$build/firmware.elf" "dist/encre-$TAG-xteink.elf"
+          ls -l dist
+
+      - name: Generate the notes
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 tools/release_notes.py \
+            --tag "$TAG" --repo "$GITHUB_REPOSITORY" > dist/notes.md
+          cat dist/notes.md
+
+      # Published rather than drafted: the tag IS the act of releasing here, and
+      # docs/releasing.md's gate is complete before anyone reaches this file. A
+      # draft would add a manual step after a gate that was already manual, and
+      # the failure mode is a release nobody notices was never published.
+      - name: Create the release
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --notes-file dist/notes.md \
+            --verify-tag \
+            "dist/encre-$TAG-xteink.bin" \
+            "dist/encre-$TAG-xteink-full.bin" \
+            "dist/encre-$TAG-xteink.elf"

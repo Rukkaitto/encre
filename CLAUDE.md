@@ -173,6 +173,58 @@ corrected title stays red; and `types` is settable only per workflow, where `ci.
 `cancel-in-progress` concurrency group would let a title edit cancel a running
 firmware build.
 
+**PUSHING AN ANNOTATED TAG PUBLISHES A RELEASE**, `.github/workflows/release.yml`
+— its own workflow for pr-title's reason one trigger over, since `on: push:
+tags:` in `ci.yml` would drag `test`, `firmware` and `compare` onto every tag,
+and because it is the one thing in `.github/` that is not `contents: read`.
+`docs/releasing.md` is the gate it sits at the end of; the tag records the
+judgement and this only carries it out. **It re-runs no tests** — CI already
+answered on that commit, and it cannot answer the two steps that decide a
+release, both of which need the hardware.
+
+- **GITHUB'S TAG TRIGGER HAS NO BRANCH FILTER**, so "a tag pushed on main" is a
+  claim a workflow has to CHECK: `on: push: tags:` fires for a tag on any commit
+  in the repository, a never-merged branch included. `git merge-base
+  --is-ancestor` against a freshly fetched `origin/main` is what makes the name
+  honest, and it is a hard **failure** rather than a quiet skip — a silent no-op
+  is indistinguishable from a workflow that did not run, and tagging a stale
+  commit is a mistake somebody wants to hear about. The tag must also be
+  **ANNOTATED**, which `docs/releasing.md` has always said a release *is* and
+  nothing checked.
+- **THE FLASH OFFSETS ARE READ FROM `partitions.csv`, NOT PINNED IN THE
+  WORKFLOW**, which is the first invariant applied to a file rather than a board:
+  that table's own comment says app0 staying at `0x10000` is what keeps an
+  ordinary upload landing correctly, so a second copy of it in YAML is the drift
+  this project keeps paying for. Only the C3's `0x0` bootloader offset and
+  ESP-IDF's `0x8000` partition table are stated there, both being the platform's
+  rather than ours. Three assets: the app image, a merged image flashable at
+  offset 0, and **the ELF** — a panic from a released build is undebuggable
+  without the byte-identical one, and no rebuild months later will match its
+  `ELF file SHA256`.
+- **THE X4 CAVEAT RETIRES ITSELF.** `docs/releasing.md` instructs that the notes
+  must say a version number does not imply the X4 works (#23), and an
+  instruction like that carried out by a generator is exactly this file's most
+  expensive recurring shape — a claim with an expiry date and no owner, still
+  printed the day #23 closes. `tools/release_notes.py` asks the tracker instead,
+  and **fails toward INCLUDING it** when the query cannot be made: a limitation
+  stated once too often is a smaller wrong than a real one dropped silently.
+- **`tools/release_notes.py` HAS ITS OWN TEST**, `tools/test_release_notes.py`,
+  plain `python3` against throwaway repositories, not wired into `make test` for
+  `test_check_conventions.py`'s reason. The logic lives there rather than in
+  YAML because **logic in a workflow is logic nothing tests** — `shell/`'s
+  problem in another directory — and the two edges are both `git`'s answers
+  rather than formatting: the FIRST tag has no predecessor (`git describe`
+  exits non-zero, and that is v0.1.0 rather than an error) and merges are
+  excluded (a squash-merge already arrives as one commit with the PR title as
+  its subject; what `--no-merges` drops is `git merge main`, which git wrote and
+  `check_conventions.py` exempts for the same reason). Every guard is proved by
+  mutation, and writing the empty-range case took two goes: the obvious fixture
+  — two tags on one commit — cannot reach it, because `describe` is asked of the
+  tag's PARENT and skips both, and `commit-tree -p X -p X` collapses to one
+  parent, so the "merge" it builds is an ordinary commit that `--no-merges`
+  keeps. A mutation tells you about your INPUT before it tells you about your
+  test.
+
 **`tools/test_check_conventions.py` IS THE CHECKER'S OWN TEST**, plain `python3`,
 **deliberately not wired into `make test`** for `tools/test_compare_design.py`'s
 reason -- the fast loop builds on a bare checkout with no Python. It drives the real
@@ -7440,10 +7492,12 @@ versus USB reset, the card probes, the refinement, the battery latch. This is
 what a card's move from `On glass` to `Done` is evidence of, and it is the list
 to run after touching a drawing primitive, the paint sequence, storage or power.
 
-`docs/releasing.md` — what a release is here (an annotated tag and nothing
-else), the gate in order, and the blocker list as a **`gh project` query rather
-than a written list**, because a list here would be a second copy of the board.
-It also records why there is deliberately no `CHANGELOG.md`.
+`docs/releasing.md` — what a release is here (an annotated tag on `main`, which
+`.github/workflows/release.yml` then turns into a published release), the gate in
+order, what the three attached images are for, and the blocker list as a **`gh
+project` query rather than a written list**, because a list here would be a
+second copy of the board. It also records why there is deliberately no
+`CHANGELOG.md`.
 
 `README.md` — the outward-facing one: what works, what is stated-refused, how to
 back up the stock firmware before flashing, and what "written with Claude Code"
