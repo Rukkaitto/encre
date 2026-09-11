@@ -863,8 +863,9 @@ int panelRowHeight(bool rule) { return kPanelRowContentH + (rule ? kPanelRowRule
 
 // --- A list's section header -------------------------------------------------
 
-int sectionHeaderHeight(const FontSet& fonts) {
-  return kSectionRuleH + kSectionPadTop + fonts[Role::Meta500].lineHeight() + kSectionPadBottom;
+int sectionHeaderHeight(const FontSet& fonts, bool rule) {
+  return (rule ? kSectionRuleH : 0) + kSectionPadTop + fonts[Role::Meta500].lineHeight() +
+         kSectionPadBottom;
 }
 
 int drawSectionHeader(Framebuffer& fb, const FontSet& fonts, int y, int w,
@@ -881,7 +882,11 @@ int drawSectionHeader(Framebuffer& fb, const FontSet& fonts, int y, int w,
            trackingEm(f, kSectionEm), plane);
   // The height ACTUALLY DRAWN, so a caller advancing by it cannot disagree with what
   // is on glass -- a first header is shorter by its missing rule.
-  return sectionHeaderHeight(fonts) - (kSectionRuleH - ruleH);
+  // ONE EXPRESSION with the height a caller reserves, so the two cannot
+  // disagree -- this used to subtract the difference from the nominal height,
+  // which is the same answer arrived at separately.
+  (void)ruleH;
+  return sectionHeaderHeight(fonts, rule);
 }
 
 int drawPanelRow(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,

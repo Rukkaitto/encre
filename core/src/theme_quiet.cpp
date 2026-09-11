@@ -2926,7 +2926,10 @@ void QuietTheme::renderWifiSettings(Framebuffer& fb, const FontSet& fonts,
   if (vm.nothingSaved) {
     for (int i = 0; i < rows; ++i) {
       const ListRow& r = vm.rows[static_cast<size_t>(i)];
-      fixedBelow += r.isHeader ? sectionHeaderHeight(fonts) : kWifiRowH;
+      // `false` BECAUSE THAT IS WHAT THE LOOP BELOW DRAWS -- this board gives
+      // neither header a border-top. Reserving the nominal height for a
+      // ruleless header floated the whole SETUP section 2px high.
+      fixedBelow += r.isHeader ? sectionHeaderHeight(fonts, /*rule=*/false) : kWifiRowH;
     }
     const int barH = hintBarHeight(fonts, hints);
     drawEmptyBlock(fb, fonts, y, fb.height() - barH - fixedBelow - y, vm.emptyTitle,

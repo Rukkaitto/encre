@@ -805,7 +805,22 @@ inline constexpr int kSectionPadTop = 18;
 inline constexpr int kSectionPadBottom = 6;
 inline constexpr int kSectionEm = 200;
 
-int sectionHeaderHeight(const FontSet& fonts);
+// A SECTION HEADER'S HEIGHT, AND IT DEPENDS ON THE RULE -- which is why
+// `rule` is required rather than defaulted. A ruleless header is
+// kSectionRuleH shorter, drawSectionHeader returns exactly that, and a caller
+// RESERVING the nominal height for a header it then draws without one puts
+// everything below it that many pixels out.
+//
+// That is not hypothetical: renderWifiSettings' empty variant summed this to
+// decide where its SETUP section starts, drew both headers with `rule=false`,
+// and so floated the block 2px high -- two 2px full-width slivers at the
+// focused row's top and bottom, and the largest single band in that screen's
+// mismatch. Settings shipped the mirror of it once, advancing `y` by the
+// nominal height and putting every row below a header a pixel low.
+//
+// No default, because the one caller that had to answer this got it wrong by
+// not being asked.
+int sectionHeaderHeight(const FontSet& fonts, bool rule);
 int drawSectionHeader(Framebuffer& fb, const FontSet& fonts, int y, int w,
                       std::string_view label, bool rule, Plane plane = Plane::Bw);
 int drawDetailRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label,
