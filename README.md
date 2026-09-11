@@ -36,12 +36,12 @@ models; it works out which one it is at boot.
 <tr>
 <td width="33%"><img src="docs/images/home.png" alt="The home screen, showing the book in progress, a library count and settings."></td>
 <td width="33%"><img src="docs/images/library.png" alt="The library, listing a folder and six books with their progress."></td>
-<td width="33%"><img src="docs/images/sleep_cover_details.png" alt="The sleep screen: a book cover as a four-level greyscale photograph, with a card over it naming the book and how far in you are."></td>
+<td width="33%"><img src="docs/images/sleep_cover.png" alt="The sleep screen showing a book cover as a four-level greyscale photograph."></td>
 </tr>
 <tr>
 <td><em>Home picks up where you left off.</em></td>
 <td><em>Folders, and how far you are into each book.</em></td>
-<td><em>Asleep, showing the cover and your place in the book. Covers come from the EPUB: baseline JPEG and 8-bit PNG work, and a book whose cover is a progressive JPEG, or an interlaced or paletted PNG, shows the card alone. You can also show the cover by itself, or turn it off.</em></td>
+<td><em>Asleep, showing the book's cover. Covers come from the EPUB: baseline JPEG and 8-bit PNG work, and a book whose cover is a progressive JPEG, or an interlaced or paletted PNG, falls back to a card naming the book. You can also show that card over the cover, or turn the cover off.</em></td>
 </tr>
 </table>
 

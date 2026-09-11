@@ -49,20 +49,23 @@ sim:
 # these illustrate the firmware rather than document both panels, and the X4's
 # 480x800 would only differ in how much of a list fits.
 #
-# sleep_cover_details rather than sleep_cover, chosen deliberately and with two
-# known costs, so nobody re-picks it as a mistake:
+# sleep_cover, NOT sleep_cover_details, and the reason is issue #120 rather than
+# taste: the details board names MIDDLEMARCH over a cover of ROMOLA. That is a
+# BOARD defect and the render is faithful to it -- three constraints collide,
+# each written down somewhere, and they cannot all hold. The card must equal
+# Sleep.dc.html's (sim/main.cpp says so in as many words); the specimen book is
+# Middlemarch on 33 of the boards; the cover asset is Romola, rights-checked in
+# design/assets/README.md and feeding three boards.
 #
-#   - It is the DEFAULT setting (Shows = COVER + DETAILS), so it is what a reader
-#     actually sees, and it shows the cover AND what they are reading.
-#   - The badge is drawn over the cover's own title band and slices the author
-#     line. That is a real open question about the badge on glass, not a render
-#     bug, and the answer is NOT to move the badge -- its position is
-#     Sleep.dc.html's.
-#   - The demo card names Middlemarch over a Romola cover, because the fixture
-#     pairs that metadata with the one committed cover asset. Fixing it means
-#     changing the fixture and re-blessing a golden, which is the wrong reason to
-#     touch a golden.
-README_SCREENS := reader home library sleep_cover_details
+# SleepCover.dc.html is coherent BY CONSTRUCTION, because it draws no card: there
+# is no second claim to contradict the picture. That is what makes it the safe
+# one to put on a public page while #120 is open, and it is why this line moves
+# back the day the cover assets are regenerated from Middlemarch.
+#
+# The badge is also absent there, which costs the README nothing and avoids
+# showing the badge slicing the cover's own title band -- itself an open
+# on-glass question, whose answer is NOT to move the badge.
+README_SCREENS := reader home library sleep_cover
 readme-images:
 	cmake -S . -B build && cmake --build build -j --target reader_sim
 	@mkdir -p docs/images
