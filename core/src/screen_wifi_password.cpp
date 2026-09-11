@@ -8,10 +8,18 @@ namespace reader {
 namespace {
 
 // THE BOARD'S OWN BASE LAYER: a-j / k-t / u-z 0 1 2 3 / 4-9 . - _ !
-constexpr const char* kLower = "abcdefghijklmnopqrstuvwxyz0123.-_!";
+//
+// A `kLower` HOLDING THAT WHOLE STRING USED TO SIT HERE AND NOTHING READ IT.
+// rebuildCells builds its own, and the dead copy was 34 characters against
+// the 40 the layer actually has -- a second, WRONG spelling of the layout,
+// under this comment claiming to be the board's. Nothing could catch it: an
+// unread constant renders nothing, so the goldens agreed with the real
+// string while the file documented the other one.
+//
 // 26 letters + 0-3 on row three, then 4-9 and four punctuation on row four.
-// Written out rather than generated so the board and the code can be read
-// side by side.
+// The tail is written out rather than generated so the board and the code can
+// be read side by side; the letters are generated, because a second literal
+// alphabet is what produced the defect above.
 constexpr const char* kBaseTail = "456789.-_!";
 
 // The 28 punctuation characters the base layer does NOT carry, then the two
