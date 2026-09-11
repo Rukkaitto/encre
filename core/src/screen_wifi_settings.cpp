@@ -106,7 +106,23 @@ void WifiSettingsScreen::syncVm() {
   // nothing behind it is the dead-affordance the four-slot rule exists to
   // prevent, and it is why the empty variant's bar has no ring at all.
   const bool onNetwork = !focusedSsid().empty();
-  vm_.hints = {"BACK", onNetwork ? "CHANGE" : "OPEN", "UP", "DOWN"};
+  // AND THE TWO MOVERS GO QUIET WHEN THERE IS NOWHERE TO MOVE, which the
+  // empty variant's board already draws: design/WifiSettingsEmpty.dc.html
+  // authors both slots as the 36px spacer eight other boards use, and this
+  // drew UP and DOWN over them. One focusable row means a press that reports
+  // no change and spends nothing, under a bar promising it will -- the dead
+  // affordance the four-slot rule exists to prevent, and the picker's empty
+  // variant got this right one screen over.
+  //
+  // Counted rather than read off `nothingSaved`: what decides it is how many
+  // rows a focus can LAND on, and the saved list is only one of the things
+  // that changes that.
+  int landable = 0;
+  for (int i = 0; i < static_cast<int>(vm_.rows.size()); ++i)
+    if (focusable(i)) ++landable;
+  const bool movable = landable > 1;
+  vm_.hints = {"BACK", onNetwork ? "CHANGE" : "OPEN", movable ? "UP" : "",
+               movable ? "DOWN" : ""};
   vm_.holds = {false, onNetwork, false, false};
   declareHints(vm_.holds);
 }

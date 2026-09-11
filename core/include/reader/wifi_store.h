@@ -58,8 +58,26 @@ inline constexpr int kMaxSavedNetworks = 8;
 inline constexpr size_t kSsidMaxBytes = 32;
 
 // Bumped when a field's MEANING changes, not when one is added -- settings.h's
-// rule. An unrecognised version is a record this build cannot trust and is
-// discarded whole, which costs the user their saved networks exactly once.
+// rule.
+//
+// NOTHING READS THIS YET, and the sentence that used to follow it -- "an
+// unrecognised version is a record this build cannot trust and is discarded
+// whole" -- described behaviour no code implements. `grep -rn
+// kWifiRecordVersion` finds this line and nothing else: not the encoder, not
+// the decoder, not shell/. It is a header asserting a guarantee, which is the
+// class of claim this project pays for most often.
+//
+// IT IS KEPT RATHER THAN DELETED because the number is the SHELL's to use and
+// the shell has no Wi-Fi code at all yet: the session record's own version is
+// a separate NVS key written beside the payload (see session_record.h, and
+// the note there about why one payload key makes the version key a real
+// commit record), and this record will be stored the same way. Deleting it
+// would lose the number rather than the claim.
+//
+// So the reader to write is `shell/`'s, alongside the `encre_wifi` namespace
+// it will keep the payload in -- and NAMING it is deliberate, because
+// CLAUDE.md's own rule is that "nothing uses it today" is a claim with an
+// expiry date and no owner, where a named caller goes stale loudly.
 inline constexpr int kWifiRecordVersion = 1;
 
 // The readable list, root-order preserved. Networks whose SSID is empty or over

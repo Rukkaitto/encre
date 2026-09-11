@@ -2796,6 +2796,21 @@ constexpr int kWifiProsePadY = 16;      // the on-demand sentence's box
 constexpr int kWifiProseLeadEm = 1550;  // line-height: 1.55
 constexpr int kWifiRowH = 80;           // a saved network, and a scan result
 constexpr int kWifiMarkGap = 12;        // between a row's padlock and its meter
+// THE CONNECTING DIALOG'S OWN BOX, from design/WifiConnect.dc.html's
+// `padding: 22px 20px 24px 20px; gap: 14px`. renderWifiConnect borrowed three
+// numbers from elsewhere instead -- DeleteConfirm's 18 and 20 for the
+// paddings, and kWifiMarkGap's 12 (a LIST ROW's padlock-to-meter gap, as its
+// own comment says) for the flex gap, spent twice. Four pixels each, so the
+// panel came out 12px SHORT -- and being centred, 6px high, with every rule
+// inside it out of register.
+//
+// Under a banner reading "Every number below is the board's". That is this
+// project's most expensive recurring shape, and the first invariant it
+// records exists for it: derive from the board's box model, never pin a
+// number another board computes.
+constexpr int kWifiConnectPadTop = 22;
+constexpr int kWifiConnectPadBottom = 24;
+constexpr int kWifiConnectGap = 14;
 constexpr int kWifiEmptyGap = 16;       // the empty block's flex `gap`
 constexpr int kWifiEmptyPadX = 40;
 constexpr int kWifiTitleLeadEm = 1100;  // line-height: 1.1 on the empty title
@@ -3188,8 +3203,9 @@ void QuietTheme::renderWifiConnect(Framebuffer& fb, const FontSet& fonts,
   const Prose message = wrapProse(body, vm.message, colW, 1300, {}, WordBreak::Anywhere);
   const Prose noteProse = wrapProse(note, vm.note, colW, 1500, noteTracking);
 
-  const int bodyH = kConfirmProsePadY + mark.h + kWifiMarkGap + f26ToPx(message.heightF26()) +
-                    kWifiMarkGap + f26ToPx(noteProse.heightF26()) + kConfirmButtonPadBottom;
+  const int bodyH = kWifiConnectPadTop + mark.h + kWifiConnectGap +
+                    f26ToPx(message.heightF26()) + kWifiConnectGap +
+                    f26ToPx(noteProse.heightF26()) + kWifiConnectPadBottom;
   const int panelH = 2 * kPanelBorder + panelCaptionHeight(fonts, label) + bodyH;
 
   const int x = panelLeft(fb.width(), kActionsPanelW);
@@ -3199,14 +3215,14 @@ void QuietTheme::renderWifiConnect(Framebuffer& fb, const FontSet& fonts,
   const int cx = x + kPanelBorder;
   int cy = y + kPanelBorder;
   cy += drawPanelCaption(fb, fonts, cx, cy, contentW, label, vm.right, plane);
-  cy += kConfirmProsePadY;
+  cy += kWifiConnectPadTop;
   // CENTRED, unlike BookError's left-aligned block: this board's body is
   // `align-items: center`.
   drawIcon(fb, mark, cx + centreIn(0, contentW, mark.w), cy, Ink::Black, plane);
-  cy += mark.h + kWifiMarkGap;
+  cy += mark.h + kWifiConnectGap;
   cy += f26ToPx(drawProse(fb, body, message, cx + kPanelPadX, colW, pxToF26(cy), Ink::Black,
                           plane, ProseAlign::Centre));
-  cy += kWifiMarkGap;
+  cy += kWifiConnectGap;
   drawProse(fb, note, noteProse, cx + kPanelPadX, colW, pxToF26(cy), Ink::Black, plane,
             ProseAlign::Centre);
 
