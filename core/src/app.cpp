@@ -26,6 +26,43 @@ void restoreFocusIn(Screen& screen, const StackEntry& entry) {
 
 }  // namespace
 
+bool screenUsesRadio(ScreenId id) {
+  // NO `default:`, deliberately -- see the header. The cost of getting this
+  // wrong is not a mis-labelled log line, it is the radio running behind a
+  // screen that does not say so, and -Wswitch is what makes a seventh screen
+  // answer the question rather than inherit an answer.
+  switch (id) {
+    case ScreenId::WifiPicker:    // SCANNING
+    case ScreenId::WifiConnect:   // CONNECTING...
+      return true;
+    // The other four Wi-Fi screens have nothing in flight. The hub in
+    // particular says `ON DEMAND`, which is a claim the radio is off.
+    case ScreenId::WifiSettings:
+    case ScreenId::WifiPassword:
+    case ScreenId::WifiError:
+    case ScreenId::WifiNetworkActions:
+    case ScreenId::Home:
+    case ScreenId::Library:
+    case ScreenId::ItemActions:
+    case ScreenId::DeleteConfirm:
+    case ScreenId::BookDetails:
+    case ScreenId::Settings:
+    case ScreenId::Typography:
+    case ScreenId::Reader:
+    case ScreenId::ReaderMenu:
+    case ScreenId::Contents:
+    case ScreenId::Peek:
+    case ScreenId::BookError:
+    case ScreenId::BookEnd:
+    case ScreenId::BatteryEmpty:
+    case ScreenId::Sleep:
+    case ScreenId::SdMissing:
+    case ScreenId::Count:
+      return false;
+  }
+  return false;
+}
+
 const char* screenName(ScreenId id) {
   switch (id) {
     case ScreenId::Home: return "HOME";

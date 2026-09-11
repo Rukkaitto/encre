@@ -54,6 +54,52 @@ const InputEvent kDown{Button::Down, PressKind::Short};
 
 }  // namespace
 
+TEST_CASE("exactly TWO screens may have the radio on behind them") {
+  // WHAT THIS PROTECTS is not a log line: `screenUsesRadio` is what the shell
+  // sweeps against to take the radio down, so a screen wrongly answering
+  // `true` lets Wi-Fi run behind something that does not say so -- and the
+  // reader is entitled to know when the radio is on.
+  //
+  // TWO, NOT THE SIX WI-FI SCREENS. The picker scans and the dialog joins;
+  // those are the two that put SCANNING and CONNECTING... on the glass. The
+  // hub is false on purpose -- its band reads `ON DEMAND`, a claim the radio
+  // is OFF -- and that is the case this rule was written for: Back off the
+  // picker MID-SCAN pops to the hub, and a predicate covering all six would
+  // have left the radio up there indefinitely, under a screen saying it was
+  // not.
+  //
+  // THE COUNT IS THE GUARD, in test_focus_restore's idiom. A seventh Wi-Fi
+  // screen fails the build first (the switch has no `default:`), and this
+  // fails second if somebody answers it `true` to get the build green.
+  int uses = 0;
+  for (int i = 0; i < static_cast<int>(ScreenId::Count); ++i) {
+    const auto id = static_cast<ScreenId>(i);
+    CAPTURE(screenName(id));
+    if (screenUsesRadio(id)) ++uses;
+  }
+  CHECK(uses == 2);
+
+  CHECK(screenUsesRadio(ScreenId::WifiPicker));
+  CHECK(screenUsesRadio(ScreenId::WifiConnect));
+  // The four Wi-Fi screens with nothing in flight, named individually because
+  // a count of two is satisfied by any two.
+  for (const ScreenId id : {ScreenId::WifiSettings, ScreenId::WifiPassword,
+                            ScreenId::WifiError, ScreenId::WifiNetworkActions}) {
+    CAPTURE(screenName(id));
+    CHECK_FALSE(screenUsesRadio(id));
+  }
+  // The screens a reader is most likely to be on while a future transfer runs.
+  for (const ScreenId id : {ScreenId::Home, ScreenId::Reader, ScreenId::Library,
+                            ScreenId::Settings, ScreenId::Sleep}) {
+    CAPTURE(screenName(id));
+    CHECK_FALSE(screenUsesRadio(id));
+  }
+  // `Count` IS NOT A SCREEN and nothing may make it one -- the sentinel's own
+  // rule. Answering `true` here would license the radio against a value no
+  // screen ever has.
+  CHECK_FALSE(screenUsesRadio(ScreenId::Count));
+}
+
 TEST_CASE("a Wi-Fi outcome is readable after the dispatch that latched it") {
   // THE REGRESSION TEST FOR THE WHOLE CLASS. One SUBCASE per screen, each
   // asserting the same three things: the latch fired, the stack did NOT move,

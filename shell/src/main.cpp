@@ -2794,6 +2794,42 @@ static void handleWifi() {
 static void pollWifi() {
   const reader::ScreenId id = gApp->top().id();
 
+  // THE RADIO MAY ONLY BE ON WHILE A SCREEN SAYS SO, and this is what makes
+  // that structural rather than a rule five exit paths each remember. Every
+  // one of them already calls endWifiSession() -- both cancels, the error
+  // panel, the failure and the success -- so in normal operation this fires
+  // NEVER. That is the point: it is the backstop for the path somebody adds
+  // later and forgets, exactly as pollCardPresence is the backstop for
+  // operation feedback that never fires.
+  //
+  // WHY IT IS WORTH HAVING AT ALL, when today no path can reach it: Wi-Fi on
+  // without the reader knowing is not a bug they can see. There is no
+  // indicator on the other screens -- `drawHeaderBand`'s mark slot reaches
+  // ten screens and NOT the Reader, which is where somebody would be while a
+  // V2 transfer ran -- so nothing would tell them. A guarantee nobody can
+  // observe has to be made by construction.
+  //
+  // THE TOP SCREEN, not the stack. What announces the radio is the screen in
+  // front of the reader; one buried under three others announces nothing.
+  //
+  // AND IT IS A BACKSTOP TO A TIGHTER RULE, not the only thing holding the
+  // line: the radio goes down the moment a scan is harvested or a join
+  // settles, so in practice it is on only while SCANNING or CONNECTING... is
+  // actually on the glass. This catches what that misses -- including the
+  // case that found this gap, Back off the picker MID-SCAN, which pops to a
+  // hub whose band says `ON DEMAND` while the radio is still up. The hub is a
+  // Wi-Fi screen, so the predicate below would not fire; the scan's own
+  // completion is what takes it down, and if the reader leaves first the pop
+  // to Settings does.
+  if (!reader::screenUsesRadio(id) && gRadio.isUp()) {
+    logf("[wifi] radio was up under %s, which has nothing in flight -- taking it "
+         "down. Nothing should reach this line in normal operation; a path is "
+         "leaving the flow without endWifiSession()\n",
+         reader::screenName(id));
+    logFlush();
+    endWifiSession();
+  }
+
   // THE ACTIONS OVERLAY'S FACTS, KEPT CURRENT WHILE THE HUB IS ON TOP. The
   // hold returns Action::push(WifiNetworkActions) DIRECTLY, so the factory
   // has to be able to build the overlay before the press happens -- and it
@@ -2838,12 +2874,22 @@ static void pollWifi() {
     if (gRadio.scanState() == reader::ScanState::Done) {
       gScanDelivered = true;
       p.setResults(reader::rankScanResults(gRadio.scanResults()));
+      // AND THE RADIO GOES DOWN THE MOMENT THE SCAN IS HARVESTED, rather than
+      // staying up for as long as the reader browses the list. `Wi-Fi stays
+      // off except while it is being used` is the design, and once the rows
+      // are copied into the screen nothing is using it: picking a network
+      // calls beginJoin, which brings it back up.
+      //
+      // ORDER MATTERS -- down() clears the radio's own results, so the copy
+      // has to be taken first. The screen owns its rows from here.
+      gRadio.down();
       gApp->markDirty();
     } else if (gRadio.scanState() == reader::ScanState::Failed) {
       // AN EMPTY PICKER, NOT A JOIN FAILURE -- beginScan's own contract: a
       // radio that would not come up is not a network that rejected you.
       gScanDelivered = true;
       p.setResults({});
+      gRadio.down();
       gApp->markDirty();
     }
     return;
@@ -7579,7 +7625,8 @@ void loop() {
     // second spelling of the choice, free to disagree with the one actually made.
     logf("[alive] last-stage=%s heap=%u minHeap=%u screen=%s depth=%d "
          "dropped=%lu/%lu listings=%u slots/%uB hit=%u miss=%u "
-         "battery observable=%d pct=%d charging=%d level=%d polls=%lu pollMs=%lu\n",
+         "battery observable=%d pct=%d charging=%d level=%d polls=%lu pollMs=%lu "
+         "wifi=%d\n",
          stage, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
          reader::screenName(gApp->top().id()), gApp->depth(),
          (unsigned long)rawSamplesDropped(), (unsigned long)gPresses.dropped(),
@@ -7587,7 +7634,13 @@ void loop() {
          (unsigned)gSd.listings().hits(), (unsigned)gSd.listings().misses(),
          (int)gChargingObservable, gBattery.percent(), (int)gBattery.charging(),
          (int)gBattery.level(), (unsigned long)gBatteryPolls,
-         (unsigned long)gBattery.pollIntervalMs(bandRepaintPossible()));
+         (unsigned long)gBattery.pollIntervalMs(bandRepaintPossible()),
+         // THE RADIO'S OWN STATE, read off the object rather than inferred
+         // from which screen is up -- which is the whole point: the two
+         // disagreeing is the thing worth seeing, and a field derived from
+         // the screen could never show it. `wifi=1` beside a `screen=` that
+         // is not a Wi-Fi one is the sweep's symptom in one line.
+         (int)gRadio.isUp());
     // WHAT THE CARD LOG HAS COST AND WHAT IT HAS LOST, on the heartbeat rather than
     // per flush. `dropped` non-zero means the buffer overran between two idle
     // windows and the log has a HOLE in it -- which must never be mistaken for the

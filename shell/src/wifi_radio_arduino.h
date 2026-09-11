@@ -34,6 +34,11 @@ class ArduinoWifiRadio : public reader::WifiRadio {
 
   void down() override;
 
+  // WHETHER THE RADIO IS ON, for the shell's own sweep and for `[alive]`.
+  // Not on reader::WifiRadio: core/ has no reason to ask, and the one caller
+  // is the shell holding this concrete type.
+  bool isUp() const { return onState_; }
+
  private:
   // Brings the interface up in station mode. Idempotent.
   bool up();

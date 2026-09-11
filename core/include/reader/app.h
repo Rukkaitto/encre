@@ -133,6 +133,25 @@ enum class ScreenId : uint8_t {
 // a serial log is one more thing to decode while diagnosing a device.
 const char* screenName(ScreenId id);
 
+// WHETHER THIS SCREEN IS ONE THE RADIO MAY BE ON BEHIND, which is TWO of the
+// six Wi-Fi screens and not all of them: the picker while it scans, and the
+// connecting dialog while it joins. Those are the two that put SCANNING and
+// CONNECTING... on the glass, so the radio being on is exactly what they say.
+//
+// THE OTHER FOUR ARE FALSE DELIBERATELY. The hub's band reads `ON DEMAND`,
+// which is a claim that the radio is OFF -- so leaving it up there is a false
+// claim, not merely untidy, and that is the case that found this rule: Back
+// off the picker MID-SCAN pops to the hub, and a predicate covering all six
+// would have let the radio sit there indefinitely. The keyboard and the error
+// panel have nothing in flight either; a join is started from the keyboard by
+// beginJoin, which brings the radio back up.
+//
+// IT IS HERE RATHER THAN IN shell/ FOR #42's REASON. This is a fact about the
+// screen catalogue, and its body is an exhaustive switch with NO `default:`,
+// so a seventh Wi-Fi screen fails the build with -Wswitch rather than being
+// quietly answered `false`. `shell/` has no harness and this has a test.
+bool screenUsesRadio(ScreenId id);
+
 // What a screen asks the app to do after handling an event.
 //
 // FIVE OF THE KINDS ARE LATCHES, not instructions: `Sleep`, `Retry`, `Open`,
