@@ -49,23 +49,23 @@ sim:
 # these illustrate the firmware rather than document both panels, and the X4's
 # 480x800 would only differ in how much of a list fits.
 #
-# sleep_cover, NOT sleep_cover_details, and the reason is issue #120 rather than
-# taste: the details board names MIDDLEMARCH over a cover of ROMOLA. That is a
-# BOARD defect and the render is faithful to it -- three constraints collide,
-# each written down somewhere, and they cannot all hold. The card must equal
-# Sleep.dc.html's (sim/main.cpp says so in as many words); the specimen book is
-# Middlemarch on 33 of the boards; the cover asset is Romola, rights-checked in
-# design/assets/README.md and feeding three boards.
+# sleep_cover_details, which is the DEFAULT mode and so what a reader actually
+# sees: the cover with the reading card over it.
 #
-# SleepCover.dc.html is coherent BY CONSTRUCTION, because it draws no card: there
-# is no second claim to contradict the picture. That is what makes it the safe
-# one to put on a public page while #120 is open, and it is why this line moves
-# back the day the cover assets are regenerated from Middlemarch.
+# IT WAS sleep_cover FOR EXACTLY AS LONG AS #120 WAS OPEN. The details board
+# named MIDDLEMARCH over a cover of ROMOLA -- a BOARD defect the render was
+# faithful to -- and the cover-alone board was coherent by construction, because
+# it draws no card and so has no second claim to contradict the picture. #120
+# regenerated the assets from Standard Ebooks' Middlemarch, so all three of the
+# constraints that collided now hold at once and this line moved back, which the
+# comment it replaces said it would.
 #
-# The badge is also absent there, which costs the README nothing and avoids
-# showing the badge slicing the cover's own title band -- itself an open
-# on-glass question, whose answer is NOT to move the badge.
-README_SCREENS := reader home library sleep_cover
+# WHAT COMES BACK WITH THE CARD is the badge sitting across the cover's own title
+# band, cutting GEORGE ELIOT in half lengthwise. That is a SEPARATE open on-glass
+# question, it is boarded, and its answer is NOT to move the badge -- the badge's
+# position is Sleep.dc.html's. It is also what the device does in this mode, so a
+# README showing this mode should show it.
+README_SCREENS := reader home library sleep_cover_details
 readme-images:
 	cmake -S . -B build && cmake --build build -j --target reader_sim
 	@mkdir -p docs/images
