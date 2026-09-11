@@ -1,5 +1,6 @@
 #include "doctest.h"
 #include "reader/screen_home.h"
+#include "reader/screen_wifi_password.h"
 #include "reader/screens.h"
 
 using namespace reader;
@@ -70,6 +71,41 @@ TEST_CASE("the factory refuses a BookError nothing primed") {
   CHECK(f.create(ScreenId::BookError) != nullptr);
   f.clearBookErrorFacts();
   CHECK(f.create(ScreenId::BookError) == nullptr);
+}
+
+TEST_CASE("a fresh Wi-Fi target clears the passphrase typed for the last one") {
+  // THE DEFECT THIS CLOSES: fail on HOME, press EDIT PASSWORD, cancel, then
+  // pick a different network out of the scan -- and its keyboard came up
+  // holding HOME's passphrase, in clear, on a screen whose whole design note
+  // is `SHOWN WHILE TYPING`. `clearDeleteFacts`' defect verbatim, where the
+  // delete confirmation named the previous book.
+  //
+  // It is asserted through the FACTORY rather than through the screen,
+  // because the screen was never wrong: `wifiEntered_` had a setter and no
+  // counterpart, so the stale text arrived in the constructor.
+  DemoScreenFactory f;
+  f.setWifiDemo();
+
+  // EDIT PASSWORD's own call: the SSID and what was already typed, together.
+  f.setWifiTarget("HOME", "hunter2hunter2");
+  auto again = f.create(ScreenId::WifiPassword);
+  REQUIRE(again != nullptr);
+  auto* kb = static_cast<WifiPasswordScreen*>(again.get());
+  CHECK(kb->vm().ssid == "HOME");
+  CHECK(kb->entered() == "hunter2hunter2");
+
+  // A FRESH JOIN, which primes the SSID and nothing else. One call, so the
+  // two facts about one join attempt cannot be set separately -- a
+  // `clearWifiEntered()` beside it would be an ordering maintained in prose.
+  f.setWifiTarget("CAFE-BIBLIO");
+  auto fresh = f.create(ScreenId::WifiPassword);
+  REQUIRE(fresh != nullptr);
+  auto* kb2 = static_cast<WifiPasswordScreen*>(fresh.get());
+  CHECK(kb2->vm().ssid == "CAFE-BIBLIO");
+  CHECK(kb2->entered().empty());
+  // And the counter agrees, because it is the one place a reader would see
+  // the leak if `entered` were mirrored and the count were not.
+  CHECK(kb2->vm().counter == "0 CHARS");
 }
 
 TEST_CASE("a primed BookEnd states the facts it was given") {

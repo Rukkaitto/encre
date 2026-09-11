@@ -119,7 +119,8 @@ TEST_CASE("QuietTheme renders the connect flow to golden at both geometries") {
          for (int i = 0; i < 11; ++i) a.app.dispatch({Button::Down, PressKind::Short});
          for (int i = 0; i < 4; ++i) a.app.dispatch({Button::Up, PressKind::Short});
        }},
-      {"wifi_password", [](WifiApp& a) { a.factory.setWifiEntered("correcthor"); },
+      {"wifi_password",
+       [](WifiApp& a) { a.factory.setWifiTarget("PENDRAGON", "correcthor"); },
        [](WifiApp& a) {
          REQUIRE(a.app.pushScreen(ScreenId::WifiPicker));
          REQUIRE(a.app.pushScreen(ScreenId::WifiPassword));

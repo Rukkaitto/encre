@@ -708,7 +708,7 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       if (!wifiTargetPrimed_) return nullptr;
       auto pw = std::make_unique<WifiPasswordScreen>(wifiTarget_);
       // Empty for a fresh join and non-empty only where EDIT PASSWORD primed
-      // it -- see setWifiEntered.
+      // it -- see setWifiTarget.
       if (!wifiEntered_.empty()) pw->setEntered(wifiEntered_);
       return pw;
     }

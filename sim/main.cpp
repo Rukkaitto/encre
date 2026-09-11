@@ -1297,8 +1297,9 @@ int main(int argc, char** argv) {
           app.dispatch(reader::InputEvent{reader::Button::Up, reader::PressKind::Short});
       }
       if (isWifiPassword) {
-        // The board's own field: ten characters and a caret.
-        factory.setWifiEntered("correcthor");
+        // The board's own field: ten characters and a caret. The SSID is
+        // re-stated because it and the field are one call now.
+        factory.setWifiTarget("PENDRAGON", "correcthor");
         if (!app.pushScreen(reader::ScreenId::WifiPassword)) {
           std::fprintf(stderr, "the factory refused ScreenId::WifiPassword\n");
           return 1;

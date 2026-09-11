@@ -275,17 +275,33 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
     wifiScanPrimed_ = true;
   }
   void setWifiPickerVisibleRows(int n) { wifiPickerRows_ = n; }
-  // The network a join is about: the keyboard's band, the dialog's sentence
-  // and the error's. One setter for all three, because they are one fact.
-  void setWifiTarget(std::string ssid) {
+  // The network a join is about, AND what the keyboard's field starts with:
+  // the keyboard's band, the dialog's sentence and the error's. One setter,
+  // because they are one fact about one join attempt.
+  //
+  // IT WAS TWO SETTERS AND THE TEXT WAS NEVER CLEARED, which is how a
+  // passphrase typed for one network reached another network's keyboard in
+  // clear. `setWifiEntered` had no counterpart: fail on HOME, press EDIT
+  // PASSWORD, cancel, pick CAFE-BIBLIO off the scan, and its keyboard came up
+  // holding HOME's passphrase -- `clearDeleteFacts`' defect verbatim, where
+  // the delete confirmation named the previous book.
+  //
+  // AND THE HEADER ALREADY SAID SO. The old comment here read "a fresh join
+  // primes the SSID and NOT the text -- and a keyboard that came up holding
+  // the last attempt's passphrase would be worse than one that came up
+  // empty", which is the rule stated beside the defect it forbids: this
+  // project's most expensive recurring shape.
+  //
+  // A `clearWifiEntered()` beside the other clears would have been an ORDERING
+  // maintained in prose -- clear, then set, and only for the EDIT PASSWORD
+  // path -- which CLAUDE.md calls a function not yet written. One call with a
+  // defaulted second argument cannot be half-taken: priming a target IS
+  // deciding what is in the field, and the common answer is nothing.
+  void setWifiTarget(std::string ssid, std::string entered = {}) {
     wifiTarget_ = std::move(ssid);
+    wifiEntered_ = std::move(entered);
     wifiTargetPrimed_ = true;
   }
-  // What EDIT PASSWORD comes back with. Separate from setWifiTarget because a
-  // fresh join primes the SSID and NOT the text -- and a keyboard that came up
-  // holding the last attempt's passphrase would be worse than one that came up
-  // empty.
-  void setWifiEntered(std::string text) { wifiEntered_ = std::move(text); }
   void setWifiFailure(JoinFailure why) { wifiFailure_ = why; }
   void setWifiNetworkFacts(WifiNetworkActionsScreen::Facts f) {
     wifiActionFacts_ = std::move(f);
