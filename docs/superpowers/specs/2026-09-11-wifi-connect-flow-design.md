@@ -514,7 +514,7 @@ none.
 | mark | source | note |
 |---|---|---|
 | `kLock` | `WifiPicker.dc.html` | locked rows |
-| `kSignal1`..`kSignal4` | `WifiPicker.dc.html` | a family, one per fill state |
+| `kSignal1`..`kSignal3` | `WifiPicker.dc.html` | a family, one per fill state — see below |
 | `kRescan` | `WifiPicker.dc.html` | the circular arrow on the last row |
 | `kWifi` | `WifiConnect.dc.html` | the arc in the dialog |
 | `kWarning` | — | **reuse**, generated for `BatteryEmpty` |
@@ -524,6 +524,27 @@ and not transcribed — the rule `iconc.py` exists to enforce after it once held
 and swallowed a design fix. **The four signal states must be drawn distinctly on the
 board**, or two collide on identical path data and need the `source` tie-breaker that
 already separates `kBook` from `kBookLarge` and `kBattery` from `kBatteryCharging`.
+
+**THE GLYPH IS THREE BARS, NOT FOUR, and this line said four until the board was
+counted.** `WifiPicker.dc.html` draws one `<svg viewBox="0 0 17 13">` holding exactly
+three `<rect>`s, and three fill states across its rows: 3-of-3, 2-of-3, 1-of-3. So the
+family is `kSignal1..kSignal3`. Whether a zero-bar state is wanted is a question the
+board does not answer — a scan result with no signal at all is not a row any board
+draws.
+
+**AND THE FULL-STRENGTH MARK EXISTS ONLY IN WHITE.** The list is sorted by signal
+descending, so 3-of-3 lands on the top row, and the top row is the FOCUSED one, which
+is inverted — meaning there is no black 3-of-3 anywhere on either picker board.
+Whether `iconc.py` can generate a mark from an SVG whose rects are `fill="#ffffff"`
+is an implementation-time question for `make icons`, not a defect in the boards: they
+draw what the screens draw. If it cannot, the fix is a board change (an unfocused row
+carrying the full-strength mark) and not a hand-written asset — assets are generated
+from the design, never transcribed.
+
+`iconc.py` matches on an arbitrary substring rather than on `<path>` data specifically
+(`"match": '<rect x="19.5"'` is how `kBattery` is already keyed), so rect-built marks
+are supported — but the three states differ only in the `fill` of their second and
+third rects, so each `match` has to include that attribute to be distinguishing.
 
 All six are chrome at `Fidelity::Mono`, so they are hard-thresholded. **`kSignal*`'s
 bars are axis-aligned and `kLock`'s shackle is a curve** — the thin-diagonal warning
