@@ -238,14 +238,27 @@ and SetupHotspot. They are **parked, not deleted**: `V2_SCREENS` in
 be rendered, without counting them as V1 work nobody is doing. Instapaper was cut
 the same way earlier (canvas page "V2 · Instapaper").
 
-Two consequences that are easy to trip over:
+**AND V1.1 HAS TAKEN HALF OF IT BACK — THE CONNECT FLOW, NOT TRANSFER.** Six
+screens (`WifiSettings`, `WifiPicker`, `WifiPassword`, `WifiConnect`, `WifiError`,
+`WifiNetworkActions`) let a network be joined, preferred and forgotten; `Transfer`
+and `SetupHotspot` moved to canvas page "V2 · Wi-Fi transfer" and stay parked.
+**There is still no way to send a book to the device**, which is the distinction
+the two consequences below turn on.
 
-- **Settings has no CONNECTIONS section**, which is what brought its list back
-  inside the panel — see the scroll rail under **Overlays and lists**.
-- **HomeEmpty has no action slab.** Its board's call-to-action was
-  `SEND BOOKS OVER WI-FI`, and a primary action that cannot work is worse than
-  none, so the copy carries it: *"Put the SD card in your computer and copy EPUB
-  files into its /books folder."* The slab returns with Wi-Fi.
+- **Settings HAS a CONNECTIONS section again**, one header and one `Wi-Fi` row that
+  opens `WifiSettings`. It does **not** start the list scrolling — eleven items
+  where twelve fit, so no rail and no 14px gutter, and `renderSettings` reads
+  `totalRows > rows` rather than assuming. **This line said "Settings has no
+  CONNECTIONS section" while the board said CONNECTIONS IS BACK**, and the code
+  agreed with the line: the six screens shipped with no door, every golden green,
+  and `make compare` measuring Settings drifting AWAY from a board that was already
+  right.
+- **HomeEmpty STILL has no action slab**, and V1.1 does not bring it back. Its
+  board's call-to-action was `SEND BOOKS OVER WI-FI`, and a primary action that
+  cannot work is worse than none, so the copy carries it: *"Put the SD card in your
+  computer and copy EPUB files into its /books folder."* **Wi-Fi existing is not the
+  condition — TRANSFER is**, which is why the connect flow landing changed nothing
+  here.
 
 ## The rule that governs UI work
 
@@ -2357,9 +2370,12 @@ case to look at if one ever appears.
   - **This governs every scrollable list**, and today that is Library alone.
     Settings scrolled for about an hour: adding its `Refresh on screen change` row
     pushed it past the panel, and then Wi-Fi was cut from V1 and CONNECTIONS went
-    with it — eleven items where twelve fit, and the SLEEP SCREEN section has
-    since taken it back to nine. Phase 3's typography settings will
-    push it over again and it will start scrolling **without any code change**,
+    with it — eleven items where twelve fit, the SLEEP SCREEN section took it back
+    to nine, and **V1.1's CONNECTIONS row has now put it at eleven again**, which is
+    still inside twelve: no rail, no gutter, rows still running to the panel edge.
+    That figure has moved four times and is the thing to re-read rather than
+    inherit. Phase 3's typography settings will
+    push it over and it will start scrolling **without any code change**,
     because `renderSettings` reads `totalRows > rows` rather than assuming. Contents
     and Bookmarks are Phase 3's and will want it too.
   - **It is compared against its board now**, and for a while it was not: Library's
