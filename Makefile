@@ -65,7 +65,7 @@ sim:
 # question, it is boarded, and its answer is NOT to move the badge -- the badge's
 # position is Sleep.dc.html's. It is also what the device does in this mode, so a
 # README showing this mode should show it.
-README_SCREENS := reader home library sleep_cover_details
+README_SCREENS := reader home library typography sleep_cover_details
 readme-images:
 	cmake -S . -B build && cmake --build build -j --target reader_sim
 	@mkdir -p docs/images
