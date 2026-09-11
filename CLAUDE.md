@@ -7434,7 +7434,7 @@ the paragraph goes in the roadmap and the card gets the line number.
 
 | Field | Holds |
 |---|---|
-| `Release` | `V1` / `V1.1` / `V2` / `Someday`. What is left for each is the **Left to do** view, grouped by this |
+| `Release` | `V1` / `V1.1` / `V1.2` / `V2` / `Someday`. What is left for each is the **Left to do** view, grouped by this |
 | `Status` | the six stages below, with two entry doors |
 | `Kind` | `Screen` / `Engine` / `Fidelity` / `Perf` / `Hardware` / `Tooling` / `Docs` — **and it names the skill**: `Screen` goes through `implement-screen`, `Fidelity` through `design-change`, an `On glass` move through `flash-device` |
 | `Board` | which `.dc.html`, or empty |
@@ -7515,13 +7515,24 @@ it.
 - **Finding something deferrable:** make a card. Not a `TODO`, not a bullet in a
   plan, not a paragraph here. **This is the rule the board is for.**
 
-**V1 IS ISSUES; V2 AND SOMEDAY ARE DRAFT ITEMS, DELIBERATELY.** `#1`–`#30` are
-real issues so a commit can close one; the eighteen parked items are drafts so
-Wi-Fi's nine boards and the spec §8 shelf are not sitting in the tracker as open
-work nobody is doing. Same reasoning as `V2_SCREENS` in `tools/compare-design.py`:
+**A PLANNED RELEASE IS ISSUES; V2 AND SOMEDAY ARE DRAFT ITEMS, DELIBERATELY.**
+An issue is what a commit can close, so everything anybody is working towards is
+one: **V1 47, V1.1 19, V1.2 24, and not a draft among them**. The eighteen parked
+items stay drafts so the spec §8 shelf is not sitting in the tracker as open work
+nobody is doing. Same reasoning as `V2_SCREENS` in `tools/compare-design.py`:
 reachable, not counted. Promoting a draft is
 `convertProjectV2DraftIssueItemToIssue` and **the reverse does not exist**, so
 promote when the work starts and not before.
+
+**This said "V1 IS ISSUES" and named "Wi-Fi's nine boards" among the parked
+drafts, and V1.1 falsified both halves** — the connect flow came back and
+shipped, and its cards were issues from the day they were filed. **The count is
+still eighteen and that is a coincidence**, not the figure surviving: the Wi-Fi
+drafts left and the Names family and `Restore HomeEmpty's action slab` arrived.
+A count that is right for a different reason is the shape this file keeps
+recording, so the composition is worth reading off the board rather than off
+this line — **V2 is 6 drafts beside 2 real issues now**, which the old sentence
+had no room for either.
 
 **`Todo` was missing from this table until 2026-08-28, and it is the entry door for
 every non-UI card** — so anyone following this section for a `Kind = Tooling` card
@@ -7541,11 +7552,11 @@ it empty.
   is interactive. A missing scope reads as
   `your authentication token is missing required scopes`.
 
-The ids, rediscoverable with `gh project field-list 1 --owner Rukkaitto` if they
-ever go stale — **and `Release`'s HAD, silently**: all four of its option ids had
-changed and a `V1.1` had appeared, which reads as
-`The single select option Id does not belong to the field` and is the only one of
-these five rows that has ever moved. Re-list before trusting the table.
+The ids, rediscoverable with `gh project field-list 1 --owner Rukkaitto`.
+**`Release` is the one row here that has ever gone stale, and it has done it
+twice — re-list that field before trusting this table.** The incidents are in
+its own row below rather than restated here, because a history kept in two
+places is one that drifts in one of them.
 
 | | id |
 |---|---|
@@ -7554,7 +7565,7 @@ these five rows that has ever moved. Re-list before trusting the table.
 | `Kind` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUU` — `Screen` `fe704ca2`, `Engine` `e45425d2`, `Fidelity` `067a44e5`, `Perf` `3906b97c`, `Hardware` `8952abc2`, `Tooling` `09fcefaa`, `Docs` `ac2492c0` |
 | `Source` | `PVTF_lAHOAkvc3c4BhZ5gzhgVwX8` (text) |
 | `Phase` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgV6lo` — `1` `1af00faf`, `2A` `70d666b6`, `2A-2` `10dd1639`, `2B` `891e6f65`, `2C` `226e8a24`, `3A` `726ae204`, `3B` `e13f494d`, `3C` `edb93849`, `3C+` `40a66d57`, `3D` `8f1728ee`, `3E` `f7ea731c`, `4` `e7a6573a`, `5` `f00b8560` |
-| `Release` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUQ` — `V1` `88741031`, **`V1.1` `0244a105`**, `V2` `3a9bcb84`, `Someday` `4cd5509e`. **All four were stale here and the fourth was missing entirely** — the recorded ids answered `The single select option Id does not belong to the field`, silently, because `gh project item-edit` prints a GraphQL error and still **exits 0**. So a scripted `set -e` sweep reports success on the fields it did not set. Re-read them from `field-list` rather than from this table, which is what the line below already says. **`Status`, `Kind` and `Phase` have not moved.** |
+| `Release` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUQ` — `V1` `88741031`, `V1.1` `0244a105`, **`V1.2` `f78ca656`**, `V2` `3a9bcb84`, `Someday` `4cd5509e`. **THIS ROW HAS NOW GONE STALE TWICE, THE SAME WAY BOTH TIMES: A RELEASE WAS ADDED AND NOTHING HERE NOTICED.** First `V1.1`, when all four recorded ids had also been rotated and the recorded ids answered `The single select option Id does not belong to the field` — **silently**, because `gh project item-edit` prints a GraphQL error and still **exits 0**, so a scripted `set -e` sweep reports success on the fields it did not set. Then `V1.2`, which is not an empty placeholder: it holds **24 issues**. That one cost nothing only because the missing option was one nobody had tried to set yet, which is luck rather than a property. **So the id is not the fragile part — the OPTION LIST is**, and it changes whenever the owner plans a release, which is not a moment anybody edits this file. Re-read the whole field from `field-list` rather than one id from this table, and verify by reading the item back: a write that failed and a write that landed look identical at the shell. **`Status`, `Kind` and `Phase` have never moved.** |
 
 Moving one card is `gh project item-edit --id <item> --project-id <project>
 --field-id <field> --single-select-option-id <option>`; the item id comes from
