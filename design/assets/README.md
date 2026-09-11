@@ -5,8 +5,8 @@ thing worth comparing it against.
 
 | file | bytes | sha256 | drawn by |
 |---|--:|---|---|
-| `sleep-cover-480x800.png` | 124,807 | `de433f3eaf7d734a55cc4c351d47210522f00a3f1be671ebe2c0d902e2b5038b` | `reader_sim cover`, X4 geometry |
-| `sleep-cover-528x792.png` | 137,979 | `eee45dcd73e584a2eb0d4ad1649aa00e7713056abaef83566e48403e6724db20` | `reader_sim cover`, X3 geometry |
+| `sleep-cover-480x800.png` | 129,716 | `759d0cfe9b5a068fb07cb381b8ed13602a3245a0e031ed12482d56bad4f13471` | `reader_sim cover`, X4 geometry |
+| `sleep-cover-528x792.png` | 142,796 | `7cf0087100b84446efcae0402923e555543fb9e351f847aea81d3d2213207476` | `reader_sim cover`, X3 geometry |
 
 Used by **three** boards: `design/SleepCover.dc.html` and
 `design/SleepCoverDetails.dc.html`, the two cover modes of the sleep screen, and
@@ -64,12 +64,19 @@ panel.
 
 ## The book, and the rights check
 
-**Romola, George Eliot** -- Standard Ebooks, from the corpus
-(`tools/corpus.manifest` line 204, `standardebooks`, epub sha256
-`b59312cb82a2c091cac19e8e3ec57fa6cb6318ca7ed3442134533437bb4d46d3`, cached as
-`~/.cache/encre-corpus/standardebooks/b59312cb82a2c091.epub`). The cover is
+**Middlemarch, George Eliot** -- Standard Ebooks, from the corpus
+(`tools/corpus.manifest` line 212, `standardebooks`, epub sha256
+`cc2f7d8113f526335de81455b5bea9d3750a935f4b751cbdc6a191b3138ffcc8`, cached as
+`~/.cache/encre-corpus/standardebooks/cc2f7d8113f52633.epub`). The cover is
 `epub/images/cover.jpg`, 1400x2100, sha256
-`5167f8d2da715a9db60a56bc2d058fcd72838b69215570c8b568d76f1142d33b`.
+`bfe7b0532e5899ad4fc9ad1dec9eaab1f9034f40ad19c2fc30cdca3c9d495687`.
+
+**It is Middlemarch because every board's card says Middlemarch** (#120). The
+specimen book is one book across 33 boards, and `SleepCoverDetails.dc.html` is
+`Sleep.dc.html` with its background replaced and nothing else -- so a cover of a
+DIFFERENT book put two claims on one screen, and the card called the picture a
+liar. The asset was Romola for as long as the cover was chosen for its picture
+rather than for its title.
 
 **Checked from the book's own `dc:rights`, not from which folder it sits in**,
 which is the standard `test/unit/fixtures/images/README.md` sets and the episode
@@ -83,9 +90,10 @@ etext, because Gutenberg hosts both. This book's `content.opf` says:
 > terms in the CC0 1.0 Universal Public Domain Dedication.
 
 The artwork clause is the one that matters here, since what is committed is the
-cover and not a word of the text. The colophon names the painting: *Cimabue's
-Celebrated Madonna*, Frederic Leighton, 1855 -- painter died 1896, so the source
-artwork is public domain on its own terms as well as by Standard Ebooks' policy.
+cover and not a word of the text. The colophon names the painting: *The Grove,
+Hampstead*, John Constable, completed between 1821 and 1822 -- painter died
+1837, so the source artwork is public domain on its own terms as well as by
+Standard Ebooks' policy.
 
 **1400x2100 is the typical case, not a flattering one.** All 95 Standard Ebooks
 in the corpus are exactly that size, and `cover_fit.h`'s own census says 160 of
@@ -99,7 +107,7 @@ showing this screen should be showing.
 
 ```bash
 make sim
-B=~/.cache/encre-corpus/standardebooks/b59312cb82a2c091.epub
+B=~/.cache/encre-corpus/standardebooks/cc2f7d8113f52633.epub
 ./build/reader_sim cover "$B" design/assets/sleep-cover-480x800.png --canvas 480x800 --fit fill
 ./build/reader_sim cover "$B" design/assets/sleep-cover-528x792.png --canvas 528x792 --fit fill
 ```
@@ -107,8 +115,8 @@ B=~/.cache/encre-corpus/standardebooks/b59312cb82a2c091.epub
 What it printed when these were made:
 
 ```
-cover result=Ok src=1400x2100 scale=1/2 dst=480x800+0+0 panel=480x800 fit=fill open_ms=1.3 decode_ms=78.1
-cover result=Ok src=1400x2100 scale=1/2 dst=528x792+0+0 panel=528x792 fit=fill open_ms=1.0 decode_ms=72.0
+cover result=Ok src=1400x2100 scale=1/2 dst=480x800+0+0 panel=480x800 fit=fill open_ms=0.4 decode_ms=27.6
+cover result=Ok src=1400x2100 scale=1/2 dst=528x792+0+0 panel=528x792 fit=fill open_ms=0.2 decode_ms=26.7
 ```
 
 `dst` covering the whole panel at `+0+0` is what makes these full-bleed: `fill`
