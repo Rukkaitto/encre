@@ -30,7 +30,13 @@ constexpr const char* kBaseTail = "456789.-_!";
 // eye here.
 constexpr const char* kSymbolTail = "\"#$%&'()*+,/:;<=>?@[\\]^`{|}~.-";
 
-const char* kFunctionRow[4] = {"SHIFT", "#+=", "SPACE", "JOIN"};
+// SIX CELLS, the two new ones being the caret's. `\u2039` and `\u203A` rather
+// than an icon pair: both are already in fontc.py's subset, so they cost no
+// mark, no font rebuild and no flash -- CLAUDE.md records the Typography
+// panel reaching the same conclusion about the same two codepoints.
+constexpr const char* kCaretLeft = "\xE2\x80\xB9";
+constexpr const char* kCaretRight = "\xE2\x80\xBA";
+const char* kFunctionRow[6] = {kCaretLeft, kCaretRight, "SHIFT", "#+=", "SPACE", "JOIN"};
 
 std::string upperOf(const std::string& s) {
   std::string out = s;
@@ -43,7 +49,7 @@ std::string upperOf(const std::string& s) {
 }  // namespace
 
 WifiPasswordScreen::WifiPasswordScreen(std::string ssid)
-    : GridFocusScreen(GridFocus({10, 10, 10, 10, 4})), ssid_(std::move(ssid)) {
+    : GridFocusScreen(GridFocus({10, 10, 10, 10, 6})), ssid_(std::move(ssid)) {
   // The side buttons move along a row and the front buttons change row --
   // the board's own note, and a mechanism ReaderScreen and PeekScreen already
   // use rather than one this screen invents.
@@ -66,10 +72,10 @@ void WifiPasswordScreen::rebuildCells() {
       break;
   }
   vm_.cells.clear();
-  vm_.cells.reserve(44);
+  vm_.cells.reserve(46);
   for (const char c : chars) vm_.cells.push_back(std::string(1, c));
   for (const char* f : kFunctionRow) vm_.cells.push_back(f);
-  vm_.rowWidths = {10, 10, 10, 10, 4};
+  vm_.rowWidths = {10, 10, 10, 10, 6};
 }
 
 void WifiPasswordScreen::setLayer(Layer l) {
@@ -82,7 +88,24 @@ void WifiPasswordScreen::setLayer(Layer l) {
 void WifiPasswordScreen::setEntered(std::string text) {
   if (text.size() > kMaxPassphrase) text.resize(kMaxPassphrase);
   entered_ = std::move(text);
+  // AT THE END, which is where somebody arriving from EDIT PASSWORD wants it:
+  // the usual reason to come back is that the last characters were wrong.
+  caret_ = entered_.size();
   syncVm();
+}
+
+bool WifiPasswordScreen::moveCaret(int delta) {
+  const int at = static_cast<int>(caret_) + delta;
+  const int clamped = at < 0 ? 0 : (at > static_cast<int>(entered_.size())
+                                        ? static_cast<int>(entered_.size())
+                                        : at);
+  // CLAMPS RATHER THAN WRAPPING, which is Focus::set's rule and for its
+  // reason: a caret that jumped from the start of a passphrase to its end
+  // would be indistinguishable from a misread press.
+  if (static_cast<size_t>(clamped) == caret_) return false;
+  caret_ = static_cast<size_t>(clamped);
+  syncVm();
+  return true;
 }
 
 void WifiPasswordScreen::syncVm() {
@@ -92,6 +115,7 @@ void WifiPasswordScreen::syncVm() {
   // character per ~520 ms repaint on a 44-cell grid, a typo you cannot see is
   // punishing, and this is a device you hold.
   vm_.entered = entered_;
+  vm_.caret = caret_;
   vm_.counter = std::to_string(entered_.size()) + " CHARS";
   vm_.visibility = "SHOWN WHILE TYPING";
   vm_.note = "UP AND DOWN MOVE BETWEEN ROWS; THE SIDE PAGE BUTTONS MOVE ALONG A ROW.";
@@ -134,6 +158,7 @@ std::string WifiPasswordScreen::confirmLabel() const {
   const std::string& cell = vm_.cells[static_cast<size_t>(f)];
   // SPACE is not in this list, and that is the distinction: it types a
   // character like any other cell and is the only function key that does.
+  if (cell == kCaretLeft || cell == kCaretRight) return "MOVE";
   if (cell == "SHIFT" || cell == "#+=") return cell;
   if (cell == "JOIN") return joinable() ? "JOIN" : "";
   return "TYPE";
@@ -158,6 +183,8 @@ Action WifiPasswordScreen::activateCell() {
     setLayer(layer_ == Layer::Symbols ? Layer::Lower : Layer::Symbols);
     return Action::redraw();
   }
+  if (cell == kCaretLeft) return moveCaret(-1) ? Action::redraw() : Action::none();
+  if (cell == kCaretRight) return moveCaret(+1) ? Action::redraw() : Action::none();
   if (cell == "JOIN") {
     // TOO SHORT TO BE A PASSPHRASE, so the press does nothing -- and the bar
     // has already said so with an empty Confirm slot, which is what keeps
@@ -177,7 +204,11 @@ Action WifiPasswordScreen::activateCell() {
   // keyboard that swallows a press is indistinguishable from one that missed
   // it.
   if (entered_.size() + text.size() > kMaxPassphrase) return Action::none();
-  entered_ += text;
+  // INSERTED AT THE CARET, not appended. With the caret at the end -- which
+  // is where it starts and where it spends most of its life -- this is the
+  // same thing.
+  entered_.insert(caret_, text);
+  caret_ += text.size();
   if (shiftArmed_) {
     shiftArmed_ = false;
     setLayer(Layer::Lower);
@@ -201,7 +232,14 @@ Action WifiPasswordScreen::onGesture(const GestureEvent& g) {
         cancelled_ = true;
         return Action::wifi();
       }
-      entered_.pop_back();
+      // BEFORE THE CARET, which is what backspace means -- and at the start of
+      // a non-empty field there is nothing before it, so the press does
+      // nothing rather than deleting the character after it or leaving the
+      // screen. Leaving there would be a Back that means two different things
+      // depending on where the caret sits.
+      if (caret_ == 0) return Action::none();
+      entered_.erase(caret_ - 1, 1);
+      --caret_;
       syncVm();
       return Action::redraw();
     case Gesture::Secondary:

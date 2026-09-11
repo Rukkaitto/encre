@@ -2847,7 +2847,13 @@ constexpr int kKeyH = 52;
 // The function row's four cells. WIDER AND UNEQUAL, which is the board's own
 // declaration: 83 + 83 + 126 + 126 with three 3px gaps is 427, exactly what ten
 // 40px cells and nine gaps make -- so the two row shapes share an edge.
-constexpr int kKeyFnW[4] = {83, 83, 126, 126};
+// THE FUNCTION ROW'S SIX CELLS. The two 40px ones are the caret's and match a
+// character key's width, which is what makes them read as keys; the other four
+// are rebalanced to keep the slack they had. 40+40+83+60+95+94 plus five 3px
+// gaps is 427 -- exactly ten character keys and nine gaps, so the two row
+// shapes still share an edge. See design/WifiPassword.dc.html, which carries
+// the measurement that says the words fit without icons.
+constexpr int kKeyFnW[6] = {40, 40, 83, 60, 95, 94};
 constexpr int kKeyRowW = 10 * kKeyW + 9 * kKeyGap;  // 427
 
 // The centred block both empty states draw: a title over a paragraph, in the
@@ -3119,15 +3125,38 @@ void QuietTheme::renderWifiPassword(Framebuffer& fb, const FontSet& fonts,
   // the left: a 63-character passphrase is far wider than this box, and a
   // field that elided its TAIL would hide the character just typed.
   const int textRoom = fieldW - 2 * (2 + kKeyFieldPadX) - kKeyFieldGap - kCaretW;
-  std::string shown = vm.entered;
-  while (!shown.empty() && fieldFont.measure(shown, fieldTracking) > textRoom) {
-    shown.erase(shown.begin());
+
+  // THE WINDOW FOLLOWS THE CARET, NOT THE END. This dropped leading characters
+  // until the whole string fitted, which is right when the caret is always at
+  // the end and wrong the moment it is not: moving left past the window's edge
+  // would scroll the caret out of the field and the reader would be editing
+  // something they cannot see.
+  //
+  // So the caret's own offset is what must stay inside the box, and the text
+  // before it is trimmed from the left until it does. Everything after the
+  // caret then fills whatever is left and is cut at the right, which is the
+  // half that can be hidden without hiding where you are.
+  const size_t caret = vm.caret > vm.entered.size() ? vm.entered.size() : vm.caret;
+  std::string before = vm.entered.substr(0, caret);
+  std::string after = vm.entered.substr(caret);
+  while (!before.empty() && fieldFont.measure(before, fieldTracking) > textRoom) {
+    before.erase(before.begin());
   }
-  const int textW = fieldFont.measure(shown, fieldTracking);
-  drawText(fb, fieldFont, textX, baselineIn(fieldFont, y, kKeyFieldH), shown, Ink::Black,
-           fieldTracking, plane);
-  fb.fillRect(textX + textW + kKeyFieldGap, y + centreIn(0, kKeyFieldH, kCaretH), kCaretW,
-              kCaretH, false);
+  const int beforeW = fieldFont.measure(before, fieldTracking);
+  const int caretX = textX + beforeW + kKeyFieldGap;
+  while (!after.empty() &&
+         caretX + kCaretW + kKeyFieldGap + fieldFont.measure(after, fieldTracking) >
+             textX + textRoom + kKeyFieldGap + kCaretW) {
+    after.pop_back();
+  }
+
+  const int base = baselineIn(fieldFont, y, kKeyFieldH);
+  drawText(fb, fieldFont, textX, base, before, Ink::Black, fieldTracking, plane);
+  fb.fillRect(caretX, y + centreIn(0, kKeyFieldH, kCaretH), kCaretW, kCaretH, false);
+  if (!after.empty()) {
+    drawText(fb, fieldFont, caretX + kCaretW + kKeyFieldGap, base, after, Ink::Black,
+             fieldTracking, plane);
+  }
   y += kKeyFieldH;
 
   // --- the counter row ---------------------------------------------------
@@ -3160,7 +3189,7 @@ void QuietTheme::renderWifiPassword(Framebuffer& fb, const FontSet& fonts,
     const bool functionRow = (r + 1 == vm.rowWidths.size());
     int x = gridX;
     for (int c = 0; c < cols; ++c, ++cell) {
-      const int w = functionRow ? kKeyFnW[c < 4 ? c : 3] : kKeyW;
+      const int w = functionRow ? kKeyFnW[c < 6 ? c : 5] : kKeyW;
       const bool focused = (cell == vm.focusedCell);
       if (focused) {
         fb.fillRect(x, y, w, kKeyH, false);

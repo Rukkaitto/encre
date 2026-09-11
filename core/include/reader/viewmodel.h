@@ -745,6 +745,10 @@ struct WifiPasswordViewModel {
   // character per ~520 ms repaint on a 44-cell grid, a typo you cannot see is
   // punishing, and this is a device you hold.
   std::string entered;
+  // WHERE THE CARET SITS, as a byte offset into `entered`. The field draws the
+  // text either side of it rather than a block on the end -- the caret is a
+  // position now, not a terminator.
+  size_t caret = 0;
   std::string counter;     // "10 CHARS"
   std::string visibility;  // "SHOWN WHILE TYPING"
   // The cells, row-major, and the widths that cut them into rows. The theme

@@ -65,9 +65,11 @@ TEST_CASE("the three layers reach every printable ASCII character") {
   std::set<char> reachable;
   for (const Layer l : {Layer::Lower, Layer::Upper, Layer::Symbols}) {
     s.setLayer(l);
-    // EVERY LAYER IS THE SAME 44 CELLS, which is what keeps the panel
-    // geometry from moving and GridFocus from meeting a changing shape.
-    REQUIRE(s.vm().cells.size() == 44);
+    // EVERY LAYER IS THE SAME 46 CELLS, which is what keeps the panel
+    // geometry from moving and GridFocus from meeting a changing shape. It
+    // was 44 until the caret's two arrows joined the function row; what the
+    // invariant asks is that the layers AGREE, not that the number is 44.
+    REQUIRE(s.vm().cells.size() == 46);
     for (size_t i = 0; i < 40; ++i) {
       REQUIRE(s.vm().cells[i].size() == 1);
       reachable.insert(s.vm().cells[i][0]);
@@ -180,6 +182,85 @@ TEST_CASE("Back deletes a character, and LEAVES when there is none to delete") {
   const Action a = s.onGesture(kBack);
   CHECK(a.kind == Action::Kind::Wifi);
   CHECK(s.cancelled());
+}
+
+TEST_CASE("the caret is a position, and typing inserts there") {
+  // THERE WAS NO WAY TO FIX A TYPO THREE CHARACTERS BACK: every press
+  // appended and Back deleted from the end, so a mistyped passphrase had to
+  // be unwound to the mistake and retyped. Reported off the device.
+  WifiPasswordScreen s("N");
+  press(s, "a");
+  press(s, "b");
+  press(s, "d");
+  REQUIRE(s.entered() == "abd");
+  CHECK(s.caret() == 3);
+
+  // Left twice, to sit between `b` and `d`.
+  press(s, "\xE2\x80\xB9");
+  CHECK(s.caret() == 2);
+  press(s, "c");
+  CHECK(s.entered() == "abcd");
+  // AND THE CARET FOLLOWS WHAT WAS TYPED, so a second character lands after
+  // the first rather than before it.
+  CHECK(s.caret() == 3);
+  press(s, "x");
+  CHECK(s.entered() == "abcxd");
+
+  // Right to the end, and past it.
+  press(s, "\xE2\x80\xBA");
+  CHECK(s.caret() == 5);
+  const Action a = s.onGesture(kConfirm);  // still on the right arrow
+  CHECK(a.kind == Action::Kind::None);  // clamped: nothing moved, nothing repaints
+  CHECK(s.caret() == 5);
+}
+
+TEST_CASE("Back deletes BEFORE the caret, and does nothing at the start") {
+  WifiPasswordScreen s("N");
+  s.setEntered("abcd");
+  // setEntered leaves it at the end, which is where EDIT PASSWORD wants it.
+  REQUIRE(s.caret() == 4);
+
+  press(s, "\xE2\x80\xB9");
+  press(s, "\xE2\x80\xB9");
+  REQUIRE(s.caret() == 2);
+  CHECK(s.onGesture(kBack).kind == Action::Kind::Redraw);
+  CHECK(s.entered() == "acd");
+  CHECK(s.caret() == 1);
+
+  // AT THE START OF A NON-EMPTY FIELD THERE IS NOTHING BEFORE THE CARET, so
+  // the press does nothing -- and in particular does NOT leave. A Back that
+  // meant two different things depending on where the caret sits would be
+  // worse than one that means one.
+  press(s, "\xE2\x80\xB9");
+  REQUIRE(s.caret() == 0);
+  const Action a = s.onGesture(kBack);
+  CHECK(a.kind == Action::Kind::None);
+  CHECK(s.entered() == "acd");
+  CHECK_FALSE(s.cancelled());
+  // The bar still says DELETE, because the field is not empty -- which is
+  // what that slot is keyed on.
+  CHECK(s.vm().hints[0] == "DELETE");
+}
+
+TEST_CASE("the arrows are guillemets, which cost no icon and no font rebuild") {
+  // `\u2039` and `\u203A` are already in fontc.py's subset -- CLAUDE.md
+  // records the Typography panel planning the same pair as a `make fonts`
+  // pass and a flash cost that did not exist. Asserted as the CELLS' own
+  // bytes so a silent swap to an icon, or to ASCII `<` and `>` (which a
+  // passphrase may legitimately contain and which the symbol layer types),
+  // fails here.
+  WifiPasswordScreen s("N");
+  const int left = cellNamed(s, "\xE2\x80\xB9");
+  const int right = cellNamed(s, "\xE2\x80\xBA");
+  REQUIRE(left >= 0);
+  REQUIRE(right >= 0);
+  CHECK(right == left + 1);
+  // The function row is the last, and they lead it.
+  CHECK(left == 40);
+  CHECK(s.vm().rowWidths.back() == 6);
+  // And the Confirm hint names what they do rather than repeating the glyph.
+  focusOn(s, left);
+  CHECK(s.vm().hints[1] == "MOVE");
 }
 
 TEST_CASE("the Back slot says which of the two things it will do") {

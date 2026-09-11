@@ -58,6 +58,9 @@ class WifiPasswordScreen : public GridFocusScreen {
 
   const WifiPasswordViewModel& vm() const { return vm_; }
   const std::string& entered() const { return entered_; }
+  // WHERE THE NEXT CHARACTER GOES, as a byte offset into entered(). Exposed
+  // for the tests; the theme reads vm().caret.
+  size_t caret() const { return caret_; }
 
   // EDIT PASSWORD comes back here with what was already typed, which is the
   // whole reason that slab exists -- see WifiErrorScreen. Clamped to the
@@ -98,8 +101,20 @@ class WifiPasswordScreen : public GridFocusScreen {
   // What pressing the focused cell does.
   Action activateCell();
 
+  // MOVES THE CARET, clamped. Returns whether it went anywhere, so a press at
+  // either end costs no ~520 ms repaint.
+  bool moveCaret(int delta);
+
   std::string ssid_;
   std::string entered_;
+  // A BYTE OFFSET, not a character index, and the distinction is safe here
+  // for a reason worth stating: a WPA2 passphrase is printable ASCII, which
+  // this keyboard enforces by construction -- every cell emits exactly one
+  // byte. So one byte is one character and the caret cannot land inside a
+  // multi-byte sequence. setEntered is the only door a non-ASCII string could
+  // come through and it is the shell's own stored secret, which this keyboard
+  // wrote.
+  size_t caret_ = 0;
   WifiPasswordViewModel vm_;
   Layer layer_ = Layer::Lower;
   // SHIFT IS ONE-SHOT and #+= LATCHES. A passphrase usually needs one capital,
