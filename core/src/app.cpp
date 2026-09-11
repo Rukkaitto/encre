@@ -55,6 +55,16 @@ const char* screenName(ScreenId id) {
     case ScreenId::BookEnd: return "BOOK-END";
     case ScreenId::BookError: return "BOOK-ERROR";
     case ScreenId::BatteryEmpty: return "BATTERY-EMPTY";
+    // The V1.1 connect flow. Kebab like their neighbours -- these are log
+    // labels and are free to be reworded; session_record.cpp's hyphenated
+    // spellings are a storage format and are not these, however alike they
+    // happen to look.
+    case ScreenId::WifiSettings: return "WIFI-SETTINGS";
+    case ScreenId::WifiPicker: return "WIFI-PICKER";
+    case ScreenId::WifiPassword: return "WIFI-PASSWORD";
+    case ScreenId::WifiConnect: return "WIFI-CONNECT";
+    case ScreenId::WifiError: return "WIFI-ERROR";
+    case ScreenId::WifiNetworkActions: return "WIFI-NETWORK-ACTIONS";
     // NOT A SCREEN -- see ScreenId::Count's own comment. Refused explicitly so this
     // switch stays exhaustive, the same reason session_record.cpp's does.
     case ScreenId::Count: return "?";

@@ -1,5 +1,9 @@
 #include "reader/screens.h"
 
+#include "reader/screen_wifi_connect.h"
+#include "reader/screen_wifi_password.h"
+#include "reader/screen_wifi_picker.h"
+
 #include "reader/screen_contents.h"
 #include "reader/screen_reader_menu.h"
 #include "reader/screen_sleep.h"
@@ -339,6 +343,83 @@ std::vector<LibraryItem> demoLibraryScrolledItems() {
 DemoScreenFactory::DemoScreenFactory(FileSystem& fs, std::string root)
     : fs_(&fs), root_(std::move(root)) {}
 
+std::vector<ScanResult> demoWifiScanLong() {
+  // design/WifiPickerScrolled.dc.html's OWN WINDOW, and the order is not
+  // decorative: that board shows items 6..12 of 19 with the third of them
+  // focused, so ranked positions 5..11 have to be exactly its seven rows in
+  // exactly its order or the comparison is measuring two different lists.
+  //
+  // The signal values are chosen to land on the board's bars through
+  // WifiPickerScreen::barsFor rather than being copied out of it -- a specimen
+  // that agreed with the banding by construction would not be evidence that
+  // the banding is right. barsFor bands at -55 and -70.
+  static const struct {
+    const char* ssid;
+    int rssi;
+    bool locked;
+  } kSeen[] = {
+      // 0..4 -- above the window, so only their strength matters.
+      {"PENDRAGON", -32, true},
+      {"BUREAU-GUEST", -35, false},
+      {"NEIGHBOUR-2G", -38, true},
+      {"ORANGE-4D2C", -41, true},
+      {"MOBILE-HOTSPOT", -44, false},
+      // 5..11 -- the board's visible window, in its order and at its bars.
+      {"LIVEBOX-7F42", -47, true},   // 3 bars
+      {"CAFE-BIBLIO", -58, true},    // 2 bars
+      {"FREEBOX-A23B", -72, true},   // 1 bar, and the focused row
+      {"SFR-8C40", -74, true},       // 1
+      {"EDUROAM", -76, true},        // 1
+      {"VOISIN-5G", -78, true},      // 1
+      {"BBOX-2E1A", -80, true},      // 1
+      // 12..17 -- below the window, so the rail has something to measure.
+      {"LIVEBOX-991E", -82, true},   {"PRINTER-DIRECT", -84, false},
+      {"SFR_AC10", -85, true},       {"BBOX-7745", -86, true},
+      {"FREEWIFI_SECURE", -87, true}, {"GUEST-3F", -88, false},
+  };
+  std::vector<ScanResult> out;
+  for (const auto& a : kSeen) {
+    ScanResult r;
+    r.ssid = a.ssid;
+    r.rssi = a.rssi;
+    r.locked = a.locked;
+    out.push_back(std::move(r));
+  }
+  return out;
+}
+
+// THE BOARDS' OWN CONTENT, asked for. design/WifiSettings.dc.html shows HOME
+// (automatic) and BUREAU; design/WifiPicker.dc.html shows five networks with
+// BUREAU-GUEST open and the rest locked, sorted by signal.
+void DemoScreenFactory::setWifiDemo() {
+  SavedNetworks nets;
+  nets.remember("HOME", true);
+  nets.remember("BUREAU", true);
+  setWifiNetworks(std::move(nets));
+
+  // The rssi values are chosen to land on the board's own three-bar spread
+  // through WifiPickerScreen::barsFor, rather than being copied out of it --
+  // a board specimen that agreed with the banding by construction would not
+  // be evidence that the banding is right.
+  std::vector<ScanResult> scan;
+  auto add = [&scan](const char* ssid, int rssi, bool locked) {
+    ScanResult r;
+    r.ssid = ssid;
+    r.rssi = rssi;
+    r.locked = locked;
+    scan.push_back(std::move(r));
+  };
+  add("PENDRAGON", -40, true);
+  add("BUREAU-GUEST", -58, false);
+  add("LIVEBOX-7F42", -62, true);
+  add("CAFE-BIBLIO", -78, true);
+  add("FREEBOX-A23B", -82, true);
+  setWifiScan(std::move(scan));
+
+  setWifiTarget("PENDRAGON");
+  setWifiNetworkFacts({"HOME", true});
+}
+
 std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
   switch (id) {
     case ScreenId::Library: {
@@ -607,6 +688,39 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
     // switch stays exhaustive and -Wswitch keeps working as the reminder that a NEW
     // screen needs a case here. Falling through to the `return nullptr` below would
     // behave identically and cost exactly that reminder.
+    // --- The V1.1 connect flow ------------------------------------------
+    //
+    // EVERY ONE REFUSES WHEN UNPRIMED. A refused push leaves the stack exactly
+    // as it was and paints nothing -- wrong in a way the reader can see
+    // through, where a substituted demo is wrong in a way they cannot. That
+    // rule cost this project two shipped defects before it was written down.
+    case ScreenId::WifiSettings:
+      if (!wifiPrimed_) return nullptr;
+      return std::make_unique<WifiSettingsScreen>(wifiNets_, wifiSink_);
+    case ScreenId::WifiPicker:
+      // `wifiScanPrimed_` IS ITS OWN FLAG rather than "the list is non-empty":
+      // a scan that legitimately found nothing primes an EMPTY list and must
+      // still build, because the empty state is a boarded screen. Same
+      // distinction contentsPrimed_ draws for a book with no NCX.
+      if (!wifiScanPrimed_) return nullptr;
+      return std::make_unique<WifiPickerScreen>(wifiScan_, wifiPickerRows_);
+    case ScreenId::WifiPassword: {
+      if (!wifiTargetPrimed_) return nullptr;
+      auto pw = std::make_unique<WifiPasswordScreen>(wifiTarget_);
+      // Empty for a fresh join and non-empty only where EDIT PASSWORD primed
+      // it -- see setWifiEntered.
+      if (!wifiEntered_.empty()) pw->setEntered(wifiEntered_);
+      return pw;
+    }
+    case ScreenId::WifiConnect:
+      if (!wifiTargetPrimed_) return nullptr;
+      return std::make_unique<WifiConnectScreen>(wifiTarget_);
+    case ScreenId::WifiError:
+      if (!wifiTargetPrimed_) return nullptr;
+      return std::make_unique<WifiErrorScreen>(wifiTarget_, wifiFailure_);
+    case ScreenId::WifiNetworkActions:
+      if (!wifiActionFactsSet_) return nullptr;
+      return std::make_unique<WifiNetworkActionsScreen>(wifiActionFacts_);
     case ScreenId::Count:
       return nullptr;
   }

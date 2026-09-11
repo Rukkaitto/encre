@@ -26,20 +26,24 @@ constexpr const char* kNames[] = {
     "book-details", "settings", "sleep", "reader", "reader-menu",
     "contents", "sd-missing", "typography", "peek", "book-end",
     "book-error", "battery-empty",
+    // The V1.1 connect flow. Hyphenated like their neighbours, and STABLE
+    // FOREVER from here: a name may never be edited while any device might
+    // hold a record containing it.
+    "wifi-settings", "wifi-picker", "wifi-password", "wifi-connect",
+    "wifi-error", "wifi-network-actions",
 };
 
-// AND IT IS STILL A NAMED MEMBER, WHICH IS #42 AND NOT THE FIX THIS COMMENT CLAIMS.
-// Appending BatteryEmpty left this assert reading `BookEnd + 1` on both sides and it
-// said NOTHING -- the same silence test_focus_restore.cpp's has now produced three
-// times. What actually pointed at the table was -Wswitch on sessionWireName below,
-// which is a WARNING rather than an error. The line still has to be advanced by hand.
+// TIED TO THE SENTINEL, NOT TO A NAMED MEMBER, AND THAT IS #42's WHOLE POINT.
+// This line used to read `BookEnd + 1`, so appending BatteryEmpty left both
+// sides equal and it said NOTHING -- the same silence test_focus_restore.cpp's
+// guard produced for Typography and then BookEnd. Three bounds in this file
+// were once spelled `<= ScreenId::Peek`, which left the table short, the decode
+// loop unable to see the new name, and sessionWireName's fall-through storing
+// the new screen as `home`.
 //
-// Three separate bounds in this feature were
-// spelled `<= ScreenId::Peek`, so appending a screen left the table short, the decode
-// loop unable to see the new name, and the round-trip test silently not covering it --
-// while sessionWireName's fallthrough stored the new screen as `home`. That is the
-// same shape as #42 and as the three "reports on less than it claims" checks CLAUDE.md
-// records. A count against the enum's end cannot be left behind by an append.
+// It works: appending the six connect-flow screens failed this assert before a
+// line of them was written, which is the guard doing its job at the moment it
+// was written for rather than one append later.
 static_assert(sizeof(kNames) / sizeof(kNames[0]) == static_cast<size_t>(ScreenId::Count),
               "a ScreenId was added or removed; give it a row in kNames and a case in"
               " sessionWireName. This names the Count SENTINEL, never a member -- a"
@@ -173,6 +177,12 @@ const char* sessionWireName(ScreenId id) {
     // falls through to `return kNames[0]` and stores the new screen as "home". That
     // has already happened twice here.
     case ScreenId::BatteryEmpty: return kNames[15];
+    case ScreenId::WifiSettings: return kNames[16];
+    case ScreenId::WifiPicker: return kNames[17];
+    case ScreenId::WifiPassword: return kNames[18];
+    case ScreenId::WifiConnect: return kNames[19];
+    case ScreenId::WifiError: return kNames[20];
+    case ScreenId::WifiNetworkActions: return kNames[21];
     // NOT A SCREEN, so it has no name and must never reach the fall-through below,
     // which is what silently made a missing case read as `home`.
     case ScreenId::Count: break;

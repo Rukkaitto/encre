@@ -83,6 +83,39 @@ enum class ScreenId : uint8_t {
   // member failed all of them at once, which is the whole point: the guards that
   // stayed quiet for Typography and then BookEnd cannot stay quiet for the next one.
   BatteryEmpty,
+  // THE V1.1 CONNECT FLOW, six screens appended together. Appending SIX at once is
+  // the case #42's sentinel was really written for -- the last time two screens
+  // arrived at once it was a merge, and every guard that named a member instead of
+  // Count would have let the loser of that merge serialise as `home`.
+  //
+  // design/WifiSettings.dc.html -- the hub: saved networks, and the door to a scan.
+  // Reached from Settings' CONNECTIONS row, which is the only place the radio may
+  // come up: the Reader is not on the stack there and the Library is not resident,
+  // so there is ~133 KB free against Wi-Fi's ~23 KB of static allocation. With a
+  // book open on a large card the measured floor is 13,696 bytes, so this is not a
+  // preference about battery -- the flow is entered from Settings because nowhere
+  // else has the heap.
+  WifiSettings,
+  // design/WifiPicker.dc.html -- the scan list. The second scrolling list in the
+  // firmware after the Library, and the second user of the rail.
+  WifiPicker,
+  // design/WifiPassword.dc.html -- the on-device keyboard, and the first text entry
+  // anywhere in this firmware. Derives from GridFocusScreen rather than FocusScreen:
+  // 44 cells in five rows, the last of them ragged.
+  WifiPassword,
+  // design/WifiConnect.dc.html -- the connecting dialog. An overlay, and it REPLACES
+  // the join stack rather than sitting on it (Action::replace), which is what makes
+  // one veiled parent truthful for both entry paths: an open network arrives here
+  // straight from the picker and has no WifiPassword to veil.
+  WifiConnect,
+  // design/WifiError.dc.html and its two siblings -- one screen, THREE COPY SHAPES.
+  // A join fails three distinguishable ways and one sentence would be a lie, which
+  // is BookError's argument; the two new shapes also DROP the EDIT PASSWORD slab,
+  // because the password is not what went wrong. Absent, not inert.
+  WifiError,
+  // design/WifiNetworkActions.dc.html -- what holding Confirm on a saved network
+  // opens. ItemActions reads the LIBRARY's focused row, so it could not be reused.
+  WifiNetworkActions,
   // NOT A SCREEN. A bound, so a guard can name "one past the last member" without
   // naming a member -- which is #42, and which had gone quiet twice by the time it
   // was fixed: session_record.cpp spelled three bounds `<= ScreenId::Peek` and then

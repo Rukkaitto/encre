@@ -224,6 +224,47 @@ ICONS = {
     # body -- rather than on the three contact rects, which are three
     # indistinguishable `<rect>`s and would not identify the mark if the outline
     # were ever retuned.
+    # --- The V1.1 connect flow -------------------------------------------
+    #
+    # THREE MARKS, NOT SIX. The picker's signal meter is three axis-aligned
+    # rectangles differing only in which are filled, and it is drawn by
+    # drawSignalBars rather than shipped as kSignal1..3 -- see components.h for
+    # the argument. What is left here is the three marks that are genuinely
+    # icon-shaped: a curve, a spiral and three arcs.
+    #
+    # THE LOCK KEYS ON THE *WHITE* COPY, WHICH IS kBookRow's PRECEDENT EXACTLY
+    # and is about uniqueness rather than colour. A scan list is mostly locked
+    # networks, so design/WifiPicker.dc.html carries THREE byte-identical black
+    # padlocks -- and this generator refuses an ambiguous match rather than
+    # picking one, which is the right call and is what caught this. The focused
+    # row's padlock is inverted and therefore the only one of its kind on the
+    # board. extract() re-colours an all-white mark to black before rasterising,
+    # so the asset is identical either way; what the colour buys is a match that
+    # names one element.
+    #
+    # Narrowing on anything else was not available: the three black copies are
+    # the same bytes, and pointing `source` at a board with one lock would mean
+    # authoring a scan list where only one network is secured, which is not a
+    # specimen of anything real.
+    "lock": {
+        "symbol": "kLock",
+        "note": "a closed padlock: a scan row that needs a passphrase",
+        "source": "design/WifiPicker.dc.html",
+        "match": 'M2.5 5.5V4a2.5 2.5 0 0 1 5 0v1.5" stroke="#ffffff"',
+    },
+    # Unique on its board without help: there is one Rescan row.
+    "rescan": {
+        "symbol": "kRescan",
+        "note": "a circular arrow: the picker's last row",
+        "source": "design/WifiPicker.dc.html",
+        "match": "M13 8a5 5 0 1 1-1.5-3.6",
+    },
+    "wifi": {
+        "symbol": "kWifi",
+        "note": "three arcs over a dot: the connecting dialog's mark",
+        "source": "design/WifiConnect.dc.html",
+        "match": "M1 6a16 16 0 0 1 22 0",
+    },
     "sdcard": {
         "symbol": "kSdCard",
         "note": "an SD card, notched corner and contacts: the no-card prompt",

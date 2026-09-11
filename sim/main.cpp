@@ -738,6 +738,28 @@ int main(int argc, char** argv) {
   // way down -- so it is pushed directly, which is `sleep`'s model and for `sleep`'s
   // reason. It needs no priming: the board's copy lives in the screen's constructor.
   const bool isBatteryEmpty = std::strcmp(argv[1], "battery_empty") == 0;
+  // --- The V1.1 connect flow ---------------------------------------------
+  //
+  // Eleven subcommands for six screens, because five of them have a boarded
+  // STATE as well: an empty hub, a scrolled and an empty picker, and two more
+  // failure shapes. Each has its own id because the comparison sheet measures
+  // per screen, and folding a state in would average a regression in one
+  // against a board that cannot show it.
+  const bool isWifiSettings = std::strcmp(argv[1], "wifi_settings") == 0;
+  const bool isWifiSettingsEmpty = std::strcmp(argv[1], "wifi_settings_empty") == 0;
+  const bool isWifiPicker = std::strcmp(argv[1], "wifi_picker") == 0;
+  const bool isWifiPickerScrolled = std::strcmp(argv[1], "wifi_picker_scrolled") == 0;
+  const bool isWifiPickerEmpty = std::strcmp(argv[1], "wifi_picker_empty") == 0;
+  const bool isWifiPassword = std::strcmp(argv[1], "wifi_password") == 0;
+  const bool isWifiConnect = std::strcmp(argv[1], "wifi_connect") == 0;
+  const bool isWifiError = std::strcmp(argv[1], "wifi_error") == 0;
+  const bool isWifiErrorNotFound = std::strcmp(argv[1], "wifi_error_not_found") == 0;
+  const bool isWifiErrorFailed = std::strcmp(argv[1], "wifi_error_failed") == 0;
+  const bool isWifiNetworkActions = std::strcmp(argv[1], "wifi_network_actions") == 0;
+  const bool isWifiAny = isWifiSettings || isWifiSettingsEmpty || isWifiPicker ||
+                         isWifiPickerScrolled || isWifiPickerEmpty || isWifiPassword ||
+                         isWifiConnect || isWifiError || isWifiErrorNotFound ||
+                         isWifiErrorFailed || isWifiNetworkActions;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
       !isHomeUnopened && !isHomeCharging && !isLibraryScrolled && !isReader && !isSleepIdle &&
@@ -745,7 +767,7 @@ int main(int argc, char** argv) {
       !isSleepWaking && !isLibraryOpening && !isTypography && !isPeek && !isSleepCover &&
       !isSleepCoverDetails && !isSleepCoverWaking && !isBookEnd && !isBookError &&
       !isBookErrorUnreadable && !isBookErrorMemory && !isLowBattery &&
-      !isBatteryEmpty) {
+      !isBatteryEmpty && !isWifiAny) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
@@ -756,7 +778,11 @@ int main(int argc, char** argv) {
                  "'sleep_cover', 'sleep_cover_details', 'sleep_cover_waking', "
                  "'library_opening', 'peek', 'book_end', 'book_error', "
                  "'book_error_unreadable', 'book_error_memory', 'low_battery', "
-                 "'battery_empty' or "
+                 "'battery_empty', 'wifi_settings', 'wifi_settings_empty', "
+                 "'wifi_picker', 'wifi_picker_scrolled', 'wifi_picker_empty', "
+                 "'wifi_password', 'wifi_connect', 'wifi_error', "
+                 "'wifi_error_not_found', 'wifi_error_failed', "
+                 "'wifi_network_actions' or "
                  "'app')\n",
                  argv[1]);
     return 3;
@@ -1222,6 +1248,86 @@ int main(int argc, char** argv) {
     // two boards drift apart in the one way the comparison could not see.
     for (const reader::InputEvent& ev : libraryEntry()) app.dispatch(ev);
   }
+  if (isWifiAny) {
+    // WifiSettings IS THE PARENT UNDER EVERY ONE OF THESE, which is what the
+    // three overlay boards veil. On the device it is reached from Settings'
+    // CONNECTIONS row -- the only place the radio may come up, because the
+    // Reader is not on the stack there -- but the simulator pushes it
+    // directly: what these renders are evidence about is the screens, and a
+    // Settings frame nobody draws would only be a slower way to the same
+    // framebuffer.
+    factory.setWifiDemo();
+    factory.setWifiPickerVisibleRows(7);
+    if (isWifiSettingsEmpty) {
+      // THE EMPTY VARIANT IS THE SAME ScreenId with a different list, which is
+      // what makes it a variant rather than a second screen: priming an empty
+      // SavedNetworks is the whole difference.
+      factory.setWifiNetworks(reader::SavedNetworks{});
+    }
+    if (isWifiPickerEmpty) factory.setWifiScan({});
+    if (isWifiPickerScrolled) factory.setWifiScan(reader::demoWifiScanLong());
+
+    if (!app.pushScreen(reader::ScreenId::WifiSettings)) {
+      std::fprintf(stderr, "the factory refused ScreenId::WifiSettings\n");
+      return 1;
+    }
+    if (isWifiNetworkActions) {
+      // The hold on a saved network. Pushed rather than pressed for the reason
+      // BookError is: a Secondary is a HELD Confirm, and the simulator has no
+      // way to hold a button.
+      if (!app.pushScreen(reader::ScreenId::WifiNetworkActions)) {
+        std::fprintf(stderr, "the factory refused ScreenId::WifiNetworkActions\n");
+        return 1;
+      }
+    } else if (isWifiPicker || isWifiPickerScrolled || isWifiPickerEmpty || isWifiPassword) {
+      if (!app.pushScreen(reader::ScreenId::WifiPicker)) {
+        std::fprintf(stderr, "the factory refused ScreenId::WifiPicker\n");
+        return 1;
+      }
+      if (isWifiPickerScrolled) {
+        // REACHED BY PRESSING PAST THE WINDOW AND BACK, which is
+        // LibraryScrolled's own recipe: arriving from above lands the focus on
+        // the window's BOTTOM edge, so getting the board's window means going
+        // PAST it and coming back. Down to item 11 puts first at 5, and four
+        // Ups then land the focus on 7 without moving the window -- which is
+        // the board, list on both sides of the thumb.
+        for (int i = 0; i < 11; ++i)
+          app.dispatch(reader::InputEvent{reader::Button::Down, reader::PressKind::Short});
+        for (int i = 0; i < 4; ++i)
+          app.dispatch(reader::InputEvent{reader::Button::Up, reader::PressKind::Short});
+      }
+      if (isWifiPassword) {
+        // The board's own field: ten characters and a caret.
+        factory.setWifiEntered("correcthor");
+        if (!app.pushScreen(reader::ScreenId::WifiPassword)) {
+          std::fprintf(stderr, "the factory refused ScreenId::WifiPassword\n");
+          return 1;
+        }
+      }
+    } else if (isWifiConnect || isWifiError || isWifiErrorNotFound || isWifiErrorFailed) {
+      // THE CONNECTING DIALOG AND THE THREE FAILURE SHAPES SIT ON
+      // WifiSettings, NOT ON THE PICKER, and that is the design rather than a
+      // shortcut: Action::replace collapses the join stack, which is what
+      // makes one veiled parent truthful for both entry paths. An open
+      // network arrives here with no WifiPassword behind it at all.
+      if (isWifiError || isWifiErrorNotFound || isWifiErrorFailed) {
+        factory.setWifiFailure(isWifiErrorNotFound ? reader::JoinFailure::NotFound
+                               : isWifiErrorFailed ? reader::JoinFailure::Incomplete
+                                                   : reader::JoinFailure::BadPassword);
+      }
+      // design/WifiConnect.dc.html names HOME and the error boards name
+      // PENDRAGON -- a saved network being re-joined against one just picked
+      // out of a scan. Both are real, so the specimen follows each board.
+      if (isWifiConnect) factory.setWifiTarget("HOME");
+      const reader::ScreenId next =
+          isWifiConnect ? reader::ScreenId::WifiConnect : reader::ScreenId::WifiError;
+      if (!app.pushScreen(next)) {
+        std::fprintf(stderr, "the factory refused a connect-flow screen\n");
+        return 1;
+      }
+    }
+  }
+
   if (isBookError || isBookErrorUnreadable || isBookErrorMemory) {
     // The board draws the LIBRARY under the veil with Dubliners focused -- the sixth
     // row, which is the same row the overlay boards focus and the same file the

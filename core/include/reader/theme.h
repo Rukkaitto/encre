@@ -17,6 +17,12 @@ struct DeleteConfirmViewModel;
 struct BookErrorViewModel;
 struct BookDetailsViewModel;
 struct SettingsViewModel;
+struct WifiSettingsViewModel;
+struct WifiPickerViewModel;
+struct WifiPasswordViewModel;
+struct WifiConnectViewModel;
+struct WifiErrorViewModel;
+struct WifiNetworkActionsViewModel;
 struct SleepViewModel;
 struct ReaderViewModel;
 struct ReaderMenuViewModel;
@@ -122,6 +128,45 @@ class Theme {
   // reasoning renderSdMissing and renderBookEnd each carry.
   virtual void renderBookError(Framebuffer& fb, const FontSet& fonts,
                                const BookErrorViewModel& vm, Plane plane = Plane::Bw) = 0;
+
+  // --- The V1.1 connect flow -------------------------------------------
+  //
+  // Six methods rather than one "a list, a panel and some slabs" surface, for
+  // renderBookError's stated reason: a shared abstraction would have to be told
+  // which board it was drawing, which is a caller list wearing a parameter's
+  // clothes.
+
+  // design/WifiSettings.dc.html, and design/WifiSettingsEmpty.dc.html as the
+  // same method -- `nothingSaved` is the whole branch, because two render paths
+  // would be two ways to spell one layout.
+  virtual void renderWifiSettings(Framebuffer& fb, const FontSet& fonts,
+                                  const WifiSettingsViewModel& vm, Plane plane = Plane::Bw) = 0;
+
+  // design/WifiPicker.dc.html and its scrolled and empty variants. The second
+  // scrolling list in the firmware, and the second user of the rail.
+  virtual void renderWifiPicker(Framebuffer& fb, const FontSet& fonts,
+                                const WifiPickerViewModel& vm, Plane plane = Plane::Bw) = 0;
+
+  // design/WifiPassword.dc.html -- a 10x4 character grid over a function row of
+  // four, and the only screen here that draws something components.h has no
+  // primitive for.
+  virtual void renderWifiPassword(Framebuffer& fb, const FontSet& fonts,
+                                  const WifiPasswordViewModel& vm, Plane plane = Plane::Bw) = 0;
+
+  // design/WifiConnect.dc.html -- an overlay, and the caption is the whole
+  // indicator: the board's eight-cell ticker is gone.
+  virtual void renderWifiConnect(Framebuffer& fb, const FontSet& fonts,
+                                 const WifiConnectViewModel& vm, Plane plane = Plane::Bw) = 0;
+
+  // design/WifiError.dc.html and its two siblings -- one method, three copy
+  // shapes, and `offersEdit` decides whether the first slab is drawn AT ALL.
+  virtual void renderWifiError(Framebuffer& fb, const FontSet& fonts,
+                               const WifiErrorViewModel& vm, Plane plane = Plane::Bw) = 0;
+
+  // design/WifiNetworkActions.dc.html -- the actions panel's box with one row.
+  virtual void renderWifiNetworkActions(Framebuffer& fb, const FontSet& fonts,
+                                        const WifiNetworkActionsViewModel& vm,
+                                        Plane plane = Plane::Bw) = 0;
 
   // Book details, which is a whole screen and not an overlay -- so it clears the
   // framebuffer and draws its own hint bar like any other screen.

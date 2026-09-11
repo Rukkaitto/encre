@@ -2785,4 +2785,526 @@ void QuietTheme::renderPeek(Framebuffer& fb, const FontSet& fonts, const GlyphSo
   drawOverlayHintBar(fb, fonts, hints, plane);
 }
 
+// ---------------------------------------------------------------------------
+// THE V1.1 CONNECT FLOW
+//
+// Every number below is the board's, and the ones that are not derived say so.
+// ---------------------------------------------------------------------------
+namespace {
+
+constexpr int kWifiProsePadY = 16;      // the on-demand sentence's box
+constexpr int kWifiProseLeadEm = 1550;  // line-height: 1.55
+constexpr int kWifiRowH = 80;           // a saved network, and a scan result
+constexpr int kWifiMarkGap = 12;        // between a row's padlock and its meter
+constexpr int kWifiEmptyGap = 16;       // the empty block's flex `gap`
+constexpr int kWifiEmptyPadX = 40;
+constexpr int kWifiTitleLeadEm = 1100;  // line-height: 1.1 on the empty title
+constexpr int kRescanPadY = 21;
+constexpr int kRescanGap = 12;
+constexpr int kPickerNotePadBottom = 14;
+
+// The keyboard, all from design/WifiPassword.dc.html.
+constexpr int kKeyFieldMarginTop = 24;
+// THE FIELD IS 80 PAINTED, NOT 76. The board says `height: 76px; border: 2px`
+// on a div that does NOT set box-sizing, so 76 is the CONTENT box and the
+// painted extent is 76 + two borders. Measured off the render: the design's
+// field spans 80 rows and this read 76, which put every keyboard row 4px high.
+// The first invariant, from the other direction -- a number the board states
+// is not always the number it draws.
+constexpr int kKeyFieldH = 80;
+constexpr int kKeyFieldPadX = 16;
+constexpr int kKeyFieldGap = 10;
+constexpr int kKeyFieldEm = 80;  // 0.08em
+constexpr int kCaretW = 10;
+constexpr int kCaretH = 34;
+constexpr int kKeyCounterPadTop = 10;
+constexpr int kKeyGridPadTop = 24;
+constexpr int kKeyGap = 3;
+constexpr int kKeyW = 40;
+constexpr int kKeyH = 52;
+// The function row's four cells. WIDER AND UNEQUAL, which is the board's own
+// declaration: 83 + 83 + 126 + 126 with three 3px gaps is 427, exactly what ten
+// 40px cells and nine gaps make -- so the two row shapes share an edge.
+constexpr int kKeyFnW[4] = {83, 83, 126, 126};
+constexpr int kKeyRowW = 10 * kKeyW + 9 * kKeyGap;  // 427
+
+// The centred block both empty states draw: a title over a paragraph, in the
+// space the list would have had. Returns nothing -- it is placed by its caller,
+// which knows what is below it.
+void drawEmptyBlock(Framebuffer& fb, const FontSet& fonts, int top, int areaH,
+                    std::string_view title, std::string_view prose,
+                    std::string_view second, Plane plane) {
+  const Font& titleFont = fonts[Role::Title700];
+  const Font& bodyFont = fonts[Role::Label400];
+  const int colW = fb.width() - 2 * kWifiEmptyPadX;
+  const int colX = kWifiEmptyPadX;
+
+  // Wrapped before anything is placed, because the block's height is what it
+  // wraps to and the whole thing is centred on that total. Two wraps would be
+  // two chances to disagree, which reads as a paragraph drifted off centre.
+  const Prose titleProse = wrapProse(titleFont, title, colW, kWifiTitleLeadEm);
+  const Prose p1 = wrapProse(bodyFont, prose, colW, kWifiProseLeadEm);
+  const bool hasSecond = !second.empty();
+  const Prose p2 =
+      hasSecond ? wrapProse(bodyFont, second, colW, kWifiProseLeadEm) : Prose{};
+
+  int blockF26 = titleProse.heightF26() + pxToF26(kWifiEmptyGap) + p1.heightF26();
+  if (hasSecond) blockF26 += pxToF26(kWifiEmptyGap) + p2.heightF26();
+
+  int yF26 = pxToF26(top) + (pxToF26(areaH) - blockF26) / 2;
+  yF26 += drawProse(fb, titleFont, titleProse, colX, colW, yF26, Ink::Black, plane,
+                    ProseAlign::Centre);
+  yF26 += pxToF26(kWifiEmptyGap);
+  yF26 += drawProse(fb, bodyFont, p1, colX, colW, yF26, Ink::Black, plane, ProseAlign::Centre);
+  if (hasSecond) {
+    yF26 += pxToF26(kWifiEmptyGap);
+    drawProse(fb, bodyFont, p2, colX, colW, yF26, Ink::Black, plane, ProseAlign::Centre);
+  }
+}
+
+// One 80px list row: a label on the left margin and whatever the caller draws
+// on the right. Shared by the hub and the picker, which state the identical box
+// -- `height: 80px; padding: 0 24px` -- and would otherwise be two copies of
+// the fill-and-baseline dance.
+int drawWifiRow(Framebuffer& fb, const FontSet& fonts, int y, int w, std::string_view label,
+                bool focused, bool rule, int rightReserved, Plane plane) {
+  if (focused) fb.fillRect(0, y, w, kWifiRowH, false);
+  const Ink ink = focused ? Ink::White : Ink::Black;
+  const Font& f = focused ? fonts[Role::Value700] : fonts[Role::Value500];
+  const int maxW = w - 2 * kMargin - rightReserved;
+  drawTextElided(fb, f, kMargin, baselineIn(f, y, kWifiRowH), label, maxW, ink, {}, plane);
+  // The boards' positional rule: every row carries a bottom border except the
+  // focused one, whose fill runs to the next row's edge, and the last drawn.
+  if (rule) fb.fillRect(0, y + kWifiRowH, w, 1, false);
+  return kWifiRowH + (rule ? 1 : 0);
+}
+
+}  // namespace
+
+void QuietTheme::renderWifiSettings(Framebuffer& fb, const FontSet& fonts,
+                                    const WifiSettingsViewModel& vm, Plane plane) {
+  fb.clear(true);
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+
+  // No mark in the band: the board's right slot is `ON DEMAND`, which is a
+  // state and not a charge cell.
+  int y = drawHeaderBand(fb, fonts, vm.title, vm.state, nullptr, plane);
+
+  // The on-demand sentence, in its own bordered box under the band.
+  const Font& proseFont = fonts[Role::Label400];
+  const int colW = fb.width() - 2 * kMargin;
+  const Prose prose = wrapProse(proseFont, vm.prose, colW, kWifiProseLeadEm);
+  y += kWifiProsePadY;
+  y += f26ToPx(drawProse(fb, proseFont, prose, kMargin, colW, pxToF26(y), Ink::Black, plane,
+                         ProseAlign::Left));
+  y += kWifiProsePadY;
+  fb.fillRect(0, y, fb.width(), 1, false);
+  y += 1;
+
+  const int rows = static_cast<int>(vm.rows.size());
+  // Where the SETUP section starts. The empty variant floats its copy in the
+  // space above it, so the one row the two variants share stays at the foot --
+  // see design/WifiSettingsEmpty.dc.html, which records that this DOES move the
+  // row between the two states and why that is right.
+  int fixedBelow = 0;
+  if (vm.nothingSaved) {
+    for (int i = 0; i < rows; ++i) {
+      const ListRow& r = vm.rows[static_cast<size_t>(i)];
+      fixedBelow += r.isHeader ? sectionHeaderHeight(fonts) : kWifiRowH;
+    }
+    const int barH = hintBarHeight(fonts, hints);
+    drawEmptyBlock(fb, fonts, y, fb.height() - barH - fixedBelow - y, vm.emptyTitle,
+                   vm.emptyProse, {}, plane);
+    y = fb.height() - barH - fixedBelow;
+  }
+
+  const Font& value = fonts[Role::Value700];
+  for (int i = 0; i < rows; ++i) {
+    const ListRow& row = vm.rows[static_cast<size_t>(i)];
+    if (row.isHeader) {
+      // `rule=false` on BOTH headers: this board gives neither a `border-top`.
+      // SAVED NETWORKS sits directly under the prose block's own 1px border,
+      // and SETUP is separated by the list above it -- the same positional
+      // judgement renderSettings makes, reaching the opposite answer because
+      // the board says so.
+      y += drawSectionHeader(fb, fonts, y, fb.width(), row.label, /*rule=*/false, plane);
+      continue;
+    }
+    const bool focused = (i == vm.focusedRow);
+    const Ink ink = focused ? Ink::White : Ink::Black;
+    const int trailingW = row.discloses ? icons::kChevron.w : value.measure(row.value);
+    y += drawWifiRow(fb, fonts, y, fb.width(), row.label, focused,
+                     rowRuleFor(i, rows, focused, i + 1 < rows &&
+                                                      vm.rows[static_cast<size_t>(i + 1)].isHeader),
+                     trailingW + kMargin, plane);
+    const int rowTop = y - kWifiRowH - (rowRuleFor(i, rows, focused,
+                                                   i + 1 < rows &&
+                                                       vm.rows[static_cast<size_t>(i + 1)].isHeader)
+                                            ? 1
+                                            : 0);
+    const int right = fb.width() - kMargin;
+    if (row.discloses) {
+      const Icon& chev = icons::kChevron;
+      drawIcon(fb, chev, right - chev.w, iconTopIn(rowTop, kWifiRowH, chev.h), ink, plane);
+    } else if (!row.value.empty()) {
+      drawText(fb, value, right - value.measure(row.value), baselineIn(value, rowTop, kWifiRowH),
+               row.value, ink, {}, plane);
+    }
+  }
+
+  drawHintBar(fb, fonts, hints, plane);
+}
+
+void QuietTheme::renderWifiPicker(Framebuffer& fb, const FontSet& fonts,
+                                  const WifiPickerViewModel& vm, Plane plane) {
+  fb.clear(true);
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+  // THE SCANNING STATE REPLACES THE HINT BAR, not the list: drawStatusBar is
+  // the mechanism LibraryOpening and SleepWaking already board, and it derives
+  // its box through hintBarHeight so the two are identical.
+  const int barH = hintBarHeight(fonts, hints);
+
+  int y = drawHeaderBand(fb, fonts, vm.title, vm.found, nullptr, plane);
+
+  const Font& note = fonts[Role::Meta400];
+  const Tracking noteTracking = trackingEm(note, 100);
+  const Prose noteProse = wrapProse(note, vm.note, fb.width() - 2 * kMargin, 1500, noteTracking);
+  const int noteH = f26ToPx(noteProse.heightF26()) + kPickerNotePadBottom;
+
+  // THE FOOTER NOTE IS ONLY ON THE POPULATED BOARD. It explains what the
+  // ROWS do -- open ones join directly, locked ones ask -- so on a screen with
+  // no rows it is a caption for nothing, and design/WifiPickerEmpty.dc.html
+  // draws none.
+  const bool showNote = !vm.nothingFound;
+  const int noteRoom = showNote ? noteH : 0;
+
+  if (vm.nothingFound) {
+    // The Rescan row still draws, anchored at the foot: it is the only action,
+    // and an empty state with a live action is a different shape from one
+    // without (HomeEmpty has none, and says why).
+    const Font& lf = fonts[Role::Label500];
+    const int rowH = 2 * kRescanPadY + lf.lineHeight();
+    const int rescanH = 2 + rowH;
+    drawEmptyBlock(fb, fonts, y, fb.height() - barH - rescanH - y, vm.emptyTitle, vm.emptyProse,
+                   vm.emptyCaveat, plane);
+    y = fb.height() - barH - rescanH;
+    // DRAWN, not merely reserved. Reserving its height and never painting it
+    // is what this did first: the space was right and the row was not there,
+    // which on a screen whose only action it is reads as a dead end.
+    fb.fillRect(0, y, fb.width(), 2, false);
+    y += 2;
+    const WifiScanRow* rescan = nullptr;
+    for (const WifiScanRow& r : vm.rows) {
+      if (r.isRescan) rescan = &r;
+    }
+    const bool focused = vm.focusedRow >= 0;
+    if (focused) fb.fillRect(0, y, fb.width(), rowH, false);
+    const Ink ink = focused ? Ink::White : Ink::Black;
+    const Icon& mark = icons::kRescan;
+    drawIcon(fb, mark, kMargin, iconTopIn(y, rowH, mark.h), ink, plane);
+    drawText(fb, lf, kMargin + mark.w + kRescanGap, baselineIn(lf, y, rowH),
+             rescan != nullptr ? rescan->ssid : std::string_view("Rescan"), ink, {}, plane);
+  } else {
+    const int listTop = y;
+    const bool overflowing = vm.totalRows > static_cast<int>(vm.rows.size());
+    const int inset = overflowing ? kListGutterW : 0;
+    const int rows = static_cast<int>(vm.rows.size());
+    for (int i = 0; i < rows; ++i) {
+      const WifiScanRow& row = vm.rows[static_cast<size_t>(i)];
+      const bool focused = (i == vm.focusedRow);
+      if (row.isRescan) {
+        // The board's own box: `padding: 21px 24px; border-top: 2px`, a mark
+        // and a Label500 run rather than a Value row.
+        fb.fillRect(0, y, fb.width() - inset, 2, false);
+        y += 2;
+        const Font& lf = fonts[Role::Label500];
+        const int h = 2 * kRescanPadY + lf.lineHeight();
+        if (focused) fb.fillRect(0, y, fb.width() - inset, h, false);
+        const Ink ink = focused ? Ink::White : Ink::Black;
+        const Icon& mark = icons::kRescan;
+        drawIcon(fb, mark, kMargin, iconTopIn(y, h, mark.h), ink, plane);
+        drawText(fb, lf, kMargin + mark.w + kRescanGap, baselineIn(lf, y, h), row.ssid, ink, {},
+                 plane);
+        y += h;
+        continue;
+      }
+      const Ink ink = focused ? Ink::White : Ink::Black;
+      // The right group: an optional padlock, then the meter, both on the
+      // margin. Reserved before the label is drawn so a long SSID elides
+      // against them rather than through them.
+      const int lockW = row.locked ? icons::kLock.w + kWifiMarkGap : 0;
+      const int groupW = lockW + kSignalW;
+      const int rule = rowRuleFor(i, rows, focused);
+      drawWifiRow(fb, fonts, y, fb.width() - inset, row.ssid, focused, rule, groupW + kMargin,
+                  plane);
+      const int right = fb.width() - inset - kMargin;
+      drawSignalBars(fb, right - kSignalW, iconTopIn(y, kWifiRowH, kSignalH), row.bars, ink);
+      if (row.locked) {
+        const Icon& lock = icons::kLock;
+        drawIcon(fb, lock, right - groupW, iconTopIn(y, kWifiRowH, lock.h), ink, plane);
+      }
+      y += kWifiRowH + (rule ? 1 : 0);
+    }
+    if (overflowing) {
+      drawScrollRail(fb, listTop, fb.height() - barH - noteRoom, vm.firstRow,
+                     static_cast<int>(vm.rows.size()), vm.totalRows, plane);
+    }
+  }
+
+  // The footer note is CHROME rather than slack -- see the scrolled board:
+  // drawing it only when the list FITS would delete it exactly when there are
+  // most networks to disambiguate. That is a different question from whether
+  // there is a list at all, which is what showNote asks.
+  if (showNote) {
+    drawProse(fb, note, noteProse, kMargin, fb.width() - 2 * kMargin,
+              pxToF26(fb.height() - barH - noteH), Ink::Black, plane, ProseAlign::Left);
+  }
+
+  if (vm.scanning) {
+    drawStatusBar(fb, fonts, vm.statusLabel, plane);
+  } else {
+    drawHintBar(fb, fonts, hints, plane);
+  }
+}
+
+void QuietTheme::renderWifiPassword(Framebuffer& fb, const FontSet& fonts,
+                                    const WifiPasswordViewModel& vm, Plane plane) {
+  fb.clear(true);
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+
+  int y = drawHeaderBand(fb, fonts, vm.title, vm.ssid, nullptr, plane);
+
+  // --- the field ---------------------------------------------------------
+  y += kKeyFieldMarginTop;
+  const int fieldW = fb.width() - 2 * kMargin;
+  outlineRect(fb, kMargin, y, fieldW, kKeyFieldH, 2);
+  const Font& fieldFont = fonts[Role::Body400];
+  const Tracking fieldTracking = trackingEm(fieldFont, kKeyFieldEm);
+  const int textX = kMargin + 2 + kKeyFieldPadX;
+  // THE TEXT SCROLLS SO THE CARET AND THE TAIL STAY VISIBLE, head-first off
+  // the left: a 63-character passphrase is far wider than this box, and a
+  // field that elided its TAIL would hide the character just typed.
+  const int textRoom = fieldW - 2 * (2 + kKeyFieldPadX) - kKeyFieldGap - kCaretW;
+  std::string shown = vm.entered;
+  while (!shown.empty() && fieldFont.measure(shown, fieldTracking) > textRoom) {
+    shown.erase(shown.begin());
+  }
+  const int textW = fieldFont.measure(shown, fieldTracking);
+  drawText(fb, fieldFont, textX, baselineIn(fieldFont, y, kKeyFieldH), shown, Ink::Black,
+           fieldTracking, plane);
+  fb.fillRect(textX + textW + kKeyFieldGap, y + centreIn(0, kKeyFieldH, kCaretH), kCaretW,
+              kCaretH, false);
+  y += kKeyFieldH;
+
+  // --- the counter row ---------------------------------------------------
+  y += kKeyCounterPadTop;
+  const Font& meta = fonts[Role::Meta400];
+  const Tracking metaTracking = trackingEm(meta, 100);
+  const int metaBase = baselineIn(meta, y, meta.lineHeight());
+  drawText(fb, meta, kMargin, metaBase, vm.counter, Ink::Black, metaTracking, plane);
+  const int visW = meta.measure(vm.visibility, metaTracking);
+  drawText(fb, meta, fb.width() - kMargin - visW, metaBase, vm.visibility, Ink::Black,
+           metaTracking, plane);
+  y += meta.lineHeight();
+
+  // --- the grid ----------------------------------------------------------
+  //
+  // THE ONLY THING ON THIS SCREEN components.h HAS NO PRIMITIVE FOR, and it is
+  // not extracted into one: a 10x4 character grid over a ragged function row
+  // has exactly one caller, and this project undid an extraction made in
+  // advance of a second (the Typography formatters).
+  y += kKeyGridPadTop;
+  const Font& cellFont = fonts[Role::Body400];
+  const Font& cellFocused = fonts[Role::Body700];
+  const Font& fnFont = fonts[Role::Meta500];
+  const Tracking fnTracking = trackingEm(fnFont, 100);
+  const int gridX = centreIn(0, fb.width(), kKeyRowW);
+
+  int cell = 0;
+  for (size_t r = 0; r < vm.rowWidths.size(); ++r) {
+    const int cols = vm.rowWidths[r];
+    const bool functionRow = (r + 1 == vm.rowWidths.size());
+    int x = gridX;
+    for (int c = 0; c < cols; ++c, ++cell) {
+      const int w = functionRow ? kKeyFnW[c < 4 ? c : 3] : kKeyW;
+      const bool focused = (cell == vm.focusedCell);
+      if (focused) {
+        fb.fillRect(x, y, w, kKeyH, false);
+      } else {
+        outlineRect(fb, x, y, w, kKeyH, 1);
+      }
+      if (cell < static_cast<int>(vm.cells.size())) {
+        const std::string& label = vm.cells[static_cast<size_t>(cell)];
+        const Ink ink = focused ? Ink::White : Ink::Black;
+        const Font& f = functionRow ? fnFont : (focused ? cellFocused : cellFont);
+        const Tracking t = functionRow ? fnTracking : Tracking{};
+        drawCentredText(fb, f, x, w, baselineIn(f, y, kKeyH), label, ink, t, plane);
+      }
+      x += w + kKeyGap;
+    }
+    y += kKeyH + kKeyGap;
+  }
+
+  // --- the note ----------------------------------------------------------
+  const int barH = hintBarHeight(fonts, hints);
+  const Prose noteProse =
+      wrapProse(meta, vm.note, fb.width() - 2 * kMargin, 1500, metaTracking);
+  drawProse(fb, meta, noteProse, kMargin, fb.width() - 2 * kMargin,
+            pxToF26(fb.height() - barH - kPickerNotePadBottom -
+                    f26ToPx(noteProse.heightF26())),
+            Ink::Black, plane, ProseAlign::Left);
+
+  drawHintBar(fb, fonts, hints, plane);
+}
+
+void QuietTheme::renderWifiConnect(Framebuffer& fb, const FontSet& fonts,
+                                   const WifiConnectViewModel& vm, Plane plane) {
+  // No fb.clear(): WifiSettings underneath is already painted, and this
+  // screen's whole job is to be in front of it.
+  veilRect(fb, 0, 0, fb.width(), fb.height());
+
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+
+  const int contentW = panelContentW(kActionsPanelW);
+  const int colW = contentW - 2 * kPanelPadX;
+  const Font& body = fonts[Role::Value500];
+  const Font& note = fonts[Role::Meta400];
+  const Tracking noteTracking = trackingEm(note, 100);
+  const Icon& mark = icons::kWifi;
+
+  const Prose label = wrapPanelCaption(fonts, vm.caption, contentW);
+  const Prose message = wrapProse(body, vm.message, colW, 1300);
+  const Prose noteProse = wrapProse(note, vm.note, colW, 1500, noteTracking);
+
+  const int bodyH = kConfirmProsePadY + mark.h + kWifiMarkGap + f26ToPx(message.heightF26()) +
+                    kWifiMarkGap + f26ToPx(noteProse.heightF26()) + kConfirmButtonPadBottom;
+  const int panelH = 2 * kPanelBorder + panelCaptionHeight(fonts, label) + bodyH;
+
+  const int x = panelLeft(fb.width(), kActionsPanelW);
+  const int y = centreIn(0, fb.height(), panelH);
+  drawPanel(fb, x, y, kActionsPanelW, panelH);
+
+  const int cx = x + kPanelBorder;
+  int cy = y + kPanelBorder;
+  cy += drawPanelCaption(fb, fonts, cx, cy, contentW, label, vm.right, plane);
+  cy += kConfirmProsePadY;
+  // CENTRED, unlike BookError's left-aligned block: this board's body is
+  // `align-items: center`.
+  drawIcon(fb, mark, cx + centreIn(0, contentW, mark.w), cy, Ink::Black, plane);
+  cy += mark.h + kWifiMarkGap;
+  cy += f26ToPx(drawProse(fb, body, message, cx + kPanelPadX, colW, pxToF26(cy), Ink::Black,
+                          plane, ProseAlign::Centre));
+  cy += kWifiMarkGap;
+  drawProse(fb, note, noteProse, cx + kPanelPadX, colW, pxToF26(cy), Ink::Black, plane,
+            ProseAlign::Centre);
+
+  drawOverlayHintBar(fb, fonts, hints, plane);
+}
+
+void QuietTheme::renderWifiError(Framebuffer& fb, const FontSet& fonts,
+                                 const WifiErrorViewModel& vm, Plane plane) {
+  veilRect(fb, 0, 0, fb.width(), fb.height());
+
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+
+  const int contentW = panelContentW(kConfirmPanelW);
+  const int colW = contentW - 2 * kPanelPadX;
+  const Font& body = fonts[Role::Body400];
+  const Icon& mark = icons::kWarning;
+
+  const Prose label = wrapPanelCaption(fonts, vm.caption, contentW);
+  // WordBreak::Anywhere for BookError's reason: an SSID is 32 arbitrary octets
+  // and is frequently one unbreakable token, so under the default a real
+  // network's name is drawn straight through the panel's right border.
+  std::string tail;
+  Prose prose = wrapProse(body, vm.message, colW, kConfirmProseLeadEm, {}, WordBreak::Anywhere);
+
+  const int slabs = static_cast<int>(vm.actions.size());
+  // The gap is BETWEEN items, so n slabs carry n-1 of them -- the arithmetic
+  // BookErrorMemory's single slab made explicit, and the reason that shape's
+  // panel is 80px shorter rather than 68.
+  const int actionsH = slabs * kActionH + (slabs - 1) * kConfirmButtonGap + kConfirmButtonPadBottom;
+  const int panelFixedH = 2 * kPanelBorder + panelCaptionHeight(fonts, label) +
+                          (2 * kConfirmProsePadY + mark.h + kBookErrorIconGap) + actionsH;
+  const int proseRoom = centredPanelRoom(fb, fonts, hints) - panelFixedH;
+  int maxProseLines = 1;
+  while (maxProseLines < prose.lineCount() &&
+         f26ToPx((maxProseLines + 1) * prose.leadF26) <= proseRoom)
+    ++maxProseLines;
+  clampProse(body, prose, maxProseLines, colW, tail);
+
+  const int panelH = panelFixedH - (2 * kConfirmProsePadY + mark.h + kBookErrorIconGap) +
+                     (kConfirmProsePadY + mark.h + kBookErrorIconGap +
+                      f26ToPx(prose.heightF26()) + kConfirmProsePadY);
+
+  const int x = panelLeft(fb.width(), kConfirmPanelW);
+  const int y = centreIn(0, fb.height(), panelH);
+  drawPanel(fb, x, y, kConfirmPanelW, panelH);
+
+  const int cx = x + kPanelBorder;
+  int cy = y + kPanelBorder;
+  cy += drawPanelCaption(fb, fonts, cx, cy, contentW, label, "", plane);
+  cy += kConfirmProsePadY;
+  drawIcon(fb, mark, cx + kPanelPadX, cy, Ink::Black, plane);
+  cy += mark.h + kBookErrorIconGap;
+  cy += f26ToPx(drawProse(fb, body, prose, cx + kPanelPadX, colW, pxToF26(cy), Ink::Black, plane,
+                          ProseAlign::Left));
+  cy += kConfirmProsePadY;
+
+  for (int i = 0; i < slabs; ++i) {
+    if (i > 0) cy += kActionH + kConfirmButtonGap;
+    drawActionButton(fb, fonts, cx + kPanelPadX, cy, colW, vm.actions[static_cast<size_t>(i)],
+                     i == vm.focusedAction, plane);
+  }
+
+  drawOverlayHintBar(fb, fonts, hints, plane);
+}
+
+void QuietTheme::renderWifiNetworkActions(Framebuffer& fb, const FontSet& fonts,
+                                          const WifiNetworkActionsViewModel& vm, Plane plane) {
+  veilRect(fb, 0, 0, fb.width(), fb.height());
+
+  const int contentW = panelContentW(kActionsPanelW);
+  // THE CAPTION IS THE SSID and the board truncates it on one line rather than
+  // wrapping: an SSID is up to 32 arbitrary octets, and a caption allowed to
+  // wrap makes the panel a different height for every network.
+  const Font& capValueFont = fonts[Role::Meta400];
+  const int valueW =
+      vm.captionValue.empty()
+          ? 0
+          : capValueFont.measure(vm.captionValue, trackingEm(capValueFont, kHintEm)) + kBandGap;
+  const std::string caption =
+      elideToWidth(fonts[Role::Label500], upperLatin1(vm.caption),
+                   panelCaptionColumnW(contentW) - valueW,
+                   trackingEm(fonts[Role::Label500], kBandLabelEm));
+  const Prose label = wrapPanelCaption(fonts, caption, contentW);
+
+  const int rows = static_cast<int>(vm.rows.size());
+  int rowsH = 0;
+  for (int i = 0; i < rows; ++i) rowsH += panelRowHeight(i != vm.focusedRow && i != rows - 1);
+  const int panelH = 2 * kPanelBorder + panelCaptionHeight(fonts, label) + rowsH;
+
+  const int x = panelLeft(fb.width(), kActionsPanelW);
+  const int y = centreIn(0, fb.height(), panelH);
+  drawPanel(fb, x, y, kActionsPanelW, panelH);
+
+  const int cx = x + kPanelBorder;
+  int cy = y + kPanelBorder;
+  cy += drawPanelCaption(fb, fonts, cx, cy, contentW, label, vm.captionValue, plane);
+  for (int i = 0; i < rows; ++i) {
+    const ListRow& row = vm.rows[static_cast<size_t>(i)];
+    cy += drawPanelRow(fb, fonts, cx, cy, contentW, row.label, i == vm.focusedRow, row.discloses,
+                       rowRuleFor(i, rows, i == vm.focusedRow), plane);
+  }
+
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+  drawOverlayHintBar(fb, fonts, hints, plane);
+}
+
 }  // namespace reader

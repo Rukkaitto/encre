@@ -887,6 +887,39 @@ int drawPanelCaption(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
 // distinction Body500-versus-Body700 makes on a Library row. `discloses` is the
 // trailing chevron: LibraryActions gives one to Open and Book details, which
 // lead somewhere, and none to Mark as finished or Delete..., which act in place.
+// --- The picker's signal meter ---------------------------------------------
+//
+// design/WifiPicker.dc.html draws it as `<svg width="30" height="23" viewBox="0
+// 0 17 13">` holding THREE rects -- bottom-aligned bars of increasing height,
+// filled up to the level and outlined above it.
+//
+// DRAWN RATHER THAN GENERATED, which is a deliberate exception to "assets are
+// generated from the design, not transcribed" and is worth the sentence:
+//
+//   - IT IS A FAMILY OF THREE STATES, not a mark. As icons it would be three
+//     pre-rendered bitmaps of the same drawing differing only in which
+//     rectangles are filled, which is what kBook/kBookLarge exists to avoid one
+//     level up.
+//   - iconc.py COULD NOT TELL THEM APART. The three states are byte-identical
+//     but for a `fill` attribute, so each match would have to key on that -- and
+//     the generator refuses an ambiguous match, correctly, which is how this was
+//     found rather than shipped.
+//   - THEY ARE AXIS-ALIGNED RECTANGLES, so they are coverage 0 or 3 and
+//     identical in every plane and every pass -- the same class of furniture as
+//     drawProgressBar and drawScrollRail, both of which this firmware already
+//     draws in code from geometry a board states.
+//
+// The thin-stroke warning this project records is about DIAGONALS (kChevron)
+// and does not reach a vertical bar. `level` is 1..3 and is clamped.
+//
+// NO `plane` PARAMETER, which is the same statement outlineRect and
+// Framebuffer::fillRect make: this is furniture, so every pixel of it is
+// coverage 0 or 3 and identical in Bw, BwDithered and all three grayscale
+// planes. A plane argument would imply it could differ.
+inline constexpr int kSignalW = 30;
+inline constexpr int kSignalH = 23;
+void drawSignalBars(Framebuffer& fb, int x, int y, int level, Ink ink = Ink::Black);
+
 int panelRowHeight(bool rule);
 // `value` is the row's right slot where the board gives one, and empty where it draws
 // a chevron -- a row states a quantity or discloses a screen, never both. Defaulted

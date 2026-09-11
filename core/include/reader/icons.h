@@ -67,6 +67,14 @@ extern const Icon kWarning;  // a warning triangle: the corrupt-book dialog and
                              // low-battery banner's mark. ONE bitmap: all three
                              // boards' svgs differ only in colour, and colour is
                              // Ink's business -- see iconc.py's `warning` entry.
+// --- The V1.1 connect flow ---------------------------------------------
+// THREE MARKS, NOT SIX. The picker's signal meter is three axis-aligned
+// rectangles differing only in which are filled, and it is drawSignalBars in
+// components.h rather than kSignal1..3 here -- see that function for why. What
+// is generated is the three that are genuinely icon-shaped.
+extern const Icon kLock;    // a closed padlock: a scan row needing a passphrase
+extern const Icon kRescan;  // a circular arrow: the picker's last row
+extern const Icon kWifi;    // three arcs over a dot: the connecting dialog
 }  // namespace icons
 
 }  // namespace reader

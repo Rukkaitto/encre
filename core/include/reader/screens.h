@@ -5,6 +5,11 @@
 
 #include "reader/app.h"
 #include "reader/screen_settings.h"
+#include "reader/screen_wifi_error.h"
+#include "reader/screen_wifi_network_actions.h"
+#include "reader/screen_wifi_settings.h"
+#include "reader/wifi_radio.h"
+#include "reader/wifi_store.h"
 #include "reader/screen_typography.h"
 #include "reader/screen_book_details.h"
 #include "reader/screen_book_end.h"
@@ -84,6 +89,13 @@ std::string demoPeekXhtml();
 // authors, NEW -- so this is what keeps `make compare` and the goldens testing
 // the RENDERING while the data they show is still Phase 3's.
 std::vector<LibraryItem> demoLibraryItems();
+
+// design/WifiPickerScrolled.dc.html's fiction: EIGHTEEN networks, which is what
+// a scan in a block of flats returns and what makes the rail's proportions
+// mean something. Its own function rather than a flag on setWifiDemo, because
+// the two boards are two specimens and a screen that could not tell them apart
+// would not be comparing either.
+std::vector<ScanResult> demoWifiScanLong();
 
 class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
  public:
@@ -241,6 +253,49 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // "A factory that substitutes content is worse than one that refuses" was already
   // written down for exactly this, one screen earlier.
   void setContentsDemo() { contentsDemo_ = true; }
+
+  // --- The V1.1 connect flow --------------------------------------------
+  //
+  // EVERY ONE OF THESE IS ASKED FOR, and an unprimed screen is REFUSED rather
+  // than substituted. That rule is setReaderDemo's and setContentsDemo's, and
+  // it exists because this project has shipped the substitution twice -- once
+  // waking a device into Middlemarch, once showing a book's contents from a
+  // different book -- and each time it hid the real cause.
+  //
+  // The flow's own priming is the shell's: it hands over the saved list, the
+  // scan, the SSID being joined. The `*Demo` flags are the simulator's and the
+  // goldens', which have no radio and no NVS.
+  void setWifiNetworks(SavedNetworks nets) {
+    wifiNets_ = std::move(nets);
+    wifiPrimed_ = true;
+  }
+  void setWifiSink(WifiSink* sink) { wifiSink_ = sink; }
+  void setWifiScan(std::vector<ScanResult> rows) {
+    wifiScan_ = std::move(rows);
+    wifiScanPrimed_ = true;
+  }
+  void setWifiPickerVisibleRows(int n) { wifiPickerRows_ = n; }
+  // The network a join is about: the keyboard's band, the dialog's sentence
+  // and the error's. One setter for all three, because they are one fact.
+  void setWifiTarget(std::string ssid) {
+    wifiTarget_ = std::move(ssid);
+    wifiTargetPrimed_ = true;
+  }
+  // What EDIT PASSWORD comes back with. Separate from setWifiTarget because a
+  // fresh join primes the SSID and NOT the text -- and a keyboard that came up
+  // holding the last attempt's passphrase would be worse than one that came up
+  // empty.
+  void setWifiEntered(std::string text) { wifiEntered_ = std::move(text); }
+  void setWifiFailure(JoinFailure why) { wifiFailure_ = why; }
+  void setWifiNetworkFacts(WifiNetworkActionsScreen::Facts f) {
+    wifiActionFacts_ = std::move(f);
+    wifiActionFactsSet_ = true;
+  }
+  void clearWifiNetworkFacts() { wifiActionFactsSet_ = false; }
+  // The demo content the simulator and the goldens use, asked for exactly as
+  // setContentsDemo is.
+  void setWifiDemo();
+
 
   // THE BOARD'S OWN PEEK, ASKED FOR. Same rule as setReaderDemo and setContentsDemo:
   // the factory refuses a Peek nothing primed rather than substituting, because this
@@ -448,6 +503,18 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   std::vector<TocEntry> contentsToc_;
   int contentsSpine_ = 0;
   bool contentsPrimed_ = false;
+  SavedNetworks wifiNets_;
+  WifiSink* wifiSink_ = nullptr;
+  bool wifiPrimed_ = false;
+  std::vector<ScanResult> wifiScan_;
+  bool wifiScanPrimed_ = false;
+  int wifiPickerRows_ = 0;
+  std::string wifiTarget_;
+  bool wifiTargetPrimed_ = false;
+  std::string wifiEntered_;
+  JoinFailure wifiFailure_ = JoinFailure::BadPassword;
+  WifiNetworkActionsScreen::Facts wifiActionFacts_;
+  bool wifiActionFactsSet_ = false;
   int contentsRows_ = 0;
   std::string menuTitle_, menuProgress_;
   int readerStartChapter_ = 0;

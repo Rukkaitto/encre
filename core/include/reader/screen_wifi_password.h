@@ -1,0 +1,91 @@
+#pragma once
+#include <string>
+#include <vector>
+
+#include "reader/grid_focus_screen.h"
+#include "reader/viewmodel.h"
+
+namespace reader {
+
+// design/WifiPassword.dc.html -- THE FIRST TEXT ENTRY IN THIS FIRMWARE. There
+// is no caret, no editable string, no character set and no keyboard anywhere
+// in core/, shell/ or sim/ before this; it brings all four.
+//
+// THREE LAYERS, ALL EXACTLY 10x4, over a function row of four. A WPA2
+// passphrase is any printable ASCII, 8 to 63 characters, so all 95 have to be
+// reachable or some passwords are untypeable on this device -- which is
+// asserted rather than assumed, in test_screen_wifi_password.cpp.
+//
+// EVERY LAYER IS THE SAME 40 CELLS, so the panel geometry never moves and
+// GridFocus never has to cope with a changing shape. That constraint is what
+// decides the layout: the symbol layer repeats the digits, because 28 of the
+// 32 punctuation characters are not on the base layer and 28 does not fill 40
+// -- and repeating digits is what a symbol page is for anyway, so nobody has
+// to switch back to type one.
+//
+// THE INPUT MODEL ALREADY EXISTS. declareSplitMovers is what ReaderScreen and
+// PeekScreen use: with it, Up/Down arrive as AltPrev/AltNext and the SIDE
+// buttons as Prev/Next -- exactly the board's "up and down move between rows;
+// the side page buttons move along a row".
+//
+// BACK DELETES AND A HELD BACK LEAVES, which is spec 4.1b's own wording and
+// the hold the board has drawn a ring for since it was authored. It is the
+// only way off this screen, so the ring is not decoration.
+class WifiPasswordScreen : public GridFocusScreen {
+ public:
+  // 802.11's own bound on a WPA2 passphrase. Typing stops here rather than
+  // silently dropping characters, because a keyboard that swallows a keypress
+  // is indistinguishable from one that missed it.
+  static constexpr size_t kMaxPassphrase = 63;
+
+  explicit WifiPasswordScreen(std::string ssid);
+
+  ScreenId id() const override { return ScreenId::WifiPassword; }
+  Action onGesture(const GestureEvent& g) override;
+  void render(Framebuffer& fb, const FontSet& fonts, Theme& theme, Plane plane) const override;
+
+  const WifiPasswordViewModel& vm() const { return vm_; }
+  const std::string& entered() const { return entered_; }
+
+  // EDIT PASSWORD comes back here with what was already typed, which is the
+  // whole reason that slab exists -- see WifiErrorScreen. Clamped to the
+  // maximum, because a record from anywhere else is not this screen's to
+  // trust.
+  void setEntered(std::string text);
+
+  // Whether JOIN was pressed. The shell reads it after the pop and starts the
+  // join; this screen owns no radio.
+  bool joinChosen() const { return join_; }
+  // Whether a held Back asked to leave without joining.
+  bool cancelled() const { return cancelled_; }
+
+  // Which layer is showing. Exposed for the simulator and the goldens, which
+  // render all three: they are the same 44 cells with different glyphs, so
+  // they are goldens rather than boards.
+  enum class Layer { Lower, Upper, Symbols };
+  Layer layer() const { return layer_; }
+  void setLayer(Layer l);
+
+ protected:
+  void syncVm() override;
+
+ private:
+  // The 40 character cells of the showing layer, plus the four function keys.
+  void rebuildCells();
+  // What pressing the focused cell does.
+  Action activateCell();
+
+  std::string ssid_;
+  std::string entered_;
+  WifiPasswordViewModel vm_;
+  Layer layer_ = Layer::Lower;
+  // SHIFT IS ONE-SHOT and #+= LATCHES. A passphrase usually needs one capital,
+  // so a shift that stayed on would cost a second press to turn off far more
+  // often than it saved one; a symbol page is the opposite, because somebody
+  // typing punctuation usually types several.
+  bool shiftArmed_ = false;
+  bool join_ = false;
+  bool cancelled_ = false;
+};
+
+}  // namespace reader

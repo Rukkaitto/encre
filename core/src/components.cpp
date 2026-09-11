@@ -916,4 +916,31 @@ int drawPanelRow(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
   return panelRowHeight(rule);
 }
 
+void drawSignalBars(Framebuffer& fb, int x, int y, int level, Ink ink) {
+  if (level < 1) level = 1;
+  if (level > 3) level = 3;
+  // The board's three rects, scaled from its `viewBox="0 0 17 13"` onto the
+  // 30x23 box it draws them in: x at 0/6/12 and w 4 become 0/11/21 and 7, and
+  // heights 5/9/13 become 9/16/23. Bottom-aligned, which is what makes them
+  // read as a meter rather than three unrelated marks.
+  constexpr int kBarX[3] = {0, 11, 21};
+  constexpr int kBarW = 7;
+  constexpr int kBarH[3] = {9, 16, kSignalH};
+  const bool white = (ink == Ink::White);
+  for (int i = 0; i < 3; ++i) {
+    const int bx = x + kBarX[i];
+    const int bh = kBarH[i];
+    const int by = y + kSignalH - bh;
+    if (i < level) {
+      fb.fillRect(bx, by, kBarW, bh, white);
+    } else {
+      // `fill: none; stroke-width: 1` on a viewBox scaled ~1.77x, so the
+      // painted stroke is ~2px. An unlit bar is an outline rather than an
+      // absence: the meter's full extent is what says how many bars there
+      // could be.
+      outlineRect(fb, bx, by, kBarW, bh, 2, white);
+    }
+  }
+}
+
 }  // namespace reader

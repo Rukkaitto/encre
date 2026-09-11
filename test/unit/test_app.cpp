@@ -116,6 +116,18 @@ class NullTheme : public Theme {
   }
   void renderPeek(Framebuffer&, const FontSet&, const GlyphSource&, const GlyphSource*,
                   const PeekViewModel&, const Page&, Plane) override {}
+  void renderWifiSettings(Framebuffer&, const FontSet&, const WifiSettingsViewModel&,
+                          Plane) override {}
+  void renderWifiPicker(Framebuffer&, const FontSet&, const WifiPickerViewModel&,
+                        Plane) override {}
+  void renderWifiPassword(Framebuffer&, const FontSet&, const WifiPasswordViewModel&,
+                          Plane) override {}
+  void renderWifiConnect(Framebuffer&, const FontSet&, const WifiConnectViewModel&,
+                         Plane) override {}
+  void renderWifiError(Framebuffer&, const FontSet&, const WifiErrorViewModel&,
+                       Plane) override {}
+  void renderWifiNetworkActions(Framebuffer&, const FontSet&, const WifiNetworkActionsViewModel&,
+                                Plane) override {}
   void settingsMetrics(int, const FontSet&, int& listH, int& rowH, int& headerH) const override {
     listH = 0;
     rowH = 1;
