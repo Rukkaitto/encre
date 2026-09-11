@@ -2792,7 +2792,6 @@ void QuietTheme::renderPeek(Framebuffer& fb, const FontSet& fonts, const GlyphSo
 // ---------------------------------------------------------------------------
 namespace {
 
-constexpr int kWifiProsePadY = 16;      // the on-demand sentence's box
 constexpr int kWifiProseLeadEm = 1550;  // line-height: 1.55
 constexpr int kWifiRowH = 80;           // a saved network, and a scan result
 constexpr int kWifiMarkGap = 12;        // between a row's padlock and its meter
@@ -2828,7 +2827,15 @@ constexpr int kKeyFieldMarginTop = 24;
 // is not always the number it draws.
 constexpr int kKeyFieldH = 80;
 constexpr int kKeyFieldPadX = 16;
-constexpr int kKeyFieldGap = 10;
+// THE CARET'S GAP, AND THE DECLARED NUMBER IS NOT THE VISUAL ONE. The field's
+// run is tracked at 0.08em and GlyphSource::measure adds tracking after the
+// LAST glyph as well -- so `measure()` already carries a trailing letter-space
+// of ~2px at this ppem, and a 10px gap rendered as ~12px against a space in
+// this face of roughly 8px. The caret sat further from the text than a space
+// is wide and read as one. design/WifiPassword.dc.html carries the same
+// number and the same reasoning; Chrome's letter-spacing behaves identically,
+// which is why the board looked right too.
+constexpr int kKeyFieldGap = 3;
 constexpr int kKeyFieldEm = 80;  // 0.08em
 constexpr int kCaretW = 10;
 constexpr int kCaretH = 34;
@@ -2906,16 +2913,16 @@ void QuietTheme::renderWifiSettings(Framebuffer& fb, const FontSet& fonts,
   // state and not a charge cell.
   int y = drawHeaderBand(fb, fonts, vm.title, vm.state, nullptr, plane);
 
-  // The on-demand sentence, in its own bordered box under the band.
-  const Font& proseFont = fonts[Role::Label400];
-  const int colW = fb.width() - 2 * kMargin;
-  const Prose prose = wrapProse(proseFont, vm.prose, colW, kWifiProseLeadEm);
-  y += kWifiProsePadY;
-  y += f26ToPx(drawProse(fb, proseFont, prose, kMargin, colW, pxToF26(y), Ink::Black, plane,
-                         ProseAlign::Left));
-  y += kWifiProsePadY;
-  fb.fillRect(0, y, fb.width(), 1, false);
-  y += 1;
+  // THE ON-DEMAND SENTENCE IS GONE -- `Wi-Fi stays off. It connects only while
+  // receiving books, then turns off.` -- and its bordered box with it. It
+  // explained a policy to a reader who never asked and cannot change it: the
+  // device behaves the same whether or not they read it. Cut on the owner's
+  // call, the same judgement that took the eight-cell ticker off
+  // WifiConnect.
+  //
+  // The band's right slot still says `ON DEMAND`, which is the policy in two
+  // words in the slot that exists for a screen's state -- so nothing was
+  // lost, and every screen that veils this one gains its top back.
 
   const int rows = static_cast<int>(vm.rows.size());
   // Where the SETUP section starts. The empty variant floats its copy in the
@@ -2986,22 +2993,16 @@ void QuietTheme::renderWifiPicker(Framebuffer& fb, const FontSet& fonts,
 
   int y = drawHeaderBand(fb, fonts, vm.title, vm.found, nullptr, plane);
 
-  const Font& note = fonts[Role::Meta400];
-  const Tracking noteTracking = trackingEm(note, 100);
-  const Prose noteProse = wrapProse(note, vm.note, fb.width() - 2 * kMargin, 1500, noteTracking);
-  const int noteH = f26ToPx(noteProse.heightF26()) + kPickerNotePadBottom;
 
   // THE FOOTER NOTE IS ONLY ON THE POPULATED BOARD. It explains what the
   // ROWS do -- open ones join directly, locked ones ask -- so on a screen with
-  // no rows it is a caption for nothing, and design/WifiPickerEmpty.dc.html
-  // draws none.
-  // ...AND NOT WHILE THE SCAN IS RUNNING EITHER, which `!vm.nothingFound`
-  // alone stopped saying the moment those two flags became distinct: the note
-  // describes what the ROWS do, and during a scan there are none. It came
-  // back on the scanning frame as soon as nothingFound stopped being true
-  // there.
-  const bool showNote = !vm.nothingFound && !vm.scanning;
-  const int noteRoom = showNote ? noteH : 0;
+  // THE FOOTER NOTE IS GONE -- `OPEN NETWORKS JOIN DIRECTLY; LOCKED ONES ASK
+  // FOR A PASSWORD`. It described what a press would do before the reader had
+  // pressed anything, and the difference it describes is already on the row:
+  // a locked network carries a padlock, and pressing one opens a keyboard.
+  // Cut on the owner's call, and the space goes to the list, which on a
+  // scrolled picker is two more rows.
+  const int noteRoom = 0;
 
   // A SCAN IN FLIGHT DRAWS NO LIST AT ALL -- not the rows it has not got, and
   // not the Rescan row either. That is what the screen's own input model
@@ -3090,15 +3091,6 @@ void QuietTheme::renderWifiPicker(Framebuffer& fb, const FontSet& fonts,
       drawScrollRail(fb, listTop, fb.height() - barH - noteRoom, vm.firstRow,
                      static_cast<int>(vm.rows.size()), vm.totalRows, plane);
     }
-  }
-
-  // The footer note is CHROME rather than slack -- see the scrolled board:
-  // drawing it only when the list FITS would delete it exactly when there are
-  // most networks to disambiguate. That is a different question from whether
-  // there is a list at all, which is what showNote asks.
-  if (showNote) {
-    drawProse(fb, note, noteProse, kMargin, fb.width() - 2 * kMargin,
-              pxToF26(fb.height() - barH - noteH), Ink::Black, plane, ProseAlign::Left);
   }
 
   if (vm.scanning) {

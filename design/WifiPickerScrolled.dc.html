@@ -134,9 +134,11 @@
        so drawing it only when the list fits would delete it exactly when there
        are most networks to disambiguate. It keeps its place and the list scrolls
        in what is left. -->
-  <div style="padding: 0 24px 14px 24px;">
-    <div style="font-size: var(--t-meta); letter-spacing: 0.1em; line-height: 1.5;">OPEN NETWORKS JOIN DIRECTLY; LOCKED ONES ASK FOR A PASSWORD.</div>
-  </div>
+  <!-- THE FOOTER NOTE IS GONE, as on WifiPicker.dc.html: it described what a
+       press would do before the reader had pressed anything, and the padlock
+       on a locked row already shows the difference. Cut on the owner's call.
+       The list keeps the space, which on a SCROLLED picker means two more
+       rows visible. -->
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
   <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">BACK</div></div>
   <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">JOIN</div></div>

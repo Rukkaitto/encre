@@ -190,23 +190,3 @@ TEST_CASE("the keyboard's three layers are pinned, because a notdef box inks lik
   SUBCASE("symbols") { renderLayer(WifiPasswordScreen::Layer::Symbols, "wifi_password_symbols"); }
 }
 
-TEST_CASE("the connecting dialog's READY step is pinned") {
-  // The board draws CONNECTING...; READY is the other half of the same panel
-  // and is what a successful join actually puts on the glass. Not a board,
-  // because the two differ by one word -- but a golden, because that word
-  // changes the caption's measured width and the panel is centred on it.
-  ramp::Ramp ramp;
-  QuietTheme theme;
-  WifiApp a;
-  a.factory.setWifiTarget("HOME");
-  REQUIRE(a.app.pushScreen(ScreenId::WifiSettings));
-  REQUIRE(a.app.pushScreen(ScreenId::WifiConnect));
-  auto* dialog = static_cast<WifiConnectScreen*>(&a.app.top());
-  CHECK(dialog->markReady());
-  // A second call changes nothing, so it owes no repaint -- the bool the shell
-  // reads to decide whether a ~520 ms paint is owed.
-  CHECK_FALSE(dialog->markReady());
-  Framebuffer fb(480, 800);
-  a.app.render(fb, ramp.fonts, theme, Plane::Bw);
-  golden::checkGolden(fb, "wifi_connect_ready");
-}

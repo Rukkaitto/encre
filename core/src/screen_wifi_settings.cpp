@@ -8,8 +8,6 @@ namespace {
 // The board's own copy. Held here rather than in the theme because it is
 // content: a theme that owned the sentence would be a second place to change
 // it when the board does.
-constexpr const char* kProse =
-    "Wi-Fi stays off. It connects only while receiving books \xE2\x80\x94 then turns off.";
 constexpr const char* kEmptyTitle = "No networks saved";
 constexpr const char* kEmptyProse =
     "Join one below and Encre remembers it. Whichever you save first becomes automatic.";
@@ -29,7 +27,6 @@ WifiSettingsScreen::WifiSettingsScreen(SavedNetworks nets, WifiSink* sink)
 void WifiSettingsScreen::rebuild() {
   vm_.title = "WI-FI";
   vm_.state = "ON DEMAND";
-  vm_.prose = kProse;
   vm_.nothingSaved = nets_.all().empty();
   vm_.emptyTitle = kEmptyTitle;
   vm_.emptyProse = kEmptyProse;

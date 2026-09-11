@@ -39,12 +39,17 @@ class WifiConnectScreen : public Screen {
 
   const WifiConnectViewModel& vm() const { return vm_; }
 
-  // The shell steps the label when the radio reports success, just before it
-  // takes the radio down and pops. Returns whether anything changed, so a
-  // second call cannot cost a ~520 ms repaint.
-  bool markReady();
-  bool ready() const { return ready_; }
-
+  // `markReady()` IS GONE, AND WITH IT THE `READY` STATE. The dialog stepped
+  // its caption to READY and its sentence to "Joined ...", and the shell now
+  // leaves for the saved-network list the moment the radio reports success --
+  // so nothing could reach it. An unreachable state with a golden is what
+  // this project deletes rather than keeps as capability.
+  //
+  // THE DESTINATION IS THE CONFIRMATION, and a better one: the hub opens with
+  // the network in the list. READY was a second full waveform saying what the
+  // screen after it shows. It also made the bar lie -- the only hint is
+  // CANCEL, which is right for a join in flight and nonsense over the word
+  // Joined, which is how this was reported.
   // Whether the reader asked to stop, so the shell can take the radio down.
   // Back here is NOT navigation -- a join is in flight.
   // READ IT WHILE THIS SCREEN IS STILL ON TOP. It latches and returns
@@ -60,7 +65,6 @@ class WifiConnectScreen : public Screen {
 
   std::string ssid_;
   WifiConnectViewModel vm_;
-  bool ready_ = false;
   bool cancelled_ = false;
 };
 

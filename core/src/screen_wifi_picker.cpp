@@ -58,7 +58,6 @@ void WifiPickerScreen::rebuild() {
   vm_.emptyTitle = kEmptyTitle;
   vm_.emptyProse = kEmptyProse;
   vm_.emptyCaveat = kEmptyCaveat;
-  vm_.note = kNote;
   // `NONE FOUND` rather than `0 FOUND`. Zero is a real value in a count slot,
   // so this is not a false claim -- it is simply colder than it needs to be,
   // and this is the one screen where the number carries nothing the words

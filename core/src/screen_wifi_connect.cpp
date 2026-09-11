@@ -26,34 +26,21 @@ WifiConnectScreen::WifiConnectScreen(std::string ssid) : ssid_(std::move(ssid)) 
 }
 
 void WifiConnectScreen::syncVm() {
-  vm_.caption = ready_ ? "READY" : "CONNECTING\xE2\x80\xA6";
+  vm_.caption = "CONNECTING\xE2\x80\xA6";
   vm_.right = "WI-FI";
-  // THE SENTENCE STEPS WITH THE CAPTION, and it has to: `READY` over "Joining
-  // ... to test the password" is a panel contradicting itself in two lines.
-  // Found by looking at the golden rather than by reasoning about it, which is
-  // the whole reason the READY state has one -- the board draws only
-  // CONNECTING, so nothing else on the desktop renders this half.
-  //
-  // Spec 4.1b documents the variant as "the connect dialog stepping its label
-  // Joining -> Ready" and does not say whether the body moves with it. It
-  // does, because the alternative is a claim that stopped being true the
-  // moment the caption changed.
-  vm_.message = ready_ ? std::string("Joined ") + kOpenQuote + ssid_ + kCloseQuote + "."
-                       : std::string("Joining ") + kOpenQuote + ssid_ + kCloseQuote +
-                             " to test the password.";
+  // ONE CAPTION AND ONE SENTENCE, because there is one state. Both stepped to
+  // a READY the shell can no longer reach: it leaves for the saved-network
+  // list the moment the radio reports success, and that list -- with the
+  // network in it -- is the confirmation READY was trying to be, without the
+  // second waveform. See the header.
+  vm_.message = std::string("Joining ") + kOpenQuote + ssid_ + kCloseQuote +
+                " to test the password.";
   vm_.note = kNote;
   // One live slot. The other three are empty, which the theme draws at
   // kHintEmptySlotW rather than as nothing -- measuring a dead slot as zero
   // moves the live one.
   vm_.hints = {"CANCEL", "", "", ""};
   vm_.holds = {false, false, false, false};
-}
-
-bool WifiConnectScreen::markReady() {
-  if (ready_) return false;
-  ready_ = true;
-  syncVm();
-  return true;
 }
 
 Action WifiConnectScreen::onGesture(const GestureEvent& g) {

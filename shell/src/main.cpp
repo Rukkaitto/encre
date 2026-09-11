@@ -2794,6 +2794,31 @@ static void handleWifi() {
 static void pollWifi() {
   const reader::ScreenId id = gApp->top().id();
 
+  // THE ACTIONS OVERLAY'S FACTS, KEPT CURRENT WHILE THE HUB IS ON TOP. The
+  // hold returns Action::push(WifiNetworkActions) DIRECTLY, so the factory
+  // has to be able to build the overlay before the press happens -- and it
+  // refuses without facts, which made the hold do nothing at all. That is the
+  // same defect as the OPEN row that started all this, one gesture along.
+  //
+  // Re-primed every iteration rather than on a focus change, because a focus
+  // move is internal to the screen and reaches the shell as an ordinary
+  // redraw: there is no edge to hang this on. It is a string copy on a screen
+  // that repaints at ~520 ms.
+  if (id == reader::ScreenId::WifiSettings) {
+    const auto& hub = static_cast<const reader::WifiSettingsScreen&>(gApp->top());
+    const std::string ssid = hub.focusedSsid();
+    if (ssid.empty()) {
+      // The SETUP row, which has nothing to forget -- and the hub's own hint
+      // bar drops its ring there, so this only has to agree with it.
+      gFactory.clearWifiNetworkFacts();
+    } else {
+      const int at = gWifiNets.indexOf(ssid);
+      const bool automatic =
+          at >= 0 && gWifiNets.all()[static_cast<size_t>(at)].automatic;
+      gFactory.setWifiNetworkFacts({ssid, automatic});
+    }
+  }
+
   if (id == reader::ScreenId::WifiPicker) {
     auto& p = static_cast<reader::WifiPickerScreen&>(gApp->top());
     // ARRIVING AT THE PICKER STARTS EXACTLY ONE SCAN. The hub pushes this
@@ -2827,7 +2852,6 @@ static void pollWifi() {
   gScanDelivered = false;
 
   if (id == reader::ScreenId::WifiConnect) {
-    auto& dlg = static_cast<reader::WifiConnectScreen&>(gApp->top());
     switch (gRadio.joinState()) {
       case reader::JoinState::Ok: {
         // PERSISTED ONLY ON SUCCESS. A passphrase that did not work is not
@@ -2836,11 +2860,34 @@ static void pollWifi() {
         gWifiNets.remember(gJoinSsid, gJoinLocked);
         if (gJoinLocked) shellwifi::putSecret(gJoinSsid, gJoinPsk);
         shellwifi::save(gWifiNets);
+        const std::string joined = gJoinSsid;  // endWifiSession clears it
+        // THE RADIO GOES DOWN THE MOMENT THE CREDENTIAL IS PROVEN, which is
+        // the whole point of the on-demand design: the join existed to prove
+        // it and nothing in this release transfers anything.
+        endWifiSession();
         primeWifi();
-        // AND THE RADIO GOES DOWN AT READY, which is the point of the whole
-        // on-demand design: the join existed to prove the credential.
-        gRadio.down();
-        if (dlg.markReady()) gApp->markDirty();
+
+        // AND THE FLOW LEAVES FOR THE SAVED-NETWORK LIST, rather than
+        // stepping the dialog to READY and waiting to be dismissed. The hub
+        // opening with the network in it IS the confirmation, and a better
+        // one than a second full waveform saying so -- the dialog's only hint
+        // is CANCEL, which is right for a join in flight and nonsense over
+        // the word Joined. Reported off the device as exactly that.
+        //
+        // Unwound rather than popped once, because how deep the flow got
+        // depends on how the join started: an open network joins straight
+        // from the picker and a locked one goes through the keyboard, which
+        // REPLACED itself with this dialog. Action::popTo is the screen-side
+        // spelling of this and the shell cannot apply an Action.
+        while (gApp->depth() > 1 && gApp->top().id() != reader::ScreenId::WifiSettings) {
+          if (!gApp->popScreen()) break;
+        }
+        // A FRESH HUB, because the one underneath holds its own copy of the
+        // list and would open without the network just joined. The forget
+        // path replaces it for the same reason.
+        gApp->replaceScreen(reader::ScreenId::WifiSettings);
+        logf("[wifi] joined %s; back to the saved list\n", joined.c_str());
+        logFlush();
         return;
       }
       case reader::JoinState::Failed: {

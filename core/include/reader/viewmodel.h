@@ -684,7 +684,6 @@ struct WifiSettingsViewModel {
   // "ON DEMAND", never "CONNECTED" -- spec 4.1b:249 forbids the second, because
   // the radio is off whenever this screen is on glass.
   std::string state;
-  std::string prose;  // the on-demand sentence, drawn under the band
   // The empty variant: no saved networks yet, which is the state every user
   // meets first. The SETUP row is still drawn and still focusable, which is
   // what makes this NOT HomeEmpty's shape -- there is something to press.
@@ -734,7 +733,6 @@ struct WifiPickerViewModel {
   // The rail's two numbers, over the WHOLE list. Not derivable from `rows`.
   int firstRow = 0;
   int totalRows = 0;
-  std::string note;  // the footer: open networks join directly
   std::array<std::string, 4> hints{};
   std::array<bool, 4> holds{};
 };
