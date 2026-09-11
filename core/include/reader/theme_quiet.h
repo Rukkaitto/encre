@@ -26,6 +26,19 @@ class QuietTheme : public Theme {
                            const DeleteConfirmViewModel& vm, Plane plane = Plane::Bw) override;
   void renderBookError(Framebuffer& fb, const FontSet& fonts, const BookErrorViewModel& vm,
                        Plane plane = Plane::Bw) override;
+  void renderWifiSettings(Framebuffer& fb, const FontSet& fonts,
+                          const WifiSettingsViewModel& vm, Plane plane = Plane::Bw) override;
+  void renderWifiPicker(Framebuffer& fb, const FontSet& fonts, const WifiPickerViewModel& vm,
+                        Plane plane = Plane::Bw) override;
+  void renderWifiPassword(Framebuffer& fb, const FontSet& fonts,
+                          const WifiPasswordViewModel& vm, Plane plane = Plane::Bw) override;
+  void renderWifiConnect(Framebuffer& fb, const FontSet& fonts, const WifiConnectViewModel& vm,
+                         Plane plane = Plane::Bw) override;
+  void renderWifiError(Framebuffer& fb, const FontSet& fonts, const WifiErrorViewModel& vm,
+                       Plane plane = Plane::Bw) override;
+  void renderWifiNetworkActions(Framebuffer& fb, const FontSet& fonts,
+                                const WifiNetworkActionsViewModel& vm,
+                                Plane plane = Plane::Bw) override;
   void renderBookDetails(Framebuffer& fb, const FontSet& fonts, const BookDetailsViewModel& vm,
                          Plane plane = Plane::Bw) override;
   int libraryVisibleRows(int panelH, const FontSet& fonts) const override;

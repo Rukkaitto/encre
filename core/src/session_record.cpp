@@ -3,6 +3,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "reader/wire_escape.h"
+
 namespace reader {
 namespace {
 
@@ -24,20 +26,24 @@ constexpr const char* kNames[] = {
     "book-details", "settings", "sleep", "reader", "reader-menu",
     "contents", "sd-missing", "typography", "peek", "book-end",
     "book-error", "battery-empty",
+    // The V1.1 connect flow. Hyphenated like their neighbours, and STABLE
+    // FOREVER from here: a name may never be edited while any device might
+    // hold a record containing it.
+    "wifi-settings", "wifi-picker", "wifi-password", "wifi-connect",
+    "wifi-error", "wifi-network-actions",
 };
 
-// AND IT IS STILL A NAMED MEMBER, WHICH IS #42 AND NOT THE FIX THIS COMMENT CLAIMS.
-// Appending BatteryEmpty left this assert reading `BookEnd + 1` on both sides and it
-// said NOTHING -- the same silence test_focus_restore.cpp's has now produced three
-// times. What actually pointed at the table was -Wswitch on sessionWireName below,
-// which is a WARNING rather than an error. The line still has to be advanced by hand.
+// TIED TO THE SENTINEL, NOT TO A NAMED MEMBER, AND THAT IS #42's WHOLE POINT.
+// This line used to read `BookEnd + 1`, so appending BatteryEmpty left both
+// sides equal and it said NOTHING -- the same silence test_focus_restore.cpp's
+// guard produced for Typography and then BookEnd. Three bounds in this file
+// were once spelled `<= ScreenId::Peek`, which left the table short, the decode
+// loop unable to see the new name, and sessionWireName's fall-through storing
+// the new screen as `home`.
 //
-// Three separate bounds in this feature were
-// spelled `<= ScreenId::Peek`, so appending a screen left the table short, the decode
-// loop unable to see the new name, and the round-trip test silently not covering it --
-// while sessionWireName's fallthrough stored the new screen as `home`. That is the
-// same shape as #42 and as the three "reports on less than it claims" checks CLAUDE.md
-// records. A count against the enum's end cannot be left behind by an append.
+// It works: appending the six connect-flow screens failed this assert before a
+// line of them was written, which is the guard doing its job at the moment it
+// was written for rather than one append later.
 static_assert(sizeof(kNames) / sizeof(kNames[0]) == static_cast<size_t>(ScreenId::Count),
               "a ScreenId was added or removed; give it a row in kNames and a case in"
               " sessionWireName. This names the Count SENTINEL, never a member -- a"
@@ -68,64 +74,19 @@ constexpr int kFocusMax = 32767;
 // itself is 6.
 constexpr size_t kPlaceMaxBytes = 128;
 
-bool isHexDigit(char c) {
-  return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-}
-
-int hexValue(char c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-  return c - 'A' + 10;
-}
-
-// `%`, `;`, `:` and any control byte, as `%XX`; everything else verbatim -- see
-// the header for why UTF-8 is not escaped.
-std::string escapePlace(const std::string& place) {
-  static const char* const kHex = "0123456789ABCDEF";
-  std::string out;
-  out.reserve(place.size());
-  for (const char ch : place) {
-    const unsigned char c = static_cast<unsigned char>(ch);
-    if (c == '%' || c == ';' || c == ':' || c < 0x20 || c == 0x7F) {
-      out += '%';
-      out += kHex[c >> 4];
-      out += kHex[c & 0x0F];
-    } else {
-      out += static_cast<char>(c);
-    }
-  }
-  return out;
-}
-
-// False refuses the WHOLE record: a place this cannot decode was written by
-// something that is not this format. Empty is refused too -- encodeSessionStack
-// writes no field at all for a screen with no place, so `library:7:` is a record
-// with a third field and nothing in it, which is the trailing-separator rule.
-bool decodePlace(const char* start, size_t len, std::string& out) {
-  out.clear();
-  if (len == 0) return false;
-  out.reserve(len);
-  for (size_t i = 0; i < len; ++i) {
-    const char c = start[i];
-    if (c == '%') {
-      if (i + 2 >= len || !isHexDigit(start[i + 1]) || !isHexDigit(start[i + 2])) return false;
-      const int v = hexValue(start[i + 1]) * 16 + hexValue(start[i + 2]);
-      // A NUL cannot be in a path and would truncate this record's own string the
-      // next time it is written, so it is refused rather than carried.
-      if (v == 0) return false;
-      out += static_cast<char>(v);
-      i += 2;
-      continue;
-    }
-    // A RAW SEPARATOR HERE IS A FOURTH FIELD, and there is no fourth field: the
-    // escape puts `:` beyond the parser's reach, so `library:7:/books:extra` is
-    // malformed rather than a path with a colon in it. (`;` cannot reach here at
-    // all -- it ends the entry.)
-    if (c == ':' || c == ';') return false;
-    out += c;
-  }
-  return true;
-}
+// THE PERCENT-ESCAPING MOVED TO reader/wire_escape.h, because the Wi-Fi store
+// needs byte-for-byte the same rules on an SSID -- same separators, same three
+// refusals, same reason for wanting a record `nvs_get` can print. It was
+// written here for a Library path and this is the second caller, which is
+// where this project extracts rather than copies.
+//
+// What the place-specific reasoning was, and still is, now that the code is
+// shared: a place that cannot be decoded refuses the WHOLE record, on the
+// unknown-name rule -- it was written by something that is not this format, so
+// the entries around it may not mean what they say either. An EMPTY place is
+// refused too, because encodeSessionStack writes no third field at all for a
+// screen with no place, so `library:7:` is a record with a field and nothing in
+// it, which is the trailing-separator rule.
 
 bool decodeName(const char* start, size_t len, ScreenId& out) {
   if (len == 0) return false;
@@ -216,6 +177,12 @@ const char* sessionWireName(ScreenId id) {
     // falls through to `return kNames[0]` and stores the new screen as "home". That
     // has already happened twice here.
     case ScreenId::BatteryEmpty: return kNames[15];
+    case ScreenId::WifiSettings: return kNames[16];
+    case ScreenId::WifiPicker: return kNames[17];
+    case ScreenId::WifiPassword: return kNames[18];
+    case ScreenId::WifiConnect: return kNames[19];
+    case ScreenId::WifiError: return kNames[20];
+    case ScreenId::WifiNetworkActions: return kNames[21];
     // NOT A SCREEN, so it has no name and must never reach the fall-through below,
     // which is what silently made a missing case read as `home`.
     case ScreenId::Count: break;
@@ -235,7 +202,7 @@ std::string encodeSessionStack(const std::vector<StackEntry>& stack) {
     // directory, not none -- and the row it indexes goes with it, because a row
     // index without its folder is the defect this field exists to close. -1 is
     // "nothing selected", a real position every focused screen accepts.
-    const std::string place = escapePlace(e.place);
+    const std::string place = escapeWireField(e.place);
     const bool fits = !place.empty() && place.size() <= kPlaceMaxBytes;
     if (!place.empty() && !fits) focus = kFocusMin;
     out += std::to_string(focus);
@@ -261,7 +228,7 @@ bool decodeSessionStack(const char* raw, std::vector<StackEntry>& out) {
       return false;
     }
     // The SECOND colon, if the entry has one, ends the focus and begins the
-    // place. It cannot be a colon inside the place: escapePlace put every one of
+    // place. It cannot be a colon inside the place: escapeWireField put every one of
     // those beyond this search, which is what makes a path with a colon in it
     // impossible rather than ambiguous.
     const char* placeSep = static_cast<const char*>(
@@ -275,7 +242,7 @@ bool decodeSessionStack(const char* raw, std::vector<StackEntry>& out) {
       return false;
     }
     if (placeSep != nullptr &&
-        !decodePlace(placeSep + 1, static_cast<size_t>(entryEnd - placeSep - 1), e.place)) {
+        !decodeWireField(placeSep + 1, static_cast<size_t>(entryEnd - placeSep - 1), e.place)) {
       out.clear();
       return false;
     }

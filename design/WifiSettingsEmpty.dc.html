@@ -1,0 +1,138 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+
+  </style>
+</helmet>
+
+<!-- A VARIANT of WifiSettings.dc.html, not a second screen: same ScreenId, same
+     view model, same band, same prose, same SETUP section -- copy where the saved
+     list would be. HomeEmpty, HomeUnopened and NamesEmpty are the same mechanism,
+     and the reason is theirs: two render branches would be two ways to spell one
+     layout, and they would drift.
+
+     THIS IS THE STATE EVERY USER MEETS FIRST and no board drew it. WifiSettings
+     shows HOME and BUREAU, which is a device somebody has already used.
+
+     IT IS NOT HomeEmpty's SHAPE, AND THE DIFFERENCE IS THE WHOLE POINT. HomeEmpty
+     and NamesEmpty have NO action slab, because a primary action that cannot work
+     is worse than none -- nothing on the device can put a book on the card, and
+     nothing but reading fills the name index. HERE THERE IS SOMETHING TO PRESS.
+     `Join another network...` is exactly the thing to do about an empty list, so
+     the SETUP section stays where it is and the copy sits above it rather than
+     replacing the screen. An empty state with a working action is a different
+     shape from one without.
+
+     NO 112px MARK. HomeEmpty and NamesEmpty centre kBookLarge, and both are
+     full-screen "there is nothing here" states. This screen is a settings list
+     with one section temporarily empty and a live action below it; a hero mark
+     would claim more emptiness than there is, and a second large asset is 3,136
+     bytes of flash for a screen that still has a row to press.
+
+     THE COPY SAYS WHEN IT WILL FILL, NOT THAT IT IS EMPTY -- NamesEmpty's rule.
+     "No networks saved" alone invites the reader to conclude Wi-Fi is broken or
+     unsupported. Naming the mechanism turns an empty screen into an explained one,
+     and the second sentence is the only place the AUTO rule is ever stated: the
+     first network saved becomes the automatic one, which is otherwise a behaviour
+     the reader can only infer from a word appearing in a row. -->
+
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
+
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
+  <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">WI-FI</div>
+  <div style="font-size: var(--t-value); font-weight: 700;">ON DEMAND</div>
+</div>
+  <!-- THE `Wi-Fi stays off. It connects only while receiving books` BLOCK IS
+       GONE. It explained the on-demand radio to a reader who never asked and
+       cannot change it: the device's behaviour is the same whether or not
+       they read it, so the block was a paragraph of chrome bought with the
+       top of every screen that veils this one. Cut on the owner's call --
+       "either obvious or the user doesn't need to know them" -- which is the
+       same judgement that took the eight-cell ticker off WifiConnect.
+
+       The header band's `ON DEMAND` already states the policy in two words,
+       in the slot that exists for a screen's state. -->
+
+  <!-- The block takes the space the saved list would have, and `flex-grow: 1`
+       pushes the SETUP section to the foot.
+
+       SO THE ONE ROW THE TWO VARIANTS SHARE DOES MOVE, and by a lot: measured off
+       the X4 renders, `Join another network...` occupies y=656..736 here against
+       roughly y=467..547 on the populated board -- 189px, and it is focused here
+       and not there. That is worth stating rather than glossing, because the
+       first draft of this comment claimed the opposite, that the action stays
+       put, and the render says otherwise.
+
+       IT IS STILL RIGHT. The alternative is sizing this block to exactly the
+       height a header plus two rows would occupy, which is pinning a number the
+       board computes -- the first invariant, and the one three separate defects
+       in this project came from. And the jump happens exactly once in a device's
+       life, on the first network ever saved, where the screen it lands on is the
+       one the reader just acted to produce.
+
+       WifiPickerEmpty.dc.html does the same thing with its Rescan row, so the two
+       empty states in this flow anchor their action the same way. -->
+  <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 0 40px; text-align: center; min-height: 0; overflow: hidden;">
+    <div style="font-size: var(--t-title); font-weight: 700; line-height: 1.1;">No networks saved</div>
+<!-- COPY MEASURED AGAINST THE WRAP BOUNDARY, which #76 made a rule for this
+       panel family after two BookError shapes shipped one and three pixels from
+       it: the firmware's .rfnt faces measure ~3% wider than Chrome's, so a line
+       that merely fits here wraps differently on glass, and a centred panel then
+       lands every rule out of register.
+
+       TWO DIRECTIONS, NOT ONE. test_book_error_copy.cpp asserts that the NEXT
+       word overflowed by at least 12px, which stops a word coming UP into a line.
+       It does not stop the opposite: a line sitting flush at the column width has
+       its own last word pushed DOWN the moment the face widens. Both were
+       measured for every string here, at 4% of each column, and the shipped
+       wording clears both.
+  -->
+      <div style="font-size: var(--t-label); line-height: 1.55; overflow-wrap: anywhere;">Join one below and Encre remembers it. Whichever you save first becomes automatic.</div>
+  </div>
+
+  <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">SETUP</div>
+  <!-- Focused, because it is the only row on the screen that can be. No hold ring
+       on SELECT in this state: the ring binds FORGET, and there is nothing saved
+       to forget. A hint bar that promises a hold with nothing behind it is the
+       dead-affordance defect the bar's four-slot rule exists to prevent. -->
+  <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; background: #000000; color: #ffffff;">
+  <div style="font-size: var(--t-value); font-weight: 700;">Join another network&hellip;</div>
+  <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#ffffff" stroke-width="2"></path></svg>
+</div>
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">BACK</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">OPEN</div></div>
+  <div style="width: 36px;"></div>
+  <div style="width: 36px;"></div>
+</div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

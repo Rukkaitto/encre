@@ -40,6 +40,8 @@ constexpr ScreenId kAllScreens[] = {
     ScreenId::ReaderMenu,  ScreenId::Contents,  ScreenId::SdMissing,
     ScreenId::Typography,  ScreenId::Peek,     ScreenId::BookEnd,
     ScreenId::BookError,   ScreenId::BatteryEmpty,
+    ScreenId::WifiSettings, ScreenId::WifiPicker, ScreenId::WifiPassword,
+    ScreenId::WifiConnect,  ScreenId::WifiError,  ScreenId::WifiNetworkActions,
 };
 // NAMES THE SENTINEL, so an append cannot satisfy it unchanged. It used to name the
 // last member by hand -- `ScreenId::Peek + 1`, then `ScreenId::BookEnd + 1` -- and
@@ -112,6 +114,20 @@ std::unique_ptr<Standalone> build(ScreenId id) {
   // null and the REQUIRE would fire -- which is the refusal working, not a reason to
   // let the screen out of the catalogue.
   b->factory.setBookErrorFacts(demoBookErrorFacts());
+  // AND THE CONNECT FLOW, on exactly that argument: every one of its six
+  // screens is refused unprimed, so a fixture that did not ask would get a
+  // null and the REQUIRE below would fire -- which is the refusal working
+  // rather than a reason to let six screens out of the catalogue.
+  //
+  // setWifiDemo primes all six at once because they share their content: the
+  // saved list, the scan, and the SSID a join is about. Six setters here would
+  // be six chances to prime five.
+  b->factory.setWifiDemo();
+  // The picker is a WINDOWED list and gets its row count from the theme, so an
+  // unset one refuses movement -- which would make it look like a screen whose
+  // focus legitimately cannot move and quietly shrink the `movable` count
+  // below. That is the trap Contents already sprang here once.
+  b->factory.setWifiPickerVisibleRows(7);
   if (id == ScreenId::Reader || id == ScreenId::Peek) {
     // GIVEN a body face rather than skipped. Excluding either from the loop would
     // have been a screen this file claims to cover and does not -- and both are
@@ -202,7 +218,21 @@ TEST_CASE("every screen accepts back the focus it reports") {
     CHECK(restored->get().focus() == moved);
   }
 
-  CHECK(movable == 10);
+  // TEN, PLUS THE FOUR OF THE CONNECT FLOW WHOSE FOCUS CAN MOVE. The count is
+  // hand-maintained on purpose -- it is what stops this loop quietly testing
+  // nothing when a screen stops being constructible -- and it has been wrong
+  // at every revision before the one that wrote it, so the arithmetic is
+  // spelled out rather than left to be re-derived:
+  //
+  //   WifiSettings        two saved networks and a SETUP row
+  //   WifiPicker          five scan rows plus Rescan
+  //   WifiPassword        44 cells, and the FIRST GridFocusScreen here
+  //   WifiError           three slabs on the bad-password shape
+  //
+  // The two that cannot move are WifiConnect, which has no focus at all
+  // because it has one action and it is CANCEL, and WifiNetworkActions, whose
+  // single row means a move that cannot change anything.
+  CHECK(movable == 14);
 }
 
 TEST_CASE("every screen with a movable focus wraps off the end") {
@@ -233,7 +263,10 @@ TEST_CASE("every screen with a movable focus wraps off the end") {
     CHECK(wrapped);
     ++wrapping;
   }
-  CHECK(wrapping == 10);
+  // The same fourteen, and it must stay the same number as `movable` above:
+  // every list in this firmware wraps, so a screen that can move and does not
+  // wrap is the Settings defect this case was written for.
+  CHECK(wrapping == 14);
 }
 
 TEST_CASE("restoring the focus a screen is already on is a no-op, not a failure") {

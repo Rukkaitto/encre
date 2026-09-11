@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+
+  </style>
+</helmet>
+
+<!-- A VARIANT of WifiPicker.dc.html: same ScreenId, same band, same Rescan row --
+     copy where the results would be. The scan completed and found nothing.
+
+     NOT THE SCANNING STATE, which is a different thing and is drawStatusBar:
+     that one replaces the hint bar with one centred tracked line, the mechanism
+     LibraryOpening.dc.html and SleepWaking.dc.html already board between them. A
+     third board would be a third copy of a box those two already specify. This
+     board is the state AFTER the scan came back.
+
+     THE BAND READS `NONE FOUND`, NOT `0 FOUND`. The right slot is a count and
+     zero is a real value there, so `0 FOUND` is not a false claim -- it is simply
+     colder than it needs to be, and this is the one screen where the number
+     carries no information the words below do not. Same call as the reader
+     footer's em dash over a literal zero.
+
+     ==================================================================
+     OPEN FOR REVIEW -- THE SECOND SENTENCE. See the spec's own open item
+     (docs/superpowers/specs/2026-09-11-wifi-connect-flow-design.md).
+
+     THE ESP32-C3 IS 2.4 GHz ONLY. A 5 GHz-only network does not appear in a
+     scan, at all, and the reader's conclusion will be that the device is broken
+     rather than that the band is unsupported. Nothing anywhere on the device says
+     so today.
+
+     The sentence is written in because the failure without it is a reader
+     concluding their new e-reader has no working Wi-Fi. The argument against is
+     that it is noise for the overwhelming majority, whose router broadcasts both
+     bands and whose scan is therefore never empty.
+
+     AND IT DOES NOT FULLY BELONG HERE, WHICH IS THE PART TO SETTLE. A dual-band
+     household never sees this screen. A 5 GHz-only household sees a POPULATED
+     list -- the neighbours' networks -- with the one name they are looking for
+     missing, and this board never renders for them. If the caveat is worth
+     saying, its honest home may be WifiPicker.dc.html's own footer, where the
+     note about open networks already sits. That is a board decision before it is
+     a copy one.
+     ================================================================== -->
+
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
+
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
+  <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">JOIN NETWORK</div>
+  <div style="font-size: var(--t-value); font-weight: 700;">NONE FOUND</div>
+</div>
+
+  <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 0 40px; text-align: center; min-height: 0; overflow: hidden;">
+    <div style="font-size: var(--t-title); font-weight: 700; line-height: 1.1;">Nothing answered</div>
+<!-- COPY MEASURED AGAINST THE WRAP BOUNDARY, which #76 made a rule for this
+       panel family after two BookError shapes shipped one and three pixels from
+       it: the firmware's .rfnt faces measure ~3% wider than Chrome's, so a line
+       that merely fits here wraps differently on glass, and a centred panel then
+       lands every rule out of register.
+
+       TWO DIRECTIONS, NOT ONE. test_book_error_copy.cpp asserts that the NEXT
+       word overflowed by at least 12px, which stops a word coming UP into a line.
+       It does not stop the opposite: a line sitting flush at the column width has
+       its own last word pushed DOWN the moment the face widens. Both were
+       measured for every string here, at 4% of each column, and the shipped
+       wording clears both.
+  -->
+  <div style="font-size: var(--t-label); line-height: 1.55; overflow-wrap: anywhere;">Move closer and scan again.</div>
+    <div style="font-size: var(--t-label); line-height: 1.55; overflow-wrap: anywhere;">Encre joins 2.4 GHz networks only. A 5 GHz network never appears here.</div>
+  </div>
+
+  <!-- The Rescan row keeps its 2px top border from WifiPicker.dc.html, where it
+       separates the action from the list. Focused here, because it is the only
+       row there is -- and the Confirm hint therefore reads RESCAN rather than
+       JOIN, which is Settings' rule that the label follows the focused row. There
+       is nothing to join.
+
+       UP AND DOWN ARE DEAD SLOTS at 36px each, the boards' spacer: one row means
+       a move that cannot change anything, and a mark over a button with no action
+       is an affordance for something that is not there. -->
+  <div style="display: flex; align-items: center; gap: 12px; padding: 21px 24px; border-top: 2px solid #000000; background: #000000; color: #ffffff;">
+    <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M13 8a5 5 0 1 1-1.5-3.6" stroke="#ffffff" stroke-width="1.6"></path><path d="M12 1v3.5H8.5" stroke="#ffffff" stroke-width="1.6"></path></svg>
+    <div style="font-size: var(--t-label); font-weight: 700;">Rescan</div>
+  </div>
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">BACK</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">RESCAN</div></div>
+  <div style="width: 36px;"></div>
+  <div style="width: 36px;"></div>
+</div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

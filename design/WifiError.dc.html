@@ -33,17 +33,41 @@
   <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">WI-FI</div>
   <div style="font-size: var(--t-value); font-weight: 700;">ON DEMAND</div>
 </div>
-  <div style="padding: 16px 24px; border-bottom: 1px solid #000000;">
-    <div style="font-size: var(--t-label); line-height: 1.55;">Wi-Fi stays off. It connects only while receiving books &mdash; then turns off again.</div>
-  </div>
+  <!-- THE `Wi-Fi stays off. It connects only while receiving books` BLOCK IS
+       GONE. It explained the on-demand radio to a reader who never asked and
+       cannot change it: the device's behaviour is the same whether or not
+       they read it, so the block was a paragraph of chrome bought with the
+       top of every screen that veils this one. Cut on the owner's call --
+       "either obvious or the user doesn't need to know them" -- which is the
+       same judgement that took the eight-cell ticker off WifiConnect.
+
+       The header band's `ON DEMAND` already states the policy in two words,
+       in the slot that exists for a screen's state. -->
+  <!--
+    ROWS WERE 72px HERE AND WifiSettings.dc.html DRAWS THEM AT 80px, so this
+    veil disagreed with the screen it claims to be showing. A veil is not
+    decoration: App::render paints the real parent, then the veil, then the
+    overlay, so whatever is under the stipple is a screen the firmware actually
+    renders and make compare actually measures. The dimming is what made eight
+    pixels a row invisible to review for a year.
+
+    The SETUP section was missing for the same reason -- the panel covers it,
+    so nobody noticed the firmware will draw it. Both fixed, and
+    WifiConnect.dc.html now veils the identical markup.
+  -->
   <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">SAVED NETWORKS</div>
-  <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 24px; background: #000000; color: #ffffff;">
+  <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; background: #000000; color: #ffffff;">
     <div style="font-size: var(--t-value); font-weight: 700;">HOME</div>
     <div style="font-size: var(--t-value); font-weight: 700;">AUTO</div>
   </div>
-  <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 24px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px;">
     <div style="font-size: var(--t-value); font-weight: 500;">BUREAU</div>
     <div style="font-size: var(--t-value); font-weight: 700;">SAVED</div>
+  </div>
+  <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">SETUP</div>
+  <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px;">
+    <div style="font-size: var(--t-value); font-weight: 500;">Join another network&hellip;</div>
+    <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
   </div>
   </div>
   <div class="dim-veil" style="position: absolute; top: 0; left: 0; width: 480px; height: 800px;"></div>
@@ -53,7 +77,21 @@
     </div>
     <div style="padding: 18px 20px; display: flex; flex-direction: column; gap: 12px;">
       <svg width="32" height="28" viewBox="0 0 18 16" fill="none"><path d="M9 1 17 15H1z" stroke="#000000" stroke-width="1.6"></path><path d="M9 6v4" stroke="#000000" stroke-width="1.6"></path><rect x="8.3" y="11.6" width="1.4" height="1.4" fill="#000000"></rect></svg>
-      <div style="font-size: var(--t-body); line-height: 1.45;">&ldquo;PENDRAGON&rdquo; rejected the password. Wi-Fi is off again.</div>
+      <!-- THE SHIPPED SENTENCE WAS ON THE BOUNDARY and this one is not. Measured at
+         --t-body in this panel's 340px column: "...rejected the password." broke
+         with the next word overflowing by only 6.3px, so the firmware's ~3% wider
+         advances push "the" down, the panel grows a line, and every rule inside a
+         centred panel goes out of register. That is #76's Book-error defect
+         exactly, which cost 11.12%/11.70% against 3.58%.
+
+         IT NO LONGER LEADS WITH THE SSID, which the other two shapes do, and that
+         is a trade forced by measurement rather than a preference: every
+         SSID-first wording tried sat inside the floor in one direction or the
+         other ("refused the" left line one flush at exactly 340px, "turned down"
+         left 7px, "did not accept" left 3px). This one clears by +14px up and
+         26px down. It also happens to be the plainest of them.
+    -->
+    <div style="font-size: var(--t-body); line-height: 1.45;">Wrong password for &ldquo;PENDRAGON&rdquo;. Wi-Fi is off again.</div>
     </div>
     <div style="display: flex; flex-direction: column; gap: 12px; padding: 0 20px 20px 20px;">
       <div style="background: #000000; color: #ffffff; height: 68px; display: flex; align-items: center; justify-content: center;">

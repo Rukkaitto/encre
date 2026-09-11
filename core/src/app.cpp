@@ -26,6 +26,43 @@ void restoreFocusIn(Screen& screen, const StackEntry& entry) {
 
 }  // namespace
 
+bool screenUsesRadio(ScreenId id) {
+  // NO `default:`, deliberately -- see the header. The cost of getting this
+  // wrong is not a mis-labelled log line, it is the radio running behind a
+  // screen that does not say so, and -Wswitch is what makes a seventh screen
+  // answer the question rather than inherit an answer.
+  switch (id) {
+    case ScreenId::WifiPicker:    // SCANNING
+    case ScreenId::WifiConnect:   // CONNECTING...
+      return true;
+    // The other four Wi-Fi screens have nothing in flight. The hub in
+    // particular says `ON DEMAND`, which is a claim the radio is off.
+    case ScreenId::WifiSettings:
+    case ScreenId::WifiPassword:
+    case ScreenId::WifiError:
+    case ScreenId::WifiNetworkActions:
+    case ScreenId::Home:
+    case ScreenId::Library:
+    case ScreenId::ItemActions:
+    case ScreenId::DeleteConfirm:
+    case ScreenId::BookDetails:
+    case ScreenId::Settings:
+    case ScreenId::Typography:
+    case ScreenId::Reader:
+    case ScreenId::ReaderMenu:
+    case ScreenId::Contents:
+    case ScreenId::Peek:
+    case ScreenId::BookError:
+    case ScreenId::BookEnd:
+    case ScreenId::BatteryEmpty:
+    case ScreenId::Sleep:
+    case ScreenId::SdMissing:
+    case ScreenId::Count:
+      return false;
+  }
+  return false;
+}
+
 const char* screenName(ScreenId id) {
   switch (id) {
     case ScreenId::Home: return "HOME";
@@ -55,6 +92,16 @@ const char* screenName(ScreenId id) {
     case ScreenId::BookEnd: return "BOOK-END";
     case ScreenId::BookError: return "BOOK-ERROR";
     case ScreenId::BatteryEmpty: return "BATTERY-EMPTY";
+    // The V1.1 connect flow. Kebab like their neighbours -- these are log
+    // labels and are free to be reworded; session_record.cpp's hyphenated
+    // spellings are a storage format and are not these, however alike they
+    // happen to look.
+    case ScreenId::WifiSettings: return "WIFI-SETTINGS";
+    case ScreenId::WifiPicker: return "WIFI-PICKER";
+    case ScreenId::WifiPassword: return "WIFI-PASSWORD";
+    case ScreenId::WifiConnect: return "WIFI-CONNECT";
+    case ScreenId::WifiError: return "WIFI-ERROR";
+    case ScreenId::WifiNetworkActions: return "WIFI-NETWORK-ACTIONS";
     // NOT A SCREEN -- see ScreenId::Count's own comment. Refused explicitly so this
     // switch stays exhaustive, the same reason session_record.cpp's does.
     case ScreenId::Count: return "?";
@@ -132,6 +179,35 @@ App::RestoreReport App::restore(const std::vector<StackEntry>& stack) {
   dirty_ = true;
   transition_ = true;
   return r;
+}
+
+bool App::popScreen() {
+  // The root is the app: popping it would leave nothing to render and
+  // nothing to receive the next event.
+  if (stack_.size() <= 1) return false;
+  stack_.pop_back();
+  dirty_ = true;
+  transition_ = true;
+  return true;
+}
+
+bool App::replaceScreen(ScreenId id) {
+  // PUSHED BEFORE THE OLD ONE IS REMOVED, so a factory that refuses leaves the
+  // stack exactly as it was. Popping first would lose the screen that asked and
+  // put the reader back on the list with nothing to show for the press -- the
+  // same "wrong in a way the reader cannot see through" the factory's refusals
+  // exist to avoid.
+  const size_t before = stack_.size();
+  if (!pushScreen(id)) return false;
+  // The root is the app: with only a root there is nothing beneath the new
+  // screen to remove, and erasing it would leave nothing to render and nothing
+  // to receive the next event. That degrades to a plain Push, which is the right
+  // answer for a caller that is somehow the root.
+  if (before >= 2) stack_.erase(stack_.end() - 2);
+  // pushScreen already set dirty_ and transition_. A replace IS a screen change,
+  // so it takes the transition's full refresh and is never a partial repaint --
+  // which it must not be, since the frame beneath it is about to be wrong.
+  return true;
 }
 
 bool App::pushScreen(ScreenId id) {
@@ -231,12 +307,7 @@ void App::dispatch(const InputEvent& ev) {
       pushScreen(a.target);
       break;
     case Action::Kind::Pop:
-      // The root is the app: popping it would leave nothing to render and
-      // nothing to receive the next event.
-      if (stack_.size() <= 1) break;
-      stack_.pop_back();
-      dirty_ = true;
-      transition_ = true;
+      popScreen();
       break;
     case Action::Kind::PopTo:
       // Down to `target`, or to the root if it is not on the stack -- never past
@@ -247,21 +318,7 @@ void App::dispatch(const InputEvent& ev) {
       transition_ = true;
       break;
     case Action::Kind::Replace: {
-      // PUSHED BEFORE THE OLD ONE IS REMOVED, so a factory that refuses leaves the
-      // stack exactly as it was. Popping first would lose the screen that asked and
-      // put the reader back on the list with nothing to show for the press -- the
-      // same "wrong in a way the reader cannot see through" the factory's refusals
-      // exist to avoid.
-      const size_t before = stack_.size();
-      if (!pushScreen(a.target)) break;
-      // The root is the app: with only a root there is nothing beneath the new
-      // screen to remove, and erasing it would leave nothing to render and nothing
-      // to receive the next event. That degrades to a plain Push, which is the right
-      // answer for a caller that is somehow the root.
-      if (before >= 2) stack_.erase(stack_.end() - 2);
-      // pushScreen already set dirty_ and transition_. A replace IS a screen change,
-      // so it takes the transition's full refresh and is never a partial repaint --
-      // which it must not be, since the frame beneath it is about to be wrong.
+      replaceScreen(a.target);
       break;
     }
     case Action::Kind::Sleep:
@@ -291,6 +348,14 @@ void App::dispatch(const InputEvent& ev) {
       // popTo(facts().returnTo) after the file is gone, because where a completed
       // delete lands is a fact about how the confirmation was reached.
       delete_ = true;
+      break;
+    case Action::Kind::Wifi:
+      // Delete's contract exactly, and for the sharper version of its reason:
+      // the radio is the shell's, and NOTHING IS POPPED because the shell has
+      // to ask the screen which outcome it was. The five connect-flow screens
+      // each popped themselves and then offered a getter, and a popped screen
+      // is a DESTROYED screen -- see Action::wifi().
+      wifi_ = true;
       break;
   }
 }

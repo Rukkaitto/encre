@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+    .dim-veil { background-image: radial-gradient(circle, #ffffff 1.3px, transparent 1.5px); background-size: 3px 3px; }
+  </style>
+</helmet>
+
+<!-- WHAT THE HOLD ON A SAVED NETWORK OPENS. WifiSettings.dc.html has drawn the
+     hollow ring on its SELECT slot since the board was authored, and spec 4.0
+     says what it binds: "Long-press Confirm on any list item = contextual
+     actions overlay ... Saved Wi-Fi networks: hold to forget." This is that
+     overlay, and it is the second hold in the firmware -- the Library's is the
+     first, and the binding is identical: Confirm short acts on the row (here,
+     toggling AUTO), Confirm long opens this.
+
+     IT IS ITS OWN ScreenId AND ITS OWN BOARD, WHICH IS A REAL COST AND IS NOT
+     AVOIDABLE. ItemActions reads the LIBRARY's focused row, so it cannot be
+     reused for a list of networks; this takes the connect flow from five screens
+     to six. Stated rather than buried.
+
+     ONE ROW, DELIBERATELY. `Forget network` is the only thing this overlay does
+     today, and a one-row panel looks like an odd amount of ceremony until you ask
+     what the alternatives are:
+
+       - Hold forgets outright, no overlay. The shortest reading of the spec, no
+         new screen, no new board -- and the only destructive action anywhere in
+         this firmware with nothing between the press and the loss, when deleting
+         a book has two steps.
+       - Hold, overlay, then a confirm screen. The Library's pattern verbatim, so
+         the two lists behave identically. Two boards and two ScreenIds for an
+         action whose worst outcome is typing a password again.
+
+     THE OVERLAY IS ITSELF THE CONFIRMATION STEP, and that is the proportionate
+     answer: forgetting a network costs you retyping a password, where deleting a
+     book is irreversible and gets DeleteConfirm.dc.html. It is also where
+     `Connect now` and `Make automatic` go when there is a reason for them.
+
+     NO CHEVRON ON THE ROW. It acts in place rather than disclosing a screen, and
+     ListRow::discloses is an explicit flag precisely so this is not inferred from
+     an empty value -- deriving it once drew a chevron on `Close book` promising a
+     screen that did not exist.
+
+     THE CAPTION IS THE NETWORK AND ITS STATE, which is LibraryActions.dc.html's
+     shape (the book's name and its progress). It truncates on one line rather
+     than wrapping: an SSID is up to 32 bytes of anything, and a caption allowed
+     to wrap makes the panel a different height for every network. `gap: 7px`
+     keeps the ellipsis off the value.
+
+     UP AND DOWN ARE DEAD SLOTS at the boards' 36px spacer, because one row means
+     a move that cannot change anything. The Confirm label reads FORGET rather
+     than SELECT -- Settings' rule that the label follows the focused row, and
+     here it doubles as the warning: the word tells you what the press does. -->
+
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; position: relative;">
+
+  <div style="position: absolute; top: 0; left: 0; width: 480px; height: 800px; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;">
+<div style="display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
+  <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">WI-FI</div>
+  <div style="font-size: var(--t-value); font-weight: 700;">ON DEMAND</div>
+</div>
+  <!-- THE `Wi-Fi stays off. It connects only while receiving books` BLOCK IS
+       GONE. It explained the on-demand radio to a reader who never asked and
+       cannot change it: the device's behaviour is the same whether or not
+       they read it, so the block was a paragraph of chrome bought with the
+       top of every screen that veils this one. Cut on the owner's call --
+       "either obvious or the user doesn't need to know them" -- which is the
+       same judgement that took the eight-cell ticker off WifiConnect.
+
+       The header band's `ON DEMAND` already states the policy in two words,
+       in the slot that exists for a screen's state. -->
+  <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">SAVED NETWORKS</div>
+  <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; background: #000000; color: #ffffff;">
+    <div style="font-size: var(--t-value); font-weight: 700;">HOME</div>
+    <div style="font-size: var(--t-value); font-weight: 700;">AUTO</div>
+  </div>
+  <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px;">
+    <div style="font-size: var(--t-value); font-weight: 500;">BUREAU</div>
+    <div style="font-size: var(--t-value); font-weight: 700;">SAVED</div>
+  </div>
+  <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">SETUP</div>
+  <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px;">
+    <div style="font-size: var(--t-value); font-weight: 500;">Join another network&hellip;</div>
+    <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
+  </div>
+  </div>
+  <div class="dim-veil" style="position: absolute; top: 0; left: 0; width: 480px; height: 800px;"></div>
+  <div style="position: absolute; top: 50%; transform: translateY(-50%); left: 70px; width: 340px; background: #ffffff; border: 2px solid #000000; box-sizing: border-box;">
+
+  <div style="display: flex; justify-content: space-between; align-items: center; gap: 7px; padding: 21px 20px; border-bottom: 2px solid #000000;">
+  <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">HOME</div>
+  <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">AUTO</div>
+</div>
+  <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 20px; background: #000000; color: #ffffff;">
+  <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">Forget network</div>
+</div>
+  </div>
+<div style="position: absolute; bottom: 0; left: 0; width: 100%; background: #ffffff; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">BACK</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">FORGET</div></div>
+  <div style="width: 36px;"></div>
+  <div style="width: 36px;"></div>
+</div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

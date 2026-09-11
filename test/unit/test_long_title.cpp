@@ -33,6 +33,7 @@
 #include "reader/screen_book_error.h"
 #include "reader/screen_home.h"
 #include "reader/text.h"
+#include "reader/screen_wifi_connect.h"
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
 
@@ -291,6 +292,68 @@ TEST_CASE("the delete panel stays on the glass for a pathologically long name") 
   }
 }
 
+
+// --- the Wi-Fi connect dialog -------------------------------------------------
+
+TEST_CASE("a 32-byte SSID stays inside the connecting dialog") {
+  // AN SSID IS 32 ARBITRARY OCTETS AND NEED CONTAIN NO SPACE, so the quoted
+  // name in "Joining \u201c...\u201d to test the password." is one unbreakable
+  // token. renderWifiError passes WordBreak::Anywhere and says so in as many
+  // words; renderWifiConnect -- its sibling, embedding the SAME string -- did
+  // not, so a name with nothing to break on measured far wider than the 296px
+  // column, sat on one line, and ran off both sides of the panel.
+  //
+  // THE VERTICAL WITNESS THIS FILE ALREADY HAS CANNOT SEE IT. With Normal, an
+  // over-wide token takes ONE line, so the panel's height is right and its
+  // borders are where they should be -- the overflow is sideways. So this
+  // watches the columns instead, and it renders the dialog ALONE rather than
+  // over its parent: with a veiled WifiSettings underneath, everything outside
+  // the panel is legitimately inked and there is no evidence to find.
+  ramp::Ramp r;
+  reader::QuietTheme theme;
+
+  // 32 bytes, no space, no hyphen -- 802.11's maximum and the worst case.
+  const std::string ssid(32, 'W');
+  REQUIRE(ssid.size() == 32);
+
+  for (const auto geo : {std::pair<int, int>{480, 800}, std::pair<int, int>{528, 792}}) {
+    const int width = geo.first, height = geo.second;
+    CAPTURE(width);
+    reader::WifiConnectScreen screen(ssid);
+    reader::Framebuffer fb(width, height);
+    fb.clear(true);
+    screen.render(fb, r.fonts, theme, reader::Plane::Bw);
+
+    // 340 is `kActionsPanelW`, file-local to theme_quiet.cpp and staying that
+    // way -- widening a theme's surface for a test is the wrong trade, which
+    // is the same call this file makes for `kHomeMarks` and for
+    // DeleteConfirm's 380 above. A drift shows up here as a failure.
+    const int panelW = 340;
+    const int panelX = reader::panelLeft(width, panelW);
+    // THE BAR IS EXCLUDED BY ITS OWN MEASURED HEIGHT, not by a guess. The first
+    // version of this bounded it with `firstY > height / 2` and the case
+    // PASSED against the unwrapped code -- the panel is centred, so the
+    // overflowing line sits just below the midpoint and the escape clause
+    // swallowed the defect it was written to catch. A mutation tells you about
+    // your input before it tells you about your test, and so does a guard.
+    reader::Hint hints[4];
+    reader::buildHints(reader::kHintSlotMarks, screen.vm().hints, screen.vm().holds, hints);
+    const int barTop = height - reader::hintBarHeight(r.fonts, hints);
+
+    int outside = 0, firstX = -1, firstY = -1;
+    for (int y = 0; y < barTop; ++y) {
+      for (int x = 0; x < width; ++x) {
+        if (x >= panelX && x < panelX + panelW) continue;
+        if (fb.getPixel(x, y)) continue;  // paper
+        ++outside;
+        if (firstX < 0) { firstX = x; firstY = y; }
+      }
+    }
+    CHECK_MESSAGE(outside == 0, outside << " inked pixels outside the panel, first at ("
+                                        << firstX << ", " << firstY << ") at " << width << "x"
+                                        << height);
+  }
+}
 
 // --- Home ---------------------------------------------------------------------
 

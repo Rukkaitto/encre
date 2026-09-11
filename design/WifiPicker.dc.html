@@ -56,9 +56,12 @@
     <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M13 8a5 5 0 1 1-1.5-3.6" stroke="#000000" stroke-width="1.6"></path><path d="M12 1v3.5H8.5" stroke="#000000" stroke-width="1.6"></path></svg>
     <div style="font-size: var(--t-label); font-weight: 500;">Rescan</div>
   </div>
-  <div style="margin-top: auto; padding: 0 24px 14px 24px;">
-    <div style="font-size: var(--t-meta); letter-spacing: 0.1em; line-height: 1.5;">OPEN NETWORKS JOIN DIRECTLY; LOCKED ONES ASK FOR A PASSWORD.</div>
-  </div>
+  <!-- THE `OPEN NETWORKS JOIN DIRECTLY` FOOTER IS GONE. It described what a
+       press would do before the reader had pressed anything, and the
+       difference it describes is already visible: a locked row carries a
+       padlock, and pressing one opens a keyboard. Cut on the owner's call.
+       `margin-top: auto` moves to the list so the Rescan row still sits at
+       the foot. -->
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
   <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">BACK</div></div>
   <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">JOIN</div></div>

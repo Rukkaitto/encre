@@ -106,8 +106,21 @@ class SettingsScreen : public FocusScreen {
     CoverFit,
     SleepAfter,
     FullRefresh,
-    OnTransition
+    OnTransition,
+    Wifi
   };
+
+  // WHICH SCREEN A ROW DISCLOSES, IF ANY -- the one spelling of that question,
+  // and it has to be one: three separate places ask it (the chevron in syncVm,
+  // the Confirm hint beside it, and the push in onGesture), and three spellings
+  // of "this row opens something" is how a row draws a chevron, promises OPEN,
+  // and then cycles a value it does not have. That is the drifting-condition
+  // defect this project has shipped twice, both times as a dead button.
+  //
+  // It was `field == Field::Typography` written out three times, which was
+  // correct while one row disclosed and became a maintenance trap the moment a
+  // second did.
+  static bool disclosedScreen(Field f, ScreenId& out);
 
   struct Item {
     const char* label;

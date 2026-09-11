@@ -166,6 +166,41 @@
       <div style="font-size: var(--t-value); font-weight: 700;">ON</div>
     </div>
 
+    <!-- CONNECTIONS IS BACK, and the row above predicted exactly this: 53c92d4
+         cut this section with Wi-Fi, and the note on `Refresh on screen change`
+         says "If a section is ever added below DEVICE, this stays as it is --
+         that section's own `border-top` becomes the line between them". It does,
+         so that row is untouched and this header carries the 2px.
+
+         IT DOES NOT START THE LIST SCROLLING, which is the thing to check rather
+         than assume, because losing this section is what stopped it. The history:
+         `Refresh on screen change` took the content past 800px and the board grew
+         Library's rail in a 14px gutter; cutting CONNECTIONS brought it to eleven
+         items where twelve fit and the gutter came back off. The SLEEP SCREEN
+         section has since taken it to nine, so a header plus one row is eleven
+         again -- inside twelve, no rail, no gutter, rows still running to the
+         panel edge. And no code changes either way: renderSettings reads
+         `totalRows > rows` rather than assuming.
+
+         V1.1 IS THE CONNECT FLOW, NOT TRANSFER. This row opens WifiSettings,
+         where a network can be joined, preferred and forgotten. There is still no
+         way to send a book to the device, which is why HomeEmpty.dc.html's action
+         slab STAYS ABSENT -- its call to action was SEND BOOKS OVER WI-FI, and a
+         primary action that cannot work is worse than none. Wi-Fi existing is not
+         the condition that brings it back; transfer is.
+
+         A CHEVRON AND NO VALUE, which is `Typography`'s own rule two sections up:
+         a row states a quantity or discloses a screen, never both. The tempting
+         `Wi-Fi . ON DEMAND` is exactly the shape that forbids, and Settings' test
+         asserts every drawn row does one or the other.
+
+         No `border-bottom`: this is now the last drawn row. -->
+    <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px; border-top: 2px solid #000000;">CONNECTIONS</div>
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px;">
+      <div style="font-size: var(--t-value); font-weight: 500;">Wi-Fi</div>
+      <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
+    </div>
+
   </div>
 
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">

@@ -666,4 +666,146 @@ struct TypographyViewModel {
   std::array<bool, 4> holds{};
 };
 
+// ---------------------------------------------------------------------------
+// THE V1.1 CONNECT FLOW. Six screens, and three of them reuse ListRow because a
+// label with a right-aligned value IS ListRow's shape -- a fourth copy of it
+// would be the duplication this project extracted it to end.
+// ---------------------------------------------------------------------------
+
+// design/WifiSettings.dc.html, and design/WifiSettingsEmpty.dc.html.
+//
+// ONE MODEL FOR BOTH, which is HomeEmpty's and NamesEmpty's mechanism: a
+// variant rather than a second screen, because two render branches would be two
+// ways to spell one layout and they would drift. `nothingSaved` is the whole
+// difference, and it is named for the STATE rather than for the layout so the
+// theme decides what that means.
+struct WifiSettingsViewModel {
+  std::string title;  // "WI-FI"
+  // "ON DEMAND", never "CONNECTED" -- spec 4.1b:249 forbids the second, because
+  // the radio is off whenever this screen is on glass.
+  std::string state;
+  // The empty variant: no saved networks yet, which is the state every user
+  // meets first. The SETUP row is still drawn and still focusable, which is
+  // what makes this NOT HomeEmpty's shape -- there is something to press.
+  bool nothingSaved = false;
+  std::string emptyTitle;
+  std::string emptyProse;
+  std::vector<ListRow> rows;
+  int focusedRow = -1;
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
+// One scan result as the picker draws it.
+struct WifiScanRow {
+  std::string ssid;
+  // 1..3, the board's three-bar glyph. NOT an rssi: the theme draws one of
+  // three marks, and a view-model carrying dBm would make the theme do the
+  // banding -- which is a decision, and decisions do not belong there.
+  int bars = 1;
+  bool locked = false;
+  // The last row. A row rather than a slab because the board draws it as one,
+  // and it is what the Confirm hint names when it is focused.
+  bool isRescan = false;
+};
+
+// design/WifiPicker.dc.html, plus its scrolled and empty variants.
+struct WifiPickerViewModel {
+  std::string title;  // "JOIN NETWORK"
+  std::string found;  // "18 FOUND", or "NONE FOUND"
+  // The scan has not come back. drawStatusBar REPLACES the hint bar with one
+  // centred tracked line -- LibraryOpening's mechanism, reused rather than
+  // re-boarded.
+  bool scanning = false;
+  std::string statusLabel;  // "SCANNING"
+  // The scan came back with nothing. Its own board, because the list is
+  // replaced by copy.
+  bool nothingFound = false;
+  std::string emptyTitle;
+  // TWO PARAGRAPHS, not one: the second carries the 2.4 GHz caveat, which is a
+  // separate thought and could not be made to clear the wrap boundary inside
+  // one block. See design/WifiPickerEmpty.dc.html, which also records that
+  // whether the caveat belongs here at all is still open.
+  std::string emptyProse;
+  std::string emptyCaveat;
+  std::vector<WifiScanRow> rows;  // the VISIBLE window, not the whole list
+  int focusedRow = -1;            // an index into `rows`
+  // The rail's two numbers, over the WHOLE list. Not derivable from `rows`.
+  int firstRow = 0;
+  int totalRows = 0;
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
+// design/WifiPassword.dc.html -- the first text entry in this firmware.
+struct WifiPasswordViewModel {
+  std::string title;  // "PASSWORD"
+  std::string ssid;   // the band's right slot
+  // SHOWN IN CLEAR, which is the board's own `SHOWN WHILE TYPING`: at one
+  // character per ~520 ms repaint on a 44-cell grid, a typo you cannot see is
+  // punishing, and this is a device you hold.
+  std::string entered;
+  // WHERE THE CARET SITS, as a byte offset into `entered`. The field draws the
+  // text either side of it rather than a block on the end -- the caret is a
+  // position now, not a terminator.
+  size_t caret = 0;
+  std::string counter;     // "10 CHARS"
+  std::string visibility;  // "SHOWN WHILE TYPING"
+  // The cells, row-major, and the widths that cut them into rows. The theme
+  // draws what it is given rather than knowing the layout, so a layer change is
+  // a screen change.
+  std::vector<std::string> cells;
+  std::vector<int> rowWidths;
+  int focusedCell = 0;
+  std::string note;  // "UP AND DOWN MOVE BETWEEN ROWS; ..."
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
+// design/WifiConnect.dc.html -- the connecting dialog.
+//
+// NO PROGRESS FIELD, deliberately. The board's eight-cell ticker is gone: it
+// read as a fraction of a known total, a join takes an unknown one to ten
+// seconds, and nothing on this device animates. The LABEL is the indicator.
+struct WifiConnectViewModel {
+  std::string caption;  // "CONNECTING..." stepping to "READY"
+  std::string right;    // "WI-FI"
+  std::string message;  // Joining "HOME" to test the password.
+  std::string note;     // WI-FI TURNS OFF AGAIN AFTERWARDS.
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
+// design/WifiError.dc.html and its two siblings -- ONE SCREEN, THREE COPY
+// SHAPES, which is BookError's argument: a join fails three distinguishable
+// ways and one sentence would be a lie.
+struct WifiErrorViewModel {
+  std::string caption;  // "COULDN'T JOIN" on all three
+  std::string message;
+  // WHETHER THE EDIT-PASSWORD SLAB IS DRAWN AT ALL. Absent, not inert: on the
+  // two shapes where the password is not what went wrong, a slab offering to
+  // change it points the wrong way, and a slab that draws and does nothing is
+  // the works-only-sometimes trap this project has shipped twice.
+  //
+  // An explicit flag rather than an empty label, for ListRow::discloses'
+  // reason: a slab is a bigger claim than a chevron.
+  bool offersEdit = false;
+  std::vector<std::string> actions;  // the slab labels, first is focused-filled
+  int focusedAction = 0;
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
+// design/WifiNetworkActions.dc.html -- what holding Confirm on a saved network
+// opens. One row today, deliberately; it is where Connect now and Make
+// automatic go when there is a reason for them.
+struct WifiNetworkActionsViewModel {
+  std::string caption;       // the SSID, truncated on one line
+  std::string captionValue;  // "AUTO" or "SAVED"
+  std::vector<ListRow> rows;
+  int focusedRow = 0;
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
 }  // namespace reader

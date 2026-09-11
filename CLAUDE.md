@@ -290,14 +290,27 @@ and SetupHotspot. They are **parked, not deleted**: `V2_SCREENS` in
 be rendered, without counting them as V1 work nobody is doing. Instapaper was cut
 the same way earlier (canvas page "V2 · Instapaper").
 
-Two consequences that are easy to trip over:
+**AND V1.1 HAS TAKEN HALF OF IT BACK — THE CONNECT FLOW, NOT TRANSFER.** Six
+screens (`WifiSettings`, `WifiPicker`, `WifiPassword`, `WifiConnect`, `WifiError`,
+`WifiNetworkActions`) let a network be joined, preferred and forgotten; `Transfer`
+and `SetupHotspot` moved to canvas page "V2 · Wi-Fi transfer" and stay parked.
+**There is still no way to send a book to the device**, which is the distinction
+the two consequences below turn on.
 
-- **Settings has no CONNECTIONS section**, which is what brought its list back
-  inside the panel — see the scroll rail under **Overlays and lists**.
-- **HomeEmpty has no action slab.** Its board's call-to-action was
-  `SEND BOOKS OVER WI-FI`, and a primary action that cannot work is worse than
-  none, so the copy carries it: *"Put the SD card in your computer and copy EPUB
-  files into its /books folder."* The slab returns with Wi-Fi.
+- **Settings HAS a CONNECTIONS section again**, one header and one `Wi-Fi` row that
+  opens `WifiSettings`. It does **not** start the list scrolling — eleven items
+  where twelve fit, so no rail and no 14px gutter, and `renderSettings` reads
+  `totalRows > rows` rather than assuming. **This line said "Settings has no
+  CONNECTIONS section" while the board said CONNECTIONS IS BACK**, and the code
+  agreed with the line: the six screens shipped with no door, every golden green,
+  and `make compare` measuring Settings drifting AWAY from a board that was already
+  right.
+- **HomeEmpty STILL has no action slab**, and V1.1 does not bring it back. Its
+  board's call-to-action was `SEND BOOKS OVER WI-FI`, and a primary action that
+  cannot work is worse than none, so the copy carries it: *"Put the SD card in your
+  computer and copy EPUB files into its /books folder."* **Wi-Fi existing is not the
+  condition — TRANSFER is**, which is why the connect flow landing changed nothing
+  here.
 
 ## The rule that governs UI work
 
@@ -457,6 +470,46 @@ boards say, and names what drifted.
   the serial log.
 - **Flashing must be run by the user** — the permission classifier blocks it
   from an agent. Give them the command.
+- **LINKING THE WI-FI STACK COSTS 21,328 BYTES OF STATIC RAM, PAID AT BOOT
+  WHETHER OR NOT THE RADIO IS EVER SWITCHED ON**, and that is a different
+  number from the one V1.1's spec argued about. That spec priced the RUNTIME
+  allocation — ~23 KB of driver buffers and two tasks when the radio comes up —
+  and concluded the flow may only be entered from Settings, where ~133 KB is
+  free. The link-time cost is not on that path: it comes off the heap at every
+  instant, including while reading.
+  - **Measured by isolation, not inferred**: the same firmware with the radio's
+    translation unit stubbed and every new global still present links at
+    **24,844** bytes of static RAM against **46,172** with it, so the objects
+    this feature added are **96 bytes** and the rest is the stack. Flash goes
+    1,547,190 → 2,198,129 (23.6% → 33.5% of the 6.25 MB app partition), which
+    is a non-issue.
+  - **THE FIGURE TO CHECK IT AGAINST IS THE READING FLOOR**, and
+    `docs/on-device-smoke-checklist.md` records the smallest this project has
+    ever measured: **13,696 bytes**, reproducibly, opening a 66,843-byte
+    chapter from a **232-entry** Library, found as a `reason=4 PANIC` three
+    times. Take 21,328 off it and the arithmetic is negative.
+  - **MEASURED ON GLASS (2026-09-11): `[stage] open-paginated heap=45140
+    min=28508`**, opening from the LIBRARY — which is the conservative path,
+    since the Library stays resident under the Reader where Home's CONTINUE
+    leaves nothing behind. So the floor on that card is **28,508 bytes**,
+    against ~49,836 for the same open without the stack linked: Wi-Fi took
+    ~43% of the headroom and what remains is **2.1x the 13,696** that produced
+    the recorded panic.
+  - **WHAT THAT BUYS, AND IT IS NOT A LOT OF CARD.** The Library's residency is
+    ~291 bytes a book (203 books, 201,576 → 142,560), so 28,508 bytes is about
+    **98 more books** before the floor reaches zero — a ceiling roughly DOUBLE
+    that shelf rather than ten times it. Two things make that optimistic: the
+    floor is chapter-dependent and the recorded panic used a 66,843-byte
+    chapter, so a longer book can spend the margin before the book COUNT does;
+    and `getFreeHeap` cannot see the largest contiguous BLOCK, which is what
+    actually decides an allocation.
+  - **THE SYMPTOM TO EXPECT IS NOT A WI-FI FAILURE** — it is `abort()` with no
+    diagnostic, which is a reboot to Home, a shape this file records having been
+    misreported twice already.
+  - The escape hatch if it bites is `ENCRE_FS_SELFTEST`'s: an opt-in build flag
+    so the default firmware never links the stack. What it costs is that the
+    Settings row must not promise Wi-Fi in a build without it, and the only
+    clean way to tell the row is to plumb a build capability into `core/`.
 - **ATTACHING A SERIAL LOGGER CAN TURN A WAKE INTO A COLD BOOT.** Deep sleep
   powers down USB, so a resume has to re-enumerate and the host has to reopen the
   port — and on the C3 the USB Serial/JTAG peripheral can reset the chip when that
@@ -2406,12 +2459,18 @@ case to look at if one ever appears.
     axis-aligned and coverage 0-or-3, so track and thumb are identical in every
     plane and pass. The thin-stroke warning this project records is about
     DIAGONALS (`kChevron`); it was wrongly cited against a rail once.
-  - **This governs every scrollable list**, and today that is Library alone.
+  - **This governs every scrollable list**, and today that is the Library and
+    V1.1's Wi-Fi picker — which is the second user of the rail and the first
+    since it was written. This line said "Library alone" through the picker
+    landing.
     Settings scrolled for about an hour: adding its `Refresh on screen change` row
     pushed it past the panel, and then Wi-Fi was cut from V1 and CONNECTIONS went
-    with it — eleven items where twelve fit, and the SLEEP SCREEN section has
-    since taken it back to nine. Phase 3's typography settings will
-    push it over again and it will start scrolling **without any code change**,
+    with it — eleven items where twelve fit, the SLEEP SCREEN section took it back
+    to nine, and **V1.1's CONNECTIONS row has now put it at eleven again**, which is
+    still inside twelve: no rail, no gutter, rows still running to the panel edge.
+    That figure has moved four times and is the thing to re-read rather than
+    inherit. Phase 3's typography settings will
+    push it over and it will start scrolling **without any code change**,
     because `renderSettings` reads `totalRows > rows` rather than assuming. Contents
     and Bookmarks are Phase 3's and will want it too.
   - **It is compared against its board now**, and for a while it was not: Library's
@@ -2458,6 +2517,12 @@ worth knowing before changing it:
 | Peek | `Peek.dc.html` | The only overlay over a `Grayscale` screen. Its column is NOT the reading column, which is why it shows no page number. |
 | Battery empty | `BatteryEmpty.dc.html` | Painted and never pushed, on `Sleep`'s argument. The last thing on the glass before a critical shutdown, and what the resume gate leaves standing when it refuses. |
 | SD missing | `SdMissing.dc.html` | RETRY restarts the device when the card was lost after a mount. |
+| Wi-Fi | `WifiSettings.dc.html` | V1.1. The hub: saved networks, `AUTO`/`SAVED` toggled in place, and a HOLD for FORGET — the **second hold in the firmware**, the Library's being the first. Reached from Settings' `CONNECTIONS` row. |
+| Wi-Fi / nothing saved | `WifiSettingsEmpty.dc.html` | A **variant**, not a screen, and its two movers go quiet: one focusable row means UP and DOWN would promise a press that changes nothing. |
+| Join network | `WifiPicker.dc.html` | The **second scrolling list and the second user of the rail**. A scan in flight draws NO list and no count — that state is not boarded (drawStatusBar is specified by LibraryOpening and SleepWaking) and is pinned by a golden. |
+| Password | `WifiPassword.dc.html` | The **first text entry in this firmware**: a caret, an editable string, three layers whose union is all 95 printable ASCII, and a 46-cell grid over `GridFocus`. The Confirm hint names what the focused CELL does; Back deletes before the caret and LEAVES when the field is empty. |
+| Connecting | `WifiConnect.dc.html` | One state. It used to step to `READY`, which is gone: a successful join leaves for the saved list, and the list with the network in it is the confirmation — at one waveform instead of two. |
+| Couldn't join | `WifiError.dc.html` | THREE copy shapes, BookError's argument: wrong password, not found, and didn't finish. `EDIT PASSWORD` is **absent** on the latter two rather than inert. Its slab count is the slab LIST, measured, not a second spelling. |
 
 **SETTINGS IS NINE ITEMS NOW — THREE SECTIONS AND SIX ROWS — AND NOTHING ON IT IS
 INERT BY DEFAULT.** Its five inert TYPOGRAPHY rows became one disclosing
@@ -7035,6 +7100,54 @@ mutation: the shipped sentences fail it reporting exactly 2 and 3.
 must not put a line on the wrap boundary* had no enforcement anywhere, and
 `ReaderList`'s "Space is measured in rows." had already been moved by hand for it.
 Every other board is still on the honour system.
+
+## What the shell owes a flow, and two ways it silently owes nothing
+
+**A REFUSED PUSH IS SILENT BY DESIGN, AND THAT IS INDISTINGUISHABLE FROM A DEAD
+BUTTON.** `App::dispatch`'s Push case ignores `pushScreen`'s `false`, so a
+factory that refuses marks nothing dirty and nothing reaches the glass. That is
+right for a wake restore — it stops short of a screen it cannot build and
+leaves what stands — and it is how V1.1's Wi-Fi flow shipped with **three
+separate dead controls**, each reported off the device as "pressing X does
+nothing":
+
+| the press | what was not primed |
+|---|---|
+| Settings' `Wi-Fi` row | `setWifiNetworks` — `shell/` had no Wi-Fi code at all |
+| the hub's SETUP row | `setWifiScan`, which is why an EMPTY scan is primed at boot |
+| the HOLD on a saved network | `setWifiNetworkFacts`, re-primed every iteration the hub is on top |
+
+**THE COMMON SHAPE IS A SCREEN THAT PUSHES DIRECTLY.** Each of those returns
+`Action::push(...)` from its own `onGesture`, so the shell never sees the press
+and cannot prime in response to it — whatever the factory needs has to be there
+**before** the gesture. A latch would have let the shell prime and then push,
+and that is the trade: a push is one line in the screen, a latch is a handler
+in the shell. Where the payload is cheap and stateless, prime it continuously.
+
+**AND A SCREEN'S OWN TEST CANNOT SEE ANY OF IT.** `CHECK(a.kind == Push && a.target == X)`
+asserts what the screen RETURNS, which was correct in all three cases. Whether
+the push SUCCEEDS is a fact about the factory and the shell, and `shell/` has no
+harness. The catalogue guard in `test_focus_restore.cpp` requires every screen
+to be CONSTRUCTIBLE, not reachable.
+
+**`dispatchBack()` SENDS A PRESS, SO WHAT IT DOES IS WHATEVER THAT SCREEN'S
+`onGesture` DOES WITH BACK.** That is right for `DeleteConfirm`, `BookEnd` and
+the reader menu, whose Backs return a pop — the screen decides, once, and
+nothing in the shell can drift from it. It is wrong for a screen whose Back
+LATCHES: every connect-flow screen answers Back with `Action::wifi()`, so a
+cancel handler that synthesised a Back **re-latched the request it was
+serving** and the screen never left. An infinite loop, reaching the glass as a
+hint that does nothing. `App::popScreen()` is the other tool, and
+`dispatchBack`'s own header carries the rule for choosing. The note beside
+`handleDelete` warning that a Back which does not pop "would spin loop()
+forever" was written before either existed, and is exactly what this cost.
+
+**A HEADER NAMED `wifi.h` IN `shell/src/` SHADOWS ARDUINO'S `<WiFi.h>`.** macOS's
+filesystem is case-INSENSITIVE by default, so the sibling translation unit's
+`#include <WiFi.h>` resolved to ours and the build failed with `'WiFi' was not
+declared` against a header the compiler had happily opened. **It would have
+built correctly on a case-sensitive volume**, which is the worse half. The file
+is `wifi_store_nvs.h`.
 
 ## Editing this repo with scripts
 

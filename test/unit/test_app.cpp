@@ -116,6 +116,18 @@ class NullTheme : public Theme {
   }
   void renderPeek(Framebuffer&, const FontSet&, const GlyphSource&, const GlyphSource*,
                   const PeekViewModel&, const Page&, Plane) override {}
+  void renderWifiSettings(Framebuffer&, const FontSet&, const WifiSettingsViewModel&,
+                          Plane) override {}
+  void renderWifiPicker(Framebuffer&, const FontSet&, const WifiPickerViewModel&,
+                        Plane) override {}
+  void renderWifiPassword(Framebuffer&, const FontSet&, const WifiPasswordViewModel&,
+                          Plane) override {}
+  void renderWifiConnect(Framebuffer&, const FontSet&, const WifiConnectViewModel&,
+                         Plane) override {}
+  void renderWifiError(Framebuffer&, const FontSet&, const WifiErrorViewModel&,
+                       Plane) override {}
+  void renderWifiNetworkActions(Framebuffer&, const FontSet&, const WifiNetworkActionsViewModel&,
+                                Plane) override {}
   void settingsMetrics(int, const FontSet&, int& listH, int& rowH, int& headerH) const override {
     listH = 0;
     rowH = 1;
@@ -332,6 +344,70 @@ TEST_CASE("a replace from the root is a push, because the root is the app") {
   CHECK(app.depth() == 2);
   CHECK(app.top().id() == ScreenId::Library);
   CHECK(app.at(0).id() == ScreenId::Home);
+}
+
+TEST_CASE("popScreen is callable directly, and a synthesised Back is not the same thing") {
+  // THE DISTINCTION THAT COST A FREEZE. The shell used to leave a screen by
+  // synthesising a Back press, which runs whatever THAT screen's onGesture
+  // does with Back -- right for DeleteConfirm, whose Back returns a pop, and
+  // wrong for every connect-flow screen, whose Back returns Action::wifi().
+  // There the shell's own cancel handler re-latched the request it was
+  // serving and the screen never left: an infinite loop that reached the
+  // glass as a Back hint that did nothing.
+  FakeFactory f;
+  auto root = std::make_unique<FakeScreen>(ScreenId::Home, Action::push(ScreenId::Library));
+  App app(std::move(root), f);
+  app.dispatch(kConfirm);
+  REQUIRE(app.depth() == 2);
+  app.clearDirty();
+
+  CHECK(app.popScreen());
+  CHECK(app.depth() == 1);
+  CHECK(app.top().id() == ScreenId::Home);
+  CHECK(app.dirty());
+  CHECK(app.transition());
+
+  // THE ROOT IS THE APP. Popping it would leave nothing to render and nothing
+  // to receive the next event, so it is refused and SAYS so -- the bool is
+  // what a shell loop needs to avoid spinning on a pop that cannot happen.
+  app.clearDirty();
+  CHECK_FALSE(app.popScreen());
+  CHECK(app.depth() == 1);
+  CHECK_FALSE(app.dirty());
+}
+
+TEST_CASE("replaceScreen is callable directly, because the shell is its second caller") {
+  // THE ACTION AND THE METHOD ARE ONE BODY, and this is the half the Action
+  // cannot reach. The Wi-Fi flow is driven from shell/src/main.cpp -- the
+  // radio comes back with a result and the shell puts WifiError where the
+  // CONNECTING dialog was -- so the replace has to be callable with no
+  // gesture at all. That is a second caller, and the second copy is the
+  // extraction point; this case is what says the extraction moved behaviour
+  // rather than leaving a parallel one.
+  FakeFactory f;
+  auto root = std::make_unique<FakeScreen>(ScreenId::Home, Action::push(ScreenId::Library));
+  App app(std::move(root), f);
+
+  app.dispatch(kConfirm);
+  REQUIRE(app.depth() == 2);
+  app.clearDirty();
+
+  CHECK(app.replaceScreen(ScreenId::Settings));
+  CHECK(app.depth() == 2);
+  CHECK(app.top().id() == ScreenId::Settings);
+  CHECK(app.at(0).id() == ScreenId::Home);
+  CHECK(app.dirty());
+  CHECK(app.transition());
+
+  // AND IT REPORTS THE REFUSAL, which the Action form throws away -- a shell
+  // that replaced into a screen nothing primed would otherwise carry on as
+  // though the flow had advanced.
+  f.refuse = true;
+  app.clearDirty();
+  CHECK_FALSE(app.replaceScreen(ScreenId::Library));
+  CHECK(app.depth() == 2);
+  CHECK(app.top().id() == ScreenId::Settings);
+  CHECK_FALSE(app.dirty());
 }
 
 TEST_CASE("a redraw is dirty but is not a transition") {

@@ -65,6 +65,9 @@ const Icon kBatteryLarge{data::kBatteryLargeW, data::kBatteryLargeH, 2, data::kB
 const Icon kSdCard{data::kSdCardW, data::kSdCardH, 2, data::kSdCardBits};
 const Icon kCheck{data::kCheckW, data::kCheckH, 2, data::kCheckBits};
 const Icon kWarning{data::kWarningW, data::kWarningH, 2, data::kWarningBits};
+const Icon kLock{data::kLockW, data::kLockH, 2, data::kLockBits};
+const Icon kRescan{data::kRescanW, data::kRescanH, 2, data::kRescanBits};
+const Icon kWifi{data::kWifiW, data::kWifiH, 2, data::kWifiBits};
 }  // namespace icons
 
 }  // namespace reader

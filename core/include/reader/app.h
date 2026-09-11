@@ -83,6 +83,39 @@ enum class ScreenId : uint8_t {
   // member failed all of them at once, which is the whole point: the guards that
   // stayed quiet for Typography and then BookEnd cannot stay quiet for the next one.
   BatteryEmpty,
+  // THE V1.1 CONNECT FLOW, six screens appended together. Appending SIX at once is
+  // the case #42's sentinel was really written for -- the last time two screens
+  // arrived at once it was a merge, and every guard that named a member instead of
+  // Count would have let the loser of that merge serialise as `home`.
+  //
+  // design/WifiSettings.dc.html -- the hub: saved networks, and the door to a scan.
+  // Reached from Settings' CONNECTIONS row, which is the only place the radio may
+  // come up: the Reader is not on the stack there and the Library is not resident,
+  // so there is ~133 KB free against Wi-Fi's ~23 KB of static allocation. With a
+  // book open on a large card the measured floor is 13,696 bytes, so this is not a
+  // preference about battery -- the flow is entered from Settings because nowhere
+  // else has the heap.
+  WifiSettings,
+  // design/WifiPicker.dc.html -- the scan list. The second scrolling list in the
+  // firmware after the Library, and the second user of the rail.
+  WifiPicker,
+  // design/WifiPassword.dc.html -- the on-device keyboard, and the first text entry
+  // anywhere in this firmware. Derives from GridFocusScreen rather than FocusScreen:
+  // 44 cells in five rows, the last of them ragged.
+  WifiPassword,
+  // design/WifiConnect.dc.html -- the connecting dialog. An overlay, and it REPLACES
+  // the join stack rather than sitting on it (Action::replace), which is what makes
+  // one veiled parent truthful for both entry paths: an open network arrives here
+  // straight from the picker and has no WifiPassword to veil.
+  WifiConnect,
+  // design/WifiError.dc.html and its two siblings -- one screen, THREE COPY SHAPES.
+  // A join fails three distinguishable ways and one sentence would be a lie, which
+  // is BookError's argument; the two new shapes also DROP the EDIT PASSWORD slab,
+  // because the password is not what went wrong. Absent, not inert.
+  WifiError,
+  // design/WifiNetworkActions.dc.html -- what holding Confirm on a saved network
+  // opens. ItemActions reads the LIBRARY's focused row, so it could not be reused.
+  WifiNetworkActions,
   // NOT A SCREEN. A bound, so a guard can name "one past the last member" without
   // naming a member -- which is #42, and which had gone quiet twice by the time it
   // was fixed: session_record.cpp spelled three bounds `<= ScreenId::Peek` and then
@@ -100,6 +133,25 @@ enum class ScreenId : uint8_t {
 // a serial log is one more thing to decode while diagnosing a device.
 const char* screenName(ScreenId id);
 
+// WHETHER THIS SCREEN IS ONE THE RADIO MAY BE ON BEHIND, which is TWO of the
+// six Wi-Fi screens and not all of them: the picker while it scans, and the
+// connecting dialog while it joins. Those are the two that put SCANNING and
+// CONNECTING... on the glass, so the radio being on is exactly what they say.
+//
+// THE OTHER FOUR ARE FALSE DELIBERATELY. The hub's band reads `ON DEMAND`,
+// which is a claim that the radio is OFF -- so leaving it up there is a false
+// claim, not merely untidy, and that is the case that found this rule: Back
+// off the picker MID-SCAN pops to the hub, and a predicate covering all six
+// would have let the radio sit there indefinitely. The keyboard and the error
+// panel have nothing in flight either; a join is started from the keyboard by
+// beginJoin, which brings the radio back up.
+//
+// IT IS HERE RATHER THAN IN shell/ FOR #42's REASON. This is a fact about the
+// screen catalogue, and its body is an exhaustive switch with NO `default:`,
+// so a seventh Wi-Fi screen fails the build with -Wswitch rather than being
+// quietly answered `false`. `shell/` has no harness and this has a test.
+bool screenUsesRadio(ScreenId id);
+
 // What a screen asks the app to do after handling an event.
 //
 // FIVE OF THE KINDS ARE LATCHES, not instructions: `Sleep`, `Retry`, `Open`,
@@ -116,7 +168,7 @@ struct Action {
   // APPENDED, never inserted -- a Kind is compared, never stored, but appending
   // costs nothing and keeps every existing value where it was.
   enum class Kind : uint8_t {
-    None, Redraw, Push, Pop, PopTo, Replace, Sleep, Retry, Open, Finish, Delete
+    None, Redraw, Push, Pop, PopTo, Replace, Sleep, Retry, Open, Finish, Delete, Wifi
   };
   Kind kind = Kind::None;
   ScreenId target = ScreenId::Home;  // meaningful for Push and PopTo
@@ -183,6 +235,32 @@ struct Action {
   // gesture on every screen, to serve one. The shell reads the path off the screen
   // that is still on top when the dispatch runs.
   static Action del() { return {Kind::Delete, ScreenId::Home}; }
+  // "A Wi-Fi screen has an outcome for you." A latch like Delete, and it takes
+  // Delete's contract exactly: NOTHING IS POPPED, so the shell reads the
+  // outcome off the screen that is still on top and then pops it itself.
+  //
+  // THE FIVE CONNECT-FLOW SCREENS EACH SHIPPED WITH A GETTER THE SHELL COULD
+  // NOT CALL. `joinChosen()`, `cancelled()`, `chosen()` and `forgetChosen()`
+  // all latched a result and then returned `Action::pop()` -- and dispatch's
+  // Pop is `stack_.pop_back()`, which DESTROYS the screen. Every one of those
+  // headers said the shell reads it after the pop; after the pop there is no
+  // screen left to ask. shell/src/main.cpp already records this lesson for the
+  // peek, and `deleteRequested()` already states the fix in its own words:
+  // read it "WHILE IT IS STILL ON TOP, because the dispatch that follows pops
+  // it".
+  //
+  // IT CARRIES NO OUTCOME, for the reason Open and Finish carry no path: a
+  // payload here is a payload in every Action returned by every gesture on
+  // every screen, to serve one kind. The outcomes are five different shapes --
+  // an SSID and a lock bit, a passphrase, a three-way choice -- and no one
+  // field could hold them. The screen is still standing, so it can be asked.
+  //
+  // A SCREEN LATCHES WHEN THE SHELL HAS WORK TO DO AND POPS ITSELF WHEN IT HAS
+  // NOT. A plain Back off the picker is navigation and nothing else, so it
+  // stays `Action::pop()` -- routing it through here would be machinery bought
+  // for no work. Back off the CONNECTING dialog is not navigation: a join is in
+  // flight and the radio has to be told.
+  static Action wifi() { return {Kind::Wifi, ScreenId::Home}; }
 };
 
 // The four hint slots are the four front buttons in hardware order (spec 4.0).
@@ -592,6 +670,37 @@ class App {
   // restored screen still has to be painted.
   bool pushScreen(ScreenId id);
 
+  // "PUT `id` WHERE THE TOP SCREEN IS" -- Action::Kind::Replace's own body,
+  // extracted because the SHELL is its second caller and the second copy is
+  // the extraction point. It drives the connect flow, where every step
+  // replaces the one that asked for it: the keyboard must not be left
+  // standing under the CONNECTING dialog, and the dialog must not be left
+  // under the error panel. App::render draws EVERY overlay above the topmost
+  // non-overlay, so a push there leaves the asking panel visible wherever the
+  // two differ in size -- which is how that defect was reported off a device.
+  //
+  // PUSHES BEFORE IT REMOVES, so a factory that refuses leaves the stack
+  // exactly as it was, and degrades to a plain push at the root. Same
+  // guarantees as the Action, because it is the same code.
+  bool replaceScreen(ScreenId id);
+
+  // POP, WITHOUT A PRESS. Action::Kind::Pop's own body, extracted for
+  // replaceScreen's reason: the shell is its second caller.
+  //
+  // THE SHELL COULD NOT DO THIS BY SYNTHESISING A BACK, and that is not a
+  // convenience argument -- it is a correctness one. `dispatchBack()` sends a
+  // Back PRESS to the top screen, so what happens next is whatever that
+  // screen's onGesture does with it. Every connect-flow screen answers Back
+  // with Action::wifi(), so the shell's own cancel handling re-latched the
+  // request it was in the middle of serving and the screen never left: an
+  // infinite latch loop that reached the glass as a Back hint that did
+  // nothing. dispatchBack works for DeleteConfirm only because THAT screen's
+  // Back returns a pop.
+  //
+  // Refuses the root, exactly as the Action does: popping it would leave
+  // nothing to render and nothing to receive the next event.
+  bool popScreen();
+
   // Something on screen changed and needs painting.
   bool dirty() const { return dirty_; }
   // ...and the change was a screen change rather than a change within one. What
@@ -707,6 +816,27 @@ class App {
   bool deleteRequested() const { return delete_; }
   void clearDeleteRequest() { delete_ = false; }
 
+  // A connect-flow screen has latched an outcome. The shell's job, in order:
+  //
+  //   1. clearWifiRequest(), so a failed attempt does not re-fire forever;
+  //   2. ask the screen that is STILL ON TOP which outcome it was -- the
+  //      picker's chosenSsid()/chosenLocked()/rescanChosen(), the keyboard's
+  //      joinChosen()/entered()/cancelled(), the dialog's cancelled(), the
+  //      error's chosen(), the actions overlay's forgetChosen(). This is the
+  //      whole reason nothing is popped here: after a pop there is no screen
+  //      left to ask, which is the defect this latch closes;
+  //   3. drive the radio or the store, keeping neither in core/ -- a radio is
+  //      the shell's exactly as the card is;
+  //   4. pop, or replace, or leave the screen standing, whichever the outcome
+  //      calls for. Where the flow lands is a fact about the outcome and not
+  //      about the screen, which is why the screen does not decide it -- the
+  //      same argument Delete makes for popTo(facts().returnTo).
+  //
+  // Nothing here repaints on its own, for Retry's reason: what a join changes
+  // on glass is a screen change rather than a repaint of this one.
+  bool wifiRequested() const { return wifi_; }
+  void clearWifiRequest() { wifi_ = false; }
+
   ButtonMask longPressable() const { return top().longPressable(); }
   ButtonMask autoRepeat() const { return top().autoRepeat(); }
 
@@ -744,6 +874,7 @@ class App {
   bool open_ = false;
   bool finish_ = false;
   bool delete_ = false;
+  bool wifi_ = false;
   // Mutable because render() is const: painting does not change the app, but it
   // does change what is on glass, and this is what remembers that. The
   // alternative -- a non-const render() -- would make every const App& in the

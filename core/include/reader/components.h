@@ -805,7 +805,22 @@ inline constexpr int kSectionPadTop = 18;
 inline constexpr int kSectionPadBottom = 6;
 inline constexpr int kSectionEm = 200;
 
-int sectionHeaderHeight(const FontSet& fonts);
+// A SECTION HEADER'S HEIGHT, AND IT DEPENDS ON THE RULE -- which is why
+// `rule` is required rather than defaulted. A ruleless header is
+// kSectionRuleH shorter, drawSectionHeader returns exactly that, and a caller
+// RESERVING the nominal height for a header it then draws without one puts
+// everything below it that many pixels out.
+//
+// That is not hypothetical: renderWifiSettings' empty variant summed this to
+// decide where its SETUP section starts, drew both headers with `rule=false`,
+// and so floated the block 2px high -- two 2px full-width slivers at the
+// focused row's top and bottom, and the largest single band in that screen's
+// mismatch. Settings shipped the mirror of it once, advancing `y` by the
+// nominal height and putting every row below a header a pixel low.
+//
+// No default, because the one caller that had to answer this got it wrong by
+// not being asked.
+int sectionHeaderHeight(const FontSet& fonts, bool rule);
 int drawSectionHeader(Framebuffer& fb, const FontSet& fonts, int y, int w,
                       std::string_view label, bool rule, Plane plane = Plane::Bw);
 int drawDetailRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label,
@@ -887,6 +902,39 @@ int drawPanelCaption(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
 // distinction Body500-versus-Body700 makes on a Library row. `discloses` is the
 // trailing chevron: LibraryActions gives one to Open and Book details, which
 // lead somewhere, and none to Mark as finished or Delete..., which act in place.
+// --- The picker's signal meter ---------------------------------------------
+//
+// design/WifiPicker.dc.html draws it as `<svg width="30" height="23" viewBox="0
+// 0 17 13">` holding THREE rects -- bottom-aligned bars of increasing height,
+// filled up to the level and outlined above it.
+//
+// DRAWN RATHER THAN GENERATED, which is a deliberate exception to "assets are
+// generated from the design, not transcribed" and is worth the sentence:
+//
+//   - IT IS A FAMILY OF THREE STATES, not a mark. As icons it would be three
+//     pre-rendered bitmaps of the same drawing differing only in which
+//     rectangles are filled, which is what kBook/kBookLarge exists to avoid one
+//     level up.
+//   - iconc.py COULD NOT TELL THEM APART. The three states are byte-identical
+//     but for a `fill` attribute, so each match would have to key on that -- and
+//     the generator refuses an ambiguous match, correctly, which is how this was
+//     found rather than shipped.
+//   - THEY ARE AXIS-ALIGNED RECTANGLES, so they are coverage 0 or 3 and
+//     identical in every plane and every pass -- the same class of furniture as
+//     drawProgressBar and drawScrollRail, both of which this firmware already
+//     draws in code from geometry a board states.
+//
+// The thin-stroke warning this project records is about DIAGONALS (kChevron)
+// and does not reach a vertical bar. `level` is 1..3 and is clamped.
+//
+// NO `plane` PARAMETER, which is the same statement outlineRect and
+// Framebuffer::fillRect make: this is furniture, so every pixel of it is
+// coverage 0 or 3 and identical in Bw, BwDithered and all three grayscale
+// planes. A plane argument would imply it could differ.
+inline constexpr int kSignalW = 30;
+inline constexpr int kSignalH = 23;
+void drawSignalBars(Framebuffer& fb, int x, int y, int level, Ink ink = Ink::Black);
+
 int panelRowHeight(bool rule);
 // `value` is the row's right slot where the board gives one, and empty where it draws
 // a chevron -- a row states a quantity or discloses a screen, never both. Defaulted

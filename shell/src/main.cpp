@@ -26,6 +26,15 @@
 #include <string>
 #include <vector>
 
+#include "reader/screen_wifi_connect.h"
+#include "reader/screen_wifi_error.h"
+#include "reader/screen_wifi_network_actions.h"
+#include "reader/screen_wifi_password.h"
+#include "reader/screen_wifi_picker.h"
+#include "reader/screen_wifi_settings.h"
+#include "wifi_store_nvs.h"
+#include "wifi_radio_arduino.h"
+
 #include "font_body400.h"
 #include "font_body500.h"
 #include "font_body700.h"
@@ -543,6 +552,39 @@ static SdFileSystem gSd;
 // with no card the app is rooted at the SD-missing screen and there is no way to
 // a Library at all.
 static reader::DemoScreenFactory gFactory(gSd, reader::kBooksRoot);
+
+// ---------------------------------------------------------------- Wi-Fi
+//
+// THE V1.1 CONNECT FLOW'S SHELL HALF. core/ owns the screens, the record's
+// format and the reason mapping; what lives here is NVS, the radio, and the
+// one function that reads an outcome off a screen and acts on it.
+//
+// IT SHIPPED WITHOUT ANY OF THIS, and the symptom was exact: pressing OPEN on
+// Settings' Wi-Fi row did nothing at all. The factory refuses to build
+// WifiSettings unless something primes it, App::pushScreen returns false, and
+// dispatch's Push case ignores that -- so nothing is marked dirty and nothing
+// reaches the glass. A refused push is silent BY DESIGN (it is what makes a
+// wake restore stop short of a screen it cannot build) and is indistinguishable
+// from a dead button when a finger caused it.
+static ArduinoWifiRadio gRadio;
+static shellwifi::NvsWifiSink gWifiSink;
+static reader::SavedNetworks gWifiNets;
+// The ONE join attempt in flight, which is the shell's by design -- spec 4.1b:
+// a screen holding it would be the screen that happens to be on top, and the
+// flow replaces its own screens as it goes.
+static std::string gJoinSsid;
+static std::string gJoinPsk;
+static bool gJoinLocked = false;
+// Whether a scan has been asked for on the picker currently on top, so
+// arriving at the picker starts exactly one.
+static bool gScanArmed = false;
+// Whether the completed scan's rows have been handed over. scanState() stays
+// Done once it is Done, so without this the poll called setResults on EVERY
+// loop iteration -- and setResults puts the focus back at the top, correctly,
+// because the list it indexed no longer exists. The reported symptom was that
+// moving through the networks "goes back to the first one on its own": the
+// focus was being reset several times a second under the reader's thumb.
+static bool gScanDelivered = false;
 
 // THE BODY FACE, and it is resident now rather than a boot-time local. It used to
 // be scoped to the check below and released before setup() returned, because
@@ -2409,14 +2451,27 @@ static void handleOpen() {
 // LEAVE THE TOP SCREEN FROM OUTSIDE A GESTURE, by handing it the press it would have
 // taken.
 //
-// THE SHELL CANNOT APPLY AN Action AT ALL, which is worth stating because it looks as
-// though it should be able to. `Action::pop()` and `Action::popTo()` are values a
-// SCREEN returns; `App::dispatch` is the only thing that interprets one, and the only
-// stack call App exposes is `pushScreen()` -- there is no popScreen() and no
-// apply(Action). So a latch handler that has to leave a screen either grows a second
-// interpretation of the stack in the shell, or synthesises the press. This is the
-// second, and it is the one that cannot drift: whatever Back means on that screen is
-// what runs, decided by the screen, once.
+// THE SHELL STILL CANNOT APPLY AN Action: `Action::pop()` and `Action::popTo()` are
+// values a SCREEN returns, `App::dispatch` is the only thing that interprets one, and
+// there is no apply(Action). So a latch handler that has to leave a screen either
+// synthesises the press -- this -- or calls the stack directly.
+//
+// WHICH ONE IS NOT A MATTER OF TASTE, and the rule is about what Back MEANS on the
+// target screen:
+//
+//   dispatchBack()     when Back on that screen already means "leave". The screen
+//                      decides, once, and nothing here can drift from it. That is
+//                      DeleteConfirm, BookEnd and the reader menu, whose Backs return
+//                      a pop.
+//   App::popScreen()   when it does not. Every connect-flow screen answers Back with
+//                      Action::wifi(), so dispatching a Back there re-latches the very
+//                      request the handler is serving -- an infinite loop in which the
+//                      screen never leaves, which reached the glass as a Back hint
+//                      that did nothing.
+//
+// `popScreen()` did not exist when this was written, and the paragraph below about
+// bounding a synthesised Back three ways is what that cost: it is a real hazard and
+// this note is where to check which tool a new handler wants.
 //
 // Short on Back, because gestureFor turns exactly that into Gesture::Back -- a Long is
 // dropped there unless the screen bound a hold, which is not the press being imitated.
@@ -2555,6 +2610,346 @@ static void handleFinish() {
   }
 }
 
+// ------------------------------------------------------------------ Wi-Fi
+//
+// PRIMES THE FACTORY FROM NVS. Called at boot and again after every change to
+// the list, because the factory holds a COPY -- the same trap setSettings has,
+// where closing a screen and reopening it shows the values from before the
+// change.
+static void primeWifi() {
+  gFactory.setWifiNetworks(gWifiNets);
+  gFactory.setWifiSink(&gWifiSink);
+}
+
+// Boot. The list, then the one rule that needs both namespaces at once.
+static void loadWifi() {
+  shellwifi::load(gWifiNets);
+  // A LOCKED NETWORK WHOSE PASSPHRASE IS GONE CAN ONLY FAIL, and the two
+  // halves live in different NVS namespaces so only a read can see both. This
+  // is the only caller of dropLockedWithoutSecret and the reason SecretProbe
+  // is an interface rather than a flag on the record.
+  const shellwifi::NvsSecretProbe probe;
+  const int dropped = gWifiNets.dropLockedWithoutSecret(probe);
+  if (dropped > 0) {
+    logf("[wifi] dropped %d saved network(s) whose passphrase is missing; a row that can "
+         "only fail is worse than no row\n",
+         dropped);
+    shellwifi::save(gWifiNets);
+  }
+  // AN EMPTY SCAN, PRIMED UP FRONT, and this is load-bearing rather than
+  // tidiness: WifiSettings' SETUP row returns Action::push(WifiPicker)
+  // DIRECTLY, so the factory has to be able to build the picker before the
+  // press happens. Unprimed, that push is refused and SETUP is the dead
+  // button this whole function exists to remove -- one screen deeper.
+  //
+  // An empty list is a boarded state (WifiPickerEmpty), so what the reader
+  // sees for the moment before the scan starts is a screen the design has,
+  // not a hole.
+  gFactory.setWifiScan({});
+  primeWifi();
+  logf("[wifi] %d saved network(s)\n", gWifiNets.size());
+  logFlush();
+}
+
+// Takes the radio down and forgets the attempt. Called on every way out of
+// the flow, because Wi-Fi stays off except while it is being used -- forced
+// by heap rather than chosen: ~23 KB static against a measured 13,696-byte
+// floor with a book open.
+static void endWifiSession() {
+  gRadio.down();
+  gJoinSsid.clear();
+  gJoinPsk.clear();
+  gJoinLocked = false;
+  gScanArmed = false;
+}
+
+// Starts the join the flow has assembled, and puts the CONNECTING... dialog
+// where the asking screen was. REPLACE rather than PUSH, because the keyboard
+// and the error panel must not be left standing under it -- Action::replace's
+// own reason, and what makes one veiled parent truthful for both entry paths.
+static void beginJoinFlow(bool replace) {
+  gFactory.setWifiTarget(gJoinSsid);
+  if (!gRadio.beginJoin(gJoinSsid, gJoinPsk)) {
+    gFactory.setWifiFailure(reader::JoinFailure::Incomplete);
+    if (replace) gApp->replaceScreen(reader::ScreenId::WifiError);
+    else gApp->pushScreen(reader::ScreenId::WifiError);
+    return;
+  }
+  if (replace) gApp->replaceScreen(reader::ScreenId::WifiConnect);
+  else gApp->pushScreen(reader::ScreenId::WifiConnect);
+}
+
+// A CONNECT-FLOW SCREEN LATCHED AN OUTCOME. See Action::wifi() and
+// App::wifiRequested()'s four-step note, which this follows in order -- and
+// note step 2: the screen is STILL ON TOP, which is the whole reason nothing
+// was popped. After a pop there is no screen left to ask.
+static void handleWifi() {
+  gApp->clearWifiRequest();
+
+  const reader::ScreenId id = gApp->top().id();
+  switch (id) {
+    case reader::ScreenId::WifiPicker: {
+      auto& p = static_cast<reader::WifiPickerScreen&>(gApp->top());
+      if (p.rescanChosen()) {
+        p.clearChoice();
+        gScanDelivered = false;  // a second scan owes a second delivery
+        if (gRadio.beginScan()) p.setScanning(true);
+        return;
+      }
+      // A COPY, not a reference: the push below can destroy the screen these
+      // live in.
+      const std::string ssid = p.chosenSsid();
+      if (ssid.empty()) return;
+      const bool locked = p.chosenLocked();
+      p.clearChoice();
+
+      gJoinSsid = ssid;
+      gJoinLocked = locked;
+      // AN OPEN NETWORK JOINS DIRECTLY and a locked one asks for a password
+      // -- the board's own note -- EXCEPT where a passphrase is already
+      // stored, which is the case the picker cannot know about and the
+      // reason it reports `locked` rather than deciding.
+      gJoinPsk = locked ? shellwifi::secret(ssid) : std::string();
+      if (locked && gJoinPsk.empty()) {
+        gFactory.setWifiTarget(gJoinSsid);
+        gApp->pushScreen(reader::ScreenId::WifiPassword);
+        return;
+      }
+      beginJoinFlow(/*replace=*/false);
+      return;
+    }
+
+    case reader::ScreenId::WifiPassword: {
+      const auto& kb = static_cast<const reader::WifiPasswordScreen&>(gApp->top());
+      if (kb.cancelled()) {
+        endWifiSession();
+        gApp->popScreen();
+        return;
+      }
+      if (!kb.joinChosen()) return;
+      gJoinPsk = kb.entered();
+      beginJoinFlow(/*replace=*/true);
+      return;
+    }
+
+    case reader::ScreenId::WifiConnect: {
+      // The only outcome this screen latches is the cancel; READY and the
+      // failures are the POLL's, below.
+      endWifiSession();
+      gApp->popScreen();
+      return;
+    }
+
+    case reader::ScreenId::WifiError: {
+      const auto& e = static_cast<const reader::WifiErrorScreen&>(gApp->top());
+      switch (e.chosen()) {
+        case reader::WifiErrorScreen::Chosen::EditPassword:
+          // BACK TO THE KEYBOARD HOLDING WHAT WAS TYPED, which is the whole
+          // reason that slab exists. One call carries both, so a fresh join
+          // cannot inherit this passphrase -- see setWifiTarget.
+          gFactory.setWifiTarget(gJoinSsid, gJoinPsk);
+          gApp->replaceScreen(reader::ScreenId::WifiPassword);
+          return;
+        case reader::WifiErrorScreen::Chosen::TryAgain:
+          beginJoinFlow(/*replace=*/true);
+          return;
+        case reader::WifiErrorScreen::Chosen::Cancel:
+        case reader::WifiErrorScreen::Chosen::None:
+          endWifiSession();
+          gApp->popScreen();
+          return;
+      }
+      return;
+    }
+
+    case reader::ScreenId::WifiNetworkActions: {
+      const auto& a = static_cast<const reader::WifiNetworkActionsScreen&>(gApp->top());
+      if (!a.forgetChosen()) return;
+      const std::string ssid = a.facts().ssid;  // a copy; the pops destroy the screen
+      gWifiNets.forget(ssid);
+      shellwifi::dropSecret(ssid);
+      shellwifi::save(gWifiNets);
+      primeWifi();
+      // THE HUB UNDERNEATH HOLDS ITS OWN COPY OF THE LIST, so popping back to
+      // it would show the network still there. Home's `gHomeStale` rebuild is
+      // the precedent: the screen is REPLACED rather than asked to refresh,
+      // because the list it was built from is the thing that changed.
+      gApp->popScreen();                                    // the overlay
+      gApp->replaceScreen(reader::ScreenId::WifiSettings);  // a fresh hub
+      logf("[wifi] forgot %s\n", ssid.c_str());
+      logFlush();
+      return;
+    }
+
+    default:
+      logf("[wifi] latched with %s on top\n", reader::screenName(id));
+      logFlush();
+      return;
+  }
+}
+
+// THE SCAN AND THE JOIN, POLLED FROM loop()'s QUIET WINDOW -- the interface is
+// poll-shaped precisely so this is not a callback on the system event task.
+// See reader/wifi_radio.h.
+static void pollWifi() {
+  const reader::ScreenId id = gApp->top().id();
+
+  // THE RADIO MAY ONLY BE ON WHILE A SCREEN SAYS SO, and this is what makes
+  // that structural rather than a rule five exit paths each remember. Every
+  // one of them already calls endWifiSession() -- both cancels, the error
+  // panel, the failure and the success -- so in normal operation this fires
+  // NEVER. That is the point: it is the backstop for the path somebody adds
+  // later and forgets, exactly as pollCardPresence is the backstop for
+  // operation feedback that never fires.
+  //
+  // WHY IT IS WORTH HAVING AT ALL, when today no path can reach it: Wi-Fi on
+  // without the reader knowing is not a bug they can see. There is no
+  // indicator on the other screens -- `drawHeaderBand`'s mark slot reaches
+  // ten screens and NOT the Reader, which is where somebody would be while a
+  // V2 transfer ran -- so nothing would tell them. A guarantee nobody can
+  // observe has to be made by construction.
+  //
+  // THE TOP SCREEN, not the stack. What announces the radio is the screen in
+  // front of the reader; one buried under three others announces nothing.
+  //
+  // AND IT IS A BACKSTOP TO A TIGHTER RULE, not the only thing holding the
+  // line: the radio goes down the moment a scan is harvested or a join
+  // settles, so in practice it is on only while SCANNING or CONNECTING... is
+  // actually on the glass. This catches what that misses -- including the
+  // case that found this gap, Back off the picker MID-SCAN, which pops to a
+  // hub whose band says `ON DEMAND` while the radio is still up. The hub is a
+  // Wi-Fi screen, so the predicate below would not fire; the scan's own
+  // completion is what takes it down, and if the reader leaves first the pop
+  // to Settings does.
+  if (!reader::screenUsesRadio(id) && gRadio.isUp()) {
+    logf("[wifi] radio was up under %s, which has nothing in flight -- taking it "
+         "down. Nothing should reach this line in normal operation; a path is "
+         "leaving the flow without endWifiSession()\n",
+         reader::screenName(id));
+    logFlush();
+    endWifiSession();
+  }
+
+  // THE ACTIONS OVERLAY'S FACTS, KEPT CURRENT WHILE THE HUB IS ON TOP. The
+  // hold returns Action::push(WifiNetworkActions) DIRECTLY, so the factory
+  // has to be able to build the overlay before the press happens -- and it
+  // refuses without facts, which made the hold do nothing at all. That is the
+  // same defect as the OPEN row that started all this, one gesture along.
+  //
+  // Re-primed every iteration rather than on a focus change, because a focus
+  // move is internal to the screen and reaches the shell as an ordinary
+  // redraw: there is no edge to hang this on. It is a string copy on a screen
+  // that repaints at ~520 ms.
+  if (id == reader::ScreenId::WifiSettings) {
+    const auto& hub = static_cast<const reader::WifiSettingsScreen&>(gApp->top());
+    const std::string ssid = hub.focusedSsid();
+    if (ssid.empty()) {
+      // The SETUP row, which has nothing to forget -- and the hub's own hint
+      // bar drops its ring there, so this only has to agree with it.
+      gFactory.clearWifiNetworkFacts();
+    } else {
+      const int at = gWifiNets.indexOf(ssid);
+      const bool automatic =
+          at >= 0 && gWifiNets.all()[static_cast<size_t>(at)].automatic;
+      gFactory.setWifiNetworkFacts({ssid, automatic});
+    }
+  }
+
+  if (id == reader::ScreenId::WifiPicker) {
+    auto& p = static_cast<reader::WifiPickerScreen&>(gApp->top());
+    // ARRIVING AT THE PICKER STARTS EXACTLY ONE SCAN. The hub pushes this
+    // screen itself, so there is no press for the shell to hang a scan on --
+    // the screen appearing IS the trigger.
+    if (!gScanArmed) {
+      gScanArmed = true;
+      gScanDelivered = false;
+      if (gRadio.beginScan()) p.setScanning(true);
+      return;
+    }
+    // ONCE PER SCAN. scanState() stays Done once it is Done, so an ungated
+    // setResults here runs every iteration and resets the focus to the top
+    // every time -- which is exactly what it is specified to do, and is the
+    // reason the list would not stay where the reader put it.
+    if (gScanDelivered) return;
+    if (gRadio.scanState() == reader::ScanState::Done) {
+      gScanDelivered = true;
+      p.setResults(reader::rankScanResults(gRadio.scanResults()));
+      // AND THE RADIO GOES DOWN THE MOMENT THE SCAN IS HARVESTED, rather than
+      // staying up for as long as the reader browses the list. `Wi-Fi stays
+      // off except while it is being used` is the design, and once the rows
+      // are copied into the screen nothing is using it: picking a network
+      // calls beginJoin, which brings it back up.
+      //
+      // ORDER MATTERS -- down() clears the radio's own results, so the copy
+      // has to be taken first. The screen owns its rows from here.
+      gRadio.down();
+      gApp->markDirty();
+    } else if (gRadio.scanState() == reader::ScanState::Failed) {
+      // AN EMPTY PICKER, NOT A JOIN FAILURE -- beginScan's own contract: a
+      // radio that would not come up is not a network that rejected you.
+      gScanDelivered = true;
+      p.setResults({});
+      gRadio.down();
+      gApp->markDirty();
+    }
+    return;
+  }
+  gScanArmed = false;
+  gScanDelivered = false;
+
+  if (id == reader::ScreenId::WifiConnect) {
+    switch (gRadio.joinState()) {
+      case reader::JoinState::Ok: {
+        // PERSISTED ONLY ON SUCCESS. A passphrase that did not work is not
+        // worth keeping, and storing it would make the next boot's
+        // dropLockedWithoutSecret keep a row that can only fail.
+        gWifiNets.remember(gJoinSsid, gJoinLocked);
+        if (gJoinLocked) shellwifi::putSecret(gJoinSsid, gJoinPsk);
+        shellwifi::save(gWifiNets);
+        const std::string joined = gJoinSsid;  // endWifiSession clears it
+        // THE RADIO GOES DOWN THE MOMENT THE CREDENTIAL IS PROVEN, which is
+        // the whole point of the on-demand design: the join existed to prove
+        // it and nothing in this release transfers anything.
+        endWifiSession();
+        primeWifi();
+
+        // AND THE FLOW LEAVES FOR THE SAVED-NETWORK LIST, rather than
+        // stepping the dialog to READY and waiting to be dismissed. The hub
+        // opening with the network in it IS the confirmation, and a better
+        // one than a second full waveform saying so -- the dialog's only hint
+        // is CANCEL, which is right for a join in flight and nonsense over
+        // the word Joined. Reported off the device as exactly that.
+        //
+        // Unwound rather than popped once, because how deep the flow got
+        // depends on how the join started: an open network joins straight
+        // from the picker and a locked one goes through the keyboard, which
+        // REPLACED itself with this dialog. Action::popTo is the screen-side
+        // spelling of this and the shell cannot apply an Action.
+        while (gApp->depth() > 1 && gApp->top().id() != reader::ScreenId::WifiSettings) {
+          if (!gApp->popScreen()) break;
+        }
+        // A FRESH HUB, because the one underneath holds its own copy of the
+        // list and would open without the network just joined. The forget
+        // path replaces it for the same reason.
+        gApp->replaceScreen(reader::ScreenId::WifiSettings);
+        logf("[wifi] joined %s; back to the saved list\n", joined.c_str());
+        logFlush();
+        return;
+      }
+      case reader::JoinState::Failed: {
+        gFactory.setWifiFailure(reader::wifiFailureFor(gRadio.joinReason()));
+        gFactory.setWifiTarget(gJoinSsid);
+        gRadio.down();
+        gApp->replaceScreen(reader::ScreenId::WifiError);
+        return;
+      }
+      case reader::JoinState::Idle:
+      case reader::JoinState::Running:
+        return;
+    }
+  }
+}
+
 // THE USER CONFIRMED A DELETE. See Action::del() and app.h's five-step note, which
 // this follows in order.
 //
@@ -2614,11 +3009,12 @@ static void handleDelete() {
   // Library; from BookError it may be Home, and the BookError under this confirmation
   // goes too -- it names a book that no longer exists.
   //
-  // SYNTHESISED BACKS RATHER THAN popTo(). THE SHELL CANNOT APPLY AN Action AT ALL:
-  // App::dispatch takes an InputEvent, App exposes pushScreen() and no popScreen() and
-  // no apply(Action), and an Action is a value a SCREEN returns. dispatchBack() above
-  // exists for precisely this, and handleFinish leaves BookEnd the same way -- whatever
-  // Back means on each screen is what runs, decided by the screen, once.
+  // SYNTHESISED BACKS RATHER THAN popTo(), and still the right tool here even though
+  // App::popScreen() now exists: Back on every screen this unwinds ALREADY means
+  // leave, so the screen decides and nothing here can drift from it. See
+  // dispatchBack's own header for the rule, and for the case that is the other way
+  // round -- a screen whose Back latches instead, where a synthesised press re-enters
+  // the handler that sent it.
   //
   // BOUNDED THREE WAYS, because a Back that does not pop would otherwise spin loop()
   // forever: the target is reached, the root is reached (popTo's own "stop at the
@@ -4561,6 +4957,13 @@ void setup() {
   // must not depend on the card for the device to behave.
   loadAndApplySettings();
 
+  // THE SAVED NETWORKS, from NVS rather than the card -- see wifi.h. It does
+  // not depend on the mount, so it is safe here and would be safe earlier;
+  // it sits after the settings because that is where the factory's other
+  // priming is, and a factory primed in two places is a factory primed in
+  // neither on the path somebody forgets.
+  loadWifi();
+
   // AND THE BODY FACE, WHICH loadAndApplySettings CANNOT REACH.
   //
   // The face was inited ~230 lines above with the CONSTANT kBodyPpem, because it
@@ -4635,6 +5038,7 @@ void setup() {
   // late, and a list told nothing renders empty.
   gFactory.setContentsVisibleRows(gTheme.contentsVisibleRows(logicalH, fonts));
   gFactory.setLibraryVisibleRows(libraryRows);
+  gFactory.setWifiPickerVisibleRows(gTheme.libraryVisibleRows(logicalH, fonts));
   logf("[boot] Library fits %d rows on this %dx%d logical canvas "
        "(panel is %dx%d native)\n",
        libraryRows, logicalW, logicalH, panelW, panelH);
@@ -6409,6 +6813,10 @@ void loop() {
     // Placed with Open instead, the Library would be repainted one press later, still
     // listing the book that has just been removed.
     if (gApp->deleteRequested()) handleDelete();
+    // BESIDE THE DELETE AND FOR ITS REASON: the outcome is read off a screen
+    // that is still on top, so this has to run on the dispatch's own pass,
+    // before anything pops. See App::wifiRequested().
+    if (gApp->wifiRequested()) handleWifi();
     // Between the dispatch and the mask refresh below, so the refresh sees
     // whatever screen the retry left on top -- on success that is a brand new App
     // rooted at Home, whose holds are not the SD-missing screen's.
@@ -6703,6 +7111,15 @@ void loop() {
   // The cost is kCoalesceMs added to a single isolated press. That is a ~7%
   // penalty on one paint against a ~3x saving on a burst, and it is below what
   // is noticeable next to the refresh itself.
+  // BEFORE THE PAINT, AND THAT ORDERING IS THE WHOLE OF A REPORTED BUG. It
+  // ran after, so the picker was pushed, painted with the boot-primed EMPTY
+  // list -- "No networks found" -- and only THEN did the first poll arm the
+  // scan. The reader was told the scan had finished and found nothing before
+  // it had started. Up here the scan is armed and `setScanning(true)` is set
+  // in the same iteration as the push, so the first frame the picker ever
+  // draws is the scanning one.
+  pollWifi();
+
   const bool settled = static_cast<uint32_t>(millis() - gLastInputMs) >= kCoalesceMs;
   const bool painted = gApp->dirty() && settled;
   if (painted) {
@@ -7208,7 +7625,8 @@ void loop() {
     // second spelling of the choice, free to disagree with the one actually made.
     logf("[alive] last-stage=%s heap=%u minHeap=%u screen=%s depth=%d "
          "dropped=%lu/%lu listings=%u slots/%uB hit=%u miss=%u "
-         "battery observable=%d pct=%d charging=%d level=%d polls=%lu pollMs=%lu\n",
+         "battery observable=%d pct=%d charging=%d level=%d polls=%lu pollMs=%lu "
+         "wifi=%d\n",
          stage, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
          reader::screenName(gApp->top().id()), gApp->depth(),
          (unsigned long)rawSamplesDropped(), (unsigned long)gPresses.dropped(),
@@ -7216,7 +7634,13 @@ void loop() {
          (unsigned)gSd.listings().hits(), (unsigned)gSd.listings().misses(),
          (int)gChargingObservable, gBattery.percent(), (int)gBattery.charging(),
          (int)gBattery.level(), (unsigned long)gBatteryPolls,
-         (unsigned long)gBattery.pollIntervalMs(bandRepaintPossible()));
+         (unsigned long)gBattery.pollIntervalMs(bandRepaintPossible()),
+         // THE RADIO'S OWN STATE, read off the object rather than inferred
+         // from which screen is up -- which is the whole point: the two
+         // disagreeing is the thing worth seeing, and a field derived from
+         // the screen could never show it. `wifi=1` beside a `screen=` that
+         // is not a Wi-Fi one is the sweep's symptom in one line.
+         (int)gRadio.isUp());
     // WHAT THE CARD LOG HAS COST AND WHAT IT HAS LOST, on the heartbeat rather than
     // per flush. `dropped` non-zero means the buffer overran between two idle
     // windows and the log has a HOLE in it -- which must never be mistaken for the
