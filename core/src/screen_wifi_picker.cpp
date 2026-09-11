@@ -38,7 +38,23 @@ void WifiPickerScreen::rebuild() {
   vm_.title = "JOIN NETWORK";
   vm_.scanning = scanning_;
   vm_.statusLabel = "SCANNING";
-  vm_.nothingFound = results_.empty();
+  // A SCAN IN FLIGHT IS NOT A SCAN THAT FOUND NOTHING, and this read
+  // `results_.empty()` -- so the moment the picker opened, before the radio
+  // had answered, it drew "No networks saved"'s sibling copy: the scan
+  // completed and found nothing, over a status bar simultaneously saying
+  // SCANNING. Reported off the device twice.
+  //
+  // design/WifiPickerEmpty.dc.html says so in its own first paragraph -- "The
+  // scan completed and found nothing ... NOT THE SCANNING STATE, which is a
+  // different thing and is drawStatusBar" -- so the board drew the
+  // distinction and the code did not keep it.
+  //
+  // NOTHING COULD SEE IT: there is no caller of setScanning in the tests, no
+  // board for the scanning state (deliberately -- drawStatusBar is specified
+  // by LibraryOpening and SleepWaking), and therefore nothing that ever
+  // rendered this combination. A mutation pass flagged the whole branch as
+  // unexercised before a finger found it.
+  vm_.nothingFound = results_.empty() && !scanning_;
   vm_.emptyTitle = kEmptyTitle;
   vm_.emptyProse = kEmptyProse;
   vm_.emptyCaveat = kEmptyCaveat;
@@ -47,7 +63,14 @@ void WifiPickerScreen::rebuild() {
   // so this is not a false claim -- it is simply colder than it needs to be,
   // and this is the one screen where the number carries nothing the words
   // below do not.
-  vm_.found = results_.empty() ? "NONE FOUND" : std::to_string(results_.size()) + " FOUND";
+  // AND THE BAND CLAIMS NO COUNT WHILE THE SCAN IS RUNNING. `NONE FOUND` there
+  // is the same false claim as the empty copy, one slot over -- it is the
+  // result of a scan that has not happened. drawHeaderBand takes an empty
+  // value correctly (its phantom gap cancels; see CLAUDE.md), so the slot is
+  // simply blank until there is something to count.
+  vm_.found = scanning_ ? std::string()
+              : results_.empty() ? std::string("NONE FOUND")
+                                 : std::to_string(results_.size()) + " FOUND";
   // The Rescan row is the last item of the list, so it scrolls with it and is
   // counted by the rail -- treating it as chrome would make the rail lie about
   // how much list there is.

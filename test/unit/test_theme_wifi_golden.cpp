@@ -109,6 +109,23 @@ TEST_CASE("QuietTheme renders the connect flow to golden at both geometries") {
        [](WifiApp& a) { REQUIRE(a.app.pushScreen(ScreenId::WifiPicker)); }},
       {"wifi_picker_empty", [](WifiApp& a) { a.factory.setWifiScan({}); },
        [](WifiApp& a) { REQUIRE(a.app.pushScreen(ScreenId::WifiPicker)); }},
+      // THE SCANNING STATE, WHICH IS NOT A BOARD AND NEEDS A GOLDEN -- the
+      // keyboard layers' argument. design/WifiPickerEmpty.dc.html declines to
+      // board it deliberately, because drawStatusBar's box is already
+      // specified by LibraryOpening and SleepWaking and a third board would be
+      // a third copy of it.
+      //
+      // SO NOTHING HAD EVER RENDERED IT, which is exactly how it shipped
+      // drawing the "scan found nothing" copy UNDER a bar saying SCANNING:
+      // two states at once, and no instrument in the repo that put both on a
+      // frame together. A mutation pass flagged the branch as unexercised
+      // before a finger found it.
+      {"wifi_picker_scanning", [](WifiApp& a) { a.factory.setWifiScan({}); },
+       [](WifiApp& a) {
+         REQUIRE(a.app.pushScreen(ScreenId::WifiPicker));
+         auto* p = static_cast<WifiPickerScreen*>(&a.app.top());
+         REQUIRE(p->setScanning(true));
+       }},
       {"wifi_picker_scrolled",
        [](WifiApp& a) { a.factory.setWifiScan(demoWifiScanLong()); },
        [](WifiApp& a) {

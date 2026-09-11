@@ -2995,8 +2995,29 @@ void QuietTheme::renderWifiPicker(Framebuffer& fb, const FontSet& fonts,
   // ROWS do -- open ones join directly, locked ones ask -- so on a screen with
   // no rows it is a caption for nothing, and design/WifiPickerEmpty.dc.html
   // draws none.
-  const bool showNote = !vm.nothingFound;
+  // ...AND NOT WHILE THE SCAN IS RUNNING EITHER, which `!vm.nothingFound`
+  // alone stopped saying the moment those two flags became distinct: the note
+  // describes what the ROWS do, and during a scan there are none. It came
+  // back on the scanning frame as soon as nothingFound stopped being true
+  // there.
+  const bool showNote = !vm.nothingFound && !vm.scanning;
   const int noteRoom = showNote ? noteH : 0;
+
+  // A SCAN IN FLIGHT DRAWS NO LIST AT ALL -- not the rows it has not got, and
+  // not the Rescan row either. That is what the screen's own input model
+  // already promises: WifiPickerScreen::onGesture refuses every press but
+  // Back while scanning, so a drawn Rescan row is an offer to restart a scan
+  // that is already running, and a FOCUSED one is that offer inverted across
+  // the full width of an otherwise blank screen.
+  //
+  // The band, the empty field and drawStatusBar's centred line are the whole
+  // frame. It is not boarded -- drawStatusBar's box is specified by
+  // LibraryOpening and SleepWaking, and design/WifiPickerEmpty.dc.html
+  // declines to copy it a third time -- so the golden is what pins it.
+  if (vm.scanning) {
+    drawStatusBar(fb, fonts, vm.statusLabel, plane);
+    return;
+  }
 
   if (vm.nothingFound) {
     // The Rescan row still draws, anchored at the foot: it is the only action,

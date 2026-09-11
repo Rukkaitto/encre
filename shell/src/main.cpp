@@ -2451,14 +2451,27 @@ static void handleOpen() {
 // LEAVE THE TOP SCREEN FROM OUTSIDE A GESTURE, by handing it the press it would have
 // taken.
 //
-// THE SHELL CANNOT APPLY AN Action AT ALL, which is worth stating because it looks as
-// though it should be able to. `Action::pop()` and `Action::popTo()` are values a
-// SCREEN returns; `App::dispatch` is the only thing that interprets one, and the only
-// stack call App exposes is `pushScreen()` -- there is no popScreen() and no
-// apply(Action). So a latch handler that has to leave a screen either grows a second
-// interpretation of the stack in the shell, or synthesises the press. This is the
-// second, and it is the one that cannot drift: whatever Back means on that screen is
-// what runs, decided by the screen, once.
+// THE SHELL STILL CANNOT APPLY AN Action: `Action::pop()` and `Action::popTo()` are
+// values a SCREEN returns, `App::dispatch` is the only thing that interprets one, and
+// there is no apply(Action). So a latch handler that has to leave a screen either
+// synthesises the press -- this -- or calls the stack directly.
+//
+// WHICH ONE IS NOT A MATTER OF TASTE, and the rule is about what Back MEANS on the
+// target screen:
+//
+//   dispatchBack()     when Back on that screen already means "leave". The screen
+//                      decides, once, and nothing here can drift from it. That is
+//                      DeleteConfirm, BookEnd and the reader menu, whose Backs return
+//                      a pop.
+//   App::popScreen()   when it does not. Every connect-flow screen answers Back with
+//                      Action::wifi(), so dispatching a Back there re-latches the very
+//                      request the handler is serving -- an infinite loop in which the
+//                      screen never leaves, which reached the glass as a Back hint
+//                      that did nothing.
+//
+// `popScreen()` did not exist when this was written, and the paragraph below about
+// bounding a synthesised Back three ways is what that cost: it is a real hazard and
+// this note is where to check which tool a new handler wants.
 //
 // Short on Back, because gestureFor turns exactly that into Gesture::Back -- a Long is
 // dropped there unless the screen bound a hold, which is not the press being imitated.
@@ -2710,7 +2723,7 @@ static void handleWifi() {
       const auto& kb = static_cast<const reader::WifiPasswordScreen&>(gApp->top());
       if (kb.cancelled()) {
         endWifiSession();
-        dispatchBack();
+        gApp->popScreen();
         return;
       }
       if (!kb.joinChosen()) return;
@@ -2723,7 +2736,7 @@ static void handleWifi() {
       // The only outcome this screen latches is the cancel; READY and the
       // failures are the POLL's, below.
       endWifiSession();
-      dispatchBack();
+      gApp->popScreen();
       return;
     }
 
@@ -2743,7 +2756,7 @@ static void handleWifi() {
         case reader::WifiErrorScreen::Chosen::Cancel:
         case reader::WifiErrorScreen::Chosen::None:
           endWifiSession();
-          dispatchBack();
+          gApp->popScreen();
           return;
       }
       return;
@@ -2761,7 +2774,7 @@ static void handleWifi() {
       // it would show the network still there. Home's `gHomeStale` rebuild is
       // the precedent: the screen is REPLACED rather than asked to refresh,
       // because the list it was built from is the thing that changed.
-      dispatchBack();                                     // the overlay
+      gApp->popScreen();                                    // the overlay
       gApp->replaceScreen(reader::ScreenId::WifiSettings);  // a fresh hub
       logf("[wifi] forgot %s\n", ssid.c_str());
       logFlush();
@@ -2903,11 +2916,12 @@ static void handleDelete() {
   // Library; from BookError it may be Home, and the BookError under this confirmation
   // goes too -- it names a book that no longer exists.
   //
-  // SYNTHESISED BACKS RATHER THAN popTo(). THE SHELL CANNOT APPLY AN Action AT ALL:
-  // App::dispatch takes an InputEvent, App exposes pushScreen() and no popScreen() and
-  // no apply(Action), and an Action is a value a SCREEN returns. dispatchBack() above
-  // exists for precisely this, and handleFinish leaves BookEnd the same way -- whatever
-  // Back means on each screen is what runs, decided by the screen, once.
+  // SYNTHESISED BACKS RATHER THAN popTo(), and still the right tool here even though
+  // App::popScreen() now exists: Back on every screen this unwinds ALREADY means
+  // leave, so the screen decides and nothing here can drift from it. See
+  // dispatchBack's own header for the rule, and for the case that is the other way
+  // round -- a screen whose Back latches instead, where a synthesised press re-enters
+  // the handler that sent it.
   //
   // BOUNDED THREE WAYS, because a Back that does not pop would otherwise spin loop()
   // forever: the target is reached, the root is reached (popTo's own "stop at the

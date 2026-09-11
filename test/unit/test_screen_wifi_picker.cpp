@@ -102,6 +102,37 @@ TEST_CASE("a scan in flight owns the screen") {
   CHECK(s.onGesture(kNext).kind == Action::Kind::Redraw);
 }
 
+TEST_CASE("a scan IN FLIGHT is not a scan that found nothing") {
+  // TWO DIFFERENT STATES, and design/WifiPickerEmpty.dc.html says so in its
+  // own first paragraph: "The scan completed and found nothing ... NOT THE
+  // SCANNING STATE, which is a different thing and is drawStatusBar". The
+  // board drew the distinction and `nothingFound = results_.empty()` did not
+  // keep it, so the moment the picker opened -- before the radio had
+  // answered -- it drew the empty copy OVER a status bar simultaneously
+  // saying SCANNING. Reported off the device twice.
+  WifiPickerScreen s({}, 7);
+  // Not yet scanning and nothing found: that IS the empty state.
+  CHECK(s.vm().nothingFound);
+
+  REQUIRE(s.setScanning(true));
+  CHECK(s.vm().scanning);
+  // THE COPY MUST GO WHILE THE SCAN IS RUNNING. This is the assertion the
+  // defect failed.
+  CHECK_FALSE(s.vm().nothingFound);
+
+  // A scan that comes back with nothing puts it back -- which is the state
+  // the board is for.
+  s.setResults({});
+  CHECK_FALSE(s.vm().scanning);
+  CHECK(s.vm().nothingFound);
+
+  // And a scan that finds something has neither.
+  REQUIRE(s.setScanning(true));
+  s.setResults({ap("HOME", -40)});
+  CHECK_FALSE(s.vm().scanning);
+  CHECK_FALSE(s.vm().nothingFound);
+}
+
 TEST_CASE("a finished scan puts the focus back at the top") {
   // The old focus indexed a list that no longer exists. Keeping it lands the
   // reader on whatever now occupies that row -- a different network, under a

@@ -144,6 +144,16 @@ App::RestoreReport App::restore(const std::vector<StackEntry>& stack) {
   return r;
 }
 
+bool App::popScreen() {
+  // The root is the app: popping it would leave nothing to render and
+  // nothing to receive the next event.
+  if (stack_.size() <= 1) return false;
+  stack_.pop_back();
+  dirty_ = true;
+  transition_ = true;
+  return true;
+}
+
 bool App::replaceScreen(ScreenId id) {
   // PUSHED BEFORE THE OLD ONE IS REMOVED, so a factory that refuses leaves the
   // stack exactly as it was. Popping first would lose the screen that asked and
@@ -260,12 +270,7 @@ void App::dispatch(const InputEvent& ev) {
       pushScreen(a.target);
       break;
     case Action::Kind::Pop:
-      // The root is the app: popping it would leave nothing to render and
-      // nothing to receive the next event.
-      if (stack_.size() <= 1) break;
-      stack_.pop_back();
-      dirty_ = true;
-      transition_ = true;
+      popScreen();
       break;
     case Action::Kind::PopTo:
       // Down to `target`, or to the root if it is not on the stack -- never past

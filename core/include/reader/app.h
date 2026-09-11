@@ -665,6 +665,23 @@ class App {
   // guarantees as the Action, because it is the same code.
   bool replaceScreen(ScreenId id);
 
+  // POP, WITHOUT A PRESS. Action::Kind::Pop's own body, extracted for
+  // replaceScreen's reason: the shell is its second caller.
+  //
+  // THE SHELL COULD NOT DO THIS BY SYNTHESISING A BACK, and that is not a
+  // convenience argument -- it is a correctness one. `dispatchBack()` sends a
+  // Back PRESS to the top screen, so what happens next is whatever that
+  // screen's onGesture does with it. Every connect-flow screen answers Back
+  // with Action::wifi(), so the shell's own cancel handling re-latched the
+  // request it was in the middle of serving and the screen never left: an
+  // infinite latch loop that reached the glass as a Back hint that did
+  // nothing. dispatchBack works for DeleteConfirm only because THAT screen's
+  // Back returns a pop.
+  //
+  // Refuses the root, exactly as the Action does: popping it would leave
+  // nothing to render and nothing to receive the next event.
+  bool popScreen();
+
   // Something on screen changed and needs painting.
   bool dirty() const { return dirty_; }
   // ...and the change was a screen change rather than a change within one. What
