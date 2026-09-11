@@ -16,10 +16,32 @@
 // about exactly this shape: the second copy is the extraction point, not the
 // fifth.
 //
-// Non-owning: `bytes` must outlive the source, as it did at all three call sites
-// this replaces.
+// NON-OWNING: `bytes` must outlive the source -- and that requirement is now
+// ENFORCED rather than stated, because stating it was not enough. One of the 71
+// call sites built its document inline:
+//
+//     Grained src("<body><p>" + digits(...) + "</p></body>", 4096);
+//
+// The `operator+` temporary dies at the end of the constructor's full-expression,
+// so every read() afterwards copied from freed heap. It went unnoticed because
+// freeing a 13 KB block writes only 8 of its bytes: the document was still there
+// unless an unrelated allocation reused the region, so the case passed alone and
+// failed about one full-suite run in ten, in a DIFFERENT test each time it was
+// looked at. ASan named it in one run; nothing else had, in the whole life of the
+// file.
+//
+// So the rvalue-string constructor is DELETED. `Grained src(<temporary>, n)` is a
+// compile error now, and a caller must name the buffer it is lending. This is the
+// shape CLAUDE.md already argues for elsewhere -- a contract whose halves can be
+// adopted separately is a mechanism not yet made structural, which is why
+// `FocusScreen` makes its pair `final`. A comment saying "must outlive" is a rule
+// somebody has to remember; a deleted overload is one they cannot get wrong.
+//
+// A string LITERAL is still fine and still compiles: it has static storage, so
+// there is nothing to outlive.
 #include <cstddef>
 #include <cstring>
+#include <string>
 #include <string_view>
 
 #include "reader/inflate_stream.h"
@@ -29,6 +51,13 @@ namespace grainsrc {
 class Grained : public reader::ByteSource {
  public:
   Grained(std::string_view bytes, size_t grain) : b_(bytes), grain_(grain) {}
+
+  // A temporary std::string cannot be lent: it is destroyed at the end of the
+  // full-expression that builds this object, leaving b_ dangling. An exact match
+  // beats the string_view conversion, so this claims the overload and the call
+  // fails to COMPILE rather than reading freed heap at run time. Name the string.
+  // (An lvalue string is unaffected -- it cannot bind to this.)
+  Grained(std::string&&, size_t) = delete;
 
   size_t read(void* dst, size_t want) override {
     const size_t n = want < grain_ ? want : grain_;
