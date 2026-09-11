@@ -36,7 +36,36 @@ constexpr const char* kSymbolTail = "\"#$%&'()*+,/:;<=>?@[\\]^`{|}~.-";
 // panel reaching the same conclusion about the same two codepoints.
 constexpr const char* kCaretLeft = "\xE2\x80\xB9";
 constexpr const char* kCaretRight = "\xE2\x80\xBA";
-const char* kFunctionRow[6] = {kCaretLeft, kCaretRight, "SHIFT", "#+=", "SPACE", "JOIN"};
+
+// THE LAYER KEY NAMES WHERE IT TAKES YOU, NOT WHAT IT IS. It LATCHES, so with
+// one fixed label nothing on the glass distinguishes the two states except the
+// 40 cells above it -- and the key that got you to the symbols would be sitting
+// there advertising the layer you are already on. SHIFT needs no such pair,
+// because it is one-shot: it is spent by the next character, so there is no
+// state for a label to name.
+//
+// Lowercase where every other word on this row is caps, because both spellings
+// are SPECIMENS of the layer they open rather than words for it, and the base
+// layer's letters really are lowercase. `ABC` would name a layer SHIFT reaches
+// and this key does not. design/WifiPassword.dc.html carries both halves.
+//
+// IT COSTS NO GEOMETRY: at Meta500/0.1em `abc` measures 44px against `#+=`'s
+// 45, so it is a pixel NARROWER inside the same 60px cell that theme_quiet's
+// kKeyFnW pins. The firmware is the only engine that ever draws it -- the
+// symbol layer is not a board -- and `wifi_password_symbols` is what pins it.
+constexpr const char* kSymbolKey = "#+=";
+constexpr const char* kBaseKey = "abc";
+
+// A CELL IS IDENTIFIED BY ITS LABEL ON THIS SCREEN, so a label that varies needs
+// one predicate rather than a comparison per reader: confirmLabel and
+// activateCell both ask this, and neither may learn a spelling the other does
+// not. The label is what the hint slot quotes, so the bar and the binding
+// cannot disagree about which layer the key leads to.
+bool isLayerKey(const std::string& cell) { return cell == kSymbolKey || cell == kBaseKey; }
+
+// The row as the base layer spells it. rebuildCells substitutes the layer key.
+const char* kFunctionRow[6] = {kCaretLeft, kCaretRight, "SHIFT",
+                               kSymbolKey, "SPACE",     "JOIN"};
 
 std::string upperOf(const std::string& s) {
   std::string out = s;
@@ -74,7 +103,14 @@ void WifiPasswordScreen::rebuildCells() {
   vm_.cells.clear();
   vm_.cells.reserve(46);
   for (const char c : chars) vm_.cells.push_back(std::string(1, c));
-  for (const char* f : kFunctionRow) vm_.cells.push_back(f);
+  // THE LAYER KEY IS THE ONE CELL OF THE ROW THAT IS NOT A CONSTANT, and it is
+  // substituted here rather than held as a second row literal: a second array
+  // would be a second spelling of the five cells that do not change, which is
+  // what the dead `kLower` at the top of this file already cost once.
+  for (const char* f : kFunctionRow) {
+    const bool showBase = isLayerKey(f) && layer_ == Layer::Symbols;
+    vm_.cells.push_back(showBase ? kBaseKey : f);
+  }
   vm_.rowWidths = {10, 10, 10, 10, 6};
 }
 
@@ -159,7 +195,8 @@ std::string WifiPasswordScreen::confirmLabel() const {
   // SPACE is not in this list, and that is the distinction: it types a
   // character like any other cell and is the only function key that does.
   if (cell == kCaretLeft || cell == kCaretRight) return "MOVE";
-  if (cell == "SHIFT" || cell == "#+=") return cell;
+  // The key's own label, whichever layer it is currently offering.
+  if (cell == "SHIFT" || isLayerKey(cell)) return cell;
   if (cell == "JOIN") return joinable() ? "JOIN" : "";
   return "TYPE";
 }
@@ -175,7 +212,11 @@ Action WifiPasswordScreen::activateCell() {
     setLayer(shiftArmed_ ? Layer::Upper : Layer::Lower);
     return Action::redraw();
   }
-  if (cell == "#+=") {
+  if (isLayerKey(cell)) {
+    // EITHER SPELLING, because the label is the state: `abc` is this same key
+    // showing the layer it goes back to, so the branch is the same one and
+    // `setLayer` reads the state rather than the word that was pressed.
+    //
     // Latching, and it clears a pending shift: the two modifiers are
     // exclusive, so leaving shift armed under the symbol page would make the
     // next symbol turn it off for no visible reason.
