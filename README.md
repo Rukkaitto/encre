@@ -7,12 +7,6 @@ models; it works out which one it is at boot.
   <img src="docs/images/reader.png" width="330" alt="A page of Middlemarch, justified, with the chapter in the header and progress in the footer.">
 </p>
 
-<p align="center">
-  <em>Page numbers count within the chapter. A whole-book count would mean
-  laying out every chapter before showing you the first page, about a minute of
-  work on a full-length novel.</em>
-</p>
-
 ## What it does
 
 - [x] Reads EPUB, with justified text and italics taken from the book's own stylesheet
@@ -41,16 +35,17 @@ models; it works out which one it is at boot.
 <tr>
 <td><em>Home picks up where you left off.</em></td>
 <td><em>Folders, and how far you are into each book.</em></td>
-<td><em>Asleep, showing the book's cover. Covers come from the EPUB: baseline JPEG and 8-bit PNG work, and a book whose cover is a progressive JPEG, or an interlaced or paletted PNG, falls back to a card naming the book. You can also show that card over the cover, or turn the cover off.</em></td>
+<td><em>Asleep, showing the book's cover. If a cover can't be read, you get a card naming the book instead. You can also put that card over the cover, or turn the cover off.</em></td>
 </tr>
 </table>
 
 ## Before you flash
 
-**Back up the stock firmware first.** The device is recoverable: there is no
-secure boot and no flash encryption, so download mode is always available. But a
-backup is the difference between a bad afternoon and a dead reader. It is a
-16 MB read and it takes a couple of minutes.
+**Take a backup of the stock firmware.** It is step 3 below, it takes a couple
+of minutes, and it is worth doing. The device is recoverable either way, since
+there is no secure boot and no flash encryption, so download mode is always
+available. But a backup is the difference between a bad afternoon and a dead
+reader.
 
 Flashing third-party firmware is at your own risk. This was written with
 [Claude Code](https://claude.com/claude-code), directed and reviewed by its
@@ -63,14 +58,16 @@ daily on an X3, but expect to find things.
 
 ## Install
 
-You need [esptool](https://docs.espressif.com/projects/esptool/), which is one
-command:
+Four steps. Replace `PORT` with yours throughout, and `VERSION` with the release
+you downloaded.
+
+**1. Install [esptool](https://docs.espressif.com/projects/esptool/).**
 
 ```bash
 pip install esptool
 ```
 
-Plug the reader in and find its port:
+**2. Plug the reader in and find its port.**
 
 | | Port looks like | How to find it |
 |---|---|---|
@@ -78,22 +75,22 @@ Plug the reader in and find its port:
 | Linux | `/dev/ttyACM0` | `ls /dev/ttyACM*` |
 | Windows | `COM5` | Device Manager, under Ports (COM & LPT) |
 
-Back up what is on there now, and check the file really is 16 MB before you
-trust it:
+**3. Back up the stock firmware.** Check the file really is 16 MB before you
+trust it.
 
 ```bash
 esptool --port PORT read-flash 0 0x1000000 xteink-stock-backup.bin
 ```
 
-Download the latest `encre-VERSION-xteink-full.bin` from
-[Releases](https://github.com/Rukkaitto/encre/releases), and write it:
+**4. Download the latest `encre-VERSION-xteink-full.bin` from
+[Releases](https://github.com/Rukkaitto/encre/releases), and write it.**
 
 ```bash
 esptool --port PORT --chip esp32c3 write-flash 0x0 encre-VERSION-xteink-full.bin
 ```
 
-Replace `PORT` with yours and `VERSION` with the one you downloaded. If anything
-goes wrong, `write-flash 0 xteink-stock-backup.bin` puts the original back.
+If anything goes wrong, `write-flash 0 xteink-stock-backup.bin` puts the
+original back.
 
 > esptool 5 spells these `read-flash` and `write-flash`; version 4 and earlier
 > use `read_flash` and `write_flash`. `pip install esptool` gives you 5.
