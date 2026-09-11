@@ -436,10 +436,22 @@ boards say, and names what drifted.
     ever measured: **13,696 bytes**, reproducibly, opening a 66,843-byte
     chapter from a **232-entry** Library, found as a `reason=4 PANIC` three
     times. Take 21,328 off it and the arithmetic is negative.
-  - **CONFIRMED WORKING ON GLASS (2026-09-11) AND THAT DOES NOT CLOSE THIS**,
-    because the card decides: a 16-book shelf leaves ~105 KB and never comes
-    near it. **Anything that opens a book on a large card is the test**, and the
-    symptom to expect is not a Wi-Fi failure — it is `abort()` with no
+  - **MEASURED ON GLASS (2026-09-11): `[stage] open-paginated heap=45140
+    min=28508`**, opening from the LIBRARY — which is the conservative path,
+    since the Library stays resident under the Reader where Home's CONTINUE
+    leaves nothing behind. So the floor on that card is **28,508 bytes**,
+    against ~49,836 for the same open without the stack linked: Wi-Fi took
+    ~43% of the headroom and what remains is **2.1x the 13,696** that produced
+    the recorded panic.
+  - **WHAT THAT BUYS, AND IT IS NOT A LOT OF CARD.** The Library's residency is
+    ~291 bytes a book (203 books, 201,576 → 142,560), so 28,508 bytes is about
+    **98 more books** before the floor reaches zero — a ceiling roughly DOUBLE
+    that shelf rather than ten times it. Two things make that optimistic: the
+    floor is chapter-dependent and the recorded panic used a 66,843-byte
+    chapter, so a longer book can spend the margin before the book COUNT does;
+    and `getFreeHeap` cannot see the largest contiguous BLOCK, which is what
+    actually decides an allocation.
+  - **THE SYMPTOM TO EXPECT IS NOT A WI-FI FAILURE** — it is `abort()` with no
     diagnostic, which is a reboot to Home, a shape this file records having been
     misreported twice already.
   - The escape hatch if it bites is `ENCRE_FS_SELFTEST`'s: an opt-in build flag
