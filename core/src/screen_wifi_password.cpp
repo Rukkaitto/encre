@@ -91,9 +91,32 @@ void WifiPasswordScreen::syncVm() {
   // BACK DELETES AND A HELD BACK LEAVES -- spec 4.1b, and the ring the board
   // draws. It is the only way off this screen, which is why the hold is bound
   // rather than merely drawn.
-  vm_.hints = {"DELETE", "TYPE", "UP", "DOWN"};
+  //
+  // THE CONFIRM LABEL NAMES WHAT THE FOCUSED CELL DOES, and says nothing when
+  // the cell does nothing. It was a constant `TYPE`, which is false on three
+  // of the four function keys and outright misleading on JOIN -- a Confirm
+  // labelled TYPE that leaves the screen and starts a join. Settings is the
+  // precedent for a label that varies within a screen and WifiSettings is the
+  // second; the board carries the rule.
+  //
+  // The EMPTY slot on an unusable JOIN is the existing vocabulary rather than
+  // a new one: a button with no action gets an empty slot, drawn at
+  // kHintEmptySlotW rather than as nothing. activateCell asks `joinable()`
+  // too, so the bar and the behaviour cannot disagree.
+  vm_.hints = {"DELETE", confirmLabel(), "UP", "DOWN"};
   vm_.holds = {true, false, false, false};
   declareHints(vm_.holds);
+}
+
+std::string WifiPasswordScreen::confirmLabel() const {
+  const int f = focus();
+  if (f < 0 || f >= static_cast<int>(vm_.cells.size())) return "TYPE";
+  const std::string& cell = vm_.cells[static_cast<size_t>(f)];
+  // SPACE is not in this list, and that is the distinction: it types a
+  // character like any other cell and is the only function key that does.
+  if (cell == "SHIFT" || cell == "#+=") return cell;
+  if (cell == "JOIN") return joinable() ? "JOIN" : "";
+  return "TYPE";
 }
 
 Action WifiPasswordScreen::activateCell() {
@@ -116,6 +139,11 @@ Action WifiPasswordScreen::activateCell() {
     return Action::redraw();
   }
   if (cell == "JOIN") {
+    // TOO SHORT TO BE A PASSPHRASE, so the press does nothing -- and the bar
+    // has already said so with an empty Confirm slot, which is what keeps
+    // this from being the focuses-then-ignores defect. One spelling
+    // (`joinable()`) answers both.
+    if (!joinable()) return Action::none();
     join_ = true;
     // LATCHED, NOT POPPED. The shell reads joinChosen() and entered() off this
     // screen while it is still standing and then decides where the flow goes

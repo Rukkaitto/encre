@@ -244,6 +244,28 @@ usually needs one capital; the stated cost is that several capitals in a row cos
 The function row is `SHIFT`, `#+=`, `SPACE`, `JOIN` — four cells, giving 44 landing
 spots in five visual rows.
 
+**AMENDED IN IMPLEMENTATION — the Confirm hint follows the focused cell, and `JOIN`
+has a floor.** The spec left the hint bar unstated and the first implementation drew a
+constant `TYPE`, which is false on three of the four function keys and outright
+misleading on `JOIN`: a Confirm labelled TYPE that leaves the screen and starts a join
+is the misleading-button defect this project keeps recording. It reads `TYPE` on a
+character cell **and on `SPACE`** (which types a character like any other), `SHIFT` on
+`SHIFT`, `#+=` on `#+=`, and `JOIN` on `JOIN`. Settings is the precedent for a label
+that varies within a screen; `WifiSettings` is the second instance and this is the
+third.
+
+And the *"8 to"* half of the bound above was never implemented. This keyboard is only
+ever reached for a **locked** network — an open one joins directly — so `JOIN` under
+eight characters cannot succeed: it would spend a radio round trip and a failure dialog
+to report a length the counter is already showing. The cell goes inert and the Confirm
+slot goes **empty**, which is this firmware's existing vocabulary for a button with no
+action (and is 36px wide, not zero) rather than a new one. One expression,
+`joinable()`, answers both the bar and the press, so they cannot drift into a cell that
+promises `JOIN` and ignores Confirm.
+
+`design/WifiPassword.dc.html` carries the rule; its rendered state does not move,
+because the cell it focuses is a character.
+
 **The input model already exists.** `declareSplitMovers` (`core/include/reader/app.h:397`)
 is what `ReaderScreen` and `PeekScreen` use: with it, `Up`/`Down` become
 `AltPrev`/`AltNext` and the side buttons become `Prev`/`Next`. That is exactly the
@@ -339,8 +361,18 @@ its `DELETE FILE…` slab** because the file is fine.
 | shape | when | slabs |
 |---|---|---|
 | **password rejected** | auth/handshake failure | `EDIT PASSWORD` (filled) · `TRY AGAIN` · `CANCEL` |
-| **network not found** | `NO_AP_FOUND` — out of range, or a stale scan result | `TRY AGAIN` · `CANCEL` |
+| **network not found** | the `NO_AP_FOUND` **family** — out of range, a stale scan result, or an AP whose security this device cannot meet | `TRY AGAIN` · `CANCEL` |
 | **couldn't finish** | associated, no address; everything else | `TRY AGAIN` · `CANCEL` |
+
+**AMENDED IN IMPLEMENTATION — `NO_AP_FOUND` IS FOUR CODES, NOT ONE.** This line said
+`NO_AP_FOUND` and the first implementation mapped 201 alone, so Espressif's 210, 211
+and 212 (`_W_COMPATIBLE_SECURITY`, `_IN_AUTHMODE_THRESHOLD`, `_IN_RSSI_THRESHOLD` —
+verified in `esp_wifi_types_generic.h:175-177`) fell through to **couldn't finish**,
+whose sentence says the network *took the password* — an association that never
+happened. A WPA3-only router told the reader its password had been accepted, on the
+screen whose three shapes exist so that cannot happen. 212 in particular means the AP
+was **heard** and refused as too weak, which is exactly what this shape's *"it may be
+out of range"* says.
 
 **`EDIT PASSWORD` IS ABSENT ON THE LATTER TWO, NOT INERT.** The password is not what
 went wrong. A slab that draws and does nothing is the works-only-sometimes trap this

@@ -37,6 +37,18 @@ class WifiPasswordScreen : public GridFocusScreen {
   // silently dropping characters, because a keyboard that swallows a keypress
   // is indistinguishable from one that missed it.
   static constexpr size_t kMaxPassphrase = 63;
+  // AND ITS FLOOR, from the same clause of 802.11 and spec 4.1b's own "8 to
+  // 63". This keyboard is only ever reached for a LOCKED network -- an open
+  // one joins directly -- so JOIN under eight characters cannot succeed: it
+  // would spend a radio round trip and a failure dialog to report a length
+  // the counter is already showing. The cell goes inert and the Confirm slot
+  // goes EMPTY, which is this firmware's existing vocabulary for a button
+  // with no action rather than a new one.
+  static constexpr size_t kMinPassphrase = 8;
+  // Whether JOIN would do anything right now. ONE SPELLING, asked by the hint
+  // bar and by the press -- two would be free to drift, and the drift is a
+  // cell that promises JOIN and ignores Confirm.
+  bool joinable() const { return entered_.size() >= kMinPassphrase; }
 
   explicit WifiPasswordScreen(std::string ssid);
 
@@ -80,6 +92,9 @@ class WifiPasswordScreen : public GridFocusScreen {
  private:
   // The 40 character cells of the showing layer, plus the four function keys.
   void rebuildCells();
+  // What the Confirm slot says, which is what pressing the focused cell
+  // does -- or nothing, when it does nothing.
+  std::string confirmLabel() const;
   // What pressing the focused cell does.
   Action activateCell();
 
