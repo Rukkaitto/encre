@@ -9,7 +9,7 @@ models; it works out which one it is at boot.
 
 <p align="center">
   <em>Page numbers count within the chapter. A whole-book count would mean
-  laying out every chapter before showing you the first page — about a minute of
+  laying out every chapter before showing you the first page, about a minute of
   work on a full-length novel.</em>
 </p>
 
@@ -20,7 +20,7 @@ models; it works out which one it is at boot.
 - [x] The book's own table of contents
 - [x] Peek at a chapter over the page you're on, before deciding to jump
 - [x] One button back to the furthest page you reached
-- [x] Five type sizes, three margins, seven line spacings, justified or ragged — with a live preview
+- [x] Five type sizes, three margins, seven line spacings, justified or ragged, all with a live preview
 - [x] Your book's cover on the sleep screen, in four shades of grey
 - [x] Reading position kept on the SD card, and not lost if you delete the book
 - [x] Book details, and marking a book finished
@@ -41,25 +41,25 @@ models; it works out which one it is at boot.
 <tr>
 <td><em>Home picks up where you left off.</em></td>
 <td><em>Folders, and how far you are into each book.</em></td>
-<td><em>Asleep, showing the cover and where you are. Covers come from the book: baseline JPEG and 8-bit PNG work, while progressive JPEG and interlaced or paletted PNG are refused rather than guessed at, and those books show the card alone. The cover can also be shown on its own, or left off.</em></td>
+<td><em>Asleep, showing the cover and your place in the book. Covers come from the EPUB: baseline JPEG and 8-bit PNG work, and a book whose cover is a progressive JPEG, or an interlaced or paletted PNG, shows the card alone. You can also show the cover by itself, or turn it off.</em></td>
 </tr>
 </table>
 
 ## Before you flash
 
-**Back up the stock firmware first.** The device is recoverable — there is no
-secure boot and no flash encryption, so download mode is always available — but
-a backup is the difference between a bad afternoon and a dead reader. It is a
+**Back up the stock firmware first.** The device is recoverable: there is no
+secure boot and no flash encryption, so download mode is always available. But a
+backup is the difference between a bad afternoon and a dead reader. It is a
 16 MB read and it takes a couple of minutes.
 
 Flashing third-party firmware is at your own risk. This was written with
 [Claude Code](https://claude.com/claude-code), directed and reviewed by its
 owner, and the checks behind it are real: unit tests, pixel-exact reference
 renders at both panel sizes, and a comparison of every screen against its design
-drawing. They are also not everything — the layer that talks to the hardware has
+drawing. They are also not everything. The layer that talks to the hardware has
 no automated tests, and this project has more than once shipped something that
 passed every desktop check and was wrong on the actual panel. It has been used
-daily on an X3. Expect to find things.
+daily on an X3, but expect to find things.
 
 ## Install
 
@@ -100,7 +100,7 @@ goes wrong, `write-flash 0 xteink-stock-backup.bin` puts the original back.
 
 **A screen that never changes does not mean the firmware failed to start.**
 E-ink holds its last image with no power at all, and nothing wipes the screen at
-boot — so the stock firmware's last screen can sit there looking frozen while
+boot, so the stock firmware's last screen can sit there looking frozen while
 Encre is running perfectly well behind it. Press a button before concluding
 anything.
 
@@ -119,7 +119,7 @@ partitions.
 ## Putting books on it
 
 The SD card can be FAT or exFAT. Books go in a `/books` folder as EPUB files,
-loose or in subfolders — both are listed, and subfolders can go as deep as you
+loose or in subfolders. Both are listed, and subfolders can go as deep as you
 like. The folder is created for you on the first boot that doesn't find one.
 
 Encre keeps a few things of its own in `/.reader`: your settings, one small file
@@ -134,8 +134,8 @@ defaults and leaves your file exactly as you typed it.
 ## About the X4
 
 Encre is developed and tested on the X3. One binary drives both models and the
-X4 is supported, but nobody has run it on an X4 — if the screen comes out
-upside down, that is why, and it is worth an issue.
+X4 is supported, but nobody has run it on an X4. If the screen comes out upside
+down, that is why, and it is worth an issue.
 
 ## If something goes wrong
 
@@ -157,12 +157,12 @@ The unticked boxes above are what's planned, roughly in the order they matter.
 
 ## Contributing
 
-Pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for how to
+Pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to
 build it, run the tests, and the few rules that are easy to trip over.
 
 ## Licence
 
-Encre is MIT licensed — see [LICENSE](LICENSE).
+Encre is MIT licensed. See [LICENSE](LICENSE).
 
 It builds on work under other licences:
 [freeink-sdk](https://github.com/Free-Ink/freeink-sdk) (MIT) for the display,

@@ -1,6 +1,6 @@
 # Contributing
 
-Pull requests are welcome. Read this first — there are four rules a PR will
+Pull requests are welcome. Read this first: there are four rules a PR will
 bounce on, and one ceiling worth knowing about before you spend an afternoon.
 
 **`CLAUDE.md` is the real reference.** It is the project's working memory: what
@@ -40,13 +40,13 @@ PNG at exact panel size, which is where UI work actually happens:
 Firmware is `make firmware`. PlatformIO installs outside `PATH`, so the Makefile
 invokes it through `~/.platformio/penv/bin/python -m platformio`; override with
 `make firmware PIO=/path/to/pio`. If it fails with
-`Failed to install Python dependencies into penv`, that is transient — retry it,
+`Failed to install Python dependencies into penv`, that is transient. Retry it,
 and don't run two builds at once.
 
 ## The four rules
 
 **1. A UI change goes into the design HTML first, then the implementation.**
-Never only in code, and not the other way round — including when the design
+Never only in code, and not the other way round, including when the design
 itself is what's wrong: fix the board in `design/`, then follow it. `make
 compare` is what keeps the two honest, and changing only the implementation
 silently invalidates it.
@@ -68,17 +68,17 @@ make conventions   # run the same check by hand
 ```
 
 Subjects are [Conventional Commits](https://www.conventionalcommits.org/) with
-the eleven standard types and a free-form scope — `feat(reader):`, `fix(peek):`,
+the eleven standard types and a free-form scope: `feat(reader):`, `fix(peek):`,
 `docs(readme):`. Branch names take git-flow's vocabulary plus `claude/`:
 `feature/`, `bugfix/`, `chore/`, `docs/` and so on, then a lowercase slug.
-**Your PR title matters too** — it becomes the commit subject when the PR is
+**Your PR title matters too**: it becomes the commit subject when the PR is
 squash-merged, so it has to pass the same check.
 
 ## The ceiling
 
 Anything that touches the panel needs evidence from a real device, and only the
-owner can produce it — flashing is not something an automated agent here is
-allowed to do. `shell/`, the layer that talks to the hardware, has no automated
+owner can produce it, because flashing is not something an automated agent here
+is allowed to do. `shell/`, the layer that talks to the hardware, has no automated
 tests at all, and several of this project's worst bugs have lived there: a
 screen effect that passed every desktop test and smeared diagonally on glass, an
 overlay painted onto white, a function that could only call itself.
@@ -86,7 +86,7 @@ overlay painted onto white, a function that could only call itself.
 So a change to rendering, the paint sequence, storage or power can get as far as
 "passes everything on the desktop" and no further without someone holding an
 X3. `docs/on-device-smoke-checklist.md` is what that verification looks like. It
-isn't a reason not to send the PR — just don't be surprised if it waits on
+isn't a reason not to send the PR. Just don't be surprised if it waits on
 hardware.
 
 ## Finding your way around
@@ -94,15 +94,15 @@ hardware.
 | Path | What it is |
 |---|---|
 | `core/` | Portable C++20. Framebuffer, fonts, text, icons, layout, view models, themes. No Arduino, ESP or host-OS dependency. |
-| `sim/` | Desktop simulator — renders a screen to PNG at exact panel size. |
+| `sim/` | Desktop simulator. Renders a screen to PNG at exact panel size. |
 | `shell/` | The Arduino layer: device detection, display bring-up, the paint sequence. The only place that touches `freeink-sdk`. |
 | `tools/` | Asset generators, the design comparison tool, the device log readers. |
-| `design/` | `*.dc.html` design boards — **the source of truth for the UI**. |
+| `design/` | `*.dc.html` design boards. **The source of truth for the UI.** |
 | `docs/` | The spec, the roadmap, the smoke checklist, the release procedure. |
 | `freeink-sdk/` | Submodule. MIT drivers for display, input, SD and battery. Never edited here. |
 
 [Graft](https://github.com/trailhq/Graft) indexes the repo for coding agents.
-The graph is a local cache like `build/` — gitignored and regenerable; what's
+The graph is a local cache like `build/`: gitignored and regenerable. What's
 committed is the wiring in `.claude/`.
 
 ```bash
@@ -116,7 +116,7 @@ function is declared in a header and defined in a `.cpp`, which makes the name
 ambiguous, and graft drops an ambiguous cross-file edge rather than guessing.
 Same-file edges are fine. Use `graft grep`, which is exhaustive and groups hits
 by the enclosing symbol. `graft build --lsp` is the documented fix for exactly
-this and doesn't help — the ambiguity rule sits above the LSP layer.
+this and doesn't help, because the ambiguity rule sits above the LSP layer.
 
 It says so rather than reporting a confident zero, which is the only reason it's
 worth having. The rest works well: `graft ask "<question>" --source` locates a
