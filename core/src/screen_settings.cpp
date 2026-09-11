@@ -29,12 +29,23 @@ namespace {
 // the same reason the section above is READING rather than TYPOGRAPHY: a section
 // must not repeat the word of the row directly under it.
 //
-// It also had a CONNECTIONS section with a Wi-Fi row, and losing that is what
-// brought the list back inside the panel in the first place: V1 is card-transfer
-// only, Wi-Fi having been cut as too big. Nothing here has to change when the list
-// overflows again -- renderSettings reads `totalRows > rows` and draws the rail and
-// takes its gutter only then.
-constexpr std::array<SettingsScreen::Item, 9> kItems{{
+// AND CONNECTIONS IS BACK, WHICH IS WHAT MAKES THE FLOW REACHABLE AT ALL. This
+// paragraph read "it also had a CONNECTIONS section with a Wi-Fi row, and losing
+// that is what brought the list back inside the panel" -- true of V1, where Wi-Fi
+// was cut as too big, and false the moment V1.1's connect flow landed. The six
+// Wi-Fi screens shipped with a board saying CONNECTIONS IS BACK and this table
+// still at nine, so nothing on the device could reach WifiSettings: every screen
+// built, every golden passed, and the feature had no door. `make compare` could
+// not see it either -- it renders the BOARD beside the firmware, and the board
+// was right; what it measured was Settings drifting AWAY from its board, 1.91%
+// to 2.53%, in the one direction CLAUDE.md says silently invalidates the check.
+//
+// ELEVEN ITEMS, AND IT STILL DOES NOT SCROLL -- which is the thing to check
+// rather than assume, because losing this section is what stopped it scrolling.
+// Twelve fit, so there is no rail and no 14px gutter, and rows still run to the
+// panel edge. Nothing here has to change when it overflows again: renderSettings
+// reads `totalRows > rows` and takes the gutter only then.
+constexpr std::array<SettingsScreen::Item, 11> kItems{{
     {"READING", SettingsScreen::Field::None, true, false},
     {"Typography", SettingsScreen::Field::Typography, false, true},
     {"SLEEP SCREEN", SettingsScreen::Field::None, true, false},
@@ -46,6 +57,12 @@ constexpr std::array<SettingsScreen::Item, 9> kItems{{
     {"Sleep after", SettingsScreen::Field::SleepAfter, false, true},
     {"Full refresh", SettingsScreen::Field::FullRefresh, false, true},
     {"Refresh on screen change", SettingsScreen::Field::OnTransition, false, true},
+    {"CONNECTIONS", SettingsScreen::Field::None, true, false},
+    // A CHEVRON AND NO VALUE, which is `Typography`'s rule two sections up: a row
+    // states a quantity or discloses a screen, never both. The tempting
+    // `Wi-Fi . ON DEMAND` is exactly the shape that forbids, and the state it
+    // would state is the one WifiSettings' own header band already carries.
+    {"Wi-Fi", SettingsScreen::Field::Wifi, false, true},
 }};
 
 // The values CHANGE cycles through, and they wrap: this is one button, so there is
@@ -96,6 +113,24 @@ bool showsACover(SleepShows s) { return s != SleepShows::Details; }
 
 }  // namespace
 
+bool SettingsScreen::disclosedScreen(Field f, ScreenId& out) {
+  switch (f) {
+    case Field::Typography: out = ScreenId::Typography; return true;
+    case Field::Wifi: out = ScreenId::WifiSettings; return true;
+    // Named rather than swept into a `default:`, so -Wswitch is still the
+    // reminder that a new field has to answer this question -- which is the
+    // whole reason the mapping is a switch and not a table lookup.
+    case Field::None:
+    case Field::SleepShows:
+    case Field::CoverFit:
+    case Field::SleepAfter:
+    case Field::FullRefresh:
+    case Field::OnTransition:
+      return false;
+  }
+  return false;
+}
+
 SettingsScreen::SettingsScreen(const Settings& initial, SettingsSink* sink)
     : FocusScreen(static_cast<int>(kItems.size()), 0), settings_(initial), sink_(sink) {
   // The first focusable row, not row 0: row 0 is the READING header. That lands on
@@ -134,9 +169,10 @@ int SettingsScreen::firstFocusable() const {
 
 void SettingsScreen::setMetrics(int listH, int rowH, int headerH) {
   // Counted from the TOP of the list, and that is the conservative end on purpose.
-  // The top window carries the most headers -- all THREE sections begin within the
-  // first six items, so no window further down can hold more than the top one and
-  // every one of them therefore fits at least as many items. A count that varied with scroll position would make the rail's
+  // The top window carries the most headers -- three of the FOUR sections begin
+  // within the first six items and the fourth is last, so no window further down
+  // can hold more than the top one and every one of them therefore fits at least
+  // as many items. A count that varied with scroll position would make the rail's
   // proportion move as the user scrolled, which reads as the list changing length.
   int used = 0, n = 0;
   for (const Item& it : kItems) {
@@ -192,11 +228,12 @@ Action SettingsScreen::cycleFocused() {
       break;
     }
     case Field::Typography:
-      // Handled by onGesture BEFORE we get here -- this row discloses rather than
-      // edits, so there is nothing to cycle and nothing to commit. Listed rather
+    case Field::Wifi:
+      // Handled by onGesture BEFORE we get here -- these rows disclose rather than
+      // edit, so there is nothing to cycle and nothing to commit. Listed rather
       // than swept into a `default:`: -Wswitch naming a field nobody handled is the
       // point of this switch, and a `default:` would throw that away the day a
-      // fifth field arrives.
+      // sixth field arrives.
       return Action::none();
     case Field::None:
       return Action::none();
@@ -217,14 +254,17 @@ Action SettingsScreen::onGesture(const GestureEvent& g) {
     // is what moveFocus is for.
     case Gesture::Next: return moveFocus(+1);
     case Gesture::Prev: return moveFocus(-1);
-    // ONE ROW HERE OPENS A SCREEN AND THE REST EDIT IN PLACE, so Activate answers
+    // TWO ROWS HERE OPEN A SCREEN AND THE REST EDIT IN PLACE, so Activate answers
     // the push before it can reach cycleFocused -- which has nothing to cycle for
-    // that row and says so.
+    // those rows and says so. WHICH screen comes from disclosedScreen, the same
+    // call the chevron and the Confirm hint make, so a row cannot draw one and do
+    // the other.
     case Gesture::Activate: {
       const int f = focus();
+      ScreenId opens = ScreenId::Settings;
       if (f >= 0 && f < static_cast<int>(kItems.size()) &&
-          kItems[static_cast<size_t>(f)].field == Field::Typography)
-        return Action::push(ScreenId::Typography);
+          disclosedScreen(kItems[static_cast<size_t>(f)].field, opens))
+        return Action::push(opens);
       return cycleFocused();
     }
     case Gesture::Back: return Action::pop();
@@ -253,13 +293,15 @@ void SettingsScreen::syncVm() {
     row.isHeader = it.isHeader;
     row.focusable = focusable(at);
     if (!it.isHeader) {
-      row.discloses = it.field == Field::Typography;
+      ScreenId to = ScreenId::Settings;
+      row.discloses = disclosedScreen(it.field, to);
       switch (it.field) {
         // A DISCLOSING ROW HAS NO VALUE. Home's menu rows state the rule -- a row
         // states a quantity or discloses a screen, never both -- and summarising
         // four typography settings into the right slot would break it and would not
         // fit. The chevron is the whole content of that slot.
-        case Field::Typography: break;
+        case Field::Typography:
+        case Field::Wifi: break;
         case Field::SleepShows: row.value = showsLabel(settings_.sleepShows); break;
         case Field::CoverFit: row.value = fitLabel(settings_.coverFit); break;
         case Field::SleepAfter: row.value = sleepLabel(settings_.sleepAfterMs); break;
@@ -288,8 +330,9 @@ void SettingsScreen::syncVm() {
   // names. The other three never move, because Back, Up and Down mean the same
   // thing on every row.
   const int f = focus();
+  ScreenId to = ScreenId::Settings;
   const bool opens = f >= 0 && f < static_cast<int>(kItems.size()) &&
-                     kItems[static_cast<size_t>(f)].field == Field::Typography;
+                     disclosedScreen(kItems[static_cast<size_t>(f)].field, to);
   vm_.hints = {"BACK", opens ? "OPEN" : "CHANGE", "UP", "DOWN"};
   vm_.holds = {false, false, false, false};
   declareHints(vm_.holds);

@@ -95,12 +95,18 @@ TEST_CASE("focus skips headers in both directions") {
   CHECK(focusedLabel(scr) == "Full refresh");
   scr.onEvent(kDown);
   CHECK(focusedLabel(scr) == "Refresh on screen change");
+  // Past the CONNECTIONS header, which the gate steps over exactly as it steps
+  // over the three above it.
+  scr.onEvent(kDown);
+  CHECK(focusedLabel(scr) == "Wi-Fi");
   // The last row of the list, so DOWN wraps to the first focusable row. (It used
   // to stop here, which made Settings the one list in the firmware that did not
   // roll over.)
   scr.onEvent(kDown);
   CHECK(focusedLabel(scr) == "Typography");
 
+  scr.onEvent(kUp);
+  CHECK(focusedLabel(scr) == "Wi-Fi");
   scr.onEvent(kUp);
   CHECK(focusedLabel(scr) == "Refresh on screen change");
   scr.onEvent(kUp);
@@ -116,7 +122,7 @@ TEST_CASE("focus skips headers in both directions") {
   // And UP from the first focusable row wraps to the last rather than climbing
   // into the READING header above it.
   scr.onEvent(kUp);
-  CHECK(focusedLabel(scr) == "Refresh on screen change");
+  CHECK(focusedLabel(scr) == "Wi-Fi");
 }
 
 TEST_CASE("every move on this list changes something, so every move repaints") {
@@ -243,12 +249,12 @@ TEST_CASE("setFocus CLAMPS an out-of-range index rather than refusing it") {
   // setFocus(999) was refused -- and it passed for an ACCIDENTAL reason: `set()`
   // clamps (a record naming row 400 of a three-row list means "as far down as you
   // can go"), and the last item then happened to be the inert `Sleep screen`, so
-  // the clamp landed somewhere the gate refused. The last item is `Refresh on
-  // screen change` now, which is focusable, so the clamp lands and the restore
-  // succeeds -- which is what `set()` has always been specified to do.
+  // the clamp landed somewhere the gate refused. The last item is `Wi-Fi` now,
+  // which is focusable, so the clamp lands and the restore succeeds -- which is
+  // what `set()` has always been specified to do.
   SettingsScreen scr = sized(Settings{}, nullptr);
   CHECK(scr.setFocus(999));
-  CHECK(focusedLabel(scr) == "Refresh on screen change");
+  CHECK(focusedLabel(scr) == "Wi-Fi");
 }
 
 TEST_CASE("setFocus refuses Cover fit while it is inert, and accepts it when it is not") {
@@ -295,12 +301,12 @@ TEST_CASE("the list FITS the panel, so no rail is drawn") {
   // renderSettings draws the rail and takes its gutter off `totalRows > rows`, so
   // the day this flips, the screen starts scrolling without anything else changing.
   //
-  // setMetrics counts from the TOP, which is the conservative end -- and there are
-  // THREE headers in the first six items now, so the window it counts is the
-  // tallest one the list has. `rows.size() == totalRows` is what says every item
-  // still fits.
+  // setMetrics counts from the TOP, which is the conservative end -- three of the
+  // FOUR headers are in the first six items and the fourth is last, so the window
+  // it counts is the tallest one the list has. `rows.size() == totalRows` is what
+  // says every item still fits.
   SettingsScreen scr = sized(Settings{}, nullptr);
-  CHECK(scr.vm().totalRows == 9);
+  CHECK(scr.vm().totalRows == 11);
   CHECK(static_cast<int>(scr.vm().rows.size()) == scr.vm().totalRows);
 }
 
@@ -313,7 +319,7 @@ TEST_CASE("section headers are rows in the list, not decoration around it") {
       CHECK(row.value.empty());
       CHECK_FALSE(row.focusable);
     }
-  CHECK(headers == 3);  // READING, SLEEP SCREEN and DEVICE -- no CONNECTIONS
+  CHECK(headers == 4);  // READING, SLEEP SCREEN, DEVICE and CONNECTIONS
 }
 
 TEST_CASE("with the defaults, no row is drawn inert") {
@@ -353,7 +359,7 @@ TEST_CASE("Settings' READING row opens the Typography panel") {
   // displayed the values are redundant.
   SettingsScreen scr = sized(Settings{}, nullptr);
 
-  REQUIRE(scr.vm().rows.size() == 9);
+  REQUIRE(scr.vm().rows.size() == 11);
   CHECK(scr.vm().rows[0].label == "READING");
   CHECK(scr.vm().rows[0].isHeader);
   CHECK(scr.vm().rows[1].label == "Typography");
@@ -371,6 +377,46 @@ TEST_CASE("Settings' READING row opens the Typography panel") {
   const reader::Action a = scr.onEvent(kChange);
   CHECK(a.kind == reader::Action::Kind::Push);
   CHECK(a.target == reader::ScreenId::Typography);
+}
+
+TEST_CASE("Settings' CONNECTIONS row opens the Wi-Fi screen") {
+  // THE DOOR TO THE WHOLE V1.1 FLOW, and it shipped missing. The six Wi-Fi
+  // screens landed with design/Settings.dc.html saying CONNECTIONS IS BACK and
+  // kItems still at nine, so nothing on the device could reach WifiSettings --
+  // every screen built, every golden passed, and the feature was unreachable.
+  // Nothing in the suite could see it: a screen nobody pushes is a screen nobody
+  // tests the pushing of, and `make compare` renders the BOARD beside the
+  // firmware, so what it measured was Settings drifting away from a board that
+  // was already right.
+  //
+  // Asserted through the ROW rather than through kItems, because what was wrong
+  // was the table, and a test that read the table would have agreed with it.
+  SettingsScreen scr = sized(Settings{}, nullptr);
+
+  REQUIRE(scr.vm().rows.size() == 11);
+  CHECK(scr.vm().rows[9].label == "CONNECTIONS");
+  CHECK(scr.vm().rows[9].isHeader);
+  CHECK(scr.vm().rows[10].label == "Wi-Fi");
+  // A CHEVRON AND NO VALUE, `Typography`'s own rule: a row states a quantity or
+  // discloses a screen, never both. `Wi-Fi . ON DEMAND` is the tempting shape
+  // that forbids, and WifiSettings' own header band already carries that state.
+  CHECK(scr.vm().rows[10].discloses);
+  CHECK(scr.vm().rows[10].value.empty());
+  CHECK(scr.vm().rows[10].focusable);
+
+  // It is the LAST row, so DOWN from the bottom of DEVICE reaches it and DOWN
+  // again wraps -- the walk above pins that; here it only has to be reachable.
+  REQUIRE(scr.setFocus(10));
+  REQUIRE(focusedLabel(scr) == "Wi-Fi");
+
+  // THE HINT SAYS OPEN AND THE PRESS PUSHES, and both come from
+  // disclosedScreen -- one spelling, so a row cannot promise OPEN and then cycle
+  // a value it has not got. That is the drifting-condition defect this project
+  // has shipped twice, both times as a dead button.
+  CHECK(scr.vm().hints[1] == "OPEN");
+  const reader::Action a = scr.onEvent(kChange);
+  CHECK(a.kind == reader::Action::Kind::Push);
+  CHECK(a.target == reader::ScreenId::WifiSettings);
 }
 
 TEST_CASE("the five old typography rows are gone") {
@@ -442,7 +488,7 @@ TEST_CASE("CHANGE on a device row still cycles, and OPEN does not") {
 
 TEST_CASE("the SLEEP SCREEN section is drawn where the board puts it") {
   SettingsScreen scr = sized(Settings{}, nullptr);
-  REQUIRE(scr.vm().rows.size() == 9);
+  REQUIRE(scr.vm().rows.size() == 11);
   CHECK(scr.vm().rows[2].label == "SLEEP SCREEN");
   CHECK(scr.vm().rows[2].isHeader);
   CHECK(scr.vm().rows[3].label == "Shows");
