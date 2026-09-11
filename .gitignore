@@ -1,6 +1,9 @@
 build/
 # The anti-alias A/B's second build tree: same sources, ENCRE_AA_THRESHOLDS_4BIT on.
 build-aa/
+# The AddressSanitizer tree. Same reason as build-aa/, and it was TRACKED --
+# 412 files of objects, .dSYM bundles and CMake caches carrying absolute paths.
+build-asan/
 .pio/
 .cache/
 __pycache__/
