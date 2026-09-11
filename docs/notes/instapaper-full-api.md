@@ -9,12 +9,15 @@ NOT let a browser page do the exchange, because the exchange is an OAuth 1.0a
 signed request and signing needs the consumer secret. Something we control and
 that holds the secret must perform it.**
 
-**The design survives that; one sentence of copy does not.** The device holding
-the secret, taking the password by POST from the page it serves and signing the
-exchange itself *is* the flow the boards draw and the flow #110 already scopes —
-but `InstapaperConnect.dc.html`'s `PASSWORD STAYS IN THE BROWSER.` is false, and
-it is on a board, so it reaches glass. §6 has the whole of it, including the
-sentence this project wrote correctly in 2026-08 and then deleted.
+**And that changed the design the same day.** Only something holding the secret
+can perform the exchange, so it is the device — which the boards already assumed.
+What the boards also assumed, and what turned out to be buying nothing, is the
+*route the password takes to get there*: a page the device serves, on the
+strength of `InstapaperConnect.dc.html`'s `PASSWORD STAYS IN THE BROWSER.` With
+that sentence false, the web page's whole argument goes with it, and **V1.1 signs
+in on the Wi-Fi keyboard instead** — which is not a new mechanism, and not even a
+new promise, because joining Wi-Fi already types a password on it. §6 has the
+whole of it.
 
 Two further findings outrank the credentials question:
 
@@ -390,22 +393,75 @@ repo's own precedent is one board over: `design/WebSetup.dc.html` already posts 
 **Wi-Fi password** to a page the device serves, and claims nothing about where it
 stays.
 
-### The architecture is right; one sentence of copy is not
+### The exchange is the device's, and the setup page was buying nothing
 
-This is the reassuring half, and it is worth stating before the rest. The device
-holds the consumer secret, serves `/setup`, takes the password by POST — which is
-#110's "one credentials POST", the mechanism already scoped — signs the xAuth
-call, keeps the token in NVS and discards the password. That flow is the one
-Instapaper offers and the one the boards draw. **Nothing needs rebuilding.**
+Half the design survives unchanged: only something that holds the consumer secret
+can perform the exchange, so the device performs it, keeps the token in NVS and
+discards the password — which is what the boards assumed and what spec `ad0e70e`
+said.
 
-What is false is `PASSWORD STAYS IN THE BROWSER.` The password leaves the browser
-the moment the form is submitted; the device is what it is submitted *to*. That
-string is on a board, so it reaches glass, and it is the same false-claim shape
-this project already refuses for an unread gauge (`-1`, never `0%`) and for a
-badge promising a wake charging cannot deliver. **The replacement is an owner's
-decision, not this note's** — `ArticlesSetup`'s own line is already true and
-already says the thing that matters to a reader ("nothing to type on the
-device").
+**The other half does not.** `PASSWORD STAYS IN THE BROWSER.` is false — the
+password leaves the browser the moment the form is submitted, and the device is
+what it is submitted *to*. That is the same false-claim shape this project
+already refuses for an unread gauge (`-1`, never `0%`) and for a badge promising
+a wake charging cannot deliver, and it is on a board, so it reaches glass.
+
+**And it was the whole argument for the setup page.** A page the device serves
+exists here to keep the credential off the six-button keyboard; with the safety
+claim gone, what remains is convenience, and it is bought with an HTTP server in
+firmware (#110), a plain-HTTP hop across the LAN, and static RAM beside a TLS
+client whose heap #112 already flags as unmeasured. **So V1.1 signs in on the
+keyboard**, and the four facts that decide it are below.
+
+### Why the keyboard wins, and what it costs
+
+**1. The device already has one, shipped and on glass.** `WifiPasswordScreen`
+(`04cd890`, V1.1) is a 46-cell `GridFocus` grid over three layers whose union is
+all 95 printable ASCII, with a caret, a one-shot shift, a latching `#+=` and a
+held Back to leave. The HTTP server is unwritten.
+
+**2. The promise was already broken one screen earlier.** In V1.1 the only route
+onto Wi-Fi is `WifiPassword.dc.html` — `SetupHotspot.dc.html`, the no-typing
+alternative, is parked in V2 — so a user reaching Instapaper setup **has already
+typed a password on this keyboard**. "Nothing to type on the device" is not a
+promise this device keeps.
+
+**3. Sign-in is #110's only V1.1 consumer.** Its own body parks the upload page,
+the streaming write, `Transfer`, `WebUpload` and the AP in V2. Take sign-in away
+and the card has nothing left to serve in V1.1.
+
+**4. The cost is one-time and measured rather than argued.** Simulated over the
+shipped layout — both grid axes wrap, and the screen declares no auto-repeat, so
+every move is a discrete press and a ~520 ms repaint:
+
+| | presses | waveform |
+|---|--:|--:|
+| `lucas@example.com` | 92 | ~48 s |
+| a 12-character mixed password | 56 | ~29 s |
+| **both fields** | **~150** | **~78 s** |
+
+A floor: no typos, no backtracking, optimal navigation. Against it, the web flow
+still needs the WPA2 passphrase typed on the same keyboard first, plus a second
+device and a URL typed into that.
+
+**What has to change, and it is not the keyboard.** `WifiPasswordScreen` is
+Wi-Fi-shaped — an SSID in the band, a `JOIN` cell, `Action::wifi()`, and 802.11's
+own 8-to-63 bounds — so this is a text-entry extraction, which is *"the second
+copy is the extraction point"* arriving on schedule rather than five copies late.
+Three traps in it:
+
+- **`kMinPassphrase = 8` must not come along.** *"Passwords are not required, and
+  many users do not have one… you cannot treat an empty password as a user
+  error."* That floor blanks the Confirm slot, which is this firmware's
+  vocabulary for a button with no action — a dead button on a legal state.
+- **Two fields, not one**, and the docs bind their labels: *"Email or username"*,
+  never "Email" alone, because many usernames are not addresses; and for the
+  password, *"clarify that it's only required if the user actually has one"* —
+  Instapaper's own form says `Password, if you have one.`
+- **`SHOWN WHILE TYPING`** is right for a passphrase you own and a different
+  question for an account password on a train. `WifiPasswordViewModel::visibility`
+  is already a string, so a masked mode is cheap; whether to have one is a design
+  call, not a derivation.
 
 ### Whatever holds the consumer secret can be extracted
 
@@ -424,16 +480,21 @@ There is no fourth option, and each of the three costs something:
   nobody but the developer. Enough to build and test the whole feature; not a
   release.
 
-### The password crosses the LAN in the clear
+### The setup page would have put the password on the LAN in the clear
 
 `InstapaperConnect.dc.html` shows `http://192.168.1.42/setup` and
 `SetupHotspot.dc.html` shows `http://192.168.4.1` — plain HTTP, which is the only
 practical choice for a device with no certificate anyone's phone will trust. So
-the user's Instapaper password travels the local network unencrypted, against a
-Terms clause that asks for *"reasonable efforts to prevent passwords from being
-compromised"*. The AP-mode flow narrows the exposure to a network the device
-itself creates; the joined-network flow does not. **Not a blocker, and not
-something to discover during #110.**
+that flow sends the user's Instapaper password across the local network
+unencrypted, against a Terms clause asking for *"reasonable efforts to prevent
+passwords from being compromised"*.
+
+It is recorded here rather than dropped with the decision, for two reasons. It is
+the sharpest form of the point above — the page was **worse** than the keyboard
+on the axis it was chosen for, not merely no better — and **it comes back with the
+upload page**, which is still V2 and still posts to a device-served form over the
+same plain HTTP. Nothing typed into `WebSetup.dc.html` is an account credential
+today; the day one is, this is the finding.
 
 ### What it changes, card by card
 
@@ -447,9 +508,14 @@ something to discover during #110.**
 - **#112, #111, #113 are unaffected by that.** `bookmarks/list`,
   `bookmarks/archive` and `bookmarks/star` are plain Full API calls with no second
   key and no Premium requirement.
-- **An OAuth 1.0a HMAC-SHA1 signer is a card nobody has filed.** It is not
-  #110's — that card is one page and one POST — and it is not one screen's
-  either: the exchange needs it and so does every Full API call after it, so it
+- **#110 (the HTTP server) loses its only V1.1 consumer** and goes back to V2
+  with the upload work it was split out of. Its scope was never wrong; its
+  *reason* was, and the reason was the sentence on the board.
+- **#111 becomes a keyboard flow**, and `InstapaperConnect.dc.html` — the panel
+  that shows a URL and waits — has nothing left to draw.
+  `ArticlesSetup.dc.html`'s `SIGN-IN HAPPENS IN YOUR BROWSER` goes with it.
+- **An OAuth 1.0a HMAC-SHA1 signer is a card nobody has filed.** It is not one
+  screen's: the exchange needs it and so does every Full API call after it, so it
   belongs to the client module, beside the injected HTTP transport spec §8
   already describes. Instapaper's own advice is to use a library. On a target
   with no exceptions and a 42 KB reading floor, sizing that is planning work, not
