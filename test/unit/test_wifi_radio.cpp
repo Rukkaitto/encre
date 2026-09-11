@@ -24,11 +24,28 @@ ScanResult ap(std::string ssid, int rssi, bool locked = true) {
 
 // ------------------------------------------------------------ reason mapping
 
-TEST_CASE("only NO_AP_FOUND means the network was not there") {
-  // The one shape whose board drops the EDIT PASSWORD slab, so the one code
-  // that must not be reached by accident.
-  CHECK(wifiFailureFor(201) == JoinFailure::NotFound);
-  for (const int other : {2, 3, 15, 16, 23, 202, 204, 205, 0, 99, -1}) {
+TEST_CASE("the whole NO_AP_FOUND FAMILY means the network was not there") {
+  // The one shape whose board drops the EDIT PASSWORD slab, so the codes that
+  // must not be reached by accident -- and the codes that must not be MISSED,
+  // which is what this case was blind to.
+  //
+  // IT ASSERTED "only NO_AP_FOUND" AND CHECKED ONE OF FOUR. Espressif split
+  // the family at 210-212 and those three fell through to Incomplete, whose
+  // sentence says the network "took the password but never finished
+  // connecting" -- an association that never happened. A WPA3-only router
+  // (210) told the reader it had accepted their password, on the one screen
+  // whose three copy shapes exist so that cannot happen.
+  //
+  // The codes are verified against the installed header rather than
+  // remembered: esp_wifi_types_generic.h:175-177.
+  for (const int found : {201, 210, 211, 212}) {
+    CAPTURE(found);
+    CHECK(wifiFailureFor(found) == JoinFailure::NotFound);
+  }
+  // 205 and 209 are the NEIGHBOURS, and they are in the exclusion list for
+  // that reason: a fix that routed "anything in the 2xx range" to NotFound
+  // would pass the loop above and fail here.
+  for (const int other : {2, 3, 15, 16, 23, 202, 204, 205, 209, 213, 0, 99, -1}) {
     CAPTURE(other);
     CHECK(wifiFailureFor(other) != JoinFailure::NotFound);
   }
@@ -49,7 +66,7 @@ TEST_CASE("an unknown code degrades into the vaguer TRUE sentence") {
   // "The connection didn't finish" is true of any failure past association and
   // claims nothing specific. Routing an unrecognised code into one of the
   // other two would assert a cause nobody established.
-  for (const int reason : {0, 1, 5, 8, 39, 200, 203, 205, 1000, -7}) {
+  for (const int reason : {0, 1, 5, 8, 39, 200, 203, 205, 209, 213, 1000, -7}) {
     CAPTURE(reason);
     CHECK(wifiFailureFor(reason) == JoinFailure::Incomplete);
   }

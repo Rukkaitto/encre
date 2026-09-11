@@ -18,15 +18,43 @@ constexpr int kIe8021xAuthFailed = 23;     // WIFI_REASON_802_1X_AUTH_FAILED
 constexpr int kNoApFound = 201;            // WIFI_REASON_NO_AP_FOUND
 constexpr int kAuthFail = 202;             // WIFI_REASON_AUTH_FAIL
 constexpr int kHandshakeTimeout = 204;     // WIFI_REASON_HANDSHAKE_TIMEOUT
+// THE REST OF THE NO_AP_FOUND FAMILY, and this table shipped without them.
+// Espressif split "no AP found" into four codes and only the first was here,
+// so all three of these fell through `default:` to Incomplete -- whose
+// sentence says the network "took the password but never finished
+// connecting", asserting an association that never happened. A WPA3-only
+// router (210) told the reader it had accepted their password.
+//
+// Verified against the installed header rather than remembered:
+// esp_wifi_types_generic.h:175-177.
+constexpr int kNoApCompatibleSecurity = 210;  // ..._NO_AP_FOUND_W_COMPATIBLE_SECURITY
+constexpr int kNoApAuthmodeThreshold = 211;   // ..._NO_AP_FOUND_IN_AUTHMODE_THRESHOLD
+constexpr int kNoApRssiThreshold = 212;       // ..._NO_AP_FOUND_IN_RSSI_THRESHOLD
 
 }  // namespace
 
 JoinFailure wifiFailureFor(int reason) {
   switch (reason) {
-    // THE AP WAS NOT THERE. The only code that means it, and the only one that
-    // must not offer to edit the password -- the password is not what went
-    // wrong.
+    // THE AP WAS NOT THERE. These are the codes that mean it, and the only
+    // ones that must not offer to edit the password -- the password is not
+    // what went wrong.
+    //
+    // THIS SAID "the only code that means it" AND NAMED ONE OF FOUR. Espressif
+    // split the family at 210-212, and those three reached `default:` and the
+    // Incomplete sentence -- which claims the network took the password. So a
+    // WPA3-only router, an AP below the configured authmode, and an AP below
+    // the RSSI threshold each told the reader their password had been
+    // accepted, on a screen whose three copy shapes exist precisely so that
+    // cannot happen. An absent claim beats a false one, and this was a false
+    // one.
+    //
+    // 212 (below the RSSI threshold) is the one worth reading twice: it means
+    // the AP was HEARD and refused as too weak, which is exactly what the
+    // NotFound sentence's "it may be out of range" says.
     case kNoApFound:
+    case kNoApCompatibleSecurity:
+    case kNoApAuthmodeThreshold:
+    case kNoApRssiThreshold:
       return JoinFailure::NotFound;
 
     // THE CREDENTIAL WAS REJECTED. A WPA2 AP that dislikes the passphrase
