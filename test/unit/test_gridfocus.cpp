@@ -13,6 +13,16 @@ using namespace reader;
 // part and is why the widths are per row rather than one number.
 static GridFocus keyboard() { return GridFocus({10, 10, 10, 10, 4}); }
 
+// A GRID WHOSE NARROW ROW IS IN THE MIDDLE, and the reason it exists: the
+// keyboard's only narrow row is the LAST, where Focus's flat clamp
+// coincidentally gives the same answer as a per-row one. Every assertion above
+// therefore passes with the per-row clamp removed entirely, or replaced by a
+// clamp into row 0's width -- both survive the whole suite. gridfocus.h claims
+// "THE RAGGED ROW IS NOT A SPECIAL CASE ... the arithmetic that clamps a column
+// into a narrow row is the same arithmetic that does nothing in a wide one",
+// and nothing was checking the half that does something.
+static GridFocus middleNarrow() { return GridFocus({10, 4, 10}); }
+
 TEST_CASE("the grid is its row widths, and the count is their sum") {
   GridFocus g = keyboard();
   CHECK(g.rows() == 5);
@@ -93,6 +103,41 @@ TEST_CASE("landing in a narrower row clamps the column") {
   CHECK(g.col() == 3);  // the function row is 4 wide
 }
 
+TEST_CASE("the column is clamped into the TARGET row's width, not row 0's") {
+  // THE CASE THE KEYBOARD'S SHAPE CANNOT REACH. With {10,4,10} the narrow row
+  // is in the MIDDLE, so a flat clamp and a per-row clamp give different
+  // answers and the difference is a wrong ROW rather than a wrong column:
+  // 44-cell arithmetic that clamps against the wrong width walks the flat
+  // index past the row it was aiming at.
+  GridFocus g = middleNarrow();
+  REQUIRE(g.setCell(0, 7));
+  REQUIRE(g.moveRow(+1));
+  CHECK(g.row() == 1);   // NOT 2 -- which is where both surviving mutants land
+  CHECK(g.col() == 3);   // the middle row is 4 wide
+  CHECK(g.index() == 13);
+
+  // And upward out of the narrow row, which is the mirror: a clamp against
+  // row 0's width would leave col 5 in a 4-wide row and not move at all.
+  GridFocus h = GridFocus({4, 10});
+  REQUIRE(h.setCell(1, 9));
+  REQUIRE(h.moveRow(-1));
+  CHECK(h.row() == 0);
+  CHECK(h.col() == 3);
+}
+
+TEST_CASE("a row index out of range clamps to the last row rather than wrapping") {
+  // `clampInto(row, rows_)` replaced by `row % rows_` also survived, because
+  // the one upper-bound fixture in this file is setCell(99, 99) and
+  // 99 % 5 == 4 == rows_ - 1: the modulo and the clamp agree by arithmetic
+  // accident. A row just past the end separates them.
+  GridFocus g = keyboard();
+  REQUIRE(g.rows() == 5);
+  g.setCell(5, 0);
+  CHECK(g.row() == 4);  // clamped; `% rows_` would give 0
+  g.setCell(6, 2);
+  CHECK(g.row() == 4);  // `% rows_` would give 1
+}
+
 TEST_CASE("THE ORIGINAL COLUMN IS REMEMBERED ACROSS A NARROWER ROW") {
   // Without this, walking down through the 4-wide function row and back up
   // leaves the focus in column 3 -- the user's column is destroyed by passing
@@ -121,12 +166,30 @@ TEST_CASE("a column move re-establishes the remembered column") {
 }
 
 TEST_CASE("set() and setCell() also re-establish the remembered column") {
-  GridFocus g = keyboard();
-  REQUIRE(g.setCell(3, 7));
-  REQUIRE(g.moveRow(+1));
-  REQUIRE(g.setCell(4, 1));
-  CHECK(g.moveRow(-1));
-  CHECK(g.col() == 1);
+  // BOTH OF THEM, because this case used to drive setCell alone and the
+  // set() half survived being removed. set() is the RESTORE path -- it is
+  // what GridFocusScreen::setFocus calls -- so on the real keyboard a wake
+  // into cell 41 followed by one Up gave column 0 instead of column 1.
+  SUBCASE("setCell") {
+    GridFocus g = keyboard();
+    REQUIRE(g.setCell(3, 7));
+    REQUIRE(g.moveRow(+1));
+    REQUIRE(g.setCell(4, 1));
+    CHECK(g.moveRow(-1));
+    CHECK(g.col() == 1);
+  }
+  SUBCASE("set(), which is the restore path") {
+    GridFocus g = keyboard();
+    REQUIRE(g.setCell(3, 7));
+    REQUIRE(g.moveRow(+1));
+    // Cell 41 is row 4, column 1 -- the same landing as setCell(4, 1) above,
+    // reached the way a session restore reaches it.
+    REQUIRE(g.set(41));
+    REQUIRE(g.row() == 4);
+    REQUIRE(g.col() == 1);
+    CHECK(g.moveRow(-1));
+    CHECK(g.col() == 1);  // 1, not the forgotten 7 and not 0
+  }
 }
 
 TEST_CASE("A HELD MOVE CLAMPS ON BOTH AXES WHERE A PRESS WRAPS") {

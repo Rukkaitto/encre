@@ -106,6 +106,24 @@ TEST_CASE("the merged row keeps the stronger sighting's lock state") {
   CHECK_FALSE(rows[0].locked);
 }
 
+TEST_CASE("two sightings of EQUAL strength keep the FIRST, as the sort does") {
+  // `if (r.rssi > kept.rssi)` relaxed to `>=` survived: the case above uses
+  // -80 and -30, so the tie is never exercised, and the header states a tie
+  // rule for the SORT only. It matters because the two sightings can disagree
+  // about `locked` -- which decides whether the picker sends the reader to a
+  // keyboard or joins directly -- so a tie broken the other way flips that,
+  // and flips it differently between scans.
+  //
+  // FIRST, because that is what stable_sort does one step later: the merge
+  // and the sort answering a tie differently would be two rules for one
+  // question.
+  const std::vector<ScanResult> rows =
+      rankScanResults({ap("HOME", -55, true), ap("HOME", -55, false)});
+  REQUIRE(rows.size() == 1);
+  CHECK(rows[0].rssi == -55);
+  CHECK(rows[0].locked);  // the FIRST sighting's flag
+}
+
 TEST_CASE("a hidden network's blank SSID is dropped rather than drawn") {
   // There is no join-hidden flow, so a blank row is a choice with nothing
   // behind it.
