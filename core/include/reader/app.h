@@ -651,6 +651,20 @@ class App {
   // restored screen still has to be painted.
   bool pushScreen(ScreenId id);
 
+  // "PUT `id` WHERE THE TOP SCREEN IS" -- Action::Kind::Replace's own body,
+  // extracted because the SHELL is its second caller and the second copy is
+  // the extraction point. It drives the connect flow, where every step
+  // replaces the one that asked for it: the keyboard must not be left
+  // standing under the CONNECTING dialog, and the dialog must not be left
+  // under the error panel. App::render draws EVERY overlay above the topmost
+  // non-overlay, so a push there leaves the asking panel visible wherever the
+  // two differ in size -- which is how that defect was reported off a device.
+  //
+  // PUSHES BEFORE IT REMOVES, so a factory that refuses leaves the stack
+  // exactly as it was, and degrades to a plain push at the root. Same
+  // guarantees as the Action, because it is the same code.
+  bool replaceScreen(ScreenId id);
+
   // Something on screen changed and needs painting.
   bool dirty() const { return dirty_; }
   // ...and the change was a screen change rather than a change within one. What

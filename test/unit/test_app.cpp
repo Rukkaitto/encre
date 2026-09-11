@@ -346,6 +346,40 @@ TEST_CASE("a replace from the root is a push, because the root is the app") {
   CHECK(app.at(0).id() == ScreenId::Home);
 }
 
+TEST_CASE("replaceScreen is callable directly, because the shell is its second caller") {
+  // THE ACTION AND THE METHOD ARE ONE BODY, and this is the half the Action
+  // cannot reach. The Wi-Fi flow is driven from shell/src/main.cpp -- the
+  // radio comes back with a result and the shell puts WifiError where the
+  // CONNECTING dialog was -- so the replace has to be callable with no
+  // gesture at all. That is a second caller, and the second copy is the
+  // extraction point; this case is what says the extraction moved behaviour
+  // rather than leaving a parallel one.
+  FakeFactory f;
+  auto root = std::make_unique<FakeScreen>(ScreenId::Home, Action::push(ScreenId::Library));
+  App app(std::move(root), f);
+
+  app.dispatch(kConfirm);
+  REQUIRE(app.depth() == 2);
+  app.clearDirty();
+
+  CHECK(app.replaceScreen(ScreenId::Settings));
+  CHECK(app.depth() == 2);
+  CHECK(app.top().id() == ScreenId::Settings);
+  CHECK(app.at(0).id() == ScreenId::Home);
+  CHECK(app.dirty());
+  CHECK(app.transition());
+
+  // AND IT REPORTS THE REFUSAL, which the Action form throws away -- a shell
+  // that replaced into a screen nothing primed would otherwise carry on as
+  // though the flow had advanced.
+  f.refuse = true;
+  app.clearDirty();
+  CHECK_FALSE(app.replaceScreen(ScreenId::Library));
+  CHECK(app.depth() == 2);
+  CHECK(app.top().id() == ScreenId::Settings);
+  CHECK_FALSE(app.dirty());
+}
+
 TEST_CASE("a redraw is dirty but is not a transition") {
   FakeFactory f;
   App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::redraw()), f);

@@ -144,6 +144,25 @@ App::RestoreReport App::restore(const std::vector<StackEntry>& stack) {
   return r;
 }
 
+bool App::replaceScreen(ScreenId id) {
+  // PUSHED BEFORE THE OLD ONE IS REMOVED, so a factory that refuses leaves the
+  // stack exactly as it was. Popping first would lose the screen that asked and
+  // put the reader back on the list with nothing to show for the press -- the
+  // same "wrong in a way the reader cannot see through" the factory's refusals
+  // exist to avoid.
+  const size_t before = stack_.size();
+  if (!pushScreen(id)) return false;
+  // The root is the app: with only a root there is nothing beneath the new
+  // screen to remove, and erasing it would leave nothing to render and nothing
+  // to receive the next event. That degrades to a plain Push, which is the right
+  // answer for a caller that is somehow the root.
+  if (before >= 2) stack_.erase(stack_.end() - 2);
+  // pushScreen already set dirty_ and transition_. A replace IS a screen change,
+  // so it takes the transition's full refresh and is never a partial repaint --
+  // which it must not be, since the frame beneath it is about to be wrong.
+  return true;
+}
+
 bool App::pushScreen(ScreenId id) {
   // The reserve() in the constructor is what keeps a push from allocating the
   // vector again, and -fno-exceptions makes a failed reallocation an abort()
@@ -257,21 +276,7 @@ void App::dispatch(const InputEvent& ev) {
       transition_ = true;
       break;
     case Action::Kind::Replace: {
-      // PUSHED BEFORE THE OLD ONE IS REMOVED, so a factory that refuses leaves the
-      // stack exactly as it was. Popping first would lose the screen that asked and
-      // put the reader back on the list with nothing to show for the press -- the
-      // same "wrong in a way the reader cannot see through" the factory's refusals
-      // exist to avoid.
-      const size_t before = stack_.size();
-      if (!pushScreen(a.target)) break;
-      // The root is the app: with only a root there is nothing beneath the new
-      // screen to remove, and erasing it would leave nothing to render and nothing
-      // to receive the next event. That degrades to a plain Push, which is the right
-      // answer for a caller that is somehow the root.
-      if (before >= 2) stack_.erase(stack_.end() - 2);
-      // pushScreen already set dirty_ and transition_. A replace IS a screen change,
-      // so it takes the transition's full refresh and is never a partial repaint --
-      // which it must not be, since the frame beneath it is about to be wrong.
+      replaceScreen(a.target);
       break;
     }
     case Action::Kind::Sleep:
