@@ -39,12 +39,26 @@ std::string sentence(JoinFailure why, const std::string& ssid) {
 
 }  // namespace
 
-int WifiErrorScreen::actionsFor(JoinFailure why) {
-  return why == JoinFailure::BadPassword ? 3 : 2;
-}
-
 WifiErrorScreen::WifiErrorScreen(std::string ssid, JoinFailure why)
-    : FocusScreen(actionsFor(why), actionsFor(why)), ssid_(std::move(ssid)), why_(why) {
+    // ZERO, AND THE REAL RANGE BELOW -- WifiSettingsScreen's own shape, and
+    // here it is what makes the count honest. This was
+    // `FocusScreen(actionsFor(why), actionsFor(why))` over a static
+    // `why == BadPassword ? 3 : 2`, and the header claimed "THE ROW COUNT IS
+    // THE ONLY GATE". There were THREE spellings of that count -- actionsFor,
+    // `offersEdit`, and the unconditional push_back pair -- and nothing tied
+    // them, so each could drift from the others:
+    //
+    //   actionsFor -> 2 : the BadPassword dialog DRAWS three slabs and the
+    //                     focus can never reach CANCEL.
+    //   actionsFor -> 3 : the two-slab shapes get a focus position past the
+    //                     last slab. renderWifiError highlights
+    //                     `i == vm.focusedAction`, so two Downs leave NOTHING
+    //                     selected and Activate there returns none() -- a dead
+    //                     Confirm on a live dialog.
+    //
+    // Both survived the whole suite, because all three error goldens render
+    // focus 0.
+    : FocusScreen(0, 0), ssid_(std::move(ssid)), why_(why) {
   // ONE CAPTION FOR ALL THREE, as BookError's three shapes share `CAN'T OPEN
   // FILE`: the caption names the event and the sentence names the cause.
   vm_.caption = std::string("COULDN") + kApos + "T JOIN";
@@ -53,6 +67,15 @@ WifiErrorScreen::WifiErrorScreen(std::string ssid, JoinFailure why)
   if (vm_.offersEdit) vm_.actions.push_back("EDIT PASSWORD");
   vm_.actions.push_back("TRY AGAIN");
   vm_.actions.push_back("CANCEL");
+  // THE SLAB LIST IS THE COUNT. Built first, then measured -- so the focus
+  // range cannot disagree with what is drawn, and `offersEdit` is reduced to
+  // what it always should have been: a fact about ONE slab, consumed by the
+  // push_back above it and by the theme. There is nothing left for a second
+  // condition to drift from.
+  const int slabs = static_cast<int>(vm_.actions.size());
+  window().setCount(slabs);
+  window().setVisibleRows(slabs);
+  window().setFocus(0, nullptr);
   syncVm();
 }
 

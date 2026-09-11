@@ -55,11 +55,17 @@ class WifiErrorScreen : public FocusScreen {
   void syncVm() override;
 
  private:
-  // How many slabs this shape draws. THE ROW COUNT IS THE ONLY GATE: onGesture
-  // is deliberately NOT also checked against `offersEdit`, because a second
-  // condition is free to drift from the first, which is the class of bug Focus
-  // was extracted to delete.
-  static int actionsFor(JoinFailure why);
+  // `actionsFor(JoinFailure)` IS GONE, and its own comment is why. It said
+  // "THE ROW COUNT IS THE ONLY GATE: onGesture is deliberately NOT also
+  // checked against `offersEdit`, because a second condition is free to drift"
+  // -- while being the SECOND of three spellings of that count, beside
+  // `offersEdit` and the unconditional push_back pair. The rule was right and
+  // the code did not keep it: both directions of drift survived the entire
+  // suite, one hiding CANCEL from the focus and the other putting the focus
+  // past the last slab, where nothing highlights and Confirm does nothing.
+  //
+  // The constructor measures `vm_.actions` instead, so the range IS the list.
+  // See screen_wifi_error.cpp.
 
   std::string ssid_;
   JoinFailure why_;
