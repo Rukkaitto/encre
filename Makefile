@@ -1,4 +1,4 @@
-.PHONY: test sim firmware fonts icons compare epubs epubs-bulk card-add card-remove zips conventions hooks canvas canvas-check canvas-test
+.PHONY: test sim readme-images firmware fonts icons compare epubs epubs-bulk card-add card-remove zips conventions hooks canvas canvas-check canvas-test
 # PlatformIO installs outside PATH by default; allow an override: make firmware PIO=/path/to/pio
 #
 # Invoked through its MODULE entry point rather than the `pio` launcher script,
@@ -40,6 +40,35 @@ hooks:
 	@echo "hooks installed: commit-msg, pre-push  (undo: git config --unset core.hooksPath)"
 sim:
 	cmake -S . -B build && cmake --build build -j --target reader_sim && ./build/reader_sim home build/home.png
+# The four renders README.md shows, regenerated from the simulator so they are
+# exactly what the panel draws rather than screenshots of something adjacent.
+# Run it after any UI change that reaches one of these four screens; the release
+# gate in docs/releasing.md is where it is remembered.
+#
+# 528x792 is the X3, which is the development device -- one geometry, because
+# these illustrate the firmware rather than document both panels, and the X4's
+# 480x800 would only differ in how much of a list fits.
+#
+# sleep_cover_details rather than sleep_cover, chosen deliberately and with two
+# known costs, so nobody re-picks it as a mistake:
+#
+#   - It is the DEFAULT setting (Shows = COVER + DETAILS), so it is what a reader
+#     actually sees, and it shows the cover AND what they are reading.
+#   - The badge is drawn over the cover's own title band and slices the author
+#     line. That is a real open question about the badge on glass, not a render
+#     bug, and the answer is NOT to move the badge -- its position is
+#     Sleep.dc.html's.
+#   - The demo card names Middlemarch over a Romola cover, because the fixture
+#     pairs that metadata with the one committed cover asset. Fixing it means
+#     changing the fixture and re-blessing a golden, which is the wrong reason to
+#     touch a golden.
+README_SCREENS := reader home library sleep_cover_details
+readme-images:
+	cmake -S . -B build && cmake --build build -j --target reader_sim
+	@mkdir -p docs/images
+	@for s in $(README_SCREENS); do \
+		./build/reader_sim $$s docs/images/$$s.png --canvas 528x792; \
+	done
 firmware:
 	$(PIO) run -e xteink
 # Rebuilds every generated font asset from the TTFs in assets/fonts. Needs

@@ -41,23 +41,31 @@ agreement — the last two cannot be produced on a desktop at all.
 
 1. **The query above returns nothing but the release card.** Every other V1
    card is `Done`.
-2. **`make test` is green** on a clean tree, and `make compare` is green.
+2. **`README.md`'s checklist agrees with the board**, reconciled against the
+   query you have just run. A ticked box that stopped being true is a lie on the
+   front page; an unticked one that shipped only understates, so the ticks are
+   the half to check hardest. This is the one thing the README states that can
+   drift, and it states it deliberately -- every other claim on that page was
+   chosen because a merge cannot falsify it. The rendered screens go with it: if
+   a UI change reached Home, the Library, a reader page or the sleep cover, run
+   `make readme-images` and commit what moves.
+3. **`make test` is green** on a clean tree, and `make compare` is green.
    `make conventions` passes for the commits being released.
-3. **CI is green on `main`** for the commit being tagged. `firmware` is the only
+4. **CI is green on `main`** for the commit being tagged. `firmware` is the only
    thing anywhere that compiles `shell/`, and `test` runs on Linux/gcc where the
    goldens were blessed on macOS/clang. **The release workflow does not re-run
    any of it** — that would be ten minutes to re-answer a question already
-   answered on this commit, and it cannot answer steps 4 and 5. So this step is
+   answered on this commit, and it cannot answer steps 5 and 6. So this step is
    a real precondition and not a formality: check the run.
-4. **`docs/on-device-smoke-checklist.md` has been run in full**, on hardware,
+5. **`docs/on-device-smoke-checklist.md` has been run in full**, on hardware,
    with its `run.log` kept. A pass is what moves the last cards from `On glass`
    to `Done`.
-5. **The roadmap's Phase 5 exit is met:** *a week of daily-driver reading
+6. **The roadmap's Phase 5 exit is met:** *a week of daily-driver reading
    without touching a cable.* This is the criterion the whole of V1 was written
    against and it is the one that cannot be hurried — a week of real use finds
    what twenty minutes of checklist does not.
 
-**Steps 4 and 5 are the owner's, not an agent's.** Flashing is blocked from an
+**Steps 5 and 6 are the owner's, not an agent's.** Flashing is blocked from an
 agent by the permission classifier, so device evidence can only come from the
 person holding the device. An agent can carry a release card as far as `On
 glass` and must stop there.
