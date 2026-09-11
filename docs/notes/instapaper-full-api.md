@@ -145,7 +145,7 @@ None of those is an endpoint we call.
 
 Error code **`1041: Premium account required`** still exists in the current error
 table (`/developers/v1/full-api/responses`). **The docs never say which endpoints
-can return it.** They are silent, and that silence is recorded in §6 rather than
+can return it.** They are silent, and that silence is recorded in §7 rather than
 guessed at. What is documented nearby: `1220` fires for domains whose content
 needs *"a login or Instapaper Premium"* to crawl — that is about `bookmarks/add`,
 not about reading back what is already saved — and highlights are capped for
@@ -508,9 +508,14 @@ today; the day one is, this is the finding.
 - **#112, #111, #113 are unaffected by that.** `bookmarks/list`,
   `bookmarks/archive` and `bookmarks/star` are plain Full API calls with no second
   key and no Premium requirement.
-- **#110 (the HTTP server) loses its only V1.1 consumer** and goes back to V2
-  with the upload work it was split out of. Its scope was never wrong; its
-  *reason* was, and the reason was the sentence on the board.
+- **#110 (the HTTP server) loses its only V1.1 consumer and is closed as
+  superseded.** Its scope was never wrong; its *reason* was, and the reason was
+  the sentence on the board. Parking it at V2 was the first answer and left a
+  server with nothing to serve, beside the draft it had been split out of — so
+  the split is reversed instead, and `HTTP upload server and Transfer screen`
+  carries its scope again. That draft's body had said outright *"The HTTP server
+  itself is NOT in this card any more"*, which is why closing #110 alone would
+  have left the server homeless in a way only the two bodies together showed.
 - **#111 becomes a keyboard flow**, and `InstapaperConnect.dc.html` — the panel
   that shows a URL and waits — has nothing left to draw.
   `ArticlesSetup.dc.html`'s `SIGN-IN HAPPENS IN YOUR BROWSER` goes with it.
