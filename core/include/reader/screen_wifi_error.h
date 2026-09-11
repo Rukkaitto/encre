@@ -28,9 +28,9 @@ namespace reader {
 // spelling of it.
 class WifiErrorScreen : public FocusScreen {
  public:
-  // What the reader pressed. Read by the shell after the pop, because every
-  // one of them touches state this screen does not own -- the join attempt,
-  // the radio, the stack.
+  // What the reader pressed. Read by the shell BEFORE the pop -- see chosen()
+  // -- because every one of them touches state this screen does not own: the
+  // join attempt, the radio, the stack.
   enum class Chosen { None, EditPassword, TryAgain, Cancel };
 
   WifiErrorScreen(std::string ssid, JoinFailure why);
@@ -42,6 +42,13 @@ class WifiErrorScreen : public FocusScreen {
 
   const WifiErrorViewModel& vm() const { return vm_; }
   JoinFailure why() const { return why_; }
+  // Which slab was pressed, or Cancel for Back.
+  // READ IT WHILE THIS SCREEN IS STILL ON TOP. It latches and returns
+  // Action::wifi(), which pops NOTHING, so the shell reads the outcome on the
+  // dispatch's own pass and pops afterwards. This said "the shell reads it
+  // after the pop", and after a pop there is no screen left to ask:
+  // App::dispatch's Pop is `stack_.pop_back()`, which destroys the object. See
+  // Action::wifi(), and App::wifiRequested() for the order.
   Chosen chosen() const { return chosen_; }
 
  protected:

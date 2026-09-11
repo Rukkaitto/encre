@@ -58,8 +58,11 @@ bool WifiConnectScreen::markReady() {
 
 Action WifiConnectScreen::onGesture(const GestureEvent& g) {
   if (g.what != Gesture::Back) return Action::none();
+  // NOT NAVIGATION: a join is in flight, so the radio has to be told. Latched
+  // rather than popped, both because the shell has work to do and because
+  // cancelled() cannot be read off a screen the pop has destroyed.
   cancelled_ = true;
-  return Action::pop();
+  return Action::wifi();
 }
 
 void WifiConnectScreen::render(Framebuffer& fb, const FontSet& fonts, Theme& theme,

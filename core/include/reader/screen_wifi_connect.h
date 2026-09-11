@@ -45,8 +45,14 @@ class WifiConnectScreen : public Screen {
   bool markReady();
   bool ready() const { return ready_; }
 
-  // Whether the reader asked to stop. The shell reads it after the pop and
-  // takes the radio down.
+  // Whether the reader asked to stop, so the shell can take the radio down.
+  // Back here is NOT navigation -- a join is in flight.
+  // READ IT WHILE THIS SCREEN IS STILL ON TOP. It latches and returns
+  // Action::wifi(), which pops NOTHING, so the shell reads the outcome on the
+  // dispatch's own pass and pops afterwards. This said "the shell reads it
+  // after the pop", and after a pop there is no screen left to ask:
+  // App::dispatch's Pop is `stack_.pop_back()`, which destroys the object. See
+  // Action::wifi(), and App::wifiRequested() for the order.
   bool cancelled() const { return cancelled_; }
 
  private:

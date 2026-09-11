@@ -69,8 +69,11 @@ void WifiErrorScreen::syncVm() {
 Action WifiErrorScreen::onGesture(const GestureEvent& g) {
   switch (g.what) {
     case Gesture::Back:
+      // Back IS Cancel here -- the bar says so -- and Cancel is giving up on
+      // this network, which the shell has to act on. Latched rather than
+      // popped: chosen() is unreadable from a destroyed screen.
       chosen_ = Chosen::Cancel;
-      return Action::pop();
+      return Action::wifi();
     case Gesture::Prev:
       return moveFocus(-g.steps, g.held);
     case Gesture::Next:
@@ -88,7 +91,7 @@ Action WifiErrorScreen::onGesture(const GestureEvent& g) {
       } else {
         chosen_ = Chosen::Cancel;
       }
-      return Action::pop();
+      return Action::wifi();
     }
     default:
       return Action::none();

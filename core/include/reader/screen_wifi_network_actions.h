@@ -43,9 +43,15 @@ class WifiNetworkActionsScreen : public FocusScreen {
   const WifiNetworkActionsViewModel& vm() const { return vm_; }
   const Facts& facts() const { return facts_; }
 
-  // Whether the reader confirmed the forget. The shell reads it after the pop,
-  // because removing a network touches NVS and the list below -- which is the
-  // shell's business, exactly as a delete's consequences are.
+  // Whether the reader confirmed the forget. Removing a network touches NVS
+  // and the list below, which is the shell's business exactly as a delete's
+  // consequences are.
+  // READ IT WHILE THIS SCREEN IS STILL ON TOP. It latches and returns
+  // Action::wifi(), which pops NOTHING, so the shell reads the outcome on the
+  // dispatch's own pass and pops afterwards. This said "the shell reads it
+  // after the pop", and after a pop there is no screen left to ask:
+  // App::dispatch's Pop is `stack_.pop_back()`, which destroys the object. See
+  // Action::wifi(), and App::wifiRequested() for the order.
   bool forgetChosen() const { return forget_; }
 
  protected:

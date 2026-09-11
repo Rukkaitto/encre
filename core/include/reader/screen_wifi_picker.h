@@ -53,6 +53,12 @@ class WifiPickerScreen : public FocusScreen {
   // What the reader chose, once Confirm has fired on a network row. Empty
   // until then, and empty on the Rescan row -- which is why rescanChosen() is
   // separate rather than being an empty SSID.
+  //
+  // These three were readable, because this screen never popped -- but the
+  // Action that carried the choice was `Action::redraw()`, a SIDE CHANNEL that
+  // spent a ~520 ms repaint of an identical frame and gave the shell no signal
+  // to look at all. They latch Action::wifi() now, which is the signal, and
+  // still pop nothing. See Action::wifi().
   const std::string& chosenSsid() const { return chosen_; }
   bool chosenLocked() const { return chosenLocked_; }
   bool rescanChosen() const { return rescan_; }

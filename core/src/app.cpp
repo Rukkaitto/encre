@@ -302,6 +302,14 @@ void App::dispatch(const InputEvent& ev) {
       // delete lands is a fact about how the confirmation was reached.
       delete_ = true;
       break;
+    case Action::Kind::Wifi:
+      // Delete's contract exactly, and for the sharper version of its reason:
+      // the radio is the shell's, and NOTHING IS POPPED because the shell has
+      // to ask the screen which outcome it was. The five connect-flow screens
+      // each popped themselves and then offered a getter, and a popped screen
+      // is a DESTROYED screen -- see Action::wifi().
+      wifi_ = true;
+      break;
   }
 }
 

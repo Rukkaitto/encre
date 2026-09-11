@@ -117,7 +117,11 @@ Action WifiPasswordScreen::activateCell() {
   }
   if (cell == "JOIN") {
     join_ = true;
-    return Action::pop();
+    // LATCHED, NOT POPPED. The shell reads joinChosen() and entered() off this
+    // screen while it is still standing and then decides where the flow goes
+    // -- a pop would destroy the object holding the passphrase. See
+    // Action::wifi().
+    return Action::wifi();
   }
 
   const std::string text = (cell == "SPACE") ? " " : cell;
@@ -143,8 +147,12 @@ Action WifiPasswordScreen::onGesture(const GestureEvent& g) {
       syncVm();
       return Action::redraw();
     case Gesture::Secondary:
+      // The held Back, which is the only way off this screen. It latches
+      // rather than popping because the shell has work to do -- the radio was
+      // brought up for this join and nothing else is going to take it down --
+      // and because cancelled() is unreadable from a destroyed screen.
       cancelled_ = true;
-      return Action::pop();
+      return Action::wifi();
     case Gesture::Activate:
       return activateCell();
     // WITH SPLIT MOVERS, the front buttons arrive as AltPrev/AltNext and the

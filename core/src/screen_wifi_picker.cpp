@@ -137,7 +137,14 @@ Action WifiPickerScreen::onGesture(const GestureEvent& g) {
         rescan_ = true;
         // The shell starts the scan and calls setScanning; this screen does
         // not own the radio.
-        return Action::redraw();
+        //
+        // A LATCH RATHER THAN A REDRAW, and the redraw was a side channel:
+        // this screen's outcomes were readable only because it never popped,
+        // so the shell would have had to poll them after every dispatch -- and
+        // the Action it returned spent a ~520 ms repaint of an IDENTICAL frame
+        // to carry the signal. Nothing is dirty here: what a rescan changes on
+        // glass is setScanning's to mark.
+        return Action::wifi();
       }
       const ScanResult& r = results_[static_cast<size_t>(f)];
       chosen_ = r.ssid;
@@ -147,7 +154,11 @@ Action WifiPickerScreen::onGesture(const GestureEvent& g) {
       // pushes one or the other, because which screen comes next depends on
       // state this screen does not have -- whether a passphrase is already
       // stored for it.
-      return Action::redraw();
+      //
+      // Latched for the rescan row's reason, and it matters more here: the
+      // repaint this used to spend was in front of the push that replaces the
+      // screen being repainted.
+      return Action::wifi();
     }
     default:
       return Action::none();

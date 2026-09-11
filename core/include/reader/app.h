@@ -149,7 +149,7 @@ struct Action {
   // APPENDED, never inserted -- a Kind is compared, never stored, but appending
   // costs nothing and keeps every existing value where it was.
   enum class Kind : uint8_t {
-    None, Redraw, Push, Pop, PopTo, Replace, Sleep, Retry, Open, Finish, Delete
+    None, Redraw, Push, Pop, PopTo, Replace, Sleep, Retry, Open, Finish, Delete, Wifi
   };
   Kind kind = Kind::None;
   ScreenId target = ScreenId::Home;  // meaningful for Push and PopTo
@@ -216,6 +216,32 @@ struct Action {
   // gesture on every screen, to serve one. The shell reads the path off the screen
   // that is still on top when the dispatch runs.
   static Action del() { return {Kind::Delete, ScreenId::Home}; }
+  // "A Wi-Fi screen has an outcome for you." A latch like Delete, and it takes
+  // Delete's contract exactly: NOTHING IS POPPED, so the shell reads the
+  // outcome off the screen that is still on top and then pops it itself.
+  //
+  // THE FIVE CONNECT-FLOW SCREENS EACH SHIPPED WITH A GETTER THE SHELL COULD
+  // NOT CALL. `joinChosen()`, `cancelled()`, `chosen()` and `forgetChosen()`
+  // all latched a result and then returned `Action::pop()` -- and dispatch's
+  // Pop is `stack_.pop_back()`, which DESTROYS the screen. Every one of those
+  // headers said the shell reads it after the pop; after the pop there is no
+  // screen left to ask. shell/src/main.cpp already records this lesson for the
+  // peek, and `deleteRequested()` already states the fix in its own words:
+  // read it "WHILE IT IS STILL ON TOP, because the dispatch that follows pops
+  // it".
+  //
+  // IT CARRIES NO OUTCOME, for the reason Open and Finish carry no path: a
+  // payload here is a payload in every Action returned by every gesture on
+  // every screen, to serve one kind. The outcomes are five different shapes --
+  // an SSID and a lock bit, a passphrase, a three-way choice -- and no one
+  // field could hold them. The screen is still standing, so it can be asked.
+  //
+  // A SCREEN LATCHES WHEN THE SHELL HAS WORK TO DO AND POPS ITSELF WHEN IT HAS
+  // NOT. A plain Back off the picker is navigation and nothing else, so it
+  // stays `Action::pop()` -- routing it through here would be machinery bought
+  // for no work. Back off the CONNECTING dialog is not navigation: a join is in
+  // flight and the radio has to be told.
+  static Action wifi() { return {Kind::Wifi, ScreenId::Home}; }
 };
 
 // The four hint slots are the four front buttons in hardware order (spec 4.0).
@@ -740,6 +766,27 @@ class App {
   bool deleteRequested() const { return delete_; }
   void clearDeleteRequest() { delete_ = false; }
 
+  // A connect-flow screen has latched an outcome. The shell's job, in order:
+  //
+  //   1. clearWifiRequest(), so a failed attempt does not re-fire forever;
+  //   2. ask the screen that is STILL ON TOP which outcome it was -- the
+  //      picker's chosenSsid()/chosenLocked()/rescanChosen(), the keyboard's
+  //      joinChosen()/entered()/cancelled(), the dialog's cancelled(), the
+  //      error's chosen(), the actions overlay's forgetChosen(). This is the
+  //      whole reason nothing is popped here: after a pop there is no screen
+  //      left to ask, which is the defect this latch closes;
+  //   3. drive the radio or the store, keeping neither in core/ -- a radio is
+  //      the shell's exactly as the card is;
+  //   4. pop, or replace, or leave the screen standing, whichever the outcome
+  //      calls for. Where the flow lands is a fact about the outcome and not
+  //      about the screen, which is why the screen does not decide it -- the
+  //      same argument Delete makes for popTo(facts().returnTo).
+  //
+  // Nothing here repaints on its own, for Retry's reason: what a join changes
+  // on glass is a screen change rather than a repaint of this one.
+  bool wifiRequested() const { return wifi_; }
+  void clearWifiRequest() { wifi_ = false; }
+
   ButtonMask longPressable() const { return top().longPressable(); }
   ButtonMask autoRepeat() const { return top().autoRepeat(); }
 
@@ -777,6 +824,7 @@ class App {
   bool open_ = false;
   bool finish_ = false;
   bool delete_ = false;
+  bool wifi_ = false;
   // Mutable because render() is const: painting does not change the app, but it
   // does change what is on glass, and this is what remembers that. The
   // alternative -- a non-const render() -- would make every const App& in the

@@ -53,10 +53,18 @@ class WifiPasswordScreen : public GridFocusScreen {
   // trust.
   void setEntered(std::string text);
 
-  // Whether JOIN was pressed. The shell reads it after the pop and starts the
-  // join; this screen owns no radio.
+  // Whether JOIN was pressed. The shell starts the join; this screen owns no
+  // radio -- and it reads entered() off this same object, which is the
+  // sharpest reason the pop had to go: the pop destroyed the passphrase.
+  // READ IT WHILE THIS SCREEN IS STILL ON TOP. It latches and returns
+  // Action::wifi(), which pops NOTHING, so the shell reads the outcome on the
+  // dispatch's own pass and pops afterwards. This said "the shell reads it
+  // after the pop", and after a pop there is no screen left to ask:
+  // App::dispatch's Pop is `stack_.pop_back()`, which destroys the object. See
+  // Action::wifi(), and App::wifiRequested() for the order.
   bool joinChosen() const { return join_; }
-  // Whether a held Back asked to leave without joining.
+  // Whether a held Back asked to leave without joining. Same rule, and the
+  // shell has work to do on it: the radio was brought up for this join.
   bool cancelled() const { return cancelled_; }
 
   // Which layer is showing. Exposed for the simulator and the goldens, which

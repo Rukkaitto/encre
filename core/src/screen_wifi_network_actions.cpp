@@ -36,10 +36,13 @@ Action WifiNetworkActionsScreen::onGesture(const GestureEvent& g) {
       return Action::pop();
     case Gesture::Activate:
       // The overlay is the confirmation step, so this is the forget. The shell
-      // does the removal after the pop: it touches NVS and the list below,
-      // which is not this screen's business.
+      // does the removal -- it touches NVS and the list below, which is not
+      // this screen's business -- and it does it BEFORE the pop, reading
+      // forgetChosen() off a screen that is still standing. This returned
+      // Action::pop() and offered that getter, which dispatch's
+      // `stack_.pop_back()` made unreadable. See Action::wifi().
       forget_ = true;
-      return Action::pop();
+      return Action::wifi();
     default:
       // Up and Down deliberately do nothing: one row, so a move would report
       // no change anyway, and the bar promises neither.
