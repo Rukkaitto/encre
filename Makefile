@@ -1,4 +1,4 @@
-.PHONY: test sim firmware fonts icons compare epubs epubs-bulk card-add card-remove zips conventions hooks canvas canvas-check canvas-test
+.PHONY: test sim readme-images firmware fonts icons compare epubs epubs-bulk card-add card-remove zips conventions hooks canvas canvas-check canvas-test
 # PlatformIO installs outside PATH by default; allow an override: make firmware PIO=/path/to/pio
 #
 # Invoked through its MODULE entry point rather than the `pio` launcher script,
@@ -40,6 +40,38 @@ hooks:
 	@echo "hooks installed: commit-msg, pre-push  (undo: git config --unset core.hooksPath)"
 sim:
 	cmake -S . -B build && cmake --build build -j --target reader_sim && ./build/reader_sim home build/home.png
+# The four renders README.md shows, regenerated from the simulator so they are
+# exactly what the panel draws rather than screenshots of something adjacent.
+# Run it after any UI change that reaches one of these four screens; the release
+# gate in docs/releasing.md is where it is remembered.
+#
+# 528x792 is the X3, which is the development device -- one geometry, because
+# these illustrate the firmware rather than document both panels, and the X4's
+# 480x800 would only differ in how much of a list fits.
+#
+# sleep_cover_details, which is the DEFAULT mode and so what a reader actually
+# sees: the cover with the reading card over it.
+#
+# IT WAS sleep_cover FOR EXACTLY AS LONG AS #120 WAS OPEN. The details board
+# named MIDDLEMARCH over a cover of ROMOLA -- a BOARD defect the render was
+# faithful to -- and the cover-alone board was coherent by construction, because
+# it draws no card and so has no second claim to contradict the picture. #120
+# regenerated the assets from Standard Ebooks' Middlemarch, so all three of the
+# constraints that collided now hold at once and this line moved back, which the
+# comment it replaces said it would.
+#
+# WHAT COMES BACK WITH THE CARD is the badge sitting across the cover's own title
+# band, cutting GEORGE ELIOT in half lengthwise. That is a SEPARATE open on-glass
+# question, it is boarded, and its answer is NOT to move the badge -- the badge's
+# position is Sleep.dc.html's. It is also what the device does in this mode, so a
+# README showing this mode should show it.
+README_SCREENS := reader home library sleep_cover_details
+readme-images:
+	cmake -S . -B build && cmake --build build -j --target reader_sim
+	@mkdir -p docs/images
+	@for s in $(README_SCREENS); do \
+		./build/reader_sim $$s docs/images/$$s.png --canvas 528x792; \
+	done
 firmware:
 	$(PIO) run -e xteink
 # Rebuilds every generated font asset from the TTFs in assets/fonts. Needs

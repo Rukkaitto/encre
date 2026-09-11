@@ -1,247 +1,168 @@
 # Encre
 
-From-scratch firmware for the Xteink X4 and X3 e-readers — ESP32-C3, e-ink,
-~220 PPI. One binary drives both models; the hardware is identified at boot,
-because the panel controller varies by production batch.
+Open-source firmware for the Xteink X4 and X3 e-readers. One binary drives both
+models; it works out which one it is at boot.
 
-It exists because the stock firmware is not the reader we wanted. Design
-fidelity is treated as a functional requirement here rather than as polish: the
-`design/` boards are the source of truth for the UI, and a tool compares every
-built screen against its board.
+<p align="center">
+  <img src="docs/images/reader.png" width="330" alt="A page of Middlemarch, justified, with the chapter in the header and progress in the footer.">
+</p>
 
-## Status
+## What it does
 
-**V1 is card transfer only. Wi-Fi is cut** — books get onto the device by
-putting the SD card in a computer. That is a scope decision, not a gap waiting
-on a driver.
+- [x] Reads EPUB, with justified text and italics taken from the book's own stylesheet
+- [x] A library you can browse by folder, with per-book progress on every row
+- [x] The book's own table of contents
+- [x] Peek at a chapter over the page you're on, before deciding to jump
+- [x] One button back to the furthest page you reached
+- [x] Five type sizes, three margins, seven line spacings, justified or ragged, all with a live preview
+- [x] Your book's cover on the sleep screen, in four shades of grey
+- [x] Reading position kept on the SD card, and not lost if you delete the book
+- [x] Book details, and marking a book finished
+- [x] Battery level, a warning when it runs low, and a clean shutdown before it dies
+- [ ] Sending books over Wi-Fi
+- [ ] Bookmarks
+- [ ] Plain text files
+- [ ] Hyphenation, and better line breaking
+- [ ] Instapaper
+- [ ] A boot screen
 
-What is built and on glass: Home, Library, book details, the item-actions and
-delete-confirm overlays, Settings, the typography panel, the reader (EPUB, with
-justification, italics from the book's stylesheet, and a page ring), the table
-of contents, the peek overlay, and the sleep screen — including the open book's
-cover at four grey levels.
-
-What is designed and **not** built: the low-battery banner, critical shutdown,
-the corrupt-book dialog, and the end-of-book screen. Their boards exist; the
-screens do not.
-
-Known refusals, each stated rather than discovered:
-
-- **Progressive JPEG covers** are refused. 2 of a 225-book corpus — but 2 of
-  the author's own 16, so a real library meets this more often than the corpus
-  suggests. The sleep screen falls back to the reading card.
-- **A book whose metadata carries an attribute over 512 bytes is refused
-  entirely.** Calibre writes these. [#35](https://github.com/Rukkaitto/encre/issues/35)
-- **A single text block over 64 KB ends the chapter silently.**
-  [#37](https://github.com/Rukkaitto/encre/issues/37)
-
-There is no release yet. `docs/releasing.md` says what v0.1.0 is waiting on.
-
-## Written with Claude Code
-
-Effectively all of this firmware was written by Claude Code, directed and
-reviewed by its owner. Most commits carry a `Co-authored-by: Claude` trailer,
-and it was applied inconsistently — treat it as a floor rather than a measure.
-`CLAUDE.md` is the project's working memory: what was measured, what was tried
-and abandoned, and why. It is the most accurate document in the repo.
-
-**What that means if you are going to run this on your own reader.** The checks
-are real: unit tests, pixel-exact golden renders at both panel geometries, and a
-design-versus-firmware comparison against every board in `design/`. They are
-also not enough on their own — `shell/` has no test harness, and this repo has
-more than once shipped something that passed every desktop test and was wrong on
-the glass: a veil that smeared under rotation, an overlay painted onto white, a
-function that could only recurse. That is what
-`docs/on-device-smoke-checklist.md` exists for. Flash it expecting to find
-things.
+<table>
+<tr>
+<td width="33%"><img src="docs/images/home.png" alt="The home screen, showing the book in progress, a library count and settings."></td>
+<td width="33%"><img src="docs/images/library.png" alt="The library, listing a folder and six books with their progress."></td>
+<td width="33%"><img src="docs/images/sleep_cover_details.png" alt="The sleep screen: a book cover as a four-level greyscale photograph, with a card over it naming the book and how far in you are."></td>
+</tr>
+<tr>
+<td><em>Home picks up where you left off.</em></td>
+<td><em>Folders, and how far you are into each book.</em></td>
+<td><em>Asleep, showing the book's cover and where you are in it. If a cover can't be read, you get the card on its own. You can also hide the card, or turn the cover off.</em></td>
+</tr>
+</table>
 
 ## Before you flash
 
-**The device is recoverable.** There is no secure boot and no flash encryption,
-so download mode is always available. Back the stock firmware up anyway, before
-you write anything — it is a 16 MB read and it is the difference between a bad
-afternoon and a dead reader:
+**Take a backup of the stock firmware.** It is step 3 below, it takes a couple
+of minutes, and it is worth doing. The device is recoverable either way, since
+there is no secure boot and no flash encryption, so download mode is always
+available. But a backup is the difference between a bad afternoon and a dead
+reader.
 
-    ~/.platformio/penv/bin/python -m esptool --port /dev/cu.usbmodemXXXX \
-        read-flash 0 0x1000000 xteink-stock-backup.bin
+Flashing third-party firmware is at your own risk. This was written with
+[Claude Code](https://claude.com/claude-code), directed and reviewed by its
+owner, and the checks behind it are real: unit tests, pixel-exact reference
+renders at both panel sizes, and a comparison of every screen against its design
+drawing. They are also not everything. The layer that talks to the hardware has
+no automated tests, and this project has more than once shipped something that
+passed every desktop check and was wrong on the actual panel. It has been used
+daily on an X3, but expect to find things.
 
-Restoring is `write-flash 0 xteink-stock-backup.bin` with the same tool. Verify
-the backup is 16 MB before you trust it. (esptool before v5 spells these
-`read_flash` and `write_flash`.)
+## Install
 
-Flashing third-party firmware is your own risk. Nobody here has tested this on
-every batch of either model, and the X4 in particular is the model this project
-does not develop on — see **What is unverified** below.
+Four steps. Replace `PORT` with yours throughout, and `VERSION` with the release
+you downloaded.
 
-## Getting the source
+**1. Install [esptool](https://docs.espressif.com/projects/esptool/).**
 
-    git clone https://github.com/Rukkaitto/encre.git
-    cd encre
-    git submodule update --init
+```bash
+pip install esptool
+```
 
-**The submodule step is not optional.** `freeink-sdk/` holds the MIT display,
-input, SD and battery drivers. Without it `make firmware` fails with
-`PackageException: not a directory`, which names neither the submodule nor the
-fix. The desktop build is unaffected, so a checkout can look healthy and still
-not build firmware.
+**2. Plug the reader in and find its port.**
 
-## Building and testing on the desktop
+| | Port looks like | How to find it |
+|---|---|---|
+| macOS | `/dev/cu.usbmodem1101` | `ls /dev/cu.usbmodem*` |
+| Linux | `/dev/ttyACM0` | `ls /dev/ttyACM*` |
+| Windows | `COM5` | Device Manager, under Ports (COM & LPT) |
 
-    make test      # build core + run the unit and golden tests
-    make sim       # render Home to build/home.png
-    make compare   # design-vs-firmware contact sheet, all boards (~3 min)
+**3. Back up the stock firmware.** Check the file really is 16 MB before you
+trust it.
 
-`core/` is portable C++20 with no Arduino, ESP or host-OS dependency, so it
-compiles for macOS and the ESP32 alike. The simulator renders any screen to a
-PNG at exact panel size, which is where UI iteration happens.
+```bash
+esptool --port PORT read-flash 0 0x1000000 xteink-stock-backup.bin
+```
 
-`reader_sim <screen> out.png --canvas 528x792` renders one screen;
-`--bench 200` reports what a render pass costs.
+**4. Download the latest `encre-VERSION-xteink-full.bin` from
+[Releases](https://github.com/Rukkaitto/encre/releases), and write it.**
 
-CMake globs its sources, so **re-run `cmake -S . -B build` after adding or
-removing a file** or it is silently ignored.
+```bash
+esptool --port PORT --chip esp32c3 write-flash 0x0 encre-VERSION-xteink-full.bin
+```
 
-## Building and flashing the firmware
+If anything goes wrong, `write-flash 0 xteink-stock-backup.bin` puts the
+original back.
 
-    make firmware
+> esptool 5 spells these `read-flash` and `write-flash`; version 4 and earlier
+> use `read_flash` and `write_flash`. `pip install esptool` gives you 5.
 
-PlatformIO installs outside `PATH`, so the Makefile invokes it through
-`~/.platformio/penv/bin/python -m platformio`. Override with
-`make firmware PIO=/path/to/pio` if yours lives elsewhere.
+**A screen that never changes does not mean the firmware failed to start.**
+E-ink holds its last image with no power at all, and nothing wipes the screen at
+boot, so the stock firmware's last screen can sit there looking frozen while
+Encre is running perfectly well behind it. Press a button before concluding
+anything.
 
-To flash, find the port and upload:
+## Updating
 
-    set -- /dev/cu.usbmodem*; echo "$1"
+Once Encre is installed, take the smaller `encre-VERSION-xteink.bin` and write it
+to the app partition instead:
 
-    ~/.platformio/penv/bin/python -m platformio run -e xteink -t upload \
-        --upload-port /dev/cu.usbmodem1101
+```bash
+esptool --port PORT --chip esp32c3 write-flash 0x10000 encre-VERSION-xteink.bin
+```
 
-Two things that will otherwise waste an afternoon:
-
-- **`Failed to install Python dependencies into penv` is transient — retry it.**
-  The check lives in the platform's builder script and runs `uv pip install
-  --upgrade` on every build that has a network, so it can fail on a PyPI hiccup
-  or when two builds share the `uv` cache. Do not run two builds at once.
-- **E-ink holds its last image with no power, so a frozen screen is not evidence
-  that the firmware ran.** Nothing clears the glass at boot. Read the serial log
-  before concluding anything from the panel.
+The full image is only needed the first time, because it also lays out the
+partitions.
 
 ## Putting books on it
 
-The card is FAT or exFAT. Books go in `/books` as EPUB — flat or in folders,
-both are listed. That is the whole transfer story in V1.
+The SD card can be FAT or exFAT. Books go in a `/books` folder as EPUB files,
+loose or in subfolders. Both are listed, and subfolders can go as deep as you
+like. The folder is created for you on the first boot that doesn't find one.
 
-The firmware writes two things of its own:
+Encre keeps a few things of its own in `/.reader`: your settings, one small file
+per book holding your place in it, and the cover it last prepared for the sleep
+screen. Deleting a book from the library never touches your progress in it, so
+putting the book back puts you back where you were.
 
-- `/.reader/settings.json` — created with defaults on the first boot that finds
-  no file, and hand-editable. A corrupt or wrong-version file is left exactly as
-  you typed it and defaults are used; a single out-of-range value is clamped and
-  the rest of the file still loads. The boot log distinguishes those two cases.
-- `/.reader/state/` — one small JSON per started book holding the reading
-  position, plus `last.json` naming the book last open. Deleting a book from the
-  Library never erases its progress.
+Settings live in `/.reader/settings.json`, which is created with sensible
+defaults and can be edited by hand. If you break it, Encre falls back to the
+defaults and leaves your file exactly as you typed it.
 
-## Watching what it does
+## About the X4
 
-    ~/.platformio/penv/bin/python tools/serial-log.py --seconds 20
+Encre is developed and tested on the X3. One binary drives both models and the
+X4 is supported, but nobody has run it on an X4. If the screen comes out upside
+down, that is why, and it is worth an issue.
 
-    ~/.platformio/penv/bin/python -m platformio device monitor -e xteink | tee run.log
-    python3 tools/latency.py run.log      # what each interaction cost, by press
+## If something goes wrong
 
-The firmware prints one `[i]` line per interaction, from the button going down
-to the panel being finished with it, and `tools/latency.py` groups those by
-where the press landed and reports medians.
+Please [open an issue](https://github.com/Rukkaitto/encre/issues). Say which
+model you have and what you were doing.
 
-**Every timing taken over USB is inflated by the cable.** The USB CDC write
-blocks until the host takes the bytes, and unplugged it short-circuits and costs
-microseconds — which is the device's real behaviour, since it lives on battery.
-Each `[i]` line carries `ser=` for exactly this reason; `net = total − ser` is
-the number to compare across runs.
+The most useful thing you can attach is a log. Encre can write one to the card
+itself, which catches problems that only happen while it is unplugged:
 
-A log on the card exists for faults that only happen unplugged, but it is
-currently unreachable from the settings file —
-[#47](https://github.com/Rukkaitto/encre/issues/47).
+1. Put the SD card in your computer and open `/.reader/settings.json`.
+2. Set `"logToCard": true`.
+3. Put the card back, and make the problem happen again.
+4. Put the card in your computer and attach `/encre.log`.
 
-## What is unverified
+## What's new
 
-- **The X4 is not the development device.** All device measurements in this repo
-  were taken on an X3 with a UC8279 controller. Rotation is measured as
-  counter-clockwise on the X3 and unverified on the X4
-  ([#23](https://github.com/Rukkaitto/encre/issues/23)); if the X4 renders 180°
-  out, that is the reason.
-- **Two cover behaviours have not been seen on glass**: the one-bit cover the
-  *wake* paints, and whether the sleep badge slicing a cover's own title band is
-  tolerable. Most covers set type exactly where the badge sits.
+Every release has notes: see [Releases](https://github.com/Rukkaitto/encre/releases).
+The unticked boxes above are what's planned, roughly in the order they matter.
 
-The goldens are *not* on this list: they were blessed on macOS/clang, and CI
-re-runs them on Linux/gcc on every push, so the rasteriser agrees across both
-toolchains.
+## Contributing
 
-## Repo layout
+Pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to
+build it, run the tests, and the few rules that are easy to trip over.
 
-| Path | What it is |
-|---|---|
-| `core/` | Portable C++20, namespace `reader::`. Framebuffer, fonts, text, icons, dither, layout, view-models, themes. No Arduino, ESP or host-OS dependency. |
-| `sim/` | Desktop simulator — renders a screen to PNG at exact panel size. |
-| `shell/` | The Arduino layer: device detection, display bring-up, the paint sequence. The only place that touches `freeink-sdk`. |
-| `tools/` | Asset generators, the design comparison tool, and the device log readers. |
-| `design/` | `*.dc.html` design boards — **the source of truth for the UI**. |
-| `docs/` | The spec, the roadmap, per-phase plans, the smoke checklist, the release procedure. |
-| `freeink-sdk/` | Submodule. MIT drivers for display, input, SD and battery. Never edited here. |
+## Licence
 
-## Working on it
+Encre is MIT licensed. See [LICENSE](LICENSE).
 
-**A UI change goes into the design HTML first, then the implementation.** Never
-only in code, and not the other way round — including when the design itself is
-what is wrong: fix the board, then follow it. `make compare` is what keeps the
-two honest, and changing only the implementation silently invalidates it.
-
-**Never re-bless a golden to make a test pass.** A failing golden writes
-`build/<name>_candidate.png` precisely so the pixels can be looked at, which is
-the only way to tell an intended change from a regression.
-
-Branch names and commit subjects are enforced on pull requests. Install the
-local mirror of that check so you learn about it before pushing rather than
-after:
-
-    make hooks         # commit-msg + pre-push, both bypassable with --no-verify
-    make conventions   # run the same check by hand
-
-[Graft](https://github.com/trailhq/Graft) indexes this repo for coding agents.
-The graph is a local cache like `build/`, gitignored and regenerable; what is
-committed is the wiring in `.claude/`. On a fresh clone:
-
-    npm install -g @nanonets/graft
-    graft build
-
-**One of its six tools does not work here, and it is the one you would want
-most.** `graft callers <symbol>` answers nothing across files on this tree: a C++
-free function is declared in a header and defined in a `.cpp`, which makes the
-name ambiguous, and graft drops an ambiguous cross-file edge rather than guessing
-at it. Same-file edges are fine. So `callers` cannot give you a blast radius
-before a rename here — use `graft grep`, which is exhaustive and groups hits by
-the enclosing symbol. Measured against `drawBadge`, whose two call sites
-`CLAUDE.md` names: `grep` found both, `callers` found neither.
-
-**It says so rather than reporting a clean zero**, which is the only reason it is
-worth having: every such answer names the ambiguity and points at `graft grep`.
-An instrument that reports on less than it claims is worse than none, and this
-one does not.
-
-`graft build --lsp` is the documented fix for exactly this and **does not help**,
-so it is not worth rediscovering: `clangd` is on `PATH` and a
-`compile_commands.json` for the desktop build comes from
-`cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, and the edges were
-unchanged either way. The ambiguity rule sits above the LSP layer. `shell/` has
-no desktop compile database at all, so nothing there could have been covered.
-
-What does work is the rest of it — `graft ask "<question>" --source` locates a
-flow and inlines the code, `graft skeleton <file>` gives a file's API, `graft
-map` orients. Telemetry is anonymous and on by default, a machine-level setting
-rather than anything committed here; `graft telemetry disable` turns it off.
-
-Where to read next: `CLAUDE.md` for how the thing actually behaves and why,
-`docs/superpowers/plans/2026-08-20-v1-roadmap.md` for the phases, and
-`docs/superpowers/specs/2026-08-20-ereader-firmware-v1-design.md` for the spec.
-Deferred work lives on [the project board](https://github.com/users/Rukkaitto/projects/1),
-which is the only index of it.
+It builds on work under other licences:
+[freeink-sdk](https://github.com/Free-Ink/freeink-sdk) (MIT) for the display,
+input, SD and battery drivers; Literata and Space Grotesk under the SIL Open
+Font License 1.1 (`assets/fonts/`); and `stb_truetype`, `stb_image`,
+`stb_image_write` (MIT / public domain) and TJpgDec (ChaN) in `third_party/`.
