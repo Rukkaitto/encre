@@ -117,10 +117,15 @@ class WifiPasswordScreen : public GridFocusScreen {
   size_t caret_ = 0;
   WifiPasswordViewModel vm_;
   Layer layer_ = Layer::Lower;
-  // SHIFT IS ONE-SHOT and #+= LATCHES. A passphrase usually needs one capital,
-  // so a shift that stayed on would cost a second press to turn off far more
-  // often than it saved one; a symbol page is the opposite, because somebody
-  // typing punctuation usually types several.
+  // SHIFT IS ONE-SHOT and the LAYER KEY LATCHES. A passphrase usually needs one
+  // capital, so a shift that stayed on would cost a second press to turn off far
+  // more often than it saved one; a symbol page is the opposite, because
+  // somebody typing punctuation usually types several.
+  //
+  // WHICH IS ALSO WHY ONLY THE LAYER KEY CHANGES ITS LABEL -- `#+=` on the two
+  // letter layers, `abc` while the symbol layer is showing. A latched mode needs
+  // a way off it that says so; a one-shot has no state for a label to name. See
+  // kSymbolKey in the .cpp, and design/WifiPassword.dc.html.
   bool shiftArmed_ = false;
   bool join_ = false;
   bool cancelled_ = false;

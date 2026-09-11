@@ -130,9 +130,55 @@ TEST_CASE("SHIFT is one-shot and #+= latches") {
   press(s, "@");
   CHECK(s.entered() == "Ab~@");
   CHECK(s.layer() == Layer::Symbols);
-  // And it toggles back rather than needing another route out.
-  press(s, "#+=");
+  // And it toggles back rather than needing another route out -- pressed by the
+  // label it is SHOWING, which on this layer is `abc`. `press` looks a cell up
+  // by its label, so naming `#+=` here would be looking for a cell that is not
+  // on the glass: that is the whole point of the rule, expressed as the test
+  // being unable to spell it the old way.
+  press(s, "abc");
   CHECK(s.layer() == Layer::Lower);
+}
+
+TEST_CASE("the layer key names where it takes you, not what it is") {
+  // IT LATCHES, so with one fixed label nothing on the glass distinguishes the
+  // two states except the 40 cells above it -- and the key that got you to the
+  // symbols would be advertising the layer you are already on. SHIFT needs no
+  // such pair because it is one-shot: it is spent by the next character, so
+  // there is no state for a label to name.
+  //
+  // Asserted at the CELL and at the HINT, because they are two readers of one
+  // label and the defect this replaced was a second spelling drifting from the
+  // first. The golden is the third and pins the pixels.
+  WifiPasswordScreen s("N");
+
+  REQUIRE(s.layer() == Layer::Lower);
+  REQUIRE(cellNamed(s, "#+=") >= 0);
+  CHECK(cellNamed(s, "abc") == -1);
+
+  // THE SAME CELL, not a sixth key: the row is six wide on every layer and the
+  // index does not move, so a focus sitting on it survives the press.
+  const int at = cellNamed(s, "#+=");
+  focusOn(s, at);
+  CHECK(s.vm().hints[1] == "#+=");
+  s.onGesture(kConfirm);
+
+  REQUIRE(s.layer() == Layer::Symbols);
+  CHECK(s.vm().cells[static_cast<size_t>(at)] == "abc");
+  CHECK(cellNamed(s, "#+=") == -1);
+  CHECK(s.focus() == at);
+  CHECK(s.vm().hints[1] == "abc");
+
+  // SHIFT'S LAYER IS NOT THE SYMBOL LAYER, and this is the case that says the
+  // substitution keys on the layer rather than on "not Lower": the upper layer
+  // still offers the symbols, so the key still reads `#+=` there.
+  s.setLayer(Layer::Upper);
+  CHECK(s.vm().cells[static_cast<size_t>(at)] == "#+=");
+  CHECK(s.vm().hints[1] == "#+=");
+
+  // AND THE ROW IS OTHERWISE UNTOUCHED -- one cell varies, five do not.
+  s.setLayer(Layer::Symbols);
+  for (const char* f : {"SHIFT", "SPACE", "JOIN"}) CHECK(cellNamed(s, f) >= 0);
+  CHECK(s.vm().cells.size() == 46);
 }
 
 TEST_CASE("#+= clears a pending shift") {
@@ -342,6 +388,12 @@ TEST_CASE("the Confirm hint names what the focused cell does") {
   CHECK(s.vm().hints[1] == "SHIFT");
   focusOn(s, cellNamed(s, "#+="));
   CHECK(s.vm().hints[1] == "#+=");
+  // THE SLOT QUOTES THE CELL rather than a literal, so on the symbol layer it
+  // reads `abc` -- the label and the binding cannot disagree about which layer
+  // the key leads to.
+  s.setLayer(Layer::Symbols);
+  CHECK(s.vm().hints[1] == "abc");
+  s.setLayer(Layer::Lower);
   // SPACE IS NOT A MODIFIER: it types a character like any other cell, and it
   // is the only function key that does.
   focusOn(s, cellNamed(s, "SPACE"));
