@@ -3,6 +3,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "reader/wire_escape.h"
+
 namespace reader {
 namespace {
 
@@ -68,64 +70,19 @@ constexpr int kFocusMax = 32767;
 // itself is 6.
 constexpr size_t kPlaceMaxBytes = 128;
 
-bool isHexDigit(char c) {
-  return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-}
-
-int hexValue(char c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-  return c - 'A' + 10;
-}
-
-// `%`, `;`, `:` and any control byte, as `%XX`; everything else verbatim -- see
-// the header for why UTF-8 is not escaped.
-std::string escapePlace(const std::string& place) {
-  static const char* const kHex = "0123456789ABCDEF";
-  std::string out;
-  out.reserve(place.size());
-  for (const char ch : place) {
-    const unsigned char c = static_cast<unsigned char>(ch);
-    if (c == '%' || c == ';' || c == ':' || c < 0x20 || c == 0x7F) {
-      out += '%';
-      out += kHex[c >> 4];
-      out += kHex[c & 0x0F];
-    } else {
-      out += static_cast<char>(c);
-    }
-  }
-  return out;
-}
-
-// False refuses the WHOLE record: a place this cannot decode was written by
-// something that is not this format. Empty is refused too -- encodeSessionStack
-// writes no field at all for a screen with no place, so `library:7:` is a record
-// with a third field and nothing in it, which is the trailing-separator rule.
-bool decodePlace(const char* start, size_t len, std::string& out) {
-  out.clear();
-  if (len == 0) return false;
-  out.reserve(len);
-  for (size_t i = 0; i < len; ++i) {
-    const char c = start[i];
-    if (c == '%') {
-      if (i + 2 >= len || !isHexDigit(start[i + 1]) || !isHexDigit(start[i + 2])) return false;
-      const int v = hexValue(start[i + 1]) * 16 + hexValue(start[i + 2]);
-      // A NUL cannot be in a path and would truncate this record's own string the
-      // next time it is written, so it is refused rather than carried.
-      if (v == 0) return false;
-      out += static_cast<char>(v);
-      i += 2;
-      continue;
-    }
-    // A RAW SEPARATOR HERE IS A FOURTH FIELD, and there is no fourth field: the
-    // escape puts `:` beyond the parser's reach, so `library:7:/books:extra` is
-    // malformed rather than a path with a colon in it. (`;` cannot reach here at
-    // all -- it ends the entry.)
-    if (c == ':' || c == ';') return false;
-    out += c;
-  }
-  return true;
-}
+// THE PERCENT-ESCAPING MOVED TO reader/wire_escape.h, because the Wi-Fi store
+// needs byte-for-byte the same rules on an SSID -- same separators, same three
+// refusals, same reason for wanting a record `nvs_get` can print. It was
+// written here for a Library path and this is the second caller, which is
+// where this project extracts rather than copies.
+//
+// What the place-specific reasoning was, and still is, now that the code is
+// shared: a place that cannot be decoded refuses the WHOLE record, on the
+// unknown-name rule -- it was written by something that is not this format, so
+// the entries around it may not mean what they say either. An EMPTY place is
+// refused too, because encodeSessionStack writes no third field at all for a
+// screen with no place, so `library:7:` is a record with a field and nothing in
+// it, which is the trailing-separator rule.
 
 bool decodeName(const char* start, size_t len, ScreenId& out) {
   if (len == 0) return false;
@@ -235,7 +192,7 @@ std::string encodeSessionStack(const std::vector<StackEntry>& stack) {
     // directory, not none -- and the row it indexes goes with it, because a row
     // index without its folder is the defect this field exists to close. -1 is
     // "nothing selected", a real position every focused screen accepts.
-    const std::string place = escapePlace(e.place);
+    const std::string place = escapeWireField(e.place);
     const bool fits = !place.empty() && place.size() <= kPlaceMaxBytes;
     if (!place.empty() && !fits) focus = kFocusMin;
     out += std::to_string(focus);
@@ -261,7 +218,7 @@ bool decodeSessionStack(const char* raw, std::vector<StackEntry>& out) {
       return false;
     }
     // The SECOND colon, if the entry has one, ends the focus and begins the
-    // place. It cannot be a colon inside the place: escapePlace put every one of
+    // place. It cannot be a colon inside the place: escapeWireField put every one of
     // those beyond this search, which is what makes a path with a colon in it
     // impossible rather than ambiguous.
     const char* placeSep = static_cast<const char*>(
@@ -275,7 +232,7 @@ bool decodeSessionStack(const char* raw, std::vector<StackEntry>& out) {
       return false;
     }
     if (placeSep != nullptr &&
-        !decodePlace(placeSep + 1, static_cast<size_t>(entryEnd - placeSep - 1), e.place)) {
+        !decodeWireField(placeSep + 1, static_cast<size_t>(entryEnd - placeSep - 1), e.place)) {
       out.clear();
       return false;
     }
