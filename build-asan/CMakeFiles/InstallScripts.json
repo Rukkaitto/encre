@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/Users/lucasgoudin/dev/encre/.claude/worktrees/github-release-ci-workflow-e86e00/build-asan/cmake_install.cmake"
-	],
-	"Parallel" : false
-}
