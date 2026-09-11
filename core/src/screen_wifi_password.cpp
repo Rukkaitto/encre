@@ -111,8 +111,20 @@ void WifiPasswordScreen::syncVm() {
   // a new one: a button with no action gets an empty slot, drawn at
   // kHintEmptySlotW rather than as nothing. activateCell asks `joinable()`
   // too, so the bar and the behaviour cannot disagree.
-  vm_.hints = {"DELETE", confirmLabel(), "UP", "DOWN"};
-  vm_.holds = {true, false, false, false};
+  // BACK DELETES A CHARACTER AND LEAVES WHEN THERE IS NONE, and the slot says
+  // which. It read a constant DELETE with a constant ring, so on an empty
+  // field the press did nothing at all -- reported off the device as "you
+  // can't go back from the password screen", which is exactly what it was:
+  // the hold was the only way out of a screen a reader can arrive at by
+  // accident.
+  //
+  // THE RING GOES WITH IT. A hold ring promises a DIFFERENT action, and once
+  // the short press already leaves there is no second action to promise. One
+  // expression drives the label, the ring and the binding, so none of the
+  // three can drift from the others.
+  const bool deletes = !entered_.empty();
+  vm_.hints = {deletes ? "DELETE" : "BACK", confirmLabel(), "UP", "DOWN"};
+  vm_.holds = {deletes, false, false, false};
   declareHints(vm_.holds);
 }
 
@@ -177,8 +189,18 @@ Action WifiPasswordScreen::activateCell() {
 Action WifiPasswordScreen::onGesture(const GestureEvent& g) {
   switch (g.what) {
     case Gesture::Back:
-      // DELETE, not leave. The bar says so, and the hold is the way out.
-      if (entered_.empty()) return Action::none();
+      // DELETE while there is something to delete, and LEAVE when there is
+      // not -- which is what the bar says in each state. This returned
+      // none() on an empty field, so the press was a dead button and the
+      // hold was the only way off the screen.
+      //
+      // IT LATCHES RATHER THAN POPPING, exactly as the hold does: the radio
+      // was brought up for this join and the shell has to be told. Leaving
+      // by either route is the same event, so it sets the same flag.
+      if (entered_.empty()) {
+        cancelled_ = true;
+        return Action::wifi();
+      }
       entered_.pop_back();
       syncVm();
       return Action::redraw();

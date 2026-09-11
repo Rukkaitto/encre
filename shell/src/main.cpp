@@ -578,6 +578,13 @@ static bool gJoinLocked = false;
 // Whether a scan has been asked for on the picker currently on top, so
 // arriving at the picker starts exactly one.
 static bool gScanArmed = false;
+// Whether the completed scan's rows have been handed over. scanState() stays
+// Done once it is Done, so without this the poll called setResults on EVERY
+// loop iteration -- and setResults puts the focus back at the top, correctly,
+// because the list it indexed no longer exists. The reported symptom was that
+// moving through the networks "goes back to the first one on its own": the
+// focus was being reset several times a second under the reader's thumb.
+static bool gScanDelivered = false;
 
 // THE BODY FACE, and it is resident now rather than a boot-time local. It used to
 // be scoped to the check below and released before setup() returned, because
@@ -2672,6 +2679,7 @@ static void handleWifi() {
       auto& p = static_cast<reader::WifiPickerScreen&>(gApp->top());
       if (p.rescanChosen()) {
         p.clearChoice();
+        gScanDelivered = false;  // a second scan owes a second delivery
         if (gRadio.beginScan()) p.setScanning(true);
         return;
       }
@@ -2780,21 +2788,30 @@ static void pollWifi() {
     // the screen appearing IS the trigger.
     if (!gScanArmed) {
       gScanArmed = true;
+      gScanDelivered = false;
       if (gRadio.beginScan()) p.setScanning(true);
       return;
     }
+    // ONCE PER SCAN. scanState() stays Done once it is Done, so an ungated
+    // setResults here runs every iteration and resets the focus to the top
+    // every time -- which is exactly what it is specified to do, and is the
+    // reason the list would not stay where the reader put it.
+    if (gScanDelivered) return;
     if (gRadio.scanState() == reader::ScanState::Done) {
+      gScanDelivered = true;
       p.setResults(reader::rankScanResults(gRadio.scanResults()));
       gApp->markDirty();
     } else if (gRadio.scanState() == reader::ScanState::Failed) {
       // AN EMPTY PICKER, NOT A JOIN FAILURE -- beginScan's own contract: a
       // radio that would not come up is not a network that rejected you.
+      gScanDelivered = true;
       p.setResults({});
       gApp->markDirty();
     }
     return;
   }
   gScanArmed = false;
+  gScanDelivered = false;
 
   if (id == reader::ScreenId::WifiConnect) {
     auto& dlg = static_cast<reader::WifiConnectScreen&>(gApp->top());
@@ -6987,6 +7004,15 @@ void loop() {
   // The cost is kCoalesceMs added to a single isolated press. That is a ~7%
   // penalty on one paint against a ~3x saving on a burst, and it is below what
   // is noticeable next to the refresh itself.
+  // BEFORE THE PAINT, AND THAT ORDERING IS THE WHOLE OF A REPORTED BUG. It
+  // ran after, so the picker was pushed, painted with the boot-primed EMPTY
+  // list -- "No networks found" -- and only THEN did the first poll arm the
+  // scan. The reader was told the scan had finished and found nothing before
+  // it had started. Up here the scan is armed and `setScanning(true)` is set
+  // in the same iteration as the push, so the first frame the picker ever
+  // draws is the scanning one.
+  pollWifi();
+
   const bool settled = static_cast<uint32_t>(millis() - gLastInputMs) >= kCoalesceMs;
   const bool painted = gApp->dirty() && settled;
   if (painted) {
@@ -7311,20 +7337,6 @@ void loop() {
   // card-presence poll uses", and the battery poll below follows the same rule
   // for a different bus.
   const bool quiet = !gApp->dirty() && rawSamplesPending() == 0;
-
-  // THE SCAN AND THE JOIN, in the window every slow job in this firmware
-  // already uses -- the deferred page count, the grayscale refinement, the
-  // ring warm, the card-log flush, the position save. It needs no SpiBusGuard:
-  // the radio is not on the display's bus, and unlike the card probe it cannot
-  // race a refresh.
-  //
-  // NOT gated on `quiet`, deliberately, unlike its neighbours below. Those are
-  // OPTIONAL work that must not delay a paint; this one OWES the reader a
-  // paint -- a scan that has come back and a join that has failed both have to
-  // reach the glass, and gating them on an idle App would stall the flow
-  // exactly when it is doing something. It is a few pointer tests when nothing
-  // is in flight.
-  pollWifi();
 
   // THE CARD LOG'S IDLE FLUSH. This is the call kLogFlushAtBytes was declared for
   // and did not have: the tee filled the 4 KB buffer, logTee then began counting

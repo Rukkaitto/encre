@@ -150,11 +150,16 @@ TEST_CASE("#+= clears a pending shift") {
   CHECK(s.layer() == Layer::Symbols);
 }
 
-TEST_CASE("Back deletes, and on an empty field it does nothing at all") {
-  // The bar says DELETE and the hold is the way out, so Back must never
-  // leave. On an empty field there is nothing to delete and nothing to
-  // repaint -- a ~520 ms refresh drawing an identical screen is what
-  // Action::none() exists to refuse.
+TEST_CASE("Back deletes a character, and LEAVES when there is none to delete") {
+  // THIS CASE USED TO ASSERT THE DEFECT. It said "on an empty field it does
+  // nothing at all", on the reasoning that the bar says DELETE and the hold
+  // is the way out -- and that is a dead button plus a hold as the only exit
+  // from a screen a reader can arrive at by accident. Reported off the
+  // device as "you can't go back from the password screen".
+  //
+  // A character in the field is still a delete, and the last one is still a
+  // delete rather than an exit: the press that empties the field does not
+  // also leave.
   WifiPasswordScreen s("N");
   press(s, "a");
   press(s, "b");
@@ -162,16 +167,49 @@ TEST_CASE("Back deletes, and on an empty field it does nothing at all") {
 
   CHECK(s.onGesture(kBack).kind == Action::Kind::Redraw);
   CHECK(s.entered() == "a");
+  CHECK_FALSE(s.cancelled());
   CHECK(s.onGesture(kBack).kind == Action::Kind::Redraw);
   CHECK(s.entered().empty());
-
-  const Action a = s.onGesture(kBack);
-  CHECK(a.kind == Action::Kind::None);
-  CHECK(s.entered().empty());
-  // AND IT DID NOT LEAVE, which is the half that matters: a Back that popped
-  // here would take the reader off the keyboard mid-passphrase.
-  CHECK(a.kind != Action::Kind::Pop);
+  // THE PRESS THAT EMPTIED IT DID NOT ALSO LEAVE, which is the boundary: a
+  // rule keyed on "after this press the field is empty" would take the
+  // reader off the screen on the last backspace.
   CHECK_FALSE(s.cancelled());
+
+  // And NOW it leaves, latching rather than popping, because the shell has
+  // to take the radio down.
+  const Action a = s.onGesture(kBack);
+  CHECK(a.kind == Action::Kind::Wifi);
+  CHECK(s.cancelled());
+}
+
+TEST_CASE("the Back slot says which of the two things it will do") {
+  // ONE EXPRESSION drives the label, the ring and the binding, so a reader
+  // is never told DELETE by a button that leaves, or offered a hold that
+  // does what the short press already does.
+  WifiPasswordScreen s("N");
+
+  // Empty: the short press leaves, so the slot says BACK and there is NO
+  // ring -- a ring promises a DIFFERENT action and there is no second one.
+  CHECK(s.vm().hints[0] == "BACK");
+  CHECK_FALSE(s.vm().holds[0]);
+  CHECK(s.longPressable() == 0);
+
+  press(s, "a");
+  CHECK(s.vm().hints[0] == "DELETE");
+  CHECK(s.vm().holds[0]);
+  CHECK(s.longPressable() != 0);
+
+  // ...and back again, because the field can empty.
+  s.onGesture(kBack);
+  REQUIRE(s.entered().empty());
+  CHECK(s.vm().hints[0] == "BACK");
+  CHECK_FALSE(s.vm().holds[0]);
+
+  // setEntered moves it too -- the EDIT PASSWORD path arrives through there
+  // and must not land on a bar describing the empty state.
+  s.setEntered("hunter2");
+  CHECK(s.vm().hints[0] == "DELETE");
+  CHECK(s.vm().holds[0]);
 }
 
 TEST_CASE("typing stops at the bound rather than swallowing the press") {

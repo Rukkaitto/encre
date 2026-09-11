@@ -115,14 +115,33 @@ TEST_CASE("a Wi-Fi outcome is readable after the dispatch that latched it") {
     CHECK(kb->entered() == "correcthorse");
   }
 
-  SUBCASE("the keyboard's held Back") {
-    f.factory.setWifiTarget("HOME");
+  SUBCASE("the keyboard's held Back, with something typed") {
+    // A PASSPHRASE IS PRIMED DELIBERATELY: with an EMPTY field Back leaves on
+    // the short press, so the hold is not bound at all and a Long press here
+    // would be testing a binding the screen correctly does not declare. The
+    // hold is the exit from a field with something in it.
+    f.factory.setWifiTarget("HOME", "correcthorse");
     REQUIRE(f.app.pushScreen(ScreenId::WifiPassword));
     const int depth = f.app.depth();
     f.app.dispatch(kHoldBack);
     CHECK(f.app.wifiRequested());
     REQUIRE(f.app.depth() == depth);
     auto* kb = static_cast<WifiPasswordScreen*>(&f.app.top());
+    CHECK(kb->cancelled());
+    CHECK_FALSE(kb->joinChosen());
+  }
+
+  SUBCASE("the keyboard's SHORT Back on an empty field") {
+    // THE WAY OUT A READER ACTUALLY FINDS. It used to be a dead button, with
+    // the hold as the only exit.
+    f.factory.setWifiTarget("HOME");
+    REQUIRE(f.app.pushScreen(ScreenId::WifiPassword));
+    auto* kb = static_cast<WifiPasswordScreen*>(&f.app.top());
+    REQUIRE(kb->entered().empty());
+    const int depth = f.app.depth();
+    f.app.dispatch(kBack);
+    CHECK(f.app.wifiRequested());
+    REQUIRE(f.app.depth() == depth);
     CHECK(kb->cancelled());
     CHECK_FALSE(kb->joinChosen());
   }
