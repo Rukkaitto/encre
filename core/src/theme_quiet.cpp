@@ -3177,7 +3177,15 @@ void QuietTheme::renderWifiConnect(Framebuffer& fb, const FontSet& fonts,
   const Icon& mark = icons::kWifi;
 
   const Prose label = wrapPanelCaption(fonts, vm.caption, contentW);
-  const Prose message = wrapProse(body, vm.message, colW, 1300);
+  // `WordBreak::Anywhere` FOR renderWifiError's REASON, and this screen
+  // embeds the SAME string: an SSID is 32 arbitrary octets and need contain no
+  // space, so the quoted name is one unbreakable token. Measured on the worst
+  // case, a 32-byte name with nothing to break on runs to 727px against this
+  // 296px column -- and the line is CENTRED, so it starts 215px left of the
+  // column and ran off BOTH sides of the panel.
+  //
+  // The sibling one function down had this and said why; this one did not.
+  const Prose message = wrapProse(body, vm.message, colW, 1300, {}, WordBreak::Anywhere);
   const Prose noteProse = wrapProse(note, vm.note, colW, 1500, noteTracking);
 
   const int bodyH = kConfirmProsePadY + mark.h + kWifiMarkGap + f26ToPx(message.heightF26()) +
