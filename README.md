@@ -28,14 +28,16 @@ models; it works out which one it is at boot.
 
 <table>
 <tr>
-<td width="33%"><img src="docs/images/home.png" alt="The home screen, showing the book in progress, a library count and settings."></td>
-<td width="33%"><img src="docs/images/library.png" alt="The library, listing a folder and six books with their progress."></td>
-<td width="33%"><img src="docs/images/sleep_cover_details.png" alt="The sleep screen: a book cover as a four-level greyscale photograph, with a card over it naming the book and how far in you are."></td>
+<td width="25%"><img src="docs/images/home.png" alt="The home screen, showing the book in progress, a library count and settings."></td>
+<td width="25%"><img src="docs/images/library.png" alt="The library, listing a folder and six books with their progress."></td>
+<td width="25%"><img src="docs/images/typography.png" alt="The typography panel: a live preview of body text above rows for font, size, margins, line spacing and alignment."></td>
+<td width="25%"><img src="docs/images/sleep_cover_details.png" alt="The sleep screen: a book cover as a four-level greyscale photograph, with a card over it naming the book and how far in you are."></td>
 </tr>
 <tr>
-<td><em>Home picks up where you left off.</em></td>
-<td><em>Folders, and how far you are into each book.</em></td>
-<td><em>Asleep, showing the book's cover and where you are in it. If a cover can't be read, you get the card on its own. You can also hide the card, or turn the cover off.</em></td>
+<td><em>Picks up where you left off.</em></td>
+<td><em>Folders, and how far into each book you are.</em></td>
+<td><em>Size, margins, spacing and alignment, previewed live.</em></td>
+<td><em>The cover while it sleeps, with your place on it.</em></td>
 </tr>
 </table>
 

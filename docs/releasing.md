@@ -46,9 +46,11 @@ agreement — the last two cannot be produced on a desktop at all.
    front page; an unticked one that shipped only understates, so the ticks are
    the half to check hardest. This is the one thing the README states that can
    drift, and it states it deliberately -- every other claim on that page was
-   chosen because a merge cannot falsify it. The rendered screens go with it: if
-   a UI change reached Home, the Library, a reader page or the sleep cover, run
-   `make readme-images` and commit what moves.
+   chosen because a merge cannot falsify it. The rendered screens go with it: if a
+   UI change reached any screen named in the Makefile's `README_SCREENS`, run
+   `make readme-images` and commit what moves. That variable IS the list, so
+   naming the screens here would be a second copy of it, free to go stale the
+   first time the set changes -- which it did, the first time one was added.
 3. **`make test` is green** on a clean tree, and `make compare` is green.
    `make conventions` passes for the commits being released.
 4. **CI is green on `main`** for the commit being tagged. `firmware` is the only
