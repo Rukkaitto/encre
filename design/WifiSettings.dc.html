@@ -35,6 +35,31 @@
   <div style="padding: 16px 24px; border-bottom: 1px solid #000000;">
     <div style="font-size: var(--t-label); line-height: 1.55;">Wi-Fi stays off. It connects only while receiving books &mdash; then turns off again.</div>
   </div>
+  <!--
+    AUTO IS A PREFERENCE, NOT A SWITCH, and at most one network holds it: it
+    means "tried first when the radio comes up". SAVED means known and not
+    preferred. SELECT toggles between them in place, which is Settings' own
+    CHANGE idiom and needs no screen.
+
+    THE HOLD RING ON THE `SELECT` SLOT IS ALREADY DRAWN BELOW and it binds
+    FORGET -- spec 4.0: "Long-press Confirm on any list item = contextual
+    actions overlay ... Saved Wi-Fi networks: hold to forget." It opens
+    WifiNetworkActions.dc.html, a one-row overlay, which is the step between
+    the press and the loss. No second confirmation: forgetting a network costs
+    you retyping a password, where deleting a book is irreversible and gets
+    DeleteConfirm.
+
+    This is the SECOND hold in the firmware; the Library's is the first, and
+    the binding is identical (Confirm short opens, Confirm long acts on the
+    row).
+
+    Forgetting the AUTO network leaves ZERO AUTO. Nothing is silently promoted
+    -- a preference is the user's, and changing it behind their back with
+    nothing on the glass to say so is the false-claim shape this project
+    refuses for the battery gauge. Zero AUTO is legal and is not a dead end:
+    bring-up then tries every saved network in the order the last scan ranked
+    them.
+  -->
   <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">SAVED NETWORKS</div>
   <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; background: #000000; color: #ffffff;">
   <div style="font-size: var(--t-value); font-weight: 700;">HOME</div>
@@ -44,14 +69,32 @@
   <div style="font-size: var(--t-value); font-weight: 500;">BUREAU</div>
   <div style="font-size: var(--t-value); font-weight: 700;">SAVED</div>
 </div>
+  <!--
+    THE `Start setup hotspot . SHOWS QR` ROW IS GONE, and it returns with the
+    hotspot screen. Two reasons, and the first is the rule:
+
+    A row states a quantity OR discloses a screen, never both. `SHOWS QR` is a
+    value describing where the press leads, sitting where `Join another
+    network...` puts a chevron -- so the one section had two spellings of
+    disclosure, and one of them was the shape the rule forbids.
+
+    And its screen is a later release. V1.1 is the CONNECT flow only:
+    SetupHotspot.dc.html needs an AP, an HTTP server and WebSetup.dc.html, all
+    of which are V2. The precedent for cutting rather than drawing-and-skipping
+    is the reader menu's `Names` row -- a row waiting on its own screen INSIDE
+    the release is drawn and skipped, a row waiting on a LATER RELEASE comes off
+    the board, because focus-skipping stops it misleading a reader who PRESSES
+    it and does nothing about it promising a feature the release does not have.
+
+    `Join another network...` IS THEREFORE THE LAST DRAWN ROW AND LOSES ITS
+    RULE. That is renderLibrary's `i != rows - 1` verbatim: the list's bottom
+    edge is left open rather than hanging a hairline over the slack above the
+    hint bar. It had a border-bottom only because a row followed it.
+  -->
   <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">SETUP</div>
-  <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-bottom: 1px solid #000000;">
+  <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px;">
   <div style="font-size: var(--t-value); font-weight: 500;">Join another network&hellip;</div>
   <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
-</div>
-  <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px;">
-  <div style="font-size: var(--t-value); font-weight: 500;">Start setup hotspot</div>
-  <div style="font-size: var(--t-value); font-weight: 700;">SHOWS QR</div>
 </div>
   <div style="margin-top: auto;"></div>
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">

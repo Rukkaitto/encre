@@ -542,7 +542,7 @@ this project records applies to the latter and is a glass question.
 | theme | six `Theme::render*` virtuals, `QuietTheme` implements, built from `drawSectionHeader`, `drawDetailRow`, `drawScrollRail`, `drawPanelCaption`, `drawActionButton`, `wrapProse`/`drawProse`, `drawStatusBar`, `drawHintBar`, `veilRect` |
 | icons | `kLock`, `kSignal1-4`, `kRescan`, `kWifi` via `iconc.py` |
 | new boards | **6** — `WifiErrorNotFound`, `WifiErrorFailed`, `WifiSettingsEmpty`, `WifiPickerEmpty`, `WifiPickerScrolled`, `WifiNetworkActions` |
-| edited boards | **3** — `WifiSettings` (hotspot row out), `WifiConnect` (veil, copy, ticker out), `Settings` (`CONNECTIONS` back) |
+| edited boards | **4** — `WifiSettings` (hotspot row out), `WifiConnect` (veil, copy, ticker out), `WifiError` (veil rows 72→80px, the missing SETUP section, and copy off the wrap boundary), `Settings` (`CONNECTIONS` back) |
 | simulator | one subcommand per screen and per boarded state |
 | compare | move 5 rows `V2_SCREENS` → `FLOW_SCREENS`, add 6 more; denominator **37 → 48** |
 | goldens | every screen and boarded state at both geometries, plus the two keyboard layers and `READY` |
@@ -551,6 +551,45 @@ this project records applies to the latter and is a glass question.
 **`ScreenId` goes from 16 members to 22.** The sentinel is what makes that safe: #42's
 own history is that the same append-past-a-named-member defect shipped three times,
 and the last time it was caught only by a merge in which two screens landed at once.
+
+## Copy is measured against the wrap boundary, in both directions
+
+#76 made this a rule for this panel family after two `BookError` shapes shipped
+one and three pixels from it: the firmware's `.rfnt` faces measure ~3% wider than
+Chrome's, so a line that merely fits on the board wraps differently on glass, the
+centred panel grows, and every rule inside it lands out of register. That defect
+measured 11.12%/11.70% against a 3.58% sibling.
+
+**`test_book_error_copy.cpp` CHECKS ONE DIRECTION AND THERE ARE TWO.** It asserts
+the NEXT word overflowed by at least 12px, which stops a word coming **up** into a
+line. It says nothing about a line sitting flush at the column width, whose own
+last word is pushed **down** the moment the face widens — and that is a real state:
+`"PENDRAGON" refused the password.` puts line one at **exactly 340px** in a 340px
+column, which passes the overflow test and breaks on the device.
+
+Every string in this flow was measured both ways, against a floor of 4% of its own
+column. Five were inside it and all five were reworded:
+
+| string | was | now |
+|---|---|---|
+| `WifiError`'s sentence | +6.3px up | `Wrong password for "PENDRAGON".` — +14 up, 26 down |
+| `WifiConnect`'s line | +2.7px up | `…to test the password.` — +86 up, 21 down |
+| `WifiConnect`'s note | +11.5px up | `WI-FI TURNS OFF AGAIN AFTERWARDS.` — +93 up, 57 down |
+| `WifiSettingsEmpty`'s prose | +11.3px up | `Whichever you save first…` — +46 up, 30 down |
+| `WifiPickerEmpty`'s prose | 7px down | split into two paragraphs — +18 up, 32 down |
+
+**One cost is stated rather than hidden:** `WifiError`'s sentence no longer leads
+with the SSID, where the other two shapes do. Every SSID-first wording tried sat
+inside the floor in one direction or the other, so this is a trade forced by
+measurement.
+
+**AND THE HARNESS HAS A LIMIT WORTH KNOWING.** Canvas `measureText` is accurate for
+plain text and **disagrees with Chrome's own layout for letter-spaced runs** — it
+put the shipped `OPEN NETWORKS JOIN DIRECTLY;…` footer at three lines where the
+render draws two. So the tracked-caps footers were **not** cleared by this method,
+and the option of moving the 2.4 GHz caveat into `WifiPicker`'s footer could not be
+measured. That is part of why the caveat stayed in the empty state's body, and it
+is the second half of the open question below.
 
 ## Testing
 

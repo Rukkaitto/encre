@@ -83,11 +83,11 @@
     },
     {
       "file": "Transfer.dc.html",
-      "x": 1160,
-      "y": 900,
+      "x": 0,
+      "y": 0,
       "w": 480,
       "h": 800,
-      "page": "page-2",
+      "page": "page-7",
       "title": "Transfer"
     },
     {
@@ -327,11 +327,11 @@
     {
       "file": "SetupHotspot.dc.html",
       "title": "Setup Hotspot",
-      "x": 1740,
-      "y": 2700,
+      "x": 580,
+      "y": 0,
       "w": 480,
       "h": 800,
-      "page": "page-4"
+      "page": "page-7"
     },
     {
       "file": "SyncDone.dc.html",
@@ -566,6 +566,60 @@
       "w": 480,
       "h": 800,
       "page": "page-2"
+    },
+    {
+      "file": "WifiSettingsEmpty.dc.html",
+      "title": "Wi-Fi Settings · Empty",
+      "x": 1160,
+      "y": 4500,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "WifiNetworkActions.dc.html",
+      "title": "Network Actions",
+      "x": 1740,
+      "y": 4500,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "WifiPickerScrolled.dc.html",
+      "title": "Join Network · Scrolled",
+      "x": 2320,
+      "y": 4500,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "WifiPickerEmpty.dc.html",
+      "title": "Join Network · None Found",
+      "x": 2900,
+      "y": 4500,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "WifiErrorNotFound.dc.html",
+      "title": "Join Failed · Not Found",
+      "x": 3480,
+      "y": 4500,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
+    },
+    {
+      "file": "WifiErrorFailed.dc.html",
+      "title": "Join Failed · Incomplete",
+      "x": 4060,
+      "y": 4500,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
     }
   ],
   "annotations": [
@@ -678,7 +732,7 @@
       "x": 0,
       "y": -180,
       "w": 480,
-      "text": "Every remaining UX path in the B2 theme: empty and error states, hold-action menus, reader tools, and the on-demand Wi-Fi flow.\nHint bars always show 4 slots, one per hardware button (Back / Confirm / Up / Down); a button with no action leaves its slot empty, and a hold action stacks inside its button&apos;s slot.\nRow 4: the full Wi-Fi joining path — scan, password entry, failure, hotspot setup, and sync feedback.\nRow 5: end-of-book, battery-empty, and boot states (the Instapaper boards moved to the V2 page).",
+      "text": "Every remaining UX path in the B2 theme: empty and error states, hold-action menus, reader tools, and the on-demand Wi-Fi flow.\nHint bars always show 4 slots, one per hardware button (Back / Confirm / Up / Down); a button with no action leaves its slot empty, and a hold action stacks inside its button&apos;s slot.\nRows 4 and 6: the full Wi-Fi joining path — scan, password entry, failure, hotspot setup, and sync feedback.\nRow 5: end-of-book, battery-empty, and boot states (the Instapaper boards moved to the V2 page).",
       "page": "page-4"
     },
     {
@@ -710,7 +764,7 @@
       "x": 2900,
       "y": 2700,
       "w": 300,
-      "text": "Joining a network on-device: scan list, then a button-driven keyboard (Up/Down between rows, side page buttons along a row, Confirm types, Back deletes / hold cancels). The setup hotspot is the no-typing alternative and also carries Instapaper sign-in via the web page. Failure states say Wi-Fi is off again.",
+      "text": "Joining a network on-device: scan list, then a button-driven keyboard (Up/Down between rows, side page buttons along a row, Confirm types, Back deletes / hold cancels). The setup hotspot is the no-typing alternative and is V2. Failure states say Wi-Fi is off again -- and there are three of them, because a join fails three distinguishable ways and one sentence would be a lie.",
       "page": "page-4"
     },
     {
@@ -760,6 +814,13 @@
       "w": 460,
       "text": "Names · Empty — a variant, not a second screen: same ScreenId, same view model, same band, copy where the rows would be. A book opened at chapter one legitimately knows almost nothing, and the copy names the mechanism (reading fills it) rather than just reporting emptiness — otherwise a reader concludes the feature is broken.\nNo action slab: nothing here can be pressed to help, and a primary action that cannot work is worse than none.",
       "page": "page-4"
+    },
+    {
+      "id": "v2-wifi-transfer-brief",
+      "page": "page-7",
+      "x": 0,
+      "y": -180,
+      "text": "Wi-Fi was cut from V1 on 2026-08-22 as too big, and CONNECTING came back for V1.1 -- these two did not. Sending a book needs an HTTP server, the upload page on the Web UI page, and an AP for the setup hotspot; Phase 4's exit, \"drop an EPUB from a browser onto the device over Wi-Fi\", is what these boards are waiting for. Finished design, not V1.1 scope.\n\nTransfer.dc.html sat on the V1 Screens page until now, which is what the cut never got round to: the Instapaper cut moved its boards to a page of their own and annotated it, and Wi-Fi's did neither. The five connect boards are on Flows & States, bottom row."
     }
   ],
   "pages": [
@@ -786,6 +847,10 @@
     {
       "id": "page-6",
       "name": "V2 · Instapaper"
+    },
+    {
+      "id": "page-7",
+      "name": "V2 · Wi-Fi transfer"
     }
   ],
   "launch": {

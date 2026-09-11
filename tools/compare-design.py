@@ -112,21 +112,27 @@ V1_SCREENS = [
     ("sleep",        "Sleep.dc.html",      "Sleep"),
 ]
 
-# PARKED, NOT DELETED. V1 is card-transfer only -- Wi-Fi was cut as too big --
-# so these boards describe a V2 and comparing them would report a permanent
-# "not implemented" for work nobody is doing. The files stay in design/ because
-# they are real design work and V2 will want them; what changes is that the
-# fidelity check stops counting them.
+# PARKED, NOT DELETED. These boards describe a V2 and comparing them would
+# report a permanent "not implemented" for work nobody is doing. The files stay
+# in design/ because they are real design work and V2 will want them; what
+# changes is that the fidelity check stops counting them.
 #
 # Same treatment Instapaper already got (see the canvas page "V2 - Instapaper").
-# If Wi-Fi returns, move these rows back into FLOW_SCREENS.
+#
+# WI-FI RETURNED, AND ONLY HALF OF IT. This list held seven rows: the five
+# connect-flow boards came back into FLOW_SCREENS with V1.1, which is exactly
+# what the note here used to ask for. THE TWO THAT REMAIN ARE THE TRANSFER HALF
+# and they are not a leftover -- V1.1 is the connect flow only, so there is
+# still no HTTP server, no upload page and no AP, and Phase 4's own exit ("drop
+# an EPUB from a browser onto the device over Wi-Fi") is not met.
+#
+# WebSetup.dc.html and WebUpload.dc.html are in no table at all and never were:
+# they are 960x620 BROWSER pages served by the device, so there is no simulator
+# screen to put beside them and make compare is the wrong instrument.
+#
+# When the transfer lands, these two move the same way the other five just did.
 V2_SCREENS = [
     ("transfer",        "Transfer.dc.html",       "Send books (V2)"),
-    ("wifi_picker",     "WifiPicker.dc.html",     "Join network (V2)"),
-    ("wifi_password",   "WifiPassword.dc.html",   "Password entry (V2)"),
-    ("wifi_error",      "WifiError.dc.html",      "Join failed (V2)"),
-    ("wifi_connect",    "WifiConnect.dc.html",    "Wi-Fi connect (V2)"),
-    ("wifi_settings",   "WifiSettings.dc.html",   "Wi-Fi settings (V2)"),
     ("setup_hotspot",   "SetupHotspot.dc.html",   "Setup hotspot (V2)"),
 ]
 
@@ -185,6 +191,45 @@ FLOW_SCREENS = [
     ("low_battery",     "LowBattery.dc.html",     "Low battery"),
     ("battery_empty",   "BatteryEmpty.dc.html",   "Battery empty"),
     ("boot",            "Boot.dc.html",           "Boot"),
+    # THE CONNECT FLOW (V1.1). Five of these came back out of V2_SCREENS, which
+    # is what that list's own note asked for: "If Wi-Fi returns, move these rows
+    # back into FLOW_SCREENS." `transfer` and `setup_hotspot` did NOT come with
+    # them and stay parked -- V1.1 is the connect flow only, so the HTTP server,
+    # the upload page and the AP are still work nobody is doing.
+    #
+    # Implementing a screen whose row sits in V2_SCREENS would leave it compared
+    # by nothing: parked rows are reachable by --only and never counted, so six
+    # new screens would ship with no fidelity gate at all. That is the
+    # reports-on-less-than-it-claims shape this file has been bitten by four
+    # times, which is why the move happens with the work rather than after it.
+    ("wifi_settings",   "WifiSettings.dc.html",   "Wi-Fi settings"),
+    # The first-run state: a SAVED NETWORKS section with nothing in it. A variant
+    # of the above rather than a second screen, in HomeEmpty's and NamesEmpty's
+    # company -- and the state every user meets first, which no board drew.
+    ("wifi_settings_empty", "WifiSettingsEmpty.dc.html", "Wi-Fi settings / empty"),
+    ("wifi_picker",     "WifiPicker.dc.html",     "Join network"),
+    # Two states of the picker with their own geometry rather than their own
+    # strings. `scrolled` takes 14px off every row for the rail's gutter, which is
+    # LibraryScrolled's reason for existing; `empty` replaces the list with copy.
+    # The SCANNING state is deliberately absent -- it is drawStatusBar, whose box
+    # LibraryOpening and SleepWaking already board between them, so a third board
+    # would be a third copy of one specification. It gets a golden instead.
+    ("wifi_picker_scrolled", "WifiPickerScrolled.dc.html", "Join network / scrolled"),
+    ("wifi_picker_empty",    "WifiPickerEmpty.dc.html",    "Join network / none found"),
+    ("wifi_password",   "WifiPassword.dc.html",   "Password entry"),
+    ("wifi_connect",    "WifiConnect.dc.html",    "Wi-Fi connect"),
+    # THREE FAILURE SHAPES, ONE SCREEN, on BookError's precedent: a join fails
+    # three distinguishable ways and one sentence would be a lie. Their own rows
+    # rather than variants folded into `wifi_error`, for the reason the two sleep
+    # cover modes have their own -- the mismatch percentage is per screen, and
+    # folding them in would average a regression in one shape against a board that
+    # cannot show it. The latter two also DROP a slab, so they are not one layout.
+    ("wifi_error",      "WifiError.dc.html",      "Join failed / password"),
+    ("wifi_error_not_found", "WifiErrorNotFound.dc.html", "Join failed / not found"),
+    ("wifi_error_failed",    "WifiErrorFailed.dc.html",   "Join failed / incomplete"),
+    # The hold on a saved network. ItemActions reads the LIBRARY's focused row, so
+    # this could not be reused and is its own screen.
+    ("wifi_network_actions", "WifiNetworkActions.dc.html", "Network actions"),
 ]
 
 
