@@ -1208,13 +1208,69 @@ looks exactly like a device with nothing to report.
 - **IT MUST NOT MAKE THE DELAY IT IS HUNTING**, which is the whole design. A card
   write costs ~40 ms and takes the DISPLAY'S SPI BUS, so one per line would put tens
   of milliseconds into every interaction and be indistinguishable from the fault. It
-  buffers 4 KB in RAM and flushes **only when the panel and the buttons are both
-  quiet** — the gate `pollCardPresence` already uses.
+  buffers 4 KB in RAM and flushes **when the panel and the buttons are both quiet** —
+  the gate `pollCardPresence` already uses — **and in exactly one other case**, which
+  is the next bullet.
+- **THE HEADROOM ABOVE THE TRIGGER WAS A ONE-SHOT RESERVE, AND THE LOG WAS THEREFORE
+  LEAST COMPLETE WHERE A FAULT IS MOST INTERESTING (#83).** `kLogFlushAtBytes` was
+  3072 against a 4096-byte buffer and the 1024 between them was described as the room
+  a burst still has. It is room the buffer gets **once**: the flush may only run in an
+  idle window, so from the trigger onwards the free space only shrinks and nothing
+  tops it up. Measured on glass in the first real session the card log ever ran
+  (X3/UC8279, 2026-09-07): **two drop events, 407 B and 349 B**, both in reading
+  stretches where `quiet` stayed false — so the burst reached **1024 + 407 = 1431 B**
+  past the trigger and `append` refused whole lines.
+  - **NO TRIGGER CAN BE THE FIX, WHICH IS WHAT MAKES THIS A POLICY QUESTION AND NOT A
+    TUNING ONE.** A reader turning pages keeps a paint owed or a press queued
+    continuously, so the non-quiet stretch is bounded by **the user** rather than by
+    anything the firmware picks. Lowering the trigger makes the hole rarer; it cannot
+    make it impossible, and a number fitted to two drop events is fitted to one
+    session, which this file's own rule says is not a distribution.
+  - **SO THE RESERVE IS RESTORED EVERY LOOP ITERATION INSTEAD OF EVERY IDLE WINDOW.**
+    `CardLogBuffer::mustFlush(reserveBytes)` asks whether fewer than that many bytes
+    are free, and the loop tail writes the card when it is true **whether or not the
+    loop is quiet**. What that buys is a bound the trigger cannot express: every
+    iteration begins with `kLogLineReserveBytes` free, so a drop now needs more than
+    the reserve **inside one iteration** rather than merely more than the headroom
+    across an open-ended stretch.
+  - **THE TWO CONSTANTS ARE TWO QUANTITIES**, the sleep card's `chapterReserveH` /
+    `chapterH` idiom one feature over, and collapsing them is the defect: `mustFlush`
+    takes **free space** where `wantsFlush` takes a **fill level**, the trigger is
+    **2048** and the reserve **1024**, and a `static_assert` in `shell/src/main.cpp`
+    fails the build if they cross — which the **old 3072 now does**, proved by
+    mutation.
+  - **1024 IS DERIVED FROM WHAT ONE ITERATION EMITS**, measured off the real format
+    strings at values from this file's own recorded runs: a plain page turn is
+    **417 B** (`[i]` 137 + `[paint]` 152 + `[render]` 91 + `[page]` 37), a chapter
+    crossing **559**, and a crossing whose quiet-window jobs also report **725**. It
+    is also 2× `logf`'s `char line[512]`, the hard bound on one append — a reserve
+    under 512 could not promise even one whole line.
+  - **WHAT IT COSTS, AND THE LAST TERM IS THE DEVICE'S TO SETTLE.** The forced write
+    can only fire once per 3072 B logged, which is **one per eight page turns** in the
+    worst case where the reader never pauses and **never at all** on a device that
+    does. Against `net=` it is a ~15–40 ms write on a 634 ms (RIGHT Reader) or 1055 ms
+    (LEFT Reader) turn — **2.8% typical, 7.9% worst**. Lowering the trigger to 2048
+    costs write COUNT, not latency: 1.5× as many writes at two thirds the size, total
+    bytes unchanged, every one still in an idle window. **RAM is unchanged to the
+    byte** — 46,188 either side, measured — which is why growing `kLogBufBytes` was
+    rejected: the array is `.bss`, so it is paid by every device at every instant
+    including the overwhelming majority whose `logToCard` is off, and 4096 more is
+    9.7% of the 42,152-byte reading floor.
+  - **AND A FORCED WRITE NAMES ITSELF**, `[log] FORCED wrote NB in Xms`, for the
+    reason `ser=` exists: a device whose reading bursts routinely overrun and one that
+    never forces a write must not look alike in the log. **It does NOT land in
+    `ser=`**, which is the USB cable's term, so it inflates `net=` silently and that
+    line beside it is the only thing that says so.
 - **IT REPORTS ITS OWN WEIGHT**: `[log] wrote NB in Xms` per flush and
   `buffered/dropped/sdTotal` on `[alive]`. Same reason `ser=` exists — an instrument
   that hides its cost lets you attribute it to the device.
 - **A DROPPED LINE IS COUNTED, NEVER SILENT.** An overrun between two idle windows
   leaves a HOLE in the log, and a hole must not read as the device having gone quiet.
+  **The count is what made #83 visible at all** — `dropped=756B` on an `[alive]` line
+  is the only reason anybody knew. It is still CUMULATIVE and still only on `[alive]`,
+  so it says bytes were lost and not **where**: with drops now rare, the next hole is
+  further from the line that reports it. Marking the hole in place, in the file, is
+  the honest completion of this bullet and is not built.
 - **It flushes on the way into sleep**, after `markSleeping()` — the flag is what the
   next boot needs and the log is only what a human needs, so the ordering says which
   one may not be lost.

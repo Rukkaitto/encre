@@ -911,9 +911,71 @@ static void logf(const char* fmt, ...) {
 // Bounded on both sides: 4 KB of RAM, and the file is truncated and restarted past
 // kLogFileCapBytes so a device left running cannot fill the card.
 constexpr size_t kLogBufBytes = 4096;
-// Flush at three quarters rather than at full: a burst arriving after the threshold
-// still has room, so the newest lines are not the ones dropped.
-constexpr size_t kLogFlushAtBytes = 3072;
+// THE TRIGGER, AND IT IS NOT THE RESERVE -- two quantities, and collapsing them into
+// one subtraction is #83.
+//
+// This used to be 3072, leaving 1024 B between the trigger and the ceiling, and that
+// 1024 was described as the room a burst arriving after the threshold still has. It
+// is room the buffer gets ONCE: the flush below may only run in an idle window, so
+// from the moment the threshold is crossed the free space only shrinks until one
+// arrives. Measured on glass (X3/UC8279, 2026-09-07), the first real session the card
+// log ever ran: two drop events of 407 B and 349 B, each in a reading stretch where
+// `quiet` stayed false -- so the burst reached 1024 + 407 = 1431 B past the trigger
+// and the log lost whole lines in exactly the window a fault is most interesting.
+//
+// LOWERING THIS IS HALF THE FIX AND CANNOT BE ALL OF IT. A reader turning pages keeps
+// a paint owed or a press queued continuously, so the non-quiet stretch is bounded by
+// the user rather than by anything here -- any trigger makes the hole rarer and none
+// makes it impossible. The bound is kLogLineReserveBytes below; this number's job is
+// to leave room for it and to rate-limit the ordinary write.
+//
+// 2048 IS WHAT THAT LEAVES. Trigger 2048, forced point 4096 - 1024 = 3072, so an idle
+// window has 1024 B to arrive in before the forced write takes over -- 2.5 plain page
+// turns at the 417 B one emits ([i] 137 + [paint] 152 + [render] 91 + [page] 37, the
+// real format strings at values off this file's own recorded runs). What it costs is
+// write COUNT: a flush empties the buffer, so writes go from one per 3072 B logged to
+// one per 2048 B, 1.5x as many at two thirds the size, with the total bytes written
+// unchanged. Every one of them is still in an idle window, which is the whole reason
+// this is the cheap lever -- it is battery and card wear, never latency.
+constexpr size_t kLogFlushAtBytes = 2048;
+// THE RESERVE, RESTORED EVERY LOOP ITERATION RATHER THAN EVERY IDLE WINDOW.
+//
+// CardLogBuffer::mustFlush() asks whether fewer than this many bytes are free, and
+// the loop tail writes the card when it is true WHETHER OR NOT the loop is quiet.
+// That is the one thing this feature exists to avoid, so it is a last resort and the
+// number is what makes it rare: it can only fire when 1024 B arrives between the
+// ordinary trigger and the next idle window, and a flush empties the buffer, so it
+// cannot fire again until another 3072 B has been logged -- once per EIGHT page turns
+// in the worst case where the reader never lets the loop go quiet, and never at all
+// on a device that pauses. (3072 B is 7.37 turns of 417 B, but a turn is indivisible,
+// so the eighth is the one that crosses; test_card_log.cpp asserts the same 7 writes
+// over 60 turns rather than a second spelling of the ratio.)
+//
+// DERIVED FROM WHAT ONE LOOP ITERATION EMITS, because that is the burst the reserve
+// now has to hold. Measured off the real format strings: a plain page turn is 417 B,
+// a chapter crossing 559 B, and a crossing with the quiet-window jobs also reporting
+// ([warm], [restream], [progress]) is 725 B. 1024 covers the worst of those with
+// 299 B to spare, and it is also 2x logf()'s `char line[512]` -- the hard bound on a
+// single append, so a reserve under 512 could not promise even one whole line.
+//
+// WHAT IT COSTS IS ONE CARD WRITE INSIDE AN INTERACTION, and the honest figure is a
+// range rather than a measurement: this file records ~40 ms for a writeAll and the
+// session above logged its own flushes at ~15-20 ms, against a page turn's 634 ms
+// (RIGHT Reader) and 1055 ms (LEFT Reader) of `net=`. So 2.8% typical and 7.9%
+// worst against the cheapest interaction on the device. Against the 756 B of log
+// that was silently lost instead, that is the trade -- and the write NAMES itself
+// in the line it costs, `[log] FORCED ...`, for the reason `ser=` exists.
+//
+// WHAT ONLY A DEVICE CAN SETTLE: this cost against a real `[i] net=`. It does NOT
+// land in `ser=`, which is the USB cable's term, so a forced write inflates `net=`
+// silently and the `[log] FORCED` line beside it is the only thing that says so.
+constexpr size_t kLogLineReserveBytes = 1024;
+// The two must not cross. Equal, and the forced point IS the trigger, so every write
+// becomes a forced one and the idle gate stops meaning anything at all -- a failure
+// that would be invisible on the desktop and would show up on glass as the card log
+// making the delay it is hunting.
+static_assert(kLogFlushAtBytes + kLogLineReserveBytes < kLogBufBytes,
+              "the forced-flush point must sit strictly above the ordinary trigger");
 constexpr uint32_t kLogFileCapBytes = 256u * 1024u;
 constexpr const char* kLogPath = "/encre.log";
 
@@ -7490,7 +7552,30 @@ void loop() {
   // /encre.log. That is one question rather than the two this used to spell as
   // `gLogToCard && gLogLen >= ...`, and two spellings of one condition is how this
   // project has shipped a dead button twice.
-  if (quiet && gCardLog.wantsFlush(kLogFlushAtBytes)) {
+  // AND THE SECOND GATE, WHICH IS THE ONE THAT MAKES THE RESERVE A BOUND (#83).
+  //
+  // The paragraph above says the threshold leaves a kilobyte of headroom to carry the
+  // log across the gap to the next quiet window, and that was a ONE-SHOT reserve: the
+  // free space only shrinks from the trigger onwards, and a reader turning pages keeps
+  // a paint owed or a press queued for as long as they keep pressing, so the stretch
+  // it has to survive is the USER'S and not ours. Measured on glass, it lost 756 B in
+  // two bursts. No trigger can fix that -- a bigger one makes the hole rarer and never
+  // impossible -- so the reserve is restored every ITERATION instead, and this is what
+  // restores it.
+  //
+  // IT IGNORES `quiet`, DELIBERATELY, AND IT IS THE ONLY THING HERE THAT MAY. What it
+  // buys is that every loop iteration begins with kLogLineReserveBytes free, so a drop
+  // now needs 1024 B inside ONE iteration where the worst measured iteration emits
+  // 725 B. What it costs is a ~15-40 ms card write in front of an owed paint or a
+  // queued press, which is the delay this feature exists not to make -- so it fires
+  // only where the alternative is losing the lines outright, and it SAYS SO in the
+  // line it costs. A device whose reading bursts routinely overrun and one that never
+  // forces a write must not look alike in the log.
+  //
+  // The bus is safe either way: this is the loop TAIL, past the paint block, so no
+  // refresh is in flight whatever `quiet` says. Only latency is at stake.
+  const bool forced = gCardLog.mustFlush(kLogLineReserveBytes);
+  if (forced || (quiet && gCardLog.wantsFlush(kLogFlushAtBytes))) {
     // Recursive, and appendToCard takes one of its own -- same reason the poll
     // takes one below: the write and the line reporting it are one atomic use of
     // the bus rather than two that could straddle a paint.
@@ -7498,8 +7583,8 @@ void loop() {
     const unsigned buffered = static_cast<unsigned>(gCardLog.size());
     bool landed = false;
     const uint32_t took = flushLogToCard(&landed);
-    logf("[log] %s %uB in %lums\n", landed ? "wrote" : "COULD NOT WRITE", buffered,
-         (unsigned long)took);
+    logf("[log] %s%s %uB in %lums\n", forced ? "FORCED " : "",
+         landed ? "wrote" : "COULD NOT WRITE", buffered, (unsigned long)took);
     logFlush();
   }
 
