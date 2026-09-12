@@ -91,7 +91,7 @@ TEST_CASE("a fresh Wi-Fi target clears the passphrase typed for the last one") {
   auto again = f.create(ScreenId::WifiPassword);
   REQUIRE(again != nullptr);
   auto* kb = static_cast<WifiPasswordScreen*>(again.get());
-  CHECK(kb->vm().ssid == "HOME");
+  CHECK(kb->vm().fieldName == "HOME");
   CHECK(kb->entered() == "hunter2hunter2");
 
   // A FRESH JOIN, which primes the SSID and nothing else. One call, so the
@@ -101,7 +101,7 @@ TEST_CASE("a fresh Wi-Fi target clears the passphrase typed for the last one") {
   auto fresh = f.create(ScreenId::WifiPassword);
   REQUIRE(fresh != nullptr);
   auto* kb2 = static_cast<WifiPasswordScreen*>(fresh.get());
-  CHECK(kb2->vm().ssid == "CAFE-BIBLIO");
+  CHECK(kb2->vm().fieldName == "CAFE-BIBLIO");
   CHECK(kb2->entered().empty());
   // And the counter agrees, because it is the one place a reader would see
   // the leak if `entered` were mirrored and the count were not.
