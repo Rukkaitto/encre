@@ -3310,20 +3310,25 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // the whole of the answer -- locate, paginate and heap.
   int pages = -1;
   const char* readerWhy = "";
+  // WHICH CHAPTER THIS OPEN ACTUALLY LANDED ON, and it is ONE expression with three
+  // consumers rather than three expressions free to disagree -- which is what the two
+  // literals below were. Taken from the SCREEN where there is one, because
+  // `startChapter` is what was ASKED for and openChapterAt skips a spine entry that
+  // paginates to nothing: three of a real book's 92 are a cover and two title pages,
+  // so the two differ on exactly the opens where it matters. On the wake path there is
+  // no screen yet (App::restore does the pushing), and the requested chapter is the
+  // best that is known -- the line says `pushed=0` beside it, so a reader of the log
+  // can tell the asked-for case from the landed-on one.
+  int openedChapter = startChapter;
   if (pushed) {
     const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
     pages = rd->pageCount();
     readerWhy = rd->error();
+    openedChapter = rd->chapterIndex();
     logChapterOpen(rd, millis() - t0);
   }
-  // THE CROSSING DETECTOR'S STARTING POINT -- see gLastChapter. Taken from the SCREEN
-  // where there is one, because `startChapter` is what was ASKED for and openChapterAt
-  // skips a spine entry that paginates to nothing: three of a real book's 92 are a
-  // cover and two title pages, so the two differ on exactly the opens where it matters.
-  // On the wake path there is no screen yet (App::restore does the pushing), and the
-  // requested chapter is the best that is known.
-  gLastChapter = pushed ? static_cast<const reader::ReaderScreen*>(&gApp->top())->chapterIndex()
-                        : startChapter;
+  // THE CROSSING DETECTOR'S STARTING POINT -- see gLastChapter.
+  gLastChapter = openedChapter;
   // THE STACK HIGH-WATER MARK, because a stack is the one budget this firmware had
   // no instrument for -- and the first thing to exhaust it did so on the very first
   // book. uxTaskGetStackHighWaterMark reports the SMALLEST free space the task has
@@ -3333,11 +3338,32 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   logf("[stack] loopTask free at worst: %u bytes of %u\n",
        (unsigned)(uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t)),
        (unsigned)getArduinoLoopTaskStackSize());
-  logf("[open] %s -> \"%s\" ch=1/%d: locate=%lums total=%lums pages=%d "
+  // `spine=` AND NOT `ch=`, AND THAT WORD IS THE CONVENTION MARKER RATHER THAN A
+  // rewording. The numerator is the RAW 0-based spine index, which is what every other
+  // index in this log already means by `spine=` -- `[chapter]`, both `[progress]` lines
+  // and all three `[peek]` lines -- so the three lines this one is read beside now
+  // carry one number that matches without arithmetic. `ch=` is the GLASS's word (Home's
+  // `CH. 08 OF 92`, the reader's band) and the glass counts from one; this line was the
+  // only place the user's vocabulary carried the developer's convention, which is what
+  // made the convention unreadable. The denominator stays `chapterCount()`, a COUNT, so
+  // the last entry of a 92-entry spine is `spine=91/92`.
+  //
+  // IT WAS A LITERAL `1` AND SO WAS `entry=`'s INDEX, and they were one defect with one
+  // cause: both were correct while this function could only ever open entry 0 (`ch=1`
+  // since 426bdee, and `entry=` was `opened.chapter.compressedSize` until b2efe88 made
+  // the single chapter a spine and mechanically rewrote it as `locate(0)`), and both
+  // went stale at the same moment for the same reason -- the restore learning to open
+  // at a saved spine entry. A restored book reported `ch=1/92` and the cover's
+  // compressed bytes while `[chapter]` on the next line said 58.
+  //
+  // `entry=` is the ARCHIVE entry's compressed size, which is why it keeps its name
+  // beside `[chapter]`'s `bytes=`: that one is the INFLATED size. Both now describe the
+  // chapter whose decode the rest of this line is attributing time and heap to.
+  logf("[open] %s -> \"%s\" spine=%d/%d: locate=%lums total=%lums pages=%d "
        "entry=%uB heap %u -> %u (cost %ld) min=%u pushed=%d%s%s\n",
-       path.c_str(), opened.title.c_str(), opened.chapterCount(),
+       path.c_str(), opened.title.c_str(), openedChapter, opened.chapterCount(),
        (unsigned long)(t1 - t0), (unsigned long)(millis() - t0), pages,
-       (unsigned)opened.locate(0).compressedSize, (unsigned)heapBefore,
+       (unsigned)opened.locate(openedChapter).compressedSize, (unsigned)heapBefore,
        (unsigned)ESP.getFreeHeap(),
        (long)heapBefore - (long)ESP.getFreeHeap(),
        (unsigned)ESP.getMinFreeHeap(), pushed ? 1 : 0,
