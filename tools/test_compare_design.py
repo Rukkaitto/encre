@@ -21,6 +21,15 @@ returning a bare None for two opposite failures, `--only <flow screen>` matching
 nothing at all, and a repeated `--only` whose earlier ids were silently dropped.
 Every one of them printed a confident ratio. So the assertions here are about
 the SET and the COUNT, never about a pixel.
+
+AND NOW ABOUT THE MISMATCH FIGURE, which is the same family one number over: it
+is an ARITHMETIC over two panels, and the assertions below are over synthetic
+images whose answer is known by construction -- a 128 boundary, a half-black
+panel -- never over a rendered screen. Pinning a real render here would be a
+golden in the wrong file. What these cases defend is the boundary (`<= 128`
+moves `contents` off its recorded 8,814 pixels by one), the denominator, the
+figure being per PANEL, and its absence beside a screen the firmware does not
+draw.
 """
 import contextlib
 import importlib.util
@@ -28,6 +37,8 @@ import io
 import pathlib
 import sys
 import tempfile
+
+from PIL import Image
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -41,13 +52,24 @@ def load():
     return mod
 
 
-class FakeImage:
-    """Stands in for a Pillow image. `save` really writes, so the export test
-    can count FILES rather than trusting the tool's own tally -- which is the
-    whole point of that case."""
+def fake_render(path):
+    """The image a stubbed Chrome or simulator "produced", by output filename.
 
-    def save(self, path):
-        pathlib.Path(path).write_bytes(b"x")
+    REAL PILLOW IMAGES, and small ones: normalise() resizes whatever it is given
+    to the panel size with NEAREST, so a 2x1 source becomes exact half-panel
+    columns at both geometries (480 and 528 are both even). The design side is
+    all paper and the firmware side is half ink, which makes the mismatch figure
+    EXACTLY 50% of the panel -- a number a test can assert without rendering
+    anything, and one that differs in PIXELS between the two geometries, which
+    is what pins the figure as per-panel rather than per-screen.
+
+    `save` therefore really writes, so the export test can count FILES rather
+    than trusting the tool's own tally -- which is the whole point of that case.
+    """
+    im = Image.new("L", (2, 1), 255)
+    if "_sim" in pathlib.Path(path).name:
+        im.putpixel((0, 0), 0)
+    return im
 
 
 class Run:
@@ -97,9 +119,13 @@ def run(mod, argv, sim_status=None, chrome="/bin/echo"):
         return (pathlib.Path(out) if status == "ok" else None), status
 
     mod.render_sim = fake_sim
-    mod.normalise = lambda im, w, h: FakeImage()
-    mod.placeholder = lambda text, w, h: FakeImage()
-    mod.Image.open = lambda p: FakeImage()
+    # normalise() and mismatch() are NOT stubbed: they are cheap, and the figure
+    # the run prints is the thing under test in the cases below. placeholder is,
+    # and it returns a real PAPER panel -- so a mutation that measured one would
+    # print a plausible "0.00%" beside an unimplemented screen rather than
+    # crashing, which is the failure a test has to be able to see.
+    mod.placeholder = lambda text, w, h: Image.new("L", (w, h), 245)
+    mod.Image.open = lambda p: fake_render(p)
 
     def fake_compose(rows, out, geom_keys, pairs_per_row=2):
         captured["rows"] = list(rows)
@@ -273,6 +299,89 @@ def main():
         check(claimed and claimed[0].startswith(f"exported {len(files)} "),
               "the exported count matches the files on disk",
               f"files={len(files)} line={claimed!r}")
+
+    print("\nthe mismatch figure is threshold-at-128, over the panel's own pixels")
+
+    def panel(values, w=None):
+        """A 1-row image from a list of greys."""
+        im = Image.new("L", (len(values) if w is None else w, 1), 255)
+        for x, v in enumerate(values):
+            im.putpixel((x, 0), v)
+        return im
+
+    # IDENTICAL PANELS ARE 0 OF w*h. The denominator is the panel, not the
+    # differing count and not the ink: `sleep_cover` reads a true 0.00% because
+    # the board displays the firmware's own committed PNG, and that has to stay
+    # expressible.
+    a = Image.new("L", (7, 5), 255)
+    check(mod.mismatch(a, a.copy()) == (0, 35),
+          "identical panels are 0 differing of w*h", f"{mod.mismatch(a, a.copy())}")
+
+    b = Image.new("L", (7, 5), 0)
+    check(mod.mismatch(a, b) == (35, 35),
+          "opposite panels are every pixel", f"{mod.mismatch(a, b)}")
+
+    # THE BOUNDARY. Ink is BELOW 128, so 127 is ink and 128 is paper. `<= 128`
+    # is the mutation this case exists for: it is invisible on most screens and
+    # moves `contents` off its recorded 8,814 differing pixels by exactly one.
+    # Grey 127 being ink is also the mechanism behind the half-pixel phase
+    # artefact CLAUDE.md records, where Chrome lays a 1px rule across two rows
+    # of 127 and the count scores both against the firmware's one.
+    paper = panel([255, 255, 255, 255])
+    check(mod.mismatch(panel([126, 127, 128, 129]), paper)[0] == 2,
+          "127 counts as ink and 128 as paper",
+          f"{mod.mismatch(panel([126, 127, 128, 129]), paper)}")
+    # And symmetrically: a panel that agrees about every pixel's SIDE of the
+    # threshold is 0, however far apart the greys are. That is what makes this a
+    # comparison of ink and not of tone.
+    check(mod.mismatch(panel([0, 60, 127, 200]), panel([120, 0, 5, 255]))[0] == 0,
+          "greys on the same side of 128 do not differ",
+          f"{mod.mismatch(panel([0, 60, 127, 200]), panel([120, 0, 5, 255]))}")
+
+    print("\nthe figure names the panel's grey levels, off the FIRMWARE render")
+    # A threshold-at-128 count over four levels inflates against a one-bit
+    # screen's, so `reader` at 5.24% is not worse than `reader_menu` at 3.00%.
+    # The tag is measured off the render rather than read from a table of which
+    # screens declare Fidelity::Grayscale -- that fact lives in core/.
+    check(mod.panel_levels(panel([0, 255, 0, 255])) == 2, "a one-bit panel is 2 levels")
+    check(mod.panel_levels(panel([0, 85, 170, 255])) == 4, "a grayscale panel is 4 levels")
+    # The DESIGN panel is Chrome's antialiasing and has many levels on every
+    # screen, so taking the tag from it would label the whole sheet 4-level.
+    grey4 = panel([0, 85, 170, 255])
+    check("1-bit" in mod.figure_for(panel([0, 60, 127, 200]), panel([0, 255, 0, 255])),
+          "a one-bit firmware panel reads 1-bit beside an antialiased board")
+    check("4-level" in mod.figure_for(panel([0, 60, 127, 200]), grey4),
+          "a four-level firmware panel says so")
+
+    # NO FIGURE WHERE THERE IS NOTHING HONEST TO MEASURE. A board with no screen
+    # behind it is a third of this list, and a percentage against the NOT
+    # IMPLEMENTED hatch would be a confident false claim.
+    check(mod.figure_for(None, grey4) is None and mod.figure_for(grey4, None) is None,
+          "a missing render has no figure rather than a number")
+
+    print("\na run prints the figure per PANEL, and only where both sides rendered")
+    r = run(mod, ["--only", "home,library"])
+    lines = [ln for ln in r.stdout.splitlines() if "mismatch" in ln]
+    # The stub makes every firmware panel exactly half ink against an all-paper
+    # board, so the percentage is 50.00% by construction at both geometries.
+    check(len(lines) == 4 and all("mismatch 50.00%" in ln for ln in lines),
+          "every rendered panel carries its figure", f"lines={lines}")
+    # PER PANEL, NOT PER SCREEN. The two geometries are the same half-panel and
+    # different pixel counts, so a figure computed once and reused for both
+    # would show 192000 twice.
+    px = [ln.split("(")[1].split(" px")[0] for ln in lines]
+    check(px == ["192000", "209088", "192000", "209088"],
+          "each geometry is measured on its own pixels", f"px={px}")
+    # The SHEET gets it too -- that PNG is the artifact CI uploads, and a figure
+    # that lived only in a scrolled-away run log is one nobody reads later.
+    figures = [entry[-1] for _, entries, _ in r.rows for entry in entries]
+    check(all(isinstance(f, str) and "mismatch" in f for f in figures),
+          "the sheet's geometry captions carry the figure", f"figures={figures}")
+
+    r = run(mod, ["--only", "home,library"] + x4, sim_status={"library": "unimplemented"})
+    named = [ln for ln in r.stdout.splitlines() if "not implemented" in ln]
+    check(len(named) == 1 and "mismatch" not in named[0],
+          "an unimplemented screen gets no figure", f"line={named}")
 
     print("\nthe board-vs-disk check covers every element of a selection")
     # A board named in the list and absent from disk is a hard error, and it has

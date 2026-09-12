@@ -167,10 +167,17 @@ jobs:
 
       # WHAT THIS GATE MEANS, because it is narrower than the job name suggests:
       # it fails when a screen the SIMULATOR KNOWS will not render, and when a
-      # board named in compare-design.py is missing from disk. It does NOT
-      # measure fidelity -- the sheet still prints `ok` rather than a mismatch
-      # percentage, which is issue #41 and is open. A board with no screen behind
-      # it is fine and stays fine; that is a third of the list.
+      # board named in compare-design.py is missing from disk. A board with no
+      # screen behind it is fine and stays fine; that is a third of the list.
+      #
+      # THE RUN NOW REPORTS FIDELITY AND STILL DOES NOT GATE ON IT. Every panel
+      # prints its threshold-at-128 mismatch percentage -- the figure this job's
+      # comment used to say the sheet could not produce -- into the log and onto
+      # the uploaded sheet. NO FLAG TURNS IT INTO A FAILURE, and none should:
+      # there is no blessed number to fail against, a board and its screen can
+      # legitimately move together, and the figure rises on a half-pixel phase
+      # flip with nothing having moved at all. What CI buys is the number in
+      # front of a reviewer, beside the diff that changed it.
       #
       # Without --require-implemented this job would be green-always: a crashed
       # subcommand makes the sheet print "not implemented" and the run exit 0,

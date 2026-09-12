@@ -320,6 +320,76 @@ what is wrong (fix the board, then follow it). `make compare` is what keeps them
 honest; changing only the implementation silently invalidates it and the goldens
 stop meaning anything.
 
+**AND IT PRINTS THE PERCENTAGE NOW, WHICH IS THE QUANTITY THIS FILE HAS ALWAYS
+SAID TO READ** (#41). Every panel gets `mismatch 2.30% (8814 px, 1-bit)` beside
+its `ok`, in the run log and on the sheet. `ok` only ever meant *a frame was
+produced*, and this file's own rule — **the percentage is the check, the word is
+not** — was unenforceable by the tool that prints the word: the `ReaderMenu.dc.html`
+merge that read `ok` throughout while the screen sat at 13.02% against 3.02% is the
+recorded instance, and **every percentage in this file up to that point was a hand
+count somebody ran over the `--export` PNGs**.
+
+- **THE ARITHMETIC IS THE HAND COUNT'S, AND IT REPRODUCES IT TO THE DIGIT.**
+  Threshold both panels at 128 — **ink is BELOW 128, so grey 127 is ink and 128 is
+  paper** — and count the pixels that disagree over the panel's own `w*h`. Verified
+  against this file's recorded pairs on every screen that has not changed since its
+  figure was written: `contents` **2.30%/2.11%** and its recorded **8,814 pixels**,
+  `sd_missing` 1.83%/1.67%, `sleep` 2.32%/2.13%, `battery_empty` 2.05%/1.89%,
+  `reader` 5.24%/6.29%, `peek` 3.99%/4.02%, `low_battery` 5.03%/6.02%, `reader_menu`
+  3.00%/3.56%, `sleep_cover` 0.00%/0.00% — **nine screens, four of them grayscale.**
+  **The boundary is load-bearing rather than a taste**: `<= 128` moves
+  `contents` off 8,814 by one and `battery_empty` from 2.05% to 2.06%.
+- **A FIGURE THAT DISAGREES IS A FIGURE WHOSE SCREEN MOVED, AND THAT IS CHECKABLE
+  NOW.** Six recorded pairs no longer reproduce, and every one of them has a commit
+  after it that changed that screen: `home` 3.54%/3.25% → **1.23%/1.13%**, `library`
+  3.85%/3.54% → **2.25%/2.07%**, `book_details` 3.57%/3.28% → **0.91%/0.84%**,
+  `book_error` 3.44%/3.53% → **3.08%/2.92%** and `book_error_unreadable`
+  2.99%/3.17% → **2.61%/2.56%**, all five boarded and re-rendered by #100's
+  placeholder-cover removal; and `settings` 1.91%/1.76% → **2.16%/1.98%**, which is
+  V1.1 putting the CONNECTIONS section back on that screen. **Those figures are not
+  wrong** — they record what the screen measured when it was written, which is what
+  they are for. What changed is that the next one can be re-run instead of inherited.
+- **THE FIGURE NAMES THE PANEL'S GREY LEVELS, so the two kinds of number stop
+  inviting a comparison.** A threshold-at-128 count over the four-level grayscale
+  sequence inflates against a one-bit screen's, which this file otherwise has to say
+  in prose every time it quotes one — `reader` at 5.24% is not worse than
+  `reader_menu` at 3.00%. **Measured off the render, never from a table of which
+  screens declare `Fidelity::Grayscale`**: that fact lives in `core/` and a copy in a
+  tool would be a second one free to drift, and the render is the more honest
+  question anyway, since what inflates the count is the greys the panel actually
+  carries. `sleep_cover_waking` declares `Grayscale` and paints ONE pass, and is
+  correctly reported **1-bit**.
+- **IT IS A READING AND NOT A GATE, and CI passes no new flag.** There is no blessed
+  number to fail against, a board and its screen may legitimately move together, and
+  **the count can rise while nothing moved** — the half-pixel phase flip the `Names`
+  cut and the Sleep card's parity both record. What CI buys is the number in front of
+  a reviewer beside the diff that changed it, which is the PR-title job's bargain.
+  **No total and no average across screens either**: that is what the tables' own
+  comments refuse when they give the styled reader specimens and the two cover modes
+  their own rows, and it would be worse here, across screens that do not share a
+  fidelity.
+- **NO ±1-ROW-TOLERANT SECOND READING SHIPS, AND THE REASON IS THAT THE RECORDED
+  ONES CANNOT BE REPRODUCED.** This file quotes tolerant counts twice — `reader_menu`
+  at 1.76%/2.20% after the `Names` cut, `sleep` falling 4,326 → 4,152 — and **both
+  screens' STRICT figures reproduce to the digit in this tree, so the tree is at the
+  state those numbers were taken at.** Nine candidate definitions were tried against
+  them (pixelwise forgiveness against the other panel's row above or below, the
+  symmetric form, ink-only in each direction and both, per-row best of three
+  alignments, whole-image best shift, and dilating both) and **not one lands on either
+  target**; the closest misses `reader_menu` by 13% and `sleep` by 26%, in different
+  directions, which is what two separate ad-hoc hand counts look like. So the tolerant
+  readings in this file were each computed with a definition nobody wrote down, and
+  **shipping a tenth would put a number in the tool that disagrees with every tolerant
+  figure here** — the second-instrument drift this file is mostly a record of. If one
+  is ever wanted, define it in `compare-design.py` first and treat the recorded
+  tolerant readings as not comparable. The strict count stays the instrument, which is
+  the point: swapping instruments to make a figure look better is how a real
+  regression gets hidden.
+- **IT IS NOT DECISIVE AND WAS NEVER GOING TO BE.** Fixing `design/Settings.dc.html`'s
+  `Size` row — a real defect, three points wrong — moved this figure by **one pixel**
+  (8553 → 8554), because that right-aligned run was mismatched either way. **The value
+  is in being able to ask**, and nobody could have known that one without computing it.
+
 **And it has to actually cover the screen.** Until a cold-read review found it,
 `make compare` defaulted to the seven V1 boards, so it compared Home and Library
 and skipped four of the six implemented screens — while CLAUDE.md called it the
@@ -370,10 +440,22 @@ meant, and this tool must not answer it by guessing.
 
 **THE SCRIPT HAS ITS OWN TESTS NOW** — `tools/test_compare_design.py`, plain
 `python3`, Chrome and the simulator stubbed out. They assert the **set and the
-count**, never a pixel, because that is where all six of these defects lived.
+count**, because that is where all six of these defects lived.
 **Deliberately NOT wired into `make test`**, which builds on a bare checkout with
 no Python and no submodule; so it is a test that has to be remembered, which is
 the honest cost of keeping the fast loop interpreter-free.
+
+- **THIS LINE SAID "never a pixel" AND THE MISMATCH FIGURE MADE THAT HALF FALSE.**
+  The rule it was really stating is **never a RENDERED pixel** — a golden in the
+  wrong file — and that still holds: the arithmetic's cases are **synthetic panels
+  whose answer is known by construction**, a four-pixel row at 126/127/128/129 for
+  the boundary and a half-black panel for the rest, with the stubbed simulator
+  producing a 2x1 image `normalise` scales to exact half-panel columns at both
+  geometries. Every guard is proved by mutation: `<= 128` fails the boundary case,
+  measuring the `NOT IMPLEMENTED` placeholder prints `mismatch 0.00%` beside a
+  screen nothing draws and fails, reading the levels off the DESIGN panel labels a
+  one-bit screen 4-level and fails, a wrong denominator fails three cases, and one
+  figure reused across geometries fails on the pixel counts being equal.
 
 **AND THE SAME SHAPE HAD THE REVIEW SURFACE ITSELF: `design/ereader-v1-ui.html`
 IS A GENERATED FILE AND ITS GENERATOR WAS LOST** (#60). It is the published design
