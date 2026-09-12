@@ -152,6 +152,60 @@ const char* screenName(ScreenId id);
 // quietly answered `false`. `shell/` has no harness and this has a test.
 bool screenUsesRadio(ScreenId id);
 
+// WHETHER A WAKE MAY PUT THIS SCREEN BACK, AND WHAT IT OWES FIRST (#49).
+//
+// A wake replays a stack of screen NAMES and the factory rebuilds each one from
+// state the shell must have primed. Nothing connected "the record names screen X"
+// to "X's construction inputs are primed", so each screen that needed inputs
+// rediscovered the same failure -- the restore pushes, the factory refuses
+// (correctly), App::restore stops there and keeps what stands, and the reader
+// reports "it went back to the book". Reader, ReaderMenu and Contents each landed
+// that way; Peek lands that way ON PURPOSE and was confirmed on device.
+//
+// THE GAP WAS NEVER THE REFUSAL, WHICH IS RIGHT AND STAYS. Substituting content is
+// worse and this project has shipped that twice. The gap is that from outside, "this
+// screen deliberately does not come back" and "somebody forgot to prime it" are the
+// same observation. This is the question that tells them apart, and every ScreenId
+// has to answer it: the table behind this is static_assert'ed against Count, so a
+// screen appended to the enum FAILS THE BUILD until it says which of the three it is.
+//
+// It is here rather than in shell/ for screenUsesRadio's reason, one line up: this is
+// a fact about the screen catalogue, `shell/` has no harness, and five bugs have
+// hidden there.
+enum class Restore : uint8_t {
+  // A WAKE OWES IT NOTHING. The factory can rebuild it from what BOOT has already
+  // given it -- a filesystem and a root, panel geometry, a settings copy and a
+  // sink, the saved Wi-Fi list -- or from the parent screen the restore has just
+  // put underneath it. This is the default answer and the cheap one.
+  //
+  // THE LINE BETWEEN THIS AND NeedsPriming IS "did a PRESS produce it", and
+  // test_focus_restore.cpp draws it once by building every screen from a factory
+  // configured the way setup() leaves it and no further. That check moved an entry
+  // the first time it ran: the Wi-Fi hub was written NeedsPriming from reading its
+  // factory case, and loadWifi() primes it at boot.
+  Ready,
+  // REBUILDABLE, BUT ONLY AFTER THE SHELL HAS HANDED THE FACTORY SOMETHING A PRESS
+  // WOULD HAVE. Today that is one thing wearing four names -- the open book, which
+  // the page, the menu over it, its chapter list and its end screen are all built
+  // from -- and a wake makes no press, so the shell has to do it from last.json
+  // before the replay starts.
+  //
+  // The priming itself can never move here: core/ does not know what a filesystem, a
+  // book or last.json is. WHICH screens owe one is a fact about the catalogue, so the
+  // shell reads that list from here rather than keeping its own. A list the shell
+  // kept is what the hand-written `namesReader` scan was.
+  NeedsPriming,
+  // NEVER COMES BACK, AND THAT IS A DECISION RATHER THAN AN OMISSION. App::snapshot()
+  // stops the record at one of these and App::restore refuses to push one, so the
+  // screens that must not be woken into cannot be -- which is stronger than today,
+  // where Sleep and BatteryEmpty are kept out of a record only by nothing ever
+  // pushing them, and the factory would happily build either.
+  Never,
+};
+
+// Which of the three `id` is. Total, and the table behind it cannot be short.
+Restore restorability(ScreenId id);
+
 // What a screen asks the app to do after handling an event.
 //
 // FIVE OF THE KINDS ARE LATCHES, not instructions: `Sleep`, `Retry`, `Open`,
@@ -623,6 +677,18 @@ class App {
   // of them are -- which is the point. The mechanic used to be a ladder in the
   // shell with Home and the SD-missing screen written into it by name, and every
   // screen that was not in the ladder silently lost the user's place.
+  //
+  // IT STOPS AT THE FIRST SCREEN A WAKE WILL NOT PUT BACK (#49), so every screen
+  // the record names is one that comes back and the record is TRUE rather than
+  // aspirational. Sleeping under a peek therefore stores `...;reader:0` and the
+  // wake reports a COMPLETE restore, where it used to store the peek as well and
+  // then report stopping short -- which reads in a log exactly like the three
+  // defects that were stopping short for want of priming.
+  //
+  // TRUNCATED, NOT FILTERED. Dropping a Restore::Never entry from the MIDDLE
+  // would hand the wake a stack that never existed; stopping is the honest rule
+  // and costs nothing today, since every Never screen is a modal on top or is
+  // painted without being pushed at all.
   std::vector<StackEntry> snapshot() const;
 
   // WHAT A RESTORE DID, so the caller can log it without asking which screens
@@ -638,6 +704,19 @@ class App {
     // rooted this App at the no-card screen and a record naming Home must not be
     // layered over it. One rule, no screen named.
     bool rootMatched = false;
+    // WHICH SCREEN THE RESTORE STOPPED AT, when it stopped short, and `stopped`
+    // is what says whether `stoppedAt` means anything -- Home is a real id, so
+    // it cannot double as "nothing stopped", which is the sentinel mistake this
+    // file records for CoverResult and for peekPrimed_.
+    //
+    // IT EXISTS SO THE CALLER CAN ATTRIBUTE THE STOP (#49). Ask restorability()
+    // about it: `Never` is the mechanism working and nothing was owed, and
+    // anything else is the factory refusing a screen a wake was supposed to get
+    // -- which is a firmware defect and must not read like the other one. Before
+    // this, a restore that stopped printed one line whichever it was, and three
+    // screens shipped the defect while a fourth shipped the decision.
+    bool stopped = false;
+    ScreenId stoppedAt = ScreenId::Home;
   };
 
   // PUT A SNAPSHOT BACK. Only meaningful on a fresh App, which is the only thing
@@ -652,7 +731,17 @@ class App {
   //
   // A push the factory refuses STOPS the restore and keeps what already stands: a
   // record from a newer firmware naming a screen this build cannot make should
-  // not cost the user the Library they really were in.
+  // not cost the user the Library they really were in. Either way the report
+  // names the screen it stopped at, so the caller can say WHICH of the two it
+  // was -- see RestoreReport::stoppedAt.
+  //
+  // AND A Restore::Never ENTRY IS REFUSED BEFORE THE FACTORY IS ASKED (#49).
+  // snapshot() will not write one, so this is for a record an older firmware
+  // wrote -- and for the screens the factory would cheerfully BUILD. Sleep and
+  // BatteryEmpty are both buildable, and both are kept out of a record today only
+  // by nothing ever pushing them, which is a property of the shell rather than a
+  // rule: restoring either would wake the device onto `ASLEEP, HOLD POWER TO
+  // WAKE` or onto a battery-empty prompt over a pack that has just been charged.
   RestoreReport restore(const std::vector<StackEntry>& stack);
 
   // Push a screen with no input event behind it. The one caller is the shell's

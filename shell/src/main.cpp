@@ -5454,23 +5454,62 @@ void setup() {
            reader::screenName(gApp->top().id()));
       logFlush();
     } else {
-      // THE READER CANNOT BE RESTORED WITHOUT ITS BOOK, and the factory is right to
-      // refuse one -- falling through to the demo is how this device once woke into
-      // Middlemarch. So a record naming the Reader needs the book set FIRST, from the
-      // same pointer Home reads; without this, sleeping on a page woke to the Library
-      // because the restore correctly stopped short of a screen that could not build.
+      // WHAT THE RECORD NAMES, PRIMED BEFORE THE RESTORE REPLAYS IT (#49).
       //
-      // The position comes from the sidecar, exactly as a button press would get it:
-      // the record says WHICH SCREENS, and the card says where in the book. Two
+      // THIS WAS A SCAN FOR ONE SCREEN ID WRITTEN IN BY HAND. `ReaderMenu`,
+      // `Contents` and `BookEnd` came back only because openBookAt primes them on
+      // its way past a Reader -- they rode the Reader's scan by accident rather
+      // than by design -- and each screen that needed its own inputs before them
+      // arrived as a bug report saying "sleeping on X resumes to the book".
+      // Nothing connected "the record names X" to "X's inputs are primed".
+      //
+      // WHICH SCREENS OWE A PRIMING IS reader::restorability()'s ANSWER, in core/,
+      // behind a table static_assert'ed against ScreenId::Count -- so the shell
+      // cannot keep a stale copy of the list, and a screen appended to the enum
+      // fails the build until it has answered the question. What cannot move there
+      // is the priming itself: core/ does not know what a filesystem, a book or
+      // last.json is, and it must not learn.
+      //
+      // A SCREEN THIS DOES NOT ANSWER IS NAMED IN THE LOG rather than left to fail
+      // at the push. That is the distinction the whole ticket is about: "the
+      // factory refused `contents`" and "a peek does not come back" used to be the
+      // same line.
+      bool wantsOpenBook = false;
+      for (const reader::StackEntry& e : stack) {
+        if (reader::restorability(e.screen) != reader::Restore::NeedsPriming) continue;
+        switch (e.screen) {
+          // FOUR SCREENS AND ONE OPEN, and naming all four here is the change.
+          // They are every screen whose inputs come from the book that is open --
+          // the page, the menu over it, its chapter list, and the screen its last
+          // page turns into -- and openBookAt primes all four in one pass, which is
+          // why this is one flag rather than four.
+          case reader::ScreenId::Reader:
+          case reader::ScreenId::ReaderMenu:
+          case reader::ScreenId::Contents:
+          case reader::ScreenId::BookEnd:
+            wantsOpenBook = true;
+            break;
+          default:
+            logf("[session] the record names %s, which this build declares needs "
+                 "priming and nothing here primes: the restore will stop at it, and "
+                 "that is a firmware defect rather than a missing card\n",
+                 reader::screenName(e.screen));
+            logFlush();
+            break;
+        }
+      }
+      // THE POSITION COMES FROM THE SIDECAR, exactly as a button press gets it: the
+      // record says WHICH SCREENS, and the card says where in the book. Two
       // records, two jobs -- the session record has never known about a book.
-      bool namesReader = false;
-      for (const reader::StackEntry& e : stack)
-        if (e.screen == reader::ScreenId::Reader) namesReader = true;
-      if (namesReader && gStorageUsable) {
+      //
+      // The factory is right to refuse a Reader with no book -- falling through to
+      // the demo is how this device once woke into Middlemarch -- so the book is
+      // set FIRST, from the same pointer Home reads.
+      if (wantsOpenBook && gStorageUsable) {
         reader::LastRead last;
         if (!reader::loadLastRead(gSd, last) || !gSd.exists(last.bookPath)) {
-          logf("[session] the record names the Reader but no saved book is on the "
-               "card; it will stop at the screen below it\n");
+          logf("[session] the record names a screen built from the open book, and no "
+               "saved book is on the card; it will stop at the screen below it\n");
           logFlush();
         } else {
           uint32_t bytes = 0;
@@ -5509,6 +5548,20 @@ void setup() {
                             "a folder it named is no longer on the card -- in which case its "
                             "row was dropped with it rather than applied to another "
                             "directory -- or a focused row is no longer in its list)");
+        // WHY IT STOPPED, WHEN IT STOPPED (#49). Both outcomes leave the reader
+        // somewhere they did not expect and used to print the same line, which is
+        // how three screens shipped un-restorable while a fourth shipped
+        // deliberately so. `Restore::Never` is the mechanism working and nothing
+        // was owed; anything else is a screen this build says a wake may have and
+        // the factory could not build, which means nothing primed it.
+        if (r.stopped) {
+          logf("[session] it stopped at %s: %s\n", reader::screenName(r.stoppedAt),
+               reader::restorability(r.stoppedAt) == reader::Restore::Never
+                   ? "this build declares that screen never comes back, so nothing "
+                     "was owed and the screen below it is where a wake belongs"
+                   : "this build declares that screen restorable, so its construction "
+                     "inputs were not primed -- a firmware defect, not a card fault");
+        }
         logFlush();
         mark("session-restored");
       }
