@@ -7753,10 +7753,26 @@ to run after touching a drawing primitive, the paint sequence, storage or power.
 
 `docs/releasing.md` — what a release is here (an annotated tag on `main`, which
 `.github/workflows/release.yml` then turns into a published release), the gate in
-order, what the three attached images are for, and the blocker list as a **`gh
-project` query rather than a written list**, because a list here would be a
-second copy of the board. It also records why there is deliberately no
-`CHANGELOG.md`.
+order, what the three attached images are for, and the blocker list as a **query
+rather than a written list**, because a list here would be a second copy of the
+board. It also records why there is deliberately no `CHANGELOG.md`.
+
+**THAT QUERY IS `tools/release_blockers.py --release <R>` NOW, AND IT WAS A
+`gh ... | jq` PIPELINE THAT COULD NOT FAIL.** It passed `--limit 100` against a
+board that reached 114, and `gh project item-list` truncates **silently** — so
+the release gate was reading a prefix of the board and reporting a verdict.
+Measured when it was replaced: **6** V1.1 blockers seen where there were **17**,
+the issue asking for the fix among the eleven dropped. Three things it now does
+that a pipeline could not, each the shape this file records elsewhere: the size
+is **asked for** rather than capped (`totalCount` does not shrink with
+`--limit`, so there is no constant to outgrow and a disagreement is a refusal);
+an **unknown release name is an error**, not the empty answer a typo would
+otherwise turn into a pass, which is `compare-design.py`'s `--only` rule; and
+the three outcomes are **three exit codes** (0 clear, 1 blockers, 2 could not
+answer), because `gh ... | jq ... | sort` reports `sort`'s status and a `jq`
+that refused mid-stream leaves a pipeline that printed nothing and exited 0.
+`tools/test_release_blockers.py` is its test, plain `python3` with `gh` stubbed,
+not wired into `make test` for `test_release_notes.py`'s reason.
 
 `README.md` — the outward-facing one: what works, what is stated-refused, how to
 back up the stock firmware before flashing, and what "written with Claude Code"
