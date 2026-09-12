@@ -1,8 +1,12 @@
 // design/BatteryEmpty.dc.html -- what the panel holds after a critical shutdown.
+#include <algorithm>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "doctest.h"
+#include "ramp.h"
+#include "reader/components.h"
 #include "reader/screen_battery_empty.h"
 #include "reader/session_record.h"
 
@@ -53,7 +57,57 @@ TEST_CASE("BatteryEmpty's prose names no connector") {
     CHECK(m.find(connector) == std::string::npos);
   }
   // And it still says what to DO, which is the half that must survive the deletion.
-  CHECK(m.find("connect a charger") != std::string::npos);
+  // Capitalised because it opens its own sentence: the dash that used to join it to
+  // `shutting down` is gone, for the reason the constructor states.
+  CHECK(m.find("Connect a charger") != std::string::npos);
+}
+
+TEST_CASE("BatteryEmpty's copy clears the wrap boundary") {
+  // #76's RULE, APPLIED TO THE SECOND SCREEN. test_book_error_copy.cpp made "a
+  // specimen board must not put a line on the wrap boundary" mechanical for the
+  // corrupt-book dialog and left every other board on the honour system. This screen
+  // is the one whose copy was edited next, so it gets the same instrument rather than
+  // a hand measurement that nothing re-runs.
+  //
+  // WHAT IS MEASURED IS THE NEXT WORD'S OVERFLOW, not the line's slack: a line with
+  // 15px to spare is safe when the next word is 130px wide and a coin toss when it is
+  // 14px. The engines differ by ~3% of the column, which is ~12px here.
+  //
+  // design/BatteryEmpty.dc.html: `max-width: 400px`, and the column is 400 on BOTH
+  // panels -- the X4's usable width is 480 - 2*kMargin = 432 and the X3's is 480, so
+  // the max-width wins at each and one measurement covers both geometries.
+  constexpr int kCopyColW = 400;
+  constexpr int kMinOverflow = 12;
+
+  ramp::Ramp ramp;
+  const GlyphSource& body = ramp.fonts[Role::Body400];
+  // THE MESSAGE IS HELD IN A NAMED LOCAL, and it has to be: Prose::lines are
+  // string_views into the text handed to the wrap, "which must outlive the Prose".
+  // Wrapping `BatteryEmptyScreen().vm().message` inline reads a temporary that dies
+  // at the end of the full expression -- the same use-after-free that once drew
+  // Home's title as a column of notdef boxes, and it does not crash here either: it
+  // measured freed bytes and reported a next-word overflow of -44px.
+  const std::string message = BatteryEmptyScreen().vm().message;
+  const Prose p = wrapProse(body, message, kCopyColW, kProseLeadEm);
+
+  // The board renders four lines in Chrome and this must be the same four here --
+  // a fifth would make the centred column taller and move every rule above it.
+  REQUIRE(p.lineCount() == 4);
+
+  const int spaceW = body.measure(" ", p.tracking);
+  int worst = kCopyColW;
+  for (int i = 0; i + 1 < p.lineCount(); ++i) {
+    const std::string_view next = p.lines[i + 1];
+    const size_t sp = next.find(' ');
+    const std::string_view word = sp == std::string_view::npos ? next : next.substr(0, sp);
+    const int over = body.measure(p.lines[i], p.tracking) + spaceW +
+                     body.measure(word, p.tracking) - kCopyColW;
+    worst = std::min(worst, over);
+  }
+  CAPTURE(worst);
+  // 33px when this was written, and the same 33 before the dash came out -- which is
+  // what says that edit moved glyphs and not geometry.
+  CHECK(worst >= kMinOverflow);
 }
 
 TEST_CASE("BatteryEmpty is Mono and takes no input") {

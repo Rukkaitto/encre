@@ -34,23 +34,31 @@ BatteryEmptyScreen::BatteryEmptyScreen() {
   // promise the shell's save keeps and markSleeping() redeems -- the screen must
   // not say it unless both run before it.
   vm_.title = "BATTERY EMPTY";
-  // The board writes the dash as `&mdash;`, U+2014, which fontc.py's CODEPOINTS
-  // carries -- a mapping onto a glyph the subset lacked would render as a notdef
-  // box, which is worse than the wrong dash.
+  // THREE SENTENCES, AND THE DASH BETWEEN THE LAST TWO IS GONE. This read
+  // `shutting down \xE2\x80\x94 connect`, and a dash standing in for a full stop is the
+  // one punctuation habit the rest of this device's copy does not have: every other
+  // prompt on the glass states its facts as separate sentences (`The file leaves the
+  // SD card. Your progress and bookmarks are kept...`, `Books, articles, fonts, and
+  // reading progress live on the card. Insert one, then retry.`), so this one line
+  // was the outlier rather than the house style.
+  //
+  // MEASURED AND NOT ASSUMED, on test_book_error_copy.cpp's own instrument: the
+  // paragraph still wraps to FOUR lines at the same four breaks, and the tightest
+  // next-word overflow is UNCHANGED at 33px. So the column's height, and therefore
+  // its centring, did not move -- what changed is the glyphs on two of the four
+  // lines. See `BatteryEmpty's copy clears the wrap boundary` below.
   //
   // THE CONNECTOR IS DELIBERATELY UNNAMED. This said `charge over USB-C` and was
   // reported from an X3, WHICH HAS NO USB-C PORT -- so the sentence was false on the
   // model it was read on. One binary drives both the X3 and the X4, they do not share
   // a connector, and nothing in the board profile names the socket (there is no such
   // field), so the copy can neither name one correctly nor be made conditional.
-  // `connect a charger` is true on both, and is 17 characters exactly as
+  // `Connect a charger` is true on both, and is 17 characters exactly as
   // `charge over USB-C` was, so the paragraph wraps identically -- four lines at the
   // same break positions, verified against the board in Chrome at both geometries
   // rather than assumed. Same rule as the badge below: a false claim is worse than an
   // absent one.
-  vm_.message =
-      "Your page is saved. The reader is shutting down \xE2\x80\x94 connect a charger to "
-      "continue.";
+  vm_.message = "Your page is saved. The reader is shutting down. Connect a charger to continue.";
   // THE BADGE NAMES TWO STEPS BECAUSE THE WAKE TAKES TWO. It said `CHARGE TO WAKE`,
   // and both halves of that were wrong -- reported from an X3 as confusing, which it
   // was. Charging cannot wake this hardware: there is no charge-detect wake source
