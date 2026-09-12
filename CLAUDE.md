@@ -5436,6 +5436,69 @@ goldens call) and a Reader with neither a book nor a demo is **refused**. A refu
 push leaves the Library standing — wrong in a way the user can see through, rather
 than wrong in a way they cannot.
 
+**AND THE REFUSAL WAS RIGHT WHILE BEING UNREADABLE, WHICH IS #49.** A wake replays a
+stack of screen NAMES and the factory rebuilds each from state the shell must have
+primed, and **nothing connected "the record names X" to "X's inputs are primed"** —
+there was one hand-written scan for `ScreenId::Reader`, and `ReaderMenu`, `Contents`
+and `BookEnd` came back only because `openBookAt` primes them **on its way past**. So
+each screen that needed its own inputs rediscovered the same failure, always with the
+same symptom and always misattributed: the restore pushes, the factory refuses, the
+restore stops and keeps what stands, and the reader reports *"it went back to the
+book"*. **Three screens shipped that way as a defect and `Peek` ships it as a
+DECISION, and from outside those are the same observation.**
+
+**`reader::restorability(ScreenId)` IS THAT QUESTION, AND EVERY SCREEN ANSWERS IT.**
+`Ready` (a wake owes it nothing), `NeedsPriming` (only a press could have produced
+its inputs), `Never` (it does not come back, and that is a decision). It is in `app.h`
+beside `screenUsesRadio` **for `screenUsesRadio`'s reason** — a fact about the screen
+catalogue, and `shell/` has no harness.
+
+- **THE TABLE IS AN ARRAY `static_assert`ed AGAINST `ScreenId::Count`, NOT A SWITCH.**
+  An exhaustive switch leans on `-Wswitch`, which is a WARNING here — this file records
+  a screen appended while three such switches answered it wrongly and the only
+  diagnostic was three warnings scrolling past. **Proved by appending a dummy screen**:
+  with `kNames` and `kAllScreens` both satisfied, so every pre-existing guard was
+  quiet, this one still refused the build.
+- **`App::snapshot()` STOPS THE RECORD AT THE FIRST `Never` SCREEN**, so the record
+  only ever names screens that come back. Sleeping under a peek stores `…;reader:0`
+  and the wake reports a **complete** restore, where it used to store the peek and
+  then report stopping short — which reads in a log exactly like a screen nobody
+  primed. **Truncated, not filtered**: dropping one from the MIDDLE would hand the
+  wake a stack that never existed.
+- **`App::restore` REFUSES A `Never` ENTRY BEFORE ASKING THE FACTORY**, and the
+  screens that most needed it are the ones the factory **builds**: `Sleep` and
+  `BatteryEmpty` were kept out of a record only by nothing ever pushing them, which
+  is a property of the shell rather than a rule. Waking into either is *"press power,
+  get asleep back"* and a battery-empty prompt over a charged pack.
+- **`RestoreReport::stoppedAt` IS WHAT MAKES THE LOG SAY WHICH**, asking
+  `restorability()` rather than carrying a second field free to disagree with it:
+  `Never` is the mechanism working, anything else is a screen this build says a wake
+  may have and nothing primed — a firmware defect, not a card fault.
+- **THE SHELL'S SCAN IS NOW A WALK OVER THE RECORD** that asks `core/` which entries
+  owe a priming and **names in the log any it does not answer**. The priming stays the
+  shell's and may never move — `core/` does not know what a filesystem, a book or
+  `last.json` is — but the LIST is `core/`'s, so the shell cannot hold a stale copy of
+  it. That is this file's own rule: a caller list is a function not yet written.
+  `openBookAt` still primes all four book-built screens in one pass, and the walk now
+  **names all four** rather than leaving three to ride the first.
+
+**THE DECLARATION IS CHECKED, NOT MERELY WRITTEN**, and that is the half that earns
+it: `test_focus_restore.cpp` builds every screen from a factory configured the way
+`setup()` leaves it — panel geometry, settings, the saved Wi-Fi list — and **no
+further**, then demands a `Ready` screen build and a `NeedsPriming` screen refuse.
+A declaration nothing checks is a second copy of the factory's own switch, free to
+disagree with it, and **it disagreed on the first run**: `WifiSettings` was written
+`NeedsPriming` from reading its factory case, and `loadWifi()` primes it at boot. The
+counts are hand-maintained for `movable`'s reason — **9 `Ready`, 4 `NeedsPriming`,
+9 `Never`**.
+
+**WHAT ONLY A WAKE ON THE DEVICE CAN CONFIRM**, and it is the whole feature: that a
+sleep in the peek stores the reader's page and wakes onto it reporting a COMPLETE
+restore, that `[session] it stopped at …` appears with the right half of its sentence
+when one does stop, and that a record from before this firmware — which can name a
+`Never` screen — is refused rather than restored. `shell/` has no harness, so 1,594
+green test cases say nothing about any of it.
+
 ### Paging: forward is free, backward re-decodes
 
 A DEFLATE stream cannot be seeked and checkpointing one costs 32 KB a checkpoint. So:
