@@ -5927,6 +5927,72 @@ card contains. The nav document is a later job and a small one — `Epub::tocPat
 already answers "which part is the contents" by media type, so it is the only thing
 that would need widening.
 
+**AND THE ONE THING IT WOULD OBVIOUSLY BUY, IT DOES NOT BUY: A NAV DOCUMENT NAMES 0 OF
+THE 133 SPINE ENTRIES THE NCX SKIPS.** Measured over the whole corpus when a reader
+reported the conclusion of `Digital Minimalism` as unreachable — both tables are emitted
+by one generator from one source, so a publisher's contents that misses an entry misses
+it in **both**. This does not retire the later job (a book with a nav and no NCX is a
+real shape), but it removes the reason somebody would reach for it first. Also measured
+against the two other places a name could come from: the chapter's own `<h1>`–`<h6>`
+names **35 of 133 (26.3%)**, and `<title>` is present for **96.2%** and is not a chapter
+name — the reporting book's reads `Continued, Digital Minimalism`. **The name is not
+recoverable**, so `fillTocGaps` gives the row a POSITION rather than chasing one.
+
+**A SPINE ENTRY NO ENTRY NAMES IS READABLE BY PAGING AND REACHABLE BY NOTHING ELSE, AND
+`fillTocGaps` CLOSES THAT.** The list is what the NCX names; what a reader can be IN is a
+spine entry, and where those differ Contents cannot offer the section at all — so the
+only way back to it is to remember which chapter it follows and page through. Reported
+off `Digital Minimalism`, whose publisher styled the Conclusion's title as a `<p>` where
+every real chapter uses an `<h2>`: their generator walks headings, the chapter lost its
+navPoint, and the NCX runs `… spine 14, spine 16 …`. The reader sat in the conclusion of
+the book with no row marked `NOW`, **the cursor thrown to `Cover`**, and no way back.
+
+- **THE BOUND IS POSITIONAL AND THAT WAS A MEASUREMENT, NOT A TASTE.** A gap is a spine
+  entry no row names lying strictly between the first and last the book DID name. That
+  is what separates a missing chapter from front and back matter — this book's spine
+  carries 15 footnote files and a `next-reads.xhtml` after its last named entry, so an
+  unbounded fill adds **16 rows of noise to reach the one chapter that matters**.
+  **A SIZE FLOOR WAS MEASURED AND REFUSED**: text length separates cleanly (junk tops out
+  at 1,976 characters, real chapters start at 4,510) and is unknowable without decoding
+  every gap at book-open; the archive's UNCOMPRESSED SIZE is free and does **not**
+  separate — junk reaches 5,210 bytes where a real chapter starts at 6,187 — so any free
+  floor either keeps junk or drops a chapter. The stated cost of having none is a couple
+  of front-matter rows on a minority of books.
+- **ONLY THE LOWER HALF OF THE BOUND IS WRITTEN DOWN.** The upper half is structural: the
+  walk emits a gap only in front of an entry that already exists, so it cannot reach past
+  the last one. A `next < hi` term read as load-bearing and was implied by the loop's own
+  `next < e.spine` — **caught by a mutation that removed it and failed nothing**, which is
+  this file's own rule about a branch no test exercises.
+- **A SYNTHESISED ROW TAKES THE FOLLOWING ENTRY'S DEPTH, WHICH MAKES IT STRUCTURALLY
+  INCAPABLE OF BECOMING A HEADER.** `isHeaderAt` is "the next entry sits deeper than this
+  one", and equal depths are not — so the row can never be drawn as a tracked-caps label
+  the focus skips, which would be this defect reintroduced by its own fix. **The first
+  test of it could not tell the two candidate rules apart**: its fixture gave the gap
+  neighbours at equal depths, so taking the PRECEDING entry's depth passed all 1,359,370
+  assertions. A part divider followed by its first chapter is the shape that separates
+  them. *A mutation tells you about your INPUT before it tells you about your test*, for
+  the fourth time in this file.
+- **THE LABEL IS `chapterPositionLabel`, ONE FUNCTION AND TWO CALLERS.**
+  `ReaderScreen::updateChapterLabel` has composed `CH. %02d` since the header band stopped
+  being a spine position; the row now carries the same string, so the list, the band, the
+  sleep card and Home say one thing about a chapter none of them can name. Two copies of a
+  format string is how those four surfaces drift. The position fallback survives for a
+  book with **no** contents at all, which is the only case left that can reach it.
+- **WHAT IT COSTS ON REAL BOOKS**, through the built pipeline over `~/.cache/encre-corpus`:
+  of 206 books with a usable NCX, **29 gain a row, 134 rows in all**, a median of 2 per
+  affected book. The largest is the point rather than the price — **`Dune - Tome 3` gains
+  35 rows, 33 of them whole chapters of 7,000–20,000 characters**, a novel navigable today
+  only by paging. On the corpus's own `local/` shelf **5 of 16** books gain something.
+- **A BOOK WITH NO CONTENTS AT ALL IS LEFT ALONE**: there is no named range to bound the
+  fill by, so the only available rule would be "every spine entry", which is a different
+  feature with a different argument.
+- **IT RUNS IN THE SHELL, NOT INSIDE `loadToc`**, because that function's job is to report
+  what the book AUTHORED and this adds rows the book did not write — and it needs the
+  spine's length, which `openBookAt` has in hand and the archive read does not. Its second
+  row list is guarded with `pushOrRefuse` like `loadToc`'s own, and **a refusal leaves the
+  contents exactly as the book wrote them**: a partial fill would make which chapters got
+  a row depend on where the heap ran out.
+
 **`Epub` NOTES THE NCX DURING THE OPF WALK**, which already resolves every manifest
 href — finding it later would mean re-parsing the OPF, and scanning the archive for
 `*.ncx` would be a guess where the manifest is a statement. Two routes, both needed:

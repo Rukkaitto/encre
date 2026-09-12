@@ -212,3 +212,119 @@ TEST_CASE("a flat NCX is all depth 1") {
   REQUIRE_FALSE(toc.empty());
   for (const reader::TocEntry& e : toc) CHECK(e.depth == 1);
 }
+
+TEST_CASE("a spine entry the book's contents skip still gets a row") {
+  // READABLE BY PAGING, UNREACHABLE BY JUMPING -- the defect this closes. Reported
+  // off Digital Minimalism, whose Conclusion is spine 15: the publisher styled its
+  // title as `<p class="x03-Chapter-Title-BRK">` where every real chapter uses an
+  // `<h2>`, their generator walks headings, and the chapter lost its navPoint. The
+  // NCX runs `... spine 14, spine 16 ...` and nothing names 15.
+  //
+  // THE NAME IS NOT RECOVERABLE AND THAT WAS MEASURED, not assumed, over the 133
+  // mid-book gaps in ~/.cache/encre-corpus: the EPUB 3 nav document names 0 of them
+  // (both tables come from one generator, so they skip the same entries), the
+  // chapter's own `<h1>`-`<h6>` names 35 (26.3%), and `<title>` is present for 96%
+  // and useless -- this book's reads `Continued, Digital Minimalism`. So the row
+  // carries the POSITION, which is what the reader's header band has always fallen
+  // back to for exactly this case.
+  std::vector<reader::TocEntry> toc = {
+      {13, 2, "6: Reclaim Leisure"}, {14, 2, "7: Join the Attention Resistance"},
+      {16, 1, "Acknowledgments"},    {17, 1, "Notes"}};
+  CHECK(reader::fillTocGaps(toc, 20) == 1);
+  REQUIRE(toc.size() == 5);
+  // IN SPINE ORDER, where the reader would page into it.
+  CHECK(toc[2].spine == 15);
+  CHECK(toc[2].label == "CH. 16");
+  // AND IT IS THEN FINDABLE BY THE ONE FUNCTION BOTH SCREENS ASK. Before this it
+  // answered -1, so Contents marked no row at all and the reader's header fell
+  // through to its own copy of the same string.
+  CHECK(reader::tocIndexForSpine(toc, 15) == 2);
+}
+
+TEST_CASE("a synthesised row can never become a section header") {
+  // `ContentsScreen::isHeaderAt` is "the next entry sits deeper than this one", and a
+  // header is drawn as a tracked-caps label the focus SKIPS -- so a synthesised row
+  // that landed at a shallower depth than its successor would be unreachable, which
+  // is the defect this function exists to close, reintroduced by its own fix.
+  //
+  // TAKING THE FOLLOWING ENTRY'S DEPTH MAKES THAT STRUCTURAL rather than checked:
+  // `next.depth > synth.depth` is false when they are equal, whatever the book's
+  // shape. The gap-between-named-entries rule guarantees a following entry exists.
+  // THE FIXTURE HAS TO PUT THE TWO CANDIDATE RULES ON DIFFERENT ANSWERS, and the
+  // first one written here did not -- it gave the gap neighbours at equal depths, so
+  // "take the following entry's depth" and "take the preceding entry's" agreed and a
+  // mutation swapping them passed all 1,359,370 assertions. A mutation tells you
+  // about your INPUT before it tells you about your test.
+  //
+  // A part divider followed by its first chapter is the shape that separates them,
+  // and it is the shape that bites: the gap's PRECEDING entry is shallower than its
+  // FOLLOWING one, so taking the preceding depth makes `next.depth > synth.depth`
+  // true -- the synthesised row becomes a section header, the focus skips it, and it
+  // is unreachable. Which is this function's own defect, reintroduced by its fix.
+  std::vector<reader::TocEntry> toc = {{0, 1, "Part I"}, {2, 2, "Chapter two"}};
+  REQUIRE(reader::fillTocGaps(toc, 8) == 1);
+  REQUIRE(toc.size() == 3);
+  CHECK(toc[1].spine == 1);
+  CHECK(toc[1].depth == 2);          // the FOLLOWING entry's
+  CHECK(toc[1].depth != toc[0].depth);  // and not the preceding one's
+  // `ContentsScreen::isHeaderAt` is exactly this comparison, so equality here is the
+  // whole guarantee.
+  CHECK_FALSE(toc[2].depth > toc[1].depth);
+}
+
+TEST_CASE("only the gaps BETWEEN what the book names are filled") {
+  // THE FRONT AND BACK MATTER ARE NOT GAPS. Digital Minimalism's spine carries 15
+  // footnote files and a `next-reads.xhtml` after the last named entry, and its
+  // cover before the first -- 16 rows of noise against the one chapter that is
+  // missing. Bounding the fill by what the book itself named is what separates
+  // them, and it is free: no size test, no decode.
+  //
+  // A SIZE FLOOR WAS MEASURED AND REFUSED. Text length separates cleanly (junk tops
+  // out at 1,976 chars, real chapters start at 4,510) and is not knowable without
+  // decoding every gap at book-open time; the archive's uncompressed size is free
+  // and does NOT separate -- junk reaches 5,210 bytes where a real chapter starts at
+  // 6,187. The cost of having none is a couple of front-matter rows on a minority of
+  // books; see the corpus figures in toc.h.
+  std::vector<reader::TocEntry> toc = {{2, 1, "Chapter one"}, {4, 1, "Chapter two"}};
+  CHECK(reader::fillTocGaps(toc, 40) == 1);
+  REQUIRE(toc.size() == 3);
+  CHECK(toc[1].spine == 3);
+  // Spines 0, 1 and 5..39 are outside the named range and stay unlisted.
+  CHECK(toc.front().spine == 2);
+  CHECK(toc.back().spine == 4);
+}
+
+TEST_CASE("a book whose contents have no gaps is left byte-identical") {
+  // The common case -- 177 of the corpus's 207 books with a usable NCX -- and it
+  // must cost nothing, because this runs on every book open.
+  const std::vector<reader::TocEntry> before = {
+      {0, 1, "Cover"}, {1, 1, "Part one"}, {1, 2, "Part two"}, {2, 1, "End"}};
+  std::vector<reader::TocEntry> toc = before;
+  CHECK(reader::fillTocGaps(toc, 3) == 0);
+  REQUIRE(toc.size() == before.size());
+  for (size_t i = 0; i < before.size(); ++i) {
+    CHECK(toc[i].spine == before[i].spine);
+    CHECK(toc[i].depth == before[i].depth);
+    CHECK(toc[i].label == before[i].label);
+  }
+  // A GROUP IS NOT A GAP. Several navPoints naming one spine entry is the majority
+  // case (109 of 206 corpus books), and the spine indices they skip between them are
+  // not holes -- `Part one` and `Part two` above both name spine 1.
+}
+
+TEST_CASE("an empty contents is not filled in, and neither is one past the cap") {
+  // A BOOK WITH NO NCX GETS NO SYNTHETIC CONTENTS. There is no named range to bound
+  // the fill by, so the only rule available would be "every spine entry", which is a
+  // different feature with a different argument -- and `Contents` already has an
+  // answer for a book that cannot name its chapters.
+  std::vector<reader::TocEntry> empty;
+  CHECK(reader::fillTocGaps(empty, 40) == 0);
+  CHECK(empty.empty());
+
+  // AND THE CAP IS THE ONE THE LIST ALREADY HAS. `kMaxTocEntries` sizes a vector and
+  // a file is free to claim anything; a gap fill must not be the way past it.
+  std::vector<reader::TocEntry> wide = {{0, 1, "first"},
+                                        {static_cast<int>(reader::kMaxTocEntries) * 4, 1, "last"}};
+  reader::fillTocGaps(wide, static_cast<int>(reader::kMaxTocEntries) * 8);
+  CHECK(wide.size() <= reader::kMaxTocEntries);
+}
