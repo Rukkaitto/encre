@@ -3106,13 +3106,13 @@ void QuietTheme::renderWifiPicker(Framebuffer& fb, const FontSet& fonts,
   }
 }
 
-void QuietTheme::renderWifiPassword(Framebuffer& fb, const FontSet& fonts,
-                                    const WifiPasswordViewModel& vm, Plane plane) {
+void QuietTheme::renderTextEntry(Framebuffer& fb, const FontSet& fonts,
+                                 const TextEntryViewModel& vm, Plane plane) {
   fb.clear(true);
   Hint hints[4];
   buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
 
-  int y = drawHeaderBand(fb, fonts, vm.title, vm.ssid, nullptr, plane);
+  int y = drawHeaderBand(fb, fonts, vm.title, vm.fieldName, nullptr, plane);
 
   // --- the field ---------------------------------------------------------
   y += kKeyFieldMarginTop;
