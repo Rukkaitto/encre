@@ -1,0 +1,261 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+    
+  </style>
+</helmet>
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
+
+  <!--
+    THIS BOARD IS design/WifiPassword.dc.html's GEOMETRY, AND DELIBERATELY SO.
+    Issue #124, after docs/notes/instapaper-full-api.md SS6 moved Instapaper
+    sign-in off a browser page and onto the keyboard this device already has.
+    #126 extracts the text-entry screen from WifiPasswordScreen; these two
+    boards are what it has to be able to serve, so every pixel they share with
+    the Wi-Fi board is a pixel the extraction does not have to argue about.
+
+    WHAT IS IDENTICAL, and must stay identical: the 10x4 character grid, the
+    3px gaps, the 40x52 cell, the 427px row width (ten keys and nine gaps), the
+    six function cells at 40/40/83/60/95/94, the 76px field box with its 2px
+    border and its 10x34 caret 3px from the text, the counter row's 10px top
+    padding, and the hint bar.
+
+    WHAT DIFFERS, and each difference is a parameter rather than a redraw:
+    the band's two runs, ONE new element (the field label below), the Confirm
+    cell's word, and -- on the password board -- the counter row's right slot.
+
+    THE FIELD LABEL IS A SECTION HEADER, NOT A NEW PRIMITIVE. `--t-meta` at
+    0.2em/500 on `padding: 18px 24px 6px 24px` is Settings.dc.html's
+    `SAVED NETWORKS` box to the pixel, which is components.h's
+    `drawSectionHeader` with its rule suppressed. It exists because the band
+    cannot hold these two strings: measured against the firmware's own ramp,
+    `EMAIL OR USERNAME` is 314px at Label500/0.22em and `PASSWORD, IF YOU HAVE
+    ONE` would be wider still, against 432px of band shared with a value. At
+    Meta500/0.2em they are 281px and 389px, so both fit one line with room.
+
+    THE BAND IS `SIGN IN` / WHICH ACCOUNT. That is WifiPassword's own right-slot
+    semantics -- `PENDRAGON` there answers "which network is this secret for" --
+    with the flow's name on the left, because the field's name has moved to the
+    label. The username board has no account yet, so it names the service
+    instead; the password board names the account you are signing in as, which
+    is the review a two-screen flow would otherwise not have.
+
+    THE VALUE CARRIES `min-width: 0`, WHICH IS HOW A BOARD SAYS WHICH RUN
+    YIELDS (#82). An address off a real card can be any length, and the run
+    naming the screen may never elide, so the account is the run that gives way.
+    The committed specimen fits -- `SIGN IN` + `LUCAS@EXAMPLE.COM` measures
+    400px of 432 -- exactly as Contents.dc.html's `MIDDLEMARCH` fits: the
+    declaration states the rule the specimen cannot show.
+  -->
+  <div style="display: flex; justify-content: space-between; align-items: center; gap: 7px; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
+  <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500; white-space: nowrap;">SIGN IN</div>
+  <div style="font-size: var(--t-value); font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">INSTAPAPER</div>
+</div>
+  <!--
+    `EMAIL OR USERNAME`, NEVER `EMAIL` ALONE. Instapaper's own developer
+    documentation binds this: "label the field 'Email or username', 'Email
+    address or username', or 'Username'. Don't label it only 'Email': many
+    usernames are not email addresses." The device cannot tell which one a
+    reader has, so the label must admit both.
+
+    THE SPECIMEN IS AN ADDRESS BEING TYPED, head not yet finished, which is
+    WifiPassword's `correcthor` idiom. It is deliberately an address rather
+    than a bare username because that is the case with a cost: `@` is not on
+    the base layer, so it takes the latching `#+=` out and `abc` back --
+    two presses on top of the 92 SS6 counted for this field.
+
+    THE COUNTER ROW'S RIGHT SLOT IS EMPTY HERE. WifiPassword uses it to say
+    `SHOWN WHILE TYPING`, which pre-empts the expectation that a PASSWORD
+    field is masked. A username carries no such expectation, so saying it
+    would be noise -- and an empty slot is what the theme already draws when
+    `vm.visibility` is empty.
+  -->
+  <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">EMAIL OR USERNAME</div>
+  <div style="margin: 0 24px; border: 2px solid #000000; height: 76px; display: flex; align-items: center; padding: 0 16px; gap: 3px;">
+    <div style="font-size: var(--t-body); letter-spacing: 0.08em;">lucas@example.c</div>
+    <div style="width: 10px; height: 34px; background: #000000;"></div>
+  </div>
+  <div style="display: flex; justify-content: space-between; padding: 10px 24px 0 24px;">
+    <div style="font-size: var(--t-meta); letter-spacing: 0.1em;">15 CHARS</div>
+    <div></div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 3px; padding: 24px 24px 0 24px;">
+    <div style="display: flex; gap: 3px; justify-content: center;"><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">a</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">b</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">c</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">d</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">e</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">f</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">g</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">h</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">i</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">j</div>
+</div></div>
+    <div style="display: flex; gap: 3px; justify-content: center;"><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">k</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">l</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">m</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">n</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; background: #000000; color: #ffffff;">
+  <div style="font-size: var(--t-body); font-weight: 700;">o</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">p</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">q</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">r</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">s</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">t</div>
+</div></div>
+    <div style="display: flex; gap: 3px; justify-content: center;"><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">u</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">v</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">w</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">x</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">y</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">z</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">0</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">1</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">2</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">3</div>
+</div></div>
+    <div style="display: flex; gap: 3px; justify-content: center;"><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">4</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">5</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">6</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">7</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">8</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">9</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">.</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">-</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">_</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-body); font-weight: 400;">!</div>
+</div></div>
+    <div style="display: flex; gap: 3px; justify-content: center;"><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-meta); letter-spacing: 0.1em; font-weight: 500;">&lsaquo;</div>
+</div><div style="width: 40px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-meta); letter-spacing: 0.1em; font-weight: 500;">&rsaquo;</div>
+</div><div style="width: 83px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-meta); letter-spacing: 0.1em; font-weight: 500;">SHIFT</div>
+</div><div style="width: 60px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-meta); letter-spacing: 0.1em; font-weight: 500;">#+=</div>
+</div><div style="width: 95px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-meta); letter-spacing: 0.1em; font-weight: 500;">SPACE</div>
+</div><div style="width: 94px; height: 52px; display: flex; align-items: center; justify-content: center; border: 1px solid #000000; box-sizing: border-box;">
+  <div style="font-size: var(--t-meta); letter-spacing: 0.1em; font-weight: 500;">NEXT</div>
+</div></div>
+  </div>
+  <!--
+    THE CONFIRM CELL IS `NEXT`, WHICH IS ALSO WHAT TELLS THE READER THERE IS A
+    SECOND FIELD. That is the one thing a two-screen flow owes a reader, and
+    it is paid by the word on the cell rather than by a step counter in the
+    band -- this project has a rule about counters that invite an arithmetic
+    the numbers do not support.
+
+    IT IS INERT ON AN EMPTY FIELD, AND THE CONFIRM SLOT GOES EMPTY WITH IT,
+    which is this firmware's existing vocabulary rather than a new one.
+    Instapaper's xAuth exchange cannot succeed without a username, so `NEXT`
+    with nothing typed would advance to a password field for an account that
+    does not exist and fail two screens later.
+
+    NOTE THE ASYMMETRY WITH THE PASSWORD BOARD, AND THAT IT IS DERIVED.
+    A username is required and a password is not, so the floor is ONE here and
+    ZERO there -- both read off Instapaper rather than off 802.11.
+    `kMinPassphrase = 8` is the Wi-Fi caller's and must not come along (#126).
+
+    THE ROW GEOMETRY DOES NOT MOVE. `NEXT` measures 61px at Meta500/0.1em
+    against `JOIN`'s 56, and the cell is 94px, so the function row is
+    WifiPassword's 40/40/83/60/95/94 unchanged.
+
+    AND THE BAR HOLDS: `DELETE`+ring / `NEXT` / `UP` / `DOWN` measures 414px of
+    the X4's 432 usable, against the shipped `TYPE` state's 412. The X4 fails
+    first; the X3 has 66px spare.
+  -->
+  <div style="margin-top: auto; padding: 0 24px 14px 24px;">
+    <div style="font-size: var(--t-meta); letter-spacing: 0.1em; line-height: 1.5;">UP AND DOWN MOVE BETWEEN ROWS; THE SIDE PAGE BUTTONS MOVE ALONG A ROW.</div>
+  </div>
+  <!--
+    BACK DELETES AND A HELD BACK LEAVES, inherited unchanged from
+    WifiPassword.dc.html -- including its own correction: on an EMPTY field
+    Back LEAVES, the slot reads `BACK`, and the hold ring comes off, because a
+    ring promises a DIFFERENT action and there is none left once the short
+    press already leaves. The drawn state here is non-empty, so it keeps
+    DELETE and its ring.
+
+    WHERE IT LEAVES TO IS THE ONE THING THAT IS NEW, and it falls out of the
+    two screens being a stack: leaving the password board lands on the
+    username board with what was typed still in it, and leaving that one lands
+    back on ArticlesSetup.dc.html. That is the same return WifiError's
+    EDIT PASSWORD slab already needs, so `setEntered` is the mechanism and
+    there is no new one.
+  -->
+<div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">DELETE</div><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="none" stroke="#000000" stroke-width="1"></circle></svg></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">TYPE</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">UP</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M4 9l4 4 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">DOWN</div></div>
+</div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

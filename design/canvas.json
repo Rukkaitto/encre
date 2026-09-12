@@ -352,9 +352,18 @@
       "page": "page-6"
     },
     {
-      "file": "InstapaperConnect.dc.html",
-      "title": "Browser Sign-In",
+      "file": "InstapaperUsername.dc.html",
+      "title": "Sign-In · Username",
       "x": 2900,
+      "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-6"
+    },
+    {
+      "file": "InstapaperPassword.dc.html",
+      "title": "Sign-In · Password",
+      "x": 3480,
       "y": 0,
       "w": 480,
       "h": 800,
@@ -363,8 +372,44 @@
     {
       "file": "InstapaperAccount.dc.html",
       "title": "Account",
-      "x": 3480,
+      "x": 4060,
       "y": 0,
+      "w": 480,
+      "h": 800,
+      "page": "page-6"
+    },
+    {
+      "file": "InstapaperSigningIn.dc.html",
+      "title": "Sign-In · Working",
+      "x": 0,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-6"
+    },
+    {
+      "file": "InstapaperSignInError.dc.html",
+      "title": "Sign-In · Rejected",
+      "x": 580,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-6"
+    },
+    {
+      "file": "InstapaperSignInOffline.dc.html",
+      "title": "Sign-In · Didn't Finish",
+      "x": 1160,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-6"
+    },
+    {
+      "file": "InstapaperSignInRefused.dc.html",
+      "title": "Sign-In · App Refused",
+      "x": 1740,
+      "y": 900,
       "w": 480,
       "h": 800,
       "page": "page-6"
