@@ -1,0 +1,155 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+    .dim-veil { background-image: radial-gradient(circle, #ffffff 1.3px, transparent 1.5px); background-size: 3px 3px; }
+  </style>
+</helmet>
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; position: relative;">
+
+  <!--
+    THE SIGN-IN FLOW'S MIDDLE STATES (#124, round 3). ArticlesSetup's slab opens
+    InstapaperUsername -> InstapaperPassword -> `GO`, and between that press and
+    InstapaperAccount.dc.html sit the exchange and its failures. This board is
+    one of four: InstapaperSigningIn, and three failure shapes.
+
+    THE PRECEDENTS ARE WifiConnect.dc.html AND WifiError.dc.html, and they are
+    followed rather than adapted: the 380px panel on `left: 50px` with a 21/20
+    caption, an 18/20 body block with kWarning over a --t-body message at 1.45,
+    a 0/20/20 slab column of 68px slabs, and an opaque absolutely-positioned
+    hint bar. The in-flight board takes WifiConnect's 340px panel on `left: 70px`.
+
+    THERE IS NO SUCCESS BOARD, AND THAT IS A DECISION. CLAUDE.md records why
+    WifiConnect has one state and not two: "It used to step to READY, which is
+    gone: a successful join leaves for the saved list, and the list with the
+    network in it is the confirmation -- at one waveform instead of two." The
+    same holds exactly here. InstapaperAccount.dc.html reads back `SIGNED IN`,
+    the account name, the unread count and the last sync, so it IS the
+    confirmation, and a `SIGNED IN` step in front of it would be a second
+    waveform saying less than the screen behind it.
+
+    THE VEILED PARENT IS ArticlesSetup.dc.html, and it is GENERATED FROM THAT
+    BOARD rather than transcribed. A veil is not decoration: App::render paints
+    the real parent, then the veil, then the overlay, so whatever is under the
+    stipple is a screen the firmware really renders and make compare really
+    measures -- WifiError.dc.html shipped for a year with 72px rows against
+    WifiSettings' 80px because the dimming made eight pixels a row invisible to
+    review.
+
+    WHY ArticlesSetup AND NOT THE PASSWORD SCREEN: these dialogs REPLACE the
+    sign-in stack rather than sitting on it (Action::replace, which pushes
+    before it erases, so a refused factory leaves the stack intact), which is
+    WifiConnect's own choice. It also keeps the typed password off the glass
+    under a 5-of-9 stipple, and it makes the flow's root -- still `NOT SET UP`
+    throughout -- the one truthful parent for every one of these four states.
+  -->
+  <!--
+    ONE STATE, NOT TWO, AND NO TICKER. WifiConnect.dc.html's eight-cell progress
+    ticker was cut because "it read as a fraction of a known total, a join takes
+    an unknown one to ten seconds, and nothing on this device animates. The
+    LABEL is the indicator." An xAuth exchange is one signed POST and its
+    duration is just as unknown, so the same answer holds.
+
+    IT CAN BE CANCELLED, AND WHAT THAT MEANS IS WORTH STATING: CANCEL STOPS
+    WAITING, IT DOES NOT UN-SEND. The request is a single
+    `POST /api/1/oauth/access_token` and an HTTP request in flight cannot be
+    recalled, so a cancel that lands after the server has already answered
+    leaves a token minted and never read. That is waste and not damage -- the
+    exchange creates no account state, changes nothing the reader can see, and
+    the token is one nobody ever holds. The alternative is a screen with no
+    input at all, which on a bad network is a panel the reader cannot leave
+    until the idle timer sleeps the device.
+
+    THE CAPTION HAS NO RIGHT SLOT, AND THE PANEL THEREFORE DOES NOT NAME
+    INSTAPAPER. WifiConnect puts `WI-FI` there; measured, `INSTAPAPER` is 144px
+    at Meta400/0.12em against 296px of caption box already holding
+    `SIGNING IN...` at 188px, so the pair overflows by 36px. Dropping it is
+    WifiError.dc.html's and BookErrorMemory.dc.html's caption shape anyway.
+
+    PUTTING THE NAME IN THE MESSAGE INSTEAD WAS TRIED AND WRAPPED BADLY:
+    `Signing in to Instapaper as "lucas@example.com".` breaks after
+    `Instapaper` and then ORPHANS `as` on a line of its own, because the quoted
+    address is one 278px token against a 296px column. What the message carries
+    is the ACCOUNT -- the same review surface the password board's band carries
+    -- on two balanced lines, 151px and 278px, clearing by 139px.
+
+    NOTHING IS LOST BY NOT NAMING THE SERVICE HERE. The veiled parent behind
+    this panel is ArticlesSetup.dc.html, which says `ARTICLES / NOT SET UP` and
+    draws `SET UP INSTAPAPER` across the middle of the glass; the reader
+    arrived by pressing it, and there is no second sign-in on this device. The
+    three FAILURE boards do name Instapaper, because there the name is
+    load-bearing: it is what attributes the refusal.
+
+    NO MARK, AND THAT IS A DECISION ABOUT FLASH RATHER THAN ABOUT LAYOUT.
+    WifiConnect draws `kWifi`; there is no Instapaper mark in core/src/icons.cpp
+    and inventing one for a transient panel is a generated asset plus flash
+    spent on decoration. `kWifi` itself would be a lie -- this is not an
+    operation on the radio. If one is ever wanted, ArticlesSetup.dc.html's
+    page-stack is its source and it is an iconc.py entry.
+
+    THE NOTE SETS THE EXPECTATION THAT STOPS THIS READING AS FROZEN, which is
+    the one thing a still panel on e-ink owes a reader, and it is hedged
+    because the duration genuinely is not known.
+  -->
+  <div style="position: absolute; top: 0; left: 0; width: 480px; height: 800px; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;">
+<div style="display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
+  <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">ARTICLES</div>
+  <div style="font-size: var(--t-value); font-weight: 700;">NOT SET UP</div>
+</div>
+  <div style="display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 46px 24px 0 24px; flex-shrink: 1; min-height: 0; overflow: hidden; text-align: center;">
+    <svg width="98" height="91" viewBox="0 0 28 26" fill="none"><rect x="4.5" y="0.5" width="19" height="3" stroke="#000000"></rect><rect x="2.5" y="6.5" width="23" height="3" stroke="#000000"></rect><rect x="0.7" y="12.7" width="26.6" height="12.6" stroke="#000000" stroke-width="1.4"></rect><path d="M4 17h14M4 20.5h20" stroke="#000000" stroke-width="1.2"></path></svg>
+    <div style="font-size: 39px; font-weight: 700; letter-spacing: 0.06em;">READ IT LATER</div>
+    <div style="font-size: var(--t-body); line-height: 1.55; max-width: 400px;">Connect your Instapaper account to read your saved articles offline &mdash; and archive or like them from the device.</div>
+    <div style="width: 420px;"><div style="background: #000000; color: #ffffff; height: 72px; display: flex; align-items: center; justify-content: center;">
+  <div style="font-size: var(--t-value); letter-spacing: 0.18em; font-weight: 700;">SET UP INSTAPAPER</div>
+</div></div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.1em; line-height: 1.5; max-width: 400px;">YOU TYPE YOUR SIGN-IN ON THIS DEVICE, OVER WI-FI.</div>
+  </div>
+  <div style="margin-top: auto;"></div>
+  </div>
+  <div class="dim-veil" style="position: absolute; top: 0; left: 0; width: 480px; height: 800px;"></div>
+  <div style="position: absolute; top: 50%; transform: translateY(-50%); left: 70px; width: 340px; background: #ffffff; border: 2px solid #000000; box-sizing: border-box;">
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 21px 20px; border-bottom: 2px solid #000000;">
+      <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">SIGNING IN&hellip;</div>
+    </div>
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 22px 20px 24px 20px; text-align: center;">
+      <div style="font-size: var(--t-value); font-weight: 500;">Signing in as &ldquo;lucas@example.com&rdquo;.</div>
+      <div style="font-size: var(--t-meta); letter-spacing: 0.1em; line-height: 1.5;">THIS CAN TAKE A FEW SECONDS.</div>
+    </div>
+  </div>
+<div style="position: absolute; bottom: 0; left: 0; width: 100%; background: #ffffff; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">CANCEL</div></div>
+  <div style="width: 36px;"></div>
+  <div style="width: 36px;"></div>
+  <div style="width: 36px;"></div>
+</div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
