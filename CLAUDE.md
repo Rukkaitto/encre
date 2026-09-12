@@ -430,6 +430,70 @@ boards say, and names what drifted.
 - **Publishing is still a separate, human step**, with `contract: "0.1.31"` and
   the canvas's own `url` — publishing without it creates a stray duplicate.
 
+## The rule that governs COPY
+
+**EVERY STRING A READER SEES GOES THROUGH THE `humanizer` SKILL BEFORE IT SHIPS**
+(`/humanizer`), and it goes through it **on the board**, because copy is a UI change
+and a UI change goes into the design HTML first. That covers board copy, screen
+titles, badges, hint-bar words, prompts, empty states, every refusal's sentence, and
+the pages `design/Web*.dc.html` serve — a new string and an edit to an existing one
+alike. The skill's reference is Wikipedia's *Signs of AI writing*; what it is here to
+catch is the staging half, a `not X but Y` naming an objection nobody made, a one-line
+closer restating the line above it, a forced triad, inflated significance, and a dash
+standing in for a full stop.
+
+**IT IS A STANDING RULE BECAUSE THIS FIRMWARE IS WRITTEN WITH CLAUDE CODE**, so its
+copy carries a model's default habits unless something takes them out, and nothing
+else here looks. `make compare` measures the board against the panel and is blind to
+what the board SAYS; the goldens pin the pixels of a sentence, not its voice.
+
+**WHAT A FULL PASS OVER THE DEVICE'S COPY ACTUALLY FOUND (2026-09-12): two dashes,
+and nothing else.** That is the finding rather than a light touch — the copy was
+already short, concrete and active, because this file has been refusing false and
+inflated claims one screen at a time since the battery gauge. The two were
+`BatteryEmpty`'s *"shutting down — connect a charger"* and the Instapaper setup line's
+*"offline — and archive or like them"*, and **what convicted them was the rest of the
+app**: every other prompt on the glass states its facts as separate sentences
+(`The file leaves the SD card. Your progress and bookmarks are kept...`), so the
+connecting dash was the outlier and not the house style. Both are now a full stop and
+a comma.
+
+**THREE THINGS THE SKILL DOES NOT REACH, and they are most of the strings in this
+repo:**
+
+- **SPECIMEN CONTENT IS THE READER'S VOICE, NOT THE DEVICE'S.** The Middlemarch
+  excerpts, `Bookmarks`' quotes, the article titles and `ReaderList`'s essay on line
+  boxes all stand in for what a book or a feed holds. `ReaderList`'s specimen opens
+  *"A page is not a container that text is poured into. It is a grid of line boxes"*,
+  which is a textbook `not X but Y` — and it is a **book's** sentence, so it stays, on
+  the same rule that leaves Eliot alone.
+- **DEVELOPER ENGLISH NEVER REACHES THE GLASS.** `openBook`'s `why`, `CoverReport`'s
+  reason, every `[tag]` line in the log. The screen takes a bounded
+  `BookErrorReason` precisely so that prose stays blunt and unstyled.
+- **A SEPARATOR IS A GLYPH, NOT A CONNECTOR.** `·` in `ASLEEP · HOLD POWER TO WAKE`
+  and the em dash the reader's footer draws for an unknown page total (`3 / —`) are
+  punctuation the boards chose. The dash rule is about one joining two clauses.
+
+**AND A COPY EDIT IS A WRAP QUESTION, so it owes the same two measurements any other
+copy change owes**: #76's next-word clearance, which `test_book_error_copy.cpp` and
+`test_screen_battery_empty.cpp` now make mechanical for two screens, and a
+threshold-at-128 count over the `--export` panels with an untouched screen beside it
+as the control — because the sheet prints `ok` and not a percentage (#41). The
+`BatteryEmpty` edit above kept its four lines at the same four breaks with the
+tightest clearance **unchanged at 33px**, moved 3,748 pixels in **two contiguous
+27-row bands at both geometries and none outside them**, and measured
+**2.08%/1.91% → 2.05%/1.89%** against `sd_missing`'s 1.83%/1.67%, which reproduced
+this file's recorded figure to the digit and is what says the two readings are one
+instrument.
+
+**ONE CONTRAST WAS KEPT, AND THE EXEMPTION IS THE USEFUL HALF OF THE RULE.**
+`InstapaperSignInRefused` says *"Instapaper refused Encre itself, not your account.
+Trying again won't help."* — a `not X but Y` by shape, and the skill's own condition
+for keeping one is that the negative half corrects a belief the reader actually
+holds. A reader who has just been refused a sign-in believes it was their account.
+**Removing that clause would cost the sentence its entire job**, which is the test to
+apply before deleting a contrast anywhere else.
+
 ## Hardware facts
 
 - One binary drives both models. **The panel controller varies by production
@@ -3610,8 +3674,10 @@ rather than corrected**:
   `SdMissing.dc.html` needed `max-width` 400→420 for exactly this — the `.rfnt` faces
   measure ~3% wider than Chrome's. `connect a charger` is 17 characters as
   `charge over USB-C` was, and both engines wrap the paragraph to **four lines at the
-  same three break positions** (after *The*, after *down —*, after *to*) at both
-  geometries, before and after. `max-width` did not move.
+  same three break positions** (after *The*, after *down*, after *to*) at both
+  geometries, before and after. `max-width` did not move. **The dash that used to sit
+  at that second break is gone** — see **The rule that governs COPY** — and the breaks
+  did not move with it.
 
 **THE RESUME GATE IS BEFORE `display.begin()`, AND THAT IS THE WHOLE COST OF THE
 FEATURE.** `requireChargeOrSleepAgain()` sits in `setup()` immediately after
@@ -3689,9 +3755,12 @@ all four were corrected rather than just the string.
 
 **MEASURED AGAINST THE BOARDS:** `low_battery` 5.03% (X4) / 6.02% (X3) against the
 untouched `reader`'s 5.34%/6.38% — compare it against the other **grayscale** screens,
-for the reason recorded under the peek. `battery_empty` is **2.08%/1.91%** against
+for the reason recorded under the peek. `battery_empty` is **2.05%/1.89%** against
 `sd_missing`'s 1.83%/1.67%, measured as a control in the same tree with the same
-instrument. It read 1.81%/1.66% before the badge's copy changed, and the increase is
+instrument. It read **2.08%/1.91%** until the connecting dash came out of its
+paragraph (see **The rule that governs COPY**), and the control reproduced its own
+recorded pair to the digit across that change, which is what says the two readings
+are one instrument rather than two. It read 1.81%/1.66% before the badge's copy changed, and the increase is
 accounted for row by row: **the badge's box agrees with Chrome's to 1px**, so what moved
 is a wider tracked-caps run rasterising differently, not geometry drifting. `make
 compare` reports 30/36 implemented and both ids `firmware ok`.
