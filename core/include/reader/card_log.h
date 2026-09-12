@@ -99,6 +99,42 @@ class CardLogBuffer {
   // burst loses are the ones that would have overflowed anyway.
   bool wantsFlush(size_t threshold) const { return enabled() && len_ >= threshold; }
 
+  // THE RESERVE IS GONE AND THE NEXT LINE WILL BE REFUSED -- flush wherever you are.
+  //
+  // wantsFlush() alone is a ONE-SHOT reserve and #83 is what that costs. The caller
+  // may only write in an idle window, so between crossing the threshold and the next
+  // quiet loop iteration the free space can only shrink and nothing tops it up. A
+  // reader turning pages keeps a paint owed or a press queued continuously, so that
+  // stretch is bounded by the USER rather than by anything the firmware picks: no
+  // threshold derived from a burst size can be a bound, it can only make the hole
+  // rarer. Measured on glass (X3, 2026-09-07): 1024 B of reserve was overrun by
+  // 407 B, and the log lost whole lines in the one window a fault is most
+  // interesting -- the "reports on less than it claims" shape.
+  //
+  // So the reserve is restored EVERY loop iteration instead of once per idle window,
+  // and this is the question that does it. What it buys is a bound the caller's
+  // threshold cannot express: at the start of every iteration there are at least
+  // `reserveBytes` free, so a drop now needs more than that to arrive inside ONE
+  // iteration rather than merely more than the headroom across an open-ended stretch.
+  //
+  // `reserveBytes` IS FREE SPACE, WHERE wantsFlush() TAKES A FILL LEVEL. They are
+  // deliberately different questions -- one is "enough has accumulated to be worth a
+  // write", the other is "there is no longer room to keep logging" -- and the caller
+  // must keep the second point above the first or every flush becomes this one and
+  // the idle gate stops meaning anything.
+  //
+  // ARMING IS ASKED HERE TOO, exactly as wantsFlush() asks it: nothing may reach the
+  // card before the setting has been read, and a Pending buffer that filled during
+  // boot must keep what it holds rather than write it to a card that is not mounted.
+  // And an EMPTY buffer never must: a reserve larger than the whole buffer would
+  // otherwise ask for a write of nothing on every iteration for ever. Note the
+  // Disabled half of the arming rides `len_ > 0` rather than `enabled()` -- a
+  // Disabled buffer is always empty, because applySetting(false) zeroes it and
+  // append() returns early -- so the term enabled() actually holds is PENDING.
+  bool mustFlush(size_t reserveBytes) const {
+    return enabled() && len_ > 0 && (cap_ - len_) < reserveBytes;
+  }
+
   // The buffer is emptied either way. A card that refuses the write must not make
   // the buffer grow until it starts losing lines silently, and a log that stops the
   // device working is worse than no log -- so a failure shows up as a gap plus the
