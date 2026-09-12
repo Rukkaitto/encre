@@ -3202,6 +3202,19 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
          (unsigned long)(millis() - tocT), (unsigned)tocHeap,
          (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
          tocWhy[0] != '\0' ? " -- " : "", tocWhy);
+    // AND EVERY CHAPTER THE BOOK'S OWN CONTENTS SKIP GETS A ROW. A spine entry no
+    // navPoint names is readable by paging into it and reachable by nothing else --
+    // Contents cannot offer it, so the only way back is to remember which chapter it
+    // follows. Reported off `Digital Minimalism`, whose Conclusion is spine 15.
+    //
+    // HERE RATHER THAN INSIDE `loadToc`, because that function's job is to report
+    // what the book AUTHORED and this adds rows the book did not write. It needs the
+    // spine's length, which `opened` has in hand one scope up and the archive read
+    // does not.
+    const size_t filled = reader::fillTocGaps(gReading.toc, opened.chapterCount());
+    if (filled != 0)
+      logf("[toc] %u chapter(s) the contents skip, given a row\n", (unsigned)filled);
+
     // NAMED IN THE LOG, because a book whose italics do not render has three
     // explanations and this is the one that used to be invisible. `[markup]` says
     // what the chapter CLAIMED; this says what the stylesheet ANSWERED.

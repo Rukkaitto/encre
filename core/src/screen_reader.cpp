@@ -183,12 +183,15 @@ void ReaderScreen::updateChapterLabel() {
     chapter_label_ = names_[static_cast<size_t>(at)].label;
     return;
   }
-  // THE POSITION IS STILL THE FALLBACK, for a book with no contents and for a chapter
-  // its contents does not mention -- spine entry 0 of a real book is its cover, and
-  // nothing names that.
-  char buf[16];
-  std::snprintf(buf, sizeof(buf), "CH. %02d", chapterAt_ + 1);
-  chapter_label_.assign(buf);
+  // THE POSITION IS STILL THE FALLBACK, for a book with NO contents at all -- and
+  // for spine entry 0 of a real book, which is its cover and which nothing names.
+  //
+  // IT IS NO LONGER THE FALLBACK FOR A CHAPTER THE CONTENTS MERELY SKIP, because
+  // `fillTocGaps` gives that chapter a row carrying this same string, so the lookup
+  // above finds it. That row is what makes the chapter reachable from Contents at
+  // all; this composing the identical label independently is how the list and the
+  // band would have disagreed about a book neither could name.
+  chapter_label_ = chapterPositionLabel(chapterAt_);
 }
 
 ReaderScreen::WalkResult ReaderScreen::openChapterAt(int c, bool atEnd) {

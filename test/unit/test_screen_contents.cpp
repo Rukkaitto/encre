@@ -904,3 +904,69 @@ TEST_CASE("held UP or DOWN scrolls, as the Library's does") {
   big.onEvent(reader::InputEvent{reader::Button::Down, reader::PressKind::Repeat, 9});
   CHECK(big.focus() == was + 9);
 }
+
+TEST_CASE("a chapter the book's contents skip is reachable from the list") {
+  // THE WHOLE POINT OF `fillTocGaps`, asserted where the reader meets it. Reported
+  // off Digital Minimalism, whose Conclusion is spine 15 and whose NCX runs
+  // `... spine 14, spine 16 ...` -- so before this the screen marked no row, dropped
+  // the cursor to `Cover`, and offered no way to jump back into the chapter the
+  // reader was sitting in. This is that book's shape, trimmed to the seam.
+  std::vector<reader::TocEntry> toc = {
+      {10, 1, "PART 2: Practices"},      {11, 2, "4: Spend Time Alone"},
+      {14, 2, "7: Join the Attention Resistance"}, {16, 1, "Acknowledgments"},
+      {17, 1, "Notes"}};
+  REQUIRE(reader::fillTocGaps(toc, 20) == 3);  // spines 12, 13 and 15
+
+  reader::ContentsScreen s(toc, "Digital Minimalism", 15, 12);
+
+  // A ROW EXISTS FOR IT, in spine order, carrying the position -- and carrying the
+  // SAME string the reader's header band and the sleep card put on this chapter,
+  // which is `chapterPositionLabel`'s reason for being one function.
+  const int row = s.nowRow();
+  REQUIRE(row >= 0);
+
+  // AND THE SCREEN OPENS ON IT, which is what the reader reported the absence of:
+  // the cursor used to fall to row 0, the top of the book.
+  CHECK(s.focus() == row);
+
+  // GO GOES THERE. This is the whole defect in one assertion -- the chapter was
+  // readable by paging into it and reachable by no other means.
+  CHECK(s.chosenSpine() == 15);
+
+  // Everything fits the window here, so the visible slice IS the list.
+  REQUIRE(static_cast<int>(s.vm().rows.size()) == s.rowCount());
+  REQUIRE(s.vm().focusedRow == row);
+  const reader::ListRow& r = s.vm().rows[static_cast<size_t>(row)];
+  // IT CARRIES THE SAME STRING the reader's header band and the sleep card put on
+  // this chapter, which is `chapterPositionLabel`'s reason for being one function.
+  CHECK(r.label == reader::chapterPositionLabel(15));
+  // IT CAN BE LANDED ON. A synthesised row that came out as a section header would
+  // be drawn as a tracked-caps label the focus skips -- present in the list and
+  // unreachable by the buttons, which is this defect wearing a different hat.
+  CHECK(r.focusable);
+  CHECK_FALSE(r.isHeader);
+}
+
+TEST_CASE("the filled list still marks exactly one row NOW") {
+  // `NOW` is a claim about where the reader is, so more than one of it is the false
+  // claim #75's fix was about. A synthesised row must not become a second match for
+  // a spine some navPoint already names -- `fillTocGaps` only ever adds a row for a
+  // spine index no entry holds, so the property is structural, and this is what says
+  // so over a list that has both kinds of row in it.
+  std::vector<reader::TocEntry> toc = {
+      {0, 1, "Cover"}, {1, 1, "Intro"}, {4, 1, "Later"}, {4, 1, "Later, again"}};
+  REQUIRE(reader::fillTocGaps(toc, 9) == 2);  // spines 2 and 3
+  for (int spine = 0; spine < 9; ++spine) {
+    reader::ContentsScreen s(toc, "book", spine, 12);
+    int marked = 0;
+    for (int i = 0; i < s.rowCount(); ++i)
+      if (i == s.nowRow()) ++marked;
+    CHECK(marked <= 1);
+  }
+  // EVERY SPINE INSIDE THE NAMED RANGE NOW HAS A ROW, which is the fill's contract
+  // read from the screen's side: 0, 1, 2, 3 and 4 all mark something.
+  for (int spine = 0; spine <= 4; ++spine) {
+    reader::ContentsScreen s(toc, "book", spine, 12);
+    CHECK(s.nowRow() >= 0);
+  }
+}

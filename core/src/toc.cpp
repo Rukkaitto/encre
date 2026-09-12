@@ -2,6 +2,7 @@
 
 #include "reader/css.h"
 
+#include <cstdio>
 #include <memory>
 
 #include "reader/epub.h"
@@ -228,6 +229,71 @@ bool loadToc(FileSystem& fs, std::string_view bookPath, std::vector<TocEntry>& o
     }
   }
   return true;
+}
+
+std::string chapterPositionLabel(int spine) {
+  // `CH. %02d`, one-based, which is the form ReaderScreen has put in the header band
+  // since it stopped being able to name the chapter. Two callers now, so it is one
+  // function -- see toc.h.
+  char buf[16];
+  std::snprintf(buf, sizeof(buf), "CH. %02d", spine + 1);
+  return std::string(buf);
+}
+
+size_t fillTocGaps(std::vector<TocEntry>& toc, int spineCount) {
+  if (toc.empty() || spineCount <= 0) return 0;
+
+  // THE NAMED RANGE, which is what bounds the fill -- front and back matter the book
+  // itself did not list are not gaps. See toc.h for the measurement that settled this
+  // against a size floor.
+  //
+  // ONLY THE LOWER HALF OF THAT BOUND IS WRITTEN DOWN, because the upper half is
+  // structural: the walk below emits a gap only in front of an entry that already
+  // exists, so it can never reach past the last one. A `next < hi` term here read as
+  // load-bearing and was implied by the loop's own `next < e.spine` -- caught by a
+  // mutation that removed it and failed nothing.
+  int lo = spineCount;
+  std::vector<bool> named(static_cast<size_t>(spineCount), false);
+  for (const TocEntry& e : toc) {
+    if (e.spine < 0 || e.spine >= spineCount) continue;
+    named[static_cast<size_t>(e.spine)] = true;
+    if (e.spine < lo) lo = e.spine;
+  }
+  if (lo >= spineCount) return 0;  // nothing the book names is in range
+
+  // THE SECOND LIST IS GUARDED LIKE THE FIRST. `out` grows from a number a FILE
+  // states -- the spine's length -- on the book-open path, and there is no nothrow
+  // spelling of `reserve` or `push_back`, so an unguarded one is an `abort()` with no
+  // diagnostic under -fno-exceptions. `loadToc` already builds its own list through
+  // `pushOrRefuse` for exactly this reason, two functions up.
+  //
+  // A REFUSAL COSTS THE ROWS AND NOTHING ELSE: `toc` is left as the book wrote it and
+  // this answers 0, which is the behaviour before this function existed. A PARTIAL
+  // fill would be worse than none -- which chapters got a row would depend on where
+  // the heap ran out, so the same book would offer a different list on different days.
+  std::vector<TocEntry> out;
+  if (!ensureRoom(out, toc.size())) return 0;
+  size_t added = 0;
+  // ONE PASS IN DOCUMENT ORDER, starting one past the first spine entry the book
+  // names -- which is the whole of the lower bound. A gap is emitted immediately
+  // before the first entry that sits past it, and takes THAT entry's depth -- which is what makes a
+  // synthesised row structurally incapable of becoming a section header, since
+  // `isHeaderAt` asks whether the next entry is DEEPER and equal depths are not.
+  // The strictly-between bound guarantees such an entry exists.
+  int next = lo + 1;
+  for (const TocEntry& e : toc) {
+    while (next < e.spine) {
+      if (!named[static_cast<size_t>(next)] && out.size() + 1 < kMaxTocEntries) {
+        if (!pushOrRefuse(out, TocEntry{next, e.depth, chapterPositionLabel(next)})) return 0;
+        ++added;
+      }
+      ++next;
+    }
+    if (!pushOrRefuse(out, e)) return 0;
+    if (e.spine >= next) next = e.spine + 1;
+  }
+  if (added != 0) toc = std::move(out);
+  return added;
 }
 
 int tocIndexForSpine(const std::vector<TocEntry>& toc, int spine) {

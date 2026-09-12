@@ -147,4 +147,77 @@ bool loadToc(FileSystem& fs, std::string_view bookPath, std::vector<TocEntry>& o
 // this function by an equivalence in test_screen_contents.cpp.
 int tocIndexForSpine(const std::vector<TocEntry>& toc, int spine);
 
+// The label a chapter with no name falls back to: `CH. 16` for spine entry 15.
+//
+// ONE SPELLING, TWO CALLERS. `ReaderScreen::updateChapterLabel` has composed this
+// string since the header band stopped being a spine position, and `fillTocGaps`
+// below now writes the same string into a row -- so a book that skips a chapter says
+// the same thing on the sleep card, on Home, in the reader's band and in the list.
+// Two copies of a format string is how those four surfaces would drift apart.
+std::string chapterPositionLabel(int spine);
+
+// Gives a row to every spine entry the book's own contents leave out, and answers how
+// many it added.
+//
+// --- READABLE BY PAGING, UNREACHABLE BY JUMPING -------------------------------
+//
+// A table of contents lists what the NCX names; what the reader can actually be IN is
+// a spine entry. Where those differ, a section is reachable by turning pages into it
+// and reachable by no other means -- Contents cannot offer it, so the only way back to
+// it is to remember which chapter it follows and page through.
+//
+// Reported off `Digital Minimalism`, whose Conclusion is spine 15. Its publisher gave
+// that chapter's title a `<p class="x03-Chapter-Title-BRK">` where every real chapter
+// uses `<h2 class="x03-Chapter-Title">`; the generator walks headings, so the chapter
+// lost its navPoint and the NCX runs `... spine 14, spine 16 ...`. The reader sat in
+// the conclusion of the book with no row marked `NOW`, the cursor thrown to `Cover`,
+// and no way to jump back to where they were.
+//
+// THE NAME CANNOT BE RECOVERED, and that is measured rather than assumed -- over the
+// 133 mid-book gaps in ~/.cache/encre-corpus:
+//
+//   * the EPUB 3 NAV DOCUMENT names 0 of 133. Both tables are emitted by one
+//     generator from one source, so a publisher's TOC that skips an entry skips it
+//     in both. This is worth knowing on its own: reading the nav document is filed
+//     as "a later job and a small one", and it would not have touched this.
+//   * the chapter's own `<h1>`-`<h6>` names 35 (26.3%) -- and this book is in the
+//     other 74%, because the missing heading IS why the entry is missing.
+//   * `<title>` is present for 128 (96.2%) and is not a chapter name: this book's
+//     reads `Continued, Digital Minimalism`.
+//
+// So the row carries the POSITION, via `chapterPositionLabel` -- the same string the
+// reader's header band has always fallen back to for exactly this case.
+//
+// --- WHAT COUNTS AS A GAP, AND WHY IT IS POSITIONAL ----------------------------
+//
+// A spine entry that no row names AND that lies strictly between the first and last
+// spine entry the book DID name. The bound is what separates a missing chapter from
+// front and back matter: Digital Minimalism's spine carries 15 footnote files and a
+// `next-reads.xhtml` after its last named entry, so an unbounded fill would add 16
+// rows of noise to reach the one chapter that matters.
+//
+// A SIZE FLOOR WAS MEASURED AND REFUSED. Text length separates the two cleanly -- the
+// junk tops out at 1,976 characters and real chapters start at 4,510 -- and is not
+// knowable without decoding every gap at book-open time, on the path this file
+// already pays one archive re-open for. The archive's UNCOMPRESSED SIZE is free and
+// does not separate: junk reaches 5,210 bytes where a real chapter starts at 6,187,
+// so any free floor either keeps junk or drops a chapter. The stated cost of having
+// none is a couple of front-matter rows on a minority of books.
+//
+// WHAT IT COSTS ON REAL BOOKS, over the corpus's 207 with a usable NCX: 30 books
+// (14.5%) gain a row, 136 rows in all, a median of 2 per affected book. The largest
+// are the point rather than the price -- `Dune - Tome 3` gains 33 rows that are whole
+// chapters of 7,000-20,000 characters apiece, a novel that is today navigable only by
+// paging.
+//
+// A BOOK WITH NO CONTENTS AT ALL IS LEFT ALONE. There is no named range to bound the
+// fill by, so the only available rule would be "every spine entry" -- a different
+// feature with a different argument, and `Contents` already answers for a book that
+// cannot name its chapters.
+// `spineCount` is the book's spine length -- `OpenedBook::chapterCount()` -- which
+// `Epub::kMaxChapters` caps at 1024, so the presence bitmap this sizes is 128 bytes at
+// worst. The row list it builds is guarded like `loadToc`'s own, and a refusal leaves
+// `toc` exactly as the book wrote it and answers 0.
+size_t fillTocGaps(std::vector<TocEntry>& toc, int spineCount);
+
 }  // namespace reader
