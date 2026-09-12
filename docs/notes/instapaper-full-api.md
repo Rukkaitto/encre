@@ -531,6 +531,60 @@ today; the day one is, this is the finding.
   the review that takes an app out of Owner Only — which gates *shipping*, not
   *building*.
 
+### If `get_text` is unaffordable, what replaces it — and what that costs
+
+Sized 2026-09-11 against the tree, because "Encre parses the article itself" is
+the fallback §7.5 names and it was a sentence rather than an estimate.
+
+**Most of the pipeline already exists.** The 252-name HTML entity table
+(`tools/entities.py`) is generated and tested; `document` / `layout` / `chapter`
+take blocks to glyphs unchanged, because an article *is* a chapter;
+`inflate_stream.h` already decodes DEFLATE, which is what sits behind HTTP's
+`Content-Encoding: gzip`; `openRead` is random-access, built for a zip's central
+directory and the thing that makes a two-pass approach possible at all; and
+`css.h`'s `collectItalicClasses` — a forward scan answering one question with no
+tree and no cascade — is the right *shape* for the heuristic.
+
+**Three things do not exist, and one of them is architectural.**
+
+1. **An HTML tokenizer.** `xml.h` states the gap itself: *"EPUB content is
+   well-formed XML by specification, so none of the tag-soup recovery that makes
+   an HTML parser large is needed here."* Void elements, implied end tags, raw
+   text elements where `<` is not markup, unquoted attributes, bogus comments.
+   `xml.cpp` is 502 lines strict; **900–1,400** for tag soup.
+2. **A TREE. `Document` is `std::vector<Block>` and `BlockKind` has four
+   values.** Readability scores a node from its CHILDREN — text density, link
+   density, comma counts — so it cannot know which subtree is the article until
+   it has seen them all. **That inverts this project's whole memory model**,
+   which is stream-and-never-hold.
+3. **The scoring pass**, ~400–600 lines, between `css.cpp` (224) and `toc.cpp`
+   (242) in size.
+
+**The shape that fits is one this repo already uses twice: the card is the
+scratch space.** Fetch, write the raw HTML under `/.reader/`, then **pass one**
+builds a compact CANDIDATE TABLE rather than a DOM — per block-level element,
+`(offset, depth, tag, textBytes, linkBytes, commas)`, on the order of 16 bytes
+each — and **pass two** seeks to the winner and streams it through the existing
+`BlockReader`. That is the zip EOCD scan and the page-index-of-cursors reused,
+and it keeps the memory model rather than arguing with it.
+
+**So: roughly 2,000–2,500 new lines in `core/`, against a reader stack that is
+~4,700 across nine layers** — a 40–50% increase in the portable layer for one
+feature, which is the same order as the entire EPUB pipeline. Shell-side HTTP is
+on top, though #112 owns the TLS heap question either way; arbitrary domains is
+the harder version of it, since a certificate chain for a host nobody has seen
+before is not the same problem as one pinned endpoint.
+
+**AND THE PART THAT IS NOT A LINE COUNT IS QUALITY.** Instaparser sells *"15
+years of parsing refinement… refined across billions of articles since 2008"*. A
+first-pass extractor gets most pages right and **fails silently** — the nav
+sidebar instead of the article — which reads as a broken device rather than a
+broken parser, and is the false-claim shape this file refuses everywhere else.
+
+**DO NOT BUILD IT TO AVOID A COST NOBODY HAS CONFIRMED.** §7.5 and §7.10 are
+free to ask and one email; this estimate exists so the answer can be judged
+against a number rather than a feeling.
+
 ## 7. What is still unknown
 
 Everything here is either absent from the docs or behind a sign-in, and needs to
@@ -559,9 +613,12 @@ be asked of Instapaper (`support@instapaper.com`) or established by trying it.
    1 req/sec free-tier limit applies through Instapaper's endpoint (error `1047`
    suggests it does).
 5. **Is there any route to `get_text` at scale that is not $150/month?** No page
-   discusses non-commercial, open-source or low-volume terms. If the answer is
-   no, an alternative is to build Encre's reader on the article text it can fetch
-   itself, and use Instapaper only for the list and the state changes.
+   discusses non-commercial, open-source or low-volume terms. **Ask §7.10 first**
+   — a key the reader supplies is a far cheaper answer than either of the others.
+   If both come back no, the alternative is to build Encre's reader on the
+   article text it can fetch itself and use Instapaper only for the list and the
+   state changes, which is **sized in §6** rather than left as a sentence:
+   ~2,000–2,500 lines of `core/`, and a tree where this project holds none.
 6. **The published rate limits.** None, for any Instapaper endpoint. Ask for the
    figure and the window before designing a sync cadence.
 7. **Is `bookmarks/get_text` output bounded?** No maximum size is documented. It
@@ -579,7 +636,16 @@ be asked of Instapaper (`support@instapaper.com`) or established by trying it.
    disclosure "to any other services"? Every flow on offer needs one party to
    hold both the secret and the password, so one of these has to be acceptable.
    Worth asking explicitly rather than assuming the reading that suits us.
-10. **Whether the old docs' `jsonp` parameter still works.** Dropped from the
+10. **MAY EACH USER SUPPLY THEIR OWN INSTAPARSER KEY?** `instaparser_api_key` is
+    a REQUEST parameter rather than a build-time constant, and Instaparser's free
+    tier is *"$0 forever"* per account — so a key entered by the reader makes the
+    1,000-a-month ceiling PER READER instead of fleet-wide, and Encre never pays.
+    The docs say a key is required for non-personal use and **never say whose**.
+    This is the cheapest answer to §7.5 by a wide margin and the one to ask first;
+    it does not address the dependency itself, only the cost. Related and also
+    unstated: whether the reader's own Instapaper account then counts as
+    "personal use" for their own key.
+11. **Whether the old docs' `jsonp` parameter still works.** Dropped from the
     current docs without a deprecation note. Irrelevant if the exchange is
     server-side, and the only thing that would have made a browser-side read path
     possible at all, so it is listed for completeness.
