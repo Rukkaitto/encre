@@ -179,6 +179,56 @@ std::unique_ptr<Standalone> build(ScreenId id) {
 
 const InputEvent kDown{Button::Down, PressKind::Short};
 
+// A FACTORY CONFIGURED THE WAY BOOT LEAVES IT, and no further (#49).
+//
+// The distinction this draws is the whole of Restore::Ready versus
+// Restore::NeedsPriming, so it is drawn once, here, rather than argued per screen.
+// By the time shell/src/main.cpp reaches the session restore it has given the
+// factory its PANEL GEOMETRY and its DEVICE STATE -- row counts, settings metrics,
+// the reader's column and body face, the saved Wi-Fi list -- all of it at fixed
+// line numbers in setup() and none of it caused by a press. It has given it NO
+// CONTENT: no book, no table of contents, no menu header, no Facts of any kind,
+// and none of the *Demo flags, because every one of those is set by a press that a
+// wake did not make.
+//
+// So: a Ready screen must build out of this, and a NeedsPriming screen must not.
+// That turns the declaration from a comment into a checked property -- a screen
+// declared Ready that quietly starts needing content fails here rather than on
+// someone's device, which is the failure this whole mechanism exists to move.
+struct BootConfigured {
+  DemoScreenFactory factory;
+  std::unique_ptr<Screen> parent;
+  std::unique_ptr<Screen> screen;
+};
+
+std::unique_ptr<BootConfigured> bootBuild(ScreenId id) {
+  auto b = std::make_unique<BootConfigured>();
+  b->factory.setLibraryVisibleRows(7);
+  b->factory.setContentsVisibleRows(8);
+  b->factory.setSettingsMetrics(700, 55, 45);
+  b->factory.setWifiPickerVisibleRows(7);
+  // loadWifi()'s two calls, and only those two: the saved list with its sink, and
+  // an empty scan. A real boot's list comes out of NVS and is usually empty, which
+  // is what an empty one here stands for.
+  b->factory.setWifiNetworks(SavedNetworks{});
+  b->factory.setWifiScan({});
+  // NO BODY FACE, deliberately, and it costs this walk nothing: the two screens
+  // that need one -- the Reader and the Peek -- are NeedsPriming and Never, so
+  // neither is asked to build here. Loading a TTF per screen to prove a refusal
+  // that has a second, independent cause would be paying for nothing.
+  if (id == ScreenId::ItemActions || id == ScreenId::DeleteConfirm ||
+      id == ScreenId::BookDetails) {
+    // The parent a restore would have put underneath, built from the same factory
+    // so that `library_` names it. ONTO A BOOK: the demo list's first row is a
+    // folder and DeleteConfirm refuses one, on FileSystem::remove's files-only
+    // contract.
+    b->parent = b->factory.create(ScreenId::Library);
+    b->parent->onEvent(kDown);
+  }
+  b->screen = b->factory.create(id);
+  return b;
+}
+
 }  // namespace
 
 TEST_CASE("every screen accepts back the focus it reports") {
@@ -326,4 +376,73 @@ TEST_CASE("every screen that reports a place accepts that place back") {
     CHECK(restored->get().place() == where);
   }
   CHECK(placed == 1);
+}
+
+TEST_CASE("what a screen declares about a wake is what a boot-configured factory does") {
+  // THE DECLARATION, CHECKED RATHER THAN WRITTEN DOWN (#49). `restorability()` is
+  // what makes "is this screen supposed to come back?" a question the code can
+  // answer -- before it, the three screens that shipped one-way and the one that is
+  // deliberately one-way were the same observation from outside. A declaration
+  // nothing checks would be a second copy of the factory's own switch, free to
+  // disagree with it, which is exactly the shape this project keeps paying for.
+  //
+  // COUNTED PER ANSWER, so a refactor that made every screen answer the same thing
+  // cannot leave this loop passing on nothing. That is the "reports on less than it
+  // claims" failure this file already guards `movable` and `wrapping` against.
+  int ready = 0, needsPriming = 0, never = 0;
+
+  for (const ScreenId id : kAllScreens) {
+    CAPTURE(std::string(screenName(id)));
+    switch (restorability(id)) {
+      case Restore::Ready: {
+        ++ready;
+        if (id == ScreenId::Home) {
+          // THE ROOT IS THE ONE EXCEPTION AND IT IS STATED RATHER THAN SKIPPED. The
+          // factory refuses Home on purpose -- popping back to it must return the
+          // original object with its own state -- so App::restore sets the root's
+          // focus instead of rebuilding it. A wake still owes Home nothing, which
+          // is what Ready means; the check is that the refusal is the documented
+          // one and not a screen that has quietly acquired an input.
+          CHECK(bootBuild(id)->screen == nullptr);
+          break;
+        }
+        CHECK(bootBuild(id)->screen != nullptr);
+        break;
+      }
+      case Restore::NeedsPriming:
+        // AND THE OTHER DIRECTION, which is the half that keeps the shell's work
+        // honest: a screen declared to owe a priming must really refuse without one.
+        // One that quietly started building unprimed would have the shell doing card
+        // work on every wake for nothing, and would hide a substitution if one were
+        // ever reintroduced.
+        ++needsPriming;
+        CHECK(bootBuild(id)->screen == nullptr);
+        break;
+      case Restore::Never:
+        // NO BUILD ASSERTION, and that is the point of the third answer rather than
+        // an omission. Sleep and BatteryEmpty BUILD perfectly well and must still
+        // never be woken into; Peek and the connect flow's five refuse for their own
+        // reasons. Buildability is not the question here -- whether a wake belongs
+        // there is -- so it is App::snapshot and App::restore that enforce this one,
+        // and test_session_restore.cpp is where that is checked.
+        ++never;
+        break;
+    }
+  }
+
+  // Hand-maintained, and spelled out so the arithmetic is re-readable rather than
+  // re-derived: NINE screens a wake owes nothing -- Home, Library, the two Library
+  // overlays, Book details, Settings, SdMissing, Typography and the Wi-Fi hub;
+  // FOUR owe a priming, and they are one fact under four names, the open book;
+  // NINE never come back -- Sleep, Peek, BookError, BatteryEmpty and the five
+  // connect-flow screens past the hub.
+  //
+  // THE HUB IS HERE BECAUSE THIS CASE MOVED IT. It was declared NeedsPriming, read
+  // off its factory case, and this walk failed it: loadWifi() primes the saved list
+  // at boot, so a wake owes it nothing. A declaration nothing checks is a second
+  // copy of the factory free to disagree with it, and it disagreed on its first run.
+  CHECK(ready == 9);
+  CHECK(needsPriming == 4);
+  CHECK(never == 9);
+  CHECK(ready + needsPriming + never == static_cast<int>(ScreenId::Count));
 }

@@ -26,6 +26,117 @@ void restoreFocusIn(Screen& screen, const StackEntry& entry) {
 
 }  // namespace
 
+// WHICH OF THE THREE EVERY SCREEN IS (#49) -- see Restore in the header for what
+// the answers mean and why the question exists at all.
+//
+// A TABLE INDEXED BY ORDINAL, static_assert'ed against Count, and NOT a switch.
+// An exhaustive switch with no `default:` leans on -Wswitch, which this project
+// does not build with -Werror -- CLAUDE.md records a screen appended while three
+// such switches answered it wrongly and the only diagnostic was three warnings
+// scrolling past. An array whose length is asserted cannot be short: appending a
+// ScreenId FAILS THE BUILD here until the new screen answers this question, which
+// is the whole point of the mechanism and is #42's sentinel doing its job again.
+//
+// IN ENUM ORDER, and the order is load-bearing because the index IS the ordinal.
+constexpr Restore kRestorability[] = {
+    // Home -- the root. A wake owes it nothing: restore() sets the root's focus
+    // rather than rebuilding it, which is a fact about the root and not about Home.
+    Restore::Ready,
+    // Library -- the factory holds the filesystem and the root path it lists.
+    Restore::Ready,
+    // ItemActions -- reads the focused row of the Library beneath it, and restore()
+    // puts that Library back, focused, BEFORE this is pushed. That ordering is why
+    // an overlay is restorable at all.
+    Restore::Ready,
+    // DeleteConfirm -- the same, through the Library's focused row.
+    Restore::Ready,
+    // BookDetails -- the same again.
+    Restore::Ready,
+    // Settings -- the factory holds the settings copy and the sink.
+    Restore::Ready,
+    // Sleep -- NEVER. It is painted directly and never pushed, on its own argument:
+    // the record names the top of the stack, so a pushed SleepScreen would make the
+    // next wake restore INTO it -- press power, get "asleep, hold power to wake"
+    // back. The factory BUILDS one happily, so before this the rule was "nothing
+    // pushes it" and nothing enforced that.
+    Restore::Never,
+    // Reader -- the book. The shell primes it from last.json; the factory refuses a
+    // Reader with neither a book nor an explicit demo, which is what once woke this
+    // device into Middlemarch.
+    Restore::NeedsPriming,
+    // ReaderMenu -- its header, which is the open book's title and progress.
+    Restore::NeedsPriming,
+    // Contents -- the book's table of contents, read off the card.
+    Restore::NeedsPriming,
+    // SdMissing -- takes no arguments. A missing card is a missing card.
+    Restore::Ready,
+    // Typography -- the same settings copy and sink Settings gets.
+    Restore::Ready,
+    // Peek -- NEVER, and this is the one entry that was already a DECISION rather
+    // than a defect. Confirmed on device (2026-08-29): a peek is a transient "am I
+    // sure?", and waking onto your own page is the calmer default. It was expressed
+    // only as a factory refusal, which is the same observation as the three screens
+    // refused because nobody had primed them -- so it is stated here, and snapshot()
+    // now keeps it out of the record instead of letting the wake discover it.
+    // Restoring one would also need a peeked cursor nothing persists.
+    Restore::Never,
+    // BookEnd -- its Facts, primed by openBookAt beside the Reader's book.
+    Restore::NeedsPriming,
+    // BookError -- NEVER, and the reasoning was already written down in the shell
+    // with nowhere to live: openBookAt raises this dialog only when `push` is true,
+    // which is a reader's press, "because waking into a modal about a book nobody
+    // just asked for replaces a calm landing with an interruption". That is a
+    // decision about restorability, so it belongs where that question is now asked.
+    Restore::Never,
+    // BatteryEmpty -- NEVER, on Sleep's argument and stated in its own enum comment:
+    // painted directly and never pushed, because a wake into it is a battery-empty
+    // prompt over a pack that has just been charged. Buildable, so the same gap.
+    Restore::Never,
+    // WifiSettings -- READY, and this entry was written NeedsPriming until the
+    // catalogue test said otherwise, which is the declaration being checked rather
+    // than believed. loadWifi() hands the factory the saved list and the sink at
+    // boot and again after every change to it, so the hub is standing before a
+    // restore ever asks -- device state the factory holds, exactly as the settings
+    // copy is, and not content a press produces. The hub is also the ONE
+    // connect-flow screen a wake may put back, and it is honest there: its band
+    // reads `ON DEMAND`, which after a chip reset is exactly true.
+    Restore::Ready,
+    // WifiPicker -- NEVER. The five screens past the hub each describe something IN
+    // FLIGHT, and deep sleep is a chip reset that ends all of it along with the
+    // radio. A restored picker would show an empty scan list with nothing scanning:
+    // a boarded state, and a false one, because it says nothing was found where
+    // nothing looked.
+    Restore::Never,
+    // WifiPassword -- NEVER. A half-typed passphrase is not persisted and must not
+    // be: the record is NVS and in the clear, and a keyboard that came back holding
+    // the last attempt's passphrase is the defect setWifiTarget was rewritten for.
+    Restore::Never,
+    // WifiConnect -- NEVER. There is no join in flight after a chip reset, so the
+    // dialog would say CONNECTING... about nothing and never resolve.
+    Restore::Never,
+    // WifiError -- NEVER. The attempt it describes is gone with the radio, and
+    // endWifiSession() has already cleared the SSID it names.
+    Restore::Never,
+    // WifiNetworkActions -- NEVER, on Peek's argument rather than the radio's: its
+    // Facts belong to the press that opened it, and it is re-primed on every loop
+    // iteration the hub is on top -- which a restore, happening before any iteration
+    // runs, is not.
+    Restore::Never,
+};
+static_assert(sizeof(kRestorability) / sizeof(kRestorability[0]) ==
+                  static_cast<size_t>(ScreenId::Count),
+              "a ScreenId was added or removed; say whether a wake may put it back, "
+              "and what it owes first -- see Restore in app.h");
+
+Restore restorability(ScreenId id) {
+  // The sentinel is not a screen and nothing may give it a row. Answering Never
+  // rather than indexing past the table is the same refusal sessionWireName and
+  // screenName make, and for the same reason: a sentinel that became restorable
+  // would be a worse version of the bug the sentinel closes.
+  if (id >= ScreenId::Count) return Restore::Never;
+  return kRestorability[static_cast<size_t>(id)];
+}
+
 bool screenUsesRadio(ScreenId id) {
   // NO `default:`, deliberately -- see the header. The cost of getting this
   // wrong is not a mis-labelled log line, it is the radio running behind a
@@ -142,8 +253,15 @@ std::vector<StackEntry> App::snapshot() const {
   out.reserve(stack_.size());
   // The place is COPIED, because the snapshot's whole job is to outlive these
   // screens: Screen::place() hands back a view of the screen's own member.
-  for (const auto& screen : stack_)
+  for (const auto& screen : stack_) {
+    // STOPS AT THE FIRST SCREEN A WAKE WILL NOT PUT BACK (#49), so the record only
+    // ever names screens that come back -- see the header for why it stops rather
+    // than filtering. A peek over a reader stores the reader and ends there, and
+    // the wake then reports a COMPLETE restore instead of reporting that it stopped
+    // short, which is what a wake owed a screen nobody primed also reports.
+    if (restorability(screen->id()) == Restore::Never) break;
     out.push_back({screen->id(), screen->focus(), std::string(screen->place())});
+  }
   return out;
 }
 
@@ -166,7 +284,25 @@ App::RestoreReport App::restore(const std::vector<StackEntry>& stack) {
   r.restored = 1;
 
   for (size_t i = 1; i < stack.size(); ++i) {
-    if (!pushScreen(stack[i].screen)) break;
+    // REFUSED BEFORE THE FACTORY IS ASKED (#49). snapshot() will not write one of
+    // these, so what reaches here is a record an older firmware wrote -- and the
+    // screens that most need refusing are the ones the factory would BUILD: Sleep
+    // and BatteryEmpty are buildable, and were kept out of a record only by nothing
+    // ever pushing them.
+    if (restorability(stack[i].screen) == Restore::Never) {
+      r.stopped = true;
+      r.stoppedAt = stack[i].screen;
+      break;
+    }
+    if (!pushScreen(stack[i].screen)) {
+      // WHICH SCREEN, so the caller can say WHY. A factory refusing a screen this
+      // build declares restorable means its construction inputs were never primed,
+      // which is a firmware defect; ask restorability() about `stoppedAt` and the
+      // two outcomes stop reading alike.
+      r.stopped = true;
+      r.stoppedAt = stack[i].screen;
+      break;
+    }
     // Before the next push, because an overlay reads the focused row of the
     // screen under it at construction time.
     restoreFocusIn(top(), stack[i]);
