@@ -5141,7 +5141,9 @@ be felt", which was right about the cost and wrong about where to put the work: 
 bounded a power cut's damage at one chapter, which on a real novel is an hour. The write
 is not made cheaper — it is made to happen when the loop is already idle, which is the
 answer the page count, the refinement, the ring warm and the card log all reached
-before it. `kSaveQuietMs` is **2000 ms**, sized from the device's own twelve-turn
+before it. (**The card log is no longer purely quiet-gated** — #83 gave it one forced
+case, a reserve restored per loop iteration; the save's own claim is unaffected, and the
+reasoning is under **AND THERE IS A LOG ON THE CARD**.) `kSaveQuietMs` is **2000 ms**, sized from the device's own twelve-turn
 measurement (median 72 ms between turns, longest 898 and 1360) so that **steady page
 turning never pays for it at all** and an ordinary reader, who spends ~23 s on a page,
 saves about two seconds after every turn.
@@ -6180,8 +6182,17 @@ Desktop, 12-line page, 444px column, ppem 32: paginate 349 µs/page, lay out one
 168 µs, draw a page 580 µs cold (29 rasterisations) and 363 µs warm. The device is a
 160 MHz RISC-V with no FPU and rasterises at ~3,794 µs a glyph, so a cold page is
 ~110–140 ms there and the pagination walk is the part with no desktop analogue worth
-trusting. The `[open]` serial line reports parse, total, blocks, pages and the heap
-cost of an open for exactly this reason.
+trusting. The `[open]` serial line reports locate, total, pages and the heap cost of an
+open for exactly this reason. **It said `parse` and `blocks` here long after the line
+stopped printing either** (`af622f1`), which is the cheap half of the same defect #89
+found in the line itself: two of its fields were LITERALS, `ch=1` and an `entry=` reading
+spine entry **zero** — the cover, a file that is never decoded — so the only size on a
+line attributing decode cost described the wrong file. Both were correct while
+`openBookAt` could open nothing but entry 0, and both went stale at the same moment, when
+the restore learned to open at a saved spine. The field is `spine=` now rather than `ch=`,
+and that word IS the convention marker: it is the raw 0-based index every other line in
+this log already means by it, where `ch=` is the GLASS's word and the glass counts from
+one.
 
 ## The table of contents
 
@@ -6914,28 +6925,37 @@ plain member, where `ChapterReader::bytesRead()` would answer 0 with `inflated_`
 push `progressPercent` onto its page/pageTotal fallback — the exact shape of the
 percentage-going-backwards bug.
 
-**IT IS NOT RESTORABLE ACROSS A WAKE.** The factory refuses an unprimed `Peek`, so
-`App::restore` stops early and leaves the Reader standing — a refused push is wrong in a
-way the reader can see through. Persisting a peeked cursor would be a card write for a
-breadcrumb the anchor's own design declined to pay for.
+**IT IS NOT RESTORABLE ACROSS A WAKE, AND #49 MOVED THAT FROM AN ACCIDENT TO A
+DECLARATION.** It used to rest on the factory refusing an unprimed `Peek`, so
+`App::restore` stopped early and left the Reader standing — true, and indistinguishable
+in a log from a screen nobody remembered to prime. `restorability(ScreenId::Peek)` is
+`Restore::Never` now, so **`snapshot()` stops before the peek and the record never names
+it**: the wake reports a COMPLETE restore onto the page instead of a short one. Persisting
+a peeked cursor would still be a card write for a breadcrumb the anchor's own design
+declined to pay for.
 
 **RE-ASKED ON GLASS AND CONFIRMED (2026-08-29), so it does not need arguing again.** It
 was reported as a defect — "sleeping in the peek takes us back to the book" — and it is
 not one: a peek is a transient *am I sure?*, and waking onto your own page is the calmer
 default. **The reason given above is weaker than the decision, and that is worth knowing
-if it is ever revisited**: the session record already stores the entry (`home:0;library:2;
-reader:0;peek:0`), and that trailing `0` is a focus slot the peek has no use for, so the
-peeked SPINE could ride there for no new card write at all. The cost was never the
-storage; only the peeked *page within the panel* would need one. So the honest statement
-is that a peek should not come back, not that it cannot.
+if it is ever revisited**: the session record USED to store the entry
+(`home:0;library:2;reader:0;peek:0`), and that trailing `0` is a focus slot the peek has
+no use for, so the peeked SPINE could have ridden there for no new card write at all. The
+cost was never the storage; only the peeked *page within the panel* would need one. So the
+honest statement is that a peek should not come back, not that it cannot. **#49 has since
+made the record stop naming it**, so anyone revisiting this now has to undo a declaration
+rather than just read a field — which is the right cost for reversing a decision taken on
+glass, and is why the argument is kept here rather than deleted.
 
 **AND THE REPORT WAS RIGHT ABOUT THE MECHANISM even though it was wrong about this
-screen** — see #49. Being restorable is per-screen tribal knowledge: one hand-written
-`namesReader` scan on the wake path primes the book, and the reader menu and Contents are
-primed only because `openBookAt` passes them on the way. Three screens have shipped
-un-restorable by accident and this one is un-restorable on purpose, and **from the outside
-those are indistinguishable** — the restore stops early and the reader lands somewhere
-they did not expect. That is what makes the question keep coming back.
+screen** — which was #49, and #49 is answered. Being restorable WAS per-screen tribal
+knowledge: one hand-written `namesReader` scan on the wake path primed the book, and the
+reader menu and Contents were primed only because `openBookAt` passed them on the way.
+Three screens shipped un-restorable by accident and this one is un-restorable on purpose,
+and **from the outside those were indistinguishable** — the restore stopped early and the
+reader landed somewhere they did not expect. Every `ScreenId` now declares which of the
+three it is, behind a `static_assert` on `ScreenId::Count` that a new screen cannot pass
+unchanged; see **A factory that substitutes content is worse than one that refuses**.
 
 **THE BOX IS THE CONSTANT AND THE LINE COUNT IS THE RESULT, and it shipped the other way
 round.** `kPeekPanelH` is **546px** — the panel is that tall on every device at every

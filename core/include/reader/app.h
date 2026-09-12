@@ -100,8 +100,10 @@ enum class ScreenId : uint8_t {
   // firmware after the Library, and the second user of the rail.
   WifiPicker,
   // design/WifiPassword.dc.html -- the on-device keyboard, and the first text entry
-  // anywhere in this firmware. Derives from GridFocusScreen rather than FocusScreen:
-  // 44 cells in five rows, the last of them ragged.
+  // anywhere in this firmware. 46 cells in five rows, the last of them ragged. It
+  // derives from TextEntryScreen now rather than straight from GridFocusScreen (#126,
+  // the second copy being the extraction point); what stays here is 802.11's bound,
+  // its floor, four strings and two Actions.
   WifiPassword,
   // design/WifiConnect.dc.html -- the connecting dialog. An overlay, and it REPLACES
   // the join stack rather than sitting on it (Action::replace), which is what makes

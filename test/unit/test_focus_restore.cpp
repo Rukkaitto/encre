@@ -276,7 +276,8 @@ TEST_CASE("every screen accepts back the focus it reports") {
   //
   //   WifiSettings        two saved networks and a SETUP row
   //   WifiPicker          five scan rows plus Rescan
-  //   WifiPassword        44 cells, and the FIRST GridFocusScreen here
+  //   WifiPassword        46 cells; the first GridFocusScreen here, and since #126
+  //                       the first TextEntryScreen
   //   WifiError           three slabs on the bad-password shape
   //
   // The two that cannot move are WifiConnect, which has no focus at all
