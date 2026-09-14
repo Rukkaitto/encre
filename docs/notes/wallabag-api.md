@@ -166,12 +166,83 @@ fewer thing a leaked card can be used for.
   example. Measured against the shipped keyboard in `instapaper-full-api.md` §6,
   a 17-character email is **92 presses**; this is comfortably past six hundred
   before a password. **The keyboard is not a credible route** and that is an open
-  design question — see #111, which recommends a file on the card and states what
-  that costs.
+  design question — **answered in §5**: the credentials arrive on the card.
 - **Unverified: that a wallabag EPUB opens in this reader.** It is one file from
   one generator, and this reader has been wrong about real EPUBs before.
 
-## 5. What to check first, and it is cheap
+## 5. The credentials arrive on the card, and the flow end to end
+
+**Decided 2026-09-14.** `/.reader/wallabag.json`, hand-edited, five strings. It is
+`logToCard`'s precedent — a hand-edited card key with no Settings row — and needs
+no mechanism this firmware does not have: `readAll` plus the flat one-object JSON
+parser `settings.json` already uses. It closes the alternatives rather than
+deferring them: **no HTTP server** (#110 stays closed), **no keyboard for this**
+(#126 keeps its own argument and stops being #111's blocker), no password on
+glass and none over plain HTTP on a LAN.
+
+```json
+{ "server": "http://wallabag.lan", "clientId": "12_5um6…", "clientSecret": "3qd1…",
+  "username": "…", "password": "…" }
+```
+
+**THE PASSWORD STAYS IN THE FILE, AND THAT IS EVIDENCED RATHER THAN ASSUMED.**
+wallabag's own browser extension documents its token as expiring *"once in two
+weeks"*, so the refresh token is good for about a fortnight — and this device
+sleeps for days at a time. A reader who does not sync for three weeks needs a
+fresh `grant_type=password`, and there is nobody standing in front of the panel
+to ask. Deleting the password after first use would strand exactly that reader.
+
+**The stated cost is plaintext on a removable card**, and two things bound it
+rather than excuse it. It is the reader's own card and their own server. And
+`--grant-types=password,refresh_token` (§3) means the client on that card cannot
+be used for an `authorization_code` flow at all, so what a lost card gives up is
+one wallabag account, not a credential with more reach than the device needs.
+**wallabag's own ecosystem makes the same trade and says so**: Wallabagger's
+documentation carries a *"Security warning — your password is stored in the
+browser local storage as a plain text"*. That is a precedent, not a defence.
+
+### What the device does with it
+
+`GET /api/info` needs no token, so *"that URL is not a wallabag"* is answerable
+before any credential is used and is a different message from *"those credentials
+were refused"*. Then `POST /oauth/v2/token`, tokens into NVS, and the list.
+
+**Neither timestamp the design wants needs a clock, which matters because this
+device has none** (#25). `since` is served by storing the largest `updated_at`
+the last sync returned and sending it back — the server's own clock, never ours.
+And `expires_in: 3600` is relative to a grant that may have happened before a
+deep sleep, which resets `millis()`, so the device **cannot predict expiry and
+must not try**: call, and refresh on a 401. That is one extra round trip on the
+first call after a long sleep and no state to get wrong.
+
+### The whole path, and the four things it leaves open
+
+Setting up wallabag, and putting articles in it, are entirely outside this
+firmware — a bookmarklet, the web UI's `+`, the official browser extension or the
+mobile apps. **Encre never adds an article**: it has no browser and no practical
+way to type a URL, which is a fact about the device rather than a gap. What the
+device does is join Wi-Fi (#107, and that flow *does* use the keyboard, so the
+keyboard is on the setup path whatever this decision says), read the card file,
+sync, and read.
+
+Four things this path raises that no card answers yet:
+
+1. **When is the EPUB fetched — at sync, or when the article is opened?**
+   `InstapaperAccount.dc.html` reads `Keep offline · NEWEST 50`, and fetching at
+   open would need Wi-Fi at reading time, which is the opposite of what an
+   offline reader is for. So: at sync — which makes a sync *one listing plus N
+   file downloads* and is what `SyncDone` stamps. #112.
+2. **Where do article files live?** Not `/books`: they would appear in the
+   Library among books, and the Library's own delete would remove something the
+   server still has. #114.
+3. **Do articles reach Home's CONTINUE block and the sleep card?** They are
+   opened through `openBook`, so `last.json` would carry them for free — which is
+   probably right and is a design decision, not a consequence to discover. #114.
+4. **Does archiving delete the local file?** It should, or the card fills with
+   things the reader has finished — and that drops the `/.reader/state` sidecar
+   with it, which for an archived article is correct. #112.
+
+## 6. What to check first, and it is cheap
 
 **Export one article from the owner's instance as `.epub`, put it in `/books`,
 and open it on the device.** That is the fact the whole shape rests on, it needs
