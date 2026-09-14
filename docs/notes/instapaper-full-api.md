@@ -22,9 +22,12 @@ whole of it.
 Two further findings outrank the credentials question:
 
 - **`bookmarks/get_text` now requires a separate, paid third-party API key**
-  (Instaparser) for any use beyond the developer's own account. It is not part
-  of the Instapaper credentials at all. The free tier is **1,000 articles per
-  month across all users of the app**.
+  (Instaparser) for any use beyond the developer's own account. **It is not part
+  of the Instapaper credentials at all, and an Instapaper consumer key alone will
+  not serve this endpoint.** The free tier is **1,000 credits a month across all
+  users of the app**, with no overage. Whether a credit is spent per CALL or per
+  ARTICLE decides whether that is ~30 readers or a pool every page-open drains,
+  and the docs do not say — §2 and §7.4.
 - **The docs were rewritten since this issue was filed.** Every URL the issue
   and the wider internet point at (`/api`, `/api/full`,
   `/main/request_oauth_consumer_token`) now redirects somewhere else, and the
@@ -194,11 +197,51 @@ rolls over.
 > — `https://www.instaparser.com/docs/1/article_api`
 
 **The key belongs to the application, not to the user**, so the free tier's 1,000
-credits per month is a ceiling on the *whole fleet*: every article every Encre
-user opens spends from one pool, and 1 req/sec is the aggregate rate. The step
-above free is $150/month. The other three endpoints we need — `bookmarks/list`,
-`bookmarks/archive`, `bookmarks/star` — carry no such requirement and are plain
-Full API calls.
+credits per month is a ceiling on the *whole fleet*, and 1 req/sec is the
+aggregate rate. The step above free is $150/month. The other three endpoints we
+need — `bookmarks/list`, `bookmarks/archive`, `bookmarks/star` — carry no such
+requirement and are plain Full API calls.
+
+**THIS SAID "EVERY ARTICLE EVERY ENCRE USER *OPENS* SPENDS FROM ONE POOL", AND
+THAT IS PROBABLY WRONG IN THE DIRECTION THAT MATTERS.** It reads the credit as
+the cost of a PARSE, and the article has already been parsed — by Instapaper,
+when the user saved it. The archive settles that the endpoint did not change what
+it does:
+
+| | [2023 docs](https://web.archive.org/web/20231205051257/https://www.instapaper.com/api/full) | today |
+|---|---|---|
+| parameters | **`bookmark_id`** | `bookmark_id` + `instaparser_api_key` |
+| output | *"the specified bookmark's **processed text-view HTML**, which is always text/html encoded as UTF-8"* | *"the bookmark's **processed text-view HTML**, always `text/html` encoded as UTF-8"* |
+
+Same sentence for the output, and no key of any kind in 2023. So the endpoint
+**acquired a paid dependency without changing what it returns** — which reads as
+a commercial gate on programmatic access to text Instapaper already holds and
+already serves in its own apps, rather than a per-parse cost we would be asking
+them to absorb.
+
+**THE CAVEAT THAT CANNOT BE RULED OUT FROM THE DOCS**, and it is why this is
+stated as a reading rather than a fact: Premium sells a *"permanent archive —
+stores a permanent copy of your articles so they're always available, even if
+they disappear from the internet"*, so retention plainly differs by tier. If a
+free account's text is evicted and `get_text` re-parses the live URL to serve it,
+the credit really is a parse. Nothing on any page says either way.
+
+**WHAT THE READING CHANGES IS THE UNIT, AND IT IS THE WHOLE VIABILITY QUESTION.**
+Encre downloads to the card and reads offline by design, so if a credit is spent
+per ARTICLE FETCHED rather than per READ, the fleet spends at the rate people
+*save* articles — on the order of 30 a month for a real read-it-later user, so
+1,000/month is roughly **30 readers** rather than a pool every page-open drains.
+If it is per call regardless, it is far worse. **That is §7.4, and it is the
+single highest-value question on the list**, not the footnote it was filed as.
+
+**WHAT IT DOES NOT CHANGE: WE STILL NEED AN INSTAPARSER KEY TO SHIP.** The
+requirement is documented and enforced — *"a non-personal request without a key
+returns 1044"* — so the reading affects why the gate exists and what a credit
+probably buys, and not whether the gate is there. **An Instapaper consumer key
+alone is not enough for `get_text`.** The three routes past it are §7.10 (the
+reader supplies their own free-tier key), §7.5 (Instapaper offers some other
+arrangement) and §6 (Encre extracts the text itself); Owner Only covers building
+and testing and nothing more.
 
 The personal-use exemption lines up exactly with Owner Only mode: an unapproved
 app used by its own developer can call `get_text` with no key. That is enough to
@@ -536,6 +579,14 @@ today; the day one is, this is the finding.
 Sized 2026-09-11 against the tree, because "Encre parses the article itself" is
 the fallback §7.5 names and it was a sentence rather than an estimate.
 
+**READ §2's LAST FOUR PARAGRAPHS FIRST.** This is not work Instapaper is failing
+to do — the article is already parsed and `get_text` returns that stored
+extraction. So what this section prices is **doing again, on a 160 MHz part with
+no PSRAM, work that has already been done on a server**, in order to route around
+a billing decision. That is an argument for asking §7.10 and §7.5 before building
+any of it, and it is the honest framing of the trade rather than a reason the
+estimate is wrong.
+
 **Most of the pipeline already exists.** The 252-name HTML entity table
 (`tools/entities.py`) is generated and tested; `document` / `layout` / `chapter`
 take blocks to glyphs unchanged, because an article *is* a chapter;
@@ -604,14 +655,18 @@ be asked of Instapaper (`support@instapaper.com`) or established by trying it.
    and the pricing page implies none of ours. Unresolved, and worth a direct
    question, because a Premium requirement on `bookmarks/list` would end the
    feature.
-4. **Does one `get_text` call consume exactly one Instaparser credit?** Never
-   stated. Instaparser's own Article API doc says 1 credit per call and error
-   `1046` is *"Instaparser free credit limit exceeded"*, so the pool is plainly
-   shared — but the mapping is an inference, and the free tier's viability turns
-   on it. Related and equally unstated: whether Instapaper caches the text so a
-   re-read of the same article costs a second credit, and whether Instaparser's
-   1 req/sec free-tier limit applies through Instapaper's endpoint (error `1047`
-   suggests it does).
+4. **IS A CREDIT SPENT PER CALL, OR PER ARTICLE?** *The highest-value question
+   here* — see §2, which is why. The text is already parsed and stored, so a
+   device that caches to its card would spend at the rate articles are SAVED
+   (~30/month/reader → ~30 readers on the free tier) if re-fetching the same
+   article is free, and at the rate they are READ if it is not. Never stated
+   either way. Instaparser's own Article API doc says 1 credit per call and
+   `1046` is *"free credit limit exceeded"*, so the pool is plainly shared — but
+   the per-article question is exactly what "per call" leaves open. Ask it as
+   three: does `get_text` on an article already fetched cost a second credit;
+   does it cost one at all when the account is Premium and the text is in the
+   permanent archive; and does Instaparser's 1 req/sec free-tier limit apply
+   through Instapaper's endpoint (`1047` suggests it does).
 5. **Is there any route to `get_text` at scale that is not $150/month?** No page
    discusses non-commercial, open-source or low-volume terms. **Ask §7.10 first**
    — a key the reader supplies is a far cheaper answer than either of the others.
@@ -644,7 +699,10 @@ be asked of Instapaper (`support@instapaper.com`) or established by trying it.
     This is the cheapest answer to §7.5 by a wide margin and the one to ask first;
     it does not address the dependency itself, only the cost. Related and also
     unstated: whether the reader's own Instapaper account then counts as
-    "personal use" for their own key.
+    "personal use" for their own key. **§2 makes this more askable rather than
+    less**: if the gate is commercial rather than a parse cost, a free tier
+    existing at all is a statement that small integrations are expected to use
+    one — and the question is then which account holds it.
 11. **Whether the old docs' `jsonp` parameter still works.** Dropped from the
     current docs without a deprecation note. Irrelevant if the exchange is
     server-side, and the only thing that would have made a browser-side read path
