@@ -737,13 +737,17 @@ struct WifiPickerViewModel {
   std::array<bool, 4> holds{};
 };
 
-// design/WifiPassword.dc.html -- the first text entry in this firmware.
-struct WifiPasswordViewModel {
-  std::string title;  // "PASSWORD"
-  std::string ssid;   // the band's right slot
-  // SHOWN IN CLEAR, which is the board's own `SHOWN WHILE TYPING`: at one
-  // character per ~520 ms repaint on a 44-cell grid, a typo you cannot see is
-  // punishing, and this is a device you hold.
+// design/WifiPassword.dc.html -- the text-entry keyboard. NOT WI-FI'S, although
+// Wi-Fi's passphrase board is the only thing drawing it today: the screen behind
+// it was extracted before its second caller arrived (#126), so this carries a
+// FIELD NAME rather than a network and has no Wi-Fi in it anywhere.
+struct TextEntryViewModel {
+  std::string title;      // the band's left slot -- "PASSWORD"
+  std::string fieldName;  // the band's right slot -- what the text is FOR
+  // WHAT IS IN THE FIELD, IN CLEAR -- which is the CALLER's decision and not
+  // this struct's. `visibility` below is what states it on the glass, and the
+  // argument for showing a passphrase lives at the Wi-Fi call site: there is no
+  // masked mode today and whether to have one wants a board.
   std::string entered;
   // WHERE THE CARET SITS, as a byte offset into `entered`. The field draws the
   // text either side of it rather than a block on the end -- the caret is a

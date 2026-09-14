@@ -30,8 +30,8 @@ class QuietTheme : public Theme {
                           const WifiSettingsViewModel& vm, Plane plane = Plane::Bw) override;
   void renderWifiPicker(Framebuffer& fb, const FontSet& fonts, const WifiPickerViewModel& vm,
                         Plane plane = Plane::Bw) override;
-  void renderWifiPassword(Framebuffer& fb, const FontSet& fonts,
-                          const WifiPasswordViewModel& vm, Plane plane = Plane::Bw) override;
+  void renderTextEntry(Framebuffer& fb, const FontSet& fonts, const TextEntryViewModel& vm,
+                       Plane plane = Plane::Bw) override;
   void renderWifiConnect(Framebuffer& fb, const FontSet& fonts, const WifiConnectViewModel& vm,
                          Plane plane = Plane::Bw) override;
   void renderWifiError(Framebuffer& fb, const FontSet& fonts, const WifiErrorViewModel& vm,

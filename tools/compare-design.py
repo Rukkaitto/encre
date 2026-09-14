@@ -13,6 +13,17 @@ each board is additionally re-rendered at the X3 frame by overriding the
 board's root-element size at render time (see render_board) -- no board file
 is ever edited. Each screen therefore produces one pair per geometry.
 
+Every pair is also MEASURED: both panels are thresholded at 128 and the pixels
+that disagree are reported over the panel's own pixel count, which is the
+arithmetic every design-vs-firmware percentage in CLAUDE.md was produced by --
+by hand, over --export's PNGs, because this tool had no way to say it (#41).
+`ok` says a frame was produced; the percentage says how close it is. The figure
+names the panel's grey levels beside it, because a threshold-at-128 count over
+the four-level grayscale sequence is not comparable with a one-bit screen's.
+
+It is a reading, NOT A GATE. There is no blessed number to fail against, and
+--require-implemented is still the only thing here that can fail a run.
+
 Not part of the build. Requires Google Chrome and Pillow.
 
     make test                                         # build the simulator
@@ -40,7 +51,7 @@ import subprocess
 import tempfile
 import threading
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 # The frame every design board is authored at (the literal inline-style size
 # on each board's root element). render_board() overrides this at render
@@ -408,6 +419,80 @@ def normalise(im, w, h):
     return im
 
 
+# Ink below 128, paper at 128 and above. THE BOUNDARY IS LOAD-BEARING and is not
+# a taste: `<= 128` moves `contents` off its recorded 8,814 differing pixels by
+# one, and `battery_empty` from its recorded 2.05% to 2.06%. Grey 127 is ink --
+# which is the whole mechanism behind the half-pixel phase artefact CLAUDE.md
+# records, where Chrome rasterises a 1px rule across two rows of 127 and both
+# score as ink against the firmware's one.
+INK_BELOW_128 = [255 if v < 128 else 0 for v in range(256)]
+
+
+def mismatch(design, firmware):
+    """(differing pixels, total pixels) between two panel renders.
+
+    THIS IS THE ARITHMETIC EVERY PERCENTAGE IN CLAUDE.md WAS PRODUCED BY, and
+    until now it existed only as a hand count somebody ran over the `--export`
+    PNGs -- so the repo's headline design check could not report the quantity its
+    own documentation calls the check ("the percentage is the check; the word is
+    not"). Threshold both panels at 128 and count the pixels that disagree, over
+    the panel's own pixel count.
+
+    It is handed the SAME image objects `--export` writes, not a re-read of them,
+    so the figure and the exported PNG can never be measurements of two different
+    things. Both come from normalise(), so both are mode L at the panel size.
+
+    WHAT IT CANNOT DO, so nobody reads more into it than it says: it is a count
+    of pixels and not a judgement. Fixing `design/Settings.dc.html`'s `Size` row
+    -- a real defect, three points wrong -- moved this figure by ONE pixel
+    (8553 -> 8554), because that right-aligned run was mismatched either way.
+    The value is in being able to ask.
+    """
+    a = design.point(INK_BELOW_128)
+    b = firmware.point(INK_BELOW_128)
+    differing = sum(ImageChops.difference(a, b).histogram()[1:])
+    return differing, design.size[0] * design.size[1]
+
+
+def panel_levels(im):
+    """How many distinct greys a render carries: 2 for a one-bit panel, 4 for the
+    grayscale sequence.
+
+    WHY THE FIGURE SAYS SO. A threshold-at-128 count over four levels INFLATES
+    against a one-bit screen's, so `reader` at 5.24% is not worse than
+    `reader_menu` at 3.00% -- and CLAUDE.md has to say that in prose every time
+    it quotes one, because chasing a healthy grayscale screen against a 1-bit
+    number is a real way to waste a day. Printing it alongside is what stops the
+    two figures inviting the comparison.
+
+    MEASURED OFF THE RENDER, never from a table of which screens declare
+    `Fidelity::Grayscale` -- that fact lives in `core/` and a copy here would be
+    a second one free to drift. It is also the more honest question: what
+    inflates the count is the greys the panel actually carries, so a grayscale
+    screen whose render came out one-bit (`sleep_cover_waking` is a single Bw
+    pass) is correctly reported as one-bit.
+    """
+    return sum(1 for count in im.histogram() if count)
+
+
+def figure_for(design, firmware):
+    """The printable mismatch figure for one panel pair, or None.
+
+    NONE WHEN EITHER SIDE IS A PLACEHOLDER, and that is the point rather than an
+    omission: a board with no screen behind it is a third of this list, and
+    measuring a design panel against the NOT IMPLEMENTED hatch would put a
+    confident percentage beside a screen nothing renders. An absent figure beats
+    a false one -- the call this repo already makes for an unread battery gauge
+    (-1, never 0%).
+    """
+    if design is None or firmware is None:
+        return None
+    differing, total = mismatch(design, firmware)
+    levels = panel_levels(firmware)
+    return "mismatch %.2f%% (%d px, %s)" % (
+        100.0 * differing / total, differing, "4-level" if levels > 2 else "1-bit")
+
+
 def placeholder(text, w, h):
     im = Image.new("L", (w, h), 245)
     d = ImageDraw.Draw(im)
@@ -419,8 +504,20 @@ def placeholder(text, w, h):
 
 
 def compose(rows, out, geom_keys, pairs_per_row=2):
-    """rows: list of (label, geom_entries, impl) where geom_entries is a list
-    of (key, device, w, h, design_img, firmware_img), one per geom_keys entry.
+    """rows: list of (label, geom_entries, impl) where geom_entries is a list of
+    (key, device, w, h, design_img, firmware_img, figure), one per geom_keys
+    entry. `figure` is the panel's mismatch line, or None where there is nothing
+    honest to measure.
+
+    THE SHEET CARRIES THE FIGURE BECAUSE THE SHEET IS THE ARTIFACT. CI uploads
+    this PNG pass or fail and the run log scrolls away, so a number printed only
+    to stdout is one nobody reads a week later.
+
+    NO TOTAL, NO AVERAGE, deliberately. A mean over screens is what the tables'
+    own comments refuse when they give the styled reader specimens and the two
+    sleep cover modes their own rows -- "folding them in would average a
+    regression against a board that cannot show it" -- and it would be worse
+    here, across screens that do not even share a fidelity.
     """
     cap_h, sub_cap_h, gap_x, gap_y, pad, mid, geom_gap = 22, 16, 34, 22, 18, 10, 26
 
@@ -450,8 +547,9 @@ def compose(rows, out, geom_keys, pairs_per_row=2):
         d.text((cx0, cy + 4), f"{label}{mark}", fill=0 if impl else 110)
 
         gx = cx0
-        for key, device, gw, gh, dimg, fimg in geom_entries:
-            d.text((gx, cy + cap_h), f"{device} - {gw}x{gh}", fill=60)
+        for key, device, gw, gh, dimg, fimg, figure in geom_entries:
+            d.text((gx, cy + cap_h),
+                   f"{device} - {gw}x{gh}" + (f"   {figure}" if figure else ""), fill=60)
             py = cy + cap_h + sub_cap_h
             for j, im in enumerate((dimg, fimg)):
                 bx = gx + j * (gw + mid)
@@ -681,7 +779,8 @@ def main():
                         else placeholder("DESIGN FAILED", gw, gh))
                 fimg = (normalise(Image.open(simg), gw, gh) if impl
                         else placeholder("NOT IMPLEMENTED", gw, gh))
-                geom_entries.append((key, device, gw, gh, dimg, fimg))
+                figure = figure_for(dimg if bimg else None, fimg if impl else None)
+                geom_entries.append((key, device, gw, gh, dimg, fimg, figure))
 
                 if args.export:
                     outdir = pathlib.Path(args.export)
@@ -695,7 +794,8 @@ def main():
                         fimg.save(outdir / f"{sid}_{key}_firmware.png")
                         exported.append(f"{sid}_{key}_firmware.png")
                 print(f"  {label:22s} [{device} {gw}x{gh}] design {'ok' if bimg else 'FAIL'}   "
-                      f"firmware {'ok' if impl else 'not implemented'}")
+                      f"firmware {'ok' if impl else 'not implemented'}"
+                      + (f"   {figure}" if figure else ""))
 
             rows.append((label, geom_entries, any_impl))
         size, done, total = compose(rows, args.out, geom_keys, args.pairs_per_row)

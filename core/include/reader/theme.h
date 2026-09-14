@@ -19,7 +19,7 @@ struct BookDetailsViewModel;
 struct SettingsViewModel;
 struct WifiSettingsViewModel;
 struct WifiPickerViewModel;
-struct WifiPasswordViewModel;
+struct TextEntryViewModel;
 struct WifiConnectViewModel;
 struct WifiErrorViewModel;
 struct WifiNetworkActionsViewModel;
@@ -148,10 +148,15 @@ class Theme {
                                 const WifiPickerViewModel& vm, Plane plane = Plane::Bw) = 0;
 
   // design/WifiPassword.dc.html -- a 10x4 character grid over a function row of
-  // four, and the only screen here that draws something components.h has no
+  // six, and the only screen here that draws something components.h has no
   // primitive for.
-  virtual void renderWifiPassword(Framebuffer& fb, const FontSet& fonts,
-                                  const WifiPasswordViewModel& vm, Plane plane = Plane::Bw) = 0;
+  //
+  // NAMED FOR THE MECHANISM AND NOT FOR THE BOARD, because the screen behind it
+  // was extracted before its second caller (#126) and this draws what the
+  // view-model holds: a band, a field, a counter row, a grid and a note. There
+  // is one board today and it is Wi-Fi's.
+  virtual void renderTextEntry(Framebuffer& fb, const FontSet& fonts,
+                               const TextEntryViewModel& vm, Plane plane = Plane::Bw) = 0;
 
   // design/WifiConnect.dc.html -- an overlay, and the caption is the whole
   // indicator: the board's eight-cell ticker is gone.

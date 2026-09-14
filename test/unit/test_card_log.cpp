@@ -194,3 +194,176 @@ TEST_CASE("an empty append is not a drop") {
   CHECK(f.log.size() == 0);
   CHECK(f.log.dropped() == 0);
 }
+
+// --- THE RESERVE, AND WHY IT HAD TO STOP BEING ONE-SHOT (#83) -----------------
+//
+// wantsFlush() is a TRIGGER and the room above it was being read as a RESERVE. The
+// caller may only write in an idle window, so from the trigger onwards the free space
+// only shrinks and nothing tops it up -- and a reader turning pages keeps a paint owed
+// or a press queued continuously, so the stretch that room has to survive is bounded
+// by the user and not by anything the firmware chooses. On glass (X3, 2026-09-07) 1024
+// bytes of it were overrun by 407, and whole lines went.
+//
+// mustFlush() is the second question, and what it buys is that the reserve is restored
+// every loop ITERATION instead of every idle window.
+
+TEST_CASE("a buffer still inside its reserve does not force a flush") {
+  Fixture f;
+  f.log.applySetting(true);
+  f.put("01234567");  // 8 of 16, so 8 free
+  CHECK_FALSE(f.log.mustFlush(4));
+  CHECK_FALSE(f.log.mustFlush(8));  // free == reserve: intact, not broken
+}
+
+TEST_CASE("a buffer whose reserve is broken forces a flush") {
+  Fixture f;
+  f.log.applySetting(true);
+  f.put("012345678");  // 9 of 16, so 7 free
+  CHECK(f.log.mustFlush(8));
+}
+
+TEST_CASE("the forced point is `fewer than the reserve free`, not `at or fewer`") {
+  // The boundary is load-bearing: at free == reserve the buffer can still take a
+  // maximal line, and forcing there would move the forced point a byte below where
+  // the caller's static_assert believes it is.
+  Fixture f;
+  f.log.applySetting(true);
+  f.put("01234567");  // free == 8
+  CHECK_FALSE(f.log.mustFlush(8));
+  f.put("x");  // free == 7
+  CHECK(f.log.mustFlush(8));
+}
+
+TEST_CASE("a pending buffer never forces a flush, however full it is") {
+  // Boot fills this before the card is mounted. Nothing may reach /encre.log before
+  // the file authorising it has been read -- which is the whole of #47/#69 -- so the
+  // last-resort write is arming-gated exactly as the ordinary one is.
+  Fixture f;
+  f.put("0123456789abcde");  // 15 of 16
+  CHECK(f.log.state() == CardLogBuffer::State::Pending);
+  CHECK_FALSE(f.log.mustFlush(8));
+}
+
+TEST_CASE("a disabled buffer never forces a flush") {
+  // KEPT, AND IT DOES NOT PROVE WHAT IT LOOKS LIKE IT PROVES. A Disabled buffer is
+  // always EMPTY -- applySetting(false) zeroes it and append() returns early -- so
+  // this passes on the `len_ > 0` term and cannot reach `enabled()` at all. Deleting
+  // the arming gate leaves it green; the Pending case above is the one that bites.
+  // Stated rather than left implied, because a case that holds for a reason other
+  // than the one its name gives is how a guard quietly stops being tested.
+  Fixture f;
+  f.put("0123456789abcde");
+  f.log.applySetting(false);
+  CHECK(f.log.size() == 0);
+  CHECK_FALSE(f.log.mustFlush(8));
+}
+
+TEST_CASE("an empty buffer never forces a flush, even under a reserve it cannot hold") {
+  // A reserve larger than the whole buffer would otherwise ask for a write of nothing
+  // on every iteration for ever -- a [log] wrote 0B line per loop.
+  Fixture f;
+  f.log.applySetting(true);
+  CHECK_FALSE(f.log.mustFlush(999));
+  f.put("x");
+  CHECK(f.log.mustFlush(999));
+}
+
+TEST_CASE("a forced write restores the reserve, so the next iteration starts with room") {
+  Fixture f;
+  f.log.applySetting(true);
+  f.put("0123456789abcde");
+  CHECK(f.log.mustFlush(8));
+  f.log.wrote(true);
+  CHECK_FALSE(f.log.mustFlush(8));
+  CHECK(f.log.dropped() == 0);
+}
+
+namespace {
+
+// The shell's real numbers, so this reproduces the device rather than a scale model:
+// 4096 B of buffer, the ordinary trigger at 2048, the reserve at 1024. A plain reader
+// page turn emits 417 B -- [i] 137 + [paint] 152 + [render] 91 + [page] 37, measured
+// off the real format strings in shell/src/main.cpp at values from this project's own
+// recorded runs.
+constexpr size_t kBuf = 4096;
+constexpr size_t kTrigger = 2048;
+constexpr size_t kReserve = 1024;
+constexpr size_t kPageTurnBytes = 417;
+
+struct Loop {
+  char storage[kBuf];
+  CardLogBuffer log{storage, sizeof(storage)};
+  std::string turn = std::string(kPageTurnBytes, 'x');
+  int writes = 0;
+
+  Loop() { log.applySetting(true); }
+
+  // One iteration of loop(): the interaction's lines are teed, then the tail decides.
+  // `quiet` is false throughout -- the reader is pressing, so a paint is owed or a
+  // sample is queued on every iteration, which is the state #83 was measured in.
+  void iterate(bool forcedGateBuilt) {
+    log.append(turn.data(), turn.size());
+    if (forcedGateBuilt && log.mustFlush(kReserve)) {
+      log.wrote(true);
+      ++writes;
+    }
+  }
+};
+
+}  // namespace
+
+TEST_CASE("a reader who never lets the loop go quiet loses nothing") {
+  // THE REGRESSION. Sixty page turns with `quiet` false for all of them: on the
+  // shipped gate the buffer runs from the trigger to the ceiling and refuses whole
+  // lines, and the log grows a hole in the one window a fault is most interesting.
+  Loop withGate;
+  for (int i = 0; i < 60; ++i) withGate.iterate(true);
+  CHECK(withGate.log.dropped() == 0);
+
+  // And it is bounded rather than merely rarer: a flush empties the buffer, so the
+  // forced write cannot recur until the reserve has been eaten again. 3072 B of room
+  // is 7.37 page turns, but a turn is indivisible, so it is the EIGHTH that crosses
+  // and sixty turns buy 7 writes -- one per 8 turns, not one per turn. The bytes-wise
+  // ratio rounds the wrong way here and the discrete count is the honest one.
+  CHECK(withGate.writes == 7);
+
+  Loop without;
+  for (int i = 0; i < 60; ++i) without.iterate(false);
+  CHECK(without.log.dropped() > 0);
+  CHECK(without.writes == 0);
+}
+
+TEST_CASE("every iteration begins with room for the worst one this device emits") {
+  // The reserve is derived from what ONE loop iteration can emit: 417 B for a plain
+  // page turn, 559 for a chapter crossing, 725 for a crossing whose quiet-window jobs
+  // also report. The bound the forced gate buys is that a drop needs more than
+  // kReserve inside a single iteration -- so 725 must fit with room over.
+  Loop l;
+  const std::string worstIteration(725, 'y');
+  for (int i = 0; i < 40; ++i) {
+    CHECK(kBuf - l.log.size() >= kReserve);
+    l.log.append(worstIteration.data(), worstIteration.size());
+    if (l.log.mustFlush(kReserve)) l.log.wrote(true);
+  }
+  CHECK(l.log.dropped() == 0);
+}
+
+TEST_CASE("the trigger and the reserve are separate questions about the same buffer") {
+  // wantsFlush() takes a FILL level and mustFlush() takes FREE space, which is the one
+  // place these two could be read as one number. Between the trigger and the forced
+  // point there is a window where the ordinary flush is wanted and the forced one is
+  // not -- that window is what the idle gate still governs, and collapsing the two
+  // constants closes it.
+  Loop l;
+  const std::string chunk(kTrigger, 'z');
+  l.log.append(chunk.data(), chunk.size());
+  CHECK(l.log.wantsFlush(kTrigger));
+  CHECK_FALSE(l.log.mustFlush(kReserve));
+
+  const std::string more(kBuf - kTrigger - kReserve, 'z');
+  l.log.append(more.data(), more.size());
+  CHECK(l.log.wantsFlush(kTrigger));
+  CHECK_FALSE(l.log.mustFlush(kReserve));  // free == kReserve exactly: still intact
+  l.log.append("!", 1);
+  CHECK(l.log.mustFlush(kReserve));
+}

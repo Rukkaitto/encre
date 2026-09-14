@@ -120,8 +120,8 @@ class NullTheme : public Theme {
                           Plane) override {}
   void renderWifiPicker(Framebuffer&, const FontSet&, const WifiPickerViewModel&,
                         Plane) override {}
-  void renderWifiPassword(Framebuffer&, const FontSet&, const WifiPasswordViewModel&,
-                          Plane) override {}
+  void renderTextEntry(Framebuffer&, const FontSet&, const TextEntryViewModel&,
+                       Plane) override {}
   void renderWifiConnect(Framebuffer&, const FontSet&, const WifiConnectViewModel&,
                          Plane) override {}
   void renderWifiError(Framebuffer&, const FontSet&, const WifiErrorViewModel&,

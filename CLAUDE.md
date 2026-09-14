@@ -320,6 +320,76 @@ what is wrong (fix the board, then follow it). `make compare` is what keeps them
 honest; changing only the implementation silently invalidates it and the goldens
 stop meaning anything.
 
+**AND IT PRINTS THE PERCENTAGE NOW, WHICH IS THE QUANTITY THIS FILE HAS ALWAYS
+SAID TO READ** (#41). Every panel gets `mismatch 2.30% (8814 px, 1-bit)` beside
+its `ok`, in the run log and on the sheet. `ok` only ever meant *a frame was
+produced*, and this file's own rule — **the percentage is the check, the word is
+not** — was unenforceable by the tool that prints the word: the `ReaderMenu.dc.html`
+merge that read `ok` throughout while the screen sat at 13.02% against 3.02% is the
+recorded instance, and **every percentage in this file up to that point was a hand
+count somebody ran over the `--export` PNGs**.
+
+- **THE ARITHMETIC IS THE HAND COUNT'S, AND IT REPRODUCES IT TO THE DIGIT.**
+  Threshold both panels at 128 — **ink is BELOW 128, so grey 127 is ink and 128 is
+  paper** — and count the pixels that disagree over the panel's own `w*h`. Verified
+  against this file's recorded pairs on every screen that has not changed since its
+  figure was written: `contents` **2.30%/2.11%** and its recorded **8,814 pixels**,
+  `sd_missing` 1.83%/1.67%, `sleep` 2.32%/2.13%, `battery_empty` 2.05%/1.89%,
+  `reader` 5.24%/6.29%, `peek` 3.99%/4.02%, `low_battery` 5.03%/6.02%, `reader_menu`
+  3.00%/3.56%, `sleep_cover` 0.00%/0.00% — **nine screens, four of them grayscale.**
+  **The boundary is load-bearing rather than a taste**: `<= 128` moves
+  `contents` off 8,814 by one and `battery_empty` from 2.05% to 2.06%.
+- **A FIGURE THAT DISAGREES IS A FIGURE WHOSE SCREEN MOVED, AND THAT IS CHECKABLE
+  NOW.** Six recorded pairs no longer reproduce, and every one of them has a commit
+  after it that changed that screen: `home` 3.54%/3.25% → **1.23%/1.13%**, `library`
+  3.85%/3.54% → **2.25%/2.07%**, `book_details` 3.57%/3.28% → **0.91%/0.84%**,
+  `book_error` 3.44%/3.53% → **3.08%/2.92%** and `book_error_unreadable`
+  2.99%/3.17% → **2.61%/2.56%**, all five boarded and re-rendered by #100's
+  placeholder-cover removal; and `settings` 1.91%/1.76% → **2.16%/1.98%**, which is
+  V1.1 putting the CONNECTIONS section back on that screen. **Those figures are not
+  wrong** — they record what the screen measured when it was written, which is what
+  they are for. What changed is that the next one can be re-run instead of inherited.
+- **THE FIGURE NAMES THE PANEL'S GREY LEVELS, so the two kinds of number stop
+  inviting a comparison.** A threshold-at-128 count over the four-level grayscale
+  sequence inflates against a one-bit screen's, which this file otherwise has to say
+  in prose every time it quotes one — `reader` at 5.24% is not worse than
+  `reader_menu` at 3.00%. **Measured off the render, never from a table of which
+  screens declare `Fidelity::Grayscale`**: that fact lives in `core/` and a copy in a
+  tool would be a second one free to drift, and the render is the more honest
+  question anyway, since what inflates the count is the greys the panel actually
+  carries. `sleep_cover_waking` declares `Grayscale` and paints ONE pass, and is
+  correctly reported **1-bit**.
+- **IT IS A READING AND NOT A GATE, and CI passes no new flag.** There is no blessed
+  number to fail against, a board and its screen may legitimately move together, and
+  **the count can rise while nothing moved** — the half-pixel phase flip the `Names`
+  cut and the Sleep card's parity both record. What CI buys is the number in front of
+  a reviewer beside the diff that changed it, which is the PR-title job's bargain.
+  **No total and no average across screens either**: that is what the tables' own
+  comments refuse when they give the styled reader specimens and the two cover modes
+  their own rows, and it would be worse here, across screens that do not share a
+  fidelity.
+- **NO ±1-ROW-TOLERANT SECOND READING SHIPS, AND THE REASON IS THAT THE RECORDED
+  ONES CANNOT BE REPRODUCED.** This file quotes tolerant counts twice — `reader_menu`
+  at 1.76%/2.20% after the `Names` cut, `sleep` falling 4,326 → 4,152 — and **both
+  screens' STRICT figures reproduce to the digit in this tree, so the tree is at the
+  state those numbers were taken at.** Nine candidate definitions were tried against
+  them (pixelwise forgiveness against the other panel's row above or below, the
+  symmetric form, ink-only in each direction and both, per-row best of three
+  alignments, whole-image best shift, and dilating both) and **not one lands on either
+  target**; the closest misses `reader_menu` by 13% and `sleep` by 26%, in different
+  directions, which is what two separate ad-hoc hand counts look like. So the tolerant
+  readings in this file were each computed with a definition nobody wrote down, and
+  **shipping a tenth would put a number in the tool that disagrees with every tolerant
+  figure here** — the second-instrument drift this file is mostly a record of. If one
+  is ever wanted, define it in `compare-design.py` first and treat the recorded
+  tolerant readings as not comparable. The strict count stays the instrument, which is
+  the point: swapping instruments to make a figure look better is how a real
+  regression gets hidden.
+- **IT IS NOT DECISIVE AND WAS NEVER GOING TO BE.** Fixing `design/Settings.dc.html`'s
+  `Size` row — a real defect, three points wrong — moved this figure by **one pixel**
+  (8553 → 8554), because that right-aligned run was mismatched either way. **The value
+  is in being able to ask**, and nobody could have known that one without computing it.
+
 **And it has to actually cover the screen.** Until a cold-read review found it,
 `make compare` defaulted to the seven V1 boards, so it compared Home and Library
 and skipped four of the six implemented screens — while CLAUDE.md called it the
@@ -370,10 +440,22 @@ meant, and this tool must not answer it by guessing.
 
 **THE SCRIPT HAS ITS OWN TESTS NOW** — `tools/test_compare_design.py`, plain
 `python3`, Chrome and the simulator stubbed out. They assert the **set and the
-count**, never a pixel, because that is where all six of these defects lived.
+count**, because that is where all six of these defects lived.
 **Deliberately NOT wired into `make test`**, which builds on a bare checkout with
 no Python and no submodule; so it is a test that has to be remembered, which is
 the honest cost of keeping the fast loop interpreter-free.
+
+- **THIS LINE SAID "never a pixel" AND THE MISMATCH FIGURE MADE THAT HALF FALSE.**
+  The rule it was really stating is **never a RENDERED pixel** — a golden in the
+  wrong file — and that still holds: the arithmetic's cases are **synthetic panels
+  whose answer is known by construction**, a four-pixel row at 126/127/128/129 for
+  the boundary and a half-black panel for the rest, with the stubbed simulator
+  producing a 2x1 image `normalise` scales to exact half-panel columns at both
+  geometries. Every guard is proved by mutation: `<= 128` fails the boundary case,
+  measuring the `NOT IMPLEMENTED` placeholder prints `mismatch 0.00%` beside a
+  screen nothing draws and fails, reading the levels off the DESIGN panel labels a
+  one-bit screen 4-level and fails, a wrong denominator fails three cases, and one
+  figure reused across geometries fails on the pixel counts being equal.
 
 **AND THE SAME SHAPE HAD THE REVIEW SURFACE ITSELF: `design/ereader-v1-ui.html`
 IS A GENERATED FILE AND ITS GENERATOR WAS LOST** (#60). It is the published design
@@ -1208,13 +1290,69 @@ looks exactly like a device with nothing to report.
 - **IT MUST NOT MAKE THE DELAY IT IS HUNTING**, which is the whole design. A card
   write costs ~40 ms and takes the DISPLAY'S SPI BUS, so one per line would put tens
   of milliseconds into every interaction and be indistinguishable from the fault. It
-  buffers 4 KB in RAM and flushes **only when the panel and the buttons are both
-  quiet** — the gate `pollCardPresence` already uses.
+  buffers 4 KB in RAM and flushes **when the panel and the buttons are both quiet** —
+  the gate `pollCardPresence` already uses — **and in exactly one other case**, which
+  is the next bullet.
+- **THE HEADROOM ABOVE THE TRIGGER WAS A ONE-SHOT RESERVE, AND THE LOG WAS THEREFORE
+  LEAST COMPLETE WHERE A FAULT IS MOST INTERESTING (#83).** `kLogFlushAtBytes` was
+  3072 against a 4096-byte buffer and the 1024 between them was described as the room
+  a burst still has. It is room the buffer gets **once**: the flush may only run in an
+  idle window, so from the trigger onwards the free space only shrinks and nothing
+  tops it up. Measured on glass in the first real session the card log ever ran
+  (X3/UC8279, 2026-09-07): **two drop events, 407 B and 349 B**, both in reading
+  stretches where `quiet` stayed false — so the burst reached **1024 + 407 = 1431 B**
+  past the trigger and `append` refused whole lines.
+  - **NO TRIGGER CAN BE THE FIX, WHICH IS WHAT MAKES THIS A POLICY QUESTION AND NOT A
+    TUNING ONE.** A reader turning pages keeps a paint owed or a press queued
+    continuously, so the non-quiet stretch is bounded by **the user** rather than by
+    anything the firmware picks. Lowering the trigger makes the hole rarer; it cannot
+    make it impossible, and a number fitted to two drop events is fitted to one
+    session, which this file's own rule says is not a distribution.
+  - **SO THE RESERVE IS RESTORED EVERY LOOP ITERATION INSTEAD OF EVERY IDLE WINDOW.**
+    `CardLogBuffer::mustFlush(reserveBytes)` asks whether fewer than that many bytes
+    are free, and the loop tail writes the card when it is true **whether or not the
+    loop is quiet**. What that buys is a bound the trigger cannot express: every
+    iteration begins with `kLogLineReserveBytes` free, so a drop now needs more than
+    the reserve **inside one iteration** rather than merely more than the headroom
+    across an open-ended stretch.
+  - **THE TWO CONSTANTS ARE TWO QUANTITIES**, the sleep card's `chapterReserveH` /
+    `chapterH` idiom one feature over, and collapsing them is the defect: `mustFlush`
+    takes **free space** where `wantsFlush` takes a **fill level**, the trigger is
+    **2048** and the reserve **1024**, and a `static_assert` in `shell/src/main.cpp`
+    fails the build if they cross — which the **old 3072 now does**, proved by
+    mutation.
+  - **1024 IS DERIVED FROM WHAT ONE ITERATION EMITS**, measured off the real format
+    strings at values from this file's own recorded runs: a plain page turn is
+    **417 B** (`[i]` 137 + `[paint]` 152 + `[render]` 91 + `[page]` 37), a chapter
+    crossing **559**, and a crossing whose quiet-window jobs also report **725**. It
+    is also 2× `logf`'s `char line[512]`, the hard bound on one append — a reserve
+    under 512 could not promise even one whole line.
+  - **WHAT IT COSTS, AND THE LAST TERM IS THE DEVICE'S TO SETTLE.** The forced write
+    can only fire once per 3072 B logged, which is **one per eight page turns** in the
+    worst case where the reader never pauses and **never at all** on a device that
+    does. Against `net=` it is a ~15–40 ms write on a 634 ms (RIGHT Reader) or 1055 ms
+    (LEFT Reader) turn — **2.8% typical, 7.9% worst**. Lowering the trigger to 2048
+    costs write COUNT, not latency: 1.5× as many writes at two thirds the size, total
+    bytes unchanged, every one still in an idle window. **RAM is unchanged to the
+    byte** — 46,188 either side, measured — which is why growing `kLogBufBytes` was
+    rejected: the array is `.bss`, so it is paid by every device at every instant
+    including the overwhelming majority whose `logToCard` is off, and 4096 more is
+    9.7% of the 42,152-byte reading floor.
+  - **AND A FORCED WRITE NAMES ITSELF**, `[log] FORCED wrote NB in Xms`, for the
+    reason `ser=` exists: a device whose reading bursts routinely overrun and one that
+    never forces a write must not look alike in the log. **It does NOT land in
+    `ser=`**, which is the USB cable's term, so it inflates `net=` silently and that
+    line beside it is the only thing that says so.
 - **IT REPORTS ITS OWN WEIGHT**: `[log] wrote NB in Xms` per flush and
   `buffered/dropped/sdTotal` on `[alive]`. Same reason `ser=` exists — an instrument
   that hides its cost lets you attribute it to the device.
 - **A DROPPED LINE IS COUNTED, NEVER SILENT.** An overrun between two idle windows
   leaves a HOLE in the log, and a hole must not read as the device having gone quiet.
+  **The count is what made #83 visible at all** — `dropped=756B` on an `[alive]` line
+  is the only reason anybody knew. It is still CUMULATIVE and still only on `[alive]`,
+  so it says bytes were lost and not **where**: with drops now rare, the next hole is
+  further from the line that reports it. Marking the hole in place, in the file, is
+  the honest completion of this bullet and is not built.
 - **It flushes on the way into sleep**, after `markSleeping()` — the flag is what the
   next boot needs and the log is only what a human needs, so the ordering says which
   one may not be lost.
@@ -2584,7 +2722,7 @@ worth knowing before changing it:
 | Wi-Fi | `WifiSettings.dc.html` | V1.1. The hub: saved networks, `AUTO`/`SAVED` toggled in place, and a HOLD for FORGET — the **second hold in the firmware**, the Library's being the first. Reached from Settings' `CONNECTIONS` row. |
 | Wi-Fi / nothing saved | `WifiSettingsEmpty.dc.html` | A **variant**, not a screen, and its two movers go quiet: one focusable row means UP and DOWN would promise a press that changes nothing. |
 | Join network | `WifiPicker.dc.html` | The **second scrolling list and the second user of the rail**. A scan in flight draws NO list and no count — that state is not boarded (drawStatusBar is specified by LibraryOpening and SleepWaking) and is pinned by a golden. |
-| Password | `WifiPassword.dc.html` | The **first text entry in this firmware**: a caret, an editable string, three layers whose union is all 95 printable ASCII, and a 46-cell grid over `GridFocus`. The layer key names where it TAKES you — `abc` while the symbols show — because it latches and SHIFT does not. The Confirm hint names what the focused CELL does; Back deletes before the caret and LEAVES when the field is empty. |
+| Password | `WifiPassword.dc.html` | The **first text entry in this firmware**, and **the screen is no longer in this file**: the keyboard is `TextEntryScreen`, extracted at the SECOND copy rather than the fifth (#126) — a caret, three layers whose union is all 95 printable ASCII, a 46-cell grid over `GridFocus`, the latching layer key that names where it TAKES you, and a Back that deletes before the caret and LEAVES on an empty field. What stays here is 802.11: the 63-byte bound, the **8-byte floor**, four strings and two Actions. **`minLength` DEFAULTS TO 0 AND THIS IS THE ONLY CALL SITE THAT SETS IT** — a floor blanks the Confirm slot, so carrying it to a caller whose field may legally be empty is a **dead button on a legal state**. A masked mode is NOT foreclosed and is NOT designed: `visibility` is the caller's string, and whether to mask wants a board. |
 | Connecting | `WifiConnect.dc.html` | One state. It used to step to `READY`, which is gone: a successful join leaves for the saved list, and the list with the network in it is the confirmation — at one waveform instead of two. |
 | Couldn't join | `WifiError.dc.html` | THREE copy shapes, BookError's argument: wrong password, not found, and didn't finish. `EDIT PASSWORD` is **absent** on the latter two rather than inert. Its slab count is the slab LIST, measured, not a second spelling. |
 
@@ -5003,7 +5141,9 @@ be felt", which was right about the cost and wrong about where to put the work: 
 bounded a power cut's damage at one chapter, which on a real novel is an hour. The write
 is not made cheaper — it is made to happen when the loop is already idle, which is the
 answer the page count, the refinement, the ring warm and the card log all reached
-before it. `kSaveQuietMs` is **2000 ms**, sized from the device's own twelve-turn
+before it. (**The card log is no longer purely quiet-gated** — #83 gave it one forced
+case, a reserve restored per loop iteration; the save's own claim is unaffected, and the
+reasoning is under **AND THERE IS A LOG ON THE CARD**.) `kSaveQuietMs` is **2000 ms**, sized from the device's own twelve-turn
 measurement (median 72 ms between turns, longest 898 and 1360) so that **steady page
 turning never pays for it at all** and an ordinary reader, who spends ~23 s on a page,
 saves about two seconds after every turn.
@@ -5435,6 +5575,69 @@ The demo now has to be asked for (`setReaderDemo()`, which the simulator and the
 goldens call) and a Reader with neither a book nor a demo is **refused**. A refused
 push leaves the Library standing — wrong in a way the user can see through, rather
 than wrong in a way they cannot.
+
+**AND THE REFUSAL WAS RIGHT WHILE BEING UNREADABLE, WHICH IS #49.** A wake replays a
+stack of screen NAMES and the factory rebuilds each from state the shell must have
+primed, and **nothing connected "the record names X" to "X's inputs are primed"** —
+there was one hand-written scan for `ScreenId::Reader`, and `ReaderMenu`, `Contents`
+and `BookEnd` came back only because `openBookAt` primes them **on its way past**. So
+each screen that needed its own inputs rediscovered the same failure, always with the
+same symptom and always misattributed: the restore pushes, the factory refuses, the
+restore stops and keeps what stands, and the reader reports *"it went back to the
+book"*. **Three screens shipped that way as a defect and `Peek` ships it as a
+DECISION, and from outside those are the same observation.**
+
+**`reader::restorability(ScreenId)` IS THAT QUESTION, AND EVERY SCREEN ANSWERS IT.**
+`Ready` (a wake owes it nothing), `NeedsPriming` (only a press could have produced
+its inputs), `Never` (it does not come back, and that is a decision). It is in `app.h`
+beside `screenUsesRadio` **for `screenUsesRadio`'s reason** — a fact about the screen
+catalogue, and `shell/` has no harness.
+
+- **THE TABLE IS AN ARRAY `static_assert`ed AGAINST `ScreenId::Count`, NOT A SWITCH.**
+  An exhaustive switch leans on `-Wswitch`, which is a WARNING here — this file records
+  a screen appended while three such switches answered it wrongly and the only
+  diagnostic was three warnings scrolling past. **Proved by appending a dummy screen**:
+  with `kNames` and `kAllScreens` both satisfied, so every pre-existing guard was
+  quiet, this one still refused the build.
+- **`App::snapshot()` STOPS THE RECORD AT THE FIRST `Never` SCREEN**, so the record
+  only ever names screens that come back. Sleeping under a peek stores `…;reader:0`
+  and the wake reports a **complete** restore, where it used to store the peek and
+  then report stopping short — which reads in a log exactly like a screen nobody
+  primed. **Truncated, not filtered**: dropping one from the MIDDLE would hand the
+  wake a stack that never existed.
+- **`App::restore` REFUSES A `Never` ENTRY BEFORE ASKING THE FACTORY**, and the
+  screens that most needed it are the ones the factory **builds**: `Sleep` and
+  `BatteryEmpty` were kept out of a record only by nothing ever pushing them, which
+  is a property of the shell rather than a rule. Waking into either is *"press power,
+  get asleep back"* and a battery-empty prompt over a charged pack.
+- **`RestoreReport::stoppedAt` IS WHAT MAKES THE LOG SAY WHICH**, asking
+  `restorability()` rather than carrying a second field free to disagree with it:
+  `Never` is the mechanism working, anything else is a screen this build says a wake
+  may have and nothing primed — a firmware defect, not a card fault.
+- **THE SHELL'S SCAN IS NOW A WALK OVER THE RECORD** that asks `core/` which entries
+  owe a priming and **names in the log any it does not answer**. The priming stays the
+  shell's and may never move — `core/` does not know what a filesystem, a book or
+  `last.json` is — but the LIST is `core/`'s, so the shell cannot hold a stale copy of
+  it. That is this file's own rule: a caller list is a function not yet written.
+  `openBookAt` still primes all four book-built screens in one pass, and the walk now
+  **names all four** rather than leaving three to ride the first.
+
+**THE DECLARATION IS CHECKED, NOT MERELY WRITTEN**, and that is the half that earns
+it: `test_focus_restore.cpp` builds every screen from a factory configured the way
+`setup()` leaves it — panel geometry, settings, the saved Wi-Fi list — and **no
+further**, then demands a `Ready` screen build and a `NeedsPriming` screen refuse.
+A declaration nothing checks is a second copy of the factory's own switch, free to
+disagree with it, and **it disagreed on the first run**: `WifiSettings` was written
+`NeedsPriming` from reading its factory case, and `loadWifi()` primes it at boot. The
+counts are hand-maintained for `movable`'s reason — **9 `Ready`, 4 `NeedsPriming`,
+9 `Never`**.
+
+**WHAT ONLY A WAKE ON THE DEVICE CAN CONFIRM**, and it is the whole feature: that a
+sleep in the peek stores the reader's page and wakes onto it reporting a COMPLETE
+restore, that `[session] it stopped at …` appears with the right half of its sentence
+when one does stop, and that a record from before this firmware — which can name a
+`Never` screen — is refused rather than restored. `shell/` has no harness, so 1,594
+green test cases say nothing about any of it.
 
 ### Paging: forward is free, backward re-decodes
 
@@ -5979,8 +6182,17 @@ Desktop, 12-line page, 444px column, ppem 32: paginate 349 µs/page, lay out one
 168 µs, draw a page 580 µs cold (29 rasterisations) and 363 µs warm. The device is a
 160 MHz RISC-V with no FPU and rasterises at ~3,794 µs a glyph, so a cold page is
 ~110–140 ms there and the pagination walk is the part with no desktop analogue worth
-trusting. The `[open]` serial line reports parse, total, blocks, pages and the heap
-cost of an open for exactly this reason.
+trusting. The `[open]` serial line reports locate, total, pages and the heap cost of an
+open for exactly this reason. **It said `parse` and `blocks` here long after the line
+stopped printing either** (`af622f1`), which is the cheap half of the same defect #89
+found in the line itself: two of its fields were LITERALS, `ch=1` and an `entry=` reading
+spine entry **zero** — the cover, a file that is never decoded — so the only size on a
+line attributing decode cost described the wrong file. Both were correct while
+`openBookAt` could open nothing but entry 0, and both went stale at the same moment, when
+the restore learned to open at a saved spine. The field is `spine=` now rather than `ch=`,
+and that word IS the convention marker: it is the raw 0-based index every other line in
+this log already means by it, where `ch=` is the GLASS's word and the glass counts from
+one.
 
 ## The table of contents
 
@@ -6713,28 +6925,37 @@ plain member, where `ChapterReader::bytesRead()` would answer 0 with `inflated_`
 push `progressPercent` onto its page/pageTotal fallback — the exact shape of the
 percentage-going-backwards bug.
 
-**IT IS NOT RESTORABLE ACROSS A WAKE.** The factory refuses an unprimed `Peek`, so
-`App::restore` stops early and leaves the Reader standing — a refused push is wrong in a
-way the reader can see through. Persisting a peeked cursor would be a card write for a
-breadcrumb the anchor's own design declined to pay for.
+**IT IS NOT RESTORABLE ACROSS A WAKE, AND #49 MOVED THAT FROM AN ACCIDENT TO A
+DECLARATION.** It used to rest on the factory refusing an unprimed `Peek`, so
+`App::restore` stopped early and left the Reader standing — true, and indistinguishable
+in a log from a screen nobody remembered to prime. `restorability(ScreenId::Peek)` is
+`Restore::Never` now, so **`snapshot()` stops before the peek and the record never names
+it**: the wake reports a COMPLETE restore onto the page instead of a short one. Persisting
+a peeked cursor would still be a card write for a breadcrumb the anchor's own design
+declined to pay for.
 
 **RE-ASKED ON GLASS AND CONFIRMED (2026-08-29), so it does not need arguing again.** It
 was reported as a defect — "sleeping in the peek takes us back to the book" — and it is
 not one: a peek is a transient *am I sure?*, and waking onto your own page is the calmer
 default. **The reason given above is weaker than the decision, and that is worth knowing
-if it is ever revisited**: the session record already stores the entry (`home:0;library:2;
-reader:0;peek:0`), and that trailing `0` is a focus slot the peek has no use for, so the
-peeked SPINE could ride there for no new card write at all. The cost was never the
-storage; only the peeked *page within the panel* would need one. So the honest statement
-is that a peek should not come back, not that it cannot.
+if it is ever revisited**: the session record USED to store the entry
+(`home:0;library:2;reader:0;peek:0`), and that trailing `0` is a focus slot the peek has
+no use for, so the peeked SPINE could have ridden there for no new card write at all. The
+cost was never the storage; only the peeked *page within the panel* would need one. So the
+honest statement is that a peek should not come back, not that it cannot. **#49 has since
+made the record stop naming it**, so anyone revisiting this now has to undo a declaration
+rather than just read a field — which is the right cost for reversing a decision taken on
+glass, and is why the argument is kept here rather than deleted.
 
 **AND THE REPORT WAS RIGHT ABOUT THE MECHANISM even though it was wrong about this
-screen** — see #49. Being restorable is per-screen tribal knowledge: one hand-written
-`namesReader` scan on the wake path primes the book, and the reader menu and Contents are
-primed only because `openBookAt` passes them on the way. Three screens have shipped
-un-restorable by accident and this one is un-restorable on purpose, and **from the outside
-those are indistinguishable** — the restore stops early and the reader lands somewhere
-they did not expect. That is what makes the question keep coming back.
+screen** — which was #49, and #49 is answered. Being restorable WAS per-screen tribal
+knowledge: one hand-written `namesReader` scan on the wake path primed the book, and the
+reader menu and Contents were primed only because `openBookAt` passed them on the way.
+Three screens shipped un-restorable by accident and this one is un-restorable on purpose,
+and **from the outside those were indistinguishable** — the restore stopped early and the
+reader landed somewhere they did not expect. Every `ScreenId` now declares which of the
+three it is, behind a `static_assert` on `ScreenId::Count` that a new screen cannot pass
+unchanged; see **A factory that substitutes content is worse than one that refuses**.
 
 **THE BOX IS THE CONSTANT AND THE LINE COUNT IS THE RESULT, and it shipped the other way
 round.** `kPeekPanelH` is **546px** — the panel is that tall on every device at every
@@ -7753,10 +7974,26 @@ to run after touching a drawing primitive, the paint sequence, storage or power.
 
 `docs/releasing.md` — what a release is here (an annotated tag on `main`, which
 `.github/workflows/release.yml` then turns into a published release), the gate in
-order, what the three attached images are for, and the blocker list as a **`gh
-project` query rather than a written list**, because a list here would be a
-second copy of the board. It also records why there is deliberately no
-`CHANGELOG.md`.
+order, what the three attached images are for, and the blocker list as a **query
+rather than a written list**, because a list here would be a second copy of the
+board. It also records why there is deliberately no `CHANGELOG.md`.
+
+**THAT QUERY IS `tools/release_blockers.py --release <R>` NOW, AND IT WAS A
+`gh ... | jq` PIPELINE THAT COULD NOT FAIL.** It passed `--limit 100` against a
+board that reached 114, and `gh project item-list` truncates **silently** — so
+the release gate was reading a prefix of the board and reporting a verdict.
+Measured when it was replaced: **6** V1.1 blockers seen where there were **17**,
+the issue asking for the fix among the eleven dropped. Three things it now does
+that a pipeline could not, each the shape this file records elsewhere: the size
+is **asked for** rather than capped (`totalCount` does not shrink with
+`--limit`, so there is no constant to outgrow and a disagreement is a refusal);
+an **unknown release name is an error**, not the empty answer a typo would
+otherwise turn into a pass, which is `compare-design.py`'s `--only` rule; and
+the three outcomes are **three exit codes** (0 clear, 1 blockers, 2 could not
+answer), because `gh ... | jq ... | sort` reports `sort`'s status and a `jq`
+that refused mid-stream leaves a pipeline that printed nothing and exited 0.
+`tools/test_release_blockers.py` is its test, plain `python3` with `gh` stubbed,
+not wired into `make test` for `test_release_notes.py`'s reason.
 
 `README.md` — the outward-facing one: what works, what is stated-refused, how to
 back up the stock firmware before flashing, and what "written with Claude Code"

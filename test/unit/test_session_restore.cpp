@@ -129,6 +129,66 @@ TEST_CASE("a screen this build cannot make stops the restore there and keeps wha
   CHECK(r.restored == 1);
   CHECK(woken.app.depth() == 1);
   CHECK(woken.app.top().focus() == 1);  // the root's focus still landed
+  // AND IT NAMES WHAT IT STOPPED AT (#49). The count alone says how far it got and
+  // not why, so "the factory could not build this" and "this screen does not come
+  // back" printed one line -- which is how three screens shipped un-restorable
+  // while a fourth shipped deliberately so.
+  CHECK(r.stopped);
+  CHECK(r.stoppedAt == ScreenId::BookDetails);
+}
+
+TEST_CASE("a record naming a screen no wake may have is refused before the factory") {
+  // Restore::Never, enforced (#49). Sleep is the sharp case and the reason this is
+  // not left to the factory: the factory BUILDS a SleepScreen quite happily, so
+  // before this the only thing keeping a device from waking onto `ASLEEP, HOLD
+  // POWER TO WAKE` was that nothing pushed one -- a property of the shell rather
+  // than a rule. Such a record can only come from an older firmware now, because
+  // snapshot() will not write one.
+  Fixture woken;
+  const App::RestoreReport r = woken.app.restore(
+      {{ScreenId::Home, 0}, {ScreenId::Library, 2}, {ScreenId::Sleep, 0}});
+  CHECK(r.rootMatched);
+  CHECK(r.requested == 3);
+  CHECK(r.restored == 2);
+  CHECK(woken.app.depth() == 2);
+  CHECK(woken.app.top().id() == ScreenId::Library);
+  CHECK(r.stopped);
+  CHECK(r.stoppedAt == ScreenId::Sleep);
+  // The caller tells the two stops apart by asking the same question the restore
+  // asked, rather than by a second field free to disagree with it.
+  CHECK(restorability(r.stoppedAt) == Restore::Never);
+}
+
+TEST_CASE("the record stops at the first screen a wake will not put back") {
+  // WHAT MAKES THE PEEK'S EXCLUSION A STATED FACT (#49). A peek needs a body face
+  // and a book, so Sleep stands in for it here -- it is the same declaration and
+  // the only Restore::Never screen this fixture can push -- and the property is the
+  // one that matters for both: the record names the reader's page and ends there,
+  // so the wake reports a COMPLETE restore. It used to name the transient screen as
+  // well and then report stopping short of it, which reads in a serial log exactly
+  // like a screen nobody primed.
+  Fixture f;
+  f.app.dispatch(kDown);
+  f.app.dispatch(kConfirm);
+  REQUIRE(f.app.top().id() == ScreenId::Library);
+  f.app.dispatch(kDown);
+  REQUIRE(f.app.pushScreen(ScreenId::Sleep));
+  REQUIRE(f.app.depth() == 3);
+
+  const std::vector<StackEntry> snap = f.app.snapshot();
+  REQUIRE(snap.size() == 2);
+  CHECK(snap[0].screen == ScreenId::Home);
+  CHECK(snap[1].screen == ScreenId::Library);
+  CHECK(snap[1].focus == 1);
+
+  // AND THE ROUND TRIP IS THEN COMPLETE, which is the half worth asserting: a
+  // truncated record that still reported `restored < requested` would have moved
+  // the confusing log line rather than removed it.
+  Fixture woken;
+  const App::RestoreReport r = woken.app.restore(snap);
+  CHECK(r.restored == r.requested);
+  CHECK_FALSE(r.stopped);
+  CHECK(woken.app.top().id() == ScreenId::Library);
 }
 
 TEST_CASE("an empty record restores nothing and says so") {

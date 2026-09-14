@@ -911,9 +911,71 @@ static void logf(const char* fmt, ...) {
 // Bounded on both sides: 4 KB of RAM, and the file is truncated and restarted past
 // kLogFileCapBytes so a device left running cannot fill the card.
 constexpr size_t kLogBufBytes = 4096;
-// Flush at three quarters rather than at full: a burst arriving after the threshold
-// still has room, so the newest lines are not the ones dropped.
-constexpr size_t kLogFlushAtBytes = 3072;
+// THE TRIGGER, AND IT IS NOT THE RESERVE -- two quantities, and collapsing them into
+// one subtraction is #83.
+//
+// This used to be 3072, leaving 1024 B between the trigger and the ceiling, and that
+// 1024 was described as the room a burst arriving after the threshold still has. It
+// is room the buffer gets ONCE: the flush below may only run in an idle window, so
+// from the moment the threshold is crossed the free space only shrinks until one
+// arrives. Measured on glass (X3/UC8279, 2026-09-07), the first real session the card
+// log ever ran: two drop events of 407 B and 349 B, each in a reading stretch where
+// `quiet` stayed false -- so the burst reached 1024 + 407 = 1431 B past the trigger
+// and the log lost whole lines in exactly the window a fault is most interesting.
+//
+// LOWERING THIS IS HALF THE FIX AND CANNOT BE ALL OF IT. A reader turning pages keeps
+// a paint owed or a press queued continuously, so the non-quiet stretch is bounded by
+// the user rather than by anything here -- any trigger makes the hole rarer and none
+// makes it impossible. The bound is kLogLineReserveBytes below; this number's job is
+// to leave room for it and to rate-limit the ordinary write.
+//
+// 2048 IS WHAT THAT LEAVES. Trigger 2048, forced point 4096 - 1024 = 3072, so an idle
+// window has 1024 B to arrive in before the forced write takes over -- 2.5 plain page
+// turns at the 417 B one emits ([i] 137 + [paint] 152 + [render] 91 + [page] 37, the
+// real format strings at values off this file's own recorded runs). What it costs is
+// write COUNT: a flush empties the buffer, so writes go from one per 3072 B logged to
+// one per 2048 B, 1.5x as many at two thirds the size, with the total bytes written
+// unchanged. Every one of them is still in an idle window, which is the whole reason
+// this is the cheap lever -- it is battery and card wear, never latency.
+constexpr size_t kLogFlushAtBytes = 2048;
+// THE RESERVE, RESTORED EVERY LOOP ITERATION RATHER THAN EVERY IDLE WINDOW.
+//
+// CardLogBuffer::mustFlush() asks whether fewer than this many bytes are free, and
+// the loop tail writes the card when it is true WHETHER OR NOT the loop is quiet.
+// That is the one thing this feature exists to avoid, so it is a last resort and the
+// number is what makes it rare: it can only fire when 1024 B arrives between the
+// ordinary trigger and the next idle window, and a flush empties the buffer, so it
+// cannot fire again until another 3072 B has been logged -- once per EIGHT page turns
+// in the worst case where the reader never lets the loop go quiet, and never at all
+// on a device that pauses. (3072 B is 7.37 turns of 417 B, but a turn is indivisible,
+// so the eighth is the one that crosses; test_card_log.cpp asserts the same 7 writes
+// over 60 turns rather than a second spelling of the ratio.)
+//
+// DERIVED FROM WHAT ONE LOOP ITERATION EMITS, because that is the burst the reserve
+// now has to hold. Measured off the real format strings: a plain page turn is 417 B,
+// a chapter crossing 559 B, and a crossing with the quiet-window jobs also reporting
+// ([warm], [restream], [progress]) is 725 B. 1024 covers the worst of those with
+// 299 B to spare, and it is also 2x logf()'s `char line[512]` -- the hard bound on a
+// single append, so a reserve under 512 could not promise even one whole line.
+//
+// WHAT IT COSTS IS ONE CARD WRITE INSIDE AN INTERACTION, and the honest figure is a
+// range rather than a measurement: this file records ~40 ms for a writeAll and the
+// session above logged its own flushes at ~15-20 ms, against a page turn's 634 ms
+// (RIGHT Reader) and 1055 ms (LEFT Reader) of `net=`. So 2.8% typical and 7.9%
+// worst against the cheapest interaction on the device. Against the 756 B of log
+// that was silently lost instead, that is the trade -- and the write NAMES itself
+// in the line it costs, `[log] FORCED ...`, for the reason `ser=` exists.
+//
+// WHAT ONLY A DEVICE CAN SETTLE: this cost against a real `[i] net=`. It does NOT
+// land in `ser=`, which is the USB cable's term, so a forced write inflates `net=`
+// silently and the `[log] FORCED` line beside it is the only thing that says so.
+constexpr size_t kLogLineReserveBytes = 1024;
+// The two must not cross. Equal, and the forced point IS the trigger, so every write
+// becomes a forced one and the idle gate stops meaning anything at all -- a failure
+// that would be invisible on the desktop and would show up on glass as the card log
+// making the delay it is hunting.
+static_assert(kLogFlushAtBytes + kLogLineReserveBytes < kLogBufBytes,
+              "the forced-flush point must sit strictly above the ordinary trigger");
 constexpr uint32_t kLogFileCapBytes = 256u * 1024u;
 constexpr const char* kLogPath = "/encre.log";
 
@@ -3310,20 +3372,25 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // the whole of the answer -- locate, paginate and heap.
   int pages = -1;
   const char* readerWhy = "";
+  // WHICH CHAPTER THIS OPEN ACTUALLY LANDED ON, and it is ONE expression with three
+  // consumers rather than three expressions free to disagree -- which is what the two
+  // literals below were. Taken from the SCREEN where there is one, because
+  // `startChapter` is what was ASKED for and openChapterAt skips a spine entry that
+  // paginates to nothing: three of a real book's 92 are a cover and two title pages,
+  // so the two differ on exactly the opens where it matters. On the wake path there is
+  // no screen yet (App::restore does the pushing), and the requested chapter is the
+  // best that is known -- the line says `pushed=0` beside it, so a reader of the log
+  // can tell the asked-for case from the landed-on one.
+  int openedChapter = startChapter;
   if (pushed) {
     const auto* rd = static_cast<const reader::ReaderScreen*>(&gApp->top());
     pages = rd->pageCount();
     readerWhy = rd->error();
+    openedChapter = rd->chapterIndex();
     logChapterOpen(rd, millis() - t0);
   }
-  // THE CROSSING DETECTOR'S STARTING POINT -- see gLastChapter. Taken from the SCREEN
-  // where there is one, because `startChapter` is what was ASKED for and openChapterAt
-  // skips a spine entry that paginates to nothing: three of a real book's 92 are a
-  // cover and two title pages, so the two differ on exactly the opens where it matters.
-  // On the wake path there is no screen yet (App::restore does the pushing), and the
-  // requested chapter is the best that is known.
-  gLastChapter = pushed ? static_cast<const reader::ReaderScreen*>(&gApp->top())->chapterIndex()
-                        : startChapter;
+  // THE CROSSING DETECTOR'S STARTING POINT -- see gLastChapter.
+  gLastChapter = openedChapter;
   // THE STACK HIGH-WATER MARK, because a stack is the one budget this firmware had
   // no instrument for -- and the first thing to exhaust it did so on the very first
   // book. uxTaskGetStackHighWaterMark reports the SMALLEST free space the task has
@@ -3333,11 +3400,32 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   logf("[stack] loopTask free at worst: %u bytes of %u\n",
        (unsigned)(uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t)),
        (unsigned)getArduinoLoopTaskStackSize());
-  logf("[open] %s -> \"%s\" ch=1/%d: locate=%lums total=%lums pages=%d "
+  // `spine=` AND NOT `ch=`, AND THAT WORD IS THE CONVENTION MARKER RATHER THAN A
+  // rewording. The numerator is the RAW 0-based spine index, which is what every other
+  // index in this log already means by `spine=` -- `[chapter]`, both `[progress]` lines
+  // and all three `[peek]` lines -- so the three lines this one is read beside now
+  // carry one number that matches without arithmetic. `ch=` is the GLASS's word (Home's
+  // `CH. 08 OF 92`, the reader's band) and the glass counts from one; this line was the
+  // only place the user's vocabulary carried the developer's convention, which is what
+  // made the convention unreadable. The denominator stays `chapterCount()`, a COUNT, so
+  // the last entry of a 92-entry spine is `spine=91/92`.
+  //
+  // IT WAS A LITERAL `1` AND SO WAS `entry=`'s INDEX, and they were one defect with one
+  // cause: both were correct while this function could only ever open entry 0 (`ch=1`
+  // since 426bdee, and `entry=` was `opened.chapter.compressedSize` until b2efe88 made
+  // the single chapter a spine and mechanically rewrote it as `locate(0)`), and both
+  // went stale at the same moment for the same reason -- the restore learning to open
+  // at a saved spine entry. A restored book reported `ch=1/92` and the cover's
+  // compressed bytes while `[chapter]` on the next line said 58.
+  //
+  // `entry=` is the ARCHIVE entry's compressed size, which is why it keeps its name
+  // beside `[chapter]`'s `bytes=`: that one is the INFLATED size. Both now describe the
+  // chapter whose decode the rest of this line is attributing time and heap to.
+  logf("[open] %s -> \"%s\" spine=%d/%d: locate=%lums total=%lums pages=%d "
        "entry=%uB heap %u -> %u (cost %ld) min=%u pushed=%d%s%s\n",
-       path.c_str(), opened.title.c_str(), opened.chapterCount(),
+       path.c_str(), opened.title.c_str(), openedChapter, opened.chapterCount(),
        (unsigned long)(t1 - t0), (unsigned long)(millis() - t0), pages,
-       (unsigned)opened.locate(0).compressedSize, (unsigned)heapBefore,
+       (unsigned)opened.locate(openedChapter).compressedSize, (unsigned)heapBefore,
        (unsigned)ESP.getFreeHeap(),
        (long)heapBefore - (long)ESP.getFreeHeap(),
        (unsigned)ESP.getMinFreeHeap(), pushed ? 1 : 0,
@@ -5366,23 +5454,62 @@ void setup() {
            reader::screenName(gApp->top().id()));
       logFlush();
     } else {
-      // THE READER CANNOT BE RESTORED WITHOUT ITS BOOK, and the factory is right to
-      // refuse one -- falling through to the demo is how this device once woke into
-      // Middlemarch. So a record naming the Reader needs the book set FIRST, from the
-      // same pointer Home reads; without this, sleeping on a page woke to the Library
-      // because the restore correctly stopped short of a screen that could not build.
+      // WHAT THE RECORD NAMES, PRIMED BEFORE THE RESTORE REPLAYS IT (#49).
       //
-      // The position comes from the sidecar, exactly as a button press would get it:
-      // the record says WHICH SCREENS, and the card says where in the book. Two
+      // THIS WAS A SCAN FOR ONE SCREEN ID WRITTEN IN BY HAND. `ReaderMenu`,
+      // `Contents` and `BookEnd` came back only because openBookAt primes them on
+      // its way past a Reader -- they rode the Reader's scan by accident rather
+      // than by design -- and each screen that needed its own inputs before them
+      // arrived as a bug report saying "sleeping on X resumes to the book".
+      // Nothing connected "the record names X" to "X's inputs are primed".
+      //
+      // WHICH SCREENS OWE A PRIMING IS reader::restorability()'s ANSWER, in core/,
+      // behind a table static_assert'ed against ScreenId::Count -- so the shell
+      // cannot keep a stale copy of the list, and a screen appended to the enum
+      // fails the build until it has answered the question. What cannot move there
+      // is the priming itself: core/ does not know what a filesystem, a book or
+      // last.json is, and it must not learn.
+      //
+      // A SCREEN THIS DOES NOT ANSWER IS NAMED IN THE LOG rather than left to fail
+      // at the push. That is the distinction the whole ticket is about: "the
+      // factory refused `contents`" and "a peek does not come back" used to be the
+      // same line.
+      bool wantsOpenBook = false;
+      for (const reader::StackEntry& e : stack) {
+        if (reader::restorability(e.screen) != reader::Restore::NeedsPriming) continue;
+        switch (e.screen) {
+          // FOUR SCREENS AND ONE OPEN, and naming all four here is the change.
+          // They are every screen whose inputs come from the book that is open --
+          // the page, the menu over it, its chapter list, and the screen its last
+          // page turns into -- and openBookAt primes all four in one pass, which is
+          // why this is one flag rather than four.
+          case reader::ScreenId::Reader:
+          case reader::ScreenId::ReaderMenu:
+          case reader::ScreenId::Contents:
+          case reader::ScreenId::BookEnd:
+            wantsOpenBook = true;
+            break;
+          default:
+            logf("[session] the record names %s, which this build declares needs "
+                 "priming and nothing here primes: the restore will stop at it, and "
+                 "that is a firmware defect rather than a missing card\n",
+                 reader::screenName(e.screen));
+            logFlush();
+            break;
+        }
+      }
+      // THE POSITION COMES FROM THE SIDECAR, exactly as a button press gets it: the
+      // record says WHICH SCREENS, and the card says where in the book. Two
       // records, two jobs -- the session record has never known about a book.
-      bool namesReader = false;
-      for (const reader::StackEntry& e : stack)
-        if (e.screen == reader::ScreenId::Reader) namesReader = true;
-      if (namesReader && gStorageUsable) {
+      //
+      // The factory is right to refuse a Reader with no book -- falling through to
+      // the demo is how this device once woke into Middlemarch -- so the book is
+      // set FIRST, from the same pointer Home reads.
+      if (wantsOpenBook && gStorageUsable) {
         reader::LastRead last;
         if (!reader::loadLastRead(gSd, last) || !gSd.exists(last.bookPath)) {
-          logf("[session] the record names the Reader but no saved book is on the "
-               "card; it will stop at the screen below it\n");
+          logf("[session] the record names a screen built from the open book, and no "
+               "saved book is on the card; it will stop at the screen below it\n");
           logFlush();
         } else {
           uint32_t bytes = 0;
@@ -5421,6 +5548,20 @@ void setup() {
                             "a folder it named is no longer on the card -- in which case its "
                             "row was dropped with it rather than applied to another "
                             "directory -- or a focused row is no longer in its list)");
+        // WHY IT STOPPED, WHEN IT STOPPED (#49). Both outcomes leave the reader
+        // somewhere they did not expect and used to print the same line, which is
+        // how three screens shipped un-restorable while a fourth shipped
+        // deliberately so. `Restore::Never` is the mechanism working and nothing
+        // was owed; anything else is a screen this build says a wake may have and
+        // the factory could not build, which means nothing primed it.
+        if (r.stopped) {
+          logf("[session] it stopped at %s: %s\n", reader::screenName(r.stoppedAt),
+               reader::restorability(r.stoppedAt) == reader::Restore::Never
+                   ? "this build declares that screen never comes back, so nothing "
+                     "was owed and the screen below it is where a wake belongs"
+                   : "this build declares that screen restorable, so its construction "
+                     "inputs were not primed -- a firmware defect, not a card fault");
+        }
         logFlush();
         mark("session-restored");
       }
@@ -7490,7 +7631,30 @@ void loop() {
   // /encre.log. That is one question rather than the two this used to spell as
   // `gLogToCard && gLogLen >= ...`, and two spellings of one condition is how this
   // project has shipped a dead button twice.
-  if (quiet && gCardLog.wantsFlush(kLogFlushAtBytes)) {
+  // AND THE SECOND GATE, WHICH IS THE ONE THAT MAKES THE RESERVE A BOUND (#83).
+  //
+  // The paragraph above says the threshold leaves a kilobyte of headroom to carry the
+  // log across the gap to the next quiet window, and that was a ONE-SHOT reserve: the
+  // free space only shrinks from the trigger onwards, and a reader turning pages keeps
+  // a paint owed or a press queued for as long as they keep pressing, so the stretch
+  // it has to survive is the USER'S and not ours. Measured on glass, it lost 756 B in
+  // two bursts. No trigger can fix that -- a bigger one makes the hole rarer and never
+  // impossible -- so the reserve is restored every ITERATION instead, and this is what
+  // restores it.
+  //
+  // IT IGNORES `quiet`, DELIBERATELY, AND IT IS THE ONLY THING HERE THAT MAY. What it
+  // buys is that every loop iteration begins with kLogLineReserveBytes free, so a drop
+  // now needs 1024 B inside ONE iteration where the worst measured iteration emits
+  // 725 B. What it costs is a ~15-40 ms card write in front of an owed paint or a
+  // queued press, which is the delay this feature exists not to make -- so it fires
+  // only where the alternative is losing the lines outright, and it SAYS SO in the
+  // line it costs. A device whose reading bursts routinely overrun and one that never
+  // forces a write must not look alike in the log.
+  //
+  // The bus is safe either way: this is the loop TAIL, past the paint block, so no
+  // refresh is in flight whatever `quiet` says. Only latency is at stake.
+  const bool forced = gCardLog.mustFlush(kLogLineReserveBytes);
+  if (forced || (quiet && gCardLog.wantsFlush(kLogFlushAtBytes))) {
     // Recursive, and appendToCard takes one of its own -- same reason the poll
     // takes one below: the write and the line reporting it are one atomic use of
     // the bus rather than two that could straddle a paint.
@@ -7498,8 +7662,8 @@ void loop() {
     const unsigned buffered = static_cast<unsigned>(gCardLog.size());
     bool landed = false;
     const uint32_t took = flushLogToCard(&landed);
-    logf("[log] %s %uB in %lums\n", landed ? "wrote" : "COULD NOT WRITE", buffered,
-         (unsigned long)took);
+    logf("[log] %s%s %uB in %lums\n", forced ? "FORCED " : "",
+         landed ? "wrote" : "COULD NOT WRITE", buffered, (unsigned long)took);
     logFlush();
   }
 

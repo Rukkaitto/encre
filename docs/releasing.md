@@ -13,34 +13,69 @@ GitHub's tag trigger does not check on its own — plus the notes and the build.
 
 Nothing here is signed.
 
-## What v0.1.0 is waiting on
+## What a release is waiting on
 
 **Not a list, a query.** A written list of blockers in this file would be a
 second copy of the project board, and this project's whole failure history is
-second copies drifting from first ones. Run it:
+second copies drifting from first ones. Run it, naming the release being cut:
 
-    gh project item-list 1 --owner Rukkaitto --format json --limit 100 \
-      | jq -r '.items[] | select(.release=="V1" and .status!="Done")
-               | [.status, .content.number // "draft", .kind, .title] | @tsv' \
-      | sort
+    python3 tools/release_blockers.py --release V1.1
 
-**Everything that prints is a blocker, except the release card itself** — the
-card tracking this tag is a V1 card and is not `Done` until the tag exists, so
-it always appears. Every other line is real work.
+One TSV line per card in that release that is not `Done` — status, issue number
+(or `draft`), kind, title — and everything it prints is real work. It exits
+**0** when the release is clear, **1** when blockers remain, and **2** when it
+could not answer. That third code is the point of the rewrite: a gate that
+cannot tell a complete answer from a missing one has no business clearing a
+release.
+
+**IT USED TO BE A `gh ... | jq` PIPELINE, AND THE PIPELINE COULD NOT FAIL.** It
+passed `--limit 100` against a board that has since reached 114 items, and
+`gh project item-list` truncates silently — so the gate was reading a prefix of
+the board and reporting it as a verdict. That is the
+reports-on-less-than-it-claims shape this project refuses for the card probe
+answered from cache, for the `make compare` default that skipped four screens,
+and for `logToCard`.
+Measured at the moment it was replaced: the old query saw **6** V1.1 blockers
+where there were **17**, and among the eleven it dropped was the issue asking
+for this fix.
+
+- **The limit is gone rather than raised.** 200 would reintroduce the same
+  defect one board-year later. `totalCount` is the board's own count and does
+  not shrink with `--limit`, so the size is *asked for*: one call to learn it, a
+  second asking for exactly that many, and a refusal if the two disagree.
+- **The release is a parameter, and an unknown one is an error.** A typo selects
+  nothing and would otherwise exit 0, which reads exactly like a release with
+  nothing left to do. The name is checked against the board's own `Release`
+  options, read live, for the reason `compare-design.py`'s `--only` errors on an
+  id it does not recognise rather than reporting `0/0`.
+- **It hides nothing, including the release card.** If a card tracks the tag
+  being cut, that one line is not a blocker: it closes when the tag does. That
+  is a judgement for whoever reads the line and not a row the tool drops — a
+  script guessing which card is the release card, by title, there being nothing
+  else to go on, would hide a genuine blocker the first time a title matched.
+  v0.1.0's card is the only one there has ever been, and it is `Done`, so at the
+  time of writing no release has such a card and nothing is exempt.
+- **It has its own tests**, `python3 tools/test_release_blockers.py`,
+  deliberately not wired into `make test` for `tools/test_release_notes.py`'s
+  reason. Its refusals are the reason it is a tracked script rather than four
+  lines in this file: `gh ... | jq ... | sort` reports `sort`'s exit status, so
+  a `jq` that refused mid-stream leaves a pipeline that printed nothing and
+  exited 0 — the fix for a gate that passes silently must not itself pass
+  silently.
 
 The board is the only index of this project's deferred work; if something is
-missing from it, the fix is a card, not a line here.
-
-At the time of writing, that query returns unbuilt V1 screens, open engine
-defects, and these docs. It will keep returning things until it does not.
+missing from it, the fix is a card, not a line here. A card carrying no
+`Release` appears in no release's gate at all, so the script names those on
+stderr rather than leaving them to be found by looking.
 
 ## The gate, in order
 
 Each step is a precondition for the next. Nothing here can be skipped by
 agreement — the last two cannot be produced on a desktop at all.
 
-1. **The query above returns nothing but the release card.** Every other V1
-   card is `Done`.
+1. **The query above exits 0**, having named the release being cut. Every card
+   in that release is `Done`, bar a release card if one exists — which is the
+   one line above that is not work, and the only one.
 2. **`README.md`'s checklist agrees with the board**, reconciled against the
    query you have just run. A ticked box that stopped being true is a lie on the
    front page; an unticked one that shipped only understates, so the ticks are
@@ -80,8 +115,12 @@ Once the gate is clear, from a clean checkout of `main`:
     git status --porcelain          # must print nothing
     make test && make compare
 
-    git tag -a v0.1.0 -m "Encre v0.1.0"
-    git push origin v0.1.0
+    git tag -a <tag> -m "Encre <tag>"
+    git push origin <tag>
+
+`<tag>` is written out rather than shown as `v0.1.0`, which has shipped: a
+worked example naming a tag that already exists is one a reader can run and be
+told only that it exists.
 
 **`-a` is not optional and the workflow enforces it**, because this file has
 always said a release *is* an annotated tag and nothing checked. A lightweight
@@ -99,7 +138,7 @@ the changelog. `tools/release_notes.py` is that log — `git log --no-merges
 there is no previous tag, which is v0.1.0's case. Run it yourself before tagging
 if you want to see what it will say:
 
-    python3 tools/release_notes.py --tag v0.1.0
+    python3 tools/release_notes.py --tag <tag>
 
 It has its own tests, `python3 tools/test_release_notes.py`, deliberately not
 wired into `make test` for `tools/test_check_conventions.py`'s reason.
@@ -132,9 +171,12 @@ the workflow, and they are commented as such.
 
 ## Versioning
 
-`v0.1.0` is the first tag; the repo has none today. Semantic-versioning
+`v0.1.0` was the first tag and shipped on 2026-09-11. Semantic-versioning
 mechanics are not worth deciding in advance for a project with one user — what
-matters is that a tag names a commit somebody actually read a book on.
+matters is that a tag names a commit somebody actually read a book on. **This
+line said the repo had no tags, and stayed that way through the release that
+falsified it**, which is why the blocker query above no longer names a release
+either: a claim about *which* release is being cut goes stale the moment one is.
 
 **One thing a version number here does not mean:** that it runs on an X4. Every
 device measurement in this repo was taken on an X3, and rotation is unverified
