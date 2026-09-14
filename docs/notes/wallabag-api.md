@@ -112,11 +112,19 @@ instance's own how-to page shows
 anybody types a username**, and it is the whole of why §4 says the keyboard
 cannot carry this.
 
-### The web route, which works on any instance
+### The web route, which is the normal one and needs no terminal
 
-Log in, visit `/developer/client/create`, give it a redirect URI — the docs say
-*"if your application is a desktop one, use any URL that suits your needs"* — and
-it shows both values with copy-to-clipboard buttons.
+Log in, visit `/developer/client/create`, and the form has **two fields, one of
+them optional**: `name`, and `redirect_uris` with `'required' => false`
+(`src/Form/Type/Api/ClientType.php`). The docs say *"provide the redirect URL of
+your application … if your application is a desktop one, use any URL that suits
+your needs"*, and the form is softer than the docs — **a device can leave it
+blank**. Both values then appear with copy-to-clipboard buttons.
+
+**It offers no control over grant types**, and that is not a gap in the form but
+a decision in the controller: `Api\DeveloperController.php:47` calls
+`setAllowedGrantTypes(['token', 'authorization_code', 'password',
+'refresh_token'])` — hardcoded, all four, for every client made this way.
 
 **And unlike Instapaper's, the secret is NOT a one-time reveal.**
 `templates/Developer/index.html.twig:44` renders `client.secret` in the
@@ -125,7 +133,7 @@ reader who loses the card, or the file on it, goes and looks rather than
 re-registering — which is worth knowing before designing any recovery flow,
 because there is nothing to recover.
 
-### The console route, which is why self-hosting is the easier case
+### The console route, which a self-hoster may prefer and nobody needs
 
 `src/Command/CreateApiClientCommand.php`:
 
@@ -145,11 +153,18 @@ value passing through a human's hands or a clipboard. `--display-name` names the
 client in the web list, which is how a reader later revokes *this device* rather
 than all of them.
 
-**`--grant-types` narrows what the client may do.** The allowed set is `token`,
-`authorization_code`, `password`, `refresh_token` and the default is all four;
-this device needs **`password,refresh_token`** and nothing else, so that is what
-the instructions should say. A client that cannot do `authorization_code` is one
-fewer thing a leaked card can be used for.
+**`--grant-types` narrows what the client may do**, and it is the one capability
+the web form does not have: the allowed set is `token`, `authorization_code`,
+`password`, `refresh_token`, the default is all four, and this device needs
+`password,refresh_token`.
+
+**IT IS TIDINESS RATHER THAN DEFENCE, WHICH §5 GOT WRONG.** That section called
+it *"a real answer to the plaintext-on-the-card cost"* and it is not: the same
+file carries the username and the password, so anyone holding the card gets a
+token through the `password` grant whatever else the client is allowed to do.
+Narrowing removes grants this device will not use; it does not narrow what a lost
+card gives up. **And the instructions cannot require it anyway**, because the
+route most readers will take is the web form, which has no such control.
 
 ## 4. What it costs, stated rather than discovered
 
@@ -192,14 +207,20 @@ sleeps for days at a time. A reader who does not sync for three weeks needs a
 fresh `grant_type=password`, and there is nobody standing in front of the panel
 to ask. Deleting the password after first use would strand exactly that reader.
 
-**The stated cost is plaintext on a removable card**, and two things bound it
-rather than excuse it. It is the reader's own card and their own server. And
-`--grant-types=password,refresh_token` (§3) means the client on that card cannot
-be used for an `authorization_code` flow at all, so what a lost card gives up is
-one wallabag account, not a credential with more reach than the device needs.
-**wallabag's own ecosystem makes the same trade and says so**: Wallabagger's
-documentation carries a *"Security warning — your password is stored in the
-browser local storage as a plain text"*. That is a precedent, not a defence.
+**The stated cost is plaintext on a removable card, and it is not bounded by
+anything clever.** What a lost card gives up is one wallabag account — the file
+carries the username and the password, so the `password` grant is available to
+whoever holds it and no grant-type narrowing changes that. §3 offers
+`--grant-types=password,refresh_token` and **this section previously called it "a
+real answer" to this cost, which was wrong twice over**: it does not reduce what
+the card exposes, and it is unavailable on the web route most readers will take.
+
+What actually bounds it is the deployment: the reader's own card, their own
+server, and an account whose blast radius is their reading list.
+**wallabag's own ecosystem makes the same trade and says so plainly** —
+Wallabagger's documentation carries a *"Security warning — your password is
+stored in the browser local storage as a plain text"*. A precedent, not a
+defence.
 
 ### What the device does with it
 
