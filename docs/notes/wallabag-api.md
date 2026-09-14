@@ -99,7 +99,59 @@ An entry carries `id`, `title`, `url`, `domain_name`, `content`, `created_at`,
 `preview_picture`, `reading_time`, `tags` — so `Articles.dc.html`'s rows and
 `ArticleEnd`'s reading time need no derivation and no second call.
 
-## 3. What it costs, stated rather than discovered
+## 3. Where the credentials come from
+
+Read from wallabag's own source at `wallabag/wallabag`, because it decides whether
+the five values can reach the device at all.
+
+**The `client_id` is `<id>_<50 random chars>`** — `Client::getPublicId()` is
+`getId() . '_' . getRandomId()` (`src/Entity/Api/Client.php:108`), so the
+instance's own how-to page shows
+`12_5um6nz50ceg4088c0840wwc0kgg44g00kk84og044ggkscso0k`. The secret is a bare
+50-character random string. **That is ~103 characters of random text before
+anybody types a username**, and it is the whole of why §4 says the keyboard
+cannot carry this.
+
+### The web route, which works on any instance
+
+Log in, visit `/developer/client/create`, give it a redirect URI — the docs say
+*"if your application is a desktop one, use any URL that suits your needs"* — and
+it shows both values with copy-to-clipboard buttons.
+
+**And unlike Instapaper's, the secret is NOT a one-time reveal.**
+`templates/Developer/index.html.twig:44` renders `client.secret` in the
+existing-clients list, so `/developer` shows it again whenever it is wanted. A
+reader who loses the card, or the file on it, goes and looks rather than
+re-registering — which is worth knowing before designing any recovery flow,
+because there is nothing to recover.
+
+### The console route, which is why self-hosting is the easier case
+
+`src/Command/CreateApiClientCommand.php`:
+
+```
+php bin/console wallabag:api-client:create <username> --format=json
+```
+
+prints
+
+```json
+{ "client_id": "…", "client_secret": "…", "name": "…" }
+```
+
+**Those key names are the ones a config file wants**, so on a self-hosted
+instance the credentials can be generated and copied to the card without either
+value passing through a human's hands or a clipboard. `--display-name` names the
+client in the web list, which is how a reader later revokes *this device* rather
+than all of them.
+
+**`--grant-types` narrows what the client may do.** The allowed set is `token`,
+`authorization_code`, `password`, `refresh_token` and the default is all four;
+this device needs **`password,refresh_token`** and nothing else, so that is what
+the instructions should say. A client that cannot do `authorization_code` is one
+fewer thing a leaked card can be used for.
+
+## 4. What it costs, stated rather than discovered
 
 - **The reader has to run a server.** That is the trade, and it is the whole of
   it: "sign in to Instapaper" is a feature anyone can use, "point it at your
@@ -108,15 +160,18 @@ An entry carries `id`, `title`, `url`, `domain_name`, `content`, `created_at`,
 - **The token expires in 3600 s.** Instapaper's did not. So the client owns a
   refresh, and a refresh that fails has to fall back to the stored credentials
   rather than to a screen nobody is standing in front of.
-- **FIVE VALUES REACH THE DEVICE, TWO OF THEM ~50-CHARACTER RANDOM STRINGS.**
-  Server URL, `client_id`, `client_secret`, username, password. Measured against
-  the shipped keyboard in `instapaper-full-api.md` §6, a 17-character email is 92
-  presses; a 51-character `client_id` is several hundred. **The keyboard is not a
-  credible route for this** and that is an open design question — see below.
+- **FIVE VALUES REACH THE DEVICE, AND ~103 CHARACTERS OF THEM ARE RANDOM.**
+  Server URL, `client_id` (`<id>_<50 chars>`), `client_secret` (50 chars),
+  username, password — the format is §3's, off the entity rather than off an
+  example. Measured against the shipped keyboard in `instapaper-full-api.md` §6,
+  a 17-character email is **92 presses**; this is comfortably past six hundred
+  before a password. **The keyboard is not a credible route** and that is an open
+  design question — see #111, which recommends a file on the card and states what
+  that costs.
 - **Unverified: that a wallabag EPUB opens in this reader.** It is one file from
   one generator, and this reader has been wrong about real EPUBs before.
 
-## 4. What to check first, and it is cheap
+## 5. What to check first, and it is cheap
 
 **Export one article from the owner's instance as `.epub`, put it in `/books`,
 and open it on the device.** That is the fact the whole shape rests on, it needs
