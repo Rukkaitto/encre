@@ -888,13 +888,13 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
   with `mark()` around it and the largest free block printed. Radio down after.
 - [x] **Step 2:** Build with `PLATFORMIO_BUILD_FLAGS="-DENCRE_WALLABAG_PROBE=1" make firmware`.
   Hand the owner the flash command and ask for `run.log`.
-- [ ] **Step 3:** Read the log. Record in `docs/notes/wallabag-api.md` a new §8: the
+- [x] **Step 3:** Read the log. Record in `docs/notes/wallabag-api.md` a new §8: the
   heap spent by plain HTTP, by TLS, and by one streamed download; whether TLS fits at
   all with no book open. **Decision rule, written before the numbers arrive:** if TLS
   leaves less than 40 KB free with the radio up and no book open, the transport
   supports plain HTTP only in this release and the account screen's band says
   `HTTP ONLY` as a stated limit; if it fits, TLS is enabled and nothing else changes.
-- [ ] **Step 4:** Remove the probe (`ENCRE_COVER_PROBE` was removed after it answered);
+- [x] **Step 4:** Remove the probe (`ENCRE_COVER_PROBE` was removed after it answered);
   commit `docs(wallabag): what a plain and a TLS round trip cost on the C3, measured`.
 
 ### Task 4.2: The Arduino transport and the card file sink
@@ -903,7 +903,7 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
 - Create: `shell/src/http_transport_arduino.h`, `shell/src/http_transport_arduino.cpp`
 - Create: `shell/src/card_file_sink.h`, `shell/src/card_file_sink.cpp`
 
-- [ ] **Step 1:** `ArduinoHttpTransport` implements `HttpTransport` over `HTTPClient`
+- [x] **Step 1:** `ArduinoHttpTransport` implements `HttpTransport` over `HTTPClient`
   and `WiFiClient` (and `WiFiClientSecure` only if Task 4.1 said yes, with the
   well-known root bundle arduino-esp32 ships and no per-host pinning). **Poll-shaped
   over a blocking library**: `begin()` opens the connection and sends headers;
@@ -911,13 +911,13 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
   so `loop()` keeps ticking between chunks and a cancel lands within one chunk. A
   read that yields nothing for 15 s is `Timeout`. Every state the fake has, the real
   one reports.
-- [ ] **Step 2:** `CardFileSink` writes to `<path>.part` over SdFat directly — a free
+- [x] **Step 2:** `CardFileSink` writes to `<path>.part` over SdFat directly — a free
   function pair like `appendToCard`, for `sd_fs.h`'s stated reason (the `FileSystem`
   contract has no write handle and must not grow one for a caller `core/` will never
   be) — under `SpiBusGuard` per write, and `finish()` renames `.part` to the final
   name; a failure removes the `.part`. Sizes are checked as `writeAll` checks them: a
   short write is a failure, not a success.
-- [ ] **Step 3:** `make firmware` builds. Commit
+- [x] **Step 3:** `make firmware` builds. Commit
   `feat(shell): the Arduino HTTP transport, chunked per poll, and a card file sink that streams`.
 
 ### Task 4.3: The NVS token store
@@ -925,12 +925,12 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
 **Files:**
 - Create: `shell/src/wallabag_store_nvs.h`, `shell/src/wallabag_store_nvs.cpp`
 
-- [ ] **Step 1:** Implement `TokenStore` over `Preferences`, namespace `encre_wbg`,
+- [x] **Step 1:** Implement `TokenStore` over `Preferences`, namespace `encre_wbg`,
   keys `ver`, `access`, `refresh`, in `wifi_store_nvs.cpp`'s idiom: the version checked
   before the payload, a missing namespace a quiet empty, a wrong version discarded
   whole with a log line. NVS caps a string at 4000 bytes; a wallabag bearer token is
   ~40 characters, assert the bound in the header rather than trusting it.
-- [ ] **Step 2:** `make firmware` builds. Commit
+- [x] **Step 2:** `make firmware` builds. Commit
   `feat(shell): the wallabag token store in NVS, wifi_store_nvs's shape`.
 
 ### Task 4.4: The seed at mount, Home's count, and the Articles list on the card
@@ -962,7 +962,7 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
 - Modify: `shell/src/main.cpp` (`handleArticle()`, `pollSync()`, `beginSyncFlow()`,
   `endSyncSession()`)
 
-- [ ] **Step 1:** `handleArticle()`, called beside `handleWifi()` on the dispatch's own
+- [x] **Step 1:** `handleArticle()`, called beside `handleWifi()` on the dispatch's own
   pass (the outcome is read off a screen still on top): on `Articles` with `chosen() ==
   Sync` → `beginSyncFlow()`; on `WallabagConnecting` cancelled → `engine.cancel()`,
   which the poll below finishes; on `WallabagError` → `TryAgain` re-enters
@@ -973,12 +973,12 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
   `NextArticle` opens the next unread through `openBookAt`, `BackToList` pops to the
   list; on `WallabagAccount` → `KeepOffline` commits the setting and `prune`s; on
   `ArticlesRemoveConfirm` → `removeAll()`, pop, replace the account screen.
-- [ ] **Step 2:** `beginSyncFlow()`: if the credentials do not load as configured →
+- [x] **Step 2:** `beginSyncFlow()`: if the credentials do not load as configured →
   push `WallabagError(SignIn)`; if `gWifiNets.automatic()` is null → push
   `WallabagError(NoNetwork)`; else `gRadio.beginJoin()` on that network with its
   secret, prime the host, push `WallabagConnecting`. Reuses `gRadio`, `shellwifi::
   secret`, and `endWifiSession()`'s discipline.
-- [ ] **Step 3:** `pollSync()`, called from the quiet window beside `pollWifi()`: while
+- [x] **Step 3:** `pollSync()`, called from the quiet window beside `pollWifi()`: while
   `WallabagConnecting` is on top — if the join is `Running`, wait; if `Failed`,
   `WallabagError(Offline)` and radio down; if `Ok` and the engine has not begun,
   construct the transport and the engine and `begin()`; then `engine.poll()` each
@@ -990,7 +990,16 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
   `CredentialsRefused` replace the dialog with `WallabagError(SignIn)`; `Unreachable`
   and `failed` with `WallabagError(Offline)`; `cancelled` pops to the list. Set
   `gHomeStale` on any outcome that wrote.
-- [ ] **Step 4:** The `screenUsesRadio` backstop in `pollWifi()` already takes the
+- [x] **Step 3b (NEW, from Task 4.1's answer):** `restartIfHeapSpent()` — the sync
+  restarts the device, because one TLS handshake takes the largest free block from
+  61,428 bytes to 34,804 and never returns it above 36,852 against an
+  `Inflater::begin` window of 36,956. Gated on the TRANSPORT's own scheme, so a
+  plain-HTTP server never pays it. Taken when the dialog leaves for the list (the
+  watermark is on the card, so the restored list says the same thing) and when the
+  error panel is DISMISSED rather than when the sync fails — that screen is
+  `Restore::Never`, so restarting under it would throw away what the reader needs
+  to read.
+- [x] **Step 4:** The `screenUsesRadio` backstop in `pollWifi()` already takes the
   radio down under any screen that does not declare it; confirm by reading that no
   path out of the sync leaves without `endWifiSession()` — and that the backstop
   would catch it if one did.

@@ -84,7 +84,12 @@
 #include "reader/screens.h"
 #include "reader/session_record.h"
 #include "reader/settings.h"
+#include "card_file_sink.h"
+#include "http_transport_arduino.h"
 #include "reader/article_store.h"
+#include "reader/sync_engine.h"
+#include "reader/wallabag_client.h"
+#include "wallabag_store_nvs.h"
 #include "reader/wallabag_credentials.h"
 #include "reader/text.h"  // reader::Plane
 #include "reader/theme_quiet.h"
@@ -3211,6 +3216,455 @@ static void beginJoinFlow(bool replace) {
   }
   if (replace) gApp->replaceScreen(reader::ScreenId::WifiConnect);
   else gApp->pushScreen(reader::ScreenId::WifiConnect);
+}
+
+// ---------------------------------------------------------------------------
+// The sync, which is the Wi-Fi flow's shape with an engine hanging off it.
+// ---------------------------------------------------------------------------
+
+// THE ENGINE'S SINKS. One `CardFileSink` per article, named by the store so the
+// path the engine writes and the path `ArticleStore` looks for cannot drift.
+class CardSinkFactory : public reader::SinkFactory {
+ public:
+  std::unique_ptr<reader::BodySink> forArticle(int id) override {
+    reader::ArticleStore store(gSd);
+    auto sink = std::unique_ptr<CardFileSink>(new (std::nothrow)
+                                                  CardFileSink(store.epubPath(id)));
+    // NULL IS A CONTRACT VALUE HERE, not an error: the engine reads it as one
+    // failed download rather than a failed sync, which is the difference
+    // between missing one article and missing nineteen.
+    return sink;
+  }
+  void discard(int id) override {
+    // The sink's own destructor removes an unfinished `.part`, so by the time
+    // the engine asks, there is usually nothing left. This is the belt to that
+    // brace: the engine may have dropped the sink already, and a `.part` that
+    // outlived it would be re-fetched for ever without ever being promoted.
+    reader::ArticleStore store(gSd);
+    const std::string part = store.epubPath(id) + ".part";
+    if (gSd.exists(part)) gSd.remove(part);
+  }
+};
+
+static CardSinkFactory gSinks;
+static shellwallabag::NvsTokenStore gTokens;
+static reader::WallabagCredentials gWbCreds;
+static std::unique_ptr<ArduinoHttpTransport> gTransport;
+static std::unique_ptr<reader::WallabagClient> gWbClient;
+static std::unique_ptr<reader::ArticleStore> gWbStore;
+static std::unique_ptr<reader::SyncEngine> gSyncEngine;
+static int gSyncShownDone = -1;
+static int gSyncShownTotal = -1;
+
+// A TLS SESSION HAS RUN THIS BOOT, AND THE DEVICE CANNOT OPEN A BOOK UNTIL IT
+// RESTARTS. Measured on an X3: one handshake takes the largest free block from
+// 61,428 bytes to 34,804 and never returns it above 36,852, against an
+// `Inflater::begin` window of 36,956 -- and the free heap recovers in full every
+// time, so nothing but the block says anything is wrong. See CLAUDE.md's
+// hardware facts and `docs/notes/wallabag-api.md` §8.
+//
+// IT IS SET FROM THE TRANSPORT'S OWN SCHEME rather than from the credentials,
+// so a plain-HTTP server -- the LAN case -- never pays a restart it does not
+// owe. A plain round trip costs no block at all.
+static bool gTlsFragmentedHeap = false;
+
+static void endSyncSession() {
+  gSyncEngine.reset();
+  gWbClient.reset();
+  gTransport.reset();
+  gWbStore.reset();
+  gSyncShownDone = -1;
+  gSyncShownTotal = -1;
+  endWifiSession();
+}
+
+// THE RESTART THE SYNC OWES, TAKEN AT THE ONE MOMENT IT IS INVISIBLE.
+//
+// It is `handleRetry`'s remedy for a card lost after a mount -- forced by the
+// platform rather than working around our own bug -- and it lands here for three
+// reasons that have to hold together:
+//
+//   - THE RESULT IS ON THE CARD, NOT IN RAM. The stamp the Articles list draws
+//     comes from `ArticleStore`'s watermark, so the restored list says exactly
+//     what the list we are throwing away would have said. Nothing is lost by not
+//     showing it first.
+//   - THE RECORD ALREADY NAMES THE RIGHT SCREEN. `WallabagConnecting` is
+//     `Restore::Never`, so `App::snapshot()` truncated the record BEFORE the
+//     dialog when it was pushed: what stands is `...;articles:N`, written by that
+//     push. #49's declarations carry this with nothing added.
+//   - AND E-INK HOLDS ITS LAST IMAGE. Nothing clears the glass at boot, so the
+//     fetching screen stays up through the reset and the first paint is the
+//     restored list -- one transition flash, which is what an ordinary screen
+//     change looks like.
+//
+// THE ERROR DIALOG IS WHY THIS IS NOT CALLED AT THE END OF THE SYNC. That screen
+// is `Restore::Never` too, so restarting under it would throw away the one thing
+// the reader needs to read. The restart waits for the dialog to be dismissed.
+static void restartIfHeapSpent(const char* why) {
+  if (!gTlsFragmentedHeap) return;
+  logf("[sync] restarting after %s: TLS has run, so the largest free block is %u and "
+       "`Inflater::begin` wants 36956 in one piece -- a book could not be opened until "
+       "this reset\n",
+       why, (unsigned)ESP.getMaxAllocHeap());
+  saveWhereWeAre();
+  logFlush();
+  delay(20);
+  esp_restart();
+}
+
+// START A SYNC, or say why it cannot start. `replace` because the dialog takes
+// the asking screen's place when the error panel asked -- beginJoinFlow's own
+// argument, so one veiled parent is truthful for both entry paths.
+static void beginSyncFlow(bool replace) {
+  auto show = [&](reader::WallabagErrorScreen::Shape shape, const char* why) {
+    logf("[sync] not starting: %s\n", why);
+    logFlush();
+    gFactory.setWallabagFailure(shape);
+    if (replace) gApp->replaceScreen(reader::ScreenId::WallabagError);
+    else gApp->pushScreen(reader::ScreenId::WallabagError);
+  };
+
+  std::string why;
+  const reader::CredentialsResult got = reader::loadWallabagCredentials(gSd, gWbCreds, why);
+  if (got != reader::CredentialsResult::Ok) {
+    // ALL THREE NON-OK ANSWERS LAND ON `SignIn`, and that is the honest shape
+    // rather than a missing one: absent, half-filled and malformed are all "this
+    // device cannot sign in with what is on the card", which is what the panel
+    // says. The LOG is where they are told apart, because that is where a
+    // reader's broken edit is actionable.
+    show(reader::WallabagErrorScreen::Shape::SignIn,
+         got == reader::CredentialsResult::Malformed ? why.c_str()
+                                                     : "wallabag.json is absent or blank");
+    return;
+  }
+
+  const reader::SavedNetwork* net = gWifiNets.automatic();
+  if (net == nullptr) {
+    show(reader::WallabagErrorScreen::Shape::NoNetwork, "no saved network is set to AUTO");
+    return;
+  }
+
+  const std::string psk = net->locked ? shellwifi::secret(net->ssid) : std::string();
+  if (!gRadio.beginJoin(net->ssid, psk)) {
+    show(reader::WallabagErrorScreen::Shape::Offline, "the radio refused the join");
+    return;
+  }
+  logf("[sync] joining \"%s\" to reach %s\n", net->ssid.c_str(), gWbCreds.server.c_str());
+  logFlush();
+
+  gFactory.setWallabagHost(gWbCreds.server);
+  if (replace) gApp->replaceScreen(reader::ScreenId::WallabagConnecting);
+  else gApp->pushScreen(reader::ScreenId::WallabagConnecting);
+}
+
+// Leave the dialog for the list, with the outcome already on the card.
+static void finishSync(reader::SyncOutcome outcome) {
+  const bool wrote = outcome == reader::SyncOutcome::New;
+  endSyncSession();
+
+  switch (outcome) {
+    case reader::SyncOutcome::New:
+    case reader::SyncOutcome::UpToDate:
+      // BACK TO THE LIST, AND THE LIST IS REBUILT RATHER THAN REDRAWN: its rows
+      // changed under it, which is the Wi-Fi hub's own reason for a replace.
+      // The stamp it draws comes from the watermark the engine just wrote, so
+      // this screen and the account screen cannot disagree about what happened.
+      gApp->popScreen();
+      gApp->replaceScreen(reader::ScreenId::Articles);
+      // HOME'S ARTICLES ROW MOVED, so the gate that rebuilds it is marked -- the
+      // same call `saveReadingPosition` makes for the reading progress, and for
+      // its reason: Home is the App's ROOT, so popping back to it hands over the
+      // instance it was built with and a count that changed under it would keep
+      // the old number.
+      if (wrote) gHomeRebuild.markStale();
+      // AND THE RESTART, HERE, where it is invisible: e-ink holds the fetching
+      // screen through the reset and the restored list says the same thing this
+      // one would have.
+      restartIfHeapSpent("a completed sync");
+      break;
+    case reader::SyncOutcome::NotAWallabag:
+    case reader::SyncOutcome::CredentialsRefused:
+      gFactory.setWallabagFailure(reader::WallabagErrorScreen::Shape::SignIn);
+      gApp->replaceScreen(reader::ScreenId::WallabagError);
+      break;
+    case reader::SyncOutcome::Failed:
+      gFactory.setWallabagFailure(reader::WallabagErrorScreen::Shape::Offline);
+      gApp->replaceScreen(reader::ScreenId::WallabagError);
+      break;
+    case reader::SyncOutcome::Cancelled:
+    case reader::SyncOutcome::None:
+      // A CANCEL LEAVES THE LIST AS IT WAS, and the engine's own contract is why
+      // that is honest: the watermark was not advanced, so the next sync asks for
+      // exactly what this one did not get.
+      gApp->popScreen();
+      restartIfHeapSpent("a cancelled sync");
+      break;
+  }
+}
+
+// DRIVEN FROM THE QUIET WINDOW, beside pollWifi(), for its reason: everything on
+// this device is the loop's, and a sync that blocked would stop the panel and the
+// buttons for a minute.
+static void pollSync() {
+  if (gApp->top().id() != reader::ScreenId::WallabagConnecting) return;
+  auto& dialog = static_cast<reader::WallabagConnectingScreen&>(gApp->top());
+
+  if (gSyncEngine == nullptr) {
+    // STILL JOINING. The dialog says CONNECTING... for exactly this stretch.
+    const reader::JoinState join = gRadio.joinState();
+    if (join == reader::JoinState::Running) return;
+    if (join != reader::JoinState::Ok) {
+      logf("[sync] the join did not complete, reason %d -- %s\n", gRadio.joinReason(),
+           reader::wifiReasonName(gRadio.joinReason()));
+      endSyncSession();
+      gFactory.setWallabagFailure(reader::WallabagErrorScreen::Shape::Offline);
+      gApp->replaceScreen(reader::ScreenId::WallabagError);
+      return;
+    }
+
+    // THE ENGINE IS BUILT ONLY ONCE THE RADIO IS UP, which is what keeps the
+    // decision about WHEN to bring it up in the shell -- `SyncEngine`'s own
+    // header says it owns no radio and is handed a transport already connected.
+    gTransport.reset(new (std::nothrow) ArduinoHttpTransport(gWbCreds.server));
+    gWbStore.reset(new (std::nothrow) reader::ArticleStore(gSd));
+    if (gTransport == nullptr || gWbStore == nullptr) {
+      endSyncSession();
+      gFactory.setWallabagFailure(reader::WallabagErrorScreen::Shape::Offline);
+      gApp->replaceScreen(reader::ScreenId::WallabagError);
+      return;
+    }
+    gWbClient.reset(new (std::nothrow)
+                        reader::WallabagClient(*gTransport, gTokens, gWbCreds));
+    gSyncEngine.reset(new (std::nothrow) reader::SyncEngine(
+        *gWbClient, *gWbStore, gSinks, gSettings.articlesKeepOffline));
+    if (gWbClient == nullptr || gSyncEngine == nullptr) {
+      endSyncSession();
+      gFactory.setWallabagFailure(reader::WallabagErrorScreen::Shape::Offline);
+      gApp->replaceScreen(reader::ScreenId::WallabagError);
+      return;
+    }
+    // SET FROM THE TRANSPORT, not from the URL, so there is one answer to "did
+    // TLS run" and the restart cannot disagree with the connection that caused
+    // it.
+    if (gTransport->secure()) gTlsFragmentedHeap = true;
+    mark("sync-begin");
+    if (!gSyncEngine->begin()) {
+      finishSync(reader::SyncOutcome::Failed);
+      return;
+    }
+    return;
+  }
+
+  gSyncEngine->poll();
+
+  // ONE PAINT PER FILE, NEVER PER BYTE. `setFetching` reports whether anything
+  // on the panel changed rather than acting, because a screen cannot mark the
+  // App dirty -- and a waveform per chunk would cost more than the download.
+  const int done = gSyncEngine->fetched();
+  const int total = gSyncEngine->toFetch();
+  if (done != gSyncShownDone || total != gSyncShownTotal) {
+    gSyncShownDone = done;
+    gSyncShownTotal = total;
+    if (dialog.setFetching(done, total)) gApp->markDirty();
+  }
+
+  if (gSyncEngine->state() == reader::SyncState::Done) {
+    const reader::SyncOutcome outcome = gSyncEngine->outcome();
+    mark("sync-done");
+    logf("[sync] %d of %d fetched, outcome %d, heap=%u block=%u\n", done, total, (int)outcome,
+         (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+    logFlush();
+    finishSync(outcome);
+  }
+}
+
+// POP UNTIL `target` IS ON TOP. `Action::popTo` is the SCREEN's way of asking
+// for this and there is no `App` method behind it -- the App resolves the Action
+// during a dispatch. These screens latch with `Action::article()` instead,
+// precisely so the shell can read the outcome off a screen still on top, so the
+// shell is what walks the stack.
+//
+// BOUNDED BY THE DEPTH AND NOT BY THE TARGET, because a target that is not on
+// the stack would otherwise pop to the root and take Home with it: the loop
+// stops at depth 1 whatever it finds, which degrades to "you are at Home"
+// rather than to an App with nothing in it.
+static void popToScreen(reader::ScreenId target) {
+  while (gApp->depth() > 1 && gApp->top().id() != target) gApp->popScreen();
+}
+
+// AN ARTICLE SCREEN LATCHED AN OUTCOME. handleWifi()'s shape and its four-step
+// note: the screen is STILL ON TOP, which is the whole reason nothing was
+// popped -- after a pop there is no screen left to ask.
+static void handleArticle() {
+  gApp->clearArticleRequest();
+
+  const reader::ScreenId id = gApp->top().id();
+  switch (id) {
+    case reader::ScreenId::Articles: {
+      auto& list = static_cast<reader::ArticlesScreen&>(gApp->top());
+      if (list.chosen() == reader::ArticlesScreen::Chosen::Sync) {
+        // NO clearChoice(): `ArticlesScreen::onGesture` zeroes the latch at the
+        // top of every press, so it is self-clearing -- and the success path
+        // replaces this screen outright, which destroys it anyway.
+        beginSyncFlow(/*replace=*/false);
+      }
+      break;
+    }
+
+    case reader::ScreenId::WallabagConnecting: {
+      auto& dialog = static_cast<reader::WallabagConnectingScreen&>(gApp->top());
+      if (dialog.cancelled() && gSyncEngine != nullptr) {
+        // THE ENGINE FINISHES THE CANCEL, not this: it stops after the file in
+        // flight, discards that one and keeps everything already fetched, and
+        // the poll above sees `Cancelled` next iteration. Tearing down here
+        // would drop a transport mid-write.
+        gSyncEngine->cancel();
+      } else if (dialog.cancelled()) {
+        // Cancelled while still joining, so there is no engine to ask.
+        endSyncSession();
+        gApp->popScreen();
+      }
+      break;
+    }
+
+    case reader::ScreenId::WallabagError: {
+      auto& panel = static_cast<reader::WallabagErrorScreen&>(gApp->top());
+      const auto chosen = panel.chosen();
+      if (chosen == reader::WallabagErrorScreen::Chosen::TryAgain) {
+        // REPLACE, so the panel is not left standing under the dialog -- and no
+        // restart yet, because the next thing that happens is another sync.
+        beginSyncFlow(/*replace=*/true);
+      } else if (chosen == reader::WallabagErrorScreen::Chosen::Ok) {
+        gApp->popScreen();
+        // THE RESTART THE FAILED SYNC OWED, taken now rather than when the sync
+        // ended: this screen is `Restore::Never`, so restarting under it would
+        // have thrown away the one thing the reader needed to read.
+        restartIfHeapSpent("a dismissed sync error");
+      }
+      break;
+    }
+
+    case reader::ScreenId::ArticleActions: {
+      auto& panel = static_cast<reader::ArticleActionsScreen&>(gApp->top());
+      // A COPY, because the replace below destroys the screen these live in --
+      // handleWifi()'s own rule at the same point in the same shape.
+      const reader::ArticleActionsScreen::Facts facts = panel.facts();
+      const auto chosen = panel.chosen();
+      if (chosen == reader::ArticleActionsScreen::Chosen::None) break;
+
+      reader::ArticleStore store(gSd);
+      bool wrote = false;
+      if (chosen == reader::ArticleActionsScreen::Chosen::Archive) {
+        wrote = store.queueArchive(facts.id);
+      } else {
+        wrote = store.queueStar(facts.id, !facts.starred);
+      }
+      // A QUEUED ACTION IS A MARKER FILE AND NOT A ROUND TRIP. The device has no
+      // radio up here, and bringing one up for a star would cost the restart
+      // this feature already owes once per sync -- see `restartIfHeapSpent`. The
+      // next sync pushes the queue before it asks for anything.
+      logf("[articles] %s %d: %s\n",
+           chosen == reader::ArticleActionsScreen::Chosen::Archive ? "archive" : "star",
+           facts.id, wrote ? "queued" : "COULD NOT be queued");
+      logFlush();
+
+      gApp->popScreen();
+      // REPLACED RATHER THAN REDRAWN: an archive takes the row out of the list
+      // and a star changes what its actions overlay will say, so the rows
+      // changed under it -- the Wi-Fi hub's own reason for a replace.
+      gApp->replaceScreen(reader::ScreenId::Articles);
+      if (wrote) gHomeRebuild.markStale();
+      break;
+    }
+
+    case reader::ScreenId::ArticleEnd: {
+      auto& panel = static_cast<reader::ArticleEndScreen&>(gApp->top());
+      const reader::ArticleEndScreen::Facts facts = panel.facts();
+      const auto chosen = panel.chosen();
+      if (chosen == reader::ArticleEndScreen::Chosen::None) break;
+
+      reader::ArticleStore store(gSd);
+      switch (chosen) {
+        case reader::ArticleEndScreen::Chosen::Archive:
+          store.queueArchive(facts.id);
+          gHomeRebuild.markStale();
+          // TO THE LIST, not back one screen: under this is the Reader and under
+          // that the list, and an archived article's own page is not somewhere
+          // to be left standing.
+          popToScreen(reader::ScreenId::Articles);
+          gApp->replaceScreen(reader::ScreenId::Articles);
+          break;
+        case reader::ArticleEndScreen::Chosen::Star:
+          store.queueStar(facts.id, !facts.starred);
+          // IN PLACE, because the slab's own label is what changed and the
+          // reader is still looking at this article.
+          gApp->replaceScreen(reader::ScreenId::ArticleEnd);
+          break;
+        case reader::ArticleEndScreen::Chosen::BackToList:
+          popToScreen(reader::ScreenId::Articles);
+          break;
+        case reader::ArticleEndScreen::Chosen::NextArticle:
+          // NOT BUILT HERE. Opening the next article is `openBookAt`'s, which is
+          // Task 4.6 -- and a slab that silently did nothing would be the
+          // dead-button shape this project has shipped twice, so it is left
+          // saying so in the log until that lands.
+          logf("[articles] NEXT ARTICLE is not wired yet (task 4.6)\n");
+          logFlush();
+          break;
+        case reader::ArticleEndScreen::Chosen::None:
+          break;
+      }
+      break;
+    }
+
+    case reader::ScreenId::WallabagAccount: {
+      auto& panel = static_cast<reader::WallabagAccountScreen&>(gApp->top());
+      if (panel.chosen() != reader::WallabagAccountScreen::Chosen::KeepOffline) break;
+      // APPLIES AND PERSISTS, in that order -- `SettingsSink::commit`'s contract
+      // verbatim, and a refused write still shows the new value because the
+      // change HAS taken effect in RAM and reverting the display would make a
+      // read-only card look like a screen that ignores its buttons.
+      gSettings.articlesKeepOffline = panel.keepOffline();
+      if (!reader::saveSettings(gSd, gSettings)) {
+        logf("[articles] keep-offline is now %d but the card would not take it; it "
+             "reverts at the next boot\n",
+             gSettings.articlesKeepOffline);
+        logFlush();
+      }
+      // AND THE NEW CEILING IS APPLIED NOW rather than at the next sync, because
+      // the row the reader just changed is the one that says how many are kept:
+      // a screen stating 20 with 50 on the card is a number with nothing behind
+      // it.
+      reader::ArticleStore store(gSd);
+      const int pruned = store.prune(gSettings.articlesKeepOffline);
+      if (pruned > 0) {
+        logf("[articles] pruned %d article(s) down to the new ceiling of %d\n", pruned,
+             gSettings.articlesKeepOffline);
+        logFlush();
+        gHomeRebuild.markStale();
+      }
+      gApp->replaceScreen(reader::ScreenId::WallabagAccount);
+      break;
+    }
+
+    case reader::ScreenId::ArticlesRemoveConfirm: {
+      auto& panel = static_cast<reader::ArticlesRemoveConfirmScreen&>(gApp->top());
+      if (panel.chosen() != reader::ArticlesRemoveConfirmScreen::Chosen::RemoveAll) break;
+      reader::ArticleStore store(gSd);
+      const int removed = store.removeAll();
+      logf("[articles] removed %d downloaded article(s); the account and the watermark "
+           "stay, so the next sync fetches them again\n",
+           removed);
+      logFlush();
+      gApp->popScreen();
+      gApp->replaceScreen(reader::ScreenId::WallabagAccount);
+      gHomeRebuild.markStale();
+      break;
+    }
+
+    default:
+      break;
+  }
 }
 
 // A CONNECT-FLOW SCREEN LATCHED AN OUTCOME. See Action::wifi() and
@@ -7457,6 +7911,7 @@ void loop() {
     // that is still on top, so this has to run on the dispatch's own pass,
     // before anything pops. See App::wifiRequested().
     if (gApp->wifiRequested()) handleWifi();
+    if (gApp->articleRequested()) handleArticle();
     // Between the dispatch and the mask refresh below, so the refresh sees
     // whatever screen the retry left on top -- on success that is a brand new App
     // rooted at Home, whose holds are not the SD-missing screen's.
@@ -7759,6 +8214,7 @@ void loop() {
   // in the same iteration as the push, so the first frame the picker ever
   // draws is the scanning one.
   pollWifi();
+  pollSync();
 
   const bool settled = static_cast<uint32_t>(millis() - gLastInputMs) >= kCoalesceMs;
   const bool painted = gApp->dirty() && settled;
