@@ -103,11 +103,19 @@ TEST_CASE("unreadCount asks reading_store rather than re-deriving") {
   put(s, fs, meta(3, "2026-09-03T10:00:00+0000", /*starred=*/false, /*archived=*/true));
   CHECK(s.unreadCount() == 2);
 
-  // FINISHED is not unread; merely STARTED still is.
+  // OPENED IS NOT UNREAD, AND THIS ASSERTED THE BOOK'S RULE. It read "FINISHED
+  // is not unread; merely STARTED still is" -- which is right for a novel and
+  // wrong for an article, and it made the state unreachable: `finished` is set
+  // by an explicit press that no article screen offers, so every row stayed
+  // unread for ever. Reported off the device as "the little dot on the left of
+  // an article never goes away".
+  //
+  // An article is a single sitting with no second session to come back to;
+  // opening it is the signal, and it costs the reader nothing.
   markRead(fs, s.epubPath(1), /*finished=*/true);
   CHECK(s.unreadCount() == 1);
   markRead(fs, s.epubPath(2), /*finished=*/false);
-  CHECK(s.unreadCount() == 1);
+  CHECK(s.unreadCount() == 0);
 }
 
 TEST_CASE("queueing an archive removes the local files at once") {

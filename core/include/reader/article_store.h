@@ -6,6 +6,12 @@
 
 namespace reader {
 
+// FORWARD-DECLARED RATHER THAN INCLUDED. `readFromProgress` only compares the
+// pointer against null, so the definition is not needed here -- and
+// `reading_store.h` would be a header edge bought for one inline body, which is
+// the coupling `settings.h` already refuses at `bodyPpem`.
+struct ProgressEntry;
+
 // The article directory: /.reader/articles/, and everything the device knows
 // about an article that is not its text.
 //
@@ -139,6 +145,29 @@ class ArticleStore {
   // Home's ARTICLES row. `N UNREAD` when configured, EMPTY when not -- and the
   // empty value is what draws the chevron, which is Main.dc.html's menu note
   // refusing a setup nag on the screen the device boots to.
+  // WHETHER AN ARTICLE COUNTS AS READ, AND IT MEANS OPENED -- where a BOOK's
+  // `finished` means finished. One spelling, because there were two: this rule
+  // sat in `unreadCount()` and again in `ArticlesScreen::load()`, and both took
+  // the book's meaning.
+  //
+  // WHICH MADE THE MARK UNREACHABLE. `ProgressEntry::finished` is set by an
+  // explicit press -- BookEnd's slab, or the Library's actions overlay -- and an
+  // article has neither, so every row stayed solid for ever. Reported off the
+  // device as "the little dot on the left of an article never goes away".
+  //
+  // THE TWO MEANINGS ARE RIGHT FOR THE TWO THINGS. A novel is not read because
+  // you opened it, and marking one finished is a fair thing to ask once a book.
+  // An article is a single sitting with no second session to come back to, and a
+  // list needing a press per item to stay useful is a chore in front of a feature
+  // whose point is not being one. design/Articles.dc.html has the argument.
+  //
+  // THE SIDECAR EXISTING IS THE SIGNAL, which is the same record the percentage
+  // comes from: a position is saved on the way out, on a chapter crossing, into
+  // sleep, and in the quiet window two seconds after the buttons stop. `finished`
+  // is not tested because it implies the record exists -- testing it too would be
+  // two conditions where one decides.
+  static bool readFromProgress(const ProgressEntry* p) { return p != nullptr; }
+
   static std::string homeMenuValue(bool configured, int unread);
 
  private:

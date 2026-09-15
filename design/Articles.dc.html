@@ -127,6 +127,35 @@
     <div style="font-size: var(--t-meta); letter-spacing: 0.1em; white-space: nowrap;">1 TO PUSH</div>
   </div>
 
+  <!--
+    THE BULLET IS SOLID WHEN UNREAD AND HOLLOW WHEN READ, and it never
+    DISAPPEARS: the rows below draw both, and the read ones also drop to weight
+    400 and gain `. READ` on the meta line. Three signals for one state, because
+    a 8x8 mark at arm's length is not much on its own.
+
+    AND `READ` MEANS OPENED HERE, WHERE FOR A BOOK IT MEANS FINISHED. That was
+    not stated anywhere and the code took the book's meaning, so the bullet could
+    never go hollow at all: `finished` is set by an explicit press -- BookEnd's
+    slab, or the Library's actions overlay -- and an article has neither. Every
+    row stayed solid for ever. Reported off the device as "the little dot on the
+    left of an article never goes away".
+
+    THE TWO MEANINGS ARE RIGHT FOR THE TWO THINGS. A novel is not read because
+    you opened it, and asking a reader to mark one finished is a fair thing to
+    ask once a book. An article is a single sitting: it is one to twenty minutes,
+    there is no second session to come back to, and a list that needed a press
+    per item to stay useful would be a chore in front of a feature whose whole
+    point is not being a chore. Opening it is the signal, and it costs the reader
+    nothing.
+
+    WHAT IT IS READ OFF is the per-article progress sidecar EXISTING -- the same
+    record the percentage comes from -- so "opened" means a reading position was
+    saved, which happens on the way out of the article, on a chapter crossing,
+    on the way into sleep, and in the quiet window two seconds after the buttons
+    stop. A reader who opens an article and immediately presses Back has still
+    opened it, and the mark says so.
+  -->
+
   <div style="display: flex; flex-direction: column; flex-grow: 1;">
 
     <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px; background: #000000; color: #ffffff;">

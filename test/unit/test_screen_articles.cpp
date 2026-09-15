@@ -531,3 +531,50 @@ TEST_CASE("the sync row is focusable, says so, and the Confirm hint follows it")
     CHECK_FALSE(s.vm().syncFocused);
   }
 }
+
+TEST_CASE("an article goes hollow when it is OPENED, not when it is finished") {
+  // THE MARK WAS UNREACHABLE. `ArticleRow::read` drove the bullet -- solid unread,
+  // hollow read, which the theme has always drawn correctly -- and the rule
+  // behind it was the BOOK's: `ProgressEntry::finished`, set by an explicit press
+  // that no article screen offers. So every row stayed solid for ever, and the
+  // band and Home's row counted every article as unread whatever the reader did.
+  // Reported off the device as "the little dot on the left of an article never
+  // goes away".
+  FakeFileSystem fs;
+  writeCredentials(fs);
+  writeArticle(fs, 1, "2026-09-01T10:00:00Z", "Opened");
+  writeArticle(fs, 2, "2026-09-02T10:00:00Z", "Untouched");
+
+  SUBCASE("untouched: both solid, both counted") {
+    ArticlesScreen s(fs);
+    s.setVisibleRows(5);
+    REQUIRE(s.vm().rows.size() == 2);
+    CHECK_FALSE(s.vm().rows[0].read);
+    CHECK_FALSE(s.vm().rows[1].read);
+    CHECK(s.vm().bandValue == "2 UNREAD");
+  }
+
+  SUBCASE("opened WITHOUT finishing: hollow, and out of the count") {
+    // A position saved and nothing else -- which is what the quiet window writes
+    // two seconds after the buttons stop, and what Back out of an article writes
+    // before the dispatch. No press marked anything finished.
+    reader::ArticleStore store(fs);
+    reader::ReadingPosition pos;
+    pos.bookPath = store.epubPath(1);
+    pos.bookBytes = 4;
+    pos.finished = false;
+    REQUIRE(reader::savePosition(fs, pos) != reader::SaveResult::Failed);
+
+    ArticlesScreen s(fs);
+    s.setVisibleRows(5);
+    REQUIRE(s.vm().rows.size() == 2);
+    // The list is newest first, so row 1 is article 1.
+    CHECK(s.vm().rows[1].title == "Opened");
+    CHECK(s.vm().rows[1].read);
+    CHECK_FALSE(s.vm().rows[0].read);
+    CHECK(s.vm().bandValue == "1 UNREAD");
+    // AND THE STORE AGREES, because the rule has one spelling now -- it was in
+    // `unreadCount()` and again in `load()`, and both took the book's meaning.
+    CHECK(store.unreadCount() == 1);
+  }
+}

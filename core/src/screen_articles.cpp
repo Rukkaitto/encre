@@ -145,7 +145,7 @@ bool ArticlesScreen::load() {
       if (m.archived) continue;
       const ProgressEntry* p = progressFor(progress, store.epubPath(m.id));
       items_.push_back({m.id, m.title, m.domain, m.readingTime,
-                        p != nullptr && p->finished, m.starred});
+                        ArticleStore::readFromProgress(p), m.starred});
     }
     // THE STAMP IS WHAT THIS DEVICE OWES THE SERVER, not what the last sync did.
     // `WALLABAG . NO NEW` was redundant -- the account screen's `Last sync` row
@@ -199,7 +199,7 @@ bool ArticlesScreen::refreshProgress() {
   bool moved = false;
   for (ArticleItem& a : items_) {
     const ProgressEntry* p = progressFor(progress, store.epubPath(a.id));
-    const bool read = p != nullptr && p->finished;
+    const bool read = ArticleStore::readFromProgress(p);
     if (read != a.read) {
       a.read = read;
       moved = true;

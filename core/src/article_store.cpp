@@ -127,7 +127,7 @@ int ArticleStore::unreadCount() const {
   for (const ArticleMeta& m : list()) {
     if (m.archived) continue;
     const ProgressEntry* p = progressFor(progress, epubPath(m.id));
-    if (p != nullptr && p->finished) continue;
+    if (readFromProgress(p)) continue;
     ++n;
   }
   return n;
