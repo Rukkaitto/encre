@@ -564,7 +564,7 @@ screen writes a marker the sync will push later.
 - Create: `core/include/reader/wallabag_credentials.h`, `core/src/wallabag_credentials.cpp`
 - Test: `test/unit/test_wallabag_credentials.cpp`
 
-- [ ] **Step 1:** Write the failing tests over `FakeFileSystem`. Path constant
+- [x] **Step 1:** Write the failing tests over `FakeFileSystem`. Path constant
   `/.reader/wallabag.json`. `load()` returns a struct of five strings (`server`,
   `clientId`, `clientSecret`, `username`, `password`) and a `configured` answer that is
   true only when all five are non-empty. A missing file loads as unconfigured, **not**
@@ -577,11 +577,11 @@ screen writes a marker the sync will push later.
   an existing file however malformed (`loadAndApplySettings`' rule). The flat `Json`
   parser is the parser; assert a `\uXXXX` escape in the file reads as malformed, and
   say in the header that a hand-editor's accented password must be typed as UTF-8.
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement. The header states the security position in
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement. The header states the security position in
   `docs/notes/wallabag-api.md` §5's words: plaintext on a removable card, bounded by
   the deployment and not by anything clever.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(wallabag): the credentials file, seeded when absent and never overwritten`.
 
 ### Task 2.2: The article store — metadata sidecars, queue markers, watermark, pruning
@@ -590,7 +590,7 @@ screen writes a marker the sync will push later.
 - Create: `core/include/reader/article_store.h`, `core/src/article_store.cpp`
 - Test: `test/unit/test_article_store.cpp`
 
-- [ ] **Step 1:** Write the failing tests over `FakeFileSystem`. The directory is
+- [x] **Step 1:** Write the failing tests over `FakeFileSystem`. The directory is
   `/.reader/articles/`. **Per article, two files named by the server's integer id**:
   `<id>.epub` and `<id>.json` — the sidecar holding `title`, `domain`, `readingTime`,
   `starred`, `archived`, `updatedAt` (the server's string, stored verbatim), all
@@ -613,14 +613,14 @@ screen writes a marker the sync will push later.
   never one with a reading position (`percentFor` > -1). `removeAll()` deletes every
   `.epub` and sidecar and every reading sidecar for them, and leaves the queue and
   the watermark alone.
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement. Every write goes through `writeAll`, which drops the
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement. Every write goes through `writeAll`, which drops the
   listing cache by construction (`SdFileSystem::forgetCardFacts`). Nothing here reads a
   clock.
-- [ ] **Step 4:** Run. Expected: PASS. Add a case that a sidecar with no `.epub` is
+- [x] **Step 4:** Run. Expected: PASS. Add a case that a sidecar with no `.epub` is
   skipped by `list()` and reported by a `stray()` count, so a download that died
   between the two writes shows in the log rather than as a row that will not open.
-- [ ] **Step 5:** Commit `feat(articles): the card-side store -- sidecars, marker-file queue, watermark, pruning`.
+- [x] **Step 5:** Commit `feat(articles): the card-side store -- sidecars, marker-file queue, watermark, pruning`.
 
 ### Task 2.3: `articlesKeepOffline` in Settings
 
@@ -628,15 +628,15 @@ screen writes a marker the sync will push later.
 - Modify: `core/include/reader/settings.h`, `core/src/settings.cpp`
 - Test: `test/unit/test_settings.cpp`
 
-- [ ] **Step 1:** Write the failing test: a new field `articlesKeepOffline`, default
+- [x] **Step 1:** Write the failing test: a new field `articlesKeepOffline`, default
   50, steps `{20, 50, 100}`, clamped to the table on load (an out-of-range value is
   `CORRECTED`, not `DEFAULTED`), round-trips through `saveSettings`/`loadSettings`, and
   an older file without the key loads with the default. Assert `kSettingsVersion` did
   **not** move — the default is today's behaviour.
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement beside the other tables in `settings.h`, with the
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement beside the other tables in `settings.h`, with the
   `ascending` assert the others carry.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(settings): articlesKeepOffline, the account screen's one persisted row`.
 
 ### Task 2.4: The list, the account, Home and the end screen read the store
@@ -648,7 +648,7 @@ screen writes a marker the sync will push later.
   `refreshProgress()` pair on `LibraryScreen`'s model
 - Test: `test/unit/test_screen_articles.cpp`, `test/unit/test_home_rebuild.cpp`
 
-- [ ] **Step 1:** Write the failing tests: an `ArticlesScreen` constructed over a
+- [x] **Step 1:** Write the failing tests: an `ArticlesScreen` constructed over a
   `FakeFileSystem` holding three sidecars lists three rows newest first, marks the one
   with a `finished` reading sidecar `READ`, and its band reads `2 UNREAD`; with no
   credentials file it is the not-set-up variant; with credentials but no articles it
@@ -658,10 +658,10 @@ screen writes a marker the sync will push later.
   logic is in the shell, so pin the **pure** half here: a helper in
   `article_store.h` that returns the menu value — `N UNREAD` when configured, empty
   when not — and test both.
-- [ ] **Step 2:** Run. Expected: failures.
-- [ ] **Step 3:** Implement. The factory holds a `FileSystem*` for the store exactly as
+- [x] **Step 2:** Run. Expected: failures.
+- [x] **Step 3:** Implement. The factory holds a `FileSystem*` for the store exactly as
   it holds one for the Library, and `Articles` is `Ready` because of it.
-- [ ] **Step 4:** Run; `make test` green. Commit
+- [x] **Step 4:** Run; `make test` green. Commit
   `feat(articles): the list, the account and Home's row read the card store`.
 
 ---
