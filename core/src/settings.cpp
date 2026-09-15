@@ -187,6 +187,7 @@ bool Settings::validate() {
   if (!snapToTable(bodyPpem, kBodyPpemSteps)) ok = false;
   if (!snapToTable(margins, kMarginSteps)) ok = false;
   if (!snapToTable(lineSpacing, kLineSpacingSteps)) ok = false;
+  if (!snapToTable(articlesKeepOffline, kArticlesKeepOfflineSteps)) ok = false;
   // `justify` is a bool: there is no invalid value to snap.
   // The two enums are RESET rather than clamped -- see the helper, and the
   // header's own note on why an enum is a third kind of correction.
@@ -252,6 +253,8 @@ bool loadSettings(FileSystem& fs, Settings& out) {
   readSteppedInt(o, "bodyPpem", parsed.bodyPpem, kBodyPpemSteps, ok);
   readSteppedInt(o, "margins", parsed.margins, kMarginSteps, ok);
   readSteppedInt(o, "lineSpacing", parsed.lineSpacing, kLineSpacingSteps, ok);
+  readSteppedInt(o, "articlesKeepOffline", parsed.articlesKeepOffline, kArticlesKeepOfflineSteps,
+                 ok);
   readBool(o, "justify", parsed.justify, ok);
   readEnum(o, "sleepShows", parsed.sleepShows, kSleepShowsCount, ok);
   readEnum(o, "coverFit", parsed.coverFit, kCoverFitCount, ok);
@@ -275,6 +278,7 @@ bool saveSettings(FileSystem& fs, const Settings& in) {
   o.setInt("bodyPpem", valid.bodyPpem);
   o.setInt("margins", valid.margins);
   o.setInt("lineSpacing", valid.lineSpacing);
+  o.setInt("articlesKeepOffline", valid.articlesKeepOffline);
   o.setBool("justify", valid.justify);
   // The enums go out as their integer index, which is what makes the order in
   // settings.h a stored format rather than a free choice: reordering the

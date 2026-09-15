@@ -579,3 +579,49 @@ TEST_CASE("saveSettings never writes an out-of-enum value to the card") {
   CHECK(reader::loadSettings(fs, back));  // TRUE: the file on the card is clean
   CHECK(back.sleepShows == reader::SleepShows::CoverAndDetails);
 }
+
+TEST_CASE("articlesKeepOffline is stepped, clamped to its table, and needs no version bump") {
+  // The account screen's one persisted row. 50 is the board's specimen and the
+  // default, so a device that has never seen the row behaves as the board draws
+  // it.
+  CHECK(Settings{}.articlesKeepOffline == 50);
+
+  SUBCASE("an out-of-range value is CORRECTED, not DEFAULTED") {
+    // Refusing to boot over one bad number is worse, so the field snaps to the
+    // table and the rest of the file still loads. loadSettings' rule for every
+    // stepped value, and it returns false either way.
+    FakeFileSystem fs;
+    REQUIRE(fs.writeAll("/.reader/settings.json",
+                        "{\"version\":1,\"articlesKeepOffline\":37,\"sleepAfterMs\":600000}"));
+    Settings s;
+    CHECK_FALSE(loadSettings(fs, s));
+    CHECK(s.articlesKeepOffline == 50);
+    CHECK(s.sleepAfterMs == 600000u);
+  }
+
+  SUBCASE("it round-trips through all three steps") {
+    for (const int v : {20, 50, 100}) {
+      CAPTURE(v);
+      FakeFileSystem fs;
+      Settings out;
+      out.articlesKeepOffline = v;
+      REQUIRE(saveSettings(fs, out));
+      Settings in;
+      REQUIRE(loadSettings(fs, in));
+      CHECK(in.articlesKeepOffline == v);
+    }
+  }
+
+  SUBCASE("an older file without the key loads with the default") {
+    // WHICH IS WHY kSettingsVersion DID NOT MOVE. A bump would make loadSettings
+    // refuse the whole file and cost every device its sleep timeout and its
+    // typography to gain one number.
+    FakeFileSystem fs;
+    REQUIRE(fs.writeAll("/.reader/settings.json",
+                        "{\"version\":1,\"sleepAfterMs\":600000}"));
+    Settings s;
+    REQUIRE(loadSettings(fs, s));
+    CHECK(s.articlesKeepOffline == 50);
+    CHECK(s.sleepAfterMs == 600000u);
+  }
+}

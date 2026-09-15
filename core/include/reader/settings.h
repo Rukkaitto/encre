@@ -225,6 +225,17 @@ struct Settings {
   SleepShows sleepShows = SleepShows::CoverAndDetails;
   CoverFit coverFit = CoverFit::Fill;
 
+  // HOW MANY ARTICLES THE CARD KEEPS, from design/WallabagAccount.dc.html's
+  // `Keep offline` row. 50 is the board's own specimen and is the default, so a
+  // device that has never seen this row behaves as the board draws it.
+  //
+  // kSettingsVersion DID NOT MOVE, for the fourth time and for the reason at the
+  // top of this file: an added field takes its default from an older file, and
+  // the default IS the behaviour a card with no key gets. A bump would make
+  // loadSettings refuse the whole file and cost every device its sleep timeout
+  // and its typography to gain one number.
+  int articlesKeepOffline = 50;
+
   // Corrects every field, returning false if anything had to be corrected --
   // and there are THREE corrections, not one. The ranged fields (sleepAfterMs,
   // fullRefreshEvery) are CLAMPED into a range. The typography fields are
