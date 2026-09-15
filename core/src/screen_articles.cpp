@@ -2,7 +2,11 @@
 
 #include <string>
 
+#include "reader/article_store.h"
+#include "reader/reading_position.h"
+#include "reader/reading_store.h"
 #include "reader/theme.h"
+#include "reader/wallabag_credentials.h"
 
 namespace reader {
 namespace {
@@ -35,6 +39,14 @@ const std::array<std::string, 4> kHints{"BACK", "READ", "UP", "DOWN"};
 // (kHintEmptySlotW), which the board authors as a spacer div -- measuring one as
 // nothing draws the live slot in the wrong place.
 const std::array<std::string, 4> kSetupHints{"BACK", "", "", ""};
+
+// design/ArticlesSetup.dc.html's own words, in ONE place: two constructors set
+// them, and a second copy is a board change that reaches one variant.
+constexpr const char* kSetupTitle = "READ IT LATER";
+constexpr const char* kSetupProse =
+    "Put the SD card in your computer and fill in your wallabag details in its "
+    "/.reader/wallabag.json file.";
+constexpr const char* kSetupNote = "THE FILE IS ALREADY ON THE CARD.";
 
 }  // namespace
 
@@ -71,15 +83,117 @@ ArticlesScreen::ArticlesScreen()
   // The board's own words. They live on the model rather than in the theme for
   // the reason every other string here does: the board owns the copy, and a
   // sentence in a renderer is a copy change that needs a code change.
-  vm_.setupTitle = "READ IT LATER";
-  vm_.setupProse =
-      "Put the SD card in your computer and fill in your wallabag details in its "
-      "/.reader/wallabag.json file.";
-  vm_.setupNote = "THE FILE IS ALREADY ON THE CARD.";
+  vm_.setupTitle = kSetupTitle;
+  vm_.setupProse = kSetupProse;
+  vm_.setupNote = kSetupNote;
   vm_.hints = kSetupHints;
   vm_.holds = {false, false, false, false};
   declareHints(vm_.holds);
   syncVm();
+}
+
+ArticlesScreen::ArticlesScreen(FileSystem& fs) : FocusScreen(0, 0, Focus::WithNone), fs_(&fs) {
+  vm_.title = "ARTICLES";
+  vm_.syncLabel = "Sync now";
+  vm_.hints = kHints;
+  vm_.holds = {false, true, false, false};
+  declareHints(vm_.holds);
+  declareRepeat(static_cast<ButtonMask>(buttonBit(Button::Up) | buttonBit(Button::Down)));
+  load();
+  if (!items_.empty()) setFocus(0);
+  syncVm();
+}
+
+bool ArticlesScreen::load() {
+  if (fs_ == nullptr) return false;
+  const int visible = window().visibleRows();
+
+  // WHICH VARIANT IS READ OFF THE CARD, and it is the CREDENTIALS that decide --
+  // never the row count. `Absent` and `Unconfigured` are both "nobody has set
+  // this up"; anything else is the list, empty or not.
+  WallabagCredentials creds;
+  std::string why;
+  const CredentialsResult r = loadWallabagCredentials(*fs_, creds, why);
+  const bool configured = (r == CredentialsResult::Ok);
+
+  const std::vector<ArticleItem> before = items_;
+  const std::string beforeStamp = vm_.syncStamp;
+  const bool beforeNotSetUp = vm_.notSetUp;
+
+  items_.clear();
+  vm_.notSetUp = !configured;
+  if (!configured) {
+    vm_.syncStamp.clear();
+    // The not-set-up variant's copy, which the fixture constructor also sets:
+    // one place, so the two cannot drift.
+    vm_.setupTitle = kSetupTitle;
+    vm_.setupProse = kSetupProse;
+    vm_.setupNote = kSetupNote;
+    // Noneless: there is nothing to focus, and -1 would be a selection on an
+    // invisible row -- HomeEmpty's rule.
+    window() = ScrollWindow(0, 0, Focus::Noneless);
+    vm_.hints = kSetupHints;
+    vm_.holds = {false, false, false, false};
+    declareHints(vm_.holds);
+  } else {
+    const ArticleStore store(*fs_);
+    std::vector<ProgressEntry> progress;
+    loadProgressIndex(*fs_, progress);
+    for (const ArticleMeta& m : store.list()) {
+      if (m.archived) continue;
+      const ProgressEntry* p = progressFor(progress, store.epubPath(m.id));
+      items_.push_back({m.id, m.title, m.domain, m.readingTime,
+                        p != nullptr && p->finished, m.starred});
+    }
+    SyncWatermark w;
+    store.loadWatermark(w);
+    vm_.syncStamp = std::string("WALLABAG ") + kMiddot + " " +
+                    ArticleStore::outcomeLabel(w.lastOutcome);
+    // THE WINDOW IS REBUILT HERE, which is where the count is known. It was not,
+    // and the constructor over a FileSystem then had a zero-high window: the
+    // slice was empty, the screen rendered no rows at all, and refreshProgress
+    // walked off the end of it. `visibleRows` is carried, because setVisibleRows
+    // may already have been called -- the shell sets it from the theme before
+    // anything else, and a rescan must not throw it away.
+    window() = ScrollWindow(static_cast<int>(items_.size()), visible, Focus::WithNone);
+    vm_.hints = kHints;
+    vm_.holds = {false, true, false, false};
+    declareHints(vm_.holds);
+  }
+  return items_ != before || vm_.syncStamp != beforeStamp || vm_.notSetUp != beforeNotSetUp;
+}
+
+bool ArticlesScreen::rescan() {
+  if (fs_ == nullptr) return false;
+  const int was = focus();
+  const bool moved = load();
+  // THE FOCUS IS CARRIED RATHER THAN RESET, and clamped by the window: a sync
+  // that removed rows must not move a selection the reader did not touch any
+  // further than it has to. -1 is the sync row and stays there.
+  if (!vm_.notSetUp && !items_.empty() && was >= 0) window().setFocus(was, nullptr);
+  syncVm();
+  return moved;
+}
+
+bool ArticlesScreen::refreshProgress() {
+  // NO LISTING OF THE ARTICLES DIRECTORY, which is the point: only /.reader/state
+  // changed, and the Library's own refreshProgress exists for the same reason --
+  // a rescan on the critical path of a Back costs a directory walk per row.
+  if (fs_ == nullptr || vm_.notSetUp) return false;
+  std::vector<ProgressEntry> progress;
+  loadProgressIndex(*fs_, progress);
+  const ArticleStore store(*fs_);
+  bool moved = false;
+  for (ArticleItem& a : items_) {
+    const ProgressEntry* p = progressFor(progress, store.epubPath(a.id));
+    const bool read = p != nullptr && p->finished;
+    if (read != a.read) {
+      a.read = read;
+      moved = true;
+    }
+  }
+  if (moved) syncVm();
+  return moved;
 }
 
 void ArticlesScreen::setVisibleRows(int n) {

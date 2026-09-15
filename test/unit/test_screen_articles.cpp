@@ -180,3 +180,236 @@ TEST_CASE("the sync-done variant is the stamp and a status line, and nothing els
   CHECK(s.vm().rows.size() == 5);
   CHECK(s.id() == ScreenId::Articles);
 }
+
+// --- built from the card -----------------------------------------------------
+
+#include "fake_fs.h"
+#include "reader/article_store.h"
+#include "reader/reading_position.h"
+#include "reader/reading_store.h"
+#include "reader/settings.h"
+#include "reader/screen_wallabag_account.h"
+#include "reader/screens.h"
+#include "reader/wallabag_credentials.h"
+
+namespace {
+
+void writeCredentials(FakeFileSystem& fs) {
+  REQUIRE(fs.writeAll("/.reader/wallabag.json",
+                      "{\"server\":\"http://w.lan\",\"clientId\":\"a\",\"clientSecret\":\"b\""
+                      ",\"username\":\"lucasg\",\"password\":\"p\"}"));
+}
+
+void writeArticle(FakeFileSystem& fs, int id, const std::string& updated,
+                  const std::string& title, bool starred = false) {
+  ArticleStore s(fs);
+  REQUIRE(s.writeMeta({id, title, "LONGREADS", 12, starred, false, updated}));
+  REQUIRE(fs.writeAll(s.epubPath(id), "PK"));
+}
+
+void finish(FakeFileSystem& fs, int id) {
+  ArticleStore s(fs);
+  ReadingPosition p;
+  p.bookPath = s.epubPath(id);
+  p.bookBytes = 2;
+  p.finished = true;
+  REQUIRE(savePosition(fs, p) != SaveResult::Failed);
+}
+
+}  // namespace
+
+TEST_CASE("over a card: three sidecars list newest first, with READ marked") {
+  FakeFileSystem fs;
+  writeCredentials(fs);
+  writeArticle(fs, 1, "2026-09-01T10:00:00Z", "Oldest");
+  writeArticle(fs, 2, "2026-09-03T10:00:00Z", "Newest");
+  writeArticle(fs, 3, "2026-09-02T10:00:00Z", "Middle");
+  finish(fs, 3);
+
+  ArticlesScreen s(fs);
+  s.setVisibleRows(5);
+  REQUIRE(s.vm().rows.size() == 3);
+  CHECK(s.vm().rows[0].title == "Newest");
+  CHECK(s.vm().rows[1].title == "Middle");
+  CHECK(s.vm().rows[2].title == "Oldest");
+  CHECK(s.vm().rows[1].read);
+  CHECK_FALSE(s.vm().rows[0].read);
+  CHECK(s.vm().bandValue == "2 UNREAD");
+  CHECK_FALSE(s.vm().notSetUp);
+}
+
+TEST_CASE("over a card: no credentials is the not-set-up variant, whatever is in the directory") {
+  // THE CREDENTIALS DECIDE, NEVER THE ROW COUNT. A card with articles left from
+  // a previous account and no credentials file is still "nobody has set this
+  // up", and drawing a list the reader cannot sync would be worse.
+  FakeFileSystem fs;
+  writeArticle(fs, 1, "2026-09-01T10:00:00Z", "Left over");
+  ArticlesScreen s(fs);
+  CHECK(s.vm().notSetUp);
+  CHECK(s.vm().bandValue == "NOT SET UP");
+  CHECK(s.vm().rows.empty());
+}
+
+TEST_CASE("over a card: credentials and no articles is the LIST, not the setup screen") {
+  // The state a reader is in the moment they fill the file in. Telling them to
+  // go and fill in a file they have just filled in is the defect this separates.
+  FakeFileSystem fs;
+  writeCredentials(fs);
+  ArticlesScreen s(fs);
+  s.setVisibleRows(5);
+  CHECK_FALSE(s.vm().notSetUp);
+  CHECK(s.vm().bandValue == "0 UNREAD");
+  CHECK(s.vm().rows.empty());
+  CHECK(s.vm().syncStamp == "WALLABAG \xC2\xB7 NEVER");
+}
+
+TEST_CASE("over a card: the stamp is the watermark's outcome, in four words") {
+  FakeFileSystem fs;
+  writeCredentials(fs);
+  ArticleStore store(fs);
+  struct Case { const char* stored; const char* shown; };
+  const Case cases[] = {
+      {"never", "WALLABAG \xC2\xB7 NEVER"},
+      {"upToDate", "WALLABAG \xC2\xB7 NO NEW"},
+      {"new:3", "WALLABAG \xC2\xB7 3 NEW"},
+      {"new:100", "WALLABAG \xC2\xB7 100 NEW"},
+      {"failed", "WALLABAG \xC2\xB7 FAILED"},
+      // A watermark from a newer firmware must not make this screen say
+      // something false; NEVER is the safe reading of a word we cannot parse.
+      {"something-else", "WALLABAG \xC2\xB7 NEVER"},
+      // `new:0` cannot be written by the engine (it writes upToDate), so this is
+      // a malformed record -- and the honest word beats a zero to interpret.
+      {"new:0", "WALLABAG \xC2\xB7 NO NEW"},
+  };
+  for (const Case& c : cases) {
+    CAPTURE(c.stored);
+    SyncWatermark w;
+    w.lastOutcome = c.stored;
+    REQUIRE(store.saveWatermark(w));
+    ArticlesScreen s(fs);
+    CHECK(s.vm().syncStamp == c.shown);
+  }
+}
+
+TEST_CASE("rescan re-reads the directory and carries the focus") {
+  FakeFileSystem fs;
+  writeCredentials(fs);
+  for (int i = 1; i <= 4; ++i)
+    writeArticle(fs, i, "2026-09-0" + std::to_string(i) + "T10:00:00Z", "A" + std::to_string(i));
+  ArticlesScreen s(fs);
+  s.setVisibleRows(5);
+  REQUIRE(s.vm().rows.size() == 4);
+  REQUIRE(s.onGesture(ev(Gesture::Next)).kind == Action::Kind::Redraw);
+  REQUIRE(s.focus() == 1);
+
+  ArticleStore store(fs);
+  REQUIRE(store.queueArchive(4));  // the NEWEST, so row 0 goes
+  CHECK(s.rescan());
+  CHECK(s.vm().rows.size() == 3);
+  // Carried, not reset: a sync that removed rows must not move a selection the
+  // reader did not touch any further than it has to.
+  CHECK(s.focus() == 1);
+  CHECK_FALSE(s.rescan());
+}
+
+TEST_CASE("refreshProgress marks READ without re-listing the articles directory") {
+  FakeFileSystem fs;
+  writeCredentials(fs);
+  writeArticle(fs, 1, "2026-09-01T10:00:00Z", "One");
+  ArticlesScreen s(fs);
+  s.setVisibleRows(5);
+  REQUIRE_FALSE(s.vm().rows[0].read);
+  CHECK_FALSE(s.refreshProgress());
+
+  finish(fs, 1);
+  CHECK(s.refreshProgress());
+  CHECK(s.vm().rows[0].read);
+  CHECK(s.vm().bandValue == "0 UNREAD");
+  CHECK_FALSE(s.refreshProgress());
+}
+
+TEST_CASE("the account screen reads the card, and one watermark feeds both screens") {
+  FakeFileSystem fs;
+  writeCredentials(fs);
+  writeArticle(fs, 1, "2026-09-01T10:00:00Z", "One");
+  writeArticle(fs, 2, "2026-09-02T10:00:00Z", "Two");
+  ArticleStore store(fs);
+  REQUIRE(store.queueStar(1, true));
+  SyncWatermark w;
+  w.lastOutcome = "upToDate";
+  REQUIRE(store.saveWatermark(w));
+
+  Settings settings;
+  settings.articlesKeepOffline = 100;
+  WallabagAccountScreen a(fs, settings);
+  CHECK(a.vm().bandValue == "SIGNED IN");
+  CHECK(a.vm().rows[0].value == "lucasg");
+  CHECK(a.vm().rows[1].value == "2 ARTICLES");
+  CHECK(a.vm().rows[2].value == "NO NEW");
+  CHECK(a.vm().rows[3].value == "NEWEST 100");
+  CHECK(a.vm().rows[4].value == "1 TO PUSH");
+
+  // THE SAME FOUR WORDS THE LIST DRAWS, from the same watermark through the same
+  // formatter -- two screens naming one fact differently is two spellings of it.
+  ArticlesScreen l(fs);
+  CHECK(l.vm().syncStamp == "WALLABAG \xC2\xB7 NO NEW");
+}
+
+TEST_CASE("the account screen says NOT SET UP with no credentials") {
+  FakeFileSystem fs;
+  writeArticle(fs, 1, "2026-09-01T10:00:00Z", "One");
+  WallabagAccountScreen a(fs, Settings{});
+  CHECK(a.vm().bandValue == "NOT SET UP");
+  CHECK(a.vm().rows[0].value.empty());
+  CHECK_FALSE(a.vm().rows[6].focusable);
+}
+
+TEST_CASE("the account screen's refresh picks up a queue push and leaves the cycled value") {
+  FakeFileSystem fs;
+  writeCredentials(fs);
+  writeArticle(fs, 1, "2026-09-01T10:00:00Z", "One");
+  Settings settings;
+  WallabagAccountScreen a(fs, settings);
+  REQUIRE(a.vm().rows[4].value == "0 TO PUSH");
+
+  // The cycle moves the value HERE, and a refresh must not undo a press the
+  // reader has already seen take effect -- the shell commits it afterwards.
+  REQUIRE(a.onGesture(ev(Gesture::Activate)).kind == Action::Kind::Article);
+  REQUIRE(a.keepOffline() == 100);
+
+  ArticleStore(fs).queueStar(1, true);
+  CHECK(a.refresh());
+  CHECK(a.vm().rows[4].value == "1 TO PUSH");
+  CHECK(a.keepOffline() == 100);
+  CHECK_FALSE(a.refresh());
+}
+
+TEST_CASE("the factory builds both from the card when it has one, and refuses when it has neither") {
+  // Their `Restore::Ready` declaration rests on exactly this: the factory holds
+  // a FileSystem* for them as it holds one for the Library, so a wake rebuilds
+  // both off the card.
+  FakeFileSystem fs;
+  writeCredentials(fs);
+  writeArticle(fs, 1, "2026-09-01T10:00:00Z", "One");
+
+  DemoScreenFactory f;
+  CHECK(f.create(ScreenId::Articles) == nullptr);
+  CHECK(f.create(ScreenId::WallabagAccount) == nullptr);
+
+  f.setArticleStore(&fs);
+  f.setArticlesVisibleRows(5);
+  auto list = f.create(ScreenId::Articles);
+  REQUIRE(list != nullptr);
+  CHECK(static_cast<ArticlesScreen&>(*list).vm().rows.size() == 1);
+  auto account = f.create(ScreenId::WallabagAccount);
+  REQUIRE(account != nullptr);
+  CHECK(static_cast<WallabagAccountScreen&>(*account).vm().bandValue == "SIGNED IN");
+
+  // THE DEMO CLEARS THE CARD POINTER, so a fixture cannot be quietly overlaid on
+  // a real card -- which is the substitution this flow's refusals prevent, in
+  // the other direction.
+  f.setArticlesDemo();
+  auto demo = f.create(ScreenId::Articles);
+  REQUIRE(demo != nullptr);
+  CHECK(static_cast<ArticlesScreen&>(*demo).vm().rows.size() == 5);
+}

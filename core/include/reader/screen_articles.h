@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 
+#include "reader/filesystem.h"
 #include "reader/focus_screen.h"
 #include "reader/viewmodel.h"
 
@@ -22,6 +23,14 @@ struct ArticleItem {
   int readingMinutes = 0;
   bool read = false;     // a reading sidecar says this one is finished
   bool starred = false;  // the overlay's second row reads `Unstar` when true
+
+  // So a reload can say whether anything MOVED, which is what decides a
+  // waveform. Every field, because any of them changes a row on the glass.
+  bool operator==(const ArticleItem& o) const {
+    return id == o.id && title == o.title && domain == o.domain &&
+           readingMinutes == o.readingMinutes && read == o.read && starred == o.starred;
+  }
+  bool operator!=(const ArticleItem& o) const { return !(*this == o); }
 };
 
 // design/Articles.dc.html, with design/ArticlesSetup.dc.html and
@@ -57,6 +66,16 @@ class ArticlesScreen : public FocusScreen {
   ArticlesScreen(std::vector<ArticleItem> items, std::string stamp);
   // The not-set-up variant.
   ArticlesScreen();
+  // OVER A FileSystem -- the device, and the simulator's card. Which of the two
+  // above it becomes is read off the CARD: no credentials (absent, or a value
+  // missing) is the not-set-up variant, and anything else is the list, EMPTY OR
+  // NOT. A reader who has just filled the file in must not be told to go and
+  // fill the file in.
+  //
+  // LibraryScreen's two-constructor shape, and for its reason: the goldens and
+  // the comparison sheet need a screen built from the BOARD's content, which is
+  // what makes a golden a test of the rendering.
+  explicit ArticlesScreen(FileSystem& fs);
 
   ScreenId id() const override { return ScreenId::Articles; }
   Action onGesture(const GestureEvent& g) override;
@@ -83,12 +102,27 @@ class ArticlesScreen : public FocusScreen {
   void setStamp(std::string stamp);
   void setStatusLine(std::string line);
 
+  // Re-read the directory. LibraryScreen's pair, and the same division of
+  // labour: `rescan` is for when the FILES changed (a sync landed, an archive
+  // removed one) and `refreshProgress` for when only /.reader/state did (the
+  // reader finished one), which costs no listing of the articles directory.
+  //
+  // Both are no-ops without a filesystem, so a screen built from fixtures is
+  // unaffected -- the goldens' content cannot be washed away by a rescan.
+  bool rescan();
+  bool refreshProgress();
+
  protected:
   void syncVm() override;
 
  private:
+  // Read the card into `items_` and the stamp, and answer whether anything
+  // changed -- so a caller can decide whether to spend a waveform.
+  bool load();
+
   std::vector<ArticleItem> items_;
   ArticlesViewModel vm_;
+  FileSystem* fs_ = nullptr;
   Chosen chosen_ = Chosen::None;
 };
 

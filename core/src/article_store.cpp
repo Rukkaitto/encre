@@ -257,6 +257,24 @@ int ArticleStore::removeAll() {
   return removed;
 }
 
+std::string ArticleStore::outcomeLabel(const std::string& lastOutcome) {
+  if (lastOutcome == "upToDate") return "NO NEW";
+  if (lastOutcome == "failed") return "FAILED";
+  if (lastOutcome.rfind("new:", 0) == 0) {
+    const std::string n = lastOutcome.substr(4);
+    // A COUNT OF NOTHING IS `NO NEW`, not `0 NEW`. The engine writes `upToDate`
+    // for that, so this only fires on a malformed watermark -- and stating the
+    // honest word beats printing a zero somebody has to interpret.
+    if (n.empty() || n == "0") return "NO NEW";
+    return n + " NEW";
+  }
+  // `never`, and anything a future firmware wrote that this one does not know.
+  // A watermark from a newer build must not make a screen say something false,
+  // and "no sync has completed on this card" is the safe reading of a word we
+  // cannot parse: it is what the reader sees before their first sync.
+  return "NEVER";
+}
+
 std::string ArticleStore::homeMenuValue(bool configured, int unread) {
   if (!configured) return std::string();
   return std::to_string(unread) + " UNREAD";

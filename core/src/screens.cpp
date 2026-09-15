@@ -420,6 +420,10 @@ std::vector<ScanResult> demoWifiScanLong() {
 // (automatic) and BUREAU; design/WifiPicker.dc.html shows five networks with
 // BUREAU-GUEST open and the rest locked, sorted by signal.
 void DemoScreenFactory::setArticlesDemo() {
+  // THE DEMO CLEARS THE CARD POINTER. A factory holding both would build one of
+  // them by whichever branch happened to come first, which is the substitution
+  // this flow's refusals exist to prevent -- in the other direction.
+  articleFs_ = nullptr;
   setArticles(demoArticles(), "WALLABAG \xC2\xB7 NO NEW");
   setArticleActionsFacts({2, "Why We Forget Most of the Books We Read", false});
   setArticleEndFacts({1, "The Death and Life of the Great American Essay", "LONGREADS", 22, false,
@@ -768,6 +772,15 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
     // was reading.
     case ScreenId::Articles: {
       if (!articlesPrimed_) return nullptr;
+      // THE CARD WINS. A device has one and the goldens do not, and which
+      // variant the screen becomes is then read off the credentials rather than
+      // decided here.
+      if (articleFs_ != nullptr) {
+        auto s = std::make_unique<ArticlesScreen>(*articleFs_);
+        if (articlesRows_ > 0) s->setVisibleRows(articlesRows_);
+        if (!articlesStatus_.empty()) s->setStatusLine(articlesStatus_);
+        return s;
+      }
       auto s = articlesNotSetUp_ ? std::make_unique<ArticlesScreen>()
                                  : std::make_unique<ArticlesScreen>(articles_, articlesStamp_);
       if (!articlesNotSetUp_) {
@@ -783,6 +796,8 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       if (!articleEndFactsSet_) return nullptr;
       return std::make_unique<ArticleEndScreen>(articleEndFacts_);
     case ScreenId::WallabagAccount:
+      if (articleFs_ != nullptr)
+        return std::make_unique<WallabagAccountScreen>(*articleFs_, settings_);
       if (!wallabagAccountSet_) return nullptr;
       return std::make_unique<WallabagAccountScreen>(wallabagAccountFacts_);
     case ScreenId::WallabagConnecting:

@@ -120,6 +120,22 @@ class ArticleStore {
   // the reader has just asked to be rid of.
   int removeAll();
 
+  // THE FOUR WORDS BOTH SCREENS DRAW, from one watermark, so the Articles list's
+  // stamp and the account screen's `Last sync` row cannot disagree about what
+  // the last sync did: `NEVER`, `NO NEW`, `N NEW`, `FAILED`.
+  //
+  // THEY ARE OUTCOMES AND NEVER AGES (#132). A deep sleep on battery is a full
+  // power-down, so nothing survives to measure elapsed time across one, and the
+  // server's `Date` header is the server's clock. What the device holds is what
+  // the last sync DID.
+  //
+  // SHORT BECAUSE THE SYNC ROW IS: design/Articles.dc.html gives its stamp
+  // 279.03px beside a `Sync now` that may never elide, and `NEVER SYNCED` and
+  // `UP TO DATE` both overflowed it at BOTH geometries. The account screen has
+  // room for the longer words and does not get them -- a vocabulary that fits
+  // one slot and not the other is two vocabularies.
+  static std::string outcomeLabel(const std::string& lastOutcome);
+
   // Home's ARTICLES row. `N UNREAD` when configured, EMPTY when not -- and the
   // empty value is what draws the chevron, which is Main.dc.html's menu note
   // refusing a setup nag on the screen the device boots to.

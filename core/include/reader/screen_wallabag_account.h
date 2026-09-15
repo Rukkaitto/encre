@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 
+#include "reader/filesystem.h"
 #include "reader/focus_screen.h"
 #include "reader/settings.h"
 #include "reader/viewmodel.h"
@@ -35,6 +36,15 @@ class WallabagAccountScreen : public FocusScreen {
   enum class Chosen { None, KeepOffline };
 
   explicit WallabagAccountScreen(Facts facts);
+  // OVER A FileSystem -- the device. Every value on this screen describes the
+  // CARD (the credentials, the article count, the queue, the watermark), which
+  // is the whole reason it is declared `Restore::Ready`: a chip reset changes
+  // none of them.
+  WallabagAccountScreen(FileSystem& fs, const Settings& settings);
+
+  // Read the card again. Called after anything that changes what this screen
+  // states -- a sync, a remove-all, a keep-offline commit.
+  bool refresh();
 
   ScreenId id() const override { return ScreenId::WallabagAccount; }
   Action onGesture(const GestureEvent& g) override;
@@ -61,8 +71,14 @@ class WallabagAccountScreen : public FocusScreen {
   enum Row { kAccount = 0, kUnread, kLastSync, kKeepOffline, kPending, kHeader, kRemove,
              kRowCount };
 
+  // Build Facts from the card. Static, so the constructor can use it in its
+  // member initialiser and `refresh` can use the same one -- two spellings of
+  // "what does the card say" is two answers a screen could show.
+  static Facts factsFrom(FileSystem& fs, const Settings& settings);
+
   Facts facts_;
   WallabagAccountViewModel vm_;
+  FileSystem* fs_ = nullptr;
   Chosen chosen_ = Chosen::None;
 };
 

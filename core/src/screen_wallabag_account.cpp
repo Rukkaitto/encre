@@ -1,6 +1,8 @@
 #include "reader/screen_wallabag_account.h"
 
+#include "reader/article_store.h"
 #include "reader/theme.h"
+#include "reader/wallabag_credentials.h"
 
 namespace reader {
 namespace {
@@ -18,6 +20,47 @@ WallabagAccountScreen::WallabagAccountScreen(Facts facts)
   // rather than wrapping, so this cannot land anywhere else.
   setFocus(kKeepOffline);
   syncVm();
+}
+
+WallabagAccountScreen::Facts WallabagAccountScreen::factsFrom(FileSystem& fs,
+                                                              const Settings& settings) {
+  Facts f;
+  WallabagCredentials creds;
+  std::string why;
+  f.configured = loadWallabagCredentials(fs, creds, why) == CredentialsResult::Ok;
+  f.username = creds.username;
+  const ArticleStore store(fs);
+  f.unread = store.unreadCount();
+  f.pending = store.pendingCount();
+  SyncWatermark w;
+  store.loadWatermark(w);
+  // ONE WATERMARK FEEDS BOTH SCREENS, through one formatter, so the list's stamp
+  // and this row cannot disagree about what the last sync did.
+  f.lastSync = ArticleStore::outcomeLabel(w.lastOutcome);
+  f.keepOffline = settings.articlesKeepOffline;
+  return f;
+}
+
+WallabagAccountScreen::WallabagAccountScreen(FileSystem& fs, const Settings& settings)
+    : WallabagAccountScreen(factsFrom(fs, settings)) {
+  fs_ = &fs;
+}
+
+bool WallabagAccountScreen::refresh() {
+  if (fs_ == nullptr) return false;
+  Settings s;
+  s.articlesKeepOffline = facts_.keepOffline;
+  const Facts next = factsFrom(*fs_, s);
+  const bool moved = next.configured != facts_.configured || next.unread != facts_.unread ||
+                     next.pending != facts_.pending || next.lastSync != facts_.lastSync ||
+                     next.username != facts_.username;
+  if (!moved) return false;
+  // THE KEEP-OFFLINE VALUE IS THIS SCREEN'S, not the card's, once the row has
+  // been pressed: the cycle moves it here and the shell commits afterwards, so
+  // re-reading it would undo a press the reader has already seen take effect.
+  facts_ = next;
+  syncVm();
+  return true;
 }
 
 bool WallabagAccountScreen::focusable(int index) const {

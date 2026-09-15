@@ -335,6 +335,19 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
     articlesPrimed_ = true;
   }
   void setArticlesVisibleRows(int n) { articlesRows_ = n; }
+  // THE CARD, and it makes `Articles` and `WallabagAccount` buildable from boot
+  // -- which is what their `Restore::Ready` declaration rests on. The factory
+  // holds a FileSystem* for them exactly as it holds one for the Library, and
+  // for the same reason: what the screen shows is a directory, and a directory
+  // survives a chip reset.
+  //
+  // IT WINS OVER THE FIXTURE SETTERS, because a device has a card and the
+  // goldens do not. setArticlesDemo() is the simulator's door and clears this,
+  // so a demo cannot be quietly overlaid on a real card.
+  void setArticleStore(FileSystem* fs) {
+    articleFs_ = fs;
+    if (fs != nullptr) articlesPrimed_ = true;
+  }
   void setArticlesStatusLine(std::string line) { articlesStatus_ = std::move(line); }
   void setArticleActionsFacts(ArticleActionsScreen::Facts f) {
     articleActionFacts_ = std::move(f);
@@ -580,6 +593,7 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   std::string articlesStatus_;
   bool articlesNotSetUp_ = false;
   bool articlesPrimed_ = false;
+  FileSystem* articleFs_ = nullptr;
   int articlesRows_ = 0;
   ArticleActionsScreen::Facts articleActionFacts_;
   bool articleActionFactsSet_ = false;
