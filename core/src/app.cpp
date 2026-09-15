@@ -148,6 +148,13 @@ constexpr Restore kRestorability[] = {
     // waking into a modal about a sync nobody remembers asking for is Peek's
     // argument and BookError's.
     Restore::Never,
+    // ArticlesRemoveConfirm -- NEVER, on DeleteConfirm's OPPOSITE answer, and the
+    // difference is worth stating. That confirmation is Ready because it reads
+    // the Library's focused row and restore() puts that Library back first. This
+    // one is built from the ACCOUNT screen's press and carries no row to be
+    // rebuilt from -- and waking into "remove every article?" is a destructive
+    // question nobody asked, which is BookError's argument at its sharpest.
+    Restore::Never,
 };
 static_assert(sizeof(kRestorability) / sizeof(kRestorability[0]) ==
                   static_cast<size_t>(ScreenId::Count),
@@ -186,6 +193,7 @@ bool screenUsesRadio(ScreenId id) {
     // true-set goes from two to three, and that count is asserted in
     // test_article_outcomes.cpp rather than left as a comment.
     case ScreenId::Articles:
+    case ScreenId::ArticlesRemoveConfirm:
     case ScreenId::ArticleActions:
     case ScreenId::ArticleEnd:
     case ScreenId::WallabagAccount:
@@ -257,6 +265,7 @@ const char* screenName(ScreenId id) {
     case ScreenId::WallabagAccount: return "WALLABAG-ACCOUNT";
     case ScreenId::WallabagConnecting: return "WALLABAG-CONNECTING";
     case ScreenId::WallabagError: return "WALLABAG-ERROR";
+    case ScreenId::ArticlesRemoveConfirm: return "ARTICLES-REMOVE-CONFIRM";
     // NOT A SCREEN -- see ScreenId::Count's own comment. Refused explicitly so this
     // switch stays exhaustive, the same reason session_record.cpp's does.
     case ScreenId::Count: return "?";

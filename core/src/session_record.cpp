@@ -34,6 +34,7 @@ constexpr const char* kNames[] = {
     // Articles over wallabag, and stable forever from here for the reason above.
     "articles", "article-actions", "article-end",
     "wallabag-account", "wallabag-connecting", "wallabag-error",
+    "articles-remove-confirm",
 };
 
 // TIED TO THE SENTINEL, NOT TO A NAMED MEMBER, AND THAT IS #42's WHOLE POINT.
@@ -196,6 +197,7 @@ const char* sessionWireName(ScreenId id) {
     case ScreenId::WallabagAccount: return kNames[25];
     case ScreenId::WallabagConnecting: return kNames[26];
     case ScreenId::WallabagError: return kNames[27];
+    case ScreenId::ArticlesRemoveConfirm: return kNames[28];
     // NOT A SCREEN, so it has no name and must never reach the fall-through below,
     // which is what silently made a missing case read as `home`.
     case ScreenId::Count: break;

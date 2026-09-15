@@ -151,6 +151,13 @@ enum class ScreenId : uint8_t {
   // unreachable, and no saved network to reach it over. Two of the three drop
   // `TRY AGAIN`, because pressing it could not succeed.
   WallabagError,
+  // design/ArticlesRemoveConfirm.dc.html -- the confirmation the account
+  // screen's `Remove downloaded articles...` row opens. DeleteConfirm's shape,
+  // and the ONE overlay in this flow whose veiled parent is not the Articles
+  // list. Appended here rather than with the other six because it is the account
+  // screen's push target and that screen is what needed it; the guards fired a
+  // second time and grew a second time, which is what they are for.
+  ArticlesRemoveConfirm,
   // NOT A SCREEN. A bound, so a guard can name "one past the last member" without
   // naming a member -- which is #42, and which had gone quiet twice by the time it
   // was fixed: session_record.cpp spelled three bounds `<= ScreenId::Peek` and then

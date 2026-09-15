@@ -144,6 +144,31 @@ static_assert(ascending(kBodyPpemSteps));
 static_assert(ascending(kMarginSteps));
 static_assert(ascending(kLineSpacingSteps));
 
+// HOW MANY ARTICLES THE CARD KEEPS, from design/WallabagAccount.dc.html's
+// `Keep offline` row. The table is here rather than in the screen for the reason
+// the three above are: a step table is a value's whole vocabulary, and a screen
+// holding its own copy is a second one for the loader to disagree with.
+//
+// The field that persists it lands with the rest of the store; this is the
+// vocabulary, which the screen needs first because the row cycles before
+// anything writes it down.
+inline constexpr int kArticlesKeepOfflineSteps[] = {20, 50, 100};
+static_assert(ascending(kArticlesKeepOfflineSteps));
+
+// The next value in the wrapping cycle the `Keep offline` row steps through. A
+// free function rather than the screen's own arithmetic, so the cycle and the
+// table cannot drift -- and it SNAPS an off-table value onto the table first, so
+// a hand-edited settings file that says 37 cycles to 50 rather than sitting
+// outside the vocabulary for ever.
+constexpr int nextKeepOfflineStep(int current) {
+  constexpr int n = static_cast<int>(sizeof(kArticlesKeepOfflineSteps) /
+                                     sizeof(kArticlesKeepOfflineSteps[0]));
+  int at = 0;
+  for (int i = 0; i < n; ++i)
+    if (kArticlesKeepOfflineSteps[i] <= current) at = i;
+  return kArticlesKeepOfflineSteps[(at + 1) % n];
+}
+
 // Every knob the shell hardcoded through 2B. Defaults here are the values that
 // were compiled in, so behaviour is unchanged until a user changes something.
 struct Settings {

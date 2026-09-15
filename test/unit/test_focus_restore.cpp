@@ -44,6 +44,7 @@ constexpr ScreenId kAllScreens[] = {
     ScreenId::WifiConnect,  ScreenId::WifiError,  ScreenId::WifiNetworkActions,
     ScreenId::Articles,     ScreenId::ArticleActions, ScreenId::ArticleEnd,
     ScreenId::WallabagAccount, ScreenId::WallabagConnecting, ScreenId::WallabagError,
+    ScreenId::ArticlesRemoveConfirm,
 };
 // NAMES THE SENTINEL, so an append cannot satisfy it unchanged. It used to name the
 // last member by hand -- `ScreenId::Peek + 1`, then `ScreenId::BookEnd + 1` -- and
@@ -437,8 +438,8 @@ TEST_CASE("what a screen declares about a wake is what a boot-configured factory
   // re-derived: NINE screens a wake owes nothing -- Home, Library, the two Library
   // overlays, Book details, Settings, SdMissing, Typography and the Wi-Fi hub;
   // FOUR owe a priming, and they are one fact under four names, the open book;
-  // TWELVE never come back -- Sleep, Peek, BookError, BatteryEmpty, the five
-  // connect-flow screens past the hub, and three of the Articles six.
+  // THIRTEEN never come back -- Sleep, Peek, BookError, BatteryEmpty, the five
+  // connect-flow screens past the hub, and FOUR of the Articles seven.
   //
   // THE ARTICLES SIX SPLIT 2/1/3, and the two READY ones are the Wi-Fi hub's row
   // twice over rather than the Library's once: the factory holds the FileSystem,
@@ -454,6 +455,6 @@ TEST_CASE("what a screen declares about a wake is what a boot-configured factory
   // copy of the factory free to disagree with it, and it disagreed on its first run.
   CHECK(ready == 11);
   CHECK(needsPriming == 5);
-  CHECK(never == 12);
+  CHECK(never == 13);
   CHECK(ready + needsPriming + never == static_cast<int>(ScreenId::Count));
 }
