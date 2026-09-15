@@ -3376,4 +3376,544 @@ void QuietTheme::renderWifiNetworkActions(Framebuffer& fb, const FontSet& fonts,
   drawOverlayHintBar(fb, fonts, hints, plane);
 }
 
+// --- Articles over wallabag (V1.1) -------------------------------------------
+//
+// Six renderers, ASSEMBLED FROM SHIPPED PRIMITIVES rather than new geometry.
+// Every board in this flow is one this firmware already draws with different
+// content in it, which is what let the screens be built first, on fixture data,
+// with nothing behind them.
+
+namespace {
+// --- design/Articles.dc.html -------------------------------------------------
+//
+// The sync row: `display: flex; gap: 12px; padding: 12px 24px; border-bottom:
+// 1px`, holding the kRescan mark, `Sync now` at --t-label/500 with
+// `flex-grow: 1`, and the stamp at --t-meta/0.10em `white-space: nowrap`.
+constexpr int kSyncRowPadY = 12;
+constexpr int kSyncRowGap = 12;
+// 0.10em, and the board's note carries the measurement AND the reason: this run
+// is mostly a NAME (`NEVER`, `NO NEW`, `FAILED`) and 0.14em-and-up is a
+// counter's tracking. It was 0.12em and the vocabulary did not fit the row.
+constexpr int kSyncStampEm = 100;
+
+// An article row: `gap: 14px; padding: 12px 24px`, an 8x8 bullet with
+// `margin-top: 7px`, and a column at `gap: 4px` holding the title
+// (--t-value, `line-height: 1.25`) over the meta line (--t-meta/0.14em).
+constexpr int kArticleRowPadY = 12;
+constexpr int kArticleRowGap = 14;
+constexpr int kArticleBulletW = 8;
+constexpr int kArticleBulletTop = 7;
+constexpr int kArticleColGap = 4;
+constexpr int kArticleTitleLineH = 31;  // round(1.25 * 25)
+constexpr int kArticleMetaEm = 140;
+// THE TITLE WRAPS, WHICH THE LIBRARY'S DOES NOT, and two is where it stops.
+// The board draws two-line and one-line rows side by side, so a row's height is
+// a RESULT here where every other list in this firmware is on a fixed grid --
+// see articlesVisibleRows for what that costs and why the cost is taken.
+constexpr int kArticleTitleMaxLines = 2;
+
+// design/SyncDone.dc.html's status block: `margin: 14px 24px 0 24px;
+// border: 2px; padding: 10px 14px; gap: 12px`, with kCheck and a --t-meta/0.1em
+// run at `line-height: 1.5`. The sync row below it then carries `margin-top: 12px`.
+constexpr int kSyncStatusMarginTop = 14;
+constexpr int kSyncStatusBorder = 2;
+constexpr int kSyncStatusPadY = 10;
+constexpr int kSyncStatusPadX = 14;
+constexpr int kSyncStatusGap = 12;
+constexpr int kSyncStatusEm = 100;
+constexpr int kSyncStatusLeadEm = 1500;
+constexpr int kSyncStatusBelow = 12;
+
+// design/ArticlesSetup.dc.html: a centred column, `gap: 20px; padding: 46px 24px
+// 0 24px`, holding kArticlesLarge, a --t-title/700 at 0.06em, a --t-body
+// paragraph at `line-height: 1.55` and a --t-meta/0.1em note, the last two
+// capped at `max-width: 400px`.
+constexpr int kSetupPadTop = 46;
+constexpr int kSetupGap = 20;
+constexpr int kSetupTitleEm = 60;
+constexpr int kSetupProseLeadEm = 1550;
+constexpr int kSetupNoteLeadEm = 1500;
+constexpr int kSetupNoteEm = 100;
+constexpr int kSetupMaxW = 400;
+
+// --- design/ArticleEnd.dc.html ----------------------------------------------
+//
+// Two blocks at `gap: 10px; padding: 32px 24px 0 24px` -- the naming block and
+// the slab column -- and a note on `margin-top: auto; padding: 0 24px 14px`.
+constexpr int kArticleEndPadTop = 32;
+constexpr int kArticleEndGap = 10;
+constexpr int kArticleEndTitleLineH = 53;  // round(1.25 * 42)
+constexpr int kArticleEndMetaEm = 140;
+constexpr int kArticleEndNoteEm = 100;
+constexpr int kArticleEndNoteLeadEm = 1500;
+constexpr int kArticleEndNotePadBottom = 14;
+// THE TITLE'S BUDGET IS DERIVED, never pinned, and it is the canvas less
+// everything that is not the title -- Home's own rule, and the Sleep card's.
+constexpr int kArticleEndTitleMaxLines = 4;
+
+// --- design/WallabagAccount.dc.html -----------------------------------------
+//
+// 72px rows at `padding: 0 24px`, which is a THIRD full-width row height in this
+// firmware (Settings says 54, BookDetails and Contents say 64). The board's own
+// number, followed rather than argued with.
+constexpr int kAccountRowH = 72;
+constexpr int kAccountNotePadTop = 14;
+constexpr int kAccountNoteEm = 100;
+constexpr int kAccountNoteLeadEm = 1500;
+
+// How tall an article row is, given how many lines its title took. The bullet
+// block and the text column are `align-items: flex-start`, so the row is the
+// taller of the two plus its padding -- and the bullet's is its own top margin
+// plus its 8px, which a one-line title already exceeds.
+int articleRowContentH(const FontSet& fonts, int titleLines) {
+  const int textH = titleLines * kArticleTitleLineH + kArticleColGap +
+                    fonts[Role::Meta400].lineHeight();
+  const int bulletH = kArticleBulletTop + kArticleBulletW;
+  return (textH > bulletH ? textH : bulletH);
+}
+
+int articleRowHeight(const FontSet& fonts, int titleLines, bool rule) {
+  return 2 * kArticleRowPadY + articleRowContentH(fonts, titleLines) + (rule ? 1 : 0);
+}
+
+// The sync row's own height, which is one line of the taller of its two runs.
+int syncRowHeight(const FontSet& fonts) {
+  const int label = fonts[Role::Label500].lineHeight();
+  const int stamp = fonts[Role::Meta400].lineHeight();
+  const int mark = icons::kRescan.h;
+  int h = label > stamp ? label : stamp;
+  if (mark > h) h = mark;
+  return 2 * kSyncRowPadY + h + 1;  // + the board's `border-bottom: 1px`
+}
+}  // namespace
+
+int QuietTheme::articlesVisibleRows(int panelH, const FontSet& fonts) const {
+  Hint hints[4];
+  measuringHints(hints);
+  const int area = panelH - headerBandHeight(fonts, nullptr) - syncRowHeight(fonts) -
+                   hintBarHeight(fonts, hints);
+  // THE WORST CASE, WHICH IS THE COST OF A LIST WHOSE ROWS ARE NOT ON A GRID.
+  // The board wraps an article's title to two lines and draws one-line rows
+  // beside two-line ones, so a row's height is a RESULT -- and a ScrollWindow
+  // needs a fixed count to decide when to scroll. Answering for the TALLEST row
+  // is what makes the window's promise true whatever the titles are: the list
+  // never overflows the area, and a screenful of short titles leaves slack at
+  // the foot rather than drawing a row through the hint bar.
+  //
+  // What it costs is that slack, up to about one row of it. The alternative --
+  // filling the window greedily from the actual titles -- makes the count depend
+  // on where the list is scrolled to, so the same row would be visible or not
+  // depending on which way the reader arrived at it.
+  const int row = articleRowHeight(fonts, kArticleTitleMaxLines, /*rule=*/true);
+  if (area <= 0 || row <= 0) return 0;
+  return area / row;
+}
+
+void QuietTheme::renderArticles(Framebuffer& fb, const FontSet& fonts, const ArticlesViewModel& vm,
+                                Plane plane) {
+  fb.clear(true);
+  const int listTop = drawHeaderBand(fb, fonts, vm.title, vm.bandValue, nullptr, plane);
+
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+  const int barH = hintBarHeight(fonts, hints);
+
+  if (vm.notSetUp) {
+    // design/ArticlesSetup.dc.html -- a VARIANT, not a second renderer, which is
+    // HomeEmpty's rule and renderWifiSettings' one flow over. Two render paths
+    // would be two ways to spell one layout.
+    const Font& titleF = fonts[Role::Title700];
+    const Font& bodyF = fonts[Role::Body400];
+    const Font& noteF = fonts[Role::Meta400];
+    const int colW = fb.width() - 2 * kMargin;
+    const int proseW = colW < kSetupMaxW ? colW : kSetupMaxW;
+    const Icon& mark = icons::kArticlesLarge;
+
+    const Prose prose = wrapProse(bodyF, vm.setupProse, proseW, kSetupProseLeadEm, {},
+                                  WordBreak::Normal);
+    const Prose note = wrapProse(noteF, vm.setupNote, proseW, kSetupNoteLeadEm,
+                                 trackingEm(noteF, kSetupNoteEm));
+
+    int y = listTop + kSetupPadTop;
+    drawIcon(fb, mark, centreIn(0, fb.width(), mark.w), y, Ink::Black, plane);
+    y += mark.h + kSetupGap;
+    const Tracking titleTracking = trackingEm(titleF, kSetupTitleEm);
+    drawCentredText(fb, titleF, 0, fb.width(), y + titleF.ascent(), vm.setupTitle, Ink::Black,
+                    titleTracking, plane);
+    y += titleF.lineHeight() + kSetupGap;
+    y += f26ToPx(drawProse(fb, bodyF, prose, centreIn(0, fb.width(), proseW), proseW, pxToF26(y),
+                           Ink::Black, plane, ProseAlign::Centre));
+    y += kSetupGap;
+    drawProse(fb, noteF, note, centreIn(0, fb.width(), proseW), proseW, pxToF26(y), Ink::Black,
+              plane, ProseAlign::Centre);
+    drawHintBar(fb, fonts, hints, plane);
+    return;
+  }
+
+  int y = listTop;
+
+  // design/SyncDone.dc.html's status block. EMPTY on every other path here, which
+  // is what makes that board a variant rather than a state: it is the one place a
+  // push count is stated, and a list reached any other way must not claim one.
+  if (!vm.statusLine.empty()) {
+    const Font& statusF = fonts[Role::Meta400];
+    const Icon& tick = icons::kCheck;
+    const int boxW = fb.width() - 2 * kMargin;
+    const int colW = boxW - 2 * kSyncStatusBorder - 2 * kSyncStatusPadX - tick.w - kSyncStatusGap;
+    const Prose line = wrapProse(statusF, vm.statusLine, colW, kSyncStatusLeadEm,
+                                 trackingEm(statusF, kSyncStatusEm));
+    const int inner = f26ToPx(line.heightF26());
+    const int boxH = 2 * kSyncStatusBorder + 2 * kSyncStatusPadY +
+                     (inner > tick.h ? inner : tick.h);
+    y += kSyncStatusMarginTop;
+    outlineRect(fb, kMargin, y, boxW, boxH, kSyncStatusBorder);
+    const int ix = kMargin + kSyncStatusBorder + kSyncStatusPadX;
+    const int iy = y + kSyncStatusBorder + kSyncStatusPadY;
+    drawIcon(fb, tick, ix, iy + centreIn(0, inner, tick.h), Ink::Black, plane);
+    drawProse(fb, statusF, line, ix + tick.w + kSyncStatusGap, colW, pxToF26(iy), Ink::Black,
+              plane, ProseAlign::Left);
+    y += boxH + kSyncStatusBelow;
+  }
+
+  // --- the sync row ---------------------------------------------------------
+  {
+    const Font& labelF = fonts[Role::Label500];
+    const Font& stampF = fonts[Role::Meta400];
+    const Tracking stampTracking = trackingEm(stampF, kSyncStampEm);
+    const Icon& mark = icons::kRescan;
+    const int rowH = syncRowHeight(fonts);
+    const int mid = y + kSyncRowPadY;
+    const int contentH = rowH - 2 * kSyncRowPadY - 1;
+    drawIcon(fb, mark, kMargin, mid + centreIn(0, contentH, mark.h), Ink::Black, plane);
+    drawText(fb, labelF, kMargin + mark.w + kSyncRowGap, baselineIn(labelF, mid, contentH),
+             vm.syncLabel, Ink::Black, {}, plane);
+    // RIGHT-ALIGNED ON THE MARGIN, and it never elides: the board holds both runs
+    // `white-space: nowrap` and the vocabulary was cut until the widest reachable
+    // form fits beside the label. See design/Articles.dc.html's note, which
+    // carries the five measurements.
+    const int stampW = stampF.measure(vm.syncStamp, stampTracking);
+    drawText(fb, stampF, fb.width() - kMargin - stampW, baselineIn(stampF, mid, contentH),
+             vm.syncStamp, Ink::Black, stampTracking, plane);
+    fb.fillRect(0, y + rowH - 1, fb.width(), 1, false);
+    y += rowH;
+  }
+
+  // --- the list -------------------------------------------------------------
+  const int rows = static_cast<int>(vm.rows.size());
+  // ONE condition for the rail and the gutter, read from one place -- the
+  // Library's rule, and drawScrollRail refuses the same case independently so
+  // the two cannot disagree.
+  const bool overflowing = vm.totalRows > rows;
+  const int inset = overflowing ? kListGutterW : 0;
+  const Font& titleF = fonts[Role::Value500];
+  const Font& titleFocusedF = fonts[Role::Value700];
+  const Font& metaF = fonts[Role::Meta400];
+  const Tracking metaTracking = trackingEm(metaF, kArticleMetaEm);
+
+  for (int i = 0; i < rows; ++i) {
+    const ArticleRow& row = vm.rows[static_cast<size_t>(i)];
+    const bool focused = (i == vm.focusedRow);
+    const bool rule = rowRuleFor(i, rows, focused);
+    const Font& tf = focused ? titleFocusedF : titleF;
+    const int textX = kMargin + kArticleBulletW + kArticleRowGap;
+    const int textW = fb.width() - inset - kMargin - textX;
+
+    std::string tail;
+    Prose title = wrapProse(tf, row.title, textW, 0, {}, WordBreak::Anywhere);
+    // `WordBreak::Anywhere` for the Library's reason one list over: a title comes
+    // off a SERVER and may be one unbreakable token, and a segment wider than the
+    // column would otherwise be drawn straight through the rail's gutter.
+    title.leadF26 = pxToF26(kArticleTitleLineH);
+    clampProse(tf, title, kArticleTitleMaxLines, textW, tail);
+
+    const int contentH = articleRowContentH(fonts, title.lineCount());
+    const int rowH = 2 * kArticleRowPadY + contentH + (rule ? 1 : 0);
+    if (focused) fb.fillRect(0, y, fb.width() - inset, 2 * kArticleRowPadY + contentH, false);
+    else if (rule) fb.fillRect(0, y + 2 * kArticleRowPadY + contentH, fb.width() - inset, 1, false);
+    const Ink ink = focused ? Ink::White : Ink::Black;
+
+    // THE BULLET IS SOLID WHEN UNREAD AND HOLLOW WHEN READ, which is the board's
+    // own distinction and is why ArticleRow carries a flag rather than the theme
+    // reading the end of `meta`: a string is not the source of truth for a mark.
+    const int by = y + kArticleRowPadY + kArticleBulletTop;
+    if (row.read)
+      outlineRect(fb, kMargin, by, kArticleBulletW, kArticleBulletW, 1, focused);
+    else
+      fb.fillRect(kMargin, by, kArticleBulletW, kArticleBulletW, focused);
+
+    int ty = y + kArticleRowPadY;
+    ty += f26ToPx(drawProse(fb, tf, title, textX, textW, pxToF26(ty), ink, plane,
+                            ProseAlign::Left));
+    ty += kArticleColGap;
+    drawText(fb, metaF, textX, ty + metaF.ascent(), elideToWidth(metaF, row.meta, textW,
+                                                                 metaTracking),
+             ink, metaTracking, plane);
+    y += rowH;
+  }
+
+  drawScrollRail(fb, listTop, fb.height() - barH, vm.firstRow, rows, vm.totalRows, plane);
+  drawHintBar(fb, fonts, hints, plane);
+}
+
+void QuietTheme::renderArticleActions(Framebuffer& fb, const FontSet& fonts,
+                                      const ArticleActionsViewModel& vm, Plane plane) {
+  // renderItemActions, with one slot fewer in the caption: an article has no
+  // percentage the list already knows, so there is no status value beside it.
+  // NO fb.clear(): the list underneath is already painted.
+  veilRect(fb, 0, 0, fb.width(), fb.height());
+
+  const int contentW = panelContentW(kActionsPanelW);
+  // ELIDED TO ONE LINE, for renderItemActions' reason: this panel is a list of
+  // actions on one item, and a caption allowed to wrap makes the panel a
+  // different height for every article -- which on an overlay also means a
+  // different partial-repaint footprint for every article.
+  const std::string caption = elideToWidth(fonts[Role::Label500], upperLatin1(vm.caption),
+                                           panelCaptionColumnW(contentW),
+                                           trackingEm(fonts[Role::Label500], kBandLabelEm));
+  const Prose label = wrapPanelCaption(fonts, caption, contentW);
+
+  const int rows = static_cast<int>(vm.actions.size());
+  int rowsH = 0;
+  for (int i = 0; i < rows; ++i) rowsH += panelRowHeight(i != vm.focusedAction && i != rows - 1);
+  const int panelH = 2 * kPanelBorder + panelCaptionHeight(fonts, label) + rowsH;
+
+  const int x = panelLeft(fb.width(), kActionsPanelW);
+  const int y = centreIn(0, fb.height(), panelH);
+  drawPanel(fb, x, y, kActionsPanelW, panelH);
+
+  const int cx = x + kPanelBorder;
+  int cy = y + kPanelBorder;
+  cy += drawPanelCaption(fb, fonts, cx, cy, contentW, label, "", plane);
+  for (int i = 0; i < rows; ++i) {
+    const ItemActionEntry& row = vm.actions[static_cast<size_t>(i)];
+    const bool focused = (i == vm.focusedAction);
+    cy += drawPanelRow(fb, fonts, cx, cy, contentW, row.label, focused, row.discloses,
+                       rowRuleFor(i, rows, focused), plane);
+  }
+
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+  drawOverlayHintBar(fb, fonts, hints, plane);
+}
+
+void QuietTheme::renderArticleEnd(Framebuffer& fb, const FontSet& fonts,
+                                  const ArticleEndViewModel& vm, Plane plane) {
+  fb.clear(true);
+
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+
+  // THE BAND HAS A VALUE HERE, where renderBookEnd's is deliberately empty. That
+  // slot held a shouted BOOK TITLE there, and a long one squeezed the label until
+  // `BOOK FINISHED` itself elided; `2 LEFT` is a short count that cannot.
+  const int bandH = drawHeaderBand(fb, fonts, vm.title, vm.leftValue, nullptr, plane);
+
+  const int usableW = fb.width() - 2 * kMargin;
+  const Font& titleF = fonts[Role::Title700];
+  const Font& metaF = fonts[Role::Meta400];
+
+  // The note first, because it is a FLOOR: `margin-top: auto` on the board, so it
+  // hangs off the bottom of the frame rather than off the slabs. renderBookEnd's
+  // ordering exactly, and for its reason.
+  const Prose note = wrapProse(metaF, vm.note, usableW, kArticleEndNoteLeadEm,
+                               trackingEm(metaF, kArticleEndNoteEm));
+  const int barH = hintBarHeight(fonts, hints);
+  const int noteTop = fb.height() - barH - kArticleEndNotePadBottom - f26ToPx(note.heightF26());
+
+  const int slabs = static_cast<int>(vm.actions.size());
+  // The gap is BETWEEN items, so n slabs carry n-1 of them -- the arithmetic
+  // BookErrorMemory's single slab made explicit one dialog over, and the reason
+  // this screen's height moves by 78 rather than 68 when `NEXT ARTICLE` goes.
+  const int slabsH = slabs * kActionH + (slabs > 0 ? (slabs - 1) * kArticleEndGap : 0);
+  const int metaH = vm.meta.empty() ? 0 : kArticleEndGap + metaF.lineHeight();
+
+  // THE TITLE'S LINE BUDGET IS DERIVED, never pinned: the room between the band
+  // and the slabs, less everything in it that is not the title.
+  const int blockTop = bandH + kArticleEndPadTop;
+  const int slabsTop = noteTop - kArticleEndPadTop - slabsH;
+  const int room = slabsTop - blockTop - metaH;
+  int maxLines = 1;
+  while ((maxLines + 1) * kArticleEndTitleLineH <= room && maxLines < kArticleEndTitleMaxLines)
+    ++maxLines;
+
+  std::string tail;
+  Prose title = wrapProse(titleF, vm.articleTitle, usableW, 0, {}, WordBreak::Anywhere);
+  title.leadF26 = pxToF26(kArticleEndTitleLineH);
+  clampProse(titleF, title, maxLines, usableW, tail);
+
+  int y = blockTop;
+  y += f26ToPx(drawProse(fb, titleF, title, kMargin, usableW, pxToF26(y), Ink::Black, plane,
+                         ProseAlign::Left));
+  if (!vm.meta.empty()) {
+    y += kArticleEndGap;
+    const Tracking metaTracking = trackingEm(metaF, kArticleEndMetaEm);
+    drawText(fb, metaF, kMargin, y + metaF.ascent(),
+             elideToWidth(metaF, vm.meta, usableW, metaTracking), Ink::Black, metaTracking, plane);
+  }
+
+  int sy = slabsTop;
+  for (int i = 0; i < slabs; ++i) {
+    if (i > 0) sy += kActionH + kArticleEndGap;
+    drawActionButton(fb, fonts, kMargin, sy, usableW, vm.actions[static_cast<size_t>(i)],
+                     i == vm.focusedAction, plane);
+  }
+
+  drawProse(fb, metaF, note, kMargin, usableW, pxToF26(noteTop), Ink::Black, plane,
+            ProseAlign::Left);
+  drawHintBar(fb, fonts, hints, plane);
+}
+
+void QuietTheme::renderWallabagAccount(Framebuffer& fb, const FontSet& fonts,
+                                       const WallabagAccountViewModel& vm, Plane plane) {
+  fb.clear(true);
+  const int listTop = drawHeaderBand(fb, fonts, vm.title, vm.bandValue, nullptr, plane);
+  int y = listTop;
+
+  const int rows = static_cast<int>(vm.rows.size());
+  const bool overflowing = vm.totalRows > rows;
+  const int inset = overflowing ? kListGutterW : 0;
+
+  for (int i = 0; i < rows; ++i) {
+    const ListRow& row = vm.rows[static_cast<size_t>(i)];
+    if (row.isHeader) {
+      // ITS RULE IS POSITIONAL AND THE SCREEN DECIDES WHETHER IT RULES AT ALL --
+      // #81's rule. This board gives `ON THIS DEVICE` a `border-top: 2px` where
+      // Contents gives its headers none, so the answer is `i != 0` as Settings'
+      // is, and drawSectionHeader returns the height it ACTUALLY drew.
+      y += drawSectionHeader(fb, fonts, y, fb.width() - inset, row.label, /*rule=*/i != 0, plane);
+      continue;
+    }
+    const bool focused = (i == vm.focusedRow);
+    // AN INERT ROW IS DRAWN EXACTLY AS AN UNFOCUSED FOCUSABLE ONE. `row.focusable`
+    // is deliberately not read here, which is renderSettings' rule: the flag is
+    // about input, and a theme that dimmed on it would be inventing a design.
+    y += drawDetailRow(fb, fonts, y, row.label, row.value, focused,
+                       rowRuleFor(i, rows, focused), plane, kAccountRowH);
+  }
+
+  if (!vm.note.empty()) {
+    const Font& noteF = fonts[Role::Meta400];
+    const int colW = fb.width() - 2 * kMargin;
+    const Prose note = wrapProse(noteF, vm.note, colW, kAccountNoteLeadEm,
+                                 trackingEm(noteF, kAccountNoteEm));
+    drawProse(fb, noteF, note, kMargin, colW, pxToF26(y + kAccountNotePadTop), Ink::Black, plane,
+              ProseAlign::Left);
+  }
+
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+  drawScrollRail(fb, listTop, fb.height() - hintBarHeight(fonts, hints), vm.firstRow, rows,
+                 vm.totalRows, plane);
+  drawHintBar(fb, fonts, hints, plane);
+}
+
+void QuietTheme::renderWallabagConnecting(Framebuffer& fb, const FontSet& fonts,
+                                          const WallabagConnectingViewModel& vm, Plane plane) {
+  // renderWifiConnect, and the two STAGES live entirely in the strings -- see the
+  // view-model for why there is no `fetching` flag here.
+  veilRect(fb, 0, 0, fb.width(), fb.height());
+
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+
+  const int contentW = panelContentW(kActionsPanelW);
+  const int colW = contentW - 2 * kPanelPadX;
+  const Font& body = fonts[Role::Value500];
+  const Font& note = fonts[Role::Meta400];
+  const Tracking noteTracking = trackingEm(note, 100);
+  const Icon& mark = icons::kWifi;
+
+  const Prose label = wrapPanelCaption(fonts, vm.caption, contentW);
+  // `WordBreak::Anywhere` for renderWifiConnect's reason, which transfers with
+  // one noun changed: the connecting message embeds a HOST, and a hostname need
+  // contain no space, so the name is one unbreakable token. Centred, so a line
+  // wider than the column starts left of it and runs off BOTH sides of the panel.
+  const Prose message = wrapProse(body, vm.message, colW, 1300, {}, WordBreak::Anywhere);
+  const Prose noteProse = wrapProse(note, vm.note, colW, 1500, noteTracking);
+
+  const int bodyH = kWifiConnectPadTop + mark.h + kWifiConnectGap +
+                    f26ToPx(message.heightF26()) + kWifiConnectGap +
+                    f26ToPx(noteProse.heightF26()) + kWifiConnectPadBottom;
+  const int panelH = 2 * kPanelBorder + panelCaptionHeight(fonts, label) + bodyH;
+
+  const int x = panelLeft(fb.width(), kActionsPanelW);
+  const int y = centreIn(0, fb.height(), panelH);
+  drawPanel(fb, x, y, kActionsPanelW, panelH);
+
+  const int cx = x + kPanelBorder;
+  int cy = y + kPanelBorder;
+  cy += drawPanelCaption(fb, fonts, cx, cy, contentW, label, "", plane);
+  cy += kWifiConnectPadTop;
+  drawIcon(fb, mark, cx + centreIn(0, contentW, mark.w), cy, Ink::Black, plane);
+  cy += mark.h + kWifiConnectGap;
+  cy += f26ToPx(drawProse(fb, body, message, cx + kPanelPadX, colW, pxToF26(cy), Ink::Black, plane,
+                          ProseAlign::Centre));
+  cy += kWifiConnectGap;
+  drawProse(fb, note, noteProse, cx + kPanelPadX, colW, pxToF26(cy), Ink::Black, plane,
+            ProseAlign::Centre);
+
+  drawOverlayHintBar(fb, fonts, hints, plane);
+}
+
+void QuietTheme::renderWallabagError(Framebuffer& fb, const FontSet& fonts,
+                                     const WallabagErrorViewModel& vm, Plane plane) {
+  // renderWifiError, and the SLAB LIST is the shape: two of the three copy shapes
+  // drop `TRY AGAIN` and their vector is simply shorter. There is no offersRetry
+  // flag to read -- see the view-model for why WifiError needs one and this
+  // does not.
+  veilRect(fb, 0, 0, fb.width(), fb.height());
+
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+
+  const int contentW = panelContentW(kConfirmPanelW);
+  const int colW = contentW - 2 * kPanelPadX;
+  const Font& body = fonts[Role::Body400];
+  const Icon& mark = icons::kWarning;
+
+  const Prose label = wrapPanelCaption(fonts, vm.caption, contentW);
+  std::string tail;
+  // `WordBreak::Anywhere` for BookError's reason: the sign-in shape's message
+  // names a PATH, which is one unbreakable token wider than nothing in particular.
+  Prose prose = wrapProse(body, vm.message, colW, kConfirmProseLeadEm, {}, WordBreak::Anywhere);
+
+  const int slabs = static_cast<int>(vm.actions.size());
+  const int actionsH =
+      slabs * kActionH + (slabs > 0 ? (slabs - 1) * kConfirmButtonGap : 0) + kConfirmButtonPadBottom;
+  const int panelFixedH = 2 * kPanelBorder + panelCaptionHeight(fonts, label) +
+                          (2 * kConfirmProsePadY + mark.h + kBookErrorIconGap) + actionsH;
+  const int proseRoom = centredPanelRoom(fb, fonts, hints) - panelFixedH;
+  int maxProseLines = 1;
+  while (maxProseLines < prose.lineCount() &&
+         f26ToPx((maxProseLines + 1) * prose.leadF26) <= proseRoom)
+    ++maxProseLines;
+  clampProse(body, prose, maxProseLines, colW, tail);
+
+  const int panelH = panelFixedH - (2 * kConfirmProsePadY + mark.h + kBookErrorIconGap) +
+                     (kConfirmProsePadY + mark.h + kBookErrorIconGap +
+                      f26ToPx(prose.heightF26()) + kConfirmProsePadY);
+
+  const int x = panelLeft(fb.width(), kConfirmPanelW);
+  const int y = centreIn(0, fb.height(), panelH);
+  drawPanel(fb, x, y, kConfirmPanelW, panelH);
+
+  const int cx = x + kPanelBorder;
+  int cy = y + kPanelBorder;
+  cy += drawPanelCaption(fb, fonts, cx, cy, contentW, label, "", plane);
+  cy += kConfirmProsePadY;
+  drawIcon(fb, mark, cx + kPanelPadX, cy, Ink::Black, plane);
+  cy += mark.h + kBookErrorIconGap;
+  cy += f26ToPx(drawProse(fb, body, prose, cx + kPanelPadX, colW, pxToF26(cy), Ink::Black, plane,
+                          ProseAlign::Left));
+  cy += kConfirmProsePadY;
+
+  for (int i = 0; i < slabs; ++i) {
+    if (i > 0) cy += kActionH + kConfirmButtonGap;
+    drawActionButton(fb, fonts, cx + kPanelPadX, cy, colW, vm.actions[static_cast<size_t>(i)],
+                     i == vm.focusedAction, plane);
+  }
+
+  drawOverlayHintBar(fb, fonts, hints, plane);
+}
+
 }  // namespace reader

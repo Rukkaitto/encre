@@ -763,15 +763,16 @@ int drawBookRow(Framebuffer& fb, const FontSet& fonts, int y, const BookRowConte
 
 // --- design/BookDetails.dc.html's and Contents.dc.html's field row -----------
 
-int detailRowHeight(bool rule) { return kDetailRowContentH + (rule ? kDetailRowRuleH : 0); }
+int detailRowHeight(bool rule, int contentH) { return contentH + (rule ? kDetailRowRuleH : 0); }
 
 int drawDetailRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label,
-                  std::string_view value, bool focused, bool rule, Plane plane) {
+                  std::string_view value, bool focused, bool rule, Plane plane,
+                  int contentH) {
   const Ink ink = focused ? Ink::White : Ink::Black;
   if (focused)
-    fb.fillRect(0, y, fb.width(), kDetailRowContentH, false);
+    fb.fillRect(0, y, fb.width(), contentH, false);
   else if (rule)
-    fb.fillRect(0, y + kDetailRowContentH, fb.width(), kDetailRowRuleH, false);
+    fb.fillRect(0, y + contentH, fb.width(), kDetailRowRuleH, false);
   // Value500 and Value700: the same size at two weights, which is the board's
   // own distinction between what a field is called and what it says. Neither run
   // is tracked -- the board sets no letter-spacing on either.
@@ -800,11 +801,11 @@ int drawDetailRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view
   const int vNatural = value.empty() ? 0 : vf.measure(value);
   const int avail = fb.width() - 2 * kMargin - (value.empty() ? 0 : kBandGap);
   const int labelW = labelShare(lf.measure(label), vNatural, avail);
-  drawText(fb, lf, kMargin, baselineIn(lf, y, kDetailRowContentH),
+  drawText(fb, lf, kMargin, baselineIn(lf, y, contentH),
            elideToWidth(lf, label, labelW), ink, {}, plane);
   if (!value.empty())
     drawText(fb, vf, fb.width() - kMargin - vf.measure(value),
-             baselineIn(vf, y, kDetailRowContentH), value, ink, {}, plane);
+             baselineIn(vf, y, contentH), value, ink, {}, plane);
   return detailRowHeight(rule);
 }
 

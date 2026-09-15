@@ -774,7 +774,7 @@ int drawProse(Framebuffer& fb, const GlyphSource& font, const Prose& prose, int 
 inline constexpr int kDetailRowContentH = 64;
 inline constexpr int kDetailRowRuleH = 1;
 
-int detailRowHeight(bool rule);
+int detailRowHeight(bool rule, int contentH = kDetailRowContentH);
 
 // --- A list's section header -------------------------------------------------
 //
@@ -823,8 +823,18 @@ inline constexpr int kSectionEm = 200;
 int sectionHeaderHeight(const FontSet& fonts, bool rule);
 int drawSectionHeader(Framebuffer& fb, const FontSet& fonts, int y, int w,
                       std::string_view label, bool rule, Plane plane = Plane::Bw);
+//
+// `contentH` IS A PARAMETER BECAUSE A THIRD BOARD DECLARES A THIRD HEIGHT.
+// BookDetails and Contents both say 64 (kDetailRowContentH, the default);
+// WallabagAccount.dc.html says 72. That is the board's own number and it is
+// followed rather than argued with -- a row height is exactly the kind of thing
+// CLAUDE.md's first invariant says to derive from the board and never to pin.
+// The alternative was a fourth hand-written copy of "label left, value right,
+// optionally inverted, optionally ruled", which is what this function already
+// exists to have deleted.
 int drawDetailRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label,
-                  std::string_view value, bool focused, bool rule, Plane plane = Plane::Bw);
+                  std::string_view value, bool focused, bool rule, Plane plane = Plane::Bw,
+                  int contentH = kDetailRowContentH);
 
 // --- An overlay's panel ------------------------------------------------------
 //

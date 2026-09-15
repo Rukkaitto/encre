@@ -812,4 +812,142 @@ struct WifiNetworkActionsViewModel {
   std::array<bool, 4> holds{};
 };
 
+// ---------------------------------------------------------------------------
+// ARTICLES OVER WALLABAG (V1.1). design/Articles.dc.html and its five siblings.
+
+// One row of the Articles list (design/Articles.dc.html). LibraryRow's shape and
+// deliberately not LibraryRow itself: these live in different directories, carry
+// different second lines and have different values, and sharing the struct would
+// tempt a theme into sharing the renderer, which is where the two lists would
+// start constraining each other.
+struct ArticleRow {
+  std::string title;
+  // "LONGREADS - 22 MIN", or with " - READ" on the end. Composed by the SCREEN,
+  // as LibraryRow::meta is and for its reason: it is content.
+  std::string meta;
+  // Drawn as a hollow bullet where an unread row draws a solid one. A flag rather
+  // than the theme keying on `meta` ending in READ, which would make a string the
+  // source of truth for a mark.
+  bool read = false;
+};
+
+// design/Articles.dc.html, with design/ArticlesSetup.dc.html and
+// design/SyncDone.dc.html as VARIANTS of it -- same ScreenId, same model, same
+// renderer. HomeEmpty's rule: what differs between the three is what this struct
+// says, never which function draws it.
+struct ArticlesViewModel {
+  std::string title;  // the band's label: "ARTICLES"
+  // The band's value, PRE-FORMATTED here where LibraryViewModel's is an int, and
+  // the difference is that this slot holds two KINDS of answer: "3 UNREAD" is a
+  // count and "NOT SET UP" is a state. An int plus a flag would be the theme
+  // deciding which of two sentences to build, which is a screen's decision.
+  std::string bandValue;
+  // THE NOT-SET-UP VARIANT, which replaces the list and the sync row with a
+  // centred block. Not a second screen and not a second renderer: one flag, as
+  // HomeViewModel::nothingToContinue is, and spelled to match it.
+  bool notSetUp = false;
+  std::string setupTitle;   // "READ IT LATER"
+  std::string setupProse;   // the paragraph naming the file
+  std::string setupNote;    // "THE FILE IS ALREADY ON THE CARD."
+  // The sync row's right-hand stamp: "WALLABAG - NO NEW", "- NEVER", "- 3 NEW",
+  // "- FAILED". AN OUTCOME AND NEVER AN AGE, because this device has no clock
+  // (#132) -- design/Articles.dc.html carries the argument and the four values.
+  std::string syncLabel;  // "Sync now"
+  std::string syncStamp;
+  // design/SyncDone.dc.html's status block, above the sync row. EMPTY on every
+  // other path to this screen, which is what makes it a variant rather than a
+  // state: it is the ONE place a push count is stated, and a list reached any
+  // other way must not claim one.
+  std::string statusLine;
+  std::vector<ArticleRow> rows;  // the VISIBLE slice, never the whole directory
+  int focusedRow = -1;           // an index into `rows`
+  // The rail's two numbers, over the whole list. LibraryViewModel's pair exactly.
+  int firstRow = 0;
+  int totalRows = 0;
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
+// design/ArticleActions.dc.html -- the overlay a HOLD on an article row opens.
+// ItemActionsViewModel's shape with one slot fewer: there is no status value in
+// its caption, because an article has no percentage the list already knows.
+struct ArticleActionsViewModel {
+  std::string caption;  // the article's title, shouted and elided by the theme
+  std::vector<ItemActionEntry> actions;
+  int focusedAction = 0;
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
+// design/ArticleEnd.dc.html -- what an article's last page turns into.
+// BookEndViewModel's shape, and the two differences are both real:
+//
+//   - the band HAS a value here, where BookEnd's is deliberately empty. `2 LEFT`
+//     is a count of files on the card, not the thing the screen is about, so it
+//     cannot squeeze the label the way a shouted book title did there;
+//   - FOUR slabs rather than two, and the third is ABSENT rather than inert when
+//     there is no next unread article -- WifiError's rule that the slab list IS
+//     the shape, which is why `actions` is a vector and not four named strings.
+struct ArticleEndViewModel {
+  std::string title;      // "ARTICLE FINISHED"
+  std::string leftValue;  // "2 LEFT", the band's right slot; empty when none remain
+  // The article's name. IT WRAPS, so it must outlive the render that reads it --
+  // Prose holds views into it, which is the use-after-free Home shipped once.
+  std::string articleTitle;
+  std::string meta;  // "LONGREADS - 22 MIN"
+  std::vector<std::string> actions;  // slab labels; the focused one is filled
+  int focusedAction = 0;
+  std::string note;  // "SYNCS ON THE NEXT CONNECTION."
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
+// design/WallabagAccount.dc.html -- setup and status. SettingsViewModel's shape,
+// and it reuses ListRow for its rows because a label and a right-aligned value is
+// exactly ListRow's shape -- TypographyViewModel's reason for the same choice.
+struct WallabagAccountViewModel {
+  std::string title;      // "WALLABAG"
+  std::string bandValue;  // "SIGNED IN" or "NOT SET UP"
+  std::vector<ListRow> rows;
+  int focusedRow = -1;
+  int firstRow = 0;
+  int totalRows = 0;
+  std::string note;  // the paragraph under the last row
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
+// design/WallabagConnecting.dc.html AND design/WallabagFetching.dc.html -- ONE
+// screen, TWO STAGES, and one model for both. WifiConnectViewModel's shape.
+//
+// The caption and the message are the whole difference between the stages, which
+// is why neither is a flag: a `fetching` bool would put the two captions in the
+// THEME, where a copy change means a code change and the board is no longer the
+// source of truth for the words.
+struct WallabagConnectingViewModel {
+  std::string caption;  // "CONNECTING..." then "SYNCING..."
+  std::string message;  // "Connecting to wallabag.lan." then "Fetching 3 of 12."
+  std::string note;     // the footnote; it differs per stage too
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
+// design/WallabagError.dc.html and its two siblings -- ONE SCREEN, THREE COPY
+// SHAPES, which is BookError's argument and the join flow's precedent: a sync
+// fails three distinguishable ways and one sentence would be a lie.
+//
+// THERE IS NO `offersRetry` FLAG, where WifiErrorViewModel has `offersEdit`. The
+// slab LIST is the shape here: two of the three drop `TRY AGAIN` and the vector
+// is already shorter, so a flag would be a second spelling of its length -- and
+// the two could disagree. WifiError carries its flag because its slab is not the
+// last one in the list and its absence cannot be read off the count.
+struct WallabagErrorViewModel {
+  std::string caption;  // "COULDN'T SIGN IN" or "COULDN'T CONNECT"
+  std::string message;
+  std::vector<std::string> actions;  // slab labels; the focused one is filled
+  int focusedAction = 0;
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
 }  // namespace reader

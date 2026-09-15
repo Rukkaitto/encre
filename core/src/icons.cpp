@@ -68,6 +68,8 @@ const Icon kWarning{data::kWarningW, data::kWarningH, 2, data::kWarningBits};
 const Icon kLock{data::kLockW, data::kLockH, 2, data::kLockBits};
 const Icon kRescan{data::kRescanW, data::kRescanH, 2, data::kRescanBits};
 const Icon kWifi{data::kWifiW, data::kWifiH, 2, data::kWifiBits};
+const Icon kArticlesLarge{data::kArticlesLargeW, data::kArticlesLargeH, 2,
+                          data::kArticlesLargeBits};
 }  // namespace icons
 
 }  // namespace reader

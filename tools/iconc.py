@@ -288,6 +288,23 @@ ICONS = {
         "source": "design/BookEnd.dc.html",
         "match": "M1 6l5 5L15 1",
     },
+    # The Articles flow's not-set-up mark, 98x91 -- a stack of articles over an
+    # open tray. Unique on its board and unique in the whole design directory:
+    # nothing else draws a `rect` at x=4.5,y=0.5, which is the top sheet of the
+    # stack. It is the ONLY new mark this flow needs -- the sync row reuses
+    # kRescan (the identical circular-arrow path at the identical 25x25) and the
+    # sync-done tick reuses kCheck, whose own note already records that
+    # SyncDone.dc.html draws that path at the same 26x21.
+    #
+    # LARGE, like kBookLarge and kBatteryLarge, and for their reason: these are
+    # pre-rendered bitmaps and there is no scaling one up. 98x91 at 2bpp is
+    # 2,275 bytes.
+    "articles_setup": {
+        "symbol": "kArticlesLarge",
+        "note": "a stack of articles over a tray: the not-set-up prompt",
+        "source": "design/ArticlesSetup.dc.html",
+        "match": '<rect x="4.5" y="0.5"',
+    },
     # THE WARNING TRIANGLE, 32x28, and THREE BOARDS DRAW IT -- BookError.dc.html,
     # BookErrorUnreadable.dc.html and LowBattery.dc.html. It arrived twice, on two
     # branches at once (the corrupt-book dialog and the low-battery banner), each

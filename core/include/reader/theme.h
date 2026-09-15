@@ -29,6 +29,12 @@ struct ReaderMenuViewModel;
 struct ContentsViewModel;
 struct TypographyViewModel;
 struct PeekViewModel;
+struct ArticlesViewModel;
+struct ArticleActionsViewModel;
+struct ArticleEndViewModel;
+struct WallabagAccountViewModel;
+struct WallabagConnectingViewModel;
+struct WallabagErrorViewModel;
 
 // THE PEEK PANEL'S HEIGHT. The BOX is the constant and the LINE COUNT is the result,
 // and this is the inversion of what shipped -- there was a `kPeekLines = 8` here and
@@ -173,6 +179,54 @@ class Theme {
                                         const WifiNetworkActionsViewModel& vm,
                                         Plane plane = Plane::Bw) = 0;
 
+  // --- Articles over wallabag (V1.1) -----------------------------------
+  //
+  // Six methods for the connect flow's stated reason, which is renderBookError's:
+  // a shared "a list, a panel and some slabs" surface would have to be told which
+  // board it was drawing, and a parameter naming a board is a caller list wearing
+  // a parameter's clothes.
+  //
+  // ASSEMBLED FROM SHIPPED PRIMITIVES, NOT NEW GEOMETRY. Every one of these six
+  // is a board this firmware already draws with different content in it, which is
+  // why the flow could be built screens-first on fixture data at all.
+
+  // design/Articles.dc.html, with design/ArticlesSetup.dc.html and
+  // design/SyncDone.dc.html as the SAME method -- `notSetUp` and a non-empty
+  // `statusLine` are the two branches. Three render paths would be three ways to
+  // spell one layout, which is renderWifiSettings' own rule one flow over.
+  virtual void renderArticles(Framebuffer& fb, const FontSet& fonts,
+                              const ArticlesViewModel& vm, Plane plane = Plane::Bw) = 0;
+
+  // design/ArticleActions.dc.html -- an overlay, so this must NOT clear the
+  // framebuffer. renderItemActions' panel with a caption that has no value slot.
+  virtual void renderArticleActions(Framebuffer& fb, const FontSet& fonts,
+                                    const ArticleActionsViewModel& vm,
+                                    Plane plane = Plane::Bw) = 0;
+
+  // design/ArticleEnd.dc.html -- renderBookEnd's screen with a band VALUE and a
+  // slab list whose LENGTH is the shape.
+  virtual void renderArticleEnd(Framebuffer& fb, const FontSet& fonts,
+                                const ArticleEndViewModel& vm, Plane plane = Plane::Bw) = 0;
+
+  // design/WallabagAccount.dc.html -- renderSettings' rows and section header,
+  // plus a paragraph under the last row.
+  virtual void renderWallabagAccount(Framebuffer& fb, const FontSet& fonts,
+                                     const WallabagAccountViewModel& vm,
+                                     Plane plane = Plane::Bw) = 0;
+
+  // design/WallabagConnecting.dc.html AND design/WallabagFetching.dc.html -- one
+  // method, two stages, and the stage lives entirely in the strings. An overlay.
+  virtual void renderWallabagConnecting(Framebuffer& fb, const FontSet& fonts,
+                                        const WallabagConnectingViewModel& vm,
+                                        Plane plane = Plane::Bw) = 0;
+
+  // design/WallabagError.dc.html and its two siblings -- one method, three copy
+  // shapes, and the slab LIST is the shape (there is no offersRetry flag; see the
+  // view-model). An overlay.
+  virtual void renderWallabagError(Framebuffer& fb, const FontSet& fonts,
+                                   const WallabagErrorViewModel& vm,
+                                   Plane plane = Plane::Bw) = 0;
+
   // Book details, which is a whole screen and not an overlay -- so it clears the
   // framebuffer and draws its own hint bar like any other screen.
   virtual void renderBookDetails(Framebuffer& fb, const FontSet& fonts,
@@ -192,6 +246,15 @@ class Theme {
   // geometries differ by 8px of height, the band's height depends on its type
   // role, and a row's depends on the faces its two lines are set in.
   virtual int libraryVisibleRows(int panelH, const FontSet& fonts) const = 0;
+  // How many ARTICLE rows fit, which is libraryVisibleRows' question over a
+  // different row height and one row fewer of chrome -- the sync row sits between
+  // the band and the list and is not one of these.
+  //
+  // Its own query rather than libraryVisibleRows reused, for that query's own
+  // reason: the count depends on the row's box and this board's rows are not the
+  // Library's. A shared answer would be right by coincidence and would stop being
+  // right the first time either board moved.
+  virtual int articlesVisibleRows(int panelH, const FontSet& fonts) const = 0;
 
   // Settings' BOX MODEL, not its row count, and the split is deliberate.
   //

@@ -128,6 +128,18 @@ class NullTheme : public Theme {
                        Plane) override {}
   void renderWifiNetworkActions(Framebuffer&, const FontSet&, const WifiNetworkActionsViewModel&,
                                 Plane) override {}
+  void renderArticles(Framebuffer&, const FontSet&, const ArticlesViewModel&, Plane) override {}
+  void renderArticleActions(Framebuffer&, const FontSet&, const ArticleActionsViewModel&,
+                            Plane) override {}
+  void renderArticleEnd(Framebuffer&, const FontSet&, const ArticleEndViewModel&,
+                        Plane) override {}
+  void renderWallabagAccount(Framebuffer&, const FontSet&, const WallabagAccountViewModel&,
+                             Plane) override {}
+  void renderWallabagConnecting(Framebuffer&, const FontSet&, const WallabagConnectingViewModel&,
+                                Plane) override {}
+  void renderWallabagError(Framebuffer&, const FontSet&, const WallabagErrorViewModel&,
+                           Plane) override {}
+  int articlesVisibleRows(int, const FontSet&) const override { return 0; }
   void settingsMetrics(int, const FontSet&, int& listH, int& rowH, int& headerH) const override {
     listH = 0;
     rowH = 1;

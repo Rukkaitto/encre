@@ -39,6 +39,22 @@ class QuietTheme : public Theme {
   void renderWifiNetworkActions(Framebuffer& fb, const FontSet& fonts,
                                 const WifiNetworkActionsViewModel& vm,
                                 Plane plane = Plane::Bw) override;
+
+  // --- Articles over wallabag (V1.1) -----------------------------------
+  void renderArticles(Framebuffer& fb, const FontSet& fonts, const ArticlesViewModel& vm,
+                      Plane plane = Plane::Bw) override;
+  void renderArticleActions(Framebuffer& fb, const FontSet& fonts,
+                            const ArticleActionsViewModel& vm, Plane plane = Plane::Bw) override;
+  void renderArticleEnd(Framebuffer& fb, const FontSet& fonts, const ArticleEndViewModel& vm,
+                        Plane plane = Plane::Bw) override;
+  void renderWallabagAccount(Framebuffer& fb, const FontSet& fonts,
+                             const WallabagAccountViewModel& vm, Plane plane = Plane::Bw) override;
+  void renderWallabagConnecting(Framebuffer& fb, const FontSet& fonts,
+                                const WallabagConnectingViewModel& vm,
+                                Plane plane = Plane::Bw) override;
+  void renderWallabagError(Framebuffer& fb, const FontSet& fonts, const WallabagErrorViewModel& vm,
+                           Plane plane = Plane::Bw) override;
+  int articlesVisibleRows(int panelH, const FontSet& fonts) const override;
   void renderBookDetails(Framebuffer& fb, const FontSet& fonts, const BookDetailsViewModel& vm,
                          Plane plane = Plane::Bw) override;
   int libraryVisibleRows(int panelH, const FontSet& fonts) const override;

@@ -75,6 +75,11 @@ extern const Icon kWarning;  // a warning triangle: the corrupt-book dialog and
 extern const Icon kLock;    // a closed padlock: a scan row needing a passphrase
 extern const Icon kRescan;  // a circular arrow: the picker's last row
 extern const Icon kWifi;    // three arcs over a dot: the connecting dialog
+// The Articles flow's one new mark: a stack of articles over a tray, 98x91, for
+// the not-set-up prompt. The sync row draws kRescan and the sync-done tick draws
+// kCheck -- both already generated from paths their own boards share with this
+// flow's, which iconc's `source` is what disambiguates.
+extern const Icon kArticlesLarge;
 }  // namespace icons
 
 }  // namespace reader
