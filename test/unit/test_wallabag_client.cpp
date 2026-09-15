@@ -275,20 +275,33 @@ TEST_CASE("the download, archive and star requests are built verbatim") {
   NullSink n1;
   REQUIRE(c.beginArchive(42, n1));
   run(c, t);
+  // THE PARAMETERS ARE IN THE BODY AND THE PATH CARRIES NONE, which is what the
+  // server actually reads: `patchEntriesAction` takes them off Symfony's
+  // `$request->request`, filled by FOSRestBundle from the BODY, and PHP never
+  // populates `$_POST` for a PATCH at all. These three asserted the query-string
+  // form verbatim and were green while the device pushed nothing -- wallabag
+  // answers 200 to a PATCH whose parameters it never saw, the push step acks the
+  // queue on any 2xx, and the intent is gone. So the BODY is what is asserted.
   CHECK(t.last().method == "PATCH");
-  CHECK(t.last().path == "/api/entries/42?archive=1");
+  CHECK(t.last().path == "/api/entries/42");
+  CHECK(t.last().body == "archive=1");
+  CHECK(t.last().hasHeader("Content-Type", "application/x-www-form-urlencoded"));
 
   t.scriptOk(200);
   NullSink n2;
   REQUIRE(c.beginStar(42, true, n2));
   run(c, t);
-  CHECK(t.last().path == "/api/entries/42?starred=1");
+  CHECK(t.last().path == "/api/entries/42");
+  CHECK(t.last().body == "starred=1");
 
   t.scriptOk(200);
   NullSink n3;
   REQUIRE(c.beginStar(42, false, n3));
   run(c, t);
-  CHECK(t.last().path == "/api/entries/42?starred=0");
+  CHECK(t.last().path == "/api/entries/42");
+  // `starred=0` AND NOT AN ABSENT PARAMETER: unstarring has to SAY so, or the
+  // server keeps the star and the queue acks anyway.
+  CHECK(t.last().body == "starred=0");
 
   // EVERY AUTHENTICATED CALL CARRIES THE BEARER.
   for (const auto& r : t.log()) CHECK(r.hasHeader("Authorization", "Bearer AT"));

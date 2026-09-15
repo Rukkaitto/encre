@@ -3631,7 +3631,12 @@ void QuietTheme::renderArticles(Framebuffer& fb, const FontSet& fonts, const Art
     // enters or leaves this row.
     const bool focused = vm.syncFocused;
     const Ink ink = focused ? Ink::White : Ink::Black;
-    if (focused) fb.fillRect(0, y, fb.width(), rowH, true);
+    // `false` IS THE INK. `Framebuffer::fillRect`'s flag is `white`, not `ink` --
+    // so `true` here painted the row WHITE and then drew `Ink::White` text on
+    // it, which reached the glass as a row that vanished when focused. The rule
+    // one line below has always passed `false` for its black hairline, which is
+    // the same fact stated where it is easy to read the other way.
+    if (focused) fb.fillRect(0, y, fb.width(), rowH, false);
     drawIcon(fb, mark, kMargin, mid + centreIn(0, contentH, mark.h), ink, plane);
     drawText(fb, labelF, kMargin + mark.w + kSyncRowGap, baselineIn(labelF, mid, contentH),
              vm.syncLabel, ink, {}, plane);

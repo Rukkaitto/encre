@@ -266,6 +266,15 @@ void ArticlesScreen::syncVm() {
   // press will not take.
   vm_.hints = kHints;
   vm_.hints[1] = vm_.syncFocused ? kSyncHint : kReadHint;
+  // AND SO DOES THE HOLD RING. The bar's ring and the long-press binding read
+  // ONE field -- `holds`, through `hintHoldMask()` -- precisely so a screen
+  // cannot promise a hold it has not bound. It promised one here anyway, because
+  // the array was set once at construction and never followed the focus: the
+  // sync row drew a ring and a hold on it did nothing, which is the dead-button
+  // shape this project has shipped three times. There is no actions overlay for
+  // "sync now" to open.
+  vm_.holds = {false, !vm_.syncFocused, false, false};
+  declareHints(vm_.holds);
   // WITH NO ARTICLES THE MOVERS GO QUIET, because one focusable row means UP and
   // DOWN would promise a press that changes nothing -- WifiSettingsEmpty's rule,
   // and an empty slot is 36px rather than zero, so the live slots keep their

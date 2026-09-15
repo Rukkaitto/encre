@@ -3480,6 +3480,34 @@ static void finishSync(reader::SyncOutcome outcome) {
   }
 }
 
+// THE ACTIONS OVERLAY'S FACTS, KEPT CURRENT WHILE THE LIST IS ON TOP. This is
+// the THIRD time this exact shape has cost a dead control, and the first two are
+// already written down: `ArticlesScreen`'s hold returns
+// `Action::push(ArticleActions)` DIRECTLY, so the shell never sees the press and
+// cannot prime in response to it -- and the factory refuses the overlay without
+// facts, so the hold did nothing at all. Reported as "READ on an article has a
+// hold circle but holding does nothing".
+//
+// RE-PRIMED EVERY ITERATION rather than on a focus change, for the Wi-Fi hub's
+// reason one flow over: a focus move is internal to the screen and reaches the
+// shell as an ordinary redraw, so there is no edge to hang this on. It is a
+// couple of string copies on a screen that repaints at ~450 ms.
+static void primeArticleActionsFacts() {
+  if (gApp->top().id() != reader::ScreenId::Articles) return;
+  const auto& list = static_cast<const reader::ArticlesScreen&>(gApp->top());
+  const reader::ArticleItem* item = list.focusedItem();
+  // THE SYNC ROW HAS NO ACTIONS, and leaving the previous row's facts primed
+  // there would be an overlay captioned with an article the reader is not on --
+  // which is worse than a refused push. The hold is unbound on that row anyway,
+  // so this is the belt to that brace.
+  if (item == nullptr) return;
+  reader::ArticleActionsScreen::Facts f;
+  f.id = item->id;
+  f.title = item->title;
+  f.starred = item->starred;
+  gFactory.setArticleActionsFacts(std::move(f));
+}
+
 // DRIVEN FROM THE QUIET WINDOW, beside pollWifi(), for its reason: everything on
 // this device is the loop's, and a sync that blocked would stop the panel and the
 // buttons for a minute.
@@ -8482,6 +8510,7 @@ void loop() {
   // draws is the scanning one.
   pollWifi();
   pollSync();
+  primeArticleActionsFacts();
 
   const bool settled = static_cast<uint32_t>(millis() - gLastInputMs) >= kCoalesceMs;
   const bool painted = gApp->dirty() && settled;

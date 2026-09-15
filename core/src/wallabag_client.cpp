@@ -462,10 +462,31 @@ bool WallabagClient::beginDownload(int id, BodySink& sink) {
   return start(std::move(r), sink, /*authenticated=*/true);
 }
 
+// A PATCH'S PARAMETERS GO IN THE BODY, NOT THE QUERY STRING, AND THE SERVER
+// ANSWERS 200 EITHER WAY -- which is what made this expensive to see.
+//
+// wallabag's `patchEntriesAction` reads them off Symfony's `$request->request`,
+// which is the request BODY. A PATCH with `?archive=1` and an empty body finds
+// the entry, changes nothing, and returns the entry with 200 -- so the sync's
+// push looked like it worked, the marker was acked on the 2xx, the queue emptied
+// and the server had never been told. Reported off the device as "liking or
+// archiving sets 1 TO PUSH, re-syncing seems to push, but the articles aren't
+// liked or archived on the instance".
+//
+// THE ACK IS WHAT MAKES A WRONG 200 UNRECOVERABLE. `SyncEngine`'s push step acks
+// on any 2xx, correctly -- it has no way to know the server ignored a parameter
+// it never received -- so the queue is cleared and the intent is gone. That is
+// the strongest argument for putting this right at the request rather than
+// anywhere downstream.
+//
+// The `Content-Type` is the same one the token grant already sends, and the
+// same encoder: this is a form body, exactly as that one is.
 bool WallabagClient::beginArchive(int id, BodySink& sink) {
   HttpRequest r;
   r.method = "PATCH";
-  r.path = "/api/entries/" + std::to_string(id) + "?archive=1";
+  r.path = "/api/entries/" + std::to_string(id);
+  r.headers.push_back({"Content-Type", "application/x-www-form-urlencoded"});
+  r.body = "archive=1";
   checkingInfo_ = false;
   return start(std::move(r), sink, /*authenticated=*/true);
 }
@@ -473,7 +494,9 @@ bool WallabagClient::beginArchive(int id, BodySink& sink) {
 bool WallabagClient::beginStar(int id, bool starred, BodySink& sink) {
   HttpRequest r;
   r.method = "PATCH";
-  r.path = "/api/entries/" + std::to_string(id) + (starred ? "?starred=1" : "?starred=0");
+  r.path = "/api/entries/" + std::to_string(id);
+  r.headers.push_back({"Content-Type", "application/x-www-form-urlencoded"});
+  r.body = starred ? "starred=1" : "starred=0";
   checkingInfo_ = false;
   return start(std::move(r), sink, /*authenticated=*/true);
 }

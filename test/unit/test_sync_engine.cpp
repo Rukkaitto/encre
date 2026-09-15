@@ -147,7 +147,12 @@ TEST_CASE("a full sync: info, push, listing, downloads, watermark") {
   REQUIRE(r.http.requests() == 5);
   CHECK(r.http.log()[0].path == "/api/info");
   CHECK(r.http.log()[1].method == "PATCH");
-  CHECK(r.http.log()[1].path == "/api/entries/5?starred=1");
+  CHECK(r.http.log()[1].path == "/api/entries/5");
+  // ITS OWN ASSERTION, because doctest cannot decompose a conjunction -- and
+  // because the BODY is the half the server reads. The path alone was asserted
+  // before, with `?starred=1` on it, and stayed green while the device pushed
+  // nothing at all.
+  CHECK(r.http.log()[1].body == "starred=1");
   CHECK(r.http.log()[2].path.find("/api/entries?") == 0);
   CHECK(r.http.log()[3].path == "/api/entries/7/export.epub");
   CHECK(r.http.log()[4].path == "/api/entries/8/export.epub");

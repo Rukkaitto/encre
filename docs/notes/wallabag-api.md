@@ -80,8 +80,8 @@ of a deployment and not of the design.
 | unread list, no bodies | `GET /api/entries?archive=0&detail=metadata&perPage=N` |
 | only what changed | the same plus `since=<unix ts>` |
 | the article | `GET /api/entries/{entry}/export.epub` |
-| archive | `PATCH /api/entries/{entry}?archive=1` |
-| like | `PATCH /api/entries/{entry}?starred=1` |
+| archive | `PATCH /api/entries/{entry}` + body `archive=1` |
+| like | `PATCH /api/entries/{entry}` + body `starred=1` |
 | is it reachable / which version | `GET /api/info` — needs no token |
 
 Two of those are better than the Instapaper design assumed:
@@ -98,6 +98,28 @@ An entry carries `id`, `title`, `url`, `domain_name`, `content`, `created_at`,
 `updated_at`, `is_archived`, `is_starred`, `language`, `mimetype`,
 `preview_picture`, `reading_time`, `tags` — so `Articles.dc.html`'s rows and
 `ArticleEnd`'s reading time need no derivation and no second call.
+
+**THE TWO PATCHES TAKE THEIR PARAMETERS IN THE BODY, AND THIS TABLE SAID THE
+QUERY STRING UNTIL THE DEVICE PROVED OTHERWISE.** Both rows read
+`?archive=1` / `?starred=1`, the client sent exactly that, and wallabag answered
+**200** — so the sync's push looked like it worked, the queue emptied, and
+nothing on the instance changed. Reported off the device as "liking or archiving
+sets 1 TO PUSH, re-syncing seems to push, but the articles aren't liked or
+archived".
+
+`patchEntriesAction` reads them off Symfony's `$request->request`, which
+FOSRestBundle's `BodyListener` fills from the request BODY for a PATCH when the
+content type is form-encoded. PHP never populates `$_POST` for a PATCH at all, so
+the query string reaches nothing: the entry is found, no parameter is seen, and
+the entry comes back unchanged with a 200.
+
+**A WRONG 200 IS THE WORST ANSWER THIS API CAN GIVE US**, because the push step
+acks the queue on any 2xx — correctly, since it has no way to know the server
+ignored a parameter it never received. The marker is removed, the intent is gone,
+and the next sync has nothing left to retry. That is why this is fixed at the
+request rather than anywhere downstream, and why the test asserts the BODY and
+not only the path: the previous one pinned the path verbatim and was green
+throughout.
 
 ## 3. Where the credentials come from
 
