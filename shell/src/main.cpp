@@ -1643,14 +1643,23 @@ static void probeOneGet(const char* what, const char* url, bool secure) {
   logFlush();
 }
 
-static void probeStreamedDownload(const char* url) {
+static void probeStreamedDownload(const char* url, bool secure) {
   const uint32_t before = ESP.getFreeHeap();
+  const uint32_t blockBefore = ESP.getMaxAllocHeap();
   const uint32_t t0 = millis();
   size_t wrote = 0;
 
-  WiFiClient client;
+  // IT TAKES THE SCHEME BECAUSE THE FIRST RUN MEASURED NOTHING. The download
+  // was plain against an HTTPS-only origin, so it drew nginx's 400 and the
+  // `code == 200` body never ran -- one of the three questions this probe
+  // exists to answer went unanswered. The allocation shape wanted here is a TLS
+  // session held OPEN while 4 KB chunks land on the card, which is strictly
+  // more than a handshake alone, and only the secure path has it.
+  WiFiClient plain;
+  WiFiClientSecure tls;
+  if (secure) tls.setInsecure();
   HTTPClient http;
-  if (http.begin(client, url)) {
+  if (http.begin(secure ? static_cast<WiFiClient&>(tls) : plain, url)) {
     const int code = http.GET();
     if (code == 200) {
       // THE SHAPE THE REAL SINK WILL HAVE: a fixed chunk out of the stream and
@@ -1682,9 +1691,9 @@ static void probeStreamedDownload(const char* url) {
         wrote += static_cast<size_t>(n);
       }
     }
-    logf("[probe] download   code=%d wrote=%u ms=%lu heap %u -> %u min=%u block=%u\n", code,
-         (unsigned)wrote, (unsigned long)(millis() - t0), (unsigned)before,
-         (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+    logf("[probe] download   code=%d wrote=%u ms=%lu heap %u -> %u min=%u block %u -> %u\n",
+         code, (unsigned)wrote, (unsigned long)(millis() - t0), (unsigned)before,
+         (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), (unsigned)blockBefore,
          (unsigned)ESP.getMaxAllocHeap());
     http.end();
   }
@@ -1851,17 +1860,51 @@ static void runWallabagProbe() {
   }
   mark("probe-joined");
 
-  // PLAIN HTTP against the reader's own server, which is the LAN case #139 says
-  // is the common one.
-  probeOneGet("http-info", (creds.server + "/api/info").c_str(), /*secure=*/false);
-  // AND TLS against a host that definitely speaks it, so the handshake's cost is
-  // measured even on a device whose own server is plain.
+  // THE SCHEME IS READ OFF THE URL AND SAID OUT LOUD, because the first run's
+  // `http-info` leg drew a 400 with a 255-byte body and that was read three
+  // ways before the cause was certain. `HTTPClient::begin(WiFiClient&, url)`
+  // does NOT refuse an `https://` URL -- it takes port 443 and sends plaintext
+  // at it -- so an HTTPS-only origin answers in the clear with nginx's "the
+  // plain HTTP request was sent to an HTTPS port". A refusal and a server that
+  // speaks plain HTTP badly look identical at that log line.
+  const bool serverIsTls = creds.server.rfind("https://", 0) == 0;
+  logf("[probe] server \"%s\" is %s\n", creds.server.c_str(),
+       serverIsTls ? "HTTPS -- the plain leg below is EXPECTED to be refused"
+                   : "plain HTTP");
+
+  // PLAIN against the reader's own server, ALWAYS, even when the URL says
+  // https. That is not a mistake: the rule's fallback is "plain HTTP only", so
+  // whether this origin accepts a plain request is the question that decides
+  // whether the fallback is a release or a feature nobody can use.
+  probeOneGet("own-plain", (creds.server + "/api/info").c_str(), /*secure=*/false);
+
+  // AND TLS AGAINST THE READER'S OWN SERVER, which the first run did not
+  // measure: it priced `app.wallabag.it`'s handshake instead, and a handshake's
+  // cost is mostly the CERTIFICATE CHAIN, which is the origin's and not a
+  // constant. Skipped when the server is plain, where there is nothing to
+  // measure.
+  if (serverIsTls) {
+    mark("probe-own-tls");
+    probeOneGet("own-tls", (creds.server + "/api/info").c_str(), /*secure=*/true);
+  }
+
+  // The control stays: a host that definitely speaks TLS, so the handshake is
+  // priced even on a device whose own server is plain, and so two chains can be
+  // compared when it is not.
   mark("probe-tls");
   probeOneGet("tls-info", "https://app.wallabag.it/api/info", /*secure=*/true);
-  // One streamed download, which is the allocation shape the real sink will have.
+
+  // ONE STREAMED DOWNLOAD, AND IT IS THE ROOT URL RATHER THAN AN EXPORT,
+  // because the export endpoint wants a bearer token and the token ladder is
+  // Task 4.2 -- which is the decision this measurement is meant to inform, so
+  // needing it here would be circular. What is wanted is the allocation SHAPE:
+  // a connection held open while 4 KB chunks go to the card. The body's
+  // content does not enter that, and the login page is a 200 with a body and
+  // no auth. It costs the wall clock, which this probe already states is
+  // pessimistic, and not the heap, which is the number #140 wants.
   mark("probe-download");
   gSd.mkdirs("/.reader/articles");
-  probeStreamedDownload((creds.server + "/api/entries/1/export.epub").c_str());
+  probeStreamedDownload((creds.server + "/").c_str(), serverIsTls);
 
   gRadio.down();
   mark("probe-radio-down");
