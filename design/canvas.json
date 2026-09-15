@@ -406,6 +406,15 @@
       "page": "page-6"
     },
     {
+      "file": "ArticlesRemoveConfirm.dc.html",
+      "title": "Remove downloads",
+      "x": 2900,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-6"
+    },
+    {
       "file": "BookEnd.dc.html",
       "title": "Book Finished",
       "x": 0,
