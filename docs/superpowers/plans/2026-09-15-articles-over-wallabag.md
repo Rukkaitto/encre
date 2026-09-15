@@ -138,29 +138,29 @@ in `65b1ecd`), with the render looked at. Every new or changed string goes throu
 **Files:** `design/Articles.dc.html`, `design/SyncDone.dc.html`,
 `design/WallabagAccount.dc.html`, `design/ArticleEnd.dc.html`
 
-- [ ] **Step 1:** In `Articles.dc.html`, change the sync row's stamp `WALLABAG · 2 H AGO`
+- [x] **Step 1:** In `Articles.dc.html`, change the sync row's stamp `WALLABAG · 2 H AGO`
   to `WALLABAG · UP TO DATE`. This is the specimen for a device whose last sync
   found nothing new. Add a note above the row stating the four values the stamp can
   take and that they are outcomes, not ages: `NEVER SYNCED` (no sync has ever
   completed on this card), `UP TO DATE` (the last sync fetched nothing), `3 NEW` (the
   last sync fetched articles — the count), `FAILED` (the last sync did not finish).
   State #132 as the reason an age is impossible.
-- [ ] **Step 2:** In `SyncDone.dc.html`, change `WALLABAG · NOW` to `WALLABAG · 3 NEW`,
+- [x] **Step 2:** In `SyncDone.dc.html`, change `WALLABAG · NOW` to `WALLABAG · 3 NEW`,
   and the status line `SYNC COMPLETE · 3 NEW ARTICLES · 1 ARCHIVE PUSHED` stays —
   it is the one place the push count is stated. Note that `SyncDone` is the same
   screen as `Articles` with the stamp's `N NEW` value and the status line, so it is a
   **variant**, not a `ScreenId`.
-- [ ] **Step 3:** In `WallabagAccount.dc.html`, change `Last sync · 2 H AGO` to
+- [x] **Step 3:** In `WallabagAccount.dc.html`, change `Last sync · 2 H AGO` to
   `Last sync · UP TO DATE`, and note the same four values. Change `Unread · 3 ARTICLES`
   to keep as is — that is a count the device holds.
-- [ ] **Step 4:** In `ArticleEnd.dc.html`, confirm `2 LEFT` in the band's right slot is
+- [x] **Step 4:** In `ArticleEnd.dc.html`, confirm `2 LEFT` in the band's right slot is
   the count of unread articles remaining on the card after this one, and add a note
   saying so; the value is drawn from the store, never derived from the server.
-- [ ] **Step 5:** Render all four at 480×800 and 528×792; check no stamp wraps or
+- [x] **Step 5:** Render all four at 480×800 and 528×792; check no stamp wraps or
   collides with the `Sync now` label. `WALLABAG · NEVER SYNCED` is the widest value
   — measure it in Chrome against the row's remaining width the way `65b1ecd`
   measured the dialog messages, and record the clearance in the board note.
-- [ ] **Step 6:** `make canvas && make canvas-check`; commit
+- [x] **Step 6:** `make canvas && make canvas-check`; commit
   `feat(articles): the sync stamps state an outcome, because this device has no clock`.
 
 ### Task 0.2: Settings gets its `wallabag` row back
@@ -172,21 +172,21 @@ restores it as the door to the account screen. Home's row is the door to the *li
 
 **Files:** `design/Settings.dc.html`
 
-- [ ] **Step 1:** Add a row under CONNECTIONS, after `Wi-Fi`, label `wallabag`, value
+- [x] **Step 1:** Add a row under CONNECTIONS, after `Wi-Fi`, label `wallabag`, value
   `NOT SET UP`, drawn exactly as the `Wi-Fi` row is drawn (copy that row's markup, swap
   the two runs). The value is `SIGNED IN` once `/.reader/wallabag.json` carries all five
   values and a sync has completed at least once; `NOT SET UP` otherwise. Note that
   unlike Home this is a screen visited deliberately, so a setup state here is
   information rather than a nag — Home's row stays a chevron for the reason
   `Main.dc.html`'s menu note gives.
-- [ ] **Step 2:** Count the items. Settings is eleven today where twelve fit
+- [x] **Step 2:** Count the items. Settings is eleven today where twelve fit
   (`CLAUDE.md`, *Overlays and lists*); this makes it **twelve**. Render at both
   geometries and confirm no rail and no 14px gutter appears. Record the count in the
   board note and in `CLAUDE.md`'s "eleven items where twelve fit" sentence when Phase
   1 lands the row.
-- [ ] **Step 3:** Confirm the hint bar's Confirm slot reads `OPEN` when this row is
+- [x] **Step 3:** Confirm the hint bar's Confirm slot reads `OPEN` when this row is
   focused — it discloses a screen, like `Typography` and `Wi-Fi`.
-- [ ] **Step 4:** `make canvas && make canvas-check`; commit
+- [x] **Step 4:** `make canvas && make canvas-check`; commit
   `feat(settings): the wallabag row returns under CONNECTIONS, the door to the account screen`.
 
 ### Task 0.3: A third failure shape — no network to sync over
@@ -198,15 +198,15 @@ credentials, `COULDN'T CONNECT` says the server did not answer. Neither was aske
 **Files:** `design/WallabagErrorNoNetwork.dc.html` (create from
 `design/WallabagError.dc.html`), `design/canvas.json`
 
-- [ ] **Step 1:** Copy `WallabagError.dc.html`. Caption `COULDN'T CONNECT`. Message:
+- [x] **Step 1:** Copy `WallabagError.dc.html`. Caption `COULDN'T CONNECT`. Message:
   `No saved Wi-Fi network. Join one in Settings first.` One slab, `OK` — `TRY AGAIN`
   is absent on `WallabagError`'s own argument (pressing it could never succeed until
   the reader has been to Settings). Hint bar `CANCEL · OK` and two 36px dead slots.
-- [ ] **Step 2:** Measure the message's wrap in Chrome: tightest break at least 12px
+- [x] **Step 2:** Measure the message's wrap in Chrome: tightest break at least 12px
   (#76's floor), no line wider than the 336px column. Record the numbers in the note.
-- [ ] **Step 3:** Add the artboard to `canvas.json` on page 6 (`V1.1 · Articles`) at the
+- [x] **Step 3:** Add the artboard to `canvas.json` on page 6 (`V1.1 · Articles`) at the
   slot `make canvas` names when it refuses.
-- [ ] **Step 4:** `make canvas && make canvas-check`; commit
+- [x] **Step 4:** `make canvas && make canvas-check`; commit
   `feat(articles): a third failure shape, for a device with no network to sync over`.
 
 ### Task 0.4: The connecting dialog's second stage
@@ -219,16 +219,16 @@ own note says the caption is *"the one thing a still panel on e-ink owes a reade
 **Files:** `design/WallabagFetching.dc.html` (create from
 `design/WallabagConnecting.dc.html`), `design/canvas.json`
 
-- [ ] **Step 1:** Copy `WallabagConnecting.dc.html`. Caption `SYNCING…`. Message:
+- [x] **Step 1:** Copy `WallabagConnecting.dc.html`. Caption `SYNCING…`. Message:
   `Fetching article 3 of 12.` Footnote unchanged. Same 340px panel, same `CANCEL`.
   Note that the count advances per file and each advance is a ~520 ms waveform — the
   same price a page turn pays — so this is a paint per article and never per byte.
-- [ ] **Step 2:** Note the cancel contract for this stage: cancel stops after the file
+- [x] **Step 2:** Note the cancel contract for this stage: cancel stops after the file
   in flight, the partial file is removed, everything already fetched stays, and the
   watermark is **not** advanced — so the next sync fetches what this one did not.
-- [ ] **Step 3:** Measure the message's widest form (`Fetching article 50 of 50.`)
+- [x] **Step 3:** Measure the message's widest form (`Fetching article 50 of 50.`)
   against the 296px column; record it.
-- [ ] **Step 4:** Add to `canvas.json`; `make canvas && make canvas-check`; commit
+- [x] **Step 4:** Add to `canvas.json`; `make canvas && make canvas-check`; commit
   `feat(articles): the sync dialog's fetching stage, so a long sync does not read as frozen`.
 
 ### Task 0.5: The confirmation `Remove downloaded articles…` opens
@@ -239,13 +239,13 @@ own note says the caption is *"the one thing a still panel on e-ink owes a reade
 **Files:** `design/ArticlesRemoveConfirm.dc.html` (create from
 `design/DeleteConfirm.dc.html`), `design/canvas.json`
 
-- [ ] **Step 1:** Copy `DeleteConfirm.dc.html` with `WallabagAccount.dc.html` regenerated
+- [x] **Step 1:** Copy `DeleteConfirm.dc.html` with `WallabagAccount.dc.html` regenerated
   as its veiled parent. Caption `REMOVE DOWNLOADED ARTICLES`. Message: `Every article
   on the card is deleted. Your wallabag is untouched, and the next sync fetches them
   again.` Slabs: `REMOVE` filled, `CANCEL` outlined. Hint bar as `DeleteConfirm`'s.
-- [ ] **Step 2:** Note it is an **overlay** over the account screen; the veil is
+- [x] **Step 2:** Note it is an **overlay** over the account screen; the veil is
   generated from `WallabagAccount.dc.html`, not transcribed.
-- [ ] **Step 3:** Measure the wrap; record. Add to `canvas.json`; `make canvas &&
+- [x] **Step 3:** Measure the wrap; record. Add to `canvas.json`; `make canvas &&
   make canvas-check`; commit
   `feat(articles): the remove-downloads confirmation, which the row's ellipsis promised`.
 
@@ -253,16 +253,16 @@ own note says the caption is *"the one thing a still panel on e-ink owes a reade
 
 **Files:** `tools/compare-design.py`
 
-- [ ] **Step 1:** Add `FLOW_SCREENS` rows, one per boarded state, after the `wifi_*`
+- [x] **Step 1:** Add `FLOW_SCREENS` rows, one per boarded state, after the `wifi_*`
   rows: `articles`, `articles_setup`, `articles_sync_done`, `article_actions`,
   `article_end`, `wallabag_account`, `wallabag_connecting`, `wallabag_fetching`,
   `wallabag_error`, `wallabag_error_offline`, `wallabag_error_no_network`,
   `articles_remove_confirm`. Each names its `.dc.html` and a label.
-- [ ] **Step 2:** Run `python3 tools/test_compare_design.py` — the table checks (no
+- [x] **Step 2:** Run `python3 tools/test_compare_design.py` — the table checks (no
   duplicate id, every board on disk) must pass. Run `make compare
   COMPARE_ARGS="--only articles,wallabag_account"` and confirm each prints `design ok
   firmware not implemented` — the boards exist, the screens do not yet.
-- [ ] **Step 3:** Commit `chore(compare): rows for the twelve Articles board states`.
+- [x] **Step 3:** Commit `chore(compare): rows for the twelve Articles board states`.
 
 ---
 
