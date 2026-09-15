@@ -54,7 +54,8 @@ class QuietTheme : public Theme {
                                 Plane plane = Plane::Bw) override;
   void renderWallabagError(Framebuffer& fb, const FontSet& fonts, const WallabagErrorViewModel& vm,
                            Plane plane = Plane::Bw) override;
-  int articlesVisibleRows(int panelH, const FontSet& fonts) const override;
+  int articlesVisibleRows(int panelH, int panelW, const FontSet& fonts,
+                          std::string_view statusLine) const override;
   void renderBookDetails(Framebuffer& fb, const FontSet& fonts, const BookDetailsViewModel& vm,
                          Plane plane = Plane::Bw) override;
   int libraryVisibleRows(int panelH, const FontSet& fonts) const override;

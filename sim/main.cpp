@@ -1289,15 +1289,19 @@ int main(int argc, char** argv) {
     // about is the screens, and a Home frame nobody draws would only be a
     // slower way to the same framebuffer.
     factory.setArticlesDemo();
-    factory.setArticlesVisibleRows(theme.articlesVisibleRows(h, fonts));
+    // THE STATUS LINE IS PART OF THE QUESTION, because the sync-done variant
+    // draws a block between the band and the sync row and so has one row fewer.
+    const std::string statusLine =
+        isArticlesSyncDone ? "SYNC COMPLETE \xC2\xB7 3 NEW ARTICLES \xC2\xB7 1 ARCHIVE PUSHED"
+                           : std::string();
+    factory.setArticlesVisibleRows(theme.articlesVisibleRows(h, w, fonts, statusLine));
     if (isArticlesSetup) factory.setArticlesNotSetUp();
     if (isArticlesSyncDone) {
       // THE SYNC-DONE VARIANT IS THE SAME ScreenId with a stamp and a status
       // block, which is what makes it a variant: SyncDone.dc.html is
       // Articles.dc.html with two things added.
       factory.setArticles(reader::demoArticles(), "WALLABAG \xC2\xB7 3 NEW");
-      factory.setArticlesStatusLine(
-          "SYNC COMPLETE \xC2\xB7 3 NEW ARTICLES \xC2\xB7 1 ARCHIVE PUSHED");
+      factory.setArticlesStatusLine(statusLine);
     }
     if (isWallabagErrorOffline)
       factory.setWallabagFailure(reader::WallabagErrorScreen::Shape::Offline);

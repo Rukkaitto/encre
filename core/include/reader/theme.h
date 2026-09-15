@@ -254,7 +254,15 @@ class Theme {
   // reason: the count depends on the row's box and this board's rows are not the
   // Library's. A shared answer would be right by coincidence and would stop being
   // right the first time either board moved.
-  virtual int articlesVisibleRows(int panelH, const FontSet& fonts) const = 0;
+  //
+  // `statusLine` AND `panelW` ARE REQUIRED, NOT DEFAULTED, and that is
+  // sectionHeaderHeight's rule for its own `rule`: the one caller that had to
+  // answer this got it wrong by not being asked. design/SyncDone.dc.html draws a
+  // status block between the band and the sync row, so that variant has one row
+  // fewer -- and the first golden of it drew the last row's meta line straight
+  // through the hint bar. A default would have hidden exactly that.
+  virtual int articlesVisibleRows(int panelH, int panelW, const FontSet& fonts,
+                                  std::string_view statusLine) const = 0;
 
   // Settings' BOX MODEL, not its row count, and the split is deliberate.
   //

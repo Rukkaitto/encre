@@ -3476,6 +3476,24 @@ int articleRowHeight(const FontSet& fonts, int titleLines, bool rule) {
   return 2 * kArticleRowPadY + articleRowContentH(fonts, titleLines) + (rule ? 1 : 0);
 }
 
+// design/SyncDone.dc.html's status block, or 0 when there is none. SHARED by
+// articlesVisibleRows and renderArticles, because two spellings of one box is
+// how a list comes to overflow by exactly one row -- which is what the first
+// golden of that variant caught, with the last row's meta line drawn through
+// the hint bar.
+int syncStatusHeight(const FontSet& fonts, std::string_view statusLine, int panelW) {
+  if (statusLine.empty()) return 0;
+  const Font& statusF = fonts[Role::Meta400];
+  const Icon& tick = icons::kCheck;
+  const int boxW = panelW - 2 * kMargin;
+  const int colW = boxW - 2 * kSyncStatusBorder - 2 * kSyncStatusPadX - tick.w - kSyncStatusGap;
+  const Prose line = wrapProse(statusF, statusLine, colW, kSyncStatusLeadEm,
+                               trackingEm(statusF, kSyncStatusEm));
+  const int inner = f26ToPx(line.heightF26());
+  return kSyncStatusMarginTop + 2 * kSyncStatusBorder + 2 * kSyncStatusPadY +
+         (inner > tick.h ? inner : tick.h) + kSyncStatusBelow;
+}
+
 // The sync row's own height, which is one line of the taller of its two runs.
 int syncRowHeight(const FontSet& fonts) {
   const int label = fonts[Role::Label500].lineHeight();
@@ -3487,11 +3505,12 @@ int syncRowHeight(const FontSet& fonts) {
 }
 }  // namespace
 
-int QuietTheme::articlesVisibleRows(int panelH, const FontSet& fonts) const {
+int QuietTheme::articlesVisibleRows(int panelH, int panelW, const FontSet& fonts,
+                                    std::string_view statusLine) const {
   Hint hints[4];
   measuringHints(hints);
   const int area = panelH - headerBandHeight(fonts, nullptr) - syncRowHeight(fonts) -
-                   hintBarHeight(fonts, hints);
+                   syncStatusHeight(fonts, statusLine, panelW) - hintBarHeight(fonts, hints);
   // THE WORST CASE, WHICH IS THE COST OF A LIST WHOSE ROWS ARE NOT ON A GRID.
   // The board wraps an article's title to two lines and draws one-line rows
   // beside two-line ones, so a row's height is a RESULT -- and a ScrollWindow
@@ -3574,6 +3593,10 @@ void QuietTheme::renderArticles(Framebuffer& fb, const FontSet& fonts, const Art
     const int inner = f26ToPx(line.heightF26());
     const int boxH = 2 * kSyncStatusBorder + 2 * kSyncStatusPadY +
                      (inner > tick.h ? inner : tick.h);
+    // The same arithmetic syncStatusHeight reserves, spent here -- and it is a
+    // second expression rather than a call because this one needs the pieces
+    // (the box, the column, the wrapped Prose) to DRAW with. A test asserts the
+    // two agree to the pixel.
     y += kSyncStatusMarginTop;
     outlineRect(fb, kMargin, y, boxW, boxH, kSyncStatusBorder);
     const int ix = kMargin + kSyncStatusBorder + kSyncStatusPadX;

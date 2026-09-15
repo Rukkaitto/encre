@@ -139,7 +139,9 @@ class NullTheme : public Theme {
                                 Plane) override {}
   void renderWallabagError(Framebuffer&, const FontSet&, const WallabagErrorViewModel&,
                            Plane) override {}
-  int articlesVisibleRows(int, const FontSet&) const override { return 0; }
+  int articlesVisibleRows(int, int, const FontSet&, std::string_view) const override {
+    return 0;
+  }
   void settingsMetrics(int, const FontSet&, int& listH, int& rowH, int& headerH) const override {
     listH = 0;
     rowH = 1;
