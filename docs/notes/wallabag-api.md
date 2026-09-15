@@ -456,18 +456,30 @@ card buffer whether or not a host is there, and `loop()` flushes it in the first
 quiet window. This is the route for a device on battery, where there is no host
 coming at all — the case the card log was built for.
 
-**THE CABLE, IF YOU WANT IT LIVE.** The probe now WAITS for a terminal, up to
-30 s, whenever `isPlugged()` says a host is there — so start the monitor and the
-probe will be waiting for you:
+**THE CABLE, IF YOU WANT IT LIVE.** The probe WAITS for a terminal, up to 30 s,
+whenever `isPlugged()` says a host is there — so start the monitor and the probe
+will be waiting for you. **One command:**
 
 ```
-PLATFORMIO_BUILD_FLAGS="-DENCRE_WALLABAG_PROBE=1" make firmware
-~/.platformio/penv/bin/python -m platformio run -e xteink -t upload -t monitor
+make probe
 ```
 
-Chaining `-t upload -t monitor` is what closes the gap; with the wait in place,
-resetting the board with a monitor already open works too. Unplugged the probe
-does not wait at all, because nobody is coming.
+**IT IS A MAKE TARGET BECAUSE THE TWO-COMMAND FORM SILENTLY FLASHES THE WRONG
+BUILD, AND THAT IS WHAT WENT WRONG TWICE.** `PLATFORMIO_BUILD_FLAGS` is an
+ENVIRONMENT VARIABLE, so it applies only to the command it is written on — and
+`pio run -t upload` REBUILDS before it uploads. So this:
+
+```
+PLATFORMIO_BUILD_FLAGS="-DENCRE_WALLABAG_PROBE=1" make firmware   # builds WITH the probe
+pio run -e xteink -t upload -t monitor                            # rebuilds WITHOUT it, uploads that
+```
+
+builds the probe, throws it away, and flashes the default firmware, with nothing
+anywhere saying so. Proved rather than reasoned: the ELF's own probe banner goes
+from present to absent between those two commands.
+
+`make probe-build` is the same build without uploading, for checking it compiles.
+Unplugged the probe does not wait at all, because nobody is coming.
 
 **IT SAYS WHICH BUILD IS RUNNING BEFORE IT SAYS ANYTHING ELSE.** The first line
 is `[probe] ENCRE_WALLABAG_PROBE build` with the heap, and the second says
