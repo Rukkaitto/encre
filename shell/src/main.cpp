@@ -1741,7 +1741,40 @@ static void runWallabagProbe() {
   std::string why;
   const reader::CredentialsResult r = reader::loadWallabagCredentials(gSd, creds, why);
   if (r != reader::CredentialsResult::Ok) {
-    logf("[probe] /.reader/wallabag.json is not configured -- nothing to probe\n");
+    // THREE ANSWERS, NAMED SEPARATELY, because they need three different things
+    // done about them -- and the first version of this line collapsed them into
+    // one sentence, which is the reports-on-less-than-it-claims shape this
+    // project refuses everywhere else. `loadWallabagCredentials` distinguishes
+    // them precisely so a caller can.
+    switch (r) {
+      case reader::CredentialsResult::Absent:
+        // AND THE BOOT SEED IS NOT BUILT YET. Task 4.4 writes this file when it
+        // is missing; until then it is created by hand, and saying so is the
+        // difference between a reader editing a file and a reader wondering why
+        // the device did not make one.
+        logf("[probe] no %s on the card -- create it with the five keys "
+             "(server, clientId, clientSecret, username, password)\n",
+             reader::kWallabagCredentialsPath);
+        break;
+      case reader::CredentialsResult::Unconfigured:
+        // WHICH ONES ARE EMPTY, because "not configured" over five fields sends
+        // somebody to re-check all five. A seeded file and a half-finished edit
+        // are the same state and this names the gap in both.
+        logf("[probe] %s is missing a value:%s%s%s%s%s\n", reader::kWallabagCredentialsPath,
+             creds.server.empty() ? " server" : "", creds.clientId.empty() ? " clientId" : "",
+             creds.clientSecret.empty() ? " clientSecret" : "",
+             creds.username.empty() ? " username" : "",
+             creds.password.empty() ? " password" : "");
+        break;
+      case reader::CredentialsResult::Malformed:
+        // The reader's edit is the only copy of itself, so this is the one that
+        // has to carry a reason rather than a verdict.
+        logf("[probe] %s %s -- it is left exactly as typed\n",
+             reader::kWallabagCredentialsPath, why.c_str());
+        break;
+      case reader::CredentialsResult::Ok:
+        break;
+    }
     logFlush();
     return;
   }
