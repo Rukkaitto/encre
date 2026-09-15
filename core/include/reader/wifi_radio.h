@@ -63,6 +63,11 @@ inline constexpr int kWifiReasonNoAddress = -1;
 // direction.
 JoinFailure wifiFailureFor(int reason);
 
+// The vendor reason as a WORD, for the log only -- never for the glass, whose
+// three copy shapes are wifiFailureFor's. `vendor reason 208` cost a round trip
+// to an ESP-IDF header to read once; this is so nobody pays that again.
+const char* wifiReasonName(int reason);
+
 // The picker shows at most this many. A scan in a block of flats returns
 // thirty; Rescan is the last row, so the cap is what keeps it reachable in a
 // couple of held presses.

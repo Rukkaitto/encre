@@ -1784,8 +1784,16 @@ static void runWallabagProbe() {
     return;
   }
 
+  // THE SSID AND ITS LOCK STATE, because "the join did not complete" over a
+  // saved list does not say WHICH network -- and whether a secret was sent is
+  // half of any join diagnosis.
+  const std::string psk = net->locked ? shellwifi::secret(net->ssid) : std::string();
+  logf("[probe] joining AUTO network \"%s\" (locked=%d, secret=%d bytes)\n", net->ssid.c_str(),
+       (int)net->locked, (int)psk.size());
+  logFlush();
+
   mark("probe-radio-up");
-  if (!gRadio.beginJoin(net->ssid, shellwifi::secret(net->ssid))) {
+  if (!gRadio.beginJoin(net->ssid, psk)) {
     logf("[probe] the radio refused the join\n");
     logFlush();
     return;
@@ -1795,7 +1803,8 @@ static void runWallabagProbe() {
     delay(50);
   }
   if (gRadio.joinState() != reader::JoinState::Ok) {
-    logf("[probe] the join did not complete (reason %d)\n", gRadio.joinReason());
+    logf("[probe] the join did not complete: reason %d -- %s\n", gRadio.joinReason(),
+         reader::wifiReasonName(gRadio.joinReason()));
     gRadio.down();
     logFlush();
     return;
