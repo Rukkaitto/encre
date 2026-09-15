@@ -667,6 +667,16 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // would leave the first page measured roman and drawn in two faces -- the
       // measure/draw disagreement StyledFace exists to prevent, and invisible on any
       // page that happens to have no emphasis.
+      // WHICH BOARD THE LAST PAGE TURNS INTO, set on EVERY path through this
+      // case including the demos: a Reader told nothing keeps whatever the last
+      // one was told, and the factory outlives every screen it builds. That is
+      // the one-way hazard `setEndScreen`'s own header names.
+      //
+      // NOT ON THE PEEK'S reader one case below. That one is headless -- its
+      // gestures are never dispatched -- so an end screen there would be a
+      // setting with no reader, which is the producerless-field shape this
+      // project keeps finding from the other direction.
+      scr->setEndScreen(readerEndScreen_);
       scr->setItalic(readerItalic_);
       // BEFORE setMetrics for the reason stated just above, and it applies more
       // sharply here: the classes decide which runs are emphasised at all, so a set

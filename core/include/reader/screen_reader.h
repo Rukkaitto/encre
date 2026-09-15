@@ -309,6 +309,24 @@ class ReaderScreen : public Screen {
   // clobber it, and the simplest way to guarantee that is for there to be nothing
   // for syncVm() to clobber it from.
   void setBatteryLow(int percent) { vm_.batteryLowPercent = percent; }
+
+  // WHICH BOARD THE LAST PAGE TURNS INTO. `BookEnd` by default, `ArticleEnd`
+  // when the shell opened an article -- and that is the whole of what differs
+  // between reading a book and reading an article on this device.
+  //
+  // ONE READER SERVES BOTH, which is decision 3 of the wallabag note taken to its
+  // conclusion: an article is an EPUB on the card and goes through `openBook`
+  // like anything else. A second Reader would be a second copy of paging, the
+  // rewind, the page ring and the index -- the three routines this project has
+  // spent the most effort on, each carrying rules a copy would have to re-earn.
+  //
+  // IT IS A MEMBER AND NOT A CONSTRUCTOR ARGUMENT because the shell primes a
+  // Reader per BOOK and the factory builds one per push: a constructor argument
+  // would be right for exactly one of those. It must also go BACK -- see the
+  // test -- or the first article read leaves its board on every book opened
+  // afterwards.
+  void setEndScreen(ScreenId id) { endScreen_ = id; }
+  ScreenId endScreen() const { return endScreen_; }
   // Where the reader is, as the anchor spells a page.
   AnchorPos here() const;
 
@@ -773,6 +791,7 @@ class ReaderScreen : public Screen {
   void dropPageRing() { pageRing_.clear(); }
 
   ReaderViewModel vm_{};
+  ScreenId endScreen_ = ScreenId::BookEnd;
   std::string bookTitle_, chapter_label_;
   std::vector<TocEntry> names_;
 

@@ -1021,10 +1021,10 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
 - Modify: `shell/src/main.cpp` (`handleOpen`, `openBookAt`, the restore walk)
 - Test: `test/unit/test_screen_reader_bookend.cpp`
 
-- [ ] **Step 1:** Write the failing test: a `ReaderScreen` told `setEndScreen(ArticleEnd)`
+- [x] **Step 1:** Write the failing test: a `ReaderScreen` told `setEndScreen(ArticleEnd)`
   pushes `ArticleEnd` off its last page where the default pushes `BookEnd`. Run;
   expected failure; implement; pass.
-- [ ] **Step 2:** `handleOpen()`: a third asker beside the Library and Home — when the
+- [x] **Step 2:** `handleOpen()`: a third asker beside the Library and Home — when the
   top is `Articles`, the path is `epubPath(focusedId())` and the bytes come from the
   store. `openBookAt()` gains an `isArticle` fact (derived from the path prefix
   `/.reader/articles/`, one place): when true it primes `ArticleEndFacts` from the
@@ -1032,7 +1032,7 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
   exists) and tells the Reader `ArticleEnd`; otherwise everything is as today.
   `last.json` carries the article through `openBook` unchanged — Home's CONTINUE
   offers it, the sleep card names it; that is decision 3 of the note, taken.
-- [ ] **Step 3:** The restore walk: `ArticleEnd` joins `Reader`, `ReaderMenu`,
+- [x] **Step 3:** The restore walk: `ArticleEnd` joins `Reader`, `ReaderMenu`,
   `Contents` and `BookEnd` as a screen whose priming is `openBookAt`'s — the switch
   gains one case and the comment's "four screens and one open" becomes five.
 - [ ] **Step 4:** Flash; on glass: open an article from the list, page to its end,

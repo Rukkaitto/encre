@@ -153,3 +153,47 @@ TEST_CASE("paging back off the front of the book still does nothing") {
   CHECK(r.scr->chapterIndex() == 0);
   CHECK(r.scr->pageIndex() == 0);
 }
+
+TEST_CASE("an ARTICLE's last page opens ArticleEnd, and the default is unchanged") {
+  // ONE READER SERVES BOTH, which is decision 3 of the wallabag note taken to its
+  // conclusion: an article is an EPUB on the card and reads through `openBook`
+  // like any book, so the only thing that differs at the end of it is which board
+  // the last page turns into. A second Reader would be a second copy of paging,
+  // the rewind, the ring and the index -- the three routines this project has
+  // spent the most effort on.
+  //
+  // THE DEFAULT IS ASSERTED BESIDE IT ON PURPOSE. This is a setter with a
+  // default value, which is the shape that goes wrong silently: a reader told
+  // nothing must still reach `BookEnd`, or every book on the card ends on a
+  // screen about articles.
+  SUBCASE("told ArticleEnd, it pushes ArticleEnd") {
+    cardfix::CardReading r("<html><body><p>One.</p></body></html>");
+    r.scr->setEndScreen(ScreenId::ArticleEnd);
+    const Action a = pageToTheEnd(*r.scr);
+    CHECK(a.kind == Action::Kind::Push);
+    CHECK(a.target == ScreenId::ArticleEnd);
+    // The page is undisturbed here for `BookEnd`'s reason, and it is what makes
+    // Back off the end screen land on the article's last page rather than
+    // nowhere.
+    CHECK(r.scr->chapterIndex() == 1);
+    CHECK(r.scr->pageCount() > 0);
+  }
+
+  SUBCASE("told nothing, it still pushes BookEnd") {
+    cardfix::CardReading r("<html><body><p>One.</p></body></html>");
+    const Action a = pageToTheEnd(*r.scr);
+    CHECK(a.target == ScreenId::BookEnd);
+  }
+
+  SUBCASE("told BookEnd back again, it goes back") {
+    // A Reader is reused across opens on this device -- the factory builds one
+    // per push, but the shell primes it per book -- so the setter has to be able
+    // to go both ways. One-way would leave the first article's board on every
+    // book opened after it.
+    cardfix::CardReading r("<html><body><p>One.</p></body></html>");
+    r.scr->setEndScreen(ScreenId::ArticleEnd);
+    r.scr->setEndScreen(ScreenId::BookEnd);
+    const Action a = pageToTheEnd(*r.scr);
+    CHECK(a.target == ScreenId::BookEnd);
+  }
+}

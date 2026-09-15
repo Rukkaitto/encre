@@ -2922,13 +2922,38 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push);
 static void handleOpen() {
   gApp->clearOpenRequest();  // first, so a book that refuses does not re-fire
 
-  // TWO SCREENS CAN ASK TO OPEN A BOOK, and they mean different books. The Library
-  // means the row it has selected; Home's CONTINUE means the one the card's pointer
-  // names. Action::Kind::Open carries no path -- deliberately, since core/ does no
+  // THREE SCREENS CAN ASK TO OPEN A BOOK, and they mean different books. The
+  // Library means the row it has selected; Home's CONTINUE means the one the
+  // card's pointer names; the Articles list means the article it has selected.
+  // Action::Kind::Open carries no path -- deliberately, since core/ does no
   // storage -- so resolving it is this function's job.
   std::string path;
   uint32_t bookBytes = 0;
-  if (gApp->top().id() == reader::ScreenId::Home) {
+  if (gApp->top().id() == reader::ScreenId::Articles) {
+    // AN ARTICLE IS AN EPUB AND OPENS LIKE ONE. That is decision 3 of the
+    // wallabag note taken to its conclusion: nothing below this line knows or
+    // needs to know that the file came off a server rather than off the card in
+    // a computer, and `openBookAt` derives the one thing that differs -- which
+    // board the last page turns into -- from the path.
+    const auto& list = static_cast<const reader::ArticlesScreen&>(gApp->top());
+    const reader::ArticleItem* item = list.focusedItem();
+    if (item == nullptr) {
+      // The sync row, which is not an open. It latches `Action::article()` and
+      // never reaches here; this is the belt to that brace.
+      logf("[open] the Articles list has no article selected\n");
+      return;
+    }
+    const reader::ArticleStore store(gSd);
+    path = store.epubPath(item->id);
+    if (!gSd.exists(path)) {
+      // THE ROW IS THERE AND THE FILE IS NOT, which a sync cancelled mid-fetch
+      // can leave: the metadata is written as the listing is walked and the EPUB
+      // arrives afterwards. Saying so beats `openBook` failing less clearly.
+      logf("[open] article %d has metadata but no file at %s; the next sync fetches it\n",
+           item->id, path.c_str());
+      return;
+    }
+  } else if (gApp->top().id() == reader::ScreenId::Home) {
     reader::LastRead last;
     if (!reader::loadLastRead(gSd, last)) {
       logf("[open] CONTINUE with no saved book\n");
@@ -3701,14 +3726,38 @@ static void handleArticle() {
         case reader::ArticleEndScreen::Chosen::BackToList:
           popToScreen(reader::ScreenId::Articles);
           break;
-        case reader::ArticleEndScreen::Chosen::NextArticle:
-          // NOT BUILT HERE. Opening the next article is `openBookAt`'s, which is
-          // Task 4.6 -- and a slab that silently did nothing would be the
-          // dead-button shape this project has shipped twice, so it is left
-          // saying so in the log until that lands.
-          logf("[articles] NEXT ARTICLE is not wired yet (task 4.6)\n");
-          logFlush();
+        case reader::ArticleEndScreen::Chosen::NextArticle: {
+          // THE NEXT UNREAD IN LIST ORDER, which is the same walk that decided
+          // whether this slab is DRAWN at all -- `hasNext` is set by openBookAt
+          // from exactly this rule, so a slab that is on screen always lands
+          // somewhere. Two spellings of "next" is how a drawn slab and a reachable
+          // article come apart.
+          int next = 0;
+          bool seenSelf = false;
+          for (const reader::ArticleMeta& m : store.list()) {
+            if (m.archived) continue;
+            if (m.id == facts.id) {
+              seenSelf = true;
+              continue;
+            }
+            if (seenSelf && store.hasEpub(m.id)) {
+              next = m.id;
+              break;
+            }
+          }
+          if (next == 0) {
+            logf("[articles] NEXT ARTICLE found nothing after %d; staying put\n", facts.id);
+            logFlush();
+            break;
+          }
+          // POP TO THE LIST FIRST, so the stack under the next article is the list
+          // and not this article's end screen and its Reader. Otherwise every
+          // NEXT ARTICLE would grow the stack by two and Back would walk back
+          // through every article read in the session.
+          popToScreen(reader::ScreenId::Articles);
+          openBookAt(store.epubPath(next), 0, /*push=*/true);
           break;
+        }
         case reader::ArticleEndScreen::Chosen::None:
           break;
       }
@@ -4384,6 +4433,57 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // is the extraction point rather than the first.
   endFacts.libraryBeneath = appHasScreen(*gApp, reader::ScreenId::Library);
   gFactory.setBookEndFacts(std::move(endFacts));
+
+  // AN ARTICLE IS AN EPUB UNDER `/.reader/articles/`, AND THAT IS THE WHOLE TEST.
+  // Derived from the path in ONE place rather than plumbed down from the three
+  // callers, because two of them -- the wake restore and Home's CONTINUE -- do
+  // not know what they are opening: `last.json` carries an article's path exactly
+  // as it carries a book's, which is decision 3 of the wallabag note taken. A
+  // flag threaded through the call sites would be right at the Articles list and
+  // a guess at the other two.
+  const std::string kArticlesPrefix = std::string(reader::kArticlesDir) + "/";
+  const bool isArticle = path.rfind(kArticlesPrefix, 0) == 0;
+
+  // SET ON EVERY OPEN AND NOT ONLY WHEN IT CHANGES. The factory outlives every
+  // screen it builds, so a book opened after an article would otherwise end on a
+  // board about articles.
+  gFactory.setReaderEndScreen(isArticle ? reader::ScreenId::ArticleEnd
+                                        : reader::ScreenId::BookEnd);
+
+  if (isArticle) {
+    const reader::ArticleStore store(gSd);
+    reader::ArticleEndScreen::Facts af;
+    // THE ID OUT OF THE PATH, which is where it already is: `epubPath` built it,
+    // so parsing it back is one expression against a store method and a second
+    // source of truth that could disagree.
+    af.id = atoi(path.c_str() + kArticlesPrefix.size());
+
+    // EVERY FIGURE ON THAT BOARD COMES OFF THE CARD, never off the server. The
+    // board's own note has the argument: the server's unread count includes what
+    // this device has not fetched and what a phone archived an hour ago, so a
+    // panel quoting it would claim one thing while counting another.
+    const std::vector<reader::ArticleMeta> all = store.list();
+    bool seenSelf = false;
+    for (const reader::ArticleMeta& m : all) {
+      if (m.archived) continue;
+      if (m.id == af.id) {
+        af.title = m.title;
+        af.domain = m.domain;
+        af.readingMinutes = m.readingTime;
+        af.starred = m.starred;
+        seenSelf = true;
+        continue;
+      }
+      if (!store.hasEpub(m.id)) continue;
+      ++af.unreadRemaining;
+      // `hasNext` IS NOT `unreadRemaining > 0`, and the board says why: "next"
+      // walks the list in ORDER from here, so an unread article BEFORE this one
+      // is remaining and is not next. Deriving it would draw a slab that lands
+      // nowhere.
+      if (seenSelf && !af.hasNext) af.hasNext = true;
+    }
+    gFactory.setArticleEndFacts(std::move(af));
+  }
 
   const bool pushed = push && gApp->pushScreen(reader::ScreenId::Reader);
   // The push builds the screen, which locates the chapter, decodes it once to index
@@ -6531,15 +6631,22 @@ void setup() {
       for (const reader::StackEntry& e : stack) {
         if (reader::restorability(e.screen) != reader::Restore::NeedsPriming) continue;
         switch (e.screen) {
-          // FOUR SCREENS AND ONE OPEN, and naming all four here is the change.
+          // FIVE SCREENS AND ONE OPEN, and naming all five here is the change.
           // They are every screen whose inputs come from the book that is open --
-          // the page, the menu over it, its chapter list, and the screen its last
-          // page turns into -- and openBookAt primes all four in one pass, which is
-          // why this is one flag rather than four.
+          // the page, the menu over it, its chapter list, and the two screens its
+          // last page can turn into -- and openBookAt primes all five in one pass,
+          // which is why this is one flag rather than five.
+          //
+          // `ArticleEnd` JOINS THEM BECAUSE AN ARTICLE IS A BOOK HERE. `last.json`
+          // carries its path exactly as it carries a book's, `openBookAt` derives
+          // which board the last page turns into from that path, and the facts it
+          // primes come off the card -- so a wake onto the end of an article owes
+          // this walk nothing the other four did not already owe it.
           case reader::ScreenId::Reader:
           case reader::ScreenId::ReaderMenu:
           case reader::ScreenId::Contents:
           case reader::ScreenId::BookEnd:
+          case reader::ScreenId::ArticleEnd:
             wantsOpenBook = true;
             break;
           default:

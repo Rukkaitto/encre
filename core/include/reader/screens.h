@@ -357,6 +357,14 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // for and the reason: without it, holding Confirm on one article and then
   // reaching this overlay another way would act on the article before last.
   void clearArticleActionsFacts() { articleActionFactsSet_ = false; }
+  // WHICH END SCREEN THE READER IT BUILDS WILL PUSH. `BookEnd` unless the shell
+  // says otherwise, and the shell says otherwise for exactly one thing: a file
+  // under `/.reader/articles/`. Held here rather than passed at construction
+  // because the factory is what constructs the screen -- `libraryVisibleRows`'
+  // own reason -- and the shell sets it on EVERY open rather than only when it
+  // changes, so a book opened after an article cannot inherit its board.
+  void setReaderEndScreen(ScreenId id) { readerEndScreen_ = id; }
+
   void setArticleEndFacts(ArticleEndScreen::Facts f) {
     articleEndFacts_ = std::move(f);
     articleEndFactsSet_ = true;
@@ -595,6 +603,7 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   bool articlesPrimed_ = false;
   FileSystem* articleFs_ = nullptr;
   int articlesRows_ = 0;
+  ScreenId readerEndScreen_ = ScreenId::BookEnd;
   ArticleActionsScreen::Facts articleActionFacts_;
   bool articleActionFactsSet_ = false;
   ArticleEndScreen::Facts articleEndFacts_;
