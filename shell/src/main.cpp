@@ -84,6 +84,7 @@
 #include "reader/screens.h"
 #include "reader/session_record.h"
 #include "reader/settings.h"
+#include "reader/wallabag_credentials.h"
 #include "reader/text.h"  // reader::Plane
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
@@ -1602,8 +1603,6 @@ static uint32_t gLastSdDeepPollMs = 0;
 // release and the account screen's band says so as a stated limit. If it fits,
 // TLS is enabled and nothing else changes.
 #ifdef ENCRE_WALLABAG_PROBE
-#include "reader/wallabag_credentials.h"
-
 #include <HTTPClient.h>
 #include <WiFiClient.h>
 #include <WiFiClientSecure.h>
@@ -1833,6 +1832,34 @@ static void armCardProbes(const char* why) {
       logf("[sd] %s: there is no settings file and %s could NOT be written (card "
            "full, write-protected, or failing). Running on defaults\n",
            why, reader::kSettingsPath);
+    }
+    logFlush();
+  }
+
+  // THE WALLABAG CREDENTIALS, SEEDED THE SAME WAY AND FOR THE SAME REASON: the
+  // reader gets a hand-editable file rather than an invisible one, and a device
+  // nobody has set up carries the shape of the thing it is asking for.
+  // `docs/notes/wallabag-api.md` §5: the file is SEEDED, not demanded.
+  //
+  // WRITTEN ONLY WHEN ABSENT. A file with empty values is the NORMAL state of a
+  // device nobody has configured, and a malformed one is a reader's edit with a
+  // typo in it -- the only copy of itself. seedWallabagCredentials refuses both,
+  // which is loadAndApplySettings' rule one file over.
+  //
+  // IT DOES NOT JOIN THE PROBE'S REASON, AND THAT IS THE ONE THING TO GET RIGHT
+  // HERE. The settings file is the card-presence probe's target because opening
+  // it walks three sectors against SdFat's single 512-byte cache; a SECOND file
+  // adopted for that job would be a second answer to "is the card still there",
+  // free to disagree with the first. This one is seeded and never probed.
+  if (!gSd.exists(reader::kWallabagCredentialsPath)) {
+    if (reader::seedWallabagCredentials(gSd)) {
+      logf("[sd] %s: no wallabag file on the card, so an empty %s was written -- "
+           "fill in the five values on a computer to enable Articles\n",
+           why, reader::kWallabagCredentialsPath);
+    } else {
+      logf("[sd] %s: there is no wallabag file and %s could NOT be written (card "
+           "full, write-protected, or failing). Articles stays NOT SET UP\n",
+           why, reader::kWallabagCredentialsPath);
     }
     logFlush();
   }

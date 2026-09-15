@@ -918,7 +918,7 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
 **Files:**
 - Modify: `shell/src/main.cpp`
 
-- [ ] **Step 1:** In `armCardProbes()`, immediately after the settings seed and with its
+- [x] **Step 1:** In `armCardProbes()`, immediately after the settings seed and with its
   exact three-way log idiom, seed `/.reader/wallabag.json` when absent. **It does not
   join the probe's reason** — the settings file is the probe target and this file must
   never become a second one (`docs/notes/wallabag-api.md` §5's fourth bullet). Log
