@@ -862,7 +862,13 @@ repo can read it, and vendoring is refused here.
 > glass at boot, so the reader sees the fetching screen held, one transition
 > flash, then the list — which is what an ordinary screen change looks like.
 >
-> Everything below 4.1 is unstarted. Phases 0-3 are complete and `make test` is
+> **EVERY TASK IS BUILT. What is left is the four steps that need the panel**, and
+> they are the owner's by rule: 4.4.4, 4.5.5, 4.6.4 and the whole of
+> `docs/on-device-smoke-checklist.md` §13, which is where eleven of this feature's
+> defects were found with `make test` green throughout. The six cards are at
+> `On glass`; `Done` is the owner's move on that evidence.
+>
+> Phases 0-3 are complete and `make test` is
 > green at 1,751 cases; `make firmware` builds at 46,652 bytes of static RAM
 > (14.2%) and 2,242,745 of flash (34.2%).
 
@@ -943,11 +949,11 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
   join the probe's reason** — the settings file is the probe target and this file must
   never become a second one (`docs/notes/wallabag-api.md` §5's fourth bullet). Log
   `written`, `could NOT be written`, or nothing when present.
-- [ ] **Step 2:** `homeVmForCard()`: fill `vm.menu[1].value` from the store's helper
+- [x] **Step 2:** `homeVmForCard()`: fill `vm.menu[1].value` from the store's helper
   (Task 2.4) — `N UNREAD` when configured, empty when not — and log it on the
   `[boot] Home's ARTICLES row:` line beside the LIBRARY one. `gHomeStale` is set by any
   store write the shell makes (a sync, an archive, a remove-all), so Home rebuilds.
-- [ ] **Step 3:** Prime the factory's store pointer at mount (`setArticleStore(&gSd)`)
+- [x] **Step 3:** Prime the factory's store pointer at mount (`setArticleStore(&gSd)`)
   beside `primeWifi()`, so `Articles` and `WallabagAccount` are buildable from boot —
   `loadWifi()`'s argument about the dead SETUP row, one door over.
 - [ ] **Step 4:** Flash; on glass: Home shows `ARTICLES ›`; pressing it shows
@@ -1048,7 +1054,7 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
 - Modify: `CLAUDE.md`
 - The board
 
-- [ ] **Step 1:** §13 *Articles*, in the checklist's numbered idiom, covering: the
+- [x] **Step 1:** §13 *Articles*, in the checklist's numbered idiom, covering: the
   seeded file appears on a fresh card and is not overwritten once edited; the three
   failure shapes each reachable on demand (wrong password, unplugged router,
   no `AUTO` network); a cancel mid-fetch leaves no `.part` and the next sync resumes;
@@ -1056,15 +1062,15 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
   print); the `mark()` heap trail across a sync with the largest free block; an
   archive from the end screen removes the file and the next sync's log shows the
   `PATCH` and the ack; `ARTICLES` on Home reads the right count after each.
-- [ ] **Step 2:** `CLAUDE.md`: seven rows in *The chrome screens* table; the Settings
+- [x] **Step 2:** `CLAUDE.md`: seven rows in *The chrome screens* table; the Settings
   item count sentence to twelve; a short *Articles* section stating the six decisions
   this plan made that the code does not explain by itself — no ages (#132), marker
   files as the queue, per-article sidecars over the flat parser, push before pull,
   the watermark advanced only after every download, and `since` dropping `archive=0`.
-- [ ] **Step 3:** Move #113, #114, #111, #112, #140, #141 to `On glass` with the
+- [x] **Step 3:** Move #113, #114, #111, #112, #140, #141 to `On glass` with the
   checklist section named in a comment on each. **Not `Done`** — that is the owner's
   move on the evidence above.
-- [ ] **Step 4:** Commit `docs(articles): smoke checklist §13, the CLAUDE.md section, and the cards to On glass`.
+- [x] **Step 4:** Commit `docs(articles): smoke checklist §13, the CLAUDE.md section, and the cards to On glass`.
 
 ---
 
