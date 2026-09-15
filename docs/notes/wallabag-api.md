@@ -433,21 +433,47 @@ and failed on the first firmware build.
 
 ### Running it
 
-```
-PLATFORMIO_BUILD_FLAGS="-DENCRE_WALLABAG_PROBE=1" make firmware
-```
-
-then flash, and capture:
-
-```
-pio device monitor -e xteink | tee run.log
-```
-
 It needs `/.reader/wallabag.json` filled in and one saved Wi-Fi network marked
 `AUTO`; without either it says so and does nothing. It runs at the END of
 `setup()`, after the first paint — which is the measurement rather than a
 convenience, because what #140 asks is what a round trip costs with **no book
 open**, the state the sync flow actually runs in.
+
+**AND THAT PLACEMENT IS WHY `make firmware` THEN `pio device monitor` CAPTURES
+NOTHING.** `HWCDC::write` short-circuits on `!isCDC_Connected()`, so a line
+printed before a terminal has OPENED the port is **dropped rather than
+buffered** — and `setup()`'s own wait for a host is capped at 400 ms because
+every boot pays it. By the time a monitor started by hand attaches, the probe has
+already run and its output is gone. The first version of this section said to do
+exactly that; it cannot work.
+
+Two routes that do.
+
+**THE CARD, WHICH ALWAYS WORKS.** Set `"logToCard": true` in
+`/.reader/settings.json`, flash, let the device sit for a few seconds, then read
+`/encre.log` off the card on a computer. Nothing is racing: `logf` tees into the
+card buffer whether or not a host is there, and `loop()` flushes it in the first
+quiet window. This is the route for a device on battery, where there is no host
+coming at all — the case the card log was built for.
+
+**THE CABLE, IF YOU WANT IT LIVE.** The probe now WAITS for a terminal, up to
+30 s, whenever `isPlugged()` says a host is there — so start the monitor and the
+probe will be waiting for you:
+
+```
+PLATFORMIO_BUILD_FLAGS="-DENCRE_WALLABAG_PROBE=1" make firmware
+~/.platformio/penv/bin/python -m platformio run -e xteink -t upload -t monitor
+```
+
+Chaining `-t upload -t monitor` is what closes the gap; with the wait in place,
+resetting the board with a monitor already open works too. Unplugged the probe
+does not wait at all, because nobody is coming.
+
+**IT SAYS WHICH BUILD IS RUNNING BEFORE IT SAYS ANYTHING ELSE.** The first line
+is `[probe] ENCRE_WALLABAG_PROBE build` with the heap, and the second says
+whether the card log is on. Without them, a build flashed WITHOUT the flag and a
+probe that returned early because nothing was configured look identical:
+silence. If neither line appears, the running firmware is not a probe build.
 
 Three `[probe]` lines come back, each with the heap before, after, spent, the
 minimum since boot, and the largest free BLOCK — which is the number that decides

@@ -1692,7 +1692,51 @@ static void probeStreamedDownload(const char* url) {
   logFlush();
 }
 
+// WAIT FOR SOMEBODY TO BE WATCHING, WHICH setup()'s OWN 400ms WAIT CANNOT DO.
+//
+// THIS PROBE WAS UNCAPTURABLE AS FIRST WRITTEN, and the reason is the one this
+// file already documents for every other timing: `HWCDC::write` short-circuits
+// on `!isCDC_Connected()`, so a line printed before a terminal has OPENED the
+// port is DROPPED rather than buffered. The probe runs at the end of setup(),
+// seconds before anybody can type `pio device monitor` -- so its whole output
+// went nowhere and the flash looked like a firmware that ignored the flag.
+//
+// setup()'s wait is capped at 400ms on purpose: it is paid by EVERY boot,
+// including the overnight-charging one, and the comment above it says so. This
+// wait is paid only by a probe build, which exists to be watched, so it can
+// afford to be long.
+//
+// UNPLUGGED IT DOES NOT WAIT AT ALL, and that is the case the card log is for: a
+// device on battery has no host coming, and `logf` still tees to /encre.log when
+// `logToCard` is on. That is the ROUTE THAT ALWAYS WORKS, and §8 leads with it.
+static void probeWaitForHost() {
+  if (!HWCDC::isPlugged()) return;
+  constexpr uint32_t kCapMs = 30000;
+  const uint32_t t0 = millis();
+  while (millis() - t0 < kCapMs) {
+    if (Serial) break;
+    if (!HWCDC::isPlugged()) break;  // the cable came out; nobody is coming
+    delay(50);
+  }
+  // Printed AFTER the wait, so it is the first thing a terminal that has just
+  // attached actually receives.
+  logf("[probe] waited %lums for a terminal (open=%d)\n", (unsigned long)(millis() - t0),
+       Serial ? 1 : 0);
+  logFlush();
+}
+
 static void runWallabagProbe() {
+  probeWaitForHost();
+  // A BANNER FIRST, so "the probe build is running" is answerable separately
+  // from "the probe found something to measure". Without it, a build flashed
+  // WITHOUT the flag and a probe that returned early look identical: silence.
+  logf("[probe] ENCRE_WALLABAG_PROBE build -- heap=%u min=%u block=%u\n",
+       (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+       (unsigned)ESP.getMaxAllocHeap());
+  logf("[probe] card log %s -- when enabled, every line below is also in /encre.log\n",
+       gCardLog.enabled() ? "ON" : "off");
+  logFlush();
+
   reader::WallabagCredentials creds;
   std::string why;
   const reader::CredentialsResult r = reader::loadWallabagCredentials(gSd, creds, why);
