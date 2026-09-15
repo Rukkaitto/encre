@@ -64,6 +64,12 @@ class ArduinoHttpTransport : public reader::HttpTransport {
   // the case serial cannot see. Empty when the request did not fail.
   const std::string& lastError() const { return lastError_; }
   int lastCode() const { return lastCode_; }
+  // HOW MANY REQUESTS HAVE BEEN ACCEPTED, so the shell can log one line per
+  // ROUND TRIP. Logging on a changed CODE instead is what hid the second
+  // request of the first real sync: it also answered 200, so the line was
+  // suppressed and the failure after it had no trail at all. A counter cannot
+  // collapse two requests that agree.
+  uint32_t requests() const { return requests_; }
   uint32_t heapBefore() const { return heapBefore_; }
   uint32_t heapAfter() const { return heapAfter_; }
   uint32_t heapMin() const { return heapMin_; }
@@ -104,6 +110,7 @@ class ArduinoHttpTransport : public reader::HttpTransport {
   bool secure_ = false;
   std::string lastError_;
   int lastCode_ = 0;
+  uint32_t requests_ = 0;
   uint32_t heapBefore_ = 0;
   uint32_t heapAfter_ = 0;
   uint32_t heapMin_ = 0;

@@ -136,6 +136,7 @@ bool ArduinoHttpTransport::begin(const reader::HttpRequest& request, reader::Bod
   // measured on glass against the ~56 KB the probe priced with `setInsecure()`
   // -- so the heap either side of it is the first thing anybody debugging this
   // needs and the last thing they can reconstruct afterwards.
+  ++requests_;
   heapBefore_ = heapBefore;
   heapAfter_ = ESP.getFreeHeap();
   heapMin_ = ESP.getMinFreeHeap();

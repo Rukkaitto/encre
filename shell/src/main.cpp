@@ -3253,7 +3253,7 @@ static std::unique_ptr<ArduinoHttpTransport> gTransport;
 static std::unique_ptr<reader::WallabagClient> gWbClient;
 static std::unique_ptr<reader::ArticleStore> gWbStore;
 static std::unique_ptr<reader::SyncEngine> gSyncEngine;
-static int gSyncLoggedCode = 0;
+static uint32_t gSyncLoggedRequests = 0;
 static int gSyncShownDone = -1;
 static int gSyncShownTotal = -1;
 
@@ -3276,7 +3276,7 @@ static void endSyncSession() {
   gWbStore.reset();
   gSyncShownDone = -1;
   gSyncShownTotal = -1;
-  gSyncLoggedCode = 0;
+  gSyncLoggedRequests = 0;
   endWifiSession();
 }
 
@@ -3465,10 +3465,10 @@ static void pollSync() {
   // round trip is the trail that says whether the next failure is memory or the
   // far end. Logged from here because `logf` is static to main.cpp and is the
   // only route that also reaches `/encre.log`.
-  if (gTransport->lastCode() != gSyncLoggedCode) {
-    gSyncLoggedCode = gTransport->lastCode();
-    logf("[http] code=%d heap %u -> %u (min %u) block %u -> %u%s%s\n",
-         gTransport->lastCode(), (unsigned)gTransport->heapBefore(),
+  if (gTransport->requests() != gSyncLoggedRequests) {
+    gSyncLoggedRequests = gTransport->requests();
+    logf("[http] #%u code=%d heap %u -> %u (min %u) block %u -> %u%s%s\n",
+         (unsigned)gTransport->requests(), gTransport->lastCode(), (unsigned)gTransport->heapBefore(),
          (unsigned)gTransport->heapAfter(), (unsigned)gTransport->heapMin(),
          (unsigned)gTransport->blockBefore(), (unsigned)gTransport->blockAfter(),
          gTransport->lastError().empty() ? "" : " -- ",
@@ -3497,8 +3497,17 @@ static void pollSync() {
   if (gSyncEngine->state() == reader::SyncState::Done) {
     const reader::SyncOutcome outcome = gSyncEngine->outcome();
     mark("sync-done");
-    logf("[sync] %d of %d fetched, outcome %d, heap=%u block=%u\n", done, total, (int)outcome,
-         (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+    // THE TRANSPORT'S OWN LAST WORD BESIDE THE ENGINE'S. `outcome` says a round
+    // trip did not complete and cannot say WHICH layer stopped it -- a refused
+    // sink, a timeout waiting on a body and a handshake that would not allocate
+    // are one number up here. Asked of the transport rather than re-derived, so
+    // the two cannot disagree about the request they are both describing.
+    logf("[sync] %d of %d fetched after %u request(s), outcome %d, transport state=%d "
+         "failure=%d status=%d body=%u | heap=%u block=%u\n",
+         done, total, (unsigned)gTransport->requests(), (int)outcome,
+         (int)gTransport->state(), (int)gTransport->failure(), gTransport->status(),
+         (unsigned)gTransport->bodyBytes(), (unsigned)ESP.getFreeHeap(),
+         (unsigned)ESP.getMaxAllocHeap());
     logFlush();
     finishSync(outcome);
   }
