@@ -31,10 +31,62 @@
     <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">ARTICLES</div>
     <div style="font-size: var(--t-value); font-weight: 700;">3 UNREAD</div>
   </div>
+  <!--
+    THE STAMP IS AN OUTCOME, NOT AN AGE. This row read `2 H AGO` and this device
+    has no clock (#132). A deep sleep on battery is a full power-down, so nothing
+    survives to measure elapsed time across one, and the server's `Date` header
+    is the server's clock in GMT rather than ours. What the device does hold is
+    what the last sync DID, stored in the watermark beside the `since` value it
+    sends back.
+
+    FOUR VALUES, and they are the whole vocabulary of this slot:
+
+      NEVER    no sync has ever completed on this card
+      NO NEW   the last sync fetched nothing
+      N NEW    the last sync fetched N articles
+      FAILED   the last sync did not finish
+
+    `WallabagAccount.dc.html`'s `Last sync` row draws the SAME four values from
+    the same watermark. That row has room for longer words and does not get
+    them: two screens naming one fact differently is two spellings of it, and
+    the vocabulary is chosen by the tighter of the two slots, which is this one.
+
+    THE WORDS ARE SHORT BECAUSE THE ROW IS, AND THE FIRST DRAFT DID NOT FIT.
+    The row is `gap: 12px; padding: 12px 24px` over an icon, `Sync now` at
+    `flex-grow: 1`, and this stamp, so the stamp's slot is
+    `432 - 25 - 24 - 103.97 = 279.03px` at the 480px panel and 48px more at 528.
+    `Sync now` is a literal that must never elide and carries no `min-width: 0`,
+    so it keeps its 103.97px and the stamp takes what is left. Measured in
+    Chrome at --t-meta, against that 279.03px:
+
+      WALLABAG . NEVER      232.61px   46.42 clear
+      WALLABAG . NO NEW     251.06px   27.97 clear
+      WALLABAG . 3 NEW      229.52px   49.51 clear
+      WALLABAG . 100 NEW    257.06px   21.97 clear   <- the tightest reachable form
+      WALLABAG . FAILED     235.91px   43.12 clear
+
+    The drafts that are gone: `NEVER SYNCED` measured 347.95px and `UP TO DATE`
+    303.69px, so both overflowed the slot at BOTH geometries. #76's fix for
+    exactly this shape was to shorten the sentence rather than widen the box.
+
+    AND THE TRACKING CAME DOWN FROM 0.12em TO 0.10em, which is 6.00px of the
+    room above and is not only room. CLAUDE.md records the distinction where
+    Home's own meta runs make it: 0.14em-and-up is a COUNTER's tracking and
+    0.10em is a NAME's. Three of the four values here are words.
+
+    THE FIRMWARE MEASURES ~3% WIDER than Chrome does -- whole-pixel advances
+    against subpixel ones -- so the tightest form above has ~11px of clearance
+    on glass rather than 21.97, and `100 NEW` is the one to look at when the
+    goldens for this screen land. A board's figure is a Chrome figure.
+
+    The specimen below is `NO NEW`, which is the state a settled reader sees
+    most. `SyncDone.dc.html` draws the same row with `3 NEW` and a status line,
+    and is a VARIANT of this screen rather than a second one.
+  -->
   <div style="display: flex; align-items: center; gap: 12px; padding: 12px 24px; border-bottom: 1px solid #000000;">
     <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M13 8a5 5 0 1 1-1.5-3.6" stroke="#000000" stroke-width="1.6"></path><path d="M12 1v3.5H8.5" stroke="#000000" stroke-width="1.6"></path></svg>
     <div style="font-size: var(--t-label); font-weight: 500; flex-grow: 1;">Sync now</div>
-    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">WALLABAG &middot; 2 H AGO</div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.1em; white-space: nowrap;">WALLABAG &middot; NO NEW</div>
   </div>
 
   <div style="display: flex; flex-direction: column; flex-grow: 1;">

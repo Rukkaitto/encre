@@ -28,6 +28,20 @@
 </helmet>
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
 
+  <!--
+    `2 LEFT` IS A COUNT OF FILES ON THE CARD, and it is drawn from the store
+    rather than from anything the server said. It is the unread articles
+    remaining after this one -- so an article the reader archives from the slab
+    below takes the next screen's count down by one, with no sync in between and
+    nothing to ask.
+
+    NOT AN AGE AND NOT A SERVER FIGURE. `Articles.dc.html`'s note has the clock
+    argument (#132); the sharper point here is the second half, that the server
+    holds a different number. Its unread count includes everything this device
+    has not fetched and everything a phone archived an hour ago, and the panel
+    would be claiming one while counting the other. The store is what the slabs
+    on this screen can act on, so the store is what the band counts.
+  -->
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
   <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">ARTICLE FINISHED</div>
   <div style="font-size: var(--t-value); font-weight: 700;">2 LEFT</div>

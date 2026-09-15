@@ -32,6 +32,29 @@
   <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">ARTICLES</div>
   <div style="font-size: var(--t-value); font-weight: 700;">3 UNREAD</div>
 </div>
+  <!--
+    THIS IS `Articles.dc.html` WITH TWO THINGS ADDED, NOT A SECOND SCREEN. The
+    stamp carries its `N NEW` value and the status block below sits above the
+    sync row. Same ScreenId, same view-model, same rows: a VARIANT, on
+    `HomeEmpty.dc.html`'s rule.
+
+    THE STAMP SAID `WALLABAG &middot; NOW` AND THIS DEVICE HAS NO CLOCK (#132). `NOW`
+    is an age like any other -- it is only true for the first few seconds, and
+    nothing here can tell when it stops being true. `3 NEW` is what the sync
+    DID, which is a fact the device holds for as long as the card does. See
+    `Articles.dc.html` for the four values this slot takes.
+
+    THE STATUS BLOCK IS THE ONE PLACE THE PUSH COUNT IS STATED. `1 ARCHIVE
+    PUSHED` is what the queue's marker files spent on this sync, and no other
+    screen says it -- the account screen's `Pending actions` counts what is
+    STILL owed, which is the opposite quantity. It is drawn only on this
+    variant, so a list reached any other way carries neither the block nor a
+    claim about a push.
+
+    THE STAMP'S TRACKING IS 0.10em, WHICH IS `Articles.dc.html`'s. That board's
+    note carries the measurement and the reason; the two rows are the same row
+    and must not differ by a hundredth of an em.
+  -->
   <div style="display: flex; align-items: center; gap: 12px; margin: 14px 24px 0 24px; border: 2px solid #000000; padding: 10px 14px;">
     <svg width="26" height="21" viewBox="0 0 16 12" fill="none"><path d="M1 6l5 5L15 1" stroke="#000000" stroke-width="2"></path></svg>
     <div style="font-size: var(--t-meta); letter-spacing: 0.1em; line-height: 1.5;">SYNC COMPLETE &middot; 3 NEW ARTICLES &middot; 1 ARCHIVE PUSHED</div>
@@ -39,7 +62,7 @@
   <div style="display: flex; align-items: center; gap: 12px; padding: 12px 24px; border-bottom: 1px solid #000000; margin-top: 12px;">
     <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M13 8a5 5 0 1 1-1.5-3.6" stroke="#000000" stroke-width="1.6"></path><path d="M12 1v3.5H8.5" stroke="#000000" stroke-width="1.6"></path></svg>
     <div style="font-size: var(--t-label); font-weight: 500; flex-grow: 1;">Sync now</div>
-    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">WALLABAG &middot; NOW</div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.1em; white-space: nowrap;">WALLABAG &middot; 3 NEW</div>
   </div>
   <div style="display: flex; align-items: flex-start; gap: 14px; padding: 16px 24px; background: #000000; color: #ffffff;">
   <div style="width: 8px; height: 8px; background: #ffffff; margin-top: 7px; flex-shrink: 0;"></div>
