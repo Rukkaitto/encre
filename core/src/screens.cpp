@@ -135,9 +135,14 @@ std::vector<ArticleItem> demoArticles() {
       {1, "The Death and Life of the Great American Essay", "LONGREADS", 22, false, false},
       {2, "Why We Forget Most of the Books We Read", "THE ATLANTIC", 9, false, false},
       {3, "In Praise of Slow Reading", "AEON", 14, false, false},
-      {4, "The Tyranny of the To-Be-Read Pile", "LIT HUB", 7, true, false},
-      {5, "E Ink: The Quiet Display Technology That Refused to Die", "IEEE SPECTRUM", 16, true,
-       false},
+      // THE MIDDLE STATE, which had no specimen until it had a model: started and
+      // not finished, so no bullet and no `. READ`. It is also the state a reader
+      // is in most often -- an article put down half way is what a queue like
+      // this collects. design/Articles.dc.html's fourth row.
+      {4, "The Tyranny of the To-Be-Read Pile", "LIT HUB", 7, /*opened=*/true,
+       /*finished=*/false, false},
+      {5, "E Ink: The Quiet Display Technology That Refused to Die", "IEEE SPECTRUM", 16,
+       /*opened=*/true, /*finished=*/true, false},
   };
 }
 

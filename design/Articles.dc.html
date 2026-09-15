@@ -128,15 +128,38 @@
   </div>
 
   <!--
-    THE BULLET IS DRAWN ONLY WHEN THE ARTICLE HAS NEVER BEEN OPENED. A read row
-    has NO mark at all -- it drops to weight 400 and gains `. READ` on the meta
-    line, which are the two signals that remain.
+    THREE STATES AND TWO MARKS, AND THEY MEAN DIFFERENT THINGS:
 
-    IT WAS HOLLOW-WHEN-READ AND THAT IS AN OWNER'S CHANGE, not a defect: a
-    hollow 8x8 square at arm's length is a mark you have to look AT to read,
-    where an absence is one you read without looking. The list is scanned rather
-    than studied, so what matters is which rows still want something from you,
-    and those are the ones with ink beside them.
+      never opened   a solid bullet
+      opened         no bullet, and NO `. READ`
+      finished       no bullet, and `. READ` on the meta line
+
+    THE WEIGHT IS NOT ONE OF THE SIGNALS, AND THIS BOARD ASKED FOR ONE THE RAMP
+    CANNOT DRAW. It set a read row's title to `font-weight: 400` where an unread
+    one is 500 -- and the type ramp carries `Value500` and `Value700` and no
+    `Value400` at all, so that was an asset nobody has. `renderArticles` has
+    always drawn every unfocused row at 500, so the boards have differed from the
+    render here since they landed. Sleep's 53px title and HomeEmpty's 39px are the
+    precedent and both were fixed the same way: the board asks for what the ramp
+    carries. A new role is 15-20 KB of flash and would want the panel to ask for
+    it first.
+
+    THE BULLET IS `HAVE I STARTED THIS` AND `READ` IS `DID I GET TO THE END`.
+    They were ONE flag and that was wrong in both directions at once: an article
+    opened for ten seconds lost its bullet AND claimed to have been read, and an
+    article read to the last page could claim neither, because nothing set
+    `finished` for one at all.
+
+    THE MIDDLE STATE HAD NO SPECIMEN BECAUSE IT HAD NO MODEL. The fourth row
+    below is it -- started, not finished, and the list says so by saying nothing.
+    It is also the state a reader is in most often, since an article put down
+    half way is exactly what a queue like this collects.
+
+    THE BULLET IS AN ABSENCE RATHER THAN A HOLLOW BOX, which was an owner's
+    change: a hollow 8x8 square at arm's length is a mark you have to look AT to
+    read, where an absence is one you read without looking. The list is scanned
+    rather than studied, so what matters is which rows have not been touched at
+    all, and those are the ones with ink beside them.
 
     THE SLOT STAYS AND ONLY THE MARK GOES, which is kHintEmptySlotW's rule one
     screen over: an empty slot is its own width and never zero. Removing the box
@@ -195,15 +218,15 @@
     <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px; border-bottom: 1px solid #000000;">
       <div style="width: 8px; height: 8px; margin-top: 7px; flex-shrink: 0;"></div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="font-size: var(--t-value); font-weight: 400; line-height: 31px;">The Tyranny of the To-Be-Read Pile</div>
-        <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">LIT HUB &middot; 7 MIN &middot; READ</div>
+        <div style="font-size: var(--t-value); font-weight: 500; line-height: 31px;">The Tyranny of the To-Be-Read Pile</div>
+        <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">LIT HUB &middot; 7 MIN</div>
       </div>
     </div>
 
     <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px;">
       <div style="width: 8px; height: 8px; margin-top: 7px; flex-shrink: 0;"></div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="font-size: var(--t-value); font-weight: 400; line-height: 31px;">E Ink: The Quiet Display Technology That Refused to Die</div>
+        <div style="font-size: var(--t-value); font-weight: 500; line-height: 31px;">E Ink: The Quiet Display Technology That Refused to Die</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">IEEE SPECTRUM &middot; 16 MIN &middot; READ</div>
       </div>
     </div>

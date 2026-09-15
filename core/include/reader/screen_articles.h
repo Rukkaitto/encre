@@ -21,14 +21,19 @@ struct ArticleItem {
   std::string title;
   std::string domain;
   int readingMinutes = 0;
-  bool read = false;     // a reading sidecar says this one is finished
+  // A reading sidecar EXISTS for it -- the article has been started. Drives the
+  // bullet's absence.
+  bool opened = false;
+  // ...and that sidecar says the reader reached the end. Drives `. READ`.
+  bool finished = false;
   bool starred = false;  // the overlay's second row reads `Unstar` when true
 
   // So a reload can say whether anything MOVED, which is what decides a
   // waveform. Every field, because any of them changes a row on the glass.
   bool operator==(const ArticleItem& o) const {
     return id == o.id && title == o.title && domain == o.domain &&
-           readingMinutes == o.readingMinutes && read == o.read && starred == o.starred;
+           readingMinutes == o.readingMinutes && opened == o.opened &&
+           finished == o.finished && starred == o.starred;
   }
   bool operator!=(const ArticleItem& o) const { return !(*this == o); }
 };

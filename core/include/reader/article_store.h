@@ -6,7 +6,7 @@
 
 namespace reader {
 
-// FORWARD-DECLARED RATHER THAN INCLUDED. `readFromProgress` only compares the
+// FORWARD-DECLARED RATHER THAN INCLUDED. `openedFromProgress` only compares the
 // pointer against null, so the definition is not needed here -- and
 // `reading_store.h` would be a header edge bought for one inline body, which is
 // the coupling `settings.h` already refuses at `bodyPpem`.
@@ -145,8 +145,8 @@ class ArticleStore {
   // Home's ARTICLES row. `N UNREAD` when configured, EMPTY when not -- and the
   // empty value is what draws the chevron, which is Main.dc.html's menu note
   // refusing a setup nag on the screen the device boots to.
-  // WHETHER AN ARTICLE COUNTS AS READ, AND IT MEANS OPENED -- where a BOOK's
-  // `finished` means finished. One spelling, because there were two: this rule
+  // WHETHER AN ARTICLE HAS BEEN STARTED, which is what the bullet's absence and
+  // the UNREAD count both mean. One spelling, because there were two: this rule
   // sat in `unreadCount()` and again in `ArticlesScreen::load()`, and both took
   // the book's meaning.
   //
@@ -166,7 +166,7 @@ class ArticleStore {
   // sleep, and in the quiet window two seconds after the buttons stop. `finished`
   // is not tested because it implies the record exists -- testing it too would be
   // two conditions where one decides.
-  static bool readFromProgress(const ProgressEntry* p) { return p != nullptr; }
+  static bool openedFromProgress(const ProgressEntry* p) { return p != nullptr; }
 
   static std::string homeMenuValue(bool configured, int unread);
 

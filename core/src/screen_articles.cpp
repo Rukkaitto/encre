@@ -26,7 +26,10 @@ std::string metaFor(const ArticleItem& a) {
   // and the bullet carries the same fact as a shape. Two spellings of one fact,
   // which the board asks for: the mark is legible at a glance and the word is
   // unambiguous.
-  if (a.read) {
+  // `READ` MEANS FINISHED, not opened. The bullet answers "have I started this"
+  // and this answers "did I get to the end" -- two questions, and they were one
+  // flag, which made an article opened for ten seconds claim both.
+  if (a.finished) {
     s += " ";
     s += kMiddot;
     s += " READ";
@@ -145,7 +148,8 @@ bool ArticlesScreen::load() {
       if (m.archived) continue;
       const ProgressEntry* p = progressFor(progress, store.epubPath(m.id));
       items_.push_back({m.id, m.title, m.domain, m.readingTime,
-                        ArticleStore::readFromProgress(p), m.starred});
+                        ArticleStore::openedFromProgress(p),
+                        p != nullptr && p->finished, m.starred});
     }
     // THE STAMP IS WHAT THIS DEVICE OWES THE SERVER, not what the last sync did.
     // `WALLABAG . NO NEW` was redundant -- the account screen's `Last sync` row
@@ -199,9 +203,11 @@ bool ArticlesScreen::refreshProgress() {
   bool moved = false;
   for (ArticleItem& a : items_) {
     const ProgressEntry* p = progressFor(progress, store.epubPath(a.id));
-    const bool read = ArticleStore::readFromProgress(p);
-    if (read != a.read) {
-      a.read = read;
+    const bool opened = ArticleStore::openedFromProgress(p);
+    const bool finished = p != nullptr && p->finished;
+    if (opened != a.opened || finished != a.finished) {
+      a.opened = opened;
+      a.finished = finished;
       moved = true;
     }
   }
@@ -251,9 +257,11 @@ void ArticlesScreen::syncVm() {
     return;
   }
 
+  // UNREAD IS NEVER-OPENED, the same question the bullet answers, so the band and
+  // the marks below it cannot disagree.
   int unread = 0;
   for (const ArticleItem& a : items_)
-    if (!a.read) ++unread;
+    if (!a.opened) ++unread;
   vm_.bandValue = std::to_string(unread) + " UNREAD";
 
   const ScrollWindow::Slice s = window().slice();
@@ -261,7 +269,7 @@ void ArticlesScreen::syncVm() {
   vm_.rows.reserve(static_cast<size_t>(s.count));
   for (int i = 0; i < s.count; ++i) {
     const ArticleItem& a = items_[static_cast<size_t>(s.first + i)];
-    vm_.rows.push_back({a.title, metaFor(a), a.read});
+    vm_.rows.push_back({a.title, metaFor(a), a.opened, a.finished});
   }
   vm_.focusedRow = s.focused;
   vm_.firstRow = s.first;

@@ -127,7 +127,10 @@ int ArticleStore::unreadCount() const {
   for (const ArticleMeta& m : list()) {
     if (m.archived) continue;
     const ProgressEntry* p = progressFor(progress, epubPath(m.id));
-    if (readFromProgress(p)) continue;
+    // UNREAD IS `NEVER OPENED`, which is what the bullet draws -- so the count
+    // and the marks answer one question. An article started and put down half
+    // way is neither unread nor READ, and the list says so by saying nothing.
+    if (openedFromProgress(p)) continue;
     ++n;
   }
   return n;

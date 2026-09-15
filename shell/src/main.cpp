@@ -745,6 +745,11 @@ static reader::HomeRebuildGate gHomeRebuild;
 // refreshes it.
 static bool gLibraryStale = false;
 
+// THE ARTICLES LIST'S OWN, and it is `gLibraryStale`'s twin for its reason: the
+// two are consumed when THEIR screen is on top, so one flag would let whichever
+// was reached first clear it for the other.
+static bool gArticlesStale = false;
+
 // The spine Contents chose, or -1. Held for exactly one dispatch: the choice is made
 // while Contents is on top and acted on once the pop has put the Reader back.
 //
@@ -3492,6 +3497,51 @@ static void finishSync(reader::SyncOutcome outcome) {
 // reason one flow over: a focus move is internal to the screen and reaches the
 // shell as an ordinary redraw, so there is no edge to hang this on. It is a
 // couple of string copies on a screen that repaints at ~450 ms.
+// REACHING `ArticleEnd` IS FINISHING THE ARTICLE, and no press is needed to say
+// so. A book is marked finished by an explicit press -- BookEnd's slab, the
+// Library's actions overlay -- because a novel can be abandoned at 90% and the
+// reader is the only one who knows. An article's last page IS the end of it:
+// paging off it is the whole act, and asking for a press afterwards would be a
+// chore in front of a feature whose point is not being one.
+//
+// WITHOUT THIS THE THIRD STATE IS UNREACHABLE, which is the same defect one
+// level up from the one that made the bullet permanent: `. READ` would be drawn
+// by a flag nothing ever set.
+//
+// GUARDED ON THE ID rather than on a timer, so this costs one comparison an
+// iteration and one card write per article. The sidecar already exists by the
+// time anyone reaches the end -- the quiet window wrote it seconds ago -- so this
+// is a read, a bool and a write rather than a record built from nothing.
+static int gArticleFinishedMarked = 0;
+
+static void markArticleFinishedAtEnd() {
+  if (gApp->top().id() != reader::ScreenId::ArticleEnd) return;
+  const auto& end = static_cast<const reader::ArticleEndScreen&>(gApp->top());
+  const int id = end.facts().id;
+  if (id == 0 || id == gArticleFinishedMarked) return;
+  gArticleFinishedMarked = id;
+
+  SpiBusGuard bus;
+  const reader::ArticleStore store(gSd);
+  const std::string path = store.epubPath(id);
+  reader::ReadingPosition pos;
+  if (!reader::loadPosition(gSd, path, pos)) {
+    pos = reader::ReadingPosition{};
+    pos.bookPath = path;
+  }
+  if (pos.finished) return;
+  pos.finished = true;
+  const reader::SaveResult r = reader::savePosition(gSd, pos);
+  // NOT FATAL, `handleFinish`'s rule: a failed write must not throw a reader out
+  // of an article they have just finished reading, over a flag.
+  logf("[articles] %d finished -> %s\n", id,
+       r == reader::SaveResult::Failed ? "FAILED" : "ok");
+  logFlush();
+  // The ROW changed and the COUNT did not -- `UNREAD` is never-opened, and this
+  // article stopped being counted when it was opened.
+  gArticlesStale = true;
+}
+
 static void primeArticleActionsFacts() {
   if (gApp->top().id() != reader::ScreenId::Articles) return;
   const auto& list = static_cast<const reader::ArticlesScreen&>(gApp->top());
@@ -8485,6 +8535,17 @@ void loop() {
         logFlush();
       }
     }
+    // THE ARTICLES LIST'S OWN REFRESH, `gLibraryStale`'s shape above and its
+    // reasons: consumed when ITS screen is on top, and the flag is LEFT SET when
+    // the top is something else so the refresh is not lost.
+    if (gArticlesStale && gApp->top().id() == reader::ScreenId::Articles) {
+      auto& list = static_cast<reader::ArticlesScreen&>(gApp->top());
+      const bool moved = list.refreshProgress();
+      gArticlesStale = false;
+      if (moved) gApp->markDirty();
+      logf("[articles] rows re-read: %s\n", moved ? "changed" : "no change");
+      logFlush();
+    }
     if (gApp->retryRequested()) handleRetry();
     // Same placement and the same reason: the mask refresh below must see whatever
     // screen the open left on top.
@@ -8532,6 +8593,7 @@ void loop() {
   pollWifi();
   pollSync();
   primeArticleActionsFacts();
+  markArticleFinishedAtEnd();
 
   const bool settled = static_cast<uint32_t>(millis() - gLastInputMs) >= kCoalesceMs;
   const bool painted = gApp->dirty() && settled;

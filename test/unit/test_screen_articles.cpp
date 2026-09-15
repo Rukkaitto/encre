@@ -10,11 +10,11 @@ namespace {
 // Five fixture rows, three unread, in the board's own order.
 std::vector<ArticleItem> fixture() {
   return {
-      {1, "The Death and Life of the Great American Essay", "LONGREADS", 22, false, false},
-      {2, "Why We Forget Most of the Books We Read", "THE ATLANTIC", 9, false, false},
-      {3, "In Praise of Slow Reading", "AEON", 14, false, false},
-      {4, "The Tyranny of the To-Be-Read Pile", "LIT HUB", 7, true, false},
-      {5, "E Ink: The Quiet Display Technology That Refused to Die", "IEEE SPECTRUM", 16, true,
+      {1, "The Death and Life of the Great American Essay", "LONGREADS", 22, false, false, false},
+      {2, "Why We Forget Most of the Books We Read", "THE ATLANTIC", 9, false, false, false},
+      {3, "In Praise of Slow Reading", "AEON", 14, false, false, false},
+      {4, "The Tyranny of the To-Be-Read Pile", "LIT HUB", 7, true, true, false},
+      {5, "E Ink: The Quiet Display Technology That Refused to Die", "IEEE SPECTRUM", 16, true, true,
        false},
   };
 }
@@ -84,8 +84,8 @@ TEST_CASE("the band counts the UNREAD rows, not the rows") {
   CHECK_FALSE(s.vm().notSetUp);
   // And the read rows carry it into the row itself, which is what draws the
   // hollow bullet -- a flag, not the theme reading the end of `meta`.
-  CHECK_FALSE(s.vm().rows[0].read);
-  CHECK(s.vm().rows[3].read);
+  CHECK_FALSE(s.vm().rows[0].finished);
+  CHECK(s.vm().rows[3].finished);
   CHECK(s.vm().rows[3].meta == "LIT HUB \xC2\xB7 7 MIN \xC2\xB7 READ");
   CHECK(s.vm().rows[0].meta == "LONGREADS \xC2\xB7 22 MIN");
 }
@@ -232,8 +232,8 @@ TEST_CASE("over a card: three sidecars list newest first, with READ marked") {
   CHECK(s.vm().rows[0].title == "Newest");
   CHECK(s.vm().rows[1].title == "Middle");
   CHECK(s.vm().rows[2].title == "Oldest");
-  CHECK(s.vm().rows[1].read);
-  CHECK_FALSE(s.vm().rows[0].read);
+  CHECK(s.vm().rows[1].finished);
+  CHECK_FALSE(s.vm().rows[0].finished);
   CHECK(s.vm().bandValue == "2 UNREAD");
   CHECK_FALSE(s.vm().notSetUp);
 }
@@ -344,12 +344,12 @@ TEST_CASE("refreshProgress marks READ without re-listing the articles directory"
   writeArticle(fs, 1, "2026-09-01T10:00:00Z", "One");
   ArticlesScreen s(fs);
   s.setVisibleRows(5);
-  REQUIRE_FALSE(s.vm().rows[0].read);
+  REQUIRE_FALSE(s.vm().rows[0].finished);
   CHECK_FALSE(s.refreshProgress());
 
   finish(fs, 1);
   CHECK(s.refreshProgress());
-  CHECK(s.vm().rows[0].read);
+  CHECK(s.vm().rows[0].finished);
   CHECK(s.vm().bandValue == "0 UNREAD");
   CHECK_FALSE(s.refreshProgress());
 }
@@ -532,49 +532,85 @@ TEST_CASE("the sync row is focusable, says so, and the Confirm hint follows it")
   }
 }
 
-TEST_CASE("an article goes hollow when it is OPENED, not when it is finished") {
-  // THE MARK WAS UNREACHABLE. `ArticleRow::read` drove the bullet -- solid unread,
-  // hollow read, which the theme has always drawn correctly -- and the rule
-  // behind it was the BOOK's: `ProgressEntry::finished`, set by an explicit press
-  // that no article screen offers. So every row stayed solid for ever, and the
-  // band and Home's row counted every article as unread whatever the reader did.
-  // Reported off the device as "the little dot on the left of an article never
-  // goes away".
+// `LONGREADS` CONTAINS `READ`, which is why this asks about the SUFFIX rather
+// than searching the meta: the fixture's domain made a `find("READ")` succeed on
+// every row, so the first version of the case below passed where it should have
+// failed and failed where it should have passed.
+bool saysRead(const std::string& meta) {
+  const std::string suffix = std::string(" \xC2\xB7 READ");
+  return meta.size() >= suffix.size() &&
+         meta.compare(meta.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+TEST_CASE("three states: never opened, opened, finished") {
+  // THE BULLET AND THE WORD ANSWER DIFFERENT QUESTIONS AND WERE ONE FLAG.
+  // `opened` is "have I started this" and drives the bullet; `finished` is "did
+  // I get to the end" and drives `. READ`. As one flag it was wrong in both
+  // directions at once: an article opened for ten seconds lost its bullet AND
+  // claimed to have been read, and an article read to its last page could claim
+  // neither, because nothing set `finished` for one at all.
   FakeFileSystem fs;
   writeCredentials(fs);
-  writeArticle(fs, 1, "2026-09-01T10:00:00Z", "Opened");
-  writeArticle(fs, 2, "2026-09-02T10:00:00Z", "Untouched");
+  writeArticle(fs, 1, "2026-09-01T10:00:00Z", "Oldest");
+  writeArticle(fs, 2, "2026-09-02T10:00:00Z", "Newest");
 
-  SUBCASE("untouched: both solid, both counted") {
+  auto save = [&](int id, bool finished) {
+    reader::ArticleStore store(fs);
+    reader::ReadingPosition pos;
+    pos.bookPath = store.epubPath(id);
+    pos.bookBytes = 4;
+    pos.finished = finished;
+    REQUIRE(reader::savePosition(fs, pos) != reader::SaveResult::Failed);
+  };
+
+  SUBCASE("never opened: a bullet, no READ, and counted") {
     ArticlesScreen s(fs);
     s.setVisibleRows(5);
     REQUIRE(s.vm().rows.size() == 2);
-    CHECK_FALSE(s.vm().rows[0].read);
-    CHECK_FALSE(s.vm().rows[1].read);
+    CHECK_FALSE(s.vm().rows[0].opened);
+    CHECK_FALSE(s.vm().rows[0].finished);
+    CHECK_FALSE(saysRead(s.vm().rows[0].meta));
     CHECK(s.vm().bandValue == "2 UNREAD");
   }
 
-  SUBCASE("opened WITHOUT finishing: hollow, and out of the count") {
-    // A position saved and nothing else -- which is what the quiet window writes
-    // two seconds after the buttons stop, and what Back out of an article writes
-    // before the dispatch. No press marked anything finished.
-    reader::ArticleStore store(fs);
-    reader::ReadingPosition pos;
-    pos.bookPath = store.epubPath(1);
-    pos.bookBytes = 4;
-    pos.finished = false;
-    REQUIRE(reader::savePosition(fs, pos) != reader::SaveResult::Failed);
-
+  SUBCASE("opened and not finished: NO bullet, and still no READ") {
+    // THE MIDDLE STATE, and the one a reader is in most often -- an article put
+    // down half way is what a queue like this collects. A position saved and
+    // nothing else, which is what the quiet window writes two seconds after the
+    // buttons stop and what Back writes before the dispatch.
+    save(1, /*finished=*/false);
     ArticlesScreen s(fs);
     s.setVisibleRows(5);
-    REQUIRE(s.vm().rows.size() == 2);
-    // The list is newest first, so row 1 is article 1.
-    CHECK(s.vm().rows[1].title == "Opened");
-    CHECK(s.vm().rows[1].read);
-    CHECK_FALSE(s.vm().rows[0].read);
+    // Newest first, so row 1 is article 1.
+    REQUIRE(s.vm().rows[1].title == "Oldest");
+    CHECK(s.vm().rows[1].opened);
+    CHECK_FALSE(s.vm().rows[1].finished);
+    CHECK_FALSE(saysRead(s.vm().rows[1].meta));
+    // UNREAD IS NEVER-OPENED, the same question the bullet answers, so the band
+    // and the marks cannot disagree.
     CHECK(s.vm().bandValue == "1 UNREAD");
-    // AND THE STORE AGREES, because the rule has one spelling now -- it was in
-    // `unreadCount()` and again in `load()`, and both took the book's meaning.
-    CHECK(store.unreadCount() == 1);
+    CHECK(reader::ArticleStore(fs).unreadCount() == 1);
+  }
+
+  SUBCASE("finished: no bullet AND the word") {
+    save(1, /*finished=*/true);
+    ArticlesScreen s(fs);
+    s.setVisibleRows(5);
+    CHECK(s.vm().rows[1].opened);
+    CHECK(s.vm().rows[1].finished);
+    CHECK(saysRead(s.vm().rows[1].meta));
+    CHECK(s.vm().bandValue == "1 UNREAD");
+  }
+
+  SUBCASE("refreshProgress carries BOTH, not one") {
+    // It compared and copied a single flag; a screen already built would have
+    // learned that an article was opened and never that it was finished.
+    ArticlesScreen s(fs);
+    s.setVisibleRows(5);
+    REQUIRE_FALSE(s.vm().rows[1].opened);
+    save(1, /*finished=*/true);
+    CHECK(s.refreshProgress());
+    CHECK(s.vm().rows[1].opened);
+    CHECK(s.vm().rows[1].finished);
   }
 }

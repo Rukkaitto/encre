@@ -825,10 +825,19 @@ struct ArticleRow {
   // "LONGREADS - 22 MIN", or with " - READ" on the end. Composed by the SCREEN,
   // as LibraryRow::meta is and for its reason: it is content.
   std::string meta;
-  // Drawn as a hollow bullet where an unread row draws a solid one. A flag rather
-  // than the theme keying on `meta` ending in READ, which would make a string the
-  // source of truth for a mark.
-  bool read = false;
+  // TWO FACTS AND NOT ONE, because they answer different questions: `opened` is
+  // "have I started this" and drives the BULLET, and `finished` is "did I get to
+  // the end" and drives the `. READ` on the meta line above.
+  //
+  // THEY WERE ONE FLAG AND IT WAS WRONG IN BOTH DIRECTIONS AT ONCE. An article
+  // opened for ten seconds lost its bullet AND claimed to have been read; an
+  // article read to its last page could claim neither, because nothing set
+  // `finished` for one at all. design/Articles.dc.html draws all three states.
+  //
+  // FLAGS RATHER THAN THE THEME KEYING ON `meta` ENDING IN READ, which would make
+  // a string the source of truth for a mark.
+  bool opened = false;
+  bool finished = false;
 };
 
 // design/Articles.dc.html, with design/ArticlesSetup.dc.html and

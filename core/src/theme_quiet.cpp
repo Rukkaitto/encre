@@ -3700,7 +3700,7 @@ void QuietTheme::renderArticles(Framebuffer& fb, const FontSet& fonts, const Art
     // it every read row's text would step 22px left of every unread one, which
     // reads as a rendering fault rather than as a state.
     const int by = y + kArticleRowPadY + kArticleBulletTop;
-    if (!row.read) fb.fillRect(kMargin, by, kArticleBulletW, kArticleBulletW, focused);
+    if (!row.opened) fb.fillRect(kMargin, by, kArticleBulletW, kArticleBulletW, focused);
 
     int ty = y + kArticleRowPadY;
     ty += f26ToPx(drawProse(fb, tf, title, textX, textW, pxToF26(ty), ink, plane,
