@@ -128,10 +128,20 @@
   </div>
 
   <!--
-    THE BULLET IS SOLID WHEN UNREAD AND HOLLOW WHEN READ, and it never
-    DISAPPEARS: the rows below draw both, and the read ones also drop to weight
-    400 and gain `. READ` on the meta line. Three signals for one state, because
-    a 8x8 mark at arm's length is not much on its own.
+    THE BULLET IS DRAWN ONLY WHEN THE ARTICLE HAS NEVER BEEN OPENED. A read row
+    has NO mark at all -- it drops to weight 400 and gains `. READ` on the meta
+    line, which are the two signals that remain.
+
+    IT WAS HOLLOW-WHEN-READ AND THAT IS AN OWNER'S CHANGE, not a defect: a
+    hollow 8x8 square at arm's length is a mark you have to look AT to read,
+    where an absence is one you read without looking. The list is scanned rather
+    than studied, so what matters is which rows still want something from you,
+    and those are the ones with ink beside them.
+
+    THE SLOT STAYS AND ONLY THE MARK GOES, which is kHintEmptySlotW's rule one
+    screen over: an empty slot is its own width and never zero. Removing the box
+    would step every read row's text 22px left of every unread one, and a list
+    whose left edge moved per row would read as a rendering fault.
 
     AND `READ` MEANS OPENED HERE, WHERE FOR A BOOK IT MEANS FINISHED. That was
     not stated anywhere and the code took the book's meaning, so the bullet could
@@ -183,7 +193,7 @@
     </div>
 
     <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px; border-bottom: 1px solid #000000;">
-      <div style="width: 8px; height: 8px; border: 1px solid #000000; box-sizing: border-box; margin-top: 7px; flex-shrink: 0;"></div>
+      <div style="width: 8px; height: 8px; margin-top: 7px; flex-shrink: 0;"></div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
         <div style="font-size: var(--t-value); font-weight: 400; line-height: 31px;">The Tyranny of the To-Be-Read Pile</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">LIT HUB &middot; 7 MIN &middot; READ</div>
@@ -191,7 +201,7 @@
     </div>
 
     <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px;">
-      <div style="width: 8px; height: 8px; border: 1px solid #000000; box-sizing: border-box; margin-top: 7px; flex-shrink: 0;"></div>
+      <div style="width: 8px; height: 8px; margin-top: 7px; flex-shrink: 0;"></div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
         <div style="font-size: var(--t-value); font-weight: 400; line-height: 31px;">E Ink: The Quiet Display Technology That Refused to Die</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">IEEE SPECTRUM &middot; 16 MIN &middot; READ</div>

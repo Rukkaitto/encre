@@ -3685,14 +3685,22 @@ void QuietTheme::renderArticles(Framebuffer& fb, const FontSet& fonts, const Art
     else if (rule) fb.fillRect(0, y + 2 * kArticleRowPadY + contentH, fb.width() - inset, 1, false);
     const Ink ink = focused ? Ink::White : Ink::Black;
 
-    // THE BULLET IS SOLID WHEN UNREAD AND HOLLOW WHEN READ, which is the board's
-    // own distinction and is why ArticleRow carries a flag rather than the theme
-    // reading the end of `meta`: a string is not the source of truth for a mark.
+    // THE BULLET IS DRAWN ONLY WHEN THE ARTICLE HAS NEVER BEEN OPENED, which is
+    // the board's own distinction and is why ArticleRow carries a flag rather
+    // than the theme reading the end of `meta`: a string is not the source of
+    // truth for a mark.
+    //
+    // A READ ROW HAS NO MARK AT ALL, where this drew a hollow square. An absence
+    // is read without looking where a hollow 8x8 box has to be looked AT, and
+    // this list is scanned rather than studied: what matters is which rows still
+    // want something, and those are the ones with ink beside them.
+    //
+    // THE SLOT IS NOT RECLAIMED. `textX` is computed above and does not consult
+    // `read`, so the column stands still -- kHintEmptySlotW's rule, and without
+    // it every read row's text would step 22px left of every unread one, which
+    // reads as a rendering fault rather than as a state.
     const int by = y + kArticleRowPadY + kArticleBulletTop;
-    if (row.read)
-      outlineRect(fb, kMargin, by, kArticleBulletW, kArticleBulletW, 1, focused);
-    else
-      fb.fillRect(kMargin, by, kArticleBulletW, kArticleBulletW, focused);
+    if (!row.read) fb.fillRect(kMargin, by, kArticleBulletW, kArticleBulletW, focused);
 
     int ty = y + kArticleRowPadY;
     ty += f26ToPx(drawProse(fb, tf, title, textX, textW, pxToF26(ty), ink, plane,

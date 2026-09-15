@@ -617,6 +617,11 @@ this API can give us, because nothing downstream can tell it from a right one.
       always focused, and UP/DOWN are blank.
 - [ ] **13.8.4** A **HOLD** on an article opens the actions overlay; a hold on the
       sync row does nothing **and draws no ring**.
+- [ ] **13.8.4b** Open an article and come straight back. Its dot is **gone** —
+      not hollow, gone — the title is lighter, the meta says `· READ`, and the
+      band and Home both drop by one. **The text column does not move**: a read
+      row's title lines up with an unread one's, because the mark's slot stays
+      when the mark goes.
 - [ ] **13.8.5** `CHANGE` on the account screen's `Keep offline` cycles the value,
       the row redraws with the new one, and it survives a reboot.
 - [ ] **13.8.6** A long chapter name on Book details **elides** rather than running
