@@ -6,6 +6,7 @@
 #include <WiFi.h>
 
 #include <new>
+#include <string>
 
 using reader::HttpFailure;
 using reader::HttpState;
@@ -241,13 +242,16 @@ bool ArduinoHttpTransport::begin(const reader::HttpRequest& request, reader::Bod
 void ArduinoHttpTransport::poll() {
   if (state_ != HttpState::Running || !live_) return;
 
+  // A NULL STREAM IS THE CONNECTION HAVING ENDED, WHICH AFTER A WHOLE BODY IS
+  // SUCCESS. This read it as a failure and reported `Timeout` on a request that
+  // had already finished -- measured on glass as `status=200 body=81` with
+  // `/api/info`'s whole 81-byte answer in hand, failing 2.7 s in against a 15 s
+  // idle timeout that had not remotely elapsed. `getStreamPtr()` returns null
+  // once the client is no longer connected, and with `Connection: close` that is
+  // the ORDINARY end of every response.
   NetworkClient* stream = live_->http.getStreamPtr();
-  if (stream == nullptr) {
-    fail(HttpFailure::Timeout);
-    return;
-  }
+  const int avail = stream != nullptr ? stream->available() : 0;
 
-  const int avail = stream->available();
   if (avail > 0) {
     const size_t want = avail < static_cast<int>(kChunkBytes) ? static_cast<size_t>(avail)
                                                               : kChunkBytes;
@@ -273,13 +277,21 @@ void ArduinoHttpTransport::poll() {
     }
   }
 
-  // COMPLETE WHEN THE LENGTH IS SATISFIED, or when the far end has gone with
-  // nothing left buffered. Both are needed: a `Content-Length` response can
-  // leave the socket open (keep-alive), and a chunked one -- `getSize()` is -1
-  // there, which is every wallabag response measured -- can only end the second
-  // way.
-  const bool lengthDone = declaredLen_ >= 0 && bodyBytes_ >= static_cast<size_t>(declaredLen_);
-  if (lengthDone || (!live_->http.connected() && stream->available() == 0)) {
+  // THREE ENDINGS, AND ONLY ONE OF THEM IS A FAILURE.
+  //
+  //   the length is satisfied            -> done, whatever the socket is doing
+  //   the far end went, no length given  -> done; gone IS the end of a chunked
+  //                                         or close-delimited body
+  //   the far end went, length NOT met   -> truncated, and the only real failure
+  //
+  // The order matters: `lengthDone` is asked FIRST, so a response whose last
+  // chunk arrived in the poll that also closed the socket completes rather than
+  // being read as a body cut short.
+  const bool lengthKnown = declaredLen_ >= 0;
+  const bool lengthDone = lengthKnown && bodyBytes_ >= static_cast<size_t>(declaredLen_);
+  const bool gone = stream == nullptr || !live_->http.connected();
+
+  if (lengthDone || (gone && !lengthKnown)) {
     const bool wanted = status_ >= 200 && status_ < 300;
     if (wanted && sink_ != nullptr && !sink_->finish()) {
       fail(HttpFailure::SinkRefused);
@@ -290,7 +302,18 @@ void ArduinoHttpTransport::poll() {
     return;
   }
 
+  if (gone) {
+    // A DECLARED LENGTH THAT DID NOT ARRIVE. Distinct from the idle timeout
+    // below: the connection is not quiet, it is closed, and retrying is a
+    // different decision from waiting.
+    lastError_ = "the connection closed with " + std::to_string(bodyBytes_) + " of " +
+                 std::to_string(declaredLen_) + " bytes";
+    fail(HttpFailure::Timeout);
+    return;
+  }
+
   if (millis() - lastProgressMs_ > kIdleTimeoutMs) {
+    lastError_ = "no bytes for " + std::to_string(kIdleTimeoutMs) + " ms";
     fail(HttpFailure::Timeout);
   }
 }
