@@ -118,6 +118,39 @@ enum class ScreenId : uint8_t {
   // design/WifiNetworkActions.dc.html -- what holding Confirm on a saved network
   // opens. ItemActions reads the LIBRARY's focused row, so it could not be reused.
   WifiNetworkActions,
+  // ARTICLES OVER WALLABAG (V1.1), six screens appended together -- the same
+  // case as the connect flow above, and the case #42's sentinel exists for.
+  //
+  // design/Articles.dc.html -- the list of articles on the card, with a `Sync now`
+  // row above it. LibraryScreen's shape: a band, a scrolling list, a rail. What it
+  // lists is /.reader/articles/ rather than /books, which is the whole of why an
+  // archived article's file can be removed by a sync without the Library's delete
+  // ever seeing it.
+  Articles,
+  // design/ArticleActions.dc.html -- the overlay a HOLD on an article row opens.
+  // Archive and Star. Built from Facts rather than from an ArticlesScreen&, on
+  // DeleteConfirmScreen's argument: a screen reference makes an overlay reachable
+  // from one parent only, and this one is also reachable from the end screen.
+  ArticleActions,
+  // design/ArticleEnd.dc.html -- what an article's last page turns into, where a
+  // book's turns into BookEnd. A fourth slab (`NEXT ARTICLE`), and that slab is
+  // ABSENT rather than inert when no next unread article exists -- WifiError's rule
+  // that the slab list is the shape.
+  ArticleEnd,
+  // design/WallabagAccount.dc.html -- setup and status, reached from Settings'
+  // CONNECTIONS row. Home's ARTICLES row is the door to the LIST; this is the door
+  // to the account, which is what Settings is for.
+  WallabagAccount,
+  // design/WallabagConnecting.dc.html and design/WallabagFetching.dc.html -- ONE
+  // screen with TWO stages. The caption and message change once the token is in
+  // hand and files start arriving, because one caption held for the minute a
+  // fifty-article sync takes reads as a frozen panel.
+  WallabagConnecting,
+  // design/WallabagError.dc.html and its two siblings -- one screen, THREE COPY
+  // SHAPES, on BookError's argument and the join flow's precedent: refused,
+  // unreachable, and no saved network to reach it over. Two of the three drop
+  // `TRY AGAIN`, because pressing it could not succeed.
+  WallabagError,
   // NOT A SCREEN. A bound, so a guard can name "one past the last member" without
   // naming a member -- which is #42, and which had gone quiet twice by the time it
   // was fixed: session_record.cpp spelled three bounds `<= ScreenId::Peek` and then
