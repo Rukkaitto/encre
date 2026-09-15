@@ -1607,6 +1607,27 @@ static uint32_t gLastSdDeepPollMs = 0;
 #include <WiFiClient.h>
 #include <WiFiClientSecure.h>
 
+// WHAT THE SECOND RUN FOUND, AND IT IS NOT THE FREE HEAP.
+//
+// Across three TLS connections the free heap recovered every time -- 73,136 /
+// 73,340 / 73,076 -- and the largest BLOCK did not: 61,428 -> 45,044 -> 34,804,
+// measured with no session open at any of the three. Free heap says nothing is
+// wrong; the block says the heap is being cut up, and CLAUDE.md's own rule is
+// that the largest free BLOCK decides an allocation rather than the free total.
+//
+// SO THE QUESTION IS ASKED DIRECTLY RATHER THAN READ OFF A NUMBER. These three
+// sizes are the largest single contiguous requests the EPUB open path makes,
+// measured over 225 real books and recorded in CLAUDE.md: the inflate window,
+// the zip central directory, and the OPF string. A device that cannot serve
+// 36,956 bytes in one piece cannot open a book, whatever its free heap says.
+static void probeBlocks(const char* when) {
+  const uint32_t block = ESP.getMaxAllocHeap();
+  logf("[probe] blocks %-14s heap=%u block=%u | inflate36956=%s zipdir39610=%s opf64080=%s\n",
+       when, (unsigned)ESP.getFreeHeap(), (unsigned)block, block >= 36956 ? "fits" : "REFUSED",
+       block >= 39610 ? "fits" : "REFUSED", block >= 64080 ? "fits" : "REFUSED");
+  logFlush();
+}
+
 static void probeOneGet(const char* what, const char* url, bool secure) {
   const uint32_t before = ESP.getFreeHeap();
   const uint32_t blockBefore = ESP.getMaxAllocHeap();
@@ -1655,10 +1676,16 @@ static void probeStreamedDownload(const char* url, bool secure) {
   // exists to answer went unanswered. The allocation shape wanted here is a TLS
   // session held OPEN while 4 KB chunks land on the card, which is strictly
   // more than a handshake alone, and only the secure path has it.
-  WiFiClient plain;
-  WiFiClientSecure tls;
-  if (secure) tls.setInsecure();
-  HTTPClient http;
+  {
+    WiFiClient plain;
+    WiFiClientSecure tls;
+    if (secure) tls.setInsecure();
+    HTTPClient http;
+    // IT FOLLOWS REDIRECTS NOW, because the second run drew a 302 and streamed
+    // nothing: the root URL sends a browser to the login page, and HTTPClient
+    // does not follow by default. STRICT is the right one -- it follows only a
+    // GET or HEAD, which is what this is.
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   if (http.begin(secure ? static_cast<WiFiClient&>(tls) : plain, url)) {
     const int code = http.GET();
     if (code == 200) {
@@ -1691,12 +1718,21 @@ static void probeStreamedDownload(const char* url, bool secure) {
         wrote += static_cast<size_t>(n);
       }
     }
-    logf("[probe] download   code=%d wrote=%u ms=%lu heap %u -> %u min=%u block %u -> %u\n",
+    // THIS READING IS TAKEN WITH THE SESSION STILL OPEN, and that is the
+    // measurement rather than an accident of where the line sits. A streamed
+    // download HOLDS a TLS connection for its whole length, so what decides
+    // whether the sink fits is the heap DURING the stream and not the floor a
+    // handshake touches on its way through. The second run read 26,588 free and
+    // a 14,324-byte block here, against 73,076 and 34,804 a line earlier.
+    logf("[probe] download   code=%d wrote=%u ms=%lu heap %u -> %u min=%u block %u -> %u"
+         " (SESSION OPEN)\n",
          code, (unsigned)wrote, (unsigned long)(millis() - t0), (unsigned)before,
          (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), (unsigned)blockBefore,
          (unsigned)ESP.getMaxAllocHeap());
     http.end();
   }
+  }
+  probeBlocks("stream closed");
   logFlush();
 }
 
@@ -1876,6 +1912,7 @@ static void runWallabagProbe() {
   // https. That is not a mistake: the rule's fallback is "plain HTTP only", so
   // whether this origin accepts a plain request is the question that decides
   // whether the fallback is a release or a feature nobody can use.
+  probeBlocks("joined");
   probeOneGet("own-plain", (creds.server + "/api/info").c_str(), /*secure=*/false);
 
   // AND TLS AGAINST THE READER'S OWN SERVER, which the first run did not
@@ -1886,6 +1923,7 @@ static void runWallabagProbe() {
   if (serverIsTls) {
     mark("probe-own-tls");
     probeOneGet("own-tls", (creds.server + "/api/info").c_str(), /*secure=*/true);
+    probeBlocks("after own-tls");
   }
 
   // The control stays: a host that definitely speaks TLS, so the handshake is
@@ -1893,6 +1931,7 @@ static void runWallabagProbe() {
   // compared when it is not.
   mark("probe-tls");
   probeOneGet("tls-info", "https://app.wallabag.it/api/info", /*secure=*/true);
+  probeBlocks("after tls-info");
 
   // ONE STREAMED DOWNLOAD, AND IT IS THE ROOT URL RATHER THAN AN EXPORT,
   // because the export endpoint wants a bearer token and the token ladder is
@@ -1906,10 +1945,37 @@ static void runWallabagProbe() {
   gSd.mkdirs("/.reader/articles");
   probeStreamedDownload((creds.server + "/").c_str(), serverIsTls);
 
+  // A SYNC IS NOT ONE REQUEST, SO ONE HANDSHAKE IS NOT THE MEASUREMENT.
+  // info, then a token, then a listing, then one fetch per article -- a dozen
+  // connections on an ordinary sync. The second run lost 16,384 bytes of
+  // largest block to the first TLS connection and 10,240 to the second, with
+  // the free heap recovering fully both times, and two of those already put
+  // the block UNDER the 36,956-byte inflate window. So the question is whether
+  // that loss PLATEAUS or keeps going: if it plateaus, TLS is a heap budget to
+  // fit inside, and if it does not, a sync leaves a device that cannot open the
+  // article it just fetched, which is exactly what the decision rule was
+  // written to prevent.
+  if (serverIsTls) {
+    for (int i = 1; i <= 4; ++i) {
+      char what[16];
+      snprintf(what, sizeof(what), "repeat-%d", i);
+      probeOneGet(what, (creds.server + "/api/info").c_str(), /*secure=*/true);
+    }
+    probeBlocks("after 4 repeats");
+  }
+
+  // AND WHETHER THE RADIO GIVES IT BACK IS THE LAST QUESTION, because a sync
+  // ends with the radio going down and a reader opening an article. If the
+  // block comes back here, the fragmentation is the radio's and lives exactly
+  // as long as the sync; if it does not, it outlives the feature that caused
+  // it. The settle is because WIFI_OFF releases some of the driver's buffers
+  // off this task, so reading the block on the next line reads it too early.
+  probeBlocks("before down");
   gRadio.down();
+  delay(500);
   mark("probe-radio-down");
-  logf("[probe] done -- radio down, heap=%u min=%u block=%u\n", (unsigned)ESP.getFreeHeap(),
-       (unsigned)ESP.getMinFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+  probeBlocks("after down+500");
+  logf("[probe] done\n");
   logFlush();
 }
 #endif  // ENCRE_WALLABAG_PROBE
