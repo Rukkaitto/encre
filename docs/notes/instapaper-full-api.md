@@ -1,5 +1,17 @@
 # Instapaper Full API — what the credentials cover
 
+> **SUPERSEDED 2026-09-14: Encre uses wallabag instead.** See
+> `docs/notes/wallabag-api.md`. Every finding below is still true of Instapaper
+> and none of it is ours to care about any more — the Instaparser key, the
+> fleet-wide credit ceiling, the xAuth signing and §7's ten open questions all go
+> with it. **Two things in here outlived the decision and are recorded there
+> rather than lost**: §6's HTML tokenizer was filed as fallback-only and is
+> baseline for any HTML-bearing backend (`document.cpp` parses through `xml.h`,
+> which is strict XML), and §6's keyboard press counts are what say the six-button
+> keyboard cannot carry a 51-character `client_id`. Kept whole rather than
+> trimmed: this is the investigation that produced the decision, and a note edited
+> down to its conclusion cannot be checked.
+
 Issue #115. Investigated 2026-09-11 against Instapaper's live developer
 documentation at `https://www.instapaper.com/developers`, its API Terms of Use,
 its Premium pages, the Internet Archive's copies of the previous docs, and

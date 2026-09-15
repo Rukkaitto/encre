@@ -352,25 +352,7 @@
       "page": "page-6"
     },
     {
-      "file": "InstapaperUsername.dc.html",
-      "title": "Sign-In · Username",
-      "x": 2900,
-      "y": 0,
-      "w": 480,
-      "h": 800,
-      "page": "page-6"
-    },
-    {
-      "file": "InstapaperPassword.dc.html",
-      "title": "Sign-In · Password",
-      "x": 3480,
-      "y": 0,
-      "w": 480,
-      "h": 800,
-      "page": "page-6"
-    },
-    {
-      "file": "InstapaperAccount.dc.html",
+      "file": "WallabagAccount.dc.html",
       "title": "Account",
       "x": 4060,
       "y": 0,
@@ -379,8 +361,8 @@
       "page": "page-6"
     },
     {
-      "file": "InstapaperSigningIn.dc.html",
-      "title": "Sign-In · Working",
+      "file": "WallabagConnecting.dc.html",
+      "title": "Connecting",
       "x": 0,
       "y": 900,
       "w": 480,
@@ -388,8 +370,8 @@
       "page": "page-6"
     },
     {
-      "file": "InstapaperSignInError.dc.html",
-      "title": "Sign-In · Rejected",
+      "file": "WallabagError.dc.html",
+      "title": "Couldn’t sign in",
       "x": 580,
       "y": 900,
       "w": 480,
@@ -397,18 +379,9 @@
       "page": "page-6"
     },
     {
-      "file": "InstapaperSignInOffline.dc.html",
-      "title": "Sign-In · Didn't Finish",
+      "file": "WallabagErrorOffline.dc.html",
+      "title": "Couldn’t connect",
       "x": 1160,
-      "y": 900,
-      "w": 480,
-      "h": 800,
-      "page": "page-6"
-    },
-    {
-      "file": "InstapaperSignInRefused.dc.html",
-      "title": "Sign-In · App Refused",
-      "x": 1740,
       "y": 900,
       "w": 480,
       "h": 800,
@@ -891,7 +864,7 @@
     },
     {
       "id": "page-6",
-      "name": "V2 · Instapaper"
+      "name": "V1.1 · Articles"
     },
     {
       "id": "page-7",

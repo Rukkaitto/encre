@@ -32,49 +32,64 @@
   <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">ARTICLES</div>
   <div style="font-size: var(--t-value); font-weight: 700;">NOT SET UP</div>
 </div>
-  <div style="display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 46px 24px 0 24px; flex-shrink: 1; min-height: 0; overflow: hidden; text-align: center;">
+  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: 46px 24px 0 24px; flex: 1; min-height: 0; overflow: hidden; text-align: center;">
     <svg width="98" height="91" viewBox="0 0 28 26" fill="none"><rect x="4.5" y="0.5" width="19" height="3" stroke="#000000"></rect><rect x="2.5" y="6.5" width="23" height="3" stroke="#000000"></rect><rect x="0.7" y="12.7" width="26.6" height="12.6" stroke="#000000" stroke-width="1.4"></rect><path d="M4 17h14M4 20.5h20" stroke="#000000" stroke-width="1.2"></path></svg>
-    <div style="font-size: 39px; font-weight: 700; letter-spacing: 0.06em;">READ IT LATER</div>
-    <div style="font-size: var(--t-body); line-height: 1.55; max-width: 400px;">Connect your Instapaper account to read your saved articles offline, and archive or like them from the device.</div>
-    <div style="width: 420px;"><div style="background: #000000; color: #ffffff; height: 72px; display: flex; align-items: center; justify-content: center;">
-  <div style="font-size: var(--t-value); letter-spacing: 0.18em; font-weight: 700;">SET UP INSTAPAPER</div>
-</div></div>
+    <div style="font-size: var(--t-title); font-weight: 700; letter-spacing: 0.06em;">READ IT LATER</div>
+    <div style="font-size: var(--t-body); line-height: 1.55; max-width: 400px;">Put the SD card in your computer and fill in your wallabag details in its /.reader/wallabag.json file.</div>
     <!--
-      THIS FOOTNOTE SAID `SIGN-IN HAPPENS IN YOUR BROWSER &mdash; NOTHING TO TYPE
-      ON THE DEVICE.` AND IT STOPPED BEING TRUE (#124).
+      THIS BOARD HAS NO ACTION SLAB, AND THAT IS #111 ON ONE SCREEN. It had one
+      -- `SET UP INSTAPAPER`, opening a keyboard -- and before that a footnote
+      promising the sign-in happened in a browser. Both are gone: the
+      credentials are a file the reader fills in on a computer,
+      /.reader/wallabag.json, so there is nothing here to press and no field for
+      a press to open.
 
-      It was the one line on any board that was ACCURATE about the browser
-      flow -- InstapaperConnect.dc.html's `PASSWORD STAYS IN THE BROWSER.` was
-      stronger than the spec it came from and was false -- and it is exactly
-      what the move to the keyboard falsifies. #115 settled that the xAuth
-      exchange is an OAuth 1.0a HMAC-SHA1 SIGNED request, so whoever performs
-      it holds the consumer secret and that cannot be a browser: the password
-      reaches the firmware either way. With the safety claim gone the setup
-      page was buying convenience with an HTTP server in firmware and a
-      plain-HTTP hop across the LAN, so sign-in moved to the keyboard this
-      device already ships. See docs/notes/instapaper-full-api.md SS6.
+      HomeEmpty.dc.html IS THE PRECEDENT AND IT IS EXACT. Its call to action was
+      `SEND BOOKS OVER WI-FI`, and CLAUDE.md records the rule that removed it:
+      "a primary action that cannot work is worse than none", so the copy
+      carries it instead -- "Put the SD card in your computer and copy EPUB
+      files into its /books folder." This screen's sentence is that one's
+      sibling down to its shape, because it is the same instruction about the
+      same card.
 
-      THE SLAB STAYS AND NOW OPENS A KEYBOARD -- InstapaperUsername.dc.html,
-      then InstapaperPassword.dc.html.
+      THE FOOTNOTE IS THE ONE THING THE PROSE CANNOT SAY FOR ITSELF. A reader
+      told to fill in a file goes looking for the file, and the firmware WRITES
+      a commented template on first boot exactly as it writes
+      /.reader/settings.json when a card has none -- so `THE FILE IS ALREADY ON
+      THE CARD.` is what stops the instruction reading as "create this".
 
-      WHAT THE REPLACEMENT MAY NOT SAY IS ANYTHING ABOUT SAFETY. The device
-      really does discard the password once it holds the token, and putting
-      that on a board would be the same class of promise this card exists to
-      remove -- a security claim on glass, which nothing on the panel can keep
-      the user informed about if it ever stops being true. So the line states
-      the two MECHANICAL facts a reader needs before pressing: they will type,
-      and it needs the radio.
+      AND IT SAYS NOTHING ABOUT SAFETY, WHICH IS THE LINE THE OLD FOOTNOTE
+      CROSSED. That one said the password stayed in the browser; it was stronger
+      than the spec it came from, and a security claim on glass is one nothing
+      on the panel can withdraw the day it stops being true. This one states a
+      fact about the card and makes no promise at all.
 
-      TWO LINES WHERE THE OLD ONE WAS THREE, so the centred block moves up
-      rather than down; measured at 48 characters against the old 63 in the
-      same 400px box.
-    -->
-    <div style="font-size: var(--t-meta); letter-spacing: 0.1em; line-height: 1.5; max-width: 400px;">YOU TYPE YOUR SIGN-IN ON THIS DEVICE, OVER WI-FI.</div>
+      THE BLOCK IS CENTRED RATHER THAN TOP-ALIGNED. With the slab gone the
+      top-aligned block left ~200px of nothing above the hint bar, which reads
+      as a screen that failed to finish drawing.
+
+      THE HINT BAR HAS ONE LIVE SLOT: `BACK`, and three 36px dead ones. Nothing
+      here is focusable, so `SELECT` would promise a choice with nothing to
+      choose. An empty slot is 36px and not zero (kHintEmptySlotW) -- measuring
+      one as nothing draws the live slots in the wrong places.
+
+      THE HERO IS `--t-title` AND IT WAS 39px (#133). A role is a pre-rendered
+      asset per size AND weight and the ramp carries no 39px/700, so the old
+      number asked for a face nobody has -- LowBattery's band label's defect,
+      and Sleep's 53px title before it.
+
+      THIS SCREEN IS NOT WHAT THE SYNC DIALOGS VEIL, and it used to be. See the
+      note at the head of WallabagConnecting.dc.html: a connect drawn over
+      `NOT SET UP` claims the device is not set up while it demonstrably is, so
+      all three of those boards veil Articles.dc.html now.
+  
+-->
+    <div style="font-size: var(--t-meta); letter-spacing: 0.1em; line-height: 1.5; max-width: 400px;">THE FILE IS ALREADY ON THE CARD.</div>
   </div>
   <div style="margin-top: auto;"></div>
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
   <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">BACK</div></div>
-  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">SELECT</div></div>
+  <div style="width: 36px;"></div>
   <div style="width: 36px;"></div>
   <div style="width: 36px;"></div>
 </div>
