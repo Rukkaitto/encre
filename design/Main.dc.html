@@ -134,10 +134,79 @@
     </div>
   </div>
 
+  <!--
+    THE ARTICLES ROW IS THE DOOR TO Articles.dc.html, AND IT WAS CUT WITH
+    INSTAPAPER AND NEVER PUT BACK. `c2468df` (2026-08-20) removed it from this
+    board and an `Instapaper / SIGNED IN` row from Settings' CONNECTIONS in the
+    same commit, so the nine Articles boards have been a closed set reachable
+    from NOTHING ever since -- the shape CLAUDE.md already records for V1.1,
+    where "the six screens shipped with no door, every golden green, and make
+    compare measuring Settings drifting AWAY from a board that was already
+    right". Restored HERE rather than in Settings because this is the screen a
+    reader is looking at when they want something to read.
+
+    THE RIGHT SLOT STATES A COUNT ONLY WHEN THERE IS ONE, AND OTHERWISE
+    DISCLOSES. components.h's rule is that a row states a quantity or discloses
+    a screen, never both, and this menu already draws both shapes -- LIBRARY
+    carries `12`, SETTINGS carries the chevron. A connected wallabag reads
+    `3 UNREAD`; one that was never set up has no quantity to state and takes the
+    chevron, which is HomeEmpty.dc.html's specimen. In the view-model that is
+    the same distinction SETTINGS already makes, an empty `value`, so it needs
+    no new field.
+
+    IT IS NOT `NOT SET UP`, AND THE REASON IS WHO IS LOOKING. Most readers will
+    never connect a wallabag, and a row telling them so would sit on the screen
+    they see most often, every time, about a feature they did not ask for. An
+    unconfigured row has nothing to report, so it reports nothing: the chevron
+    makes it a door rather than a notice.
+
+    WHAT IT COSTS IS THE TITLE'S BUDGET, AND THAT IS MEASURED RATHER THAN
+    ESTIMATED. renderHome's `bottomAnchored` is
+    `hintBarHeight + vm.menu.size() * kRowH`, so a third row takes kRowH (81px)
+    off `blockRoom` and the title's line count falls out of the same arithmetic
+    with nothing to update -- derived, not pinned, which is why this board is
+    the whole change. Measured through the real renderHome at both geometries:
+    `blockRoom` 346 -> 265 on the X4 and 338 -> 257 on the X3, so the budget
+    goes 4 -> 2 lines and 3 -> 2. Two lines at this 304px column in shouted
+    Title700 is about 24 characters -- `THE BROTHERS KARAMAZOV` fits and
+    `A PORTRAIT OF THE ARTIST AS A YOUNG MAN` does not -- so a long title clamps
+    where it used to wrap, which is the ellipsis #74 took off this screen
+    arriving back at a greater length.
+
+    THE TRADE WAS PRICED AND TAKEN BY THE OWNER: one always-present door is
+    worth more than the fourth title line. **If it reads badly on glass the way
+    back is not to shrink the row** -- it is to show ARTICLES only once articles
+    exist and move the setup door to Settings' CONNECTIONS, which restores the
+    other row c2468df cut and costs a reader who never connects one nothing.
+
+    THIS BOARD NOW LEADS THE FIRMWARE, AND make compare SAYS SO LOUDLY -- READ
+    IT AS THE DESIGN-FIRST RULE WORKING, NOT AS A REGRESSION. Until the row is
+    implemented the firmware draws two menu rows where these three boards draw
+    three, so the bottom-anchored menu sits 81px lower on the firmware's panel.
+    Measured the moment the boards landed: `home` 1.23%/1.13% -> 1.98%/1.83%,
+    and `home_empty` and `home_unopened` -> 20.96%/21.09% and 20.62%/20.78%.
+    The two variants are the big ones for one reason -- their FOCUSED row is a
+    full-bleed inverted block, ~38,000 px of solid ink, and it is counted twice
+    when it sits in two places. **Those figures are expected to return to about
+    what they were when the third row lands**, and a number that does not is the
+    thing worth chasing. Nothing in CI reads them: the gate passes
+    --require-implemented and --require-canvas-current, and neither is a
+    fidelity check.
+
+    THE MENU'S BOX IS UNCHANGED. The row is LIBRARY's own, copied rather than
+    transcribed, so it cannot drift from the two beside it -- and copying the
+    FOCUSED row is the mistake this pass made first, which put an inverted fill
+    on two rows of HomeEmpty and HomeUnopened at once. The unfocused box comes
+    from SETTINGS.
+  -->
   <div style="display: flex; flex-direction: column; margin-top: auto;">
     <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000;">
       <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">LIBRARY</div>
       <div style="font-size: var(--t-value); font-weight: 700;">12</div>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000;">
+      <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">ARTICLES</div>
+      <div style="font-size: var(--t-value); font-weight: 700;">3 UNREAD</div>
     </div>
     <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000;">
       <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">SETTINGS</div>
