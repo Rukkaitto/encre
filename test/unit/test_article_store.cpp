@@ -260,7 +260,10 @@ TEST_CASE("Home's ARTICLES value is empty when unconfigured, which draws the che
   // to, and an empty value is SETTINGS' own mechanism for the chevron.
   CHECK(ArticleStore::homeMenuValue(/*configured=*/false, 0).empty());
   CHECK(ArticleStore::homeMenuValue(/*configured=*/false, 7).empty());
-  CHECK(ArticleStore::homeMenuValue(/*configured=*/true, 0) == "0 UNREAD");
+  // ZERO IS NOT A COUNT. This asserted `"0 UNREAD"` and that shipped: a reader
+  // who has read everything was told so on the screen they see most often. Three
+  // states, two shapes -- unconfigured and nothing-unread both take the chevron.
+  CHECK(ArticleStore::homeMenuValue(/*configured=*/true, 0).empty());
   CHECK(ArticleStore::homeMenuValue(/*configured=*/true, 3) == "3 UNREAD");
 }
 

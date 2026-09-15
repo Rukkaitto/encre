@@ -276,7 +276,21 @@ std::string ArticleStore::outcomeLabel(const std::string& lastOutcome) {
 }
 
 std::string ArticleStore::homeMenuValue(bool configured, int unread) {
-  if (!configured) return std::string();
+  // THREE STATES, TWO SHAPES. Never set up and nothing unread both answer with
+  // an empty value -- which on Home's menu is the chevron SETTINGS already draws
+  // -- and only a real number takes the slot. design/Main.dc.html carries the
+  // argument: the right slot states a count only when there IS one, and zero is
+  // not one.
+  //
+  // `0 UNREAD` SHIPPED AND WAS REPORTED OFF THE DEVICE. A reader who has read
+  // everything was told so on the screen they see most often, every time, and
+  // the words were longer the less there was to say.
+  //
+  // LIBRARY DIFFERS ON PURPOSE and the distinction is worth keeping: its count
+  // is how many books are ON the card, a fact about a shelf, where this is how
+  // many are WAITING, a fact about a queue. An empty shelf is worth stating; an
+  // empty queue has nothing to report rather than a zero to report.
+  if (!configured || unread <= 0) return std::string();
   return std::to_string(unread) + " UNREAD";
 }
 

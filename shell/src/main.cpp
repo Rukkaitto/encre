@@ -3370,6 +3370,12 @@ static void endSyncSession() {
 // the reader needs to read. The restart waits for the dialog to be dismissed.
 static void restartIfHeapSpent(const char* why) {
   if (!gTlsFragmentedHeap) return;
+  // THE INTENT, RECORDED BEFORE THE RESTART THAT DOES NOT RETURN -- `sleepNow`'s
+  // ordering and its reason. `esp_restart()` reports `ESP_RST_SW`, which the boot
+  // reads as a cold start, so without this the record is CLEARED and the reader
+  // lands on Home: reported off the device as "after syncing it reboots to home,
+  // not to the article list".
+  markRestarting();
   logf("[sync] restarting after %s: TLS has run, so the largest free block is %u and "
        "`Inflater::begin` wants 36956 in one piece -- a book could not be opened until "
        "this reset\n",
@@ -3790,6 +3796,14 @@ static void handleArticle() {
         logFlush();
         gHomeRebuild.markStale();
       }
+      // THE FACTORY HOLDS A COPY AND HAS TO BE TOLD, which is the trap CLAUDE.md
+      // records for Settings and which this hit verbatim: the account screen is
+      // built from `settings_`, so a replace after changing `gSettings` rebuilt
+      // it from the value before the press. Reported as "hitting CHANGE on the
+      // Keep offline row doesn't seem to do anything" -- the setting HAD changed,
+      // been persisted and been applied, and the screen redrawn from a stale
+      // copy was the only part anybody could see.
+      gFactory.setSettings(gSettings);
       gApp->replaceScreen(reader::ScreenId::WallabagAccount);
       break;
     }
@@ -5827,6 +5841,25 @@ void setup() {
   // stopped working" and "the logger reset the device" look identical from the
   // serial output.
   const esp_reset_reason_t rst = esp_reset_reason();
+  // A RESTART THIS FIRMWARE ASKED FOR, KEPT SEPARATE FROM `fromSleep` ON PURPOSE.
+  // `fromSleep` drives the hold gate, the charge gate and the waking paint, none
+  // of which a sync's restart is: nothing was asleep, the panel holds the
+  // fetching screen rather than a sleep card, and there is no finger on the power
+  // button to check. It buys exactly one thing -- the session restore -- so it is
+  // one flag and not a widening of another.
+  //
+  // `ESP_RST_SW` AS WELL AS THE FLAG, which is `slept`'s own belt: the flag is
+  // written immediately before `esp_restart()`, so any other reset reaching this
+  // line with it set is a reset that interrupted us, and resuming into a sync's
+  // aftermath is not what that boot should do.
+  const bool restartAsked = takeRestartFlag();
+  const bool resumingRestart = restartAsked && rst == ESP_RST_SW;
+  if (restartAsked && !resumingRestart) {
+    logf("[session] a restart was recorded but this boot is reset reason %d, not SW; "
+         "treating it as a cold start\n",
+         (int)rst);
+  }
+
 
   // MAY NOT RETURN. See the definition: a wake the user did not hold through is
   // refused here, before display.begin(), so it costs no waveform and nothing on
@@ -6568,7 +6601,7 @@ void setup() {
   // WHERE THE USER WAS. Only across a genuine wake: a device that boots into a
   // sub-screen after a week off is confusing, and 2B already distinguishes the
   // two cases from esp_sleep_get_wakeup_cause().
-  if (!fromSleep) {
+  if (!fromSleep && !resumingRestart) {
     // Cold boot starts at Home and forgets the record, so the next wake cannot
     // resume a screen from a previous run of the device. Logged because otherwise
     // "it started at Home" is indistinguishable from a restore that silently
@@ -6579,6 +6612,11 @@ void setup() {
     logf("[session] cold boot: record cleared, nothing to restore\n");
     logFlush();
   } else if (storage) {
+    if (resumingRestart) {
+      logf("[session] this boot is the restart the sync asked for; restoring where the "
+           "reader was rather than starting at Home\n");
+      logFlush();
+    }
     // EVERY OUTCOME BELOW IS LOGGED, and it was not always so. This used to read
     // `if (loadSession(s) && s.screen != ScreenId::Home) { ... }` with no else at
     // all, which made the two most interesting outcomes print nothing: a

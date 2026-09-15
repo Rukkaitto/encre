@@ -72,7 +72,7 @@ constexpr std::array<SettingsScreen::Item, 12> kItems{{
     // tempting `wallabag . NOT SET UP` is the shape a row states a quantity or
     // discloses a screen, never both forbids -- and the state it would state is
     // the one WallabagAccount's own header band already carries.
-    {"wallabag", SettingsScreen::Field::Wallabag, false, true},
+    {"Wallabag", SettingsScreen::Field::Wallabag, false, true},
 }};
 
 // The values CHANGE cycles through, and they wrap: this is one button, so there is

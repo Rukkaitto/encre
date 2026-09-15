@@ -859,6 +859,13 @@ struct ArticlesViewModel {
   // state: it is the ONE place a push count is stated, and a list reached any
   // other way must not claim one.
   std::string statusLine;
+  // WHETHER THE SYNC ROW HOLDS THE FOCUS. -1 in `focusedRow` says "no ARTICLE is
+  // focused" and cannot say where the focus went instead, so a renderer reading
+  // only that draws a screen with nothing selected -- which is what shipped, and
+  // was reported as "the sync now row doesn't look focused, even when it is".
+  // Worst on an empty list, where the sync row is the only row and always has
+  // it. design/Articles.dc.html states the rule the specimen cannot show.
+  bool syncFocused = false;
   std::vector<ArticleRow> rows;  // the VISIBLE slice, never the whole directory
   int focusedRow = -1;           // an index into `rows`
   // The rail's two numbers, over the whole list. LibraryViewModel's pair exactly.

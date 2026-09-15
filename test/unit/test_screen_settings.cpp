@@ -100,7 +100,7 @@ TEST_CASE("focus skips headers in both directions") {
   scr.onEvent(kDown);
   CHECK(focusedLabel(scr) == "Wi-Fi");
   scr.onEvent(kDown);
-  CHECK(focusedLabel(scr) == "wallabag");
+  CHECK(focusedLabel(scr) == "Wallabag");
   // The last row of the list, so DOWN wraps to the first focusable row. (It used
   // to stop here, which made Settings the one list in the firmware that did not
   // roll over.)
@@ -108,7 +108,7 @@ TEST_CASE("focus skips headers in both directions") {
   CHECK(focusedLabel(scr) == "Typography");
 
   scr.onEvent(kUp);
-  CHECK(focusedLabel(scr) == "wallabag");
+  CHECK(focusedLabel(scr) == "Wallabag");
   scr.onEvent(kUp);
   CHECK(focusedLabel(scr) == "Wi-Fi");
   scr.onEvent(kUp);
@@ -126,7 +126,7 @@ TEST_CASE("focus skips headers in both directions") {
   // And UP from the first focusable row wraps to the last rather than climbing
   // into the READING header above it.
   scr.onEvent(kUp);
-  CHECK(focusedLabel(scr) == "wallabag");
+  CHECK(focusedLabel(scr) == "Wallabag");
 }
 
 TEST_CASE("every move on this list changes something, so every move repaints") {
@@ -259,7 +259,7 @@ TEST_CASE("setFocus CLAMPS an out-of-range index rather than refusing it") {
   // now, and it is focusable for the same reason.
   SettingsScreen scr = sized(Settings{}, nullptr);
   CHECK(scr.setFocus(999));
-  CHECK(focusedLabel(scr) == "wallabag");
+  CHECK(focusedLabel(scr) == "Wallabag");
 }
 
 TEST_CASE("setFocus refuses Cover fit while it is inert, and accepts it when it is not") {

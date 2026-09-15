@@ -34,7 +34,9 @@ std::string metaFor(const ArticleItem& a) {
   return s;
 }
 
-const std::array<std::string, 4> kHints{"BACK", "READ", "UP", "DOWN"};
+const char* const kReadHint = "READ";
+const char* const kSyncHint = "SYNC";
+const std::array<std::string, 4> kHints{"BACK", kReadHint, "UP", "DOWN"};
 // BACK and three empty slots. An empty slot is 36px and not zero
 // (kHintEmptySlotW), which the board authors as a spacer div -- measuring one as
 // nothing draws the live slot in the wrong place.
@@ -44,7 +46,7 @@ const std::array<std::string, 4> kSetupHints{"BACK", "", "", ""};
 // them, and a second copy is a board change that reaches one variant.
 constexpr const char* kSetupTitle = "READ IT LATER";
 constexpr const char* kSetupProse =
-    "Put the SD card in your computer and fill in your wallabag details in its "
+    "Put the SD card in your computer and fill in your Wallabag details in its "
     "/.reader/wallabag.json file.";
 constexpr const char* kSetupNote = "THE FILE IS ALREADY ON THE CARD.";
 
@@ -229,6 +231,9 @@ void ArticlesScreen::syncVm() {
   if (vm_.notSetUp) {
     vm_.bandValue = "NOT SET UP";
     vm_.rows.clear();
+    // EXPLICIT, not left at whatever the configured branch set: this variant
+    // draws no sync row, so a true here would invert a row that is not there.
+    vm_.syncFocused = false;
     vm_.focusedRow = -1;
     vm_.firstRow = 0;
     vm_.totalRows = 0;
@@ -250,6 +255,25 @@ void ArticlesScreen::syncVm() {
   vm_.focusedRow = s.focused;
   vm_.firstRow = s.first;
   vm_.totalRows = static_cast<int>(items_.size());
+
+  // -1 IS THE SYNC ROW, which is Home's CONTINUE block one screen over and the
+  // whole reason the ring is `Focus::WithNone`.
+  vm_.syncFocused = focus() < 0;
+
+  // AND THE CONFIRM HINT FOLLOWS IT. The second hint bar in this firmware whose
+  // text varies within a screen -- Settings' is the first -- and for its reason:
+  // a bar reading READ while the focus sits on the sync row names an action the
+  // press will not take.
+  vm_.hints = kHints;
+  vm_.hints[1] = vm_.syncFocused ? kSyncHint : kReadHint;
+  // WITH NO ARTICLES THE MOVERS GO QUIET, because one focusable row means UP and
+  // DOWN would promise a press that changes nothing -- WifiSettingsEmpty's rule,
+  // and an empty slot is 36px rather than zero, so the live slots keep their
+  // places.
+  if (items_.empty()) {
+    vm_.hints[2].clear();
+    vm_.hints[3].clear();
+  }
 }
 
 Action ArticlesScreen::onGesture(const GestureEvent& g) {

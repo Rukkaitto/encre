@@ -3616,17 +3616,33 @@ void QuietTheme::renderArticles(Framebuffer& fb, const FontSet& fonts, const Art
     const int rowH = syncRowHeight(fonts);
     const int mid = y + kSyncRowPadY;
     const int contentH = rowH - 2 * kSyncRowPadY - 1;
-    drawIcon(fb, mark, kMargin, mid + centreIn(0, contentH, mark.h), Ink::Black, plane);
+
+    // IT INVERTS WHEN IT HOLDS THE FOCUS, exactly as an article row does. It did
+    // not, and the screen then had no visible selection at all whenever the focus
+    // sat here -- reported off the device as "the sync now row doesn't look
+    // focused, even when it is", and worst on an empty list where this is the
+    // ONLY row and always holds it. design/Articles.dc.html states the rule the
+    // specimen cannot show, a screen having one focus and that one drawing it on
+    // an article.
+    //
+    // FULL-BLEED, AND THE ROW'S OWN RULE GOES WITH IT: `renderLibrary`'s focused
+    // row is the precedent, and the bottom rule would be black on black anyway.
+    // Nothing about the geometry moves, so the list cannot step when the focus
+    // enters or leaves this row.
+    const bool focused = vm.syncFocused;
+    const Ink ink = focused ? Ink::White : Ink::Black;
+    if (focused) fb.fillRect(0, y, fb.width(), rowH, true);
+    drawIcon(fb, mark, kMargin, mid + centreIn(0, contentH, mark.h), ink, plane);
     drawText(fb, labelF, kMargin + mark.w + kSyncRowGap, baselineIn(labelF, mid, contentH),
-             vm.syncLabel, Ink::Black, {}, plane);
+             vm.syncLabel, ink, {}, plane);
     // RIGHT-ALIGNED ON THE MARGIN, and it never elides: the board holds both runs
     // `white-space: nowrap` and the vocabulary was cut until the widest reachable
     // form fits beside the label. See design/Articles.dc.html's note, which
     // carries the five measurements.
     const int stampW = stampF.measure(vm.syncStamp, stampTracking);
     drawText(fb, stampF, fb.width() - kMargin - stampW, baselineIn(stampF, mid, contentH),
-             vm.syncStamp, Ink::Black, stampTracking, plane);
-    fb.fillRect(0, y + rowH - 1, fb.width(), 1, false);
+             vm.syncStamp, ink, stampTracking, plane);
+    if (!focused) fb.fillRect(0, y + rowH - 1, fb.width(), 1, false);
     y += rowH;
   }
 

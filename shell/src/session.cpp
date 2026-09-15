@@ -16,6 +16,8 @@ namespace {
 // in one place rather than inline at each call.
 constexpr const char* kNamespace = "encre_sess";
 constexpr const char* kKeySlept = "slept";
+// NVS caps a key at 15 characters; this is 7.
+constexpr const char* kKeyRestart = "restart";
 // 8 characters, inside NVS's 15. See session.h for why this is not the `slept`
 // flag with a second meaning: the resume gate it licenses is strict, and a strict
 // gate applied to every boot would refuse a perfectly usable 10% battery.
@@ -177,6 +179,36 @@ bool markSleeping() {
     Serial.flush();
   }
   return ok;
+}
+
+bool markRestarting() {
+  Preferences prefs;
+  if (!prefs.begin(kNamespace, false)) {
+    Serial.printf("[session] could not open %s to record the restart; the next boot will "
+                  "land on Home\n",
+                  kNamespace);
+    Serial.flush();
+    return false;
+  }
+  const bool ok = prefs.putUChar(kKeyRestart, 1) == sizeof(uint8_t);
+  prefs.end();
+  if (!ok) {
+    Serial.printf("[session] the restart flag did not store; the next boot will land on "
+                  "Home\n");
+    Serial.flush();
+  }
+  return ok;
+}
+
+bool takeRestartFlag() {
+  Preferences prefs;
+  // Read-write, because taking the flag clears it -- takeSleptFlag()'s rule and
+  // its reason.
+  if (!prefs.begin(kNamespace, false)) return false;
+  const bool set = prefs.getUChar(kKeyRestart, 0) == 1;
+  if (set) prefs.remove(kKeyRestart);
+  prefs.end();
+  return set;
 }
 
 bool takeSleptFlag() {

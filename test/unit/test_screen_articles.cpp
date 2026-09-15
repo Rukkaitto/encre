@@ -449,3 +449,54 @@ TEST_CASE("a card-backed list draws NOTHING until it is told how many rows fit")
   REQUIRE(s.vm().rows.size() == 1);
   CHECK(s.vm().rows[0].title == "Only");
 }
+
+TEST_CASE("the sync row is focusable, says so, and the Confirm hint follows it") {
+  // THREE REPORTS OFF THE DEVICE, ONE CAUSE. "The sync now row doesn't look
+  // focused, even when it is"; "on an empty article list, sync now looks
+  // unfocused"; "...and the hint bar says READ, even though no article is
+  // selected". `focusedRow` is an index into the VISIBLE ARTICLE ROWS, so -1
+  // says "no article" and cannot say where the focus went instead -- a renderer
+  // reading only that draws a screen with nothing selected at all.
+  FakeFileSystem fs;
+  writeCredentials(fs);
+
+  SUBCASE("with articles: -1 is the sync row, 0 is the first article") {
+    writeArticle(fs, 1, "2026-09-01T10:00:00Z", "Only");
+    ArticlesScreen s(fs);
+    s.setVisibleRows(5);
+
+    // The constructor lands on the first article, so READ is right there.
+    REQUIRE(s.focus() == 0);
+    CHECK_FALSE(s.vm().syncFocused);
+    CHECK(s.vm().hints[1] == "READ");
+    // ...and both movers are live, because there are two places to be.
+    CHECK(s.vm().hints[2] == "UP");
+    CHECK(s.vm().hints[3] == "DOWN");
+
+    s.onGesture({Gesture::Prev, 1, false});
+    CHECK(s.focus() == -1);
+    CHECK(s.vm().syncFocused);
+    CHECK(s.vm().focusedRow == -1);
+    CHECK(s.vm().hints[1] == "SYNC");
+  }
+
+  SUBCASE("with none: the sync row is the only row and always has the focus") {
+    ArticlesScreen s(fs);
+    s.setVisibleRows(5);
+    CHECK(s.vm().rows.empty());
+    CHECK(s.vm().syncFocused);
+    CHECK(s.vm().hints[1] == "SYNC");
+    // THE MOVERS GO QUIET, WifiSettingsEmpty's rule: one focusable row means UP
+    // and DOWN would promise a press that changes nothing.
+    CHECK(s.vm().hints[2].empty());
+    CHECK(s.vm().hints[3].empty());
+  }
+
+  SUBCASE("not set up: no sync row to focus, so it claims none") {
+    FakeFileSystem bare;
+    ArticlesScreen s(bare);
+    s.setVisibleRows(5);
+    REQUIRE(s.vm().notSetUp);
+    CHECK_FALSE(s.vm().syncFocused);
+  }
+}

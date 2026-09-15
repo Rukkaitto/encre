@@ -103,6 +103,23 @@ bool clearSession();
 bool markSleeping();
 bool takeSleptFlag();
 
+// A RESTART THIS FIRMWARE ASKED FOR, AND THE RESUME IT BUYS.
+//
+// `esp_restart()` reports `ESP_RST_SW`, which the boot reads as a COLD start --
+// so it clears the record and lands on Home. That is right for every restart
+// this device did not choose, and wrong for the one it does: the wallabag sync
+// restarts deliberately, because one TLS handshake leaves the largest free block
+// below `Inflater::begin`'s 36,956 bytes and a book could not be opened until the
+// reset. Measured on glass, and reported as "after syncing it reboots to Home,
+// not to the article list".
+//
+// IT IS `slept`'s SHAPE AND ITS RULES, for its reasons: the INTENT is recorded
+// rather than inferred, because no reset reason can tell a restart we asked for
+// from one a panic caused; and taking it CLEARS it, so a boot that sets out to
+// resume and then fails cannot resume for ever. One flag buys one resume.
+bool markRestarting();
+bool takeRestartFlag();
+
 // --- "Was that shutdown a flat battery?" -------------------------------------
 //
 // THE CRITICAL-SHUTDOWN FLAG, and it is what makes `CHARGE TO WAKE` enforceable.

@@ -93,6 +93,31 @@
     most. `SyncDone.dc.html` draws the same row with `3 NEW` and a status line,
     and is a VARIANT of this screen rather than a second one.
   -->
+  <!--
+    THE SYNC ROW IS A FOCUSABLE ROW AND INVERTS LIKE ANY OTHER, and the specimen
+    below cannot show it: a screen has ONE focus and this one draws it on the
+    first article. Stated here because the alternative is a rule that exists only
+    in a renderer -- and it shipped that way once, reported off the device as
+    "the sync now row doesn't look focused, even when it is", with the empty list
+    the worst case because the sync row is then the ONLY row and always focused.
+
+    When it holds the focus it takes the same `background: #000000; color:
+    #ffffff` the article row below draws, the mark and the stamp reversing out
+    with the label. Nothing else about the row moves -- same padding, same gap,
+    same height -- so the list cannot step when the focus enters or leaves it.
+
+    AND THE CONFIRM HINT FOLLOWS THE FOCUSED ROW, which makes this the second
+    hint bar in the firmware whose text varies within a screen (Settings' is the
+    first, and its own comment has the argument). `READ` on an article, `SYNC` on
+    this row: a bar promising READ while the focus sits on the sync row names an
+    action the press will not take, which is the false-claim shape this project
+    refuses for an unread gauge and for a badge promising a wake.
+
+    WITH NO ARTICLES, UP AND DOWN ARE EMPTY SLOTS. One focusable row means the
+    two movers would promise a press that changes nothing, which is
+    WifiSettingsEmpty's rule for exactly this reason -- and an empty slot is 36px
+    and not zero, so the two live slots keep their places.
+  -->
   <div style="display: flex; align-items: center; gap: 12px; padding: 12px 24px; border-bottom: 1px solid #000000;">
     <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M13 8a5 5 0 1 1-1.5-3.6" stroke="#000000" stroke-width="1.6"></path><path d="M12 1v3.5H8.5" stroke="#000000" stroke-width="1.6"></path></svg>
     <div style="font-size: var(--t-label); font-weight: 500; flex-grow: 1;">Sync now</div>
