@@ -143,56 +143,83 @@
   </div>
   <div class="dim-veil" style="position: absolute; top: 0; left: 0; width: 480px; height: 800px;"></div>
   <!--
-    SHAPE ONE OF TWO: WALLABAG JUDGED THE CREDENTIALS AND SAID NO. BookError's
-    argument, which CLAUDE.md states as: three copy shapes because one sentence
-    would be a lie. A sync fails two distinguishable ways -- the server answered
-    and refused, or the round trip never produced a token -- and what the reader
-    can DO about them differs, which is what the slab list encodes.
+    SHAPE THREE OF THREE: THERE WAS NOTHING TO SYNC OVER. A sync needs a saved
+    Wi-Fi network marked `AUTO`, and a device with none can reach neither of the
+    other two boards truthfully. `COULDN'T SIGN IN` blames the credentials,
+    which were never sent. WallabagErrorOffline.dc.html says the server did not
+    answer, and it was never asked. Both would have the panel state something
+    the firmware knows to be false, which is the shape CLAUDE.md refuses for an
+    unread battery gauge (-1, never 0%) and for a badge promising a wake that
+    charging cannot deliver.
 
-    IT WAS THREE SHAPES AND TWO OF THEM WERE ABOUT TYPING. The refused-pair
-    shape existed because a keyboard had just been used. With the sign-in in a
-    file there is one refusal and one thing to do about it.
+    BookError's argument, which CLAUDE.md states as: three copy shapes because
+    one sentence would be a lie. That screen has damaged / unreadable / did not
+    fit; this flow has refused / unreachable / nothing to reach it over.
 
-    `TRY AGAIN` IS ABSENT HERE, AND THAT IS THE SHARPEST DIFFERENCE FROM
-    WifiError.dc.html, WHICH HAS IT. A Wi-Fi join can fail spuriously -- a weak
-    association, a busy AP -- so retrying the same passphrase is a real action
-    there. A rejected grant is DETERMINISTIC: the same values out of the same
-    file produce the same answer, and nothing the reader can press changes the
-    file. That is the works-only-sometimes trap in its purest form -- a slab
-    that draws and cannot act -- and CLAUDE.md's rule is that an illegal action
-    is ABSENT, not inert. It is absent.
+    THE CAPTION IS `COULDN'T CONNECT`, WHICH IS WallabagErrorOffline.dc.html's.
+    Two shapes sharing a caption is deliberate and is the smaller of the two
+    wrongs available. From the reader's side both are one event -- the sync did
+    not happen because the network did not carry it -- and the MESSAGE is where
+    they separate, which is where BookError separates its own damaged and
+    unreadable shapes under one `CAN'T OPEN FILE`. A third caption would claim a
+    third kind of failure and there are two.
 
-    SO THERE IS ONE SLAB AND IT IS `OK`. The earlier round had two, `EDIT
-    PASSWORD` over `EDIT USERNAME`, on the argument that there are two fields
-    and the refusal names neither. Both halves of that are still true and
-    neither is actionable any more: the fields are lines in a file on a
-    computer, so there is no screen to send the reader to and no ordering
-    question to answer. What the panel can do is name the file, and stop.
+    `TRY AGAIN` IS ABSENT, ON THE SIGN-IN BOARD'S ARGUMENT RATHER THAN A NEW ONE.
+    Pressing it could not succeed until the reader has been to Settings and
+    joined a network, and nothing on this panel can do that, so it is a slab
+    that draws and cannot act -- ABSENT rather than inert. Note this is the
+    DETERMINISTIC half of that argument arriving by a different road: a rejected
+    grant is deterministic because the file does not change between two presses,
+    and this is deterministic because the saved-network list does not.
+    WallabagErrorOffline.dc.html keeps its `TRY AGAIN` because a round trip can
+    fail spuriously and retrying really is an action there.
 
-    THE MESSAGE NAMES THE FILE AND BLAMES NO FIELD. /.reader/wallabag.json
-    carries five things -- the host, the client id and secret, the username and
-    the password -- and this panel can neither walk a reader through which the
-    server objected to nor correct one from here. Measured at --t-body in its
-    336px column: four lines, widest 320.7px, tightest break 15.1px against
-    #76's 12px floor. `Check the sign-in in /.reader/wallabag.json on the card.`
-    was the first cut and broke with 3.7px to spare -- the rule
-    WifiError.dc.html itself was re-cut for when its shipped sentence cleared by
-    only 6.3px.
+    IT DOES NOT SEND THE READER ANYWHERE ITSELF. The message names Settings and
+    the reader walks there; there is no `OPEN SETTINGS` slab. A slab that
+    unwound this dialog, popped the list, popped Home and pushed Settings would
+    be the only control in this firmware that navigates across a flow boundary,
+    and it would leave the reader no way back to the sync they asked for. One
+    slab, `OK`, which is the sibling's.
 
-    THE HINT BAR IS `CANCEL - OK` AND TWO 36px DEAD SLOTS. One slab is not a
-    choice, so `SELECT` would promise one, and Up and Down have no second row to
-    reach -- SdMissing's rule, where the Confirm slot is named after the slab it
-    activates. An empty slot is 36px and not zero (kHintEmptySlotW): measuring
-    one as nothing draws the live slots in the wrong places.
-  
--->
+    THE MESSAGE NAMES THE THING TO DO AND NOT THE MACHINERY. `AUTO` is what the
+    firmware requires -- a saved network the reader marked automatic -- and the
+    sentence says `saved` instead. A reader who has joined one network has
+    marked it AUTO already, and a reader who has joined none needs to hear
+    `join`, not a distinction between two states of a list they have never seen.
+    It is state-then-action in two sentences, which is the family's shape:
+    WallabagError.dc.html is state-then-what-to-check and
+    WallabagErrorOffline.dc.html is state-then-reassurance.
+
+    MEASURED IN THIS BOARD, NOT IN A RECONSTRUCTION OF IT, and the difference is
+    not academic: a scratch page rebuilding this column's CSS measured ~4% narrow
+    and would have shipped a sentence one word past the edge. Greedy-on-spaces,
+    which is the firmware's own rule, with the measuring span injected into this
+    board so it inherits this board's root font stack. The column is 336px at
+    BOTH geometries -- the panel is a fixed 380px and only its left offset moves
+    -- so one measurement covers both:
+
+      No Wi-Fi network is saved.       265.19 / 247.67 / 189.34px
+      Join one in Settings first.      3 lines, tightest break 25.92px
+
+    against #76's 12px floor, and beside WallabagErrorOffline.dc.html's own
+    78.86px on the same panel. The first cut, `No saved Wi-Fi network. Join one
+    in Settings first.`, also ran to three lines and broke at 12.66px with its
+    first line 332.09px of the 336 -- over the floor by two thirds of a pixel,
+    which is the knife edge WifiError.dc.html was re-cut off and this board
+    should not have been authored onto. `No network is saved yet.` is worse
+    still at 1.25px.
+
+    THE HINT BAR IS `CANCEL . OK` AND TWO 36px DEAD SLOTS, the sibling's, for
+    the sibling's reason: one slab is not a choice, so `SELECT` would promise
+    one, and Up and Down have no second row to reach.
+  -->
   <div style="position: absolute; top: 50%; transform: translateY(-50%); left: 50px; width: 380px; background: #ffffff; border: 2px solid #000000; box-sizing: border-box;">
     <div style="display: flex; justify-content: space-between; align-items: center; padding: 21px 20px; border-bottom: 2px solid #000000;">
-      <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">COULDN&rsquo;T SIGN IN</div>
+      <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">COULDN&rsquo;T CONNECT</div>
     </div>
     <div style="padding: 18px 20px; display: flex; flex-direction: column; gap: 12px;">
       <svg width="32" height="28" viewBox="0 0 18 16" fill="none"><path d="M9 1 17 15H1z" stroke="#000000" stroke-width="1.6"></path><path d="M9 6v4" stroke="#000000" stroke-width="1.6"></path><rect x="8.3" y="11.6" width="1.4" height="1.4" fill="#000000"></rect></svg>
-      <div style="font-size: var(--t-body); line-height: 1.45;">wallabag didn&rsquo;t accept those details. Check /.reader/wallabag.json on the card.</div>
+      <div style="font-size: var(--t-body); line-height: 1.45;">No Wi-Fi network is saved. Join one in Settings first.</div>
     </div>
     <div style="display: flex; flex-direction: column; gap: 12px; padding: 0 20px 20px 20px;">
       <div style="background: #000000; color: #ffffff; height: 68px; display: flex; align-items: center; justify-content: center;">
