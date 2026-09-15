@@ -116,3 +116,69 @@ TEST_CASE("cancel stops the request in flight and does NOT finish the sink") {
   CHECK(t.cancelled());
   CHECK(sink.finished == 0);
 }
+
+TEST_CASE("a non-2xx completes the request and does NOT finish the sink") {
+  // THE CASE THAT MAKES THE CARD SINK SAFE, and it covered nothing until the
+  // clause existed: a 401 is a request that COMPLETED -- the refresh ladder is
+  // built on that -- so a rule saying "finish on completion" renames wallabag's
+  // JSON error body over the article's real name. The row then opens onto an
+  // error message and is indistinguishable from a corrupt EPUB.
+  struct CountingSink : BodySink {
+    bool write(const uint8_t*, size_t n) override {
+      bytes += n;
+      return true;
+    }
+    bool finish() override {
+      ++finished;
+      return true;
+    }
+    size_t bytes = 0;
+    int finished = 0;
+  };
+
+  SUBCASE("401 -- the body arrives, the finish does not") {
+    CountingSink sink;
+    FakeHttpTransport t;
+    // Named, so the length below is the literal's own and not a hand count --
+    // the first version of this line said 24 and the body is 25.
+    const std::string kError = "{\"error\":\"invalid_grant\"}";
+    t.scriptOk(401, kError);
+    HttpRequest r;
+    r.path = "/api/entries/7/export.epub";
+    REQUIRE(t.begin(r, sink));
+    t.step();
+    // DONE rather than Failed: the round trip worked and the ANSWER was no,
+    // which is the distinction the whole refresh ladder reads.
+    CHECK(t.state() == HttpState::Done);
+    CHECK(t.status() == 401);
+    CHECK(sink.bytes == kError.size());
+    CHECK(sink.finished == 0);
+  }
+
+  SUBCASE("200 -- both") {
+    CountingSink sink;
+    FakeHttpTransport t;
+    t.scriptOk(200, "PK\x03\x04");
+    HttpRequest r;
+    r.path = "/api/entries/7/export.epub";
+    REQUIRE(t.begin(r, sink));
+    t.step();
+    CHECK(t.state() == HttpState::Done);
+    CHECK(sink.finished == 1);
+  }
+
+  SUBCASE("204 is 2xx, and a PATCH is the reason to check") {
+    // Every archive and star answers 204 with no body. Reading the clause as
+    // "200" rather than "2xx" would leave those sinks unfinished for ever.
+    CountingSink sink;
+    FakeHttpTransport t;
+    t.scriptOk(204, "");
+    HttpRequest r;
+    r.method = "PATCH";
+    r.path = "/api/entries/7";
+    REQUIRE(t.begin(r, sink));
+    t.step();
+    CHECK(t.state() == HttpState::Done);
+    CHECK(sink.finished == 1);
+  }
+}

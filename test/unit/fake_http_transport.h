@@ -84,7 +84,12 @@ class FakeHttpTransport : public HttpTransport {
         return;
       }
     }
-    if (sink_ != nullptr && !sink_->finish()) {
+    // ONLY ON A 2xx, which is the contract in http_transport.h and not this
+    // fake's own idea. A 401 is a completed request -- the whole refresh ladder
+    // rests on that -- and finishing a card sink there renames an error body
+    // over an article's real name.
+    const bool ok2xx = pending_.status >= 200 && pending_.status < 300;
+    if (sink_ != nullptr && ok2xx && !sink_->finish()) {
       failure_ = HttpFailure::SinkRefused;
       state_ = HttpState::Failed;
       return;

@@ -18,10 +18,22 @@ class BodySink {
   // transport does not invent: a full card and a closed connection are different
   // events and the log has to tell them apart.
   virtual bool write(const uint8_t* data, size_t n) = 0;
-  // Called once, after the last write, and only on a request that completed.
-  // False fails it too -- a rename that did not happen is a file that is not
-  // there, and reporting success would leave a `.part` the next sync re-fetches
-  // while the list shows a row that will not open.
+  // Called once, after the last write, on a request that completed AND whose
+  // status is 2xx. False fails it too -- a rename that did not happen is a file
+  // that is not there, and reporting success would leave a `.part` the next sync
+  // re-fetches while the list shows a row that will not open.
+  //
+  // THE 2xx CLAUSE IS LOAD-BEARING AND WAS NOT HERE AT FIRST. This said "only on
+  // a request that completed", and a 401 IS a request that completed -- the
+  // refresh ladder is built on exactly that. So a download whose token had
+  // expired would have had wallabag's JSON error body written into the article's
+  // `.part` and then RENAMED over the article's real name: a row in the list
+  // that opens onto an error message, indistinguishable from a corrupt EPUB. The
+  // sink is deliberately dumb about HTTP and must not learn to read a status, so
+  // the transport is what withholds the call.
+  //
+  // A NON-2xx THEREFORE LEAVES THE SINK UNFINISHED, which is the same state a
+  // cancel leaves, and the caller discards it the same way.
   virtual bool finish() = 0;
 };
 
