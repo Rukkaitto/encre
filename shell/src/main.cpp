@@ -3555,6 +3555,23 @@ static void pollSync() {
          (unsigned)gTransport->bodyBytes(), (unsigned)ESP.getFreeHeap(),
          (unsigned)ESP.getMaxAllocHeap());
     logFlush();
+    // THE BYTES THAT WOULD NOT PARSE, ONTO THE CARD. Four flash cycles have now
+    // gone into a sync that fails one layer at a time, and this is the one
+    // question a log cannot answer: the body is 5 KB and the log buffer is 4, so
+    // it cannot be printed, and a desktop fixture built to be a REAL wallabag
+    // item parses perfectly -- which means the answer is in these bytes and
+    // nowhere else. Written before `finishSync`, because that resets the engine.
+    if (outcome == reader::SyncOutcome::Failed) {
+      const std::string& body = gSyncEngine->listingBody();
+      if (!body.empty()) {
+        const char* kDump = "/.reader/articles/listing-failed.json";
+        const bool wrote = gSd.writeAll(kDump, body);
+        logf("[sync] the listing that failed is %u bytes; %s %s -- head: %.100s\n",
+             (unsigned)body.size(), wrote ? "written to" : "COULD NOT be written to", kDump,
+             body.c_str());
+        logFlush();
+      }
+    }
     finishSync(outcome);
   }
 }

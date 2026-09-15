@@ -72,6 +72,20 @@ class SyncEngine {
   // Empty until something terminal happens, and empty on success.
   const char* note() const { return note_; }
 
+  // THE LISTING AS IT ARRIVED, FOR THE SHELL TO PUT ON THE CARD WHEN IT WILL NOT
+  // PARSE. A 5,368-byte listing off a real server failed on glass while every
+  // desktop fixture passed -- including one written to be a REAL wallabag item,
+  // thirty fields, HAL links, 0/1 integers, nulls, a `\u00e9` escape, driven at
+  // three grains. So the bytes are the only thing left that can say why, and
+  // reconstructing them from a log is not possible: the body is 5 KB and the log
+  // buffer is 4.
+  //
+  // It is a DIAGNOSTIC and not a feature, which is why it hands back a reference
+  // to a buffer the next request will clear rather than a copy: the one caller
+  // reads it immediately, on the failure path, where nothing else is competing
+  // for the heap.
+  const std::string& listingBody() const { return listing_.body(); }
+
   // For the dialog's second stage. `toFetch` is 0 until the listing has been
   // walked, which is exactly when the caption may still say CONNECTING...
   int fetched() const { return fetched_; }

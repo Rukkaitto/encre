@@ -394,3 +394,122 @@ TEST_CASE("an empty page is valid and yields no entries") {
   CHECK(p.entries.empty());
   CHECK(p.pages == 2);
 }
+
+TEST_CASE("a REAL wallabag listing parses, with every field a real one carries") {
+  // EVERY FIXTURE IN THIS SUITE IS A HAND-WRITTEN ITEM OF SIX FIELDS, AND A REAL
+  // ONE HAS THIRTY. That gap is why a 5,368-byte listing off a real server
+  // failed to parse on glass with every desktop test green -- the same shape as
+  // "a stream of one block kind is not a chapter", which this project has
+  // already paid for once in the pager.
+  //
+  // This body is wallabag 2.6's `/api/entries?detail=metadata` as it actually
+  // comes back: HAL `_links` at the root AND inside every item, `is_archived`
+  // and `is_starred` as 0/1 integers, nulls in six nullable fields, a `tags`
+  // array of objects, a `headers` object, timestamps with a `+0200` offset
+  // rather than `Z`, and a `é` escape where PHP's json_encode puts one.
+  const std::string body = R"({
+  "page": 1,
+  "limit": 30,
+  "pages": 1,
+  "total": 2,
+  "_links": {
+    "self": {"href": "https://w.example.com/api/entries?page=1&perPage=30"},
+    "first": {"href": "https://w.example.com/api/entries?page=1&perPage=30"},
+    "last": {"href": "https://w.example.com/api/entries?page=1&perPage=30"}
+  },
+  "_embedded": {
+    "items": [
+      {
+        "is_archived": 0,
+        "is_starred": 0,
+        "user_name": "lucas",
+        "user_email": "l@example.com",
+        "user_id": 1,
+        "tags": [{"id": 3, "label": "tech", "slug": "tech"}],
+        "is_public": false,
+        "id": 12,
+        "uid": null,
+        "title": "Un titre accentué",
+        "url": "https://example.com/a",
+        "hashed_url": "0a1b2c",
+        "origin_url": null,
+        "given_url": null,
+        "hashed_given_url": "3d4e5f",
+        "archived_at": null,
+        "created_at": "2026-09-01T10:00:00+0200",
+        "updated_at": "2026-09-02T11:00:00+0200",
+        "published_at": null,
+        "published_by": ["Somebody"],
+        "starred_at": null,
+        "annotations": [],
+        "mimetype": "text/html",
+        "language": "fr",
+        "reading_time": 7,
+        "domain_name": "example.com",
+        "preview_picture": "https://example.com/p.jpg",
+        "http_status": "200",
+        "headers": {"content-type": "text/html; charset=UTF-8"},
+        "_links": {"self": {"href": "https://w.example.com/api/entries/12"}}
+      },
+      {
+        "is_archived": 1,
+        "is_starred": 1,
+        "user_name": "lucas",
+        "user_id": 1,
+        "tags": [],
+        "is_public": false,
+        "id": 13,
+        "uid": null,
+        "title": "Second",
+        "url": "https://example.com/b",
+        "hashed_url": "aaa",
+        "origin_url": null,
+        "archived_at": "2026-09-03T09:00:00+0200",
+        "created_at": "2026-09-01T09:00:00+0200",
+        "updated_at": "2026-09-03T09:00:00+0200",
+        "published_at": null,
+        "published_by": [],
+        "starred_at": "2026-09-03T09:00:00+0200",
+        "annotations": [],
+        "mimetype": "text/html",
+        "language": null,
+        "reading_time": 2,
+        "domain_name": "example.com",
+        "preview_picture": null,
+        "http_status": "200",
+        "headers": {"content-type": "text/html"},
+        "_links": {"self": {"href": "https://w.example.com/api/entries/13"}}
+      }
+    ]
+  }
+})";
+
+  // AT THREE GRAINS, because the device feeds this 4 KB at a time and a source
+  // that satisfies every read hides every resumption bug there is -- the lesson
+  // the inflater's own validation is built on.
+  for (const size_t grain : {size_t(1), size_t(4096), body.size() + 1}) {
+    CAPTURE(grain);
+    grainsrc::Grained src(body, grain);
+    ListingPage p;
+    REQUIRE(parseListing(src, p));
+  CHECK(p.pages == 1);
+  REQUIRE(p.entries.size() == 2);
+
+  CHECK(p.entries[0].id == 12);
+  // The escape is DECODED, not passed through: a reader seeing `accentué`
+  // on the glass would read as a rendering fault and be a parsing one.
+  CHECK(p.entries[0].title == "Un titre accentu\xC3\xA9");
+  CHECK(p.entries[0].domain == "example.com");
+  CHECK(p.entries[0].readingTime == 7);
+  CHECK_FALSE(p.entries[0].archived);
+  CHECK_FALSE(p.entries[0].starred);
+  CHECK(p.entries[0].updatedAt == "2026-09-02T11:00:00+0200");
+
+  CHECK(p.entries[1].id == 13);
+  CHECK(p.entries[1].archived);
+  CHECK(p.entries[1].starred);
+  // `domain_name` is present here and `language` is null -- the nullable path
+  // has to survive a null it does not read as well as one it does.
+  CHECK(p.entries[1].domain == "example.com");
+  }
+}
