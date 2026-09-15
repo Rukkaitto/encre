@@ -656,6 +656,41 @@ apply before deleting a contrast anywhere else.
     so the default firmware never links the stack. What it costs is that the
     Settings row must not promise Wi-Fi in a build without it, and the only
     clean way to tell the row is to plumb a build capability into `core/`.
+- **ONE TLS HANDSHAKE FRAGMENTS THE HEAP FOR THE REST OF THE SESSION, AND
+  `getFreeHeap` CANNOT SEE IT.** Measured on an X3 by `ENCRE_WALLABAG_PROBE`
+  against a real server: the largest free BLOCK goes **61,428 -> 34,804** on the
+  first `WiFiClientSecure` connection and never returns above **36,852** — not
+  when the stream closes, not after four more handshakes, not when the radio goes
+  down. **A plain `WiFiClient` costs no block at all.** Every figure in the run is
+  in `docs/notes/wallabag-api.md` §8.
+  - **THE FREE HEAP RECOVERS EVERY TIME, WHICH IS WHY NOTHING SAW IT** — 73,344 /
+    73,076 / 72,760 across three connections, with the block falling throughout.
+    This file's own rule is that **the largest free BLOCK decides an allocation**,
+    and here is the case where the two answer differently and the block is right.
+    It is a leak in neither direction: the repeats OSCILLATE (22,516, 19,444,
+    36,852, 22,516, 22,516), so a dozen connections cost no more than one.
+  - **THE PLATEAU IS 104 BYTES UNDER THE ONE ALLOCATION EVERY BOOK NEEDS.**
+    `Inflater::begin` wants **36,956** bytes in one piece on every deflated entry;
+    36,852 refuses it. So a device that has used TLS **cannot open a book until it
+    is restarted**, and it fails politely — nothrow, `BookErrorReason::OutOfMemory`,
+    `BookErrorMemory`'s *"needs more memory than is free right now"* — about a
+    book that is fine. **104 bytes is a coin flip, not a margin**: one run, one
+    session, and a tree measuring 38 KB tomorrow is the same finding.
+  - **AND ~21.5 KB OF FREE HEAP DOES NOT COME BACK AFTER `down()` EITHER**,
+    130,744 -> 109,172, reproduced within 1.5 KB across three runs. That is
+    **separate from** the 21,328 bytes of static RAM the stack costs at link time
+    above. A session that has brought the radio up carries a reading floor ~21 KB
+    below the one every figure in this file was measured against.
+  - **THE ANSWER TAKEN IS A RESTART, NOT A SMALLER TLS.** A cold boot measures
+    61,428, so `esp_restart` provably restores it — `handleRetry`'s own remedy for
+    a card lost after a mount, forced by the platform rather than working around
+    our own bug. Shrinking mbedTLS means building arduino-esp32 from source, since
+    it ships precompiled, and would risk "fails on some servers and not others".
+  - **`[alive]` CARRIES `block=` BECAUSE OF THIS.** It reported `heap` and
+    `minHeap` and not the number that decides an allocation, so a fragmented heap
+    and a healthy one read identically — the reports-on-less-than-it-claims shape
+    this file records for the card probe answered from cache and the `make compare`
+    default that skipped four screens.
 - **ATTACHING A SERIAL LOGGER CAN TURN A WAKE INTO A COLD BOOT.** Deep sleep
   powers down USB, so a resume has to re-enumerate and the host has to reopen the
   port — and on the C3 the USB Serial/JTAG peripheral can reset the chip when that

@@ -625,6 +625,24 @@ prediction.** What remains is a design question rather than a measurement: the
 sync and the reading have to stop sharing a heap. It is the owner's, and it is
 recorded on the card rather than decided here.
 
+**THE OWNER'S CALL (2026-09-15): THE SYNC RESTARTS THE DEVICE WHEN IT
+FINISHES.** A cold boot measures 61,428 bytes, so a restart provably restores the
+block — that is the one thing in this section measured on both sides. The
+precedent is `handleRetry`'s `esp_restart` for a card lost after a mount, which
+`CLAUDE.md` records as forced by the platform rather than a workaround for our
+own bug; this is the same shape, forced by mbedTLS.
+
+**AND #49's RESTORE DECLARATIONS ALREADY CARRY IT, WITH NOTHING ADDED.**
+`Articles` is `Restore::Ready` and `WallabagConnecting` is `Restore::Never`, so
+`App::snapshot()` truncates the record **before** the sync dialog — the record
+standing while a sync runs is already `…;articles:N`, written by the push that
+opened the dialog. So the restart lands on the Articles list, rebuilt off the
+card with the new items in it. **E-ink holds its last image and nothing clears
+the glass at boot**, so what the reader sees is the fetching screen held, one
+transition flash, then the list: an ordinary screen change. The mechanism written
+for a wake serves a restart untouched, which is the argument for having declared
+it per screen rather than scanning for one.
+
 **ONE INSTRUMENT WAS ADDED RATHER THAN ANOTHER PROBE RUN.** `[alive]` carried
 `heap` and `minHeap` and not the block, so whether this ceiling heals over
 minutes of idling was unanswerable from a log. It carries `block=` now.

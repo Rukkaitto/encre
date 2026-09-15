@@ -832,19 +832,39 @@ repo can read it, and vendoring is refused here.
 
 ## Phase 4 — The shell, and the glass
 
-> **STOPPED HERE, AND NOT FOR WANT OF TIME.** Task 4.1's probe is WRITTEN and
-> builds (`PLATFORMIO_BUILD_FLAGS="-DENCRE_WALLABAG_PROBE=1" make firmware`); it
-> has not RUN, because flashing is the owner's step. Its answer is an input to
-> Task 4.2 -- whether the transport carries TLS at all -- and #140's whole
-> argument is that the probe comes first, at the point where the answer can still
-> change the design. Writing 4.2 before it would be doing exactly what this task
-> exists to prevent. `docs/notes/wallabag-api.md` §8 carries the run instructions,
-> the three lines to read, and the decision rule, which is stated before the
-> numbers so it cannot be fitted to them.
+> **TASK 4.1 IS RUN AND ANSWERED, AND IT CHANGED THE DESIGN — which is what #140
+> said a probe before the transport was for.** Three runs on an X3 against
+> `https://wallabag.lucasgoudin.com`; the numbers are in
+> `docs/notes/wallabag-api.md` §8, under the decision rule, which is unedited
+> since it was written before them.
+>
+> **BOTH ANSWERS THE RULE CHOOSES BETWEEN ARE UNAVAILABLE ON THIS HARDWARE.**
+> Plain HTTP draws nginx's 400 because the origin is HTTPS-only. And TLS
+> permanently fragments the heap: one handshake takes the largest free block from
+> 61,428 bytes to 34,804 and it never returns above **36,852** — not when the
+> stream closes, not after four more handshakes, not when the radio goes down —
+> against an `Inflater::begin` window of **36,956**. The free heap recovers every
+> time, which is why nothing saw this until the question was asked directly. A
+> reader would fetch an article and be unable to open it, or any book, which is
+> the rule's own sentence arriving by a mechanism the rule did not name.
+>
+> **THE OWNER'S CALL: THE SYNC RESTARTS THE DEVICE WHEN IT FINISHES.** A cold
+> boot measures 61,428, so this provably restores the heap, and `handleRetry`'s
+> `esp_restart` on a card lost after a mount is the precedent — forced by the
+> platform rather than a workaround for our own bug.
+>
+> **AND #49's DECLARATIONS ALREADY CARRY IT, WITH NO NEW CODE.** `Articles` is
+> `Restore::Ready` (the factory holds the `FileSystem`, so the list rebuilds off
+> the card) and `WallabagConnecting` is `Restore::Never`, so `App::snapshot()`
+> truncates the record **before** the sync dialog: the record standing while a
+> sync runs is already `…;articles:N`. The restart therefore lands on the Articles
+> list with the new items in it. E-ink holds its last image and nothing clears the
+> glass at boot, so the reader sees the fetching screen held, one transition
+> flash, then the list — which is what an ordinary screen change looks like.
 >
 > Everything below 4.1 is unstarted. Phases 0-3 are complete and `make test` is
 > green at 1,751 cases; `make firmware` builds at 46,652 bytes of static RAM
-> (14.2%) and 2,241,403 of flash (34.2%).
+> (14.2%) and 2,242,745 of flash (34.2%).
 
 
 Nothing here can be tested on the desktop. Every task ends at `On glass`, and the card
