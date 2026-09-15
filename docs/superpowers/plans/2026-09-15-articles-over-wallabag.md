@@ -678,7 +678,7 @@ push, listing, downloads, watermark — and every failure shape is reachable on 
 - Create: `core/include/reader/http_transport.h`
 - Create: `test/unit/fake_http_transport.h`
 
-- [ ] **Step 1:** Write the interface, poll-shaped, on `WifiRadio`'s argument (the
+- [x] **Step 1:** Write the interface, poll-shaped, on `WifiRadio`'s argument (the
   spec's *The radio seam*, verbatim reasoning in the header): `begin(request, sink)`
   returns whether the request was accepted; `state()` is `Idle / Running / Done /
   Failed`; `status()` is the HTTP status once `Done`; `failure()` names why once
@@ -691,11 +691,11 @@ push, listing, downloads, watermark — and every failure shape is reachable on 
   `perPage=20` × ~1 KB of metadata with `detail=metadata`, and refusing past the cap
   is the JSON parser's own "large is malformed" rule), and `NullSink` for `PATCH`
   responses nobody reads. The card sink is the shell's.
-- [ ] **Step 2:** Write `FakeHttpTransport`: a queue of scripted responses (status,
+- [x] **Step 2:** Write `FakeHttpTransport`: a queue of scripted responses (status,
   body, or a failure), a log of every request made (method, path, headers, body), and
   `step()` to move `Running → Done` under the test's control so a poll loop can be
   asserted mid-flight. Model on `fake_wifi_radio.h`.
-- [ ] **Step 3:** Build. Commit `feat(wallabag): the injected HTTP transport, poll-shaped, and its fake`.
+- [x] **Step 3:** Build. Commit `feat(wallabag): the injected HTTP transport, poll-shaped, and its fake`.
 
 ### Task 3.2: A bounded pull scanner for nested JSON
 
@@ -707,7 +707,7 @@ repo can read it, and vendoring is refused here.
 - Create: `core/include/reader/json_stream.h`, `core/src/json_stream.cpp`
 - Test: `test/unit/test_json_stream.cpp`
 
-- [ ] **Step 1:** Write the failing tests. A pull tokenizer over the same `ByteSource`
+- [x] **Step 1:** Write the failing tests. A pull tokenizer over the same `ByteSource`
   `xml.h` uses: `next()` yields `ObjectStart / ObjectEnd / ArrayStart / ArrayEnd / Key
   / String / Number / Bool / Null / End / Error`, with the current key and scalar
   readable after each. Strings decode the JSON escapes **including `\uXXXX` and
@@ -721,9 +721,9 @@ repo can read it, and vendoring is refused here.
   including a nested one, so a consumer can ignore `tags` and `preview_picture`
   without knowing their shape. Test it on a byte-at-a-time source (grain 1 is the
   load-bearing case, `inflate_stream.h`'s lesson).
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement. No allocation beyond the one bounded string buffer.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement. No allocation beyond the one bounded string buffer.
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(json): a bounded pull scanner for nested JSON, because a listing is an array`.
 
 ### Task 3.3: The client — requests, the token, refresh on 401, and three answers
@@ -735,7 +735,7 @@ repo can read it, and vendoring is refused here.
   over a struct)
 - Test: `test/unit/test_wallabag_client.cpp`
 
-- [ ] **Step 1:** Write the failing tests against `FakeHttpTransport` and a fake token
+- [x] **Step 1:** Write the failing tests against `FakeHttpTransport` and a fake token
   store. The client builds exactly the six requests in `docs/notes/wallabag-api.md`
   §2 and the test asserts each path and query verbatim from the fake's request log:
   `GET /api/info` with no `Authorization` header; `POST /oauth/v2/token` as a form body
@@ -753,10 +753,10 @@ repo can read it, and vendoring is refused here.
   not answer 200 with a body carrying `appname`), `CredentialsRefused`, `Unreachable`
   (any transport failure). Tokens are saved on every successful grant and cleared on
   `CredentialsRefused`.
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement as a poll-shaped state machine too: `beginX()`, `poll()`,
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement as a poll-shaped state machine too: `beginX()`, `poll()`,
   `result()` — because the transport is, and the loop that drives it is `loop()`.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(wallabag): the client -- six requests, refresh on 401, three honest answers`.
 
 ### Task 3.4: The listing parser
@@ -765,16 +765,16 @@ repo can read it, and vendoring is refused here.
 - Modify: `core/src/wallabag_client.cpp`
 - Test: `test/unit/test_wallabag_client.cpp`
 
-- [ ] **Step 1:** Write the failing tests over a fixture page captured from the spec's
+- [x] **Step 1:** Write the failing tests over a fixture page captured from the spec's
   shape: `page`, `pages`, `total`, and `_embedded.items[]` with `id`, `title`,
   `domain_name`, `reading_time`, `is_archived`, `is_starred`, `updated_at`, plus
   `tags` and `preview_picture` to be skipped. `parseListing(source, out)` yields one
   `ListingEntry` per item and the page count, through `json_stream`, skipping every
   key not named. A title over the cap arrives truncated and flagged. A malformed page
   is `Error` with nothing partial handed back. Test at grain 1.
-- [ ] **Step 2:** Run. Expected: failures.
-- [ ] **Step 3:** Implement.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 2:** Run. Expected: failures.
+- [x] **Step 3:** Implement.
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(wallabag): the listing parser, over the pull scanner, ignoring what it does not draw`.
 
 ### Task 3.5: The sync engine
@@ -783,7 +783,7 @@ repo can read it, and vendoring is refused here.
 - Create: `core/include/reader/sync_engine.h`, `core/src/sync_engine.cpp`
 - Test: `test/unit/test_sync_engine.cpp`
 
-- [ ] **Step 1:** Write the failing tests over `FakeHttpTransport`, `FakeFileSystem`,
+- [x] **Step 1:** Write the failing tests over `FakeHttpTransport`, `FakeFileSystem`,
   the store and a fake token store. The engine is a state machine the shell polls:
   `begin()`, `poll()`, `state()`, `progress()` (files fetched of files to fetch, for
   the dialog's second stage), `outcome()`, `cancel()`. The order of a sync, asserted
@@ -803,30 +803,30 @@ repo can read it, and vendoring is refused here.
   download behaves as `Unreachable` for the file in flight but the outcome is
   `cancelled`. A test drives every state transition through `poll()` with the fake's
   `step()`.
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement. The engine owns no clock and no radio; it is handed a
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement. The engine owns no clock and no radio; it is handed a
   transport that is already connected.
-- [ ] **Step 4:** Run. Expected: PASS. Add one property: a sync run twice against the
+- [x] **Step 4:** Run. Expected: PASS. Add one property: a sync run twice against the
   same fake yields an identical store — idempotence is what makes a cancelled sync safe
   to retry.
-- [ ] **Step 5:** Commit `feat(wallabag): the sync engine, a poll-driven state machine that pushes before it pulls`.
+- [x] **Step 5:** Commit `feat(wallabag): the sync engine, a poll-driven state machine that pushes before it pulls`.
 
 ### Task 3.6: The outcome contract through a real `App`
 
 **Files:**
 - Create: `test/unit/test_article_outcomes.cpp`
 
-- [ ] **Step 1:** Write it on `test_wifi_outcomes.cpp`'s model, through `App::dispatch`
+- [x] **Step 1:** Write it on `test_wifi_outcomes.cpp`'s model, through `App::dispatch`
   with a primed factory: Confirm on `Sync now` leaves the list on top at the same depth
   with `articleRequested()` true; a long Confirm on a row pushes `ArticleActions` and
   Confirm on `Archive` leaves the overlay standing with the latch set; on `ArticleEnd`
   each slab likewise; Back on `WallabagConnecting` sets the latch and does not pop;
   `screenUsesRadio` is true for exactly `WifiPicker`, `WifiConnect` and
   `WallabagConnecting` — the count is **three** now and the test says so.
-- [ ] **Step 2:** Run. Expected: PASS if Phase 1 was done right; any failure here is a
+- [x] **Step 2:** Run. Expected: PASS if Phase 1 was done right; any failure here is a
   screen returning `pop()` where it should latch, which is the defect that file exists
   to catch.
-- [ ] **Step 3:** Commit `test(articles): the latch contract through a real dispatch, wifi's outcome test one flow over`.
+- [x] **Step 3:** Commit `test(articles): the latch contract through a real dispatch, wifi's outcome test one flow over`.
 
 ---
 
