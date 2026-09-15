@@ -557,6 +557,78 @@ read after it. That is an observation about the rule and **not a licence to reas
 around it**: a rule written before the numbers is not one to reinterpret once they
 arrive.
 
+### The second and third runs: it is the BLOCK, and the rule was right for a reason it did not name
+
+**THE LARGEST FREE BLOCK NEVER COMES BACK, AND A BOOK CANNOT BE OPENED AFTER A
+SYNC.** Third run, same device, `https://wallabag.lucasgoudin.com`, with the
+three decisive contiguous sizes asked directly rather than read off a number:
+
+| after | free heap | largest block | inflate window (36,956) |
+|---|--:|--:|---|
+| boot, before the probe | 130,744 | 61,428 | fits |
+| joined | 74,500 | 61,428 | fits |
+| `own-plain` (400) | 73,248 | 61,428 | fits |
+| **`own-tls` (200)** | 73,344 | **34,804** | **REFUSED** |
+| `tls-info` (200) | 73,076 | 36,852 | REFUSED |
+| `download`, **session open** | 26,556 | 14,836 | REFUSED |
+| stream closed (6,388 B written) | 72,760 | 22,516 | REFUSED |
+| 4 more handshakes | 71,572 | 22,516 | REFUSED |
+| **radio down + 500 ms** | 109,172 | **36,852** | **REFUSED by 104 bytes** |
+
+**ONE HANDSHAKE DOES IT, AND NOTHING UNDOES IT.** `own-plain` costs no block at
+all; the first TLS connection takes it from 61,428 to 34,804 and it never
+returns above **36,852** — not when the stream closes, not after four more
+handshakes, not when the radio goes down. The free heap recovers every single
+time, which is exactly why this was invisible until the question was asked
+directly.
+
+**IT IS FRAGMENTATION AND NOT A LEAK, WHICH IS WHY `getFreeHeap` SAW NOTHING.**
+The repeats oscillate — 22,516, 19,444, 36,852, 22,516, 22,516 — so the loss
+plateaus rather than running away, and a sync of a dozen articles is no worse
+than a sync of one. **The plateau is the problem.** It settles at a ceiling of
+36,852 against an inflate window of **36,956**, so the answer to "does it
+plateau" is yes, 104 bytes too low.
+
+**THAT MAKES THE RULE RIGHT FOR A REASON IT DID NOT NAME.** 40 KB was justified
+as "the point below which a sync would be trading a reader's ability to open the
+article it just fetched", and the earlier reading of this file objected that the
+TLS transient is released before any article is opened — true, and beside the
+point. What is not released is the **shape** of the heap. `Inflater::begin` wants
+36,956 bytes in ONE piece on every deflated entry of every book, it is
+nothrow-checked, and it would refuse: the reader would fetch an article, reach
+`BookErrorMemory`'s *"needs more memory than is free right now"*, and be told to
+do nothing in particular. **The rule's conclusion is confirmed and its mechanism
+was wrong.**
+
+**104 BYTES IS NOT A MARGIN, IT IS A COIN FLIP.** One run, one card, one session.
+The honest statement is that the post-sync ceiling lands *at* the inflate
+window's size, not below it by a knowable amount — a build that measured 38 KB
+tomorrow would be the same finding.
+
+**AND ~21.5 KB OF FREE HEAP DOES NOT COME BACK EITHER.** 130,744 before the probe
+against 109,172 after `down()`, reproduced within 1.5 KB across all three runs
+(110,696 / 110,212 / 109,172). That is **separate from** the 21,328 bytes of
+static RAM the stack costs at link time, which this project already prices and
+which is paid whether or not the radio is switched on. So a session that has
+synced once carries a reading floor ~21 KB lower than the one every figure in
+`CLAUDE.md` was measured against.
+
+### So the two answers the rule chooses between are both unavailable
+
+- **Plain HTTP only** — the rule's own prescription — cannot serve this reader.
+  `own-plain` draws nginx's 400 because the origin is HTTPS, which the probe now
+  states outright before it runs.
+- **TLS** ends the session's ability to open a book.
+
+**Neither is a shipping answer, and the probe is what says so rather than a
+prediction.** What remains is a design question rather than a measurement: the
+sync and the reading have to stop sharing a heap. It is the owner's, and it is
+recorded on the card rather than decided here.
+
+**ONE INSTRUMENT WAS ADDED RATHER THAN ANOTHER PROBE RUN.** `[alive]` carried
+`heap` and `minHeap` and not the block, so whether this ceiling heals over
+minutes of idling was unanswerable from a log. It carries `block=` now.
+
 ### One leg measured a refusal and one measured nothing
 
 **`http-info` CAME BACK 400 WITH A 255-BYTE BODY, AND THAT IS NOT A PLAIN ROUND

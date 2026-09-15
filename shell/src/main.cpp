@@ -8235,11 +8235,22 @@ void loop() {
     // NOTHING ELSE that reaches a log. Read straight off pollIntervalMs() with the
     // same predicate the loop uses, never re-derived from level= -- which would be a
     // second spelling of the choice, free to disagree with the one actually made.
-    logf("[alive] last-stage=%s heap=%u minHeap=%u screen=%s depth=%d "
+    // block= IS THE NUMBER THAT DECIDES AN ALLOCATION AND THIS LINE DID NOT
+    // CARRY IT, which is how a whole class of fault stayed invisible: the
+    // wallabag probe measured one TLS handshake taking the largest free block
+    // from 61,428 to 34,804 and never giving it back, with heap= and minHeap=
+    // recovering fully every time and reporting nothing wrong. Free heap and
+    // the largest block are two quantities, this file says so wherever an
+    // allocation is sized, and a heartbeat that carries only the first says a
+    // fragmented heap is healthy. `Inflater::begin` wants 36,956 bytes in one
+    // piece on every deflated entry of every book, so that gap is the
+    // difference between a device that can open a book and one that cannot.
+    logf("[alive] last-stage=%s heap=%u minHeap=%u block=%u screen=%s depth=%d "
          "dropped=%lu/%lu listings=%u slots/%uB hit=%u miss=%u "
          "battery observable=%d pct=%d charging=%d level=%d polls=%lu pollMs=%lu "
          "wifi=%d\n",
          stage, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+         (unsigned)ESP.getMaxAllocHeap(),
          reader::screenName(gApp->top().id()), gApp->depth(),
          (unsigned long)rawSamplesDropped(), (unsigned long)gPresses.dropped(),
          (unsigned)gSd.listings().slotsHeld(), (unsigned)gSd.listings().residentBytes(),
