@@ -260,34 +260,60 @@ TEST_CASE("over a card: credentials and no articles is the LIST, not the setup s
   CHECK_FALSE(s.vm().notSetUp);
   CHECK(s.vm().bandValue == "0 UNREAD");
   CHECK(s.vm().rows.empty());
-  CHECK(s.vm().syncStamp == "WALLABAG \xC2\xB7 NEVER");
+  // The stamp is the PUSH QUEUE now, and a device nobody has synced owes
+  // nothing -- so it is empty here, not `NEVER`.
+  CHECK(s.vm().syncStamp.empty());
 }
 
-TEST_CASE("over a card: the stamp is the watermark's outcome, in four words") {
+TEST_CASE("over a card: the stamp is what this device OWES the server") {
+  // IT USED TO BE THE WATERMARK'S OUTCOME AND THAT WAS REDUNDANT. The account
+  // screen's `Last sync` row draws the same watermark through the same
+  // `outcomeLabel`, and a reader standing on this list has just been told the
+  // outcome by the screen that reported it. What nothing else says is that a
+  // star or an archive is waiting to go out -- the one fact that makes pressing
+  // `Sync now` worth doing when there is nothing new to fetch.
+  //
+  // `outcomeLabel`'s OWN CASES MOVED RATHER THAN WENT: they lived only here, and
+  // the function is still live on the account screen, so they are in
+  // test_article_store.cpp now -- beside the function, where a mapping belongs.
   FakeFileSystem fs;
   writeCredentials(fs);
   ArticleStore store(fs);
-  struct Case { const char* stored; const char* shown; };
-  const Case cases[] = {
-      {"never", "WALLABAG \xC2\xB7 NEVER"},
-      {"upToDate", "WALLABAG \xC2\xB7 NO NEW"},
-      {"new:3", "WALLABAG \xC2\xB7 3 NEW"},
-      {"new:100", "WALLABAG \xC2\xB7 100 NEW"},
-      {"failed", "WALLABAG \xC2\xB7 FAILED"},
-      // A watermark from a newer firmware must not make this screen say
-      // something false; NEVER is the safe reading of a word we cannot parse.
-      {"something-else", "WALLABAG \xC2\xB7 NEVER"},
-      // `new:0` cannot be written by the engine (it writes upToDate), so this is
-      // a malformed record -- and the honest word beats a zero to interpret.
-      {"new:0", "WALLABAG \xC2\xB7 NO NEW"},
-  };
-  for (const Case& c : cases) {
-    CAPTURE(c.stored);
-    SyncWatermark w;
-    w.lastOutcome = c.stored;
-    REQUIRE(store.saveWatermark(w));
+  writeArticle(fs, 1, "2026-09-01T10:00:00Z", "One");
+  writeArticle(fs, 2, "2026-09-02T10:00:00Z", "Two");
+
+  SUBCASE("nothing queued: an empty stamp, never `0 TO PUSH`") {
+    // Home's ARTICLES row one screen over, and its reason: an empty queue has
+    // nothing to report rather than a zero to report.
     ArticlesScreen s(fs);
-    CHECK(s.vm().syncStamp == c.shown);
+    s.setVisibleRows(5);
+    CHECK(s.vm().syncStamp.empty());
+  }
+
+  SUBCASE("one queued: the account screen's own words") {
+    REQUIRE(store.queueStar(1, true));
+    ArticlesScreen s(fs);
+    s.setVisibleRows(5);
+    CHECK(s.vm().syncStamp == "1 TO PUSH");
+  }
+
+  SUBCASE("two queued, and an archive counts as one of them") {
+    REQUIRE(store.queueStar(1, true));
+    REQUIRE(store.queueArchive(2));
+    ArticlesScreen s(fs);
+    s.setVisibleRows(5);
+    CHECK(s.vm().syncStamp == "2 TO PUSH");
+  }
+
+  SUBCASE("a sync that emptied the queue empties the stamp with it") {
+    // The push runs BEFORE the pull, so a completed sync has by definition
+    // cleared what it owed -- which is why SyncDone.dc.html's specimen draws an
+    // empty stamp rather than a count.
+    REQUIRE(store.queueStar(1, true));
+    store.ack(1, PendingKind::Star);
+    ArticlesScreen s(fs);
+    s.setVisibleRows(5);
+    CHECK(s.vm().syncStamp.empty());
   }
 }
 
@@ -349,10 +375,15 @@ TEST_CASE("the account screen reads the card, and one watermark feeds both scree
   CHECK(a.vm().rows[3].value == "NEWEST 100");
   CHECK(a.vm().rows[4].value == "1 TO PUSH");
 
-  // THE SAME FOUR WORDS THE LIST DRAWS, from the same watermark through the same
-  // formatter -- two screens naming one fact differently is two spellings of it.
+  // THE TWO SCREENS AGREE, AND ON A DIFFERENT FACT THAN THEY USED TO. This
+  // asserted that both drew the watermark's outcome; the list's stamp is the
+  // PUSH QUEUE now, so what has to agree is the queue -- and this fixture's
+  // account row says `1 TO PUSH` three lines above. Two screens naming one fact
+  // differently is still two spellings of it; the fact changed, not the rule.
   ArticlesScreen l(fs);
-  CHECK(l.vm().syncStamp == "WALLABAG \xC2\xB7 NO NEW");
+  l.setVisibleRows(5);
+  CHECK(l.vm().syncStamp == a.vm().rows[4].value);
+  CHECK(l.vm().syncStamp == "1 TO PUSH");
 }
 
 TEST_CASE("the account screen says NOT SET UP with no credentials") {

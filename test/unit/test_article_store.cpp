@@ -276,3 +276,23 @@ TEST_CASE("a file whose name is not an id is ignored rather than parsed") {
   REQUIRE(fs.writeAll(std::string(kArticlesDir) + "/12x.json", "{}"));
   CHECK(s.list().size() == 1);
 }
+
+TEST_CASE("outcomeLabel maps a watermark to the account screen's four words") {
+  // MOVED FROM test_screen_articles.cpp, where these were the only coverage this
+  // mapping had -- the Articles list drew them as its sync stamp until that slot
+  // became the push queue. The function is still live on the account screen's
+  // `Last sync` row, so the cases belong beside it rather than beside a screen
+  // that no longer calls it.
+  CHECK(ArticleStore::outcomeLabel("never") == "NEVER");
+  CHECK(ArticleStore::outcomeLabel("upToDate") == "NO NEW");
+  CHECK(ArticleStore::outcomeLabel("new:3") == "3 NEW");
+  CHECK(ArticleStore::outcomeLabel("new:100") == "100 NEW");
+  CHECK(ArticleStore::outcomeLabel("failed") == "FAILED");
+  // A watermark from a NEWER firmware must not make a screen say something
+  // false, and "no sync has completed on this card" is the safe reading of a
+  // word this build cannot parse.
+  CHECK(ArticleStore::outcomeLabel("something-else") == "NEVER");
+  // `new:0` cannot be written by the engine -- it writes `upToDate` -- so this
+  // is a malformed record, and the honest word beats a zero to interpret.
+  CHECK(ArticleStore::outcomeLabel("new:0") == "NO NEW");
+}

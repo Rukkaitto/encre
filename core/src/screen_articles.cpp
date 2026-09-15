@@ -147,10 +147,21 @@ bool ArticlesScreen::load() {
       items_.push_back({m.id, m.title, m.domain, m.readingTime,
                         p != nullptr && p->finished, m.starred});
     }
-    SyncWatermark w;
-    store.loadWatermark(w);
-    vm_.syncStamp = std::string("WALLABAG ") + kMiddot + " " +
-                    ArticleStore::outcomeLabel(w.lastOutcome);
+    // THE STAMP IS WHAT THIS DEVICE OWES THE SERVER, not what the last sync did.
+    // `WALLABAG . NO NEW` was redundant -- the account screen's `Last sync` row
+    // draws the same watermark through the same `outcomeLabel`, and a reader
+    // standing here has just been told the outcome by the screen that reported
+    // it. What nothing else says is that a star or an archive is waiting to go
+    // out, which is the one fact that makes pressing `Sync now` worth doing when
+    // there is nothing new to fetch. design/Articles.dc.html has the argument.
+    //
+    // THE ACCOUNT SCREEN'S OWN WORDS, so the two cannot name one fact
+    // differently -- that board's existing rule, applied to a new string.
+    //
+    // AND ZERO IS NOT A COUNT: an empty queue draws an empty stamp rather than
+    // `0 TO PUSH`, which is Home's ARTICLES row one screen over and its reason.
+    const int pending = store.pendingCount();
+    vm_.syncStamp = pending > 0 ? std::to_string(pending) + " TO PUSH" : std::string();
     // THE WINDOW IS REBUILT HERE, which is where the count is known. It was not,
     // and the constructor over a FileSystem then had a zero-high window: the
     // slice was empty, the screen rendered no rows at all, and refreshProgress

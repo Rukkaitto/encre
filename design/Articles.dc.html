@@ -51,47 +51,50 @@
     them: two screens naming one fact differently is two spellings of it, and
     the vocabulary is chosen by the tighter of the two slots, which is this one.
 
-    THE WORDS ARE SHORT BECAUSE THE ROW IS, AND THE FIRST DRAFT DID NOT FIT.
-    The row is `gap: 12px; padding: 12px 24px` over an icon, `Sync now` at
-    `flex-grow: 1`, and this stamp, so the stamp's slot is
-    `432 - 25 - 24 - 103.97 = 279.03px` at the 480px panel and 48px more at 528.
-    `Sync now` is a literal that must never elide and carries no `min-width: 0`,
-    so it keeps its 103.97px and the stamp takes what is left. Measured in
-    Chrome at --t-meta, against that 279.03px:
+    THE STAMP IS WHAT THIS DEVICE OWES THE SERVER, AND IT USED TO BE WHAT THE
+    LAST SYNC DID. `WALLABAG . NO NEW` was redundant: the account screen's
+    `Last sync` row draws the same watermark through the same `outcomeLabel`,
+    and a reader standing on this list has just been told the outcome by the
+    screen that reported it. What nothing else on this screen says is that a
+    star or an archive is waiting to go out -- which is the one fact that makes
+    pressing `Sync now` worth doing when there is nothing new to fetch.
 
-      WALLABAG . NEVER      232.61px   46.42 clear
-      WALLABAG . NO NEW     251.06px   27.97 clear
-      WALLABAG . 3 NEW      229.52px   49.51 clear
-      WALLABAG . 100 NEW    257.06px   21.97 clear   <- the tightest reachable form
-      WALLABAG . FAILED     235.91px   43.12 clear
+    IT IS THE ACCOUNT SCREEN'S OWN WORDS, `N TO PUSH`, and that is this board's
+    existing rule applied to a new string: two screens naming one fact
+    differently is two spellings of it, and the vocabulary is chosen by the
+    tighter of the two slots, which is still this one. The outcome is NOT lost --
+    it moved to the one screen that was already stating it.
 
-    The drafts that are gone: `NEVER SYNCED` measured 347.95px and `UP TO DATE`
-    303.69px, so both overflowed the slot at BOTH geometries. #76's fix for
-    exactly this shape was to shorten the sentence rather than widen the box.
+    AND ZERO IS NOT A COUNT, so an empty queue draws an empty stamp rather than
+    `0 TO PUSH`. Main.dc.html's ARTICLES row carries the argument: an empty queue
+    has nothing to report rather than a zero to report, and this slot is a queue
+    exactly as that one is.
 
-    AND THE TRACKING CAME DOWN FROM 0.12em TO 0.10em, which is 6.00px of the
-    room above and is not only room. CLAUDE.md records the distinction where
-    Home's own meta runs make it: 0.14em-and-up is a COUNTER's tracking and
-    0.10em is a NAME's. Three of the four values here are words.
+    THE FIT IS NO LONGER THE CONSTRAINT IT WAS. The row is `gap: 12px; padding:
+    12px 24px` over an icon, `Sync now` at `flex-grow: 1` and this stamp, so the
+    stamp's slot is `432 - 25 - 24 - 103.97 = 279.03px` at the 480px panel and
+    48px more at 528. Measured in Chrome by injecting a span into THIS board,
+    at --t-meta and 0.1em:
 
-    THE FIRMWARE MEASURES ~3% WIDER than Chrome does -- whole-pixel advances
-    against subpixel ones -- so the tightest form above has ~11px of clearance
-    on glass rather than 21.97, and `100 NEW` is the one to look at when the
-    goldens for this screen land. A board's figure is a Chrome figure.
+      1 TO PUSH      120.86px   158.17 clear
+      12 TO PUSH     133.45px   145.58 clear
+      100 TO PUSH    146.05px   132.98 clear   <- the widest realistic form
 
-    A ROW'S TITLE LINE BOX IS STATED AS 31px, NOT AS `1.25`, and that is the
-    Sleep card's lesson on a second screen. Chrome resolves `1.25` on --t-value
-    to a FRACTIONAL 31.25px and the firmware derives round(1.25 * 25) = 31, so a
-    ONE-line row agreed to the pixel and a TWO-line row was a pixel short -- and
-    the error ACCUMULATES down a list, because every row below a wrapped one
-    starts a pixel higher. Measured before the change: the rules under rows 1, 2
-    and 3 sat 2, 2 and 3 pixels above the board's. Stating the number is what
-    Sleep.dc.html did when its title's `1.1` put every run under it out of
-    register, and it moves nothing in Chrome that was not already wrong.
+    THE OLD VOCABULARY'S MEASUREMENTS ARE KEPT BELOW AS HISTORY, because they
+    are what the short words were chosen against and the next person to widen
+    this slot should see how little room there was:
 
-    The specimen below is `NO NEW`, which is the state a settled reader sees
-    most. `SyncDone.dc.html` draws the same row with `3 NEW` and a status line,
-    and is a VARIANT of this screen rather than a second one.
+      WALLABAG . NEVER      232.61px      WALLABAG . NO NEW     251.06px
+      WALLABAG . 3 NEW      229.52px      WALLABAG . 100 NEW    257.06px
+      WALLABAG . FAILED     235.91px      NEVER SYNCED          347.95px  (cut)
+                                          UP TO DATE            303.69px  (cut)
+
+    AND THE TWO INSTRUMENTS DISAGREE BY UP TO 2%, stated rather than hidden: the
+    span-injection above reads `WALLABAG . NEVER` at 237.17px against the 232.61
+    recorded here, and `WALLABAG . 100 NEW` at 255.94 against 257.06. Neither
+    number decides anything now -- 133px of clearance is not a close call by any
+    instrument -- but a figure taken with a second instrument must not be quoted
+    as if it were the first.
   -->
   <!--
     THE SYNC ROW IS A FOCUSABLE ROW AND INVERTS LIKE ANY OTHER, and the specimen
@@ -121,7 +124,7 @@
   <div style="display: flex; align-items: center; gap: 12px; padding: 12px 24px; border-bottom: 1px solid #000000;">
     <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M13 8a5 5 0 1 1-1.5-3.6" stroke="#000000" stroke-width="1.6"></path><path d="M12 1v3.5H8.5" stroke="#000000" stroke-width="1.6"></path></svg>
     <div style="font-size: var(--t-label); font-weight: 500; flex-grow: 1;">Sync now</div>
-    <div style="font-size: var(--t-meta); letter-spacing: 0.1em; white-space: nowrap;">WALLABAG &middot; NO NEW</div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.1em; white-space: nowrap;">1 TO PUSH</div>
   </div>
 
   <div style="display: flex; flex-direction: column; flex-grow: 1;">

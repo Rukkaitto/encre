@@ -424,7 +424,11 @@ void DemoScreenFactory::setArticlesDemo() {
   // them by whichever branch happened to come first, which is the substitution
   // this flow's refusals exist to prevent -- in the other direction.
   articleFs_ = nullptr;
-  setArticles(demoArticles(), "WALLABAG \xC2\xB7 NO NEW");
+  // THE STAMP IS THE PUSH QUEUE, and this specimen carries one so the slot is
+  // drawn at all -- design/Articles.dc.html's own specimen says `1 TO PUSH` for
+  // the same reason. An empty queue draws an empty stamp, which is the common
+  // state and shows nothing.
+  setArticles(demoArticles(), "1 TO PUSH");
   setArticleActionsFacts({2, "Why We Forget Most of the Books We Read", false});
   setArticleEndFacts({1, "The Death and Life of the Great American Essay", "LONGREADS", 22, false,
                       2, true});
