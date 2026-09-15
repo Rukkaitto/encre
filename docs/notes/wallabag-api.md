@@ -416,9 +416,11 @@ and the HTML tokenizer is back on the bill — the estimate `instapaper-full-api
 
 ## 8. What a round trip costs on the C3 — the probe, and the rule before the numbers
 
-**NOT YET RUN.** This section is written before the measurement on purpose: #140
-asks for the probe at the point where the answer can still change the design, and
-a decision rule written afterwards is a rule fitted to whatever turned up.
+**RUN ON GLASS 2026-09-15 — the numbers are under "What it measured" below.**
+This section was written before the measurement on purpose: #140 asks for the
+probe at the point where the answer can still change the design, and a decision
+rule written afterwards is a rule fitted to whatever turned up. **The rule above
+the numbers is unedited since; read it before reading them.**
 
 ### Why it cannot be answered from a desktop
 
@@ -512,6 +514,68 @@ and not others. **If it fits**, TLS is enabled and nothing else changes.
 reading floor plus room for the largest single allocation the open path makes on
 a normal book, and it is the point below which a sync would be trading a reader's
 ability to open the article it just fetched.
+
+### What it measured (2026-09-15, X3/UC8279)
+
+**THE RULE FIRES, AND IT FIRES BY 23 KB.** TLS left **17,120 bytes** free against
+a threshold of 40,000, so by the rule written above it the transport supports
+**plain HTTP only** in this release.
+
+| leg | code | wall | heap before -> after | net | **transient** | min free | largest block |
+|---|--:|--:|---|--:|--:|--:|---|
+| `http-info` | 400 | 38 ms | 74,496 -> 73,336 | 1,160 | **11,608** | 62,888 | 61,428 -> 61,428 |
+| `tls-info` | 200 | 797 ms | 73,952 -> 73,312 | 640 | **56,832** | **17,120** | 61,428 -> **49,140** |
+| `download` | 400 | 23 ms | 73,364 -> 70,728 | — | — | 17,120 | 49,140 |
+
+**THE TRANSIENT IS THE COLUMN THAT MATTERS AND IT IS NOT THE ONE THE LOG PRINTS
+AS `spent`.** `spent` is before minus after — 640 bytes for a handshake, which
+says only that TLS gives back what it took. The cost is before minus the
+**minimum**, and the two differ by a factor of 89 on that row.
+
+Radio up with no book open is **74,568 bytes** free (`[stage] probe-joined`),
+which is the budget every figure here is spent out of. A plain round trip costs
+**11,608** bytes transient; **a TLS one costs 56,832 — 4.9x as much, and 76% of
+the entire budget.**
+
+**AND 56,832 IS THE OPTIMISTIC NUMBER RATHER THAN THE SHIPPED ONE.**
+`probeOneGet` calls `setInsecure()`, which still performs a handshake and skips
+**verification** — no CA bundle parsed, no chain walked, no pinned root held. A
+transport that actually verified a certificate costs more than this, so 17,120 is
+a **ceiling on the headroom** and not a measurement of it.
+
+**THE FREE HEAP IS WHAT FAILED AND THE LARGEST BLOCK WAS COMFORTABLE**, which is
+worth stating because this project's rule elsewhere is that the block is the
+number that decides an allocation: it never fell below **49,140**. The decision
+rule names *free*, deliberately and in advance, and free is the half that missed.
+
+**THE TRANSIENT IS RELEASED, WHICH THE RULE'S OWN REASONING DID NOT ANTICIPATE.**
+40 KB was justified as "the point below which a sync would be trading a reader's
+ability to open the article it just fetched" — and those two never coexist: the
+handshake tears down and the heap is back to **73,312** before anything opens an
+article. What a 17,120-byte floor actually risks is **the sync aborting**, not the
+read after it. That is an observation about the rule and **not a licence to reason
+around it**: a rule written before the numbers is not one to reinterpret once they
+arrive.
+
+### One leg measured a refusal and one measured nothing
+
+**`http-info` CAME BACK 400 WITH A 255-BYTE BODY, AND THAT IS NOT A PLAIN ROUND
+TRIP TO A SERVER THAT SPEAKS ONE.** `HTTPClient::begin(WiFiClient&, url)` does
+**not** refuse an `https://` URL — it takes port 443 and sends plaintext at it —
+so an HTTPS-only origin answers in the clear with nginx's `The plain HTTP request
+was sent to an HTTPS port`, a page of about that size. The 11,608 bytes is
+therefore a sound measurement of what a plain request costs, and it is **not**
+evidence that this reader's server accepts one. The evidence points the other way.
+
+**AND THAT TOOK THE DOWNLOAD LEG WITH IT.** `probeStreamedDownload` is plain too,
+so it drew the same 400, `wrote=0`, and its `if (code == 200)` body never ran.
+**The streaming sink's allocation shape is still unmeasured** — one of the three
+questions this probe exists to answer is unanswered. Fixing it needs more than a
+scheme change: `/api/entries/1/export.epub` wants a bearer token, so measuring it
+needs the token ladder rather than another URL.
+
+**SO THE PROBE ANSWERED TWO OF ITS THREE QUESTIONS AND IS NOT REMOVABLE YET.**
+The instruction to remove it once it has answered stands, and it has not.
 
 ### What the probe costs, measured
 
