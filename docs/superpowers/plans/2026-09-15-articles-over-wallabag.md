@@ -286,31 +286,31 @@ grown; that is the guards working.
 - Modify: `test/unit/test_focus_restore.cpp` (`kAllScreens`, the three counts)
 - Test: `test/unit/test_session_record.cpp` (already walks every id)
 
-- [ ] **Step 1:** Append `Articles`, `ArticleActions`, `ArticleEnd`, `WallabagAccount`,
+- [x] **Step 1:** Append `Articles`, `ArticleActions`, `ArticleEnd`, `WallabagAccount`,
   `WallabagConnecting`, `WallabagError` to `ScreenId` immediately before `Count`, each
   with a comment naming its board. Build. Expected: the build fails at
   `session_record.cpp`'s table assert and at `test_focus_restore.cpp`'s catalogue
   assert, and `-Wswitch` warns in `screenUsesRadio` and `screenName`. Write down which
   guards fired — that list is evidence for the commit message.
-- [ ] **Step 2:** Add six wire names to `kNames`: `articles`, `article-actions`,
+- [x] **Step 2:** Add six wire names to `kNames`: `articles`, `article-actions`,
   `article-end`, `wallabag-account`, `wallabag-connecting`, `wallabag-error`.
-- [ ] **Step 3:** Add six `kRestorability` rows with their reasons as comments:
+- [x] **Step 3:** Add six `kRestorability` rows with their reasons as comments:
   `Articles` → `Ready` (built from the card, as the Library is); `ArticleActions` →
   `Never` (`WifiNetworkActions`' argument: its facts belong to the press);
   `ArticleEnd` → `NeedsPriming` (`BookEnd`'s: built from the open book);
   `WallabagAccount` → `Ready`; `WallabagConnecting` → `Never` and `WallabagError` →
   `Never` (a sync in flight does not survive a sleep, and waking into a dialog about
   one nobody remembers is `Peek`'s argument).
-- [ ] **Step 4:** `screenUsesRadio`: `WallabagConnecting` returns **true**; the other
+- [x] **Step 4:** `screenUsesRadio`: `WallabagConnecting` returns **true**; the other
   five return false, each listed explicitly. The sync runs behind the connecting
   dialog and nowhere else — this is what `pollWifi()`'s backstop sweeps against.
-- [ ] **Step 5:** `screenName`: six upper-case labels.
-- [ ] **Step 6:** `test_focus_restore.cpp`: six rows in `kAllScreens`; raise the
+- [x] **Step 5:** `screenName`: six upper-case labels.
+- [x] **Step 6:** `test_focus_restore.cpp`: six rows in `kAllScreens`; raise the
   `Ready` count by two, `NeedsPriming` by one, `Never` by three; leave `movable` and
   `wrapping` for Task 1.9, which is when the screens exist to be built. The `build()`
   helper `REQUIRE`s a non-null screen, so this file will not go green until the
   factory has cases — expected, and the reason Task 1.9 exists.
-- [ ] **Step 7:** Build. Expected: `core/` compiles; `unit_tests` fails only in
+- [x] **Step 7:** Build. Expected: `core/` compiles; `unit_tests` fails only in
   `test_focus_restore.cpp` with the six unbuildable ids. Commit
   `feat(articles): six ScreenIds appended together, and the six guards that had to grow`.
 
@@ -326,17 +326,17 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
 - Modify: `core/src/app.cpp` (`dispatch` sets the latch)
 - Test: `test/unit/test_app.cpp`
 
-- [ ] **Step 1:** Write the failing test: a stub screen whose `onGesture` returns
+- [x] **Step 1:** Write the failing test: a stub screen whose `onGesture` returns
   `Action::article()`; after `dispatch`, `articleRequested()` is true, the stack depth
   is unchanged, and the same screen is still on top. After `clearArticleRequest()` it
   is false. Model it on the existing `wifiRequested` case in that file.
-- [ ] **Step 2:** Run `cmake --build build -j8 && build/unit_tests -tc="*article
+- [x] **Step 2:** Run `cmake --build build -j8 && build/unit_tests -tc="*article
   latch*"`. Expected: compile failure, `article` is not a member of `Action`.
-- [ ] **Step 3:** Add the kind, the factory, the two `App` members, and the `dispatch`
+- [x] **Step 3:** Add the kind, the factory, the two `App` members, and the `dispatch`
   case, each with the one-line comment `wifi()` carries about carrying no payload.
-- [ ] **Step 4:** Run the test. Expected: PASS. Run `make test`. Expected: green
+- [x] **Step 4:** Run the test. Expected: PASS. Run `make test`. Expected: green
   except `test_focus_restore.cpp` (still waiting on Task 1.9).
-- [ ] **Step 5:** Commit `feat(app): the Article latch, wifi()'s contract for the Articles flow`.
+- [x] **Step 5:** Commit `feat(app): the Article latch, wifi()'s contract for the Articles flow`.
 
 ### Task 1.3: View-models and the theme's six renderers
 
@@ -344,7 +344,7 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
 - Modify: `core/include/reader/viewmodel.h`
 - Modify: `core/include/reader/theme.h`, `core/src/theme_quiet.cpp`
 
-- [ ] **Step 1:** Add the six view-models. `ArticlesViewModel`: a band value string
+- [x] **Step 1:** Add the six view-models. `ArticlesViewModel`: a band value string
   (`3 UNREAD` / `NOT SET UP`), a `notSetUp` flag, the sync row's stamp string, an
   optional status line for the sync-done variant, a visible slice of rows (title,
   source-and-minutes meta string, a read flag, focused index) mirroring
@@ -356,7 +356,7 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
   message, footnote — the fetching stage is the same view-model with a different
   caption and message. `WallabagErrorViewModel`: caption, message, a slab list whose
   length is the shape (one slab for `SignIn` and `NoNetwork`, two for `Offline`).
-- [ ] **Step 2:** Add six `render*` virtuals to `theme.h` and implement each in
+- [x] **Step 2:** Add six `render*` virtuals to `theme.h` and implement each in
   `theme_quiet.cpp` **by assembly, not new geometry**: `renderArticles` is
   `renderLibrary`'s band, rows and rail with a sync row after the band;
   `renderArticleActions` is `renderItemActions`; `renderArticleEnd` is
@@ -365,7 +365,7 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
   `renderWallabagError` is `renderWifiError`. Where a primitive already exists in
   `components.h`, call it; where the second copy of something appears, extract it then
   — *the second copy is the extraction point*.
-- [ ] **Step 3:** Build. Expected: compiles; nothing calls the renderers yet.
+- [x] **Step 3:** Build. Expected: compiles; nothing calls the renderers yet.
   Commit `feat(articles): six view-models and their renderers, assembled from shipped primitives`.
 
 ### Task 1.4: `ArticlesScreen` — the list, its not-set-up variant and its stamp
@@ -374,7 +374,7 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
 - Create: `core/include/reader/screen_articles.h`, `core/src/screen_articles.cpp`
 - Test: `test/unit/test_screen_articles.cpp`
 
-- [ ] **Step 1:** Write the failing tests. Construct the screen from a vector of
+- [x] **Step 1:** Write the failing tests. Construct the screen from a vector of
   fixture rows (title, source, minutes, read flag, an id) plus a stamp string and a
   `notSetUp` flag. Assert: with rows, row 0 of the focus ring is the `Sync now` row
   and Confirm on it returns `Action::article()` with the screen's `chosen()` reading
@@ -386,13 +386,13 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
   gesture but Back returns `Action::none()`. With rows and `visibleRows` smaller than
   the count: the slice moves as the Library's does (copy the shape of
   `test_screen_library.cpp`'s scrolling case).
-- [ ] **Step 2:** Run the file's tests. Expected: compile failure, no such header.
-- [ ] **Step 3:** Implement as a `FocusScreen` over a `ScrollWindow`, `id()` →
+- [x] **Step 2:** Run the file's tests. Expected: compile failure, no such header.
+- [x] **Step 3:** Implement as a `FocusScreen` over a `ScrollWindow`, `id()` →
   `Articles`, `Fidelity::Mono`, `declareRepeat` on Up/Down, `holds` on Confirm only.
   `focusedId()` and `focusedTitle()` getters for the shell and the overlay.
   `setStamp()` and `setStatusLine()` for the sync-done variant. The not-set-up variant
   is a constructor flag, not a second screen — `HomeEmpty`'s rule.
-- [ ] **Step 4:** Run the tests. Expected: PASS. Commit
+- [x] **Step 4:** Run the tests. Expected: PASS. Commit
   `feat(articles): the Articles list, its not-set-up variant and its sync stamp`.
 
 ### Task 1.5: `ArticleActionsScreen` — Archive and Star
@@ -401,7 +401,7 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
 - Create: `core/include/reader/screen_article_actions.h`, `core/src/screen_article_actions.cpp`
 - Test: `test/unit/test_screen_article_actions.cpp`
 
-- [ ] **Step 1:** Write the failing tests. Constructed from `Facts` (id, title,
+- [x] **Step 1:** Write the failing tests. Constructed from `Facts` (id, title,
   starred flag) — **not** from an `ArticlesScreen&`, for `DeleteConfirmScreen`'s
   reason (a screen reference makes the overlay reachable from one parent only).
   Assert: `isOverlay()`; two rows; Confirm on `Archive` returns `Action::article()`
@@ -410,9 +410,9 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
   between the two rows; `paintFootprint()` is constant across both focus states (two
   rows of one height, the last row's rule already absent — verify by rendering both
   states and comparing the panel's top border row, the `ItemActions` one-pixel lesson).
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement on `ItemActionsScreen`'s shape.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement on `ItemActionsScreen`'s shape.
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(articles): the Archive / Star overlay, built from facts rather than a parent`.
 
 ### Task 1.6: `ArticleEndScreen`
@@ -421,7 +421,7 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
 - Create: `core/include/reader/screen_article_end.h`, `core/src/screen_article_end.cpp`
 - Test: `test/unit/test_screen_article_end.cpp`
 
-- [ ] **Step 1:** Write the failing tests. `Facts`: id, title, source, minutes,
+- [x] **Step 1:** Write the failing tests. `Facts`: id, title, source, minutes,
   starred, unread-remaining count, whether a next unread article exists. Assert four
   slabs `ARCHIVE / STAR / NEXT ARTICLE / BACK TO LIST`; when no next article exists the
   `NEXT ARTICLE` slab is **absent** rather than inert (`WifiError`'s rule: the slab list
@@ -429,9 +429,9 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
   `Action::article()` with `chosen()` naming it; Back returns `Action::pop()` (back to
   the last page, `BookEnd`'s rule); the band's right slot is `N LEFT`; the footnote is
   `SYNCS ON THE NEXT CONNECTION.`; `restorability` is `NeedsPriming`.
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement on `BookEndScreen`'s shape.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement on `BookEndScreen`'s shape.
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(articles): the end-of-article screen, BookEnd's shape with a fourth slab`.
 
 ### Task 1.7: `WallabagAccountScreen`
@@ -440,7 +440,7 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
 - Create: `core/include/reader/screen_wallabag_account.h`, `core/src/screen_wallabag_account.cpp`
 - Test: `test/unit/test_screen_wallabag_account.cpp`
 
-- [ ] **Step 1:** Write the failing tests. `Facts`: username, unread count, last-sync
+- [x] **Step 1:** Write the failing tests. `Facts`: username, unread count, last-sync
   outcome string, keep-offline value, pending count, configured flag. Assert: the
   focus starts on `Keep offline` and **skips** `Account`, `Unread`, `Last sync` and
   `Pending actions` (Settings' rule — a row that cannot act is not focusable); Confirm
@@ -450,10 +450,10 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
   Confirm hint reads `CHANGE` on the cycling row and `OPEN` on the disclosing one —
   Settings' own varying-hint precedent; when `configured` is false the band reads
   `NOT SET UP` and `Keep offline` is the only focusable row.
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement as a `FocusScreen` with a `focusable()` gate, on
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement as a `FocusScreen` with a `focusable()` gate, on
   `SettingsScreen`'s shape.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(articles): the account screen, Settings' shape with one cycling row`.
 
 ### Task 1.8: The three dialogs — connecting, fetching, and three failure shapes
@@ -465,7 +465,7 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
   (and grow every table Task 1.1 grew; the guards will name each one)
 - Test: `test/unit/test_wallabag_dialogs.cpp`
 
-- [ ] **Step 1:** Write the failing tests. Connecting: constructed with the host;
+- [x] **Step 1:** Write the failing tests. Connecting: constructed with the host;
   `isOverlay()`; no focus; the message names the host unquoted; Back returns
   `Action::article()` with `cancelled()` true; `setFetching(3, 12)` switches the
   caption to `SYNCING…` and the message to `Fetching article 3 of 12.` and marks the
@@ -475,10 +475,10 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
   `Action::article()` with `chosen()` naming it; the three captions and messages are
   the boards' strings verbatim. Remove-confirm: `DeleteConfirmScreen`'s shape — `REMOVE`
   returns `Action::article()` with `chosen()` reading `RemoveAll`, `CANCEL` pops.
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement on `WifiConnectScreen`'s and `WifiErrorScreen`'s shapes;
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement on `WifiConnectScreen`'s and `WifiErrorScreen`'s shapes;
   the remove-confirm on `DeleteConfirmScreen`'s.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(articles): the sync dialogs, WifiConnect's and WifiError's shapes one subsystem over`.
 
 ### Task 1.9: The factory, the simulator, and the catalogue goes green
@@ -489,65 +489,65 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
 - Modify: `test/unit/test_focus_restore.cpp`
 - Test: `test/unit/test_screens.cpp`
 
-- [ ] **Step 1:** Factory setters, each with a primed flag rather than "the data is
+- [x] **Step 1:** Factory setters, each with a primed flag rather than "the data is
   non-empty" (`contentsPrimed_`'s rule): `setArticles(rows, stamp, notSetUp)`,
   `setArticleActionsFacts` / `clearArticleActionsFacts`, `setArticleEndFacts`,
   `setWallabagAccountFacts`, `setWallabagHost`, `setWallabagFailure(shape)`,
   `setArticlesDemo()` for the simulator. Factory cases for all seven ids; each refuses
   (returns null) when unprimed — **never substitutes demo data**.
-- [ ] **Step 2:** Demo view-models in `screens.cpp` with the boards' specimen strings:
+- [x] **Step 2:** Demo view-models in `screens.cpp` with the boards' specimen strings:
   the five article rows, `3 UNREAD`, `WALLABAG · UP TO DATE`, the account's `LUCASG`.
-- [ ] **Step 3:** Home: `demoHomeTargets()` returns `Library, Articles, Settings`; the
+- [x] **Step 3:** Home: `demoHomeTargets()` returns `Library, Articles, Settings`; the
   three `demoHome*Vm()` menus gain the `ARTICLES` row — `3 UNREAD` on `Main` and
   `HomeUnopened`, an empty value on `HomeEmpty` (the empty value draws the chevron,
   `SETTINGS`' own mechanism). This is #141's whole implementation; the budget already
   reads `vm.menu.size()`.
-- [ ] **Step 4:** `sim/main.cpp`: subcommands `articles`, `articles_setup`,
+- [x] **Step 4:** `sim/main.cpp`: subcommands `articles`, `articles_setup`,
   `articles_sync_done`, `article_actions`, `article_end`, `wallabag_account`,
   `wallabag_connecting`, `wallabag_fetching`, `wallabag_error`,
   `wallabag_error_offline`, `wallabag_error_no_network`, `articles_remove_confirm`,
   each priming the factory and pushing the stack the board draws (the overlays over
   their veiled parent: the dialogs over the list, the actions over the list, the
   remove-confirm over the account).
-- [ ] **Step 5:** `test_focus_restore.cpp`: raise `movable` and `wrapping` by the
+- [x] **Step 5:** `test_focus_restore.cpp`: raise `movable` and `wrapping` by the
   screens whose focus moves — `Articles`, `ArticleActions`, `ArticleEnd`,
   `WallabagAccount`, `ArticlesRemoveConfirm`, `WallabagError` (its slabs) — and set the
   `Ready`/`NeedsPriming`/`Never` counts to what the seven rows say. Run
   `build/unit_tests -tf="*focus_restore*"`. Expected: PASS, with the counts read off the
   run and then written down rather than guessed.
-- [ ] **Step 6:** `test_screens.cpp`: a case that walks Home → Down ×2 → Confirm and
+- [x] **Step 6:** `test_screens.cpp`: a case that walks Home → Down ×2 → Confirm and
   lands on `Articles`, then Back to Home at depth 1.
-- [ ] **Step 7:** `make test`. Expected: **green**, including every Home golden going
+- [x] **Step 7:** `make test`. Expected: **green**, including every Home golden going
   red first — inspect each candidate (a third menu row, the title block moved up by
   81px, nothing else) and bless. Ten Home goldens move; record which rows differ.
-- [ ] **Step 8:** Commit `feat(articles): the factory builds all seven screens, and Home's ARTICLES row opens the list (#141)`.
+- [x] **Step 8:** Commit `feat(articles): the factory builds all seven screens, and Home's ARTICLES row opens the list (#141)`.
 
 ### Task 1.10: Goldens for every boarded state, at both geometries
 
 **Files:**
 - Create: `test/unit/test_theme_articles_golden.cpp`
 
-- [ ] **Step 1:** One golden per simulator subcommand from Task 1.9, at 480×800 and
+- [x] **Step 1:** One golden per simulator subcommand from Task 1.9, at 480×800 and
   528×792 — twenty-four PNGs. Model the file on `test_theme_wifi_golden.cpp`.
-- [ ] **Step 2:** Run once to generate candidates; **look at all twenty-four** and say
+- [x] **Step 2:** Run once to generate candidates; **look at all twenty-four** and say
   what you see. The things to catch: the sync row's stamp colliding with `Sync now` on
   the X4; the connecting dialog's host wrapping; `2 LEFT` in the band; the veil under
   each overlay being the right parent.
-- [ ] **Step 3:** Bless; `make test` green; commit
+- [x] **Step 3:** Bless; `make test` green; commit
   `test(articles): every boarded Articles state pinned per pixel at both geometries`.
 
 ### Task 1.11: The comparison sheet reads the screens
 
-- [ ] **Step 1:** `make compare COMPARE_ARGS="--only
+- [x] **Step 1:** `make compare COMPARE_ARGS="--only
   articles,articles_setup,article_actions,article_end,wallabag_account,wallabag_connecting,wallabag_error"`.
   Expected: every row `design ok firmware ok mismatch N%`. Read the percentages and
   compare like with like — the three dialogs against `wifi_connect` and `wifi_error`
   (~3–4%), the list against `library` (~2%). Anything over 8% is a board/screen
   disagreement to find before moving on, not a number to record.
-- [ ] **Step 2:** `home`, `home_empty`, `home_unopened` should have returned to about
+- [x] **Step 2:** `home`, `home_empty`, `home_unopened` should have returned to about
   1.2%/1.1%, 1.3%/1.2% and their old figures from ~21% — `Main.dc.html`'s menu note
   says to expect exactly that. Record the three pairs in the note.
-- [ ] **Step 3:** Commit `docs(design): the Home boards' compare figures, back where the note said they would be`.
+- [x] **Step 3:** Commit `docs(design): the Home boards' compare figures, back where the note said they would be`.
 
 ---
 
