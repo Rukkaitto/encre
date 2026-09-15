@@ -84,6 +84,7 @@
 #include "reader/screens.h"
 #include "reader/session_record.h"
 #include "reader/settings.h"
+#include "reader/article_store.h"
 #include "reader/wallabag_credentials.h"
 #include "reader/text.h"  // reader::Plane
 #include "reader/theme_quiet.h"
@@ -2403,6 +2404,36 @@ static reader::HomeViewModel homeVmForCard() {
        patched ? vm.menu[0].value.c_str() : "blank",
        books >= 0 ? "books in /books plus one level down"
                            : "/books could not be read, so no count is claimed");
+
+  // THE ARTICLES ROW, AND AN UNCONFIGURED DEVICE SAYS NOTHING RATHER THAN
+  // `NOT SET UP`. Home is the first screen a reader sees every time, and a
+  // standing instruction to finish setting up a feature they may not want is a
+  // nag on the one screen that cannot be navigated away from. The row still
+  // opens -- the list's own not-set-up variant is where the instruction lives,
+  // which is the screen somebody reached by ASKING. `homeMenuValue` is the one
+  // spelling of that rule and it lives in `core/`, where a test drives it.
+  if (vm.menu.size() > 1) {
+    reader::WallabagCredentials creds;
+    std::string why;
+    // `Ok` ALONE, which is narrower than it looks and is the point: `Absent` and
+    // `Unconfigured` are both "nobody has set this up" and draw the same blank,
+    // and `Malformed` is a reader's broken edit -- claiming a count off a file
+    // we could not parse would be a number with nothing behind it. The list
+    // screen is where a malformed file gets said out loud.
+    const bool configured =
+        reader::loadWallabagCredentials(gSd, creds, why) == reader::CredentialsResult::Ok;
+    const reader::ArticleStore store(gSd);
+    // THE COUNT IS ONLY ASKED FOR WHEN IT WILL BE SHOWN. `unreadCount` lists
+    // `/.reader/articles`, and this runs on every Home rebuild -- which is every
+    // Back out of a book. An unconfigured device would pay a directory walk to
+    // produce a string the rule above throws away.
+    const int unread = configured ? store.unreadCount() : 0;
+    vm.menu[1].value = reader::ArticleStore::homeMenuValue(configured, unread);
+    logf("[boot] Home's ARTICLES row: %s (%s)\n",
+         vm.menu[1].value.empty() ? "blank" : vm.menu[1].value.c_str(),
+         configured ? "wallabag.json is filled in, so the count is claimed"
+                    : "wallabag.json is absent or blank -- the row opens and says nothing");
+  }
   logFlush();
   return vm;
 }
@@ -3137,6 +3168,21 @@ static void loadWifi() {
   primeWifi();
   logf("[wifi] %d saved network(s)\n", gWifiNets.size());
   logFlush();
+}
+
+// THE ARTICLE STORE, FOR loadWifi()'s DEAD-SETUP-ROW REASON ONE DOOR OVER.
+// Home's ARTICLES row and Settings' `wallabag` row both return
+// `Action::push(...)` DIRECTLY from their own `onGesture`, so the shell never
+// sees the press and cannot prime in response to it: whatever the factory needs
+// has to be there BEFORE the gesture, or the push is refused and the row is the
+// dead button this project has now shipped three times.
+//
+// IT IS THE FileSystem AND NOT A BUILT STORE, which is what makes it safe to do
+// once: `ArticlesScreen` and `WallabagAccountScreen` build their own store off
+// it at construction, so a card whose contents changed under them is read fresh
+// on the next push rather than from something held here.
+static void primeArticles() {
+  gFactory.setArticleStore(&gSd);
 }
 
 // Takes the radio down and forgets the attempt. Called on every way out of
@@ -5490,6 +5536,11 @@ void setup() {
   // priming is, and a factory primed in two places is a factory primed in
   // neither on the path somebody forgets.
   loadWifi();
+
+  // AND THE ARTICLE STORE, for loadWifi()'s reason and beside it -- a factory
+  // primed in two places is a factory primed in neither on the path somebody
+  // forgets.
+  primeArticles();
 
   // AND THE BODY FACE, WHICH loadAndApplySettings CANNOT REACH.
   //
