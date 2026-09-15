@@ -413,3 +413,39 @@ TEST_CASE("the factory builds both from the card when it has one, and refuses wh
   REQUIRE(demo != nullptr);
   CHECK(static_cast<ArticlesScreen&>(*demo).vm().rows.size() == 5);
 }
+
+TEST_CASE("a card-backed list draws NOTHING until it is told how many rows fit") {
+  // THIS IS THE DEFECT, PINNED AS A PROPERTY RATHER THAN FIXED HERE. Reported off
+  // the device after the first successful sync: the article downloaded, Home said
+  // `1 UNREAD`, and the list was empty with `Sync now` doing nothing.
+  //
+  // The cause is a setter with no caller. `ArticlesScreen(FileSystem&)` starts
+  // from `FocusScreen(0, 0, ...)` and `load()` CARRIES `visibleRows` forward --
+  // deliberately, so a rescan cannot throw away what the shell set -- which on a
+  // fresh construction means carrying the base class's zero. The factory has
+  // `setArticlesVisibleRows` and the shell never called it, so the guard
+  // `articlesRows_ > 0` skipped it and the window stayed zero high.
+  //
+  // EVERY OTHER CARD-BACKED CASE IN THIS FILE CALLS `setVisibleRows(5)` ON THE
+  // NEXT LINE, which is precisely why none of them could see it: the tests always
+  // told it and the shell never did. So this one deliberately does not.
+  FakeFileSystem fs;
+  writeCredentials(fs);
+  writeArticle(fs, 1, "2026-09-01T10:00:00Z", "Only");
+
+  ArticlesScreen s(fs);
+
+  // The MODEL has the article -- `unreadCount()` and Home's row agree, which is
+  // why the device said 1 UNREAD while showing nothing.
+  CHECK_FALSE(s.vm().notSetUp);
+  CHECK(s.vm().bandValue == "1 UNREAD");
+  // ...and the VIEW has no rows at all, the sync row included. That second half
+  // is what made the symptom confusing: a reader pressing Confirm hit the
+  // article, not `Sync now`, so the sync appeared dead too.
+  CHECK(s.vm().rows.empty());
+
+  // One call is the whole fix, and it is the shell's to make.
+  s.setVisibleRows(5);
+  REQUIRE(s.vm().rows.size() == 1);
+  CHECK(s.vm().rows[0].title == "Only");
+}

@@ -6169,6 +6169,30 @@ void setup() {
   gFactory.setContentsVisibleRows(gTheme.contentsVisibleRows(logicalH, fonts));
   gFactory.setLibraryVisibleRows(libraryRows);
   gFactory.setWifiPickerVisibleRows(gTheme.libraryVisibleRows(logicalH, fonts));
+
+  // AND THE ARTICLES LIST, WHICH HAD THE SETTER AND NO CALLER -- so the factory's
+  // `articlesRows_ > 0` guard skipped it, the screen kept the zero-high window
+  // its constructor starts with, and the list drew NOTHING while holding a real
+  // row. Reported off the device as "it downloaded the article, Home says 1
+  // UNREAD, the list is empty and Sync now does nothing": the sync row was not
+  // drawn either, and the one focusable row left was the article, so Confirm
+  // asked to open it rather than to sync.
+  //
+  // `load()` carries `visibleRows` forward on purpose -- a rescan must not throw
+  // away what the shell set -- and on a FRESH construction there is nothing to
+  // carry but the base class's zero. That makes this call load-bearing rather
+  // than tidy, which is the same lesson the comment beside `setContentsVisibleRows`
+  // already records: "a list told nothing renders empty".
+  //
+  // THE STATUS LINE IS THE EMPTY ONE, and the theme requires it rather than
+  // defaulting it. `SyncDone`'s variant draws a status block between the band and
+  // the sync row and so fits one row FEWER -- but that variant is a REPLACE of
+  // this screen after a sync, built by the same factory, and the count it needs
+  // depends on a string this boot cannot know. Sized for the plain list here; the
+  // sync-done path re-derives it when it builds that screen.
+  const int articleRows = gTheme.articlesVisibleRows(logicalH, logicalW, fonts, "");
+  gFactory.setArticlesVisibleRows(articleRows);
+  logf("[boot] Articles fits %d rows\n", articleRows);
   logf("[boot] Library fits %d rows on this %dx%d logical canvas "
        "(panel is %dx%d native)\n",
        libraryRows, logicalW, logicalH, panelW, panelH);
