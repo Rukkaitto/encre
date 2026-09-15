@@ -1793,18 +1793,58 @@ static void runWallabagProbe() {
   logFlush();
 
   mark("probe-radio-up");
-  if (!gRadio.beginJoin(net->ssid, psk)) {
-    logf("[probe] the radio refused the join\n");
+  // THE PROBE RETRIES THE JOIN, AND THE SHIPPED FLOW DOES NOT. Measured on glass
+  // 2026-09-15: the same network joins first time through Settings -> Wi-Fi and
+  // was refused here with reason 208, ASSOC_COMEBACK_TIME_TOO_LONG -- 802.11w's
+  // "try again in N", which the ESP32 obeys exactly once.
+  //
+  // WHAT DIFFERS IS WHEN, NOT HOW. This runs ~1.3 s after a reset, while the AP
+  // still holds the previous association for this MAC and answers a new request
+  // with a comeback time; the picker's join happens seconds or minutes later,
+  // by which point that has cleared. So the probe waits for the radio to settle
+  // and then asks again, which is what the reason code is telling it to do.
+  //
+  // IT IS A PROBE-ONLY RETRY AND STAYS THAT WAY UNTIL SOMEBODY DECIDES
+  // OTHERWISE. `ArduinoWifiRadio::joinState()` reports Failed on the FIRST
+  // disconnect event, which every shipped join and Phase 4's sync driver share.
+  // That is defensible for a user-initiated join -- the reader sees it fail and
+  // presses again -- and it is a real question for an automatic one. Changing it
+  // there would change what three boarded copy shapes describe, so it is not
+  // being changed on the strength of one router.
+  //
+  // `down()` BETWEEN ATTEMPTS, because the STA is still connecting when the
+  // first failure is reported -- the log said so: `sta is connecting, cannot set
+  // config`. Without it the second beginJoin lands on a stack that has not let
+  // go of the first.
+  constexpr int kJoinAttempts = 4;
+  constexpr uint32_t kSettleMs = 3000;
+  bool joined = false;
+  for (int attempt = 1; attempt <= kJoinAttempts && !joined; ++attempt) {
+    if (attempt > 1) {
+      gRadio.down();
+      delay(kSettleMs);
+    }
+    if (!gRadio.beginJoin(net->ssid, psk)) {
+      logf("[probe] attempt %d: the radio refused the join\n", attempt);
+      logFlush();
+      continue;
+    }
+    const uint32_t joinStart = millis();
+    while (gRadio.joinState() == reader::JoinState::Running && millis() - joinStart < 20000) {
+      delay(50);
+    }
+    if (gRadio.joinState() == reader::JoinState::Ok) {
+      joined = true;
+      logf("[probe] attempt %d: joined in %lums\n", attempt,
+           (unsigned long)(millis() - joinStart));
+    } else {
+      logf("[probe] attempt %d: reason %d -- %s\n", attempt, gRadio.joinReason(),
+           reader::wifiReasonName(gRadio.joinReason()));
+    }
     logFlush();
-    return;
   }
-  const uint32_t joinStart = millis();
-  while (gRadio.joinState() == reader::JoinState::Running && millis() - joinStart < 20000) {
-    delay(50);
-  }
-  if (gRadio.joinState() != reader::JoinState::Ok) {
-    logf("[probe] the join did not complete: reason %d -- %s\n", gRadio.joinReason(),
-         reader::wifiReasonName(gRadio.joinReason()));
+  if (!joined) {
+    logf("[probe] no join after %d attempts -- nothing to measure\n", kJoinAttempts);
     gRadio.down();
     logFlush();
     return;
