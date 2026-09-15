@@ -79,6 +79,16 @@
     on glass rather than 21.97, and `100 NEW` is the one to look at when the
     goldens for this screen land. A board's figure is a Chrome figure.
 
+    A ROW'S TITLE LINE BOX IS STATED AS 31px, NOT AS `1.25`, and that is the
+    Sleep card's lesson on a second screen. Chrome resolves `1.25` on --t-value
+    to a FRACTIONAL 31.25px and the firmware derives round(1.25 * 25) = 31, so a
+    ONE-line row agreed to the pixel and a TWO-line row was a pixel short -- and
+    the error ACCUMULATES down a list, because every row below a wrapped one
+    starts a pixel higher. Measured before the change: the rules under rows 1, 2
+    and 3 sat 2, 2 and 3 pixels above the board's. Stating the number is what
+    Sleep.dc.html did when its title's `1.1` put every run under it out of
+    register, and it moves nothing in Chrome that was not already wrong.
+
     The specimen below is `NO NEW`, which is the state a settled reader sees
     most. `SyncDone.dc.html` draws the same row with `3 NEW` and a status line,
     and is a VARIANT of this screen rather than a second one.
@@ -94,7 +104,7 @@
     <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px; background: #000000; color: #ffffff;">
       <div style="width: 8px; height: 8px; background: #ffffff; margin-top: 7px; flex-shrink: 0;"></div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="font-size: var(--t-value); font-weight: 700; line-height: 1.25;">The Death and Life of the Great American Essay</div>
+        <div style="font-size: var(--t-value); font-weight: 700; line-height: 31px;">The Death and Life of the Great American Essay</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">LONGREADS &middot; 22 MIN</div>
       </div>
     </div>
@@ -102,7 +112,7 @@
     <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px; border-bottom: 1px solid #000000;">
       <div style="width: 8px; height: 8px; background: #000000; margin-top: 7px; flex-shrink: 0;"></div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="font-size: var(--t-value); font-weight: 500; line-height: 1.25;">Why We Forget Most of the Books We Read</div>
+        <div style="font-size: var(--t-value); font-weight: 500; line-height: 31px;">Why We Forget Most of the Books We Read</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">THE ATLANTIC &middot; 9 MIN</div>
       </div>
     </div>
@@ -110,7 +120,7 @@
     <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px; border-bottom: 1px solid #000000;">
       <div style="width: 8px; height: 8px; background: #000000; margin-top: 7px; flex-shrink: 0;"></div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="font-size: var(--t-value); font-weight: 500; line-height: 1.25;">In Praise of Slow Reading</div>
+        <div style="font-size: var(--t-value); font-weight: 500; line-height: 31px;">In Praise of Slow Reading</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">AEON &middot; 14 MIN</div>
       </div>
     </div>
@@ -118,7 +128,7 @@
     <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px; border-bottom: 1px solid #000000;">
       <div style="width: 8px; height: 8px; border: 1px solid #000000; box-sizing: border-box; margin-top: 7px; flex-shrink: 0;"></div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="font-size: var(--t-value); font-weight: 400; line-height: 1.25;">The Tyranny of the To-Be-Read Pile</div>
+        <div style="font-size: var(--t-value); font-weight: 400; line-height: 31px;">The Tyranny of the To-Be-Read Pile</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">LIT HUB &middot; 7 MIN &middot; READ</div>
       </div>
     </div>
@@ -126,7 +136,7 @@
     <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px;">
       <div style="width: 8px; height: 8px; border: 1px solid #000000; box-sizing: border-box; margin-top: 7px; flex-shrink: 0;"></div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="font-size: var(--t-value); font-weight: 400; line-height: 1.25;">E Ink: The Quiet Display Technology That Refused to Die</div>
+        <div style="font-size: var(--t-value); font-weight: 400; line-height: 31px;">E Ink: The Quiet Display Technology That Refused to Die</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">IEEE SPECTRUM &middot; 16 MIN &middot; READ</div>
       </div>
     </div>

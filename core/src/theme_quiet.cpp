@@ -3534,7 +3534,16 @@ void QuietTheme::renderArticles(Framebuffer& fb, const FontSet& fonts, const Art
     const Prose note = wrapProse(noteF, vm.setupNote, proseW, kSetupNoteLeadEm,
                                  trackingEm(noteF, kSetupNoteEm));
 
-    int y = listTop + kSetupPadTop;
+    // CENTRED IN WHAT IS LEFT, not top-anchored. The board's block is
+    // `justify-content: center; flex: 1` with `padding: 46px 24px 0` -- so the
+    // 46px is a FLOOR under the centring rather than the position, exactly as
+    // HomeEmpty's block is. Measured once from the wrapped runs, because a
+    // paragraph's height is a result and the block cannot be placed without it.
+    const int blockH = mark.h + kSetupGap + titleF.lineHeight() + kSetupGap +
+                       f26ToPx(prose.heightF26()) + kSetupGap + f26ToPx(note.heightF26());
+    const int areaTop = listTop + kSetupPadTop;
+    const int areaH = fb.height() - hintBarHeight(fonts, hints) - areaTop;
+    int y = areaTop + (areaH > blockH ? (areaH - blockH) / 2 : 0);
     drawIcon(fb, mark, centreIn(0, fb.width(), mark.w), y, Ink::Black, plane);
     y += mark.h + kSetupGap;
     const Tracking titleTracking = trackingEm(titleF, kSetupTitleEm);
@@ -3749,9 +3758,21 @@ void QuietTheme::renderArticleEnd(Framebuffer& fb, const FontSet& fonts,
     const Tracking metaTracking = trackingEm(metaF, kArticleEndMetaEm);
     drawText(fb, metaF, kMargin, y + metaF.ascent(),
              elideToWidth(metaF, vm.meta, usableW, metaTracking), Ink::Black, metaTracking, plane);
+    y += metaF.lineHeight();
   }
 
-  int sy = slabsTop;
+  // THE SLABS FOLLOW THE CONTENT BLOCK, they are not anchored above the note.
+  // The board draws two SIBLING blocks each at `padding: 32px 24px 0 24px`, so
+  // the slab column sits 32px under whatever the title and meta took -- and only
+  // the NOTE carries `margin-top: auto`. Bottom-anchoring them put the whole
+  // column 30px low on a one-line-meta specimen and would have moved it again
+  // for every title length.
+  //
+  // `slabsTop` above is still the FLOOR the title's budget divides against,
+  // which is a different quantity and stays: the budget asks how many lines fit
+  // before the slabs would collide with the note, and this asks where the slabs
+  // actually go. Collapsing the two is the Sleep card's chapterReserveH defect.
+  int sy = y + kArticleEndPadTop;
   for (int i = 0; i < slabs; ++i) {
     if (i > 0) sy += kActionH + kArticleEndGap;
     drawActionButton(fb, fonts, kMargin, sy, usableW, vm.actions[static_cast<size_t>(i)],

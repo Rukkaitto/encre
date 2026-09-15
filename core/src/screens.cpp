@@ -4,7 +4,12 @@
 #include "reader/screen_wifi_password.h"
 #include "reader/screen_wifi_picker.h"
 
+#include "reader/screen_article_actions.h"
+#include "reader/screen_article_end.h"
+#include "reader/screen_articles.h"
 #include "reader/screen_contents.h"
+#include "reader/screen_wallabag_account.h"
+#include "reader/screen_wallabag_dialogs.h"
 #include "reader/screen_reader_menu.h"
 #include "reader/screen_sleep.h"
 
@@ -34,7 +39,7 @@ HomeViewModel demoHomeVm() {
   vm.percent = 6;
   vm.batteryPercent = 87;
   vm.hasCover = false;
-  vm.menu = {{"LIBRARY", "12"}, {"SETTINGS", ""}};
+  vm.menu = {{"LIBRARY", "12"}, {"ARTICLES", "3 UNREAD"}, {"SETTINGS", ""}};
   vm.focusedMenuIndex = -1;
   vm.hints = {"READ", "SELECT", "UP", "DOWN"};
   // Home binds no long press, so no slot shows a ring.
@@ -52,7 +57,11 @@ HomeViewModel demoHomeEmptyVm() {
   vm.emptyBody = "Put the SD card in your computer and copy EPUB files into its /books folder.";
   // LIBRARY says EMPTY where Home says a count -- the value is what the state
   // changes, and the row is otherwise Home's row.
-  vm.menu = {{"LIBRARY", "EMPTY"}, {"SETTINGS", ""}};
+  // ARTICLES CARRIES NO VALUE HERE, so it draws the chevron -- SETTINGS' own
+  // mechanism. A device with no books is usually a device nobody has set up, and
+  // Main.dc.html's menu note refuses `NOT SET UP` on this row: a reader should
+  // not open their e-reader onto a list of chores.
+  vm.menu = {{"LIBRARY", "EMPTY"}, {"ARTICLES", ""}, {"SETTINGS", ""}};
   vm.focusedMenuIndex = 0;
   // NO READ HINT: slot 0 is empty, because there is nothing to read. The bar keeps
   // its four slots and the empty one keeps its 36px -- measuring it as nothing
@@ -79,7 +88,7 @@ HomeViewModel demoHomeUnopenedVm() {
   vm.nothingToContinue = true;
   vm.emptyTitle = "NOTHING OPEN YET";
   vm.emptyBody = "Choose a book from your library to start reading.";
-  vm.menu = {{"LIBRARY", "12"}, {"SETTINGS", ""}};
+  vm.menu = {{"LIBRARY", "12"}, {"ARTICLES", "3 UNREAD"}, {"SETTINGS", ""}};
   // The first menu row, not the CONTINUE block: there is no block, and it is also
   // the row this screen's sentence is telling the user to press.
   vm.focusedMenuIndex = 0;
@@ -89,6 +98,10 @@ HomeViewModel demoHomeUnopenedVm() {
   vm.holds = {false, false, false, false};
   return vm;
 }
+
+// design/Articles.dc.html's own five rows, in its order, with the two READ ones
+// last. A demo view model for demoHomeVm's reason: core/ has no card to read,
+// and a board is a statement about layout that a render has to reproduce exactly.
 
 // design/Contents.dc.html's own list: two sections over eight chapters, with the
 // reader on the first. Depths, not indentation -- a depth-1 entry is a section header
@@ -111,7 +124,22 @@ std::vector<TocEntry> demoContents() {
 // The board marks its FIRST chapter row `NOW`, so the demo reader is on spine 0.
 int demoContentsSpine() { return 0; }
 
-std::vector<ScreenId> demoHomeTargets() { return {ScreenId::Library, ScreenId::Settings}; }
+// THREE ROWS NOW, AND THE MIDDLE ONE IS #141's WHOLE IMPLEMENTATION. Home's
+// budget already reads `vm.menu.size()`, so nothing else moves to make room.
+std::vector<ScreenId> demoHomeTargets() {
+  return {ScreenId::Library, ScreenId::Articles, ScreenId::Settings};
+}
+
+std::vector<ArticleItem> demoArticles() {
+  return {
+      {1, "The Death and Life of the Great American Essay", "LONGREADS", 22, false, false},
+      {2, "Why We Forget Most of the Books We Read", "THE ATLANTIC", 9, false, false},
+      {3, "In Praise of Slow Reading", "AEON", 14, false, false},
+      {4, "The Tyranny of the To-Be-Read Pile", "LIT HUB", 7, true, false},
+      {5, "E Ink: The Quiet Display Technology That Refused to Die", "IEEE SPECTRUM", 16, true,
+       false},
+  };
+}
 
 // The board's `&middot;`, spaces included. A third copy of this two-byte string
 // (screen_library.cpp and components.cpp have the others) and deliberately not
@@ -391,6 +419,16 @@ std::vector<ScanResult> demoWifiScanLong() {
 // THE BOARDS' OWN CONTENT, asked for. design/WifiSettings.dc.html shows HOME
 // (automatic) and BUREAU; design/WifiPicker.dc.html shows five networks with
 // BUREAU-GUEST open and the rest locked, sorted by signal.
+void DemoScreenFactory::setArticlesDemo() {
+  setArticles(demoArticles(), "WALLABAG \xC2\xB7 NO NEW");
+  setArticleActionsFacts({2, "Why We Forget Most of the Books We Read", false});
+  setArticleEndFacts({1, "The Death and Life of the Great American Essay", "LONGREADS", 22, false,
+                      2, true});
+  setWallabagAccountFacts({"LUCASG", 3, "NO NEW", 50, 1, true});
+  setWallabagHost("wallabag.example.com");
+  setWallabagFailure(WallabagErrorScreen::Shape::SignIn);
+}
+
 void DemoScreenFactory::setWifiDemo() {
   SavedNetworks nets;
   nets.remember("HOME", true);
@@ -721,6 +759,43 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
     case ScreenId::WifiNetworkActions:
       if (!wifiActionFactsSet_) return nullptr;
       return std::make_unique<WifiNetworkActionsScreen>(wifiActionFacts_);
+    // --- Articles over wallabag (V1.1) --------------------------------
+    //
+    // EVERY ONE REFUSES WHEN UNPRIMED AND NONE SUBSTITUTES. A factory that
+    // substitutes content is worse than one that refuses: a refused push leaves
+    // the screen beneath standing, which is wrong in a way the reader can see
+    // through, where a substitution once woke this device into a book nobody
+    // was reading.
+    case ScreenId::Articles: {
+      if (!articlesPrimed_) return nullptr;
+      auto s = articlesNotSetUp_ ? std::make_unique<ArticlesScreen>()
+                                 : std::make_unique<ArticlesScreen>(articles_, articlesStamp_);
+      if (!articlesNotSetUp_) {
+        if (articlesRows_ > 0) s->setVisibleRows(articlesRows_);
+        if (!articlesStatus_.empty()) s->setStatusLine(articlesStatus_);
+      }
+      return s;
+    }
+    case ScreenId::ArticleActions:
+      if (!articleActionFactsSet_) return nullptr;
+      return std::make_unique<ArticleActionsScreen>(articleActionFacts_);
+    case ScreenId::ArticleEnd:
+      if (!articleEndFactsSet_) return nullptr;
+      return std::make_unique<ArticleEndScreen>(articleEndFacts_);
+    case ScreenId::WallabagAccount:
+      if (!wallabagAccountSet_) return nullptr;
+      return std::make_unique<WallabagAccountScreen>(wallabagAccountFacts_);
+    case ScreenId::WallabagConnecting:
+      if (!wallabagHostSet_) return nullptr;
+      return std::make_unique<WallabagConnectingScreen>(wallabagHost_);
+    case ScreenId::WallabagError:
+      if (!wallabagFailureSet_) return nullptr;
+      return std::make_unique<WallabagErrorScreen>(wallabagFailure_);
+    // NO PRIMING, because it carries nothing: the confirmation names no article
+    // and asks one question. DeleteConfirm needs Facts because it names a FILE;
+    // this removes the lot.
+    case ScreenId::ArticlesRemoveConfirm:
+      return std::make_unique<ArticlesRemoveConfirmScreen>();
     case ScreenId::Count:
       return nullptr;
   }

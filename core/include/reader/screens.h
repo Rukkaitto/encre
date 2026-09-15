@@ -5,6 +5,8 @@
 
 #include "reader/app.h"
 #include "reader/screen_settings.h"
+#include "reader/screen_wallabag_account.h"
+#include "reader/screen_wallabag_dialogs.h"
 #include "reader/screen_wifi_error.h"
 #include "reader/screen_wifi_network_actions.h"
 #include "reader/screen_wifi_settings.h"
@@ -12,6 +14,9 @@
 #include "reader/wifi_store.h"
 #include "reader/screen_typography.h"
 #include "reader/screen_book_details.h"
+#include "reader/screen_article_actions.h"
+#include "reader/screen_article_end.h"
+#include "reader/screen_articles.h"
 #include "reader/screen_book_end.h"
 #include "reader/screen_book_error.h"
 #include "reader/screen_delete_confirm.h"
@@ -96,6 +101,11 @@ std::vector<LibraryItem> demoLibraryItems();
 // the two boards are two specimens and a screen that could not tell them apart
 // would not be comparing either.
 std::vector<ScanResult> demoWifiScanLong();
+// design/Articles.dc.html's own five rows. Exported for the reason
+// demoWifiScanLong is: the simulator needs the board's content to re-prime a
+// VARIANT of the same screen, and a second copy in sim/ would be a board
+// specimen the comparison sheet could drift from.
+std::vector<ArticleItem> demoArticles();
 
 class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
  public:
@@ -303,6 +313,59 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
     wifiTargetPrimed_ = true;
   }
   void setWifiFailure(JoinFailure why) { wifiFailure_ = why; }
+  // --- Articles over wallabag (V1.1) -----------------------------------
+  //
+  // EVERY ONE OF THESE CARRIES A PRIMED FLAG RATHER THAN "the data is not
+  // empty", which is contentsPrimed_'s rule: a configured card with no articles
+  // yet primes an EMPTY list and must still build, because a reader who has just
+  // filled the credentials in must not be told to go and fill them in.
+  void setArticles(std::vector<ArticleItem> rows, std::string stamp) {
+    articles_ = std::move(rows);
+    articlesStamp_ = std::move(stamp);
+    articlesNotSetUp_ = false;
+    articlesPrimed_ = true;
+  }
+  // The not-set-up variant: no /.reader/wallabag.json, or one with a value
+  // missing. Its own setter rather than a flag on the one above, so "no
+  // credentials" and "no articles" cannot be spelled the same way by accident.
+  void setArticlesNotSetUp() {
+    articles_.clear();
+    articlesStamp_.clear();
+    articlesNotSetUp_ = true;
+    articlesPrimed_ = true;
+  }
+  void setArticlesVisibleRows(int n) { articlesRows_ = n; }
+  void setArticlesStatusLine(std::string line) { articlesStatus_ = std::move(line); }
+  void setArticleActionsFacts(ArticleActionsScreen::Facts f) {
+    articleActionFacts_ = std::move(f);
+    articleActionFactsSet_ = true;
+  }
+  // CLEARED ON THE WAY OUT, which BookDetails' own facts pair is the precedent
+  // for and the reason: without it, holding Confirm on one article and then
+  // reaching this overlay another way would act on the article before last.
+  void clearArticleActionsFacts() { articleActionFactsSet_ = false; }
+  void setArticleEndFacts(ArticleEndScreen::Facts f) {
+    articleEndFacts_ = std::move(f);
+    articleEndFactsSet_ = true;
+  }
+  void setWallabagAccountFacts(WallabagAccountScreen::Facts f) {
+    wallabagAccountFacts_ = std::move(f);
+    wallabagAccountSet_ = true;
+  }
+  void setWallabagHost(std::string host) {
+    wallabagHost_ = std::move(host);
+    wallabagHostSet_ = true;
+  }
+  void setWallabagFailure(WallabagErrorScreen::Shape shape) {
+    wallabagFailure_ = shape;
+    wallabagFailureSet_ = true;
+  }
+  // The simulator's and the goldens' door, asked for rather than fallen back to
+  // -- setReaderDemo()'s rule, and for its reason: a factory that SUBSTITUTES
+  // content is worse than one that refuses, which is how this device once woke
+  // into a book nobody was reading.
+  void setArticlesDemo();
+
   void setWifiNetworkFacts(WifiNetworkActionsScreen::Facts f) {
     wifiActionFacts_ = std::move(f);
     wifiActionFactsSet_ = true;
@@ -512,6 +575,22 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   bool detailsFactsSet_ = false;
   BookEndScreen::Facts bookEndFacts_{};
   bool bookEndPrimed_ = false;
+  std::vector<ArticleItem> articles_;
+  std::string articlesStamp_;
+  std::string articlesStatus_;
+  bool articlesNotSetUp_ = false;
+  bool articlesPrimed_ = false;
+  int articlesRows_ = 0;
+  ArticleActionsScreen::Facts articleActionFacts_;
+  bool articleActionFactsSet_ = false;
+  ArticleEndScreen::Facts articleEndFacts_;
+  bool articleEndFactsSet_ = false;
+  WallabagAccountScreen::Facts wallabagAccountFacts_;
+  bool wallabagAccountSet_ = false;
+  std::string wallabagHost_;
+  bool wallabagHostSet_ = false;
+  WallabagErrorScreen::Shape wallabagFailure_ = WallabagErrorScreen::Shape::SignIn;
+  bool wallabagFailureSet_ = false;
   BookErrorScreen::Facts bookErrorFacts_{};
   bool bookErrorFactsSet_ = false;
   DeleteConfirmScreen::Facts deleteFacts_{};

@@ -29,17 +29,25 @@ GestureEvent ev(Gesture g, int steps = 1, bool held = false) {
 
 }  // namespace
 
-TEST_CASE("the focus starts on the sync row, which is -1 and not row 0") {
-  // HOME'S CONTINUE BLOCK, one screen over: Focus::WithNone gives -1 as a real
-  // position and this screen spends it on the row above the list. The sync row
-  // does not scroll -- the board fixes it between the band and the list -- so it
-  // cannot be a member of the ScrollWindow that scrolls, and -1 is the position
-  // the window already has for exactly this.
+TEST_CASE("the sync row is -1, above the list, and the focus starts on the first article") {
+  // -1 IS THE SYNC ROW. The board fixes it between the band and the list, so it
+  // does not scroll and cannot be a member of the ScrollWindow that does.
+  // Focus::WithNone already has a position outside the list for exactly this,
+  // and Home spends it the same way on its CONTINUE block -- the only difference
+  // being that Home's sits BELOW the first item and this one sits above it.
+  //
+  // THE FOCUS STARTS ON ROW 0 THOUGH, and the board is what says so: it draws
+  // row 0 inverted and the sync row plain. A reader who opens this screen has
+  // come to read.
   ArticlesScreen s(fixture(), "WALLABAG \xC2\xB7 NO NEW");
   s.setVisibleRows(5);
-  CHECK(s.focus() == -1);
-  CHECK(s.vm().focusedRow == -1);
+  CHECK(s.focus() == 0);
+  CHECK(s.vm().focusedRow == 0);
 
+  // Up from the first article reaches the sync row rather than wrapping to the
+  // bottom, which is what -1 being a real position buys.
+  REQUIRE(s.onGesture(ev(Gesture::Prev)).kind == Action::Kind::Redraw);
+  CHECK(s.focus() == -1);
   const Action a = s.onGesture(ev(Gesture::Activate));
   CHECK(a.kind == Action::Kind::Article);
   CHECK(s.chosen() == ArticlesScreen::Chosen::Sync);
@@ -48,7 +56,6 @@ TEST_CASE("the focus starts on the sync row, which is -1 and not row 0") {
 TEST_CASE("Confirm on an article row asks the shell to open it") {
   ArticlesScreen s(fixture(), "WALLABAG \xC2\xB7 NO NEW");
   s.setVisibleRows(5);
-  REQUIRE(s.onGesture(ev(Gesture::Next)).kind == Action::Kind::Redraw);
   REQUIRE(s.focus() == 0);
   const Action a = s.onGesture(ev(Gesture::Activate));
   CHECK(a.kind == Action::Kind::Open);
@@ -61,6 +68,8 @@ TEST_CASE("a HOLD on an article row opens the actions overlay, and never on the 
   s.setVisibleRows(5);
   // On the sync row there is nothing to act on, so the hold does nothing rather
   // than opening an overlay captioned with an article the reader did not choose.
+  REQUIRE(s.onGesture(ev(Gesture::Prev)).kind == Action::Kind::Redraw);
+  REQUIRE(s.focus() == -1);
   CHECK(s.onGesture(ev(Gesture::Secondary)).kind == Action::Kind::None);
   REQUIRE(s.onGesture(ev(Gesture::Next)).kind == Action::Kind::Redraw);
   const Action a = s.onGesture(ev(Gesture::Secondary));
@@ -150,7 +159,7 @@ TEST_CASE("the slice moves as the Library's does") {
   CHECK(s.vm().rows.size() == 2);
   CHECK(s.vm().firstRow == 0);
 
-  for (int i = 0; i < 3; ++i) s.onGesture(ev(Gesture::Next));
+  for (int i = 0; i < 2; ++i) s.onGesture(ev(Gesture::Next));
   REQUIRE(s.focus() == 2);
   // Scrolled by the overflow rather than by a page, which is ScrollWindow's rule:
   // the focus lands on the window's BOTTOM edge arriving from above.

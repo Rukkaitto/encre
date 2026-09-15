@@ -806,7 +806,7 @@ int drawDetailRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view
   if (!value.empty())
     drawText(fb, vf, fb.width() - kMargin - vf.measure(value),
              baselineIn(vf, y, contentH), value, ink, {}, plane);
-  return detailRowHeight(rule);
+  return detailRowHeight(rule, contentH);
 }
 
 // --- An overlay's panel -----------------------------------------------------

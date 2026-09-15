@@ -52,6 +52,15 @@ ArticlesScreen::ArticlesScreen(std::vector<ArticleItem> items, std::string stamp
   vm_.holds = {false, true, false, false};
   declareHints(vm_.holds);
   declareRepeat(static_cast<ButtonMask>(buttonBit(Button::Up) | buttonBit(Button::Down)));
+  // THE FOCUS STARTS ON THE FIRST ARTICLE, NOT ON THE SYNC ROW, AND THE BOARD IS
+  // WHAT SAYS SO -- design/Articles.dc.html draws row 0 inverted and the sync row
+  // plain. It is also the better landing: a reader who opens this screen has come
+  // to READ, and a sync is the thing they do occasionally.
+  //
+  // WITH NO ARTICLES THERE IS NOWHERE ELSE TO BE, so -1 stands and the sync row
+  // is focused -- which is the only state where pressing Confirm immediately is
+  // what the reader wants.
+  if (!items_.empty()) setFocus(0);
   syncVm();
 }
 

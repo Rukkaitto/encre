@@ -107,7 +107,8 @@ class SettingsScreen : public FocusScreen {
     SleepAfter,
     FullRefresh,
     OnTransition,
-    Wifi
+    Wifi,
+    Wallabag
   };
 
   // WHICH SCREEN A ROW DISCLOSES, IF ANY -- the one spelling of that question,
