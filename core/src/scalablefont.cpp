@@ -730,6 +730,20 @@ ScalableFont::CacheStats ScalableFont::cacheStats() const {
   return s;
 }
 
+void ScalableFont::releaseCache() {
+  if (!impl_) return;
+  impl_->resizeArena(0);
+}
+
+bool ScalableFont::restoreCache() {
+  if (!impl_) return false;
+  // THE SAME ARITHMETIC init() USES, asked again rather than remembered, so a
+  // face restored after a `Size` change cannot come back at the old size's
+  // arena. `resizeArena` is a no-op when the answer already holds.
+  impl_->resizeArena(cacheBytesFor(ppem_, impl_->budgetAtRef));
+  return impl_->arenaCap > 0;
+}
+
 void ScalableFont::resetCacheStats() const {
   if (!impl_) return;
   const size_t cap = impl_->stats.capacityBytes;

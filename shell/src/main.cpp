@@ -3269,7 +3269,48 @@ static int gSyncShownTotal = -1;
 // owe. A plain round trip costs no block at all.
 static bool gTlsFragmentedHeap = false;
 
+// THE 26 KB NOTHING IN A SYNC IS USING. `gBody` and `gItalic` hold 16 KB and
+// 10 KB of glyph arena at ppem 32, and every screen in this flow draws with the
+// EMBEDDED `.rfnt` ramp instead -- the scalable faces are the reader's alone. So
+// for the length of a sync they are 26 KB of idle bitmaps sitting in front of the
+// largest transient this firmware makes.
+//
+// MEASURED ON GLASS AND THIS IS WHY IT EXISTS: a verified handshake needs ~59 KB
+// and the radio leaves ~63 KB, so every request ran within a few kilobytes of
+// death -- minimum free heap 5,872 on the first request, 5,012 on the second,
+// 716 on the third, and `abort()` on the fourth. That abort is `-fno-exceptions`
+// turning a failed allocation into a reboot with no diagnostic, which this file
+// records having been misreported as a navigation bug three times.
+//
+// IT COSTS NOTHING VISIBLE. The cache is a memo, so a released face still draws
+// through the bypass buffer -- slower, never dead -- and no book is open here to
+// draw with it anyway. The restart at the end of a TLS sync re-inits both faces;
+// the restore below is what covers the plain-HTTP sync, which does not restart.
+static void releaseBodyFacesForSync() {
+  const uint32_t before = ESP.getFreeHeap();
+  gBody.releaseCache();
+  gItalic.releaseCache();
+  logf("[sync] gave back the body glyph arenas: heap %u -> %u, block=%u\n",
+       (unsigned)before, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+  logFlush();
+}
+
+static void restoreBodyFacesAfterSync() {
+  const bool roman = gBody.restoreCache();
+  const bool ital = gItalic.restoreCache();
+  // A FAILED RESTORE IS NOT A FAILED SYNC. The face keeps working without its
+  // memo, so this is a note about how fast the next page will draw and never a
+  // reason to tell the reader anything.
+  if (!roman || !ital) {
+    logf("[sync] the body glyph arenas did not come back (roman=%d italic=%d); pages "
+         "will re-rasterise until the next re-init\n",
+         (int)roman, (int)ital);
+    logFlush();
+  }
+}
+
 static void endSyncSession() {
+  restoreBodyFacesAfterSync();
   gSyncEngine.reset();
   gWbClient.reset();
   gTransport.reset();
@@ -3353,6 +3394,10 @@ static void beginSyncFlow(bool replace) {
   }
   logf("[sync] joining \"%s\" to reach %s\n", net->ssid.c_str(), gWbCreds.server.c_str());
   logFlush();
+
+  // BEFORE THE RADIO IS EVEN UP, so the 26 KB is free when the first handshake
+  // asks for its 59.
+  releaseBodyFacesForSync();
 
   gFactory.setWallabagHost(gWbCreds.server);
   if (replace) gApp->replaceScreen(reader::ScreenId::WallabagConnecting);
