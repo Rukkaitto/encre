@@ -411,3 +411,78 @@ something this project has already been bitten by:
 If a future export fails any of them, `detail=full`'s `content` is the fallback
 and the HTML tokenizer is back on the bill — the estimate `instapaper-full-api.md`
 §6 carries — so nothing is lost but the shortcut.
+
+---
+
+## 8. What a round trip costs on the C3 — the probe, and the rule before the numbers
+
+**NOT YET RUN.** This section is written before the measurement on purpose: #140
+asks for the probe at the point where the answer can still change the design, and
+a decision rule written afterwards is a rule fitted to whatever turned up.
+
+### Why it cannot be answered from a desktop
+
+The reading floor with Wi-Fi linked is **28,508 bytes**, measured on glass, and
+the stack already costs **21,328 bytes of static RAM at every instant** whether
+or not the radio is ever switched on. What nothing here can price is an mbedTLS
+handshake on a part with no PSRAM. This project has been wrong about the C3 from
+desktop evidence three times — the `__divdi3` in a hot loop the desktop does not
+have, the cover decode that peaked **17–25 KB above** its desktop twin because
+the allocator is simply different, and the `dynamic_cast` that compiled on macOS
+and failed on the first firmware build.
+
+### Running it
+
+```
+PLATFORMIO_BUILD_FLAGS="-DENCRE_WALLABAG_PROBE=1" make firmware
+```
+
+then flash, and capture:
+
+```
+pio device monitor -e xteink | tee run.log
+```
+
+It needs `/.reader/wallabag.json` filled in and one saved Wi-Fi network marked
+`AUTO`; without either it says so and does nothing. It runs at the END of
+`setup()`, after the first paint — which is the measurement rather than a
+convenience, because what #140 asks is what a round trip costs with **no book
+open**, the state the sync flow actually runs in.
+
+Three `[probe]` lines come back, each with the heap before, after, spent, the
+minimum since boot, and the largest free BLOCK — which is the number that decides
+an allocation and which `getFreeHeap` cannot see:
+
+| line | what it measures |
+|---|---|
+| `http-info` | a plain round trip to the reader's own server |
+| `tls-info` | the same against `app.wallabag.it`, so the handshake is priced even on a device whose own server is plain |
+| `download` | one article streamed 4 KB at a time onto the card |
+
+The download reopens the file per chunk, because `SdMan` is the SDK's singleton
+and `sd_fs.h` does not export it — so the probe's **wall clock is pessimistic**
+and its **heap**, which is the number wanted, is not.
+
+### The decision rule, written before the numbers arrive
+
+**If TLS leaves less than 40 KB free with the radio up and no book open**, the
+transport supports **plain HTTP only** in this release, and the account screen's
+band says so as a stated limit rather than a device that fails on some servers
+and not others. **If it fits**, TLS is enabled and nothing else changes.
+
+40 KB is not a round number chosen for looking like one: it is the 28,508-byte
+reading floor plus room for the largest single allocation the open path makes on
+a normal book, and it is the point below which a sync would be trading a reader's
+ability to open the article it just fetched.
+
+### What the probe costs, measured
+
+`-DENCRE_WALLABAG_PROBE=1` is **+1,880 bytes of static RAM and +154 KB of flash**
+against the default build (46,652 → 48,532 and 2,241,403 → 2,395,467), almost all
+of it the TLS stack being linked at all. The default build is byte-identical with
+the flag absent, which is the whole point of `ENCRE_FS_SELFTEST`'s idiom: a
+diagnostic that ships in every build is one every reader pays for.
+
+**Remove the probe once it has answered**, as `ENCRE_COVER_PROBE` was removed
+after it answered its own question.
+

@@ -1582,6 +1582,170 @@ static uint32_t gLastSdDeepPollMs = 0;
 // this is the boot line that says which mechanism is in force. A probe that
 // degrades quietly is the defect this whole block exists to fix, so "degraded"
 // has to be visible from a serial log without knowing to look for it.
+// --- #140's PROBE: what a round trip costs on this part ----------------------
+//
+// BEHIND A FLAG AND ABSENT BY DEFAULT, which is ENCRE_FS_SELFTEST's idiom and
+// ENCRE_BATTERY_FAKE_PERCENT's: a diagnostic that ships in every build is a
+// diagnostic every reader pays for.
+//
+// IT RUNS BEFORE THE TRANSPORT IS WRITTEN, deliberately. #140 asks for it at the
+// point where the answer can still change the design, and the one cost this plan
+// could not price from a desktop is an mbedTLS handshake on a C3 with no PSRAM.
+// The figure to check it against is the READING FLOOR: docs/on-device-smoke-
+// checklist.md records 13,696 bytes as the smallest this project has ever
+// measured, and the Wi-Fi stack already takes ~21 KB of static RAM at every
+// instant.
+//
+// THE DECISION RULE IS WRITTEN HERE BEFORE THE NUMBERS ARRIVE, so it cannot be
+// bent to whatever they turn out to be: if TLS leaves less than 40 KB free with
+// the radio up and no book open, the transport supports plain HTTP only in this
+// release and the account screen's band says so as a stated limit. If it fits,
+// TLS is enabled and nothing else changes.
+#ifdef ENCRE_WALLABAG_PROBE
+#include "reader/wallabag_credentials.h"
+
+#include <HTTPClient.h>
+#include <WiFiClient.h>
+#include <WiFiClientSecure.h>
+
+static void probeOneGet(const char* what, const char* url, bool secure) {
+  const uint32_t before = ESP.getFreeHeap();
+  const uint32_t blockBefore = ESP.getMaxAllocHeap();
+  const uint32_t t0 = millis();
+
+  HTTPClient http;
+  int code = -1;
+  int len = -1;
+  if (secure) {
+    WiFiClientSecure client;
+    // NO PINNING, and no bundle either: what is being measured is the
+    // HANDSHAKE's heap, and `setInsecure` still performs one. A probe that
+    // refused to connect would measure nothing.
+    client.setInsecure();
+    if (http.begin(client, url)) {
+      code = http.GET();
+      len = http.getSize();
+      http.end();
+    }
+  } else {
+    WiFiClient client;
+    if (http.begin(client, url)) {
+      code = http.GET();
+      len = http.getSize();
+      http.end();
+    }
+  }
+
+  const uint32_t after = ESP.getFreeHeap();
+  logf("[probe] %-10s code=%d len=%d ms=%lu heap %u -> %u (spent %d) min=%u block %u -> %u\n",
+       what, code, len, (unsigned long)(millis() - t0), (unsigned)before, (unsigned)after,
+       (int)before - (int)after, (unsigned)ESP.getMinFreeHeap(), (unsigned)blockBefore,
+       (unsigned)ESP.getMaxAllocHeap());
+  logFlush();
+}
+
+static void probeStreamedDownload(const char* url) {
+  const uint32_t before = ESP.getFreeHeap();
+  const uint32_t t0 = millis();
+  size_t wrote = 0;
+
+  WiFiClient client;
+  HTTPClient http;
+  if (http.begin(client, url)) {
+    const int code = http.GET();
+    if (code == 200) {
+      // THE SHAPE THE REAL SINK WILL HAVE: a fixed chunk out of the stream and
+      // straight onto the card, so the whole body never exists in RAM. What is
+      // being measured is whether that is true in practice.
+      // THE CHUNK IS WHAT IS BEING MEASURED, not the write. 4 KB out of the
+      // stream and straight onto the card, so the whole body never exists in
+      // RAM -- which is the shape the real sink will have.
+      //
+      // IT APPENDS THROUGH `appendToCard` RATHER THAN OPENING A FILE, because
+      // that is the only card-write this translation unit can reach: SdMan is
+      // the SDK's singleton and sd_fs.h does not export it. The real sink opens
+      // ONCE and this reopens per chunk, so the probe's WALL CLOCK is
+      // pessimistic and its HEAP -- the number #140 wants -- is not.
+      uint8_t buf[4096];
+      WiFiClient* stream = http.getStreamPtr();
+      bool first = true;
+      while (http.connected() && (stream->available() || http.getSize() < 0)) {
+        const int n = stream->readBytes(buf, sizeof(buf));
+        if (n <= 0) break;
+        if (first) {
+          // Start from empty: a probe run twice must not measure the first run's
+          // file as well.
+          gSd.remove("/.reader/articles/probe.epub");
+          first = false;
+        }
+        appendToCard("/.reader/articles/probe.epub", reinterpret_cast<const char*>(buf),
+                     static_cast<size_t>(n), 4u * 1024u * 1024u);
+        wrote += static_cast<size_t>(n);
+      }
+    }
+    logf("[probe] download   code=%d wrote=%u ms=%lu heap %u -> %u min=%u block=%u\n", code,
+         (unsigned)wrote, (unsigned long)(millis() - t0), (unsigned)before,
+         (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+         (unsigned)ESP.getMaxAllocHeap());
+    http.end();
+  }
+  logFlush();
+}
+
+static void runWallabagProbe() {
+  reader::WallabagCredentials creds;
+  std::string why;
+  const reader::CredentialsResult r = reader::loadWallabagCredentials(gSd, creds, why);
+  if (r != reader::CredentialsResult::Ok) {
+    logf("[probe] /.reader/wallabag.json is not configured -- nothing to probe\n");
+    logFlush();
+    return;
+  }
+  const reader::SavedNetwork* net = gWifiNets.automatic();
+  if (net == nullptr) {
+    logf("[probe] no AUTO network saved -- join one in Settings first\n");
+    logFlush();
+    return;
+  }
+
+  mark("probe-radio-up");
+  if (!gRadio.beginJoin(net->ssid, shellwifi::secret(net->ssid))) {
+    logf("[probe] the radio refused the join\n");
+    logFlush();
+    return;
+  }
+  const uint32_t joinStart = millis();
+  while (gRadio.joinState() == reader::JoinState::Running && millis() - joinStart < 20000) {
+    delay(50);
+  }
+  if (gRadio.joinState() != reader::JoinState::Ok) {
+    logf("[probe] the join did not complete (reason %d)\n", gRadio.joinReason());
+    gRadio.down();
+    logFlush();
+    return;
+  }
+  mark("probe-joined");
+
+  // PLAIN HTTP against the reader's own server, which is the LAN case #139 says
+  // is the common one.
+  probeOneGet("http-info", (creds.server + "/api/info").c_str(), /*secure=*/false);
+  // AND TLS against a host that definitely speaks it, so the handshake's cost is
+  // measured even on a device whose own server is plain.
+  mark("probe-tls");
+  probeOneGet("tls-info", "https://app.wallabag.it/api/info", /*secure=*/true);
+  // One streamed download, which is the allocation shape the real sink will have.
+  mark("probe-download");
+  gSd.mkdirs("/.reader/articles");
+  probeStreamedDownload((creds.server + "/api/entries/1/export.epub").c_str());
+
+  gRadio.down();
+  mark("probe-radio-down");
+  logf("[probe] done -- radio down, heap=%u min=%u block=%u\n", (unsigned)ESP.getFreeHeap(),
+       (unsigned)ESP.getMinFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+  logFlush();
+}
+#endif  // ENCRE_WALLABAG_PROBE
+
 static void armCardProbes(const char* why) {
   if (!gSd.exists(reader::kSettingsPath)) {
     if (reader::saveSettings(gSd, gSettings)) {
@@ -5611,6 +5775,15 @@ void setup() {
   gCrumbs.firstPaintMs = millis();
   mark("first-paint-complete");
   saveCrumbs();
+
+#ifdef ENCRE_WALLABAG_PROBE
+  // AT THE END OF setup(), AND THE PLACEMENT IS THE MEASUREMENT. What #140 asks
+  // is what a round trip costs with NO BOOK OPEN, which is the state the sync
+  // flow runs in -- so this goes after the first paint, with the panel settled
+  // and the heap where a reader pressing `Sync now` from Home would find it.
+  // Earlier and it would measure a boot rather than a sync.
+  runWallabagProbe();
+#endif
 }
 
 // --- THE CACHED COVER: WRITING IT, AND READING IT BACK ------------------------
