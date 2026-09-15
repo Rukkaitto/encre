@@ -168,10 +168,13 @@ route most readers will take is the web form, which has no such control.
 
 ## 4. What it costs, stated rather than discovered
 
-- **The reader has to run a server.** That is the trade, and it is the whole of
-  it: "sign in to Instapaper" is a feature anyone can use, "point it at your
-  wallabag" is a feature for people who already self-host. It narrows the
-  audience and it is the owner's call, taken.
+- **The reader has to have a wallabag, and every setup step is theirs.** "Sign in
+  to Instapaper" is a feature anyone can use; this one is for people who
+  self-host **or will pay wallabag.it from €11/yr** — which is the half that
+  keeps it addressable rather than personal. It narrows the audience, the owner's
+  call is taken, and **§5 prices it step by step** rather than leaving it as this
+  sentence, because the developer pays none of it and a note written by the
+  developer will forget that.
 - **The token expires in 3600 s.** Instapaper's did not. So the client owns a
   refresh, and a refresh that fails has to fall back to the stored credentials
   rather than to a screen nobody is standing in front of.
@@ -235,6 +238,70 @@ And `expires_in: 3600` is relative to a grant that may have happened before a
 deep sleep, which resets `millis()`, so the device **cannot predict expiry and
 must not try**: call, and refresh on a 401. That is one extra round trip on the
 first call after a long sleep and no state to get wrong.
+
+### What it costs a READER, which is what the developer never pays
+
+**Every one of these steps is the reader's, every time. There is nothing for the
+developer to do, ever, and that is the same fact as "the firmware ships no
+secret" seen from the other side.** Instapaper's shape was the reverse: one
+registration by us, baked in, and the reader typed an email and a password. This
+note argued that asymmetry as an advantage four times without once pricing the
+half a reader pays, so here it is.
+
+| # | step | whose | what it takes |
+|--:|---|---|---|
+| 1 | **have a wallabag** — self-host, or **wallabag.it from €11/yr** | wallabag's | hours and a server, **or five minutes and €11** |
+| 2 | an account on it | wallabag's | trivial |
+| 3 | a way to save articles — the browser extension | wallabag's | **it needs its own client id and secret too** |
+| 4 | an API client for the device, `/developer/client/create` | ours to document | one web form, two fields, redirect URI blank |
+| 5 | write `/.reader/wallabag.json` | **ours** | **hand-written JSON — the weakest link** |
+| 6 | join Wi-Fi | ours, shipped (#107) | the six-button keyboard |
+
+**STEP 1 IS THE FILTER AND EVERYTHING ELSE IS NOISE BESIDE IT.** Self-hosting is
+not a step, it is a hobby, and assuming it because the owner does it is how this
+feature would ship for an audience of one. **wallabag.it collapses it to a
+signup** — from €11 a year, hosted in Europe, a 14-day trial that takes no card —
+and **that belongs at the top of any setup document rather than in a footnote**,
+because it is the difference between "you need a server" and "you need €11 or a
+server". Encre's audience already flashes its own firmware, so the overlap with
+self-hosters is real; it is not total, and the hosted option is what makes the
+feature addressable rather than personal.
+
+**Step 3 means the client dance happens twice.** Wallabagger's own setup wants a
+client id and secret exactly as we do, so a reader arriving at step 4 has
+probably done it once already — which makes step 4 familiar rather than novel,
+and is worth saying in the copy for that reason. It is still two.
+
+**Step 5 is ours and it is the one that produces a device that silently does
+nothing.** A missing comma, a wrong key, a `.reader` folder the file manager
+hides, macOS writing `._wallabag.json` beside it. **So the firmware seeds the
+file** — see below, which is this project's own precedent rather than a new idea.
+
+### The file is SEEDED, not demanded
+
+`armCardProbes()` already writes `/.reader/settings.json` when the card has none
+(`shell/src/main.cpp:1586`), and `saveSettings` creates `/.reader` on the way. So
+a card that has been in this device once already has the folder and a worked
+example of the format. **`wallabag.json` gets the same treatment**: written with
+the five keys and empty string values when absent, so the reader fills in blanks
+in a file that exists rather than authoring JSON from a wiki page.
+
+Three things it inherits and one it must not:
+
+- **Only when ABSENT.** A file that exists is the reader's, however wrong it is.
+  `loadAndApplySettings` already refuses to overwrite a corrupt settings file —
+  *"overwriting it would destroy the only copy of their edit"* — and a
+  half-finished `wallabag.json` is exactly that.
+- **A failed write is reported, not assumed**, in `armCardProbes`'s own idiom:
+  the card may be full, write-protected or failing, and a seed that did not land
+  must not read as one that did.
+- **Empty values are NOT a configuration error.** A seeded file with blank
+  strings is the normal state of a device nobody has set up yet, so it reads as
+  *not configured* and lands on `ArticlesSetup`, never on an error.
+- **It does NOT join the probe's reason.** The settings file is created where it
+  is because `useFileProbeTarget` needs a guaranteed target to read; this one has
+  no such job and must not become a second one, or a reader who deletes it takes
+  the card probe down with it.
 
 ### The whole path, and the four things it leaves open
 
