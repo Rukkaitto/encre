@@ -383,3 +383,42 @@ TEST_CASE("prune runs on a successful sync and not on a failed one") {
   CHECK(r.engine.outcome() == SyncOutcome::Failed);
   CHECK(r.store.list().size() == 1);
 }
+
+TEST_CASE("a failure says which layer stopped it") {
+  // SIX CALL SITES ANSWER `Failed` AND ON GLASS THEY ARRIVE AS ONE NUMBER.
+  // Three flash cycles were spent discovering which layer had stopped a real
+  // sync -- a transport that was fine, a body that was whole, a listing that had
+  // arrived -- each time because the layer that knew did not say. The note is
+  // that answer, and this is what stops it going quiet.
+  SUBCASE("a listing that will not parse names the listing") {
+    Rig r;
+    r.http.scriptOk(200, kInfo);
+    // MALFORMED BYTES, NOT A WRONG SHAPE, and the difference was measured
+    // rather than assumed: `{"not":"a listing"}` parses HAPPILY as a page with
+    // no entries, so the first version of this case asserted Failed and got
+    // UpToDate. `parseListing` is permissive about shape by design -- an object
+    // that names no items IS a page of no items -- so only bytes the scanner
+    // cannot walk reach this branch.
+    r.http.scriptOk(200, R"({"_embedded": {"items": [{"id": )");
+    r.run();
+    REQUIRE(r.engine.outcome() == SyncOutcome::Failed);
+    CHECK(std::string(r.engine.note()).find("listing") != std::string::npos);
+  }
+
+  SUBCASE("a round trip that does not complete names the round trip") {
+    Rig r;
+    r.http.scriptFailure(HttpFailure::Timeout);
+    r.run();
+    REQUIRE(r.engine.outcome() == SyncOutcome::Failed);
+    CHECK(std::string(r.engine.note()).find("round trip") != std::string::npos);
+  }
+
+  SUBCASE("a sync that works carries NO note, so empty is not a silent failure") {
+    Rig r;
+    r.http.scriptOk(200, kInfo);
+    r.http.scriptOk(200, page(""));
+    r.run();
+    REQUIRE(r.engine.outcome() != SyncOutcome::Failed);
+    CHECK(std::string(r.engine.note()).empty());
+  }
+}

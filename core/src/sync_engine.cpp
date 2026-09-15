@@ -24,12 +24,14 @@ bool SyncEngine::begin() {
 
   step_ = Step::Info;
   info_.reset();
-  if (!client_.beginInfo(info_)) return finish(SyncOutcome::Failed), false;
+  if (!client_.beginInfo(info_))
+    return finish(SyncOutcome::Failed, "the transport refused the info request"), false;
   return true;
 }
 
-void SyncEngine::finish(SyncOutcome o) {
+void SyncEngine::finish(SyncOutcome o, const char* why) {
   outcome_ = o;
+  note_ = why;
   state_ = SyncState::Done;
   step_ = Step::Done;
 
@@ -84,7 +86,8 @@ void SyncEngine::nextPush() {
 
 void SyncEngine::nextPage() {
   listing_.reset();
-  if (!client_.beginListing(since_, page_, listing_)) finish(SyncOutcome::Failed);
+  if (!client_.beginListing(since_, page_, listing_))
+    finish(SyncOutcome::Failed, "the transport refused the listing request");
 }
 
 void SyncEngine::nextFetch() {
@@ -161,7 +164,7 @@ void SyncEngine::poll() {
       sinks_.discard(wanted_[fetchAt_]);
       epub_.reset();
     }
-    return finish(SyncOutcome::Failed);
+    return finish(SyncOutcome::Failed, "a round trip did not complete");
   }
 
   switch (step_) {
@@ -184,8 +187,10 @@ void SyncEngine::poll() {
     case Step::List: {
       BufferSource src(listing_.body());
       ListingPage page;
-      if (!parseListing(src, page)) return finish(SyncOutcome::Failed);
-      if (!applyPage(page)) return finish(SyncOutcome::Failed);
+      if (!parseListing(src, page))
+        return finish(SyncOutcome::Failed, "the listing did not parse");
+      if (!applyPage(page))
+        return finish(SyncOutcome::Failed, "the card would not take the listing's metadata");
       pages_ = page.pages > 0 ? page.pages : 1;
       if (page_ < pages_) {
         ++page_;

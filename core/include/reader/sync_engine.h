@@ -60,6 +60,18 @@ class SyncEngine {
   SyncState state() const { return state_; }
   SyncOutcome outcome() const { return outcome_; }
 
+  // WHY, IN THE ENGINE'S OWN WORDS. `SyncOutcome::Failed` has SIX call sites
+  // here -- a refused info request, a refused listing request, a round trip that
+  // did not complete, a listing that would not parse, a listing that would not
+  // be written to the card, and a download the sinks refused -- and on glass
+  // they arrive as one number. Three separate flash cycles were spent
+  // discovering which layer had stopped a sync, each time because the layer that
+  // knew did not say; this is that answer, kept as a literal so it costs no
+  // allocation on the path where the heap is already scarce.
+  //
+  // Empty until something terminal happens, and empty on success.
+  const char* note() const { return note_; }
+
   // For the dialog's second stage. `toFetch` is 0 until the listing has been
   // walked, which is exactly when the caption may still say CONNECTING...
   int fetched() const { return fetched_; }
@@ -74,7 +86,7 @@ class SyncEngine {
  private:
   enum class Step { Idle, Info, Push, List, Fetch, Done };
 
-  void finish(SyncOutcome o);
+  void finish(SyncOutcome o, const char* why = "");
   void nextPush();
   void nextPage();
   void nextFetch();
@@ -88,6 +100,7 @@ class SyncEngine {
   Step step_ = Step::Idle;
   SyncState state_ = SyncState::Idle;
   SyncOutcome outcome_ = SyncOutcome::None;
+  const char* note_ = "";
 
   BufferSink info_{4096};
   BufferSink listing_{kListingSinkCap};

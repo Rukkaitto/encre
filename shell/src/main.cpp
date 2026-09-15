@@ -3547,9 +3547,10 @@ static void pollSync() {
     // sink, a timeout waiting on a body and a handshake that would not allocate
     // are one number up here. Asked of the transport rather than re-derived, so
     // the two cannot disagree about the request they are both describing.
-    logf("[sync] %d of %d fetched after %u request(s), outcome %d, transport state=%d "
+    logf("[sync] %d of %d fetched after %u request(s), outcome %d%s%s | transport state=%d "
          "failure=%d status=%d body=%u | heap=%u block=%u\n",
          done, total, (unsigned)gTransport->requests(), (int)outcome,
+         gSyncEngine->note()[0] != '\0' ? " -- " : "", gSyncEngine->note(),
          (int)gTransport->state(), (int)gTransport->failure(), gTransport->status(),
          (unsigned)gTransport->bodyBytes(), (unsigned)ESP.getFreeHeap(),
          (unsigned)ESP.getMaxAllocHeap());
