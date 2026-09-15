@@ -29,78 +29,111 @@
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; position: relative;">
 
   <!--
-    THE SIGN-IN FLOW'S MIDDLE STATES (#124, round 3). ArticlesSetup's slab opens
-    InstapaperUsername -> InstapaperPassword -> `GO`, and between that press and
-    InstapaperAccount.dc.html sit the exchange and its failures. This board is
-    one of four: InstapaperSigningIn, and three failure shapes.
+    THE SYNC FLOW'S MIDDLE STATES (#124). The credentials are a file on the
+    card, /.reader/wallabag.json (#111), so nothing on this device opens a
+    sign-in: the firmware reads that file and connects when it syncs. Between
+    the sync starting and the list coming back with new articles in it sit
+    three boards -- WallabagConnecting.dc.html and the two failure shapes
+    WallabagError.dc.html and WallabagErrorOffline.dc.html.
+
+    IT WAS FOUR BOARDS AND A KEYBOARD, AND #111 DELETED HALF OF THEM. The
+    earlier round had ArticlesSetup's slab open InstapaperUsername ->
+    InstapaperPassword -> `GO`, with a third failure shape for a refused pair.
+    Those three boards are gone: with the sign-in in a file there is nothing to
+    type, no field to send the reader back to, and no refusal that is about a
+    keystroke.
 
     THE PRECEDENTS ARE WifiConnect.dc.html AND WifiError.dc.html, and they are
     followed rather than adapted: the 380px panel on `left: 50px` with a 21/20
     caption, an 18/20 body block with kWarning over a --t-body message at 1.45,
     a 0/20/20 slab column of 68px slabs, and an opaque absolutely-positioned
-    hint bar. The in-flight board takes WifiConnect's 340px panel on `left: 70px`.
+    hint bar. The in-flight board takes WifiConnect's 340px panel on `left: 70px`
+    and its --t-value message, which is that board's shape and not these two's.
 
     THERE IS NO SUCCESS BOARD, AND THAT IS A DECISION. CLAUDE.md records why
     WifiConnect has one state and not two: "It used to step to READY, which is
     gone: a successful join leaves for the saved list, and the list with the
     network in it is the confirmation -- at one waveform instead of two." The
-    same holds exactly here. InstapaperAccount.dc.html reads back `SIGNED IN`,
-    the account name, the unread count and the last sync, so it IS the
-    confirmation, and a `SIGNED IN` step in front of it would be a second
-    waveform saying less than the screen behind it.
+    same holds here. A sync that works leaves for Articles.dc.html with the new
+    articles in it, and SyncDone.dc.html stamps `WALLABAG - NOW` on the row that
+    started it, so the LIST is the confirmation; a `CONNECTED` step in front of
+    it would be a second waveform saying less than the screen behind it.
 
-    THE VEILED PARENT IS ArticlesSetup.dc.html, and it is GENERATED FROM THAT
-    BOARD rather than transcribed. A veil is not decoration: App::render paints
-    the real parent, then the veil, then the overlay, so whatever is under the
-    stipple is a screen the firmware really renders and make compare really
-    measures -- WifiError.dc.html shipped for a year with 72px rows against
-    WifiSettings' 80px because the dimming made eight pixels a row invisible to
-    review.
+    THE VEILED PARENT IS Articles.dc.html ON ALL THREE, and it is GENERATED FROM
+    THAT BOARD rather than transcribed. A veil is not decoration: App::render
+    paints the real parent, then the veil, then the overlay, so whatever is
+    under the stipple is a screen the firmware really renders and make compare
+    really measures -- WifiError.dc.html shipped for a year with 72px rows
+    against WifiSettings' 80px because the dimming made eight pixels a row
+    invisible to review.
 
-    WHY ArticlesSetup AND NOT THE PASSWORD SCREEN: these dialogs REPLACE the
-    sign-in stack rather than sitting on it (Action::replace, which pushes
-    before it erases, so a refused factory leaves the stack intact), which is
-    WifiConnect's own choice. It also keeps the typed password off the glass
-    under a 5-of-9 stipple, and it makes the flow's root -- still `NOT SET UP`
-    throughout -- the one truthful parent for every one of these four states.
-  -->
+    AND IT IS THE LIST RATHER THAN ArticlesSetup.dc.html, WHICH IS WHAT ALL
+    THREE USED TO VEIL. That parent reads `ARTICLES / NOT SET UP`, so a connect
+    drawn over it claimed the device was not set up while it demonstrably was --
+    and every one of these three states is reachable from a working device: a
+    wallabag password changed on the server rejects the next ordinary sync, and
+    WallabagErrorOffline's own sentence ("Nothing on it changed") presupposes
+    there is something to leave alone. The second reason is review surface:
+    ArticlesSetup under a stipple is a caption and two lines of prose, where the
+    list is a band, a sync row, five article rows and their rules.
+
+    AND THE THREE HAVE TO AGREE ABOUT IT, which is why this block stands in all
+    three notes verbatim. They are one sequence -- CONNECTING... resolves into
+    one of the other two -- so a parent that differed between them would swap
+    the whole screen behind a dialog that has not moved.
+  
+-->
   <!--
     ONE STATE, NOT TWO, AND NO TICKER. WifiConnect.dc.html's eight-cell progress
     ticker was cut because "it read as a fraction of a known total, a join takes
     an unknown one to ten seconds, and nothing on this device animates. The
-    LABEL is the indicator." An xAuth exchange is one signed POST and its
-    duration is just as unknown, so the same answer holds.
+    LABEL is the indicator." A sync is a token exchange and then a listing,
+    against a server the reader runs themselves on whatever connection they
+    have, so its duration is just as unknown and the same answer holds.
 
     IT CAN BE CANCELLED, AND WHAT THAT MEANS IS WORTH STATING: CANCEL STOPS
-    WAITING, IT DOES NOT UN-SEND. The request is a single
-    `POST /api/1/oauth/access_token` and an HTTP request in flight cannot be
-    recalled, so a cancel that lands after the server has already answered
-    leaves a token minted and never read. That is waste and not damage -- the
-    exchange creates no account state, changes nothing the reader can see, and
-    the token is one nobody ever holds. The alternative is a screen with no
-    input at all, which on a bad network is a panel the reader cannot leave
+    WAITING, IT DOES NOT UN-SEND. An HTTP request in flight cannot be recalled,
+    so a cancel that lands after the server has already answered leaves a token
+    minted and never read. That is waste and not damage -- `POST /oauth/v2/token`
+    creates no entry state, changes nothing on the reader's wallabag and nothing
+    the reader can see, and an unread token expires an hour later on its own
+    (`expires_in: 3600`, docs/notes/wallabag-api.md SS2). The alternative is a
+    panel with no input at all, which on a bad network the reader cannot leave
     until the idle timer sleeps the device.
 
-    THE CAPTION HAS NO RIGHT SLOT, AND THE PANEL THEREFORE DOES NOT NAME
-    INSTAPAPER. WifiConnect puts `WI-FI` there; measured, `INSTAPAPER` is 144px
-    at Meta400/0.12em against 296px of caption box already holding
-    `SIGNING IN...` at 188px, so the pair overflows by 36px. Dropping it is
-    WifiError.dc.html's and BookErrorMemory.dc.html's caption shape anyway.
+    A CANCEL DURING THE LISTING IS THE SAME ANSWER FOR A DIFFERENT REASON:
+    everything after the token is a GET -- /api/entries and
+    /api/entries/{entry}/export.epub -- so an abandoned sync leaves a partial
+    download on the card and nothing at all on the server. The archive and star
+    writes are PATCHes the READER makes from ArticleActions.dc.html, and they
+    are not on this path.
 
-    PUTTING THE NAME IN THE MESSAGE INSTEAD WAS TRIED AND WRAPPED BADLY:
-    `Signing in to Instapaper as "lucas@example.com".` breaks after
-    `Instapaper` and then ORPHANS `as` on a line of its own, because the quoted
-    address is one 278px token against a 296px column. What the message carries
-    is the ACCOUNT -- the same review surface the password board's band carries
-    -- on two balanced lines, 151px and 278px, clearing by 139px.
+    THE CAPTION HAS NO RIGHT SLOT, WHERE WifiConnect PUTS `WI-FI` IN ONE. The
+    host is in the message, which is the one place it has to be, and a band
+    reading `WALLABAG` over a sentence naming the same service is the name twice
+    in a 340px panel. WifiError.dc.html and BookErrorMemory.dc.html are the
+    caption-with-no-value shape already.
 
-    THE SERVICE IS NAMED HERE NOW, AND THE REASON IT WAS NOT IS GONE. This
-    said nothing was lost by leaving it out, because the veiled parent drew
-    `SET UP INSTAPAPER` across the middle of the glass and the reader had
-    arrived by pressing it. THERE IS NO SLAB ANY MORE: credentials arrive on
-    the card (#111), so the parent is an instruction and nobody pressed
-    anything to get here. The name has to be in the panel because it is no
-    longer behind it.
+    THE MESSAGE NAMES THE HOST BECAUSE THIS IS THE ONLY ECHO THE FILE EVER GETS.
+    The reader typed their server into /.reader/wallabag.json on a computer and
+    put the card back; this panel is where the device says what it read out of
+    it, so a mistyped host is visible here rather than only as a failure two
+    seconds later.
+
+    AND IT IS UNQUOTED, WHICH IS A MEASUREMENT AND NOT A STYLE.
+    `Connecting to wallabag at "wallabag.example.com".` was drawn first and was
+    wrong twice over in this 296px column: it ORPHANED `at` on a line of its own
+    -- the exact defect the Instapaper draft of this note recorded avoiding, and
+    reintroduced by swapping the service name in -- and the quoted host is one
+    unbreakable 303.3px token, 7.3px WIDER than the column it sits in.
+    `Connecting to wallabag.example.com.` is two lines, 173.1px and 280.4px, the
+    widest clearing by 15.6px against #76's 12px floor. Measured in Chrome on
+    this board; the .rfnt faces run ~3% wider, which is what that floor absorbs.
+
+    A HOST LONGER THAN THE SPECIMEN IS THE IMPLEMENTATION'S PROBLEM AND IT IS
+    NOT A WRAP. A hostname has no space in it, so it is one token whatever its
+    length -- the case WordBreak::Anywhere exists for, and the rule the sleep
+    card's chapter name and Home's title already take.
 
     NO MARK, AND THAT IS A DECISION ABOUT FLASH RATHER THAN ABOUT LAYOUT.
     WifiConnect draws `kWifi`; there is no wallabag mark in core/src/icons.cpp
@@ -112,7 +145,8 @@
     THE NOTE SETS THE EXPECTATION THAT STOPS THIS READING AS FROZEN, which is
     the one thing a still panel on e-ink owes a reader, and it is hedged
     because the duration genuinely is not known.
-  -->
+  
+-->
   <div style="position: absolute; top: 0; left: 0; width: 480px; height: 800px; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;">
 
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
@@ -177,7 +211,7 @@
       <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">CONNECTING&hellip;</div>
     </div>
     <div style="display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 22px 20px 24px 20px; text-align: center;">
-      <div style="font-size: var(--t-value); font-weight: 500;">Connecting to wallabag at &ldquo;wallabag.example.com&rdquo;.</div>
+      <div style="font-size: var(--t-value); font-weight: 500;">Connecting to wallabag.example.com.</div>
       <div style="font-size: var(--t-meta); letter-spacing: 0.1em; line-height: 1.5;">THIS CAN TAKE A FEW SECONDS.</div>
     </div>
   </div>
