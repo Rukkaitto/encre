@@ -3253,6 +3253,7 @@ static std::unique_ptr<ArduinoHttpTransport> gTransport;
 static std::unique_ptr<reader::WallabagClient> gWbClient;
 static std::unique_ptr<reader::ArticleStore> gWbStore;
 static std::unique_ptr<reader::SyncEngine> gSyncEngine;
+static int gSyncLoggedCode = 0;
 static int gSyncShownDone = -1;
 static int gSyncShownTotal = -1;
 
@@ -3275,6 +3276,7 @@ static void endSyncSession() {
   gWbStore.reset();
   gSyncShownDone = -1;
   gSyncShownTotal = -1;
+  gSyncLoggedCode = 0;
   endWifiSession();
 }
 
@@ -3457,12 +3459,36 @@ static void pollSync() {
 
   gSyncEngine->poll();
 
+  // EVERY REQUEST'S OWN ACCOUNT, INCLUDING THE ONES THAT WORK. The first sync on
+  // glass failed with `outcome 3` and nothing else, and a verified handshake is
+  // the largest transient this firmware makes -- so the heap either side of each
+  // round trip is the trail that says whether the next failure is memory or the
+  // far end. Logged from here because `logf` is static to main.cpp and is the
+  // only route that also reaches `/encre.log`.
+  if (gTransport->lastCode() != gSyncLoggedCode) {
+    gSyncLoggedCode = gTransport->lastCode();
+    logf("[http] code=%d heap %u -> %u (min %u) block %u -> %u%s%s\n",
+         gTransport->lastCode(), (unsigned)gTransport->heapBefore(),
+         (unsigned)gTransport->heapAfter(), (unsigned)gTransport->heapMin(),
+         (unsigned)gTransport->blockBefore(), (unsigned)gTransport->blockAfter(),
+         gTransport->lastError().empty() ? "" : " -- ",
+         gTransport->lastError().c_str());
+    logFlush();
+  }
+
   // ONE PAINT PER FILE, NEVER PER BYTE. `setFetching` reports whether anything
   // on the panel changed rather than acting, because a screen cannot mark the
   // App dirty -- and a waveform per chunk would cost more than the download.
+  //
+  // AND NOT UNTIL THERE IS SOMETHING TO FETCH. `toFetch()` is 0 until the
+  // listing has been walked, which the dialog's own header says is "exactly when
+  // the caption may still say CONNECTING..." -- so stepping at 0 of 0 spends a
+  // 449 ms waveform to draw a count of nothing, and the first sync on glass
+  // spent it at the WORST moment there is: mid-handshake, with the heap at
+  // 18,204 bytes and its minimum at 5,960.
   const int done = gSyncEngine->fetched();
   const int total = gSyncEngine->toFetch();
-  if (done != gSyncShownDone || total != gSyncShownTotal) {
+  if (total > 0 && (done != gSyncShownDone || total != gSyncShownTotal)) {
     gSyncShownDone = done;
     gSyncShownTotal = total;
     if (dialog.setFetching(done, total)) gApp->markDirty();

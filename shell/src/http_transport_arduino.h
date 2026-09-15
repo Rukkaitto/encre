@@ -58,6 +58,18 @@ class ArduinoHttpTransport : public reader::HttpTransport {
   reader::HttpFailure failure() const override { return failure_; }
   void cancel() override;
 
+  // THE LAST REQUEST'S OWN ACCOUNT, for the shell to log. It is kept here rather
+  // than printed here because `logf` is static to main.cpp and is the only route
+  // that also tees to `/encre.log` -- and a sync that fails unplugged is exactly
+  // the case serial cannot see. Empty when the request did not fail.
+  const std::string& lastError() const { return lastError_; }
+  int lastCode() const { return lastCode_; }
+  uint32_t heapBefore() const { return heapBefore_; }
+  uint32_t heapAfter() const { return heapAfter_; }
+  uint32_t heapMin() const { return heapMin_; }
+  uint32_t blockBefore() const { return blockBefore_; }
+  uint32_t blockAfter() const { return blockAfter_; }
+
   // What the body actually moved, for the log. A sync that reports success
   // having transferred nothing is the reports-on-less-than-it-claims shape.
   size_t bodyBytes() const { return bodyBytes_; }
@@ -90,4 +102,11 @@ class ArduinoHttpTransport : public reader::HttpTransport {
   int32_t declaredLen_ = -1;
   uint32_t lastProgressMs_ = 0;
   bool secure_ = false;
+  std::string lastError_;
+  int lastCode_ = 0;
+  uint32_t heapBefore_ = 0;
+  uint32_t heapAfter_ = 0;
+  uint32_t heapMin_ = 0;
+  uint32_t blockBefore_ = 0;
+  uint32_t blockAfter_ = 0;
 };

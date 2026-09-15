@@ -61,6 +61,8 @@ bool ArduinoHttpTransport::begin(const reader::HttpRequest& request, reader::Bod
   failure_ = HttpFailure::None;
   bodyBytes_ = 0;
   declaredLen_ = -1;
+  lastError_.clear();
+  lastCode_ = 0;
   teardown();
 
   // THE RADIO FIRST, because every other failure below costs a DNS lookup or a
@@ -85,6 +87,8 @@ bool ArduinoHttpTransport::begin(const reader::HttpRequest& request, reader::Bod
     live_->tls.setHandshakeTimeout(kIdleTimeoutMs / 1000);
   }
 
+  const uint32_t heapBefore = ESP.getFreeHeap();
+  const uint32_t blockBefore = ESP.getMaxAllocHeap();
   const std::string url = server_ + request.path;
   NetworkClient& client = secure_ ? static_cast<NetworkClient&>(live_->tls) : live_->plain;
   if (!live_->http.begin(client, url.c_str())) {
@@ -120,10 +124,40 @@ bool ArduinoHttpTransport::begin(const reader::HttpRequest& request, reader::Bod
     return false;
   }
 
+  // WHAT THE HANDSHAKE COST AND WHY IT FAILED, RECORDED RATHER THAN PRINTED.
+  // The first sync on glass failed with nothing in the log but `outcome 3`,
+  // which is the reports-on-less-than-it-claims shape this project records for
+  // the card probe answered from cache -- so the transport keeps its own
+  // account and `pollSync` writes it through `logf`, which is static to
+  // main.cpp and is the only route that also reaches `/encre.log`. A sync that
+  // fails unplugged is exactly the case serial cannot see.
+  //
+  // A VERIFIED HANDSHAKE IS THE LARGEST TRANSIENT THIS FIRMWARE MAKES -- ~66 KB
+  // measured on glass against the ~56 KB the probe priced with `setInsecure()`
+  // -- so the heap either side of it is the first thing anybody debugging this
+  // needs and the last thing they can reconstruct afterwards.
+  heapBefore_ = heapBefore;
+  heapAfter_ = ESP.getFreeHeap();
+  heapMin_ = ESP.getMinFreeHeap();
+  blockBefore_ = blockBefore;
+  blockAfter_ = ESP.getMaxAllocHeap();
+  lastCode_ = code;
+
   if (code < 0) {
-    // HTTPClient's OWN NEGATIVE CODES ARE THE ONLY PLACE THE CAUSE SURVIVES, so
-    // they are mapped rather than collapsed: the account screen says three
-    // different things and a single `Refused` would make them one.
+    // THE CAUSE, WHILE THE CLIENT IS STILL ALIVE TO BE ASKED. `HTTPClient`'s
+    // negative codes name the layer and `NetworkClientSecure::lastError` names
+    // the mbedTLS failure underneath -- a certificate that did not verify and an
+    // allocation that did not happen are both "connection refused" up here, and
+    // they need opposite fixes.
+    lastError_ = HTTPClient::errorToString(code).c_str();
+    if (secure_) {
+      char tls[128] = {0};
+      live_->tls.lastError(tls, sizeof(tls));
+      if (tls[0] != '\0') {
+        lastError_ += " | tls: ";
+        lastError_ += tls;
+      }
+    }
     switch (code) {
       case HTTPC_ERROR_CONNECTION_REFUSED:
         fail(secure_ ? HttpFailure::Tls : HttpFailure::Refused);
