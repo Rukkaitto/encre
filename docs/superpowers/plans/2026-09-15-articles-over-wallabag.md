@@ -832,6 +832,21 @@ repo can read it, and vendoring is refused here.
 
 ## Phase 4 — The shell, and the glass
 
+> **STOPPED HERE, AND NOT FOR WANT OF TIME.** Task 4.1's probe is WRITTEN and
+> builds (`PLATFORMIO_BUILD_FLAGS="-DENCRE_WALLABAG_PROBE=1" make firmware`); it
+> has not RUN, because flashing is the owner's step. Its answer is an input to
+> Task 4.2 -- whether the transport carries TLS at all -- and #140's whole
+> argument is that the probe comes first, at the point where the answer can still
+> change the design. Writing 4.2 before it would be doing exactly what this task
+> exists to prevent. `docs/notes/wallabag-api.md` §8 carries the run instructions,
+> the three lines to read, and the decision rule, which is stated before the
+> numbers so it cannot be fitted to them.
+>
+> Everything below 4.1 is unstarted. Phases 0-3 are complete and `make test` is
+> green at 1,751 cases; `make firmware` builds at 46,652 bytes of static RAM
+> (14.2%) and 2,241,403 of flash (34.2%).
+
+
 Nothing here can be tested on the desktop. Every task ends at `On glass`, and the card
 moves to `Done` only on the owner's evidence. **Flashing is the owner's step**; the
 plan gives the command each time.
@@ -845,13 +860,13 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
 **Files:**
 - Modify: `shell/src/main.cpp` (behind `ENCRE_WALLABAG_PROBE`, `ENCRE_FS_SELFTEST`'s idiom)
 
-- [ ] **Step 1:** Behind the flag, at the end of `setup()`: bring the radio up on the
+- [x] **Step 1:** Behind the flag, at the end of `setup()`: bring the radio up on the
   `AUTO` network, `GET /api/info` over plain HTTP against the host in
   `/.reader/wallabag.json`, print status, body length, and `mark()` the heap before,
   during and after; then the same over `https://` against `app.wallabag.it`; then
   `GET export.epub` for one entry over plain HTTP streamed to `/.reader/articles/probe.epub`,
   with `mark()` around it and the largest free block printed. Radio down after.
-- [ ] **Step 2:** Build with `PLATFORMIO_BUILD_FLAGS="-DENCRE_WALLABAG_PROBE=1" make firmware`.
+- [x] **Step 2:** Build with `PLATFORMIO_BUILD_FLAGS="-DENCRE_WALLABAG_PROBE=1" make firmware`.
   Hand the owner the flash command and ask for `run.log`.
 - [ ] **Step 3:** Read the log. Record in `docs/notes/wallabag-api.md` a new §8: the
   heap spent by plain HTTP, by TLS, and by one streamed download; whether TLS fits at
