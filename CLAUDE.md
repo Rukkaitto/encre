@@ -2703,12 +2703,13 @@ case to look at if one ever appears.
     Settings scrolled for about an hour: adding its `Refresh on screen change` row
     pushed it past the panel, and then Wi-Fi was cut from V1 and CONNECTIONS went
     with it — eleven items where twelve fit, the SLEEP SCREEN section took it back
-    to nine, and **V1.1's CONNECTIONS row has now put it at eleven again**, which is
-    still inside twelve: no rail, no gutter, rows still running to the panel edge.
-    That figure has moved four times and is the thing to re-read rather than
-    inherit. Phase 3's typography settings will
-    push it over and it will start scrolling **without any code change**,
-    because `renderSettings` reads `totalRows > rows` rather than assuming. Contents
+    to nine, V1.1's CONNECTIONS row put it at eleven, and **the `Wallabag` row has
+    now put it at TWELVE** — which is exactly the number that fits, so there is
+    still no rail and no gutter and the rows still run to the panel edge, with
+    nothing left over. **The next row to land starts the scroll**, and it will do
+    so with no code change, because `renderSettings` reads `totalRows > rows`
+    rather than assuming. That figure has moved FIVE times and is the thing to
+    re-read rather than inherit — count `kItems`. Contents
     and Bookmarks are Phase 3's and will want it too.
   - **It is compared against its board now**, and for a while it was not: Library's
     golden shows seven rows of seven, so it does not overflow and no rail draws in
@@ -2741,7 +2742,7 @@ worth knowing before changing it:
 | Library / scrolled | `LibraryScrolled.dc.html` | Reached by pressing PAST the focused row and back — arriving from above windows it differently. |
 | Item actions, Delete confirm | their own boards | Overlays; a focus move repaints the overlay alone. |
 | Book details | `BookDetails.dc.html` | Not an overlay, despite covering the Library. Its title **wraps**; everywhere else elides. **NO COVER, and its block's height is the COLUMN's now** — the third and last placeholder to go (#95). The height was `max(column, cover)` and the cover's 180px won for every title the screen can draw, so it was a CONSTANT and the column's runs were free; each run costs its line box now and the 2px rule below moves from 290 to 203. |
-| Settings | `Settings.dc.html` | Nine items, three sections, and every drawn row responds. |
+| Settings | `Settings.dc.html` | **Twelve items — FOUR sections and eight rows** — and every drawn row responds. The `Wallabag` row joined CONNECTIONS beside `Wi-Fi`. Both figures have moved five times; count `kItems` rather than trusting this line, which was written saying "three sections" and was wrong when counted. |
 | Sleep | `Sleep.dc.html` | Painted directly, never pushed — a push would make the wake restore into it. Its title, author and chapter **all wrap**; the chapter's two lines are reserved UNCONDITIONALLY, so the title's budget cannot move when the reader crosses a chapter. The badge is drawn first, because its top is the card's bound. |
 | Sleep / nothing open | `SleepIdle.dc.html` | The badge alone. Same screen with its card removed. |
 | Sleep / cover | `SleepCover.dc.html` | The cover full-bleed, and **the one screen that drops the badge**. `Grayscale`, decided per paint. |
@@ -2760,6 +2761,14 @@ worth knowing before changing it:
 | Password | `WifiPassword.dc.html` | The **first text entry in this firmware**, and **the screen is no longer in this file**: the keyboard is `TextEntryScreen`, extracted at the SECOND copy rather than the fifth (#126) — a caret, three layers whose union is all 95 printable ASCII, a 46-cell grid over `GridFocus`, the latching layer key that names where it TAKES you, and a Back that deletes before the caret and LEAVES on an empty field. What stays here is 802.11: the 63-byte bound, the **8-byte floor**, four strings and two Actions. **`minLength` DEFAULTS TO 0 AND THIS IS THE ONLY CALL SITE THAT SETS IT** — a floor blanks the Confirm slot, so carrying it to a caller whose field may legally be empty is a **dead button on a legal state**. A masked mode is NOT foreclosed and is NOT designed: `visibility` is the caller's string, and whether to mask wants a board. |
 | Connecting | `WifiConnect.dc.html` | One state. It used to step to `READY`, which is gone: a successful join leaves for the saved list, and the list with the network in it is the confirmation — at one waveform instead of two. |
 | Couldn't join | `WifiError.dc.html` | THREE copy shapes, BookError's argument: wrong password, not found, and didn't finish. `EDIT PASSWORD` is **absent** on the latter two rather than inert. Its slab count is the slab LIST, measured, not a second spelling. |
+| Articles | `Articles.dc.html` | The wallabag list, and the **third scrolling list**. Its sync row is `-1` — Home's CONTINUE block one screen over — so it inverts and takes the Confirm hint (`SYNC`, against `READ` on an article). Its right-hand stamp is what the device **OWES** the server, `N TO PUSH`, and empty when it owes nothing. |
+| Articles / not set up | `ArticlesSetup.dc.html` | A **variant**, not a screen, decided by the CREDENTIALS and never by the row count: an empty list and an unconfigured device are different things and only one of them names a file. |
+| Article actions | `ArticleActions.dc.html` | An overlay, `ItemActions`' shape with one slot fewer. Its Facts are re-primed **every loop iteration** the list is on top — the hold pushes it directly, so there is no press for the shell to prime on. |
+| Article end | `ArticleEnd.dc.html` | What an article's last page turns into, and the ONLY difference between reading a book and reading an article: `ReaderScreen::setEndScreen`. Every figure on it is a count of FILES on the card, never the server's. |
+| Wallabag account | `WallabagAccount.dc.html` | Reached from Settings' `Wallabag` row. Six rows off the card; `Keep offline` cycles and prunes. **The factory holds a COPY of the settings and has to be told** or the row redraws with the old value. |
+| Syncing | `WallabagConnecting.dc.html` + `WallabagFetching.dc.html` | ONE screen, two stages, differing by their **mark**: the radio while connecting, an arrow-into-tray while fetching. The two marks share one 60×46 box, because the panel's height derives from `mark.h` and it must not resize mid-sync. |
+| Sync failed | `WallabagError.dc.html` | THREE copy shapes, `WifiError`'s argument one flow over: refused credentials, unreachable, no saved network. Only the middle one offers `TRY AGAIN`, being the only one that can fail spuriously. |
+| Remove downloads | `ArticlesRemoveConfirm.dc.html` | `DeleteConfirm`'s shape, and `Restore::Never` where that one is Ready: it is built from the ACCOUNT screen's press and carries no row to be rebuilt from, so waking into "remove every article?" would be a destructive question nobody asked. |
 
 **SETTINGS IS NINE ITEMS NOW — THREE SECTIONS AND SIX ROWS — AND NOTHING ON IT IS
 INERT BY DEFAULT.** Its five inert TYPOGRAPHY rows became one disclosing
@@ -3375,6 +3384,91 @@ only from the stub's first row and no board ever listed it. **What was given up:
 classification is now verified only by `test_input.cpp` on the desktop**, and
 `shell/` is where four bugs have hidden. If held-scroll or press classification
 needs eyes on glass again, it comes back as a board row, not a hidden gesture.
+
+## Articles over wallabag
+
+Five cards, one feature: a list on the card, a sync over the radio, and an
+article that reads through `openBook` like any other EPUB. `docs/notes/wallabag-api.md`
+holds the API and the measurements; what is here is the six decisions the code
+does not explain by itself, and the one hardware fact that shaped all of them.
+
+**AN ARTICLE IS AN EPUB ON THE CARD AND NOTHING BELOW THE SHELL KNOWS OTHERWISE.**
+It goes through `openBook`, the same Reader, the same page ring, the same
+sidecar; `last.json` carries its path exactly as it carries a book's, so Home's
+CONTINUE offers it and the sleep card names it. **The ONE thing that differs is
+which board the last page turns into** — `ReaderScreen::setEndScreen`, `BookEnd`
+by default and `ArticleEnd` when the path is under `/.reader/articles/`. A second
+Reader would have been a second copy of paging, the rewind, the ring and the
+index, each carrying rules a copy would have to re-earn. Derived from the PATH in
+one place rather than threaded down, because two of the three callers — the wake
+restore and Home's CONTINUE — do not know what they are opening.
+
+**NO AGES ANYWHERE, BECAUSE THIS DEVICE HAS NO CLOCK (#132).** Every timestamp is
+the server's, handed back untouched as the `since` watermark. The list's stamp
+and the account screen's `Last sync` are OUTCOMES (`NEVER`, `NO NEW`, `3 NEW`,
+`FAILED`) and never `2 H AGO`, which the boards' own notes carry. A device that
+cannot tell the time must not draw a clock.
+
+**THE QUEUE IS MARKER FILES, and the alternative was a mutable list.** One empty
+file per pending action under `/.reader/articles/queue/`, named `<id>.archive` or
+`<id>.star`. Two properties fall out that a list does not have: starring and then
+unstarring owes the server ONE action rather than two contradictory ones, because
+the opposite marker is REMOVED rather than a second one appended; and a power cut
+mid-queue leaves a directory that is still correct, where a rewritten list can be
+half written.
+
+**PER-ARTICLE SIDECARS, NOT THE FLAT PARSER.** `/.reader/articles/<id>.json` per
+article, read by `JsonScanner` — the pull tokenizer written for the listing —
+rather than by `json.h`, which has no nesting and no arrays and is the settings
+file's parser. A listing page is 5 KB of HAL with `_links` inside every item; the
+flat parser cannot see it, and widening it for this would have made the settings
+file's parser something the settings file does not need.
+
+**PUSH BEFORE PULL, ALWAYS.** The sync sends what the device owes before it asks
+what is new, so a star made offline is on the server before the listing that
+would otherwise report the entry unstarred and overwrite it. It is also why a
+completed sync's stamp is empty: the queue is cleared by definition.
+
+**AND THE WATERMARK ADVANCES ONLY AFTER EVERY DOWNLOAD LANDED.** A sync that
+fetched nineteen of twenty does not move `since`, so the next one asks for all
+twenty again and fetches the one that is missing — which is what makes cancelling
+free rather than merely cheap. `since` also drops `archive=0`: without that an
+entry archived on a phone would never come back, and the local file would sit
+there for ever.
+
+**THE HARDWARE FACT THAT SHAPED THE REST: A SYNC RESTARTS THE DEVICE.** One
+verified TLS handshake takes the largest free block from 61,428 bytes to 34,804
+and never returns it above 36,852, against `Inflater::begin`'s 36,956 — so a
+device that has synced cannot open a book until it resets. The free heap recovers
+in full every time, which is why nothing saw it: see **Hardware facts**, which has
+the measurements. Three consequences worth knowing here:
+
+- **The two body glyph arenas are given back for the length of a sync** — 26 KB
+  that nothing in this flow draws with, since every screen here uses the embedded
+  `.rfnt` ramp. Without it the fourth request aborted with 716 bytes free.
+- **The restart is invisible because the result is on the CARD.** The stamp comes
+  from the watermark, `WallabagConnecting` is `Restore::Never` so the record
+  already reads `…;articles:N`, and e-ink holds the fetching screen through the
+  reset. What the reader sees is one transition flash.
+- **It is gated on the TRANSPORT's scheme**, so a plain-HTTP server — the LAN case
+  — never pays a restart it does not owe, a plain round trip costing no block at
+  all. And it is taken when the error panel is DISMISSED rather than when a sync
+  fails, because that screen is `Restore::Never` too.
+
+**THE TRANSPORT ASKS FOR HTTP/1.0, AND THAT IS NOT A PREFERENCE.** `HTTPClient`
+de-chunks only inside `writeToStream()`, so a poll-shaped reader taking
+`getStreamPtr()` receives the chunk framing along with the body — a 5,368-byte
+listing arrived as `14eb\r\n{…}\r\n0\r\n\r\n` and the parser correctly refused
+it. HTTP/1.0 has no chunked encoding, so the framing cannot appear. Writing a
+de-chunker was the alternative: a second parser, on the path where the heap is
+scarcest, for bytes the protocol lets us decline.
+
+**AND A `PATCH`'s PARAMETERS GO IN THE BODY.** wallabag reads them off Symfony's
+`$request->request`, which FOSRestBundle fills from the body; PHP never populates
+`$_POST` for a PATCH. A query string reaches nothing and the server answers
+**200** anyway — so the push looked like it worked, the queue acked on the 2xx,
+and the intent was discarded. **A wrong 200 is the worst answer this API can give
+us**, because nothing downstream can tell it from a right one.
 
 ## The battery
 
