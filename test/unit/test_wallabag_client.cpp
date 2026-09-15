@@ -513,3 +513,50 @@ TEST_CASE("a REAL wallabag listing parses, with every field a real one carries")
   CHECK(p.entries[1].domain == "example.com");
   }
 }
+
+TEST_CASE("chunked framing does not parse, which is what a raw socket read gives") {
+  // THIS IS A RECORD OF A REAL DEFECT, NOT A HYPOTHETICAL. `HTTPClient` de-chunks
+  // only inside `writeToStream()`, so a streaming reader that takes
+  // `getStreamPtr()` receives the framing along with the body. On glass a
+  // 5,368-byte listing arrived as `14eb\r\n{...}\r\n0\r\n\r\n` and the engine
+  // reported "the listing did not parse" about a listing that was perfectly well
+  // formed. The shell's transport asks for HTTP/1.0 now, which has no chunked
+  // encoding at all.
+  //
+  // The case lives here because `shell/` has no harness: what can be pinned is
+  // that the framing IS fatal to the parser, so anyone who reintroduces a raw
+  // stream read meets a named failure instead of a mystery.
+  const std::string framed = "14eb\r\n" + std::string(R"({"page":1,"pages":1,"total":1,)"
+                                                     R"("_embedded":{"items":[]}})") +
+                             "\r\n0\r\n\r\n";
+  grainsrc::Grained src(framed, framed.size() + 1);
+  ListingPage p;
+  CHECK_FALSE(parseListing(src, p));
+}
+
+TEST_CASE("a header value of several kilobytes is skipped, not choked on") {
+  // THE OTHER THING THE REAL BODY CARRIED. wallabag stores the origin's response
+  // headers verbatim, and a Substack page's `content-security-policy-report-only`
+  // is ~2.5 KB in ONE string -- inside `headers`, which `parseListing` skips
+  // wholesale. A scanner that refused a string longer than its buffer, rather
+  // than truncating and moving on, would lose every entry to a field nothing
+  // reads. No hand-written fixture would ever have contained one.
+  const std::string csp(2600, 'x');
+  const std::string body =
+      R"({"page":1,"pages":1,"total":1,"_embedded":{"items":[{)"
+      R"("id":42,"title":"Fine","domain_name":"x.com","reading_time":3,)"
+      R"("is_archived":0,"is_starred":0,"updated_at":"2026-09-15T06:57:26+0000",)"
+      R"("headers":{"content-security-policy-report-only":")" +
+      csp + R"("},"tags":[],"_links":{"self":{"href":"/api/entries/42"}}}]}})";
+
+  for (const size_t grain : {size_t(1), size_t(4096), body.size() + 1}) {
+    CAPTURE(grain);
+    grainsrc::Grained src(body, grain);
+    ListingPage p;
+    REQUIRE(parseListing(src, p));
+    REQUIRE(p.entries.size() == 1);
+    CHECK(p.entries[0].id == 42);
+    CHECK(p.entries[0].title == "Fine");
+    CHECK(p.entries[0].readingTime == 3);
+  }
+}

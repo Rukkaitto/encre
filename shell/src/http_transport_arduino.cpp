@@ -156,6 +156,27 @@ bool ArduinoHttpTransport::begin(const reader::HttpRequest& request, reader::Bod
   // endpoint here answers directly, so a 3xx means the server is not the one the
   // reader thinks it is -- a plain-HTTP URL against an HTTPS host, or a login
   // page in front of the API. Following it would put an HTML page in a `.part`.
+  // HTTP/1.0, AND IT IS THE WHOLE REASON THE FIRST REAL LISTING WOULD NOT PARSE.
+  //
+  // `getStreamPtr()` hands back the raw socket and `HTTPClient` de-chunks ONLY
+  // inside `writeToStream()` -- so a streaming reader like this one gets the
+  // chunked framing along with the body. Measured on glass: a 5,368-byte
+  // listing arrived as `14eb\r\n{"page":1,...}\r\n0\r\n\r\n`, and
+  // `parseListing` was handed `14eb{` and correctly refused it. The engine
+  // reported "the listing did not parse" about a listing that was perfectly
+  // well formed.
+  //
+  // HTTP/1.0 HAS NO CHUNKED ENCODING AT ALL, so the framing cannot appear: the
+  // body is delimited by `Content-Length` or by the close, and `poll()` already
+  // handles both -- "the length is satisfied" and "the far end went with no
+  // length given" are two of its three endings.
+  //
+  // WHY NOT DE-CHUNK HERE: it is a second parser, on the path where the heap is
+  // scarcest, for bytes the protocol lets us decline to be sent. What it costs
+  // is connection reuse -- `useHTTP10` clears `_reuse` itself -- and this
+  // transport was already `setReuse(false)`, so nothing is given up that was
+  // being used.
+  live_->http.useHTTP10(true);
   live_->http.setReuse(false);
   live_->http.setTimeout(kIdleTimeoutMs);
   for (const auto& h : request.headers) {
