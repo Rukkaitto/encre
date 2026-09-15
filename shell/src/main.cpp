@@ -4402,10 +4402,49 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
     gFactory.setReaderItalicClasses(std::move(italicClasses));
   }
 
+  // AN ARTICLE IS AN EPUB UNDER `/.reader/articles/`, AND THAT IS THE WHOLE TEST.
+  // Derived from the path in ONE place rather than plumbed down from the three
+  // callers, because two of them -- the wake restore and Home's CONTINUE -- do
+  // not know what they are opening: `last.json` carries an article's path exactly
+  // as it carries a book's, which is decision 3 of the wallabag note taken. A
+  // flag threaded through the call sites would be right at the Articles list and
+  // a guess at the other two.
+  const std::string kArticlesPrefix = std::string(reader::kArticlesDir) + "/";
+  const bool isArticle = path.rfind(kArticlesPrefix, 0) == 0;
+  // THE ID OUT OF THE PATH, ONCE. `epubPath` built it, so parsing it back is one
+  // expression against a store method -- and two callers want it now, which is
+  // exactly when a second spelling would start to drift.
+  const int articleId = isArticle ? atoi(path.c_str() + kArticlesPrefix.size()) : 0;
+
+  // SET ON EVERY OPEN AND NOT ONLY WHEN IT CHANGES. The factory outlives every
+  // screen it builds, so a book opened after an article would otherwise end on a
+  // board about articles.
+  gFactory.setReaderEndScreen(isArticle ? reader::ScreenId::ArticleEnd
+                                        : reader::ScreenId::BookEnd);
+
   // WHAT A SAVE WILL NEED, captured now while it is all in hand.
   gReading.path = path;
   gReading.title = opened.title;
   gReading.author = opened.author;
+
+  // AN ARTICLE'S SECOND LINE IS ITS SOURCE, WHERE A BOOK'S IS ITS AUTHOR. Home's
+  // CONTINUE block and the sleep card both draw `author` under the title, and a
+  // wallabag export's `dc:creator` is whatever the exporter put there -- often
+  // the site, often a byline, often nothing. The domain is the fact a reader
+  // recognises and it is the one the Articles list and the end screen already
+  // draw, so this is the third surface naming one fact rather than a fourth
+  // naming a different one.
+  //
+  // OFF THE SIDECAR AND NOT OUT OF THE EPUB, because the sidecar is what the
+  // listing wrote and the EPUB is what the exporter generated -- and only the
+  // first is the server's own answer. Empty leaves the EPUB's author standing
+  // rather than blanking the line: an absent claim beats a false one, and a
+  // missing sidecar is not evidence that there is no author.
+  if (isArticle) {
+    const reader::ArticleStore store(gSd);
+    reader::ArticleMeta m;
+    if (store.readMeta(articleId, m) && !m.domain.empty()) gReading.author = m.domain;
+  }
   gReading.bytes = bookBytes;
   gReading.open = true;
 
@@ -4476,29 +4515,11 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   endFacts.libraryBeneath = appHasScreen(*gApp, reader::ScreenId::Library);
   gFactory.setBookEndFacts(std::move(endFacts));
 
-  // AN ARTICLE IS AN EPUB UNDER `/.reader/articles/`, AND THAT IS THE WHOLE TEST.
-  // Derived from the path in ONE place rather than plumbed down from the three
-  // callers, because two of them -- the wake restore and Home's CONTINUE -- do
-  // not know what they are opening: `last.json` carries an article's path exactly
-  // as it carries a book's, which is decision 3 of the wallabag note taken. A
-  // flag threaded through the call sites would be right at the Articles list and
-  // a guess at the other two.
-  const std::string kArticlesPrefix = std::string(reader::kArticlesDir) + "/";
-  const bool isArticle = path.rfind(kArticlesPrefix, 0) == 0;
-
-  // SET ON EVERY OPEN AND NOT ONLY WHEN IT CHANGES. The factory outlives every
-  // screen it builds, so a book opened after an article would otherwise end on a
-  // board about articles.
-  gFactory.setReaderEndScreen(isArticle ? reader::ScreenId::ArticleEnd
-                                        : reader::ScreenId::BookEnd);
 
   if (isArticle) {
     const reader::ArticleStore store(gSd);
     reader::ArticleEndScreen::Facts af;
-    // THE ID OUT OF THE PATH, which is where it already is: `epubPath` built it,
-    // so parsing it back is one expression against a store method and a second
-    // source of truth that could disagree.
-    af.id = atoi(path.c_str() + kArticlesPrefix.size());
+    af.id = articleId;
 
     // EVERY FIGURE ON THAT BOARD COMES OFF THE CARD, never off the server. The
     // board's own note has the argument: the server's unread count includes what

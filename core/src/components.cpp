@@ -803,9 +803,28 @@ int drawDetailRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view
   const int labelW = labelShare(lf.measure(label), vNatural, avail);
   drawText(fb, lf, kMargin, baselineIn(lf, y, contentH),
            elideToWidth(lf, label, labelW), ink, {}, plane);
-  if (!value.empty())
-    drawText(fb, vf, fb.width() - kMargin - vf.measure(value),
-             baselineIn(vf, y, contentH), value, ink, {}, plane);
+  if (!value.empty()) {
+    // THE VALUE ELIDES TOO, AND IT DID NOT. Only the label was cut, so a value
+    // wider than its share was drawn at its NATURAL width from
+    // `width - margin - measure(value)` -- which for a long one is NEGATIVE. It
+    // began left of the margin, ran under the label and off the panel, with no
+    // ellipsis to say so: `centreIn`'s negative half one primitive over, and the
+    // same defect the LABEL was fixed for when real chapter names first went
+    // through this row.
+    //
+    // REPORTED AS "the chapter name in the book details screen overflows", and
+    // it is `Current chapter` -- the one value on any of these screens that is
+    // the BOOK's rather than a field name or a two-to-four-character count.
+    // `labelShare` already divided the row; the value's share is what is left of
+    // it, and nothing was spending it.
+    //
+    // RIGHT-ALIGNED ON THE MARGIN AT ITS CUT WIDTH, which is this file's
+    // existing rule for a truncated run and what keeps the slot flush whatever
+    // it holds.
+    const std::string shown = elideToWidth(vf, value, avail - labelW);
+    drawText(fb, vf, fb.width() - kMargin - vf.measure(shown), baselineIn(vf, y, contentH),
+             shown, ink, {}, plane);
+  }
   return detailRowHeight(rule, contentH);
 }
 

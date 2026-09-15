@@ -154,6 +154,18 @@
     the same distinction SETTINGS already makes, an empty `value`, so it needs
     no new field.
 
+    THE SECOND LINE OF THE CONTINUE BLOCK IS THE AUTHOR FOR A BOOK AND THE
+    SOURCE FOR AN ARTICLE. Both come from the same `author` field, because both
+    answer the same question -- who is this from -- and the reading pointer has
+    one slot for it. A wallabag export's `dc:creator` is whatever the exporter
+    put there, often the site, often a byline, often nothing; the DOMAIN is the
+    fact a reader recognises, and it is what the Articles list and the end screen
+    already draw, so this is a third surface naming one fact rather than a fourth
+    naming a different one. Taken off the article's sidecar, which is the
+    server's own answer, rather than out of the EPUB, which is the exporter's --
+    and an empty one leaves the EPUB's author standing, because an absent sidecar
+    is not evidence that there is no author.
+
     AND ZERO IS NOT A COUNT EITHER, which the sentence above was read as not
     covering and does. `0 UNREAD` shipped and was reported off the device: a
     reader who has read everything is told so on the screen they see most often,

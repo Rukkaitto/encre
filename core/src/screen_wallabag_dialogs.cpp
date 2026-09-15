@@ -28,10 +28,15 @@ bool WallabagConnectingScreen::setFetching(int done, int total) {
   const std::string message = "Fetching " + std::to_string(done) + " of " + std::to_string(total) +
                               ".";
   const std::string note = "ANYTHING FETCHED IS KEPT.";
-  if (vm_.caption == caption && vm_.message == message) return false;
+  // THE MARK CHANGES WITH THE STAGE, so the FIRST call has something to report
+  // even when the strings happen to match: `vm_.fetching` is part of what is
+  // drawn, and a `false` here would leave the radio on a panel that is
+  // downloading. It is in the comparison rather than only the assignment.
+  if (vm_.caption == caption && vm_.message == message && vm_.fetching) return false;
   vm_.caption = caption;
   vm_.message = message;
   vm_.note = note;
+  vm_.fetching = true;
   return true;
 }
 

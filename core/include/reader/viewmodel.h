@@ -935,6 +935,16 @@ struct WallabagConnectingViewModel {
   std::string caption;  // "CONNECTING..." then "SYNCING..."
   std::string message;  // "Connecting to wallabag.lan." then "Fetching 3 of 12."
   std::string note;     // the footnote; it differs per stage too
+  // WHICH STAGE, AND THEREFORE WHICH MARK. The first stage IS the radio -- it is
+  // joining a network and the message names the host -- and the second is past
+  // it, with bytes landing on the card one article at a time. Drawn as `kWifi`
+  // and `kDownload`, which is what design/WallabagConnecting.dc.html and
+  // design/WallabagFetching.dc.html respectively carry.
+  //
+  // A FLAG AND NOT A DERIVATION FROM THE CAPTION: the caption is copy and may be
+  // reworded, where this is a state. `setFetching` is the one thing that sets
+  // it, beside the three strings it already rewrites.
+  bool fetching = false;
   std::array<std::string, 4> hints{};
   std::array<bool, 4> holds{};
 };

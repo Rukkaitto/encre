@@ -3886,7 +3886,12 @@ void QuietTheme::renderWallabagConnecting(Framebuffer& fb, const FontSet& fonts,
   const Font& body = fonts[Role::Value500];
   const Font& note = fonts[Role::Meta400];
   const Tracking noteTracking = trackingEm(note, 100);
-  const Icon& mark = icons::kWifi;
+  // THE MARK SAYS WHICH STAGE. The radio while connecting, a download while
+  // fetching -- see WallabagConnectingViewModel::fetching. It drew `kWifi` at
+  // both, so the screen reporting a download showed the radio; and the board it
+  // was supposed to follow drew the SYNC ROW's circular arrow, so all three
+  // disagreed.
+  const Icon& mark = vm.fetching ? icons::kDownload : icons::kWifi;
 
   const Prose label = wrapPanelCaption(fonts, vm.caption, contentW);
   // `WordBreak::Anywhere` for renderWifiConnect's reason, which transfers with

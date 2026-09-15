@@ -29,6 +29,31 @@
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; position: relative;">
 
   <!--
+    THE MARK IS A DOWNLOAD AND NOT THE RADIO, AND THE TWO STAGES OF THIS ONE
+    SCREEN NOW DIFFER BY IT. `WallabagConnecting.dc.html` is the first stage and
+    keeps the three-arc `kWifi`, because that stage IS the radio: it is joining a
+    network and the message names the host. This stage is past that -- the
+    connection is up, the listing has been walked, and what is happening is
+    bytes arriving on the card, one article at a time.
+
+    IT WAS THE CIRCULAR ARROW, which is `kRescan`, which is the SYNC ROW's mark
+    on the list behind this panel. So the screen that reports the sync drew the
+    same glyph as the row that starts it, and neither drew what was actually
+    happening. Reported off the device as "in the Fetching modal, the icon should
+    be a download icon instead of a wifi icon" -- the firmware was drawing
+    `kWifi` at both stages while this board drew the arrow at one, so the board
+    and the render had already come apart here.
+
+    IT IS kWifi's BOX EXACTLY -- 60x46 on a 24x18 viewBox at 1.8 stroke -- AND
+    THAT IS A CONSTRAINT RATHER THAN A STYLE. The two marks are the two stages of
+    ONE panel, whose height is derived from `mark.h`, so a mark of a different
+    height resizes the panel and re-centres it partway through a sync. That is
+    the same defect this board's message note already guards against, where the
+    word `article` was dropped so `Fetching 9 of 12.` cannot reflow to a second
+    line while the reader watches. Drawn at 25x25 first, it shrank the panel 21px
+    and moved 182 rows of the render.
+  -->
+  <!--
     THE SECOND STAGE OF ONE DIALOG, NOT A SECOND DIALOG. Same ScreenId, same
     340px panel on `left: 70px`, same single `CANCEL` and three 36px dead slots.
     What changes is the caption and the message, which is why
@@ -86,7 +111,7 @@
     <div style="font-size: var(--t-value); font-weight: 700;">3 UNREAD</div>
   </div>
   <div style="display: flex; align-items: center; gap: 12px; padding: 12px 24px; border-bottom: 1px solid #000000;">
-    <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M13 8a5 5 0 1 1-1.5-3.6" stroke="#000000" stroke-width="1.6"></path><path d="M12 1v3.5H8.5" stroke="#000000" stroke-width="1.6"></path></svg>
+    <svg width="60" height="46" viewBox="0 0 24 18" fill="none"><path d="M12 1v9" stroke="#000000" stroke-width="1.8"></path><path d="M7.5 6.5L12 11l4.5-4.5" stroke="#000000" stroke-width="1.8"></path><path d="M2.5 11.5v5h19v-5" stroke="#000000" stroke-width="1.8"></path></svg>
     <div style="font-size: var(--t-label); font-weight: 500; flex-grow: 1;">Sync now</div>
     <div style="font-size: var(--t-meta); letter-spacing: 0.1em; white-space: nowrap;">WALLABAG &middot; NO NEW</div>
   </div>

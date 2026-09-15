@@ -265,6 +265,20 @@ ICONS = {
         "source": "design/WifiConnect.dc.html",
         "match": "M1 6a16 16 0 0 1 22 0",
     },
+    # THE FETCHING STAGE'S MARK, and the one thing that distinguishes the two
+    # stages of one screen. `WallabagConnecting.dc.html` keeps kWifi because that
+    # stage IS the radio; this stage is past it and what is happening is bytes
+    # landing on the card.
+    #
+    # The tray is the match key rather than the arrow: a downward stroke and a
+    # chevron are the two commonest shapes in this directory, and `M2.5 10.5v4h11v-4`
+    # is on nothing else.
+    "download": {
+        "symbol": "kDownload",
+        "note": "an arrow into a tray: the sync dialog's fetching stage",
+        "source": "design/WallabagFetching.dc.html",
+        "match": "M2.5 11.5v5h19v-5",
+    },
     "sdcard": {
         "symbol": "kSdCard",
         "note": "an SD card, notched corner and contacts: the no-card prompt",
