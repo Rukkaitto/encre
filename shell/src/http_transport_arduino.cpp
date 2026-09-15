@@ -39,6 +39,36 @@ ArduinoHttpTransport::ArduinoHttpTransport(std::string server) : server_(std::mo
 
 ArduinoHttpTransport::~ArduinoHttpTransport() { teardown(); }
 
+bool ArduinoHttpTransport::resolveHost() {
+  if (resolved_) return true;
+
+  // The host out of `scheme://host[:port]`. No path can appear here: `server_`
+  // is the origin and every request's own path is joined to it.
+  std::string host = server_;
+  const size_t scheme = host.find("://");
+  if (scheme != std::string::npos) host.erase(0, scheme + 3);
+  const size_t cut = host.find_first_of(":/");
+  if (cut != std::string::npos) host.erase(cut);
+  if (host.empty()) return false;
+
+  // AN IP ADDRESS NEEDS NO RESOLVER, and a self-hosted wallabag on a LAN is
+  // often reached by one. `fromString` answers whether this is already one.
+  IPAddress addr;
+  if (addr.fromString(host.c_str())) {
+    resolved_ = true;
+    return true;
+  }
+
+  for (int attempt = 1; attempt <= kResolveAttempts; ++attempt) {
+    if (WiFi.hostByName(host.c_str(), addr) == 1) {
+      resolved_ = true;
+      return true;
+    }
+    if (attempt < kResolveAttempts) delay(kResolveSettleMs);
+  }
+  return false;
+}
+
 void ArduinoHttpTransport::fail(HttpFailure why) {
   failure_ = why;
   state_ = HttpState::Failed;
@@ -87,12 +117,38 @@ bool ArduinoHttpTransport::begin(const reader::HttpRequest& request, reader::Bod
     live_->tls.setHandshakeTimeout(kIdleTimeoutMs / 1000);
   }
 
+  // RESOLVE THE NAME OURSELVES, WITH RETRIES, AND THAT IS TWO FIXES IN ONE.
+  //
+  // THE DIAGNOSTIC HALF: `HTTPClient` resolves inside `GET()`, so a name that
+  // does not resolve and a server that refuses a connection are the SAME -1 with
+  // the same "connection refused" string -- measured on glass, where one sync
+  // answered 200 and the next spent 5.1 s and 392 bytes to fail with mbedTLS
+  // never reaching an error of its own. `HttpFailure::Dns` exists in the seam
+  // and was on the wrong branch: it sat on `http.begin()` failing, which is a
+  // URL that will not PARSE and has nothing to do with a name.
+  //
+  // THE FIX HALF, AND IT IS THIS PROJECT'S OWN LESSON TWICE OVER: doing network
+  // work in the first instant after an association is what reason 208 already
+  // cost, and the probe's join needed the same answer -- wait and ask again.
+  // `WL_CONNECTED` means an IP arrived, which is not the same as the resolver
+  // being ready to answer, and the cost of being wrong is a whole sync.
+  if (!resolveHost()) {
+    failure_ = HttpFailure::Dns;
+    state_ = HttpState::Failed;
+    lastError_ = "the server's name did not resolve";
+    lastCode_ = 0;
+    ++requests_;
+    return false;
+  }
+
   const uint32_t heapBefore = ESP.getFreeHeap();
   const uint32_t blockBefore = ESP.getMaxAllocHeap();
   const std::string url = server_ + request.path;
   NetworkClient& client = secure_ ? static_cast<NetworkClient&>(live_->tls) : live_->plain;
   if (!live_->http.begin(client, url.c_str())) {
-    fail(HttpFailure::Dns);
+    // NOT `Dns`: this is the URL refusing to parse, which is the reader's
+    // `server` value and not the network.
+    fail(HttpFailure::Refused);
     return false;
   }
   // REDIRECTS ARE NOT FOLLOWED, and that is deliberate on an API: every wallabag

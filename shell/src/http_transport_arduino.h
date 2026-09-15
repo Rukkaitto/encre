@@ -93,7 +93,16 @@ class ArduinoHttpTransport : public reader::HttpTransport {
   // that TLS has just been measured fragmenting.
   static constexpr size_t kChunkBytes = 4096;
 
+  // THREE GOES AT THE NAME, 400 ms APART. `WL_CONNECTED` means an IP arrived and
+  // not that the resolver is ready, and this device asks within milliseconds of
+  // associating -- the same "immediately after the join" hazard that cost reason
+  // 208 on the join itself. Measured on glass: one sync resolved and answered
+  // 200, the next failed in 5.1 s having spent 392 bytes.
+  static constexpr int kResolveAttempts = 3;
+  static constexpr uint32_t kResolveSettleMs = 400;
+
  private:
+  bool resolveHost();
   void fail(reader::HttpFailure why);
   void teardown();
 
@@ -108,6 +117,7 @@ class ArduinoHttpTransport : public reader::HttpTransport {
   int32_t declaredLen_ = -1;
   uint32_t lastProgressMs_ = 0;
   bool secure_ = false;
+  bool resolved_ = false;
   std::string lastError_;
   int lastCode_ = 0;
   uint32_t requests_ = 0;
