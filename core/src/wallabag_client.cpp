@@ -423,11 +423,11 @@ void WallabagClient::cancel() {
   step_ = Step::Idle;
 }
 
-bool WallabagClient::beginInfo(BodySink& sink) {
+bool WallabagClient::beginInfo(BufferSink& sink) {
   HttpRequest r;
   r.path = "/api/info";
   checkingInfo_ = true;
-  infoSink_ = dynamic_cast<BufferSink*>(&sink);
+  infoSink_ = &sink;
   // NO Authorization HEADER, which is the whole point of this call: reachability
   // is answerable before any credential is used, so "that URL is not a wallabag"
   // is a different message from "those credentials were refused".

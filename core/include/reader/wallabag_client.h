@@ -84,7 +84,14 @@ class WallabagClient {
 
   // `/api/info`, which needs no token -- so "that URL is not a wallabag" is
   // answerable before any credential is used.
-  bool beginInfo(BodySink& sink);
+  //
+  // IT TAKES A BufferSink, NOT A BodySink, AND THE FIRMWARE BUILD IS WHY. This
+  // answer is decided from the BODY (a proxy and a captive portal both answer
+  // 200), so the sink has to be readable -- and the first version got there with
+  // a `dynamic_cast`, which compiles on the desktop and fails outright under the
+  // firmware's `-fno-rtti`. A typed parameter says the same thing at the call
+  // site and costs nothing: every caller already holds one.
+  bool beginInfo(BufferSink& sink);
   // A listing page. `sinceStamp` empty means a FIRST sync.
   bool beginListing(const std::string& sinceStamp, int page, BodySink& sink);
   bool beginDownload(int id, BodySink& sink);
@@ -130,7 +137,7 @@ class WallabagClient {
   int status_ = 0;
   bool authenticated_ = false;
   bool checkingInfo_ = false;
-  BufferSink* infoSink_ = nullptr;
+  BufferSink* infoSink_ = nullptr;  // set only by beginInfo, and typed there
 };
 
 }  // namespace reader
