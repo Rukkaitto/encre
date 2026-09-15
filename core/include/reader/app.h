@@ -257,7 +257,7 @@ struct Action {
   // APPENDED, never inserted -- a Kind is compared, never stored, but appending
   // costs nothing and keeps every existing value where it was.
   enum class Kind : uint8_t {
-    None, Redraw, Push, Pop, PopTo, Replace, Sleep, Retry, Open, Finish, Delete, Wifi
+    None, Redraw, Push, Pop, PopTo, Replace, Sleep, Retry, Open, Finish, Delete, Wifi, Article
   };
   Kind kind = Kind::None;
   ScreenId target = ScreenId::Home;  // meaningful for Push and PopTo
@@ -350,6 +350,28 @@ struct Action {
   // for no work. Back off the CONNECTING dialog is not navigation: a join is in
   // flight and the radio has to be told.
   static Action wifi() { return {Kind::Wifi, ScreenId::Home}; }
+  // "An Articles screen has an outcome for you." wifi()'s contract exactly, one
+  // subsystem over, and copied deliberately rather than re-derived.
+  //
+  // NOTHING IS POPPED. The shell reads the outcome off the screen still on top
+  // and then pops, replaces or leaves it standing, whichever the outcome calls
+  // for. A screen that popped itself and then offered a getter would be offering
+  // it about a DESTROYED object -- dispatch's Pop is stack_.pop_back() -- which
+  // is the defect wifi() was added to close after five connect-flow screens
+  // shipped with getters the shell could not call.
+  //
+  // IT CARRIES NO OUTCOME, for the reason Open and Finish carry no path: a
+  // payload here is a payload in every Action returned by every gesture on every
+  // screen, to serve one kind. The outcomes are six different shapes -- a sync
+  // request, an archive, a star, a keep-offline step, a remove-all, a cancel --
+  // and no one field could hold them. The screen is still standing, so ask it.
+  //
+  // A SCREEN LATCHES WHEN THE SHELL HAS WORK TO DO AND POPS ITSELF WHEN IT HAS
+  // NOT, which is wifi()'s rule and is why this is not on every gesture in the
+  // flow: Back off the article-actions overlay is navigation and nothing else,
+  // so it stays Action::pop(). Back off the CONNECTING dialog is not navigation
+  // -- a sync is in flight and the engine has to be told.
+  static Action article() { return {Kind::Article, ScreenId::Home}; }
 };
 
 // The four hint slots are the four front buttons in hardware order (spec 4.0).
@@ -961,6 +983,25 @@ class App {
   bool wifiRequested() const { return wifi_; }
   void clearWifiRequest() { wifi_ = false; }
 
+  // An Articles screen has latched an outcome. The shell's job, in order, and it
+  // is wifiRequested()'s list with the nouns changed:
+  //
+  //   1. clearArticleRequest(), so a failed attempt does not re-fire forever;
+  //   2. ask the screen that is STILL ON TOP which outcome it was -- the list's
+  //      chosen(), the actions overlay's chosen(), the end screen's chosen(),
+  //      the account screen's chosen(), the dialog's cancelled(), the error's
+  //      chosen(). Nothing is popped here precisely so there is something left
+  //      to ask;
+  //   3. drive the store or the radio, keeping neither in core/;
+  //   4. pop, or replace, or leave the screen standing, whichever the outcome
+  //      calls for. Where the flow lands is a fact about the outcome and not
+  //      about the screen.
+  //
+  // Nothing here repaints on its own, for Retry's and Wifi's reason: what an
+  // outcome changes on glass is usually a screen change rather than a repaint.
+  bool articleRequested() const { return article_; }
+  void clearArticleRequest() { article_ = false; }
+
   ButtonMask longPressable() const { return top().longPressable(); }
   ButtonMask autoRepeat() const { return top().autoRepeat(); }
 
@@ -999,6 +1040,7 @@ class App {
   bool finish_ = false;
   bool delete_ = false;
   bool wifi_ = false;
+  bool article_ = false;
   // Mutable because render() is const: painting does not change the app, but it
   // does change what is on glass, and this is what remembers that. The
   // alternative -- a non-const render() -- would make every const App& in the

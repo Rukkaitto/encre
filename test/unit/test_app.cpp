@@ -1057,3 +1057,44 @@ TEST_CASE("a delete request changes nothing itself -- not the frame, not the sta
   CHECK_FALSE(app.retryRequested());
   CHECK_FALSE(app.openRequested());
 }
+
+TEST_CASE("the article latch is wifi()'s contract, one flow over") {
+  // WHAT IT IS FOR: the Articles flow's screens latch outcomes the shell must act
+  // on -- a sync request, an archive, a star, a keep-offline change, a remove-all
+  // -- and every one of them needs a CARD or a RADIO, neither of which is core/'s.
+  //
+  // NOTHING IS POPPED, WHICH IS THE HALF THAT MATTERS. dispatch's Pop is
+  // stack_.pop_back(), which DESTROYS the screen, so a screen that popped itself
+  // and then offered a getter would be offering it about an object that no longer
+  // exists. That is the defect Action::wifi() was added to close, after five
+  // connect-flow screens each shipped with a getter the shell could not call.
+  FakeFactory f;
+  App app(std::make_unique<FakeScreen>(ScreenId::Home, Action::article()), f);
+  app.clearDirty();
+  CHECK_FALSE(app.articleRequested());
+  app.dispatch(kConfirm);
+  CHECK(app.articleRequested());
+
+  // The screen is STILL THERE to be asked, at the same depth, and nothing repainted.
+  CHECK(app.depth() == 1);
+  CHECK(app.top().id() == ScreenId::Home);
+  CHECK_FALSE(app.dirty());
+  CHECK_FALSE(app.transition());
+
+  app.clearArticleRequest();
+  CHECK_FALSE(app.articleRequested());
+  // And it re-latches, for the delete latch's reason: the shell clears the flag
+  // before it does the work, so a second press after a failed sync must be visible
+  // as a second request.
+  app.dispatch(kConfirm);
+  CHECK(app.articleRequested());
+
+  // Its own latch. An article outcome must not read as any of the other six --
+  // the shell branches on exactly one of these per iteration.
+  CHECK_FALSE(app.wifiRequested());
+  CHECK_FALSE(app.deleteRequested());
+  CHECK_FALSE(app.finishRequested());
+  CHECK_FALSE(app.sleepRequested());
+  CHECK_FALSE(app.retryRequested());
+  CHECK_FALSE(app.openRequested());
+}

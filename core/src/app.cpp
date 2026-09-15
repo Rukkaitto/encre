@@ -537,6 +537,12 @@ void App::dispatch(const InputEvent& ev) {
       // is a DESTROYED screen -- see Action::wifi().
       wifi_ = true;
       break;
+    case Action::Kind::Article:
+      // Wifi's contract exactly, and for the same two reasons: the card and the
+      // radio are the shell's, and NOTHING IS POPPED because the shell has to
+      // ask the screen which of six outcomes it was. See Action::article().
+      article_ = true;
+      break;
   }
 }
 
