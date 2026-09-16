@@ -241,6 +241,41 @@ FLOW_SCREENS = [
     # The hold on a saved network. ItemActions reads the LIBRARY's focused row, so
     # this could not be reused and is its own screen.
     ("wifi_network_actions", "WifiNetworkActions.dc.html", "Network actions"),
+
+    # ARTICLES OVER WALLABAG (V1.1). The list, its not-set-up variant, the two
+    # stages of the sync dialog, three failure shapes and two overlays. Same
+    # shape as the connect flow above and for the same reasons, so only what
+    # differs is noted.
+    ("articles",        "Articles.dc.html",       "Articles list"),
+    # The state a device with no /.reader/wallabag.json is in, which is every
+    # device until somebody edits a file on a computer -- so it is the state a
+    # reader meets FIRST, in HomeEmpty's and WifiSettingsEmpty's company. A
+    # variant of the list, not a second screen.
+    ("articles_setup",  "ArticlesSetup.dc.html",  "Articles / not set up"),
+    # The list with the stamp's `N NEW` value and a status block above the sync
+    # row. Also a variant; it earns its own row for the reason the three join
+    # failures do -- the mismatch percentage is per screen, and folding a state
+    # in averages a regression against a board that cannot show it.
+    ("articles_sync_done", "SyncDone.dc.html",    "Articles / sync done"),
+    ("article_actions", "ArticleActions.dc.html", "Article actions"),
+    ("article_end",     "ArticleEnd.dc.html",     "Article finished"),
+    ("wallabag_account", "WallabagAccount.dc.html", "wallabag account"),
+    # TWO STAGES OF ONE DIALOG, one ScreenId, one panel. They are separate rows
+    # because a sync holds the second for a minute or more and the first for a
+    # few seconds, so a fault in the stage nobody looks at would hide inside an
+    # average of the two.
+    ("wallabag_connecting", "WallabagConnecting.dc.html", "Sync / connecting"),
+    ("wallabag_fetching",   "WallabagFetching.dc.html",   "Sync / fetching"),
+    # THREE FAILURE SHAPES, on the join flow's precedent and BookError's
+    # argument: refused, unreachable, and nothing to reach it over. The first
+    # and third drop `TRY AGAIN`, so they are not one layout.
+    ("wallabag_error",            "WallabagError.dc.html",            "Sync failed / sign-in"),
+    ("wallabag_error_offline",    "WallabagErrorOffline.dc.html",     "Sync failed / offline"),
+    ("wallabag_error_no_network", "WallabagErrorNoNetwork.dc.html",   "Sync failed / no network"),
+    # The confirmation `Remove downloaded articles...` opens. Its veil is the
+    # account screen rather than the list, which is the one overlay in this flow
+    # whose parent is not the Articles list.
+    ("articles_remove_confirm", "ArticlesRemoveConfirm.dc.html", "Remove downloads"),
 ]
 
 

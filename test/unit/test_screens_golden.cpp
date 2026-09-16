@@ -153,8 +153,10 @@ TEST_CASE("QuietTheme renders Settings to golden, reached by pressing") {
     reader::App app(
         std::make_unique<reader::HomeScreen>(reader::demoHomeVm(), reader::demoHomeTargets()),
         factory);
-    // TWO Downs then Confirm: Home's focus starts on the CONTINUE block, so the
-    // first Down reaches LIBRARY and the second SETTINGS.
+    // THREE Downs then Confirm: Home's focus starts on the CONTINUE block, so
+    // the first Down reaches LIBRARY, the second ARTICLES and the third
+    // SETTINGS. It was two until #141's row landed between them.
+    app.dispatch({reader::Button::Down, reader::PressKind::Short});
     app.dispatch({reader::Button::Down, reader::PressKind::Short});
     app.dispatch({reader::Button::Down, reader::PressKind::Short});
     app.dispatch({reader::Button::Confirm, reader::PressKind::Short});

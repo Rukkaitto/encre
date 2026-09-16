@@ -1,0 +1,244 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+    .dim-veil { background-image: radial-gradient(circle, #ffffff 1.3px, transparent 1.5px); background-size: 3px 3px; }
+  </style>
+</helmet>
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; position: relative;">
+
+  <!--
+    THE SYNC FLOW'S MIDDLE STATES (#124). The credentials are a file on the
+    card, /.reader/wallabag.json (#111), so nothing on this device opens a
+    sign-in: the firmware reads that file and connects when it syncs. Between
+    the sync starting and the list coming back with new articles in it sit
+    three boards -- WallabagConnecting.dc.html and the two failure shapes
+    WallabagError.dc.html and WallabagErrorOffline.dc.html.
+
+    IT WAS FOUR BOARDS AND A KEYBOARD, AND #111 DELETED HALF OF THEM. The
+    earlier round had ArticlesSetup's slab open InstapaperUsername ->
+    InstapaperPassword -> `GO`, with a third failure shape for a refused pair.
+    Those three boards are gone: with the sign-in in a file there is nothing to
+    type, no field to send the reader back to, and no refusal that is about a
+    keystroke.
+
+    THE PRECEDENTS ARE WifiConnect.dc.html AND WifiError.dc.html, and they are
+    followed rather than adapted: the 380px panel on `left: 50px` with a 21/20
+    caption, an 18/20 body block with kWarning over a --t-body message at 1.45,
+    a 0/20/20 slab column of 68px slabs, and an opaque absolutely-positioned
+    hint bar. The in-flight board takes WifiConnect's 340px panel on `left: 70px`
+    and its --t-value message, which is that board's shape and not these two's.
+
+    THERE IS NO SUCCESS BOARD, AND THAT IS A DECISION. CLAUDE.md records why
+    WifiConnect has one state and not two: "It used to step to READY, which is
+    gone: a successful join leaves for the saved list, and the list with the
+    network in it is the confirmation -- at one waveform instead of two." The
+    same holds here. A sync that works leaves for Articles.dc.html with the new
+    articles in it, and SyncDone.dc.html stamps `WALLABAG - NOW` on the row that
+    started it, so the LIST is the confirmation; a `CONNECTED` step in front of
+    it would be a second waveform saying less than the screen behind it.
+
+    THE VEILED PARENT IS Articles.dc.html ON ALL THREE, and it is GENERATED FROM
+    THAT BOARD rather than transcribed. A veil is not decoration: App::render
+    paints the real parent, then the veil, then the overlay, so whatever is
+    under the stipple is a screen the firmware really renders and make compare
+    really measures -- WifiError.dc.html shipped for a year with 72px rows
+    against WifiSettings' 80px because the dimming made eight pixels a row
+    invisible to review.
+
+    AND IT IS THE LIST RATHER THAN ArticlesSetup.dc.html, WHICH IS WHAT ALL
+    THREE USED TO VEIL. That parent reads `ARTICLES / NOT SET UP`, so a connect
+    drawn over it claimed the device was not set up while it demonstrably was --
+    and every one of these three states is reachable from a working device: a
+    wallabag password changed on the server rejects the next ordinary sync, and
+    WallabagErrorOffline's own sentence ("Nothing on it changed") presupposes
+    there is something to leave alone. The second reason is review surface:
+    ArticlesSetup under a stipple is a caption and two lines of prose, where the
+    list is a band, a sync row, five article rows and their rules.
+
+    AND THE THREE HAVE TO AGREE ABOUT IT, which is why this block stands in all
+    three notes verbatim. They are one sequence -- CONNECTING... resolves into
+    one of the other two -- so a parent that differed between them would swap
+    the whole screen behind a dialog that has not moved.
+  
+-->
+  <div style="position: absolute; top: 0; left: 0; width: 480px; height: 800px; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;">
+
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
+    <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">ARTICLES</div>
+    <div style="font-size: var(--t-value); font-weight: 700;">3 UNREAD</div>
+  </div>
+  <div style="display: flex; align-items: center; gap: 12px; padding: 12px 24px; border-bottom: 1px solid #000000;">
+    <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M13 8a5 5 0 1 1-1.5-3.6" stroke="#000000" stroke-width="1.6"></path><path d="M12 1v3.5H8.5" stroke="#000000" stroke-width="1.6"></path></svg>
+    <div style="font-size: var(--t-label); font-weight: 500; flex-grow: 1;">Sync now</div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.1em; white-space: nowrap;">WALLABAG &middot; NO NEW</div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; flex-grow: 1;">
+
+    <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px; background: #000000; color: #ffffff;">
+      <div style="width: 8px; height: 8px; background: #ffffff; margin-top: 7px; flex-shrink: 0;"></div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="font-size: var(--t-value); font-weight: 700; line-height: 31px;">The Death and Life of the Great American Essay</div>
+        <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">LONGREADS &middot; 22 MIN</div>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px; border-bottom: 1px solid #000000;">
+      <div style="width: 8px; height: 8px; background: #000000; margin-top: 7px; flex-shrink: 0;"></div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="font-size: var(--t-value); font-weight: 500; line-height: 31px;">Why We Forget Most of the Books We Read</div>
+        <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">THE ATLANTIC &middot; 9 MIN</div>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px; border-bottom: 1px solid #000000;">
+      <div style="width: 8px; height: 8px; background: #000000; margin-top: 7px; flex-shrink: 0;"></div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="font-size: var(--t-value); font-weight: 500; line-height: 31px;">In Praise of Slow Reading</div>
+        <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">AEON &middot; 14 MIN</div>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px; border-bottom: 1px solid #000000;">
+      <div style="width: 8px; height: 8px; border: 1px solid #000000; box-sizing: border-box; margin-top: 7px; flex-shrink: 0;"></div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="font-size: var(--t-value); font-weight: 400; line-height: 31px;">The Tyranny of the To-Be-Read Pile</div>
+        <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">LIT HUB &middot; 7 MIN &middot; READ</div>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px;">
+      <div style="width: 8px; height: 8px; border: 1px solid #000000; box-sizing: border-box; margin-top: 7px; flex-shrink: 0;"></div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="font-size: var(--t-value); font-weight: 400; line-height: 31px;">E Ink: The Quiet Display Technology That Refused to Die</div>
+        <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">IEEE SPECTRUM &middot; 16 MIN &middot; READ</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="margin-top: auto;"></div>
+  </div>
+  <div class="dim-veil" style="position: absolute; top: 0; left: 0; width: 480px; height: 800px;"></div>
+  <!--
+    SHAPE THREE OF THREE: THERE WAS NOTHING TO SYNC OVER. A sync needs a saved
+    Wi-Fi network marked `AUTO`, and a device with none can reach neither of the
+    other two boards truthfully. `COULDN'T SIGN IN` blames the credentials,
+    which were never sent. WallabagErrorOffline.dc.html says the server did not
+    answer, and it was never asked. Both would have the panel state something
+    the firmware knows to be false, which is the shape CLAUDE.md refuses for an
+    unread battery gauge (-1, never 0%) and for a badge promising a wake that
+    charging cannot deliver.
+
+    BookError's argument, which CLAUDE.md states as: three copy shapes because
+    one sentence would be a lie. That screen has damaged / unreadable / did not
+    fit; this flow has refused / unreachable / nothing to reach it over.
+
+    THE CAPTION IS `COULDN'T CONNECT`, WHICH IS WallabagErrorOffline.dc.html's.
+    Two shapes sharing a caption is deliberate and is the smaller of the two
+    wrongs available. From the reader's side both are one event -- the sync did
+    not happen because the network did not carry it -- and the MESSAGE is where
+    they separate, which is where BookError separates its own damaged and
+    unreadable shapes under one `CAN'T OPEN FILE`. A third caption would claim a
+    third kind of failure and there are two.
+
+    `TRY AGAIN` IS ABSENT, ON THE SIGN-IN BOARD'S ARGUMENT RATHER THAN A NEW ONE.
+    Pressing it could not succeed until the reader has been to Settings and
+    joined a network, and nothing on this panel can do that, so it is a slab
+    that draws and cannot act -- ABSENT rather than inert. Note this is the
+    DETERMINISTIC half of that argument arriving by a different road: a rejected
+    grant is deterministic because the file does not change between two presses,
+    and this is deterministic because the saved-network list does not.
+    WallabagErrorOffline.dc.html keeps its `TRY AGAIN` because a round trip can
+    fail spuriously and retrying really is an action there.
+
+    IT DOES NOT SEND THE READER ANYWHERE ITSELF. The message names Settings and
+    the reader walks there; there is no `OPEN SETTINGS` slab. A slab that
+    unwound this dialog, popped the list, popped Home and pushed Settings would
+    be the only control in this firmware that navigates across a flow boundary,
+    and it would leave the reader no way back to the sync they asked for. One
+    slab, `OK`, which is the sibling's.
+
+    THE MESSAGE NAMES THE THING TO DO AND NOT THE MACHINERY. `AUTO` is what the
+    firmware requires -- a saved network the reader marked automatic -- and the
+    sentence says `saved` instead. A reader who has joined one network has
+    marked it AUTO already, and a reader who has joined none needs to hear
+    `join`, not a distinction between two states of a list they have never seen.
+    It is state-then-action in two sentences, which is the family's shape:
+    WallabagError.dc.html is state-then-what-to-check and
+    WallabagErrorOffline.dc.html is state-then-reassurance.
+
+    MEASURED IN THIS BOARD, NOT IN A RECONSTRUCTION OF IT, and the difference is
+    not academic: a scratch page rebuilding this column's CSS measured ~4% narrow
+    and would have shipped a sentence one word past the edge. Greedy-on-spaces,
+    which is the firmware's own rule, with the measuring span injected into this
+    board so it inherits this board's root font stack. The column is 336px at
+    BOTH geometries -- the panel is a fixed 380px and only its left offset moves
+    -- so one measurement covers both:
+
+      No Wi-Fi network is saved.       265.19 / 247.67 / 189.34px
+      Join one in Settings first.      3 lines, tightest break 25.92px
+
+    against #76's 12px floor, and beside WallabagErrorOffline.dc.html's own
+    78.86px on the same panel. The first cut, `No saved Wi-Fi network. Join one
+    in Settings first.`, also ran to three lines and broke at 12.66px with its
+    first line 332.09px of the 336 -- over the floor by two thirds of a pixel,
+    which is the knife edge WifiError.dc.html was re-cut off and this board
+    should not have been authored onto. `No network is saved yet.` is worse
+    still at 1.25px.
+
+    THE HINT BAR IS `CANCEL . OK` AND TWO 36px DEAD SLOTS, the sibling's, for
+    the sibling's reason: one slab is not a choice, so `SELECT` would promise
+    one, and Up and Down have no second row to reach.
+  -->
+  <div style="position: absolute; top: 50%; transform: translateY(-50%); left: 50px; width: 380px; background: #ffffff; border: 2px solid #000000; box-sizing: border-box;">
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 21px 20px; border-bottom: 2px solid #000000;">
+      <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">COULDN&rsquo;T CONNECT</div>
+    </div>
+    <div style="padding: 18px 20px; display: flex; flex-direction: column; gap: 12px;">
+      <svg width="32" height="28" viewBox="0 0 18 16" fill="none"><path d="M9 1 17 15H1z" stroke="#000000" stroke-width="1.6"></path><path d="M9 6v4" stroke="#000000" stroke-width="1.6"></path><rect x="8.3" y="11.6" width="1.4" height="1.4" fill="#000000"></rect></svg>
+      <div style="font-size: var(--t-body); line-height: 1.45;">No Wi-Fi network is saved. Join one in Settings first.</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 12px; padding: 0 20px 20px 20px;">
+      <div style="background: #000000; color: #ffffff; height: 68px; display: flex; align-items: center; justify-content: center;">
+  <div style="font-size: var(--t-value); letter-spacing: 0.18em; font-weight: 700;">OK</div>
+</div>
+    </div>
+  </div>
+<div style="position: absolute; bottom: 0; left: 0; width: 100%; background: #ffffff; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">CANCEL</div></div>
+  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">OK</div></div>
+  <div style="width: 36px;"></div>
+  <div style="width: 36px;"></div>
+</div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

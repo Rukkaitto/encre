@@ -153,7 +153,8 @@ reader::JoinState ArduinoWifiRadio::joinState() const {
   if (gSawDisconnect) {
     join_ = reader::JoinState::Failed;
     reason_ = gLastDisconnectReason;
-    Serial.printf("[wifi] join failed, vendor reason %d\n", reason_);
+    Serial.printf("[wifi] join failed, vendor reason %d -- %s\n", reason_,
+                  reader::wifiReasonName(reason_));
     Serial.flush();
     return join_;
   }

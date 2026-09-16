@@ -265,6 +265,20 @@ ICONS = {
         "source": "design/WifiConnect.dc.html",
         "match": "M1 6a16 16 0 0 1 22 0",
     },
+    # THE FETCHING STAGE'S MARK, and the one thing that distinguishes the two
+    # stages of one screen. `WallabagConnecting.dc.html` keeps kWifi because that
+    # stage IS the radio; this stage is past it and what is happening is bytes
+    # landing on the card.
+    #
+    # The tray is the match key rather than the arrow: a downward stroke and a
+    # chevron are the two commonest shapes in this directory, and `M2.5 10.5v4h11v-4`
+    # is on nothing else.
+    "download": {
+        "symbol": "kDownload",
+        "note": "an arrow into a tray: the sync dialog's fetching stage",
+        "source": "design/WallabagFetching.dc.html",
+        "match": "M2.5 11.5v5h19v-5",
+    },
     "sdcard": {
         "symbol": "kSdCard",
         "note": "an SD card, notched corner and contacts: the no-card prompt",
@@ -287,6 +301,23 @@ ICONS = {
         "note": "a tick: the end-of-book confirmation mark",
         "source": "design/BookEnd.dc.html",
         "match": "M1 6l5 5L15 1",
+    },
+    # The Articles flow's not-set-up mark, 98x91 -- a stack of articles over an
+    # open tray. Unique on its board and unique in the whole design directory:
+    # nothing else draws a `rect` at x=4.5,y=0.5, which is the top sheet of the
+    # stack. It is the ONLY new mark this flow needs -- the sync row reuses
+    # kRescan (the identical circular-arrow path at the identical 25x25) and the
+    # sync-done tick reuses kCheck, whose own note already records that
+    # SyncDone.dc.html draws that path at the same 26x21.
+    #
+    # LARGE, like kBookLarge and kBatteryLarge, and for their reason: these are
+    # pre-rendered bitmaps and there is no scaling one up. 98x91 at 2bpp is
+    # 2,275 bytes.
+    "articles_setup": {
+        "symbol": "kArticlesLarge",
+        "note": "a stack of articles over a tray: the not-set-up prompt",
+        "source": "design/ArticlesSetup.dc.html",
+        "match": '<rect x="4.5" y="0.5"',
     },
     # THE WARNING TRIANGLE, 32x28, and THREE BOARDS DRAW IT -- BookError.dc.html,
     # BookErrorUnreadable.dc.html and LowBattery.dc.html. It arrived twice, on two

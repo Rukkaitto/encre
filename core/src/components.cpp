@@ -763,15 +763,16 @@ int drawBookRow(Framebuffer& fb, const FontSet& fonts, int y, const BookRowConte
 
 // --- design/BookDetails.dc.html's and Contents.dc.html's field row -----------
 
-int detailRowHeight(bool rule) { return kDetailRowContentH + (rule ? kDetailRowRuleH : 0); }
+int detailRowHeight(bool rule, int contentH) { return contentH + (rule ? kDetailRowRuleH : 0); }
 
 int drawDetailRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label,
-                  std::string_view value, bool focused, bool rule, Plane plane) {
+                  std::string_view value, bool focused, bool rule, Plane plane,
+                  int contentH) {
   const Ink ink = focused ? Ink::White : Ink::Black;
   if (focused)
-    fb.fillRect(0, y, fb.width(), kDetailRowContentH, false);
+    fb.fillRect(0, y, fb.width(), contentH, false);
   else if (rule)
-    fb.fillRect(0, y + kDetailRowContentH, fb.width(), kDetailRowRuleH, false);
+    fb.fillRect(0, y + contentH, fb.width(), kDetailRowRuleH, false);
   // Value500 and Value700: the same size at two weights, which is the board's
   // own distinction between what a field is called and what it says. Neither run
   // is tracked -- the board sets no letter-spacing on either.
@@ -800,12 +801,31 @@ int drawDetailRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view
   const int vNatural = value.empty() ? 0 : vf.measure(value);
   const int avail = fb.width() - 2 * kMargin - (value.empty() ? 0 : kBandGap);
   const int labelW = labelShare(lf.measure(label), vNatural, avail);
-  drawText(fb, lf, kMargin, baselineIn(lf, y, kDetailRowContentH),
+  drawText(fb, lf, kMargin, baselineIn(lf, y, contentH),
            elideToWidth(lf, label, labelW), ink, {}, plane);
-  if (!value.empty())
-    drawText(fb, vf, fb.width() - kMargin - vf.measure(value),
-             baselineIn(vf, y, kDetailRowContentH), value, ink, {}, plane);
-  return detailRowHeight(rule);
+  if (!value.empty()) {
+    // THE VALUE ELIDES TOO, AND IT DID NOT. Only the label was cut, so a value
+    // wider than its share was drawn at its NATURAL width from
+    // `width - margin - measure(value)` -- which for a long one is NEGATIVE. It
+    // began left of the margin, ran under the label and off the panel, with no
+    // ellipsis to say so: `centreIn`'s negative half one primitive over, and the
+    // same defect the LABEL was fixed for when real chapter names first went
+    // through this row.
+    //
+    // REPORTED AS "the chapter name in the book details screen overflows", and
+    // it is `Current chapter` -- the one value on any of these screens that is
+    // the BOOK's rather than a field name or a two-to-four-character count.
+    // `labelShare` already divided the row; the value's share is what is left of
+    // it, and nothing was spending it.
+    //
+    // RIGHT-ALIGNED ON THE MARGIN AT ITS CUT WIDTH, which is this file's
+    // existing rule for a truncated run and what keeps the slot flush whatever
+    // it holds.
+    const std::string shown = elideToWidth(vf, value, avail - labelW);
+    drawText(fb, vf, fb.width() - kMargin - vf.measure(shown), baselineIn(vf, y, contentH),
+             shown, ink, {}, plane);
+  }
+  return detailRowHeight(rule, contentH);
 }
 
 // --- An overlay's panel -----------------------------------------------------

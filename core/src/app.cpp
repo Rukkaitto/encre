@@ -122,6 +122,39 @@ constexpr Restore kRestorability[] = {
     // iteration the hub is on top -- which a restore, happening before any iteration
     // runs, is not.
     Restore::Never,
+    // Articles -- READY, and for the Library's reason rather than the hub's: the
+    // factory holds the FileSystem the list is built from, so a wake rebuilds it
+    // off the card exactly as it rebuilds the Library. What the list shows is a
+    // directory, which survives a chip reset because it is on the card.
+    Restore::Ready,
+    // ArticleActions -- NEVER, on WifiNetworkActions' argument: its Facts belong to
+    // the press that opened it. Nothing re-primes them on a restore, and an overlay
+    // naming the wrong article would archive the wrong article.
+    Restore::Never,
+    // ArticleEnd -- NeedsPriming, on BookEnd's: its Facts come from the article
+    // openBookAt opened, beside the Reader's own book.
+    Restore::NeedsPriming,
+    // WallabagAccount -- READY, and this row is WifiSettings' twice over. The
+    // factory holds the FileSystem, so the counts and the watermark come off the
+    // card; and what the screen says after a chip reset is true, because every
+    // value on it describes the card rather than anything in flight.
+    Restore::Ready,
+    // WallabagConnecting -- NEVER. A sync is in flight, and deep sleep is a chip
+    // reset that ends it along with the radio. A restored dialog would say
+    // SYNCING... about nothing and never resolve, which is WifiConnect's own
+    // sentence one flow over.
+    Restore::Never,
+    // WallabagError -- NEVER. The attempt it describes is gone with the radio, and
+    // waking into a modal about a sync nobody remembers asking for is Peek's
+    // argument and BookError's.
+    Restore::Never,
+    // ArticlesRemoveConfirm -- NEVER, on DeleteConfirm's OPPOSITE answer, and the
+    // difference is worth stating. That confirmation is Ready because it reads
+    // the Library's focused row and restore() puts that Library back first. This
+    // one is built from the ACCOUNT screen's press and carries no row to be
+    // rebuilt from -- and waking into "remove every article?" is a destructive
+    // question nobody asked, which is BookError's argument at its sharpest.
+    Restore::Never,
 };
 static_assert(sizeof(kRestorability) / sizeof(kRestorability[0]) ==
                   static_cast<size_t>(ScreenId::Count),
@@ -145,6 +178,7 @@ bool screenUsesRadio(ScreenId id) {
   switch (id) {
     case ScreenId::WifiPicker:    // SCANNING
     case ScreenId::WifiConnect:   // CONNECTING...
+    case ScreenId::WallabagConnecting:  // CONNECTING... then SYNCING...
       return true;
     // The other four Wi-Fi screens have nothing in flight. The hub in
     // particular says `ON DEMAND`, which is a claim the radio is off.
@@ -152,6 +186,18 @@ bool screenUsesRadio(ScreenId id) {
     case ScreenId::WifiPassword:
     case ScreenId::WifiError:
     case ScreenId::WifiNetworkActions:
+    // ARTICLES OVER WALLABAG, and exactly ONE of the six answers true. The sync
+    // runs behind WallabagConnecting and nowhere else: the list, the overlay,
+    // the end screen and the account screen are all read off the CARD, and the
+    // error dialog describes a radio that is already down. So this function's
+    // true-set goes from two to three, and that count is asserted in
+    // test_article_outcomes.cpp rather than left as a comment.
+    case ScreenId::Articles:
+    case ScreenId::ArticlesRemoveConfirm:
+    case ScreenId::ArticleActions:
+    case ScreenId::ArticleEnd:
+    case ScreenId::WallabagAccount:
+    case ScreenId::WallabagError:
     case ScreenId::Home:
     case ScreenId::Library:
     case ScreenId::ItemActions:
@@ -213,6 +259,13 @@ const char* screenName(ScreenId id) {
     case ScreenId::WifiConnect: return "WIFI-CONNECT";
     case ScreenId::WifiError: return "WIFI-ERROR";
     case ScreenId::WifiNetworkActions: return "WIFI-NETWORK-ACTIONS";
+    case ScreenId::Articles: return "ARTICLES";
+    case ScreenId::ArticleActions: return "ARTICLE-ACTIONS";
+    case ScreenId::ArticleEnd: return "ARTICLE-END";
+    case ScreenId::WallabagAccount: return "WALLABAG-ACCOUNT";
+    case ScreenId::WallabagConnecting: return "WALLABAG-CONNECTING";
+    case ScreenId::WallabagError: return "WALLABAG-ERROR";
+    case ScreenId::ArticlesRemoveConfirm: return "ARTICLES-REMOVE-CONFIRM";
     // NOT A SCREEN -- see ScreenId::Count's own comment. Refused explicitly so this
     // switch stays exhaustive, the same reason session_record.cpp's does.
     case ScreenId::Count: return "?";
@@ -492,6 +545,12 @@ void App::dispatch(const InputEvent& ev) {
       // each popped themselves and then offered a getter, and a popped screen
       // is a DESTROYED screen -- see Action::wifi().
       wifi_ = true;
+      break;
+    case Action::Kind::Article:
+      // Wifi's contract exactly, and for the same two reasons: the card and the
+      // radio are the shell's, and NOTHING IS POPPED because the shell has to
+      // ask the screen which of six outcomes it was. See Action::article().
+      article_ = true;
       break;
   }
 }

@@ -54,19 +54,26 @@ const InputEvent kDown{Button::Down, PressKind::Short};
 
 }  // namespace
 
-TEST_CASE("exactly TWO screens may have the radio on behind them") {
+TEST_CASE("exactly THREE screens may have the radio on behind them") {
   // WHAT THIS PROTECTS is not a log line: `screenUsesRadio` is what the shell
   // sweeps against to take the radio down, so a screen wrongly answering
   // `true` lets Wi-Fi run behind something that does not say so -- and the
   // reader is entitled to know when the radio is on.
   //
-  // TWO, NOT THE SIX WI-FI SCREENS. The picker scans and the dialog joins;
-  // those are the two that put SCANNING and CONNECTING... on the glass. The
-  // hub is false on purpose -- its band reads `ON DEMAND`, a claim the radio
-  // is OFF -- and that is the case this rule was written for: Back off the
-  // picker MID-SCAN pops to the hub, and a predicate covering all six would
+  // TWO OF THE SIX WI-FI SCREENS, NOT SIX. The picker scans and the dialog
+  // joins; those are the two that put SCANNING and CONNECTING... on the glass.
+  // The hub is false on purpose -- its band reads `ON DEMAND`, a claim the
+  // radio is OFF -- and that is the case this rule was written for: Back off
+  // the picker MID-SCAN pops to the hub, and a predicate covering all six would
   // have left the radio up there indefinitely, under a screen saying it was
   // not.
+  //
+  // AND ONE OF THE ARTICLES SIX, WHICH IS WHY THIS CASE IS NAMED THREE. A sync
+  // runs behind WallabagConnecting and nowhere else: the list, the actions
+  // overlay, the end screen and the account screen are read off the CARD, and
+  // the error dialog describes a radio that is already down. The count lives
+  // here rather than being restated in test_article_outcomes.cpp -- one
+  // quantity, one assertion, or the two drift and the weaker one wins.
   //
   // THE COUNT IS THE GUARD, in test_focus_restore's idiom. A seventh Wi-Fi
   // screen fails the build first (the switch has no `default:`), and this
@@ -77,10 +84,18 @@ TEST_CASE("exactly TWO screens may have the radio on behind them") {
     CAPTURE(screenName(id));
     if (screenUsesRadio(id)) ++uses;
   }
-  CHECK(uses == 2);
+  CHECK(uses == 3);
 
   CHECK(screenUsesRadio(ScreenId::WifiPicker));
   CHECK(screenUsesRadio(ScreenId::WifiConnect));
+  CHECK(screenUsesRadio(ScreenId::WallabagConnecting));
+  // The five Articles screens with nothing in flight, named for the reason the
+  // four Wi-Fi ones below are: a count of three is satisfied by any three.
+  CHECK_FALSE(screenUsesRadio(ScreenId::Articles));
+  CHECK_FALSE(screenUsesRadio(ScreenId::ArticleActions));
+  CHECK_FALSE(screenUsesRadio(ScreenId::ArticleEnd));
+  CHECK_FALSE(screenUsesRadio(ScreenId::WallabagAccount));
+  CHECK_FALSE(screenUsesRadio(ScreenId::WallabagError));
   // The four Wi-Fi screens with nothing in flight, named individually because
   // a count of two is satisfied by any two.
   for (const ScreenId id : {ScreenId::WifiSettings, ScreenId::WifiPassword,

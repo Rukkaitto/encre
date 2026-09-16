@@ -138,29 +138,29 @@ in `65b1ecd`), with the render looked at. Every new or changed string goes throu
 **Files:** `design/Articles.dc.html`, `design/SyncDone.dc.html`,
 `design/WallabagAccount.dc.html`, `design/ArticleEnd.dc.html`
 
-- [ ] **Step 1:** In `Articles.dc.html`, change the sync row's stamp `WALLABAG · 2 H AGO`
+- [x] **Step 1:** In `Articles.dc.html`, change the sync row's stamp `WALLABAG · 2 H AGO`
   to `WALLABAG · UP TO DATE`. This is the specimen for a device whose last sync
   found nothing new. Add a note above the row stating the four values the stamp can
   take and that they are outcomes, not ages: `NEVER SYNCED` (no sync has ever
   completed on this card), `UP TO DATE` (the last sync fetched nothing), `3 NEW` (the
   last sync fetched articles — the count), `FAILED` (the last sync did not finish).
   State #132 as the reason an age is impossible.
-- [ ] **Step 2:** In `SyncDone.dc.html`, change `WALLABAG · NOW` to `WALLABAG · 3 NEW`,
+- [x] **Step 2:** In `SyncDone.dc.html`, change `WALLABAG · NOW` to `WALLABAG · 3 NEW`,
   and the status line `SYNC COMPLETE · 3 NEW ARTICLES · 1 ARCHIVE PUSHED` stays —
   it is the one place the push count is stated. Note that `SyncDone` is the same
   screen as `Articles` with the stamp's `N NEW` value and the status line, so it is a
   **variant**, not a `ScreenId`.
-- [ ] **Step 3:** In `WallabagAccount.dc.html`, change `Last sync · 2 H AGO` to
+- [x] **Step 3:** In `WallabagAccount.dc.html`, change `Last sync · 2 H AGO` to
   `Last sync · UP TO DATE`, and note the same four values. Change `Unread · 3 ARTICLES`
   to keep as is — that is a count the device holds.
-- [ ] **Step 4:** In `ArticleEnd.dc.html`, confirm `2 LEFT` in the band's right slot is
+- [x] **Step 4:** In `ArticleEnd.dc.html`, confirm `2 LEFT` in the band's right slot is
   the count of unread articles remaining on the card after this one, and add a note
   saying so; the value is drawn from the store, never derived from the server.
-- [ ] **Step 5:** Render all four at 480×800 and 528×792; check no stamp wraps or
+- [x] **Step 5:** Render all four at 480×800 and 528×792; check no stamp wraps or
   collides with the `Sync now` label. `WALLABAG · NEVER SYNCED` is the widest value
   — measure it in Chrome against the row's remaining width the way `65b1ecd`
   measured the dialog messages, and record the clearance in the board note.
-- [ ] **Step 6:** `make canvas && make canvas-check`; commit
+- [x] **Step 6:** `make canvas && make canvas-check`; commit
   `feat(articles): the sync stamps state an outcome, because this device has no clock`.
 
 ### Task 0.2: Settings gets its `wallabag` row back
@@ -172,21 +172,21 @@ restores it as the door to the account screen. Home's row is the door to the *li
 
 **Files:** `design/Settings.dc.html`
 
-- [ ] **Step 1:** Add a row under CONNECTIONS, after `Wi-Fi`, label `wallabag`, value
+- [x] **Step 1:** Add a row under CONNECTIONS, after `Wi-Fi`, label `wallabag`, value
   `NOT SET UP`, drawn exactly as the `Wi-Fi` row is drawn (copy that row's markup, swap
   the two runs). The value is `SIGNED IN` once `/.reader/wallabag.json` carries all five
   values and a sync has completed at least once; `NOT SET UP` otherwise. Note that
   unlike Home this is a screen visited deliberately, so a setup state here is
   information rather than a nag — Home's row stays a chevron for the reason
   `Main.dc.html`'s menu note gives.
-- [ ] **Step 2:** Count the items. Settings is eleven today where twelve fit
+- [x] **Step 2:** Count the items. Settings is eleven today where twelve fit
   (`CLAUDE.md`, *Overlays and lists*); this makes it **twelve**. Render at both
   geometries and confirm no rail and no 14px gutter appears. Record the count in the
   board note and in `CLAUDE.md`'s "eleven items where twelve fit" sentence when Phase
   1 lands the row.
-- [ ] **Step 3:** Confirm the hint bar's Confirm slot reads `OPEN` when this row is
+- [x] **Step 3:** Confirm the hint bar's Confirm slot reads `OPEN` when this row is
   focused — it discloses a screen, like `Typography` and `Wi-Fi`.
-- [ ] **Step 4:** `make canvas && make canvas-check`; commit
+- [x] **Step 4:** `make canvas && make canvas-check`; commit
   `feat(settings): the wallabag row returns under CONNECTIONS, the door to the account screen`.
 
 ### Task 0.3: A third failure shape — no network to sync over
@@ -198,15 +198,15 @@ credentials, `COULDN'T CONNECT` says the server did not answer. Neither was aske
 **Files:** `design/WallabagErrorNoNetwork.dc.html` (create from
 `design/WallabagError.dc.html`), `design/canvas.json`
 
-- [ ] **Step 1:** Copy `WallabagError.dc.html`. Caption `COULDN'T CONNECT`. Message:
+- [x] **Step 1:** Copy `WallabagError.dc.html`. Caption `COULDN'T CONNECT`. Message:
   `No saved Wi-Fi network. Join one in Settings first.` One slab, `OK` — `TRY AGAIN`
   is absent on `WallabagError`'s own argument (pressing it could never succeed until
   the reader has been to Settings). Hint bar `CANCEL · OK` and two 36px dead slots.
-- [ ] **Step 2:** Measure the message's wrap in Chrome: tightest break at least 12px
+- [x] **Step 2:** Measure the message's wrap in Chrome: tightest break at least 12px
   (#76's floor), no line wider than the 336px column. Record the numbers in the note.
-- [ ] **Step 3:** Add the artboard to `canvas.json` on page 6 (`V1.1 · Articles`) at the
+- [x] **Step 3:** Add the artboard to `canvas.json` on page 6 (`V1.1 · Articles`) at the
   slot `make canvas` names when it refuses.
-- [ ] **Step 4:** `make canvas && make canvas-check`; commit
+- [x] **Step 4:** `make canvas && make canvas-check`; commit
   `feat(articles): a third failure shape, for a device with no network to sync over`.
 
 ### Task 0.4: The connecting dialog's second stage
@@ -219,16 +219,16 @@ own note says the caption is *"the one thing a still panel on e-ink owes a reade
 **Files:** `design/WallabagFetching.dc.html` (create from
 `design/WallabagConnecting.dc.html`), `design/canvas.json`
 
-- [ ] **Step 1:** Copy `WallabagConnecting.dc.html`. Caption `SYNCING…`. Message:
+- [x] **Step 1:** Copy `WallabagConnecting.dc.html`. Caption `SYNCING…`. Message:
   `Fetching article 3 of 12.` Footnote unchanged. Same 340px panel, same `CANCEL`.
   Note that the count advances per file and each advance is a ~520 ms waveform — the
   same price a page turn pays — so this is a paint per article and never per byte.
-- [ ] **Step 2:** Note the cancel contract for this stage: cancel stops after the file
+- [x] **Step 2:** Note the cancel contract for this stage: cancel stops after the file
   in flight, the partial file is removed, everything already fetched stays, and the
   watermark is **not** advanced — so the next sync fetches what this one did not.
-- [ ] **Step 3:** Measure the message's widest form (`Fetching article 50 of 50.`)
+- [x] **Step 3:** Measure the message's widest form (`Fetching article 50 of 50.`)
   against the 296px column; record it.
-- [ ] **Step 4:** Add to `canvas.json`; `make canvas && make canvas-check`; commit
+- [x] **Step 4:** Add to `canvas.json`; `make canvas && make canvas-check`; commit
   `feat(articles): the sync dialog's fetching stage, so a long sync does not read as frozen`.
 
 ### Task 0.5: The confirmation `Remove downloaded articles…` opens
@@ -239,13 +239,13 @@ own note says the caption is *"the one thing a still panel on e-ink owes a reade
 **Files:** `design/ArticlesRemoveConfirm.dc.html` (create from
 `design/DeleteConfirm.dc.html`), `design/canvas.json`
 
-- [ ] **Step 1:** Copy `DeleteConfirm.dc.html` with `WallabagAccount.dc.html` regenerated
+- [x] **Step 1:** Copy `DeleteConfirm.dc.html` with `WallabagAccount.dc.html` regenerated
   as its veiled parent. Caption `REMOVE DOWNLOADED ARTICLES`. Message: `Every article
   on the card is deleted. Your wallabag is untouched, and the next sync fetches them
   again.` Slabs: `REMOVE` filled, `CANCEL` outlined. Hint bar as `DeleteConfirm`'s.
-- [ ] **Step 2:** Note it is an **overlay** over the account screen; the veil is
+- [x] **Step 2:** Note it is an **overlay** over the account screen; the veil is
   generated from `WallabagAccount.dc.html`, not transcribed.
-- [ ] **Step 3:** Measure the wrap; record. Add to `canvas.json`; `make canvas &&
+- [x] **Step 3:** Measure the wrap; record. Add to `canvas.json`; `make canvas &&
   make canvas-check`; commit
   `feat(articles): the remove-downloads confirmation, which the row's ellipsis promised`.
 
@@ -253,16 +253,16 @@ own note says the caption is *"the one thing a still panel on e-ink owes a reade
 
 **Files:** `tools/compare-design.py`
 
-- [ ] **Step 1:** Add `FLOW_SCREENS` rows, one per boarded state, after the `wifi_*`
+- [x] **Step 1:** Add `FLOW_SCREENS` rows, one per boarded state, after the `wifi_*`
   rows: `articles`, `articles_setup`, `articles_sync_done`, `article_actions`,
   `article_end`, `wallabag_account`, `wallabag_connecting`, `wallabag_fetching`,
   `wallabag_error`, `wallabag_error_offline`, `wallabag_error_no_network`,
   `articles_remove_confirm`. Each names its `.dc.html` and a label.
-- [ ] **Step 2:** Run `python3 tools/test_compare_design.py` — the table checks (no
+- [x] **Step 2:** Run `python3 tools/test_compare_design.py` — the table checks (no
   duplicate id, every board on disk) must pass. Run `make compare
   COMPARE_ARGS="--only articles,wallabag_account"` and confirm each prints `design ok
   firmware not implemented` — the boards exist, the screens do not yet.
-- [ ] **Step 3:** Commit `chore(compare): rows for the twelve Articles board states`.
+- [x] **Step 3:** Commit `chore(compare): rows for the twelve Articles board states`.
 
 ---
 
@@ -286,31 +286,31 @@ grown; that is the guards working.
 - Modify: `test/unit/test_focus_restore.cpp` (`kAllScreens`, the three counts)
 - Test: `test/unit/test_session_record.cpp` (already walks every id)
 
-- [ ] **Step 1:** Append `Articles`, `ArticleActions`, `ArticleEnd`, `WallabagAccount`,
+- [x] **Step 1:** Append `Articles`, `ArticleActions`, `ArticleEnd`, `WallabagAccount`,
   `WallabagConnecting`, `WallabagError` to `ScreenId` immediately before `Count`, each
   with a comment naming its board. Build. Expected: the build fails at
   `session_record.cpp`'s table assert and at `test_focus_restore.cpp`'s catalogue
   assert, and `-Wswitch` warns in `screenUsesRadio` and `screenName`. Write down which
   guards fired — that list is evidence for the commit message.
-- [ ] **Step 2:** Add six wire names to `kNames`: `articles`, `article-actions`,
+- [x] **Step 2:** Add six wire names to `kNames`: `articles`, `article-actions`,
   `article-end`, `wallabag-account`, `wallabag-connecting`, `wallabag-error`.
-- [ ] **Step 3:** Add six `kRestorability` rows with their reasons as comments:
+- [x] **Step 3:** Add six `kRestorability` rows with their reasons as comments:
   `Articles` → `Ready` (built from the card, as the Library is); `ArticleActions` →
   `Never` (`WifiNetworkActions`' argument: its facts belong to the press);
   `ArticleEnd` → `NeedsPriming` (`BookEnd`'s: built from the open book);
   `WallabagAccount` → `Ready`; `WallabagConnecting` → `Never` and `WallabagError` →
   `Never` (a sync in flight does not survive a sleep, and waking into a dialog about
   one nobody remembers is `Peek`'s argument).
-- [ ] **Step 4:** `screenUsesRadio`: `WallabagConnecting` returns **true**; the other
+- [x] **Step 4:** `screenUsesRadio`: `WallabagConnecting` returns **true**; the other
   five return false, each listed explicitly. The sync runs behind the connecting
   dialog and nowhere else — this is what `pollWifi()`'s backstop sweeps against.
-- [ ] **Step 5:** `screenName`: six upper-case labels.
-- [ ] **Step 6:** `test_focus_restore.cpp`: six rows in `kAllScreens`; raise the
+- [x] **Step 5:** `screenName`: six upper-case labels.
+- [x] **Step 6:** `test_focus_restore.cpp`: six rows in `kAllScreens`; raise the
   `Ready` count by two, `NeedsPriming` by one, `Never` by three; leave `movable` and
   `wrapping` for Task 1.9, which is when the screens exist to be built. The `build()`
   helper `REQUIRE`s a non-null screen, so this file will not go green until the
   factory has cases — expected, and the reason Task 1.9 exists.
-- [ ] **Step 7:** Build. Expected: `core/` compiles; `unit_tests` fails only in
+- [x] **Step 7:** Build. Expected: `core/` compiles; `unit_tests` fails only in
   `test_focus_restore.cpp` with the six unbuildable ids. Commit
   `feat(articles): six ScreenIds appended together, and the six guards that had to grow`.
 
@@ -326,17 +326,17 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
 - Modify: `core/src/app.cpp` (`dispatch` sets the latch)
 - Test: `test/unit/test_app.cpp`
 
-- [ ] **Step 1:** Write the failing test: a stub screen whose `onGesture` returns
+- [x] **Step 1:** Write the failing test: a stub screen whose `onGesture` returns
   `Action::article()`; after `dispatch`, `articleRequested()` is true, the stack depth
   is unchanged, and the same screen is still on top. After `clearArticleRequest()` it
   is false. Model it on the existing `wifiRequested` case in that file.
-- [ ] **Step 2:** Run `cmake --build build -j8 && build/unit_tests -tc="*article
+- [x] **Step 2:** Run `cmake --build build -j8 && build/unit_tests -tc="*article
   latch*"`. Expected: compile failure, `article` is not a member of `Action`.
-- [ ] **Step 3:** Add the kind, the factory, the two `App` members, and the `dispatch`
+- [x] **Step 3:** Add the kind, the factory, the two `App` members, and the `dispatch`
   case, each with the one-line comment `wifi()` carries about carrying no payload.
-- [ ] **Step 4:** Run the test. Expected: PASS. Run `make test`. Expected: green
+- [x] **Step 4:** Run the test. Expected: PASS. Run `make test`. Expected: green
   except `test_focus_restore.cpp` (still waiting on Task 1.9).
-- [ ] **Step 5:** Commit `feat(app): the Article latch, wifi()'s contract for the Articles flow`.
+- [x] **Step 5:** Commit `feat(app): the Article latch, wifi()'s contract for the Articles flow`.
 
 ### Task 1.3: View-models and the theme's six renderers
 
@@ -344,7 +344,7 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
 - Modify: `core/include/reader/viewmodel.h`
 - Modify: `core/include/reader/theme.h`, `core/src/theme_quiet.cpp`
 
-- [ ] **Step 1:** Add the six view-models. `ArticlesViewModel`: a band value string
+- [x] **Step 1:** Add the six view-models. `ArticlesViewModel`: a band value string
   (`3 UNREAD` / `NOT SET UP`), a `notSetUp` flag, the sync row's stamp string, an
   optional status line for the sync-done variant, a visible slice of rows (title,
   source-and-minutes meta string, a read flag, focused index) mirroring
@@ -356,7 +356,7 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
   message, footnote — the fetching stage is the same view-model with a different
   caption and message. `WallabagErrorViewModel`: caption, message, a slab list whose
   length is the shape (one slab for `SignIn` and `NoNetwork`, two for `Offline`).
-- [ ] **Step 2:** Add six `render*` virtuals to `theme.h` and implement each in
+- [x] **Step 2:** Add six `render*` virtuals to `theme.h` and implement each in
   `theme_quiet.cpp` **by assembly, not new geometry**: `renderArticles` is
   `renderLibrary`'s band, rows and rail with a sync row after the band;
   `renderArticleActions` is `renderItemActions`; `renderArticleEnd` is
@@ -365,7 +365,7 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
   `renderWallabagError` is `renderWifiError`. Where a primitive already exists in
   `components.h`, call it; where the second copy of something appears, extract it then
   — *the second copy is the extraction point*.
-- [ ] **Step 3:** Build. Expected: compiles; nothing calls the renderers yet.
+- [x] **Step 3:** Build. Expected: compiles; nothing calls the renderers yet.
   Commit `feat(articles): six view-models and their renderers, assembled from shipped primitives`.
 
 ### Task 1.4: `ArticlesScreen` — the list, its not-set-up variant and its stamp
@@ -374,7 +374,7 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
 - Create: `core/include/reader/screen_articles.h`, `core/src/screen_articles.cpp`
 - Test: `test/unit/test_screen_articles.cpp`
 
-- [ ] **Step 1:** Write the failing tests. Construct the screen from a vector of
+- [x] **Step 1:** Write the failing tests. Construct the screen from a vector of
   fixture rows (title, source, minutes, read flag, an id) plus a stamp string and a
   `notSetUp` flag. Assert: with rows, row 0 of the focus ring is the `Sync now` row
   and Confirm on it returns `Action::article()` with the screen's `chosen()` reading
@@ -386,13 +386,13 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
   gesture but Back returns `Action::none()`. With rows and `visibleRows` smaller than
   the count: the slice moves as the Library's does (copy the shape of
   `test_screen_library.cpp`'s scrolling case).
-- [ ] **Step 2:** Run the file's tests. Expected: compile failure, no such header.
-- [ ] **Step 3:** Implement as a `FocusScreen` over a `ScrollWindow`, `id()` →
+- [x] **Step 2:** Run the file's tests. Expected: compile failure, no such header.
+- [x] **Step 3:** Implement as a `FocusScreen` over a `ScrollWindow`, `id()` →
   `Articles`, `Fidelity::Mono`, `declareRepeat` on Up/Down, `holds` on Confirm only.
   `focusedId()` and `focusedTitle()` getters for the shell and the overlay.
   `setStamp()` and `setStatusLine()` for the sync-done variant. The not-set-up variant
   is a constructor flag, not a second screen — `HomeEmpty`'s rule.
-- [ ] **Step 4:** Run the tests. Expected: PASS. Commit
+- [x] **Step 4:** Run the tests. Expected: PASS. Commit
   `feat(articles): the Articles list, its not-set-up variant and its sync stamp`.
 
 ### Task 1.5: `ArticleActionsScreen` — Archive and Star
@@ -401,7 +401,7 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
 - Create: `core/include/reader/screen_article_actions.h`, `core/src/screen_article_actions.cpp`
 - Test: `test/unit/test_screen_article_actions.cpp`
 
-- [ ] **Step 1:** Write the failing tests. Constructed from `Facts` (id, title,
+- [x] **Step 1:** Write the failing tests. Constructed from `Facts` (id, title,
   starred flag) — **not** from an `ArticlesScreen&`, for `DeleteConfirmScreen`'s
   reason (a screen reference makes the overlay reachable from one parent only).
   Assert: `isOverlay()`; two rows; Confirm on `Archive` returns `Action::article()`
@@ -410,9 +410,9 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
   between the two rows; `paintFootprint()` is constant across both focus states (two
   rows of one height, the last row's rule already absent — verify by rendering both
   states and comparing the panel's top border row, the `ItemActions` one-pixel lesson).
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement on `ItemActionsScreen`'s shape.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement on `ItemActionsScreen`'s shape.
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(articles): the Archive / Star overlay, built from facts rather than a parent`.
 
 ### Task 1.6: `ArticleEndScreen`
@@ -421,7 +421,7 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
 - Create: `core/include/reader/screen_article_end.h`, `core/src/screen_article_end.cpp`
 - Test: `test/unit/test_screen_article_end.cpp`
 
-- [ ] **Step 1:** Write the failing tests. `Facts`: id, title, source, minutes,
+- [x] **Step 1:** Write the failing tests. `Facts`: id, title, source, minutes,
   starred, unread-remaining count, whether a next unread article exists. Assert four
   slabs `ARCHIVE / STAR / NEXT ARTICLE / BACK TO LIST`; when no next article exists the
   `NEXT ARTICLE` slab is **absent** rather than inert (`WifiError`'s rule: the slab list
@@ -429,9 +429,9 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
   `Action::article()` with `chosen()` naming it; Back returns `Action::pop()` (back to
   the last page, `BookEnd`'s rule); the band's right slot is `N LEFT`; the footnote is
   `SYNCS ON THE NEXT CONNECTION.`; `restorability` is `NeedsPriming`.
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement on `BookEndScreen`'s shape.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement on `BookEndScreen`'s shape.
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(articles): the end-of-article screen, BookEnd's shape with a fourth slab`.
 
 ### Task 1.7: `WallabagAccountScreen`
@@ -440,7 +440,7 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
 - Create: `core/include/reader/screen_wallabag_account.h`, `core/src/screen_wallabag_account.cpp`
 - Test: `test/unit/test_screen_wallabag_account.cpp`
 
-- [ ] **Step 1:** Write the failing tests. `Facts`: username, unread count, last-sync
+- [x] **Step 1:** Write the failing tests. `Facts`: username, unread count, last-sync
   outcome string, keep-offline value, pending count, configured flag. Assert: the
   focus starts on `Keep offline` and **skips** `Account`, `Unread`, `Last sync` and
   `Pending actions` (Settings' rule — a row that cannot act is not focusable); Confirm
@@ -450,10 +450,10 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
   Confirm hint reads `CHANGE` on the cycling row and `OPEN` on the disclosing one —
   Settings' own varying-hint precedent; when `configured` is false the band reads
   `NOT SET UP` and `Keep offline` is the only focusable row.
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement as a `FocusScreen` with a `focusable()` gate, on
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement as a `FocusScreen` with a `focusable()` gate, on
   `SettingsScreen`'s shape.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(articles): the account screen, Settings' shape with one cycling row`.
 
 ### Task 1.8: The three dialogs — connecting, fetching, and three failure shapes
@@ -465,7 +465,7 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
   (and grow every table Task 1.1 grew; the guards will name each one)
 - Test: `test/unit/test_wallabag_dialogs.cpp`
 
-- [ ] **Step 1:** Write the failing tests. Connecting: constructed with the host;
+- [x] **Step 1:** Write the failing tests. Connecting: constructed with the host;
   `isOverlay()`; no focus; the message names the host unquoted; Back returns
   `Action::article()` with `cancelled()` true; `setFetching(3, 12)` switches the
   caption to `SYNCING…` and the message to `Fetching article 3 of 12.` and marks the
@@ -475,10 +475,10 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
   `Action::article()` with `chosen()` naming it; the three captions and messages are
   the boards' strings verbatim. Remove-confirm: `DeleteConfirmScreen`'s shape — `REMOVE`
   returns `Action::article()` with `chosen()` reading `RemoveAll`, `CANCEL` pops.
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement on `WifiConnectScreen`'s and `WifiErrorScreen`'s shapes;
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement on `WifiConnectScreen`'s and `WifiErrorScreen`'s shapes;
   the remove-confirm on `DeleteConfirmScreen`'s.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(articles): the sync dialogs, WifiConnect's and WifiError's shapes one subsystem over`.
 
 ### Task 1.9: The factory, the simulator, and the catalogue goes green
@@ -489,65 +489,65 @@ copy: nothing is popped, the shell reads the outcome off the screen still on top
 - Modify: `test/unit/test_focus_restore.cpp`
 - Test: `test/unit/test_screens.cpp`
 
-- [ ] **Step 1:** Factory setters, each with a primed flag rather than "the data is
+- [x] **Step 1:** Factory setters, each with a primed flag rather than "the data is
   non-empty" (`contentsPrimed_`'s rule): `setArticles(rows, stamp, notSetUp)`,
   `setArticleActionsFacts` / `clearArticleActionsFacts`, `setArticleEndFacts`,
   `setWallabagAccountFacts`, `setWallabagHost`, `setWallabagFailure(shape)`,
   `setArticlesDemo()` for the simulator. Factory cases for all seven ids; each refuses
   (returns null) when unprimed — **never substitutes demo data**.
-- [ ] **Step 2:** Demo view-models in `screens.cpp` with the boards' specimen strings:
+- [x] **Step 2:** Demo view-models in `screens.cpp` with the boards' specimen strings:
   the five article rows, `3 UNREAD`, `WALLABAG · UP TO DATE`, the account's `LUCASG`.
-- [ ] **Step 3:** Home: `demoHomeTargets()` returns `Library, Articles, Settings`; the
+- [x] **Step 3:** Home: `demoHomeTargets()` returns `Library, Articles, Settings`; the
   three `demoHome*Vm()` menus gain the `ARTICLES` row — `3 UNREAD` on `Main` and
   `HomeUnopened`, an empty value on `HomeEmpty` (the empty value draws the chevron,
   `SETTINGS`' own mechanism). This is #141's whole implementation; the budget already
   reads `vm.menu.size()`.
-- [ ] **Step 4:** `sim/main.cpp`: subcommands `articles`, `articles_setup`,
+- [x] **Step 4:** `sim/main.cpp`: subcommands `articles`, `articles_setup`,
   `articles_sync_done`, `article_actions`, `article_end`, `wallabag_account`,
   `wallabag_connecting`, `wallabag_fetching`, `wallabag_error`,
   `wallabag_error_offline`, `wallabag_error_no_network`, `articles_remove_confirm`,
   each priming the factory and pushing the stack the board draws (the overlays over
   their veiled parent: the dialogs over the list, the actions over the list, the
   remove-confirm over the account).
-- [ ] **Step 5:** `test_focus_restore.cpp`: raise `movable` and `wrapping` by the
+- [x] **Step 5:** `test_focus_restore.cpp`: raise `movable` and `wrapping` by the
   screens whose focus moves — `Articles`, `ArticleActions`, `ArticleEnd`,
   `WallabagAccount`, `ArticlesRemoveConfirm`, `WallabagError` (its slabs) — and set the
   `Ready`/`NeedsPriming`/`Never` counts to what the seven rows say. Run
   `build/unit_tests -tf="*focus_restore*"`. Expected: PASS, with the counts read off the
   run and then written down rather than guessed.
-- [ ] **Step 6:** `test_screens.cpp`: a case that walks Home → Down ×2 → Confirm and
+- [x] **Step 6:** `test_screens.cpp`: a case that walks Home → Down ×2 → Confirm and
   lands on `Articles`, then Back to Home at depth 1.
-- [ ] **Step 7:** `make test`. Expected: **green**, including every Home golden going
+- [x] **Step 7:** `make test`. Expected: **green**, including every Home golden going
   red first — inspect each candidate (a third menu row, the title block moved up by
   81px, nothing else) and bless. Ten Home goldens move; record which rows differ.
-- [ ] **Step 8:** Commit `feat(articles): the factory builds all seven screens, and Home's ARTICLES row opens the list (#141)`.
+- [x] **Step 8:** Commit `feat(articles): the factory builds all seven screens, and Home's ARTICLES row opens the list (#141)`.
 
 ### Task 1.10: Goldens for every boarded state, at both geometries
 
 **Files:**
 - Create: `test/unit/test_theme_articles_golden.cpp`
 
-- [ ] **Step 1:** One golden per simulator subcommand from Task 1.9, at 480×800 and
+- [x] **Step 1:** One golden per simulator subcommand from Task 1.9, at 480×800 and
   528×792 — twenty-four PNGs. Model the file on `test_theme_wifi_golden.cpp`.
-- [ ] **Step 2:** Run once to generate candidates; **look at all twenty-four** and say
+- [x] **Step 2:** Run once to generate candidates; **look at all twenty-four** and say
   what you see. The things to catch: the sync row's stamp colliding with `Sync now` on
   the X4; the connecting dialog's host wrapping; `2 LEFT` in the band; the veil under
   each overlay being the right parent.
-- [ ] **Step 3:** Bless; `make test` green; commit
+- [x] **Step 3:** Bless; `make test` green; commit
   `test(articles): every boarded Articles state pinned per pixel at both geometries`.
 
 ### Task 1.11: The comparison sheet reads the screens
 
-- [ ] **Step 1:** `make compare COMPARE_ARGS="--only
+- [x] **Step 1:** `make compare COMPARE_ARGS="--only
   articles,articles_setup,article_actions,article_end,wallabag_account,wallabag_connecting,wallabag_error"`.
   Expected: every row `design ok firmware ok mismatch N%`. Read the percentages and
   compare like with like — the three dialogs against `wifi_connect` and `wifi_error`
   (~3–4%), the list against `library` (~2%). Anything over 8% is a board/screen
   disagreement to find before moving on, not a number to record.
-- [ ] **Step 2:** `home`, `home_empty`, `home_unopened` should have returned to about
+- [x] **Step 2:** `home`, `home_empty`, `home_unopened` should have returned to about
   1.2%/1.1%, 1.3%/1.2% and their old figures from ~21% — `Main.dc.html`'s menu note
   says to expect exactly that. Record the three pairs in the note.
-- [ ] **Step 3:** Commit `docs(design): the Home boards' compare figures, back where the note said they would be`.
+- [x] **Step 3:** Commit `docs(design): the Home boards' compare figures, back where the note said they would be`.
 
 ---
 
@@ -564,7 +564,7 @@ screen writes a marker the sync will push later.
 - Create: `core/include/reader/wallabag_credentials.h`, `core/src/wallabag_credentials.cpp`
 - Test: `test/unit/test_wallabag_credentials.cpp`
 
-- [ ] **Step 1:** Write the failing tests over `FakeFileSystem`. Path constant
+- [x] **Step 1:** Write the failing tests over `FakeFileSystem`. Path constant
   `/.reader/wallabag.json`. `load()` returns a struct of five strings (`server`,
   `clientId`, `clientSecret`, `username`, `password`) and a `configured` answer that is
   true only when all five are non-empty. A missing file loads as unconfigured, **not**
@@ -577,11 +577,11 @@ screen writes a marker the sync will push later.
   an existing file however malformed (`loadAndApplySettings`' rule). The flat `Json`
   parser is the parser; assert a `\uXXXX` escape in the file reads as malformed, and
   say in the header that a hand-editor's accented password must be typed as UTF-8.
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement. The header states the security position in
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement. The header states the security position in
   `docs/notes/wallabag-api.md` §5's words: plaintext on a removable card, bounded by
   the deployment and not by anything clever.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(wallabag): the credentials file, seeded when absent and never overwritten`.
 
 ### Task 2.2: The article store — metadata sidecars, queue markers, watermark, pruning
@@ -590,7 +590,7 @@ screen writes a marker the sync will push later.
 - Create: `core/include/reader/article_store.h`, `core/src/article_store.cpp`
 - Test: `test/unit/test_article_store.cpp`
 
-- [ ] **Step 1:** Write the failing tests over `FakeFileSystem`. The directory is
+- [x] **Step 1:** Write the failing tests over `FakeFileSystem`. The directory is
   `/.reader/articles/`. **Per article, two files named by the server's integer id**:
   `<id>.epub` and `<id>.json` — the sidecar holding `title`, `domain`, `readingTime`,
   `starred`, `archived`, `updatedAt` (the server's string, stored verbatim), all
@@ -613,14 +613,14 @@ screen writes a marker the sync will push later.
   never one with a reading position (`percentFor` > -1). `removeAll()` deletes every
   `.epub` and sidecar and every reading sidecar for them, and leaves the queue and
   the watermark alone.
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement. Every write goes through `writeAll`, which drops the
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement. Every write goes through `writeAll`, which drops the
   listing cache by construction (`SdFileSystem::forgetCardFacts`). Nothing here reads a
   clock.
-- [ ] **Step 4:** Run. Expected: PASS. Add a case that a sidecar with no `.epub` is
+- [x] **Step 4:** Run. Expected: PASS. Add a case that a sidecar with no `.epub` is
   skipped by `list()` and reported by a `stray()` count, so a download that died
   between the two writes shows in the log rather than as a row that will not open.
-- [ ] **Step 5:** Commit `feat(articles): the card-side store -- sidecars, marker-file queue, watermark, pruning`.
+- [x] **Step 5:** Commit `feat(articles): the card-side store -- sidecars, marker-file queue, watermark, pruning`.
 
 ### Task 2.3: `articlesKeepOffline` in Settings
 
@@ -628,15 +628,15 @@ screen writes a marker the sync will push later.
 - Modify: `core/include/reader/settings.h`, `core/src/settings.cpp`
 - Test: `test/unit/test_settings.cpp`
 
-- [ ] **Step 1:** Write the failing test: a new field `articlesKeepOffline`, default
+- [x] **Step 1:** Write the failing test: a new field `articlesKeepOffline`, default
   50, steps `{20, 50, 100}`, clamped to the table on load (an out-of-range value is
   `CORRECTED`, not `DEFAULTED`), round-trips through `saveSettings`/`loadSettings`, and
   an older file without the key loads with the default. Assert `kSettingsVersion` did
   **not** move — the default is today's behaviour.
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement beside the other tables in `settings.h`, with the
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement beside the other tables in `settings.h`, with the
   `ascending` assert the others carry.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(settings): articlesKeepOffline, the account screen's one persisted row`.
 
 ### Task 2.4: The list, the account, Home and the end screen read the store
@@ -648,7 +648,7 @@ screen writes a marker the sync will push later.
   `refreshProgress()` pair on `LibraryScreen`'s model
 - Test: `test/unit/test_screen_articles.cpp`, `test/unit/test_home_rebuild.cpp`
 
-- [ ] **Step 1:** Write the failing tests: an `ArticlesScreen` constructed over a
+- [x] **Step 1:** Write the failing tests: an `ArticlesScreen` constructed over a
   `FakeFileSystem` holding three sidecars lists three rows newest first, marks the one
   with a `finished` reading sidecar `READ`, and its band reads `2 UNREAD`; with no
   credentials file it is the not-set-up variant; with credentials but no articles it
@@ -658,10 +658,10 @@ screen writes a marker the sync will push later.
   logic is in the shell, so pin the **pure** half here: a helper in
   `article_store.h` that returns the menu value — `N UNREAD` when configured, empty
   when not — and test both.
-- [ ] **Step 2:** Run. Expected: failures.
-- [ ] **Step 3:** Implement. The factory holds a `FileSystem*` for the store exactly as
+- [x] **Step 2:** Run. Expected: failures.
+- [x] **Step 3:** Implement. The factory holds a `FileSystem*` for the store exactly as
   it holds one for the Library, and `Articles` is `Ready` because of it.
-- [ ] **Step 4:** Run; `make test` green. Commit
+- [x] **Step 4:** Run; `make test` green. Commit
   `feat(articles): the list, the account and Home's row read the card store`.
 
 ---
@@ -678,7 +678,7 @@ push, listing, downloads, watermark — and every failure shape is reachable on 
 - Create: `core/include/reader/http_transport.h`
 - Create: `test/unit/fake_http_transport.h`
 
-- [ ] **Step 1:** Write the interface, poll-shaped, on `WifiRadio`'s argument (the
+- [x] **Step 1:** Write the interface, poll-shaped, on `WifiRadio`'s argument (the
   spec's *The radio seam*, verbatim reasoning in the header): `begin(request, sink)`
   returns whether the request was accepted; `state()` is `Idle / Running / Done /
   Failed`; `status()` is the HTTP status once `Done`; `failure()` names why once
@@ -691,11 +691,11 @@ push, listing, downloads, watermark — and every failure shape is reachable on 
   `perPage=20` × ~1 KB of metadata with `detail=metadata`, and refusing past the cap
   is the JSON parser's own "large is malformed" rule), and `NullSink` for `PATCH`
   responses nobody reads. The card sink is the shell's.
-- [ ] **Step 2:** Write `FakeHttpTransport`: a queue of scripted responses (status,
+- [x] **Step 2:** Write `FakeHttpTransport`: a queue of scripted responses (status,
   body, or a failure), a log of every request made (method, path, headers, body), and
   `step()` to move `Running → Done` under the test's control so a poll loop can be
   asserted mid-flight. Model on `fake_wifi_radio.h`.
-- [ ] **Step 3:** Build. Commit `feat(wallabag): the injected HTTP transport, poll-shaped, and its fake`.
+- [x] **Step 3:** Build. Commit `feat(wallabag): the injected HTTP transport, poll-shaped, and its fake`.
 
 ### Task 3.2: A bounded pull scanner for nested JSON
 
@@ -707,7 +707,7 @@ repo can read it, and vendoring is refused here.
 - Create: `core/include/reader/json_stream.h`, `core/src/json_stream.cpp`
 - Test: `test/unit/test_json_stream.cpp`
 
-- [ ] **Step 1:** Write the failing tests. A pull tokenizer over the same `ByteSource`
+- [x] **Step 1:** Write the failing tests. A pull tokenizer over the same `ByteSource`
   `xml.h` uses: `next()` yields `ObjectStart / ObjectEnd / ArrayStart / ArrayEnd / Key
   / String / Number / Bool / Null / End / Error`, with the current key and scalar
   readable after each. Strings decode the JSON escapes **including `\uXXXX` and
@@ -721,9 +721,9 @@ repo can read it, and vendoring is refused here.
   including a nested one, so a consumer can ignore `tags` and `preview_picture`
   without knowing their shape. Test it on a byte-at-a-time source (grain 1 is the
   load-bearing case, `inflate_stream.h`'s lesson).
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement. No allocation beyond the one bounded string buffer.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement. No allocation beyond the one bounded string buffer.
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(json): a bounded pull scanner for nested JSON, because a listing is an array`.
 
 ### Task 3.3: The client — requests, the token, refresh on 401, and three answers
@@ -735,7 +735,7 @@ repo can read it, and vendoring is refused here.
   over a struct)
 - Test: `test/unit/test_wallabag_client.cpp`
 
-- [ ] **Step 1:** Write the failing tests against `FakeHttpTransport` and a fake token
+- [x] **Step 1:** Write the failing tests against `FakeHttpTransport` and a fake token
   store. The client builds exactly the six requests in `docs/notes/wallabag-api.md`
   §2 and the test asserts each path and query verbatim from the fake's request log:
   `GET /api/info` with no `Authorization` header; `POST /oauth/v2/token` as a form body
@@ -753,10 +753,10 @@ repo can read it, and vendoring is refused here.
   not answer 200 with a body carrying `appname`), `CredentialsRefused`, `Unreachable`
   (any transport failure). Tokens are saved on every successful grant and cleared on
   `CredentialsRefused`.
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement as a poll-shaped state machine too: `beginX()`, `poll()`,
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement as a poll-shaped state machine too: `beginX()`, `poll()`,
   `result()` — because the transport is, and the loop that drives it is `loop()`.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(wallabag): the client -- six requests, refresh on 401, three honest answers`.
 
 ### Task 3.4: The listing parser
@@ -765,16 +765,16 @@ repo can read it, and vendoring is refused here.
 - Modify: `core/src/wallabag_client.cpp`
 - Test: `test/unit/test_wallabag_client.cpp`
 
-- [ ] **Step 1:** Write the failing tests over a fixture page captured from the spec's
+- [x] **Step 1:** Write the failing tests over a fixture page captured from the spec's
   shape: `page`, `pages`, `total`, and `_embedded.items[]` with `id`, `title`,
   `domain_name`, `reading_time`, `is_archived`, `is_starred`, `updated_at`, plus
   `tags` and `preview_picture` to be skipped. `parseListing(source, out)` yields one
   `ListingEntry` per item and the page count, through `json_stream`, skipping every
   key not named. A title over the cap arrives truncated and flagged. A malformed page
   is `Error` with nothing partial handed back. Test at grain 1.
-- [ ] **Step 2:** Run. Expected: failures.
-- [ ] **Step 3:** Implement.
-- [ ] **Step 4:** Run. Expected: PASS. Commit
+- [x] **Step 2:** Run. Expected: failures.
+- [x] **Step 3:** Implement.
+- [x] **Step 4:** Run. Expected: PASS. Commit
   `feat(wallabag): the listing parser, over the pull scanner, ignoring what it does not draw`.
 
 ### Task 3.5: The sync engine
@@ -783,7 +783,7 @@ repo can read it, and vendoring is refused here.
 - Create: `core/include/reader/sync_engine.h`, `core/src/sync_engine.cpp`
 - Test: `test/unit/test_sync_engine.cpp`
 
-- [ ] **Step 1:** Write the failing tests over `FakeHttpTransport`, `FakeFileSystem`,
+- [x] **Step 1:** Write the failing tests over `FakeHttpTransport`, `FakeFileSystem`,
   the store and a fake token store. The engine is a state machine the shell polls:
   `begin()`, `poll()`, `state()`, `progress()` (files fetched of files to fetch, for
   the dialog's second stage), `outcome()`, `cancel()`. The order of a sync, asserted
@@ -803,34 +803,75 @@ repo can read it, and vendoring is refused here.
   download behaves as `Unreachable` for the file in flight but the outcome is
   `cancelled`. A test drives every state transition through `poll()` with the fake's
   `step()`.
-- [ ] **Step 2:** Run. Expected: compile failure.
-- [ ] **Step 3:** Implement. The engine owns no clock and no radio; it is handed a
+- [x] **Step 2:** Run. Expected: compile failure.
+- [x] **Step 3:** Implement. The engine owns no clock and no radio; it is handed a
   transport that is already connected.
-- [ ] **Step 4:** Run. Expected: PASS. Add one property: a sync run twice against the
+- [x] **Step 4:** Run. Expected: PASS. Add one property: a sync run twice against the
   same fake yields an identical store — idempotence is what makes a cancelled sync safe
   to retry.
-- [ ] **Step 5:** Commit `feat(wallabag): the sync engine, a poll-driven state machine that pushes before it pulls`.
+- [x] **Step 5:** Commit `feat(wallabag): the sync engine, a poll-driven state machine that pushes before it pulls`.
 
 ### Task 3.6: The outcome contract through a real `App`
 
 **Files:**
 - Create: `test/unit/test_article_outcomes.cpp`
 
-- [ ] **Step 1:** Write it on `test_wifi_outcomes.cpp`'s model, through `App::dispatch`
+- [x] **Step 1:** Write it on `test_wifi_outcomes.cpp`'s model, through `App::dispatch`
   with a primed factory: Confirm on `Sync now` leaves the list on top at the same depth
   with `articleRequested()` true; a long Confirm on a row pushes `ArticleActions` and
   Confirm on `Archive` leaves the overlay standing with the latch set; on `ArticleEnd`
   each slab likewise; Back on `WallabagConnecting` sets the latch and does not pop;
   `screenUsesRadio` is true for exactly `WifiPicker`, `WifiConnect` and
   `WallabagConnecting` — the count is **three** now and the test says so.
-- [ ] **Step 2:** Run. Expected: PASS if Phase 1 was done right; any failure here is a
+- [x] **Step 2:** Run. Expected: PASS if Phase 1 was done right; any failure here is a
   screen returning `pop()` where it should latch, which is the defect that file exists
   to catch.
-- [ ] **Step 3:** Commit `test(articles): the latch contract through a real dispatch, wifi's outcome test one flow over`.
+- [x] **Step 3:** Commit `test(articles): the latch contract through a real dispatch, wifi's outcome test one flow over`.
 
 ---
 
 ## Phase 4 — The shell, and the glass
+
+> **TASK 4.1 IS RUN AND ANSWERED, AND IT CHANGED THE DESIGN — which is what #140
+> said a probe before the transport was for.** Three runs on an X3 against
+> `https://wallabag.lucasgoudin.com`; the numbers are in
+> `docs/notes/wallabag-api.md` §8, under the decision rule, which is unedited
+> since it was written before them.
+>
+> **BOTH ANSWERS THE RULE CHOOSES BETWEEN ARE UNAVAILABLE ON THIS HARDWARE.**
+> Plain HTTP draws nginx's 400 because the origin is HTTPS-only. And TLS
+> permanently fragments the heap: one handshake takes the largest free block from
+> 61,428 bytes to 34,804 and it never returns above **36,852** — not when the
+> stream closes, not after four more handshakes, not when the radio goes down —
+> against an `Inflater::begin` window of **36,956**. The free heap recovers every
+> time, which is why nothing saw this until the question was asked directly. A
+> reader would fetch an article and be unable to open it, or any book, which is
+> the rule's own sentence arriving by a mechanism the rule did not name.
+>
+> **THE OWNER'S CALL: THE SYNC RESTARTS THE DEVICE WHEN IT FINISHES.** A cold
+> boot measures 61,428, so this provably restores the heap, and `handleRetry`'s
+> `esp_restart` on a card lost after a mount is the precedent — forced by the
+> platform rather than a workaround for our own bug.
+>
+> **AND #49's DECLARATIONS ALREADY CARRY IT, WITH NO NEW CODE.** `Articles` is
+> `Restore::Ready` (the factory holds the `FileSystem`, so the list rebuilds off
+> the card) and `WallabagConnecting` is `Restore::Never`, so `App::snapshot()`
+> truncates the record **before** the sync dialog: the record standing while a
+> sync runs is already `…;articles:N`. The restart therefore lands on the Articles
+> list with the new items in it. E-ink holds its last image and nothing clears the
+> glass at boot, so the reader sees the fetching screen held, one transition
+> flash, then the list — which is what an ordinary screen change looks like.
+>
+> **EVERY TASK IS BUILT. What is left is the four steps that need the panel**, and
+> they are the owner's by rule: 4.4.4, 4.5.5, 4.6.4 and the whole of
+> `docs/on-device-smoke-checklist.md` §13, which is where eleven of this feature's
+> defects were found with `make test` green throughout. The six cards are at
+> `On glass`; `Done` is the owner's move on that evidence.
+>
+> Phases 0-3 are complete and `make test` is
+> green at 1,751 cases; `make firmware` builds at 46,652 bytes of static RAM
+> (14.2%) and 2,242,745 of flash (34.2%).
+
 
 Nothing here can be tested on the desktop. Every task ends at `On glass`, and the card
 moves to `Done` only on the owner's evidence. **Flashing is the owner's step**; the
@@ -845,21 +886,21 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
 **Files:**
 - Modify: `shell/src/main.cpp` (behind `ENCRE_WALLABAG_PROBE`, `ENCRE_FS_SELFTEST`'s idiom)
 
-- [ ] **Step 1:** Behind the flag, at the end of `setup()`: bring the radio up on the
+- [x] **Step 1:** Behind the flag, at the end of `setup()`: bring the radio up on the
   `AUTO` network, `GET /api/info` over plain HTTP against the host in
   `/.reader/wallabag.json`, print status, body length, and `mark()` the heap before,
   during and after; then the same over `https://` against `app.wallabag.it`; then
   `GET export.epub` for one entry over plain HTTP streamed to `/.reader/articles/probe.epub`,
   with `mark()` around it and the largest free block printed. Radio down after.
-- [ ] **Step 2:** Build with `PLATFORMIO_BUILD_FLAGS="-DENCRE_WALLABAG_PROBE=1" make firmware`.
+- [x] **Step 2:** Build with `PLATFORMIO_BUILD_FLAGS="-DENCRE_WALLABAG_PROBE=1" make firmware`.
   Hand the owner the flash command and ask for `run.log`.
-- [ ] **Step 3:** Read the log. Record in `docs/notes/wallabag-api.md` a new §8: the
+- [x] **Step 3:** Read the log. Record in `docs/notes/wallabag-api.md` a new §8: the
   heap spent by plain HTTP, by TLS, and by one streamed download; whether TLS fits at
   all with no book open. **Decision rule, written before the numbers arrive:** if TLS
   leaves less than 40 KB free with the radio up and no book open, the transport
   supports plain HTTP only in this release and the account screen's band says
   `HTTP ONLY` as a stated limit; if it fits, TLS is enabled and nothing else changes.
-- [ ] **Step 4:** Remove the probe (`ENCRE_COVER_PROBE` was removed after it answered);
+- [x] **Step 4:** Remove the probe (`ENCRE_COVER_PROBE` was removed after it answered);
   commit `docs(wallabag): what a plain and a TLS round trip cost on the C3, measured`.
 
 ### Task 4.2: The Arduino transport and the card file sink
@@ -868,7 +909,7 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
 - Create: `shell/src/http_transport_arduino.h`, `shell/src/http_transport_arduino.cpp`
 - Create: `shell/src/card_file_sink.h`, `shell/src/card_file_sink.cpp`
 
-- [ ] **Step 1:** `ArduinoHttpTransport` implements `HttpTransport` over `HTTPClient`
+- [x] **Step 1:** `ArduinoHttpTransport` implements `HttpTransport` over `HTTPClient`
   and `WiFiClient` (and `WiFiClientSecure` only if Task 4.1 said yes, with the
   well-known root bundle arduino-esp32 ships and no per-host pinning). **Poll-shaped
   over a blocking library**: `begin()` opens the connection and sends headers;
@@ -876,13 +917,13 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
   so `loop()` keeps ticking between chunks and a cancel lands within one chunk. A
   read that yields nothing for 15 s is `Timeout`. Every state the fake has, the real
   one reports.
-- [ ] **Step 2:** `CardFileSink` writes to `<path>.part` over SdFat directly — a free
+- [x] **Step 2:** `CardFileSink` writes to `<path>.part` over SdFat directly — a free
   function pair like `appendToCard`, for `sd_fs.h`'s stated reason (the `FileSystem`
   contract has no write handle and must not grow one for a caller `core/` will never
   be) — under `SpiBusGuard` per write, and `finish()` renames `.part` to the final
   name; a failure removes the `.part`. Sizes are checked as `writeAll` checks them: a
   short write is a failure, not a success.
-- [ ] **Step 3:** `make firmware` builds. Commit
+- [x] **Step 3:** `make firmware` builds. Commit
   `feat(shell): the Arduino HTTP transport, chunked per poll, and a card file sink that streams`.
 
 ### Task 4.3: The NVS token store
@@ -890,12 +931,12 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
 **Files:**
 - Create: `shell/src/wallabag_store_nvs.h`, `shell/src/wallabag_store_nvs.cpp`
 
-- [ ] **Step 1:** Implement `TokenStore` over `Preferences`, namespace `encre_wbg`,
+- [x] **Step 1:** Implement `TokenStore` over `Preferences`, namespace `encre_wbg`,
   keys `ver`, `access`, `refresh`, in `wifi_store_nvs.cpp`'s idiom: the version checked
   before the payload, a missing namespace a quiet empty, a wrong version discarded
   whole with a log line. NVS caps a string at 4000 bytes; a wallabag bearer token is
   ~40 characters, assert the bound in the header rather than trusting it.
-- [ ] **Step 2:** `make firmware` builds. Commit
+- [x] **Step 2:** `make firmware` builds. Commit
   `feat(shell): the wallabag token store in NVS, wifi_store_nvs's shape`.
 
 ### Task 4.4: The seed at mount, Home's count, and the Articles list on the card
@@ -903,16 +944,16 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
 **Files:**
 - Modify: `shell/src/main.cpp`
 
-- [ ] **Step 1:** In `armCardProbes()`, immediately after the settings seed and with its
+- [x] **Step 1:** In `armCardProbes()`, immediately after the settings seed and with its
   exact three-way log idiom, seed `/.reader/wallabag.json` when absent. **It does not
   join the probe's reason** — the settings file is the probe target and this file must
   never become a second one (`docs/notes/wallabag-api.md` §5's fourth bullet). Log
   `written`, `could NOT be written`, or nothing when present.
-- [ ] **Step 2:** `homeVmForCard()`: fill `vm.menu[1].value` from the store's helper
+- [x] **Step 2:** `homeVmForCard()`: fill `vm.menu[1].value` from the store's helper
   (Task 2.4) — `N UNREAD` when configured, empty when not — and log it on the
   `[boot] Home's ARTICLES row:` line beside the LIBRARY one. `gHomeStale` is set by any
   store write the shell makes (a sync, an archive, a remove-all), so Home rebuilds.
-- [ ] **Step 3:** Prime the factory's store pointer at mount (`setArticleStore(&gSd)`)
+- [x] **Step 3:** Prime the factory's store pointer at mount (`setArticleStore(&gSd)`)
   beside `primeWifi()`, so `Articles` and `WallabagAccount` are buildable from boot —
   `loadWifi()`'s argument about the dead SETUP row, one door over.
 - [ ] **Step 4:** Flash; on glass: Home shows `ARTICLES ›`; pressing it shows
@@ -927,7 +968,7 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
 - Modify: `shell/src/main.cpp` (`handleArticle()`, `pollSync()`, `beginSyncFlow()`,
   `endSyncSession()`)
 
-- [ ] **Step 1:** `handleArticle()`, called beside `handleWifi()` on the dispatch's own
+- [x] **Step 1:** `handleArticle()`, called beside `handleWifi()` on the dispatch's own
   pass (the outcome is read off a screen still on top): on `Articles` with `chosen() ==
   Sync` → `beginSyncFlow()`; on `WallabagConnecting` cancelled → `engine.cancel()`,
   which the poll below finishes; on `WallabagError` → `TryAgain` re-enters
@@ -938,12 +979,12 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
   `NextArticle` opens the next unread through `openBookAt`, `BackToList` pops to the
   list; on `WallabagAccount` → `KeepOffline` commits the setting and `prune`s; on
   `ArticlesRemoveConfirm` → `removeAll()`, pop, replace the account screen.
-- [ ] **Step 2:** `beginSyncFlow()`: if the credentials do not load as configured →
+- [x] **Step 2:** `beginSyncFlow()`: if the credentials do not load as configured →
   push `WallabagError(SignIn)`; if `gWifiNets.automatic()` is null → push
   `WallabagError(NoNetwork)`; else `gRadio.beginJoin()` on that network with its
   secret, prime the host, push `WallabagConnecting`. Reuses `gRadio`, `shellwifi::
   secret`, and `endWifiSession()`'s discipline.
-- [ ] **Step 3:** `pollSync()`, called from the quiet window beside `pollWifi()`: while
+- [x] **Step 3:** `pollSync()`, called from the quiet window beside `pollWifi()`: while
   `WallabagConnecting` is on top — if the join is `Running`, wait; if `Failed`,
   `WallabagError(Offline)` and radio down; if `Ok` and the engine has not begun,
   construct the transport and the engine and `begin()`; then `engine.poll()` each
@@ -955,7 +996,16 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
   `CredentialsRefused` replace the dialog with `WallabagError(SignIn)`; `Unreachable`
   and `failed` with `WallabagError(Offline)`; `cancelled` pops to the list. Set
   `gHomeStale` on any outcome that wrote.
-- [ ] **Step 4:** The `screenUsesRadio` backstop in `pollWifi()` already takes the
+- [x] **Step 3b (NEW, from Task 4.1's answer):** `restartIfHeapSpent()` — the sync
+  restarts the device, because one TLS handshake takes the largest free block from
+  61,428 bytes to 34,804 and never returns it above 36,852 against an
+  `Inflater::begin` window of 36,956. Gated on the TRANSPORT's own scheme, so a
+  plain-HTTP server never pays it. Taken when the dialog leaves for the list (the
+  watermark is on the card, so the restored list says the same thing) and when the
+  error panel is DISMISSED rather than when the sync fails — that screen is
+  `Restore::Never`, so restarting under it would throw away what the reader needs
+  to read.
+- [x] **Step 4:** The `screenUsesRadio` backstop in `pollWifi()` already takes the
   radio down under any screen that does not declare it; confirm by reading that no
   path out of the sync leaves without `endWifiSession()` — and that the backstop
   would catch it if one did.
@@ -977,10 +1027,10 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
 - Modify: `shell/src/main.cpp` (`handleOpen`, `openBookAt`, the restore walk)
 - Test: `test/unit/test_screen_reader_bookend.cpp`
 
-- [ ] **Step 1:** Write the failing test: a `ReaderScreen` told `setEndScreen(ArticleEnd)`
+- [x] **Step 1:** Write the failing test: a `ReaderScreen` told `setEndScreen(ArticleEnd)`
   pushes `ArticleEnd` off its last page where the default pushes `BookEnd`. Run;
   expected failure; implement; pass.
-- [ ] **Step 2:** `handleOpen()`: a third asker beside the Library and Home — when the
+- [x] **Step 2:** `handleOpen()`: a third asker beside the Library and Home — when the
   top is `Articles`, the path is `epubPath(focusedId())` and the bytes come from the
   store. `openBookAt()` gains an `isArticle` fact (derived from the path prefix
   `/.reader/articles/`, one place): when true it primes `ArticleEndFacts` from the
@@ -988,7 +1038,7 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
   exists) and tells the Reader `ArticleEnd`; otherwise everything is as today.
   `last.json` carries the article through `openBook` unchanged — Home's CONTINUE
   offers it, the sleep card names it; that is decision 3 of the note, taken.
-- [ ] **Step 3:** The restore walk: `ArticleEnd` joins `Reader`, `ReaderMenu`,
+- [x] **Step 3:** The restore walk: `ArticleEnd` joins `Reader`, `ReaderMenu`,
   `Contents` and `BookEnd` as a screen whose priming is `openBookAt`'s — the switch
   gains one case and the comment's "four screens and one open" becomes five.
 - [ ] **Step 4:** Flash; on glass: open an article from the list, page to its end,
@@ -1004,7 +1054,7 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
 - Modify: `CLAUDE.md`
 - The board
 
-- [ ] **Step 1:** §13 *Articles*, in the checklist's numbered idiom, covering: the
+- [x] **Step 1:** §13 *Articles*, in the checklist's numbered idiom, covering: the
   seeded file appears on a fresh card and is not overwritten once edited; the three
   failure shapes each reachable on demand (wrong password, unplugged router,
   no `AUTO` network); a cancel mid-fetch leaves no `.part` and the next sync resumes;
@@ -1012,15 +1062,15 @@ handshake on a C3 with no PSRAM is the one cost this plan cannot price from the 
   print); the `mark()` heap trail across a sync with the largest free block; an
   archive from the end screen removes the file and the next sync's log shows the
   `PATCH` and the ack; `ARTICLES` on Home reads the right count after each.
-- [ ] **Step 2:** `CLAUDE.md`: seven rows in *The chrome screens* table; the Settings
+- [x] **Step 2:** `CLAUDE.md`: seven rows in *The chrome screens* table; the Settings
   item count sentence to twelve; a short *Articles* section stating the six decisions
   this plan made that the code does not explain by itself — no ages (#132), marker
   files as the queue, per-article sidecars over the flat parser, push before pull,
   the watermark advanced only after every download, and `since` dropping `archive=0`.
-- [ ] **Step 3:** Move #113, #114, #111, #112, #140, #141 to `On glass` with the
+- [x] **Step 3:** Move #113, #114, #111, #112, #140, #141 to `On glass` with the
   checklist section named in a comment on each. **Not `Done`** — that is the owner's
   move on the evidence above.
-- [ ] **Step 4:** Commit `docs(articles): smoke checklist §13, the CLAUDE.md section, and the cards to On glass`.
+- [x] **Step 4:** Commit `docs(articles): smoke checklist §13, the CLAUDE.md section, and the cards to On glass`.
 
 ---
 

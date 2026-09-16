@@ -17,6 +17,7 @@ TEST_CASE("the demo catalogue reaches Settings from Home, and Back unwinds") {
   const InputEvent back{Button::Back, PressKind::Short};
 
   app.dispatch(down);     // focus LIBRARY -- Home's focus starts before its menu
+  app.dispatch(down);     // focus ARTICLES
   app.dispatch(down);     // focus SETTINGS
   app.dispatch(confirm);  // push Settings
   REQUIRE(app.top().id() == ScreenId::Settings);
@@ -136,4 +137,44 @@ TEST_CASE("the demo BookEnd is the board's own content") {
   // drawing one demo book must agree.
   CHECK(vm.meta == "24 CHAPTERS");
   CHECK(vm.leaveLabel == "BACK TO LIBRARY");
+}
+
+TEST_CASE("the demo catalogue reaches Articles from Home, and Back unwinds") {
+  // #141's row, walked the way a reader walks it. THREE rows now, so SETTINGS
+  // has moved down one and this is the middle one -- which is why the case above
+  // grew a Down rather than this one being written to reach the same place by a
+  // different count.
+  DemoScreenFactory f;
+  f.setArticlesDemo();
+  App app(std::make_unique<HomeScreen>(demoHomeVm(), demoHomeTargets()), f);
+  const InputEvent down{Button::Down, PressKind::Short};
+  const InputEvent confirm{Button::Confirm, PressKind::Short};
+  const InputEvent back{Button::Back, PressKind::Short};
+
+  app.dispatch(down);     // focus LIBRARY
+  app.dispatch(down);     // focus ARTICLES
+  app.dispatch(confirm);  // push Articles
+  REQUIRE(app.top().id() == ScreenId::Articles);
+  CHECK(app.top().fidelity() == Fidelity::Mono);
+  // The one hold this flow promises, and it is on Confirm: a long press opens
+  // the actions overlay on an article row.
+  CHECK(app.top().longPressable() != 0);
+
+  app.dispatch(back);
+  CHECK(app.top().id() == ScreenId::Home);
+  CHECK(app.depth() == 1);
+}
+
+TEST_CASE("an unprimed factory refuses Articles rather than substituting a demo") {
+  // A factory that substitutes content is worse than one that refuses: a refused
+  // push leaves Home standing, which is wrong in a way the reader can see
+  // through, where a substitution once woke this device into a book nobody was
+  // reading.
+  DemoScreenFactory f;
+  App app(std::make_unique<HomeScreen>(demoHomeVm(), demoHomeTargets()), f);
+  app.dispatch({Button::Down, PressKind::Short});
+  app.dispatch({Button::Down, PressKind::Short});
+  app.dispatch({Button::Confirm, PressKind::Short});
+  CHECK(app.top().id() == ScreenId::Home);
+  CHECK(app.depth() == 1);
 }

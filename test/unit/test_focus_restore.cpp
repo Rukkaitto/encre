@@ -42,6 +42,9 @@ constexpr ScreenId kAllScreens[] = {
     ScreenId::BookError,   ScreenId::BatteryEmpty,
     ScreenId::WifiSettings, ScreenId::WifiPicker, ScreenId::WifiPassword,
     ScreenId::WifiConnect,  ScreenId::WifiError,  ScreenId::WifiNetworkActions,
+    ScreenId::Articles,     ScreenId::ArticleActions, ScreenId::ArticleEnd,
+    ScreenId::WallabagAccount, ScreenId::WallabagConnecting, ScreenId::WallabagError,
+    ScreenId::ArticlesRemoveConfirm,
 };
 // NAMES THE SENTINEL, so an append cannot satisfy it unchanged. It used to name the
 // last member by hand -- `ScreenId::Peek + 1`, then `ScreenId::BookEnd + 1` -- and
@@ -123,6 +126,23 @@ std::unique_ptr<Standalone> build(ScreenId id) {
   // saved list, the scan, and the SSID a join is about. Six setters here would
   // be six chances to prime five.
   b->factory.setWifiDemo();
+  // setArticlesDemo primes all seven of the Articles screens at once, for
+  // setWifiDemo's reason: they share their content -- the list, the article an
+  // overlay acts on, the account's counts -- so seven setters here would be
+  // seven chances to prime six.
+  b->factory.setArticlesDemo();
+  // A WINDOWED LIST, so an unset row count refuses movement -- which would make
+  // it look like a screen whose focus legitimately cannot move and quietly
+  // shrink the `movable` count below. The picker's own trap, one list over.
+  b->factory.setArticlesVisibleRows(5);
+  // AND THE ERROR DIALOG IS PRIMED WITH THE SHAPE THAT MOVES. setArticlesDemo
+  // primes `SignIn`, which is the board the comparison sheet draws and which has
+  // ONE slab -- so its focus legitimately cannot move, and it would drop out of
+  // the `movable` count below without failing anything. That is the trap this
+  // fixture already sprang for Contents and for the picker, arriving a third
+  // time: a screen that cannot move here looks exactly like a screen that has
+  // quietly stopped moving everywhere.
+  b->factory.setWallabagFailure(WallabagErrorScreen::Shape::Offline);
   // The picker is a WINDOWED list and gets its row count from the theme, so an
   // unset one refuses movement -- which would make it look like a screen whose
   // focus legitimately cannot move and quietly shrink the `movable` count
@@ -212,6 +232,17 @@ std::unique_ptr<BootConfigured> bootBuild(ScreenId id) {
   // is what an empty one here stands for.
   b->factory.setWifiNetworks(SavedNetworks{});
   b->factory.setWifiScan({});
+  // The Articles pair the shell primes at mount, and in the state a real boot
+  // leaves them: NO CREDENTIALS. That is what a card with no /.reader/
+  // wallabag.json gives, which is every card until somebody edits a file on a
+  // computer -- so it is the honest analogue of the empty saved-network list
+  // above, not a convenience.
+  //
+  // BOTH ARE DECLARED Ready AND THIS IS WHAT CHECKS IT. The declaration is a
+  // second copy of the factory free to disagree with it, and the Wi-Fi hub's own
+  // row was moved by this walk after being written from its factory case.
+  b->factory.setArticlesNotSetUp();
+  b->factory.setWallabagAccountFacts({"", 0, "NEVER", 50, 0, /*configured=*/false});
   // NO BODY FACE, deliberately, and it costs this walk nothing: the two screens
   // that need one -- the Reader and the Peek -- are NeedsPriming and Never, so
   // neither is asked to build here. Loading a TTF per screen to prove a refusal
@@ -283,7 +314,12 @@ TEST_CASE("every screen accepts back the focus it reports") {
   // The two that cannot move are WifiConnect, which has no focus at all
   // because it has one action and it is CANCEL, and WifiNetworkActions, whose
   // single row means a move that cannot change anything.
-  CHECK(movable == 14);
+  // TWENTY, read off the run and then written down rather than guessed at. The
+  // six added are the Articles list, the actions overlay, the end screen, the
+  // account screen, the remove confirmation and the error dialog -- the last of
+  // which is counted only because this fixture primes the TWO-SLAB shape; see
+  // setWallabagFailure above.
+  CHECK(movable == 20);
 }
 
 TEST_CASE("every screen with a movable focus wraps off the end") {
@@ -317,7 +353,7 @@ TEST_CASE("every screen with a movable focus wraps off the end") {
   // The same fourteen, and it must stay the same number as `movable` above:
   // every list in this firmware wraps, so a screen that can move and does not
   // wrap is the Settings defect this case was written for.
-  CHECK(wrapping == 14);
+  CHECK(wrapping == 20);
 }
 
 TEST_CASE("restoring the focus a screen is already on is a no-op, not a failure") {
@@ -435,15 +471,23 @@ TEST_CASE("what a screen declares about a wake is what a boot-configured factory
   // re-derived: NINE screens a wake owes nothing -- Home, Library, the two Library
   // overlays, Book details, Settings, SdMissing, Typography and the Wi-Fi hub;
   // FOUR owe a priming, and they are one fact under four names, the open book;
-  // NINE never come back -- Sleep, Peek, BookError, BatteryEmpty and the five
-  // connect-flow screens past the hub.
+  // THIRTEEN never come back -- Sleep, Peek, BookError, BatteryEmpty, the five
+  // connect-flow screens past the hub, and FOUR of the Articles seven.
+  //
+  // THE ARTICLES SIX SPLIT 2/1/3, and the two READY ones are the Wi-Fi hub's row
+  // twice over rather than the Library's once: the factory holds the FileSystem,
+  // so both the list and the account screen are rebuilt off the CARD, and both say
+  // only things that are still true after a chip reset. ArticleEnd owes a priming
+  // for BookEnd's reason, the article openBookAt opened. The three that never come
+  // back are the actions overlay (its Facts belong to the press) and the two sync
+  // dialogs (a sync in flight does not survive a sleep).
   //
   // THE HUB IS HERE BECAUSE THIS CASE MOVED IT. It was declared NeedsPriming, read
   // off its factory case, and this walk failed it: loadWifi() primes the saved list
   // at boot, so a wake owes it nothing. A declaration nothing checks is a second
   // copy of the factory free to disagree with it, and it disagreed on its first run.
-  CHECK(ready == 9);
-  CHECK(needsPriming == 4);
-  CHECK(never == 9);
+  CHECK(ready == 11);
+  CHECK(needsPriming == 5);
+  CHECK(never == 13);
   CHECK(ready + needsPriming + never == static_cast<int>(ScreenId::Count));
 }

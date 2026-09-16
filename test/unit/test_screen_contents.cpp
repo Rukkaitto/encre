@@ -970,3 +970,48 @@ TEST_CASE("the filled list still marks exactly one row NOW") {
     CHECK(s.nowRow() >= 0);
   }
 }
+
+TEST_CASE("A LONG VALUE ELIDES INSIDE THE ROW TOO") {
+  // THE SAME DEFECT AS THE CASE ABOVE, ON THE OTHER RUN, AND IT SHIPPED WHILE
+  // THAT ONE WAS FIXED. `drawDetailRow` elided the LABEL to its share and drew
+  // the VALUE at its natural width from `width - margin - measure(value)` --
+  // which for a value wider than its share is NEGATIVE. It began left of the
+  // margin, ran under the label and off the panel, with no ellipsis to say so.
+  //
+  // Reported off the device as "the chapter name in the book details screen
+  // overflows": `Current chapter` is the one value on these screens that is the
+  // BOOK's rather than a field name or a two-to-four-character count.
+  //
+  // THE LEFT MARGIN IS THE EVIDENCE HERE, where the label's case watches the
+  // right one -- the two runs overflow in opposite directions, so a test
+  // watching only one edge is blind to half of it.
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  const char* const kLongValue =
+      "PREMI\xC3\x88RE PARTIE : \xC3\x80 LIRE AVANT L'ACHAT ET AUSSI APR\xC3\x88S, "
+      "UN TITRE QUI NE FINIT JAMAIS";
+  for (const int w : {480, 528}) {
+    const int h = w == 480 ? 800 : 792;
+    reader::Framebuffer fb(w, h);
+    fb.clear();
+    reader::BookDetailsScreen::Facts f;
+    f.title = "A Book";
+    f.author = "Somebody";
+    f.chapter = kLongValue;
+    reader::BookDetailsScreen s(f);
+    theme.renderBookDetails(fb, ramp.fonts, s.vm(), reader::Plane::Bw);
+    // NOTHING IS INKED IN THE LEFT MARGIN. Every run on this screen starts at
+    // kMargin (24), so ink at x < 24 is a run that began left of where it may.
+    // A full-bleed focused row would ink it legitimately -- this screen draws
+    // none, and the `x=0` discriminator the sibling case uses says so.
+    for (int y = 0; y < h; ++y) {
+      if (!fb.getPixel(0, y)) continue;
+      for (int x = 0; x < 24; ++x)
+        if (!fb.getPixel(x, y)) {
+          CHECK_MESSAGE(false, "ink in the left margin at " << x << "," << y << " on " << w);
+          y = h;
+          break;
+        }
+    }
+  }
+}

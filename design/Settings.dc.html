@@ -194,10 +194,44 @@
          `Wi-Fi . ON DEMAND` is exactly the shape that forbids, and Settings' test
          asserts every drawn row does one or the other.
 
-         No `border-bottom`: this is now the last drawn row. -->
+         THE SECOND ROW IS THE DOOR TO WallabagAccount.dc.html, WHICH WAS
+         REACHABLE FROM NOTHING. c2468df cut an `Instapaper / SIGNED IN` row from
+         this section alongside Home's; this restores its successor. Home's
+         ARTICLES row is the door to the LIST -- what to read -- and this is the
+         door to SETUP AND STATUS, which is what Settings is for. Two doors to
+         two different rooms, not two doors to one.
+
+         IT IS A CHEVRON AND NO VALUE, LIKE THE ROW ABOVE IT, and the tempting
+         `wallabag . NOT SET UP` is refused by the paragraph above for the same
+         reason `Wi-Fi . ON DEMAND` is. A row states a quantity or discloses a
+         screen, never both, and Settings' own test asserts it of every drawn
+         row. The setup state is not lost by this: WallabagAccount.dc.html's
+         band carries `SIGNED IN` or `NOT SET UP` as the first thing on the
+         screen the chevron opens, which is where a state that needs a sentence
+         of context belongs.
+
+         AND A VALUE HERE WOULD BE A NAG BY THE OTHER ROUTE. Main.dc.html's menu
+         note refuses `NOT SET UP` on Home's ARTICLES row -- a device nobody has
+         set up should not open on a list of chores -- and Settings being a
+         deliberate visit answers the NAG half of that while leaving the
+         quantity-or-chevron half exactly where it was.
+
+         TWELVE ITEMS, WHICH IS THE COUNT THE PARAGRAPH ABOVE SAYS TO CHECK
+         RATHER THAN ASSUME. Eleven fit with room; this is the twelfth and it is
+         the last that does. Rendered at both geometries with no rail and no
+         14px gutter, rows still running to the panel edge. The next row added
+         to this screen starts it scrolling, and needs no code change to do so
+         -- renderSettings reads `totalRows > rows`.
+
+         No `border-bottom` on this one: it is now the last drawn row, and the
+         Wi-Fi row above took its own rule back when it stopped being. -->
     <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px; border-top: 2px solid #000000;">CONNECTIONS</div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px; border-bottom: 1px solid #000000;">
       <div style="font-size: var(--t-value); font-weight: 500;">Wi-Fi</div>
+      <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 0 24px;">
+      <div style="font-size: var(--t-value); font-weight: 500;">Wallabag</div>
       <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
     </div>
 

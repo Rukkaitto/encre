@@ -756,6 +756,30 @@ int main(int argc, char** argv) {
   const bool isWifiErrorNotFound = std::strcmp(argv[1], "wifi_error_not_found") == 0;
   const bool isWifiErrorFailed = std::strcmp(argv[1], "wifi_error_failed") == 0;
   const bool isWifiNetworkActions = std::strcmp(argv[1], "wifi_network_actions") == 0;
+  // --- Articles over wallabag (V1.1) -------------------------------------
+  //
+  // Twelve subcommands for seven screens, because five have a boarded STATE as
+  // well: the not-set-up list, the sync-done list, the fetching stage and two
+  // more failure shapes. Each has its own id for the connect flow's reason --
+  // the sheet measures per screen, and folding a state in averages a regression
+  // in one against a board that cannot show it.
+  const bool isArticles = std::strcmp(argv[1], "articles") == 0;
+  const bool isArticlesSetup = std::strcmp(argv[1], "articles_setup") == 0;
+  const bool isArticlesSyncDone = std::strcmp(argv[1], "articles_sync_done") == 0;
+  const bool isArticleActions = std::strcmp(argv[1], "article_actions") == 0;
+  const bool isArticleEnd = std::strcmp(argv[1], "article_end") == 0;
+  const bool isWallabagAccount = std::strcmp(argv[1], "wallabag_account") == 0;
+  const bool isWallabagConnecting = std::strcmp(argv[1], "wallabag_connecting") == 0;
+  const bool isWallabagFetching = std::strcmp(argv[1], "wallabag_fetching") == 0;
+  const bool isWallabagError = std::strcmp(argv[1], "wallabag_error") == 0;
+  const bool isWallabagErrorOffline = std::strcmp(argv[1], "wallabag_error_offline") == 0;
+  const bool isWallabagErrorNoNetwork = std::strcmp(argv[1], "wallabag_error_no_network") == 0;
+  const bool isArticlesRemoveConfirm = std::strcmp(argv[1], "articles_remove_confirm") == 0;
+  const bool isArticlesAny = isArticles || isArticlesSetup || isArticlesSyncDone ||
+                             isArticleActions || isArticleEnd || isWallabagAccount ||
+                             isWallabagConnecting || isWallabagFetching || isWallabagError ||
+                             isWallabagErrorOffline || isWallabagErrorNoNetwork ||
+                             isArticlesRemoveConfirm;
   const bool isWifiAny = isWifiSettings || isWifiSettingsEmpty || isWifiPicker ||
                          isWifiPickerScrolled || isWifiPickerEmpty || isWifiPassword ||
                          isWifiConnect || isWifiError || isWifiErrorNotFound ||
@@ -767,7 +791,7 @@ int main(int argc, char** argv) {
       !isSleepWaking && !isLibraryOpening && !isTypography && !isPeek && !isSleepCover &&
       !isSleepCoverDetails && !isSleepCoverWaking && !isBookEnd && !isBookError &&
       !isBookErrorUnreadable && !isBookErrorMemory && !isLowBattery &&
-      !isBatteryEmpty && !isWifiAny) {
+      !isBatteryEmpty && !isWifiAny && !isArticlesAny) {
     std::fprintf(stderr,
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
@@ -782,7 +806,11 @@ int main(int argc, char** argv) {
                  "'wifi_picker', 'wifi_picker_scrolled', 'wifi_picker_empty', "
                  "'wifi_password', 'wifi_connect', 'wifi_error', "
                  "'wifi_error_not_found', 'wifi_error_failed', "
-                 "'wifi_network_actions' or "
+                 "'wifi_network_actions', 'articles', 'articles_setup', "
+                 "'articles_sync_done', 'article_actions', 'article_end', "
+                 "'wallabag_account', 'wallabag_connecting', 'wallabag_fetching', "
+                 "'wallabag_error', 'wallabag_error_offline', "
+                 "'wallabag_error_no_network', 'articles_remove_confirm' or "
                  "'app')\n",
                  argv[1]);
     return 3;
@@ -1248,7 +1276,66 @@ int main(int argc, char** argv) {
     // two boards drift apart in the one way the comparison could not see.
     for (const reader::InputEvent& ev : libraryEntry()) app.dispatch(ev);
   }
-  if (isWifiAny) {
+  if (isArticlesAny) {
+    // THE ARTICLES LIST IS THE PARENT UNDER EVERY ONE OF THESE BUT TWO. The
+    // actions overlay and both sync dialogs veil it; the remove confirmation
+    // veils the ACCOUNT screen instead, which is the one place in this flow
+    // where the parent differs -- and the board says so, because its veil is
+    // generated from WallabagAccount.dc.html rather than transcribed.
+    //
+    // On the device the list is reached from Home's ARTICLES row and the
+    // account screen from Settings' CONNECTIONS row. The simulator pushes each
+    // directly, for the connect flow's reason: what these renders are evidence
+    // about is the screens, and a Home frame nobody draws would only be a
+    // slower way to the same framebuffer.
+    factory.setArticlesDemo();
+    // THE STATUS LINE IS PART OF THE QUESTION, because the sync-done variant
+    // draws a block between the band and the sync row and so has one row fewer.
+    const std::string statusLine =
+        isArticlesSyncDone ? "SYNC COMPLETE \xC2\xB7 3 NEW ARTICLES \xC2\xB7 1 ARCHIVE PUSHED"
+                           : std::string();
+    factory.setArticlesVisibleRows(theme.articlesVisibleRows(h, w, fonts, statusLine));
+    if (isArticlesSetup) factory.setArticlesNotSetUp();
+    if (isArticlesSyncDone) {
+      // THE SYNC-DONE VARIANT IS THE SAME ScreenId with a stamp and a status
+      // block, which is what makes it a variant: SyncDone.dc.html is
+      // Articles.dc.html with two things added.
+      factory.setArticles(reader::demoArticles(), "WALLABAG \xC2\xB7 3 NEW");
+      factory.setArticlesStatusLine(statusLine);
+    }
+    if (isWallabagErrorOffline)
+      factory.setWallabagFailure(reader::WallabagErrorScreen::Shape::Offline);
+    if (isWallabagErrorNoNetwork)
+      factory.setWallabagFailure(reader::WallabagErrorScreen::Shape::NoNetwork);
+
+    const reader::ScreenId root = (isWallabagAccount || isArticlesRemoveConfirm)
+                                      ? reader::ScreenId::WallabagAccount
+                                      : reader::ScreenId::Articles;
+    if (!app.pushScreen(root)) {
+      std::fprintf(stderr, "the factory refused the Articles flow's root\n");
+      return 1;
+    }
+    reader::ScreenId over = reader::ScreenId::Count;
+    if (isArticleActions) over = reader::ScreenId::ArticleActions;
+    else if (isArticleEnd) over = reader::ScreenId::ArticleEnd;
+    else if (isWallabagConnecting || isWallabagFetching) over = reader::ScreenId::WallabagConnecting;
+    else if (isWallabagError || isWallabagErrorOffline || isWallabagErrorNoNetwork)
+      over = reader::ScreenId::WallabagError;
+    else if (isArticlesRemoveConfirm) over = reader::ScreenId::ArticlesRemoveConfirm;
+    if (over != reader::ScreenId::Count) {
+      if (!app.pushScreen(over)) {
+        std::fprintf(stderr, "the factory refused %s\n", reader::screenName(over));
+        return 1;
+      }
+      if (isWallabagFetching) {
+        // THE SECOND STAGE, set on the screen rather than primed into the
+        // factory: it is the same screen, and the whole point of the stage
+        // living in the strings is that nothing else distinguishes the two.
+        auto& dialog = static_cast<reader::WallabagConnectingScreen&>(app.atMut(app.depth() - 1));
+        dialog.setFetching(3, 12);
+      }
+    }
+  } else if (isWifiAny) {
     // WifiSettings IS THE PARENT UNDER EVERY ONE OF THESE, which is what the
     // three overlay boards veil. On the device it is reached from Settings'
     // CONNECTIONS row -- the only place the radio may come up, because the
@@ -1371,14 +1458,20 @@ int main(int argc, char** argv) {
     app.dispatch({reader::Button::Confirm, reader::PressKind::Short});
   }
   if (isSettings) {
-    // TWO Downs, then Confirm. Home's focus starts BEFORE its menu -- on the
-    // CONTINUE block -- so the first Down reaches LIBRARY and the second reaches
-    // SETTINGS; libraryEntry() above needs only one for the same reason. Reached
-    // by pressing rather than by assignment, so the render pins the navigation
-    // too, and getting it wrong showed up immediately as a Library in the
-    // comparison sheet rather than as a subtly wrong Settings.
-    app.dispatch({reader::Button::Down, reader::PressKind::Short});
-    app.dispatch({reader::Button::Down, reader::PressKind::Short});
+    // THREE Downs, then Confirm. Home's focus starts BEFORE its menu -- on the
+    // CONTINUE block -- so the first Down reaches LIBRARY, the second ARTICLES
+    // and the third SETTINGS; libraryEntry() above needs only one for the same
+    // reason. Reached by pressing rather than by assignment, so the render pins
+    // the navigation too.
+    //
+    // IT WAS TWO UNTIL #141's ROW LANDED BETWEEN THEM, and the way that surfaced
+    // is the argument for pressing rather than assigning: the second Down now
+    // lands on ARTICLES, the Confirm pushed a screen this path never primes, the
+    // push was REFUSED, and the sheet measured HOME against the Settings board
+    // at 22.95%. A direct push would have gone on rendering Settings correctly
+    // while the device's own navigation was broken.
+    for (int i = 0; i < 3; ++i)
+      app.dispatch({reader::Button::Down, reader::PressKind::Short});
     app.dispatch({reader::Button::Confirm, reader::PressKind::Short});
   }
   // The idle variant is the same screen with nothing to show, so it takes the same

@@ -1,4 +1,4 @@
-.PHONY: test sim readme-images firmware fonts icons compare epubs epubs-bulk card-add card-remove zips conventions hooks canvas canvas-check canvas-test
+.PHONY: test sim readme-images firmware probe probe-build fonts icons compare epubs epubs-bulk card-add card-remove zips conventions hooks canvas canvas-check canvas-test
 # PlatformIO installs outside PATH by default; allow an override: make firmware PIO=/path/to/pio
 #
 # Invoked through its MODULE entry point rather than the `pio` launcher script,
@@ -74,6 +74,26 @@ readme-images:
 	done
 firmware:
 	$(PIO) run -e xteink
+
+# #140's probe: build, upload and monitor in ONE invocation. See
+# docs/notes/wallabag-api.md section 8.
+#
+# THE TARGET EXISTS BECAUSE THE TWO-COMMAND FORM SILENTLY DOES THE WRONG THING.
+# PLATFORMIO_BUILD_FLAGS is an ENVIRONMENT VARIABLE, so it applies only to the
+# command it is written on -- and `pio run -t upload` REBUILDS. Setting the flag
+# on a `make firmware` and then uploading with a second, bare command therefore
+# rebuilds WITHOUT the probe and flashes that, with nothing anywhere saying so.
+# Proved rather than reasoned: the ELF's own probe banner goes from present to
+# absent between the two commands. One target, one invocation, nothing to forget.
+#
+# Flashing is the owner's step (the permission classifier blocks it from an
+# agent), which is exactly why the command has to be one somebody can copy.
+probe:
+	PLATFORMIO_BUILD_FLAGS="-DENCRE_WALLABAG_PROBE=1" $(PIO) run -e xteink -t upload -t monitor
+
+# The same build without uploading, for checking it compiles.
+probe-build:
+	PLATFORMIO_BUILD_FLAGS="-DENCRE_WALLABAG_PROBE=1" $(PIO) run -e xteink
 # Rebuilds every generated font asset from the TTFs in assets/fonts. Needs
 # freetype-py: pip install -r tools/requirements.txt
 #

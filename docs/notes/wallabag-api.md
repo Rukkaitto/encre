@@ -80,8 +80,8 @@ of a deployment and not of the design.
 | unread list, no bodies | `GET /api/entries?archive=0&detail=metadata&perPage=N` |
 | only what changed | the same plus `since=<unix ts>` |
 | the article | `GET /api/entries/{entry}/export.epub` |
-| archive | `PATCH /api/entries/{entry}?archive=1` |
-| like | `PATCH /api/entries/{entry}?starred=1` |
+| archive | `PATCH /api/entries/{entry}` + body `archive=1` |
+| like | `PATCH /api/entries/{entry}` + body `starred=1` |
 | is it reachable / which version | `GET /api/info` — needs no token |
 
 Two of those are better than the Instapaper design assumed:
@@ -98,6 +98,28 @@ An entry carries `id`, `title`, `url`, `domain_name`, `content`, `created_at`,
 `updated_at`, `is_archived`, `is_starred`, `language`, `mimetype`,
 `preview_picture`, `reading_time`, `tags` — so `Articles.dc.html`'s rows and
 `ArticleEnd`'s reading time need no derivation and no second call.
+
+**THE TWO PATCHES TAKE THEIR PARAMETERS IN THE BODY, AND THIS TABLE SAID THE
+QUERY STRING UNTIL THE DEVICE PROVED OTHERWISE.** Both rows read
+`?archive=1` / `?starred=1`, the client sent exactly that, and wallabag answered
+**200** — so the sync's push looked like it worked, the queue emptied, and
+nothing on the instance changed. Reported off the device as "liking or archiving
+sets 1 TO PUSH, re-syncing seems to push, but the articles aren't liked or
+archived".
+
+`patchEntriesAction` reads them off Symfony's `$request->request`, which
+FOSRestBundle's `BodyListener` fills from the request BODY for a PATCH when the
+content type is form-encoded. PHP never populates `$_POST` for a PATCH at all, so
+the query string reaches nothing: the entry is found, no parameter is seen, and
+the entry comes back unchanged with a 200.
+
+**A WRONG 200 IS THE WORST ANSWER THIS API CAN GIVE US**, because the push step
+acks the queue on any 2xx — correctly, since it has no way to know the server
+ignored a parameter it never received. The marker is removed, the intent is gone,
+and the next sync has nothing left to retry. That is why this is fixed at the
+request rather than anywhere downstream, and why the test asserts the BODY and
+not only the path: the previous one pinned the path verbatim and was green
+throughout.
 
 ## 3. Where the credentials come from
 
@@ -411,3 +433,270 @@ something this project has already been bitten by:
 If a future export fails any of them, `detail=full`'s `content` is the fallback
 and the HTML tokenizer is back on the bill — the estimate `instapaper-full-api.md`
 §6 carries — so nothing is lost but the shortcut.
+
+---
+
+## 8. What a round trip costs on the C3 — the probe, and the rule before the numbers
+
+**RUN ON GLASS 2026-09-15 — the numbers are under "What it measured" below.**
+This section was written before the measurement on purpose: #140 asks for the
+probe at the point where the answer can still change the design, and a decision
+rule written afterwards is a rule fitted to whatever turned up. **The rule above
+the numbers is unedited since; read it before reading them.**
+
+### Why it cannot be answered from a desktop
+
+The reading floor with Wi-Fi linked is **28,508 bytes**, measured on glass, and
+the stack already costs **21,328 bytes of static RAM at every instant** whether
+or not the radio is ever switched on. What nothing here can price is an mbedTLS
+handshake on a part with no PSRAM. This project has been wrong about the C3 from
+desktop evidence three times — the `__divdi3` in a hot loop the desktop does not
+have, the cover decode that peaked **17–25 KB above** its desktop twin because
+the allocator is simply different, and the `dynamic_cast` that compiled on macOS
+and failed on the first firmware build.
+
+### Running it
+
+It needs `/.reader/wallabag.json` filled in and one saved Wi-Fi network marked
+`AUTO`; without either it says so and does nothing. It runs at the END of
+`setup()`, after the first paint — which is the measurement rather than a
+convenience, because what #140 asks is what a round trip costs with **no book
+open**, the state the sync flow actually runs in.
+
+**AND THAT PLACEMENT IS WHY `make firmware` THEN `pio device monitor` CAPTURES
+NOTHING.** `HWCDC::write` short-circuits on `!isCDC_Connected()`, so a line
+printed before a terminal has OPENED the port is **dropped rather than
+buffered** — and `setup()`'s own wait for a host is capped at 400 ms because
+every boot pays it. By the time a monitor started by hand attaches, the probe has
+already run and its output is gone. The first version of this section said to do
+exactly that; it cannot work.
+
+Two routes that do.
+
+**THE CARD, WHICH ALWAYS WORKS.** Set `"logToCard": true` in
+`/.reader/settings.json`, flash, let the device sit for a few seconds, then read
+`/encre.log` off the card on a computer. Nothing is racing: `logf` tees into the
+card buffer whether or not a host is there, and `loop()` flushes it in the first
+quiet window. This is the route for a device on battery, where there is no host
+coming at all — the case the card log was built for.
+
+**THE CABLE, IF YOU WANT IT LIVE.** The probe WAITS for a terminal, up to 30 s,
+whenever `isPlugged()` says a host is there — so start the monitor and the probe
+will be waiting for you. **One command:**
+
+```
+make probe
+```
+
+**IT IS A MAKE TARGET BECAUSE THE TWO-COMMAND FORM SILENTLY FLASHES THE WRONG
+BUILD, AND THAT IS WHAT WENT WRONG TWICE.** `PLATFORMIO_BUILD_FLAGS` is an
+ENVIRONMENT VARIABLE, so it applies only to the command it is written on — and
+`pio run -t upload` REBUILDS before it uploads. So this:
+
+```
+PLATFORMIO_BUILD_FLAGS="-DENCRE_WALLABAG_PROBE=1" make firmware   # builds WITH the probe
+pio run -e xteink -t upload -t monitor                            # rebuilds WITHOUT it, uploads that
+```
+
+builds the probe, throws it away, and flashes the default firmware, with nothing
+anywhere saying so. Proved rather than reasoned: the ELF's own probe banner goes
+from present to absent between those two commands.
+
+`make probe-build` is the same build without uploading, for checking it compiles.
+Unplugged the probe does not wait at all, because nobody is coming.
+
+**IT SAYS WHICH BUILD IS RUNNING BEFORE IT SAYS ANYTHING ELSE.** The first line
+is `[probe] ENCRE_WALLABAG_PROBE build` with the heap, and the second says
+whether the card log is on. Without them, a build flashed WITHOUT the flag and a
+probe that returned early because nothing was configured look identical:
+silence. If neither line appears, the running firmware is not a probe build.
+
+Three `[probe]` lines come back, each with the heap before, after, spent, the
+minimum since boot, and the largest free BLOCK — which is the number that decides
+an allocation and which `getFreeHeap` cannot see:
+
+| line | what it measures |
+|---|---|
+| `http-info` | a plain round trip to the reader's own server |
+| `tls-info` | the same against `app.wallabag.it`, so the handshake is priced even on a device whose own server is plain |
+| `download` | one article streamed 4 KB at a time onto the card |
+
+The download reopens the file per chunk, because `SdMan` is the SDK's singleton
+and `sd_fs.h` does not export it — so the probe's **wall clock is pessimistic**
+and its **heap**, which is the number wanted, is not.
+
+### The decision rule, written before the numbers arrive
+
+**If TLS leaves less than 40 KB free with the radio up and no book open**, the
+transport supports **plain HTTP only** in this release, and the account screen's
+band says so as a stated limit rather than a device that fails on some servers
+and not others. **If it fits**, TLS is enabled and nothing else changes.
+
+40 KB is not a round number chosen for looking like one: it is the 28,508-byte
+reading floor plus room for the largest single allocation the open path makes on
+a normal book, and it is the point below which a sync would be trading a reader's
+ability to open the article it just fetched.
+
+### What it measured (2026-09-15, X3/UC8279)
+
+**THE RULE FIRES, AND IT FIRES BY 23 KB.** TLS left **17,120 bytes** free against
+a threshold of 40,000, so by the rule written above it the transport supports
+**plain HTTP only** in this release.
+
+| leg | code | wall | heap before -> after | net | **transient** | min free | largest block |
+|---|--:|--:|---|--:|--:|--:|---|
+| `http-info` | 400 | 38 ms | 74,496 -> 73,336 | 1,160 | **11,608** | 62,888 | 61,428 -> 61,428 |
+| `tls-info` | 200 | 797 ms | 73,952 -> 73,312 | 640 | **56,832** | **17,120** | 61,428 -> **49,140** |
+| `download` | 400 | 23 ms | 73,364 -> 70,728 | — | — | 17,120 | 49,140 |
+
+**THE TRANSIENT IS THE COLUMN THAT MATTERS AND IT IS NOT THE ONE THE LOG PRINTS
+AS `spent`.** `spent` is before minus after — 640 bytes for a handshake, which
+says only that TLS gives back what it took. The cost is before minus the
+**minimum**, and the two differ by a factor of 89 on that row.
+
+Radio up with no book open is **74,568 bytes** free (`[stage] probe-joined`),
+which is the budget every figure here is spent out of. A plain round trip costs
+**11,608** bytes transient; **a TLS one costs 56,832 — 4.9x as much, and 76% of
+the entire budget.**
+
+**AND 56,832 IS THE OPTIMISTIC NUMBER RATHER THAN THE SHIPPED ONE.**
+`probeOneGet` calls `setInsecure()`, which still performs a handshake and skips
+**verification** — no CA bundle parsed, no chain walked, no pinned root held. A
+transport that actually verified a certificate costs more than this, so 17,120 is
+a **ceiling on the headroom** and not a measurement of it.
+
+**THE FREE HEAP IS WHAT FAILED AND THE LARGEST BLOCK WAS COMFORTABLE**, which is
+worth stating because this project's rule elsewhere is that the block is the
+number that decides an allocation: it never fell below **49,140**. The decision
+rule names *free*, deliberately and in advance, and free is the half that missed.
+
+**THE TRANSIENT IS RELEASED, WHICH THE RULE'S OWN REASONING DID NOT ANTICIPATE.**
+40 KB was justified as "the point below which a sync would be trading a reader's
+ability to open the article it just fetched" — and those two never coexist: the
+handshake tears down and the heap is back to **73,312** before anything opens an
+article. What a 17,120-byte floor actually risks is **the sync aborting**, not the
+read after it. That is an observation about the rule and **not a licence to reason
+around it**: a rule written before the numbers is not one to reinterpret once they
+arrive.
+
+### The second and third runs: it is the BLOCK, and the rule was right for a reason it did not name
+
+**THE LARGEST FREE BLOCK NEVER COMES BACK, AND A BOOK CANNOT BE OPENED AFTER A
+SYNC.** Third run, same device, `https://wallabag.lucasgoudin.com`, with the
+three decisive contiguous sizes asked directly rather than read off a number:
+
+| after | free heap | largest block | inflate window (36,956) |
+|---|--:|--:|---|
+| boot, before the probe | 130,744 | 61,428 | fits |
+| joined | 74,500 | 61,428 | fits |
+| `own-plain` (400) | 73,248 | 61,428 | fits |
+| **`own-tls` (200)** | 73,344 | **34,804** | **REFUSED** |
+| `tls-info` (200) | 73,076 | 36,852 | REFUSED |
+| `download`, **session open** | 26,556 | 14,836 | REFUSED |
+| stream closed (6,388 B written) | 72,760 | 22,516 | REFUSED |
+| 4 more handshakes | 71,572 | 22,516 | REFUSED |
+| **radio down + 500 ms** | 109,172 | **36,852** | **REFUSED by 104 bytes** |
+
+**ONE HANDSHAKE DOES IT, AND NOTHING UNDOES IT.** `own-plain` costs no block at
+all; the first TLS connection takes it from 61,428 to 34,804 and it never
+returns above **36,852** — not when the stream closes, not after four more
+handshakes, not when the radio goes down. The free heap recovers every single
+time, which is exactly why this was invisible until the question was asked
+directly.
+
+**IT IS FRAGMENTATION AND NOT A LEAK, WHICH IS WHY `getFreeHeap` SAW NOTHING.**
+The repeats oscillate — 22,516, 19,444, 36,852, 22,516, 22,516 — so the loss
+plateaus rather than running away, and a sync of a dozen articles is no worse
+than a sync of one. **The plateau is the problem.** It settles at a ceiling of
+36,852 against an inflate window of **36,956**, so the answer to "does it
+plateau" is yes, 104 bytes too low.
+
+**THAT MAKES THE RULE RIGHT FOR A REASON IT DID NOT NAME.** 40 KB was justified
+as "the point below which a sync would be trading a reader's ability to open the
+article it just fetched", and the earlier reading of this file objected that the
+TLS transient is released before any article is opened — true, and beside the
+point. What is not released is the **shape** of the heap. `Inflater::begin` wants
+36,956 bytes in ONE piece on every deflated entry of every book, it is
+nothrow-checked, and it would refuse: the reader would fetch an article, reach
+`BookErrorMemory`'s *"needs more memory than is free right now"*, and be told to
+do nothing in particular. **The rule's conclusion is confirmed and its mechanism
+was wrong.**
+
+**104 BYTES IS NOT A MARGIN, IT IS A COIN FLIP.** One run, one card, one session.
+The honest statement is that the post-sync ceiling lands *at* the inflate
+window's size, not below it by a knowable amount — a build that measured 38 KB
+tomorrow would be the same finding.
+
+**AND ~21.5 KB OF FREE HEAP DOES NOT COME BACK EITHER.** 130,744 before the probe
+against 109,172 after `down()`, reproduced within 1.5 KB across all three runs
+(110,696 / 110,212 / 109,172). That is **separate from** the 21,328 bytes of
+static RAM the stack costs at link time, which this project already prices and
+which is paid whether or not the radio is switched on. So a session that has
+synced once carries a reading floor ~21 KB lower than the one every figure in
+`CLAUDE.md` was measured against.
+
+### So the two answers the rule chooses between are both unavailable
+
+- **Plain HTTP only** — the rule's own prescription — cannot serve this reader.
+  `own-plain` draws nginx's 400 because the origin is HTTPS, which the probe now
+  states outright before it runs.
+- **TLS** ends the session's ability to open a book.
+
+**Neither is a shipping answer, and the probe is what says so rather than a
+prediction.** What remains is a design question rather than a measurement: the
+sync and the reading have to stop sharing a heap. It is the owner's, and it is
+recorded on the card rather than decided here.
+
+**THE OWNER'S CALL (2026-09-15): THE SYNC RESTARTS THE DEVICE WHEN IT
+FINISHES.** A cold boot measures 61,428 bytes, so a restart provably restores the
+block — that is the one thing in this section measured on both sides. The
+precedent is `handleRetry`'s `esp_restart` for a card lost after a mount, which
+`CLAUDE.md` records as forced by the platform rather than a workaround for our
+own bug; this is the same shape, forced by mbedTLS.
+
+**AND #49's RESTORE DECLARATIONS ALREADY CARRY IT, WITH NOTHING ADDED.**
+`Articles` is `Restore::Ready` and `WallabagConnecting` is `Restore::Never`, so
+`App::snapshot()` truncates the record **before** the sync dialog — the record
+standing while a sync runs is already `…;articles:N`, written by the push that
+opened the dialog. So the restart lands on the Articles list, rebuilt off the
+card with the new items in it. **E-ink holds its last image and nothing clears
+the glass at boot**, so what the reader sees is the fetching screen held, one
+transition flash, then the list: an ordinary screen change. The mechanism written
+for a wake serves a restart untouched, which is the argument for having declared
+it per screen rather than scanning for one.
+
+**ONE INSTRUMENT WAS ADDED RATHER THAN ANOTHER PROBE RUN.** `[alive]` carried
+`heap` and `minHeap` and not the block, so whether this ceiling heals over
+minutes of idling was unanswerable from a log. It carries `block=` now.
+
+### One leg measured a refusal and one measured nothing
+
+**`http-info` CAME BACK 400 WITH A 255-BYTE BODY, AND THAT IS NOT A PLAIN ROUND
+TRIP TO A SERVER THAT SPEAKS ONE.** `HTTPClient::begin(WiFiClient&, url)` does
+**not** refuse an `https://` URL — it takes port 443 and sends plaintext at it —
+so an HTTPS-only origin answers in the clear with nginx's `The plain HTTP request
+was sent to an HTTPS port`, a page of about that size. The 11,608 bytes is
+therefore a sound measurement of what a plain request costs, and it is **not**
+evidence that this reader's server accepts one. The evidence points the other way.
+
+**AND THAT TOOK THE DOWNLOAD LEG WITH IT.** `probeStreamedDownload` is plain too,
+so it drew the same 400, `wrote=0`, and its `if (code == 200)` body never ran.
+**The streaming sink's allocation shape is still unmeasured** — one of the three
+questions this probe exists to answer is unanswered. Fixing it needs more than a
+scheme change: `/api/entries/1/export.epub` wants a bearer token, so measuring it
+needs the token ladder rather than another URL.
+
+**SO THE PROBE ANSWERED TWO OF ITS THREE QUESTIONS AND IS NOT REMOVABLE YET.**
+The instruction to remove it once it has answered stands, and it has not.
+
+### What the probe costs, measured
+
+`-DENCRE_WALLABAG_PROBE=1` is **+1,880 bytes of static RAM and +154 KB of flash**
+against the default build (46,652 → 48,532 and 2,241,403 → 2,395,467), almost all
+of it the TLS stack being linked at all. The default build is byte-identical with
+the flag absent, which is the whole point of `ENCRE_FS_SELFTEST`'s idiom: a
+diagnostic that ships in every build is one every reader pays for.
+
+**Remove the probe once it has answered**, as `ENCRE_COVER_PROBE` was removed
+after it answered its own question.
+

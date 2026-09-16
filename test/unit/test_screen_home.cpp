@@ -201,12 +201,17 @@ TEST_CASE("the empty variant keeps Home's identity and menu") {
   reader::HomeScreen screen(vm, reader::demoHomeTargets());
   CHECK(screen.id() == reader::ScreenId::Home);
   CHECK(vm.nothingToContinue);
-  // Same two rows, in the same order, so navigation is unchanged.
-  REQUIRE(vm.menu.size() == 2);
+  // Same three rows, in the same order, so navigation is unchanged.
+  REQUIRE(vm.menu.size() == 3);
   CHECK(vm.menu[0].label == "LIBRARY");
-  CHECK(vm.menu[1].label == "SETTINGS");
+  CHECK(vm.menu[1].label == "ARTICLES");
+  CHECK(vm.menu[2].label == "SETTINGS");
   // LIBRARY says EMPTY where Home says a count.
   CHECK(vm.menu[0].value == "EMPTY");
+  // ARTICLES CARRIES NO VALUE HERE, so it draws the chevron -- SETTINGS' own
+  // mechanism, and Main.dc.html's menu note refuses `NOT SET UP` on this row: a
+  // device nobody has set up should not open onto a list of chores.
+  CHECK(vm.menu[1].value.empty());
 }
 
 TEST_CASE("the empty variant focuses LIBRARY, because there is no CONTINUE block") {
@@ -292,7 +297,7 @@ TEST_CASE("the unopened variant has no CONTINUE slot either, in either direction
   reader::Screen& s = h;
   REQUIRE(s.focus() == 0);
   h.onEvent({reader::Button::Up, reader::PressKind::Short});
-  CHECK(s.focus() == 1);  // wrapped to SETTINGS, not down to a CONTINUE block
+  CHECK(s.focus() == 2);  // wrapped to SETTINGS, not down to a CONTINUE block
   h.onEvent({reader::Button::Down, reader::PressKind::Short});
   CHECK(s.focus() == 0);
   s.setFocus(-1);
@@ -319,7 +324,7 @@ TEST_CASE("the empty variant has no CONTINUE slot to focus, in either direction"
   reader::Screen& s = h;
   REQUIRE(s.focus() == 0);
   h.onEvent({reader::Button::Up, reader::PressKind::Short});
-  CHECK(s.focus() == 1);  // wrapped to SETTINGS, not down to a CONTINUE block
+  CHECK(s.focus() == 2);  // wrapped to SETTINGS, not down to a CONTINUE block
   h.onEvent({reader::Button::Down, reader::PressKind::Short});
   CHECK(s.focus() == 0);
   // ...and a record naming the CONTINUE block cannot put one here either.
@@ -350,7 +355,9 @@ TEST_CASE("DOWN MOVES AN ORDINARY HOME OFF THE CONTINUE BLOCK") {
   CHECK(a.kind == Action::Kind::Redraw);
   CHECK(s.focus() == 0);  // LIBRARY
   h.onEvent(kDown);
-  CHECK(s.focus() == 1);  // SETTINGS
+  CHECK(s.focus() == 1);  // ARTICLES
+  h.onEvent(kDown);
+  CHECK(s.focus() == 2);  // SETTINGS
   // ...and round, because every list wraps.
   h.onEvent(kDown);
   CHECK(s.focus() == -1);
@@ -361,7 +368,7 @@ TEST_CASE("UP moves an ordinary Home the other way") {
   reader::Screen& s = h;
   REQUIRE(s.focus() == -1);
   h.onEvent(kUp);
-  CHECK(s.focus() == 1);  // wraps up to SETTINGS
+  CHECK(s.focus() == 2);  // wraps up to SETTINGS
 }
 
 TEST_CASE("setBattery mirrors into the view model") {

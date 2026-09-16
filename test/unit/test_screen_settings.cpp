@@ -99,12 +99,16 @@ TEST_CASE("focus skips headers in both directions") {
   // over the three above it.
   scr.onEvent(kDown);
   CHECK(focusedLabel(scr) == "Wi-Fi");
+  scr.onEvent(kDown);
+  CHECK(focusedLabel(scr) == "Wallabag");
   // The last row of the list, so DOWN wraps to the first focusable row. (It used
   // to stop here, which made Settings the one list in the firmware that did not
   // roll over.)
   scr.onEvent(kDown);
   CHECK(focusedLabel(scr) == "Typography");
 
+  scr.onEvent(kUp);
+  CHECK(focusedLabel(scr) == "Wallabag");
   scr.onEvent(kUp);
   CHECK(focusedLabel(scr) == "Wi-Fi");
   scr.onEvent(kUp);
@@ -122,7 +126,7 @@ TEST_CASE("focus skips headers in both directions") {
   // And UP from the first focusable row wraps to the last rather than climbing
   // into the READING header above it.
   scr.onEvent(kUp);
-  CHECK(focusedLabel(scr) == "Wi-Fi");
+  CHECK(focusedLabel(scr) == "Wallabag");
 }
 
 TEST_CASE("every move on this list changes something, so every move repaints") {
@@ -251,10 +255,11 @@ TEST_CASE("setFocus CLAMPS an out-of-range index rather than refusing it") {
   // can go"), and the last item then happened to be the inert `Sleep screen`, so
   // the clamp landed somewhere the gate refused. The last item is `Wi-Fi` now,
   // which is focusable, so the clamp lands and the restore succeeds -- which is
-  // what `set()` has always been specified to do.
+  // what `set()` has always been specified to do. The last item is `wallabag`
+  // now, and it is focusable for the same reason.
   SettingsScreen scr = sized(Settings{}, nullptr);
   CHECK(scr.setFocus(999));
-  CHECK(focusedLabel(scr) == "Wi-Fi");
+  CHECK(focusedLabel(scr) == "Wallabag");
 }
 
 TEST_CASE("setFocus refuses Cover fit while it is inert, and accepts it when it is not") {
@@ -306,7 +311,7 @@ TEST_CASE("the list FITS the panel, so no rail is drawn") {
   // it counts is the tallest one the list has. `rows.size() == totalRows` is what
   // says every item still fits.
   SettingsScreen scr = sized(Settings{}, nullptr);
-  CHECK(scr.vm().totalRows == 11);
+  CHECK(scr.vm().totalRows == 12);
   CHECK(static_cast<int>(scr.vm().rows.size()) == scr.vm().totalRows);
 }
 
@@ -359,7 +364,7 @@ TEST_CASE("Settings' READING row opens the Typography panel") {
   // displayed the values are redundant.
   SettingsScreen scr = sized(Settings{}, nullptr);
 
-  REQUIRE(scr.vm().rows.size() == 11);
+  REQUIRE(scr.vm().rows.size() == 12);
   CHECK(scr.vm().rows[0].label == "READING");
   CHECK(scr.vm().rows[0].isHeader);
   CHECK(scr.vm().rows[1].label == "Typography");
@@ -393,7 +398,7 @@ TEST_CASE("Settings' CONNECTIONS row opens the Wi-Fi screen") {
   // was the table, and a test that read the table would have agreed with it.
   SettingsScreen scr = sized(Settings{}, nullptr);
 
-  REQUIRE(scr.vm().rows.size() == 11);
+  REQUIRE(scr.vm().rows.size() == 12);
   CHECK(scr.vm().rows[9].label == "CONNECTIONS");
   CHECK(scr.vm().rows[9].isHeader);
   CHECK(scr.vm().rows[10].label == "Wi-Fi");
@@ -488,7 +493,7 @@ TEST_CASE("CHANGE on a device row still cycles, and OPEN does not") {
 
 TEST_CASE("the SLEEP SCREEN section is drawn where the board puts it") {
   SettingsScreen scr = sized(Settings{}, nullptr);
-  REQUIRE(scr.vm().rows.size() == 11);
+  REQUIRE(scr.vm().rows.size() == 12);
   CHECK(scr.vm().rows[2].label == "SLEEP SCREEN");
   CHECK(scr.vm().rows[2].isHeader);
   CHECK(scr.vm().rows[3].label == "Shows");

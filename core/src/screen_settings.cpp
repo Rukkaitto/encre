@@ -45,7 +45,7 @@ namespace {
 // Twelve fit, so there is no rail and no 14px gutter, and rows still run to the
 // panel edge. Nothing here has to change when it overflows again: renderSettings
 // reads `totalRows > rows` and takes the gutter only then.
-constexpr std::array<SettingsScreen::Item, 11> kItems{{
+constexpr std::array<SettingsScreen::Item, 12> kItems{{
     {"READING", SettingsScreen::Field::None, true, false},
     {"Typography", SettingsScreen::Field::Typography, false, true},
     {"SLEEP SCREEN", SettingsScreen::Field::None, true, false},
@@ -63,6 +63,16 @@ constexpr std::array<SettingsScreen::Item, 11> kItems{{
     // `Wi-Fi . ON DEMAND` is exactly the shape that forbids, and the state it
     // would state is the one WifiSettings' own header band already carries.
     {"Wi-Fi", SettingsScreen::Field::Wifi, false, true},
+    // THE DOOR TO THE ACCOUNT SCREEN, and without it that screen is reachable
+    // from nothing -- which is what design/Settings.dc.html's note says this row
+    // is for. Home's ARTICLES row opens the LIST, and this opens SETUP AND
+    // STATUS: two doors to two different rooms.
+    //
+    // A CHEVRON AND NO VALUE, like the row above it and for its reason. The
+    // tempting `wallabag . NOT SET UP` is the shape a row states a quantity or
+    // discloses a screen, never both forbids -- and the state it would state is
+    // the one WallabagAccount's own header band already carries.
+    {"Wallabag", SettingsScreen::Field::Wallabag, false, true},
 }};
 
 // The values CHANGE cycles through, and they wrap: this is one button, so there is
@@ -117,6 +127,7 @@ bool SettingsScreen::disclosedScreen(Field f, ScreenId& out) {
   switch (f) {
     case Field::Typography: out = ScreenId::Typography; return true;
     case Field::Wifi: out = ScreenId::WifiSettings; return true;
+    case Field::Wallabag: out = ScreenId::WallabagAccount; return true;
     // Named rather than swept into a `default:`, so -Wswitch is still the
     // reminder that a new field has to answer this question -- which is the
     // whole reason the mapping is a switch and not a table lookup.
@@ -229,6 +240,7 @@ Action SettingsScreen::cycleFocused() {
     }
     case Field::Typography:
     case Field::Wifi:
+    case Field::Wallabag:
       // Handled by onGesture BEFORE we get here -- these rows disclose rather than
       // edit, so there is nothing to cycle and nothing to commit. Listed rather
       // than swept into a `default:`: -Wswitch naming a field nobody handled is the
@@ -301,7 +313,8 @@ void SettingsScreen::syncVm() {
         // four typography settings into the right slot would break it and would not
         // fit. The chevron is the whole content of that slot.
         case Field::Typography:
-        case Field::Wifi: break;
+        case Field::Wifi:
+        case Field::Wallabag: break;
         case Field::SleepShows: row.value = showsLabel(settings_.sleepShows); break;
         case Field::CoverFit: row.value = fitLabel(settings_.coverFit); break;
         case Field::SleepAfter: row.value = sleepLabel(settings_.sleepAfterMs); break;

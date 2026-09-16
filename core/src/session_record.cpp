@@ -31,6 +31,10 @@ constexpr const char* kNames[] = {
     // hold a record containing it.
     "wifi-settings", "wifi-picker", "wifi-password", "wifi-connect",
     "wifi-error", "wifi-network-actions",
+    // Articles over wallabag, and stable forever from here for the reason above.
+    "articles", "article-actions", "article-end",
+    "wallabag-account", "wallabag-connecting", "wallabag-error",
+    "articles-remove-confirm",
 };
 
 // TIED TO THE SENTINEL, NOT TO A NAMED MEMBER, AND THAT IS #42's WHOLE POINT.
@@ -183,6 +187,17 @@ const char* sessionWireName(ScreenId id) {
     case ScreenId::WifiConnect: return kNames[19];
     case ScreenId::WifiError: return kNames[20];
     case ScreenId::WifiNetworkActions: return kNames[21];
+    // Articles over wallabag. Every one of the six is NAMEABLE, and three of
+    // them are not restorable -- which are separate facts, as the Reader's own
+    // case above says. A name is what makes this switch exhaustive; whether a
+    // wake may put the screen back is kRestorability's answer.
+    case ScreenId::Articles: return kNames[22];
+    case ScreenId::ArticleActions: return kNames[23];
+    case ScreenId::ArticleEnd: return kNames[24];
+    case ScreenId::WallabagAccount: return kNames[25];
+    case ScreenId::WallabagConnecting: return kNames[26];
+    case ScreenId::WallabagError: return kNames[27];
+    case ScreenId::ArticlesRemoveConfirm: return kNames[28];
     // NOT A SCREEN, so it has no name and must never reach the fall-through below,
     // which is what silently made a missing case read as `home`.
     case ScreenId::Count: break;

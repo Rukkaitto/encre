@@ -32,6 +32,23 @@
   <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">WALLABAG</div>
   <div style="font-size: var(--t-value); font-weight: 700;">SIGNED IN</div>
 </div>
+  <!--
+    `Last sync` STATES AN OUTCOME, NOT AN AGE. It read `2 H AGO` and this device
+    has no clock (#132), so the four values are `Articles.dc.html`'s: `NEVER`,
+    `NO NEW`, `N NEW`, `FAILED`. One watermark feeds both slots, so the two
+    screens cannot disagree about what the last sync did.
+
+    THEY ARE SHORT FOR THE OTHER SCREEN'S REASON, NOT FOR THIS ONE'S. This row
+    has room -- the value is right-aligned --t-value on a 72px row whose label
+    `Last sync` is 110.70px of a 432px content width -- and `UP TO DATE` would
+    fit it comfortably at 148.66px. It does not get it: the sync row on
+    `Articles.dc.html` has 279.03px for a stamp that also carries `WALLABAG .`,
+    and a vocabulary that fits one slot and not the other is two vocabularies.
+
+    `Unread &middot; 3 ARTICLES` STAYS AS IT IS. It is a count of files on the card,
+    which the device holds and can state at any moment, and it is the one row
+    here whose value needs no server and no clock.
+  -->
   <div style="display: flex; flex-direction: column; flex-grow: 1;">
     <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 24px; border-bottom: 1px solid #000000;">
   <div style="font-size: var(--t-value); font-weight: 500;">Account</div>
@@ -43,7 +60,7 @@
 </div>
     <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 24px; border-bottom: 1px solid #000000;">
   <div style="font-size: var(--t-value); font-weight: 500;">Last sync</div>
-  <div style="font-size: var(--t-value); font-weight: 700;">2 H AGO</div>
+  <div style="font-size: var(--t-value); font-weight: 700;">NO NEW</div>
 </div>
     <div style="display: flex; justify-content: space-between; align-items: center; height: 72px; padding: 0 24px; background: #000000; color: #ffffff; border-bottom: 1px solid #000000;">
   <div style="font-size: var(--t-value); font-weight: 700;">Keep offline</div>

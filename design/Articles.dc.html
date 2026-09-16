@@ -31,18 +31,170 @@
     <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">ARTICLES</div>
     <div style="font-size: var(--t-value); font-weight: 700;">3 UNREAD</div>
   </div>
+  <!--
+    THE STAMP IS AN OUTCOME, NOT AN AGE. This row read `2 H AGO` and this device
+    has no clock (#132). A deep sleep on battery is a full power-down, so nothing
+    survives to measure elapsed time across one, and the server's `Date` header
+    is the server's clock in GMT rather than ours. What the device does hold is
+    what the last sync DID, stored in the watermark beside the `since` value it
+    sends back.
+
+    FOUR VALUES, and they are the whole vocabulary of this slot:
+
+      NEVER    no sync has ever completed on this card
+      NO NEW   the last sync fetched nothing
+      N NEW    the last sync fetched N articles
+      FAILED   the last sync did not finish
+
+    `WallabagAccount.dc.html`'s `Last sync` row draws the SAME four values from
+    the same watermark. That row has room for longer words and does not get
+    them: two screens naming one fact differently is two spellings of it, and
+    the vocabulary is chosen by the tighter of the two slots, which is this one.
+
+    THE STAMP IS WHAT THIS DEVICE OWES THE SERVER, AND IT USED TO BE WHAT THE
+    LAST SYNC DID. `WALLABAG . NO NEW` was redundant: the account screen's
+    `Last sync` row draws the same watermark through the same `outcomeLabel`,
+    and a reader standing on this list has just been told the outcome by the
+    screen that reported it. What nothing else on this screen says is that a
+    star or an archive is waiting to go out -- which is the one fact that makes
+    pressing `Sync now` worth doing when there is nothing new to fetch.
+
+    IT IS THE ACCOUNT SCREEN'S OWN WORDS, `N TO PUSH`, and that is this board's
+    existing rule applied to a new string: two screens naming one fact
+    differently is two spellings of it, and the vocabulary is chosen by the
+    tighter of the two slots, which is still this one. The outcome is NOT lost --
+    it moved to the one screen that was already stating it.
+
+    AND ZERO IS NOT A COUNT, so an empty queue draws an empty stamp rather than
+    `0 TO PUSH`. Main.dc.html's ARTICLES row carries the argument: an empty queue
+    has nothing to report rather than a zero to report, and this slot is a queue
+    exactly as that one is.
+
+    THE FIT IS NO LONGER THE CONSTRAINT IT WAS. The row is `gap: 12px; padding:
+    12px 24px` over an icon, `Sync now` at `flex-grow: 1` and this stamp, so the
+    stamp's slot is `432 - 25 - 24 - 103.97 = 279.03px` at the 480px panel and
+    48px more at 528. Measured in Chrome by injecting a span into THIS board,
+    at --t-meta and 0.1em:
+
+      1 TO PUSH      120.86px   158.17 clear
+      12 TO PUSH     133.45px   145.58 clear
+      100 TO PUSH    146.05px   132.98 clear   <- the widest realistic form
+
+    THE OLD VOCABULARY'S MEASUREMENTS ARE KEPT BELOW AS HISTORY, because they
+    are what the short words were chosen against and the next person to widen
+    this slot should see how little room there was:
+
+      WALLABAG . NEVER      232.61px      WALLABAG . NO NEW     251.06px
+      WALLABAG . 3 NEW      229.52px      WALLABAG . 100 NEW    257.06px
+      WALLABAG . FAILED     235.91px      NEVER SYNCED          347.95px  (cut)
+                                          UP TO DATE            303.69px  (cut)
+
+    AND THE TWO INSTRUMENTS DISAGREE BY UP TO 2%, stated rather than hidden: the
+    span-injection above reads `WALLABAG . NEVER` at 237.17px against the 232.61
+    recorded here, and `WALLABAG . 100 NEW` at 255.94 against 257.06. Neither
+    number decides anything now -- 133px of clearance is not a close call by any
+    instrument -- but a figure taken with a second instrument must not be quoted
+    as if it were the first.
+  -->
+  <!--
+    THE SYNC ROW IS A FOCUSABLE ROW AND INVERTS LIKE ANY OTHER, and the specimen
+    below cannot show it: a screen has ONE focus and this one draws it on the
+    first article. Stated here because the alternative is a rule that exists only
+    in a renderer -- and it shipped that way once, reported off the device as
+    "the sync now row doesn't look focused, even when it is", with the empty list
+    the worst case because the sync row is then the ONLY row and always focused.
+
+    When it holds the focus it takes the same `background: #000000; color:
+    #ffffff` the article row below draws, the mark and the stamp reversing out
+    with the label. Nothing else about the row moves -- same padding, same gap,
+    same height -- so the list cannot step when the focus enters or leaves it.
+
+    AND THE CONFIRM HINT FOLLOWS THE FOCUSED ROW, which makes this the second
+    hint bar in the firmware whose text varies within a screen (Settings' is the
+    first, and its own comment has the argument). `READ` on an article, `SYNC` on
+    this row: a bar promising READ while the focus sits on the sync row names an
+    action the press will not take, which is the false-claim shape this project
+    refuses for an unread gauge and for a badge promising a wake.
+
+    WITH NO ARTICLES, UP AND DOWN ARE EMPTY SLOTS. One focusable row means the
+    two movers would promise a press that changes nothing, which is
+    WifiSettingsEmpty's rule for exactly this reason -- and an empty slot is 36px
+    and not zero, so the two live slots keep their places.
+  -->
   <div style="display: flex; align-items: center; gap: 12px; padding: 12px 24px; border-bottom: 1px solid #000000;">
     <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M13 8a5 5 0 1 1-1.5-3.6" stroke="#000000" stroke-width="1.6"></path><path d="M12 1v3.5H8.5" stroke="#000000" stroke-width="1.6"></path></svg>
     <div style="font-size: var(--t-label); font-weight: 500; flex-grow: 1;">Sync now</div>
-    <div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">WALLABAG &middot; 2 H AGO</div>
+    <div style="font-size: var(--t-meta); letter-spacing: 0.1em; white-space: nowrap;">1 TO PUSH</div>
   </div>
+
+  <!--
+    THREE STATES AND TWO MARKS, AND THEY MEAN DIFFERENT THINGS:
+
+      never opened   a solid bullet
+      opened         no bullet, and NO `. READ`
+      finished       no bullet, and `. READ` on the meta line
+
+    THE WEIGHT IS NOT ONE OF THE SIGNALS, AND THIS BOARD ASKED FOR ONE THE RAMP
+    CANNOT DRAW. It set a read row's title to `font-weight: 400` where an unread
+    one is 500 -- and the type ramp carries `Value500` and `Value700` and no
+    `Value400` at all, so that was an asset nobody has. `renderArticles` has
+    always drawn every unfocused row at 500, so the boards have differed from the
+    render here since they landed. Sleep's 53px title and HomeEmpty's 39px are the
+    precedent and both were fixed the same way: the board asks for what the ramp
+    carries. A new role is 15-20 KB of flash and would want the panel to ask for
+    it first.
+
+    THE BULLET IS `HAVE I STARTED THIS` AND `READ` IS `DID I GET TO THE END`.
+    They were ONE flag and that was wrong in both directions at once: an article
+    opened for ten seconds lost its bullet AND claimed to have been read, and an
+    article read to the last page could claim neither, because nothing set
+    `finished` for one at all.
+
+    THE MIDDLE STATE HAD NO SPECIMEN BECAUSE IT HAD NO MODEL. The fourth row
+    below is it -- started, not finished, and the list says so by saying nothing.
+    It is also the state a reader is in most often, since an article put down
+    half way is exactly what a queue like this collects.
+
+    THE BULLET IS AN ABSENCE RATHER THAN A HOLLOW BOX, which was an owner's
+    change: a hollow 8x8 square at arm's length is a mark you have to look AT to
+    read, where an absence is one you read without looking. The list is scanned
+    rather than studied, so what matters is which rows have not been touched at
+    all, and those are the ones with ink beside them.
+
+    THE SLOT STAYS AND ONLY THE MARK GOES, which is kHintEmptySlotW's rule one
+    screen over: an empty slot is its own width and never zero. Removing the box
+    would step every read row's text 22px left of every unread one, and a list
+    whose left edge moved per row would read as a rendering fault.
+
+    AND `READ` MEANS OPENED HERE, WHERE FOR A BOOK IT MEANS FINISHED. That was
+    not stated anywhere and the code took the book's meaning, so the bullet could
+    never go hollow at all: `finished` is set by an explicit press -- BookEnd's
+    slab, or the Library's actions overlay -- and an article has neither. Every
+    row stayed solid for ever. Reported off the device as "the little dot on the
+    left of an article never goes away".
+
+    THE TWO MEANINGS ARE RIGHT FOR THE TWO THINGS. A novel is not read because
+    you opened it, and asking a reader to mark one finished is a fair thing to
+    ask once a book. An article is a single sitting: it is one to twenty minutes,
+    there is no second session to come back to, and a list that needed a press
+    per item to stay useful would be a chore in front of a feature whose whole
+    point is not being a chore. Opening it is the signal, and it costs the reader
+    nothing.
+
+    WHAT IT IS READ OFF is the per-article progress sidecar EXISTING -- the same
+    record the percentage comes from -- so "opened" means a reading position was
+    saved, which happens on the way out of the article, on a chapter crossing,
+    on the way into sleep, and in the quiet window two seconds after the buttons
+    stop. A reader who opens an article and immediately presses Back has still
+    opened it, and the mark says so.
+  -->
 
   <div style="display: flex; flex-direction: column; flex-grow: 1;">
 
     <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px; background: #000000; color: #ffffff;">
       <div style="width: 8px; height: 8px; background: #ffffff; margin-top: 7px; flex-shrink: 0;"></div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="font-size: var(--t-value); font-weight: 700; line-height: 1.25;">The Death and Life of the Great American Essay</div>
+        <div style="font-size: var(--t-value); font-weight: 700; line-height: 31px;">The Death and Life of the Great American Essay</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">LONGREADS &middot; 22 MIN</div>
       </div>
     </div>
@@ -50,7 +202,7 @@
     <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px; border-bottom: 1px solid #000000;">
       <div style="width: 8px; height: 8px; background: #000000; margin-top: 7px; flex-shrink: 0;"></div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="font-size: var(--t-value); font-weight: 500; line-height: 1.25;">Why We Forget Most of the Books We Read</div>
+        <div style="font-size: var(--t-value); font-weight: 500; line-height: 31px;">Why We Forget Most of the Books We Read</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">THE ATLANTIC &middot; 9 MIN</div>
       </div>
     </div>
@@ -58,23 +210,23 @@
     <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px; border-bottom: 1px solid #000000;">
       <div style="width: 8px; height: 8px; background: #000000; margin-top: 7px; flex-shrink: 0;"></div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="font-size: var(--t-value); font-weight: 500; line-height: 1.25;">In Praise of Slow Reading</div>
+        <div style="font-size: var(--t-value); font-weight: 500; line-height: 31px;">In Praise of Slow Reading</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">AEON &middot; 14 MIN</div>
       </div>
     </div>
 
     <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px; border-bottom: 1px solid #000000;">
-      <div style="width: 8px; height: 8px; border: 1px solid #000000; box-sizing: border-box; margin-top: 7px; flex-shrink: 0;"></div>
+      <div style="width: 8px; height: 8px; margin-top: 7px; flex-shrink: 0;"></div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="font-size: var(--t-value); font-weight: 400; line-height: 1.25;">The Tyranny of the To-Be-Read Pile</div>
-        <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">LIT HUB &middot; 7 MIN &middot; READ</div>
+        <div style="font-size: var(--t-value); font-weight: 500; line-height: 31px;">The Tyranny of the To-Be-Read Pile</div>
+        <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">LIT HUB &middot; 7 MIN</div>
       </div>
     </div>
 
     <div style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 24px;">
-      <div style="width: 8px; height: 8px; border: 1px solid #000000; box-sizing: border-box; margin-top: 7px; flex-shrink: 0;"></div>
+      <div style="width: 8px; height: 8px; margin-top: 7px; flex-shrink: 0;"></div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="font-size: var(--t-value); font-weight: 400; line-height: 1.25;">E Ink: The Quiet Display Technology That Refused to Die</div>
+        <div style="font-size: var(--t-value); font-weight: 500; line-height: 31px;">E Ink: The Quiet Display Technology That Refused to Die</div>
         <div style="font-size: var(--t-meta); letter-spacing: 0.14em;">IEEE SPECTRUM &middot; 16 MIN &middot; READ</div>
       </div>
     </div>

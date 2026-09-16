@@ -84,6 +84,13 @@
 #include "reader/screens.h"
 #include "reader/session_record.h"
 #include "reader/settings.h"
+#include "card_file_sink.h"
+#include "http_transport_arduino.h"
+#include "reader/article_store.h"
+#include "reader/sync_engine.h"
+#include "reader/wallabag_client.h"
+#include "wallabag_store_nvs.h"
+#include "reader/wallabag_credentials.h"
 #include "reader/text.h"  // reader::Plane
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
@@ -688,7 +695,47 @@ static struct {
   // inflater does not exist yet, so the heap is ~133 KB. And it is cheap to keep:
   // measured 1,161 bytes of labels for a 96-entry book, ~12 a row.
   std::vector<reader::TocEntry> toc;
+  // AN ARTICLE'S `finished` MARK, READ AT OPEN. A BOOK HAS NO SUCH FIELD HERE, AND
+  // THE ASYMMETRY IS THE SAME ONE THAT DECIDES THE DOT.
+  //
+  // saveReadingPosition builds its record FRESH, which drops `finished` -- deliberate
+  // for a book, where re-reading is how a mark set by an explicit press is taken back.
+  // An article's mark is set by NO press: reaching ArticleEnd is what sets it, and
+  // `gArticleFinishedMarked` then refuses to set it twice in a session. So for an
+  // article the same drop is not a toggle, it is a LOSS: open a row that says
+  // `. READ`, press Back, and the mark is gone with no way to ask for it again until
+  // the next boot.
+  //
+  // CAPTURED AT OPEN RATHER THAN READ AT EACH SAVE, because a save happens on the way
+  // out, at every chapter crossing and in the 2 s quiet window after every page turn,
+  // and the open is the one moment on this path with heap and time to spare -- it is
+  // already parsing an archive and a table of contents. One small read a book against
+  // one a save.
+  bool articleFinished = false;
 } gReading;
+
+// AN ARTICLE IS AN EPUB UNDER `/.reader/articles/`, AND THAT IS THE WHOLE TEST.
+// Derived from the PATH rather than plumbed down from the callers, because two of
+// them -- the wake restore and Home's CONTINUE -- do not know what they are
+// opening: `last.json` carries an article's path exactly as it carries a book's,
+// which is decision 3 of the wallabag note taken. A flag threaded through the call
+// sites would be right at the Articles list and a guess at the other two.
+//
+// A FREE FUNCTION BECAUSE THERE ARE TWO CALLERS NOW. It was a local in `openBookAt`
+// and `saveReadingPosition` is the second, which is exactly when a second spelling
+// of the prefix would start to drift -- and the two answers would drift in opposite
+// directions, one deciding which end screen an article gets and the other which
+// LIST is told the reader moved.
+//
+// ONE FUNCTION FOR BOTH ANSWERS, because the id is the same parse: `epubPath` built
+// the name, so reading it back is one expression against it, and a caller wanting
+// only the bool passes nothing.
+static bool isArticlePath(const std::string& path, int* id = nullptr) {
+  const std::string prefix = std::string(reader::kArticlesDir) + "/";
+  if (path.rfind(prefix, 0) != 0) return false;
+  if (id != nullptr) *id = atoi(path.c_str() + prefix.size());
+  return true;
+}
 
 // HOME'S VIEW MODEL IS BUILT ONCE AND HAS TO BE REBUILT, which is the whole of a bug
 // the device reported: after reading a book, going Home still said NOTHING OPEN YET.
@@ -737,6 +784,11 @@ static reader::HomeRebuildGate gHomeRebuild;
 // the dispatch, which is what makes the pop that reveals the Library the press that
 // refreshes it.
 static bool gLibraryStale = false;
+
+// THE ARTICLES LIST'S OWN, and it is `gLibraryStale`'s twin for its reason: the
+// two are consumed when THEIR screen is on top, so one flag would let whichever
+// was reached first clear it for the other.
+static bool gArticlesStale = false;
 
 // The spine Contents chose, or -1. Held for exactly one dispatch: the choice is made
 // while Contents is on top and acted on once the pop has put the Reader back.
@@ -1582,6 +1634,403 @@ static uint32_t gLastSdDeepPollMs = 0;
 // this is the boot line that says which mechanism is in force. A probe that
 // degrades quietly is the defect this whole block exists to fix, so "degraded"
 // has to be visible from a serial log without knowing to look for it.
+// --- #140's PROBE: what a round trip costs on this part ----------------------
+//
+// BEHIND A FLAG AND ABSENT BY DEFAULT, which is ENCRE_FS_SELFTEST's idiom and
+// ENCRE_BATTERY_FAKE_PERCENT's: a diagnostic that ships in every build is a
+// diagnostic every reader pays for.
+//
+// IT RUNS BEFORE THE TRANSPORT IS WRITTEN, deliberately. #140 asks for it at the
+// point where the answer can still change the design, and the one cost this plan
+// could not price from a desktop is an mbedTLS handshake on a C3 with no PSRAM.
+// The figure to check it against is the READING FLOOR: docs/on-device-smoke-
+// checklist.md records 13,696 bytes as the smallest this project has ever
+// measured, and the Wi-Fi stack already takes ~21 KB of static RAM at every
+// instant.
+//
+// THE DECISION RULE IS WRITTEN HERE BEFORE THE NUMBERS ARRIVE, so it cannot be
+// bent to whatever they turn out to be: if TLS leaves less than 40 KB free with
+// the radio up and no book open, the transport supports plain HTTP only in this
+// release and the account screen's band says so as a stated limit. If it fits,
+// TLS is enabled and nothing else changes.
+#ifdef ENCRE_WALLABAG_PROBE
+#include <HTTPClient.h>
+#include <WiFiClient.h>
+#include <WiFiClientSecure.h>
+
+// WHAT THE SECOND RUN FOUND, AND IT IS NOT THE FREE HEAP.
+//
+// Across three TLS connections the free heap recovered every time -- 73,136 /
+// 73,340 / 73,076 -- and the largest BLOCK did not: 61,428 -> 45,044 -> 34,804,
+// measured with no session open at any of the three. Free heap says nothing is
+// wrong; the block says the heap is being cut up, and CLAUDE.md's own rule is
+// that the largest free BLOCK decides an allocation rather than the free total.
+//
+// SO THE QUESTION IS ASKED DIRECTLY RATHER THAN READ OFF A NUMBER. These three
+// sizes are the largest single contiguous requests the EPUB open path makes,
+// measured over 225 real books and recorded in CLAUDE.md: the inflate window,
+// the zip central directory, and the OPF string. A device that cannot serve
+// 36,956 bytes in one piece cannot open a book, whatever its free heap says.
+static void probeBlocks(const char* when) {
+  const uint32_t block = ESP.getMaxAllocHeap();
+  logf("[probe] blocks %-14s heap=%u block=%u | inflate36956=%s zipdir39610=%s opf64080=%s\n",
+       when, (unsigned)ESP.getFreeHeap(), (unsigned)block, block >= 36956 ? "fits" : "REFUSED",
+       block >= 39610 ? "fits" : "REFUSED", block >= 64080 ? "fits" : "REFUSED");
+  logFlush();
+}
+
+static void probeOneGet(const char* what, const char* url, bool secure) {
+  const uint32_t before = ESP.getFreeHeap();
+  const uint32_t blockBefore = ESP.getMaxAllocHeap();
+  const uint32_t t0 = millis();
+
+  HTTPClient http;
+  int code = -1;
+  int len = -1;
+  if (secure) {
+    WiFiClientSecure client;
+    // NO PINNING, and no bundle either: what is being measured is the
+    // HANDSHAKE's heap, and `setInsecure` still performs one. A probe that
+    // refused to connect would measure nothing.
+    client.setInsecure();
+    if (http.begin(client, url)) {
+      code = http.GET();
+      len = http.getSize();
+      http.end();
+    }
+  } else {
+    WiFiClient client;
+    if (http.begin(client, url)) {
+      code = http.GET();
+      len = http.getSize();
+      http.end();
+    }
+  }
+
+  const uint32_t after = ESP.getFreeHeap();
+  logf("[probe] %-10s code=%d len=%d ms=%lu heap %u -> %u (spent %d) min=%u block %u -> %u\n",
+       what, code, len, (unsigned long)(millis() - t0), (unsigned)before, (unsigned)after,
+       (int)before - (int)after, (unsigned)ESP.getMinFreeHeap(), (unsigned)blockBefore,
+       (unsigned)ESP.getMaxAllocHeap());
+  logFlush();
+}
+
+static void probeStreamedDownload(const char* url, bool secure) {
+  const uint32_t before = ESP.getFreeHeap();
+  const uint32_t blockBefore = ESP.getMaxAllocHeap();
+  const uint32_t t0 = millis();
+  size_t wrote = 0;
+
+  // IT TAKES THE SCHEME BECAUSE THE FIRST RUN MEASURED NOTHING. The download
+  // was plain against an HTTPS-only origin, so it drew nginx's 400 and the
+  // `code == 200` body never ran -- one of the three questions this probe
+  // exists to answer went unanswered. The allocation shape wanted here is a TLS
+  // session held OPEN while 4 KB chunks land on the card, which is strictly
+  // more than a handshake alone, and only the secure path has it.
+  {
+    WiFiClient plain;
+    WiFiClientSecure tls;
+    if (secure) tls.setInsecure();
+    HTTPClient http;
+    // IT FOLLOWS REDIRECTS NOW, because the second run drew a 302 and streamed
+    // nothing: the root URL sends a browser to the login page, and HTTPClient
+    // does not follow by default. STRICT is the right one -- it follows only a
+    // GET or HEAD, which is what this is.
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  if (http.begin(secure ? static_cast<WiFiClient&>(tls) : plain, url)) {
+    const int code = http.GET();
+    if (code == 200) {
+      // THE SHAPE THE REAL SINK WILL HAVE: a fixed chunk out of the stream and
+      // straight onto the card, so the whole body never exists in RAM. What is
+      // being measured is whether that is true in practice.
+      // THE CHUNK IS WHAT IS BEING MEASURED, not the write. 4 KB out of the
+      // stream and straight onto the card, so the whole body never exists in
+      // RAM -- which is the shape the real sink will have.
+      //
+      // IT APPENDS THROUGH `appendToCard` RATHER THAN OPENING A FILE, because
+      // that is the only card-write this translation unit can reach: SdMan is
+      // the SDK's singleton and sd_fs.h does not export it. The real sink opens
+      // ONCE and this reopens per chunk, so the probe's WALL CLOCK is
+      // pessimistic and its HEAP -- the number #140 wants -- is not.
+      uint8_t buf[4096];
+      WiFiClient* stream = http.getStreamPtr();
+      bool first = true;
+      while (http.connected() && (stream->available() || http.getSize() < 0)) {
+        const int n = stream->readBytes(buf, sizeof(buf));
+        if (n <= 0) break;
+        if (first) {
+          // Start from empty: a probe run twice must not measure the first run's
+          // file as well.
+          gSd.remove("/.reader/articles/probe.epub");
+          first = false;
+        }
+        appendToCard("/.reader/articles/probe.epub", reinterpret_cast<const char*>(buf),
+                     static_cast<size_t>(n), 4u * 1024u * 1024u);
+        wrote += static_cast<size_t>(n);
+      }
+    }
+    // THIS READING IS TAKEN WITH THE SESSION STILL OPEN, and that is the
+    // measurement rather than an accident of where the line sits. A streamed
+    // download HOLDS a TLS connection for its whole length, so what decides
+    // whether the sink fits is the heap DURING the stream and not the floor a
+    // handshake touches on its way through. The second run read 26,588 free and
+    // a 14,324-byte block here, against 73,076 and 34,804 a line earlier.
+    logf("[probe] download   code=%d wrote=%u ms=%lu heap %u -> %u min=%u block %u -> %u"
+         " (SESSION OPEN)\n",
+         code, (unsigned)wrote, (unsigned long)(millis() - t0), (unsigned)before,
+         (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), (unsigned)blockBefore,
+         (unsigned)ESP.getMaxAllocHeap());
+    http.end();
+  }
+  }
+  probeBlocks("stream closed");
+  logFlush();
+}
+
+// WAIT FOR SOMEBODY TO BE WATCHING, WHICH setup()'s OWN 400ms WAIT CANNOT DO.
+//
+// THIS PROBE WAS UNCAPTURABLE AS FIRST WRITTEN, and the reason is the one this
+// file already documents for every other timing: `HWCDC::write` short-circuits
+// on `!isCDC_Connected()`, so a line printed before a terminal has OPENED the
+// port is DROPPED rather than buffered. The probe runs at the end of setup(),
+// seconds before anybody can type `pio device monitor` -- so its whole output
+// went nowhere and the flash looked like a firmware that ignored the flag.
+//
+// setup()'s wait is capped at 400ms on purpose: it is paid by EVERY boot,
+// including the overnight-charging one, and the comment above it says so. This
+// wait is paid only by a probe build, which exists to be watched, so it can
+// afford to be long.
+//
+// UNPLUGGED IT DOES NOT WAIT AT ALL, and that is the case the card log is for: a
+// device on battery has no host coming, and `logf` still tees to /encre.log when
+// `logToCard` is on. That is the ROUTE THAT ALWAYS WORKS, and §8 leads with it.
+static void probeWaitForHost() {
+  if (!HWCDC::isPlugged()) return;
+  constexpr uint32_t kCapMs = 30000;
+  const uint32_t t0 = millis();
+  while (millis() - t0 < kCapMs) {
+    if (Serial) break;
+    if (!HWCDC::isPlugged()) break;  // the cable came out; nobody is coming
+    delay(50);
+  }
+  // Printed AFTER the wait, so it is the first thing a terminal that has just
+  // attached actually receives.
+  logf("[probe] waited %lums for a terminal (open=%d)\n", (unsigned long)(millis() - t0),
+       Serial ? 1 : 0);
+  logFlush();
+}
+
+static void runWallabagProbe() {
+  probeWaitForHost();
+  // A BANNER FIRST, so "the probe build is running" is answerable separately
+  // from "the probe found something to measure". Without it, a build flashed
+  // WITHOUT the flag and a probe that returned early look identical: silence.
+  logf("[probe] ENCRE_WALLABAG_PROBE build -- heap=%u min=%u block=%u\n",
+       (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+       (unsigned)ESP.getMaxAllocHeap());
+  logf("[probe] card log %s -- when enabled, every line below is also in /encre.log\n",
+       gCardLog.enabled() ? "ON" : "off");
+  logFlush();
+
+  reader::WallabagCredentials creds;
+  std::string why;
+  const reader::CredentialsResult r = reader::loadWallabagCredentials(gSd, creds, why);
+  if (r != reader::CredentialsResult::Ok) {
+    // THREE ANSWERS, NAMED SEPARATELY, because they need three different things
+    // done about them -- and the first version of this line collapsed them into
+    // one sentence, which is the reports-on-less-than-it-claims shape this
+    // project refuses everywhere else. `loadWallabagCredentials` distinguishes
+    // them precisely so a caller can.
+    switch (r) {
+      case reader::CredentialsResult::Absent:
+        // AND THE BOOT SEED IS NOT BUILT YET. Task 4.4 writes this file when it
+        // is missing; until then it is created by hand, and saying so is the
+        // difference between a reader editing a file and a reader wondering why
+        // the device did not make one.
+        logf("[probe] no %s on the card -- create it with the five keys "
+             "(server, clientId, clientSecret, username, password)\n",
+             reader::kWallabagCredentialsPath);
+        break;
+      case reader::CredentialsResult::Unconfigured:
+        // WHICH ONES ARE EMPTY, because "not configured" over five fields sends
+        // somebody to re-check all five. A seeded file and a half-finished edit
+        // are the same state and this names the gap in both.
+        logf("[probe] %s is missing a value:%s%s%s%s%s\n", reader::kWallabagCredentialsPath,
+             creds.server.empty() ? " server" : "", creds.clientId.empty() ? " clientId" : "",
+             creds.clientSecret.empty() ? " clientSecret" : "",
+             creds.username.empty() ? " username" : "",
+             creds.password.empty() ? " password" : "");
+        break;
+      case reader::CredentialsResult::Malformed:
+        // The reader's edit is the only copy of itself, so this is the one that
+        // has to carry a reason rather than a verdict.
+        logf("[probe] %s %s -- it is left exactly as typed\n",
+             reader::kWallabagCredentialsPath, why.c_str());
+        break;
+      case reader::CredentialsResult::Ok:
+        break;
+    }
+    logFlush();
+    return;
+  }
+  const reader::SavedNetwork* net = gWifiNets.automatic();
+  if (net == nullptr) {
+    logf("[probe] no AUTO network saved -- join one in Settings first\n");
+    logFlush();
+    return;
+  }
+
+  // THE SSID AND ITS LOCK STATE, because "the join did not complete" over a
+  // saved list does not say WHICH network -- and whether a secret was sent is
+  // half of any join diagnosis.
+  const std::string psk = net->locked ? shellwifi::secret(net->ssid) : std::string();
+  logf("[probe] joining AUTO network \"%s\" (locked=%d, secret=%d bytes)\n", net->ssid.c_str(),
+       (int)net->locked, (int)psk.size());
+  logFlush();
+
+  mark("probe-radio-up");
+  // THE PROBE RETRIES THE JOIN, AND THE SHIPPED FLOW DOES NOT. Measured on glass
+  // 2026-09-15: the same network joins first time through Settings -> Wi-Fi and
+  // was refused here with reason 208, ASSOC_COMEBACK_TIME_TOO_LONG -- 802.11w's
+  // "try again in N", which the ESP32 obeys exactly once.
+  //
+  // WHAT DIFFERS IS WHEN, NOT HOW. This runs ~1.3 s after a reset, while the AP
+  // still holds the previous association for this MAC and answers a new request
+  // with a comeback time; the picker's join happens seconds or minutes later,
+  // by which point that has cleared. So the probe waits for the radio to settle
+  // and then asks again, which is what the reason code is telling it to do.
+  //
+  // IT IS A PROBE-ONLY RETRY AND STAYS THAT WAY UNTIL SOMEBODY DECIDES
+  // OTHERWISE. `ArduinoWifiRadio::joinState()` reports Failed on the FIRST
+  // disconnect event, which every shipped join and Phase 4's sync driver share.
+  // That is defensible for a user-initiated join -- the reader sees it fail and
+  // presses again -- and it is a real question for an automatic one. Changing it
+  // there would change what three boarded copy shapes describe, so it is not
+  // being changed on the strength of one router.
+  //
+  // `down()` BETWEEN ATTEMPTS, because the STA is still connecting when the
+  // first failure is reported -- the log said so: `sta is connecting, cannot set
+  // config`. Without it the second beginJoin lands on a stack that has not let
+  // go of the first.
+  constexpr int kJoinAttempts = 4;
+  constexpr uint32_t kSettleMs = 3000;
+  bool joined = false;
+  for (int attempt = 1; attempt <= kJoinAttempts && !joined; ++attempt) {
+    if (attempt > 1) {
+      gRadio.down();
+      delay(kSettleMs);
+    }
+    if (!gRadio.beginJoin(net->ssid, psk)) {
+      logf("[probe] attempt %d: the radio refused the join\n", attempt);
+      logFlush();
+      continue;
+    }
+    const uint32_t joinStart = millis();
+    while (gRadio.joinState() == reader::JoinState::Running && millis() - joinStart < 20000) {
+      delay(50);
+    }
+    if (gRadio.joinState() == reader::JoinState::Ok) {
+      joined = true;
+      logf("[probe] attempt %d: joined in %lums\n", attempt,
+           (unsigned long)(millis() - joinStart));
+    } else {
+      logf("[probe] attempt %d: reason %d -- %s\n", attempt, gRadio.joinReason(),
+           reader::wifiReasonName(gRadio.joinReason()));
+    }
+    logFlush();
+  }
+  if (!joined) {
+    logf("[probe] no join after %d attempts -- nothing to measure\n", kJoinAttempts);
+    gRadio.down();
+    logFlush();
+    return;
+  }
+  mark("probe-joined");
+
+  // THE SCHEME IS READ OFF THE URL AND SAID OUT LOUD, because the first run's
+  // `http-info` leg drew a 400 with a 255-byte body and that was read three
+  // ways before the cause was certain. `HTTPClient::begin(WiFiClient&, url)`
+  // does NOT refuse an `https://` URL -- it takes port 443 and sends plaintext
+  // at it -- so an HTTPS-only origin answers in the clear with nginx's "the
+  // plain HTTP request was sent to an HTTPS port". A refusal and a server that
+  // speaks plain HTTP badly look identical at that log line.
+  const bool serverIsTls = creds.server.rfind("https://", 0) == 0;
+  logf("[probe] server \"%s\" is %s\n", creds.server.c_str(),
+       serverIsTls ? "HTTPS -- the plain leg below is EXPECTED to be refused"
+                   : "plain HTTP");
+
+  // PLAIN against the reader's own server, ALWAYS, even when the URL says
+  // https. That is not a mistake: the rule's fallback is "plain HTTP only", so
+  // whether this origin accepts a plain request is the question that decides
+  // whether the fallback is a release or a feature nobody can use.
+  probeBlocks("joined");
+  probeOneGet("own-plain", (creds.server + "/api/info").c_str(), /*secure=*/false);
+
+  // AND TLS AGAINST THE READER'S OWN SERVER, which the first run did not
+  // measure: it priced `app.wallabag.it`'s handshake instead, and a handshake's
+  // cost is mostly the CERTIFICATE CHAIN, which is the origin's and not a
+  // constant. Skipped when the server is plain, where there is nothing to
+  // measure.
+  if (serverIsTls) {
+    mark("probe-own-tls");
+    probeOneGet("own-tls", (creds.server + "/api/info").c_str(), /*secure=*/true);
+    probeBlocks("after own-tls");
+  }
+
+  // The control stays: a host that definitely speaks TLS, so the handshake is
+  // priced even on a device whose own server is plain, and so two chains can be
+  // compared when it is not.
+  mark("probe-tls");
+  probeOneGet("tls-info", "https://app.wallabag.it/api/info", /*secure=*/true);
+  probeBlocks("after tls-info");
+
+  // ONE STREAMED DOWNLOAD, AND IT IS THE ROOT URL RATHER THAN AN EXPORT,
+  // because the export endpoint wants a bearer token and the token ladder is
+  // Task 4.2 -- which is the decision this measurement is meant to inform, so
+  // needing it here would be circular. What is wanted is the allocation SHAPE:
+  // a connection held open while 4 KB chunks go to the card. The body's
+  // content does not enter that, and the login page is a 200 with a body and
+  // no auth. It costs the wall clock, which this probe already states is
+  // pessimistic, and not the heap, which is the number #140 wants.
+  mark("probe-download");
+  gSd.mkdirs("/.reader/articles");
+  probeStreamedDownload((creds.server + "/").c_str(), serverIsTls);
+
+  // A SYNC IS NOT ONE REQUEST, SO ONE HANDSHAKE IS NOT THE MEASUREMENT.
+  // info, then a token, then a listing, then one fetch per article -- a dozen
+  // connections on an ordinary sync. The second run lost 16,384 bytes of
+  // largest block to the first TLS connection and 10,240 to the second, with
+  // the free heap recovering fully both times, and two of those already put
+  // the block UNDER the 36,956-byte inflate window. So the question is whether
+  // that loss PLATEAUS or keeps going: if it plateaus, TLS is a heap budget to
+  // fit inside, and if it does not, a sync leaves a device that cannot open the
+  // article it just fetched, which is exactly what the decision rule was
+  // written to prevent.
+  if (serverIsTls) {
+    for (int i = 1; i <= 4; ++i) {
+      char what[16];
+      snprintf(what, sizeof(what), "repeat-%d", i);
+      probeOneGet(what, (creds.server + "/api/info").c_str(), /*secure=*/true);
+    }
+    probeBlocks("after 4 repeats");
+  }
+
+  // AND WHETHER THE RADIO GIVES IT BACK IS THE LAST QUESTION, because a sync
+  // ends with the radio going down and a reader opening an article. If the
+  // block comes back here, the fragmentation is the radio's and lives exactly
+  // as long as the sync; if it does not, it outlives the feature that caused
+  // it. The settle is because WIFI_OFF releases some of the driver's buffers
+  // off this task, so reading the block on the next line reads it too early.
+  probeBlocks("before down");
+  gRadio.down();
+  delay(500);
+  mark("probe-radio-down");
+  probeBlocks("after down+500");
+  logf("[probe] done\n");
+  logFlush();
+}
+#endif  // ENCRE_WALLABAG_PROBE
+
 static void armCardProbes(const char* why) {
   if (!gSd.exists(reader::kSettingsPath)) {
     if (reader::saveSettings(gSd, gSettings)) {
@@ -1592,6 +2041,34 @@ static void armCardProbes(const char* why) {
       logf("[sd] %s: there is no settings file and %s could NOT be written (card "
            "full, write-protected, or failing). Running on defaults\n",
            why, reader::kSettingsPath);
+    }
+    logFlush();
+  }
+
+  // THE WALLABAG CREDENTIALS, SEEDED THE SAME WAY AND FOR THE SAME REASON: the
+  // reader gets a hand-editable file rather than an invisible one, and a device
+  // nobody has set up carries the shape of the thing it is asking for.
+  // `docs/notes/wallabag-api.md` §5: the file is SEEDED, not demanded.
+  //
+  // WRITTEN ONLY WHEN ABSENT. A file with empty values is the NORMAL state of a
+  // device nobody has configured, and a malformed one is a reader's edit with a
+  // typo in it -- the only copy of itself. seedWallabagCredentials refuses both,
+  // which is loadAndApplySettings' rule one file over.
+  //
+  // IT DOES NOT JOIN THE PROBE'S REASON, AND THAT IS THE ONE THING TO GET RIGHT
+  // HERE. The settings file is the card-presence probe's target because opening
+  // it walks three sectors against SdFat's single 512-byte cache; a SECOND file
+  // adopted for that job would be a second answer to "is the card still there",
+  // free to disagree with the first. This one is seeded and never probed.
+  if (!gSd.exists(reader::kWallabagCredentialsPath)) {
+    if (reader::seedWallabagCredentials(gSd)) {
+      logf("[sd] %s: no wallabag file on the card, so an empty %s was written -- "
+           "fill in the five values on a computer to enable Articles\n",
+           why, reader::kWallabagCredentialsPath);
+    } else {
+      logf("[sd] %s: there is no wallabag file and %s could NOT be written (card "
+           "full, write-protected, or failing). Articles stays NOT SET UP\n",
+           why, reader::kWallabagCredentialsPath);
     }
     logFlush();
   }
@@ -1977,6 +2454,36 @@ static reader::HomeViewModel homeVmForCard() {
        patched ? vm.menu[0].value.c_str() : "blank",
        books >= 0 ? "books in /books plus one level down"
                            : "/books could not be read, so no count is claimed");
+
+  // THE ARTICLES ROW, AND AN UNCONFIGURED DEVICE SAYS NOTHING RATHER THAN
+  // `NOT SET UP`. Home is the first screen a reader sees every time, and a
+  // standing instruction to finish setting up a feature they may not want is a
+  // nag on the one screen that cannot be navigated away from. The row still
+  // opens -- the list's own not-set-up variant is where the instruction lives,
+  // which is the screen somebody reached by ASKING. `homeMenuValue` is the one
+  // spelling of that rule and it lives in `core/`, where a test drives it.
+  if (vm.menu.size() > 1) {
+    reader::WallabagCredentials creds;
+    std::string why;
+    // `Ok` ALONE, which is narrower than it looks and is the point: `Absent` and
+    // `Unconfigured` are both "nobody has set this up" and draw the same blank,
+    // and `Malformed` is a reader's broken edit -- claiming a count off a file
+    // we could not parse would be a number with nothing behind it. The list
+    // screen is where a malformed file gets said out loud.
+    const bool configured =
+        reader::loadWallabagCredentials(gSd, creds, why) == reader::CredentialsResult::Ok;
+    const reader::ArticleStore store(gSd);
+    // THE COUNT IS ONLY ASKED FOR WHEN IT WILL BE SHOWN. `unreadCount` lists
+    // `/.reader/articles`, and this runs on every Home rebuild -- which is every
+    // Back out of a book. An unconfigured device would pay a directory walk to
+    // produce a string the rule above throws away.
+    const int unread = configured ? store.unreadCount() : 0;
+    vm.menu[1].value = reader::ArticleStore::homeMenuValue(configured, unread);
+    logf("[boot] Home's ARTICLES row: %s (%s)\n",
+         vm.menu[1].value.empty() ? "blank" : vm.menu[1].value.c_str(),
+         configured ? "wallabag.json is filled in, so the count is claimed"
+                    : "wallabag.json is absent or blank -- the row opens and says nothing");
+  }
   logFlush();
   return vm;
 }
@@ -2254,6 +2761,10 @@ static reader::SaveResult saveReadingPosition(const char* why,
   // on the Reader being on top (just above), which it no longer is.
   reader::ReadingPosition p;
   p.bookPath = gReading.path;
+  // THE ONE FIELD THAT IS NOT REBUILT, and only for an article. Captured at open and
+  // raised by markArticleFinishedAtEnd, so it costs no card read here; a book leaves
+  // it false, which is the paragraph above being honoured rather than worked around.
+  p.finished = gReading.articleFinished;
   p.spine = rd->chapterIndex();
   const reader::Cursor at = rd->currentCursor();
   p.block = at.block;
@@ -2356,7 +2867,28 @@ static reader::SaveResult saveReadingPosition(const char* why,
   // one those rows were built from, and `unchanged` means it is not. Gated by the SAME
   // expression rather than by a second copy of the test -- the observed cost here was a
   // `Library rows re-read: ok in 160ms` on every Back out of an unmoved book.
-  if (wrote) gLibraryStale = true;
+  //
+  // ...AND THE ARTICLES LIST'S ROW FOR THIS ARTICLE, WHICH WAS MISSING. It is the
+  // same defect the Library had and Home had before it: the list is built when it is
+  // pushed, the Reader is pushed ON TOP of it, and the pop that leaves hands back the
+  // screen with the rows it was born with. Reported off the device as "opening an
+  // article with the dot and immediately backing out still shows the dot" -- the
+  // sidecar WAS written, so the row was right on the card and stale on the glass, and
+  // `markArticleFinishedAtEnd` was the only thing that ever set this flag, so of the
+  // three states only the third could appear without leaving the screen.
+  //
+  // WHICH LIST IS DECIDED BY THE PATH, because the two can never overlap: articles
+  // live under /.reader/articles and the Library lists /books, so a book's save
+  // cannot move an article's row and an article's cannot move a book's. Setting both
+  // would cost the other screen a /.reader/state listing on its next visit for a row
+  // that could not have changed -- which is the cost the `wrote` gate above exists to
+  // refuse, arriving one list over.
+  if (wrote) {
+    if (isArticlePath(gReading.path))
+      gArticlesStale = true;
+    else
+      gLibraryStale = true;
+  }
   logf("[progress] %s: spine=%d block=%d line=%d %d%% -- position %s, pointer %s\n", why,
        p.spine, p.block, p.line, last.percent, outcome(a), outcome(b));
   logFlush();
@@ -2460,13 +2992,38 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push);
 static void handleOpen() {
   gApp->clearOpenRequest();  // first, so a book that refuses does not re-fire
 
-  // TWO SCREENS CAN ASK TO OPEN A BOOK, and they mean different books. The Library
-  // means the row it has selected; Home's CONTINUE means the one the card's pointer
-  // names. Action::Kind::Open carries no path -- deliberately, since core/ does no
+  // THREE SCREENS CAN ASK TO OPEN A BOOK, and they mean different books. The
+  // Library means the row it has selected; Home's CONTINUE means the one the
+  // card's pointer names; the Articles list means the article it has selected.
+  // Action::Kind::Open carries no path -- deliberately, since core/ does no
   // storage -- so resolving it is this function's job.
   std::string path;
   uint32_t bookBytes = 0;
-  if (gApp->top().id() == reader::ScreenId::Home) {
+  if (gApp->top().id() == reader::ScreenId::Articles) {
+    // AN ARTICLE IS AN EPUB AND OPENS LIKE ONE. That is decision 3 of the
+    // wallabag note taken to its conclusion: nothing below this line knows or
+    // needs to know that the file came off a server rather than off the card in
+    // a computer, and `openBookAt` derives the one thing that differs -- which
+    // board the last page turns into -- from the path.
+    const auto& list = static_cast<const reader::ArticlesScreen&>(gApp->top());
+    const reader::ArticleItem* item = list.focusedItem();
+    if (item == nullptr) {
+      // The sync row, which is not an open. It latches `Action::article()` and
+      // never reaches here; this is the belt to that brace.
+      logf("[open] the Articles list has no article selected\n");
+      return;
+    }
+    const reader::ArticleStore store(gSd);
+    path = store.epubPath(item->id);
+    if (!gSd.exists(path)) {
+      // THE ROW IS THERE AND THE FILE IS NOT, which a sync cancelled mid-fetch
+      // can leave: the metadata is written as the listing is walked and the EPUB
+      // arrives afterwards. Saying so beats `openBook` failing less clearly.
+      logf("[open] article %d has metadata but no file at %s; the next sync fetches it\n",
+           item->id, path.c_str());
+      return;
+    }
+  } else if (gApp->top().id() == reader::ScreenId::Home) {
     reader::LastRead last;
     if (!reader::loadLastRead(gSd, last)) {
       logf("[open] CONTINUE with no saved book\n");
@@ -2713,6 +3270,21 @@ static void loadWifi() {
   logFlush();
 }
 
+// THE ARTICLE STORE, FOR loadWifi()'s DEAD-SETUP-ROW REASON ONE DOOR OVER.
+// Home's ARTICLES row and Settings' `wallabag` row both return
+// `Action::push(...)` DIRECTLY from their own `onGesture`, so the shell never
+// sees the press and cannot prime in response to it: whatever the factory needs
+// has to be there BEFORE the gesture, or the push is refused and the row is the
+// dead button this project has now shipped three times.
+//
+// IT IS THE FileSystem AND NOT A BUILT STORE, which is what makes it safe to do
+// once: `ArticlesScreen` and `WallabagAccountScreen` build their own store off
+// it at construction, so a card whose contents changed under them is read fresh
+// on the next push rather than from something held here.
+static void primeArticles() {
+  gFactory.setArticleStore(&gSd);
+}
+
 // Takes the radio down and forgets the attempt. Called on every way out of
 // the flow, because Wi-Fi stays off except while it is being used -- forced
 // by heap rather than chosen: ~23 KB static against a measured 13,696-byte
@@ -2739,6 +3311,667 @@ static void beginJoinFlow(bool replace) {
   }
   if (replace) gApp->replaceScreen(reader::ScreenId::WifiConnect);
   else gApp->pushScreen(reader::ScreenId::WifiConnect);
+}
+
+// ---------------------------------------------------------------------------
+// The sync, which is the Wi-Fi flow's shape with an engine hanging off it.
+// ---------------------------------------------------------------------------
+
+// THE ENGINE'S SINKS. One `CardFileSink` per article, named by the store so the
+// path the engine writes and the path `ArticleStore` looks for cannot drift.
+class CardSinkFactory : public reader::SinkFactory {
+ public:
+  std::unique_ptr<reader::BodySink> forArticle(int id) override {
+    reader::ArticleStore store(gSd);
+    auto sink = std::unique_ptr<CardFileSink>(new (std::nothrow)
+                                                  CardFileSink(store.epubPath(id)));
+    // NULL IS A CONTRACT VALUE HERE, not an error: the engine reads it as one
+    // failed download rather than a failed sync, which is the difference
+    // between missing one article and missing nineteen.
+    return sink;
+  }
+  void discard(int id) override {
+    // The sink's own destructor removes an unfinished `.part`, so by the time
+    // the engine asks, there is usually nothing left. This is the belt to that
+    // brace: the engine may have dropped the sink already, and a `.part` that
+    // outlived it would be re-fetched for ever without ever being promoted.
+    reader::ArticleStore store(gSd);
+    const std::string part = store.epubPath(id) + ".part";
+    if (gSd.exists(part)) gSd.remove(part);
+  }
+};
+
+static CardSinkFactory gSinks;
+static shellwallabag::NvsTokenStore gTokens;
+static reader::WallabagCredentials gWbCreds;
+static std::unique_ptr<ArduinoHttpTransport> gTransport;
+static std::unique_ptr<reader::WallabagClient> gWbClient;
+static std::unique_ptr<reader::ArticleStore> gWbStore;
+static std::unique_ptr<reader::SyncEngine> gSyncEngine;
+static uint32_t gSyncLoggedRequests = 0;
+static int gSyncShownDone = -1;
+static int gSyncShownTotal = -1;
+
+// A TLS SESSION HAS RUN THIS BOOT, AND THE DEVICE CANNOT OPEN A BOOK UNTIL IT
+// RESTARTS. Measured on an X3: one handshake takes the largest free block from
+// 61,428 bytes to 34,804 and never returns it above 36,852, against an
+// `Inflater::begin` window of 36,956 -- and the free heap recovers in full every
+// time, so nothing but the block says anything is wrong. See CLAUDE.md's
+// hardware facts and `docs/notes/wallabag-api.md` §8.
+//
+// IT IS SET FROM THE TRANSPORT'S OWN SCHEME rather than from the credentials,
+// so a plain-HTTP server -- the LAN case -- never pays a restart it does not
+// owe. A plain round trip costs no block at all.
+static bool gTlsFragmentedHeap = false;
+
+// THE 26 KB NOTHING IN A SYNC IS USING. `gBody` and `gItalic` hold 16 KB and
+// 10 KB of glyph arena at ppem 32, and every screen in this flow draws with the
+// EMBEDDED `.rfnt` ramp instead -- the scalable faces are the reader's alone. So
+// for the length of a sync they are 26 KB of idle bitmaps sitting in front of the
+// largest transient this firmware makes.
+//
+// MEASURED ON GLASS AND THIS IS WHY IT EXISTS: a verified handshake needs ~59 KB
+// and the radio leaves ~63 KB, so every request ran within a few kilobytes of
+// death -- minimum free heap 5,872 on the first request, 5,012 on the second,
+// 716 on the third, and `abort()` on the fourth. That abort is `-fno-exceptions`
+// turning a failed allocation into a reboot with no diagnostic, which this file
+// records having been misreported as a navigation bug three times.
+//
+// IT COSTS NOTHING VISIBLE. The cache is a memo, so a released face still draws
+// through the bypass buffer -- slower, never dead -- and no book is open here to
+// draw with it anyway. The restart at the end of a TLS sync re-inits both faces;
+// the restore below is what covers the plain-HTTP sync, which does not restart.
+static void releaseBodyFacesForSync() {
+  const uint32_t before = ESP.getFreeHeap();
+  gBody.releaseCache();
+  gItalic.releaseCache();
+  logf("[sync] gave back the body glyph arenas: heap %u -> %u, block=%u\n",
+       (unsigned)before, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+  logFlush();
+}
+
+static void restoreBodyFacesAfterSync() {
+  const bool roman = gBody.restoreCache();
+  const bool ital = gItalic.restoreCache();
+  // A FAILED RESTORE IS NOT A FAILED SYNC. The face keeps working without its
+  // memo, so this is a note about how fast the next page will draw and never a
+  // reason to tell the reader anything.
+  if (!roman || !ital) {
+    logf("[sync] the body glyph arenas did not come back (roman=%d italic=%d); pages "
+         "will re-rasterise until the next re-init\n",
+         (int)roman, (int)ital);
+    logFlush();
+  }
+}
+
+static void endSyncSession() {
+  restoreBodyFacesAfterSync();
+  gSyncEngine.reset();
+  gWbClient.reset();
+  gTransport.reset();
+  gWbStore.reset();
+  gSyncShownDone = -1;
+  gSyncShownTotal = -1;
+  gSyncLoggedRequests = 0;
+  endWifiSession();
+}
+
+// THE RESTART THE SYNC OWES, TAKEN AT THE ONE MOMENT IT IS INVISIBLE.
+//
+// It is `handleRetry`'s remedy for a card lost after a mount -- forced by the
+// platform rather than working around our own bug -- and it lands here for three
+// reasons that have to hold together:
+//
+//   - THE RESULT IS ON THE CARD, NOT IN RAM. The stamp the Articles list draws
+//     comes from `ArticleStore`'s watermark, so the restored list says exactly
+//     what the list we are throwing away would have said. Nothing is lost by not
+//     showing it first.
+//   - THE RECORD ALREADY NAMES THE RIGHT SCREEN. `WallabagConnecting` is
+//     `Restore::Never`, so `App::snapshot()` truncated the record BEFORE the
+//     dialog when it was pushed: what stands is `...;articles:N`, written by that
+//     push. #49's declarations carry this with nothing added.
+//   - AND E-INK HOLDS ITS LAST IMAGE. Nothing clears the glass at boot, so the
+//     fetching screen stays up through the reset and the first paint is the
+//     restored list -- one transition flash, which is what an ordinary screen
+//     change looks like.
+//
+// THE ERROR DIALOG IS WHY THIS IS NOT CALLED AT THE END OF THE SYNC. That screen
+// is `Restore::Never` too, so restarting under it would throw away the one thing
+// the reader needs to read. The restart waits for the dialog to be dismissed.
+static void restartIfHeapSpent(const char* why) {
+  if (!gTlsFragmentedHeap) return;
+  // THE INTENT, RECORDED BEFORE THE RESTART THAT DOES NOT RETURN -- `sleepNow`'s
+  // ordering and its reason. `esp_restart()` reports `ESP_RST_SW`, which the boot
+  // reads as a cold start, so without this the record is CLEARED and the reader
+  // lands on Home: reported off the device as "after syncing it reboots to home,
+  // not to the article list".
+  markRestarting();
+  logf("[sync] restarting after %s: TLS has run, so the largest free block is %u and "
+       "`Inflater::begin` wants 36956 in one piece -- a book could not be opened until "
+       "this reset\n",
+       why, (unsigned)ESP.getMaxAllocHeap());
+  saveWhereWeAre();
+  logFlush();
+  delay(20);
+  esp_restart();
+}
+
+// START A SYNC, or say why it cannot start. `replace` because the dialog takes
+// the asking screen's place when the error panel asked -- beginJoinFlow's own
+// argument, so one veiled parent is truthful for both entry paths.
+static void beginSyncFlow(bool replace) {
+  auto show = [&](reader::WallabagErrorScreen::Shape shape, const char* why) {
+    logf("[sync] not starting: %s\n", why);
+    logFlush();
+    gFactory.setWallabagFailure(shape);
+    if (replace) gApp->replaceScreen(reader::ScreenId::WallabagError);
+    else gApp->pushScreen(reader::ScreenId::WallabagError);
+  };
+
+  std::string why;
+  const reader::CredentialsResult got = reader::loadWallabagCredentials(gSd, gWbCreds, why);
+  if (got != reader::CredentialsResult::Ok) {
+    // ALL THREE NON-OK ANSWERS LAND ON `SignIn`, and that is the honest shape
+    // rather than a missing one: absent, half-filled and malformed are all "this
+    // device cannot sign in with what is on the card", which is what the panel
+    // says. The LOG is where they are told apart, because that is where a
+    // reader's broken edit is actionable.
+    show(reader::WallabagErrorScreen::Shape::SignIn,
+         got == reader::CredentialsResult::Malformed ? why.c_str()
+                                                     : "wallabag.json is absent or blank");
+    return;
+  }
+
+  const reader::SavedNetwork* net = gWifiNets.automatic();
+  if (net == nullptr) {
+    show(reader::WallabagErrorScreen::Shape::NoNetwork, "no saved network is set to AUTO");
+    return;
+  }
+
+  const std::string psk = net->locked ? shellwifi::secret(net->ssid) : std::string();
+  if (!gRadio.beginJoin(net->ssid, psk)) {
+    show(reader::WallabagErrorScreen::Shape::Offline, "the radio refused the join");
+    return;
+  }
+  logf("[sync] joining \"%s\" to reach %s\n", net->ssid.c_str(), gWbCreds.server.c_str());
+  logFlush();
+
+  // BEFORE THE RADIO IS EVEN UP, so the 26 KB is free when the first handshake
+  // asks for its 59.
+  releaseBodyFacesForSync();
+
+  gFactory.setWallabagHost(gWbCreds.server);
+  if (replace) gApp->replaceScreen(reader::ScreenId::WallabagConnecting);
+  else gApp->pushScreen(reader::ScreenId::WallabagConnecting);
+}
+
+// Leave the dialog for the list, with the outcome already on the card.
+static void finishSync(reader::SyncOutcome outcome) {
+  const bool wrote = outcome == reader::SyncOutcome::New;
+  endSyncSession();
+
+  switch (outcome) {
+    case reader::SyncOutcome::New:
+    case reader::SyncOutcome::UpToDate:
+      // BACK TO THE LIST, AND THE LIST IS REBUILT RATHER THAN REDRAWN: its rows
+      // changed under it, which is the Wi-Fi hub's own reason for a replace.
+      // The stamp it draws comes from the watermark the engine just wrote, so
+      // this screen and the account screen cannot disagree about what happened.
+      gApp->popScreen();
+      gApp->replaceScreen(reader::ScreenId::Articles);
+      // HOME'S ARTICLES ROW MOVED, so the gate that rebuilds it is marked -- the
+      // same call `saveReadingPosition` makes for the reading progress, and for
+      // its reason: Home is the App's ROOT, so popping back to it hands over the
+      // instance it was built with and a count that changed under it would keep
+      // the old number.
+      if (wrote) gHomeRebuild.markStale();
+      // AND THE RESTART, HERE, where it is invisible: e-ink holds the fetching
+      // screen through the reset and the restored list says the same thing this
+      // one would have.
+      restartIfHeapSpent("a completed sync");
+      break;
+    case reader::SyncOutcome::NotAWallabag:
+    case reader::SyncOutcome::CredentialsRefused:
+      gFactory.setWallabagFailure(reader::WallabagErrorScreen::Shape::SignIn);
+      gApp->replaceScreen(reader::ScreenId::WallabagError);
+      break;
+    case reader::SyncOutcome::Failed:
+      gFactory.setWallabagFailure(reader::WallabagErrorScreen::Shape::Offline);
+      gApp->replaceScreen(reader::ScreenId::WallabagError);
+      break;
+    case reader::SyncOutcome::Cancelled:
+    case reader::SyncOutcome::None:
+      // A CANCEL LEAVES THE LIST AS IT WAS, and the engine's own contract is why
+      // that is honest: the watermark was not advanced, so the next sync asks for
+      // exactly what this one did not get.
+      gApp->popScreen();
+      restartIfHeapSpent("a cancelled sync");
+      break;
+  }
+}
+
+// THE ACTIONS OVERLAY'S FACTS, KEPT CURRENT WHILE THE LIST IS ON TOP. This is
+// the THIRD time this exact shape has cost a dead control, and the first two are
+// already written down: `ArticlesScreen`'s hold returns
+// `Action::push(ArticleActions)` DIRECTLY, so the shell never sees the press and
+// cannot prime in response to it -- and the factory refuses the overlay without
+// facts, so the hold did nothing at all. Reported as "READ on an article has a
+// hold circle but holding does nothing".
+//
+// RE-PRIMED EVERY ITERATION rather than on a focus change, for the Wi-Fi hub's
+// reason one flow over: a focus move is internal to the screen and reaches the
+// shell as an ordinary redraw, so there is no edge to hang this on. It is a
+// couple of string copies on a screen that repaints at ~450 ms.
+// REACHING `ArticleEnd` IS FINISHING THE ARTICLE, and no press is needed to say
+// so. A book is marked finished by an explicit press -- BookEnd's slab, the
+// Library's actions overlay -- because a novel can be abandoned at 90% and the
+// reader is the only one who knows. An article's last page IS the end of it:
+// paging off it is the whole act, and asking for a press afterwards would be a
+// chore in front of a feature whose point is not being one.
+//
+// WITHOUT THIS THE THIRD STATE IS UNREACHABLE, which is the same defect one
+// level up from the one that made the bullet permanent: `. READ` would be drawn
+// by a flag nothing ever set.
+//
+// GUARDED ON THE ID rather than on a timer, so this costs one comparison an
+// iteration and one card write per article. The sidecar already exists by the
+// time anyone reaches the end -- the quiet window wrote it seconds ago -- so this
+// is a read, a bool and a write rather than a record built from nothing.
+static int gArticleFinishedMarked = 0;
+
+static void markArticleFinishedAtEnd() {
+  if (gApp->top().id() != reader::ScreenId::ArticleEnd) return;
+  const auto& end = static_cast<const reader::ArticleEndScreen&>(gApp->top());
+  const int id = end.facts().id;
+  if (id == 0 || id == gArticleFinishedMarked) return;
+  gArticleFinishedMarked = id;
+
+  SpiBusGuard bus;
+  const reader::ArticleStore store(gSd);
+  const std::string path = store.epubPath(id);
+  reader::ReadingPosition pos;
+  if (!reader::loadPosition(gSd, path, pos)) {
+    pos = reader::ReadingPosition{};
+    pos.bookPath = path;
+  }
+  if (pos.finished) return;
+  pos.finished = true;
+  // IN RAM AS WELL AS ON THE CARD, or the `leaving` save two presses later rebuilds
+  // the record without it and the mark this just set is erased in front of the reader.
+  gReading.articleFinished = true;
+  const reader::SaveResult r = reader::savePosition(gSd, pos);
+  // NOT FATAL, `handleFinish`'s rule: a failed write must not throw a reader out
+  // of an article they have just finished reading, over a flag.
+  logf("[articles] %d finished -> %s\n", id,
+       r == reader::SaveResult::Failed ? "FAILED" : "ok");
+  logFlush();
+  // The ROW changed and the COUNT did not -- `UNREAD` is never-opened, and this
+  // article stopped being counted when it was opened.
+  gArticlesStale = true;
+}
+
+static void primeArticleActionsFacts() {
+  if (gApp->top().id() != reader::ScreenId::Articles) return;
+  const auto& list = static_cast<const reader::ArticlesScreen&>(gApp->top());
+  const reader::ArticleItem* item = list.focusedItem();
+  // THE SYNC ROW HAS NO ACTIONS, and leaving the previous row's facts primed
+  // there would be an overlay captioned with an article the reader is not on --
+  // which is worse than a refused push. The hold is unbound on that row anyway,
+  // so this is the belt to that brace.
+  if (item == nullptr) return;
+  reader::ArticleActionsScreen::Facts f;
+  f.id = item->id;
+  f.title = item->title;
+  f.starred = item->starred;
+  gFactory.setArticleActionsFacts(std::move(f));
+}
+
+// DRIVEN FROM THE QUIET WINDOW, beside pollWifi(), for its reason: everything on
+// this device is the loop's, and a sync that blocked would stop the panel and the
+// buttons for a minute.
+static void pollSync() {
+  if (gApp->top().id() != reader::ScreenId::WallabagConnecting) return;
+  auto& dialog = static_cast<reader::WallabagConnectingScreen&>(gApp->top());
+
+  if (gSyncEngine == nullptr) {
+    // STILL JOINING. The dialog says CONNECTING... for exactly this stretch.
+    const reader::JoinState join = gRadio.joinState();
+    if (join == reader::JoinState::Running) return;
+    if (join != reader::JoinState::Ok) {
+      logf("[sync] the join did not complete, reason %d -- %s\n", gRadio.joinReason(),
+           reader::wifiReasonName(gRadio.joinReason()));
+      endSyncSession();
+      gFactory.setWallabagFailure(reader::WallabagErrorScreen::Shape::Offline);
+      gApp->replaceScreen(reader::ScreenId::WallabagError);
+      return;
+    }
+
+    // THE ENGINE IS BUILT ONLY ONCE THE RADIO IS UP, which is what keeps the
+    // decision about WHEN to bring it up in the shell -- `SyncEngine`'s own
+    // header says it owns no radio and is handed a transport already connected.
+    gTransport.reset(new (std::nothrow) ArduinoHttpTransport(gWbCreds.server));
+    gWbStore.reset(new (std::nothrow) reader::ArticleStore(gSd));
+    if (gTransport == nullptr || gWbStore == nullptr) {
+      endSyncSession();
+      gFactory.setWallabagFailure(reader::WallabagErrorScreen::Shape::Offline);
+      gApp->replaceScreen(reader::ScreenId::WallabagError);
+      return;
+    }
+    gWbClient.reset(new (std::nothrow)
+                        reader::WallabagClient(*gTransport, gTokens, gWbCreds));
+    gSyncEngine.reset(new (std::nothrow) reader::SyncEngine(
+        *gWbClient, *gWbStore, gSinks, gSettings.articlesKeepOffline));
+    if (gWbClient == nullptr || gSyncEngine == nullptr) {
+      endSyncSession();
+      gFactory.setWallabagFailure(reader::WallabagErrorScreen::Shape::Offline);
+      gApp->replaceScreen(reader::ScreenId::WallabagError);
+      return;
+    }
+    // SET FROM THE TRANSPORT, not from the URL, so there is one answer to "did
+    // TLS run" and the restart cannot disagree with the connection that caused
+    // it.
+    if (gTransport->secure()) gTlsFragmentedHeap = true;
+    mark("sync-begin");
+    if (!gSyncEngine->begin()) {
+      finishSync(reader::SyncOutcome::Failed);
+      return;
+    }
+    return;
+  }
+
+  gSyncEngine->poll();
+
+  // EVERY REQUEST'S OWN ACCOUNT, INCLUDING THE ONES THAT WORK. The first sync on
+  // glass failed with `outcome 3` and nothing else, and a verified handshake is
+  // the largest transient this firmware makes -- so the heap either side of each
+  // round trip is the trail that says whether the next failure is memory or the
+  // far end. Logged from here because `logf` is static to main.cpp and is the
+  // only route that also reaches `/encre.log`.
+  if (gTransport->requests() != gSyncLoggedRequests) {
+    gSyncLoggedRequests = gTransport->requests();
+    logf("[http] #%u code=%d heap %u -> %u (min %u) block %u -> %u%s%s\n",
+         (unsigned)gTransport->requests(), gTransport->lastCode(), (unsigned)gTransport->heapBefore(),
+         (unsigned)gTransport->heapAfter(), (unsigned)gTransport->heapMin(),
+         (unsigned)gTransport->blockBefore(), (unsigned)gTransport->blockAfter(),
+         gTransport->lastError().empty() ? "" : " -- ",
+         gTransport->lastError().c_str());
+    logFlush();
+  }
+
+  // ONE PAINT PER FILE, NEVER PER BYTE. `setFetching` reports whether anything
+  // on the panel changed rather than acting, because a screen cannot mark the
+  // App dirty -- and a waveform per chunk would cost more than the download.
+  //
+  // AND NOT UNTIL THERE IS SOMETHING TO FETCH. `toFetch()` is 0 until the
+  // listing has been walked, which the dialog's own header says is "exactly when
+  // the caption may still say CONNECTING..." -- so stepping at 0 of 0 spends a
+  // 449 ms waveform to draw a count of nothing, and the first sync on glass
+  // spent it at the WORST moment there is: mid-handshake, with the heap at
+  // 18,204 bytes and its minimum at 5,960.
+  const int done = gSyncEngine->fetched();
+  const int total = gSyncEngine->toFetch();
+  if (total > 0 && (done != gSyncShownDone || total != gSyncShownTotal)) {
+    gSyncShownDone = done;
+    gSyncShownTotal = total;
+    if (dialog.setFetching(done, total)) gApp->markDirty();
+  }
+
+  if (gSyncEngine->state() == reader::SyncState::Done) {
+    const reader::SyncOutcome outcome = gSyncEngine->outcome();
+    mark("sync-done");
+    // THE TRANSPORT'S OWN LAST WORD BESIDE THE ENGINE'S. `outcome` says a round
+    // trip did not complete and cannot say WHICH layer stopped it -- a refused
+    // sink, a timeout waiting on a body and a handshake that would not allocate
+    // are one number up here. Asked of the transport rather than re-derived, so
+    // the two cannot disagree about the request they are both describing.
+    logf("[sync] %d of %d fetched after %u request(s), outcome %d%s%s | transport state=%d "
+         "failure=%d status=%d body=%u | heap=%u block=%u\n",
+         done, total, (unsigned)gTransport->requests(), (int)outcome,
+         gSyncEngine->note()[0] != '\0' ? " -- " : "", gSyncEngine->note(),
+         (int)gTransport->state(), (int)gTransport->failure(), gTransport->status(),
+         (unsigned)gTransport->bodyBytes(), (unsigned)ESP.getFreeHeap(),
+         (unsigned)ESP.getMaxAllocHeap());
+    logFlush();
+    // THE BYTES THAT WOULD NOT PARSE, ONTO THE CARD. Four flash cycles have now
+    // gone into a sync that fails one layer at a time, and this is the one
+    // question a log cannot answer: the body is 5 KB and the log buffer is 4, so
+    // it cannot be printed, and a desktop fixture built to be a REAL wallabag
+    // item parses perfectly -- which means the answer is in these bytes and
+    // nowhere else. Written before `finishSync`, because that resets the engine.
+    if (outcome == reader::SyncOutcome::Failed) {
+      const std::string& body = gSyncEngine->listingBody();
+      if (!body.empty()) {
+        const char* kDump = "/.reader/articles/listing-failed.json";
+        const bool wrote = gSd.writeAll(kDump, body);
+        logf("[sync] the listing that failed is %u bytes; %s %s -- head: %.100s\n",
+             (unsigned)body.size(), wrote ? "written to" : "COULD NOT be written to", kDump,
+             body.c_str());
+        logFlush();
+      }
+    }
+    finishSync(outcome);
+  }
+}
+
+// POP UNTIL `target` IS ON TOP. `Action::popTo` is the SCREEN's way of asking
+// for this and there is no `App` method behind it -- the App resolves the Action
+// during a dispatch. These screens latch with `Action::article()` instead,
+// precisely so the shell can read the outcome off a screen still on top, so the
+// shell is what walks the stack.
+//
+// BOUNDED BY THE DEPTH AND NOT BY THE TARGET, because a target that is not on
+// the stack would otherwise pop to the root and take Home with it: the loop
+// stops at depth 1 whatever it finds, which degrades to "you are at Home"
+// rather than to an App with nothing in it.
+static void popToScreen(reader::ScreenId target) {
+  while (gApp->depth() > 1 && gApp->top().id() != target) gApp->popScreen();
+}
+
+// AN ARTICLE SCREEN LATCHED AN OUTCOME. handleWifi()'s shape and its four-step
+// note: the screen is STILL ON TOP, which is the whole reason nothing was
+// popped -- after a pop there is no screen left to ask.
+static void handleArticle() {
+  gApp->clearArticleRequest();
+
+  const reader::ScreenId id = gApp->top().id();
+  switch (id) {
+    case reader::ScreenId::Articles: {
+      auto& list = static_cast<reader::ArticlesScreen&>(gApp->top());
+      if (list.chosen() == reader::ArticlesScreen::Chosen::Sync) {
+        // NO clearChoice(): `ArticlesScreen::onGesture` zeroes the latch at the
+        // top of every press, so it is self-clearing -- and the success path
+        // replaces this screen outright, which destroys it anyway.
+        beginSyncFlow(/*replace=*/false);
+      }
+      break;
+    }
+
+    case reader::ScreenId::WallabagConnecting: {
+      auto& dialog = static_cast<reader::WallabagConnectingScreen&>(gApp->top());
+      if (dialog.cancelled() && gSyncEngine != nullptr) {
+        // THE ENGINE FINISHES THE CANCEL, not this: it stops after the file in
+        // flight, discards that one and keeps everything already fetched, and
+        // the poll above sees `Cancelled` next iteration. Tearing down here
+        // would drop a transport mid-write.
+        gSyncEngine->cancel();
+      } else if (dialog.cancelled()) {
+        // Cancelled while still joining, so there is no engine to ask.
+        endSyncSession();
+        gApp->popScreen();
+      }
+      break;
+    }
+
+    case reader::ScreenId::WallabagError: {
+      auto& panel = static_cast<reader::WallabagErrorScreen&>(gApp->top());
+      const auto chosen = panel.chosen();
+      if (chosen == reader::WallabagErrorScreen::Chosen::TryAgain) {
+        // REPLACE, so the panel is not left standing under the dialog -- and no
+        // restart yet, because the next thing that happens is another sync.
+        beginSyncFlow(/*replace=*/true);
+      } else if (chosen == reader::WallabagErrorScreen::Chosen::Ok) {
+        gApp->popScreen();
+        // THE RESTART THE FAILED SYNC OWED, taken now rather than when the sync
+        // ended: this screen is `Restore::Never`, so restarting under it would
+        // have thrown away the one thing the reader needed to read.
+        restartIfHeapSpent("a dismissed sync error");
+      }
+      break;
+    }
+
+    case reader::ScreenId::ArticleActions: {
+      auto& panel = static_cast<reader::ArticleActionsScreen&>(gApp->top());
+      // A COPY, because the replace below destroys the screen these live in --
+      // handleWifi()'s own rule at the same point in the same shape.
+      const reader::ArticleActionsScreen::Facts facts = panel.facts();
+      const auto chosen = panel.chosen();
+      if (chosen == reader::ArticleActionsScreen::Chosen::None) break;
+
+      reader::ArticleStore store(gSd);
+      bool wrote = false;
+      if (chosen == reader::ArticleActionsScreen::Chosen::Archive) {
+        wrote = store.queueArchive(facts.id);
+      } else {
+        wrote = store.queueStar(facts.id, !facts.starred);
+      }
+      // A QUEUED ACTION IS A MARKER FILE AND NOT A ROUND TRIP. The device has no
+      // radio up here, and bringing one up for a star would cost the restart
+      // this feature already owes once per sync -- see `restartIfHeapSpent`. The
+      // next sync pushes the queue before it asks for anything.
+      logf("[articles] %s %d: %s\n",
+           chosen == reader::ArticleActionsScreen::Chosen::Archive ? "archive" : "star",
+           facts.id, wrote ? "queued" : "COULD NOT be queued");
+      logFlush();
+
+      gApp->popScreen();
+      // REPLACED RATHER THAN REDRAWN: an archive takes the row out of the list
+      // and a star changes what its actions overlay will say, so the rows
+      // changed under it -- the Wi-Fi hub's own reason for a replace.
+      gApp->replaceScreen(reader::ScreenId::Articles);
+      if (wrote) gHomeRebuild.markStale();
+      break;
+    }
+
+    case reader::ScreenId::ArticleEnd: {
+      auto& panel = static_cast<reader::ArticleEndScreen&>(gApp->top());
+      const reader::ArticleEndScreen::Facts facts = panel.facts();
+      const auto chosen = panel.chosen();
+      if (chosen == reader::ArticleEndScreen::Chosen::None) break;
+
+      reader::ArticleStore store(gSd);
+      switch (chosen) {
+        case reader::ArticleEndScreen::Chosen::Archive:
+          store.queueArchive(facts.id);
+          gHomeRebuild.markStale();
+          // TO THE LIST, not back one screen: under this is the Reader and under
+          // that the list, and an archived article's own page is not somewhere
+          // to be left standing.
+          popToScreen(reader::ScreenId::Articles);
+          gApp->replaceScreen(reader::ScreenId::Articles);
+          break;
+        case reader::ArticleEndScreen::Chosen::Star:
+          store.queueStar(facts.id, !facts.starred);
+          // IN PLACE, because the slab's own label is what changed and the
+          // reader is still looking at this article.
+          gApp->replaceScreen(reader::ScreenId::ArticleEnd);
+          break;
+        case reader::ArticleEndScreen::Chosen::BackToList:
+          popToScreen(reader::ScreenId::Articles);
+          break;
+        case reader::ArticleEndScreen::Chosen::NextArticle: {
+          // THE NEXT UNREAD IN LIST ORDER, which is the same walk that decided
+          // whether this slab is DRAWN at all -- `hasNext` is set by openBookAt
+          // from exactly this rule, so a slab that is on screen always lands
+          // somewhere. Two spellings of "next" is how a drawn slab and a reachable
+          // article come apart.
+          int next = 0;
+          bool seenSelf = false;
+          for (const reader::ArticleMeta& m : store.list()) {
+            if (m.archived) continue;
+            if (m.id == facts.id) {
+              seenSelf = true;
+              continue;
+            }
+            if (seenSelf && store.hasEpub(m.id)) {
+              next = m.id;
+              break;
+            }
+          }
+          if (next == 0) {
+            logf("[articles] NEXT ARTICLE found nothing after %d; staying put\n", facts.id);
+            logFlush();
+            break;
+          }
+          // POP TO THE LIST FIRST, so the stack under the next article is the list
+          // and not this article's end screen and its Reader. Otherwise every
+          // NEXT ARTICLE would grow the stack by two and Back would walk back
+          // through every article read in the session.
+          popToScreen(reader::ScreenId::Articles);
+          openBookAt(store.epubPath(next), 0, /*push=*/true);
+          break;
+        }
+        case reader::ArticleEndScreen::Chosen::None:
+          break;
+      }
+      break;
+    }
+
+    case reader::ScreenId::WallabagAccount: {
+      auto& panel = static_cast<reader::WallabagAccountScreen&>(gApp->top());
+      if (panel.chosen() != reader::WallabagAccountScreen::Chosen::KeepOffline) break;
+      // APPLIES AND PERSISTS, in that order -- `SettingsSink::commit`'s contract
+      // verbatim, and a refused write still shows the new value because the
+      // change HAS taken effect in RAM and reverting the display would make a
+      // read-only card look like a screen that ignores its buttons.
+      gSettings.articlesKeepOffline = panel.keepOffline();
+      if (!reader::saveSettings(gSd, gSettings)) {
+        logf("[articles] keep-offline is now %d but the card would not take it; it "
+             "reverts at the next boot\n",
+             gSettings.articlesKeepOffline);
+        logFlush();
+      }
+      // AND THE NEW CEILING IS APPLIED NOW rather than at the next sync, because
+      // the row the reader just changed is the one that says how many are kept:
+      // a screen stating 20 with 50 on the card is a number with nothing behind
+      // it.
+      reader::ArticleStore store(gSd);
+      const int pruned = store.prune(gSettings.articlesKeepOffline);
+      if (pruned > 0) {
+        logf("[articles] pruned %d article(s) down to the new ceiling of %d\n", pruned,
+             gSettings.articlesKeepOffline);
+        logFlush();
+        gHomeRebuild.markStale();
+      }
+      // THE FACTORY HOLDS A COPY AND HAS TO BE TOLD, which is the trap CLAUDE.md
+      // records for Settings and which this hit verbatim: the account screen is
+      // built from `settings_`, so a replace after changing `gSettings` rebuilt
+      // it from the value before the press. Reported as "hitting CHANGE on the
+      // Keep offline row doesn't seem to do anything" -- the setting HAD changed,
+      // been persisted and been applied, and the screen redrawn from a stale
+      // copy was the only part anybody could see.
+      gFactory.setSettings(gSettings);
+      gApp->replaceScreen(reader::ScreenId::WallabagAccount);
+      break;
+    }
+
+    case reader::ScreenId::ArticlesRemoveConfirm: {
+      auto& panel = static_cast<reader::ArticlesRemoveConfirmScreen&>(gApp->top());
+      if (panel.chosen() != reader::ArticlesRemoveConfirmScreen::Chosen::RemoveAll) break;
+      reader::ArticleStore store(gSd);
+      const int removed = store.removeAll();
+      logf("[articles] removed %d downloaded article(s); the account and the watermark "
+           "stay, so the next sync fetches them again\n",
+           removed);
+      logFlush();
+      gApp->popScreen();
+      gApp->replaceScreen(reader::ScreenId::WallabagAccount);
+      gHomeRebuild.markStale();
+      break;
+    }
+
+    default:
+      break;
+  }
 }
 
 // A CONNECT-FLOW SCREEN LATCHED AN OUTCOME. See Action::wifi() and
@@ -3287,10 +4520,46 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
     gFactory.setReaderItalicClasses(std::move(italicClasses));
   }
 
+  // WHICH END SCREEN THIS BOOK ENDS ON, AND WHICH LIST OWNS ITS ROW -- both off
+  // the path, through the one predicate. See isArticlePath for why the test lives
+  // there rather than being threaded down from the three callers.
+  int articleId = 0;
+  const bool isArticle = isArticlePath(path, &articleId);
+
+  // SET ON EVERY OPEN AND NOT ONLY WHEN IT CHANGES. The factory outlives every
+  // screen it builds, so a book opened after an article would otherwise end on a
+  // board about articles.
+  gFactory.setReaderEndScreen(isArticle ? reader::ScreenId::ArticleEnd
+                                        : reader::ScreenId::BookEnd);
+
   // WHAT A SAVE WILL NEED, captured now while it is all in hand.
   gReading.path = path;
   gReading.title = opened.title;
   gReading.author = opened.author;
+
+  // AN ARTICLE'S SECOND LINE IS ITS SOURCE, WHERE A BOOK'S IS ITS AUTHOR. Home's
+  // CONTINUE block and the sleep card both draw `author` under the title, and a
+  // wallabag export's `dc:creator` is whatever the exporter put there -- often
+  // the site, often a byline, often nothing. The domain is the fact a reader
+  // recognises and it is the one the Articles list and the end screen already
+  // draw, so this is the third surface naming one fact rather than a fourth
+  // naming a different one.
+  //
+  // OFF THE SIDECAR AND NOT OUT OF THE EPUB, because the sidecar is what the
+  // listing wrote and the EPUB is what the exporter generated -- and only the
+  // first is the server's own answer. Empty leaves the EPUB's author standing
+  // rather than blanking the line: an absent claim beats a false one, and a
+  // missing sidecar is not evidence that there is no author.
+  gReading.articleFinished = false;
+  if (isArticle) {
+    const reader::ArticleStore store(gSd);
+    reader::ArticleMeta m;
+    if (store.readMeta(articleId, m) && !m.domain.empty()) gReading.author = m.domain;
+    // AND THE MARK, so a save on the way out carries it rather than erasing it. See
+    // gReading.articleFinished for why a book has no equivalent.
+    reader::ReadingPosition was;
+    gReading.articleFinished = reader::loadPosition(gSd, path, was) && was.finished;
+  }
   gReading.bytes = bookBytes;
   gReading.open = true;
 
@@ -3360,6 +4629,39 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // is the extraction point rather than the first.
   endFacts.libraryBeneath = appHasScreen(*gApp, reader::ScreenId::Library);
   gFactory.setBookEndFacts(std::move(endFacts));
+
+
+  if (isArticle) {
+    const reader::ArticleStore store(gSd);
+    reader::ArticleEndScreen::Facts af;
+    af.id = articleId;
+
+    // EVERY FIGURE ON THAT BOARD COMES OFF THE CARD, never off the server. The
+    // board's own note has the argument: the server's unread count includes what
+    // this device has not fetched and what a phone archived an hour ago, so a
+    // panel quoting it would claim one thing while counting another.
+    const std::vector<reader::ArticleMeta> all = store.list();
+    bool seenSelf = false;
+    for (const reader::ArticleMeta& m : all) {
+      if (m.archived) continue;
+      if (m.id == af.id) {
+        af.title = m.title;
+        af.domain = m.domain;
+        af.readingMinutes = m.readingTime;
+        af.starred = m.starred;
+        seenSelf = true;
+        continue;
+      }
+      if (!store.hasEpub(m.id)) continue;
+      ++af.unreadRemaining;
+      // `hasNext` IS NOT `unreadRemaining > 0`, and the board says why: "next"
+      // walks the list in ORDER from here, so an unread article BEFORE this one
+      // is remaining and is not next. Deriving it would draw a slab that lands
+      // nowhere.
+      if (seenSelf && !af.hasNext) af.hasNext = true;
+    }
+    gFactory.setArticleEndFacts(std::move(af));
+  }
 
   const bool pushed = push && gApp->pushScreen(reader::ScreenId::Reader);
   // The push builds the screen, which locates the chapter, decodes it once to index
@@ -4703,6 +6005,25 @@ void setup() {
   // stopped working" and "the logger reset the device" look identical from the
   // serial output.
   const esp_reset_reason_t rst = esp_reset_reason();
+  // A RESTART THIS FIRMWARE ASKED FOR, KEPT SEPARATE FROM `fromSleep` ON PURPOSE.
+  // `fromSleep` drives the hold gate, the charge gate and the waking paint, none
+  // of which a sync's restart is: nothing was asleep, the panel holds the
+  // fetching screen rather than a sleep card, and there is no finger on the power
+  // button to check. It buys exactly one thing -- the session restore -- so it is
+  // one flag and not a widening of another.
+  //
+  // `ESP_RST_SW` AS WELL AS THE FLAG, which is `slept`'s own belt: the flag is
+  // written immediately before `esp_restart()`, so any other reset reaching this
+  // line with it set is a reset that interrupted us, and resuming into a sync's
+  // aftermath is not what that boot should do.
+  const bool restartAsked = takeRestartFlag();
+  const bool resumingRestart = restartAsked && rst == ESP_RST_SW;
+  if (restartAsked && !resumingRestart) {
+    logf("[session] a restart was recorded but this boot is reset reason %d, not SW; "
+         "treating it as a cold start\n",
+         (int)rst);
+  }
+
 
   // MAY NOT RETURN. See the definition: a wake the user did not hold through is
   // refused here, before display.begin(), so it costs no waveform and nothing on
@@ -5065,6 +6386,11 @@ void setup() {
   // neither on the path somebody forgets.
   loadWifi();
 
+  // AND THE ARTICLE STORE, for loadWifi()'s reason and beside it -- a factory
+  // primed in two places is a factory primed in neither on the path somebody
+  // forgets.
+  primeArticles();
+
   // AND THE BODY FACE, WHICH loadAndApplySettings CANNOT REACH.
   //
   // The face was inited ~230 lines above with the CONSTANT kBodyPpem, because it
@@ -5140,6 +6466,30 @@ void setup() {
   gFactory.setContentsVisibleRows(gTheme.contentsVisibleRows(logicalH, fonts));
   gFactory.setLibraryVisibleRows(libraryRows);
   gFactory.setWifiPickerVisibleRows(gTheme.libraryVisibleRows(logicalH, fonts));
+
+  // AND THE ARTICLES LIST, WHICH HAD THE SETTER AND NO CALLER -- so the factory's
+  // `articlesRows_ > 0` guard skipped it, the screen kept the zero-high window
+  // its constructor starts with, and the list drew NOTHING while holding a real
+  // row. Reported off the device as "it downloaded the article, Home says 1
+  // UNREAD, the list is empty and Sync now does nothing": the sync row was not
+  // drawn either, and the one focusable row left was the article, so Confirm
+  // asked to open it rather than to sync.
+  //
+  // `load()` carries `visibleRows` forward on purpose -- a rescan must not throw
+  // away what the shell set -- and on a FRESH construction there is nothing to
+  // carry but the base class's zero. That makes this call load-bearing rather
+  // than tidy, which is the same lesson the comment beside `setContentsVisibleRows`
+  // already records: "a list told nothing renders empty".
+  //
+  // THE STATUS LINE IS THE EMPTY ONE, and the theme requires it rather than
+  // defaulting it. `SyncDone`'s variant draws a status block between the band and
+  // the sync row and so fits one row FEWER -- but that variant is a REPLACE of
+  // this screen after a sync, built by the same factory, and the count it needs
+  // depends on a string this boot cannot know. Sized for the plain list here; the
+  // sync-done path re-derives it when it builds that screen.
+  const int articleRows = gTheme.articlesVisibleRows(logicalH, logicalW, fonts, "");
+  gFactory.setArticlesVisibleRows(articleRows);
+  logf("[boot] Articles fits %d rows\n", articleRows);
   logf("[boot] Library fits %d rows on this %dx%d logical canvas "
        "(panel is %dx%d native)\n",
        libraryRows, logicalW, logicalH, panelW, panelH);
@@ -5415,7 +6765,7 @@ void setup() {
   // WHERE THE USER WAS. Only across a genuine wake: a device that boots into a
   // sub-screen after a week off is confusing, and 2B already distinguishes the
   // two cases from esp_sleep_get_wakeup_cause().
-  if (!fromSleep) {
+  if (!fromSleep && !resumingRestart) {
     // Cold boot starts at Home and forgets the record, so the next wake cannot
     // resume a screen from a previous run of the device. Logged because otherwise
     // "it started at Home" is indistinguishable from a restore that silently
@@ -5426,6 +6776,11 @@ void setup() {
     logf("[session] cold boot: record cleared, nothing to restore\n");
     logFlush();
   } else if (storage) {
+    if (resumingRestart) {
+      logf("[session] this boot is the restart the sync asked for; restoring where the "
+           "reader was rather than starting at Home\n");
+      logFlush();
+    }
     // EVERY OUTCOME BELOW IS LOGGED, and it was not always so. This used to read
     // `if (loadSession(s) && s.screen != ScreenId::Home) { ... }` with no else at
     // all, which made the two most interesting outcomes print nothing: a
@@ -5478,15 +6833,22 @@ void setup() {
       for (const reader::StackEntry& e : stack) {
         if (reader::restorability(e.screen) != reader::Restore::NeedsPriming) continue;
         switch (e.screen) {
-          // FOUR SCREENS AND ONE OPEN, and naming all four here is the change.
+          // FIVE SCREENS AND ONE OPEN, and naming all five here is the change.
           // They are every screen whose inputs come from the book that is open --
-          // the page, the menu over it, its chapter list, and the screen its last
-          // page turns into -- and openBookAt primes all four in one pass, which is
-          // why this is one flag rather than four.
+          // the page, the menu over it, its chapter list, and the two screens its
+          // last page can turn into -- and openBookAt primes all five in one pass,
+          // which is why this is one flag rather than five.
+          //
+          // `ArticleEnd` JOINS THEM BECAUSE AN ARTICLE IS A BOOK HERE. `last.json`
+          // carries its path exactly as it carries a book's, `openBookAt` derives
+          // which board the last page turns into from that path, and the facts it
+          // primes come off the card -- so a wake onto the end of an article owes
+          // this walk nothing the other four did not already owe it.
           case reader::ScreenId::Reader:
           case reader::ScreenId::ReaderMenu:
           case reader::ScreenId::Contents:
           case reader::ScreenId::BookEnd:
+          case reader::ScreenId::ArticleEnd:
             wantsOpenBook = true;
             break;
           default:
@@ -5611,6 +6973,15 @@ void setup() {
   gCrumbs.firstPaintMs = millis();
   mark("first-paint-complete");
   saveCrumbs();
+
+#ifdef ENCRE_WALLABAG_PROBE
+  // AT THE END OF setup(), AND THE PLACEMENT IS THE MEASUREMENT. What #140 asks
+  // is what a round trip costs with NO BOOK OPEN, which is the state the sync
+  // flow runs in -- so this goes after the first paint, with the panel settled
+  // and the heap where a reader pressing `Sync now` from Home would find it.
+  // Earlier and it would measure a boot rather than a sync.
+  runWallabagProbe();
+#endif
 }
 
 // --- THE CACHED COVER: WRITING IT, AND READING IT BACK ------------------------
@@ -6971,6 +8342,7 @@ void loop() {
     // that is still on top, so this has to run on the dispatch's own pass,
     // before anything pops. See App::wifiRequested().
     if (gApp->wifiRequested()) handleWifi();
+    if (gApp->articleRequested()) handleArticle();
     // Between the dispatch and the mask refresh below, so the refresh sees
     // whatever screen the retry left on top -- on success that is a brand new App
     // rooted at Home, whose holds are not the SD-missing screen's.
@@ -7228,6 +8600,17 @@ void loop() {
         logFlush();
       }
     }
+    // THE ARTICLES LIST'S OWN REFRESH, `gLibraryStale`'s shape above and its
+    // reasons: consumed when ITS screen is on top, and the flag is LEFT SET when
+    // the top is something else so the refresh is not lost.
+    if (gArticlesStale && gApp->top().id() == reader::ScreenId::Articles) {
+      auto& list = static_cast<reader::ArticlesScreen&>(gApp->top());
+      const bool moved = list.refreshProgress();
+      gArticlesStale = false;
+      if (moved) gApp->markDirty();
+      logf("[articles] rows re-read: %s\n", moved ? "changed" : "no change");
+      logFlush();
+    }
     if (gApp->retryRequested()) handleRetry();
     // Same placement and the same reason: the mask refresh below must see whatever
     // screen the open left on top.
@@ -7273,6 +8656,9 @@ void loop() {
   // in the same iteration as the push, so the first frame the picker ever
   // draws is the scanning one.
   pollWifi();
+  pollSync();
+  primeArticleActionsFacts();
+  markArticleFinishedAtEnd();
 
   const bool settled = static_cast<uint32_t>(millis() - gLastInputMs) >= kCoalesceMs;
   const bool painted = gApp->dirty() && settled;
@@ -7800,11 +9186,22 @@ void loop() {
     // NOTHING ELSE that reaches a log. Read straight off pollIntervalMs() with the
     // same predicate the loop uses, never re-derived from level= -- which would be a
     // second spelling of the choice, free to disagree with the one actually made.
-    logf("[alive] last-stage=%s heap=%u minHeap=%u screen=%s depth=%d "
+    // block= IS THE NUMBER THAT DECIDES AN ALLOCATION AND THIS LINE DID NOT
+    // CARRY IT, which is how a whole class of fault stayed invisible: the
+    // wallabag probe measured one TLS handshake taking the largest free block
+    // from 61,428 to 34,804 and never giving it back, with heap= and minHeap=
+    // recovering fully every time and reporting nothing wrong. Free heap and
+    // the largest block are two quantities, this file says so wherever an
+    // allocation is sized, and a heartbeat that carries only the first says a
+    // fragmented heap is healthy. `Inflater::begin` wants 36,956 bytes in one
+    // piece on every deflated entry of every book, so that gap is the
+    // difference between a device that can open a book and one that cannot.
+    logf("[alive] last-stage=%s heap=%u minHeap=%u block=%u screen=%s depth=%d "
          "dropped=%lu/%lu listings=%u slots/%uB hit=%u miss=%u "
          "battery observable=%d pct=%d charging=%d level=%d polls=%lu pollMs=%lu "
          "wifi=%d\n",
          stage, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+         (unsigned)ESP.getMaxAllocHeap(),
          reader::screenName(gApp->top().id()), gApp->depth(),
          (unsigned long)rawSamplesDropped(), (unsigned long)gPresses.dropped(),
          (unsigned)gSd.listings().slotsHeld(), (unsigned)gSd.listings().residentBytes(),

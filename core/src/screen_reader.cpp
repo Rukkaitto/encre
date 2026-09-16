@@ -1146,7 +1146,7 @@ Action ReaderScreen::onGesture(const GestureEvent& g) {
           // dead button on the last page of every book, which is the defect this
           // project has shipped twice before. PUSHED rather than replacing the
           // Reader, so Back comes straight back to this page.
-          return Action::push(ScreenId::BookEnd);
+          return Action::push(endScreen_);
         case WalkResult::Failed:
           // An entry that would not open is not the end of the book, and saying so
           // would be a wrong claim rather than a missing one. The in-memory demo

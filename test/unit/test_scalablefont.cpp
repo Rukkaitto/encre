@@ -902,3 +902,60 @@ TEST_CASE("the italic covers everything the roman does over fontc's subset") {
   CHECK(romanHas > 180);  // the subset really was loaded
   CHECK(italicMissing == 0);
 }
+
+TEST_CASE("the arena can be given back, and the face still draws without it") {
+  // WHAT THIS IS FOR: the two body faces hold 16 KB and 10 KB at ppem 32 and
+  // nothing outside the reader draws with them, so a device doing something
+  // expensive with no book open is holding 26 KB of idle glyph bitmaps. A
+  // wallabag sync is that moment -- a verified TLS handshake was measured on
+  // glass needing ~59 KB of a ~63 KB budget and aborting on the fourth request.
+  const std::vector<uint8_t> ttf = bodyTtf();
+  reader::ScalableFont f;
+  REQUIRE(f.init(ttf.data(), ttf.size(), 32));
+  const size_t full = f.cacheStats().capacityBytes;
+  REQUIRE(full > 0);
+
+  // A glyph, so the arena is genuinely populated before it is taken away.
+  const auto before = f.glyph(U'e');
+  REQUIRE(before.has_value());
+  const int w = before->bitmapW;
+  const int h = before->bitmapH;
+  const std::optional<int> adv = f.advance(U'e');
+  REQUIRE(adv.has_value());
+  REQUIRE(w > 0);
+  REQUIRE(h > 0);
+
+  f.releaseCache();
+  CHECK(f.cacheStats().capacityBytes == 0);
+
+  // THE CONTRACT IS "SLOWER, NEVER DEAD", which is the same one a budget too
+  // small to hold a glyph already has: the bypass buffer serves it. A face that
+  // stopped drawing here would be a blank page rather than a slow one.
+  CHECK(f.ready());
+  const auto after = f.glyph(U'e');
+  REQUIRE(after.has_value());
+  CHECK(after->bitmapW == w);
+  CHECK(after->bitmapH == h);
+  // METRICS NEVER CAME FROM THE ARENA -- `advance` reads hmtx and never
+  // rasterises -- so a released cache may not move one. If it did, a page laid
+  // out across a release would justify against widths that no longer apply.
+  CHECK(f.advance(U'e') == adv);
+
+  // AND IT COMES BACK AT THE SIZE THE BUDGET IMPLIES, not at some remembered
+  // number: `restoreCache` asks `cacheBytesFor` again, so a face restored after
+  // a Typography `Size` change cannot return to the old size's arena.
+  REQUIRE(f.restoreCache());
+  CHECK(f.cacheStats().capacityBytes == full);
+  const auto back = f.glyph(U'e');
+  REQUIRE(back.has_value());
+  CHECK(back->bitmapW == w);
+
+  SUBCASE("release is idempotent and restore is too") {
+    f.releaseCache();
+    f.releaseCache();
+    CHECK(f.cacheStats().capacityBytes == 0);
+    REQUIRE(f.restoreCache());
+    REQUIRE(f.restoreCache());
+    CHECK(f.cacheStats().capacityBytes == full);
+  }
+}

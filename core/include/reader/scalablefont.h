@@ -241,6 +241,26 @@ class ScalableFont : public GlyphSource {
   bool init(const uint8_t* ttf, size_t len, int sizePx);
   bool ready() const;
 
+  // GIVE THE ARENA BACK, AND TAKE IT AGAIN. The cache is a MEMO and not a
+  // promise -- a glyph that will not fit it already goes through the bypass
+  // buffer -- so a face with no arena still draws, slower and never dead, which
+  // is the same contract a budget too small to hold a glyph has.
+  //
+  // WHAT IT IS FOR, AND IT IS NOT A READING-PATH LEVER. The two body faces hold
+  // 16 KB and 10 KB at ppem 32 and NOTHING outside the reader draws with them:
+  // every chrome screen uses the embedded `.rfnt` ramp. So there are moments
+  // when this device is doing something expensive with no book open and 26 KB of
+  // glyph bitmaps sitting idle -- and one of them is a wallabag sync, where a
+  // verified TLS handshake was measured on glass needing ~59 KB of a ~63 KB
+  // budget and aborting on the fourth request with 716 bytes free.
+  //
+  // `restore()` IS NOT `init()`. It re-points the arena at the size the budget
+  // and the current ppem already imply, so it re-parses no font and changes no
+  // metric. It answers false when the block could not be had, which leaves the
+  // face exactly where `release()` left it -- working, without its memo.
+  void releaseCache();
+  bool restoreCache();
+
   // MAY RASTERISE (that is the whole point) and populates the cache. The
   // returned `bitmap` is borrowed from the cache and is valid only until the
   // next call into this object -- see Glyph.

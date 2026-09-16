@@ -497,6 +497,149 @@ nothing reads as a broken device.
 - [ ] **12.5** Delete a book from the Library and re-add it. Its progress is
       still there.
 
+## 13. Articles over wallabag — **[needs a real instance]**
+
+**EVERY DEFECT THIS FEATURE SHIPPED WAS FOUND HERE AND BY NOTHING ELSE.** Eleven
+of them, across seven flashes, with `make test` green at every step: a transport
+that read chunked framing as a body, a `finish()` that renamed an error page over
+an article, four handshakes that aborted the heap, a list told nothing that drew
+nothing, a PATCH whose parameters the server never saw, and a restart that landed
+on Home. `shell/` has no harness and no desktop test can reach a server, so this
+section is the whole of what stands between this feature and a reader.
+
+**IT NEEDS A WALLABAG INSTANCE AND A NETWORK**, which is the one section here
+that cannot be run from a desk with a card and a cable alone.
+
+### 13.1 The credentials file
+
+- [ ] **13.1.1** On a card with no `/.reader/wallabag.json`, boot. The log says an
+      empty one was written, and the file is there with five blank values.
+- [ ] **13.1.2** Home's `ARTICLES` row draws a **chevron and no value**. Not
+      `NOT SET UP` — see `design/Main.dc.html`: most readers will never connect a
+      wallabag and a row telling them so sits on the screen they see most.
+- [ ] **13.1.3** Open it: the not-set-up variant names the file. Fill the five
+      values in on a computer, reinsert, boot. **The file is NOT overwritten** —
+      the seed writes only when the file is absent.
+- [ ] **13.1.4** Break one value (a wrong password) and boot: the row still draws
+      a chevron, because a malformed file is "nobody has set this up" to a screen
+      and a log line to a developer.
+
+### 13.2 A sync that works
+
+- [ ] **13.2.1** `Sync now`. `CONNECTING…` carries the **three-arc radio** mark;
+      once the listing is walked it becomes `SYNCING…` with the **arrow-into-tray**
+      mark and `Fetching 1 of N.` The panel does **not** change height between the
+      two stages — the two marks share one box precisely so it cannot.
+- [ ] **13.2.2** It never draws `Fetching 0 of 0.` The count appears only once
+      there is something to fetch.
+- [ ] **13.2.3** The device **restarts** when the sync completes, and comes back
+      **on the article list** with the new rows and the right stamp — not on Home.
+      E-ink holds the fetching screen through the reset, so what you should see is
+      one transition flash. `[session] this boot is the restart the sync asked for`
+      is the line that says the resume was deliberate.
+- [ ] **13.2.4** Open an article. It reads like a book. Page to its end:
+      `ARTICLE FINISHED`, the count of what is left, and `NEXT ARTICLE` only when
+      one actually follows this one in list order.
+- [ ] **13.2.5** Home's CONTINUE block names the article and, **where a book shows
+      its author, shows the source domain**.
+
+### 13.3 The queue actually reaches the server
+
+**THIS IS THE ONE TO RUN FIRST AND THE ONE THAT HAS ALREADY BEEN WRONG.** The
+PATCH sent its parameters in the query string, wallabag answered **200**, the push
+step acked the queue on the 2xx, and the intent was discarded — so the device
+reported success and the instance never changed. A wrong 200 is the worst answer
+this API can give us, because nothing downstream can tell it from a right one.
+
+- [ ] **13.3.1** Star an article from the actions overlay (**HOLD** on a row).
+      The list's sync-row stamp reads `1 TO PUSH`, and the account screen's
+      `Pending actions` row says the same words.
+- [ ] **13.3.2** Sync. The log shows a `PATCH` and its status. **Then open the
+      instance in a browser and confirm the star is there.** The device's own
+      report is not evidence for this one.
+- [ ] **13.3.3** Archive an article from the end screen. The file leaves the card
+      at once, the list is one row shorter, and the next sync's log shows the
+      PATCH and the ack. **Confirm the archive on the instance.**
+- [ ] **13.3.4** Star and then unstar before syncing: the queue holds **one**
+      action, not two contradictory ones, and the server ends up unstarred.
+- [ ] **13.3.5** After a sync that pushed everything, the stamp is **empty** —
+      never `0 TO PUSH`.
+
+### 13.4 The three failure shapes, each on demand
+
+- [ ] **13.4.1** A wrong password in the file → `COULDN'T SIGN IN`, and
+      `TRY AGAIN` is **absent**: the same file produces the same answer, so there
+      is nothing to retry.
+- [ ] **13.4.2** Unplug the router mid-sync → `COULDN'T CONNECT`, and `TRY AGAIN`
+      **is** there, because this one can fail spuriously.
+- [ ] **13.4.3** Forget the `AUTO` network in Settings → the no-network shape,
+      which names Settings rather than the server.
+- [ ] **13.4.4** Dismissing any of them with `OK` returns to the list — and if TLS
+      ran, **that** is when the restart happens, because restarting under the
+      dialog would throw away the one thing you needed to read.
+
+### 13.5 A cancel leaves nothing behind
+
+- [ ] **13.5.1** Cancel mid-fetch. Everything already fetched stays.
+- [ ] **13.5.2** **No `.part` file is left** under `/.reader/articles/` — read the
+      card on a computer.
+- [ ] **13.5.3** The watermark did **not** advance, so the next sync asks for what
+      this one did not get and fetches only what is missing.
+
+### 13.6 The heap, which is why this feature restarts at all
+
+- [ ] **13.6.1** Read the `mark()` trail across a whole sync. The body glyph
+      arenas are given back before the radio comes up (`[sync] gave back the body
+      glyph arenas`), which is ~28 KB and the reason a sync fits at all.
+- [ ] **13.6.2** Each `[http] #N` line's **`min`** is the number to watch, not the
+      free heap either side of it. A verified handshake spends ~47 KB; it was
+      aborting at 716 bytes free before the arenas were released.
+- [ ] **13.6.3** `block=` on `[alive]` after a sync. If it is under **36,956** a
+      book cannot be opened, which is the whole reason for the restart — and it is
+      also how you would notice the restart silently stopping.
+
+### 13.7 The radio is down afterwards, every time
+
+- [ ] **13.7.1** After a success, a failure, a cancel and a dismissed error:
+      `wifi=0` on the next `[alive]`.
+- [ ] **13.7.2** **`[wifi] radio was up under` must NEVER print.** It is the
+      backstop for a path somebody adds later and forgets; if it fires, that path
+      is the card to file.
+
+### 13.8 The list and the counts agree
+
+- [ ] **13.8.1** Home's `ARTICLES` value matches the list's band after every one
+      of the above — a sync, an archive, a star, a remove-all.
+- [ ] **13.8.2** With everything read, Home's row shows **nothing** rather than
+      `0 UNREAD`.
+- [ ] **13.8.3** The sync row **inverts** when focused and the Confirm hint reads
+      `SYNC` there and `READ` on an article. On an empty list it is the only row,
+      always focused, and UP/DOWN are blank.
+- [ ] **13.8.4** A **HOLD** on an article opens the actions overlay; a hold on the
+      sync row does nothing **and draws no ring**.
+- [ ] **13.8.4b** **Three states, and they are three.** Open an article and come
+      straight back: its dot is **gone** and the meta does **not** say `· READ` —
+      started is not finished. The band and Home both drop by one, because
+      `UNREAD` counts what has never been opened, which is the same question the
+      dot answers.
+- [ ] **13.8.4c** Now page that article to its end. `· READ` appears on its row
+      and the counts do **not** move again — they already stopped counting it
+      when it was opened.
+- [ ] **13.8.4d** **The text column does not move** between any of the three: a
+      row with no dot lines up with a row that has one, because the mark's slot
+      stays when the mark goes.
+- [ ] **13.8.4e** **Both marks survive being looked at again.** Open the article
+      that says `· READ` and press Back: it still says `· READ`. Then open one
+      with no dot and no `READ`, page to the end, press **Back** twice — to the
+      last page, then out — and it says `· READ` rather than losing the mark it
+      just earned. Nothing on the desktop can see either: the save is `shell/`'s.
+- [ ] **13.8.5** `CHANGE` on the account screen's `Keep offline` cycles the value,
+      the row redraws with the new one, and it survives a reboot.
+- [ ] **13.8.6** A long chapter name on Book details **elides** rather than running
+      off the panel — check the left edge, which is the direction a value overflows.
+
+---
+
 ---
 
 ## What to do with what you find

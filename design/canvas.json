@@ -388,6 +388,33 @@
       "page": "page-6"
     },
     {
+      "file": "WallabagErrorNoNetwork.dc.html",
+      "title": "Couldn’t connect / no network",
+      "x": 1740,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-6"
+    },
+    {
+      "file": "WallabagFetching.dc.html",
+      "title": "Syncing / fetching",
+      "x": 2320,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-6"
+    },
+    {
+      "file": "ArticlesRemoveConfirm.dc.html",
+      "title": "Remove downloads",
+      "x": 2900,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-6"
+    },
+    {
       "file": "BookEnd.dc.html",
       "title": "Book Finished",
       "x": 0,

@@ -30,8 +30,43 @@ constexpr int kHandshakeTimeout = 204;     // WIFI_REASON_HANDSHAKE_TIMEOUT
 constexpr int kNoApCompatibleSecurity = 210;  // ..._NO_AP_FOUND_W_COMPATIBLE_SECURITY
 constexpr int kNoApAuthmodeThreshold = 211;   // ..._NO_AP_FOUND_IN_AUTHMODE_THRESHOLD
 constexpr int kNoApRssiThreshold = 212;       // ..._NO_AP_FOUND_IN_RSSI_THRESHOLD
+// THE AP REFUSED THE ASSOCIATION *TEMPORARILY*, which is a different thing from
+// refusing it: 802.11w's comeback mechanism has the AP answer with "try again in
+// N", and the ESP32 allows exactly ONE comeback before giving up ("Association
+// refused too many times, max allowed 1"). Seen on glass 2026-09-15 against a
+// real router, which is why it is named rather than left to `default:`.
+//
+// IT STAYS `Incomplete` AND THAT IS CORRECT. The password was never offered, so
+// NotFound would be false (the AP was heard) and BadPassword would be a lie on a
+// screen whose three copy shapes exist precisely so that cannot happen.
+constexpr int kAssocComebackTooLong = 208;  // WIFI_REASON_ASSOC_COMEBACK_TIME_TOO_LONG
 
 }  // namespace
+
+const char* wifiReasonName(int reason) {
+  // NAMED FOR THE LOG, not for the glass: this never reaches a reader, and the
+  // screen's three copy shapes come from wifiFailureFor below. It exists because
+  // `vendor reason 208` cost a round trip to a header to read, and the next
+  // person diagnosing a join should not pay that again -- the same argument the
+  // `[i]` line and `screenName` already make.
+  switch (reason) {
+    case kWifiReasonNoAddress: return "no address (associated, DHCP never finished)";
+    case kAuthExpire: return "AUTH_EXPIRE";
+    case kAuthLeave: return "AUTH_LEAVE";
+    case kHandshakeTimeout4Way: return "4WAY_HANDSHAKE_TIMEOUT (usually a wrong passphrase)";
+    case kGroupKeyUpdateTimeout: return "GROUP_KEY_UPDATE_TIMEOUT";
+    case kIe8021xAuthFailed: return "802_1X_AUTH_FAILED";
+    case kNoApFound: return "NO_AP_FOUND";
+    case kAuthFail: return "AUTH_FAIL";
+    case kHandshakeTimeout: return "HANDSHAKE_TIMEOUT";
+    case kAssocComebackTooLong:
+      return "ASSOC_COMEBACK_TIME_TOO_LONG (the AP refused association for now)";
+    case kNoApCompatibleSecurity: return "NO_AP_FOUND_W_COMPATIBLE_SECURITY";
+    case kNoApAuthmodeThreshold: return "NO_AP_FOUND_IN_AUTHMODE_THRESHOLD";
+    case kNoApRssiThreshold: return "NO_AP_FOUND_IN_RSSI_THRESHOLD (heard, too weak)";
+    default: return "unnamed";
+  }
+}
 
 JoinFailure wifiFailureFor(int reason) {
   switch (reason) {
@@ -56,6 +91,9 @@ JoinFailure wifiFailureFor(int reason) {
     case kNoApAuthmodeThreshold:
     case kNoApRssiThreshold:
       return JoinFailure::NotFound;
+
+    // 208 is deliberately NOT here: the AP was heard, so NotFound would be
+    // false. It falls to Incomplete below, which is the honest shape.
 
     // THE CREDENTIAL WAS REJECTED. A WPA2 AP that dislikes the passphrase
     // times out the four-way handshake rather than saying so, which is why the
