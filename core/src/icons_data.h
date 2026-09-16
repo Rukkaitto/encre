@@ -81,7 +81,7 @@ inline constexpr uint8_t kForwardBits[] = {
 };
 
 // dot: filled circle: the Confirm button
-// design/Main.dc.html:229, viewBox "0 0 10 10", drawn 25x25
+// design/Main.dc.html:241, viewBox "0 0 10 10", drawn 25x25
 // coverage levels 0/1/2/3: 408/22/10/185 px
 inline constexpr int kDotW = 25;
 inline constexpr int kDotH = 25;
@@ -147,7 +147,7 @@ inline constexpr uint8_t kHoldBits[] = {
 };
 
 // up: stem with a chevron head, pointing up
-// design/Main.dc.html:230, viewBox "0 0 16 16", drawn 25x25
+// design/Main.dc.html:242, viewBox "0 0 16 16", drawn 25x25
 // coverage levels 0/1/2/3: 528/20/25/52 px
 inline constexpr int kUpW = 25;
 inline constexpr int kUpH = 25;
@@ -180,7 +180,7 @@ inline constexpr uint8_t kUpBits[] = {
 };
 
 // down: stem with a chevron head, pointing down
-// design/Main.dc.html:231, viewBox "0 0 16 16", drawn 25x25
+// design/Main.dc.html:243, viewBox "0 0 16 16", drawn 25x25
 // coverage levels 0/1/2/3: 528/20/25/52 px
 inline constexpr int kDownW = 25;
 inline constexpr int kDownH = 25;
@@ -213,7 +213,7 @@ inline constexpr uint8_t kDownBits[] = {
 };
 
 // chevron: right-pointing disclosure
-// design/Main.dc.html:223, viewBox "0 0 16 16", drawn 25x25
+// design/Main.dc.html:235, viewBox "0 0 16 16", drawn 25x25
 // coverage levels 0/1/2/3: 543/20/2/60 px
 inline constexpr int kChevronW = 25;
 inline constexpr int kChevronH = 25;
@@ -246,7 +246,7 @@ inline constexpr uint8_t kChevronBits[] = {
 };
 
 // book: open book: the Read action
-// design/Main.dc.html:228, viewBox "0 0 16 16", drawn 25x25
+// design/Main.dc.html:240, viewBox "0 0 16 16", drawn 25x25
 // coverage levels 0/1/2/3: 370/58/42/155 px
 inline constexpr int kBookW = 25;
 inline constexpr int kBookH = 25;
