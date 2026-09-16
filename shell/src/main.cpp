@@ -695,7 +695,47 @@ static struct {
   // inflater does not exist yet, so the heap is ~133 KB. And it is cheap to keep:
   // measured 1,161 bytes of labels for a 96-entry book, ~12 a row.
   std::vector<reader::TocEntry> toc;
+  // AN ARTICLE'S `finished` MARK, READ AT OPEN. A BOOK HAS NO SUCH FIELD HERE, AND
+  // THE ASYMMETRY IS THE SAME ONE THAT DECIDES THE DOT.
+  //
+  // saveReadingPosition builds its record FRESH, which drops `finished` -- deliberate
+  // for a book, where re-reading is how a mark set by an explicit press is taken back.
+  // An article's mark is set by NO press: reaching ArticleEnd is what sets it, and
+  // `gArticleFinishedMarked` then refuses to set it twice in a session. So for an
+  // article the same drop is not a toggle, it is a LOSS: open a row that says
+  // `. READ`, press Back, and the mark is gone with no way to ask for it again until
+  // the next boot.
+  //
+  // CAPTURED AT OPEN RATHER THAN READ AT EACH SAVE, because a save happens on the way
+  // out, at every chapter crossing and in the 2 s quiet window after every page turn,
+  // and the open is the one moment on this path with heap and time to spare -- it is
+  // already parsing an archive and a table of contents. One small read a book against
+  // one a save.
+  bool articleFinished = false;
 } gReading;
+
+// AN ARTICLE IS AN EPUB UNDER `/.reader/articles/`, AND THAT IS THE WHOLE TEST.
+// Derived from the PATH rather than plumbed down from the callers, because two of
+// them -- the wake restore and Home's CONTINUE -- do not know what they are
+// opening: `last.json` carries an article's path exactly as it carries a book's,
+// which is decision 3 of the wallabag note taken. A flag threaded through the call
+// sites would be right at the Articles list and a guess at the other two.
+//
+// A FREE FUNCTION BECAUSE THERE ARE TWO CALLERS NOW. It was a local in `openBookAt`
+// and `saveReadingPosition` is the second, which is exactly when a second spelling
+// of the prefix would start to drift -- and the two answers would drift in opposite
+// directions, one deciding which end screen an article gets and the other which
+// LIST is told the reader moved.
+//
+// ONE FUNCTION FOR BOTH ANSWERS, because the id is the same parse: `epubPath` built
+// the name, so reading it back is one expression against it, and a caller wanting
+// only the bool passes nothing.
+static bool isArticlePath(const std::string& path, int* id = nullptr) {
+  const std::string prefix = std::string(reader::kArticlesDir) + "/";
+  if (path.rfind(prefix, 0) != 0) return false;
+  if (id != nullptr) *id = atoi(path.c_str() + prefix.size());
+  return true;
+}
 
 // HOME'S VIEW MODEL IS BUILT ONCE AND HAS TO BE REBUILT, which is the whole of a bug
 // the device reported: after reading a book, going Home still said NOTHING OPEN YET.
@@ -2721,6 +2761,10 @@ static reader::SaveResult saveReadingPosition(const char* why,
   // on the Reader being on top (just above), which it no longer is.
   reader::ReadingPosition p;
   p.bookPath = gReading.path;
+  // THE ONE FIELD THAT IS NOT REBUILT, and only for an article. Captured at open and
+  // raised by markArticleFinishedAtEnd, so it costs no card read here; a book leaves
+  // it false, which is the paragraph above being honoured rather than worked around.
+  p.finished = gReading.articleFinished;
   p.spine = rd->chapterIndex();
   const reader::Cursor at = rd->currentCursor();
   p.block = at.block;
@@ -2823,7 +2867,28 @@ static reader::SaveResult saveReadingPosition(const char* why,
   // one those rows were built from, and `unchanged` means it is not. Gated by the SAME
   // expression rather than by a second copy of the test -- the observed cost here was a
   // `Library rows re-read: ok in 160ms` on every Back out of an unmoved book.
-  if (wrote) gLibraryStale = true;
+  //
+  // ...AND THE ARTICLES LIST'S ROW FOR THIS ARTICLE, WHICH WAS MISSING. It is the
+  // same defect the Library had and Home had before it: the list is built when it is
+  // pushed, the Reader is pushed ON TOP of it, and the pop that leaves hands back the
+  // screen with the rows it was born with. Reported off the device as "opening an
+  // article with the dot and immediately backing out still shows the dot" -- the
+  // sidecar WAS written, so the row was right on the card and stale on the glass, and
+  // `markArticleFinishedAtEnd` was the only thing that ever set this flag, so of the
+  // three states only the third could appear without leaving the screen.
+  //
+  // WHICH LIST IS DECIDED BY THE PATH, because the two can never overlap: articles
+  // live under /.reader/articles and the Library lists /books, so a book's save
+  // cannot move an article's row and an article's cannot move a book's. Setting both
+  // would cost the other screen a /.reader/state listing on its next visit for a row
+  // that could not have changed -- which is the cost the `wrote` gate above exists to
+  // refuse, arriving one list over.
+  if (wrote) {
+    if (isArticlePath(gReading.path))
+      gArticlesStale = true;
+    else
+      gLibraryStale = true;
+  }
   logf("[progress] %s: spine=%d block=%d line=%d %d%% -- position %s, pointer %s\n", why,
        p.spine, p.block, p.line, last.percent, outcome(a), outcome(b));
   logFlush();
@@ -3531,6 +3596,9 @@ static void markArticleFinishedAtEnd() {
   }
   if (pos.finished) return;
   pos.finished = true;
+  // IN RAM AS WELL AS ON THE CARD, or the `leaving` save two presses later rebuilds
+  // the record without it and the mark this just set is erased in front of the reader.
+  gReading.articleFinished = true;
   const reader::SaveResult r = reader::savePosition(gSd, pos);
   // NOT FATAL, `handleFinish`'s rule: a failed write must not throw a reader out
   // of an article they have just finished reading, over a flag.
@@ -4452,19 +4520,11 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
     gFactory.setReaderItalicClasses(std::move(italicClasses));
   }
 
-  // AN ARTICLE IS AN EPUB UNDER `/.reader/articles/`, AND THAT IS THE WHOLE TEST.
-  // Derived from the path in ONE place rather than plumbed down from the three
-  // callers, because two of them -- the wake restore and Home's CONTINUE -- do
-  // not know what they are opening: `last.json` carries an article's path exactly
-  // as it carries a book's, which is decision 3 of the wallabag note taken. A
-  // flag threaded through the call sites would be right at the Articles list and
-  // a guess at the other two.
-  const std::string kArticlesPrefix = std::string(reader::kArticlesDir) + "/";
-  const bool isArticle = path.rfind(kArticlesPrefix, 0) == 0;
-  // THE ID OUT OF THE PATH, ONCE. `epubPath` built it, so parsing it back is one
-  // expression against a store method -- and two callers want it now, which is
-  // exactly when a second spelling would start to drift.
-  const int articleId = isArticle ? atoi(path.c_str() + kArticlesPrefix.size()) : 0;
+  // WHICH END SCREEN THIS BOOK ENDS ON, AND WHICH LIST OWNS ITS ROW -- both off
+  // the path, through the one predicate. See isArticlePath for why the test lives
+  // there rather than being threaded down from the three callers.
+  int articleId = 0;
+  const bool isArticle = isArticlePath(path, &articleId);
 
   // SET ON EVERY OPEN AND NOT ONLY WHEN IT CHANGES. The factory outlives every
   // screen it builds, so a book opened after an article would otherwise end on a
@@ -4490,10 +4550,15 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // first is the server's own answer. Empty leaves the EPUB's author standing
   // rather than blanking the line: an absent claim beats a false one, and a
   // missing sidecar is not evidence that there is no author.
+  gReading.articleFinished = false;
   if (isArticle) {
     const reader::ArticleStore store(gSd);
     reader::ArticleMeta m;
     if (store.readMeta(articleId, m) && !m.domain.empty()) gReading.author = m.domain;
+    // AND THE MARK, so a save on the way out carries it rather than erasing it. See
+    // gReading.articleFinished for why a book has no equivalent.
+    reader::ReadingPosition was;
+    gReading.articleFinished = reader::loadPosition(gSd, path, was) && was.finished;
   }
   gReading.bytes = bookBytes;
   gReading.open = true;

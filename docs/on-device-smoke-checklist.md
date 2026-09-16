@@ -628,6 +628,11 @@ this API can give us, because nothing downstream can tell it from a right one.
 - [ ] **13.8.4d** **The text column does not move** between any of the three: a
       row with no dot lines up with a row that has one, because the mark's slot
       stays when the mark goes.
+- [ ] **13.8.4e** **Both marks survive being looked at again.** Open the article
+      that says `· READ` and press Back: it still says `· READ`. Then open one
+      with no dot and no `READ`, page to the end, press **Back** twice — to the
+      last page, then out — and it says `· READ` rather than losing the mark it
+      just earned. Nothing on the desktop can see either: the save is `shell/`'s.
 - [ ] **13.8.5** `CHANGE` on the account screen's `Keep offline` cycles the value,
       the row redraws with the new one, and it survives a reboot.
 - [ ] **13.8.6** A long chapter name on Book details **elides** rather than running
