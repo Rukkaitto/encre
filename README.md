@@ -19,11 +19,11 @@ models; it works out which one it is at boot.
 - [x] Reading position kept on the SD card, and not lost if you delete the book
 - [x] Book details, and marking a book finished
 - [x] Battery level, a warning when it runs low, and a clean shutdown before it dies
+- [x] Joining a Wi-Fi network, and pulling your Wallabag reading list over it
 - [ ] Sending books over Wi-Fi
 - [ ] Bookmarks
 - [ ] Plain text files
 - [ ] Hyphenation, and better line breaking
-- [ ] Instapaper
 - [ ] A boot screen
 
 <table>
@@ -129,6 +129,50 @@ putting the book back puts you back where you were.
 Settings live in `/.reader/settings.json`, which is created with sensible
 defaults and can be edited by hand. If you break it, Encre falls back to the
 defaults and leaves your file exactly as you typed it.
+
+## Articles from Wallabag
+
+Encre can pull your [Wallabag](https://wallabag.org) reading list onto the
+device over Wi-Fi. An article reads like any other book, and starring or
+archiving one on the device tells your server the next time it syncs.
+
+You need a Wallabag to point it at. If you don't host one,
+[wallabag.it](https://wallabag.it) is about €11 a year and has a 14-day trial
+that doesn't ask for a card.
+
+Then, once per device:
+
+1. Sign in to your Wallabag and open `/developer/client/create`.
+2. Name the client. `Encre` will do. The name is how you revoke this reader
+   later without revoking your phone with it.
+3. Leave the redirect URI blank. Wallabag doesn't require one, and Encre never
+   opens a browser.
+4. It gives you a client ID and a client secret. Both are still at `/developer`
+   if you lose them.
+
+Now put the SD card in your computer and open `/.reader/wallabag.json`. Encre
+writes that file on the first boot that doesn't find one, so it is already
+there, with a few lines of help in it you can keep or delete:
+
+```json
+{
+  "server": "https://app.wallabag.it",
+  "clientId": "1_abc123",
+  "clientSecret": "xyz789",
+  "username": "you",
+  "password": "your Wallabag password"
+}
+```
+
+Put the card back, then open Settings, Wallabag, Sync now.
+
+Syncing restarts the device. One encrypted connection leaves the memory too
+fragmented to open a book afterwards, and only a restart gives it back, so
+Encre takes it while the sync screen is still on the glass.
+
+Your password sits in that file as you typed it, so anyone holding the card can
+read it. Encre has no keyboard to ask you for it again, and Wallabag's token
+lasts about a fortnight, so the password has to stay on the card.
 
 ## About the X4
 
