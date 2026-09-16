@@ -1,6 +1,7 @@
 #include "reader/article_store.h"
 
 #include <algorithm>
+#include <cstdint>
 
 #include "reader/json.h"
 #include "reader/reading_position.h"
