@@ -67,6 +67,12 @@ TEST_CASE("QuietTheme renders Home with nothing open to golden on both geometrie
   SUBCASE("X3 528x792") { renderOne(528, 792, "home_unopened_x3"); }
 }
 
+// design/Main.dc.html's column inset and the CONTINUE block's own padding. Named
+// here rather than reached for from the theme: they are private to theme_quiet,
+// and a test that read them from there could not catch the theme changing them.
+static constexpr int kSpineColPad = 20;
+static constexpr int kSlabPadX = 18;
+
 TEST_CASE("Home's action block carries the long arrow, not the row chevron") {
   // design/Main.dc.html:63 puts a 32x25 shafted arrow in the CONTINUE block;
   // :74 puts a 25x25 chevron on the SETTINGS row. They are different marks for
@@ -87,8 +93,13 @@ TEST_CASE("Home's action block carries the long arrow, not the row chevron") {
     // the block's field is solid there (its own `padding: 0 20px` keeps the
     // label clear of it), while the cover's dither and the progress bar's fill
     // are only a few rows deep.
-    const int barW = width - 2 * reader::kMargin;
-    const int probeX = reader::kMargin + 5;
+    // INSIDE THE SLAB, NOT INSIDE THE SPINE. This probed `kMargin + 5` = 29,
+    // which the spine now owns -- so the longest run of ink in that column is
+    // the BAND (~736 rows) rather than the 68px block, and every measurement
+    // after it described the wrong object. The slab lives in the column beside
+    // the band, so the probe has to start there.
+    const int barW = width - reader::kMargin - (reader::kSpineW + kSpineColPad);
+    const int probeX = reader::kSpineW + kSpineColPad + 5;
     int blockTop = -1, blockBot = -2, runTop = -1;
     for (int y = 0; y <= height; ++y) {
       const bool solid = y < height && !fb.getPixel(probeX, y);
@@ -104,7 +115,7 @@ TEST_CASE("Home's action block carries the long arrow, not the row chevron") {
     REQUIRE(blockBot - blockTop >= 40);
 
     // The knocked-out mark, in the block's right-hand end.
-    const int right = reader::kMargin + barW;
+    const int right = reader::kSpineW + kSpineColPad + barW;
     int x0 = right, x1 = -1, y0 = height, y1 = -1;
     for (int y = blockTop; y <= blockBot; ++y)
       for (int x = right - 120; x < right; ++x)
@@ -124,10 +135,11 @@ TEST_CASE("Home's action block carries the long arrow, not the row chevron") {
     for (int x = x0; x <= x1; ++x)
       if (fb.getPixel(x, (y0 + y1) / 2)) ++mid;
     CHECK(mid >= (x1 - x0 + 1) * 3 / 4);
-    // Right-aligned on the block's own `padding: 0 20px`, measured off the mark
-    // the board actually puts there.
-    CHECK(x1 <= right - 20);
-    CHECK(x1 >= right - 20 - 3);
+    // Right-aligned on the block's own `padding: 0 18px` -- 18 where the old
+    // full-width slab used 20, because design/Main.dc.html insets the narrower
+    // block by its own padding rather than the screen's.
+    CHECK(x1 <= right - kSlabPadX);
+    CHECK(x1 >= right - kSlabPadX - 3);
   }
 }
 

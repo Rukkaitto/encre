@@ -25,217 +25,112 @@
     a { color: #000000; } a:hover { color: #000000; }
   </style>
 </helmet>
+
+<!--
+  HOME. The reading state, with the book's name on the spine.
+
+  WHAT THIS REPLACED AND WHY. The previous layout stacked eight bands and two of
+  them said one thing twice: measured at 480x800, the menu and hint bar owned
+  307px (38% of the panel), the `6%` numeral and a progress bar owned 123px (15%)
+  BOTH STATING THE SAME FRACTION, and the title -- the one fact this screen exists
+  to state -- got 88px, two lines. The title had less room than the duplicated
+  percentage. `A Portrait of the Artist as a Young Man` overflowed the board by
+  529 ink pixels with the hint bar pushed off the glass; the firmware clamped to
+  two lines and elided, which is the same fact wearing a different symptom.
+
+  The spine takes the title out of that budget entirely and the progress BAR goes
+  -- it and the numeral were the same fact, and the numeral was already the hero.
+
+  THERE IS NO `NOW READING` BAND. The spine names the book, so a label saying a
+  book is being read would title something already unmistakable, and the 2px rule
+  under it would divide the spine from its own column. What survives is the
+  battery, which is true on every screen.
+
+  NO COVER. A dithered placeholder claims a picture this screen does not have, in
+  the most prominent slot on the screen whose job is to name the book. An absent
+  claim beats a false one. The spine takes the width the cover would have had.
+
+  THE AUTHOR IS SHOUTED AT `--t-meta` because the spine has taken the naming job,
+  so this run is metadata about it rather than the second line of a title block.
+
+  THE CHAPTER ELIDES and may NOT wrap. The words come off the card and a real
+  chapter name runs long; this column has no other growable run, and adding one
+  would put a second thing competing for the height the spine exists to free.
+
+  THE GAP BETWEEN CONTINUE AND THE MENU IS DELIBERATE. DO NOT CLOSE IT. It is
+  196px on the X4 and 188 on the X3 and does NOT shrink when the title grows,
+  because the title is no longer in this column. BookDetails.dc.html ships a 217px
+  band of the same shape and reads as calm; on a fixed panel there is no fold and
+  nothing below, so white space costs nothing. Four alternatives were drawn and
+  measured: centring only redistributes it (263px of blank against 289), floating
+  the menu up MAKES IT WORSE (a 194px hole at the foot, and the hint bar detached
+  from the rows it labels), and a NEXT UP block closes it but needs data the
+  device does not have -- no most-recent (nothing tracks it) and no newest
+  (FileSystem carries no timestamps), the wall HomeUnopened.dc.html already hit.
+
+  THE MENU ROWS ARE 74px, where the old layout used 80. That is what keeps three
+  rows plus the hint bar inside the right column once the top band is gone. The
+  row model is otherwise unchanged: a row states a quantity or discloses a screen,
+  never both -- LIBRARY carries a count, ARTICLES carries `3 UNREAD` when there is
+  something to report and the chevron otherwise, SETTINGS carries the chevron.
+-->
+
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
 
-  <div style="display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
-    <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">NOW READING</div>
-    <div style="display: flex; align-items: center; gap: 7px;">
-      <div style="font-size: var(--t-value); font-weight: 700;">87%</div>
-      <svg width="38" height="21" viewBox="0 0 22 12" fill="none"><rect x="0.5" y="0.5" width="18" height="11" stroke="#000000"></rect><rect x="2" y="2" width="14" height="8" fill="#000000"></rect><rect x="19.5" y="3.5" width="2" height="5" fill="#000000"></rect></svg>
+  <div style="display: flex; flex-grow: 1; min-height: 0;">
+    <!-- THE SPINE. The book's name, set along the panel's long axis, which is
+         what takes the title out of the competition for height: 692px of run per
+         line on the X4 and 684 on the X3, wrapping to two, against the 608px two
+         lines of the old 304px title column gave. `vertical-rl` plus a 180deg
+         rotation sets it bottom-to-top, which is how a spine reads on a shelf.
+
+         112px IS AN ALIGNMENT, NOT A TASTE, and it must stay divisible by 8.
+         Under Rotation::Ccw the framebuffer maps physX = logY, so a full-height
+         band at logical x in [0,112) is 112 CONSECUTIVE PHYSICAL ROWS -- which is
+         what lets the firmware draw this into a scratch buffer at the same stride
+         and move it with a memcpy, instead of rotating glyphs. A thickness that
+         did not start on a byte boundary would force a per-pixel transpose, and a
+         transpose is a byte-wise primitive carrying the rotation hazard this
+         project has been bitten by five times.
+
+         `overflow: hidden` on BOTH boxes is load-bearing: a title longer than two
+         lines is clipped rather than allowed to escape into the hint bar, which
+         is what the first draft did at both geometries. -->
+    <div style="width: 112px; flex-shrink: 0; background: #000000; color: #ffffff; display: flex; align-items: center; justify-content: center; padding: 22px 0; overflow: hidden;">
+      <div style="writing-mode: vertical-rl; transform: rotate(180deg); font-size: var(--t-title); font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; line-height: 1.12; max-height: 100%; overflow: hidden;">Middlemarch</div>
     </div>
-  </div>
-
-  <!-- NO COVER, AND THE READING COLUMN TAKES THE WHOLE WIDTH. This block used to
-       open with a 112x168 `.dither-dots` panel: a stand-in for a cover image,
-       drawn as a grey tint because there was no cover to draw. It was never a
-       cover. It claimed a picture this screen does not have, in the most
-       prominent slot on the screen whose whole job is to name the book being
-       read -- and it took 128px of the 480px panel (112 plus the gap) away from
-       the name to do it. An absent claim beats a false one, which is the call
-       this design already makes for an unread battery gauge and for a badge
-       promising a wake charging cannot deliver.
-
-       THE `gap: 16px` WENT WITH IT, and that is not tidying. A flex `gap` sits
-       BETWEEN items, so with one item left it separates nothing --
-       BookErrorMemory.dc.html's own rule when its second slab was cut, where
-       keeping the gap would have left 12px of dead air and pushed a centred
-       panel off its centre. Here it would simply be a number with no meaning
-       for the next reader of this file to wonder about.
-
-       WHAT DOES *NOT* MOVE is the title's line budget. That budget is derived in
-       renderHome from the room BELOW this block -- the bar, CONTINUE, the menu
-       and the hint bar -- so it is a question about height, and the cover was a
-       question about width. The name gets a wider column, not more lines. -->
-  <div style="display: flex; padding: 30px 24px 0 24px;">
-    <div style="display: flex; flex-direction: column; justify-content: flex-start; gap: 22px; flex-grow: 1; min-width: 0; padding: 2px 0;">
-      <div style="display: flex; flex-direction: column; gap: 5px;">
-                <!-- IT WRAPS, and it used to elide. `text-overflow: ellipsis` with
-             `white-space: nowrap` hid the end of any real book's name: the device
-             showed a truncated title on the one screen whose whole job is to name
-             the book you are reading, and the name is the content there.
-
-             This is BookDetails.dc.html's rule, for BookDetails' reason -- an
-             ellipsis on a LIST ROW hides only which of seven rows this is, and here
-             it hides the thing the screen exists to say. `overflow-wrap: anywhere`
-             because the break has to be allowed inside a word: a title falling back
-             to a filename is usually one word, and CSS offers no break opportunity
-             at an underscore or a hyphen.
-
-             THE WRAP IS BOUNDED and the block below it does not move: the progress
-             bar, CONTINUE, the menu and the hint bar are fixed, so the NAME yields.
-             The bound is derived from the box model in renderHome, not pinned here. -->
-        <div style="font-size: var(--t-title); font-weight: 700; line-height: 1.05; text-transform: uppercase; overflow-wrap: anywhere;">Middlemarch</div>
-        <div style="font-size: var(--t-body);">George Eliot</div>
+    <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column;">
+      <div style="display: flex; justify-content: flex-end; align-items: center; gap: 7px; padding: 18px 24px 0 20px;">
+        <div style="font-size: var(--t-value); font-weight: 700;">87%</div>
+        <svg width="38" height="21" viewBox="0 0 22 12" fill="none"><rect x="0.5" y="0.5" width="18" height="11" stroke="#000000"></rect><rect x="2" y="2" width="14" height="8" fill="#000000"></rect><rect x="19.5" y="3.5" width="2" height="5" fill="#000000"></rect></svg>
       </div>
-      <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="font-size: var(--t-display); font-weight: 700; line-height: 1;">6%</div>
-        <!-- THE CHAPTER'S NAME, AND THIS LINE HAS NOW HELD THREE THINGS. It was two
-             meta lines, `PAGE 53 / 890` above `CH. 01 &mdash; MISS BROOKE`, and
-             neither was obtainable then: a page counter for the BOOK needs every
-             chapter paginated (6.94 MB of inflated XHTML on a real novel, ~49 s of
-             decode at this device's 7.2 ms/KB), and a chapter's name needed a table
-             of contents that was not built.
-
-             SO IT BECAME `CH. 01 OF 24` -- the spine position of the spine count --
-             and that was a FALSE CLAIM, reported off an X3. A spine counts the cover,
-             the title page, the copyright, the contents, the part dividers, the
-             acknowledgements, the notes, the index and the about-the-author alongside
-             the chapters, so the two numbers invite the reader to compute progress
-             from quantities that are not chapters. One did: `47% &middot; CH. 14 OF 36`
-             for a book of 7 chapters in 2 parts, and then Contents put them at part 2
-             with five selectable rows left. Both readings cannot be true.
-
-             Measured over 206 corpus books with a usable NCX: 126 (61.2%) have a
-             spine count exceeding the spine entries their TOC names at all, worst
-             164 against 26. And 183 (88.8%) have a spine count differing from the
-             count of entries their TOC names as SELECTABLE chapters -- so no total
-             this device can derive is a chapter count, which is why there is no
-             total here rather than a better one.
-
-             THE NAME IS THE ONLY HONEST ANSWER AND IT IS FREE NOW. Contents.dc.html
-             is built and the Reader's header band already draws this exact string;
-             the reading position stores it, so Home names the reader's chapter with
-             the SAME words the Reader and Contents do. Numbering the TOC's own
-             entries would be a third numbering system, which is the mistake the
-             Contents row's right-hand slot was already fixed for.
-
-             It takes the 0.10em this board gave the chapter line it used to draw,
-             not the 0.16em of the counter that displaced it: a name is not a counter.
-             AND IT ELIDES, because the words come off the CARD -- a real chapter name
-             runs long ("PREMIERE PARTIE : A LIRE AVANT L'ACHAT") and this run has one
-             line of a 304px column. That is the Reader header's own rule for the same
-             string; the TITLE above is the run that wraps, because it is the thing the
-             screen exists to say and a name here is a name for where you are. -->
-        <div style="font-size: var(--t-meta); letter-spacing: 0.1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">I &middot; Miss Brooke</div>
+      <div style="padding: 26px 24px 0 20px;">
+        <div style="font-size: var(--t-meta); letter-spacing: 0.2em;">GEORGE ELIOT</div>
+        <div style="font-size: var(--t-display); font-weight: 700; line-height: 1; margin-top: 18px;">6%</div>
+        <div style="font-size: var(--t-meta); letter-spacing: 0.1em; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">I &middot; Miss Brooke</div>
+      </div>
+      <div style="padding: 26px 24px 0 20px;">
+        <div style="background: #000000; color: #ffffff; height: 68px; display: flex; align-items: center; justify-content: space-between; padding: 0 18px;">
+          <div style="font-size: var(--t-label); letter-spacing: 0.2em; font-weight: 500;">CONTINUE</div>
+          <svg width="32" height="25" viewBox="0 0 18 14" fill="none"><path d="M1 7h15M11 1l6 6-6 6" stroke="#ffffff" stroke-width="2"></path></svg>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; margin-top: auto;">
+        <div style="display: flex; justify-content: space-between; align-items: center; height: 74px; padding: 0 24px 0 20px; border-top: 1px solid #000000;">
+          <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">LIBRARY</div>
+          <div style="font-size: var(--t-value); font-weight: 700;">12</div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; height: 74px; padding: 0 24px 0 20px; border-top: 1px solid #000000;">
+          <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">ARTICLES</div>
+          <div style="font-size: var(--t-value); font-weight: 700;">3 UNREAD</div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; height: 74px; padding: 0 24px 0 20px; border-top: 1px solid #000000;">
+          <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">SETTINGS</div>
+          <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
+        </div>
       </div>
     </div>
   </div>
-
-  <div style="padding: 26px 24px 0 24px;">
-    <div style="width: 100%; height: 8px; border: 1px solid #000000; box-sizing: border-box;">
-      <div style="width: 6%; height: 100%; background: #000000;"></div>
-    </div>
-  </div>
-
-  <div style="padding: 26px 24px 0 24px;">
-    <div style="background: #000000; color: #ffffff; height: 72px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px;">
-      <div style="font-size: var(--t-label); letter-spacing: 0.2em; font-weight: 500;">CONTINUE</div>
-      <svg width="32" height="25" viewBox="0 0 18 14" fill="none"><path d="M1 7h15M11 1l6 6-6 6" stroke="#ffffff" stroke-width="2"></path></svg>
-    </div>
-  </div>
-
-  <!--
-    THE ARTICLES ROW IS THE DOOR TO Articles.dc.html, AND IT WAS CUT WITH
-    INSTAPAPER AND NEVER PUT BACK. `c2468df` (2026-08-20) removed it from this
-    board and an `Instapaper / SIGNED IN` row from Settings' CONNECTIONS in the
-    same commit, so the nine Articles boards have been a closed set reachable
-    from NOTHING ever since -- the shape CLAUDE.md already records for V1.1,
-    where "the six screens shipped with no door, every golden green, and make
-    compare measuring Settings drifting AWAY from a board that was already
-    right". Restored HERE rather than in Settings because this is the screen a
-    reader is looking at when they want something to read.
-
-    THE RIGHT SLOT STATES A COUNT ONLY WHEN THERE IS ONE, AND OTHERWISE
-    DISCLOSES. components.h's rule is that a row states a quantity or discloses
-    a screen, never both, and this menu already draws both shapes -- LIBRARY
-    carries `12`, SETTINGS carries the chevron. A connected wallabag reads
-    `3 UNREAD`; one that was never set up has no quantity to state and takes the
-    chevron, which is HomeEmpty.dc.html's specimen. In the view-model that is
-    the same distinction SETTINGS already makes, an empty `value`, so it needs
-    no new field.
-
-    THE SECOND LINE OF THE CONTINUE BLOCK IS THE AUTHOR FOR A BOOK AND THE
-    SOURCE FOR AN ARTICLE. Both come from the same `author` field, because both
-    answer the same question -- who is this from -- and the reading pointer has
-    one slot for it. A wallabag export's `dc:creator` is whatever the exporter
-    put there, often the site, often a byline, often nothing; the DOMAIN is the
-    fact a reader recognises, and it is what the Articles list and the end screen
-    already draw, so this is a third surface naming one fact rather than a fourth
-    naming a different one. Taken off the article's sidecar, which is the
-    server's own answer, rather than out of the EPUB, which is the exporter's --
-    and an empty one leaves the EPUB's author standing, because an absent sidecar
-    is not evidence that there is no author.
-
-    AND ZERO IS NOT A COUNT EITHER, which the sentence above was read as not
-    covering and does. `0 UNREAD` shipped and was reported off the device: a
-    reader who has read everything is told so on the screen they see most often,
-    every time, and the words are longer the less there is to say. Three states,
-    two shapes -- never set up and nothing unread both take the chevron, and only
-    a real number takes the slot. LIBRARY differs on purpose: its count is how
-    many books are ON the card, which is a fact about the shelf, where this is
-    how many are WAITING, which is a fact about a queue -- and an empty queue has
-    nothing to report rather than a zero to report.
-
-    IT IS NOT `NOT SET UP`, AND THE REASON IS WHO IS LOOKING. Most readers will
-    never connect a wallabag, and a row telling them so would sit on the screen
-    they see most often, every time, about a feature they did not ask for. An
-    unconfigured row has nothing to report, so it reports nothing: the chevron
-    makes it a door rather than a notice.
-
-    WHAT IT COSTS IS THE TITLE'S BUDGET, AND THAT IS MEASURED RATHER THAN
-    ESTIMATED. renderHome's `bottomAnchored` is
-    `hintBarHeight + vm.menu.size() * kRowH`, so a third row takes kRowH (81px)
-    off `blockRoom` and the title's line count falls out of the same arithmetic
-    with nothing to update -- derived, not pinned, which is why this board is
-    the whole change. Measured through the real renderHome at both geometries:
-    `blockRoom` 346 -> 265 on the X4 and 338 -> 257 on the X3, so the budget
-    goes 4 -> 2 lines and 3 -> 2. Two lines at this 304px column in shouted
-    Title700 is about 24 characters -- `THE BROTHERS KARAMAZOV` fits and
-    `A PORTRAIT OF THE ARTIST AS A YOUNG MAN` does not -- so a long title clamps
-    where it used to wrap, which is the ellipsis #74 took off this screen
-    arriving back at a greater length.
-
-    THE TRADE WAS PRICED AND TAKEN BY THE OWNER: one always-present door is
-    worth more than the fourth title line. **If it reads badly on glass the way
-    back is not to shrink the row** -- it is to show ARTICLES only once articles
-    exist and move the setup door to Settings' CONNECTIONS, which restores the
-    other row c2468df cut and costs a reader who never connects one nothing.
-
-    THIS BOARD NOW LEADS THE FIRMWARE, AND make compare SAYS SO LOUDLY -- READ
-    IT AS THE DESIGN-FIRST RULE WORKING, NOT AS A REGRESSION. Until the row is
-    implemented the firmware draws two menu rows where these three boards draw
-    three, so the bottom-anchored menu sits 81px lower on the firmware's panel.
-    Measured the moment the boards landed: `home` 1.23%/1.13% -> 1.98%/1.83%,
-    and `home_empty` and `home_unopened` -> 20.96%/21.09% and 20.62%/20.78%.
-    The two variants are the big ones for one reason -- their FOCUSED row is a
-    full-bleed inverted block, ~38,000 px of solid ink, and it is counted twice
-    when it sits in two places. **Those figures are expected to return to about
-    what they were when the third row lands**, and a number that does not is the
-    thing worth chasing. Nothing in CI reads them: the gate passes
-    --require-implemented and --require-canvas-current, and neither is a
-    fidelity check.
-
-    THE MENU'S BOX IS UNCHANGED. The row is LIBRARY's own, copied rather than
-    transcribed, so it cannot drift from the two beside it -- and copying the
-    FOCUSED row is the mistake this pass made first, which put an inverted fill
-    on two rows of HomeEmpty and HomeUnopened at once. The unfocused box comes
-    from SETTINGS.
-  -->
-  <div style="display: flex; flex-direction: column; margin-top: auto;">
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000;">
-      <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">LIBRARY</div>
-      <div style="font-size: var(--t-value); font-weight: 700;">12</div>
-    </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000;">
-      <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">ARTICLES</div>
-      <div style="font-size: var(--t-value); font-weight: 700;">3 UNREAD</div>
-    </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000;">
-      <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">SETTINGS</div>
-      <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
-    </div>
-  </div>
-
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
     <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 3.2C6.6 2 4.3 1.7 2 2v11c2.3-.3 4.6 0 6 1.2 1.4-1.2 3.7-1.5 6-1.2V2c-2.3-.3-4.6 0-6 1.2z" stroke="#000000" stroke-width="1.4"></path><path d="M8 3.2v11" stroke="#000000" stroke-width="1.4"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">READ</div></div>
     <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">SELECT</div></div>

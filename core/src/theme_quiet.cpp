@@ -101,6 +101,32 @@ void measuringHints(Hint out[4]) {
 // design/HomeEmpty.dc.html's own numbers: a 44px top pad, the 20px flex `gap`
 // between the mark, the title and the copy, and the copy's `max-width`.
 // The board's `padding: 18px 24px 0` on the battery strip.
+// --- design/Main.dc.html's spine layout ---------------------------------------
+//
+// The column beside the band. Its left padding is 20 where the screen margin is
+// 24: the board insets the column's contents from the SPINE, not from the panel,
+// which is what keeps the menu labels aligned with the stats above them.
+constexpr int kSpineColPadL = 20;
+constexpr int kSpineStripTop = 18;   // the battery strip's `padding-top`
+constexpr int kSpineStatsTop = 26;   // strip to the author line
+constexpr int kSpineNumGap = 18;     // author to the numeral
+constexpr int kSpineChapGap = 6;     // numeral to the chapter line
+constexpr int kSpineSlabGap = 26;    // chapter to CONTINUE
+constexpr int kSpineSlabH = 68;      // the slab, 4px shorter than the old 72
+constexpr int kSpineSlabPadX = 18;   // the slab's own `padding: 0 18px`
+constexpr int kSpineAuthorEm = 200;  // 0.2em on the shouted author
+// The two no-book states: the prose column and its lead-in below the strip. 324
+// where it was 400, because the spine takes 112 off the panel -- and it is still
+// a number to check in BOTH engines, since the firmware's autohinted faces
+// measure ~3% wider than Chrome's.
+constexpr int kSpineProseMaxW = 324;
+constexpr int kSpineEmptyTopPad = 40;
+
+// WHAT THE SPINE SAYS WHEN THERE IS NO BOOK. A literal here rather than a view
+// model field, for the reason `NOW READING` was one: it is the design's word,
+// not a fact about the card, and nothing that reads the SD card can change it.
+constexpr const char* kDeviceName = "Encre";
+
 constexpr int kEmptyStripTop = 18;
 constexpr int kEmptyTopPad = 44;
 constexpr int kEmptyGap = 20;
@@ -150,9 +176,8 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   buildHints(kHomeMarks, vm.hints, vm.holds, homeHints);
 
   // ONE CHOICE OF MARK AND ONE SPELLING OF THE NUMBER, for both draw sites below
-  // -- the header band and the nothingToContinue strip. A choice made in two
-  // places is a choice that will eventually be made differently in the two
-  // places, which is this file's own rule about the second copy.
+  // -- a choice made in two places is a choice that will eventually be made
+  // differently in the two places.
   const Icon& batteryMark = vm.batteryCharging ? icons::kBatteryCharging : icons::kBattery;
   // An empty string, not "0%": see HomeViewModel::batteryPercent. drawText and
   // measure both answer nothing for it, so the mark keeps its place on the margin
@@ -160,260 +185,148 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
   const std::string charge =
       vm.batteryPercent < 0 ? std::string() : std::to_string(vm.batteryPercent) + "%";
 
-  if (vm.nothingToContinue) {
-    // NOT A HEADER BAND, and drawHeaderBand is the wrong primitive for it. This
-    // board's top strip is a bare right-aligned battery -- `padding: 18px 24px 0`,
-    // no label and NO `border-bottom` -- where the band has a label and a 2px
-    // rule. Reaching for the band with an empty label drew that rule, which is a
-    // line the board does not have.
-    //
-    // Inline rather than a `drawHeaderBandNoRule`: the board makes this a
-    // different element, not a variant of one, and there is exactly one of it.
-    // `NOW READING` is also absent for a reason -- it would be a claim about a
-    // book that does not exist.
-    const Font& pct = fonts[Role::Value700];
-    const int chargeW = pct.measure(charge);
-    const int stripRight = fb.width() - kMargin;
-    const int battX = stripRight - batteryMark.w;
-    const int textX = battX - kBandGap - chargeW;
-    int ey = kEmptyStripTop;
-    drawIcon(fb, batteryMark, battX, iconTopIn(ey, pct.lineHeight(), batteryMark.h),
-             Ink::Black, plane);
-    drawText(fb, pct, textX, baselineIn(pct, ey, pct.lineHeight()), charge, Ink::Black, {},
-             plane);
-    ey += pct.lineHeight();
-    const Font& big = fonts[Role::Title700];
-    const Font& copy = fonts[Role::Body400];
-    const int colW = fb.width() - 2 * kMargin;
-
-    // 1/64 px through the column, for the reason renderSdMissing gives: the
-    // paragraph's height is a fraction (1.55 x 29px is 44.95) and rounding it
-    // before the next element would move everything below it.
-    const int proseW = colW < kEmptyProseMaxW ? colW : kEmptyProseMaxW;
-    const Prose lines = wrapProse(copy, vm.emptyBody, proseW, kProseLeadEm);
-
-    int eyF26 = pxToF26(ey + kEmptyTopPad);
-    drawIcon(fb, icons::kBookLarge, centreIn(kMargin, colW, icons::kBookLarge.w),
-             f26ToPx(eyF26), Ink::Black, plane);
-    eyF26 += pxToF26(icons::kBookLarge.h + kEmptyGap);
-
-    drawCentredText(fb, big, kMargin, colW,
-                    baselineInF26(big, eyF26, pxToF26(big.lineHeight())), vm.emptyTitle,
-                    Ink::Black, {}, plane);
-    eyF26 += pxToF26(big.lineHeight() + kEmptyGap);
-
-    drawProse(fb, copy, lines, centreIn(kMargin, colW, proseW), proseW, eyF26, Ink::Black, plane);
-
-    // The menu and the bar sit exactly where Home's do: this is a VARIANT of one
-    // screen, and a menu that moved between the two would read as a different
-    // screen rather than a different state. Same call, same rule for the trailing
-    // mark -- a row states a quantity or discloses a screen, never both.
-    const int menuTop = fb.height() - hintBarHeight(fonts, homeHints) -
-                        static_cast<int>(vm.menu.size()) * kRowH;
-    for (size_t i = 0; i < vm.menu.size(); ++i) {
-      const bool discloses = vm.menu[i].value.empty();
-      drawRow(fb, fonts, menuTop + static_cast<int>(i) * kRowH, vm.menu[i].label,
-              vm.menu[i].value, static_cast<int>(i) == vm.focusedMenuIndex,
-              discloses ? &icons::kChevron : nullptr, plane);
-    }
-    drawHintBar(fb, fonts, homeHints, plane);
-    return;
-  }
-
-  int y = drawHeaderBand(fb, fonts, "NOW READING", charge, &batteryMark, plane);
-
-  // ONE COLUMN. This was two -- a 112x168 placeholder cover on the left and the
-  // reading state stacked to its right -- and design/Main.dc.html has dropped the
-  // cover: it claimed a picture this screen does not have, in the most prominent
-  // slot on the screen whose whole job is to name the book being read, and it took
-  // 128px of a 480px panel away from the name to do it.
-  y += kCoverTopGap;
-
-  // The column starts on the margin now, so `titleW` below picks up the cover's
-  // 112 and the gutter's 16. Derived from the margin rather than pinned, exactly
-  // as it was derived from the cover before.
-  const int rightX = kMargin;
-  const Font& title = fonts[Role::Title700];
-  // Body400, not Body500: the board's author line is `font-size: var(--t-body)`
-  // with no font-weight, so it is CSS default 400. The ramp used to carry one
-  // 29px face at 500 -- the weight the *other* --t-body runs ask for -- and this
-  // line was drawn in it, measuring 19% over the board's ink. The role names the
-  // weight now, so asking for the wrong one is a visible mistake in this line
-  // rather than an invisible property of the asset.
-  const Font& body = fonts[Role::Body400];
-  const Font& meta = fonts[Role::Meta400];
-  const Font& display = fonts[Role::Display700];
-
-  // The stats column flows downward from its own top, with the board's gaps
-  // between runs. It used to hang the numeral off the cover's *bottom* edge,
-  // which worked only while the cover was the taller of the two columns: at the
-  // pt ramp the column was ~239px against a 192px cover, so that anchor drove the
-  // numeral up into the author line. With the cover gone there is nothing left to
-  // anchor to even by mistake, which is worth knowing before adding a run here.
-  int ry = y + kColPadTop;
-  // The board sets the title in caps (text-transform: uppercase). Casing is a
-  // presentation decision, so the theme applies it rather than the view-model
-  // carrying a pre-shouted string.
+  // THE SPINE, AND IT IS THE SAME BAND IN ALL FOUR OF HOME'S STATES. What it
+  // CARRIES differs: the book's name when there is one, and the DEVICE's name
+  // when there is not. That is what makes HomeEmpty and HomeUnopened read as
+  // this screen in a different condition rather than as different screens --
+  // the silhouette never changes. See design/HomeEmpty.dc.html, which records
+  // the two alternatives (no spine at all, or a plain black rule) and why the
+  // name won.
   //
-  // IT WRAPS, AND IT USED TO ELIDE. The board now says `overflow-wrap: anywhere`
-  // where it said `text-overflow: ellipsis` -- and the reason is BookDetails'
-  // reason: an ellipsis on a list ROW hides only which of seven rows this is, and
-  // here it hides the thing the screen exists to say. The device showed a truncated
-  // name on the one screen whose whole job is to name the book being read.
+  // It is drawn FIRST because it is the only thing that writes the left column,
+  // and everything after it is placed relative to its edge.
   //
-  // `WordBreak::Anywhere` because the break has to be allowed inside a word: a
-  // title that fell back to a filename is usually one word, and there is no break
-  // opportunity at an underscore or a hyphen.
-  //
-  // The column is everything from its left edge to the screen margin -- derived,
-  // not pinned, which is what keeps it right on both panels (304px on the X4, 352
-  // on the X3).
-  const int titleW = fb.width() - kMargin - rightX;
+  // It stops at the hint bar rather than running the panel's full height: the bar
+  // spans the whole width because it describes the device's four buttons, which
+  // belong to the device and not to a column.
+  const int bandLen = fb.height() - hintBarHeight(fonts, homeHints);
+  drawSpine(fb, fonts, kSpineW, bandLen, vm.nothingToContinue ? kDeviceName : vm.title, plane);
 
-  // THE WRAP IS BOUNDED, and the bound is DERIVED the way Book details derives its
-  // own: everything below this block is fixed -- the progress bar, CONTINUE, the
-  // menu and the hint bar -- so the NAME is what yields. Room for the block is the
-  // canvas less the band and this block's top padding, less the bar and the slab
-  // with their gaps, less the bottom-anchored menu and bar. The column's other runs
-  // are fixed; what is left, over the title's line box, is how many lines it may
-  // have.
-  //
-  // A constant here would be a second copy of three other boxes' models, and it
-  // would be wrong the first time any of them changed.
-  const int belowBlock = kBlockGap + kBarH + kBlockGap + kBlockH;
-  const int bottomAnchored =
-      hintBarHeight(fonts, homeHints) + static_cast<int>(vm.menu.size()) * kRowH;
-  const int blockRoom = fb.height() - y - belowBlock - bottomAnchored;
-  // Both of the board's 2px column paddings, the two gaps, and the three runs that
-  // are not the title.
-  const int columnFixedH = 2 * kColPadTop + kTitleAuthorGap + body.lineHeight() + kGroupGap +
-                           kDisplayLineH + kMetaGap + meta.lineHeight();
-  int maxTitleLines = (blockRoom - columnFixedH) / kTitleLineH;
-  if (maxTitleLines < 1) maxTitleLines = 1;
+  // The column beside the band. Every x below derives from this rather than from
+  // kMargin, which is the panel's: the board insets the column's contents 20px
+  // from the spine and keeps the screen's own 24px on the right.
+  const int colX = kSpineW;
+  const int colRight = fb.width() - kMargin;
+  const int colW = colRight - (colX + kSpineColPadL);
 
-  // The board's `line-height: 1.05`, passed as a LEAD rather than an em multiple:
-  // 1.05 is the board's number and 44 is what it resolves to, and wrapProseLead is
-  // the form that takes a line box the board tightened by hand.
-  //
-  // Casing is applied before the wrap, not after: the caps run is wider than the
-  // mixed-case one, so wrapping the original would break in the wrong places.
-  // THE SHOUTED STRING IS NAMED, and it has to be: `Prose::lines` are string_VIEWS
-  // into the text handed to the wrap, "which must outlive the Prose" (components.h
-  // says so). Passing `upperLatin1(vm.title)` inline made that text a temporary that
-  // died at the end of the expression, and drawProse then read freed memory -- which
-  // rendered as a column of notdef boxes for a title long enough to wrap, and
-  // rendered CORRECTLY for a short one, because the freed bytes were still there.
-  // Silently right in the case every golden covers.
-  const std::string shouted = upperLatin1(vm.title);
-  std::string titleTail;
-  Prose titleProse =
-      wrapProseLead(title, shouted, titleW, pxToF26(kTitleLineH), {}, WordBreak::Anywhere);
-  clampProse(title, titleProse, maxTitleLines, titleW, titleTail);
-  // One line is bit-identical to the drawText this replaced: drawProse's first
-  // baseline is baselineInF26(font, pxToF26(ry), pxToF26(kTitleLineH)), which is
-  // baselineIn's own definition -- so an ordinary short title moves nothing.
-  ry += f26ToPx(drawProse(fb, title, titleProse, rightX, titleW, pxToF26(ry), Ink::Black, plane,
-                          ProseAlign::Left));
-  ry += kTitleAuthorGap;
+  // THE TOP STRIP IS A BARE BATTERY AND NOT A HEADER BAND, in every state. The
+  // spine names the book, so a `NOW READING` label would title something already
+  // unmistakable and the band's 2px rule would divide the spine from its own
+  // column. drawHeaderBand is the wrong primitive for it -- reaching for it with
+  // an empty label draws that rule, which is a line no Home board has.
+  const Font& pct = fonts[Role::Value700];
+  const int chargeW = pct.measure(charge);
+  const int battX = colRight - batteryMark.w;
+  drawIcon(fb, batteryMark, battX, iconTopIn(kSpineStripTop, pct.lineHeight(), batteryMark.h),
+           Ink::Black, plane);
+  drawText(fb, pct, battX - kBandGap - chargeW,
+           baselineIn(pct, kSpineStripTop, pct.lineHeight()), charge, Ink::Black, {}, plane);
+  const int stripBottom = kSpineStripTop + pct.lineHeight();
 
-  drawText(fb, body, rightX, baselineIn(body, ry, body.lineHeight()), vm.author, Ink::Black, {},
-           plane);
-  ry += body.lineHeight() + kGroupGap;
-
-  // The percentage is the one display-scale run on the screen: 32pt against the
-  // title's 20, so it outranks the book's name instead of tying with it.
-  drawText(fb, display, rightX, baselineIn(display, ry, kDisplayLineH),
-           std::to_string(vm.percent) + "%", Ink::Black, {}, plane);
-  ry += kDisplayLineH + kMetaGap;
-
-  // ONE META LINE, AND IT NAMES THE CHAPTER. It held a spine position of a spine
-  // count (`CH. 14 OF 36`) and that was a false claim -- a spine counts the front and
-  // back matter and the part dividers with the chapters, so the pair invites an
-  // arithmetic it does not support. See design/Main.dc.html for the corpus figures.
-  //
-  // AT THE BOARD'S 0.10em, WHICH IS THE TRACKING THIS BOARD ALREADY GAVE A CHAPTER
-  // NAME before the counter displaced it -- `kMetaEm`'s 0.16em was the counter's, and
-  // a name is not a counter.
-  //
-  // ELIDED, NOT WRAPPED, AND THE BUDGET IS THE TITLE'S OWN COLUMN. The words come off
-  // the card, so this run is as long as a publisher made it; the Reader's header band
-  // elides the identical string against the identical hazard. It may not wrap: the
-  // title above it already grows into a budget derived from everything below this
-  // block, and one budget cannot serve two growable runs without saying which yields
-  // -- so the run that names the BOOK keeps every line, and the run that names where
-  // you are in it takes one. That is also what keeps `columnFixedH` above honest,
-  // since it reserves exactly one `meta.lineHeight()` for this line.
-  //
-  // AN EMPTY LABEL DRAWS NOTHING AND STILL COSTS ITS LINE, deliberately: a pointer
-  // from before last.json carried a chapter cannot say which one this is, and the
-  // line goes blank rather than falling back to the position it was reported for.
-  // `ry` advances either way, so the runs below do not step up under a blank -- which
-  // is the property the `whichever is taller` note below already rests on.
-  drawTextElided(fb, meta, rightX, baselineIn(meta, ry, meta.lineHeight()), vm.chapterLabel,
-                 titleW, Ink::Black, trackingEm(meta, kTightMetaEm), plane);
-  ry += meta.lineHeight();
-
-  // The block is as tall as its ONE column, where it used to be as tall as
-  // whichever of two was taller. With the cover gone there is no second column to
-  // compare against and no 168px floor under the block: a short view model (no
-  // chapter label, a one-digit percentage) simply makes the block shorter, and
-  // everything below it moves up with it. That floor was never reached in
-  // practice anyway -- the comment above records the column at ~239px against a
-  // 192px cover -- so this is the removal of an inert `max`, not a behaviour
-  // change dressed as one.
-  //
-  // The board gives the column `padding: 2px 0` -- both edges, not just the top --
-  // so the bottom 2px is charged here. Omitting it lands everything below 2px
-  // high, which is a defect this screen has shipped once.
-  ry += kColPadTop;
-  y = ry + kBlockGap;
-
-  // Progress bar spans the usable width.
-  const int barW = fb.width() - 2 * kMargin;
-  drawProgressBar(fb, kMargin, y, barW, kBarH, vm.percent);
-  y += kBarH + kBlockGap;
-
-  // Continue block: focused when no menu row is.
-  const bool continueFocused = (vm.focusedMenuIndex < 0);
-  const Font& label = fonts[Role::Label500];
-  if (continueFocused) {
-    fb.fillRect(kMargin, y, barW, kBlockH, false);
-  } else {
-    outlineRect(fb, kMargin, y, barW, kBlockH, 2);
-  }
-  const Ink cink = continueFocused ? Ink::White : Ink::Black;
-  // The block is an `align-items: center` flex row on the board, so its label
-  // and its mark are placed by the same two shared helpers every other box uses
-  // -- there is nothing about a 72px action block that makes it a special case.
-  const int cbase = baselineIn(label, y, kBlockH);
-  drawText(fb, label, kMargin + kBlockPadX, cbase, "CONTINUE", cink,
-           trackingEm(label, kBlockLabelEm), plane);
-  // kForward, not kChevron: the board draws a 32x25 long arrow with a shaft here
-  // (`M1 7h15M11 1l6 6-6 6`), and the 25x25 chevron this used to draw is the
-  // *menu row's* disclosure -- a different mark for a different job. An action
-  // block proceeds; a row discloses.
-  const Icon& mark = icons::kForward;
-  drawIcon(fb, mark, kMargin + barW - kBlockPadX - mark.w, iconTopIn(y, kBlockH, mark.h), cink,
-           plane);
-
-  // Menu rows sit above the hint bar, so the bar's height decides where they
-  // start. That height is the bar's to compute -- from its own padding and its
-  // own content -- and asking it is what keeps this stacking correct when a
-  // screen sets its hints in a larger role or pairs them with a taller mark. A
-  // constant here would be a second, private copy of the bar's box model.
+  // The menu and the bar sit where they sit in EVERY state: this is one screen
+  // with variants, and a menu that moved between them would read as a different
+  // screen. Computed once, above the branch, because both arms need it -- the
+  // reading column to know what it may not overrun, and the centred block to
+  // know what it is centred against.
   const int menuTop =
       fb.height() - hintBarHeight(fonts, homeHints) - static_cast<int>(vm.menu.size()) * kRowH;
+
+  if (vm.nothingToContinue) {
+    // NO BOOKS, OR NONE OPEN. One flag, one layout, two sets of words -- a
+    // second flag or a second branch would be two ways to spell one thing.
+    const Font& big = fonts[Role::Title700];
+    const Font& copy = fonts[Role::Body400];
+    const int proseW = colW < kSpineProseMaxW ? colW : kSpineProseMaxW;
+
+    // 1/64 px through the column, for renderSdMissing's reason: the paragraph's
+    // height is a fraction (1.55 x 29px is 44.95) and rounding it before the
+    // next element would move everything below it.
+    const Prose lines = wrapProse(copy, vm.emptyBody, proseW, kProseLeadEm);
+    int eyF26 = pxToF26(stripBottom + kSpineEmptyTopPad);
+    drawIcon(fb, icons::kBookLarge,
+             centreIn(colX + kSpineColPadL, colW, icons::kBookLarge.w), f26ToPx(eyF26),
+             Ink::Black, plane);
+    eyF26 += pxToF26(icons::kBookLarge.h + kEmptyGap);
+
+    // IT WRAPS, where it used to be a single centred line. The spine takes 112px
+    // off the panel, so this column is 324 where it was 400 -- and at that width
+    // the board breaks `NOTHING OPEN YET` across two lines while drawCentredText
+    // would have drawn one and run past the column on anything longer. A centred
+    // run that cannot wrap is an overflow waiting for a longer string, which is
+    // the defect the title on the reading side was fixed for.
+    // THE LEAD IS THE FACE'S OWN LINE HEIGHT, not a 1.0 em box. The board leaves
+    // this run at `line-height: normal`, which Chrome resolves to the face's
+    // metrics -- and it is what drawCentredText used before the wrap replaced it.
+    // Handing it 1.0 em instead made the line box 42px against the face's 53, so
+    // the heading sat 6px high and every prose line below it 11px high, measured
+    // against the board's own render.
+    const Prose head = wrapProseLead(big, vm.emptyTitle, colW, pxToF26(big.lineHeight()));
+    eyF26 += drawProse(fb, big, head, colX + kSpineColPadL, colW, eyF26, Ink::Black, plane) +
+             pxToF26(kEmptyGap);
+
+    drawProse(fb, copy, lines, centreIn(colX + kSpineColPadL, colW, proseW), proseW, eyF26,
+              Ink::Black, plane);
+  } else {
+    // THE READING COLUMN, and it is three runs where it used to be five. The
+    // title has gone to the spine and the progress BAR has gone outright: the
+    // bar and the numeral were the same fraction drawn twice, 123px of an
+    // 800px panel, and the numeral was already the hero.
+    const Font& meta = fonts[Role::Meta400];
+    const Font& display = fonts[Role::Display700];
+    const int textX = colX + kSpineColPadL;
+    int ry = stripBottom + kSpineStatsTop;
+
+    // SHOUTED AND TRACKED, at Meta400 rather than Body400. The spine has taken
+    // the naming job, so this run is metadata ABOUT the book rather than the
+    // second line of a title block -- which is what the board says by setting it
+    // at `--t-meta` with 0.2em where the old layout gave it `--t-body`.
+    drawText(fb, meta, textX, baselineIn(meta, ry, meta.lineHeight()), upperLatin1(vm.author),
+             Ink::Black, trackingEm(meta, kSpineAuthorEm), plane);
+    ry += meta.lineHeight() + kSpineNumGap;
+
+    drawText(fb, display, textX, baselineIn(display, ry, kDisplayLineH),
+             std::to_string(vm.percent) + "%", Ink::Black, {}, plane);
+    ry += kDisplayLineH + kSpineChapGap;
+
+    // IT ELIDES AND MAY NOT WRAP. The words come off the card and a real chapter
+    // name runs long; this column has no other growable run, and adding one
+    // would put a second thing competing for the height the spine exists to
+    // free. An empty label still costs its line, so nothing below it steps up.
+    drawTextElided(fb, meta, textX, baselineIn(meta, ry, meta.lineHeight()), vm.chapterLabel,
+                   colW, Ink::Black, trackingEm(meta, kTightMetaEm), plane);
+    ry += meta.lineHeight() + kSpineSlabGap;
+
+    // CONTINUE. Focused when no menu row is, which is the -1 position the focus
+    // ring keeps for it.
+    const bool continueFocused = (vm.focusedMenuIndex < 0);
+    const Font& label = fonts[Role::Label500];
+    if (continueFocused)
+      fb.fillRect(textX, ry, colW, kSpineSlabH, false);
+    else
+      outlineRect(fb, textX, ry, colW, kSpineSlabH, 2);
+    const Ink cink = continueFocused ? Ink::White : Ink::Black;
+    drawText(fb, label, textX + kSpineSlabPadX, baselineIn(label, ry, kSpineSlabH), "CONTINUE",
+             cink, trackingEm(label, kBlockLabelEm), plane);
+    // kForward, not kChevron: the board draws a long arrow with a shaft here, and
+    // the chevron is the menu ROW's disclosure. An action block proceeds; a row
+    // discloses.
+    const Icon& mark = icons::kForward;
+    drawIcon(fb, mark, textX + colW - kSpineSlabPadX - mark.w,
+             iconTopIn(ry, kSpineSlabH, mark.h), cink, plane);
+  }
+
   for (size_t i = 0; i < vm.menu.size(); ++i) {
     // A row states a quantity or discloses a screen, never both: the design gives
     // LIBRARY its count and SETTINGS a chevron. Keying the mark on an absent
-    // value keeps that rule in the theme, where the design lives, rather than
-    // adding a per-entry icon field the view model has no opinion about.
+    // value keeps that rule in the theme, where the design lives.
     const bool discloses = vm.menu[i].value.empty();
     drawRow(fb, fonts, menuTop + static_cast<int>(i) * kRowH, vm.menu[i].label, vm.menu[i].value,
             static_cast<int>(i) == vm.focusedMenuIndex, discloses ? &icons::kChevron : nullptr,
-            plane);
+            plane, colX);
   }
 
+  // FULL WIDTH, spine included: the bar describes the four buttons, which belong
+  // to the device rather than to a column.
   drawHintBar(fb, fonts, homeHints, plane);
 }
 

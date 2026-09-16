@@ -552,23 +552,34 @@ TEST_CASE("a long title on Home matches its golden") {
 }
 
 TEST_CASE("a long title on Home WRAPS rather than eliding") {
+  // THE TITLE IS ON THE SPINE NOW, so this can no longer be counted in inked
+  // ROWS: the band inks every row it covers whatever it carries, so a one-line
+  // and a two-line title produce the identical row set. What distinguishes them
+  // is how much of the band's THICKNESS the white run occupies -- one line or
+  // two -- which is the same property measured where it now lives.
   Ramp r;
   reader::QuietTheme theme;
   reader::Framebuffer plain(480, 800), wrapped(480, 800);
   theme.renderHome(plain, r.fonts, reader::demoHomeVm(), reader::Plane::Bw);
   theme.renderHome(wrapped, r.fonts, longHome(), reader::Plane::Bw);
-  // The whole point: a long name takes more vertical room than a short one. If it
-  // elided, these two frames would ink the same rows.
-  int plainRows = 0, wrappedRows = 0;
-  for (int y = 0; y < 800; ++y) {
-    for (int x = 0; x < 480; ++x) {
-      if (!plain.getPixel(x, y)) { ++plainRows; break; }
-    }
-    for (int x = 0; x < 480; ++x) {
-      if (!wrapped.getPixel(x, y)) { ++wrappedRows; break; }
-    }
-  }
-  CHECK(wrappedRows > plainRows);
+  // COUNT THE WHITE, AND ONLY WELL INSIDE THE BAND. The first spelling of this
+  // took the x-extent of white pixels and got 111 for both titles, because the
+  // strip BELOW the band -- where the hint bar goes -- is paper, so every column
+  // registered. Counting ink inside a y range the band certainly covers has no
+  // such escape, and a second line of text is simply more white.
+  auto whiteInBand = [](const reader::Framebuffer& fb) {
+    int n = 0;
+    for (int x = 0; x < reader::kSpineW; ++x)
+      for (int y = 0; y < 600; ++y)
+        if (fb.getPixel(x, y)) ++n;
+    return n;
+  };
+  const int plainSpan = whiteInBand(plain);
+  const int wrappedSpan = whiteInBand(wrapped);
+  INFO("one-line white " << plainSpan << ", wrapped white " << wrappedSpan);
+  // Both must actually have text, or this compares two empty bands and passes.
+  REQUIRE(plainSpan > 0);
+  CHECK(wrappedSpan > plainSpan);
 }
 
 TEST_CASE("a short title on Home is bit-identical to the drawText that elided it") {
@@ -607,8 +618,11 @@ TEST_CASE("Home keeps its menu and hint bar exactly where they were, however lon
     reader::Hint hints[4];
     const reader::HomeViewModel probe = reader::demoHomeVm();
     reader::buildHints(kHomeHintMarks, probe.hints, probe.holds, hints);
+    // reader::kRowH, not a literal. This said 81 and the row is 74 + its rule
+    // now, so the copy was silently measuring the wrong band -- a second spelling
+    // of a constant, which is the shape this project keeps paying for.
     const int menuTop = c.h - reader::hintBarHeight(r.fonts, hints) -
-                        static_cast<int>(probe.menu.size()) * 81;
+                        static_cast<int>(probe.menu.size()) * reader::kRowH;
 
     for (int repeats = 1; repeats <= 8; ++repeats) {
       reader::HomeViewModel vm = longHome();
@@ -618,11 +632,15 @@ TEST_CASE("Home keeps its menu and hint bar exactly where they were, however lon
       reader::Framebuffer fb(c.w, c.h);
       theme.renderHome(fb, r.fonts, vm, reader::Plane::Bw);
 
-      // EVERY ROW FROM THE MENU DOWN IS BYTE-IDENTICAL to the short-title render.
-      // Stronger than "nothing fell off the bottom": it says the title cannot move
-      // the furniture at all, however many lines the budget grants it.
+      // EVERY ROW FROM THE MENU DOWN IS IDENTICAL to the short-title render, in
+      // the COLUMN BESIDE THE SPINE. Stronger than "nothing fell off the bottom":
+      // it says the title cannot move the furniture at all, however long it is.
+      //
+      // x starts at kSpineW because the band is the one place the title is
+      // ALLOWED to change pixels -- that is what it is for. Comparing across it
+      // would assert the title has no effect anywhere, which is false by design.
       for (int y = menuTop; y < c.h; ++y) {
-        for (int x = 0; x < c.w; ++x) {
+        for (int x = reader::kSpineW; x < c.w; ++x) {
           if (fb.getPixel(x, y) != shortFb.getPixel(x, y)) {
             CHECK_MESSAGE(false, "row " << y << " moved at repeats " << repeats << " on " << c.w
                                         << "x" << c.h);

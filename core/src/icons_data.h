@@ -48,7 +48,7 @@ inline constexpr uint8_t kBackBits[] = {
 };
 
 // forward: long arrow: an action block's proceed mark
-// design/Main.dc.html:133, viewBox "0 0 18 14", drawn 32x25  (authored in white; re-coloured)
+// design/Main.dc.html:115, viewBox "0 0 18 14", drawn 32x25  (authored in white; re-coloured)
 // coverage levels 0/1/2/3: 547/69/24/160 px
 inline constexpr int kForwardW = 32;
 inline constexpr int kForwardH = 25;
@@ -81,7 +81,7 @@ inline constexpr uint8_t kForwardBits[] = {
 };
 
 // dot: filled circle: the Confirm button
-// design/Main.dc.html:241, viewBox "0 0 10 10", drawn 25x25
+// design/Main.dc.html:136, viewBox "0 0 10 10", drawn 25x25
 // coverage levels 0/1/2/3: 408/22/10/185 px
 inline constexpr int kDotW = 25;
 inline constexpr int kDotH = 25;
@@ -147,7 +147,7 @@ inline constexpr uint8_t kHoldBits[] = {
 };
 
 // up: stem with a chevron head, pointing up
-// design/Main.dc.html:242, viewBox "0 0 16 16", drawn 25x25
+// design/Main.dc.html:137, viewBox "0 0 16 16", drawn 25x25
 // coverage levels 0/1/2/3: 528/20/25/52 px
 inline constexpr int kUpW = 25;
 inline constexpr int kUpH = 25;
@@ -180,7 +180,7 @@ inline constexpr uint8_t kUpBits[] = {
 };
 
 // down: stem with a chevron head, pointing down
-// design/Main.dc.html:243, viewBox "0 0 16 16", drawn 25x25
+// design/Main.dc.html:138, viewBox "0 0 16 16", drawn 25x25
 // coverage levels 0/1/2/3: 528/20/25/52 px
 inline constexpr int kDownW = 25;
 inline constexpr int kDownH = 25;
@@ -213,7 +213,7 @@ inline constexpr uint8_t kDownBits[] = {
 };
 
 // chevron: right-pointing disclosure
-// design/Main.dc.html:235, viewBox "0 0 16 16", drawn 25x25
+// design/Main.dc.html:129, viewBox "0 0 16 16", drawn 25x25
 // coverage levels 0/1/2/3: 543/20/2/60 px
 inline constexpr int kChevronW = 25;
 inline constexpr int kChevronH = 25;
@@ -246,7 +246,7 @@ inline constexpr uint8_t kChevronBits[] = {
 };
 
 // book: open book: the Read action
-// design/Main.dc.html:240, viewBox "0 0 16 16", drawn 25x25
+// design/Main.dc.html:135, viewBox "0 0 16 16", drawn 25x25
 // coverage levels 0/1/2/3: 370/58/42/155 px
 inline constexpr int kBookW = 25;
 inline constexpr int kBookH = 25;
@@ -279,7 +279,7 @@ inline constexpr uint8_t kBookBits[] = {
 };
 
 // book_large: the empty-library mark, 112px on HomeEmpty
-// design/HomeEmpty.dc.html:36, viewBox "0 0 16 16", drawn 112x112
+// design/HomeEmpty.dc.html:105, viewBox "0 0 16 16", drawn 112x112
 // coverage levels 0/1/2/3: 10004/102/118/2320 px
 inline constexpr int kBookLargeW = 112;
 inline constexpr int kBookLargeH = 112;
@@ -498,7 +498,7 @@ inline constexpr uint8_t kFolderBits[] = {
 };
 
 // battery: the header band's charge cell
-// design/Main.dc.html:34, viewBox "0 0 22 12", drawn 38x21
+// design/Main.dc.html:105, viewBox "0 0 22 12", drawn 38x21
 // coverage levels 0/1/2/3: 187/59/70/482 px
 inline constexpr int kBatteryW = 38;
 inline constexpr int kBatteryH = 21;
@@ -527,7 +527,7 @@ inline constexpr uint8_t kBatteryBits[] = {
 };
 
 // battery_charging: the header band's charge cell, bolt knocked out: charging
-// design/HomeCharging.dc.html:59, viewBox "0 0 22 12", drawn 38x21
+// design/HomeCharging.dc.html:80, viewBox "0 0 22 12", drawn 38x21
 // coverage levels 0/1/2/3: 232/76/82/408 px
 inline constexpr int kBatteryChargingW = 38;
 inline constexpr int kBatteryChargingH = 21;
