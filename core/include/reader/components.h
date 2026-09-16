@@ -17,17 +17,21 @@ class Framebuffer;
 // PPI, so a margin should be the same physical size on both. What must adapt is
 // the canvas width, which every primitive reads from the framebuffer.
 inline constexpr int kMargin = 24;
-// A menu row is 80 tall because the board says so in so many words
-// (`height: 80px`), and the CONTINUE block 72 for the same reason.
-// A menu row is the board's content box plus its own top border. The boards say
-// `height: 80px` with `border-top: 1px`, and box-sizing is content-box there, so
-// the rendered box is 81 -- the same pinned-number-ignoring-the-border mistake
-// the two bars had. Every menu screen (Library, Settings, Wi-Fi settings...)
-// stacks these, so a 1px error compounds per row.
-// 74, where it was 80. design/Main.dc.html shortened the menu row when the
-// header band went: three rows plus the hint bar have to fit the right column,
-// which is everything the spine does not take. The pitch is still content plus
-// the row's own 1px rule.
+// A menu row is the board's content box plus its own top border, and the pitch
+// is the sum: design/Main.dc.html says `height: 74px` with `border-top: 1px`
+// and box-sizing is content-box there, so the rendered box is 75. Taking the
+// declared height as the pitch is the pinned-number-ignoring-the-border mistake
+// the two bars had.
+//
+// 74, WHERE IT WAS 80. The spine took the header band with it, and three rows
+// plus the hint bar have to fit the column the band does not occupy.
+//
+// THIS IS HOME'S ROW AND NOBODY ELSE'S, which the previous note had wrong: it
+// said "every menu screen (Library, Settings, Wi-Fi settings...) stacks these",
+// and none of them do. Library draws drawBookRow, Settings and Contents
+// drawDetailRow, the overlays drawPanelRow -- drawRow has exactly one production
+// caller, renderHome's menu. Worth knowing before changing this number, because
+// the old comment implied a blast radius that does not exist.
 inline constexpr int kRowContentH = 74;
 inline constexpr int kRowRuleH = 1;
 inline constexpr int kRowH = kRowContentH + kRowRuleH;
@@ -92,10 +96,11 @@ inline constexpr int kHintRuleH = 1;
 // 2.52px, and see reader/tracking.h for why that fraction has to survive.
 inline constexpr int kBandLabelEm = 220;   // 0.22em, header band label
 inline constexpr int kRowLabelEm = 180;    // 0.18em, menu row label
-// The row's own left padding INSIDE its column. design/Main.dc.html insets the
-// menu 20px from the spine's edge where the screen margin is 24 -- the column's
-// padding, not the panel's, which is what keeps the label aligned with the
-// stats above it rather than with the panel edge.
+// The menu row's own left padding inside the SPINE's column. design/Main.dc.html
+// insets it 20px from the band's edge where the screen margin is 24 -- the
+// column's padding, not the panel's, which is what keeps the label aligned with
+// the stats above it. Passed to drawRow as `padL`; a full-width row keeps
+// kMargin.
 inline constexpr int kSpineRowPadL = 20;
 inline constexpr int kBlockLabelEm = 200;  // 0.20em, action block label
 inline constexpr int kHintEm = 120;        // 0.12em, hint bar label
@@ -223,12 +228,17 @@ int drawHeaderBand(Framebuffer& fb, const FontSet& fonts, std::string_view label
 // `value` may be empty and `trailing` may be null; a row may carry either, both
 // or neither. A trailing mark is right-aligned on the margin and takes the row's
 // ink, so it reverses out of a focused row along with the text.
-// `x0` is the row's left edge: Home's menu sits in the column beside the spine,
-// so its rows begin at the band's edge rather than at the panel's. Defaulted to
-// 0, which is every caller that has no spine beside it.
+// `x0` is the row's left edge and `padL` its own inset from that edge. Home's
+// menu sits in the column beside the spine, so its rows begin at the band and
+// inset by the COLUMN's 20px; a full-width row begins at 0 and insets by the
+// SCREEN's margin. Two numbers because two boards, and they are separate
+// parameters rather than one derived from the other -- folding padL into x0
+// made a default-x0 row draw its label at 20 instead of kMargin, which no test
+// pinned and no caller would have noticed until a screen without a spine used
+// this again.
 int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label,
             std::string_view value, bool focused, const Icon* trailing = nullptr,
-            Plane plane = Plane::Bw, int x0 = 0);
+            Plane plane = Plane::Bw, int x0 = 0, int padL = kMargin);
 // THE LOADING LINE, AND IT REPLACES THE HINT BAR RATHER THAN JOINING IT.
 //
 // design/LibraryOpening.dc.html. The same box as the hint bar -- same rule, same

@@ -322,7 +322,7 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
     const bool discloses = vm.menu[i].value.empty();
     drawRow(fb, fonts, menuTop + static_cast<int>(i) * kRowH, vm.menu[i].label, vm.menu[i].value,
             static_cast<int>(i) == vm.focusedMenuIndex, discloses ? &icons::kChevron : nullptr,
-            plane, colX);
+            plane, colX, kSpineColPadL);
   }
 
   // FULL WIDTH, spine included: the bar describes the four buttons, which belong

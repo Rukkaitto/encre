@@ -160,7 +160,8 @@ int drawHeaderBand(Framebuffer& fb, const FontSet& fonts, std::string_view label
 }
 
 int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label,
-            std::string_view value, bool focused, const Icon* trailing, Plane plane, int x0) {
+            std::string_view value, bool focused, const Icon* trailing, Plane plane, int x0,
+            int padL) {
   // Role::Label500, not a Body role: the boards set a menu row's label to
   // `--t-label` (11pt/23px, weight 500) with `letter-spacing: 0.18em`. Body is
   // 14pt/29px and is what a *list item's title* uses -- a different thing on a
@@ -176,7 +177,7 @@ int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label
   // Content is centred in the content box, below the row's own rule.
   const int labelBase = baselineIn(lf, y + kRowRuleH, kRowContentH);
   const int valueBase = baselineIn(vf, y + kRowRuleH, kRowContentH);
-  drawText(fb, lf, x0 + kSpineRowPadL, labelBase, label, ink, trackingEm(lf, kRowLabelEm), plane);
+  drawText(fb, lf, x0 + padL, labelBase, label, ink, trackingEm(lf, kRowLabelEm), plane);
   // A row carries a value, a trailing mark, or neither -- the design has one of
   // each (LIBRARY's count, SETTINGS' chevron). Both are right-aligned on the
   // margin; the icon takes the row's ink, so it inverts with a focused row.

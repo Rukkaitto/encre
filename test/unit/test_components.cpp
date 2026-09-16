@@ -116,6 +116,38 @@ TEST_CASE("the header band's height follows the type role it draws") {
   }
 }
 
+TEST_CASE("a menu row insets its label from ITS OWN left edge, not the panel's") {
+  // The spine gave drawRow an `x0`, and the first spelling folded the column's
+  // 20px padding into the primitive -- so a row at x0 = 0 drew its label at 20
+  // where every board outside Home puts it on kMargin. Nothing caught it: the
+  // existing cases assert the RIGHT edge only, and Home is the one caller.
+  //
+  // Both insets are pinned here, measured off the leftmost inked column of the
+  // label itself. A tracked caps run starts on its first stem, so the assertion
+  // allows a couple of pixels of side bearing and no more.
+  Ramp f;
+  struct Case {
+    int x0, padL;
+  };
+  for (const Case c : {Case{0, reader::kMargin}, Case{reader::kSpineW, reader::kSpineRowPadL}}) {
+    reader::Framebuffer fb(480, 120);
+    fb.clear(true);
+    reader::drawRow(fb, f.fonts, 0, "LIBRARY", "12", /*focused=*/false, nullptr,
+                    reader::Plane::Bw, c.x0, c.padL);
+    int leftmost = 480;
+    // Below the row's own 1px rule, so the hairline's own ink is not the answer.
+    for (int y = reader::kRowRuleH + 1; y < reader::kRowContentH; ++y)
+      for (int x = 0; x < 480; ++x)
+        if (!fb.getPixel(x, y)) {
+          if (x < leftmost) leftmost = x;
+          break;
+        }
+    INFO("x0=" << c.x0 << " padL=" << c.padL << " leftmost ink " << leftmost);
+    CHECK(leftmost >= c.x0 + c.padL);
+    CHECK(leftmost <= c.x0 + c.padL + 3);
+  }
+}
+
 TEST_CASE("a focused row inverts: black field, white text") {
   Ramp f;
   reader::Framebuffer fb(480, 120);
