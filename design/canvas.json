@@ -37,6 +37,15 @@
       "page": "page-2"
     },
     {
+      "file": "HomeSpine.dc.html",
+      "title": "Home · Spine (proposed)",
+      "x": 0,
+      "y": 900,
+      "w": 480,
+      "h": 800,
+      "page": "page-2"
+    },
+    {
       "file": "Library.dc.html",
       "x": 580,
       "y": 0,
