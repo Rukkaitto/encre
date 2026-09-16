@@ -36,6 +36,48 @@ TEST_CASE("the seeded file loads as Unconfigured, also not an error") {
   CHECK_FALSE(c.configured());
 }
 
+TEST_CASE("the seed carries the three facts a reader cannot get anywhere else") {
+  // WITHOUT THESE THE FILE IS FIVE EMPTY STRINGS. The setup board says to fill
+  // it in and has no room to say how; `clientId` and `clientSecret` come from a
+  // page called /developer/client/create and nothing on the device can say so.
+  FakeFileSystem fs;
+  REQUIRE(seedWallabagCredentials(fs));
+  std::string text;
+  REQUIRE(fs.readAll(kPath, text));
+
+  // THE CASE ABOVE IS THE REAL GUARD AND THIS ONE NAMES THE CAUSE. A help line
+  // over kJsonMaxStringBytes makes parse() refuse the whole object, so the file
+  // would read Malformed and the screen would blame the reader's typing -- which
+  // arrives up there as a confusing failure rather than as "the copy is too
+  // long". Asserted here so a failure says which.
+  JsonObject obj;
+  REQUIRE(obj.parse(text));
+  for (const char* k : {"README 1", "README 2", "README 3"}) {
+    CAPTURE(k);
+    std::string v;
+    REQUIRE(obj.getString(k, v));
+    CHECK(v.size() < kJsonMaxStringBytes);
+  }
+  // The two unguessable fields are named in the help, by the page they come from.
+  CHECK(text.find("/developer/client/create") != std::string::npos);
+  CHECK(text.find("redirect URI blank") != std::string::npos);
+
+  // AND THE HELP DOES NOT MAKE THE FILE CONFIGURED. Unknown keys are ignored on
+  // the way in, so adding them cannot turn a seed into credentials.
+  WallabagCredentials c;
+  std::string why;
+  CHECK(loadWallabagCredentials(fs, c, why) == CredentialsResult::Unconfigured);
+
+  // A FILE THE READER HAS EDITED NEVER GAINS THEM, because the seed refuses to
+  // run over one. Their five keys are their file.
+  FakeFileSystem edited;
+  REQUIRE(edited.writeAll(kPath, five()));
+  CHECK_FALSE(seedWallabagCredentials(edited));
+  std::string after;
+  REQUIRE(edited.readAll(kPath, after));
+  CHECK(after.find("README 1") == std::string::npos);
+}
+
 TEST_CASE("ANY empty value is Unconfigured, not just all five") {
   // A half-finished edit is the same state as a seed to the reader: they have
   // not finished. Five subcases, because "all five are non-empty" is satisfied
