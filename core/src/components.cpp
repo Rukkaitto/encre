@@ -160,7 +160,8 @@ int drawHeaderBand(Framebuffer& fb, const FontSet& fonts, std::string_view label
 }
 
 int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label,
-            std::string_view value, bool focused, const Icon* trailing, Plane plane) {
+            std::string_view value, bool focused, const Icon* trailing, Plane plane, int x0,
+            int padL) {
   // Role::Label500, not a Body role: the boards set a menu row's label to
   // `--t-label` (11pt/23px, weight 500) with `letter-spacing: 0.18em`. Body is
   // 14pt/29px and is what a *list item's title* uses -- a different thing on a
@@ -170,13 +171,13 @@ int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label
   const Font& vf = fonts[Role::Value700];
   const Ink ink = focused ? Ink::White : Ink::Black;
   if (focused)
-    fb.fillRect(0, y, fb.width(), kRowH, false);
+    fb.fillRect(x0, y, fb.width() - x0, kRowH, false);
   else
-    fb.fillRect(0, y, fb.width(), 1, false);  // hairline above
+    fb.fillRect(x0, y, fb.width() - x0, 1, false);  // hairline above
   // Content is centred in the content box, below the row's own rule.
   const int labelBase = baselineIn(lf, y + kRowRuleH, kRowContentH);
   const int valueBase = baselineIn(vf, y + kRowRuleH, kRowContentH);
-  drawText(fb, lf, kMargin, labelBase, label, ink, trackingEm(lf, kRowLabelEm), plane);
+  drawText(fb, lf, x0 + padL, labelBase, label, ink, trackingEm(lf, kRowLabelEm), plane);
   // A row carries a value, a trailing mark, or neither -- the design has one of
   // each (LIBRARY's count, SETTINGS' chevron). Both are right-aligned on the
   // margin; the icon takes the row's ink, so it inverts with a focused row.
@@ -966,6 +967,123 @@ void drawSignalBars(Framebuffer& fb, int x, int y, int level, Ink ink) {
       outlineRect(fb, bx, by, kBarW, bh, 2, white);
     }
   }
+}
+
+// --- Home's spine ------------------------------------------------------------
+//
+// See components.h for the shape and for why no glyph is rotated. What lives
+// here is the two halves: composing the band in the scratch's own orientation,
+// and moving it into a framebuffer whose rotation decides how cheap that is.
+
+namespace {
+
+// Bit-reversal of a byte, built once. The transfer mirrors along the row (the
+// run reads bottom-to-top), so byte i of a scratch row becomes byte n-1-i of the
+// destination with its bits the other way round -- and a table turns that from a
+// per-PIXEL shift into a per-BYTE lookup, which is the difference between 11,088
+// operations and 88,704.
+struct BitReverse {
+  uint8_t t[256];
+  constexpr BitReverse() : t{} {
+    for (int i = 0; i < 256; ++i) {
+      uint8_t v = static_cast<uint8_t>(i), r = 0;
+      for (int b = 0; b < 8; ++b) r = static_cast<uint8_t>((r << 1) | ((v >> b) & 1));
+      t[i] = r;
+    }
+  }
+};
+const BitReverse kRev;
+
+}  // namespace
+
+void composeSpineScratch(Framebuffer& scratch, const FontSet& fonts, int bandLen,
+                         std::string_view text, Plane plane) {
+  // PAPER FIRST, then the band over the part the board gives it. The scratch is
+  // the panel's whole height so the transfer moves whole rows; the strip past
+  // `bandLen` is where the hint bar goes, and it has to come out white or the
+  // bar's leftmost slot is drawn on black -- which is what shipped for one
+  // render, with the READ mark half-swallowed by the band.
+  scratch.clear(true);
+  if (bandLen > scratch.width()) bandLen = scratch.width();
+  if (bandLen <= 0) return;
+  // THE BAND SITS AT THE SCRATCH'S FAR END, NOT AT ITS ORIGIN, and the mirror is
+  // why: the transfer maps scratch x to panel y REVERSED (that reversal is the
+  // bottom-to-top reading), so scratch x = 0 is the panel's BOTTOM edge. Filling
+  // from the origin puts the band under the hint bar and the paper strip at the
+  // top of the screen -- which is the first thing this got wrong, and the tests
+  // reported it as the whole strip below `bandLen` being inked.
+  const int x0 = scratch.width() - bandLen;
+  scratch.fillRect(x0, 0, bandLen, scratch.height(), false);
+  if (text.empty()) return;
+
+  const Font& face = fonts[Role::Title700];
+  // The board shouts it (`text-transform: uppercase`). Casing is a presentation
+  // decision, so it is applied here rather than carried pre-shouted in the view
+  // model -- and it is NAMED, because `Prose::lines` are string_VIEWS into the
+  // text handed to the wrap: passing a temporary here is the use-after-free that
+  // shipped on Home once and rendered as a column of notdef boxes.
+  const std::string shouted = upperLatin1(text);
+
+  // The run's length is the scratch's WIDTH, which is the panel's height less
+  // the band's own padding at each end.
+  const int runW = bandLen - 2 * kSpinePadEnds;
+  if (runW <= 0) return;
+
+  // `WordBreak::Anywhere` for Home's own reason: a title that fell back to a
+  // filename is usually one word, and CSS offers no break opportunity at an
+  // underscore or a hyphen. It is also what guarantees every emitted line fits
+  // `runW`, so nothing can escape the band sideways.
+  Prose lines = wrapProseLead(face, shouted, runW, pxToF26(kSpineLineH), {},
+                              WordBreak::Anywhere);
+  std::string tail;
+  clampProse(face, lines, kSpineMaxLines, runW, tail);
+
+  // Centred across the band's THICKNESS, which is the scratch's height.
+  const int used = static_cast<int>(lines.lines.size()) * kSpineLineH;
+  const int top = centreIn(0, scratch.height(), used);
+  drawProse(scratch, face, lines, x0 + kSpinePadEnds, runW, pxToF26(top), Ink::White, plane,
+            ProseAlign::Centre);
+}
+
+void drawSpine(Framebuffer& fb, const FontSet& fonts, int w, int bandLen,
+               std::string_view text, Plane plane) {
+  if (w <= 0 || fb.width() <= 0 || fb.height() <= 0) return;
+  if (w > fb.width()) w = fb.width();
+
+  Framebuffer scratch(fb.height(), w, Rotation::None);
+  composeSpineScratch(scratch, fonts, bandLen, text, plane);
+
+  // THE TRANSFER. px = sy, py = h-1-sx: the scratch's y is the panel's x, and
+  // its x is the panel's y REVERSED, which is the bottom-to-top reading.
+  const int h = fb.height();
+  if (fb.rotation() == Rotation::Ccw && (h % 8) == 0 && (w % 8) == 0) {
+    // The fast path, and the one the device takes. A main physical row is a
+    // logical COLUMN (physY = width - 1 - logX), so the band is `w` consecutive
+    // physical rows and the scratch's rows are the same length -- byte work
+    // only. The mirror makes it a reversed copy rather than a memcpy.
+    //
+    // NOTHING ON THE DESKTOP EXERCISES THIS. The simulator, every golden and
+    // every comparison sheet run Rotation::None, so test_spine.cpp's
+    // both-rotations byte-identity check is the only thing between this branch
+    // and the panel.
+    const int n = h / 8;
+    uint8_t* const dst = fb.data();
+    const uint8_t* const src = scratch.data();
+    const int dstStride = fb.physRowBytes();
+    const int srcStride = scratch.physRowBytes();
+    for (int sy = 0; sy < w; ++sy) {
+      uint8_t* d = dst + static_cast<size_t>(fb.width() - 1 - sy) * static_cast<size_t>(dstStride);
+      const uint8_t* s = src + static_cast<size_t>(sy) * static_cast<size_t>(srcStride);
+      for (int i = 0; i < n; ++i) d[n - 1 - i] = kRev.t[s[i]];
+    }
+    return;
+  }
+
+  // The reference path: unrotated buffers, and any geometry the byte path
+  // cannot claim. Slower by two orders of magnitude and only the desktop ever
+  // runs it, which is exactly the inversion of this project's usual ratio trap.
+  for (int sy = 0; sy < w; ++sy)
+    for (int sx = 0; sx < h; ++sx) fb.setPixel(sy, h - 1 - sx, scratch.getPixel(sx, sy));
 }
 
 }  // namespace reader

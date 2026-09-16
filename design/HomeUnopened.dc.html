@@ -26,120 +26,85 @@
   </style>
 </helmet>
 
-<!-- HOME WITH BOOKS ON THE CARD AND NONE OF THEM OPEN.
+<!--
+  HOME, NOTHING OPEN. Books on the card and none of them started -- the gap
+  between Main.dc.html and HomeEmpty.dc.html, and what a device actually shows
+  before its first book is opened.
 
-     The third Home state, and the last one to get a board. Main.dc.html has a
-     reading position to show; HomeEmpty.dc.html has no books at all; this is the
-     gap between them, which is what a device looks like from the moment the user
-     copies books onto the card until the moment they open one. Nothing had
-     described it, so the firmware filled the CONTINUE block with demo fiction and
-     showed a stranger's Middlemarch at 6% on a card that has never been read.
+  A VARIANT, not a screen, and the same mechanism as HomeEmpty.dc.html: one flag,
+  `nothingToContinue`, replaces the reading column with a centred block and builds
+  the focus ring with no -1 position. The two differ in WHAT THEY SAY and in the
+  LIBRARY row's value (a count against EMPTY), never in what they draw. A second
+  flag or a second render branch would be two ways to spell one layout.
 
-     IT IS HomeEmpty's SHAPE, NOT A NEW ONE, and that is deliberate rather than
-     lazy. The reading column and the CONTINUE slab both say "here is where you
-     were", and there is no answer to that yet -- so the honest screen is the one
-     that has no reading column, which HomeEmpty already is. The view model's flag
-     is even called `libraryEmpty` while its own comment calls the concept NOTHING
-     TO CONTINUE: two copies through one mechanism, not two mechanisms.
+  THE SPINE CARRIES THE DEVICE'S NAME for HomeEmpty's reason -- there is no book
+  to name, and the silhouette has to stay identical across Home's four states.
 
-     WHAT DIFFERS FROM HomeEmpty, and it is only three things:
-       * the title and the sentence -- a different state needs different words;
-       * the LIBRARY row shows the real COUNT where HomeEmpty shows `EMPTY`, which
-         is the whole distinction the user can act on: there are books, go look;
-       * nothing else. Same band, same 112px mark, same focused first row, same
-         dead first hint slot.
+  ITS COPY ONLY HAS TO SAY WHERE TO GO, where HomeEmpty has to explain something
+  the device cannot do for you. The place to go is focused and one press away.
 
-     WHY NOT OFFER A BOOK HERE. The obvious alternative was to keep the reading
-     column, fill it with some book and change CONTINUE to START. It was rejected on
-     two counts. There is no non-arbitrary book to pick: nothing has been opened, so
-     there is no most-recent, and FileSystem carries no timestamps so there is no
-     newest either -- alphabetical order is the only order available and it is not a
-     recommendation. And three of the block's five fields (the 67px percentage, the
-     page counter, the progress bar) exist only to describe progress, so they would
-     all blank at once, which reads as a broken screen rather than a fresh one. -->
+  ARTICLES STATES `3 UNREAD` here rather than taking the chevron: a device can
+  perfectly well have a connected wallabag and no book started, and this board is
+  the specimen for that. HomeEmpty.dc.html is the unconfigured specimen.
+-->
 
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
 
-  <!-- NO `NOW READING` LABEL AND NO BOTTOM RULE, exactly as HomeEmpty. The band on
-       Main.dc.html titles the reading column beneath it; with no column the label
-       would title nothing and the rule would divide nothing from nothing. What is
-       left is the battery, which is true on every screen. -->
-  <div style="display: flex; justify-content: flex-end; align-items: center; gap: 7px; padding: 18px 24px 0 24px;">
-    <div style="font-size: var(--t-value); font-weight: 700;">87%</div>
-    <svg width="38" height="21" viewBox="0 0 22 12" fill="none"><rect x="0.5" y="0.5" width="18" height="11" stroke="#000000"></rect><rect x="2" y="2" width="14" height="8" fill="#000000"></rect><rect x="19.5" y="3.5" width="2" height="5" fill="#000000"></rect></svg>
-  </div>
+  <div style="display: flex; flex-grow: 1; min-height: 0;">
+    <!-- THE SPINE. The book's name, set along the panel's long axis, which is
+         what takes the title out of the competition for height: 692px of run per
+         line on the X4 and 684 on the X3, wrapping to two, against the 608px two
+         lines of the old 304px title column gave. `vertical-rl` plus a 180deg
+         rotation sets it bottom-to-top, which is how a spine reads on a shelf.
 
-  <div style="display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 44px 24px 0 24px; flex-shrink: 1; min-height: 0; overflow: hidden; text-align: center;">
-    <!-- `kBookLarge`, the 112px second asset of the same drawing as the 25px
-         `kBook` in the hint bar -- these are pre-rendered bitmaps and there is no
-         scaling one up. It already exists for HomeEmpty, so this board adds no
-         asset. -->
-    <svg width="112" height="112" viewBox="0 0 16 16" fill="none"><path d="M8 3.2C6.6 2 4.3 1.7 2 2v11c2.3-.3 4.6 0 6 1.2 1.4-1.2 3.7-1.5 6-1.2V2c-2.3-.3-4.6 0-6 1.2z" stroke="#000000" stroke-width="0.9"></path><path d="M8 3.2v11" stroke="#000000" stroke-width="0.9"></path></svg>
+         112px IS AN ALIGNMENT, NOT A TASTE, and it must stay divisible by 8.
+         Under Rotation::Ccw the framebuffer maps physX = logY, so a full-height
+         band at logical x in [0,112) is 112 CONSECUTIVE PHYSICAL ROWS -- which is
+         what lets the firmware draw this into a scratch buffer at the same stride
+         and move it with a memcpy, instead of rotating glyphs. A thickness that
+         did not start on a byte boundary would force a per-pixel transpose, and a
+         transpose is a byte-wise primitive carrying the rotation hazard this
+         project has been bitten by five times.
 
-    <!-- ON THE RAMP at `--t-title`, and untracked, for the reason HomeEmpty's
-         title records: Title700 is drawn untracked everywhere else it appears, and
-         a size off the ramp is a new 15-20 KB asset. Parallel in form to
-         `NO BOOKS YET` because they are the same kind of statement about a
-         different fact. -->
-    <div style="font-size: var(--t-title); font-weight: 700;">NOTHING OPEN YET</div>
-
-    <!-- ONE SENTENCE, and it points at the row below rather than at a control this
-         screen does not have. HomeEmpty has to explain something the device cannot
-         do for you (get books onto the card); this only has to say where to go, and
-         the place to go is focused and one press away.
-
-         `max-width: 400px` is HomeEmpty's number and this copy is shorter than
-         HomeEmpty's, so it should wrap no wider. IT IS STILL A NUMBER TO CHECK IN
-         BOTH ENGINES: the firmware's autohinted faces have whole-pixel advances and
-         measure wide, which is why SdMissing's board says 420 where Chrome only
-         needed 400. Verify against the render before trusting this. -->
-    <div style="font-size: var(--t-body); line-height: 1.55; max-width: 400px;">Choose a book from your library to start reading.</div>
-  </div>
-
-  <!-- MAIN'S MENU, unchanged in style. HomeEmpty's copy of this had drifted into an
-       older revision of Home's menu once already -- sentence case at `--t-value`
-       with a `border-bottom` -- so it is worth saying explicitly that this is
-       `--t-label` caps at 0.18em with a `border-top`, and that the only thing this
-       board changes about it is the value. -->
-  <div style="display: flex; flex-direction: column; margin-top: auto;">
-    <!-- FOCUSED, because the hint bar says SELECT and something has to be selected
-         for it to select. Home's focus lives on the CONTINUE block (-1) and there is
-         no CONTINUE block here, so it falls to the first row that does anything --
-         which is also the row this screen is telling the user to press.
-
-         IT KEEPS ITS `border-top`, invisible against the fill and load-bearing: an
-         unfocused row is 80px plus a 1px rule, so dropping the rule would make the
-         focused one 80px and the menu's total height would depend on whether a row
-         was focused -- stepping the whole block a pixel the moment focus entered it.
-         Black on black costs nothing and holds the pitch at 81. -->
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000; background: #000000; color: #ffffff;">
-      <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">LIBRARY</div>
-      <!-- THE COUNT, which is the one fact separating this screen from HomeEmpty's
-           `EMPTY`. A user looking at "NOTHING OPEN YET" needs to know the books are
-           there; this is where they find out. -->
-      <div style="font-size: var(--t-value); font-weight: 700;">12</div>
+         `overflow: hidden` on BOTH boxes is load-bearing: a title longer than two
+         lines is clipped rather than allowed to escape into the hint bar, which
+         is what the first draft did at both geometries. -->
+    <div style="width: 112px; flex-shrink: 0; background: #000000; color: #ffffff; display: flex; align-items: center; justify-content: center; padding: 22px 0; overflow: hidden;">
+      <div style="writing-mode: vertical-rl; transform: rotate(180deg); font-size: var(--t-title); font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; line-height: 1.12; max-height: 100%; overflow: hidden;">Encre</div>
     </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000;">
-      <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">ARTICLES</div>
-      <div style="font-size: var(--t-value); font-weight: 700;">3 UNREAD</div>
-    </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000;">
-      <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">SETTINGS</div>
-      <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
+    <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column;">
+      <div style="display: flex; justify-content: flex-end; align-items: center; gap: 7px; padding: 18px 24px 0 20px;">
+        <div style="font-size: var(--t-value); font-weight: 700;">87%</div>
+        <svg width="38" height="21" viewBox="0 0 22 12" fill="none"><rect x="0.5" y="0.5" width="18" height="11" stroke="#000000"></rect><rect x="2" y="2" width="14" height="8" fill="#000000"></rect><rect x="19.5" y="3.5" width="2" height="5" fill="#000000"></rect></svg>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 40px 24px 0 20px; flex-shrink: 1; min-height: 0; overflow: hidden; text-align: center;">
+        <svg width="112" height="112" viewBox="0 0 16 16" fill="none"><path d="M8 3.2C6.6 2 4.3 1.7 2 2v11c2.3-.3 4.6 0 6 1.2 1.4-1.2 3.7-1.5 6-1.2V2c-2.3-.3-4.6 0-6 1.2z" stroke="#000000" stroke-width="0.9"></path><path d="M8 3.2v11" stroke="#000000" stroke-width="0.9"></path></svg>
+        <div style="font-size: var(--t-title); font-weight: 700;">NOTHING OPEN YET</div>
+        <div style="font-size: var(--t-body); line-height: 1.55; max-width: 300px;">Choose a book from your library to start reading.</div>
+      </div>
+      <div style="display: flex; flex-direction: column; margin-top: auto;">
+        <div style="display: flex; justify-content: space-between; align-items: center; height: 74px; padding: 0 24px 0 20px; border-top: 1px solid #000000; background: #000000; color: #ffffff;">
+          <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">LIBRARY</div>
+          <div style="font-size: var(--t-value); font-weight: 700;">12</div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; height: 74px; padding: 0 24px 0 20px; border-top: 1px solid #000000;">
+          <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">ARTICLES</div>
+          <div style="font-size: var(--t-value); font-weight: 700;">3 UNREAD</div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; height: 74px; padding: 0 24px 0 20px; border-top: 1px solid #000000;">
+          <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">SETTINGS</div>
+          <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
+        </div>
+      </div>
     </div>
   </div>
-
-  <!-- THE FIRST SLOT IS A DEAD 36px, not a READ hint. Main.dc.html binds READ there
-       because there is a book to resume; there is not one here, and a bar promising
-       a button the screen does not use is worse than one promising nothing. The 36px
-       is the boards' own width for a dead slot and `space-between` divides the
-       leftover around it -- measuring it as zero would move SELECT, UP and DOWN. -->
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
-  <div style="width: 36px;"></div>
-  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">SELECT</div></div>
-  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">UP</div></div>
-  <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M4 9l4 4 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">DOWN</div></div>
-</div>
+    <div style="width: 36px;"></div>
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">SELECT</div></div>
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">UP</div></div>
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M4 9l4 4 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">DOWN</div></div>
+  </div>
+
 </div>
 </x-dc>
 <script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>

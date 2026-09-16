@@ -25,116 +25,87 @@
     a { color: #000000; } a:hover { color: #000000; }
   </style>
 </helmet>
+
+<!--
+  HOME, CHARGING. Identical to Main.dc.html in every respect but ONE: the
+  battery's solid fill carries a knocked-out bolt. The number, the gap and the
+  mark's 38x21 box are Main's exactly, so nothing in the strip moves between the
+  two states -- which is the whole reason this treatment was chosen.
+
+  IT IS A BOARD RATHER THAN A COMMENT ON MAIN, and tools/iconc.py is what forces
+  that: its `battery` entry matches the terminal nub, which is on BOTH batteries,
+  so a second battery on Main would make that match ambiguous -- which iconc.py
+  detects and exits on. `source` is what disambiguates the two, exactly as it does
+  for kBook and kBookLarge.
+
+  AND THIS COMMENT MUST NOT CONTAIN AN SVG OPENING TAG. The generator finds marks
+  with a raw-text regex, so a literal opening tag in prose starts a match that
+  runs on to the real mark's closing tag: the hit count stays one, the ambiguity
+  guard never fires, and extraction fails on a tag with no width. Describe the
+  error, never quote it.
+
+  THE BOLT IS WHITE-INSIDE-BLACK at roughly 24x14 device pixels, which is the size
+  this glass serves worst -- thin diagonals come out one notch lighter under Mono.
+  If it closes up on the panel, the fallback is to drop the inner fill and make
+  the bolt black instead: same box, same board, one `make icons` run.
+-->
+
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
 
-  <!-- HOME, CHARGING. design/Main.dc.html with one thing different: the battery's
-       solid fill carries a KNOCKED-OUT bolt. The number, the gap and the mark's
-       38x21 box are Main's exactly, so nothing in the band moves between the two
-       states -- which is the whole reason this treatment was chosen.
+  <div style="display: flex; flex-grow: 1; min-height: 0;">
+    <!-- THE SPINE. The book's name, set along the panel's long axis, which is
+         what takes the title out of the competition for height: 692px of run per
+         line on the X4 and 684 on the X3, wrapping to two, against the 608px two
+         lines of the old 304px title column gave. `vertical-rl` plus a 180deg
+         rotation sets it bottom-to-top, which is how a spine reads on a shelf.
 
-       IT IS A BOARD RATHER THAN A COMMENT ON MAIN, and tools/iconc.py is what
-       forces that: its `battery` entry matches `<rect x="19.5"` -- the terminal
-       nub -- and a second battery on Main would make that match ambiguous, which
-       iconc.py detects and exits on. `source` is what disambiguates the two,
-       exactly as it already does for kBook and kBookLarge, which are the same
-       path at two sizes on two boards.
+         112px IS AN ALIGNMENT, NOT A TASTE, and it must stay divisible by 8.
+         Under Rotation::Ccw the framebuffer maps physX = logY, so a full-height
+         band at logical x in [0,112) is 112 CONSECUTIVE PHYSICAL ROWS -- which is
+         what lets the firmware draw this into a scratch buffer at the same stride
+         and move it with a memcpy, instead of rotating glyphs. A thickness that
+         did not start on a byte boundary would force a per-pixel transpose, and a
+         transpose is a byte-wise primitive carrying the rotation hazard this
+         project has been bitten by five times.
 
-       AND THIS COMMENT MUST NOT CONTAIN AN SVG OPENING TAG, which the first
-       version of it did -- it quoted iconc.py's own error message. The generator
-       finds marks with a raw-text regex, so a literal opening tag in prose starts
-       a match that runs on to the REAL mark's closing tag. The hit count stays
-       one, so the ambiguity guard never fires, and extraction fails instead on a
-       tag that has no width -- a long way from the cause. Describe the error, do
-       not quote it.
-
-       THE BOLT IS WHITE-INSIDE-BLACK AT ROUGHLY 24x14 DEVICE PIXELS, which is the
-       size this glass serves worst -- CLAUDE.md records thin diagonals coming out
-       one notch lighter under Mono. If it closes up on the panel, the fallback is
-       to drop the `rect x="2"` fill and make the bolt black instead: same box,
-       same board, one `make icons` run. -->
-  <div style="display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
-    <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">NOW READING</div>
-    <div style="display: flex; align-items: center; gap: 7px;">
-      <div style="font-size: var(--t-value); font-weight: 700;">87%</div>
-      <svg width="38" height="21" viewBox="0 0 22 12" fill="none"><rect x="0.5" y="0.5" width="18" height="11" stroke="#000000"></rect><rect x="2" y="2" width="14" height="8" fill="#000000"></rect><rect x="19.5" y="3.5" width="2" height="5" fill="#000000"></rect><path d="M11.4 2 L5.4 7.1 L8.1 7.1 L7.4 10 L13.4 4.9 L10.7 4.9 Z" fill="#ffffff"></path></svg>
+         `overflow: hidden` on BOTH boxes is load-bearing: a title longer than two
+         lines is clipped rather than allowed to escape into the hint bar, which
+         is what the first draft did at both geometries. -->
+    <div style="width: 112px; flex-shrink: 0; background: #000000; color: #ffffff; display: flex; align-items: center; justify-content: center; padding: 22px 0; overflow: hidden;">
+      <div style="writing-mode: vertical-rl; transform: rotate(180deg); font-size: var(--t-title); font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; line-height: 1.12; max-height: 100%; overflow: hidden;">Middlemarch</div>
     </div>
-  </div>
-
-  <!-- NO COVER, and the `gap` went with it. This is Main.dc.html's block with a
-       charging mark in the band, so it takes Main's decision verbatim -- see the
-       note there for why a placeholder cover is a false claim rather than a
-       missing feature. The two boards must agree: they are ONE screen and one
-       renderHome, differing only in which battery mark the band draws. -->
-  <div style="display: flex; padding: 30px 24px 0 24px;">
-    <div style="display: flex; flex-direction: column; justify-content: flex-start; gap: 22px; flex-grow: 1; min-width: 0; padding: 2px 0;">
-      <div style="display: flex; flex-direction: column; gap: 5px;">
-                <!-- IT WRAPS, and it used to elide. `text-overflow: ellipsis` with
-             `white-space: nowrap` hid the end of any real book's name: the device
-             showed a truncated title on the one screen whose whole job is to name
-             the book you are reading, and the name is the content there.
-
-             This is BookDetails.dc.html's rule, for BookDetails' reason -- an
-             ellipsis on a LIST ROW hides only which of seven rows this is, and here
-             it hides the thing the screen exists to say. `overflow-wrap: anywhere`
-             because the break has to be allowed inside a word: a title falling back
-             to a filename is usually one word, and CSS offers no break opportunity
-             at an underscore or a hyphen.
-
-             THE WRAP IS BOUNDED and the block below it does not move: the progress
-             bar, CONTINUE, the menu and the hint bar are fixed, so the NAME yields.
-             The bound is derived from the box model in renderHome, not pinned here. -->
-        <div style="font-size: var(--t-title); font-weight: 700; line-height: 1.05; text-transform: uppercase; overflow-wrap: anywhere;">Middlemarch</div>
-        <div style="font-size: var(--t-body);">George Eliot</div>
+    <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column;">
+      <div style="display: flex; justify-content: flex-end; align-items: center; gap: 7px; padding: 18px 24px 0 20px;">
+        <div style="font-size: var(--t-value); font-weight: 700;">87%</div>
+        <svg width="38" height="21" viewBox="0 0 22 12" fill="none"><rect x="0.5" y="0.5" width="18" height="11" stroke="#000000"></rect><rect x="2" y="2" width="14" height="8" fill="#000000"></rect><rect x="19.5" y="3.5" width="2" height="5" fill="#000000"></rect><path d="M11.4 2 L5.4 7.1 L8.1 7.1 L7.4 10 L13.4 4.9 L10.7 4.9 Z" fill="#ffffff"></path></svg>
       </div>
-      <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="font-size: var(--t-display); font-weight: 700; line-height: 1;">6%</div>
-        <!-- ONE COUNTER LINE, where this board had two meta lines -- `PAGE 53 / 890`
-             above `CH. 01 &mdash; MISS BROOKE`. NEITHER WAS OBTAINABLE:
-
-               * A page counter for the BOOK needs every chapter paginated. Measured
-                 on a real novel that is 6.94 MB of inflated XHTML, ~49 s of decode
-                 at this device's 7.2 ms/KB -- paid on a first open, with the panel
-                 blocked and no background thread to hide it in.
-               * The chapter's NAME needs a table of contents. Contents.dc.html is
-                 not built, and the Reader's own footer already shows a bare
-                 `CH. 03` for exactly this reason.
-
-             What IS free is the spine position and the spine count, both of which
-             the Home pointer already caches. So the two lines become one that is
-             true, rather than one that is drawn and wrong -- `PAGE 0 / 0` was the
-             alternative and it is the kind of claim this firmware refuses.
-
-             It keeps the 0.16em of the line it replaces, not the 0.10em of the one
-             below it: this is a COUNTER, which is what that tracking was for. -->
-        <div style="font-size: var(--t-meta); letter-spacing: 0.16em;">CH. 01 OF 24</div>
+      <div style="padding: 26px 24px 0 20px;">
+        <div style="font-size: var(--t-meta); letter-spacing: 0.2em;">GEORGE ELIOT</div>
+        <div style="font-size: var(--t-display); font-weight: 700; line-height: 1; margin-top: 18px;">6%</div>
+        <div style="font-size: var(--t-meta); letter-spacing: 0.1em; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">I &middot; Miss Brooke</div>
+      </div>
+      <div style="padding: 26px 24px 0 20px;">
+        <div style="background: #000000; color: #ffffff; height: 68px; display: flex; align-items: center; justify-content: space-between; padding: 0 18px;">
+          <div style="font-size: var(--t-label); letter-spacing: 0.2em; font-weight: 500;">CONTINUE</div>
+          <svg width="32" height="25" viewBox="0 0 18 14" fill="none"><path d="M1 7h15M11 1l6 6-6 6" stroke="#ffffff" stroke-width="2"></path></svg>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; margin-top: auto;">
+        <div style="display: flex; justify-content: space-between; align-items: center; height: 74px; padding: 0 24px 0 20px; border-top: 1px solid #000000;">
+          <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">LIBRARY</div>
+          <div style="font-size: var(--t-value); font-weight: 700;">12</div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; height: 74px; padding: 0 24px 0 20px; border-top: 1px solid #000000;">
+          <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">ARTICLES</div>
+          <div style="font-size: var(--t-value); font-weight: 700;">3 UNREAD</div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; height: 74px; padding: 0 24px 0 20px; border-top: 1px solid #000000;">
+          <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">SETTINGS</div>
+          <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
+        </div>
       </div>
     </div>
   </div>
-
-  <div style="padding: 26px 24px 0 24px;">
-    <div style="width: 100%; height: 8px; border: 1px solid #000000; box-sizing: border-box;">
-      <div style="width: 6%; height: 100%; background: #000000;"></div>
-    </div>
-  </div>
-
-  <div style="padding: 26px 24px 0 24px;">
-    <div style="background: #000000; color: #ffffff; height: 72px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px;">
-      <div style="font-size: var(--t-label); letter-spacing: 0.2em; font-weight: 500;">CONTINUE</div>
-      <svg width="32" height="25" viewBox="0 0 18 14" fill="none"><path d="M1 7h15M11 1l6 6-6 6" stroke="#ffffff" stroke-width="2"></path></svg>
-    </div>
-  </div>
-
-  <div style="display: flex; flex-direction: column; margin-top: auto;">
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000;">
-      <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">LIBRARY</div>
-      <div style="font-size: var(--t-value); font-weight: 700;">12</div>
-    </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; height: 80px; padding: 0 24px; border-top: 1px solid #000000;">
-      <div style="font-size: var(--t-label); letter-spacing: 0.18em; font-weight: 500;">SETTINGS</div>
-      <svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="#000000" stroke-width="2"></path></svg>
-    </div>
-  </div>
-
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
     <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 3.2C6.6 2 4.3 1.7 2 2v11c2.3-.3 4.6 0 6 1.2 1.4-1.2 3.7-1.5 6-1.2V2c-2.3-.3-4.6 0-6 1.2z" stroke="#000000" stroke-width="1.4"></path><path d="M8 3.2v11" stroke="#000000" stroke-width="1.4"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">READ</div></div>
     <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">SELECT</div></div>

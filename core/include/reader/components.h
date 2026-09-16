@@ -17,14 +17,22 @@ class Framebuffer;
 // PPI, so a margin should be the same physical size on both. What must adapt is
 // the canvas width, which every primitive reads from the framebuffer.
 inline constexpr int kMargin = 24;
-// A menu row is 80 tall because the board says so in so many words
-// (`height: 80px`), and the CONTINUE block 72 for the same reason.
-// A menu row is the board's content box plus its own top border. The boards say
-// `height: 80px` with `border-top: 1px`, and box-sizing is content-box there, so
-// the rendered box is 81 -- the same pinned-number-ignoring-the-border mistake
-// the two bars had. Every menu screen (Library, Settings, Wi-Fi settings...)
-// stacks these, so a 1px error compounds per row.
-inline constexpr int kRowContentH = 80;
+// A menu row is the board's content box plus its own top border, and the pitch
+// is the sum: design/Main.dc.html says `height: 74px` with `border-top: 1px`
+// and box-sizing is content-box there, so the rendered box is 75. Taking the
+// declared height as the pitch is the pinned-number-ignoring-the-border mistake
+// the two bars had.
+//
+// 74, WHERE IT WAS 80. The spine took the header band with it, and three rows
+// plus the hint bar have to fit the column the band does not occupy.
+//
+// THIS IS HOME'S ROW AND NOBODY ELSE'S, which the previous note had wrong: it
+// said "every menu screen (Library, Settings, Wi-Fi settings...) stacks these",
+// and none of them do. Library draws drawBookRow, Settings and Contents
+// drawDetailRow, the overlays drawPanelRow -- drawRow has exactly one production
+// caller, renderHome's menu. Worth knowing before changing this number, because
+// the old comment implied a blast radius that does not exist.
+inline constexpr int kRowContentH = 74;
 inline constexpr int kRowRuleH = 1;
 inline constexpr int kRowH = kRowContentH + kRowRuleH;
 
@@ -88,6 +96,12 @@ inline constexpr int kHintRuleH = 1;
 // 2.52px, and see reader/tracking.h for why that fraction has to survive.
 inline constexpr int kBandLabelEm = 220;   // 0.22em, header band label
 inline constexpr int kRowLabelEm = 180;    // 0.18em, menu row label
+// The menu row's own left padding inside the SPINE's column. design/Main.dc.html
+// insets it 20px from the band's edge where the screen margin is 24 -- the
+// column's padding, not the panel's, which is what keeps the label aligned with
+// the stats above it. Passed to drawRow as `padL`; a full-width row keeps
+// kMargin.
+inline constexpr int kSpineRowPadL = 20;
 inline constexpr int kBlockLabelEm = 200;  // 0.20em, action block label
 inline constexpr int kHintEm = 120;        // 0.12em, hint bar label
 // 0.2em, the loading line -- WIDER than a hint label on purpose, and it is the
@@ -214,9 +228,17 @@ int drawHeaderBand(Framebuffer& fb, const FontSet& fonts, std::string_view label
 // `value` may be empty and `trailing` may be null; a row may carry either, both
 // or neither. A trailing mark is right-aligned on the margin and takes the row's
 // ink, so it reverses out of a focused row along with the text.
+// `x0` is the row's left edge and `padL` its own inset from that edge. Home's
+// menu sits in the column beside the spine, so its rows begin at the band and
+// inset by the COLUMN's 20px; a full-width row begins at 0 and insets by the
+// SCREEN's margin. Two numbers because two boards, and they are separate
+// parameters rather than one derived from the other -- folding padL into x0
+// made a default-x0 row draw its label at 20 instead of kMargin, which no test
+// pinned and no caller would have noticed until a screen without a spine used
+// this again.
 int drawRow(Framebuffer& fb, const FontSet& fonts, int y, std::string_view label,
             std::string_view value, bool focused, const Icon* trailing = nullptr,
-            Plane plane = Plane::Bw);
+            Plane plane = Plane::Bw, int x0 = 0, int padL = kMargin);
 // THE LOADING LINE, AND IT REPLACES THE HINT BAR RATHER THAN JOINING IT.
 //
 // design/LibraryOpening.dc.html. The same box as the hint bar -- same rule, same
@@ -956,5 +978,61 @@ int drawPanelRow(Framebuffer& fb, const FontSet& fonts, int x, int y, int w,
                  std::string_view label, bool focused, bool discloses, bool rule,
                  Plane plane = Plane::Bw, std::string_view value = {},
                  int labelTrackingEm1000 = 0);
+
+// --- Home's spine ------------------------------------------------------------
+//
+// design/Main.dc.html sets the book's name along the panel's LONG axis, in a
+// black band down the left edge. That is what takes the title out of the
+// competition for height: 692px of run per line on the X4 against the 608px two
+// lines of the old 304px title column gave.
+//
+// NO GLYPH IS EVER ROTATED, which is the whole reason this is affordable. The
+// text is drawn HORIZONTALLY into a scratch framebuffer whose logical axes are
+// the panel's transposed -- its width is the panel's HEIGHT, its height is the
+// band's thickness -- and the scratch is then transferred a row at a time. So
+// wrapping, measuring, eliding and the blit are all the existing primitives,
+// working in their ordinary orientation, and `text.cpp` is untouched.
+//
+// THE THICKNESS MUST BE A MULTIPLE OF 8 AND SO MUST THE PANEL'S HEIGHT. Under
+// Rotation::Ccw the framebuffer maps physX = logY, so the band is `kSpineW`
+// CONSECUTIVE PHYSICAL ROWS and the scratch's rows are the same length as the
+// panel's -- which is what makes the transfer a byte operation rather than a
+// per-pixel transpose. Both panels satisfy both: 112 % 8 == 0, 800 % 8 == 0 and
+// 792 % 8 == 0.
+constexpr int kSpineW = 112;
+// The board's `padding: 22px 0` on the band, and its `line-height: 1.12` on a
+// 42px face. Spelled in pixels like every other number here, because a Font
+// reports ascent and descent but not its own ppem.
+constexpr int kSpinePadEnds = 22;
+constexpr int kSpineLineH = 47;  // round(1.12 * 42)
+// Two lines, for the reason design/Main.dc.html gives: a thick book sets its
+// spine in two, and `A Portrait of the Artist as a Young Man` needs both at both
+// geometries. Past two the band would have to thicken, which is the one number
+// here that may not move.
+constexpr int kSpineMaxLines = 2;
+
+// Fills `scratch` with the band and its text, in the scratch's own orientation.
+//
+// `scratch` must be `Framebuffer(panelHeight, kSpineW, Rotation::None)`: its
+// logical x is the panel's y (the band's LENGTH) and its logical y is the
+// panel's x (its THICKNESS). Exposed rather than private because it is the half
+// of `drawSpine` that has nothing to do with rotation, which lets a test build
+// the same pixels by an obviously-correct route and compare.
+// `bandLen` is how far down the panel the band runs -- the boards stop it at the
+// hint bar, which spans the FULL width because it describes the device's buttons
+// rather than a column. The scratch stays the panel's whole height either way so
+// the transfer can move whole rows; what is past `bandLen` is left PAPER.
+void composeSpineScratch(Framebuffer& scratch, const FontSet& fonts, int bandLen,
+                         std::string_view text, Plane plane);
+
+// Draws the spine into `fb` occupying logical x in [0, w), full height.
+//
+// The run reads BOTTOM-TO-TOP, which is how a book on a shelf reads and what the
+// board draws. That mirror is the one thing stopping the transfer being a plain
+// memcpy: it reverses the destination along the row, so each row is copied
+// through a bit-reversal instead. Still O(bytes) and not O(pixels) -- 112 rows
+// of 99 bytes through a 256-entry table, against 77,504 setPixel calls.
+void drawSpine(Framebuffer& fb, const FontSet& fonts, int w, int bandLen,
+               std::string_view text, Plane plane = Plane::Bw);
 
 }  // namespace reader
