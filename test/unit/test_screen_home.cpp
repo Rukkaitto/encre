@@ -1,6 +1,9 @@
+#include <string>
+
 #include "doctest.h"
 #include "reader/screens.h"
 #include "reader/screen_home.h"
+#include "reader/text.h"
 
 using namespace reader;
 
@@ -81,17 +84,50 @@ TEST_CASE("back on Home is the board's READ shortcut, and opens the book too") {
   CHECK(h.onEvent(kBack).kind == Action::Kind::Open);
 }
 
-TEST_CASE("neither fires when there is no book to continue") {
-  // The two no-reading-column variants draw an EMPTY first hint slot, and a bar that
-  // promises nothing must not do something. CONTINUE is unreachable there by the
-  // model -- the focus ring is built Noneless -- and READ is gated explicitly.
-  for (const reader::HomeViewModel& vm :
-       {reader::demoHomeEmptyVm(), reader::demoHomeUnopenedVm()}) {
+TEST_CASE("neither fires when there is no CONTINUE block to press") {
+  // Every variant that draws no CONTINUE slab draws an EMPTY first hint slot too,
+  // and a bar that promises nothing must not do something. CONTINUE is unreachable
+  // by the model -- the focus ring is built Noneless -- and READ is gated on the
+  // same predicate.
+  //
+  // THREE VARIANTS NOW, and the third is the one that makes this a rule rather than
+  // a fact about the two empty states: HomeMissing HAS a book to name and cannot
+  // open it, so a READ here would resolve from the same pointer, fail the same
+  // `exists` check and paint nothing.
+  for (const reader::HomeViewModel& vm : {reader::demoHomeEmptyVm(),
+                                          reader::demoHomeUnopenedVm(),
+                                          reader::demoHomeMissingVm()}) {
     HomeScreen h(vm, reader::demoHomeTargets());
+    CHECK_FALSE(vm.offersContinue());
+    CHECK(vm.hints[0].empty());
     CHECK(h.onEvent(kBack).kind == Action::Kind::None);
     // ...and the focus cannot be on a CONTINUE block, so Confirm is a menu push.
     REQUIRE(h.focus() >= 0);
     CHECK(h.onEvent(kConfirm).kind == Action::Kind::Push);
+  }
+}
+
+TEST_CASE("offersContinue is the ONE predicate, and the ring follows it") {
+  // The three things that have to agree about whether a CONTINUE block exists: the
+  // focus ring (-1 is the block's own position), the Back gesture, and -- in the
+  // theme -- the slab. Two of them spelled `!nothingToContinue` independently until
+  // a third state arrived that is not `nothingToContinue` and still has no block.
+  //
+  // Driven over EVERY Home view model this project builds, so a fourth state cannot
+  // adopt half the contract: the listing below is what a new variant has to join.
+  for (const reader::HomeViewModel& vm :
+       {reader::demoHomeVm(), reader::demoHomeEmptyVm(), reader::demoHomeUnopenedVm(),
+        reader::demoHomeMissingVm()}) {
+    HomeScreen h(vm, reader::demoHomeTargets());
+    reader::Screen& s = h;
+    // The ring admits -1 exactly when the screen draws a block to put it on.
+    s.setFocus(-1);
+    CHECK((s.focus() == -1) == vm.offersContinue());
+    // ...and Back is READ exactly then, too.
+    HomeScreen fresh(vm, reader::demoHomeTargets());
+    CHECK((fresh.onEvent(kBack).kind == Action::Kind::Open) == vm.offersContinue());
+    // ...and the bar says so, which is the half a reader sees before pressing.
+    CHECK(vm.hints[0].empty() == !vm.offersContinue());
   }
 }
 
@@ -302,6 +338,98 @@ TEST_CASE("the unopened variant has no CONTINUE slot either, in either direction
   CHECK(s.focus() == 0);
   s.setFocus(-1);
   CHECK(s.focus() == 0);
+}
+
+// --- The missing-book state -------------------------------------------------
+//
+// design/HomeMissing.dc.html: /.reader/last.json names a book the card no longer
+// has. It is NOT one of the two states above, and the difference is the whole
+// design -- the pointer still knows the name, the author, the percentage and the
+// chapter, so the reading column stays and a bordered strip over it says why the
+// numbers under it describe a book that will not open.
+
+TEST_CASE("the missing variant keeps the reading column, not the empty block") {
+  const reader::HomeViewModel vm = reader::demoHomeMissingVm();
+  reader::HomeScreen screen(vm, reader::demoHomeTargets());
+  CHECK(screen.id() == reader::ScreenId::Home);
+  CHECK(vm.bookMissing);
+  // THE DISTINCTION THIS STATE EXISTS FOR. Falling back to `nothingToContinue` is
+  // what the firmware did before the state was built, and it throws away four
+  // facts the pointer carries and that are all still true.
+  CHECK_FALSE(vm.nothingToContinue);
+  CHECK(vm.emptyTitle.empty());
+  CHECK(vm.emptyBody.empty());
+  const reader::HomeViewModel ordinary = reader::demoHomeVm();
+  CHECK(vm.title == ordinary.title);
+  CHECK(vm.author == ordinary.author);
+  CHECK(vm.percent == ordinary.percent);
+  CHECK(vm.chapterLabel == ordinary.chapterLabel);
+}
+
+TEST_CASE("the missing variant's note names the book the spine names") {
+  // Two runs on one screen naming one book. Composed by `missingBookNote` from the
+  // view model's own title rather than typed beside it, so there is no second
+  // spelling free to name a different book -- which is what a literal in both the
+  // shell and the demo would have been.
+  const reader::HomeViewModel vm = reader::demoHomeMissingVm();
+  REQUIRE_FALSE(vm.missingNote.empty());
+  CHECK(vm.missingNote == reader::missingBookNote(vm.title));
+  CHECK(vm.missingNote.find(reader::upperLatin1(vm.title)) != std::string::npos);
+}
+
+TEST_CASE("missingBookNote shouts the title and quotes it the board's way") {
+  // design/HomeMissing.dc.html's own sentence.
+  CHECK(reader::missingBookNote("Middlemarch") ==
+        "\xE2\x80\x9CMIDDLEMARCH\xE2\x80\x9D IS GONE FROM THE SD CARD.");
+  // CURLY, not a straight ASCII quote: the board says `&ldquo;`/`&rdquo;`, and
+  // fontc.py's subset carries U+201C/U+201D, so these are real glyphs rather than
+  // the notdef boxes a codepoint outside the subset would draw.
+  CHECK(reader::missingBookNote("x").compare(0, 3, "\xE2\x80\x9C") == 0);
+  CHECK(reader::missingBookNote("x").find("\xE2\x80\x9D") != std::string::npos);
+  // THE ACCENTED PATH, which is upperLatin1's whole reason for existing: an
+  // ASCII-only shout renders `LE FLeAU` on the glass, and the device showed it.
+  //
+  // THE LITERALS ARE SPLIT, and this file's first draft was not: a C++ hex escape
+  // is UNBOUNDED, so `"\xA9au"` is ONE escape reading `A9A` and not `\xA9` followed
+  // by `au`. clang refused it outright here -- the ESP32's GCC is the toolchain that
+  // ACCEPTS it and emits a different byte, which is how this trap reaches glass.
+  CHECK(reader::missingBookNote("Le Fl\xC3\xA9" "au").find("LE FL\xC3\x89" "AU") !=
+        std::string::npos);
+}
+
+TEST_CASE("the missing variant focuses LIBRARY, because that is the way out") {
+  const reader::HomeViewModel vm = reader::demoHomeMissingVm();
+  CHECK(vm.focusedMenuIndex == 0);
+  // And the closure in both directions, as the empty variants have: there is no
+  // CONTINUE block, so nothing may land on -1.
+  reader::HomeScreen h(vm, reader::demoHomeTargets());
+  reader::Screen& s = h;
+  REQUIRE(s.focus() == 0);
+  h.onEvent(kUp);
+  CHECK(s.focus() == 2);  // wrapped to SETTINGS, not down to a CONTINUE block
+  h.onEvent(kDown);
+  CHECK(s.focus() == 0);
+  s.setFocus(-1);
+  CHECK(s.focus() == 0);
+}
+
+TEST_CASE("the missing variant keeps Home's menu and rows") {
+  // A variant, not a screen: the menu and the bar are Home's and must not move
+  // between the states -- which is what makes this read as Home in a different
+  // condition rather than as a different screen.
+  const reader::HomeViewModel vm = reader::demoHomeMissingVm();
+  const reader::HomeViewModel ordinary = reader::demoHomeVm();
+  REQUIRE(vm.menu.size() == ordinary.menu.size());
+  for (size_t i = 0; i < vm.menu.size(); ++i) {
+    CHECK(vm.menu[i].label == ordinary.menu[i].label);
+    CHECK(vm.menu[i].value == ordinary.menu[i].value);
+  }
+  CHECK(vm.holds == ordinary.holds);
+  // The bar differs in exactly one slot, and only that one.
+  CHECK(vm.hints[0].empty());
+  CHECK(vm.hints[1] == ordinary.hints[1]);
+  CHECK(vm.hints[2] == ordinary.hints[2]);
+  CHECK(vm.hints[3] == ordinary.hints[3]);
 }
 
 TEST_CASE("an ordinary Home is not the empty variant") {

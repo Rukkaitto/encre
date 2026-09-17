@@ -2160,7 +2160,16 @@ static reader::CoverSource* sleepCoverForPaint();
 // fifth. The title fallback is the part most likely to have drifted: it is the same
 // decision Book details makes about a book with no OPF title.
 struct ReadingPointer {
-  bool valid = false;      // there is a pointer AND the book it names is still there
+  // THERE IS A POINTER AND ITS FIELDS CAN BE DRAWN. It used to mean "...and the
+  // book it names is still there", which folded two questions into one answer and
+  // threw the pointer away on the second -- so Home fell back to the nothing-open
+  // screen and the reader was told the device had forgotten a book it could name,
+  // its author and how far in they were. See `missing`.
+  bool valid = false;
+  // THE FILE IS NOT ON THE CARD. Everything above is still true: deleting a book
+  // from a computer, or putting a different card in the slot, does not unwrite
+  // /.reader/last.json. design/HomeMissing.dc.html is the state that says so.
+  bool missing = false;
   std::string bookPath;
   std::string title;       // the OPF's, or the filename
   std::string author;
@@ -2178,12 +2187,17 @@ static ReadingPointer readingPointer() {
   if (!gStorageUsable || !reader::loadLastRead(gSd, last)) return p;
   // CHECKED AGAINST THE CARD, not trusted. A book deleted on a computer, or a
   // different card in the slot, leaves a pointer naming something that is not
-  // there -- and offering to continue a book that cannot be opened is worse than
+  // there, and offering to continue a book that cannot be opened is worse than
   // not offering.
-  if (!gSd.exists(last.bookPath)) {
+  //
+  // THE POINTER IS KEPT EITHER WAY, which it was not: this returned early and threw
+  // away a title, an author, a percentage and a chapter name that are all still
+  // TRUE -- so a stale pointer became indistinguishable from no pointer at all, and
+  // Home said `NOTHING OPEN YET` about a book it could have named. The same
+  // reports-on-less-than-it-claims shape as an unread gauge answering 0%.
+  p.missing = !gSd.exists(last.bookPath);
+  if (p.missing)
     logf("[progress] the last book is gone from the card: %s\n", last.bookPath.c_str());
-    return p;
-  }
   p.valid = true;
   p.bookPath = last.bookPath;
   p.title = last.title.empty() ? last.bookPath : last.title;
@@ -2390,11 +2404,15 @@ static reader::HomeViewModel homeVmForCard() {
   //
   // THE POINTER IS CHECKED AGAINST THE CARD, not trusted. A book deleted on a
   // computer, or a different card in the slot, leaves a pointer naming something
-  // that is not there -- and drawing it would be Home confidently offering to
-  // continue a book that cannot be opened. `exists` is one cheap call and it is the
-  // whole check. (design/HomeMissing.dc.html is the state that shows the last book
-  // WITH a warning; it is boarded and not built, so for now a stale pointer falls
-  // back to the nothing-open screen, which is honest if less informative.)
+  // that is not there -- and drawing it as ordinary would be Home confidently
+  // offering to continue a book that cannot be opened. `exists` is one cheap call
+  // and it is the whole check.
+  //
+  // WHAT THE CHECK COSTS IS NOW A STRIP AND NOT THE COLUMN. It used to discard the
+  // pointer, so a stale one fell back to the nothing-open screen -- recorded here as
+  // "honest if less informative", which undersold it: the pointer's title, author,
+  // percentage and chapter are all still TRUE, and dropping them told the reader the
+  // device had forgotten a book it could have named. design/HomeMissing.dc.html.
   if (books > 0) {
     const ReadingPointer p = readingPointer();
     if (p.valid) {
@@ -2432,13 +2450,34 @@ static reader::HomeViewModel homeVmForCard() {
       // glass of a device reading something else -- Middlemarch fiction, which is how
       // this device once woke into a book nobody was reading.
       vm.chapterLabel = p.chapter;
-      vm.focusedMenuIndex = -1;  // the CONTINUE block, which exists again
-      vm.hints = {"READ", "SELECT", "UP", "DOWN"};
+      // THE BOOK IS GONE FROM THE CARD, and the pointer still knows everything above.
+      // design/HomeMissing.dc.html: the reading column stays, a bordered strip over it
+      // says why the numbers under it describe a book that will not open, and CONTINUE
+      // goes -- absent rather than inert, which takes the ring's -1 and the bar's READ
+      // slot with it because all three ask `offersContinue()`.
+      //
+      // NOTE THE GATE ABOVE IS `books > 0`, so a card that lost EVERY book shows the
+      // empty state rather than this one. That is deliberate and it is the older
+      // decision: with nothing on the card at all, `NO BOOKS YET` and its sentence
+      // about the /books folder is the more useful thing to say, and the LIBRARY row
+      // saying `EMPTY` is the fact that actually explains the device.
+      if (p.missing) {
+        vm.bookMissing = true;
+        // Composed from the title THIS view model carries, so the strip and the spine
+        // cannot name different books. The function lives in core/ for that reason.
+        vm.missingNote = reader::missingBookNote(vm.title);
+        vm.focusedMenuIndex = 0;  // LIBRARY, which is the way out
+        vm.hints = {"", "SELECT", "UP", "DOWN"};
+      } else {
+        vm.focusedMenuIndex = -1;  // the CONTINUE block, which exists again
+        vm.hints = {"READ", "SELECT", "UP", "DOWN"};
+      }
       // The chapter is quoted so an EMPTY one is visible as empty in the log: this is
       // the one field the pointer can legitimately fail to carry, and a bare %s makes
       // "the pointer predates the key" indistinguishable from "the line was drawn".
-      logf("[progress] Home continues \"%s\" at %d%%, spine %d, chapter \"%s\"\n",
-           vm.title.c_str(), p.percent, p.spine + 1, p.chapter.c_str());
+      logf("[progress] Home %s \"%s\" at %d%%, spine %d, chapter \"%s\"\n",
+           p.missing ? "cannot continue (the file is gone)" : "continues", vm.title.c_str(),
+           p.percent, p.spine + 1, p.chapter.c_str());
       logFlush();
     }
   }
@@ -3031,6 +3070,12 @@ static void handleOpen() {
     }
     // Checked again here, not just when Home was built: the card can have changed in
     // between, and openBook would fail less clearly.
+    //
+    // IT IS A BELT AND NOT THE BRACE NOW. Home's missing-book state draws no CONTINUE
+    // slab and leaves its READ slot empty, so the ordinary route to a press that lands
+    // here is gone; what is left is the card changing between the Home rebuild and the
+    // press, which is real and rare. A press that reaches this paints NOTHING, which is
+    // why the state upstream has to exist rather than this check being the answer.
     if (!gSd.exists(last.bookPath)) {
       logf("[open] CONTINUE names a book that is gone: %s\n", last.bookPath.c_str());
       return;

@@ -24,8 +24,10 @@ make sim        # render Home to build/home.png
 make firmware   # build for the ESP32-C3
 make fonts      # regenerate the .rfnt type ramp and embedded headers
 make icons      # regenerate icon bitmaps from the design boards' SVG
-make compare    # design-vs-firmware contact sheet, all 37 boards (~2.8 min)
-                # ...and it prints `ok`, NOT a percentage -- see #41
+make compare    # design-vs-firmware contact sheet, all 60 boards (~5 min)
+                # ...`ok` means A FRAME WAS PRODUCED; the mismatch % beside it
+                # is the check. #41 added that figure and this line still said
+                # it did not print one.
 ```
 
 ```
@@ -63,13 +65,19 @@ id named by **two** rows of those tables (#77 — it would be rendered and count
 twice), and a screen the SIMULATOR KNOWS that will not render. It does **not**
 measure how close the render is -- the sheet still prints `ok` rather than a
 percentage, which is #41. A board with no screen behind it stays fine; that is
-**five of the 37** — measured, not inherited: a full run with the gate on reports
-`32/37 screens implemented` and exits 0 (Bookmarks, Boot, Home / missing book,
-Names, Names / empty). **Both figures move whenever a board lands** — this line has
-said 36 and 31; `BookErrorMemory.dc.html` is what took them to 37 and 32, and the
-five with nothing behind them are unchanged. Note the denominator read **37 before
-#77 as well**, and for the opposite reason: the extra row there was one board counted
-twice, not a thirty-seventh board.
+**four of the 60** — measured on 2026-09-17, not inherited: a full run with the gate
+on reports `56/60 screens implemented` and exits 0 (Bookmarks, Boot, Names,
+Names / empty).
+
+**BOTH FIGURES MOVE WHENEVER A BOARD LANDS, AND THIS LINE WENT STALE BY 23 OF THEM.**
+It has said 36/31 and then 37/32, the second recorded when `BookErrorMemory.dc.html`
+landed — and V1.1's connect flow and the whole articles feature have landed since,
+with nobody coming back here. **Re-run it rather than quoting it**; the count is a
+`make compare` away and this paragraph is the standing proof that an inherited one is
+worth nothing. #7 is the first thing to move the NUMERATOR alone: `Home / missing
+book` left the nothing-behind-it list where every previous move added a board.
+Note the denominator read **37 before #77 as well**, and for the opposite reason: the
+extra row there was one board counted twice, not a thirty-seventh board.
 
 **Wiring it at all needed the script to be able to fail.** `render_sim` returned
 a bare `None` for both "the simulator has never heard of this id" and "the
@@ -2738,6 +2746,7 @@ worth knowing before changing it:
 | Home | `Main.dc.html` | Focus starts on the CONTINUE block (`-1`), not the menu. Its title WRAPS and its chapter NAME elides — two card-sourced runs in one column, and only the title may grow. **NO COVER: the reading column is the whole content width** (#95). |
 | Home / empty | `HomeEmpty.dc.html` | A **variant**, not a screen: same `ScreenId`, same view model, same menu. |
 | Home / nothing open | `HomeUnopened.dc.html` | The same variant with different words. What the device actually shows today. |
+| Home / missing book | `HomeMissing.dc.html` | A **variant**, and the only one that keeps the reading column: the pointer names a book the card no longer has, so the title, author, percentage and chapter are still true and only the file is gone. A bordered strip says so and CONTINUE is **absent, not inert** — one predicate, `offersContinue()`, takes the slab, the ring's -1 and the bar's READ slot together. The note is the only growable run in that column, so it is the only one with a budget. |
 | Library | `Library.dc.html` | The only list that scrolls today, and the only screen with a rail. A book row is the FOLDER row with a different mark (#95) — one expression picking `kBook` or `kFolder`, and the 44×64 slot stays because `bookRowContentH` takes the max with it. |
 | Library / scrolled | `LibraryScrolled.dc.html` | Reached by pressing PAST the focused row and back — arriving from above windows it differently. |
 | Item actions, Delete confirm | their own boards | Overlays; a focus move repaints the overlay alone. |
@@ -5361,8 +5370,53 @@ without opening an EPUB at boot (a central directory plus an OPF parse, ~100 ms 
 ~32 KB of transient, for a block the user may not be looking at). The cost is that it
 can go stale, so **it is checked against the card** with one `exists` call before
 anything is drawn — Home confidently offering to continue a book that cannot be opened
-is worse than not offering. `HomeMissing.dc.html` is the boarded state for that case
-and is not built, so a stale pointer currently falls back to the nothing-open screen.
+is worse than not offering.
+
+**AND THE CHECK NOW COSTS A STRIP RATHER THAN THE COLUMN (#7).** It threw the pointer
+away, so a stale one fell back to the nothing-open screen — recorded here as "honest if
+less informative", which undersold it: the title, the author, the percentage and the
+chapter name are all **still true**, and dropping them told a reader the device had
+forgotten a book it could have named. `design/HomeMissing.dc.html` is built now: the
+reading column stays, with a bordered strip over it saying *"MIDDLEMARCH" IS GONE FROM
+THE SD CARD.* and no CONTINUE slab.
+
+- **IT IS A THIRD STATE, NOT A THIRD FLAG.** `nothingToContinue` still means the centred
+  block and nothing else; `bookMissing` keeps the column. What they share is that
+  neither draws a CONTINUE block, and **that is `HomeViewModel::offersContinue()`, one
+  predicate asked by three things that must agree** — the focus ring (-1 is the block's
+  own position), the Back gesture (Home's board binds Back to READ, which is CONTINUE's
+  action from a button), and the theme. Two of them spelled `!nothingToContinue`
+  independently, which is the shape this project has shipped a dead button from twice.
+- **THE BOARD PROMISED `READ` AND THE FIX WAS THE BOARD.** It drew the hint while its
+  own paragraph said "one fewer action" — and that slot is the BACK button, bound to
+  `Action::open()`, which on this state resolves from the same pointer, fails the same
+  `exists` check and **paints nothing**. Exactly the press the slab was removed for,
+  reached by the other door. The slot is the 36px spacer now, as HomeEmpty's and
+  HomeUnopened's are.
+- **AND THE BOARD DREW A 16×14 MARK WHERE IT DECLARED 32×28**, which only a pixel count
+  found: an `<svg>` is a flex ITEM in this strip, where `BookError.dc.html` draws the
+  identical SVG in a flex COLUMN and never meets the question, so Chrome shrank it to
+  exactly half. `flex-shrink: 0` — the spine's own declaration one box over. Measured:
+  **2.69%/2.57% → 2.17%/2.03%** against `home`'s 2.01%/1.85% in the same tree.
+- **THE NOTE IS THE ONLY GROWABLE RUN IN THAT COLUMN, so it is the only one with a
+  budget.** It carries a title off the card, and everything below it is fixed while the
+  menu is bottom-anchored — so the budget derives, and `clampProse` elides past it. A
+  255-byte name (FAT's maximum) wraps to about fourteen lines unclamped and writes the
+  author, the numeral and the chapter over the menu rows. Proved by mutation: removing
+  the clamp puts 1,902 differing pixels into the menu band.
+- **THE COPY IS `missingBookNote(title)` IN `core/`, NOT A LITERAL AT EACH PRODUCER.**
+  There are two — the shell's `homeVmForCard` and `screens.cpp`'s board specimen — and a
+  sentence spelled twice is one that can name a different book from the spine two inches
+  to its left. It is also where the shout happens, so an accented title is `LE FLÉAU` and
+  not `LE FLeAU`.
+- **`books == 0` STILL WINS**, so a card that lost every book shows `NO BOOKS YET` rather
+  than this. That is the older decision and it stands: with nothing on the card at all,
+  the sentence about the /books folder is the more useful thing to say.
+- **WHAT ONLY THE PANEL CAN ANSWER:** whether the curly quotes read at 21px under `Mono`
+  thresholding — a `"` is about 4×5px of ink there, which is the thin-stroke case this
+  file already records for `kChevron` — and whether the paper the missing slab leaves
+  between the chapter line and the menu reads as deliberate rather than as a screen that
+  failed to finish drawing.
 
 **"THE BOOK IS CLOSED" MEANS NO READER IS LEFT ON THE STACK**, not that one is no
 longer on TOP — and it asked the wrong question the moment the reader menu existed. The
@@ -5647,10 +5701,10 @@ now ask to open a book and they mean different ones, so `handleOpen` resolves it
 Library means its selected row, Home means the pointer's path. `Action::Kind::Open`
 carries no path deliberately, since `core/` does no storage. Neither fires on a
 no-reading-column variant: CONTINUE is unreachable there by the model (the ring is
-built `Noneless`) and `READ` is gated on `nothingToContinue`, because those boards draw
+built `Noneless`) and `READ` is gated on `offersContinue()`, because those boards draw
 an empty first hint slot and a bar that promises nothing must not do something.
 
-### Home has THREE states, and two of them share one mechanism
+### Home has FOUR states, and two of them share one mechanism
 
 `Main.dc.html` has a reading position to show. `HomeEmpty.dc.html` has no books.
 `HomeUnopened.dc.html` is the gap between them — **books on the card and none of them
@@ -5675,6 +5729,15 @@ fails — that drift is the thing the shared mechanism is supposed to make impos
 nothing persists a reading position: no card has a book in progress. When progress
 persistence lands, the third branch appears in `homeVmForCard` and this becomes the
 fallback for "books, but none started".
+
+**AND THE FOURTH IS `HomeMissing.dc.html`, WHICH SHARES NEITHER MECHANISM** (#7). The
+pointer names a book the card no longer has, and the reading column **stays** — its
+title, author, percentage and chapter are all still true, and only the file is gone.
+So it is not `nothingToContinue`, whose whole content is that there is nothing to say.
+What it shares with those two is one narrower fact — **no CONTINUE block** — and that
+is `offersContinue()`, which the focus ring, the Back gesture and the theme all ask.
+See the `last.json` paragraph under **Reading progress lives on the card** for the
+board defects it turned up and for what only the panel can answer.
 
 **Rejected: keeping the reading column and offering a book with a START slab.** There
 is no non-arbitrary book to pick — nothing has been opened so there is no most-recent,

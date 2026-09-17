@@ -50,6 +50,15 @@ HomeViewModel demoHomeEmptyVm();
 // there and it is worth going to look.
 HomeViewModel demoHomeUnopenedVm();
 
+// design/HomeMissing.dc.html. The pointer names a book the card no longer has, so
+// the reading column stays -- the pointer still knows the name, the author and the
+// percentage -- and a bordered strip above the stats says why they describe a book
+// that will not open. demoHomeVm's OWN content with three fields changed, for
+// demoHomeUnopenedVm's reason: the board is the same screen in a different
+// condition, and a second copy of Middlemarch here would be a second place for it
+// to drift.
+HomeViewModel demoHomeMissingVm();
+
 std::vector<ScreenId> demoHomeTargets();
 
 // design/Sleep.dc.html's own values -- see the definition.

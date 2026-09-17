@@ -683,6 +683,12 @@ int main(int argc, char** argv) {
   // the device. A second demo view-model would be a second place for the board's
   // content to live and to drift.
   const bool isHomeCharging = std::strcmp(argv[1], "home_charging") == 0;
+  // design/HomeMissing.dc.html. The pointer names a book the card no longer has:
+  // demoHomeVm's OWN content with the strip over it and no CONTINUE slab, because
+  // the pointer still carries the name, the author and the percentage. Its own
+  // subcommand rather than a flag, for the reason every other state board has one
+  // -- a flag could not be named by the comparison sheet or by a golden.
+  const bool isHomeMissing = std::strcmp(argv[1], "home_missing") == 0;
   const bool isLibraryScrolled = std::strcmp(argv[1], "library_scrolled") == 0;
   const bool isReader = std::strcmp(argv[1], "reader") == 0;
   // The two styled specimens, each its own subcommand for the reason every other
@@ -786,7 +792,8 @@ int main(int argc, char** argv) {
                          isWifiErrorFailed || isWifiNetworkActions;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
-      !isHomeUnopened && !isHomeCharging && !isLibraryScrolled && !isReader && !isSleepIdle &&
+      !isHomeUnopened && !isHomeCharging && !isHomeMissing && !isLibraryScrolled && !isReader &&
+      !isSleepIdle &&
       !isReaderMenu && !isContents && !isChapterOpen && !isReaderList && !isAnchored &&
       !isSleepWaking && !isLibraryOpening && !isTypography && !isPeek && !isSleepCover &&
       !isSleepCoverDetails && !isSleepCoverWaking && !isBookEnd && !isBookError &&
@@ -796,6 +803,7 @@ int main(int argc, char** argv) {
                  "unknown screen '%s' (expected 'home', 'sd_missing', 'library', "
                  "'library_actions', 'delete_confirm', 'book_details', 'settings', "
                  "'sleep', 'sleep_idle', 'home_empty', 'home_unopened', 'home_charging', "
+                 "'home_missing', "
                  "'library_scrolled', 'reader', 'reader_anchored', "
                  "'reader_chapter_open', 'reader_list', "
                  "'reader_menu', 'contents', 'typography', 'sleep_waking', "
@@ -1242,6 +1250,7 @@ int main(int argc, char** argv) {
   // of view model.
   reader::HomeViewModel homeVm = isHomeEmpty      ? reader::demoHomeEmptyVm()
                                  : isHomeUnopened ? reader::demoHomeUnopenedVm()
+                                 : isHomeMissing  ? reader::demoHomeMissingVm()
                                                   : reader::demoHomeVm();
   if (isHomeCharging) homeVm.batteryCharging = true;
   reader::App app(

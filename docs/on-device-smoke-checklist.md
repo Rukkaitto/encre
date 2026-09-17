@@ -497,6 +497,35 @@ nothing reads as a broken device.
 - [ ] **12.5** Delete a book from the Library and re-add it. Its progress is
       still there.
 
+## 12b. The book the card no longer has ([#7](https://github.com/Rukkaitto/encre/issues/7))
+
+Reached by deleting the book the pointer names, which needs a computer: read into
+a book, Back to Home, power off, delete that file from `/books` on the card, and
+boot. `/books` must still hold other books — with none at all the empty state wins,
+deliberately.
+
+- [ ] **12b.1** Home draws the reading column with the strip over it, **not**
+      `NOTHING OPEN YET`. The spine still carries the book's name; the author, the
+      percentage and the chapter line are the ones it had.
+- [ ] **12b.2** The strip reads `"<TITLE>" IS GONE FROM THE SD CARD.` inside a
+      bordered box with a warning triangle. **Look at the curly quotes** — they are
+      about 4x5px of ink at this size under `Mono` thresholding, which is the
+      thin-stroke case `kChevron` is recorded for, and no golden can judge whether
+      they read on glass.
+- [ ] **12b.3** **There is no CONTINUE slab**, the first hint slot is blank, and
+      LIBRARY is focused. Press **Back** — nothing happens and nothing repaints;
+      that slot is deliberately unbound here.
+- [ ] **12b.4** The paper between the chapter line and the menu is the slab's
+      absence. Judge whether it reads as deliberate or as a screen that failed to
+      finish drawing; that is a design question only the panel settles.
+- [ ] **12b.5** `[progress] the last book is gone from the card: <path>` and
+      `[progress] Home cannot continue (the file is gone) ...` are both in the log.
+- [ ] **12b.6** Put the file back and reboot: Home is ordinary again, CONTINUE is
+      focused and READ is in the bar.
+- [ ] **12b.7** A book with a LONG name (rename one to 200+ characters before
+      deleting it). The strip grows, the note elides, and the author, the numeral
+      and the chapter are all still drawn clear of the menu rows.
+
 ## 13. Articles over wallabag — **[needs a real instance]**
 
 **EVERY DEFECT THIS FEATURE SHIPPED WAS FOUND HERE AND BY NOTHING ELSE.** Eleven
