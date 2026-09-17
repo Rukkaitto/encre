@@ -2445,6 +2445,26 @@ case to look at if one ever appears.
     for the same reason and becomes load-bearing the moment the title fills its
     budget. `Bookmarks.dc.html` is the only other board whose value is a book
     title and now declares the same thing, although its screen is V1.1.
+  - **AND `WifiPassword.dc.html` HAD THE IDENTICAL OMISSION, FOUND THE IDENTICAL
+    WAY — BY REVIEWING A LATER PR WHOSE NEW BOARDS INHERITED THE BAND** (#134).
+    It is Contents' case, not Library's: `PASSWORD` names the screen and the value
+    is the SSID off the scan. Measured through the real ramp,
+    `BT-Hub6-XKQP-5GHz-Guest` is **333px** against **264 (X4) / 312 (X3)** of room
+    beside a 161px `PASSWORD`, so it **already came out cut on the device** while
+    Chrome without the attributes **wrapped** it, taking the band **64px → 96px**
+    at both geometries. The committed `PENDRAGON` is 146px and fits either way, so
+    the board is **byte-identical** across the fix and `wifi_password` measures the
+    same 3.67%/3.43% (14086/14348 px) before and after — a latent divergence costs
+    three attributes and no re-bless, which is worth saying because this one was
+    first deferred on an inflated estimate of what changing a compared board costs.
+  - **AND IT IS THE ONLY BAND IN THAT FAMILY THE OMISSION CAN REACH, which is what
+    stops the next person widening the fix to twenty boards.** Every other band in
+    the connect and wallabag flows declares none of the three either and **not one
+    of them is wrong**: their values are composed literals — `ON DEMAND`, `5 FOUND`,
+    `3 UNREAD`, `SIGNED IN`, `NOT SET UP`, `2 LEFT` — so they are the
+    no-yielding-question case above, five of the seven band call sites, arriving
+    again at scale. **The question to ask of a bare band is whether its value is
+    CONTENT**, not whether it declares the attributes.
   - **THE ONE PLACE THE FIRMWARE DOES NOT FOLLOW THE BOARD IS THE CUT RUN'S
     ALIGNMENT**, and it is deliberate: Chrome keeps the box at the budget and
     left-aligns the truncated text in it, leaving the ellipsis a few pixels short
