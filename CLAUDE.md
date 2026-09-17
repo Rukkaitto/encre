@@ -63,8 +63,9 @@ toolchain.
 three things: a board named in `compare-design.py` and absent from disk, a screen
 id named by **two** rows of those tables (#77 — it would be rendered and counted
 twice), and a screen the SIMULATOR KNOWS that will not render. It does **not**
-measure how close the render is -- the sheet still prints `ok` rather than a
-percentage, which is #41. A board with no screen behind it stays fine; that is
+measure how close the render is: every panel carries a mismatch percentage beside
+its `ok` since #41, and **nothing fails on it** -- there is no blessed number to
+fail against. A board with no screen behind it stays fine; that is
 **four of the 60** — measured on 2026-09-17, not inherited: a full run with the gate
 on reports `56/60 screens implemented` and exits 0 (Bookmarks, Boot, Names,
 Names / empty).
@@ -5404,6 +5405,26 @@ THE SD CARD.* and no CONTINUE slab.
   255-byte name (FAT's maximum) wraps to about fourteen lines unclamped and writes the
   author, the numeral and the chapter over the menu rows. Proved by mutation: removing
   the clamp puts 1,902 differing pixels into the menu band.
+  - **AND IT SHIPPED WRAPPING `Normal` WHILE THE BOARD SAID `anywhere` — the board and
+    the code on opposite sides of a declaration this change itself added.** The shell's
+    own fallback when the OPF gave no title is the **path**: one token, no space and no
+    hyphen, so `Normal` emits it as a single line however wide it measures, and
+    `clampProse` cannot help because it bounds LINES and returns untouched when the
+    count already fits. Measured at `/books/Le_Fleau_Stephen_King_edition_integrale
+    .epub`: 750px against a 248px column, inking **x=479 of 480 and x=527 of 528** —
+    through the box's border, through the margin, off the panel. `drawSpine` twenty
+    pixels to its left already passed `Anywhere`, so one title was wrapped by two rules
+    on one screen. The test watches **the box's own 14px padding**, which is paper by
+    construction, on the Sleep card's rule that the panel edge is where the damage
+    ENDED rather than where it is visible.
+  - **AND THE BUDGET WAS SHORT BY THE BOX'S OWN LOWER CHROME**, 10px: it was measured
+    from `contentTop` while the height adds the padding and the border again below the
+    content. **The pixels cannot see that one**, which is what made it worth writing
+    down: at the X3 it is a whole line (9 against 8) and the chapter line then lands
+    4px inside the menu — where the first row is **full-bleed inverted** and draws it
+    black on black, so a frame comparison passes on a wrong render. The assertion is
+    arithmetic (`longBottom + statsH <= menuTop`). At the X4 the floor's 13px remainder
+    absorbs it and nothing moves at all.
 - **THE COPY IS `missingBookNote(title)` IN `core/`, NOT A LITERAL AT EACH PRODUCER.**
   There are two — the shell's `homeVmForCard` and `screens.cpp`'s board specimen — and a
   sentence spelled twice is one that can name a different book from the spine two inches

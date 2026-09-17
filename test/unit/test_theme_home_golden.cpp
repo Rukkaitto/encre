@@ -396,5 +396,84 @@ TEST_CASE("A LONG TITLE CANNOT PUSH THE STATS INTO THE MENU") {
     REQUIRE(shortBottom > 0);
     CHECK(longBottom > shortBottom);
     CHECK(longBottom < menuTop);
+
+    // ...AND THE STATS FIT UNDER IT, which the byte comparison above CANNOT see.
+    // The first menu row is full-bleed inverted, so an overrun of a few pixels is
+    // drawn in black on black and vanishes -- `differing == 0` passes on a render
+    // that is wrong. The budget is therefore asserted as arithmetic: the strip's
+    // bottom plus everything below it has to stay above the menu.
+    //
+    // design/HomeMissing.dc.html's own numbers, named here rather than read from
+    // the theme, on this file's existing rule -- a test that reached for the theme's
+    // constants could not catch the theme changing them.
+    const reader::Font& meta = ramp.fonts[reader::Role::Meta400];
+    const int statsH = 22 + meta.lineHeight() + 18 + 67 + 6 + meta.lineHeight();
+    CHECK(longBottom + statsH <= menuTop);
+  }
+}
+
+TEST_CASE("A FILENAME TITLE CANNOT LEAVE THE STRIP") {
+  // The note names a book off the CARD, and the shell's own fallback when the OPF
+  // gave no title is the PATH -- one token with no space and no hyphen. A `Normal`
+  // wrap emits that as a single line however wide it measures, and clampProse
+  // cannot catch it: it bounds LINES, not width, and returns untouched when the
+  // count already fits. The board declares `overflow-wrap: anywhere` for this and
+  // the theme shipped without it, so the run went through the box's right border,
+  // through the column's margin and off the panel.
+  //
+  // THE TEST WATCHES THE BOX'S OWN PADDING, which is the Sleep card's rule: the
+  // 14px between the note's column and the border is paper BY CONSTRUCTION, so ink
+  // there is a run that escaped. The panel edge alone is the weaker check -- it is
+  // where the damage ENDED, and a run that merely eats the frame passes it.
+  Ramp ramp;
+  reader::QuietTheme theme;
+  // A real card's shape: the whole path, because that is what `readingPointer`
+  // substitutes when `last.title` is empty.
+  const std::string filename = "/books/Le_Fleau_Stephen_King_edition_integrale.epub";
+
+  for (const auto geom : {std::pair<int, int>{480, 800}, std::pair<int, int>{528, 792}}) {
+    const int w = geom.first, h = geom.second;
+    reader::HomeViewModel vm = reader::demoHomeMissingVm();
+    vm.title = filename;
+    vm.missingNote = reader::missingBookNote(vm.title);
+    reader::Framebuffer fb(w, h);
+    theme.renderHome(fb, ramp.fonts, vm, reader::Plane::Bw);
+
+    // The strip's own box, named here rather than read from the theme -- a test
+    // that reached for the theme's constants could not catch the theme changing
+    // them. design/HomeMissing.dc.html: `border: 2px`, `padding: 8px 14px`.
+    const int boxL = reader::kSpineW + kSpineColPad;
+    const int boxR = w - reader::kMargin;  // one past the box's right edge
+    const int kBorder = 2, kPadX = 14;
+    // THE BOX LOCATES ITSELF, rather than the test deriving where the strip starts:
+    // its two borders are the only rows inked all the way across this column above
+    // the menu, so the first and last of them ARE the box. The first version of this
+    // scanned from the top of the panel instead and failed on the battery mark,
+    // which legitimately sits on the same right margin 40px higher.
+    const int menuTop = h - homeBarH(ramp.fonts, vm) - 3 * reader::kRowH;
+    int boxTop = -1, boxBot = -1, fullRows = 0;
+    for (int y = 0; y < menuTop; ++y) {
+      bool full = true;
+      for (int x = boxL; x < boxR && full; ++x) full = !fb.getPixel(x, y);
+      if (!full) continue;
+      ++fullRows;
+      if (boxTop < 0) boxTop = y;
+      boxBot = y;
+    }
+    // The box is really there and is a box: two borders of kBorder rows each. This
+    // is what stops the two checks below passing on a strip that drew nothing.
+    REQUIRE(boxTop >= 0);
+    CHECK(fullRows == 2 * kBorder);
+
+    const int boxH = boxBot - boxTop + 1;
+    // 1. The right-hand PADDING: inside the border on both axes, which is why the
+    // window is inset by kBorder in y as well as x. Without the y inset the top and
+    // bottom borders cross it -- 14 columns x 4 rows = 56 px of furniture that is
+    // supposed to be there, and the check reads as a failure on every input.
+    CHECK(inkIn(fb, boxR - kBorder - kPadX, boxTop + kBorder, kPadX,
+                boxH - 2 * kBorder) == 0);
+    // 2. The margin OUTSIDE the box entirely, to the panel's edge. No inset needed:
+    // the borders stop at boxR.
+    CHECK(inkIn(fb, boxR, boxTop, w - boxR, boxH) == 0);
   }
 }

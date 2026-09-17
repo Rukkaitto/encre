@@ -320,8 +320,20 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
       // `vm.missingNote` PASSED DIRECTLY, for the lifetime reason above: a
       // `upperLatin1(...)` inline here would be a temporary the Prose's views
       // outlive. The shouting happens once, at missingBookNote.
+      //
+      // `Anywhere`, WHICH THE BOARD DECLARES AND THIS SHIPPED WITHOUT. The name in
+      // this sentence comes off the CARD, and the shell's own fallback is the PATH
+      // when the OPF gave no title -- one token, no space and no hyphen, so a
+      // `Normal` wrap emits it as a single line and `clampProse` cannot help: it
+      // bounds LINES, not width, and returns before eliding anything when the count
+      // already fits. Measured with `/books/Le_Fleau_Stephen_King_edition_integrale
+      // .epub`: the run reached 750px against a 248px column and inked x=479 of 480
+      // and x=527 of 528 -- through the box's right border, through the column's
+      // margin, to the last column of the glass. `drawSpine` twenty pixels to the
+      // left already passes this, so without it ONE title was wrapped by two rules
+      // on one screen.
       Prose note = wrapProse(meta, vm.missingNote, noteW, kSpineMissLeadEm,
-                             trackingEm(meta, kTightMetaEm));
+                             trackingEm(meta, kTightMetaEm), WordBreak::Anywhere);
 
       // THE NOTE MAY NOT PUSH THE STATS INTO THE MENU. It carries a title off the
       // card, so it is a run that can grow -- and this column's other runs are all
@@ -331,9 +343,23 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
       // two panels and on a card whose menu grows a row.
       const int statsH = kSpineMissStatsTop + meta.lineHeight() + kSpineNumGap +
                          kDisplayLineH + kSpineChapGap + meta.lineHeight();
+      // THE BOX'S LOWER CHROME IS PART OF THE BUDGET, and leaving it out let the
+      // stats run `kSpineMissBorder + kSpineMissPadY` past the menu: the box is
+      // measured from `contentTop`, but what sits below the content is the padding
+      // and the border again, and `ry` is `boxTop + boxH + ...`. The budget and the
+      // height disagreeing by exactly the chrome between them is the two-quantities
+      // rule the sleep card records, reached from the other side.
+      //
+      // THE PIXELS CANNOT SEE IT, WHICH IS WHY THE TEST IS ARITHMETIC. At the X3 it
+      // is a whole line -- 9 against 8 -- and the chapter line then lands 4px inside
+      // the menu, where the first row is FULL-BLEED INVERTED and draws it black on
+      // black. A frame comparison passes on that render; `longBottom + statsH <=
+      // menuTop` is what fails. At the X4 the floor's remainder (13px) absorbs the
+      // 10 and nothing moves at all.
+      const int chromeBelow = kSpineMissBorder + kSpineMissPadY;
       int maxLines = 1;
       if (note.leadF26 > 0) {
-        maxLines = pxToF26(menuTop - statsH - contentTop) / note.leadF26;
+        maxLines = pxToF26(menuTop - statsH - contentTop - chromeBelow) / note.leadF26;
         if (maxLines < 1) maxLines = 1;
       }
       clampProse(meta, note, maxLines, noteW, noteTail);
