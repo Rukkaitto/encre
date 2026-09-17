@@ -115,6 +115,24 @@ constexpr int kSpineSlabGap = 26;    // chapter to CONTINUE
 constexpr int kSpineSlabH = 68;      // the slab, 4px shorter than the old 72
 constexpr int kSpineSlabPadX = 18;   // the slab's own `padding: 0 18px`
 constexpr int kSpineAuthorEm = 200;  // 0.2em on the shouted author
+// design/HomeMissing.dc.html's strip, which sits between the battery line and the
+// stats when the pointer names a book the card no longer has. Its own numbers, and
+// its HEIGHT is deliberately not among them: the note WRAPS, so a pinned height is
+// this file's first invariant broken -- derive from the box model, never pin what
+// the board computes.
+constexpr int kSpineMissTop = 16;      // the strip's `margin-top`
+constexpr int kSpineMissBorder = 2;    // its `border: 2px solid`
+constexpr int kSpineMissPadX = 14;     // its `padding: 8px 14px`
+constexpr int kSpineMissPadY = 8;
+constexpr int kSpineMissGap = 12;      // its `gap` -- the mark to the note
+constexpr int kSpineMissLeadEm = 1350; // the note's `line-height: 1.35`
+// STRIP TO THE AUTHOR LINE, AND IT IS 22 WHERE Main.dc.html SAYS 26. The board
+// states both, and the four pixels are the strip's own 2px border: the gap a
+// reader sees is measured from the ink, and the bordered box's ink is 2px lower
+// than the battery line's baseline box ends. Taking kSpineStatsTop here would put
+// the author 4px further from a box than from nothing, which is the direction that
+// reads as a gap that grew.
+constexpr int kSpineMissStatsTop = 22;
 // The two no-book states: the prose column and its lead-in below the strip. 324
 // where it was 400, because the spine takes 112 off the panel -- and it is still
 // a number to check in BOTH engines, since the firmware's autohinted faces
@@ -276,6 +294,94 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
     const int textX = colX + kSpineColPadL;
     int ry = stripBottom + kSpineStatsTop;
 
+    // THE BOOK IS GONE FROM THE CARD (design/HomeMissing.dc.html). The reading
+    // column stays -- the pointer knows the name, the author and how far in the
+    // reader was -- and this strip is what explains why the numbers under it
+    // describe a book that will not open.
+    //
+    // BORDERED RATHER THAN INVERTED, which the board argues: an inverted band at
+    // this size reads as a control, and the CONTINUE slab is the inverted element
+    // on this screen. This is a statement, and there is nothing to press.
+    //
+    if (vm.bookMissing) {
+      // `noteTail` IS DECLARED BEFORE THE Prose IT BELONGS TO, and the order is the
+      // point: clampProse's elided last line is a NEW string that is not in the text
+      // the Prose holds views into, so it has to outlive it -- and a local declared
+      // after it is destroyed first. Home shipped that lifetime the other way round
+      // once and rendered a column of notdef boxes, invisible to every golden
+      // because a notdef box inks rows exactly like a letter does.
+      std::string noteTail;
+      const int boxTop = stripBottom + kSpineMissTop;
+      const int contentTop = boxTop + kSpineMissBorder + kSpineMissPadY;
+      const Icon& warn = icons::kWarning;
+      const int noteX = textX + kSpineMissBorder + kSpineMissPadX + warn.w + kSpineMissGap;
+      const int noteW = (textX + colW - kSpineMissBorder - kSpineMissPadX) - noteX;
+
+      // `vm.missingNote` PASSED DIRECTLY, for the lifetime reason above: a
+      // `upperLatin1(...)` inline here would be a temporary the Prose's views
+      // outlive. The shouting happens once, at missingBookNote.
+      //
+      // `Anywhere`, WHICH THE BOARD DECLARES AND THIS SHIPPED WITHOUT. The name in
+      // this sentence comes off the CARD, and the shell's own fallback is the PATH
+      // when the OPF gave no title -- one token, no space and no hyphen, so a
+      // `Normal` wrap emits it as a single line and `clampProse` cannot help: it
+      // bounds LINES, not width, and returns before eliding anything when the count
+      // already fits. Measured with `/books/Le_Fleau_Stephen_King_edition_integrale
+      // .epub`: the run reached 750px against a 248px column and inked x=479 of 480
+      // and x=527 of 528 -- through the box's right border, through the column's
+      // margin, to the last column of the glass. `drawSpine` twenty pixels to the
+      // left already passes this, so without it ONE title was wrapped by two rules
+      // on one screen.
+      Prose note = wrapProse(meta, vm.missingNote, noteW, kSpineMissLeadEm,
+                             trackingEm(meta, kTightMetaEm), WordBreak::Anywhere);
+
+      // THE NOTE MAY NOT PUSH THE STATS INTO THE MENU. It carries a title off the
+      // card, so it is a run that can grow -- and this column's other runs are all
+      // fixed, which is what makes a budget derivable at all: everything below the
+      // strip costs a known height, the menu is bottom-anchored, and what is left
+      // is the note's. Derived and never pinned, so it answers differently on the
+      // two panels and on a card whose menu grows a row.
+      const int statsH = kSpineMissStatsTop + meta.lineHeight() + kSpineNumGap +
+                         kDisplayLineH + kSpineChapGap + meta.lineHeight();
+      // THE BOX'S LOWER CHROME IS PART OF THE BUDGET, and leaving it out let the
+      // stats run `kSpineMissBorder + kSpineMissPadY` past the menu: the box is
+      // measured from `contentTop`, but what sits below the content is the padding
+      // and the border again, and `ry` is `boxTop + boxH + ...`. The budget and the
+      // height disagreeing by exactly the chrome between them is the two-quantities
+      // rule the sleep card records, reached from the other side.
+      //
+      // THE PIXELS CANNOT SEE IT, WHICH IS WHY THE TEST IS ARITHMETIC. At the X3 it
+      // is a whole line -- 9 against 8 -- and the chapter line then lands 4px inside
+      // the menu, where the first row is FULL-BLEED INVERTED and draws it black on
+      // black. A frame comparison passes on that render; `longBottom + statsH <=
+      // menuTop` is what fails. At the X4 the floor's remainder (13px) absorbs the
+      // 10 and nothing moves at all.
+      const int chromeBelow = kSpineMissBorder + kSpineMissPadY;
+      int maxLines = 1;
+      if (note.leadF26 > 0) {
+        maxLines = pxToF26(menuTop - statsH - contentTop - chromeBelow) / note.leadF26;
+        if (maxLines < 1) maxLines = 1;
+      }
+      clampProse(meta, note, maxLines, noteW, noteTail);
+
+      // THE BOX'S HEIGHT IS A RESULT: the board's `align-items: center` over a
+      // 28px mark and a note of one line or several, so the taller of the two sets
+      // the content box and the shorter is centred in it.
+      const int noteH = f26ToPx(note.heightF26());
+      const int contentH = noteH > warn.h ? noteH : warn.h;
+      const int boxH = contentH + 2 * (kSpineMissBorder + kSpineMissPadY);
+      outlineRect(fb, textX, boxTop, colW, boxH, kSpineMissBorder);
+      drawIcon(fb, warn, textX + kSpineMissBorder + kSpineMissPadX,
+               iconTopIn(contentTop, contentH, warn.h), Ink::Black, plane);
+      // Centred in 1/64 px rather than in whole pixels: the note's height is a
+      // fraction (1.35 x 21px is 28.35) and halving a pre-rounded one puts the run
+      // half a pixel out against the mark beside it.
+      drawProse(fb, meta, note, noteX, noteW,
+                pxToF26(contentTop) + (pxToF26(contentH) - note.heightF26()) / 2, Ink::Black,
+                plane, ProseAlign::Left);
+      ry = boxTop + boxH + kSpineMissStatsTop;
+    }
+
     // SHOUTED AND TRACKED, at Meta400 rather than Body400. The spine has taken
     // the naming job, so this run is metadata ABOUT the book rather than the
     // second line of a title block -- which is what the board says by setting it
@@ -298,21 +404,30 @@ void QuietTheme::renderHome(Framebuffer& fb, const FontSet& fonts, const HomeVie
 
     // CONTINUE. Focused when no menu row is, which is the -1 position the focus
     // ring keeps for it.
-    const bool continueFocused = (vm.focusedMenuIndex < 0);
-    const Font& label = fonts[Role::Label500];
-    if (continueFocused)
-      fb.fillRect(textX, ry, colW, kSpineSlabH, false);
-    else
-      outlineRect(fb, textX, ry, colW, kSpineSlabH, 2);
-    const Ink cink = continueFocused ? Ink::White : Ink::Black;
-    drawText(fb, label, textX + kSpineSlabPadX, baselineIn(label, ry, kSpineSlabH), "CONTINUE",
-             cink, trackingEm(label, kBlockLabelEm), plane);
-    // kForward, not kChevron: the board draws a long arrow with a shaft here, and
-    // the chevron is the menu ROW's disclosure. An action block proceeds; a row
-    // discloses.
-    const Icon& mark = icons::kForward;
-    drawIcon(fb, mark, textX + colW - kSpineSlabPadX - mark.w,
-             iconTopIn(ry, kSpineSlabH, mark.h), cink, plane);
+    //
+    // ABSENT, NOT INERT, where the book is gone: a slab that draws and does nothing
+    // is the works-only-sometimes trap this project has shipped twice, and a slab
+    // that is not there teaches nothing because there is nothing to press. The
+    // same predicate builds the focus ring Noneless, so -1 cannot be reached to
+    // press it, and empties the bar's READ slot -- one question, three answers that
+    // cannot disagree.
+    if (vm.offersContinue()) {
+      const bool continueFocused = (vm.focusedMenuIndex < 0);
+      const Font& label = fonts[Role::Label500];
+      if (continueFocused)
+        fb.fillRect(textX, ry, colW, kSpineSlabH, false);
+      else
+        outlineRect(fb, textX, ry, colW, kSpineSlabH, 2);
+      const Ink cink = continueFocused ? Ink::White : Ink::Black;
+      drawText(fb, label, textX + kSpineSlabPadX, baselineIn(label, ry, kSpineSlabH), "CONTINUE",
+               cink, trackingEm(label, kBlockLabelEm), plane);
+      // kForward, not kChevron: the board draws a long arrow with a shaft here, and
+      // the chevron is the menu ROW's disclosure. An action block proceeds; a row
+      // discloses.
+      const Icon& mark = icons::kForward;
+      drawIcon(fb, mark, textX + colW - kSpineSlabPadX - mark.w,
+               iconTopIn(ry, kSpineSlabH, mark.h), cink, plane);
+    }
   }
 
   for (size_t i = 0; i < vm.menu.size(); ++i) {

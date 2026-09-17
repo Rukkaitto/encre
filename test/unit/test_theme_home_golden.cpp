@@ -267,3 +267,213 @@ TEST_CASE("QuietTheme renders Home charging to golden on both geometries") {
   SUBCASE("X4 480x800") { renderOne(480, 800, "home_charging"); }
   SUBCASE("X3 528x792") { renderOne(528, 792, "home_charging_x3"); }
 }
+
+namespace {
+// The bar's height is ASKED FOR rather than assumed, exactly as renderHome asks
+// for it: it derives from the hint labels and their marks, so a bar whose first
+// slot is empty is not necessarily the same height as one that is not.
+int homeBarH(const reader::FontSet& fonts, const reader::HomeViewModel& vm) {
+  reader::Hint hints[4];
+  const reader::Icon* marks[4] = {&reader::icons::kBook, &reader::icons::kDot,
+                                  &reader::icons::kUp, &reader::icons::kDown};
+  reader::buildHints(marks, vm.hints, vm.holds, hints);
+  return reader::hintBarHeight(fonts, hints);
+}
+}  // namespace
+
+// --- The missing book -------------------------------------------------------
+//
+// design/HomeMissing.dc.html: the pointer names a book the card no longer has.
+// The reading column stays -- the pointer knows the name, the author, the
+// percentage and the chapter -- with a bordered strip over it and no CONTINUE
+// slab. A golden at both geometries, because this layout is the only one on Home
+// whose HEIGHT is a result: the note wraps, so the strip's box grows with it and
+// everything under it moves.
+TEST_CASE("QuietTheme renders Home's missing book to golden on both geometries") {
+  Ramp ramp;
+  reader::QuietTheme theme;
+  auto renderOne = [&](int w, int h, const std::string& name) {
+    reader::Framebuffer fb(w, h);
+    theme.renderHome(fb, ramp.fonts, reader::demoHomeMissingVm(), reader::Plane::Bw);
+    golden::checkGolden(fb, name);
+  };
+  SUBCASE("X4 480x800") { renderOne(480, 800, "home_missing"); }
+  SUBCASE("X3 528x792") { renderOne(528, 792, "home_missing_x3"); }
+}
+
+TEST_CASE("the missing-book strip draws no CONTINUE slab, and the ordinary Home does") {
+  // The slab is the largest run of solid ink in the column, so its absence is
+  // measurable without knowing where it sat: with it gone, the column below the
+  // stats is paper all the way to the menu.
+  Ramp ramp;
+  reader::QuietTheme theme;
+  for (const auto geom : {std::pair<int, int>{480, 800}, std::pair<int, int>{528, 792}}) {
+    const int w = geom.first, h = geom.second;
+    reader::Framebuffer ordinary(w, h), missing(w, h);
+    theme.renderHome(ordinary, ramp.fonts, reader::demoHomeVm(), reader::Plane::Bw);
+    theme.renderHome(missing, ramp.fonts, reader::demoHomeMissingVm(), reader::Plane::Bw);
+    const int barH = homeBarH(ramp.fonts, reader::demoHomeMissingVm());
+
+    // ROWS INKED ALL THE WAY ACROSS THE COLUMN, which is what a slab is and what no
+    // run of type can be. A probe at one x is not enough: the first version used
+    // one five pixels into the column and measured 43 unbroken rows on the missing
+    // render -- the `6` of the 67px numeral, which starts on the same margin.
+    const int x0 = reader::kSpineW + kSpineColPad;
+    const int x1 = w - reader::kMargin;
+    auto fullRows = [&](const reader::Framebuffer& fb, int yEnd) {
+      int n = 0;
+      for (int y = 0; y < yEnd; ++y) {
+        bool full = true;
+        for (int x = x0; x < x1 && full; ++x) full = !fb.getPixel(x, y);
+        if (full) ++n;
+      }
+      return n;
+    };
+    // The menu's focused row is full-bleed inverted, so the count stops above it.
+    const int menuTop = h - barH - 3 * reader::kRowH;
+    // CONTINUE is 68 tall and FILLED, because demoHomeVm focuses it -- less the
+    // rows its knocked-out label and arrow interrupt, which is why this is not 68.
+    CHECK(fullRows(ordinary, menuTop) >= 30);
+    // The missing state's only full-column rows are the strip's two 2px borders.
+    CHECK(fullRows(missing, menuTop) == 2 * 2);
+  }
+}
+
+TEST_CASE("A LONG TITLE CANNOT PUSH THE STATS INTO THE MENU") {
+  // The note carries a name off the CARD, so it is the one run in this column that
+  // can grow -- and everything below it is fixed and the menu is bottom-anchored,
+  // which is what makes a budget derivable at all. Unbounded, a 255-byte name (FAT's
+  // long-name maximum, so a name a real card can hold) wraps to about fourteen lines
+  // and writes the author, the numeral and the chapter over the menu rows.
+  Ramp ramp;
+  reader::QuietTheme theme;
+  // A title with spaces, so the wrap has real break opportunities: `Anywhere` would
+  // hide a missing clamp behind its own breaking on a single long word.
+  std::string longTitle;
+  while (longTitle.size() < 255) longTitle += "Middlemarch or a Study of Provincial Life ";
+  longTitle.resize(255);
+
+  for (const auto geom : {std::pair<int, int>{480, 800}, std::pair<int, int>{528, 792}}) {
+    const int w = geom.first, h = geom.second;
+    reader::HomeViewModel shortVm = reader::demoHomeMissingVm();
+    reader::HomeViewModel longVm = shortVm;
+    longVm.title = longTitle;
+    longVm.missingNote = reader::missingBookNote(longVm.title);
+
+    reader::Framebuffer a(w, h), b(w, h);
+    theme.renderHome(a, ramp.fonts, shortVm, reader::Plane::Bw);
+    theme.renderHome(b, ramp.fonts, longVm, reader::Plane::Bw);
+
+    // THE MENU AND THE BAR ARE BYTE-IDENTICAL, which is the whole property: they
+    // are anchored to the bottom and know nothing about the title, so anything
+    // differing down there is the column having overrun into them. The spine is
+    // excluded because it legitimately carries the two different names.
+    const int menuTop = h - homeBarH(ramp.fonts, shortVm) - 3 * reader::kRowH;
+    int differing = 0;
+    for (int y = menuTop; y < h; ++y)
+      for (int x = reader::kSpineW; x < w; ++x)
+        if (a.getPixel(x, y) != b.getPixel(x, y)) ++differing;
+    CHECK(differing == 0);
+
+    // ...AND THE CLAMP ACTUALLY ENGAGED, so the case above cannot pass by the note
+    // having stayed one line. The box's bottom border is a full-column horizontal
+    // rule; the long note's sits lower than the short one's and still above the
+    // menu. Without that second half the fixture could go quiet the day the budget
+    // is derived wrongly and answers 1.
+    auto boxBottom = [&](const reader::Framebuffer& fb) {
+      const int x0 = reader::kSpineW + kSpineColPad;
+      const int x1 = w - reader::kMargin;
+      int last = -1;
+      for (int y = 0; y < menuTop; ++y) {
+        bool full = true;
+        for (int x = x0; x < x1 && full; ++x) full = !fb.getPixel(x, y);
+        if (full) last = y;
+      }
+      return last;
+    };
+    const int shortBottom = boxBottom(a);
+    const int longBottom = boxBottom(b);
+    REQUIRE(shortBottom > 0);
+    CHECK(longBottom > shortBottom);
+    CHECK(longBottom < menuTop);
+
+    // ...AND THE STATS FIT UNDER IT, which the byte comparison above CANNOT see.
+    // The first menu row is full-bleed inverted, so an overrun of a few pixels is
+    // drawn in black on black and vanishes -- `differing == 0` passes on a render
+    // that is wrong. The budget is therefore asserted as arithmetic: the strip's
+    // bottom plus everything below it has to stay above the menu.
+    //
+    // design/HomeMissing.dc.html's own numbers, named here rather than read from
+    // the theme, on this file's existing rule -- a test that reached for the theme's
+    // constants could not catch the theme changing them.
+    const reader::Font& meta = ramp.fonts[reader::Role::Meta400];
+    const int statsH = 22 + meta.lineHeight() + 18 + 67 + 6 + meta.lineHeight();
+    CHECK(longBottom + statsH <= menuTop);
+  }
+}
+
+TEST_CASE("A FILENAME TITLE CANNOT LEAVE THE STRIP") {
+  // The note names a book off the CARD, and the shell's own fallback when the OPF
+  // gave no title is the PATH -- one token with no space and no hyphen. A `Normal`
+  // wrap emits that as a single line however wide it measures, and clampProse
+  // cannot catch it: it bounds LINES, not width, and returns untouched when the
+  // count already fits. The board declares `overflow-wrap: anywhere` for this and
+  // the theme shipped without it, so the run went through the box's right border,
+  // through the column's margin and off the panel.
+  //
+  // THE TEST WATCHES THE BOX'S OWN PADDING, which is the Sleep card's rule: the
+  // 14px between the note's column and the border is paper BY CONSTRUCTION, so ink
+  // there is a run that escaped. The panel edge alone is the weaker check -- it is
+  // where the damage ENDED, and a run that merely eats the frame passes it.
+  Ramp ramp;
+  reader::QuietTheme theme;
+  // A real card's shape: the whole path, because that is what `readingPointer`
+  // substitutes when `last.title` is empty.
+  const std::string filename = "/books/Le_Fleau_Stephen_King_edition_integrale.epub";
+
+  for (const auto geom : {std::pair<int, int>{480, 800}, std::pair<int, int>{528, 792}}) {
+    const int w = geom.first, h = geom.second;
+    reader::HomeViewModel vm = reader::demoHomeMissingVm();
+    vm.title = filename;
+    vm.missingNote = reader::missingBookNote(vm.title);
+    reader::Framebuffer fb(w, h);
+    theme.renderHome(fb, ramp.fonts, vm, reader::Plane::Bw);
+
+    // The strip's own box, named here rather than read from the theme -- a test
+    // that reached for the theme's constants could not catch the theme changing
+    // them. design/HomeMissing.dc.html: `border: 2px`, `padding: 8px 14px`.
+    const int boxL = reader::kSpineW + kSpineColPad;
+    const int boxR = w - reader::kMargin;  // one past the box's right edge
+    const int kBorder = 2, kPadX = 14;
+    // THE BOX LOCATES ITSELF, rather than the test deriving where the strip starts:
+    // its two borders are the only rows inked all the way across this column above
+    // the menu, so the first and last of them ARE the box. The first version of this
+    // scanned from the top of the panel instead and failed on the battery mark,
+    // which legitimately sits on the same right margin 40px higher.
+    const int menuTop = h - homeBarH(ramp.fonts, vm) - 3 * reader::kRowH;
+    int boxTop = -1, boxBot = -1, fullRows = 0;
+    for (int y = 0; y < menuTop; ++y) {
+      bool full = true;
+      for (int x = boxL; x < boxR && full; ++x) full = !fb.getPixel(x, y);
+      if (!full) continue;
+      ++fullRows;
+      if (boxTop < 0) boxTop = y;
+      boxBot = y;
+    }
+    // The box is really there and is a box: two borders of kBorder rows each. This
+    // is what stops the two checks below passing on a strip that drew nothing.
+    REQUIRE(boxTop >= 0);
+    CHECK(fullRows == 2 * kBorder);
+
+    const int boxH = boxBot - boxTop + 1;
+    // 1. The right-hand PADDING: inside the border on both axes, which is why the
+    // window is inset by kBorder in y as well as x. Without the y inset the top and
+    // bottom borders cross it -- 14 columns x 4 rows = 56 px of furniture that is
+    // supposed to be there, and the check reads as a failure on every input.
+    CHECK(inkIn(fb, boxR - kBorder - kPadX, boxTop + kBorder, kPadX,
+                boxH - 2 * kBorder) == 0);
+    // 2. The margin OUTSIDE the box entirely, to the panel's edge. No inset needed:
+    // the borders stop at boxR.
+    CHECK(inkIn(fb, boxR, boxTop, w - boxR, boxH) == 0);
+  }
+}

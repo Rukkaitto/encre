@@ -1,10 +1,26 @@
 #pragma once
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include "reader/focus_screen.h"
 #include "reader/viewmodel.h"
 
 namespace reader {
+
+// THE MISSING-BOOK STRIP'S SENTENCE, composed from the book's own name.
+// design/HomeMissing.dc.html: `"MIDDLEMARCH" IS GONE FROM THE SD CARD.`
+//
+// A FUNCTION RATHER THAN A LITERAL AT EACH PRODUCER, because there are two --
+// the shell builds this view model from the card's pointer and screens.cpp
+// builds the board's specimen -- and a sentence spelled twice is a sentence free
+// to be spelled differently. It also cannot name a different book from the spine
+// two inches to its left, because there is one source for the name.
+//
+// IN `core/` RATHER THAN THE SHELL for this file's usual reason: `shell/` has no
+// harness, and shouting a title through upperLatin1 is exactly the kind of thing
+// that renders as a notdef box on one input and correctly on every other.
+std::string missingBookNote(std::string_view title);
 
 // Home. Focus runs Continue (-1) then down through the menu rows; Confirm opens
 // the focused row's screen.

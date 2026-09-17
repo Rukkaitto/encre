@@ -326,8 +326,8 @@ ICONS = {
     # both would have let the second silently overwrite the first rather than
     # failing -- one entry is the resolution, not a merge of two.
     #
-    # ONE BITMAP SERVES ALL THREE, and that is a fact about the generator rather
-    # than a coincidence: the three svgs are geometrically identical -- same
+    # ONE BITMAP SERVES THEM ALL, and that is a fact about the generator rather
+    # than a coincidence: the svgs are geometrically identical -- same
     # viewBox, same three shapes, same 1.6 stroke -- and differ only in COLOUR,
     # #000000 on the two dialogs against #ffffff on the banner, which draws it
     # inside an inverted band. extract() re-colours an all-white mark to black
@@ -335,12 +335,20 @@ ICONS = {
     # time, so the white authoring rasterises to the same bytes. The banner's
     # board is honest about the ink it is drawn in; it is not a second mark.
     #
-    # `source` NAMES BookError.dc.html AND THE CHOICE IS ARBITRARY between the
-    # three -- the match `M9 1 17 15H1z` is on all of them, so `source` is the
+    # `source` NAMES BookError.dc.html AND THE CHOICE IS ARBITRARY between
+    # them -- the match `M9 1 17 15H1z` is on all of them, so `source` is the
     # second line of defence kBook/kBookLarge and kBattery/kBatteryCharging need,
     # not a statement that this board owns the design. The cost is the one shared
     # icons always have: editing the triangle on LowBattery.dc.html alone would
-    # not reach the generator. Change it on all three or on none.
+    # not reach the generator. Change it on every board carrying it or on none.
+    #
+    # AND THE COUNT WAS THE WRONG THING TO WRITE DOWN. This said "all three" and
+    # named two boards; adding design/HomeMissing.dc.html's strip (#7) sent someone
+    # to count, and the real answer today is ELEVEN -- the three BookError shapes,
+    # LowBattery, HomeMissing, three WifiError shapes and three Wallabag ones.
+    # `grep -l 'M9 1 17 15H1z' design/*.dc.html` is the list, and it is the check to
+    # RUN rather than a number to trust: a figure in a comment about how many boards
+    # draw a mark goes stale on the next board that draws it, and nothing fails.
     #
     # THREE DIAGONALS, which is the shape Mono thresholding treats worst:
     # CLAUDE.md records kChevron coming out a notch lighter because its stroke is

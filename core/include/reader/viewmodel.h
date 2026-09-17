@@ -88,6 +88,28 @@ struct HomeViewModel {
   // be a theme deciding what the device tells the user.
   std::string emptyTitle;
   std::string emptyBody;
+  // THE POINTER NAMES A BOOK THE CARD NO LONGER HAS -- deleted from a computer
+  // between sessions, or a different card in the slot. design/HomeMissing.dc.html.
+  //
+  // IT IS NOT `nothingToContinue`, AND THE DIFFERENCE IS THE WHOLE STATE. The
+  // pointer still KNOWS the book: its name, its author, how far in the reader was.
+  // What is missing is the file. So the reading column is drawn, the spine still
+  // carries the title, and a bordered strip above the stats says why the numbers
+  // below it describe a book that will not open. Falling back to the centred block
+  // -- which is what this shipped as, and what CLAUDE.md called "honest if less
+  // informative" -- throws away the one piece of information the reader needs to
+  // understand what happened, and reads as the device having forgotten rather than
+  // as the card having changed.
+  bool bookMissing = false;
+  // The strip's sentence, and it names the book. Composed by `missingBookNote` so
+  // that the shell's and the demo's spelling of it cannot diverge, and so that it
+  // cannot name a different book from the spine two inches to its left.
+  //
+  // A FLAG AND A STRING RATHER THAN `!missingNote.empty()`, on ListRow::discloses'
+  // rule: deriving a state from an empty value makes a book whose metadata gave no
+  // title indistinguishable from a book that is present. The theme ELIDES this --
+  // it wraps, and then clamps against the stats it may not push into.
+  std::string missingNote;
   std::vector<MenuEntry> menu;
   int focusedMenuIndex = -1;                 // -1 = Continue block focused
   std::array<std::string, 4> hints{};        // Back, Confirm, Up, Down slots
@@ -97,6 +119,18 @@ struct HomeViewModel {
   // cannot drift apart -- a ring always means a hold is bound, and a bound hold
   // always shows a ring.
   std::array<bool, 4> holds{};
+
+  // DOES THIS SCREEN DRAW A CONTINUE BLOCK? One question asked once, by the three
+  // things that have to agree about it: the focus ring (-1 is the block's own
+  // position and must be unreachable where there is no block), the Back gesture
+  // (Home's board binds Back to READ, which is CONTINUE's action from a button
+  // instead of a selection) and the theme.
+  //
+  // Two of those spelled it `!nothingToContinue` independently, which was one
+  // condition in two places -- and the third state to stop offering CONTINUE would
+  // have had to be remembered in both. This project has shipped a dead button twice
+  // from exactly that shape, which is the shape the missing-book state closes.
+  bool offersContinue() const { return !nothingToContinue && !bookMissing; }
 };
 
 // The no-card prompt (spec 6): design/SdMissing.dc.html. Content only -- the

@@ -16,6 +16,7 @@
 #include "reader/screen_battery_empty.h"
 #include "reader/screen_book_details.h"
 #include "reader/screen_delete_confirm.h"
+#include "reader/screen_home.h"  // missingBookNote
 #include "reader/screen_item_actions.h"
 #include "reader/screen_library.h"
 #include "reader/screen_sd_missing.h"
@@ -96,6 +97,31 @@ HomeViewModel demoHomeUnopenedVm() {
   // nothing to resume. The empty slot keeps its 36px.
   vm.hints = {"", "SELECT", "UP", "DOWN"};
   vm.holds = {false, false, false, false};
+  return vm;
+}
+
+// design/HomeMissing.dc.html. Home with a pointer naming a book that is gone.
+//
+// demoHomeVm's OWN content, with three fields changed -- and that is the shape of
+// the state rather than economy: the board draws the same book, the same author,
+// the same 6% and the same chapter, because the POINTER still carries all of them.
+// Only the file is missing. A second Middlemarch here would be a second place for
+// the demo book to drift, which is the mistake demoHomeUnopenedVm avoids by being
+// demoHomeEmptyVm's shape.
+HomeViewModel demoHomeMissingVm() {
+  HomeViewModel vm = demoHomeVm();
+  vm.bookMissing = true;
+  // Composed from THIS view model's own title, never re-typed: the strip and the
+  // spine name one book, and the function is what makes that structural.
+  vm.missingNote = missingBookNote(vm.title);
+  // The first menu row, not the CONTINUE block -- there is no block, and LIBRARY
+  // is the way out of this state.
+  vm.focusedMenuIndex = 0;
+  // NO READ HINT, for demoHomeEmptyVm's reason with a sharper edge: here there IS
+  // a book to read and the card cannot produce it, so the press would resolve from
+  // the same pointer, fail the same `exists` check and paint nothing. The empty
+  // slot keeps its 36px.
+  vm.hints = {"", "SELECT", "UP", "DOWN"};
   return vm;
 }
 
