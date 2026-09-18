@@ -1,0 +1,56 @@
+# Shared Orca configuration for this repo. Orca reads this file from the repo
+# root, so these hooks are reviewed like any other code and are the same for
+# everyone -- unlike the per-machine scripts in Settings, which drift silently.
+#
+# TWO THINGS TO KNOW BEFORE EDITING IT:
+#
+# 1. A REPO IMPORTED AS AN EXISTING FOLDER DEFAULTS TO "Local only", AND THIS
+#    FILE IS THEN PARSED AND IGNORED. Settings -> Repository -> Hooks -> Command
+#    Source has to read `orca.yaml` (repo commands only) or `both` (this file
+#    first, then your local ones). Orca shows "Using `orca.yaml`" when it is
+#    actually being used; anything else and these hooks are not running.
+# 2. Only four keys are supported -- `scripts`, `setup`, `archive` and
+#    `issueCommand` -- and the INDENTATION IS LOAD-BEARING: hook keys at two
+#    spaces, command lines at four. Orca's own diagnostic for a file it cannot
+#    parse says exactly that, which is how it is spelled here.
+#
+# Orca passes three variables to these commands:
+#   $ORCA_WORKTREE_PATH   the worktree being created; commands run from here
+#   $ORCA_ROOT_PATH       the main checkout, for carrying per-machine files over
+#   $ORCA_WORKSPACE_NAME  the workspace name, usually the branch
+#
+# The logic lives in tools/ rather than in this file on purpose: logic in a
+# config file is logic nothing tests and nobody can run by hand. Both scripts
+# are plain `sh`, both are runnable directly, and both say what they did.
+scripts:
+  setup: |
+    sh tools/orca-setup.sh
+  archive: |
+    sh tools/orca-archive.sh
+
+# What an agent is told when a worktree is opened from a GitHub issue. It
+# replaces Orca's default, which is `Complete <url>` and nothing else -- and on
+# this repo an agent that knows only the issue will get the order of work wrong
+# and have the PR bounced. `{{artifact_url}}` is substituted with the issue or PR
+# URL. Keep it short: it is a prompt, and the detail belongs in CLAUDE.md where
+# the agent will read it in context.
+issueCommand: |
+  Work the GitHub issue at {{artifact_url}}. Read it first with `gh issue view`.
+
+  CLAUDE.md is the reference for this repo and it outranks your instincts; read
+  the sections your change touches before editing, and CONTRIBUTING.md for the
+  four rules a PR bounces on. In short:
+
+  - A UI change goes into the design board in design/ FIRST, then the code.
+    Never only in code, including when the board is what is wrong.
+  - Never re-bless a golden to make a test pass. Look at the candidate PNG.
+  - Re-run `cmake -S . -B build` after adding or removing a source file.
+  - `make test` is the fast loop. `make conventions` checks the branch name and
+    the subjects; the branch must be `feature/`, `bugfix/`, `chore/`, `docs/`,
+    `claude/` and so on, and the PR TITLE becomes the squash-merge subject, so
+    it has to be a Conventional Commit too.
+
+  Anything the panel can be wrong about needs evidence from the device, and only
+  the owner can flash one. Take the board card as far as `On glass` and say what
+  needs verifying; do not close it, and do not write `Closes #N` for that work --
+  desktop tests are not evidence about the glass.
