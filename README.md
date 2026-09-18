@@ -28,7 +28,7 @@ models; it works out which one it is at boot.
 
 <table>
 <tr>
-<td width="25%"><img src="docs/images/home.png" alt="The home screen, showing the book in progress, a library count and settings."></td>
+<td width="25%"><img src="docs/images/home.png" alt="The home screen: the book's title down a black spine, with the author, how far in you are, a library count, unread articles and settings beside it."></td>
 <td width="25%"><img src="docs/images/library.png" alt="The library, listing a folder and six books with their progress."></td>
 <td width="25%"><img src="docs/images/typography.png" alt="The typography panel: a live preview of body text above rows for font, size, margins, line spacing and alignment."></td>
 <td width="25%"><img src="docs/images/sleep_cover_details.png" alt="The sleep screen: a book cover as a four-level greyscale photograph, with a card over it naming the book and how far in you are."></td>
