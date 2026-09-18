@@ -101,7 +101,7 @@ class ChapterReader {
   // to give back. DISTINCT FROM held(), and it has to be: held() reads blocks_, so a
   // release that dropped the block reader and kept the window would satisfy it and
   // free nothing, and from outside this class nothing else can tell those apart.
-  // bytesRead() cannot: it gates on the InflateSource pointer, which is dropped either
+  // bytesRead() cannot: it gates on `inflateActive_`, which release() clears either
   // way. An observation point, like held(); nothing branches on it.
   bool inflateWindowHeld() const { return inflater_.ready(); }
 
@@ -126,7 +126,18 @@ class ChapterReader {
   // state of a long chapter for its first seconds, and longer while the reader keeps
   // pressing) it did not advance at all. This is the same quantity the percentage is
   // already made of, available with no count and no walk.
-  uint32_t bytesRead() const { return inflated_ != nullptr ? inflater_.produced() : 0; }
+  // IT IS THE SOURCE'S `consumed()`, NOT THE INFLATER'S `produced()`, and that
+  // distinction is the whole of #148: `produced()` is where the DECODER has reached,
+  // which runs a whole 16 KB chunk in front of the page on the glass -- so a chapter
+  // under a chunk long reported every byte of itself read before its first page was
+  // laid out, and the percentage stood still for the length of the chapter. See
+  // InflateSource::consumed.
+  //
+  // WHAT REMAINS IS BOUNDED AND SMALL: the tokenizer's own 512-byte buffer, plus the
+  // tail of the block that filled the page (`kMaxBlockBytes`, 8 KB, and a paragraph
+  // in practice). A page boundary sits INSIDE a block, so no cheaper answer exists
+  // without a byte offset per laid-out line.
+  uint32_t bytesRead() const { return inflateActive_ ? inflated_->consumed() : 0; }
 
   // HOW MANY TIMES A BLOCK HAS BEEN CUT AT `kMaxBlockBytes` on the current walk --
   // `BlockReader::blocksSplit()`, passed through, and an observation point in
@@ -166,6 +177,12 @@ class ChapterReader {
   std::unique_ptr<BlockReader> blocks_;
   const std::vector<std::string>* italicClasses_ = nullptr;
   int position_ = 0;
+  // Whether `inflated_` is the source the blocks are ACTUALLY coming from. Not
+  // `inflated_ != nullptr`: the wrapper is kept across a re-stream so a rewind does
+  // not reallocate it, so a stored entry or an in-memory chapter following a deflated
+  // one would otherwise be answered from the PREVIOUS chapter's decoder. Set at the
+  // one place that chooses a source.
+  bool inflateActive_ = false;
   const char* error_ = "";
 };
 

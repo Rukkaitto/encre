@@ -5366,12 +5366,63 @@ place. Two consequences, and the second is the sharper one:
   lands later. A latency fix and a correctness bug meeting in one constant is worth
   noticing: the constant was right and the thing depending on it was wrong.
 
-`ChapterReader::bytesRead()` is the inflater's `produced()`, which is the SAME
-quantity the rest of the sum is made of and needs no count and no walk.
+`ChapterReader::bytesRead()` is the SAME quantity the rest of the sum is made of and
+needs no count and no walk.
 `ReaderScreen` records it at the end of the page on screen — the end rather than the
 start, because the page in front of you has been read by the time you leave it — and
 **the ring carries it per slot**, since a page served from the ring was decoded long
 ago and the stream has moved since.
+
+**AND THIS LINE SAID `produced()` FOR TWO PHASES, WHICH IS THE DECODER'S POSITION AND
+NOT THE READER'S (#148).** Reported off an article: *"one big chapter surrounded by
+chapters that have only one page; I'm at 50% in the chapter and it says 83%."*
+`Inflater::next()` produces up to `kChunkBytes` — **HALF THE WINDOW, 16,384 bytes** —
+and the tokenizer above asks for `Xml::kInputBytes`, **512**, at a time, so the first
+ask inflates 16 KB and delivers 512 of it. `produced()` therefore leads the page on
+the glass by the whole chunk in hand. It is `InflateSource::consumed()` now — the same
+count less what is still unread — and the arithmetic in `reading_store.cpp` never
+changed, because it was never what was wrong.
+
+- **FOR A CHAPTER SHORTER THAN ONE CHUNK IT LED BY THE ENTIRE CHAPTER**, and that is
+  the shape an ARTICLE is: the whole thing inflates on the first `next()`, so **page 1
+  of 54 reported all 18,639 of its bytes read** and the number then stood still from
+  the article's first page to its last. Reproduced at **87%** on a wallabag-shaped
+  EPUB before a page was turned.
+- **A NOVEL HID IT, WHICH IS WHY IT SHIPPED.** A 50-chapter book's chapters are 2% of
+  it each, so a whole chapter of lead is a couple of points and the worst
+  disagreement over `A Connecticut Yankee` was **3pp** — while `bytes=14037/14037`
+  sat on page 1 of every chapter in the trace, visible and unremarkable.
+- **MEASURED OVER THE 226-BOOK CORPUS, page by page against pages-read/pages-total:
+  median 4pp → 2pp, p90 19pp → 7pp, p99 69pp → 15pp, max 72pp → 23pp**, 194 books
+  improved, 30 unchanged and **2 worse by one point of rounding**. Books within 10pp
+  went 192/226 → 218/226. On the article shape **83pp → 7pp**. `tools/progress_probe.cpp`
+  is that measurement, tracked and re-runnable for `sleep_chapter_probe`'s reason.
+- **WHAT REMAINS IS THE MODEL AND NOT THE INPUT.** The residual 23pp is markup that is
+  not text — a one-page wrapper carrying a kilobyte of boilerplate weighs a kilobyte —
+  and the same book tops an independent Python count of spine-boundary
+  byte-versus-text skew at 24.9pp, which is what says the instrument and the model
+  agree about where the floor is. Closing it needs a per-chapter TEXT size, which
+  costs decoding every chapter (~49 s), so it stays.
+- **THE PROBE'S OWN REFERENCE WAS WRONG FIRST, AND IT ACCUSED THE FIX.** A chapter
+  with no pages is SKIPPED by `ReaderScreen`'s constructor, so opening at a cover
+  lands on the chapter after it and credits the cover with that chapter's page count —
+  which read as 27 books getting worse, one of them by 11pp. With the reference
+  corrected the same sweep says 2, by a point each. **A disagreement between an
+  instrument and a change is a claim about the instrument until the instrument has
+  been checked.**
+- **PROVED BY MUTATION AT BOTH LEVELS**, and the two bite in different places:
+  `bytesRead()` put back on `produced()` fails `A CHAPTER SHORTER THAN ONE INFLATE
+  CHUNK DOES NOT ARRIVE FULLY READ` reporting **`first` at 100%** — the report itself —
+  and `consumed()` collapsed to `produced()` fails that *and* the source's own
+  property. **Both fixtures carry a guard that would otherwise make them vacuous**: a
+  STORED entry has no decoder to be ahead of, and a chapter over a chunk long is the
+  case that always worked.
+- **`inflateActive_` IS THE SECOND HALF, AND IT IS A LATENT BUG RATHER THAN THIS ONE.**
+  `inflated_` is KEPT across a re-stream so a rewind does not reallocate the wrapper,
+  so `inflated_ != nullptr` is not "the blocks are coming from the decoder" — a stored
+  entry or an in-memory chapter following a deflated one was answered from the
+  PREVIOUS chapter's count. Set at the one place that chooses a source, so it cannot
+  drift from the choice actually made.
 
 **`page`/`pageTotal` REMAIN AS THE FALLBACK, not as a second answer.** They are used
 only where bytes are unknowable: a stored archive entry and an in-memory chapter have

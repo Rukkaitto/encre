@@ -35,8 +35,8 @@ struct OpenChapter {
     const char* why = "";
     REQUIRE_MESSAGE(reader::openBook(fs, "/books/book.epub", book, &why), std::string(why));
     REQUIRE(book.chapterCount() >= 1);
-    // THE FIXTURE HAS TO BE DEFLATED OR HALF THIS FILE IS VACUOUS. bytesRead() is
-    // `inflated_ != nullptr ? produced() : 0` and inflateWindowHeld() reads the
+    // THE FIXTURE HAS TO BE DEFLATED OR HALF THIS FILE IS VACUOUS. bytesRead() reads
+    // the inflate source's own count and inflateWindowHeld() reads the
     // decoder's own allocation -- a STORED entry has neither, so both would answer
     // "released" before the release and every assertion below would be 0 == 0.
     REQUIRE(book.locate(0).deflated);

@@ -86,7 +86,7 @@ TEST_CASE("a released Reader still renders the page it was on") {
   CHECK(p.s().vm().pageTotal == wasVmTotal);
   // WHAT MAKES A SAVE SAFE WITH THE STREAM GONE. chapterBytesRead() is `pageBytes_`, a
   // plain member recorded at the end of the page on screen -- NOT
-  // ChapterReader::bytesRead(), which gates on the InflateSource pointer and would
+  // ChapterReader::bytesRead(), which gates on `inflateActive_` and would
   // answer 0 the moment the window is freed. A 0 here would push progressPercent onto
   // its page/pageTotal fallback and persist a smaller number over a bigger one, which
   // is exactly the percentage-going-backwards bug this project has already shipped.
