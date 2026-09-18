@@ -86,23 +86,45 @@ agreement — the last two cannot be produced on a desktop at all.
    `make readme-images` and commit what moves. That variable IS the list, so
    naming the screens here would be a second copy of it, free to go stale the
    first time the set changes -- which it did, the first time one was added.
-3. **`make test` is green** on a clean tree, and `make compare` is green.
+3. **The version the DEVICE draws is the version being tagged.** Settings'
+   header band states it, and it is **three hardcoded copies** that must move
+   together:
+
+   | | holds |
+   |---|---|
+   | `core/include/reader/version.h` | `kVersion`, which `syncVm` draws as `V <n>` |
+   | `design/Settings.dc.html` | the same string, so the board has something to be compared against |
+   | `test/unit/test_version.cpp` | a pin on the literal, which is the only one that fails loudly |
+
+   **`make compare` CANNOT CATCH THIS AND WILL REPORT GREEN WHILE IT IS WRONG**,
+   because the board carries its own copy: bump neither and the two agree, and
+   the sheet measures a stale version against a stale version. Bumping the
+   header alone fails `make test`; bumping the board alone fails `make compare`.
+   Only bumping all three passes both, which is the point of listing them.
+
+   **v0.2.0 shipped saying `V 0.1.0`** -- the whole six-step gate was run
+   faithfully and none of it mentioned the version, so the tag was cut, the
+   release published, and the firmware on it misreported itself. The tag was
+   deleted and re-cut within the hour because nothing had been downloaded yet;
+   that is luck, not a procedure. This step is what replaces the luck.
+
+4. **`make test` is green** on a clean tree, and `make compare` is green.
    `make conventions` passes for the commits being released.
-4. **CI is green on `main`** for the commit being tagged. `firmware` is the only
+5. **CI is green on `main`** for the commit being tagged. `firmware` is the only
    thing anywhere that compiles `shell/`, and `test` runs on Linux/gcc where the
    goldens were blessed on macOS/clang. **The release workflow does not re-run
    any of it** — that would be ten minutes to re-answer a question already
-   answered on this commit, and it cannot answer steps 5 and 6. So this step is
+   answered on this commit, and it cannot answer steps 6 and 7. So this step is
    a real precondition and not a formality: check the run.
-5. **`docs/on-device-smoke-checklist.md` has been run in full**, on hardware,
+6. **`docs/on-device-smoke-checklist.md` has been run in full**, on hardware,
    with its `run.log` kept. A pass is what moves the last cards from `On glass`
    to `Done`.
-6. **The roadmap's Phase 5 exit is met:** *a week of daily-driver reading
+7. **The roadmap's Phase 5 exit is met:** *a week of daily-driver reading
    without touching a cable.* This is the criterion the whole of V1 was written
    against and it is the one that cannot be hurried — a week of real use finds
    what twenty minutes of checklist does not.
 
-**Steps 5 and 6 are the owner's, not an agent's.** Flashing is blocked from an
+**Steps 6 and 7 are the owner's, not an agent's.** Flashing is blocked from an
 agent by the permission classifier, so device evidence can only come from the
 person holding the device. An agent can carry a release card as far as `On
 glass` and must stop there.
