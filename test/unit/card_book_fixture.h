@@ -9,8 +9,8 @@
 //
 // WHY A CARD IS SOMETIMES NECESSARY, in the words of the file it came from:
 //
-//   `ChapterReader::bytesRead()` is `inflated_ != nullptr ? inflater_.produced() : 0`,
-//   and the in-memory constructor readerfix::Reading uses has no inflater -- so it
+//   `ChapterReader::bytesRead()` reads the inflate source's own count, and the
+//   in-memory constructor readerfix::Reading uses has no inflater -- so it
 //   reports 0 forever. An invisibility assertion on `chapterBytesRead()` over that
 //   fixture is `0 == 0`: it passes with the walk clobbering the field, which is how
 //   this was found (a mutation that should have bitten and did not).

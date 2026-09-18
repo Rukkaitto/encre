@@ -71,6 +71,7 @@ void ChapterReader::release() {
   // silently.
   blocks_.reset();
   inflated_.reset();
+  inflateActive_ = false;
   // THE LINE THE FEATURE IS FOR. The four resets around it free a block reader, a
   // ~40-byte wrapper, a buffer view and a file handle; this frees the ~37 KB. See the
   // header for why it is not a unique_ptr like its neighbours.
@@ -114,6 +115,7 @@ bool ChapterReader::startStream() {
       bufSrc_->reset(buffer_);
     }
     bytes = bufSrc_.get();
+    inflateActive_ = false;
     if (blocks_ == nullptr) {
       blocks_.reset(new (std::nothrow) BlockReader(*bytes));
       if (blocks_ != nullptr) blocks_->setItalicClasses(italicClasses_);
@@ -148,10 +150,12 @@ bool ChapterReader::startStream() {
       inflated_->reset();
     }
     bytes = inflated_.get();
+    inflateActive_ = true;
   } else {
     // A stored entry: the bytes ARE the text, so the inflater is skipped entirely.
     // Rare in an EPUB's content but legal, and cheaper than pretending.
     bytes = &entry_;
+    inflateActive_ = false;
   }
 
   if (blocks_ == nullptr) {

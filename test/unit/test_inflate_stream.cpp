@@ -127,6 +127,39 @@ TEST_CASE("NO CHUNK EXCEEDS THE DOCUMENTED CAP, and none straddles the wrap") {
   CHECK(inf.done());
 }
 
+TEST_CASE("THE SOURCE REPORTS WHAT IT HANDED OVER, NOT WHAT THE DECODER PRODUCED") {
+  // #148. `Inflater::produced()` is where the DECODER has reached, and `next()`
+  // inflates up to kChunkBytes -- 16,384 bytes -- while the XML tokenizer above asks
+  // for 512 at a time. So a caller reading `produced()` as a reading position is
+  // ahead of the bytes anybody has seen by the whole of the chunk in hand, and for a
+  // chapter SHORTER than one chunk it is ahead by the entire chapter: on a wallabag
+  // article page 1 of 54 reported all 18,639 of its bytes read, so book progress read
+  // 87% from the article's first page to its last.
+  //
+  // The property, at a grain that makes the gap enormous on every single read.
+  Grained src(FIX(kLongRun), 4096);
+  Inflater inf;
+  REQUIRE(inf.begin(src));
+  reader::InflateSource is(inf);
+
+  char buf[512];
+  uint64_t handed = 0;
+  bool sawLead = false;
+  for (int guard = 0; guard < 100000; ++guard) {
+    const size_t got = is.read(buf, sizeof(buf));
+    if (got == 0) break;
+    handed += got;
+    REQUIRE(is.consumed() == handed);
+    if (inf.produced() > is.consumed()) sawLead = true;
+  }
+  CHECK(handed == deflatefix::kLongRunOut);
+  CHECK(is.consumed() == deflatefix::kLongRunOut);
+  // THE FIXTURE GUARD, and without it this case passes against the defect it is
+  // written for: if the decoder never ran ahead, `consumed() == produced()` and
+  // reporting either would be the same answer.
+  CHECK(sawLead);
+}
+
 TEST_CASE("EVERY GRAIN SIZE GIVES THE SAME ANSWER, one byte at a time included") {
   // The resumption test. At grain 1 the bit reader refills mid-code, a block
   // header splits across reads, and a match's extra bits arrive separately -- on

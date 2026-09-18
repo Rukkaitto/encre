@@ -12,9 +12,12 @@
 //
 // The fix is the byte position, which is what the percentage is made of everywhere
 // else and needs no count.
+#include "card_book_fixture.h"
 #include "doctest.h"
 #include "reader/book.h"
+#include "reader/inflate_stream.h"
 #include "reader/reading_store.h"
+#include "reader/screen_reader.h"
 
 using reader::OpenedBook;
 using reader::progressPercent;
@@ -86,4 +89,82 @@ TEST_CASE("a chapter of nothing does not divide by it") {
   b.chapters[4].uncompressedSize = 0;
   CHECK(progressPercent(b, 4, 1, 10, 0) == 44);
   CHECK(progressPercent(b, 4, 1, 10, 50) == 44);
+}
+
+// --- AND THE INPUT, WHICH IS WHERE THE SECOND REPORT OF THIS NUMBER LANDED --------
+//
+// Everything above drives the arithmetic with bytes handed to it. #148 was reported
+// off a wallabag article -- "one big chapter surrounded by chapters that have only
+// one page; I'm at 50% in the chapter and it says 83%" -- and the arithmetic was
+// right both times. What was wrong was `ChapterReader::bytesRead()`, which answered
+// `Inflater::produced()`: the DECODER's position, a whole 16 KB chunk in front of the
+// page on the glass.
+//
+// SO THE CHAPTER HAS TO BE SMALLER THAN ONE CHUNK, which is the shape an article is
+// and a novel's chapter is not -- the whole chapter inflates on the first `next()`,
+// so page 1 reported every byte of it read and the percentage then stood still for
+// the length of the chapter. Measured on the corpus, the worst page-by-page
+// disagreement went median 4pp -> 2pp, p99 69pp -> 15pp, 194 books of 226 improved
+// and two moved by one point of rounding; on the article shape it went 83pp -> 7pp.
+namespace {
+
+// The largest `longChapter` that still fits inside one inflate chunk, sized against
+// the constant rather than pinned to a paragraph count -- `deferredChapter()`'s own
+// idiom, and for its reason: this stays the right fixture if kChunkBytes ever moves.
+std::string oneChunkChapter() {
+  std::string d = readerfix::longChapter(2);
+  for (int paragraphs = 4; paragraphs <= 4096; paragraphs *= 2) {
+    const std::string bigger = readerfix::longChapter(paragraphs);
+    if (bigger.size() >= reader::Inflater::kChunkBytes) break;
+    d = bigger;
+  }
+  return d;
+}
+
+}  // namespace
+
+TEST_CASE("A CHAPTER SHORTER THAN ONE INFLATE CHUNK DOES NOT ARRIVE FULLY READ") {
+  cardfix::CardReading r(oneChunkChapter());
+  const int spine = r.scr->chapterIndex();
+  const uint32_t size = r.ob.chapters[static_cast<size_t>(spine)].uncompressedSize;
+
+  // THE FIXTURE GUARDS, and the first two are what make this case able to see the
+  // defect at all: a STORED entry has no inflater to be ahead of, and a chapter over
+  // a chunk long is the case that always worked.
+  REQUIRE(r.ob.locate(spine).deflated);
+  REQUIRE(size < reader::Inflater::kChunkBytes);
+  REQUIRE(r.scr->completeIndex());
+  REQUIRE(r.scr->pageCount() >= 8);
+
+  // Page 1 has read a page, not a chapter. This is the assertion that fails against
+  // `produced()`, where it read `size == size`.
+  CHECK(r.scr->chapterBytesRead() < size / 2);
+
+  // AND THE NUMBER TRACKS THE READER ACROSS THE CHAPTER, which is the report itself.
+  // Chapter 2 of this fixture is one short paragraph, so the chapter is very nearly
+  // the whole book and its halfway page is very nearly half of it.
+  const int pages = r.scr->pageCount();
+  const auto percentNow = [&] {
+    return progressPercent(r.ob, r.scr->chapterIndex(), r.scr->vm().page,
+                           r.scr->vm().pageTotal, r.scr->chapterBytesRead());
+  };
+  const int first = percentNow();
+  int middle = first;
+  int last = first;
+  int previous = first;
+  for (int i = 1; i < pages; ++i) {
+    r.scr->onGesture({reader::Gesture::Next});
+    const int now = percentNow();
+    // NEVER BACKWARDS. The first report of this number was that it went backwards,
+    // and a lead that is spent early and then waits is not the only way to produce
+    // one -- so it is asserted per turn rather than end to end.
+    CHECK(now >= previous);
+    previous = now;
+    if (r.scr->pageIndex() + 1 == pages / 2) middle = now;
+    last = now;
+  }
+  CHECK(first <= 20);
+  CHECK(middle >= 35);
+  CHECK(middle <= 65);
+  CHECK(last >= 90);
 }

@@ -83,6 +83,12 @@ target_link_libraries(sleep_chapter_probe PRIVATE reader_core)
 target_compile_options(sleep_chapter_probe PRIVATE ${READER_WARNINGS})
 target_compile_definitions(sleep_chapter_probe PRIVATE READER_DESKTOP=1)
 
+add_executable(progress_probe ${CMAKE_SOURCE_DIR}/tools/progress_probe.cpp)
+target_link_libraries(progress_probe PRIVATE reader_core)
+target_compile_options(progress_probe PRIVATE ${READER_WARNINGS})
+target_compile_definitions(progress_probe PRIVATE READER_DESKTOP=1
+    ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+
 add_executable(paging_probe ${CMAKE_SOURCE_DIR}/tools/paging_probe.cpp)
 target_link_libraries(paging_probe PRIVATE reader_core)
 target_compile_options(paging_probe PRIVATE ${READER_WARNINGS})

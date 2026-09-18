@@ -207,6 +207,21 @@ class InflateSource : public ByteSource {
     at_ = 0;
   }
 
+  // HOW MANY BYTES HAVE ACTUALLY BEEN HANDED OVER, which is NOT `Inflater::produced()`
+  // and is the number a reading position wants.
+  //
+  // `next()` inflates up to `kChunkBytes` -- HALF THE WINDOW, 16,384 bytes -- and the
+  // tokenizer above asks for `Xml::kInputBytes`, 512, at a time. So the first ask
+  // produces 16 KB and delivers 512 of it, and `produced()` leads the bytes anybody
+  // downstream has seen by the whole of the chunk in hand. For a chapter SMALLER than
+  // a chunk it leads by the entire chapter: measured on a wallabag article, page 1 of
+  // 54 reported every one of its 18,639 bytes read, so book progress stood at 87%
+  // from the first page of the article to its last. Subtracting what is still unread
+  // is the whole of the difference.
+  uint32_t consumed() const {
+    return inf_->produced() - static_cast<uint32_t>(chunk_.size() - at_);
+  }
+
   // Why the stream stopped, for a caller that got a short read and needs to tell
   // "the chapter ended" from "the chapter is corrupt".
   bool done() const { return inf_->done(); }
