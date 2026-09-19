@@ -9610,6 +9610,17 @@ void loop() {
       int runs = 0, capturing = 0, captured = 0;
       unsigned refusedBlock = 0;
       bool scanned = false;
+      // WHY A CHAPTER PRODUCED NOTHING, because "extracts=0" was three different
+      // events wearing one number and the log could not tell them apart: a reader
+      // pressing a button, a rewind the heap would not serve, and a part file that
+      // would not write. The first must not stop backfill and the other two must.
+      bool interrupted = false;
+      bool rewound = true;
+      bool partsFailed = false;
+      // THE DECISIVE NUMBER, because every other explanation for `extracts=0` can be
+      // ruled out by it: a rewind that returned true and then produced no blocks is a
+      // different defect from one that produced them and matched nothing.
+      int reread = 0, blocks = 0;
       if (continueBackfill && loc.compressedSize != 0) {
         // A BARE ChapterReader, not a headless ReaderScreen: this wants BLOCKS and
         // not pages, so a screen would buy a PageBuilder and a page index nothing
@@ -9623,11 +9634,13 @@ void loop() {
           while (cr.next(b)) {
             if ((i % 8) == 0 && rawSamplesPending() != 0) {
               whole = false;
+              interrupted = true;
               break;
             }
             sc.addBlock(b, i++);
             b = reader::Block{};
           }
+          blocks = i;
           runs = static_cast<int>(sc.runs().size());
           if (whole) {
             // The same two passes the live path does, and in the same order: quotas
@@ -9645,7 +9658,11 @@ void loop() {
             capturing = static_cast<int>(wanted.size());
             std::vector<int> kept(sc.runs().size(), 0);
             bool ok = true;
-            if (!wanted.empty() && cr.rewind()) {
+            // ASKED ONCE AND KEPT, so a refusal is reportable. Folded into the `if`
+            // it was indistinguishable from "there was nothing to capture" -- and a
+            // rewind re-enters `startStream`, which can refuse on memory.
+            if (!wanted.empty()) rewound = cr.rewind();
+            if (!wanted.empty() && rewound) {
               reader::ExtractPartWriter out(gSd, gNameStore->dir(), want);
               reader::ExtractCapture cap(std::move(wanted), quota, out);
               reader::NameScanner throwaway;
@@ -9655,12 +9672,17 @@ void loop() {
               while (cr.next(b2)) {
                 if ((j % 8) == 0 && rawSamplesPending() != 0) {
                   ok = false;
+                  interrupted = true;
                   break;
                 }
                 throwaway.addBlock(b2, j++, &cap);
                 b2 = reader::Block{};
               }
-              out.finish();
+              reread = j;
+              // THE WRITER'S ANSWER IS AN ANSWER. It was discarded, so a part file
+              // the card refused -- or a buffer the heap refused -- looked exactly
+              // like a chapter with nothing in it.
+              partsFailed = !out.finish();
               if (ok) {
                 for (size_t k = 0; k < runIndex.size(); ++k) {
                   kept[static_cast<size_t>(runIndex[k])] = cap.kept()[k];
@@ -9710,7 +9732,17 @@ void loop() {
       // device's log with one line. The scanned bit is the only thing that advances
       // the walk, so a merge that did not set it means this pass cannot make
       // progress at all.
-      if (continueBackfill && !scanned) {
+      //
+      // AN INTERRUPTION IS NOT A REFUSAL, and conflating them stopped a device's
+      // backfill at chapter 53 with `largest block 0 at the refusal` -- which is
+      // what "the merge never ran" prints as. A reader pressing a button is the one
+      // outcome here that a retry fixes, and it is the most common one: a long
+      // chapter is 38 seconds of decoding and the reader only has to touch a button
+      // once inside it. It costs the window and nothing else.
+      if (continueBackfill && !scanned && interrupted) {
+        logf("[backfill] ch=%d interrupted; retrying in a later window\n", want);
+      }
+      if (continueBackfill && !scanned && !interrupted) {
         gBackfillStopped = true;
         // THE BLOCK AS IT WAS AT THE REFUSAL, not as it is now: the reader's chapter
         // has been reacquired by the time this prints, so reading it here would
@@ -9721,10 +9753,13 @@ void loop() {
              want, refusedBlock);
       }
       if (continueBackfill)
-        logf("[backfill] ch=%d of %d %s runs=%d capturing=%d extracts=%d in %lums "
-             "(heap %u) reader %s\n",
+        logf("[backfill] ch=%d of %d %s runs=%d capturing=%d extracts=%d%s%s%s in "
+             "%lums (heap %u, block %u, blocks %d/%d) reader %s\n",
            want, bound, scanned ? "scanned" : "abandoned", runs, capturing, captured,
+           interrupted ? " INTERRUPTED" : "", rewound ? "" : " NO-REWIND",
+           partsFailed ? " PARTS-REFUSED" : "",
            (unsigned long)(millis() - t), (unsigned)ESP.getFreeHeap(),
+           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), reread, blocks,
            back ? "restored" : "COULD NOT BE RESTORED -- backfill stopped");
       logFlush();
     }
