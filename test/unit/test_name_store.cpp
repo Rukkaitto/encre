@@ -212,6 +212,37 @@ TEST_CASE("a merge is order-independent, extract lists included") {
   CHECK(forward[0].extracts.back().count == 2);
 }
 
+TEST_CASE("a chapter past the cap is dropped entirely, not kept at zero") {
+  // WRITTEN BECAUSE A MUTATION FAILED NOTHING. Removing the trim left every earlier
+  // test passing: with three chapters of three extracts the per-entry clamp already
+  // holds the TOTAL at eight, so the branch that drops a whole chapter was never
+  // reached. That is the input being too small, not the assertions being too weak --
+  // so here are more chapters than the cap can hold, one extract each.
+  FakeFileSystem fs;
+  NameStore store(fs, kBook, kBytes);
+  for (int spine = 0; spine < 12; ++spine) {
+    Chapter c;
+    c.add("Ladislaw", 2, 0, 2, 1);
+    c.seal();
+    REQUIRE(store.mergeChapter(spine, c.ptrs, &c.extracts));
+  }
+  NameIndexHeader h;
+  std::vector<NameIndexEntry> out;
+  REQUIRE(store.loadAll(h, out));
+  REQUIRE(out.size() == 1);
+  // Eight extracts in eight entries -- chapters 0 to 7. Chapters 8 to 11 are absent
+  // rather than present with a count of zero: a zero-count entry is a file open that
+  // finds nothing, and the list is what tells the screen where to look.
+  CHECK(out[0].extractCount() == 8);
+  REQUIRE(out[0].extracts.size() == 8);
+  CHECK(out[0].extracts.front().spine == 0);
+  CHECK(out[0].extracts.back().spine == 7);
+  for (const auto& a : out[0].extracts) CHECK(a.count > 0);
+  // ...and the counts still accumulated across all twelve, which is the point of
+  // admission at the door: the extract list is capped, the figure is not.
+  CHECK(out[0].midSentence == 24);
+}
+
 TEST_CASE("an index for another book is discarded rather than merged into") {
   // An index for a different book is worse than none, which is the reading
   // position's own answer to the same question.
