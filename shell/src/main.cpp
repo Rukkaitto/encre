@@ -367,6 +367,13 @@ int gNamesMetrics[3] = {0, 0, 0};
 // cannot find 36,956 contiguous bytes, and asking again at every quiet window would
 // be spending the reader's page on a question already answered.
 bool gBackfillStopped = false;
+// THE CHAPTER THE NAME LOGIC HAS LOOKED AT, and it is deliberately NOT gLastChapter.
+// That one is the crossing detector's, and openBookAt seeds it with the chapter the
+// book opened at -- so the detector never fires for that chapter, which is exactly
+// right for a SAVE EDGE (there was no crossing) and exactly wrong here. Riding it
+// meant the chapter a reader opens on was never scanned at all, and on a book opened
+// at chapter one that is every chapter they had read so far.
+int gNamesLastChapter = -1;
 
 // PUTTING THE SPENT STREAM BACK, on a window of its own.
 //
@@ -4745,6 +4752,7 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // A NEW BOOK IS A NEW QUESTION. The give-up flag describes a heap that could not
   // return the block, and opening a book has just moved the heap.
   gBackfillStopped = false;
+  gNamesLastChapter = -1;
   if (!isArticle) gNameStore = std::make_unique<reader::NameStore>(gSd, path, bookBytes);
 
   // AND THE READER MENU'S HEADER, WHICH IS WHY SLEEPING ON THAT MENU USED TO WAKE
@@ -8657,19 +8665,7 @@ void loop() {
       if (rd->chapterIndex() != was) {
         gLastChapter = rd->chapterIndex();
         mark("chapter-opened");
-        // THE SCANNER GOES ON HERE rather than at the open, because the ReaderScreen
-        // the factory built is only reachable through the stack -- and a crossing is
-        // the moment the next chapter's walk is about to start. Attaching it twice
-        // is free; it is a pointer.
-        if (gNameStore != nullptr) {
-          const_cast<reader::ReaderScreen*>(rd)->setNameScanner(&gNameScan);
-          // A CHAPTER ALREADY SCANNED OWES NOTHING, which the store answers in a
-          // header read rather than by re-walking. Re-reading is ordinary, so this
-          // is the common case and not the edge.
-          reader::NameIndexHeader h;
-          const bool known = gNameStore->loadHeader(h) && h.isScanned(rd->chapterIndex());
-          gNamesOwed = known ? -1 : rd->chapterIndex();
-        }
+
         // WHICH BRANCH, AND WHAT IT COST. A small chapter is counted before its
         // first paint and a big one is not, and the eager side had no line -- so a
         // device reporting "the dash never appears and the page is slow" could not
@@ -8710,6 +8706,9 @@ void loop() {
       // otherwise, so opening a second book at the same spine index the first was left
       // on would suppress the next real crossing and its save edge. See gLastChapter.
       gLastChapter = -1;
+      // ...and the name logic's own memory with it, for the same reason: a stale one
+      // would suppress the attach on the first chapter of the next book opened.
+      gNamesLastChapter = -1;
       // ...and so do the idle walks, for exactly the same reason wearing the same
       // sign: page 0 of chapter 0 is a position both books have, and the one that
       // could not restream is not the one that is about to be opened (#45).
@@ -9187,6 +9186,26 @@ void loop() {
       // way beats putting a ~596 ms paint in front of a page turn. The same rule
       // refineNow applies to itself, for the same reason.
       if (done && rawSamplesPending() == 0) renderTop();
+    }
+  }
+
+  // WHICH CHAPTER THE NAME LOGIC IS LOOKING AT, decided here rather than in the
+  // crossing detector -- see gNamesLastChapter for why riding that one skipped the
+  // chapter every book opens on. Keyed on this function's own memory, so it fires
+  // once per chapter INCLUDING the first, and costs one header read when it does.
+  if (gNameStore != nullptr && gApp->top().id() == reader::ScreenId::Reader) {
+    auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
+    if (rd->chapterIndex() != gNamesLastChapter) {
+      gNamesLastChapter = rd->chapterIndex();
+      // ATTACHED EVERY TIME, which is free: it is a pointer, and the ReaderScreen
+      // the factory built is only reachable through the stack.
+      rd->setNameScanner(&gNameScan);
+      // A CHAPTER ALREADY SCANNED OWES NOTHING, which the store answers in a header
+      // read rather than by re-walking. Re-reading is ordinary, so this is the
+      // common case and not the edge.
+      reader::NameIndexHeader h;
+      const bool known = gNameStore->loadHeader(h) && h.isScanned(rd->chapterIndex());
+      gNamesOwed = known ? -1 : rd->chapterIndex();
     }
   }
 
