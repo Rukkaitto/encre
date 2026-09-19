@@ -28,10 +28,16 @@
 
 <!-- WHO'S THIS CHARACTER AGAIN.
      The names the book has used, up to where you have read, built by scanning each
-     chapter as its pages are counted. Confirm opens a PEEK at the sentence that
-     introduced the name -- there is no detail screen, which is the largest
-     simplification in the feature: it deletes a screen, its board, and the need to
-     store any sentence text on the card.
+     chapter as its pages are counted -- and backfilled, behind the reader, for the
+     chapters they reached without this device watching. Confirm opens MENTIONS
+     (Mentions.dc.html), that name's sightings, and a sighting opens the peek.
+
+     THIS BOARD ONCE OPENED THE PEEK DIRECTLY, and the 2026-08-24 design called that
+     "the largest simplification in the feature: it deletes a screen, its board, and
+     the need to store any sentence text on the card". All three came back when the
+     second screen was asked for. Both halves of that trade are real and the spec
+     costs them out; what matters here is that CONFIRM NO LONGER PEEKS, so the hint
+     bar below says MENTIONS.
 
      IT SAYS NAMES, NOT CHARACTERS, AND THAT IS THE WHOLE HONESTY OF THIS SCREEN.
      A capitalisation-and-frequency heuristic on a 160 MHz part cannot tell a person
@@ -57,10 +63,16 @@
 
      HOW MANY ROWS FIT IS A RESULT, AND THE SLACK BELOW THEM IS THE CHECK. Measured
      off this render: a two-line row is 90px, a one-line row 60px, and the list box
-     is 671px. This board's mix -- five two-line and three one-line -- comes to
-     630px, leaving 41px empty at the bottom. THAT IS CORRECT, not untidy: a
-     ScrollWindow draws whole rows only, so with two row heights some slack is
-     inevitable and it varies with which rows are on screen.
+     is 670px at 480x800 and 662px at 528x792. This board's mix -- five two-line and
+     three one-line -- comes to 629px, leaving 41px and 33px empty. THAT IS CORRECT,
+     not untidy: a ScrollWindow draws whole rows only, so with two row heights some
+     slack is inevitable and it varies with which rows are on screen.
+
+     THE BAND DID NOT MOVE WHEN ITS RIGHT SLOT LOST ITS CONTENT, which is the whole
+     reason that slot is an nbsp rather than nothing -- see the band's own note. The
+     figures here sit 1px off the ones an earlier draft of this comment quoted:
+     whether the rule belongs to the row above or the box below is a convention, and
+     these are measured with the rule counted into the row above it.
      What is NOT correct is slack of 60px or more, because then another row would
      have fitted -- and the first draft of this board had 132px of it, understating
      the screen by a whole row. The invariant to implement against and to check any
@@ -74,17 +86,30 @@
 
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
 
-  <!-- THE BAND'S RIGHT SLOT IS COVERAGE, NOT A COUNT, and that is the one thing a
-       reader might otherwise wonder about this screen: why someone is missing. The
-       index knows only the chapters that have been read, which is what makes the
-       feature spoiler-proof BY CONSTRUCTION rather than by a rule someone has to
-       remember -- so the boundary is stated rather than left to be discovered.
-       `300 NAMES` would restate the label and claim a precision the threshold makes
-       arbitrary; the Library's slot counts books because a card really does hold
-       twelve of them. -->
+  <!-- THE BAND HAS NO RIGHT SLOT, AND IT USED TO SAY `TO CH. 07`. That slot stated
+       COVERAGE -- the index knows only the chapters that have been opened -- on the
+       argument that a reader would otherwise wonder why someone is missing. The
+       argument was right and BACKFILL ANSWERS IT INSTEAD: the chapters behind the
+       reader are now scanned in the quiet window, forward from the lowest unscanned
+       one, so the gap the badge explained closes by itself. A permanent label for a
+       temporary state is worse than no label, and there is nothing a reader could do
+       about it either way.
+       `300 NAMES` was refused separately and stays refused: it would restate the
+       label and claim a precision the threshold makes arbitrary. The Library's slot
+       counts books because a card really does hold twelve of them.
+       THE SLOT IS EMPTY AND STILL RESERVED, which is Typography.dc.html's and
+       BookEnd.dc.html's convention and not a new one. The nbsp holds the --t-value
+       line box, because `bandContentH` takes max(Label500, Value700)
+       UNCONDITIONALLY -- a band that shrank when a screen left its slot empty would
+       move every row beneath it, and the band is one box model shared by twelve
+       screens rather than twelve boxes.
+       DELETING THE DIV IS THE VERSION THAT LOOKS RIGHT AND IS NOT: it takes the
+       band from 66px to 64px in Chrome and nowhere else, so the board would drift
+       2px from a firmware that cannot follow it without shrinking every other
+       band. This board was drawn both ways and measured before the nbsp went back. -->
   <div style="display: flex; justify-content: space-between; align-items: center; gap: 7px; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
     <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">NAMES</div>
-    <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">TO CH. 07</div>
+    <div style="font-size: var(--t-value); font-weight: 700;">&nbsp;</div>
   </div>
 
   <!-- position: relative so the rail is placed against the LIST's own box, not the
@@ -168,13 +193,18 @@
 
   </div>
 
-  <!-- PEEK rather than OPEN or SELECT, because the word is the mechanism: it opens
-       design/Peek.dc.html at the sentence that introduced this name, over the page
-       you are on, and you come back with CLOSE. Naming it after the thing it does
-       teaches the peek once and everywhere. -->
+  <!-- MENTIONS, WHERE THIS SAID PEEK. The word names the screen Confirm opens
+       (Mentions.dc.html) rather than the thing two screens away, which is the rule
+       every other hint on this device follows. PEEK moves one screen along, onto the
+       Mentions bar, where it is again the immediate action.
+       THIS LINE SAID IT WAS THE ONLY PLACE THE WORD REACHES THE GLASS, and it was
+       true for about an hour. Mentions.dc.html's band said `LADISLAW` then; it says
+       `MENTIONS`, because a band names the screen you are on. So the word appears
+       twice and the two must not drift: this hint is a promise about where Confirm
+       goes, and that band is where it arrives. -->
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
     <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">BACK</div></div>
-    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">PEEK</div></div>
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">MENTIONS</div></div>
     <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">UP</div></div>
     <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M4 9l4 4 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">DOWN</div></div>
   </div>
