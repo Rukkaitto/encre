@@ -563,8 +563,22 @@ bool NameStore::quotasFor(const std::vector<NameScanner::Run>& runs, int cap, in
       }
     }
     const int left = room - used;
+    // A RUN WITH NO ROOM LEFT IS NOT WANTED, and it used to be listed with a quota of
+    // zero. `wanted` is read by exactly one caller -- the extract capture -- so a run
+    // that cannot keep another sighting buys that caller a second full decode of the
+    // chapter and keeps nothing from it.
+    //
+    // REPORTED OFF GLASS as `admitted=22 extracts=0`, three chapters running. Deep in
+    // a backfill every name on the card already has its eight, so the whole chapter's
+    // wanted list can be zero-quota -- `wanted.empty()` is then false, the shell
+    // rewinds and inflates the chapter a second time, and the capture keeps nothing.
+    // ~700 ms a chapter for an answer that was known before the rewind.
+    if (left <= 0) {
+      if (onCard) have = in.next(line);
+      continue;
+    }
     wanted.push_back(text);
-    quota.push_back(left > 0 ? left : 0);
+    quota.push_back(left);
     runIndex.push_back(static_cast<int>(i));
     if (onCard) have = in.next(line);
   }

@@ -374,10 +374,16 @@ TEST_CASE("a backfilled chapter may capture even when the cap is already spent")
     CHECK(wanted[0] == "Flagg");
     CHECK(quota[0] == 8);  // chapter 40's eight do not count against chapter 3
   }
-  SUBCASE("a LATER chapter still gets nothing, which is the cap doing its job") {
+  SUBCASE("a LATER chapter is not WANTED at all, which saves it a second decode") {
     REQUIRE(store.quotasFor(live.runs, 8, /*spine=*/50, wanted, quota, runIndex));
-    REQUIRE(wanted.size() == 1);
-    CHECK(quota[0] == 0);
+    // IT USED TO BE LISTED WITH A QUOTA OF ZERO, and the only caller of `wanted` is
+    // the extract capture: a name that cannot keep another sighting bought that
+    // caller a full second inflate of the chapter and kept nothing from it. Reported
+    // off glass as `admitted=22 extracts=0` on three consecutive backfill chapters,
+    // ~700 ms each. An empty list is what tells the shell to skip the pass.
+    CHECK(wanted.empty());
+    CHECK(quota.empty());
+    CHECK(runIndex.empty());
   }
   SUBCASE("and the merge then displaces the later ones") {
     Chapter early;

@@ -4544,9 +4544,14 @@ static bool namesHaveRoom(const char* what) {
   // refusal look like the whole feature giving up.
   if (!gNamesToldNoRoom) {
     gNamesToldNoRoom = true;
+    // AND IT REPORTS THE BLOCK, not just the free heap. This line says a block could
+    // not be served and then printed the one number that cannot say why: every
+    // refusal in this feature has been fragmentation, and `free 43308` beside a
+    // 12 KB ask reads as a firmware bug until the block is there beside it.
     logf("[names] %s needs %uB in one block and the heap cannot serve it "
-         "(free %u); standing down for this book\n",
-         what, (unsigned)kNamesHeadroom, (unsigned)ESP.getFreeHeap());
+         "(free %u, largest block %u); standing down for this book\n",
+         what, (unsigned)kNamesHeadroom, (unsigned)ESP.getFreeHeap(),
+         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     logFlush();
   }
   return false;
@@ -9602,7 +9607,8 @@ void loop() {
         if (!rd->reacquireChapter()) gBackfillStopped = true;
         continueBackfill = false;
       }
-      int runs = 0, admitted = 0, captured = 0;
+      int runs = 0, capturing = 0, captured = 0;
+      unsigned refusedBlock = 0;
       bool scanned = false;
       if (continueBackfill && loc.compressedSize != 0) {
         // A BARE ChapterReader, not a headless ReaderScreen: this wants BLOCKS and
@@ -9633,7 +9639,10 @@ void loop() {
             std::vector<int> quota;
             std::vector<int> runIndex;
             gNameStore->quotasFor(sc.runs(), 8, want, wanted, quota, runIndex);
-            admitted = static_cast<int>(wanted.size());
+            // WHAT THE CAPTURE WILL LOOK FOR, which is no longer the same as what
+            // this chapter admitted: a run whose eight sightings are already on the
+            // card is left out, so an empty list means the second pass is skipped.
+            capturing = static_cast<int>(wanted.size());
             std::vector<int> kept(sc.runs().size(), 0);
             bool ok = true;
             if (!wanted.empty() && cr.rewind()) {
@@ -9663,12 +9672,23 @@ void loop() {
             // regardless, so a refused write logged "scanned" and backfill picked
             // the same chapter again two seconds later, for ever. A log that cannot
             // report a failure is worse than no log.
+            // AND IT GOES BEFORE THE MERGE, NOT AFTER IT. This sat below the merge,
+            // so the index was rebuilt with backfill's OWN 36,956-byte inflate
+            // window still held -- the one allocation on this path big enough to
+            // decide the answer. Reported off glass at chapter 31: the merge wanted
+            // ~9.5 KB in one block and the heap could not serve it, with 43 KB free.
+            // Nothing between here and the merge reads the chapter: the scan has its
+            // runs, the capture has finished and closed its part file.
+            cr.release();
             if (ok) scanned = gNameStore->mergeChapter(want, sc.runs(), &kept);
+            if (ok && !scanned) refusedBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
           }
           // THE BACKFILL CHAPTER GOES BEFORE THE READER'S IS ASKED FOR, which is the
           // whole of why this is safe: the request below is then for a block of
           // exactly the size just returned, which is the benign case for
-          // fragmentation rather than a fresh 36,956-byte allocation.
+          // fragmentation rather than a fresh 36,956-byte allocation. It is a second
+          // call on the path that already released above -- `release()` is four
+          // resets and idempotent -- and the only call on the path that did not.
           cr.release();
         }
       } else if (continueBackfill) {
@@ -9692,12 +9712,18 @@ void loop() {
       // progress at all.
       if (continueBackfill && !scanned) {
         gBackfillStopped = true;
-        logf("[backfill] ch=%d would not merge; stopping for this book\n", want);
+        // THE BLOCK AS IT WAS AT THE REFUSAL, not as it is now: the reader's chapter
+        // has been reacquired by the time this prints, so reading it here would
+        // report the heap of a different moment and send the next person looking in
+        // the wrong place. Zero means the chapter never got as far as the merge.
+        logf("[backfill] ch=%d would not merge (largest block %u at the refusal); "
+             "stopping for this book\n",
+             want, refusedBlock);
       }
       if (continueBackfill)
-        logf("[backfill] ch=%d of %d %s runs=%d admitted=%d extracts=%d in %lums "
+        logf("[backfill] ch=%d of %d %s runs=%d capturing=%d extracts=%d in %lums "
              "(heap %u) reader %s\n",
-           want, bound, scanned ? "scanned" : "abandoned", runs, admitted, captured,
+           want, bound, scanned ? "scanned" : "abandoned", runs, capturing, captured,
            (unsigned long)(millis() - t), (unsigned)ESP.getFreeHeap(),
            back ? "restored" : "COULD NOT BE RESTORED -- backfill stopped");
       logFlush();
