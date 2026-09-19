@@ -45,7 +45,7 @@ constexpr ScreenId kAllScreens[] = {
     ScreenId::Articles,     ScreenId::ArticleActions, ScreenId::ArticleEnd,
     ScreenId::WallabagAccount, ScreenId::WallabagConnecting, ScreenId::WallabagError,
     ScreenId::ArticlesRemoveConfirm,
-    ScreenId::Names,
+    ScreenId::Names,   ScreenId::Mentions,
 };
 // NAMES THE SENTINEL, so an append cannot satisfy it unchanged. It used to name the
 // last member by hand -- `ScreenId::Peek + 1`, then `ScreenId::BookEnd + 1` -- and
@@ -107,6 +107,12 @@ std::unique_ptr<Standalone> build(ScreenId id) {
   // book came to show Middlemarch's chapters on the device. A fixture that did not ask
   // would get a null screen, which is the refusal working.
   b->factory.setContentsDemo();
+  // Names and Mentions both owe a priming now: the first is built from the card's
+  // grouped index and the second from a name a press chose.
+  b->factory.setNames(demoNames());
+  b->factory.setNamesVisibleRows(8);
+  b->factory.setMentions(demoMentionsSubject(), demoMentions(), {});
+  b->factory.setMentionsVisibleRows(6);
   // AND BookEnd, for that same reason. It is primed unconditionally rather than
   // under `if (id == ScreenId::BookEnd)` because it is a value copy and needs no
   // face, no metrics and no parent -- the Reader's and the Peek's demos are gated
@@ -226,6 +232,8 @@ std::unique_ptr<BootConfigured> bootBuild(ScreenId id) {
   auto b = std::make_unique<BootConfigured>();
   b->factory.setLibraryVisibleRows(7);
   b->factory.setContentsVisibleRows(8);
+  b->factory.setNamesVisibleRows(8);
+  b->factory.setMentionsVisibleRows(6);
   b->factory.setSettingsMetrics(700, 55, 45);
   b->factory.setWifiPickerVisibleRows(7);
   // loadWifi()'s two calls, and only those two: the saved list with its sink, and
@@ -315,12 +323,12 @@ TEST_CASE("every screen accepts back the focus it reports") {
   // The two that cannot move are WifiConnect, which has no focus at all
   // because it has one action and it is CANCEL, and WifiNetworkActions, whose
   // single row means a move that cannot change anything.
-  // TWENTY, read off the run and then written down rather than guessed at. The
-  // six added are the Articles list, the actions overlay, the end screen, the
-  // account screen, the remove confirmation and the error dialog -- the last of
+  // TWENTY-TWO, read off the run and then written down rather than guessed at. The
+  // six before these were the Articles list, the actions overlay, the end screen,
+  // the account screen, the remove confirmation and the error dialog -- the last of
   // which is counted only because this fixture primes the TWO-SLAB shape; see
-  // setWallabagFailure above.
-  CHECK(movable == 20);
+  // setWallabagFailure above. The two new ones are Names and Mentions, both lists.
+  CHECK(movable == 22);
 }
 
 TEST_CASE("every screen with a movable focus wraps off the end") {
@@ -351,10 +359,12 @@ TEST_CASE("every screen with a movable focus wraps off the end") {
     CHECK(wrapped);
     ++wrapping;
   }
-  // The same fourteen, and it must stay the same number as `movable` above:
-  // every list in this firmware wraps, so a screen that can move and does not
-  // wrap is the Settings defect this case was written for.
-  CHECK(wrapping == 20);
+  // The same count as `movable` above, and it must stay the same: every list in
+  // this firmware wraps, so a screen that can move and does not wrap is the
+  // Settings defect this case was written for. (This comment said "the same
+  // fourteen" through two separate growths of that number -- a count in prose
+  // beside an assertion is a second copy of the assertion.)
+  CHECK(wrapping == 22);
 }
 
 TEST_CASE("restoring the focus a screen is already on is a no-op, not a failure") {
@@ -487,15 +497,17 @@ TEST_CASE("what a screen declares about a wake is what a boot-configured factory
   // off its factory case, and this walk failed it: loadWifi() primes the saved list
   // at boot, so a wake owes it nothing. A declaration nothing checks is a second
   // copy of the factory free to disagree with it, and it disagreed on its first run.
-  // NAMES IS READY, AND THIS WALK IS WHY. The row was written NeedsPriming from the
-  // design -- the screen will be built from the card's name store -- and the store
-  // does not exist yet, so the screen has no rows and a boot-configured factory
-  // builds it complete. Same correction this case made to the Wi-Fi hub above, for
-  // the same reason: the declaration is checked against the factory rather than
-  // against the intention. It moves to NeedsPriming in the change that gives it
-  // rows, and this walk is what will require that.
-  CHECK(ready == 12);
-  CHECK(needsPriming == 5);
+  // NAMES MOVED BACK TO NeedsPriming, AND THIS WALK IS WHAT REQUIRED IT. It was
+  // declared NeedsPriming from the design, corrected to Ready by this case when the
+  // screen had no rows and a boot-configured factory could build it complete, and
+  // corrected back the moment the rows arrived -- which is exactly what the note
+  // beside it predicted. The declaration is checked against the factory rather than
+  // against the intention, which is the whole point of the walk.
+  //
+  // Mentions is NeedsPriming and always was: it is built from a name a PRESS chose,
+  // and a wake makes no press.
+  CHECK(ready == 11);
+  CHECK(needsPriming == 7);
   CHECK(never == 13);
   CHECK(ready + needsPriming + never == static_cast<int>(ScreenId::Count));
 }

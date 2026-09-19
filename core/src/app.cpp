@@ -155,18 +155,21 @@ constexpr Restore kRestorability[] = {
     // rebuilt from -- and waking into "remove every article?" is a destructive
     // question nobody asked, which is BookError's argument at its sharpest.
     Restore::Never,
-    // Names -- READY, AND THIS ROW WAS WRITTEN NeedsPriming FIRST, from reading the
-    // design rather than the screen. test_focus_restore.cpp caught it in the same
-    // pass that fixed the Wi-Fi hub the same way: the line between the two answers
-    // is "did a PRESS produce it", and today nothing did. The screen has no rows --
-    // the card's name store is #156 -- so a boot-configured factory builds it
-    // complete, and declaring otherwise would have claimed a debt the shell does not
-    // owe and could not pay.
-    //
-    // IT BECOMES NeedsPriming WHEN THE STORE LANDS, in that change and not before,
-    // because that is when a press starts producing something a wake cannot. The
-    // test above is what will say so.
-    Restore::Ready,
+    // Names -- NeedsPriming, and this row has now been both answers. It was written
+    // NeedsPriming from the design; test_focus_restore.cpp corrected it to Ready
+    // while the screen had no rows and a boot-configured factory could build it
+    // complete; and it is NeedsPriming again now that the rows arrive from the
+    // card's grouped index, which is a thing a PRESS produces and a wake does not.
+    // The note that predicted the second move said "in that change and not before",
+    // and the walk is what required it -- a declaration checked against the factory
+    // rather than against the intention.
+    Restore::NeedsPriming,
+    // Mentions -- NeedsPriming, and unlike Names it genuinely owes one. The screen
+    // is built from a name a PRESS chose, and a wake makes no press: the factory has
+    // to be handed the group before it can build anything, and a Mentions that
+    // cannot say whose mentions it shows is the substituted content screens.h
+    // refuses.
+    Restore::NeedsPriming,
 };
 static_assert(sizeof(kRestorability) / sizeof(kRestorability[0]) ==
                   static_cast<size_t>(ScreenId::Count),
@@ -207,6 +210,7 @@ bool screenUsesRadio(ScreenId id) {
     // Names reads the CARD and never the radio, which is the Articles list's own
     // answer one flow over.
     case ScreenId::Names:
+    case ScreenId::Mentions:
     case ScreenId::Articles:
     case ScreenId::ArticlesRemoveConfirm:
     case ScreenId::ArticleActions:
@@ -280,6 +284,7 @@ const char* screenName(ScreenId id) {
     // A log label, free to be reworded; session_record.cpp's "names" is a storage
     // format and is not this, however alike the two happen to look.
     case ScreenId::Names: return "NAMES";
+    case ScreenId::Mentions: return "MENTIONS";
     case ScreenId::WallabagAccount: return "WALLABAG-ACCOUNT";
     case ScreenId::WallabagConnecting: return "WALLABAG-CONNECTING";
     case ScreenId::WallabagError: return "WALLABAG-ERROR";

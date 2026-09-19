@@ -128,13 +128,13 @@
       <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">CH. 09</div>
 
       <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
-        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0;">Mr. Casaubon&rsquo;s young cousin, Will Ladislaw, was expected</div>
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0;">cousin, Will Ladislaw, was expected</div>
       </div>
 
       <!-- FOCUSED, and full-bleed inverted as every list on this device draws it --
            to the edge of the 14px gutter, which the rail does not enter. -->
       <div style="display: flex; align-items: center; padding: 11px 24px; background: #000000; color: #ffffff;">
-        <div style="font-size: var(--t-body); font-weight: 700; flex-grow: 1; min-width: 0;">Ladislaw had a sense of the ridiculous which was</div>
+        <div style="font-size: var(--t-body); font-weight: 700; flex-grow: 1; min-width: 0;">Ladislaw had a sense of the absurd</div>
       </div>
 
       <!-- ONE LINE, and this is the second row height rather than a defect. The
@@ -150,13 +150,13 @@
       <!-- SECTION-FINAL: no border-bottom, because the CH. 19 header below carries
            no line of its own. -->
       <div style="display: flex; align-items: center; padding: 11px 24px;">
-        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0;">and Will Ladislaw, who had been standing by the window</div>
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0;">and Will Ladislaw, by the window</div>
       </div>
 
       <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">CH. 19</div>
 
       <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
-        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0;">Dorothea saw Ladislaw again at the Lowick parsonage</div>
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0;">Dorothea saw Ladislaw at Lowick</div>
       </div>
 
       <!-- THE LAST ROW DRAWN KEEPS ITS RULE, because it is not section-final: what
@@ -164,7 +164,7 @@
            draws its last row the same way. Only a section-final row drops the line,
            and only because the header under it has none. -->
       <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
-        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0;">said Will Ladislaw, rising from his seat by the fire</div>
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0;">said Will Ladislaw, rising</div>
       </div>
 
     </div>
@@ -173,14 +173,20 @@
          rows do not enter, with a SOLID proportional thumb. Height is visible/total
          and top is first/total, in percent so both survive the reflow to 528x792.
 
-         THE PROPORTION IS THE SPECIFICATION. Eight mentions in three chapters stack
-         to 879px against a 670px list box, so the thumb is 76.2% tall at the top --
-         big, because this list is barely longer than its panel. Names.dc.html's is
-         2.7% for the same reason in reverse, and neither figure was chosen: both are
-         what visible/total comes to. A rail that looked the same on both screens
-         would be telling the reader nothing. -->
+         THE PROPORTION IS THE SPECIFICATION, AND IT IS IN ROWS. Eight mentions --
+         the cap, and therefore the ordinary case for a name worth looking up -- of
+         which six fit, so the thumb is 75% tall at the top. It is big because this
+         list is barely longer than its panel; Names.dc.html's is 3.5% for the same
+         reason in reverse, and neither figure was chosen: both are what
+         visible/total comes to. A rail that looked the same on both screens would
+         be telling the reader nothing.
+
+         SIX WAS ONCE THE WHOLE LIST HERE, and then it did not scroll at all: the
+         board drew a rail and the screen correctly drew none, which is a structural
+         difference between a board and its firmware and exactly what the comparison
+         exists to catch. -->
     <div style="position: absolute; top: 6px; bottom: 6px; right: 4px; width: 6px; border: 1px solid #000000; box-sizing: border-box;">
-      <div style="position: absolute; left: 0; right: 0; top: 0%; height: 76.2%; background: #000000;"></div>
+      <div style="position: absolute; left: 0; right: 0; top: 0%; height: 75%; background: #000000;"></div>
     </div>
 
   </div>

@@ -55,16 +55,31 @@
 
      TWO ROW HEIGHTS, WHICH IS SETTINGS' PROBLEM AND SETTINGS' SOLUTION. A person has
      a fuller form to show -- Ladislaw over WILL LADISLAW, often most of the answer
-     before a peek is even opened -- and a place or an already-full name has nothing
-     to put on a second line. Blank second lines on a third of the rows read as
-     broken, so those rows are one line tall. The theme therefore reports the BOX
-     MODEL (two heights) and the screen counts how many fit, exactly as
-     settingsMetrics does, because the item table belongs to the screen.
+     before the mentions are even opened -- and a place or an already-full name has
+     nothing to put on a second line. A blank second line reads as broken, so those
+     rows are one line tall. The theme reports the BOX MODEL (two heights) and the
+     screen counts how many fit, exactly as settingsMetrics does, because the item
+     table belongs to the screen.
+
+     THE SHORT ROW IS THE COMMON CASE BY A LONG WAY, AND THIS COMMENT SAID THE
+     OPPOSITE. It read "blank second lines on a third of the rows", and a third was
+     an estimate made before anything grouped. Measured once the grouping ran: rows
+     with NO fuller form are 84% on Le Fleau and 97% on Darkly Dreaming Dexter, at
+     every display threshold from 2 to 12. So this board's mix is 2 tall and 8 short
+     rather than the 5 and 3 it drew, and ten rows fit where eight did.
+
+     AND THE SECOND LINE LANDS WHERE IT IS LEAST NEEDED, which is worth knowing
+     before anyone widens it. By rank: 65% of the top 20 names have a fuller form,
+     50% of the next 30, and 7% of everything below rank 50. The names a reader looks
+     up are the RARE ones -- that is the argument this whole screen is alphabetical
+     for -- so the row that most needs a second line is the one least likely to have
+     one. It is kept because it costs nothing when it is absent and is often the
+     whole answer when it is there, and because Mentions' own band carries it too.
 
      HOW MANY ROWS FIT IS A RESULT, AND THE SLACK BELOW THEM IS THE CHECK. Measured
      off this render: a two-line row is 90px, a one-line row 60px, and the list box
-     is 670px at 480x800 and 662px at 528x792. This board's mix -- five two-line and
-     three one-line -- comes to 629px, leaving 41px and 33px empty. THAT IS CORRECT,
+     is 670px at 480x800 and 662px at 528x792. This board's mix -- two two-line and
+     eight one-line -- comes to 660px, leaving 11px and 3px empty. THAT IS CORRECT,
      not untidy: a ScrollWindow draws whole rows only, so with two row heights some
      slack is inevitable and it varies with which rows are on screen.
 
@@ -118,6 +133,24 @@
     <div style="display: flex; flex-direction: column; flex-grow: 1; margin-right: 14px;">
 
       <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Casaubon</div>
+      </div>
+
+      <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Celia</div>
+      </div>
+
+      <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Dorothea</div>
+      </div>
+
+      <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Featherstone</div>
+      </div>
+
+      <!-- A PERSON WITH A FULLER FORM, and one of only two on this screenful --
+           which is the honest proportion. -->
+      <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
         <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
           <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Ladislaw</div>
           <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">WILL LADISLAW</div>
@@ -125,7 +158,7 @@
       </div>
 
       <!-- A PLACE, one line tall. Nothing is hidden here and nothing is missing:
-           Lowick is Casaubon's parish and the book names it constantly, so it earns
+           Lowick is Casaubon&rsquo;s parish and the book names it constantly, so it earns
            its row on exactly the rule a person does. -->
       <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
         <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Lowick</div>
@@ -139,9 +172,10 @@
       </div>
 
       <!-- FOCUSED, and full-bleed inverted as every list on this device draws it.
-           One line because the display name IS the fullest form: the book calls her
+           ONE LINE, because the display name IS the fullest form: the book calls her
            Mary Garth and there is nothing longer to reveal. Repeating it underneath
-           would be the only thing worse than leaving it blank. -->
+           would be the only thing worse than leaving it blank -- and this is the
+           COMMON case, not the exception, which is why the focus sits on one. -->
       <div style="display: flex; align-items: center; padding: 11px 24px; background: #000000; color: #ffffff;">
         <div style="font-size: var(--t-body); font-weight: 700; flex-grow: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Mary Garth</div>
       </div>
@@ -151,24 +185,7 @@
       </div>
 
       <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
-        <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
-          <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Raffles</div>
-          <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">JOHN RAFFLES</div>
-        </div>
-      </div>
-
-      <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
-        <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
-          <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Rosamond</div>
-          <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">ROSAMOND VINCY</div>
-        </div>
-      </div>
-
-      <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
-        <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
-          <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Trumbull</div>
-          <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">BORTHROP TRUMBULL</div>
-        </div>
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Raffles</div>
       </div>
 
     </div>
@@ -178,7 +195,7 @@
          and top is first/total, in percent so both survive the reflow to 528x792.
 
          THE PROPORTION IS THE SPECIFICATION, so it has to be one only the rule could
-         produce. This is 8 rows of 300 from row 148 -- 2.7% tall at 49.3% down -- and
+         produce. This is 10 rows of 283 from row 148 -- 3.5% tall at 52.3% down -- and
          the thumb is therefore TINY, about 15px. That is not a defect to design
          around: it is the honest reading of a list forty times longer than the
          Library's, and the smallness is itself the information. A comfortable-looking
@@ -188,7 +205,7 @@
          alphabetical: a thumb halfway down means roughly "around M", so it can be
          aimed rather than merely read. -->
     <div style="position: absolute; top: 6px; bottom: 6px; right: 4px; width: 6px; border: 1px solid #000000; box-sizing: border-box;">
-      <div style="position: absolute; left: 0; right: 0; top: 49.3%; height: 2.7%; background: #000000;"></div>
+      <div style="position: absolute; left: 0; right: 0; top: 52.3%; height: 3.5%; background: #000000;"></div>
     </div>
 
   </div>

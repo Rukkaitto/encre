@@ -90,6 +90,11 @@ class ExtractPartWriter {
 // One stored mention, as a part holds it.
 struct StoredExtract {
   std::string run;
+  // WHICH CHAPTER IT CAME FROM. Not in the part file -- a part IS one chapter, so
+  // storing it per line would be the same number written once per extract -- but
+  // the reader fills it in, because a caller assembling a name's whole list across
+  // chapters has nothing else to group by.
+  int spine = 0;
   int block = 0;
   std::string text;
 };

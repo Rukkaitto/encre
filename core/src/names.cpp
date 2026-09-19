@@ -1,5 +1,7 @@
 #include "reader/names.h"
 
+#include "reader/name_store.h"
+
 #include <algorithm>
 #include <cstring>
 
@@ -378,6 +380,198 @@ std::vector<const NameScanner::Run*> NameScanner::admitted(int minMidSentence) c
   //
   // So the counts go on the card and the cut is applied to the ACCUMULATED figures,
   // which is why the index stores `chapterOpening` as a field rather than a verdict.
+  return out;
+}
+
+// --- Grouping ------------------------------------------------------------------
+
+namespace {
+
+size_t tokenCount(std::string_view s) {
+  size_t n = 1;
+  for (const char c : s) {
+    if (c == ' ') ++n;
+  }
+  return n;
+}
+
+std::string_view firstToken(std::string_view s) {
+  const size_t sp = s.find(' ');
+  return sp == std::string_view::npos ? s : s.substr(0, sp);
+}
+
+// Characters, not bytes: a three-letter accented nickname is three characters and
+// five bytes, and the prefix rule's floor is about how much of a name you have seen.
+size_t charLen(std::string_view s) {
+  size_t n = 0;
+  for (const char c : s) {
+    if ((static_cast<unsigned char>(c) & 0xC0) != 0x80) ++n;
+  }
+  return n;
+}
+
+int rootOf(std::vector<int>& parent, int x) {
+  while (parent[static_cast<size_t>(x)] != x) x = parent[static_cast<size_t>(x)];
+  return x;
+}
+
+void unite(std::vector<int>& parent, int a, int b) {
+  const int ra = rootOf(parent, a), rb = rootOf(parent, b);
+  if (ra != rb) parent[static_cast<size_t>(ra)] = rb;
+}
+
+}  // namespace
+
+std::vector<NameGroup> groupNames(const std::vector<NameIndexEntry>& entries,
+                                  int minMidSentence, int furnitureCutPercent) {
+  // THE FURNITURE CUT, per RUN and BEFORE grouping. A run that spends at least half
+  // its mentions opening a chapter is a running header: measured across three real
+  // novels it removes exactly ONE run, the book's own title, and leaves the other
+  // two books' top 40 byte-identical. Applied after grouping it would be diluted by
+  // the character sharing the title's name.
+  std::vector<const NameIndexEntry*> live;
+  for (const NameIndexEntry& e : entries) {
+    if (e.midSentence < minMidSentence) continue;
+    if (furnitureCutPercent > 0 && e.total > 0 &&
+        e.chapterOpening * 100 / e.total >= furnitureCutPercent)
+      continue;
+    live.push_back(&e);
+  }
+  const int n = static_cast<int>(live.size());
+  std::vector<int> parent(static_cast<size_t>(n));
+  for (int i = 0; i < n; ++i) parent[static_cast<size_t>(i)] = i;
+
+  // --- Containment edges (the probe's rule 7) ---
+  //
+  // NO RATIO GUARD, AND THAT WAS THE SINGLE LARGEST IMPROVEMENT IN THE PROBE. The
+  // guard existed so `Larry` would not be LABELLED "Larry Underwood" -- the book
+  // calls him Larry -- but the label is chosen separately, from the most-mentioned
+  // member, so the guard was only ever costing a group its other members.
+  //
+  // Linking is safe because only the BEST run per token is joined, never every run
+  // containing it: `Goldsmith` joins one Goldsmith and a family is not collapsed
+  // into one person.
+  for (int i = 0; i < n; ++i) {
+    const std::string& name = live[static_cast<size_t>(i)]->text;
+    if (name.find(' ') != std::string::npos) continue;
+    int best = -1, bestN = 0;
+    for (int j = 0; j < n; ++j) {
+      if (i == j) continue;
+      const std::string& other = live[static_cast<size_t>(j)]->text;
+      if (other.find(' ') == std::string::npos) continue;
+      const bool head =
+          other.size() > name.size() && other.compare(0, name.size(), name) == 0 &&
+          other[name.size()] == ' ';
+      const bool tail =
+          other.size() > name.size() + 1 &&
+          other.compare(other.size() - name.size(), name.size(), name) == 0 &&
+          other[other.size() - name.size() - 1] == ' ';
+      if (!head && !tail) continue;
+      const int on = live[static_cast<size_t>(j)]->midSentence;
+      if (on > bestN) {
+        bestN = on;
+        best = j;
+      }
+    }
+    if (best >= 0) unite(parent, i, best);
+  }
+
+  // --- Prefix edges, guarded twice (the probe's rule 9) ---
+  //
+  // Stu -> Stuart, Fran -> Frannie, Deb -> Deborah, Dex -> Dexter. MEASURED, because
+  // it is the one rule whose value was not obvious: on Le Fleau it draws 7 merges, 2
+  // clearly right at ranks 1 and 4, 2 clearly wrong in the tail, 3 unverifiable. It
+  // earns itself because its WINS LAND AT THE TOP OF THE LIST and its errors land on
+  // entities with under 30 mentions that nobody looks up.
+  for (int i = 0; i < n; ++i) {
+    const std::string& name = live[static_cast<size_t>(i)]->text;
+    if (name.find(' ') != std::string::npos) continue;
+    if (charLen(name) < 3) continue;
+    std::vector<int> ext;
+    for (int j = 0; j < n; ++j) {
+      if (i == j) continue;
+      const std::string& other = live[static_cast<size_t>(j)]->text;
+      const std::string_view ft = firstToken(other);
+      if (ft.size() <= name.size()) continue;
+      if (ft.compare(0, name.size(), name) != 0) continue;
+      // GUARD ONE: A PLURAL IS NOT A NICKNAME. `Noir -> Noirs` and `Etat -> Etats`
+      // were two of the first eight merges this rule drew, and both are one word
+      // inflected rather than two names for one person.
+      const std::string_view suffix = ft.substr(name.size());
+      if (suffix == "s" || suffix == "es" || suffix == "x") continue;
+      // Distinct only if the extending FIRST TOKEN differs: `Stuart` and `Stuart
+      // Redman` are not two ways to be ambiguous.
+      bool seen = false;
+      for (const int k : ext) {
+        if (firstToken(live[static_cast<size_t>(k)]->text) == ft) seen = true;
+      }
+      if (!seen) ext.push_back(j);
+    }
+    if (ext.empty()) continue;
+    std::sort(ext.begin(), ext.end(), [&](int a, int b) {
+      return live[static_cast<size_t>(a)]->midSentence > live[static_cast<size_t>(b)]->midSentence;
+    });
+    // GUARD TWO: AN AMBIGUOUS PREFIX IS DECLINED UNLESS ONE EXTENSION DOMINATES 3:1.
+    // `Fran` extends to both `Frank` and `Frannie`, and merging Frank into Frannie is
+    // far worse than leaving a nickname unlinked. Declining OUTRIGHT was the first
+    // version and it cost a top-three entity its link, so a dominant extension is
+    // taken and a close call is still refused.
+    if (ext.size() > 1) {
+      const int n0 = live[static_cast<size_t>(ext[0])]->midSentence;
+      const int n1 = live[static_cast<size_t>(ext[1])]->midSentence;
+      if (n0 < n1 * 3) continue;
+    }
+    unite(parent, i, ext[0]);
+  }
+
+  // --- Collect ---
+  std::vector<NameGroup> out;
+  std::vector<int> groupOf(static_cast<size_t>(n), -1);
+  for (int i = 0; i < n; ++i) {
+    const int r = rootOf(parent, i);
+    if (groupOf[static_cast<size_t>(r)] < 0) {
+      groupOf[static_cast<size_t>(r)] = static_cast<int>(out.size());
+      out.push_back(NameGroup{});
+    }
+    NameGroup& g = out[static_cast<size_t>(groupOf[static_cast<size_t>(r)])];
+    g.midSentence += live[static_cast<size_t>(i)]->midSentence;
+    g.members.push_back(live[static_cast<size_t>(i)]->text);
+  }
+
+  for (NameGroup& g : out) {
+    // THE DISPLAY NAME IS THE MOST-MENTIONED MEMBER, so what is ON THE PAGE is what
+    // the list shows and therefore what a reader can find.
+    std::sort(g.members.begin(), g.members.end(),
+              [&](const std::string& a, const std::string& b) {
+                int na = 0, nb = 0;
+                for (const NameIndexEntry* e : live) {
+                  if (e->text == a) na = e->midSentence;
+                  if (e->text == b) nb = e->midSentence;
+                }
+                if (na != nb) return na > nb;
+                return a < b;
+              });
+    g.display = g.members.front();
+    // THE FULLEST FORM IS THE LONGEST MEMBER: more tokens first, then longer. It is
+    // often most of the answer before an extract is read.
+    const std::string* fullest = &g.members.front();
+    for (const std::string& m : g.members) {
+      const size_t tm = tokenCount(m), tf = tokenCount(*fullest);
+      if (tm > tf || (tm == tf && m.size() > fullest->size())) fullest = &m;
+    }
+    // EMPTY WHERE THERE IS NOTHING LONGER TO REVEAL, which is the short row on the
+    // board. Repeating the display name underneath would be the only thing worse
+    // than leaving it blank.
+    if (*fullest != g.display) g.fullest = *fullest;
+  }
+
+  // ALPHABETICAL BY DISPLAY NAME. You always arrive knowing the string, because you
+  // just read it, and alphabetical is the only order where knowing it tells you
+  // where to look.
+  std::sort(out.begin(), out.end(), [](const NameGroup& a, const NameGroup& b) {
+    if (a.display != b.display) return a.display < b.display;
+    return a.midSentence > b.midSentence;
+  });
   return out;
 }
 

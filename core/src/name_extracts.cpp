@@ -162,6 +162,7 @@ bool readExtracts(FileSystem& fs, const std::string& dir, int spine, std::string
       if (t2 == std::string_view::npos) continue;
       StoredExtract e;
       e.run.assign(run);
+      e.spine = spine;
       if (!parseInt(line.substr(t1 + 1, t2 - t1 - 1), e.block)) continue;
       e.text.assign(line.substr(t2 + 1));
       out.push_back(std::move(e));

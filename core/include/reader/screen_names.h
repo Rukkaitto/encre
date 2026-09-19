@@ -1,5 +1,9 @@
 #pragma once
-#include "reader/app.h"
+#include <string>
+#include <vector>
+
+#include "reader/focus_screen.h"
+#include "reader/names.h"
 #include "reader/viewmodel.h"
 
 namespace reader {
@@ -9,27 +13,21 @@ namespace reader {
 // A FULL SCREEN, not an overlay, on Contents' argument: a list you read and scroll,
 // not a question about the page behind it.
 //
-// --- IT HAS NO ROWS YET, AND THAT IS THE WHOLE OF ITS BEHAVIOUR -----------------
+// EMPTY IS A VARIANT OF THIS SCREEN, not a second one -- same ScreenId, same view
+// model, copy where the rows would be. `rows` being empty IS the variant; there is
+// no flag, because a flag could disagree with the rows. A book opened at chapter one
+// legitimately knows almost nothing, and that is the feature working.
 //
-// The card's name store is #156 and the display-time grouping is #157. Neither
-// exists, so every instance renders the EMPTY VARIANT -- which is the honest answer
-// for a book whose names have not been scanned, and is the same screen a reader
-// legitimately meets at chapter one once the store does exist.
-//
-// SO IT IS NOT A `FocusScreen`, AND THAT IS DELIBERATE. `FocusScreen` exists to make
-// the focus/setFocus pair structural for a list; a screen with no list has no focus
-// to restore, and deriving from it now would mean carrying a ScrollWindow over an
-// empty vector and answering `focusable()` about rows that do not exist. It becomes
-// one when it gets rows, in the same change that adds them -- and that change has to
-// touch this class anyway, so nothing is saved by guessing at the base class now.
-//
-// WHAT THE ROW IN THE READER MENU PROMISES IS THEREFORE TRUE. The menu's rule is
-// that a row whose screen lands inside this release is drawn and live. Names does,
-// so the row is drawn and it opens this screen; what is behind the door is "no names
-// yet", not a no-op.
-class NamesScreen : public Screen {
+// IT IS HANDED GROUPS, NOT THE CARD. Grouping is a batch operation over the whole
+// index -- containment, prefix edges, both guards -- and it happens when the screen
+// opens, because doing it per chapter would freeze decisions later chapters should
+// change. Who reads the card and calls `groupNames` is the shell's business; this
+// class takes the answer, which is what keeps it testable without a filesystem.
+class NamesScreen : public FocusScreen {
  public:
-  NamesScreen();
+  // `visibleRows` is a starting guess; the real count depends on how many of the
+  // rows are SHORT, which only the screen knows -- see `setMetrics`.
+  NamesScreen(std::vector<NameGroup> groups, int visibleRows);
 
   ScreenId id() const override { return ScreenId::Names; }
   Action onGesture(const GestureEvent& g) override;
@@ -37,8 +35,29 @@ class NamesScreen : public Screen {
 
   const NamesViewModel& vm() const { return vm_; }
 
+  // THE THEME REPORTS THE BOX MODEL AND THE SCREEN COUNTS, which is settingsMetrics'
+  // split and for its reason: the item table belongs to the screen. Here the two
+  // heights interleave by content rather than by a header flag, so only this class
+  // can say how many fit from a given first row.
+  void setMetrics(int listH, int tallRowH, int shortRowH);
+
+  int rowCount() const { return static_cast<int>(groups_.size()); }
+
+  // The group the focus names, or nullptr. What the shell reads after a press to
+  // know whose mentions to open.
+  const NameGroup* chosen() const;
+
+ protected:
+  void syncVm() override;
+
  private:
+  int rowsFittingFrom(int first) const;
+  // Re-tune the window to what actually fits from where it is parked. See the .cpp.
+  void retune();
+
+  std::vector<NameGroup> groups_;
   NamesViewModel vm_{};
+  int listH_ = 0, tallH_ = 0, shortH_ = 0;
 };
 
 }  // namespace reader

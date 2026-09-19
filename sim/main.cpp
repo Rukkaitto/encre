@@ -31,6 +31,8 @@
 #include "reader/screen_reader_menu.h"
 #include "reader/screen_sleep.h"
 #include "reader/screen_typography.h"
+#include "reader/screen_mentions.h"
+#include "reader/screen_names.h"
 #include "reader/screens.h"
 #include "reader/settings.h"
 #include "reader/theme_quiet.h"
@@ -683,6 +685,8 @@ int main(int argc, char** argv) {
   // has never heard of is reported NOT IMPLEMENTED by compare-design.py, which is
   // the true answer until the rows land.
   const bool isNamesEmpty = std::strcmp(argv[1], "names_empty") == 0;
+  const bool isNames = std::strcmp(argv[1], "names") == 0;
+  const bool isMentions = std::strcmp(argv[1], "mentions") == 0;
   const bool isHomeEmpty = std::strcmp(argv[1], "home_empty") == 0;
   const bool isHomeUnopened = std::strcmp(argv[1], "home_unopened") == 0;
   // design/HomeCharging.dc.html. Home with the cable in: the SAME view model as
@@ -806,7 +810,8 @@ int main(int argc, char** argv) {
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
       !isHomeUnopened && !isHomeCharging && !isHomeMissing && !isLibraryScrolled && !isReader &&
       !isSleepIdle &&
-      !isReaderMenu && !isContents && !isNamesEmpty && !isChapterOpen && !isReaderList &&
+      !isReaderMenu && !isContents && !isNamesEmpty && !isNames && !isMentions &&
+      !isChapterOpen && !isReaderList &&
       !isAnchored &&
       !isSleepWaking && !isLibraryOpening && !isTypography && !isPeek && !isSleepCover &&
       !isSleepCoverDetails && !isSleepCoverWaking && !isBookEnd && !isBookError &&
@@ -1042,12 +1047,59 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  if (isNames) {
+    // THE SCREEN COUNTS AND THE THEME REPORTS THE BOX MODEL, which is settingsMetrics'
+    // split: the two row heights interleave by content, so how many fit depends on
+    // which rows are on screen and only the screen holds the item table.
+    reader::DemoScreenFactory factory;
+    factory.setNames(reader::demoNames());
+    std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Names);
+    if (scr == nullptr) {
+      std::fprintf(stderr, "the factory refused ScreenId::Names\n");
+      return 1;
+    }
+    int listH = 0, tallH = 0, shortH = 0;
+    theme.namesMetrics(h, fonts, listH, tallH, shortH);
+    static_cast<reader::NamesScreen&>(*scr).setMetrics(listH, tallH, shortH);
+    // The board's focused row is `Mary Garth`, the eighth -- a SHORT row, because
+    // that is the common case and the focus belongs on one.
+    static_cast<reader::NamesScreen&>(*scr).setFocus(7);
+    if (!renderToPng(*scr, fonts, theme, w, h, argv[2])) return 1;
+    std::printf("wrote %s (%dx%d)  names, %d rows\n", argv[2], w, h,
+                static_cast<reader::NamesScreen&>(*scr).vm().scrollTotal);
+    return 0;
+  }
+
+  if (isMentions) {
+    reader::DemoScreenFactory factory;
+    factory.setMentions(reader::demoMentionsSubject(), reader::demoMentions(), {});
+    std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Mentions);
+    if (scr == nullptr) {
+      std::fprintf(stderr, "the factory refused ScreenId::Mentions\n");
+      return 1;
+    }
+    auto& ms = static_cast<reader::MentionsScreen&>(*scr);
+    int listH = 0, headerH = 0;
+    std::vector<int> rowHeights;
+    theme.mentionsMetrics(w, h, fonts, ms.extractTexts(), listH, headerH, rowHeights);
+    ms.setMetrics(listH, headerH, rowHeights);
+    // The board focuses the second sighting, which is a two-line extract: the
+    // inverted state is worth showing on the taller of the two.
+    ms.setFocus(1);
+    if (!renderToPng(*scr, fonts, theme, w, h, argv[2])) return 1;
+    std::printf("wrote %s (%dx%d)  mentions\n", argv[2], w, h);
+    return 0;
+  }
+
   if (isNamesEmpty) {
     // A full screen, and it needs nothing primed: the screen has no rows to be given
     // and the factory therefore has no `namesPrimed_` to refuse on. That is the one
     // case in this file where `create` cannot return nullptr for want of content,
     // and it stops being so in the same change that gives the screen rows.
+    // PRIMED WITH NOTHING, which is the distinction the factory draws: an empty list
+    // is a real answer and builds, where nothing primed at all is refused.
     reader::DemoScreenFactory factory;
+    factory.setNames({});
     std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Names);
     if (scr == nullptr) {
       std::fprintf(stderr, "the factory refused ScreenId::Names\n");

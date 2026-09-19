@@ -129,6 +129,52 @@ class NameScanner {
   int dropped_ = 0;
 };
 
+// --- Grouping ------------------------------------------------------------------
+//
+// THE SCREEN'S JOB, NOT THE SCAN'S, and the card holds raw runs because of it. The
+// probe's grouping is a batch operation over the whole candidate set: doing it
+// incrementally per chapter would freeze decisions later chapters should be able to
+// change -- `Fran` is unambiguous until `Frank` appears, which may be thirty chapters
+// later.
+//
+// THREE OF THE PROBE'S ELEVEN RULES DO NOT COME ACROSS, and that is the Mentions
+// screen's doing rather than an omission. Rules 4, 5 and 8 -- the earliest of the
+// best TIER, the lowercase-after-comma test that kills the front matter, and the
+// fuller-name tie-break -- all exist to choose ONE introducing sentence per group.
+// Nothing chooses one any more: a name opens a list of its first eight sightings and
+// the reader picks. The two that do come across are the ones that decide who is WHO.
+struct NameGroup {
+  // The form the book uses most, which is what the list displays: `Stu`. A reader
+  // arrives knowing the string because they just read it on the page.
+  std::string display;
+  // The longest member, shown under the display name in tracked caps: `STUART
+  // REDMAN`. EMPTY when the group has one member or its longest IS its display name
+  // -- a place, or a name the book always writes in full -- and an empty one makes
+  // the row short rather than drawing a blank line.
+  std::string fullest;
+  // The group's rank: its members' mid-sentence mentions, summed.
+  int midSentence = 0;
+  // Every run in the group, most-mentioned first. What a lookup needs to find the
+  // group's extracts, which are stored per RUN.
+  std::vector<std::string> members;
+};
+
+// Group `entries` and return the groups sorted by DISPLAY NAME.
+//
+// ALPHABETICAL, WHICH INVERTS THE OBVIOUS ORDER. Ranking by mentions puts the leads
+// at the top, and you never look up a lead: the name you cannot place is rare, so
+// most-mentioned-first buries it hundreds of rows down and moves it as you read on.
+//
+// `minMidSentence` is the DISPLAY threshold and is a different number from admission's
+// -- that one is about what the card keeps so a count can go on growing, this one is
+// about how many rows a reader scrolls.
+//
+// `furnitureCutPercent` drops a run that spends at least that share of its mentions
+// opening a chapter. Applied per RUN and BEFORE grouping, because a book's own title
+// folds into the character sharing its name and would dilute the group's figure.
+std::vector<NameGroup> groupNames(const std::vector<struct NameIndexEntry>& entries,
+                                  int minMidSentence = 5, int furnitureCutPercent = 50);
+
 // --- The pieces, exposed because they each earned a test -----------------------
 //
 // These are internal to the scan and are declared here so the rules the probe paid

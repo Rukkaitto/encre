@@ -2151,7 +2151,31 @@ void QuietTheme::renderNames(Framebuffer& fb, const FontSet& fonts, const NamesV
   // Both Names boards reserve the line box with an `&nbsp;` to match. The slot used
   // to say `TO CH. 07`; backfill is what retired it.
   const int bandH = drawHeaderBand(fb, fonts, vm.title, "", nullptr, plane);
-  const int areaH = fb.height() - bandH - hintBarHeight(fonts, hints);
+  const int barH = hintBarHeight(fonts, hints);
+
+  if (!vm.rows.empty()) {
+    // THE LIST. Two heights that interleave by content, so this walks rather than
+    // multiplies -- and the screen has already decided which rows fit, because the
+    // item table is its and not the theme's.
+    const int listBottom = fb.height() - barH;
+    const int gutter = vm.scrollable ? kListGutterW : 0;
+    int y = bandH;
+    for (size_t i = 0; i < vm.rows.size(); ++i) {
+      const NameRow& r = vm.rows[i];
+      const int h = stackedRowHeight(fonts, !r.fullest.empty());
+      if (y + h > listBottom) break;
+      const StackedRowContent content{r.name, r.fullest, true};
+      y += drawStackedRow(fb, fonts, y, content, static_cast<int>(i) == vm.focusedRow, true,
+                          plane, gutter);
+    }
+    if (vm.scrollable)
+      drawScrollRail(fb, bandH, listBottom, vm.scrollFirst, vm.scrollCount, vm.scrollTotal,
+                     plane);
+    drawHintBar(fb, fonts, hints, plane);
+    return;
+  }
+
+  const int areaH = fb.height() - bandH - barH;
 
   // THE BOARD'S OWN PADDING, 40px, NOT kMargin. This column is inset further than a
   // list row is -- `padding: 0 40px` on the board -- and taking the screen margin
@@ -2189,6 +2213,98 @@ void QuietTheme::renderNames(Framebuffer& fb, const FontSet& fonts, const NamesV
   yF26 += drawProse(fb, title, head, colX, colW, yF26, Ink::Black, plane) + pxToF26(kEmptyGap);
   drawProse(fb, body, prose, colX, colW, yF26, Ink::Black, plane);
 
+  drawHintBar(fb, fonts, hints, plane);
+}
+
+// A MENTIONS EXTRACT WRAPS TO THREE LINES AT MOST, AND TWO WAS NOT ENOUGH.
+//
+// The X4 column holds about 30 characters at --t-body and a 64-byte extract is ~55,
+// which looked like two lines and is two in CHROME. The firmware's autohinted faces
+// have whole-pixel advances and measure ~3% wider, so the board's two lines came out
+// as three here and a cap of two CUT THE EXTRACT -- a row showing half of its own
+// sentence, which is the one thing this screen must not do. That is SdMissing's
+// 400-to-420 lesson arriving on a different board.
+//
+// So the cap is the number that cannot cut a 64-byte extract in the narrower engine,
+// and a short sentence still yields one line: the two heights are unchanged, there
+// is simply a third for the longest extracts.
+constexpr int kMentionLeadLines = 3;
+
+void QuietTheme::namesMetrics(int panelH, const FontSet& fonts, int& listH, int& tallRowH,
+                              int& shortRowH) {
+  Hint measuring[4];
+  measuringHints(measuring);
+  listH = panelH - headerBandHeight(fonts, nullptr) - hintBarHeight(fonts, measuring);
+  if (listH < 0) listH = 0;
+  tallRowH = stackedRowHeight(fonts, true);
+  shortRowH = stackedRowHeight(fonts, false);
+}
+
+void QuietTheme::mentionsMetrics(int panelW, int panelH, const FontSet& fonts,
+                                 const std::vector<std::string>& extracts, int& listH,
+                                 int& headerH, std::vector<int>& rowHeights) {
+  Hint measuring[4];
+  measuringHints(measuring);
+  listH = panelH - headerBandHeight(fonts, nullptr) - hintBarHeight(fonts, measuring);
+  if (listH < 0) listH = 0;
+  headerH = sectionHeaderHeight(fonts, false);
+  rowHeights.clear();
+  rowHeights.reserve(extracts.size());
+  // THE SAME FUNCTION THE RENDERER USES, with the same arguments, so the height the
+  // screen counts with and the height the row draws at cannot disagree. The gutter
+  // is assumed present, which is conservative: a narrower row wraps to no fewer
+  // lines than a wider one.
+  const int rowW = panelW - kListGutterW;
+  for (const std::string& e : extracts) {
+    rowHeights.push_back(stackedRowHeight(
+        fonts, false, true, stackedLeadLines(fonts, e, rowW, kMentionLeadLines)));
+  }
+}
+
+// design/Mentions.dc.html.
+void QuietTheme::renderMentions(Framebuffer& fb, const FontSet& fonts,
+                                const MentionsViewModel& vm, Plane plane) {
+  fb.clear(true);
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+
+  // THE LABEL NAMES THE SCREEN and the value is the fullest form, which is often
+  // most of the answer before an extract is read. The value is the yielding run --
+  // `min-width: 0` on the board -- because the label is a literal that always fits.
+  const int listTop = drawHeaderBand(fb, fonts, vm.title, vm.subject, nullptr, plane);
+  const int barH = hintBarHeight(fonts, hints);
+  const int listBottom = fb.height() - barH;
+  const int gutter = vm.scrollable ? kListGutterW : 0;
+
+  int y = listTop;
+  for (size_t i = 0; i < vm.rows.size(); ++i) {
+    const MentionRow& r = vm.rows[i];
+    if (r.isChapterHeader) {
+      // CONTENTS' SECTION HEADER, and its reasoning transfers exactly: no rule here
+      // and none under the row above it. A chapter is not a change of SUBJECT the
+      // way Settings' groups are -- it is one continuous sequence of sightings of
+      // one person -- so the separation is the label's own padding and its caps.
+      if (y + sectionHeaderHeight(fonts, false) > listBottom) break;
+      y += drawSectionHeader(fb, fonts, y, fb.width() - gutter, r.text, false, plane);
+      continue;
+    }
+    // THE SECTION-FINAL ROW DROPS ITS RULE, because the header below carries none
+    // and a line there would read as belonging to the header rather than the row --
+    // which is the 3px full-width line #81 found on Contents.
+    const bool nextIsHeader = (i + 1 < vm.rows.size()) && vm.rows[i + 1].isChapterHeader;
+    const bool rule = !nextIsHeader;
+    const int rowW = fb.width() - gutter;
+    const int h = stackedRowHeight(fonts, false, rule,
+                                   stackedLeadLines(fonts, r.text, rowW, kMentionLeadLines));
+    if (y + h > listBottom) break;
+    const StackedRowContent content{r.text, {}, false, kMentionLeadLines};
+    y += drawStackedRow(fb, fonts, y, content, static_cast<int>(i) == vm.focusedRow, rule,
+                        plane, gutter);
+  }
+
+  if (vm.scrollable)
+    drawScrollRail(fb, listTop, listBottom, vm.scrollFirst, vm.scrollCount, vm.scrollTotal,
+                   plane);
   drawHintBar(fb, fonts, hints, plane);
 }
 
