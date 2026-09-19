@@ -9305,7 +9305,7 @@ void loop() {
       std::vector<std::string> wanted;
       std::vector<int> quota;
       std::vector<int> runIndex;
-      gNameStore->quotasFor(gNameScan.runs(), 8, wanted, quota, runIndex);
+      gNameStore->quotasFor(gNameScan.runs(), 8, spine, wanted, quota, runIndex);
 
       // THE SECOND WALK, on the chapter that is already open -- it rewinds the
       // reader's own stream and puts the page back, so it allocates nothing. Two
@@ -9617,7 +9617,7 @@ void loop() {
             std::vector<std::string> wanted;
             std::vector<int> quota;
             std::vector<int> runIndex;
-            gNameStore->quotasFor(sc.runs(), 8, wanted, quota, runIndex);
+            gNameStore->quotasFor(sc.runs(), 8, want, wanted, quota, runIndex);
             admitted = static_cast<int>(wanted.size());
             std::vector<int> kept(sc.runs().size(), 0);
             bool ok = true;

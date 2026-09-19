@@ -38,7 +38,18 @@ namespace reader {
 struct NameIndexHeader {
   // A FORMAT CHANGE DISCARDS RATHER THAN MISREADS. Same hard gate `kPositionVersion`
   // is: a record from a future version is refused whole, not parsed hopefully.
-  static constexpr int kVersion = 1;
+  //
+  // 2, AND THE FORMAT DID NOT CHANGE -- THE MEANING OF WHAT IS IN IT DID. A store
+  // written before the quota fix has chapters marked SCANNED that captured no
+  // extracts at all, because backfill found every run already at its cap and took
+  // nothing. Those chapters would never be revisited: the scanned-spine bit is the
+  // only thing that decides, and it says they are done.
+  //
+  // A version bump is the one mechanism that reaches them, and it is exactly what
+  // this field is for -- a store whose bits mean something different from what this
+  // build believes is worse than no store, which is the same argument `bookBytes`
+  // makes about a different book.
+  static constexpr int kVersion = 2;
 
   std::string bookPath;
   // The EPUB's size, which is the cheapest identity a FileSystem with no timestamps
@@ -159,7 +170,19 @@ class NameStore {
   // Both sides are sorted by run text, so this is one pass over the file with a
   // 256-byte window and no index resident at all. `runs` is the chapter's whole
   // table; the OUT vectors carry only what this chapter will actually capture for.
-  bool quotasFor(const std::vector<NameScanner::Run>& runs, int cap,
+  //
+  // `spine` IS THE CHAPTER ABOUT TO BE CAPTURED, and it is what makes the answer
+  // right for backfill. A run's quota is the cap less the extracts it already has
+  // FROM EARLIER CHAPTERS -- not less everything it has. Extracts from LATER
+  // chapters do not count against it, because this chapter's sightings displace
+  // them: the rule is the first eight in the book, not the first eight scanned.
+  //
+  // Counting them was a real bug and a silent one. A reader halfway through a book
+  // has the major names at their cap from the chapters they read live, so backfill
+  // walking forward from chapter 0 found every run full and captured NOTHING --
+  // reported off glass as `admitted=26 extracts=0`, chapter after chapter. The
+  // eviction rule was ready and there was never anything for it to evict with.
+  bool quotasFor(const std::vector<NameScanner::Run>& runs, int cap, int spine,
                  std::vector<std::string>& wanted, std::vector<int>& quota,
                  std::vector<int>& runIndex) const;
 

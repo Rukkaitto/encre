@@ -93,10 +93,15 @@ TEST_CASE("a header round-trips, and a version it cannot read is refused whole")
   CHECK(back.contiguousPrefix() == 1);
 
   SUBCASE("a future version is discarded rather than parsed hopefully") {
+    // DERIVED, NOT PINNED. This spelled the version literally and had to be
+    // hand-edited when the store's meaning changed -- which is a second copy of the
+    // number with a build failure attached, and exactly what test_version.cpp
+    // stopped doing for the same reason.
     std::string text = reader::serialiseHeader(h);
-    const size_t v = text.find("encre-names\t1");
+    const std::string tag = "encre-names\t" + std::to_string(NameIndexHeader::kVersion);
+    const size_t v = text.find(tag);
     REQUIRE(v != std::string::npos);
-    text[v + 12] = '9';
+    text.replace(v, tag.size(), "encre-names\t999");
     NameIndexHeader bad;
     CHECK(!reader::parseHeader(text, bad, nullptr));
   }
@@ -338,6 +343,57 @@ TEST_CASE("admission is order-dependent, and that is a bound rather than a defec
   // THE TWO DISAGREE, DELIBERATELY. Asserting the difference rather than the
   // equality is what stops someone "fixing" this into the unbounded table.
   CHECK(out[0].midSentence != out2[0].midSentence);
+}
+
+TEST_CASE("a backfilled chapter may capture even when the cap is already spent") {
+  // REPORTED OFF GLASS as `admitted=26 extracts=0`, chapter after chapter. A reader
+  // halfway through a book has the major names at their cap from the chapters they
+  // read live, so backfill walking forward from chapter 0 found every run full and
+  // captured nothing at all -- and the eviction rule was sitting there ready with
+  // nothing to evict WITH.
+  //
+  // The quota is the cap less what the run already has FROM EARLIER CHAPTERS. A
+  // later chapter's extracts are not room to work around; they are what this
+  // chapter displaces, because the rule is the first eight in the BOOK.
+  FakeFileSystem fs;
+  NameStore store(fs, kBook, kBytes);
+
+  // Read live at chapter 40: the name takes its full eight.
+  Chapter live;
+  live.add("Flagg", 9, 0, 9, 8);
+  live.seal();
+  REQUIRE(store.mergeChapter(40, live.runs, &live.extracts));
+
+  std::vector<std::string> wanted;
+  std::vector<int> quota;
+  std::vector<int> runIndex;
+
+  SUBCASE("an EARLIER chapter is entitled to the whole cap") {
+    REQUIRE(store.quotasFor(live.runs, 8, /*spine=*/3, wanted, quota, runIndex));
+    REQUIRE(wanted.size() == 1);
+    CHECK(wanted[0] == "Flagg");
+    CHECK(quota[0] == 8);  // chapter 40's eight do not count against chapter 3
+  }
+  SUBCASE("a LATER chapter still gets nothing, which is the cap doing its job") {
+    REQUIRE(store.quotasFor(live.runs, 8, /*spine=*/50, wanted, quota, runIndex));
+    REQUIRE(wanted.size() == 1);
+    CHECK(quota[0] == 0);
+  }
+  SUBCASE("and the merge then displaces the later ones") {
+    Chapter early;
+    early.add("Flagg", 9, 0, 9, 8);
+    early.seal();
+    REQUIRE(store.mergeChapter(3, early.runs, &early.extracts));
+    NameIndexHeader h;
+    std::vector<NameIndexEntry> out;
+    REQUIRE(store.loadAll(h, out));
+    REQUIRE(out.size() == 1);
+    CHECK(out[0].extractCount() == 8);
+    // All eight now come from chapter 3 -- the introduction -- and chapter 40's are
+    // gone from the list, which is exactly what "the first eight in the book" means.
+    REQUIRE(out[0].extracts.size() == 1);
+    CHECK(out[0].extracts[0].spine == 3);
+  }
 }
 
 TEST_CASE("an index for another book is discarded rather than merged into") {

@@ -491,7 +491,7 @@ bool NameStore::mergeChapter(int spine, const std::vector<NameScanner::Run>& run
   return fs_.writeAll(indexPath(), serialiseHeader(header) + body);
 }
 
-bool NameStore::quotasFor(const std::vector<NameScanner::Run>& runs, int cap,
+bool NameStore::quotasFor(const std::vector<NameScanner::Run>& runs, int cap, int spine,
                           std::vector<std::string>& wanted, std::vector<int>& quota,
                           std::vector<int>& runIndex) const {
   wanted.clear();
@@ -525,7 +525,14 @@ bool NameStore::quotasFor(const std::vector<NameScanner::Run>& runs, int cap,
     }
     // A RUN NOT ON THE CARD MUST EARN ITS SLOT; one already on it keeps growing.
     if (!onCard && runs[i].midSentence < NameScanner::kAdmitMidSentence) continue;
-    const int used = onCard ? e.extractCount() : 0;
+    // ONLY WHAT IS ALREADY THERE FROM EARLIER CHAPTERS. A later chapter's extracts
+    // are not room this chapter has to work around -- they are what it displaces.
+    int used = 0;
+    if (onCard) {
+      for (const NameIndexEntry::At& a : e.extracts) {
+        if (a.spine < spine) used += a.count;
+      }
+    }
     const int left = room - used;
     wanted.push_back(text);
     quota.push_back(left > 0 ? left : 0);
