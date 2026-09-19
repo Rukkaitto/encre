@@ -148,6 +148,21 @@ class NameStore {
   bool mergeChapter(int spine, const std::vector<NameScanner::Run>& runs,
                     const std::vector<int>* extractCounts = nullptr);
 
+  // WHAT EACH RUN STILL HAS ROOM FOR, streamed rather than loaded.
+  //
+  // The capture needs a quota per run and the only thing it needs from the index is
+  // how many extracts that run already has. Answering it with `loadAll` costs the
+  // whole index as a PARSED VECTOR -- ~30 KB of strings and vectors -- on the one
+  // path where the heap is tightest, and that is what it cost until a device
+  // reported the feature standing down with 32,752 bytes free.
+  //
+  // Both sides are sorted by run text, so this is one pass over the file with a
+  // 256-byte window and no index resident at all. `runs` is the chapter's whole
+  // table; the OUT vectors carry only what this chapter will actually capture for.
+  bool quotasFor(const std::vector<NameScanner::Run>& runs, int cap,
+                 std::vector<std::string>& wanted, std::vector<int>& quota,
+                 std::vector<int>& runIndex) const;
+
   // Every entry, for the screen's grouping pass. THE ONE PLACE THE WHOLE INDEX GOES
   // RESIDENT, which is why the screen releases the Reader's chapter before it opens.
   bool loadAll(NameIndexHeader& header, std::vector<NameIndexEntry>& out) const;

@@ -388,7 +388,13 @@ int gNamesLastChapter = -1;
 // 8 KB extract part plus room for the index it is about to rewrite. Below that it
 // does nothing at all and says so, and the chapter stays unscanned -- which the
 // scanned-spine bitmap already makes a first-class state.
-constexpr size_t kNamesHeadroom = 24 * 1024;
+// TWELVE, WHERE IT WAS TWENTY-FOUR. The twenty-four was the sum of things this job
+// no longer holds at once: the whole index as a parsed vector (gone -- the quotas
+// stream), the old index as a string beside the new one (gone -- the merge streams),
+// and the 8 KB part buffer beside the merge's output (gone -- it is scoped). What is
+// left is one of those at a time, and a device reported the old figure standing the
+// feature down with 32,752 bytes free.
+constexpr size_t kNamesHeadroom = 12 * 1024;
 // Said once per book rather than per chapter: a heap this tight stays tight, and a
 // line every two seconds would be the log shouting about one fact.
 bool gNamesToldNoRoom = false;
@@ -9293,29 +9299,13 @@ void loop() {
       const int spine = gNamesOwed;
       gNamesOwed = -1;
 
-      // WHAT EACH RUN STILL HAS ROOM FOR, read off the index BEFORE the merge. A run
-      // already on the card keeps accumulating, so its quota is what the cap leaves.
-      reader::NameIndexHeader have;
-      std::vector<reader::NameIndexEntry> entries;
-      const bool hadIndex = gNameStore->loadAll(have, entries);
+      // WHAT EACH RUN STILL HAS ROOM FOR, STREAMED. This used to call loadAll, which
+      // holds the whole index as a parsed vector -- ~30 KB of strings and vectors --
+      // to answer one integer per run, on the path where the heap is tightest.
       std::vector<std::string> wanted;
       std::vector<int> quota;
-      for (const auto& r : gNameScan.runs()) {
-        int used = -1;
-        if (hadIndex) {
-          for (const auto& e : entries) {
-            if (e.text == r.text) {
-              used = e.extractCount();
-              break;
-            }
-          }
-        }
-        const bool onCard = used >= 0;
-        if (!onCard && r.midSentence < reader::NameScanner::kAdmitMidSentence) continue;
-        wanted.push_back(r.text);
-        const int room = (hadIndex ? have.extractCap : 8) - (onCard ? used : 0);
-        quota.push_back(room > 0 ? room : 0);
-      }
+      std::vector<int> runIndex;
+      gNameStore->quotasFor(gNameScan.runs(), 8, wanted, quota, runIndex);
 
       // THE SECOND WALK, on the chapter that is already open -- it rewinds the
       // reader's own stream and puts the page back, so it allocates nothing. Two
@@ -9323,22 +9313,27 @@ void loop() {
       std::vector<int> kept(gNameScan.runs().size(), 0);
       int captured = 0;
       if (!wanted.empty()) {
-        reader::ExtractPartWriter out(gSd, gNameStore->dir(), spine);
-        reader::ExtractCapture cap(wanted, quota, out);
-        const bool walked =
-            rd->captureNames(cap, [](void*) { return rawSamplesPending() != 0; }, nullptr);
-        out.finish();
-        if (walked) {
-          for (size_t i = 0; i < gNameScan.runs().size(); ++i) {
-            for (size_t k = 0; k < wanted.size(); ++k) {
-              if (wanted[k] == gNameScan.runs()[i].text) {
-                kept[i] = cap.kept()[k];
-                break;
-              }
+        // SCOPED, so the 8 KB part buffer is GONE before the merge builds its
+        // output. Held across it, the two peaks add and the job needs both at once
+        // for no reason -- the capture is finished by then.
+        bool walked = false;
+        {
+          reader::ExtractPartWriter out(gSd, gNameStore->dir(), spine);
+          reader::ExtractCapture cap(std::move(wanted), quota, out);
+          walked = rd->captureNames(cap, [](void*) { return rawSamplesPending() != 0; },
+                                    nullptr);
+          out.finish();
+          if (walked) {
+            // BY INDEX, NOT BY NAME. quotasFor hands back which run each entry came
+            // from, so the realignment is a lookup rather than a search -- and
+            // `wanted` can be moved into the capture instead of copied.
+            for (size_t k = 0; k < runIndex.size(); ++k) {
+              kept[static_cast<size_t>(runIndex[k])] = cap.kept()[k];
+              captured += cap.kept()[k];
             }
           }
-          for (const int n : cap.kept()) captured += n;
-        } else {
+        }
+        if (!walked) {
           // INTERRUPTED. The parts written so far are orphans -- referenced by
           // nothing, because the index is not touched below -- and the chapter is
           // simply rescanned. That is the whole reason the index is written LAST.
@@ -9351,7 +9346,7 @@ void loop() {
         // leaves a store that never knew about the chapter.
         const bool wrote = gNameStore->mergeChapter(spine, gNameScan.runs(), &kept);
         logf("[names] ch=%d runs=%d admitted=%u extracts=%d %s in %lums (heap %u)\n", spine,
-             (int)gNameScan.runs().size(), (unsigned)wanted.size(), captured,
+             (int)gNameScan.runs().size(), (unsigned)runIndex.size(), captured,
              wrote ? "merged" : "WRITE FAILED", (unsigned long)(millis() - t),
              (unsigned)ESP.getFreeHeap());
       } else {
@@ -9616,33 +9611,19 @@ void loop() {
           if (whole) {
             // The same two passes the live path does, and in the same order: quotas
             // off the index as it stands, capture, then the index written last.
-            reader::NameIndexHeader have;
-            std::vector<reader::NameIndexEntry> entries;
-            const bool hadIndex = gNameStore->loadAll(have, entries);
+            // STREAMED, and the part writer SCOPED so its buffer is gone before
+            // the merge builds its output -- the same two fixes the live path
+            // needed, for the same reason.
             std::vector<std::string> wanted;
             std::vector<int> quota;
-            for (const auto& r : sc.runs()) {
-              int used = -1;
-              if (hadIndex) {
-                for (const auto& e : entries) {
-                  if (e.text == r.text) {
-                    used = e.extractCount();
-                    break;
-                  }
-                }
-              }
-              const bool onCard = used >= 0;
-              if (!onCard && r.midSentence < reader::NameScanner::kAdmitMidSentence) continue;
-              wanted.push_back(r.text);
-              const int room = (hadIndex ? have.extractCap : 8) - (onCard ? used : 0);
-              quota.push_back(room > 0 ? room : 0);
-            }
+            std::vector<int> runIndex;
+            gNameStore->quotasFor(sc.runs(), 8, wanted, quota, runIndex);
             admitted = static_cast<int>(wanted.size());
             std::vector<int> kept(sc.runs().size(), 0);
             bool ok = true;
             if (!wanted.empty() && cr.rewind()) {
               reader::ExtractPartWriter out(gSd, gNameStore->dir(), want);
-              reader::ExtractCapture cap(wanted, quota, out);
+              reader::ExtractCapture cap(std::move(wanted), quota, out);
               reader::NameScanner throwaway;
               throwaway.setSinkOnly(true);
               reader::Block b2;
@@ -9657,15 +9638,10 @@ void loop() {
               }
               out.finish();
               if (ok) {
-                for (size_t k = 0; k < sc.runs().size(); ++k) {
-                  for (size_t w = 0; w < wanted.size(); ++w) {
-                    if (wanted[w] == sc.runs()[k].text) {
-                      kept[k] = cap.kept()[w];
-                      break;
-                    }
-                  }
+                for (size_t k = 0; k < runIndex.size(); ++k) {
+                  kept[static_cast<size_t>(runIndex[k])] = cap.kept()[k];
+                  captured += cap.kept()[k];
                 }
-                for (const int n : cap.kept()) captured += n;
               }
             }
             if (ok) {

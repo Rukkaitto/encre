@@ -16,6 +16,14 @@ namespace {
 // a format that corrupts on the first book that uses it.
 constexpr char kSep = '\t';
 
+// WHAT THE OUTPUT IS RESERVED AT when there is an old index to carry across. The
+// file is not resident any more, so its size is not known without a stat -- and
+// asking for one would be a second read of the thing this stopped reading. 20 KB is
+// the measured index of a 1,400-page novel with an enormous cast, and `body` grows
+// past it if it must: the reserve is there to stop a doubling realloc on a tight
+// heap, not to cap the file.
+constexpr size_t kBodyGuess = 20 * 1024;
+
 void appendInt(std::string& out, int v) {
   char buf[16];
   const int n = std::snprintf(buf, sizeof buf, "%d", v);
@@ -45,6 +53,68 @@ bool parseU32(std::string_view s, uint32_t& out) {
   out = static_cast<uint32_t>(v);
   return true;
 }
+
+// READS A SORTED FILE ONE LINE AT A TIME, holding a chunk and never the file.
+//
+// THE MERGE WAS DOCUMENTED AS STREAMING AND WAS NOT. It called `readAll`, so the
+// old index and the new one were both resident -- the ~48 KB against a 45,840-byte
+// floor that streaming was chosen to avoid, written into the one function whose
+// comment said it had been avoided. Reported off glass as the feature standing down
+// on a heap with 32,752 bytes free.
+class LineReader {
+ public:
+  LineReader(FileSystem& fs, const std::string& path) : fh_(fs.openRead(path)) {}
+  bool ok() const { return fh_ != nullptr; }
+
+  // The next line, or false at the end. The returned view is valid until the next
+  // call, which is all a two-way merge needs: it consumes one side at a time.
+  bool next(std::string_view& out) {
+    for (;;) {
+      const size_t nl = buf_.find('\n', at_);
+      if (nl != std::string::npos) {
+        line_.assign(buf_, at_, nl - at_);
+        at_ = nl + 1;
+        out = line_;
+        return true;
+      }
+      if (at_ > 0) {
+        buf_.erase(0, at_);
+        at_ = 0;
+      }
+      if (fh_ == nullptr) return finish(out);
+      char chunk[256];
+      const size_t n = fh_->read(chunk, sizeof chunk);
+      if (n == 0) {
+        fh_.reset();
+        return finish(out);
+      }
+      buf_.append(chunk, n);
+    }
+  }
+
+  // Skip the header: everything up to and including the blank line.
+  void skipHeader() {
+    std::string_view l;
+    while (next(l)) {
+      if (l.empty()) return;
+    }
+  }
+
+ private:
+  bool finish(std::string_view& out) {
+    if (buf_.empty()) return false;
+    line_ = buf_;
+    buf_.clear();
+    at_ = 0;
+    out = line_;
+    return true;
+  }
+
+  std::unique_ptr<FileHandle> fh_;
+  std::string buf_;
+  std::string line_;
+  size_t at_ = 0;
+};
 
 std::string_view nextLine(std::string_view text, size_t& pos) {
   if (pos >= text.size()) return {};
@@ -319,14 +389,8 @@ bool NameStore::mergeChapter(int spine, const std::vector<NameScanner::Run>& run
   NameIndexHeader header;
   std::string body;
   bool haveOld = false;
-  size_t bodyOffset = 0;
-  std::string old;
-  if (fs_.readAll(indexPath(), old)) {
-    if (parseHeader(old, header, &bodyOffset) && header.bookPath == bookPath_ &&
-        header.bookBytes == bookBytes_ && header.admitMidSentence == NameScanner::kAdmitMidSentence) {
-      haveOld = true;
-    }
-  }
+  if (loadHeader(header) && header.admitMidSentence == NameScanner::kAdmitMidSentence)
+    haveOld = true;
   if (!haveOld) {
     // A STORE THAT CANNOT BE READ, OR IS FOR ANOTHER BOOK, IS STARTED OVER. It is not
     // repaired and it is not merged into: mixing two populations into one set of
@@ -334,8 +398,6 @@ bool NameStore::mergeChapter(int spine, const std::vector<NameScanner::Run>& run
     header = NameIndexHeader{};
     header.bookPath = bookPath_;
     header.bookBytes = bookBytes_;
-    old.clear();
-    bodyOffset = 0;
   }
   // RE-READING IS NORMAL, SO THIS IS NOT AN EDGE CASE. Without the refusal a second
   // read of the same chapter doubles every one of its counts and admits runs that had
@@ -345,17 +407,23 @@ bool NameStore::mergeChapter(int spine, const std::vector<NameScanner::Run>& run
   // THE TWO-WAY MERGE. Both sides are sorted by run text -- the old file by
   // construction, `runs` by NameScanner -- so this is one pass with no sort and no
   // second copy of either side.
+  // ONLY THE OUTPUT IS RESIDENT NOW. The old index arrives a chunk at a time, so
+  // the peak is one copy of the index rather than two -- which is what the design
+  // said all along and what the first implementation did not do.
+  //
   // PROBED BEFORE IT IS RESERVED, because a reserve that cannot be served is
-  // abort() rather than an error -- the same failure this feature shipped twice,
-  // once in the scanner's table and once in the extract buffer. A merge that cannot
-  // allocate REFUSES, and the chapter is simply rescanned: the scanned-spine bit is
-  // only set by a merge that completed.
-  const size_t bodyWant = old.size() - bodyOffset + runs.size() * 24;
+  // abort() rather than an error. A merge that cannot allocate REFUSES, and the
+  // chapter is simply rescanned: the scanned-spine bit is only set by a merge that
+  // completed.
+  LineReader in(fs_, indexPath());
+  const bool readable = haveOld && in.ok();
+  if (readable) in.skipHeader();
+  const size_t bodyWant = (haveOld ? kBodyGuess : 0) + runs.size() * 24;
   if (!Heap::hasBlock(bodyWant)) return false;
   body.reserve(bodyWant);
-  size_t pos = bodyOffset;
   size_t i = 0;
-  std::string_view line = nextLine(old, pos);
+  std::string_view line;
+  if (!readable || !in.next(line)) line = std::string_view();
   // A RUN NOT YET ON THE CARD EARNS ITS SLOT OR IS DROPPED. This is the door, and it
   // is here rather than in the scanner because only the index knows what is already
   // through it.
@@ -382,13 +450,13 @@ bool NameStore::mergeChapter(int spine, const std::vector<NameScanner::Run>& run
       // A LINE THAT WILL NOT PARSE IS DROPPED, not fatal. `loadProgressIndex` skips
       // unparseable records individually for the same reason: one corrupt line must
       // not cost a reader the other seven hundred.
-      line = nextLine(old, pos);
+      if (!in.next(line)) line = std::string_view();
       continue;
     }
     if (i >= runs.size() || oldEntry.text < runs[i].text) {
       body += serialiseEntry(oldEntry);
       body += '\n';
-      line = nextLine(old, pos);
+      if (!in.next(line)) line = std::string_view();
     } else if (runs[i].text < oldEntry.text) {
       emitNew(i++);
     } else {
@@ -404,7 +472,7 @@ bool NameStore::mergeChapter(int spine, const std::vector<NameScanner::Run>& run
       body += serialiseEntry(oldEntry);
       body += '\n';
       ++i;
-      line = nextLine(old, pos);
+      if (!in.next(line)) line = std::string_view();
     }
   }
 
@@ -415,6 +483,50 @@ bool NameStore::mergeChapter(int spine, const std::vector<NameScanner::Run>& run
   header.markScanned(spine);
   if (!fs_.mkdirs(dir_)) return false;
   return fs_.writeAll(indexPath(), serialiseHeader(header) + body);
+}
+
+bool NameStore::quotasFor(const std::vector<NameScanner::Run>& runs, int cap,
+                          std::vector<std::string>& wanted, std::vector<int>& quota,
+                          std::vector<int>& runIndex) const {
+  wanted.clear();
+  quota.clear();
+  runIndex.clear();
+  NameIndexHeader h;
+  const bool haveIndex = loadHeader(h);
+  const int room = haveIndex ? h.extractCap : cap;
+  LineReader in(fs_, indexPath());
+  const bool readable = haveIndex && in.ok();
+  if (readable) in.skipHeader();
+  std::string_view line;
+  bool have = readable && in.next(line);
+  for (size_t i = 0; i < runs.size(); ++i) {
+    const std::string& text = runs[i].text;
+    // Advance the file to this run or past it. Both sides are sorted, so the file
+    // is walked once over the whole chapter rather than once per run.
+    NameIndexEntry e;
+    bool onCard = false;
+    while (have) {
+      if (!parseEntry(line, e)) {
+        have = in.next(line);
+        continue;
+      }
+      if (e.text < text) {
+        have = in.next(line);
+        continue;
+      }
+      onCard = (e.text == text);
+      break;
+    }
+    // A RUN NOT ON THE CARD MUST EARN ITS SLOT; one already on it keeps growing.
+    if (!onCard && runs[i].midSentence < NameScanner::kAdmitMidSentence) continue;
+    const int used = onCard ? e.extractCount() : 0;
+    const int left = room - used;
+    wanted.push_back(text);
+    quota.push_back(left > 0 ? left : 0);
+    runIndex.push_back(static_cast<int>(i));
+    if (onCard) have = in.next(line);
+  }
+  return true;
 }
 
 bool NameStore::loadAll(NameIndexHeader& header, std::vector<NameIndexEntry>& out) const {
