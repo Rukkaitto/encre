@@ -198,7 +198,8 @@ TEST_CASE("INFLATE FITS THE DEVICE'S STACK, measured rather than assumed") {
   // while leaving room for the layers above it.
   //
   // Per HOST compiler: clang measures 7,348 here and x86-64 gcc 12,212, for the
-  // same code. See stack_ceiling.h for why that is two numbers and not one.
+  // same code, and an AddressSanitizer build of that same clang 9,808. See
+  // stack_ceiling.h for why that is three numbers and not one.
   CHECK(used > 4096);   // the measurement is real, not a pattern-scan artifact
-  CHECK(used <= stackceil::pick(/*clang=*/10240, /*gcc=*/16384));
+  CHECK(used <= stackceil::pick(/*clang=*/10240, /*gcc=*/16384, /*asan=*/13312));
 }
