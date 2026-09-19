@@ -97,10 +97,15 @@ Action MentionsScreen::onGesture(const GestureEvent& g) {
       return moveFocus(+1, g.held);
     case Gesture::Activate:
       // THE SHELL OPENS THE PEEK, not this screen: the peek is pushed after this one
-      // pops, which is what Contents already does. So the screen reports the choice
-      // and asks to be dismissed.
+      // is gone, which is exactly what Contents does. So the screen reports the
+      // choice and asks to be dismissed.
+      //
+      // popTo(Reader) RATHER THAN pop(), AND THE DIFFERENCE IS THE WHOLE STACK. A
+      // single pop lands on Names, and the peek would then be pushed over a list
+      // rather than over the page -- a panel veiling the wrong thing. The peek is a
+      // panel over the BOOK, so the book has to be what is underneath it.
       if (chosen() == nullptr) return Action::none();
-      return Action::pop();
+      return Action::popTo(ScreenId::Reader);
     default:
       return Action::none();
   }

@@ -81,6 +81,10 @@
 #include "reader/screen_peek.h"
 #include "reader/screen_reader_menu.h"
 #include "reader/toc.h"
+#include "reader/name_extracts.h"
+#include "reader/name_store.h"
+#include "reader/screen_mentions.h"
+#include "reader/screen_names.h"
 #include "reader/screens.h"
 #include "reader/session_record.h"
 #include "reader/settings.h"
@@ -332,6 +336,32 @@ constexpr uint32_t kRefineQuietMs = 5000;
 // pause between 2000 ms and 2000 ms + the count's duration ends in an abandon, and
 // that press pays a rewind. `[index] counted|abandoned` is what measures how often.
 constexpr uint32_t kCountQuietMs = 2000;
+
+// --- NAMES (3E) ---------------------------------------------------------------
+//
+// THE SCAN RIDES THE PAGE COUNT, so this scanner is attached to the ReaderScreen and
+// filled by the walk that was happening anyway. What the shell owes is the CARD side:
+// merging a completed chapter into the index and capturing its extracts, both in the
+// quiet window and both behind the count.
+//
+// ONE SCANNER FOR THE WHOLE BOOK, reset per chapter by countPages itself. Its table
+// is one chapter's runs -- 7,797 bytes worst case over a real novel.
+reader::NameScanner gNameScan;
+// The book's store, or nothing when no book is open. Rebuilt by openBookAt, because
+// its directory is derived from the path.
+std::unique_ptr<reader::NameStore> gNameStore;
+// The chapter whose scan is sitting in gNameScan waiting to be merged, or -1. Set by
+// the crossing detector and by the deferred count; cleared once the merge has run.
+int gNamesOwed = -1;
+// Which name the Mentions screen was opened for, so the peek can be opened at the
+// sighting it reports. Cleared on the way out, exactly as gPendingSpine is.
+int gMentionSpine = -1;
+int gMentionBlock = -1;
+// How many sightings the last Mentions push carried, for the log line only.
+size_t gMentionExtracts = 0;
+// The Names screen's box model, measured once before the push and handed to the
+// screen after it -- setMetrics cannot be called on a screen that does not exist yet.
+int gNamesMetrics[3] = {0, 0, 0};
 
 // PUTTING THE SPENT STREAM BACK, on a window of its own.
 //
@@ -2710,6 +2740,26 @@ static void buildSdMissingApp() {
 // ring back on the way into the panel, and re-paginating it on the way out. App::at is
 // const for the renderer's sake, so App::atMut exists for exactly this; a const_cast
 // here would do the same thing and say nothing about why it is allowed.
+// THE CONTENTS' LABELS, BY SPINE, which is what Mentions draws above a run of
+// sightings. `gReading.toc` is a LIST of entries, several of which may name one
+// spine entry and many of which name none, so this flattens it into the lookup the
+// screen wants -- the same label four other surfaces already draw, rather than a
+// fifth spelling of `CH. NN`.
+static std::vector<std::string> chapterNamesBySpine() {
+  std::vector<std::string> out;
+  for (const reader::TocEntry& e : gReading.toc) {
+    if (e.spine < 0) continue;
+    if (static_cast<size_t>(e.spine) >= out.size())
+      out.resize(static_cast<size_t>(e.spine) + 1);
+    // THE FIRST ENTRY THAT NAMES A SPINE WINS. A book whose contents name one file
+    // twice -- two of the first four measured do -- gets the earlier label, which is
+    // the one the chapter opens with.
+    if (out[static_cast<size_t>(e.spine)].empty())
+      out[static_cast<size_t>(e.spine)] = e.label;
+  }
+  return out;
+}
+
 static reader::ReaderScreen* readerOnStack(reader::App& app) {
   for (int i = 0; i < app.depth(); ++i)
     if (app.at(i).id() == reader::ScreenId::Reader)
@@ -4371,6 +4421,19 @@ static void handleDelete() {
   // looking at has just been rescanned and already says which it was. An error panel
   // would be a screen with no board saying what the Library already shows.
   const bool gone = gSd.remove(facts.path);
+  // THE NAME STORE GOES WITH THE BOOK, which is the only eviction this feature has.
+  // It is ~229 KB for a 1,400-page novel and nothing else would ever remove it: a
+  // hash-named directory outliving its book is an orphan nobody can explain, and
+  // `article_store` already deletes article state on exactly this edge.
+  //
+  // BY PATH, not through gNameStore, because the book being deleted is usually not
+  // the one that is open -- this runs from the Library, where there may be no open
+  // book at all.
+  {
+    const std::string dir = reader::nameStoreDirFor(facts.path);
+    gSd.remove(dir + "/index");
+    gSd.remove(dir);
+  }
   logf("[delete] %s -> %s\n", facts.path.c_str(), gone ? "gone" : "still there");
   logFlush();
 
@@ -4664,6 +4727,17 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // which row is marked, since the reader will have moved by then.
   gFactory.setContents(gReading.toc, startChapter);
   gFactory.setReaderBook(opened, startChapter, startAt);
+
+  // THE NAME STORE, whose directory is derived from the path, so it is rebuilt with
+  // every book rather than carried. `bookBytes` is the identity check the reading
+  // position already uses: a store for a different book is worse than none, and a
+  // mismatch starts over rather than merging into a stale population.
+  //
+  // NOT FOR AN ARTICLE. A synced article is a few thousand words, the store would be
+  // mostly header, and every sync would add a directory to the card.
+  gNameStore.reset();
+  gNamesOwed = -1;
+  if (!isArticle) gNameStore = std::make_unique<reader::NameStore>(gSd, path, bookBytes);
 
   // AND THE READER MENU'S HEADER, WHICH IS WHY SLEEPING ON THAT MENU USED TO WAKE
   // INTO THE BOOK.
@@ -6944,6 +7018,19 @@ void setup() {
           case reader::ScreenId::Contents:
           case reader::ScreenId::BookEnd:
           case reader::ScreenId::ArticleEnd:
+          // NAMES JOINS THEM, and Mentions does not get further than being named.
+          // Names is rebuilt from the card's index, which openBookAt's store makes
+          // reachable -- so a wake onto the list owes this walk exactly what
+          // Contents owes it.
+          //
+          // MENTIONS IS NAMED HERE SO THE WALK DOES NOT CALL IT A DEFECT, and then
+          // the factory refuses it: the screen is built from a name a PRESS chose
+          // and the record carries no name, so App::restore stops short and leaves
+          // Names standing. That is the peek's own behaviour and it is the right
+          // one -- a Mentions screen that cannot say whose mentions it shows would
+          // be naming one name over another's sightings.
+          case reader::ScreenId::Names:
+          case reader::ScreenId::Mentions:
             wantsOpenBook = true;
             break;
           default:
@@ -6974,6 +7061,19 @@ void setup() {
           if (h != nullptr) bytes = h->size();
           h.reset();
           openBookAt(last.bookPath, bytes, /*push=*/false);
+        }
+        // AND THE NAMES LIST, for a record that names it. AFTER openBookAt AND NOT
+        // BEFORE, which is the whole of this block's correctness: the store's
+        // directory is derived from the book's path, so openBookAt is what creates
+        // it -- primed a few lines earlier this read a null store and handed the
+        // screen an empty list, which would have restored a reader onto "no names
+        // yet" for a book whose index was sitting on the card.
+        if (gNameStore != nullptr) {
+          reader::NameIndexHeader nh;
+          std::vector<reader::NameIndexEntry> nentries;
+          std::vector<reader::NameGroup> groups;
+          if (gNameStore->loadAll(nh, nentries)) groups = reader::groupNames(nentries);
+          gFactory.setNames(std::move(groups));
         }
       }
       const reader::App::RestoreReport r = gApp->restore(stack);
@@ -8331,6 +8431,40 @@ void loop() {
         if (menu->vm().focusedRow == reader::ReaderMenuScreen::kTypography) {
           if (reader::ReaderScreen* rd = readerOnStack(*gApp)) rd->setPageCacheDepth(1);
         }
+        if (menu->vm().focusedRow == reader::ReaderMenuScreen::kNames) {
+          // CARD WORK HERE, UNLIKE CONTENTS, and it has to be: the index is read and
+          // GROUPED when the screen opens, because grouping is a batch pass whose
+          // answers later chapters are allowed to change. Holding the groups from
+          // the book's open would be ~20 KB carried all session for a screen most
+          // readers never visit.
+          //
+          // THE READER LETS GO FIRST, which is the peek's move for the peek's
+          // reason: grouping a real novel's index wants ~20 KB and the Reader is
+          // holding a 37,056-byte inflate scratch underneath. 57 KB against a
+          // measured 45,840-byte floor does not fit.
+          reader::ReaderScreen* rd = readerOnStack(*gApp);
+          if (rd != nullptr) rd->releaseChapter();
+          std::vector<reader::NameGroup> groups;
+          if (gNameStore != nullptr) {
+            reader::NameIndexHeader h;
+            std::vector<reader::NameIndexEntry> entries;
+            if (gNameStore->loadAll(h, entries)) groups = reader::groupNames(entries);
+          }
+          const size_t shown = groups.size();
+          // PRIMED EVEN WHEN EMPTY, which is the distinction the factory draws: an
+          // empty list is a real answer -- "no names yet" -- and the screen has a
+          // variant that says so. Refusing here would leave the menu standing with
+          // no explanation, which is the silent dead button this project refuses.
+          gFactory.setNames(std::move(groups));
+          int listH = 0, tallH = 0, shortH = 0;
+          gTheme.namesMetrics(gFrame->height(), *gFonts, listH, tallH, shortH);
+          gNamesMetrics[0] = listH;
+          gNamesMetrics[1] = tallH;
+          gNamesMetrics[2] = shortH;
+          logf("[names] opening with %u groups (heap %u)\n", (unsigned)shown,
+               (unsigned)ESP.getFreeHeap());
+          logFlush();
+        }
         if (menu->vm().focusedRow == reader::ReaderMenuScreen::kContents) {
           // NO CARD WORK HERE. The contents were read when the book opened, where
           // there was heap for them -- see gReading.toc.
@@ -8348,6 +8482,68 @@ void loop() {
                (unsigned)gReading.toc.size(), spine);
           logFlush();
         }
+      }
+    }
+    // THE CHOSEN NAME, taken while Names is still on top. The dispatch pushes
+    // Mentions, and the factory has to be holding that name's sightings before it
+    // does -- a refused push is silent and would read as a dead button.
+    if (ev.button == reader::Button::Confirm && gApp->top().id() == reader::ScreenId::Names &&
+        gNameStore != nullptr) {
+      const auto* ns = static_cast<const reader::NamesScreen*>(&gApp->top());
+      if (const reader::NameGroup* g = ns->chosen()) {
+        // EVERY MEMBER'S SIGHTINGS, because extracts are stored per RUN and a group
+        // is several: `Stu`, `Stuart`, `Redman` and `Stuart Redman` are one person
+        // and their mentions are one list.
+        reader::NameIndexHeader h;
+        std::vector<reader::NameIndexEntry> entries;
+        std::vector<reader::StoredExtract> found;
+        if (gNameStore->loadAll(h, entries)) {
+          for (const std::string& member : g->members) {
+            for (const auto& e : entries) {
+              if (e.text != member) continue;
+              for (const auto& at : e.extracts) {
+                std::vector<reader::StoredExtract> part;
+                reader::readExtracts(gSd, gNameStore->dir(), at.spine, member, part);
+                int taken = 0;
+                for (auto& x : part) {
+                  if (taken++ >= at.count) break;
+                  found.push_back(std::move(x));
+                }
+              }
+            }
+          }
+        }
+        // OLDEST FIRST, across the whole group: the index lists each RUN's chapters
+        // in order but a group's runs interleave, so the merge of several sorted
+        // lists is sorted here rather than assumed.
+        std::sort(found.begin(), found.end(),
+                  [](const reader::StoredExtract& a, const reader::StoredExtract& b) {
+                    if (a.spine != b.spine) return a.spine < b.spine;
+                    return a.block < b.block;
+                  });
+        if (static_cast<int>(found.size()) > h.extractCap)
+          found.resize(static_cast<size_t>(h.extractCap));
+        // THE BAND'S RIGHT SLOT IS NEVER EMPTY: with the label naming the screen it
+        // is the only thing saying whose mentions these are, so a group with nothing
+        // longer to reveal carries its own name there.
+        const std::string subject = g->fullest.empty() ? g->display : g->fullest;
+        gMentionExtracts = found.size();
+        gFactory.setMentions(subject, std::move(found), gReading.toc.empty()
+                                                            ? std::vector<std::string>{}
+                                                            : chapterNamesBySpine());
+        logf("[names] %s -> %u sightings\n", g->display.c_str(),
+             (unsigned)gMentionExtracts);
+        logFlush();
+      }
+    }
+    // WHICH SIGHTING, taken while Mentions is still on top: the dispatch pops it all
+    // the way back to the Reader, and after that there is no screen left to ask.
+    if (ev.button == reader::Button::Confirm &&
+        gApp->top().id() == reader::ScreenId::Mentions) {
+      const auto* ms = static_cast<const reader::MentionsScreen*>(&gApp->top());
+      if (const reader::StoredExtract* x = ms->chosen()) {
+        gMentionSpine = x->spine;
+        gMentionBlock = x->block;
       }
     }
     // THE CHOSEN CHAPTER, taken while Contents is still on top -- the dispatch below
@@ -8453,6 +8649,19 @@ void loop() {
       if (rd->chapterIndex() != was) {
         gLastChapter = rd->chapterIndex();
         mark("chapter-opened");
+        // THE SCANNER GOES ON HERE rather than at the open, because the ReaderScreen
+        // the factory built is only reachable through the stack -- and a crossing is
+        // the moment the next chapter's walk is about to start. Attaching it twice
+        // is free; it is a pointer.
+        if (gNameStore != nullptr) {
+          const_cast<reader::ReaderScreen*>(rd)->setNameScanner(&gNameScan);
+          // A CHAPTER ALREADY SCANNED OWES NOTHING, which the store answers in a
+          // header read rather than by re-walking. Re-reading is ordinary, so this
+          // is the common case and not the edge.
+          reader::NameIndexHeader h;
+          const bool known = gNameStore->loadHeader(h) && h.isScanned(rd->chapterIndex());
+          gNamesOwed = known ? -1 : rd->chapterIndex();
+        }
         // WHICH BRANCH, AND WHAT IT COST. A small chapter is counted before its
         // first paint and a big one is not, and the eager side had no line -- so a
         // device reporting "the dash never appears and the page is slow" could not
@@ -8511,6 +8720,61 @@ void loop() {
     // reading it after the pop is too late (the screen is gone), so the spine is taken
     // off the Contents screen while it is still on top, just above.
     //
+    // THE NAMES LIST GETS ITS BOX MODEL AFTER THE PUSH, because setMetrics cannot be
+    // called on a screen that does not exist yet -- the factory builds it inside the
+    // dispatch. The two row heights interleave by content, so the screen does the
+    // counting and this only hands over the box.
+    if (gApp->top().id() == reader::ScreenId::Names && gNamesMetrics[1] > 0) {
+      static_cast<reader::NamesScreen*>(&gApp->top())
+          ->setMetrics(gNamesMetrics[0], gNamesMetrics[1], gNamesMetrics[2]);
+      gNamesMetrics[1] = 0;
+    }
+    // ...and Mentions the same, for the same reason: its rows are content-sized too,
+    // by a different mechanism -- an extract wraps to one, two or three lines.
+    if (gApp->top().id() == reader::ScreenId::Mentions) {
+      auto* ms = static_cast<reader::MentionsScreen*>(&gApp->top());
+      int listH = 0, headerH = 0;
+      std::vector<int> rowHeights;
+      gTheme.mentionsMetrics(gFrame->width(), gFrame->height(), *gFonts, ms->extractTexts(),
+                             listH, headerH, rowHeights);
+      ms->setMetrics(listH, headerH, rowHeights);
+    }
+
+    // A SIGHTING OPENS THE PEEK WHERE IT IS, which is the whole point of the Mentions
+    // list: a row that opened at the top of the chapter would make the list
+    // decorative. Contents' path one block down is the same move with no cursor.
+    if (gMentionSpine >= 0 && gApp->top().id() == reader::ScreenId::Reader) {
+      auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
+      const int spine = gMentionSpine;
+      const int block = gMentionBlock;
+      gMentionSpine = -1;
+      gMentionBlock = -1;
+      const uint32_t t = millis();
+      reader::PageMetrics pm;
+      gTheme.peekMetrics(gFrame->width(), gFrame->height(), *gFonts, gBody, gSettings, pm);
+      pm.italic = &gItalic;
+      gFactory.setPeekMetrics(pm);
+      // THE CURSOR IS (block, 0) BY CONSTRUCTION: `line` survives neither a
+      // re-layout nor a re-bind, and a landing only needs the paragraph.
+      gFactory.setPeekAt(spine, reader::Cursor{block, 0});
+      // THE READER LETS GO FIRST -- two live chapters do not fit, and the push is
+      // what allocates the second. It was already released for the Names list, so
+      // this is usually a no-op; it is called anyway because "usually" is not a
+      // guarantee and the peek path must not depend on which way the reader came.
+      rd->releaseChapter();
+      if (gApp->pushScreen(reader::ScreenId::Peek)) {
+        gPeekOpen = true;
+        gPeekCommitted = false;
+        logf("[peek] open spine=%d block=%d in %lums (heap %u)\n", spine, block,
+             (unsigned long)(millis() - t), (unsigned)ESP.getFreeHeap());
+      } else {
+        const bool back = rd->reacquireChapter();
+        logf("[peek] REFUSED spine=%d block=%d, reader %s\n", spine, block,
+             back ? "restored" : "COULD NOT BE RESTORED");
+      }
+      logFlush();
+    }
+
     // IT USED TO JUMP HERE, with goToChapter. The jump was safe -- goToChapter sets the
     // return anchor -- and the peek is what makes being WRONG about a chapter cheap.
     if (gPendingSpine >= 0 && gApp->top().id() == reader::ScreenId::Reader) {
@@ -8915,6 +9179,94 @@ void loop() {
       // way beats putting a ~596 ms paint in front of a page turn. The same rule
       // refineNow applies to itself, for the same reason.
       if (done && rawSamplesPending() == 0) renderTop();
+    }
+  }
+
+  // NAMES: MERGE THE CHAPTER AND CAPTURE ITS EXTRACTS, one job, behind the count.
+  //
+  // BEHIND IT because the count is what fills the scanner, and because a page number
+  // is something the reader can SEE while this is not. It runs on the count's own
+  // window rather than a longer one: by the time the count is done the reader has
+  // already been still for two seconds, and the work here is card writes rather than
+  // a panel refresh, so it cannot make a page turn wait.
+  if (gNameStore != nullptr && gNamesOwed >= 0 && !gApp->dirty() &&
+      rawSamplesPending() == 0 &&
+      static_cast<uint32_t>(millis() - gLastInputMs) >= kCountQuietMs &&
+      gApp->top().id() == reader::ScreenId::Reader) {
+    auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
+    // ONLY A COMPLETED WALK MAY BE MERGED. An abandoned count is discarded and
+    // retried, so a partial table merged here would double-count within one chapter
+    // open -- and the scanned-spine bit would then close the door on the truth.
+    if (rd->chapterIndex() == gNamesOwed && rd->nameScanComplete() && !rd->indexPending()) {
+      const uint32_t t = millis();
+      const int spine = gNamesOwed;
+      gNamesOwed = -1;
+
+      // WHAT EACH RUN STILL HAS ROOM FOR, read off the index BEFORE the merge. A run
+      // already on the card keeps accumulating, so its quota is what the cap leaves.
+      reader::NameIndexHeader have;
+      std::vector<reader::NameIndexEntry> entries;
+      const bool hadIndex = gNameStore->loadAll(have, entries);
+      std::vector<std::string> wanted;
+      std::vector<int> quota;
+      for (const auto& r : gNameScan.runs()) {
+        int used = -1;
+        if (hadIndex) {
+          for (const auto& e : entries) {
+            if (e.text == r.text) {
+              used = e.extractCount();
+              break;
+            }
+          }
+        }
+        const bool onCard = used >= 0;
+        if (!onCard && r.midSentence < reader::NameScanner::kAdmitMidSentence) continue;
+        wanted.push_back(r.text);
+        const int room = (hadIndex ? have.extractCap : 8) - (onCard ? used : 0);
+        quota.push_back(room > 0 ? room : 0);
+      }
+
+      // THE SECOND WALK, on the chapter that is already open -- it rewinds the
+      // reader's own stream and puts the page back, so it allocates nothing. Two
+      // inflate windows do not fit, which is why the capture cannot open its own.
+      std::vector<int> kept(gNameScan.runs().size(), 0);
+      int captured = 0;
+      if (!wanted.empty()) {
+        reader::ExtractPartWriter out(gSd, gNameStore->dir(), spine);
+        reader::ExtractCapture cap(wanted, quota, out);
+        const bool walked =
+            rd->captureNames(cap, [](void*) { return rawSamplesPending() != 0; }, nullptr);
+        out.finish();
+        if (walked) {
+          for (size_t i = 0; i < gNameScan.runs().size(); ++i) {
+            for (size_t k = 0; k < wanted.size(); ++k) {
+              if (wanted[k] == gNameScan.runs()[i].text) {
+                kept[i] = cap.kept()[k];
+                break;
+              }
+            }
+          }
+          for (const int n : cap.kept()) captured += n;
+        } else {
+          // INTERRUPTED. The parts written so far are orphans -- referenced by
+          // nothing, because the index is not touched below -- and the chapter is
+          // simply rescanned. That is the whole reason the index is written LAST.
+          gNamesOwed = spine;
+        }
+      }
+
+      if (gNamesOwed < 0) {
+        // AND THE INDEX LAST, WITH ITS BIT. Anything that interrupts before this
+        // leaves a store that never knew about the chapter.
+        const bool wrote = gNameStore->mergeChapter(spine, gNameScan.runs(), &kept);
+        logf("[names] ch=%d runs=%d admitted=%u extracts=%d %s in %lums (heap %u)\n", spine,
+             (int)gNameScan.runs().size(), (unsigned)wanted.size(), captured,
+             wrote ? "merged" : "WRITE FAILED", (unsigned long)(millis() - t),
+             (unsigned)ESP.getFreeHeap());
+      } else {
+        logf("[names] ch=%d capture interrupted, will rescan\n", spine);
+      }
+      logFlush();
     }
   }
 

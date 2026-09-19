@@ -345,12 +345,48 @@ ReaderScreen::WalkResult ReaderScreen::walkToChapter(int c, bool atEnd) {
   return WalkResult::Failed;
 }
 
+bool ReaderScreen::captureNames(NameScanner::RunSink& sink, StopFn stop, void* ctx) {
+  if (body_ == nullptr || !chapter_.ok()) return false;
+  if (!chapter_.rewind()) return false;
+  resetMarkupHints();
+  // A SCANNER OF ITS OWN, thrown away: this walk is here for the SINK, and the
+  // counts it produces have already been merged from the first walk. Feeding them
+  // again is exactly the double-count the scanned-spine bitmap exists to prevent.
+  NameScanner throwaway;
+  Block b;
+  int i = 0;
+  bool ok = true;
+  for (int guard = 0; guard < kMaxPages * 4; ++guard) {
+    if (stop != nullptr && i % kStopCheckBlocks == 0 && i > 0 && stop(ctx)) {
+      ok = false;
+      break;
+    }
+    Progress::tick();
+    if (!chapter_.next(b)) break;
+    throwaway.addBlock(b, i, &sink);
+    b = Block{};
+    ++i;
+  }
+  // THE PAGE COMES BACK. The reader is still on it -- nothing repainted while this
+  // ran -- so the stream has to be put where the page expects it, which is what
+  // countPages' own caller does after its walk.
+  seekTo(at_);
+  return ok;
+}
+
 ReaderScreen::CountOutcome ReaderScreen::countPages(std::vector<Cursor>& out, StopFn stop,
                                                    void* ctx) {
   out.clear();
   if (body_ == nullptr || !chapter_.ok()) return CountOutcome::Failed;
   if (!chapter_.rewind()) return CountOutcome::Failed;
   resetMarkupHints();  // see document.h: the hints describe THIS walk
+  // THE SCAN STARTS EMPTY ON EVERY WALK, and that is what makes an abandoned one
+  // free: `completeIndex` throws a partial count away and retries from scratch, so
+  // a table that survived would be counted twice over one chapter open.
+  if (nameScanner_ != nullptr) {
+    nameScanner_->reset();
+    nameScanComplete_ = false;
+  }
 
   PageBuilder pb(*body_, metrics_);
   if (!pb.viable()) return CountOutcome::Failed;
@@ -381,6 +417,7 @@ ReaderScreen::CountOutcome ReaderScreen::countPages(std::vector<Cursor>& out, St
       return CountOutcome::Abandoned;
     Progress::tick();
     if (!chapter_.next(b)) break;
+    if (nameScanner_ != nullptr) nameScanner_->addBlock(b, i);
     pb.add(b, i++);
     b = Block{};  // dropped: the whole point of streaming
     while (pb.ready() && static_cast<int>(out.size()) < kMaxPages) {
@@ -396,7 +433,9 @@ ReaderScreen::CountOutcome ReaderScreen::countPages(std::vector<Cursor>& out, St
   const bool trailing = pb.pageHasContent();
   pb.finish();
   if (trailing && static_cast<int>(out.size()) < kMaxPages) out.push_back(pending);
-  // The whole chapter was walked, so `out.size()` really is the page count.
+  // The whole chapter was walked, so `out.size()` really is the page count -- and
+  // the scan saw every block, which is the only state in which it may be merged.
+  if (nameScanner_ != nullptr) nameScanComplete_ = true;
   return CountOutcome::Counted;
 }
 

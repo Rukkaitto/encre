@@ -7,6 +7,7 @@
 #include "reader/book.h"
 #include "reader/chapter.h"
 #include "reader/layout.h"
+#include "reader/names.h"
 #include "reader/return_anchor.h"
 #include "reader/toc.h"
 #include "reader/viewmodel.h"
@@ -570,6 +571,29 @@ class ReaderScreen : public Screen {
   // rendering and must never be given a half-counted one.
   bool completeIndex(StopFn stop = nullptr, void* ctx = nullptr);
 
+  // --- The name scan (3E) ---------------------------------------------------
+  //
+  // IT RIDES THE PAGINATION WALK, which already decodes every block of the chapter,
+  // so the scan costs no I/O of its own and no extra decode. Attach a scanner and
+  // `countPages` feeds it; the shell reads the result once the walk has COMPLETED.
+  //
+  // A walk that is ABANDONED leaves `nameScanComplete()` false, which is the whole
+  // guard: `completeIndex` discards a partial walk and retries from scratch in the
+  // next quiet window, so a caller that merged a partial scan would double-count
+  // within one chapter open.
+  void setNameScanner(NameScanner* s) { nameScanner_ = s; }
+  bool nameScanComplete() const { return nameScanComplete_; }
+
+  // THE SECOND WALK, AND IT REUSES THE CHAPTER THAT IS ALREADY OPEN. Admission is
+  // only decided at the end of the first walk, so the extracts cannot be captured
+  // during it without holding a candidate for every run -- 28 KB beside the
+  // 37,056-byte inflate scratch that walk is using.
+  //
+  // It rewinds the reader's own stream and restores the page afterwards, exactly as
+  // `countPages` does, so it allocates NOTHING: a capture that opened its own
+  // ChapterReader would be a second inflate window, and two do not fit.
+  bool captureNames(NameScanner::RunSink& sink, StopFn stop = nullptr, void* ctx = nullptr);
+
   // Why the chapter stopped being readable, or empty. A card pulled mid-book, or a
   // stream that turned out to be corrupt partway through.
   const char* error() const { return chapter_.error(); }
@@ -749,6 +773,8 @@ class ReaderScreen : public Screen {
   // "pages known", not "pages total", and only the flag makes it the latter.
   std::vector<Cursor> starts_;
   bool indexComplete_ = false;
+  NameScanner* nameScanner_ = nullptr;
+  bool nameScanComplete_ = false;
   int at_ = 0;
 
   // A restore target waiting for setMetrics, and cleared the moment it is used.
