@@ -263,6 +263,19 @@ ReaderScreen::WalkResult ReaderScreen::walkToChapter(int c, bool atEnd) {
   // directly, and answering `Failed` is what openChapterAt's copy answers: there is
   // no book here, so there is no end of one to have run off.
   if (fs_ == nullptr || book_.path.empty() || body_ == nullptr) return WalkResult::Failed;
+  // THE SCAN DESCRIBES THIS CHAPTER OR IT DESCRIBES NOTHING, and saying so here is
+  // what makes that true. `countPages` clears the flag itself, but a chapter over
+  // kEagerCountBytes does not count on the way in -- it goes through openFirstPage
+  // and the count is deferred -- so without this line the flag would still be TRUE
+  // from the PREVIOUS chapter, with that chapter's runs still in the scanner, and a
+  // caller could merge one chapter's names under the next one's spine.
+  //
+  // Nothing reachable does today, because a deferred chapter also leaves
+  // `indexPending()` true and the shell's merge waits on that. Which is to say the
+  // bug is masked by a second condition holding for an unrelated reason -- the shape
+  // this project has been bitten by repeatedly -- so the flag is made to mean what
+  // its name says rather than left correct by coincidence.
+  nameScanComplete_ = false;
   const int dir = atEnd ? -1 : +1;
 
   // Bounded by the spine's own length: every step moves one entry, so this cannot
