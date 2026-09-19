@@ -628,7 +628,7 @@ struct ContentsViewModel {
 
 struct SettingsViewModel {
   std::string title;    // "SETTINGS"
-  std::string version;  // the band's right slot: "V 0.1.0"
+  std::string version;  // the band's right slot: "V " + reader::kVersion
   std::vector<SettingsRow> rows;  // the VISIBLE window, not the whole list
   int focusedRow = -1;            // an index into `rows`, not into the whole list
   // The rail's two numbers, over the WHOLE list including headers. Not derivable
@@ -818,7 +818,9 @@ struct WifiConnectViewModel {
 // SHAPES, which is BookError's argument: a join fails three distinguishable
 // ways and one sentence would be a lie.
 struct WifiErrorViewModel {
-  std::string caption;  // "COULDN'T JOIN" on all three
+  // "COULDN'T JOIN" on the three radio failures and "COULDN'T SAVE IT" on
+  // ListFull, whose join SUCCEEDED -- see screen_wifi_error.cpp.
+  std::string caption;
   std::string message;
   // WHETHER THE EDIT-PASSWORD SLAB IS DRAWN AT ALL. Absent, not inert: on the
   // two shapes where the password is not what went wrong, a slab offering to

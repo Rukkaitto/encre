@@ -177,8 +177,8 @@ TEST_CASE("SELECT toggles AUTO in place and persists it") {
   // told -- and they are different failures: one is a screen that ignores its
   // button, the other is a preference that forgets itself at the next boot.
   SavedNetworks nets;
-  REQUIRE(nets.remember("HOME", true));
-  REQUIRE(nets.remember("BUREAU", true));
+  REQUIRE(nets.remember("HOME", true) == Remembered::Yes);
+  REQUIRE(nets.remember("BUREAU", true) == Remembered::Yes);
   RecordingSink sink;
   WifiSettingsScreen s(nets, &sink);
 
@@ -212,7 +212,7 @@ TEST_CASE("the SETUP row opens the picker, which is the flow's entry point") {
   // to -- and the empty variant, whose entire purpose is this one live row,
   // would have been a dead end.
   SavedNetworks nets;
-  REQUIRE(nets.remember("HOME", true));
+  REQUIRE(nets.remember("HOME", true) == Remembered::Yes);
   WifiSettingsScreen s(nets, nullptr);
 
   // Down past the network row onto SETUP's `Join another network...`.
@@ -241,7 +241,7 @@ TEST_CASE("the hold opens the actions overlay on a network and does nothing on S
   // four-slot rule exists to prevent. The ring and the binding read ONE
   // field, so they cannot disagree; this asserts they actually agree.
   SavedNetworks nets;
-  REQUIRE(nets.remember("HOME", true));
+  REQUIRE(nets.remember("HOME", true) == Remembered::Yes);
   WifiSettingsScreen s(nets, nullptr);
 
   REQUIRE(s.focusedSsid() == "HOME");
@@ -268,8 +268,8 @@ TEST_CASE("the empty hub promises no hold at all") {
 
 TEST_CASE("the focus skips the headers in both directions") {
   SavedNetworks nets;
-  REQUIRE(nets.remember("HOME", true));
-  REQUIRE(nets.remember("BUREAU", true));
+  REQUIRE(nets.remember("HOME", true) == Remembered::Yes);
+  REQUIRE(nets.remember("BUREAU", true) == Remembered::Yes);
   WifiSettingsScreen s(nets, nullptr);
   // SAVED NETWORKS / HOME / BUREAU / SETUP / Join another network...
   REQUIRE(s.vm().rows.size() == 5);

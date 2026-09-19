@@ -4243,7 +4243,57 @@ static void pollWifi() {
         // PERSISTED ONLY ON SUCCESS. A passphrase that did not work is not
         // worth keeping, and storing it would make the next boot's
         // dropLockedWithoutSecret keep a row that can only fail.
-        gWifiNets.remember(gJoinSsid, gJoinLocked);
+        //
+        // AND ONLY WHEN THE LIST TOOK IT (#162). This block used to call
+        // remember() as a STATEMENT and write regardless, so on a device
+        // already holding eight networks a ninth join that SUCCEEDED was
+        // silently not saved: the passphrase landed in `encre_wpsk` under a
+        // key no list entry hashes to, `save` wrote the unchanged eight, and
+        // the flow left for the hub on the argument below that the hub
+        // opening with the network in it IS the confirmation. On the ninth it
+        // opened without it. remember() is [[nodiscard]] now, so this cannot
+        // be written again.
+        const reader::Remembered kept = gWifiNets.remember(gJoinSsid, gJoinLocked);
+        if (kept != reader::Remembered::Yes) {
+          // NOTHING IS WRITTEN. Not the secret and not the list -- the list
+          // did not change, and a secret for a network no entry names is an
+          // orphan NVS has no way to find again (there is no delete-by-prefix
+          // and nothing here enumerates keys). dropSecret is deliberately NOT
+          // called: it is `forget`'s tool for a key this device PUT there,
+          // and here no key was put, so the call could only delete whatever a
+          // colliding hash happens to name.
+          //
+          // THE SESSION ENDS EXACTLY AS THE SUCCESS PATH'S DOES -- the join
+          // proved the credential and there is nothing left to do with it, so
+          // the radio goes down and the attempt is dropped. That is what
+          // makes "Wi-Fi is off again." true on this shape as on the other
+          // three, and it is why the dialog below carries no TRY AGAIN: there
+          // is no attempt left to re-run and re-running it would be refused
+          // identically anyway.
+          const std::string refused = gJoinSsid;  // endWifiSession clears it
+          endWifiSession();
+          primeWifi();
+          if (kept == reader::Remembered::ListFull) {
+            gFactory.setWifiFailure(reader::JoinFailure::ListFull);
+            gFactory.setWifiTarget(refused);
+            gApp->replaceScreen(reader::ScreenId::WifiError);
+            logf("[wifi] joined %s and the saved list is full at %d; NOT saved\n",
+                 refused.c_str(), reader::kMaxSavedNetworks);
+          } else {
+            // NO COPY FOR THIS ONE, AND NO SCREEN. An SSID this list will not
+            // take is empty or over 32 bytes, and neither can come off a scan
+            // -- rankScanResults drops the blank ones and 802.11 caps the
+            // field at 32. A board for a state the flow cannot reach would be
+            // a specimen nobody could produce, and this project's own rule is
+            // that an absent claim beats a false one: the log line is the
+            // record, and the hub is where CANCEL would have landed anyway.
+            gApp->replaceScreen(reader::ScreenId::WifiSettings);
+            logf("[wifi] refused an unusable SSID (%u bytes); NOT saved\n",
+                 static_cast<unsigned>(refused.size()));
+          }
+          logFlush();
+          return;
+        }
         if (gJoinLocked) shellwifi::putSecret(gJoinSsid, gJoinPsk);
         shellwifi::save(gWifiNets);
         const std::string joined = gJoinSsid;  // endWifiSession clears it

@@ -282,11 +282,18 @@ TEST_CASE("every slab the error panel draws can be reached and pressed") {
   struct Shape {
     JoinFailure why;
     size_t slabs;
+    const char* last;
   };
   const Shape kShapes[] = {
-      {JoinFailure::BadPassword, 3},  // EDIT PASSWORD / TRY AGAIN / CANCEL
-      {JoinFailure::NotFound, 2},     // TRY AGAIN / CANCEL
-      {JoinFailure::Incomplete, 2},
+      {JoinFailure::BadPassword, 3, "CANCEL"},  // EDIT PASSWORD / TRY AGAIN / CANCEL
+      {JoinFailure::NotFound, 2, "CANCEL"},     // TRY AGAIN / CANCEL
+      {JoinFailure::Incomplete, 2, "CANCEL"},
+      // THE ONE-SLAB SHAPE (#162), and it is the case the walk below is least
+      // able to get wrong by luck: with one slab the focus never moves, so an
+      // over-large range would leave the dialog with a position no slab
+      // occupies and Confirm doing nothing. Its last slab is `OK` rather than
+      // `CANCEL` because there is nothing to cancel -- the join SUCCEEDED.
+      {JoinFailure::ListFull, 1, "OK"},
   };
 
   for (const Shape& sh : kShapes) {
@@ -299,7 +306,7 @@ TEST_CASE("every slab the error panel draws can be reached and pressed") {
 
     // What is DRAWN, which is the spelling the other two had to agree with.
     REQUIRE(e->vm().actions.size() == sh.slabs);
-    CHECK(e->vm().actions.back() == "CANCEL");
+    CHECK(e->vm().actions.back() == sh.last);
 
     // Walk to the bottom. One press more than there are slabs, because the
     // list wraps -- so an over-large range shows up as landing somewhere that

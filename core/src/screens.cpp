@@ -469,10 +469,13 @@ void DemoScreenFactory::setArticlesDemo() {
 }
 
 void DemoScreenFactory::setWifiDemo() {
-  SavedNetworks nets;
-  nets.remember("HOME", true);
-  nets.remember("BUREAU", true);
-  setWifiNetworks(std::move(nets));
+  // STATED RATHER THAN BUILT BY remember(), which is [[nodiscard]] since #162.
+  // A demo builder is exactly the caller that would reach for a cast to
+  // silence that, and a cast here is the discarded refusal #162 is about,
+  // wearing a specimen's clothes. The boards name HOME as AUTO and BUREAU as
+  // SAVED, so the specimen says so outright instead of deriving it from
+  // "the first network saved becomes automatic" and hoping the order holds.
+  setWifiNetworks(SavedNetworks({{"HOME", true, true}, {"BUREAU", true, false}}));
 
   // The rssi values are chosen to land on the board's own three-bar spread
   // through WifiPickerScreen::barsFor, rather than being copied out of it --

@@ -5,7 +5,7 @@ have exactly the UI/UX we want, so **design fidelity is a functional
 requirement**, not polish.
 
 **THIS FILE IS THE INDEX; `docs/notes/` HOLDS THE REST OF IT.** It outgrew the
-budget a session loads it into, so eighteen sections are files of their own — each
+budget a session loads it into, so nineteen sections are files of their own — each
 left here as its original heading, a few lines saying when you would want it, and
 the path. **A stub is not a summary and never supersedes the file it names.** A
 bold cross-reference (**Storage**, **Covers**, **The reader**) still resolves to a
@@ -24,7 +24,7 @@ the runtime, the invariants, the goldens, and how to edit this repo with scripts
 | `tools/` | Asset generators (`fontc.py`, `iconc.py`, `embed_font.py`) and the design comparison tool. |
 | `design/` | `*.dc.html` design boards — **the source of truth for the UI**. |
 | `docs/superpowers/` | The spec, the roadmap, and per-phase implementation plans. |
-| `docs/notes/` | **The rest of this file** — eighteen sections split out for size, each named by a stub under its own heading below. Plus the API notes (`wallabag-api.md`) and the verdicts (`strip-grayscale-verdict.md`). |
+| `docs/notes/` | **The rest of this file** — nineteen sections split out for size, each named by a stub under its own heading below. Plus the API notes (`wallabag-api.md`) and the verdicts (`strip-grayscale-verdict.md`). |
 | `docs/agents/` | The three agent-facing notes the **Agent skills** section names. |
 | `freeink-sdk/` | Submodule. MIT drivers for display/input/SD/battery. Never edit. |
 
@@ -36,6 +36,9 @@ make sim        # render Home to build/home.png
 make firmware   # build for the ESP32-C3
 make fonts      # regenerate the .rfnt type ramp and embedded headers
 make icons      # regenerate icon bitmaps from the design boards' SVG
+make version    # write reader/version.h's kVersion into every file that repeats
+                # it — the boards' `V <n>` slot, ReaderCore's manifest.
+                # `make version-check` says whether they agree; CI asks too.
 make compare    # design-vs-firmware contact sheet, all 60 boards (~5 min)
                 # ...`ok` means A FRAME WAS PRODUCED; the mismatch % beside it
                 # is the check. #41 added that figure and this line still said
@@ -301,6 +304,38 @@ boards say, and names what drifted.
   and truncate the canvas at that byte, and every board is HTML.
 - **Publishing is still a separate, human step**, with `contract: "0.1.31"` and
   the canvas's own `url` — publishing without it creates a stray duplicate.
+
+**AND ONE THING ON A BOARD IS NOT A PIXEL AT ALL, SO NO AMOUNT OF COMPARING
+FINDS IT: THE VERSION (#152).** `design/Settings.dc.html` states `V 0.2.0` and
+`core/include/reader/version.h` states `0.2.0`, separately — so when **both** are
+stale they agree exactly, Settings measures its usual ~2.3%, and the sheet is
+green about a screen that is lying. **v0.2.0 shipped drawing `V 0.1.0`** with the
+release gate run faithfully; the tag was deleted and re-cut within the hour
+because nothing had been downloaded, which is luck. The board's slot is
+**generated** from the header now (`make version`), `make version-check` refuses
+drift in under a second, and CI's `compare` job passes
+**`--require-version-current`** — `--require-canvas-current`'s bargain exactly,
+delegating to the generator rather than holding a second answer.
+
+- **IT WAS FOUR COPIES AND EVERY LIST OF THEM SAID THREE.** `design/Boot.dc.html`
+  states the version too, and had been stale since before v0.2.0 — missed by the
+  issue, by the release-gate step written for this, and by the comment in
+  `test_version.cpp` that enumerated the copies, because the boot screen is not
+  implemented so `make compare` draws a placeholder beside that board and
+  measures nothing. So `versionc.py` **scans `design/*.dc.html`** rather than
+  holding a list: a new board carrying a slot is covered by existing. Two boards
+  are named, and only to make **losing** a slot an error — with the slot gone
+  there is nothing left to disagree with, and a scan alone would call the tree
+  current.
+- **`test/unit/test_version.cpp` NO LONGER PINS THE STRING.** A pin that must be
+  hand-bumped beside the thing it pins is a second copy with a build failure
+  attached. What it asserts now is that the literal is one the generator's regex
+  can read — a version it cannot parse makes `versionc.py` refuse and every
+  generated copy silently stop being regenerated, and `make test` is the only
+  check of that shape which runs on a bare checkout with no Python.
+- **`core/library.json` is in the generated set too**, and had sat at `0.1.0`
+  through every release: one tag ships the firmware and the library inside it, so
+  there is no second cadence for a second number to track.
 
 ## The rule that governs COPY
 
@@ -960,6 +995,18 @@ or restores a wake** — including the rule that a screen reporting a focus acce
 one back, which shipped one-way on three screens before it was made structural.
 
 **`docs/notes/storage.md`.**
+
+## The caches
+
+Every cache in the firmware, in RAM and on the card, with what bounds it, what its
+eviction policy IS and why that one rather than the obvious one, and what it costs at
+its limit — plus the two stores that are deliberately unbounded and the reason each is.
+**Read it before adding anything that holds a derived answer**, and read it before
+reaching for #26: the Phase 5 "cache eviction" card meant the spec's `/.reader/cache/`,
+which is #19 and was never built, and everything that WAS built already evicts, refuses
+or is one-of by construction.
+
+**`docs/notes/caches.md`.**
 
 ## Type
 
