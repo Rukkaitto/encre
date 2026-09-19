@@ -104,6 +104,11 @@ class NullTheme : public Theme {
   void renderReaderMenu(Framebuffer&, const FontSet&, const ReaderMenuViewModel&,
                         Plane) override {}
   void renderContents(Framebuffer&, const FontSet&, const ContentsViewModel&, Plane) override {}
+  void renderNames(Framebuffer&, const FontSet&, const NamesViewModel&, Plane) override {}
+  void renderMentions(Framebuffer&, const FontSet&, const MentionsViewModel&, Plane) override {}
+  void namesMetrics(int, const FontSet&, int& a, int& b, int& c) override { a = b = c = 0; }
+  void mentionsMetrics(int, int, const FontSet&, const std::vector<std::string>&, int& a, int& b,
+                       std::vector<int>& c) override { a = b = 0; c.clear(); }
   int contentsVisibleRows(int, const FontSet&) override { return 8; }
   void readerMetrics(int, int, const FontSet&, const GlyphSource&, const Settings&,
                      PageMetrics&) const override {}

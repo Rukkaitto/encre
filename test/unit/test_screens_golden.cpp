@@ -30,6 +30,8 @@
 #include "reader/screen_reader.h"
 #include "reader/screen_typography.h"
 #include "reader/components.h"
+#include "reader/screen_mentions.h"
+#include "reader/screen_names.h"
 #include "reader/screens.h"
 #include "reader/settings.h"
 #include "reader/theme_quiet.h"
@@ -348,4 +350,70 @@ TEST_CASE("the Typography panel declares the fidelity its goldens are drawn at")
   // quietly pinning a path nothing paints.
   reader::TypographyScreen scr(reader::Settings{}, nullptr, nullptr);
   CHECK(scr.fidelity() == reader::Fidelity::Mono);
+}
+
+// design/Names.dc.html, design/NamesEmpty.dc.html and design/Mentions.dc.html.
+//
+// THE DEMO CONTENT IS THE SIMULATOR'S, from screens.h, so the golden and the
+// comparison sheet cannot drift: a board measured against one specimen and a golden
+// pinned against another would each pass while disagreeing with the other.
+TEST_CASE("QuietTheme renders the names list, to golden") {
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  const auto run = [&](int w, int h, const char* name) {
+    reader::DemoScreenFactory factory;
+    factory.setNames(reader::demoNames());
+    std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Names);
+    REQUIRE(scr != nullptr);
+    auto& ns = static_cast<reader::NamesScreen&>(*scr);
+    int listH = 0, tallH = 0, shortH = 0;
+    theme.namesMetrics(h, ramp.fonts, listH, tallH, shortH);
+    ns.setMetrics(listH, tallH, shortH);
+    ns.setFocus(7);
+    reader::Framebuffer fb(w, h);
+    scr->render(fb, ramp.fonts, theme, reader::Plane::Bw);
+    golden::checkGolden(fb, name);
+  };
+  SUBCASE("X4 480x800") { run(480, 800, "names"); }
+  SUBCASE("X3 528x792") { run(528, 792, "names_x3"); }
+}
+
+TEST_CASE("QuietTheme renders the empty names list, to golden") {
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  const auto run = [&](int w, int h, const char* name) {
+    // PRIMED WITH NOTHING, which is the distinction the factory draws: an empty list
+    // is a real answer and builds; nothing primed at all is refused.
+    reader::DemoScreenFactory factory;
+    factory.setNames({});
+    std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Names);
+    REQUIRE(scr != nullptr);
+    reader::Framebuffer fb(w, h);
+    scr->render(fb, ramp.fonts, theme, reader::Plane::Bw);
+    golden::checkGolden(fb, name);
+  };
+  SUBCASE("X4 480x800") { run(480, 800, "names_empty"); }
+  SUBCASE("X3 528x792") { run(528, 792, "names_empty_x3"); }
+}
+
+TEST_CASE("QuietTheme renders one name's mentions, to golden") {
+  ramp::Ramp ramp;
+  reader::QuietTheme theme;
+  const auto run = [&](int w, int h, const char* name) {
+    reader::DemoScreenFactory factory;
+    factory.setMentions(reader::demoMentionsSubject(), reader::demoMentions(), {});
+    std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Mentions);
+    REQUIRE(scr != nullptr);
+    auto& ms = static_cast<reader::MentionsScreen&>(*scr);
+    int listH = 0, headerH = 0;
+    std::vector<int> rowHeights;
+    theme.mentionsMetrics(w, h, ramp.fonts, ms.extractTexts(), listH, headerH, rowHeights);
+    ms.setMetrics(listH, headerH, rowHeights);
+    ms.setFocus(1);
+    reader::Framebuffer fb(w, h);
+    scr->render(fb, ramp.fonts, theme, reader::Plane::Bw);
+    golden::checkGolden(fb, name);
+  };
+  SUBCASE("X4 480x800") { run(480, 800, "mentions"); }
+  SUBCASE("X3 528x792") { run(528, 792, "mentions_x3"); }
 }

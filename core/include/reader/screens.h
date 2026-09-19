@@ -4,6 +4,8 @@
 #include <vector>
 
 #include "reader/app.h"
+#include "reader/name_extracts.h"
+#include "reader/names.h"
 #include "reader/screen_settings.h"
 #include "reader/screen_wallabag_account.h"
 #include "reader/screen_wallabag_dialogs.h"
@@ -64,6 +66,17 @@ std::vector<ScreenId> demoHomeTargets();
 // design/Sleep.dc.html's own values -- see the definition.
 SleepViewModel demoSleepVm();
 // design/Contents.dc.html's own list, for the simulator and the goldens.
+// design/Names.dc.html's ten rows and design/Mentions.dc.html's sightings, shared by
+// the simulator AND the goldens so the two cannot drift.
+//
+// TWO TALL ROWS IN TEN, which is the board's mix and the measured one: rows with no
+// fuller form are 84% on a real novel and 97% on another. The board's first draft
+// drew five in eight, from an estimate made before anything grouped.
+std::vector<NameGroup> demoNames();
+std::vector<StoredExtract> demoMentions();
+// The fullest form Mentions' band shows for `demoMentions`.
+const char* demoMentionsSubject();
+
 std::vector<TocEntry> demoContents();
 int demoContentsSpine();
 // design/SleepIdle.dc.html: asleep with nothing open, so the badge without the card.
@@ -515,6 +528,37 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // reason libraryVisibleRows is: the factory constructs the screen and a panel height
   // is not something `core/` can ask for. 0 means "not told", and the list renders
   // empty rather than guessing.
+  // --- Names and Mentions (3E) ---------------------------------------------
+  //
+  // GROUPS, NOT THE CARD. Grouping is a batch pass over the whole index and it
+  // happens when the screen opens; who reads the store and runs it is the shell's
+  // business. The factory takes the answer, which keeps both screens testable
+  // without a filesystem.
+  void setNames(std::vector<NameGroup> groups) {
+    namesGroups_ = std::move(groups);
+    namesPrimed_ = true;
+  }
+  void setNamesVisibleRows(int n) { namesRows_ = n; }
+  void clearNames() {
+    namesGroups_.clear();
+    namesPrimed_ = false;
+  }
+  // `subject` is the band's right slot and is never empty -- with the label naming
+  // the screen it is the only thing saying whose mentions these are.
+  void setMentions(std::string subject, std::vector<StoredExtract> extracts,
+                   std::vector<std::string> chapterNames) {
+    mentionsSubject_ = std::move(subject);
+    mentionsExtracts_ = std::move(extracts);
+    mentionsChapterNames_ = std::move(chapterNames);
+    mentionsPrimed_ = true;
+  }
+  void setMentionsVisibleRows(int n) { mentionsRows_ = n; }
+  void clearMentions() {
+    mentionsExtracts_.clear();
+    mentionsSubject_.clear();
+    mentionsPrimed_ = false;
+  }
+
   void setContentsVisibleRows(int n) { contentsRows_ = n; }
 
   void setContents(std::vector<TocEntry> toc, int spine) {
@@ -643,6 +687,14 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   WifiNetworkActionsScreen::Facts wifiActionFacts_;
   bool wifiActionFactsSet_ = false;
   int contentsRows_ = 0;
+  std::vector<NameGroup> namesGroups_;
+  bool namesPrimed_ = false;
+  int namesRows_ = 0;
+  std::string mentionsSubject_;
+  std::vector<StoredExtract> mentionsExtracts_;
+  std::vector<std::string> mentionsChapterNames_;
+  bool mentionsPrimed_ = false;
+  int mentionsRows_ = 0;
   std::string menuTitle_, menuProgress_;
   int readerStartChapter_ = 0;
   Cursor readerStartAt_{};

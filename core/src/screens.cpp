@@ -8,6 +8,8 @@
 #include "reader/screen_article_end.h"
 #include "reader/screen_articles.h"
 #include "reader/screen_contents.h"
+#include "reader/screen_names.h"
+#include "reader/screen_mentions.h"
 #include "reader/screen_wallabag_account.h"
 #include "reader/screen_wallabag_dialogs.h"
 #include "reader/screen_reader_menu.h"
@@ -22,6 +24,67 @@
 #include "reader/screen_sd_missing.h"
 
 namespace reader {
+
+std::vector<NameGroup> demoNames() {
+  // Alphabetical, because that is the screen's order and the only one where knowing
+  // the string tells you where to look. The counts are what the board's rail states.
+  auto g = [](const char* display, const char* fullest, int n) {
+    NameGroup x;
+    x.display = display;
+    x.fullest = fullest;
+    x.midSentence = n;
+    x.members.push_back(display);
+    if (*fullest != 0) x.members.push_back(fullest);
+    return x;
+  };
+  return {
+      g("Casaubon", "", 61),
+      g("Celia", "", 48),
+      g("Dorothea", "", 203),
+      g("Featherstone", "", 37),
+      g("Ladislaw", "WILL LADISLAW", 96),
+      g("Lowick", "", 44),
+      g("Lydgate", "TERTIUS LYDGATE", 148),
+      g("Mary Garth", "", 52),
+      g("Middlemarch", "", 29),
+      g("Raffles", "", 26),
+  };
+}
+
+const char* demoMentionsSubject() { return "WILL LADISLAW"; }
+
+std::vector<StoredExtract> demoMentions() {
+  auto e = [](int spine, int block, const char* text) {
+    StoredExtract x;
+    x.run = "Ladislaw";
+    x.spine = spine;
+    x.block = block;
+    x.text = text;
+    return x;
+  };
+  // Oldest first, across two chapters -- which is what the index's spine-ordered
+  // extract list hands over, and what makes the chapter header appear twice.
+  return {
+      // WELL CLEAR OF THE WRAP BOUNDARY, deliberately. A board is rasterised by
+      // Chrome from the real webfont and the device uses the prepped TTF, so a
+      // specimen within a few percent of the measure lands on opposite sides of a
+      // break in the two engines -- and no fidelity work closes that. These sit two
+      // firmware lines with room, which is what keeps the committed render honest.
+      e(8, 12, "cousin, Will Ladislaw, was expected"),
+      e(8, 31, "Ladislaw had a sense of the absurd"),
+      e(8, 44, "Ladislaw coloured."),
+      e(8, 58, "and Will Ladislaw, by the window"),
+      e(18, 7, "Dorothea saw Ladislaw at Lowick"),
+      e(18, 22, "said Will Ladislaw, rising"),
+      // EIGHT, WHICH IS THE CAP AND THEREFORE THE REAL CASE. Six fitted the panel,
+      // so the list did not scroll and the firmware drew no rail while the board
+      // drew one -- a structural difference between a board and its screen, which
+      // is exactly what the comparison exists to catch.
+      e(26, 4, "Ladislaw and Dorothea in the garden"),
+      e(26, 19, "Will Ladislaw would not take the money"),
+  };
+}
+
 
 HomeViewModel demoHomeVm() {
   HomeViewModel vm;
@@ -620,6 +683,22 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       if (!menuTitle_.empty()) return std::make_unique<ReaderMenuScreen>(menuTitle_, menuProgress_);
       if (contentsDemo_) return std::make_unique<ReaderMenuScreen>("Middlemarch", "6%");
       return nullptr;
+    case ScreenId::Names:
+      // PRIMED, NOT NON-EMPTY, which is this factory's rule everywhere: a book whose
+      // names have genuinely not been scanned yet primes an EMPTY list and still
+      // builds, because "no names yet" is the honest answer and the screen's own
+      // variant says so. Only "nothing was primed at all" is refused -- a factory
+      // that substituted demo content here would show Middlemarch's cast over
+      // somebody's own book, which is the failure the Contents case below records.
+      if (!namesPrimed_) return nullptr;
+      return std::make_unique<NamesScreen>(namesGroups_, namesRows_);
+    case ScreenId::Mentions:
+      // ITS SUBJECT IS THE WHOLE REFUSAL. A Mentions screen that cannot say whose
+      // mentions it shows would be naming one name over another's sightings, which
+      // is worse than not opening.
+      if (!mentionsPrimed_) return nullptr;
+      return std::make_unique<MentionsScreen>(mentionsSubject_, mentionsExtracts_,
+                                              mentionsChapterNames_, mentionsRows_);
     case ScreenId::Contents: {
       // AND HERE, WHICH IS WHERE IT ACTUALLY BIT. The fallback was
       // `contentsToc_.empty() ? demoContents() : contentsToc_`, so a real book whose

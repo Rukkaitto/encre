@@ -35,6 +35,8 @@ constexpr const char* kNames[] = {
     "articles", "article-actions", "article-end",
     "wallabag-account", "wallabag-connecting", "wallabag-error",
     "articles-remove-confirm",
+    // Names (3E). Stable forever from here, like every name above it.
+    "names", "mentions",
 };
 
 // TIED TO THE SENTINEL, NOT TO A NAMED MEMBER, AND THAT IS #42's WHOLE POINT.
@@ -198,6 +200,15 @@ const char* sessionWireName(ScreenId id) {
     case ScreenId::WallabagConnecting: return kNames[26];
     case ScreenId::WallabagError: return kNames[27];
     case ScreenId::ArticlesRemoveConfirm: return kNames[28];
+    // NAMEABLE AND RESTORABLE. The screen is built from the card's name store and
+    // nothing a press produced, so a record naming it decodes to the screen it
+    // names -- which is the whole job of this table. Without a case it fell through
+    // to `return kNames[0]` and stored itself as "home", the failure the notes above
+    // record happening to Contents and then to BookEnd.
+    case ScreenId::Names: return kNames[29];
+    // NAMEABLE, AND IT NEEDS MORE THAN A NAME. A restored Mentions has to say whose
+    // mentions it shows, and the record's focus index cannot.
+    case ScreenId::Mentions: return kNames[30];
     // NOT A SCREEN, so it has no name and must never reach the fall-through below,
     // which is what silently made a missing case read as `home`.
     case ScreenId::Count: break;

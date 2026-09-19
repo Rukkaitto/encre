@@ -155,6 +155,21 @@ constexpr Restore kRestorability[] = {
     // rebuilt from -- and waking into "remove every article?" is a destructive
     // question nobody asked, which is BookError's argument at its sharpest.
     Restore::Never,
+    // Names -- NeedsPriming, and this row has now been both answers. It was written
+    // NeedsPriming from the design; test_focus_restore.cpp corrected it to Ready
+    // while the screen had no rows and a boot-configured factory could build it
+    // complete; and it is NeedsPriming again now that the rows arrive from the
+    // card's grouped index, which is a thing a PRESS produces and a wake does not.
+    // The note that predicted the second move said "in that change and not before",
+    // and the walk is what required it -- a declaration checked against the factory
+    // rather than against the intention.
+    Restore::NeedsPriming,
+    // Mentions -- NeedsPriming, and unlike Names it genuinely owes one. The screen
+    // is built from a name a PRESS chose, and a wake makes no press: the factory has
+    // to be handed the group before it can build anything, and a Mentions that
+    // cannot say whose mentions it shows is the substituted content screens.h
+    // refuses.
+    Restore::NeedsPriming,
 };
 static_assert(sizeof(kRestorability) / sizeof(kRestorability[0]) ==
                   static_cast<size_t>(ScreenId::Count),
@@ -192,6 +207,10 @@ bool screenUsesRadio(ScreenId id) {
     // error dialog describes a radio that is already down. So this function's
     // true-set goes from two to three, and that count is asserted in
     // test_article_outcomes.cpp rather than left as a comment.
+    // Names reads the CARD and never the radio, which is the Articles list's own
+    // answer one flow over.
+    case ScreenId::Names:
+    case ScreenId::Mentions:
     case ScreenId::Articles:
     case ScreenId::ArticlesRemoveConfirm:
     case ScreenId::ArticleActions:
@@ -262,6 +281,10 @@ const char* screenName(ScreenId id) {
     case ScreenId::Articles: return "ARTICLES";
     case ScreenId::ArticleActions: return "ARTICLE-ACTIONS";
     case ScreenId::ArticleEnd: return "ARTICLE-END";
+    // A log label, free to be reworded; session_record.cpp's "names" is a storage
+    // format and is not this, however alike the two happen to look.
+    case ScreenId::Names: return "NAMES";
+    case ScreenId::Mentions: return "MENTIONS";
     case ScreenId::WallabagAccount: return "WALLABAG-ACCOUNT";
     case ScreenId::WallabagConnecting: return "WALLABAG-CONNECTING";
     case ScreenId::WallabagError: return "WALLABAG-ERROR";
