@@ -156,6 +156,15 @@ TEST_CASE("QuietTheme renders the connect flow to golden at both geometries") {
       {"wifi_error_failed",
        [](WifiApp& a) { a.factory.setWifiFailure(JoinFailure::Incomplete); },
        [](WifiApp& a) { REQUIRE(a.app.pushScreen(ScreenId::WifiError)); }},
+      // THE FOURTH SHAPE, WHOSE JOIN WORKED (#162). It is the only one of the
+      // four with a single slab, so it is also the only render that pins the
+      // one-slab hint bar -- `OK` in the Confirm slot and two 36px empty ones
+      // where UP and DOWN are on the other three. Measuring them as nothing
+      // would draw CANCEL and OK in the wrong places, which is a defect no
+      // structural assertion in this file can see.
+      {"wifi_error_list_full",
+       [](WifiApp& a) { a.factory.setWifiFailure(JoinFailure::ListFull); },
+       [](WifiApp& a) { REQUIRE(a.app.pushScreen(ScreenId::WifiError)); }},
   };
 
   for (const Case& c : kCases) {

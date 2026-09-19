@@ -234,15 +234,21 @@ FLOW_SCREENS = [
     ("wifi_picker_empty",    "WifiPickerEmpty.dc.html",    "Join network / none found"),
     ("wifi_password",   "WifiPassword.dc.html",   "Password entry"),
     ("wifi_connect",    "WifiConnect.dc.html",    "Wi-Fi connect"),
-    # THREE FAILURE SHAPES, ONE SCREEN, on BookError's precedent: a join fails
-    # three distinguishable ways and one sentence would be a lie. Their own rows
-    # rather than variants folded into `wifi_error`, for the reason the two sleep
-    # cover modes have their own -- the mismatch percentage is per screen, and
-    # folding them in would average a regression in one shape against a board that
-    # cannot show it. The latter two also DROP a slab, so they are not one layout.
+    # FOUR SHAPES, ONE SCREEN, on BookError's precedent: a join ends without a
+    # saved network in four distinguishable ways and one sentence would be a lie.
+    # Their own rows rather than variants folded into `wifi_error`, for the reason
+    # the two sleep cover modes have their own -- the mismatch percentage is per
+    # screen, and folding them in would average a regression in one shape against a
+    # board that cannot show it. The latter three also DROP a slab, so they are not
+    # one layout.
+    #
+    # `wifi_error_list_full` IS THE ONE WHERE THE JOIN WORKED (#162): the saved
+    # list refused a ninth network, so its caption is not `COULDN'T JOIN` and its
+    # only slab is `OK`.
     ("wifi_error",      "WifiError.dc.html",      "Join failed / password"),
     ("wifi_error_not_found", "WifiErrorNotFound.dc.html", "Join failed / not found"),
     ("wifi_error_failed",    "WifiErrorFailed.dc.html",   "Join failed / incomplete"),
+    ("wifi_error_list_full", "WifiErrorListFull.dc.html", "Joined / list full"),
     # The hold on a saved network. ItemActions reads the LIBRARY's focused row, so
     # this could not be reused and is its own screen.
     ("wifi_network_actions", "WifiNetworkActions.dc.html", "Network actions"),

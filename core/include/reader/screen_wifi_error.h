@@ -7,14 +7,25 @@
 
 namespace reader {
 
-// design/WifiError.dc.html, design/WifiErrorNotFound.dc.html and
-// design/WifiErrorFailed.dc.html -- ONE SCREEN, THREE COPY SHAPES.
+// design/WifiError.dc.html, design/WifiErrorNotFound.dc.html,
+// design/WifiErrorFailed.dc.html and design/WifiErrorListFull.dc.html --
+// ONE SCREEN, FOUR COPY SHAPES.
 //
-// A join fails three distinguishable ways and ONE SENTENCE WOULD BE A LIE,
-// which is BookError's argument and the reason it is three boards. Telling
-// somebody their password was rejected by a router that is not there is the
-// false-claim shape this project refuses for the battery gauge (-1, never 0%)
-// and for a badge promising a wake charging cannot deliver.
+// A join ends without a saved network in four distinguishable ways and ONE
+// SENTENCE WOULD BE A LIE, which is BookError's argument and the reason it is
+// four boards.
+//
+// THE FOURTH IS THE ONE WHERE THE JOIN WORKED (#162). `ListFull` is a proven
+// credential the saved list had no room for, so its caption is not
+// `COULDN'T JOIN` and its only slab is `OK`: the password is not what went
+// wrong and the cap does not change between two presses. Its sentence names
+// the cap and the remedy, because a refusal with no remedy reads as a fault.
+//
+// Telling somebody their password was rejected by a router that is not there
+// is the false-claim shape this project refuses for the battery gauge (-1,
+// never 0%) and for a badge promising a wake charging cannot deliver -- and
+// telling somebody a join failed when it succeeded is the same shape from the
+// other side.
 //
 // THE SLABS FOLLOW THE REASON, AND EDIT PASSWORD IS ABSENT RATHER THAN INERT
 // on the two shapes where the password is not what went wrong. A slab that

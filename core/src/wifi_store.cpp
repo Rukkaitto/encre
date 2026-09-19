@@ -167,17 +167,21 @@ const SavedNetwork* SavedNetworks::automatic() const {
   return nullptr;
 }
 
-bool SavedNetworks::remember(std::string_view ssid, bool locked) {
-  if (!usableSsid(ssid)) return false;
+Remembered SavedNetworks::remember(std::string_view ssid, bool locked) {
+  if (!usableSsid(ssid)) return Remembered::BadSsid;
   const int at = indexOf(ssid);
   if (at >= 0) {
     // Already known: re-joining it may have changed whether it needs a
     // passphrase (an open network that has since been secured), and the cap
     // must not refuse a network that is not being added.
     nets_[static_cast<size_t>(at)].locked = locked;
-    return true;
+    return Remembered::Yes;
   }
-  if (full()) return false;
+  // THE REFUSAL, AND IT RETURNS BEFORE ANYTHING IS TOUCHED. The caller's
+  // passphrase write is conditional on this answer, so a refusal that mutated
+  // anything would leave a half-saved network -- see #162, which is the
+  // mirror: the answer was dropped and the write happened regardless.
+  if (full()) return Remembered::ListFull;
   SavedNetwork n;
   n.ssid = std::string(ssid);
   n.locked = locked;
@@ -185,7 +189,7 @@ bool SavedNetworks::remember(std::string_view ssid, bool locked) {
   // take the flag from it without being asked.
   n.automatic = (automatic() == nullptr);
   nets_.push_back(std::move(n));
-  return true;
+  return Remembered::Yes;
 }
 
 bool SavedNetworks::forget(std::string_view ssid) {

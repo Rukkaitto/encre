@@ -52,11 +52,11 @@ find one thing nobody had named, and it is a live defect rather than a missing p
 | `/.reader/sleep.cover` | Card | **ONE file**, by construction | Overwritten when the last-read book changes | Alternating between two books re-decodes on each sleep |
 | `/.reader/articles/*.epub`, `*.json` | Card | `articlesKeepOffline`, default 50 | Oldest first, **skipping starred and started** | See below — this is a floor, not a ceiling |
 | `/.reader/articles/queue/` | Card | One marker per article per action | Cleared on ack; the opposite marker is REMOVED rather than contradicted | Self-clearing: a push acks on 2xx **or 404** |
-| Saved Wi-Fi networks | NVS `encre_wifi` | 8 (`kMaxSavedNetworks`) | **REFUSES the ninth.** Never evicts | **The ninth is refused SILENTLY** and its passphrase is orphaned — see below |
+| Saved Wi-Fi networks | NVS `encre_wifi` | 8 (`kMaxSavedNetworks`) | **REFUSES the ninth.** Never evicts | The reader is told, on `WifiError`'s fourth copy shape, and nothing is written — see below |
 | Session record | NVS `encre_sess` | `App::kMaxDepth` = 8 stack entries | One record, overwritten | n/a |
 | Home's `LIBRARY` count | RAM | One integer | Keyed on `SdFileSystem::removals()` | One listing plus one per folder to re-derive |
 | `/.reader/state/<hash>.json` | Card | **None, deliberately** | Never pruned | See *Unbounded on purpose* |
-| Wi-Fi passphrases | NVS `encre_wpsk` | One key per SSID | Deleted by `forget` only | See *The one thing nobody had named: the NINTH network* |
+| Wi-Fi passphrases | NVS `encre_wpsk` | One key per SSID | Deleted by `forget` only | A refused join no longer writes one; the older orphans stay — see below |
 
 ## The policies that are not the obvious one
 
@@ -184,48 +184,79 @@ right and its one caller does not honour it** — see the section below.
 
 ## The one thing nobody had named: the NINTH network
 
-**THE WI-FI LIST REFUSES A NINTH NETWORK AND THE SHELL THROWS THE REFUSAL AWAY, SO THE
-PASSPHRASE IS WRITTEN AND ORPHANED ON THE SPOT.** The refusal is the right policy and
-`wifi_store.h` argues it well; what nobody had looked at is what the one caller does
-with the answer. Four lines, all in the `JoinState::Ok` branch of
-`shell/src/main.cpp:4246-4248`:
+**FIXED IN #162, AND THE REFUSAL NOW REACHES THE GLASS.** What this section reported is
+below, unchanged, because the diagnosis is what makes the fix legible; what follows it
+is what shipped.
+
+**THE WI-FI LIST REFUSES A NINTH NETWORK AND THE SHELL THREW THE REFUSAL AWAY, SO THE
+PASSPHRASE WAS WRITTEN AND ORPHANED ON THE SPOT.** The refusal is the right policy and
+`wifi_store.h` argues it well; what nobody had looked at is what the one caller did
+with the answer. Three lines, all in the `JoinState::Ok` branch of
+`shell/src/main.cpp`:
 
 ```
-gWifiNets.remember(gJoinSsid, gJoinLocked);   // returns false when full() -- DISCARDED
-if (gJoinLocked) shellwifi::putSecret(gJoinSsid, gJoinPsk);   // writes anyway
-shellwifi::save(gWifiNets);                   // writes the UNCHANGED eight
+gWifiNets.remember(gJoinSsid, gJoinLocked);   // returned false when full() -- DISCARDED
+if (gJoinLocked) shellwifi::putSecret(gJoinSsid, gJoinPsk);   // wrote anyway
+shellwifi::save(gWifiNets);                   // wrote the UNCHANGED eight
 ```
 
-`SavedNetworks::remember` answers `false` on `full()` (`core/src/wifi_store.cpp:180`)
-and that is its ONLY caller in the firmware. So on a device already holding eight
-networks, a ninth join that SUCCEEDS is not saved, its passphrase lands in `encre_wpsk`
-under a key no list entry hashes to, and NVS has no delete-by-prefix to find it again.
+`SavedNetworks::remember` answered `false` on `full()` and that is its ONLY caller in
+the firmware. So on a device already holding eight networks, a ninth join that SUCCEEDS
+was not saved, its passphrase landed in `encre_wpsk` under a key no list entry hashes
+to, and NVS has no delete-by-prefix to find it again.
 
-**THE FLOW'S OWN CONFIRMATION IS THE THING THAT GOES MISSING.** The block's comment
+**THE FLOW'S OWN CONFIRMATION IS THE THING THAT WENT MISSING.** The block's comment
 says the flow leaves for the saved-network hub rather than stepping the dialog to
 READY, because "the hub opening with the network in it IS the confirmation". On the
-ninth network the hub opens without it. The reader joined, was shown a success, and
-lands on a list that does not contain what they just joined.
+ninth network the hub opened without it. The reader joined, was shown a success, and
+landed on a list that did not contain what they had just joined.
 
-**And the orphan has a second, quieter route.** `wifi_store_nvs.h` states at the site
-that "`remember` adds a row before a passphrase exists and `forget` removes the row, so
-the two move independently", and that `save()` does not touch the secrets. Only
-`forget()` knows which secret has become unreachable. So a list that fails to DECODE is
-read as "no saved networks" — the correct reading of an unparseable record — and
-abandons up to eight secrets in one step, with nothing left that could name them.
+**And the orphan has a second, quieter route, which is NOT fixed.** `wifi_store_nvs.h`
+states at the site that "`remember` adds a row before a passphrase exists and `forget`
+removes the row, so the two move independently", and that `save()` does not touch the
+secrets. Only `forget()` knows which secret has become unreachable. So a list that
+fails to DECODE is read as "no saved networks" — the correct reading of an unparseable
+record — and abandons up to eight secrets in one step, with nothing left that could
+name them.
 
-**WORTH A CARD, AND IT IS THE REFUSAL HALF THAT IS URGENT.** Each orphan is one short
-string in a 20 KB partition, so the storage is not the problem; a successful join that
-is silently not saved is. The narrow fix is to read `remember()`'s return and skip the
-`putSecret` and the `save` when it is false, which also needs a word on the screen
-saying the list is full. The sweep over `encre_wpsk` after a successful `save()`,
-deleting any `p_` key no entry hashes to, is the separate and larger half: it would be
-the first code in this firmware to enumerate NVS keys.
+### What shipped
 
-**NOT FILED, AND NOT OBSERVED ON GLASS.** It is read off the call site and the two
-headers' own statements, and nobody has taken a device to nine networks. Reported with
-this audit rather than opened, because it is the owner's call whether it is one card or
-two.
+**THE ANSWER CANNOT BE DROPPED ANY MORE, and that is the half that is structural.**
+`remember()` returns `Remembered` — `Yes`, `ListFull` or `BadSsid` — and is
+`[[nodiscard]]`, so the statement form that caused this fails to COMPILE, on every
+build including the firmware's. That matters here more than it usually would: `shell/`
+has no desktop harness, so the compiler is the only thing that reads that branch at
+all.
+
+**IT IS THREE VALUES BECAUSE `false` WAS TWO FACTS.** A dialog saying the list is full
+would be a lie about an SSID no list would have taken, whatever its length. `BadSsid`
+cannot arrive from a join — `rankScanResults` drops blank SSIDs and 802.11 caps the
+field at 32 bytes — so it has no copy and no board, and the shell logs it.
+
+**AND THE READER IS TOLD.** `JoinFailure::ListFull` is a fourth copy shape on
+`WifiError` (`design/WifiErrorListFull.dc.html`), captioned `COULDN'T SAVE IT` rather
+than `COULDN'T JOIN` because the join SUCCEEDED, with one `OK` slab: `EDIT PASSWORD`
+points at a password that worked and `TRY AGAIN` would be refused identically, so both
+are absent rather than inert. The sentence names the cap and the remedy, because a
+refusal with no remedy reads as a fault.
+
+**NOTHING IS WRITTEN ON A REFUSAL** — not the list, not the secret. `dropSecret` is
+deliberately not called either: it is `forget`'s tool for a key this device PUT there,
+and on this path none was put, so the call could only delete whatever a colliding hash
+happens to name.
+
+**THE SWEEP IS STILL NOT DONE, and it is still worth a card of its own.** Deleting any
+`p_` key in `encre_wpsk` that no entry hashes to, after a successful `save()`, is the
+larger half: it would be the first code in this firmware to enumerate NVS keys, and it
+buys back bytes rather than behaviour. It is what would collect the orphans already on
+a device, and the decode-failure route above, which #162 does not touch.
+
+**STILL NOT OBSERVED ON GLASS, and the suite cannot make it so.** The fix is
+unit-tested in `core/` — the refusal's name, the copy, the slab list and two goldens —
+and the shell branch that reads it is executed by nothing on the desktop, which is the
+whole reason `[[nodiscard]]` is doing the work rather than a test. Nobody has taken a
+device to nine networks. Confirming it needs a device and nine joins, or a build with
+`kMaxSavedNetworks` temporarily at 2.
 
 ## What is NOT a cache, checked so the sweep reads as complete
 

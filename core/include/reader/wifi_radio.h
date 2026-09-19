@@ -31,13 +31,24 @@ struct ScanResult {
 enum class ScanState { Idle, Running, Done, Failed };
 enum class JoinState { Idle, Running, Ok, Failed };
 
-// The three shapes WifiError draws. A join fails three distinguishable ways and
-// one sentence would be a lie -- BookError's argument, and the reason that
-// screen is three boards.
+// The four shapes WifiError draws. A join ends badly in distinguishable ways
+// and one sentence would be a lie -- BookError's argument, and the reason that
+// screen is four boards.
+//
+// THE FOURTH IS NOT A RADIO OUTCOME, AND wifiFailureFor NEVER RETURNS IT.
+// `ListFull` is the join that WORKED and was refused a slot afterwards, so no
+// vendor reason code means it and none ever will: the shell passes it having
+// read SavedNetworks::remember's answer. It sits in this enum rather than in
+// one of its own because the question the error dialog answers is "why is
+// there no new saved network", and the radio's three failures and the store's
+// one refusal are four answers to that -- a second enum would be a second
+// spelling of the screen's shape, free to disagree with this one about which
+// copy a shape draws.
 enum class JoinFailure {
   BadPassword,  // the AP rejected the credential
   NotFound,     // the AP never answered: out of range, off, or a stale scan
   Incomplete,   // associated and never finished -- DHCP, and everything else
+  ListFull,     // THE JOIN SUCCEEDED and the saved list had no room. See #162.
 };
 
 // WHAT THE SHELL PASSES WHEN ASSOCIATION SUCCEEDED AND NO ADDRESS ARRIVED.
