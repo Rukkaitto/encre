@@ -462,6 +462,56 @@ TEST_CASE("the store is deleted with its book") {
   CHECK(!fs.exists(store.indexPath()));
 }
 
+TEST_CASE("a merge under memory pressure writes nothing rather than half an index") {
+  // THE FOURTH CRASH, and the last line of the function: it returned
+  // `serialiseHeader(header) + body`, which builds a THIRD copy of the whole index
+  // while `body` is still held -- an unguarded allocation of the entire file. It
+  // aborted a device at chapter 30 with a 4,833-byte index and a 14,324-byte
+  // largest block.
+  //
+  // The header goes at the FRONT of `body` now, so there is one string and one
+  // allocation. And every append into it is asked for, because the reserve is an
+  // estimate and an estimate that is low is a realloc.
+  struct Guard {
+    ~Guard() { reader::Heap::install(nullptr); }
+  } restore;
+  FakeFileSystem fs;
+  NameStore store(fs, kBook, kBytes);
+
+  Chapter first;
+  for (int i = 0; i < 40; ++i)
+    first.add("Name" + std::to_string(i) + "son", 4, 0, 4, 1);
+  first.seal();
+  REQUIRE(store.mergeChapter(0, first.runs, &first.extracts));
+  NameIndexHeader h;
+  std::vector<NameIndexEntry> before;
+  REQUIRE(store.loadAll(h, before));
+  const size_t had = before.size();
+  REQUIRE(had > 0);
+
+  // Now refuse anything sizeable and merge again.
+  reader::Heap::install([](size_t bytes) { return bytes <= 64; });
+  Chapter second;
+  for (int i = 0; i < 40; ++i)
+    second.add("Other" + std::to_string(i) + "son", 4, 0, 4, 1);
+  second.seal();
+  const bool wrote = store.mergeChapter(1, second.runs, &second.extracts);
+  reader::Heap::install(nullptr);
+
+  // EITHER IT WROTE EVERYTHING OR IT WROTE NOTHING. A half-written body would be an
+  // index missing entries it used to have, with the scanned bit saying the chapter
+  // was done -- which is worse than not merging at all.
+  std::vector<NameIndexEntry> after;
+  REQUIRE(store.loadAll(h, after));
+  if (!wrote) {
+    CHECK(after.size() == had);
+    CHECK(!h.isScanned(1));
+  } else {
+    CHECK(after.size() >= had);
+    CHECK(h.isScanned(1));
+  }
+}
+
 TEST_CASE("a chapter with no runs is still marked scanned, or backfill never advances") {
   // REPORTED OFF GLASS as the log flooding with the same line: "[backfill] ch=0 of 60
   // scanned runs=0 admitted=0 extracts=0" over and over. Chapter 0 of a real novel is

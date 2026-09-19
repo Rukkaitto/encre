@@ -302,6 +302,22 @@ std::string serialiseEntry(const NameIndexEntry& e) {
   return out;
 }
 
+namespace {
+
+// APPEND ONE ENTRY, ASKING FIRST. `body`'s reserve is an estimate -- the old file's
+// size plus a guess per run -- and an estimate that is low is a realloc, which on a
+// fragmented heap is abort(). Asking before each append makes the estimate a
+// performance hint rather than a correctness claim.
+bool appendEntry(std::string& body, const NameIndexEntry& e) {
+  const std::string line = serialiseEntry(e);
+  if (!ensureRoom(body, body.size() + line.size() + 1)) return false;
+  body += line;
+  body += '\n';
+  return true;
+}
+
+}  // namespace
+
 bool parseEntry(std::string_view line, NameIndexEntry& out) {
   NameIndexEntry e;
   size_t pos = 0;
@@ -424,10 +440,21 @@ bool NameStore::mergeChapter(int spine, const std::vector<NameScanner::Run>& run
   // refused, the scanned bit was never set, and the same chapter came round again
   // two seconds later. A book three chapters in has an index of a few hundred bytes
   // and was being refused a block eighty times bigger than it needed.
-  const size_t bodyWant = (readable ? in.size() : 0) + runs.size() * 24;
+  // THE BIT IS SET BEFORE THE HEADER IS RENDERED, not after, so the output can be
+  // built as ONE string. That is not a change to when it is WRITTEN -- the write is
+  // still the last thing that happens, and nothing before it can leave a store
+  // claiming a chapter it does not have.
+  header.markScanned(spine);
+  const std::string head = serialiseHeader(header);
+  const size_t bodyWant = head.size() + (readable ? in.size() : 0) + runs.size() * 32;
   if (!Heap::hasBlock(bodyWant)) return false;
   body.reserve(bodyWant);
+  body = head;
   size_t i = 0;
+  // AN APPEND THAT COULD NOT GET ITS ROOM ABANDONS THE WHOLE MERGE. A half-written
+  // body would be an index missing entries it used to have, and the scanned bit
+  // would then say the chapter was done -- so a partial write is worse than none.
+  bool failed = false;
   std::string_view line;
   if (!readable || !in.next(line)) line = std::string_view();
   // A RUN NOT YET ON THE CARD EARNS ITS SLOT OR IS DROPPED. This is the door, and it
@@ -443,10 +470,9 @@ bool NameStore::mergeChapter(int spine, const std::vector<NameScanner::Run>& run
     if (extractCounts != nullptr && k < extractCounts->size()) {
       addExtracts(e, spine, (*extractCounts)[k], header.extractCap);
     }
-    body += serialiseEntry(e);
-    body += '\n';
+    if (!appendEntry(body, e)) failed = true;
   };
-  while (!line.empty() || i < runs.size()) {
+  while (!failed && (!line.empty() || i < runs.size())) {
     if (line.empty()) {
       emitNew(i++);
       continue;
@@ -460,8 +486,7 @@ bool NameStore::mergeChapter(int spine, const std::vector<NameScanner::Run>& run
       continue;
     }
     if (i >= runs.size() || oldEntry.text < runs[i].text) {
-      body += serialiseEntry(oldEntry);
-      body += '\n';
+      if (!appendEntry(body, oldEntry)) return false;
       if (!in.next(line)) line = std::string_view();
     } else if (runs[i].text < oldEntry.text) {
       emitNew(i++);
@@ -475,20 +500,24 @@ bool NameStore::mergeChapter(int spine, const std::vector<NameScanner::Run>& run
       if (extractCounts != nullptr && i < extractCounts->size()) {
         addExtracts(oldEntry, spine, (*extractCounts)[i], header.extractCap);
       }
-      body += serialiseEntry(oldEntry);
-      body += '\n';
+      if (!appendEntry(body, oldEntry)) return false;
       ++i;
       if (!in.next(line)) line = std::string_view();
     }
   }
 
-  // THE BIT IS SET LAST AND THE WHOLE FILE IS WRITTEN ONCE. An interruption before
-  // this leaves a store that never knew about the chapter, so the chapter is simply
-  // rescanned -- which costs one redundant walk and cannot leave the index promising
-  // extracts that are not there.
-  header.markScanned(spine);
+  // WRITTEN ONCE, AND NOT CONCATENATED FIRST. `serialiseHeader(header) + body` built
+  // a THIRD copy of the whole index while `body` was still held -- an unguarded
+  // allocation of the entire file, which is what aborted a device at chapter 30
+  // with an index of 4,833 bytes and a largest block of 14,324. The header is
+  // already at the front of `body`.
+  //
+  // The write is still the last thing that happens, which is the rule that matters:
+  // an interruption before it leaves a store that never knew about the chapter, so
+  // the chapter is simply rescanned rather than claiming extracts it does not have.
+  if (failed) return false;
   if (!fs_.mkdirs(dir_)) return false;
-  return fs_.writeAll(indexPath(), serialiseHeader(header) + body);
+  return fs_.writeAll(indexPath(), body);
 }
 
 bool NameStore::quotasFor(const std::vector<NameScanner::Run>& runs, int cap, int spine,
@@ -554,7 +583,10 @@ bool NameStore::loadAll(NameIndexHeader& header, std::vector<NameIndexEntry>& ou
     const std::string_view line = nextLine(text, pos);
     if (line.empty()) continue;
     NameIndexEntry e;
-    if (parseEntry(line, e)) out.push_back(std::move(e));
+    // GUARDED like every other growth here. This is the one place the whole index
+    // goes resident, and it runs when a reader opens the Names screen -- so it
+    // shows the names it could hold rather than rebooting the device.
+    if (parseEntry(line, e) && ensureRoom(out, out.size() + 1)) out.push_back(std::move(e));
   }
   return true;
 }

@@ -186,6 +186,10 @@ bool readExtracts(FileSystem& fs, const std::string& dir, int spine, std::string
       e.spine = spine;
       if (!parseInt(line.substr(t1 + 1, t2 - t1 - 1), e.block)) continue;
       e.text.assign(line.substr(t2 + 1));
+      // GUARDED. A chapter's parts are read whole to find one run's lines, and how
+      // many there are is whatever is on the card -- so this is input-sized like
+      // every other growth in this feature, and refuses the same way.
+      if (!ensureRoom(out, out.size() + 1)) return true;
       out.push_back(std::move(e));
     }
   }
@@ -197,6 +201,11 @@ bool readExtracts(FileSystem& fs, const std::string& dir, int spine, std::string
 ExtractCapture::ExtractCapture(std::vector<std::string> wanted, std::vector<int> quota,
                                ExtractPartWriter& out)
     : wanted_(std::move(wanted)), quota_(std::move(quota)), out_(out) {
+  // DELIBERATELY UNGUARDED, and it is the only growth in this file that is. Both are
+  // one int per admitted run -- ~2 KB at the 512-run ceiling -- and `wanted_` is a
+  // vector of STRINGS the caller already built and moved in, so a heap that cannot
+  // serve these two has already refused something an order of magnitude larger
+  // upstream. A constructor has no way to report a refusal anyway.
   quota_.resize(wanted_.size(), 0);
   kept_.assign(wanted_.size(), 0);
 }
