@@ -169,10 +169,14 @@ TEST_CASE("scanning a chapter twice yields the same index as scanning it once") 
   CHECK(find(twice, "Dorothea")->midSentence == 9);
 }
 
-TEST_CASE("a merge is order-independent, extract lists included") {
+TEST_CASE("a merge is order-independent for runs that clear the bar on their own") {
   // RE-READING DOES NOT HAPPEN IN SPINE ORDER AND NEITHER DOES BACKFILL. A Contents
   // jump reads 40 before 4 and the gap is filled afterwards, so the index must not
   // depend on which chapter reached it first.
+  //
+  // FOR THESE RUNS. The unqualified claim is FALSE and the case below is the one
+  // that shows it -- this fixture's run clears the admission bar in every chapter,
+  // which is exactly the condition under which order stops mattering.
   auto build = [](const std::vector<int>& order) {
     FakeFileSystem fs;
     NameStore store(fs, kBook, kBytes);
@@ -285,6 +289,54 @@ TEST_CASE("a run already on the card accumulates a single later mention") {
     // chapter across many chapters is never admitted.
     CHECK(find(out, "Casaubon")->midSentence == 2);
   }
+}
+
+TEST_CASE("admission is order-dependent, and that is a bound rather than a defect") {
+  // THE SPEC SAID "A MERGE IS ORDER-INDEPENDENT" FLATLY, AND IT IS NOT. Measured by
+  // running the real pipeline over a real novel twice -- once reading chapters 0..24
+  // in order, once jumping to 24 and backfilling 0..23 forward -- the two indexes
+  // agree on 156 of 171 entries and differ by one or two mentions on the other 15,
+  // in BOTH directions. The group count came to 61 against 62.
+  //
+  // THE MECHANISM IS ADMISSION MEETING ORDER. A run is admitted only when one
+  // chapter alone sees it twice mid-sentence, and mentions seen BEFORE that are
+  // dropped -- so which chapter arrives first decides which singles survive.
+  //
+  // IT CANNOT BE FIXED WITHOUT GIVING UP THE BOUND. Keeping an unadmitted run's
+  // count is the 85,001-byte whole-book table the entire design exists to refuse.
+  // So it is stated here, pinned, and accepted: a name may sit one mention either
+  // side of the display threshold depending on the route a reader took through the
+  // book, which is not something a reader can see.
+  FakeFileSystem fs;
+
+  // One mention in the early chapter, two in the later one.
+  Chapter early;
+  early.add("Ezwick", 1, 0, 1);
+  early.seal();
+  Chapter late;
+  late.add("Ezwick", 2, 0, 2);
+  late.seal();
+
+  NameStore readThrough(fs, kBook, kBytes);
+  REQUIRE(readThrough.mergeChapter(5, early.runs, nullptr));   // dropped: under the bar
+  REQUIRE(readThrough.mergeChapter(24, late.runs, nullptr));   // admitted here
+  NameIndexHeader h;
+  std::vector<NameIndexEntry> out;
+  REQUIRE(readThrough.loadAll(h, out));
+  REQUIRE(out.size() == 1);
+  CHECK(out[0].midSentence == 2);  // the ch5 single never made it
+
+  NameStore jumped(fs, "/books/other.epub", kBytes);
+  REQUIRE(jumped.mergeChapter(24, late.runs, nullptr));   // admitted first
+  REQUIRE(jumped.mergeChapter(5, early.runs, nullptr));   // ...so this one counts
+  std::vector<NameIndexEntry> out2;
+  REQUIRE(jumped.loadAll(h, out2));
+  REQUIRE(out2.size() == 1);
+  CHECK(out2[0].midSentence == 3);
+
+  // THE TWO DISAGREE, DELIBERATELY. Asserting the difference rather than the
+  // equality is what stops someone "fixing" this into the unbounded table.
+  CHECK(out[0].midSentence != out2[0].midSentence);
 }
 
 TEST_CASE("an index for another book is discarded rather than merged into") {

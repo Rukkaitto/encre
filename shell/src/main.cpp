@@ -362,6 +362,11 @@ size_t gMentionExtracts = 0;
 // The Names screen's box model, measured once before the push and handed to the
 // screen after it -- setMetrics cannot be called on a screen that does not exist yet.
 int gNamesMetrics[3] = {0, 0, 0};
+// BACKFILL GAVE UP FOR THIS SESSION, which happens only when the Reader's chapter
+// could not be taken back. One failure is enough: the condition is a heap that
+// cannot find 36,956 contiguous bytes, and asking again at every quiet window would
+// be spending the reader's page on a question already answered.
+bool gBackfillStopped = false;
 
 // PUTTING THE SPENT STREAM BACK, on a window of its own.
 //
@@ -4737,6 +4742,9 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // mostly header, and every sync would add a directory to the card.
   gNameStore.reset();
   gNamesOwed = -1;
+  // A NEW BOOK IS A NEW QUESTION. The give-up flag describes a heap that could not
+  // return the block, and opening a book has just moved the heap.
+  gBackfillStopped = false;
   if (!isArticle) gNameStore = std::make_unique<reader::NameStore>(gSd, path, bookBytes);
 
   // AND THE READER MENU'S HEADER, WHICH IS WHY SLEEPING ON THAT MENU USED TO WAKE
@@ -9418,6 +9426,173 @@ void loop() {
            done ? "ready" : "abandoned", rd->pageCacheDepth(), was, rd->backwardHeadroom(),
            (unsigned long)(millis() - t), (unsigned)ESP.getFreeHeap(),
            structural ? " (structural -- not retried at this page)" : "");
+      logFlush();
+    }
+  }
+
+  // --- BACKFILL: the chapters BEHIND the reader that were never opened here -------
+  //
+  // The index covers chapters that have been OPENED, which is not the same as
+  // chapters read. Three ordinary situations put a reader deep in a book with an
+  // index covering nothing: updating from a build without this feature, jumping into
+  // the middle with Contents, and arriving from another device. Each of them loses
+  // the INTRODUCTIONS, which are the most valuable extract the feature has.
+  //
+  // THE SPOILER ARGUMENT SURVIVES, BECAUSE IT WAS ALWAYS ABOUT SCANNING AHEAD.
+  // Chapters behind the reader's furthest point spoil nothing -- they chose to be
+  // past them -- so this never looks forward.
+  //
+  // LAST, AND BEHIND EVERYTHING THE READER CAN SEE: the position save, the page
+  // count, the refinement, the restream and the ring warm all win. It takes the
+  // warm's long gate for the warm's reason -- an interrupted backfill chapter loses
+  // a whole decode -- and does ONE chapter per window, so a button is never more
+  // than one chapter away.
+  if (gNameStore != nullptr && !gBackfillStopped && !gApp->dirty() &&
+      rawSamplesPending() == 0 && !gRefineOwed && gNamesOwed < 0 &&
+      static_cast<uint32_t>(millis() - gLastInputMs) >= kRefineQuietMs &&
+      gApp->top().id() == reader::ScreenId::Reader) {
+    auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
+    // BOUNDED BY WHERE THE READER IS. The design says the saved position's spine and
+    // this is that number live: the Reader cannot be behind its own saved position.
+    // Everything below it is fair game and nothing at or above it is touched.
+    const int bound = rd->chapterIndex();
+    reader::NameIndexHeader h;
+    int want = -1;
+    if (bound > 0 && gNameStore->loadHeader(h)) {
+          // FORWARD FROM THE LOWEST UNSCANNED, which is what keeps the cap's own rule
+      // honest: sightings then arrive in the order "the first eight in the book"
+      // wants them, so nothing inside backfill ever has to evict.
+      //
+      // IT STILL DOES NOT REPRODUCE A READ-THROUGH EXACTLY, and that is measured
+      // rather than assumed. Running the real pipeline over a real novel twice --
+      // 0..24 in order against a jump to 24 then 0..23 backfilled -- the indexes
+      // agree on 156 of 171 entries and differ by one or two mentions on the other
+      // 15, in both directions, with 61 groups against 62. The cause is admission
+      // meeting order: a run is admitted only when one chapter alone sees it twice,
+      // and mentions before that are dropped, so which chapter arrives first decides
+      // which singles survive. Keeping them is the 85,001-byte whole-book table this
+      // design exists to refuse, so it is a bound and not a defect -- a name may sit
+      // one mention either side of the display threshold depending on the route a
+      // reader took, which is not a thing a reader can see.
+      for (int c = 0; c < bound; ++c) {
+        if (!h.isScanned(c)) {
+          want = c;
+          break;
+        }
+      }
+    }
+    if (want >= 0) {
+      const uint32_t t = millis();
+      const reader::OpenedBook& book = rd->book();
+      const reader::ChapterLocation loc = book.locate(want);
+      // THE READER LETS GO FIRST. Two inflate windows do not fit, and the scan below
+      // opens one of its own -- this is the peek's constraint reached by a different
+      // road.
+      rd->releaseChapter();
+      int runs = 0, admitted = 0, captured = 0;
+      bool scanned = false;
+      if (loc.compressedSize != 0) {
+        // A BARE ChapterReader, not a headless ReaderScreen: this wants BLOCKS and
+        // not pages, so a screen would buy a PageBuilder and a page index nothing
+        // here reads.
+        reader::ChapterReader cr;
+        if (cr.begin(gSd, loc)) {
+          reader::NameScanner sc;
+          reader::Block b;
+          int i = 0;
+          bool whole = true;
+          while (cr.next(b)) {
+            if ((i % 8) == 0 && rawSamplesPending() != 0) {
+              whole = false;
+              break;
+            }
+            sc.addBlock(b, i++);
+            b = reader::Block{};
+          }
+          runs = static_cast<int>(sc.runs().size());
+          if (whole) {
+            // The same two passes the live path does, and in the same order: quotas
+            // off the index as it stands, capture, then the index written last.
+            reader::NameIndexHeader have;
+            std::vector<reader::NameIndexEntry> entries;
+            const bool hadIndex = gNameStore->loadAll(have, entries);
+            std::vector<std::string> wanted;
+            std::vector<int> quota;
+            for (const auto& r : sc.runs()) {
+              int used = -1;
+              if (hadIndex) {
+                for (const auto& e : entries) {
+                  if (e.text == r.text) {
+                    used = e.extractCount();
+                    break;
+                  }
+                }
+              }
+              const bool onCard = used >= 0;
+              if (!onCard && r.midSentence < reader::NameScanner::kAdmitMidSentence) continue;
+              wanted.push_back(r.text);
+              const int room = (hadIndex ? have.extractCap : 8) - (onCard ? used : 0);
+              quota.push_back(room > 0 ? room : 0);
+            }
+            admitted = static_cast<int>(wanted.size());
+            std::vector<int> kept(sc.runs().size(), 0);
+            bool ok = true;
+            if (!wanted.empty() && cr.rewind()) {
+              reader::ExtractPartWriter out(gSd, gNameStore->dir(), want);
+              reader::ExtractCapture cap(wanted, quota, out);
+              reader::NameScanner throwaway;
+              reader::Block b2;
+              int j = 0;
+              while (cr.next(b2)) {
+                if ((j % 8) == 0 && rawSamplesPending() != 0) {
+                  ok = false;
+                  break;
+                }
+                throwaway.addBlock(b2, j++, &cap);
+                b2 = reader::Block{};
+              }
+              out.finish();
+              if (ok) {
+                for (size_t k = 0; k < sc.runs().size(); ++k) {
+                  for (size_t w = 0; w < wanted.size(); ++w) {
+                    if (wanted[w] == sc.runs()[k].text) {
+                      kept[k] = cap.kept()[w];
+                      break;
+                    }
+                  }
+                }
+                for (const int n : cap.kept()) captured += n;
+              }
+            }
+            if (ok) {
+              gNameStore->mergeChapter(want, sc.runs(), &kept);
+              scanned = true;
+            }
+          }
+          // THE BACKFILL CHAPTER GOES BEFORE THE READER'S IS ASKED FOR, which is the
+          // whole of why this is safe: the request below is then for a block of
+          // exactly the size just returned, which is the benign case for
+          // fragmentation rather than a fresh 36,956-byte allocation.
+          cr.release();
+        }
+      } else {
+        // An empty spine entry -- a cover, a nav document -- is nothing to scan and
+        // is marked so the walk does not stop on it forever.
+        gNameStore->mergeChapter(want, {}, nullptr);
+        scanned = true;
+      }
+      const bool back = rd->reacquireChapter();
+      if (!back) {
+        // STRANDED IS THE ONE OUTCOME THIS MUST NOT REPEAT. The reader is on a page
+        // that cannot be repainted, and the cause is a heap that cannot find the
+        // block -- a condition another attempt cannot improve.
+        gBackfillStopped = true;
+      }
+      logf("[backfill] ch=%d of %d %s runs=%d admitted=%d extracts=%d in %lums "
+           "(heap %u) reader %s\n",
+           want, bound, scanned ? "scanned" : "abandoned", runs, admitted, captured,
+           (unsigned long)(millis() - t), (unsigned)ESP.getFreeHeap(),
+           back ? "restored" : "COULD NOT BE RESTORED -- backfill stopped");
       logFlush();
     }
   }
