@@ -43,6 +43,17 @@ so comparing mid-implementation is unaffected; CI passes it. Proved by mutation:
 breaking `home` in the simulator takes the gate to exit 1 naming both
 geometries, while `--only boot` (a real board with no screen) stays green.
 
+**THE JOB ALSO PASSES `--require-version-current`, WHICH IS THE ONE THING ON A
+BOARD IT COULD NEVER HAVE MEASURED.** `design/Settings.dc.html` states the
+version and `core/include/reader/version.h` states it separately, so two stale
+copies agree exactly and Settings measures its usual ~2.3% — there is no pixel
+for this job to have noticed, and v0.2.0 shipped drawing `V 0.1.0` with the sheet
+green beside it (#152). The board's slot is generated now and the flag asks
+`tools/versionc.py --check` whether it still is: no Chrome, under a second, run
+before anything renders. Off by default and passed here, for
+`--require-canvas-current`'s reason; `make version` is the fix and the failure
+message says so.
+
 `$CHROME` overrides the board rasteriser's path, which was hardcoded to macOS
 and cannot exist on a Linux runner, and `$CHROME_FLAGS` carries a runner's
 `--no-sandbox` -- set by the workflow that knows it is one rather than by

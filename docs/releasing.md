@@ -86,27 +86,37 @@ agreement — the last two cannot be produced on a desktop at all.
    `make readme-images` and commit what moves. That variable IS the list, so
    naming the screens here would be a second copy of it, free to go stale the
    first time the set changes -- which it did, the first time one was added.
-3. **The version the DEVICE draws is the version being tagged.** Settings'
-   header band states it, and it is **three hardcoded copies** that must move
-   together:
+3. **`core/include/reader/version.h` says what the tag will say**, and then
+   `make version` has been run and what it moved is committed. That header's
+   `kVersion` is the only hand-edited statement of the version there is;
+   everything else that states it -- the boards' version slot, ReaderCore's
+   manifest -- is generated from it by `tools/versionc.py`. Nothing can check
+   this step for you, because no tool knows the tag before it is cut; everything
+   *downstream* of it is checked, which is the whole of what #152 changed.
 
-   | | holds |
-   |---|---|
-   | `core/include/reader/version.h` | `kVersion`, which `syncVm` draws as `V <n>` |
-   | `design/Settings.dc.html` | the same string, so the board has something to be compared against |
-   | `test/unit/test_version.cpp` | a pin on the literal, which is the only one that fails loudly |
+   **THIS STEP USED TO NAME THREE FILES TO EDIT BY HAND, AND IT NAMED THE WRONG
+   THREE.** `design/Boot.dc.html` states the version as well and was not on the
+   list, so it sat at `V 0.1.0` across two releases with nothing anywhere saying
+   so -- the boot screen is not implemented, so `make compare` puts a NOT
+   IMPLEMENTED placeholder beside that board and measures nothing at all. A list
+   of copies maintained in prose is a function not yet written, which is
+   CLAUDE.md's own rule; the boards are found by scanning `design/` now, so the
+   next one is covered by existing rather than by being remembered.
 
-   **`make compare` CANNOT CATCH THIS AND WILL REPORT GREEN WHILE IT IS WRONG**,
-   because the board carries its own copy: bump neither and the two agree, and
-   the sheet measures a stale version against a stale version. Bumping the
-   header alone fails `make test`; bumping the board alone fails `make compare`.
-   Only bumping all three passes both, which is the point of listing them.
+   **`make compare` STILL CANNOT SEE A STALE VERSION BY COMPARING PIXELS**,
+   because `design/Settings.dc.html` carries its own copy: bump neither and the
+   two agree exactly, so the sheet measures a stale version against a stale
+   version and reports Settings green. **v0.2.0 shipped saying `V 0.1.0`** that
+   way -- the whole six-step gate was run faithfully and none of it mentioned
+   the version, so the tag was cut, the release published, and the firmware on
+   it misreported itself. The tag was deleted and re-cut within the hour because
+   nothing had been downloaded yet; that is luck, not a procedure.
 
-   **v0.2.0 shipped saying `V 0.1.0`** -- the whole six-step gate was run
-   faithfully and none of it mentioned the version, so the tag was cut, the
-   release published, and the firmware on it misreported itself. The tag was
-   deleted and re-cut within the hour because nothing had been downloaded yet;
-   that is luck, not a procedure. This step is what replaces the luck.
+   What replaces the luck is not this paragraph. It is that the board's slot is
+   generated, `make version-check` refuses drift in under a second, and CI's
+   `compare` job passes `--require-version-current` -- so the thing this step
+   used to ask a human to remember now fails a required check instead. The one
+   thing left for a human is the sentence this step opens with.
 
 4. **`make test` is green** on a clean tree, and `make compare` is green.
    `make conventions` passes for the commits being released.
@@ -135,6 +145,7 @@ Once the gate is clear, from a clean checkout of `main`:
 
     git switch main && git pull --ff-only
     git status --porcelain          # must print nothing
+    make version-check              # the header and every generated copy agree
     make test && make compare
 
     git tag -a <tag> -m "Encre <tag>"

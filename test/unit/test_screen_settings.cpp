@@ -5,6 +5,7 @@
 #include "ramp.h"
 #include "reader/screen_settings.h"
 #include "reader/theme_quiet.h"
+#include "reader/version.h"
 
 using reader::Button;
 using reader::InputEvent;
@@ -628,4 +629,19 @@ TEST_CASE("no row carries a placeholder any more") {
       }
     }
   }
+}
+
+// THE BAND'S RIGHT SLOT IS COMPOSED FROM ONE LITERAL, and the `V ` prefix is
+// part of the contract rather than decoration: `design/Settings.dc.html`'s
+// version slot is GENERATED from `reader/version.h` (#152), and the generator
+// finds it by matching `V <n>` -- the form this line builds. Change the
+// composition here and the board's slot stops being found, which is a copy that
+// silently stops being regenerated rather than a failure.
+//
+// It compares against `kVersion` rather than against a string, because a pinned
+// string here would be exactly the second copy that let v0.2.0 ship drawing
+// `V 0.1.0`.
+TEST_CASE("the version the band draws is the header's, with the board's prefix") {
+  SettingsScreen scr = sized(Settings{}, nullptr);
+  CHECK(scr.vm().version == std::string("V ") + reader::kVersion);
 }
