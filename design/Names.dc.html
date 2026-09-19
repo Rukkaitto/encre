@@ -28,10 +28,16 @@
 
 <!-- WHO'S THIS CHARACTER AGAIN.
      The names the book has used, up to where you have read, built by scanning each
-     chapter as its pages are counted. Confirm opens a PEEK at the sentence that
-     introduced the name -- there is no detail screen, which is the largest
-     simplification in the feature: it deletes a screen, its board, and the need to
-     store any sentence text on the card.
+     chapter as its pages are counted -- and backfilled, behind the reader, for the
+     chapters they reached without this device watching. Confirm opens MENTIONS
+     (Mentions.dc.html), that name's sightings, and a sighting opens the peek.
+
+     THIS BOARD ONCE OPENED THE PEEK DIRECTLY, and the 2026-08-24 design called that
+     "the largest simplification in the feature: it deletes a screen, its board, and
+     the need to store any sentence text on the card". All three came back when the
+     second screen was asked for. Both halves of that trade are real and the spec
+     costs them out; what matters here is that CONFIRM NO LONGER PEEKS, so the hint
+     bar below says MENTIONS.
 
      IT SAYS NAMES, NOT CHARACTERS, AND THAT IS THE WHOLE HONESTY OF THIS SCREEN.
      A capitalisation-and-frequency heuristic on a 160 MHz part cannot tell a person
@@ -49,18 +55,39 @@
 
      TWO ROW HEIGHTS, WHICH IS SETTINGS' PROBLEM AND SETTINGS' SOLUTION. A person has
      a fuller form to show -- Ladislaw over WILL LADISLAW, often most of the answer
-     before a peek is even opened -- and a place or an already-full name has nothing
-     to put on a second line. Blank second lines on a third of the rows read as
-     broken, so those rows are one line tall. The theme therefore reports the BOX
-     MODEL (two heights) and the screen counts how many fit, exactly as
-     settingsMetrics does, because the item table belongs to the screen.
+     before the mentions are even opened -- and a place or an already-full name has
+     nothing to put on a second line. A blank second line reads as broken, so those
+     rows are one line tall. The theme reports the BOX MODEL (two heights) and the
+     screen counts how many fit, exactly as settingsMetrics does, because the item
+     table belongs to the screen.
+
+     THE SHORT ROW IS THE COMMON CASE BY A LONG WAY, AND THIS COMMENT SAID THE
+     OPPOSITE. It read "blank second lines on a third of the rows", and a third was
+     an estimate made before anything grouped. Measured once the grouping ran: rows
+     with NO fuller form are 84% on Le Fleau and 97% on Darkly Dreaming Dexter, at
+     every display threshold from 2 to 12. So this board's mix is 2 tall and 8 short
+     rather than the 5 and 3 it drew, and ten rows fit where eight did.
+
+     AND THE SECOND LINE LANDS WHERE IT IS LEAST NEEDED, which is worth knowing
+     before anyone widens it. By rank: 65% of the top 20 names have a fuller form,
+     50% of the next 30, and 7% of everything below rank 50. The names a reader looks
+     up are the RARE ones -- that is the argument this whole screen is alphabetical
+     for -- so the row that most needs a second line is the one least likely to have
+     one. It is kept because it costs nothing when it is absent and is often the
+     whole answer when it is there, and because Mentions' own band carries it too.
 
      HOW MANY ROWS FIT IS A RESULT, AND THE SLACK BELOW THEM IS THE CHECK. Measured
      off this render: a two-line row is 90px, a one-line row 60px, and the list box
-     is 671px. This board's mix -- five two-line and three one-line -- comes to
-     630px, leaving 41px empty at the bottom. THAT IS CORRECT, not untidy: a
-     ScrollWindow draws whole rows only, so with two row heights some slack is
-     inevitable and it varies with which rows are on screen.
+     is 670px at 480x800 and 662px at 528x792. This board's mix -- two two-line and
+     eight one-line -- comes to 660px, leaving 11px and 3px empty. THAT IS CORRECT,
+     not untidy: a ScrollWindow draws whole rows only, so with two row heights some
+     slack is inevitable and it varies with which rows are on screen.
+
+     THE BAND DID NOT MOVE WHEN ITS RIGHT SLOT LOST ITS CONTENT, which is the whole
+     reason that slot is an nbsp rather than nothing -- see the band's own note. The
+     figures here sit 1px off the ones an earlier draft of this comment quoted:
+     whether the rule belongs to the row above or the box below is a convention, and
+     these are measured with the rule counted into the row above it.
      What is NOT correct is slack of 60px or more, because then another row would
      have fitted -- and the first draft of this board had 132px of it, understating
      the screen by a whole row. The invariant to implement against and to check any
@@ -74,17 +101,30 @@
 
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
 
-  <!-- THE BAND'S RIGHT SLOT IS COVERAGE, NOT A COUNT, and that is the one thing a
-       reader might otherwise wonder about this screen: why someone is missing. The
-       index knows only the chapters that have been read, which is what makes the
-       feature spoiler-proof BY CONSTRUCTION rather than by a rule someone has to
-       remember -- so the boundary is stated rather than left to be discovered.
-       `300 NAMES` would restate the label and claim a precision the threshold makes
-       arbitrary; the Library's slot counts books because a card really does hold
-       twelve of them. -->
+  <!-- THE BAND HAS NO RIGHT SLOT, AND IT USED TO SAY `TO CH. 07`. That slot stated
+       COVERAGE -- the index knows only the chapters that have been opened -- on the
+       argument that a reader would otherwise wonder why someone is missing. The
+       argument was right and BACKFILL ANSWERS IT INSTEAD: the chapters behind the
+       reader are now scanned in the quiet window, forward from the lowest unscanned
+       one, so the gap the badge explained closes by itself. A permanent label for a
+       temporary state is worse than no label, and there is nothing a reader could do
+       about it either way.
+       `300 NAMES` was refused separately and stays refused: it would restate the
+       label and claim a precision the threshold makes arbitrary. The Library's slot
+       counts books because a card really does hold twelve of them.
+       THE SLOT IS EMPTY AND STILL RESERVED, which is Typography.dc.html's and
+       BookEnd.dc.html's convention and not a new one. The nbsp holds the --t-value
+       line box, because `bandContentH` takes max(Label500, Value700)
+       UNCONDITIONALLY -- a band that shrank when a screen left its slot empty would
+       move every row beneath it, and the band is one box model shared by twelve
+       screens rather than twelve boxes.
+       DELETING THE DIV IS THE VERSION THAT LOOKS RIGHT AND IS NOT: it takes the
+       band from 66px to 64px in Chrome and nowhere else, so the board would drift
+       2px from a firmware that cannot follow it without shrinking every other
+       band. This board was drawn both ways and measured before the nbsp went back. -->
   <div style="display: flex; justify-content: space-between; align-items: center; gap: 7px; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
     <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">NAMES</div>
-    <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">TO CH. 07</div>
+    <div style="font-size: var(--t-value); font-weight: 700;">&nbsp;</div>
   </div>
 
   <!-- position: relative so the rail is placed against the LIST's own box, not the
@@ -93,6 +133,24 @@
     <div style="display: flex; flex-direction: column; flex-grow: 1; margin-right: 14px;">
 
       <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Casaubon</div>
+      </div>
+
+      <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Celia</div>
+      </div>
+
+      <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Dorothea</div>
+      </div>
+
+      <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Featherstone</div>
+      </div>
+
+      <!-- A PERSON WITH A FULLER FORM, and one of only two on this screenful --
+           which is the honest proportion. -->
+      <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
         <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
           <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Ladislaw</div>
           <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">WILL LADISLAW</div>
@@ -100,7 +158,7 @@
       </div>
 
       <!-- A PLACE, one line tall. Nothing is hidden here and nothing is missing:
-           Lowick is Casaubon's parish and the book names it constantly, so it earns
+           Lowick is Casaubon&rsquo;s parish and the book names it constantly, so it earns
            its row on exactly the rule a person does. -->
       <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
         <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Lowick</div>
@@ -114,9 +172,10 @@
       </div>
 
       <!-- FOCUSED, and full-bleed inverted as every list on this device draws it.
-           One line because the display name IS the fullest form: the book calls her
+           ONE LINE, because the display name IS the fullest form: the book calls her
            Mary Garth and there is nothing longer to reveal. Repeating it underneath
-           would be the only thing worse than leaving it blank. -->
+           would be the only thing worse than leaving it blank -- and this is the
+           COMMON case, not the exception, which is why the focus sits on one. -->
       <div style="display: flex; align-items: center; padding: 11px 24px; background: #000000; color: #ffffff;">
         <div style="font-size: var(--t-body); font-weight: 700; flex-grow: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Mary Garth</div>
       </div>
@@ -126,24 +185,7 @@
       </div>
 
       <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
-        <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
-          <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Raffles</div>
-          <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">JOHN RAFFLES</div>
-        </div>
-      </div>
-
-      <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
-        <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
-          <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Rosamond</div>
-          <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">ROSAMOND VINCY</div>
-        </div>
-      </div>
-
-      <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
-        <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
-          <div style="font-size: var(--t-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Trumbull</div>
-          <div style="font-size: var(--t-meta); letter-spacing: 0.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">BORTHROP TRUMBULL</div>
-        </div>
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Raffles</div>
       </div>
 
     </div>
@@ -153,7 +195,7 @@
          and top is first/total, in percent so both survive the reflow to 528x792.
 
          THE PROPORTION IS THE SPECIFICATION, so it has to be one only the rule could
-         produce. This is 8 rows of 300 from row 148 -- 2.7% tall at 49.3% down -- and
+         produce. This is 10 rows of 283 from row 148 -- 3.5% tall at 52.3% down -- and
          the thumb is therefore TINY, about 15px. That is not a defect to design
          around: it is the honest reading of a list forty times longer than the
          Library's, and the smallness is itself the information. A comfortable-looking
@@ -163,18 +205,23 @@
          alphabetical: a thumb halfway down means roughly "around M", so it can be
          aimed rather than merely read. -->
     <div style="position: absolute; top: 6px; bottom: 6px; right: 4px; width: 6px; border: 1px solid #000000; box-sizing: border-box;">
-      <div style="position: absolute; left: 0; right: 0; top: 49.3%; height: 2.7%; background: #000000;"></div>
+      <div style="position: absolute; left: 0; right: 0; top: 52.3%; height: 3.5%; background: #000000;"></div>
     </div>
 
   </div>
 
-  <!-- PEEK rather than OPEN or SELECT, because the word is the mechanism: it opens
-       design/Peek.dc.html at the sentence that introduced this name, over the page
-       you are on, and you come back with CLOSE. Naming it after the thing it does
-       teaches the peek once and everywhere. -->
+  <!-- MENTIONS, WHERE THIS SAID PEEK. The word names the screen Confirm opens
+       (Mentions.dc.html) rather than the thing two screens away, which is the rule
+       every other hint on this device follows. PEEK moves one screen along, onto the
+       Mentions bar, where it is again the immediate action.
+       THIS LINE SAID IT WAS THE ONLY PLACE THE WORD REACHES THE GLASS, and it was
+       true for about an hour. Mentions.dc.html's band said `LADISLAW` then; it says
+       `MENTIONS`, because a band names the screen you are on. So the word appears
+       twice and the two must not drift: this hint is a promise about where Confirm
+       goes, and that band is where it arrives. -->
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
     <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">BACK</div></div>
-    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">PEEK</div></div>
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">MENTIONS</div></div>
     <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">UP</div></div>
     <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M4 9l4 4 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">DOWN</div></div>
   </div>

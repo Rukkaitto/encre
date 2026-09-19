@@ -158,6 +158,25 @@ enum class ScreenId : uint8_t {
   // screen's push target and that screen is what needed it; the guards fired a
   // second time and grew a second time, which is what they are for.
   ArticlesRemoveConfirm,
+  // design/Names.dc.html and design/NamesEmpty.dc.html -- the names the book has
+  // used, up to where the reader has been. A FULL SCREEN and not an overlay, on
+  // Contents' argument: it is a list you read and scroll, not a question about the
+  // page behind it. Its empty state is a VARIANT of this id rather than a second
+  // one, which is HomeEmpty's rule.
+  //
+  // The reader menu pushes it, having REPLACED itself: the stack is Reader > Names,
+  // never Reader > ReaderMenu > Names. And the push releases the Reader's chapter
+  // first, because grouping the card's raw runs needs ~20 KB and the 37,056-byte
+  // inflate scratch is live underneath -- the peek's move, for the peek's reason.
+  Names,
+  // design/Mentions.dc.html -- one name's first eight sightings, each a short
+  // extract of the sentence it stood in, and a row opens the peek at that spot.
+  //
+  // THE SCREEN THE 2026-08-24 DESIGN DELIBERATELY DID NOT HAVE. Selecting a name
+  // opened the peek directly, which "deletes a screen, its board, and the
+  // stored-sentence problem in one move"; all three came back when the list was
+  // asked for, and the spec costs the trade out.
+  Mentions,
   // NOT A SCREEN. A bound, so a guard can name "one past the last member" without
   // naming a member -- which is #42, and which had gone quiet twice by the time it
   // was fixed: session_record.cpp spelled three bounds `<= ScreenId::Peek` and then

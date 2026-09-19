@@ -614,6 +614,88 @@ int bookRowHeight(const FontSet& fonts) {
   return kBookRowPadY + bookRowContentH(fonts) + kBookRowPadY + kBookRowRuleH;
 }
 
+// --- A stacked row ------------------------------------------------------------
+
+namespace {
+
+// The gap between the two lines, which is the board's `gap: 3px` on the column.
+constexpr int kStackedLineGap = 3;
+// The secondary line's tracking, the board's `letter-spacing: 0.1em`.
+constexpr int kStackedSecondaryEm = 100;
+
+}  // namespace
+
+int stackedLeadLines(const FontSet& fonts, std::string_view lead, int rowW, int maxLines) {
+  if (maxLines <= 1) return 1;
+  const Font& f = fonts[Role::Body500];
+  const int textW = rowW - 2 * kMargin;
+  if (textW <= 0) return 1;
+  // THE FACE'S OWN LINE HEIGHT as the lead, which is what the board leaves these at
+  // (`line-height: normal`, resolved by Chrome to the face's metrics).
+  const Prose p = wrapProseLead(f, lead, textW, pxToF26(f.lineHeight()));
+  const int n = static_cast<int>(p.lines.size());
+  if (n < 1) return 1;
+  return n > maxLines ? maxLines : n;
+}
+
+int stackedRowHeight(const FontSet& fonts, bool hasSecondary, bool rule, int leadLines) {
+  const int lead = fonts[Role::Body500].lineHeight() * (leadLines > 0 ? leadLines : 1);
+  const int second =
+      hasSecondary ? kStackedLineGap + fonts[Role::Meta400].lineHeight() : 0;
+  return kBookRowPadY + lead + second + kBookRowPadY + (rule ? kBookRowRuleH : 0);
+}
+
+int drawStackedRow(Framebuffer& fb, const FontSet& fonts, int y, const StackedRowContent& row,
+                   bool focused, bool rule, Plane plane, int rightInset) {
+  const bool hasSecondary = !row.secondary.empty();
+  const int h = stackedRowHeight(fonts, hasSecondary, rule,
+                                 stackedLeadLines(fonts, row.lead, fb.width() - rightInset,
+                                                  row.maxLeadLines));
+  const int w = fb.width() - rightInset;
+  // FULL-BLEED INVERTED, to the edge of the gutter the rail sits in -- which is what
+  // `rightInset` is for and why the fill takes it too. Every list on this device
+  // draws its focus this way.
+  const int boxH = h - (rule ? kBookRowRuleH : 0);
+  if (focused) {
+    // The whole box, which on the board is the row without its border: the focused
+    // row is the one row the design gives no `border-bottom`, so its fill runs to
+    // the next row's top edge. drawBookRow does the same and for the same reason.
+    fb.fillRect(0, y, w, boxH, false);
+  } else if (rule) {
+    fb.fillRect(0, y + boxH, w, kBookRowRuleH, false);
+  }
+  const Ink ink = focused ? Ink::White : Ink::Black;
+
+  const Font& lead = fonts[Role::Body500];
+  const int textW = w - 2 * kMargin;
+  int ty = y + kBookRowPadY;
+  const int leadLines = stackedLeadLines(fonts, row.lead, w, row.maxLeadLines);
+  if (leadLines <= 1) {
+    // ELIDED. A name that outruns its row is cut with an ellipsis rather than
+    // wrapped, because the row's height is decided before it is drawn.
+    drawTextElided(fb, lead, kMargin, baselineIn(lead, ty, lead.lineHeight()), row.lead,
+                   textW, ink, {}, plane);
+    ty += lead.lineHeight();
+  } else {
+    // WRAPPED, TO THE SAME COUNT THE HEIGHT WAS MEASURED WITH, because both went
+    // through stackedLeadLines with these arguments.
+    const Prose p = wrapProseLead(lead, row.lead, textW, pxToF26(lead.lineHeight()));
+    for (int i = 0; i < leadLines && i < static_cast<int>(p.lines.size()); ++i) {
+      drawText(fb, lead, kMargin, baselineIn(lead, ty, lead.lineHeight()),
+               p.lines[static_cast<size_t>(i)], ink, {}, plane);
+      ty += lead.lineHeight();
+    }
+  }
+  if (hasSecondary) {
+    const Font& meta = fonts[Role::Meta400];
+    ty += kStackedLineGap;
+    const Tracking tr = row.secondaryTracked ? trackingEm(meta, kStackedSecondaryEm) : Tracking{};
+    drawTextElided(fb, meta, kMargin, baselineIn(meta, ty, meta.lineHeight()), row.secondary,
+                   textW, ink, tr, plane);
+  }
+  return h;
+}
+
 void drawScrollRail(Framebuffer& fb, int listTop, int listBottom, int first, int visible,
                     int total, Plane plane) {
   (void)plane;  // every pixel here is coverage 0 or 3, so the plane cannot change it
