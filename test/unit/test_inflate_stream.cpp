@@ -359,6 +359,12 @@ TEST_CASE("THE STREAMING DECODER'S STACK IS A FRACTION OF THE ONE IT REPLACES") 
   // Per HOST compiler: clang measures 3,072 and x86-64 gcc 6,824. The RATIO is
   // what this test is really about, and it survives the compiler change -- under
   // gcc the stb chain wants 12,212, so this is still 56% of it.
+  //
+  // IT DOES NOT SURVIVE ADDRESSSANITIZER, which measures 9,648 here against the
+  // stb chain's 9,808 -- 98%, because the redzones are a per-object cost and
+  // this frame has few objects to hide behind. The instrumented ceiling is a
+  // regression bound only; the fraction is a claim about an uninstrumented run.
+  // stack_ceiling.h carries the measurements and the margin.
   CHECK(used > 256);    // the measurement is real, not a pattern-scan artifact
-  CHECK(used <= stackceil::pick(/*clang=*/4096, /*gcc=*/9216));
+  CHECK(used <= stackceil::pick(/*clang=*/4096, /*gcc=*/9216, /*asan=*/13312));
 }
