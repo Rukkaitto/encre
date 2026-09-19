@@ -8,6 +8,7 @@
 #include "reader/screen_article_end.h"
 #include "reader/screen_articles.h"
 #include "reader/screen_contents.h"
+#include "reader/screen_names.h"
 #include "reader/screen_wallabag_account.h"
 #include "reader/screen_wallabag_dialogs.h"
 #include "reader/screen_reader_menu.h"
@@ -620,6 +621,13 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       if (!menuTitle_.empty()) return std::make_unique<ReaderMenuScreen>(menuTitle_, menuProgress_);
       if (contentsDemo_) return std::make_unique<ReaderMenuScreen>("Middlemarch", "6%");
       return nullptr;
+    case ScreenId::Names:
+      // NOTHING TO PRIME, AND SO NOTHING TO REFUSE. Every other case here answers
+      // "has a press given me what this screen is built from"; this screen is built
+      // from nothing yet -- it has no rows until the card's name store lands -- so
+      // there is no primed flag to carry and no substitution to be tempted into.
+      // When the store arrives it gets both, exactly as Contents has both.
+      return std::make_unique<NamesScreen>();
     case ScreenId::Contents: {
       // AND HERE, WHICH IS WHERE IT ACTUALLY BIT. The fallback was
       // `contentsToc_.empty() ? demoContents() : contentsToc_`, so a real book whose

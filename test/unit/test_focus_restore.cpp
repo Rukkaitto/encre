@@ -45,6 +45,7 @@ constexpr ScreenId kAllScreens[] = {
     ScreenId::Articles,     ScreenId::ArticleActions, ScreenId::ArticleEnd,
     ScreenId::WallabagAccount, ScreenId::WallabagConnecting, ScreenId::WallabagError,
     ScreenId::ArticlesRemoveConfirm,
+    ScreenId::Names,
 };
 // NAMES THE SENTINEL, so an append cannot satisfy it unchanged. It used to name the
 // last member by hand -- `ScreenId::Peek + 1`, then `ScreenId::BookEnd + 1` -- and
@@ -486,7 +487,14 @@ TEST_CASE("what a screen declares about a wake is what a boot-configured factory
   // off its factory case, and this walk failed it: loadWifi() primes the saved list
   // at boot, so a wake owes it nothing. A declaration nothing checks is a second
   // copy of the factory free to disagree with it, and it disagreed on its first run.
-  CHECK(ready == 11);
+  // NAMES IS READY, AND THIS WALK IS WHY. The row was written NeedsPriming from the
+  // design -- the screen will be built from the card's name store -- and the store
+  // does not exist yet, so the screen has no rows and a boot-configured factory
+  // builds it complete. Same correction this case made to the Wi-Fi hub above, for
+  // the same reason: the declaration is checked against the factory rather than
+  // against the intention. It moves to NeedsPriming in the change that gives it
+  // rows, and this walk is what will require that.
+  CHECK(ready == 12);
   CHECK(needsPriming == 5);
   CHECK(never == 13);
   CHECK(ready + needsPriming + never == static_cast<int>(ScreenId::Count));

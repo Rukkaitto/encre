@@ -39,6 +39,18 @@ struct Item {
 };
 constexpr Item kItems[ReaderMenuScreen::kRowCount] = {
     {"Contents", "", true, true},
+    // NAMES, BACK FROM #73's CUT. It went when the family was V2, on the rule that a
+    // row whose screen lands in a LATER release is cut from the board and from the
+    // enum: focus-skipping stops a row misleading a press and does nothing about the
+    // row promising a feature the release does not have. The family is v0.3.0 now
+    // (#156, #157, #158, #159), so the row is drawn, live, and has a screen behind
+    // it -- one that says "no names yet" until the card's store lands, which is an
+    // answer rather than a no-op.
+    //
+    // BESIDE CONTENTS BECAUSE IT IS THE SAME KIND OF QUESTION: where am I in this
+    // book, and who is this again. Typography and About this book are about the
+    // device and the file.
+    {"Names", "", true, true},
     {"Typography", "", true, true},
     // ABOUT THIS BOOK OPENS BOOK DETAILS, and it was inert because that screen used to be
     // built from the LIBRARY's focused row -- fine from the Library and wrong from a
@@ -91,6 +103,8 @@ Action ReaderMenuScreen::onGesture(const GestureEvent& g) {
       return Action::pop();
     case Gesture::Activate:
       switch (vm_.focusedRow) {
+        case kNames:
+          return Action::push(ScreenId::Names);
         case kContents:
           return Action::push(ScreenId::Contents);
         case kTypography:

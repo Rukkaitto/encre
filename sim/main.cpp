@@ -676,6 +676,13 @@ int main(int argc, char** argv) {
   const bool isLibraryOpening = std::strcmp(argv[1], "library_opening") == 0;
   const bool isReaderMenu = std::strcmp(argv[1], "reader_menu") == 0;
   const bool isContents = std::strcmp(argv[1], "contents") == 0;
+  // NAMES, AND ONLY ITS EMPTY VARIANT. There is deliberately no `names`
+  // subcommand: the card's name store is #156, so the screen has no rows, and a
+  // `names` that rendered the empty state against Names.dc.html would report
+  // "firmware ok" for a screen drawing something else entirely. An id the simulator
+  // has never heard of is reported NOT IMPLEMENTED by compare-design.py, which is
+  // the true answer until the rows land.
+  const bool isNamesEmpty = std::strcmp(argv[1], "names_empty") == 0;
   const bool isHomeEmpty = std::strcmp(argv[1], "home_empty") == 0;
   const bool isHomeUnopened = std::strcmp(argv[1], "home_unopened") == 0;
   // design/HomeCharging.dc.html. Home with the cable in: the SAME view model as
@@ -799,7 +806,8 @@ int main(int argc, char** argv) {
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
       !isHomeUnopened && !isHomeCharging && !isHomeMissing && !isLibraryScrolled && !isReader &&
       !isSleepIdle &&
-      !isReaderMenu && !isContents && !isChapterOpen && !isReaderList && !isAnchored &&
+      !isReaderMenu && !isContents && !isNamesEmpty && !isChapterOpen && !isReaderList &&
+      !isAnchored &&
       !isSleepWaking && !isLibraryOpening && !isTypography && !isPeek && !isSleepCover &&
       !isSleepCoverDetails && !isSleepCoverWaking && !isBookEnd && !isBookError &&
       !isBookErrorUnreadable && !isBookErrorMemory && !isLowBattery &&
@@ -922,8 +930,12 @@ int main(int argc, char** argv) {
       // 18 PT remains one press away on the device, and whether it should be the
       // DEFAULT is a separate open question (roadmap:1269).
       //
-      // PRESSED, not pushed -- see isTypography's own comment. DOWN from Contents
-      // reaches Typography, and CONFIRM there opens the panel.
+      // PRESSED, not pushed -- see isTypography's own comment. TWO Downs from
+      // Contents reach Typography, and CONFIRM there opens the panel. It was ONE
+      // until #159 put `Names` back between them; the check below is what said so
+      // rather than this journey quietly rendering the wrong screen, which is why it
+      // compares the focused row instead of just pressing and hoping.
+      app.dispatch({reader::Button::Down, reader::PressKind::Short});
       app.dispatch({reader::Button::Down, reader::PressKind::Short});
       if (static_cast<const reader::ReaderMenuScreen&>(app.top()).vm().focusedRow !=
           reader::ReaderMenuScreen::kTypography) {
@@ -1027,6 +1039,22 @@ int main(int argc, char** argv) {
                 : isSleepCover      ? "the cover alone"
                                     : "the cover behind the card",
                 w, h);
+    return 0;
+  }
+
+  if (isNamesEmpty) {
+    // A full screen, and it needs nothing primed: the screen has no rows to be given
+    // and the factory therefore has no `namesPrimed_` to refuse on. That is the one
+    // case in this file where `create` cannot return nullptr for want of content,
+    // and it stops being so in the same change that gives the screen rows.
+    reader::DemoScreenFactory factory;
+    std::unique_ptr<reader::Screen> scr = factory.create(reader::ScreenId::Names);
+    if (scr == nullptr) {
+      std::fprintf(stderr, "the factory refused ScreenId::Names\n");
+      return 1;
+    }
+    if (!renderToPng(*scr, fonts, theme, w, h, argv[2])) return 1;
+    std::printf("wrote %s (%dx%d)  names / empty\n", argv[2], w, h);
     return 0;
   }
 

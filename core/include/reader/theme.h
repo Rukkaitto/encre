@@ -27,6 +27,7 @@ struct SleepViewModel;
 struct ReaderViewModel;
 struct ReaderMenuViewModel;
 struct ContentsViewModel;
+struct NamesViewModel;
 struct TypographyViewModel;
 struct PeekViewModel;
 struct ArticlesViewModel;
@@ -288,6 +289,16 @@ class Theme {
                                 const ReaderMenuViewModel& vm, Plane plane) = 0;
   virtual void renderContents(Framebuffer& fb, const FontSet& fonts,
                               const ContentsViewModel& vm, Plane plane) = 0;
+
+  // design/NamesEmpty.dc.html, and design/Names.dc.html once there are names to
+  // list. ONE METHOD FOR BOTH BOARDS, because they are one screen with a variant --
+  // renderHome's `nothingToContinue` branch is the same shape for the same reason.
+  //
+  // Today it only ever draws the empty arm, since `NamesViewModel` carries no rows
+  // (see the view model for why). The list arm arrives with the stacked-row
+  // primitive that would draw it.
+  virtual void renderNames(Framebuffer& fb, const FontSet& fonts,
+                           const NamesViewModel& vm, Plane plane) = 0;
 
   // HOW MANY CONTENTS ROWS FIT, which the screen needs before it can window its list.
   //

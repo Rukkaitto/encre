@@ -104,6 +104,7 @@ class NullTheme : public Theme {
   void renderReaderMenu(Framebuffer&, const FontSet&, const ReaderMenuViewModel&,
                         Plane) override {}
   void renderContents(Framebuffer&, const FontSet&, const ContentsViewModel&, Plane) override {}
+  void renderNames(Framebuffer&, const FontSet&, const NamesViewModel&, Plane) override {}
   int contentsVisibleRows(int, const FontSet&) override { return 8; }
   void readerMetrics(int, int, const FontSet&, const GlyphSource&, const Settings&,
                      PageMetrics&) const override {}
