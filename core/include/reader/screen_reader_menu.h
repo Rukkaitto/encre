@@ -88,10 +88,15 @@ class ReaderMenuScreen : public FocusScreen {
   // per pixel against 3.02%. Cutting it needed the same measurement in reverse.
   enum Row : int {
     kContents,
+    // NAMES, BACK FROM #73's CUT -- see the item table for why it went and why it
+    // returns. Inserted AFTER kContents rather than appended, because this enum is a
+    // row ORDER rather than a wire format: it is indexed by the focus and by the
+    // item table beside it, both of which move with it, and nothing stores it.
+    kNames,
     kTypography,
     kAboutBook,
   };
-  static constexpr int kRowCount = 3;
+  static constexpr int kRowCount = 4;
 
  protected:
   void syncVm() override;

@@ -100,7 +100,21 @@ class PeekScreen : public Screen {
   // two halves of one composed run described different chapters. The book is right here
   // in the inner reader, so the number is derived from the chapter on screen instead --
   // see PeekScreen::percentHere.
-  PeekScreen(FileSystem& fs, OpenedBook book, int spine, const GlyphSource* body);
+  //
+  // `at` IS WHERE IN THE CHAPTER TO LAND, and it is what Mentions needs. Contents
+  // passes the default and gets page one of the spine entry, which is what it has
+  // always got; a sighting passes the block it sits in.
+  //
+  // THE MECHANISM ALREADY EXISTED AND ONLY THE PARAMETER DID NOT.
+  // `ReaderScreen::restoreAt` is public and must be called BEFORE `setMetrics` --
+  // it arms `startAt_`, which `walkToChapter` consumes on the first candidate -- so
+  // this constructor is the only place that ordering has to be right.
+  //
+  // THE CURSOR IS `(block, 0)` BY CONSTRUCTION. `fitOf` grades `line` as the field
+  // that survives neither a re-layout nor a re-bind, and a landing only needs the
+  // paragraph; `chosenCursor` already zeroes it on the way out for the same reason.
+  PeekScreen(FileSystem& fs, OpenedBook book, int spine, const GlyphSource* body,
+             Cursor at = Cursor{});
 
   // A single chapter already in memory, for the simulator and the goldens, which have
   // no card -- the same pair of constructors ReaderScreen has and for the same reason.

@@ -596,6 +596,55 @@ constexpr int kRailThumbMinH = 8;
 int drawBookRow(Framebuffer& fb, const FontSet& fonts, int y, const BookRowContent& row,
                 bool focused, bool rule, Plane plane = Plane::Bw, int rightInset = 0);
 
+// --- A stacked row ------------------------------------------------------------
+//
+// design/Names.dc.html's rows and design/Mentions.dc.html's: a LEAD line over an
+// optional SECONDARY one, where the height follows whether the second line is there.
+//
+// NEITHER EXISTING ROW TYPE FITS, and the reason is the layout rather than the
+// fields. `ListRow` is label-left and value-right; these stack. `drawBookRow` stacks,
+// but its height is content-INDEPENDENT by design -- "an empty author line must not
+// make a row shorter than its neighbours", a few lines up -- which is exactly the
+// rule these two screens break. So a third row type, and both callers arrive
+// together, which is the one case this project's own rule says to extract on.
+//
+// TWO HEIGHTS, AND THE SHORT ONE IS THE COMMON CASE. Measured over two real novels
+// once the grouping ran: rows with no second line are 84% and 97%. The first draft
+// of Names.dc.html said a third, which was an estimate made before anything grouped.
+struct StackedRowContent {
+  std::string_view lead;       // `Stu`, or an extract
+  std::string_view secondary;  // `STUART REDMAN`, or a chapter label. May be empty.
+  // Whether the secondary line is drawn in tracked caps at Meta, which is Names'
+  // fullest form, or as plain Meta. Mentions' rows carry no secondary line at all
+  // today -- their chapter label is a section header -- so this exists for the one
+  // caller that needs it rather than being derived from emptiness.
+  bool secondaryTracked = true;
+  // HOW MANY LINES THE LEAD MAY WRAP TO. One for a name, which is short and is
+  // ELIDED if it outruns the row. Two for an extract, because 64 bytes of sentence
+  // is two lines in the X4 column -- measured, and the estimate that said one was
+  // wrong -- so a Mentions row that elided would show half its own extract.
+  int maxLeadLines = 1;
+};
+
+// How many lines the lead actually takes, which is 1 for anything that fits and is
+// what the two heights of a Mentions list are made of. The SCREEN calls this to
+// count rows and the renderer calls it to place them: one function, same inputs,
+// so the measured height and the drawn height cannot disagree.
+int stackedLeadLines(const FontSet& fonts, std::string_view lead, int rowW, int maxLines);
+
+// The row's full height INCLUDING its bottom rule, which is the pitch a list of them
+// stacks on. DERIVED from the faces and the board's padding, never pinned: a screen
+// divides its list box by these to learn how many fit, and a pinned number is the
+// mistake the two bars and the menu rows each made.
+int stackedRowHeight(const FontSet& fonts, bool hasSecondary, bool rule = true,
+                     int leadLines = 1);
+
+// Draws one. Returns what it consumed, so a caller stacks without recomputing.
+// `rightInset` narrows the row for the scroll rail's gutter, exactly as
+// drawBookRow's does.
+int drawStackedRow(Framebuffer& fb, const FontSet& fonts, int y, const StackedRowContent& row,
+                   bool focused, bool rule, Plane plane = Plane::Bw, int rightInset = 0);
+
 // The scroll rail: an outlined track with a solid proportional thumb, drawn in
 // the gutter beside a list that overflows.
 //
