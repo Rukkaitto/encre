@@ -124,8 +124,19 @@ class NameStore {
   // whether a chapter needs scanning at all.
   bool loadHeader(NameIndexHeader& out) const;
 
-  // MERGE ONE CHAPTER'S ADMITTED RUNS INTO THE INDEX, streaming the old copy off the
-  // card. `runs` must be sorted by text, which `NameScanner` guarantees.
+  // MERGE ONE CHAPTER'S RUNS INTO THE INDEX, streaming the old copy off the card.
+  // `runs` is the chapter's WHOLE table, sorted by text, which `NameScanner`
+  // guarantees -- not its admitted subset.
+  //
+  // ADMISSION IS DECIDED HERE AND NOT BY THE SCANNER, because it needs the index.
+  // A run already on the card accumulates whatever this chapter saw, even a single
+  // mention; a run not on it is admitted only if THIS chapter alone saw it at least
+  // `admitMidSentence` times mid-sentence. The scanner cannot make that call -- it
+  // has no idea what is on the card -- and having it try cost a real book 155 of its
+  // extracts and every later single mention of a name it had already admitted. "A
+  // run that clears the bar keeps accumulating for the rest of the book" is the
+  // whole of what admission-at-the-door buys over eviction-by-count, and it lives in
+  // this function.
   //
   // A CHAPTER ALREADY MARKED SCANNED IS A NO-OP AND RETURNS TRUE. That is the
   // scanned-spine bitmap doing its whole job: re-reading is normal, and without the
@@ -134,7 +145,7 @@ class NameStore {
   // THE HEADER AND ITS BIT ARE WRITTEN LAST, in the same `writeAll` as the body, so
   // an interruption leaves a store that never knew about the chapter rather than one
   // promising extracts it does not have.
-  bool mergeChapter(int spine, const std::vector<const NameScanner::Run*>& runs,
+  bool mergeChapter(int spine, const std::vector<NameScanner::Run>& runs,
                     const std::vector<int>* extractCounts = nullptr);
 
   // Every entry, for the screen's grouping pass. THE ONE PLACE THE WHOLE INDEX GOES

@@ -29,7 +29,6 @@ constexpr uint32_t kBytes = 123456;
 // A chapter's admitted runs, built by hand so the expected counts are countable.
 struct Chapter {
   std::vector<NameScanner::Run> runs;
-  std::vector<const NameScanner::Run*> ptrs;
   std::vector<int> extracts;
 
   void add(std::string text, int mid, int opening, int total, int extractCount = 0) {
@@ -55,8 +54,6 @@ struct Chapter {
     }
     runs = std::move(sortedRuns);
     extracts = std::move(sortedExtracts);
-    ptrs.clear();
-    for (const auto& r : runs) ptrs.push_back(&r);
   }
 };
 
@@ -152,13 +149,13 @@ TEST_CASE("scanning a chapter twice yields the same index as scanning it once") 
   c.add("Dorothea", 9, 1, 11);
   c.seal();
 
-  REQUIRE(store.mergeChapter(3, c.ptrs, &c.extracts));
+  REQUIRE(store.mergeChapter(3, c.runs, &c.extracts));
   NameIndexHeader h1;
   std::vector<NameIndexEntry> once;
   REQUIRE(store.loadAll(h1, once));
 
   // The same chapter again, which is what a re-read does.
-  REQUIRE(store.mergeChapter(3, c.ptrs, &c.extracts));
+  REQUIRE(store.mergeChapter(3, c.runs, &c.extracts));
   NameIndexHeader h2;
   std::vector<NameIndexEntry> twice;
   REQUIRE(store.loadAll(h2, twice));
@@ -185,7 +182,7 @@ TEST_CASE("a merge is order-independent, extract lists included") {
       // accumulated figure is a sum and the extract list is a choice.
       c.add("Ladislaw", spine + 1, 0, spine + 1, 3);
       c.seal();
-      REQUIRE(store.mergeChapter(spine, c.ptrs, &c.extracts));
+      REQUIRE(store.mergeChapter(spine, c.runs, &c.extracts));
     }
     NameIndexHeader h;
     std::vector<NameIndexEntry> out;
@@ -224,7 +221,7 @@ TEST_CASE("a chapter past the cap is dropped entirely, not kept at zero") {
     Chapter c;
     c.add("Ladislaw", 2, 0, 2, 1);
     c.seal();
-    REQUIRE(store.mergeChapter(spine, c.ptrs, &c.extracts));
+    REQUIRE(store.mergeChapter(spine, c.runs, &c.extracts));
   }
   NameIndexHeader h;
   std::vector<NameIndexEntry> out;
@@ -243,6 +240,53 @@ TEST_CASE("a chapter past the cap is dropped entirely, not kept at zero") {
   CHECK(out[0].midSentence == 24);
 }
 
+TEST_CASE("a run already on the card accumulates a single later mention") {
+  // "A RUN THAT CLEARS THE BAR KEEPS ACCUMULATING FOR THE REST OF THE BOOK" is the
+  // whole of what admission at the door buys over eviction by count. It was BROKEN
+  // and the unit tests were all green: admission was decided by the scanner, which
+  // cannot see the index, so a run already on the card that appeared once in a later
+  // chapter contributed nothing. Found by running the pipeline over a real novel and
+  // noticing 155 missing extracts, not here.
+  FakeFileSystem fs;
+  NameStore store(fs, kBook, kBytes);
+
+  Chapter first;
+  first.add("Ladislaw", 4, 0, 4, 2);   // admitted: two or more mid-sentence
+  first.add("Casaubon", 1, 0, 1, 1);   // NOT admitted: one is under the bar
+  first.seal();
+  REQUIRE(store.mergeChapter(0, first.runs, &first.extracts));
+
+  NameIndexHeader h;
+  std::vector<NameIndexEntry> out;
+  REQUIRE(store.loadAll(h, out));
+  REQUIRE(out.size() == 1);
+  CHECK(out[0].text == "Ladislaw");
+
+  Chapter second;
+  second.add("Ladislaw", 1, 0, 1, 1);  // ONE mention, and it must still count
+  second.add("Casaubon", 1, 0, 1, 1);  // still under the bar, still refused
+  second.seal();
+  REQUIRE(store.mergeChapter(1, second.runs, &second.extracts));
+  REQUIRE(store.loadAll(h, out));
+  REQUIRE(out.size() == 1);
+  CHECK(out[0].text == "Ladislaw");
+  CHECK(out[0].midSentence == 5);       // 4 + 1, not 4
+  CHECK(out[0].extractCount() == 3);    // 2 + 1, not 2
+
+  SUBCASE("...and the bar still applies to a run that has never cleared it") {
+    Chapter third;
+    third.add("Casaubon", 2, 0, 2, 1);  // NOW it clears it, on its own chapter
+    third.seal();
+    REQUIRE(store.mergeChapter(2, third.runs, &third.extracts));
+    REQUIRE(store.loadAll(h, out));
+    REQUIRE(out.size() == 2);
+    // It enters with THIS chapter's counts only. The two earlier single mentions are
+    // gone, which is the stated price of a bounded index: a name appearing once per
+    // chapter across many chapters is never admitted.
+    CHECK(find(out, "Casaubon")->midSentence == 2);
+  }
+}
+
 TEST_CASE("an index for another book is discarded rather than merged into") {
   // An index for a different book is worse than none, which is the reading
   // position's own answer to the same question.
@@ -251,14 +295,14 @@ TEST_CASE("an index for another book is discarded rather than merged into") {
   c.add("Dorothea", 5, 0, 5);
   c.seal();
   NameStore first(fs, kBook, kBytes);
-  REQUIRE(first.mergeChapter(0, c.ptrs, &c.extracts));
+  REQUIRE(first.mergeChapter(0, c.runs, &c.extracts));
 
   SUBCASE("the bytes disagreeing starts over") {
     NameStore rebound(fs, kBook, kBytes + 1);
     NameIndexHeader h;
     CHECK(!rebound.loadHeader(h));
     // ...and merging rebuilds rather than accumulating on top of a stale count.
-    REQUIRE(rebound.mergeChapter(0, c.ptrs, &c.extracts));
+    REQUIRE(rebound.mergeChapter(0, c.runs, &c.extracts));
     std::vector<NameIndexEntry> out;
     REQUIRE(rebound.loadAll(h, out));
     CHECK(find(out, "Dorothea")->midSentence == 5);
@@ -277,7 +321,7 @@ TEST_CASE("a corrupt line costs its own row and not the other seven hundred") {
   c.add("Casaubon", 4, 0, 4);
   c.add("Dorothea", 5, 0, 5);
   c.seal();
-  REQUIRE(store.mergeChapter(0, c.ptrs, &c.extracts));
+  REQUIRE(store.mergeChapter(0, c.runs, &c.extracts));
 
   std::string text;
   REQUIRE(fs.readAll(store.indexPath(), text));
@@ -303,7 +347,7 @@ TEST_CASE("the store is deleted with its book") {
   Chapter c;
   c.add("Dorothea", 5, 0, 5);
   c.seal();
-  REQUIRE(store.mergeChapter(0, c.ptrs, &c.extracts));
+  REQUIRE(store.mergeChapter(0, c.runs, &c.extracts));
   REQUIRE(fs.exists(store.indexPath()));
   store.remove();
   CHECK(!fs.exists(store.indexPath()));

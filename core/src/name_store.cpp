@@ -312,7 +312,7 @@ bool NameStore::loadHeader(NameIndexHeader& out) const {
   return true;
 }
 
-bool NameStore::mergeChapter(int spine, const std::vector<const NameScanner::Run*>& runs,
+bool NameStore::mergeChapter(int spine, const std::vector<NameScanner::Run>& runs,
                              const std::vector<int>* extractCounts) {
   NameIndexHeader header;
   std::string body;
@@ -347,12 +347,16 @@ bool NameStore::mergeChapter(int spine, const std::vector<const NameScanner::Run
   size_t pos = bodyOffset;
   size_t i = 0;
   std::string_view line = nextLine(old, pos);
+  // A RUN NOT YET ON THE CARD EARNS ITS SLOT OR IS DROPPED. This is the door, and it
+  // is here rather than in the scanner because only the index knows what is already
+  // through it.
   auto emitNew = [&](size_t k) {
+    if (runs[k].midSentence < header.admitMidSentence) return;
     NameIndexEntry e;
-    e.text = runs[k]->text;
-    e.midSentence = runs[k]->midSentence;
-    e.chapterOpening = runs[k]->chapterOpening;
-    e.total = runs[k]->total;
+    e.text = runs[k].text;
+    e.midSentence = runs[k].midSentence;
+    e.chapterOpening = runs[k].chapterOpening;
+    e.total = runs[k].total;
     if (extractCounts != nullptr && k < extractCounts->size()) {
       addExtracts(e, spine, (*extractCounts)[k], header.extractCap);
     }
@@ -372,19 +376,19 @@ bool NameStore::mergeChapter(int spine, const std::vector<const NameScanner::Run
       line = nextLine(old, pos);
       continue;
     }
-    if (i >= runs.size() || oldEntry.text < runs[i]->text) {
+    if (i >= runs.size() || oldEntry.text < runs[i].text) {
       body += serialiseEntry(oldEntry);
       body += '\n';
       line = nextLine(old, pos);
-    } else if (runs[i]->text < oldEntry.text) {
+    } else if (runs[i].text < oldEntry.text) {
       emitNew(i++);
     } else {
       // ALREADY ON THE CARD: keep accumulating whatever this chapter saw. A run that
       // clears the bar once keeps growing for the rest of the book, which is what
       // admission-at-the-door buys over eviction-by-count.
-      oldEntry.midSentence += runs[i]->midSentence;
-      oldEntry.chapterOpening += runs[i]->chapterOpening;
-      oldEntry.total += runs[i]->total;
+      oldEntry.midSentence += runs[i].midSentence;
+      oldEntry.chapterOpening += runs[i].chapterOpening;
+      oldEntry.total += runs[i].total;
       if (extractCounts != nullptr && i < extractCounts->size()) {
         addExtracts(oldEntry, spine, (*extractCounts)[i], header.extractCap);
       }

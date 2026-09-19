@@ -25,6 +25,15 @@ namespace reader {
 // card and 52.8 KB in one `writeAll` for the worst chapter, against a 45,840-byte
 // floor. 64 bytes is 205.6 KB and 17.8 KB.
 //
+// THOSE ARE THE PROBE'S SIMULATION. This code, run end to end over the same book --
+// scan, merge, capture, read back -- produces **3,794 extracts and 241.2 KB in 84
+// parts, the largest 8,151 bytes**, with 722 index entries in an 18,302-byte index
+// and 1.88 chapters per name. It captures MORE than the simulation predicted, for a
+// reason worth knowing: the simulation recorded only mid-sentence occurrences, and
+// the capture keeps suppressed ones too, because a name's first appearance in a
+// chapter can legitimately open a sentence. The extract list is "the first eight
+// SIGHTINGS", not "the first eight that counted towards the ranking".
+//
 // AND IT IS CENTRED ON THE NAME, NOT TAKEN FROM THE SENTENCE START. The mean
 // sentence in a real novel is 125 bytes, so 64 bytes off the front frequently stops
 // before the name appears -- a row that does not contain the word it is about.
