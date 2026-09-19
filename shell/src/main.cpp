@@ -9204,8 +9204,18 @@ void loop() {
       // read rather than by re-walking. Re-reading is ordinary, so this is the
       // common case and not the edge.
       reader::NameIndexHeader h;
-      const bool known = gNameStore->loadHeader(h) && h.isScanned(rd->chapterIndex());
+      const bool haveIndex = gNameStore->loadHeader(h);
+      const bool known = haveIndex && h.isScanned(rd->chapterIndex());
       gNamesOwed = known ? -1 : rd->chapterIndex();
+      // ONE LINE PER CHAPTER SAYING WHAT THIS FEATURE THINKS IT IS DOING, because
+      // the failure mode is SILENCE and silence is indistinguishable from working.
+      // Two separate bugs shipped behind it -- a scanner never attached, and a debt
+      // that could never be paid blocking everything behind it -- and neither was
+      // visible in a log that only spoke when something succeeded.
+      logf("[names] ch=%d index=%s scanned=%s %d/%d chapters\n", rd->chapterIndex(),
+           haveIndex ? "yes" : "none", known ? "yes" : "no",
+           haveIndex ? h.scannedCount() : 0, rd->book().chapterCount());
+      logFlush();
     }
   }
 
@@ -9224,6 +9234,27 @@ void loop() {
     // ONLY A COMPLETED WALK MAY BE MERGED. An abandoned count is discarded and
     // retried, so a partial table merged here would double-count within one chapter
     // open -- and the scanned-spine bit would then close the door on the truth.
+    // THE LIVE SCAN CANNOT ALWAYS DELIVER, AND HOLDING THE DEBT FOREVER BLOCKS
+    // EVERYTHING BEHIND IT. The scan rides countPages, and a chapter reached by a
+    // RESTORE does not go through countPages at all: `openAtCursor` is the landing
+    // for a saved position, it walks the blocks itself, and it sets indexComplete_
+    // when it reaches the end. So the scan never completes AND the count is never
+    // pending -- the two conditions below are both false, permanently.
+    //
+    // Reported off glass as "no [backfill] logs, and I am halfway through the book":
+    // opening from Home restores the position, this debt was recorded and never
+    // paid, and backfill waits on it. One unscannable chapter silenced the feature.
+    //
+    // So an unpayable debt is written off rather than carried. The chapter is not
+    // lost: it is below the reader the moment they turn a page, and backfill takes
+    // every unscanned chapter below them.
+    if (rd->chapterIndex() == gNamesOwed && !rd->nameScanComplete() && !rd->indexPending()) {
+      logf("[names] ch=%d cannot be scanned live (landed without a count); leaving it "
+           "to backfill\n",
+           gNamesOwed);
+      logFlush();
+      gNamesOwed = -1;
+    }
     if (rd->chapterIndex() == gNamesOwed && rd->nameScanComplete() && !rd->indexPending()) {
       const uint32_t t = millis();
       const int spine = gNamesOwed;
@@ -9477,7 +9508,16 @@ void loop() {
     const int bound = rd->chapterIndex();
     reader::NameIndexHeader h;
     int want = -1;
-    if (bound > 0 && gNameStore->loadHeader(h)) {
+    // NO INDEX YET MEANS NOTHING IS SCANNED, NOT NOTHING TO DO -- and reading it the
+    // other way is a DEADLOCK, which is what the first fix above would have shipped.
+    // A reader halfway through a book that has never been scanned has no index file
+    // at all: `loadHeader` fails, and a backfill that required one would wait for a
+    // file that only backfill was ever going to create.
+    //
+    // It also fails for a book whose bytes disagree, where starting over is the
+    // right answer anyway -- so both roads lead to "scan from the bottom".
+    const bool haveIndex = gNameStore->loadHeader(h);
+    if (bound > 0) {
           // FORWARD FROM THE LOWEST UNSCANNED, which is what keeps the cap's own rule
       // honest: sightings then arrive in the order "the first eight in the book"
       // wants them, so nothing inside backfill ever has to evict.
@@ -9494,7 +9534,7 @@ void loop() {
       // one mention either side of the display threshold depending on the route a
       // reader took, which is not a thing a reader can see.
       for (int c = 0; c < bound; ++c) {
-        if (!h.isScanned(c)) {
+        if (!haveIndex || !h.isScanned(c)) {
           want = c;
           break;
         }
