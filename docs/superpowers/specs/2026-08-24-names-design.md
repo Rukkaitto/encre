@@ -19,7 +19,7 @@ is the opposite trade, and it has to be paid for.
 | selecting a name | opens the peek | opens the **Mentions** list |
 | per name on the card | one `(spine, block)` cursor | up to **8** cursors **plus a 64-byte extract each** |
 | sentence text | never stored | stored, truncated, centred on the name |
-| index size, `Le Fléau` | 14.8 KB | **20.0 KB** + 208.6 KB of extracts |
+| index size, `Le Fléau` | 14.8 KB | **19.6 KB** + 205.6 KB of extracts |
 | card layout | one file | an index plus **write-once chunked per-chapter files** |
 | the scan | rides the page count | page count **plus a second walk** per chapter |
 | coverage badge | `TO CH. 07` in the band | **removed** |
@@ -74,7 +74,20 @@ best that rewards length picks the most verbose sentence in the novel).
 scratch copy of the probe carrying the per-chapter admission simulation and the extract
 cap. The probe reproduces the 2026-08-24 figures to the digit — 4,093 runs / 85,001
 bytes whole book, 412 / 7,797 worst chapter, 738 admitted / 14,812 bytes — so the tree is
-at the state those numbers were taken at, and the new ones are comparable to them.
+at the state those numbers were taken at.
+
+**ONE OF THOSE FOUR NO LONGER DESCRIBES WHAT SHIPS, AND THE REASON IS WORTH THE
+PARAGRAPH.** Porting the scan into `core/` surfaced that the probe uses **two
+definitions of mid-sentence**: it RANKS on mentions that are neither sentence-initial
+nor speech-initial — the opener rule, which is what stops French pronouns scoring —
+and its ADMISSION counter checks position only. The firmware uses the strict count for
+both, because a rule that differs from its own name by an invisible clause is the
+drift this file is mostly a record of. **So admission is 722 runs and 14,547 bytes
+where the probe says 738 and 14,812**, and every figure below that depends on
+admission is re-measured under the one rule. The 16 runs cost nothing a reader could
+see: the display threshold is five of the strict count, which none of them reaches.
+Relaxing `core/names.cpp` to the probe's rule reproduces 738/14,812 exactly, which is
+how the two were told apart.
 
 ## The constraint that forces the design
 
@@ -170,7 +183,7 @@ A run is admitted only when **one chapter alone saw it at least twice mid-senten
 
 | | admitted runs | bytes | share of the naive table | most admitted by one chapter |
 |---|---|---|---|---|
-| `Le Fléau` | 738 | **14,812** | 17.4% | 63 |
+| `Le Fléau` | 722 | **14,547** | 17.1% | 63 |
 | `Neuromancien` | 167 | 3,300 | 14.9% | 33 |
 
 Admission at the door rather than eviction after the fact is the point. Eviction by count
@@ -188,13 +201,13 @@ admitted. That is a real gap, it is accepted, and it is the price of a bounded i
 
 | cap | extracts | card | worst chapter file | index | chapters per name |
 |---|---|---|---|---|---|
-| 4 | 2,444 | 140.3 KB | 11.9 KB | 18.1 KB | 1.41 |
-| **8** | **3,648** | **208.6 KB** | **17.7 KB** | **20.0 KB** | **1.94** |
-| 12 | 4,392 | 250.6 KB | 20.4 KB | 21.1 KB | 2.24 |
-| 20 | 5,249 | 299.0 KB | 23.0 KB | 22.4 KB | 2.60 |
+| 4 | 2,398 | 137.7 KB | 11.9 KB | 17.7 KB | 1.40 |
+| **8** | **3,594** | **205.6 KB** | **17.8 KB** | **19.6 KB** | **1.92** |
+| 12 | 4,338 | 247.5 KB | 20.5 KB | 20.7 KB | 2.23 |
+| 20 | 5,191 | 295.8 KB | 22.8 KB | 21.9 KB | 2.59 |
 
 Eight is about one screenful, so a name's whole list fits without a rail, and the
-chapters-per-name figure is what the read costs: **1.94 file opens on average, 7 at
+chapters-per-name figure is what the read costs: **1.92 file opens on average, 7 at
 worst**. Keeping the *first* eight rather than a spread keeps the introduction — the
 sighting the probe's rule 4 exists to find — and keeps a name's list stable, where a
 spread reshuffles as the reader goes on.
@@ -208,10 +221,10 @@ only version that is always correct.
 
 | extract | card | worst chapter, one `writeAll` | one-pass capture peak |
 |---|---|---|---|
-| full sentence | 441.9 KB | **52.0 KB** | **82.4 KB** |
-| 96 B | 280.9 KB | 24.6 KB | **39.4 KB** |
-| **64 B** | **208.6 KB** | **17.7 KB** | 28.3 KB |
-| 48 B | 163.1 KB | 13.6 KB | 21.7 KB |
+| full sentence | 437.1 KB | **52.8 KB** | **82.4 KB** |
+| 96 B | 277.0 KB | 24.8 KB | **39.4 KB** |
+| **64 B** | **205.6 KB** | **17.8 KB** | 28.3 KB |
+| 48 B | 160.7 KB | 13.7 KB | 21.7 KB |
 
 Against a 45,840-byte floor, the full sentence cannot be written at all.
 
@@ -224,9 +237,9 @@ admitted *before* the chapter avoids that and is far worse:
 
 | book | names left with **no mentions at all** |
 |---|---|
-| `Le Fléau` | **346 of 738** (47%) |
-| `Walden` | **89 of 137** (65%) |
-| `Darkly Dreaming Dexter` | **36 of 78** (46%) |
+| `Le Fléau` | **338 of 722** (47%) |
+| `Walden` | **86 of 133** (65%) |
+| `Darkly Dreaming Dexter` | **36 of 75** (48%) |
 
 A name that is admitted in chapter 12 and never seen again would keep nothing, and a row
 that opens onto an empty screen is worse than a feature that is not there. So the chapter
@@ -242,10 +255,10 @@ for admitted runs. The cost is one extra inflate and block decode per chapter, d
 **`index`** — line-oriented, **sorted by run name**, which makes the per-chapter merge a
 linear two-way merge rather than a sort. Per line: name, non-initial mentions,
 chapter-opening mentions (the furniture cut), and up to eight `(chapter, count)` pairs
-naming where this run's extracts live. **20.0 KB** for `Le Fléau`.
+naming where this run's extracts live. **19.6 KB** for `Le Fléau`.
 
 **Not JSON.** `core/include/reader/json.h` is one flat object with no nesting and no
-arrays, bounded at 64 pairs, and this is a list of 738 things.
+arrays, bounded at 64 pairs, and this is a list of 722 things.
 
 A header carries five things:
 
@@ -269,7 +282,7 @@ happens when the screen opens.
 **`NN-0`, `NN-1`, …** — one chapter's extracts, **written once and never rewritten**. Each
 entry is a run name, a block index and a 64-byte extract, in block order. They are chunked
 at an **8 KB buffer** because the capture walk holds the 37,056-byte scratch throughout,
-and the worst chapter's file is 17.7 KB — 55 KB together, against a 45,840-byte floor.
+and the worst chapter's file is 17.8 KB — 55 KB together, against a 45,840-byte floor.
 Repeated `writeAll` to numbered paths is the only streaming write this filesystem has.
 
 Chunking costs nothing on read: entries come out in block order rather than name order, so
@@ -347,7 +360,7 @@ chapters behind the reader's furthest point spoils nothing — they chose to be 
 it, and the peek is pushed after Mentions pops, which is what Contents already does
 (`shell/src/main.cpp:8535-8544`). Nothing goes more than three deep.
 
-**`releaseChapter()` before pushing Names.** Grouping 738 raw runs needs roughly 20 KB —
+**`releaseChapter()` before pushing Names.** Grouping 722 raw runs needs roughly 20 KB —
 names, counters and union-find — and with the Reader below still holding its 37,056-byte
 scratch that is 57 KB against the floor. The peek's move applies unchanged, and
 `reacquireChapter()` brings the page back.
@@ -429,7 +442,7 @@ a band unable to name its screen is worse than a value cut short.
 
 **Rows** are the extract, with the chapter shown only when it changes — a section header
 above its runs, which is the shape Contents and Settings already draw. A name's eight
-sightings span 1.94 chapters on average, so most rows would otherwise repeat their
+sightings span 1.92 chapters on average, so most rows would otherwise repeat their
 neighbour's label.
 
 **Hint bar: `BACK · PEEK · UP · DOWN`.** With the band naming the screen, `MENTIONS`
@@ -519,10 +532,10 @@ the session — but this is the path to watch on hardware.
 
 | book | spine | admitted runs | extracts | extract bytes | worst chapter file | index |
 |---|---|---|---|---|---|---|
-| `Le Fléau` | 92 | 738 | 3,648 | 208.6 KB | 17.7 KB | 20.0 KB |
-| `Walden` | 44 | 137 | 547 | 32.4 KB | 8.0 KB | 3.5 KB |
-| `Darkly Dreaming Dexter` (ePubLibre) | 34 | 78 | 405 | 21.1 KB | 2.6 KB | 2.1 KB |
-| `Darkly Dreaming Dexter` (Random House) | 58 | 77 | 409 | 20.8 KB | 2.2 KB | 2.1 KB |
+| `Le Fléau` | 92 | 722 | 3,594 | 205.6 KB | 17.8 KB | 19.6 KB |
+| `Walden` | 44 | 133 | 534 | 31.5 KB | 7.7 KB | 3.4 KB |
+| `Darkly Dreaming Dexter` (ePubLibre) | 34 | 75 | 391 | 20.3 KB | 2.5 KB | 2.0 KB |
+| `Darkly Dreaming Dexter` (Random House) | 58 | 76 | 406 | 20.6 KB | 2.2 KB | 2.1 KB |
 | a four-entry essay | 4 | 2 | 4 | 0.2 KB | 0.2 KB | 59 B |
 
 **The 64-byte extract's rendered width is assumed, not checked.** It is ~55 characters of
