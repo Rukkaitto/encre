@@ -27,6 +27,8 @@ struct SleepViewModel;
 struct ReaderViewModel;
 struct ReaderMenuViewModel;
 struct ContentsViewModel;
+struct NamesViewModel;
+struct MentionsViewModel;
 struct TypographyViewModel;
 struct PeekViewModel;
 struct ArticlesViewModel;
@@ -288,6 +290,36 @@ class Theme {
                                 const ReaderMenuViewModel& vm, Plane plane) = 0;
   virtual void renderContents(Framebuffer& fb, const FontSet& fonts,
                               const ContentsViewModel& vm, Plane plane) = 0;
+
+  // design/NamesEmpty.dc.html, and design/Names.dc.html once there are names to
+  // list. ONE METHOD FOR BOTH BOARDS, because they are one screen with a variant --
+  // renderHome's `nothingToContinue` branch is the same shape for the same reason.
+  //
+  // Today it only ever draws the empty arm, since `NamesViewModel` carries no rows
+  // (see the view model for why). The list arm arrives with the stacked-row
+  // primitive that would draw it.
+  virtual void renderNames(Framebuffer& fb, const FontSet& fonts,
+                           const NamesViewModel& vm, Plane plane) = 0;
+
+  // design/Mentions.dc.html -- one name's sightings.
+  virtual void renderMentions(Framebuffer& fb, const FontSet& fonts,
+                              const MentionsViewModel& vm, Plane plane) = 0;
+
+  // THE BOX MODEL FOR A NAMES LIST, not a row count, and the difference is real: the
+  // two heights interleave by CONTENT -- whether a name has a fuller form -- so how
+  // many fit depends on where the list is scrolled to, and only the screen holds the
+  // item table. settingsMetrics makes the same split for the same reason.
+  virtual void namesMetrics(int panelH, const FontSet& fonts, int& listH, int& tallRowH,
+                            int& shortRowH) = 0;
+
+  // MENTIONS' ROWS ARE CONTENT-SIZED TOO, and by a different mechanism: an extract
+  // wraps to one, two or three lines. So the theme cannot hand over a pitch and the
+  // screen cannot compute one -- it has no fonts. It hands over the box, the header's
+  // height, and the height of EACH extract, and the screen does the counting, which
+  // is settingsMetrics' split with a vector where that one has a number.
+  virtual void mentionsMetrics(int panelW, int panelH, const FontSet& fonts,
+                               const std::vector<std::string>& extracts, int& listH,
+                               int& headerH, std::vector<int>& rowHeights) = 0;
 
   // HOW MANY CONTENTS ROWS FIT, which the screen needs before it can window its list.
   //

@@ -196,10 +196,17 @@ FLOW_SCREENS = [
     # main() for what that cost.
     # NAMES (3E). `names` is the alphabetical list -- two row heights, a rail -- and
     # `names_empty` is the same screen before reading has filled it, a variant rather
-    # than a second screen. Selecting a row opens the peek, so there is no name
-    # detail board to compare.
+    # than a second screen. `mentions` is the name detail screen: one name's first
+    # eight sightings, each a 64-byte extract, and a row opens the peek.
+    #
+    # THAT THIRD ROW IS NEW, and this comment used to end "selecting a row opens the
+    # peek, so there is no name detail board to compare". That was the 2026-08-24
+    # design and it is no longer what the screens do -- Names opens Mentions and
+    # Mentions opens the peek. A stale comment beside a table is the second copy of
+    # the table this file keeps finding.
     ("names",           "Names.dc.html",          "Names"),
     ("names_empty",     "NamesEmpty.dc.html",     "Names / empty"),
+    ("mentions",        "Mentions.dc.html",       "Mentions"),
     ("peek",            "Peek.dc.html",           "Peek"),
     ("bookmarks",       "Bookmarks.dc.html",      "Bookmarks"),
     ("book_end",        "BookEnd.dc.html",        "Book finished"),

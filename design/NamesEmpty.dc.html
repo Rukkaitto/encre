@@ -35,8 +35,21 @@
      THE INDEX IS BUILT AS YOU READ, one chapter at a time as its pages are
      counted, so a book opened at chapter one legitimately knows almost nothing.
      That is the feature working, not failing: scanning ahead is what would make
-     it a spoiler machine, and the boundary the band states (TO CH. 01) is the
-     same boundary that keeps it honest.
+     it a spoiler machine.
+
+     THE BAND NO LONGER STATES THE BOUNDARY -- `TO CH. 01` is gone from both this
+     board and Names.dc.html, and the reasoning is written out on that one. What
+     replaces it is BACKFILL: chapters behind the reader are scanned in the quiet
+     window, so the reader who lands here after jumping into the middle of a book
+     does not stay here.
+
+     WHICH LEAVES THE COPY SLIGHTLY GENEROUS, AND IT STAYS AS IT IS. "Keep going"
+     is the whole truth for a book opened at chapter one, which is this screen's
+     ordinary case, and only half of it for a reader who jumped to chapter 40 --
+     their list fills whether they keep going or not. That reader is told less
+     than happens rather than more, the screen they are on is about to stop being
+     this screen, and no wording covers both cases without naming a background
+     process a reader cannot see, cannot wait for and cannot act on.
 
      SO THE COPY SAYS WHEN IT WILL FILL, NOT THAT IT IS EMPTY. "No names yet"
      alone invites the reader to conclude the feature is broken or that this book
@@ -53,12 +66,16 @@
 
 <div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
 
-  <!-- The band is UNCHANGED from Names.dc.html, including the coverage slot, and
-       that is the point of it being a variant: the reader can see that the index
-       covers one chapter, which is precisely why there is nothing below. -->
+  <!-- The band is UNCHANGED from Names.dc.html, which is the point of this being a
+       variant rather than a second screen -- and it is unchanged THROUGH the
+       removal of the coverage slot, which both boards made together. It is 64px
+       here as it is there. The slot is empty and STILL RESERVED, on
+       Typography.dc.html's and BookEnd.dc.html's convention: the nbsp holds the
+       --t-value line box, so the band stays the height it is on every other
+       screen. -->
   <div style="display: flex; justify-content: space-between; align-items: center; gap: 7px; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
     <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500;">NAMES</div>
-    <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap;">TO CH. 01</div>
+    <div style="font-size: var(--t-value); font-weight: 700;">&nbsp;</div>
   </div>
 
   <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: 0 40px; text-align: center; min-height: 0; overflow: hidden;">
