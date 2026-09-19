@@ -81,6 +81,7 @@
 #include "reader/screen_peek.h"
 #include "reader/screen_reader_menu.h"
 #include "reader/toc.h"
+#include "reader/heapguard.h"
 #include "reader/name_extracts.h"
 #include "reader/name_store.h"
 #include "reader/screen_mentions.h"
@@ -374,6 +375,24 @@ bool gBackfillStopped = false;
 // meant the chapter a reader opens on was never scanned at all, and on a book opened
 // at chapter one that is every chapter they had read so far.
 int gNamesLastChapter = -1;
+// WHAT THE NAMES WORK NEEDS IN ONE PIECE BEFORE IT WILL START.
+//
+// Measured on glass rather than chosen: chapter 60 of a real novel counted 233 pages
+// and left min=4508 with a largest BLOCK of 14,324, and the merge and the capture
+// both died in there -- once in a vector's realloc and once in a string's. Every one
+// of those growths is guarded now and refuses rather than aborting, but a feature
+// that starts, allocates four things and gives up on the fifth has spent the
+// reader's heap for nothing.
+//
+// So it asks ONCE, up front, for the largest single thing it is about to want: the
+// 8 KB extract part plus room for the index it is about to rewrite. Below that it
+// does nothing at all and says so, and the chapter stays unscanned -- which the
+// scanned-spine bitmap already makes a first-class state.
+constexpr size_t kNamesHeadroom = 24 * 1024;
+// Said once per book rather than per chapter: a heap this tight stays tight, and a
+// line every two seconds would be the log shouting about one fact.
+bool gNamesToldNoRoom = false;
+
 
 // PUTTING THE SPENT STREAM BACK, on a window of its own.
 //
@@ -4511,6 +4530,18 @@ static void handleDelete() {
 // `push` is false for the WAKE, where App::restore does the pushing -- it walks the
 // record's whole stack and the Reader is one entry in it. Everything before the push
 // is identical either way, which is the point of there being one function.
+static bool namesHaveRoom(const char* what) {
+  if (reader::Heap::hasBlock(kNamesHeadroom)) return true;
+  if (!gNamesToldNoRoom) {
+    gNamesToldNoRoom = true;
+    logf("[names] %s needs %uB in one block and the heap cannot serve it "
+         "(free %u); standing down for this book\n",
+         what, (unsigned)kNamesHeadroom, (unsigned)ESP.getFreeHeap());
+    logFlush();
+  }
+  return false;
+}
+
 static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // ONE PLACE, because this is the one function both CONTINUE and a Library row go
   // through -- and the wake restore as well. Putting the deadline at the call sites
@@ -4753,6 +4784,7 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // return the block, and opening a book has just moved the heap.
   gBackfillStopped = false;
   gNamesLastChapter = -1;
+  gNamesToldNoRoom = false;
   if (!isArticle) gNameStore = std::make_unique<reader::NameStore>(gSd, path, bookBytes);
 
   // AND THE READER MENU'S HEADER, WHICH IS WHY SLEEPING ON THAT MENU USED TO WAKE
@@ -9255,7 +9287,8 @@ void loop() {
       logFlush();
       gNamesOwed = -1;
     }
-    if (rd->chapterIndex() == gNamesOwed && rd->nameScanComplete() && !rd->indexPending()) {
+    if (rd->chapterIndex() == gNamesOwed && rd->nameScanComplete() && !rd->indexPending() &&
+        namesHaveRoom("the merge")) {
       const uint32_t t = millis();
       const int spine = gNamesOwed;
       gNamesOwed = -1;
@@ -9544,13 +9577,24 @@ void loop() {
       const uint32_t t = millis();
       const reader::OpenedBook& book = rd->book();
       const reader::ChapterLocation loc = book.locate(want);
+      bool continueBackfill = true;
       // THE READER LETS GO FIRST. Two inflate windows do not fit, and the scan below
       // opens one of its own -- this is the peek's constraint reached by a different
       // road.
       rd->releaseChapter();
+      // AND THE HEAP IS ASKED AFTER THE RELEASE, NOT BEFORE IT, which is the whole
+      // difference between this gate helping and this gate being the bug. Backfill's
+      // first act frees the 37,056-byte inflate window, so asking beforehand refuses
+      // on memory the job was about to hand back -- and on a real device sitting at
+      // a 14 KB largest block that is every time. Measured there: the reader's
+      // chapter IS the block.
+      if (!namesHaveRoom("backfill")) {
+        if (!rd->reacquireChapter()) gBackfillStopped = true;
+        continueBackfill = false;
+      }
       int runs = 0, admitted = 0, captured = 0;
       bool scanned = false;
-      if (loc.compressedSize != 0) {
+      if (continueBackfill && loc.compressedSize != 0) {
         // A BARE ChapterReader, not a headless ReaderScreen: this wants BLOCKS and
         // not pages, so a screen would buy a PageBuilder and a page index nothing
         // here reads.
@@ -9635,21 +9679,24 @@ void loop() {
           // fragmentation rather than a fresh 36,956-byte allocation.
           cr.release();
         }
-      } else {
+      } else if (continueBackfill) {
         // An empty spine entry -- a cover, a nav document -- is nothing to scan and
         // is marked so the walk does not stop on it forever.
         gNameStore->mergeChapter(want, {}, nullptr);
         scanned = true;
       }
-      const bool back = rd->reacquireChapter();
-      if (!back) {
+      // ALREADY REACQUIRED AND ALREADY EXPLAINED when the heap refused, so the
+      // reacquire and the line below are skipped rather than done twice.
+      const bool back = continueBackfill ? rd->reacquireChapter() : true;
+      if (continueBackfill && !back) {
         // STRANDED IS THE ONE OUTCOME THIS MUST NOT REPEAT. The reader is on a page
         // that cannot be repainted, and the cause is a heap that cannot find the
         // block -- a condition another attempt cannot improve.
         gBackfillStopped = true;
       }
-      logf("[backfill] ch=%d of %d %s runs=%d admitted=%d extracts=%d in %lums "
-           "(heap %u) reader %s\n",
+      if (continueBackfill)
+        logf("[backfill] ch=%d of %d %s runs=%d admitted=%d extracts=%d in %lums "
+             "(heap %u) reader %s\n",
            want, bound, scanned ? "scanned" : "abandoned", runs, admitted, captured,
            (unsigned long)(millis() - t), (unsigned)ESP.getFreeHeap(),
            back ? "restored" : "COULD NOT BE RESTORED -- backfill stopped");

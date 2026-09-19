@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "reader/heapguard.h"
+
 namespace reader {
 namespace {
 
@@ -343,7 +345,14 @@ bool NameStore::mergeChapter(int spine, const std::vector<NameScanner::Run>& run
   // THE TWO-WAY MERGE. Both sides are sorted by run text -- the old file by
   // construction, `runs` by NameScanner -- so this is one pass with no sort and no
   // second copy of either side.
-  body.reserve(old.size() - bodyOffset + runs.size() * 24);
+  // PROBED BEFORE IT IS RESERVED, because a reserve that cannot be served is
+  // abort() rather than an error -- the same failure this feature shipped twice,
+  // once in the scanner's table and once in the extract buffer. A merge that cannot
+  // allocate REFUSES, and the chapter is simply rescanned: the scanned-spine bit is
+  // only set by a merge that completed.
+  const size_t bodyWant = old.size() - bodyOffset + runs.size() * 24;
+  if (!Heap::hasBlock(bodyWant)) return false;
+  body.reserve(bodyWant);
   size_t pos = bodyOffset;
   size_t i = 0;
   std::string_view line = nextLine(old, pos);

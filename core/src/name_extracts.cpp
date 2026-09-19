@@ -3,10 +3,16 @@
 #include <algorithm>
 #include <cstdio>
 
+#include "reader/heapguard.h"
+
 namespace reader {
 namespace {
 
 constexpr char kSep = '\t';
+
+// What one line can add past the flush point: a run name, a block index, an extract
+// and three separators. Reserved with the buffer so `+=` can never reallocate.
+constexpr size_t kLineSlack = NameScanner::kMaxRunBytes + kExtractBytes + 32;
 
 bool isContinuation(char c) { return (static_cast<unsigned char>(c) & 0xC0) == 0x80; }
 
@@ -104,6 +110,21 @@ ExtractPartWriter::ExtractPartWriter(FileSystem& fs, std::string dir, int spine,
 
 void ExtractPartWriter::add(std::string_view run, int block, std::string_view extract) {
   if (failed_) return;
+  // RESERVED ONCE, PROBED, AND THEN NEVER GROWN AGAIN.
+  //
+  // REPORTED OFF GLASS as an abort here: `buf_ += line` reallocated, operator new
+  // threw and -fno-exceptions made it a terminate. The device was at min=4508 with
+  // a largest block of 14,324 -- so this grew by doubling into a heap that had
+  // nothing to give. The flush below keeps the buffer under partBytes_, so one
+  // reservation of the bound plus a line is all it will ever need, and asking for
+  // it once is the difference between a refusal and a reboot.
+  if (buf_.capacity() < partBytes_ + kLineSlack) {
+    if (!Heap::hasBlock(partBytes_ + kLineSlack)) {
+      failed_ = true;
+      return;
+    }
+    buf_.reserve(partBytes_ + kLineSlack);
+  }
   std::string line(run);
   line += kSep;
   appendInt(line, block);

@@ -11,6 +11,7 @@
 #include "doctest.h"
 #include "fake_fs.h"
 #include "reader/document.h"
+#include "reader/heapguard.h"
 #include "reader/name_extracts.h"
 #include "reader/names.h"
 
@@ -182,6 +183,29 @@ TEST_CASE("a chapter with nothing to capture writes no part at all") {
   REQUIRE(w.finish());
   CHECK(w.parts() == 0);
   CHECK(!fs.exists("/.reader/names/abcd1234/5-0"));
+}
+
+TEST_CASE("a part buffer that cannot be reserved refuses instead of aborting") {
+  // THE SECOND INSTANCE OF THIS CLASS AND THE SECOND CRASH IT CAUSED. `buf_ += line`
+  // reallocated, operator new threw, and -fno-exceptions made it a terminate: the
+  // device was at min=4508 with a largest block of 14,324, so the free heap said yes
+  // and the only number that decides an allocation said no.
+  //
+  // The buffer is reserved ONCE now, probed first, and the flush keeps it under the
+  // bound -- so `+=` can never reallocate. A writer that cannot get its buffer
+  // writes nothing and says so, and the chapter is rescanned: the scanned-spine bit
+  // is only set by a merge that completed.
+  struct Guard {
+    ~Guard() { reader::Heap::install(nullptr); }
+  } restore;
+  reader::Heap::install([](size_t bytes) { return bytes < 1024; });
+
+  FakeFileSystem fs;
+  ExtractPartWriter w(fs, "/.reader/names/abcd1234", 3);
+  w.add("Ladislaw", 1, "an extract that will never reach the card");
+  CHECK(!w.finish());
+  CHECK(w.parts() == 0);
+  CHECK(!fs.exists("/.reader/names/abcd1234/3-0"));
 }
 
 TEST_CASE("a newline in block text cannot split a record") {
