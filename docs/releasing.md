@@ -19,7 +19,7 @@ Nothing here is signed.
 second copy of the project board, and this project's whole failure history is
 second copies drifting from first ones. Run it, naming the release being cut:
 
-    python3 tools/release_blockers.py --release V1.1
+    python3 tools/release_blockers.py --release v0.3.0
 
 One TSV line per card in that release that is not `Done` — status, issue number
 (or `draft`), kind, title — and everything it prints is real work. It exits
@@ -199,6 +199,13 @@ matters is that a tag names a commit somebody actually read a book on. **This
 line said the repo had no tags, and stayed that way through the release that
 falsified it**, which is why the blocker query above no longer names a release
 either: a claim about *which* release is being cut goes stale the moment one is.
+
+**The board's `Release` field is spelled in tag names**, so the argument the
+query takes is the tag being cut and there is nothing to translate. It was
+`V1` / `V1.1` / `V1.2` until 2026-09-19, mapping onto `v0.1.0` and `v0.2.0` by
+a correspondence nobody had written down anywhere — `docs/notes/the-board.md`
+has the rename and the one way it could have gone wrong. `V2` and `Someday` are
+still `V2` and `Someday`: they are shelves, and a shelf has no tag.
 
 **One thing a version number here does not mean:** that it runs on an X4. Every
 device measurement in this repo was taken on an X3, and rotation is unverified

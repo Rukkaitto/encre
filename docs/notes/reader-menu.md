@@ -124,6 +124,17 @@ member instead of `ScreenId::Count`: the rule was right, the instance was stale,
 nothing but the board could tell them apart. `Names.dc.html` and `NamesEmpty.dc.html`
 stay; the row returns with the screen.
 
+**AND IT IS RETURNING: THE NAMES FAMILY IS v0.3.0 AS OF 2026-09-19**, three
+issues now rather than three drafts (#156 the index, #157 the list screen, #158
+the alias-row overflow), with #159 for the row itself. **The rule did not move
+and the answer did** — a row waits on the release its screen lands in, and that
+release is this one, so `Names` goes back on `ReaderMenu.dc.html` and back in
+the enum. Until #157 lands it is `Typography`'s old case rather than
+`Bookmarks`': drawn and focus-skipped, because a row whose screen arrives in
+the same release cannot mislead a reader about what the release has. The board
+comment above the three rows still sends the family to V2 and `Bookmarks` to
+V1.1, and #159 owns both of those lines.
+
 **FOUR ROWS HAVE BEEN CUT ENTIRELY, AND NOT ONE OF THEM FOR ROOM** — two of them on
 2026-08-24, then `Bookmarks` and `Names` above. `Go to page…` because
 **nobody navigates an EPUB by page number**: a reflowable book has no stable page to go

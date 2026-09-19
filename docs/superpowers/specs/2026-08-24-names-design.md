@@ -1,7 +1,10 @@
 # NAMES — answering "who's this character again?" on a device with 45 KB free
 
-**Status:** design approved 2026-08-24. Not implemented. Depends on 3D (peek and
-return) and on `ReaderMenu`. Roadmap entry: 3E.
+**Status:** design approved 2026-08-24. Not implemented. Release **v0.3.0**,
+scoped 2026-09-19 — #156 (index), #157 (list screen), #158 (alias-row overflow)
+and #159 (the `ReaderMenu` row #73 cut while the family was V2). Depends on 3D
+(peek and return), which shipped, and on `ReaderMenu`, which shipped without the
+row. Roadmap entry: 3E.
 
 ## The question, and why it took a probe first
 
