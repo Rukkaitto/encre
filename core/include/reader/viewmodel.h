@@ -818,7 +818,9 @@ struct WifiConnectViewModel {
 // SHAPES, which is BookError's argument: a join fails three distinguishable
 // ways and one sentence would be a lie.
 struct WifiErrorViewModel {
-  std::string caption;  // "COULDN'T JOIN" on all three
+  // "COULDN'T JOIN" on the three radio failures and "COULDN'T SAVE IT" on
+  // ListFull, whose join SUCCEEDED -- see screen_wifi_error.cpp.
+  std::string caption;
   std::string message;
   // WHETHER THE EDIT-PASSWORD SLAB IS DRAWN AT ALL. Absent, not inert: on the
   // two shapes where the password is not what went wrong, a slab offering to

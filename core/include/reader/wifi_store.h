@@ -52,7 +52,36 @@ struct SavedNetwork {
 // the whole list at this cap is under a kilobyte of a 20 KB nvs partition. The
 // ninth is REFUSED rather than evicting the oldest, because evicting silently
 // loses a password the user typed and has no way to say so.
+//
+// REFUSING LOUDLY WAS THE POINT AND THE FIRMWARE REFUSED SILENTLY (#162). The
+// one caller discarded remember()'s `false`, wrote the passphrase anyway and
+// saved the unchanged eight, so a ninth join that SUCCEEDED vanished with
+// nothing on the glass -- the outcome this paragraph was written to forbid,
+// reached by a dropped return value instead of by eviction. See Remembered
+// below, which is why the answer can no longer be dropped.
 inline constexpr int kMaxSavedNetworks = 8;
+
+// WHAT remember() DID, because `false` was TWO DIFFERENT FACTS and the screen
+// that reports one of them must not claim the other. A dialog saying the list
+// is full is a lie about an SSID no list would have taken, and this project
+// pays for that shape more often than any other.
+//
+// IT IS AN ENUM RATHER THAN A RICHER BOOL SO THE ANSWER CANNOT BE DROPPED.
+// `[[nodiscard]]` on a bool would say the same thing; what an enum adds is that
+// there is no `if (nets.remember(...))` reading true-ish by accident, and every
+// caller has to name the outcome it is acting on.
+enum class Remembered {
+  // Added, or an SSID already present had its `locked` flag refreshed. The
+  // caller may now write the passphrase and save the list.
+  Yes,
+  // The cap refused it. NOTHING CHANGED, so nothing may be written -- not the
+  // list and not the secret, whose key no entry would hash to.
+  ListFull,
+  // Empty, or over kSsidMaxBytes. Not reachable from a join: rankScanResults
+  // drops empty SSIDs and 802.11 caps the field at 32 bytes, so there is no
+  // copy for it and the shell logs it instead.
+  BadSsid,
+};
 
 // 802.11's own limit. An SSID is octets, not text, so this is a byte count.
 inline constexpr size_t kSsidMaxBytes = 32;
@@ -146,13 +175,20 @@ class SavedNetworks {
   // state, not an error. See forget().
   const SavedNetwork* automatic() const;
 
-  // Adds, or updates the `locked` flag of one already present. False means the
-  // list is full or the SSID is unusable; a SSID already present never fails,
-  // so re-joining a known network cannot be refused by the cap.
+  // Adds, or updates the `locked` flag of one already present. An SSID already
+  // present never fails, so re-joining a known network cannot be refused by the
+  // cap.
   //
   // THE FIRST NETWORK SAVED BECOMES AUTOMATIC, because otherwise a one-network
   // device shows a flag that reads as broken.
-  bool remember(std::string_view ssid, bool locked);
+  //
+  // `[[nodiscard]]` IS THE FIX FOR #162 AND IT IS LOAD-BEARING. This returned a
+  // bool that its ONE caller dropped as a statement, so a refused ninth network
+  // was written to NVS anyway and the reader was told nothing. A refusal nobody
+  // can read is the eviction the cap exists to avoid. The compiler refuses the
+  // statement form now, on every build including the firmware's, which is the
+  // only check `shell/` has -- nothing on the desktop executes that branch.
+  [[nodiscard]] Remembered remember(std::string_view ssid, bool locked);
 
   // False when absent. FORGETTING THE AUTOMATIC NETWORK LEAVES ZERO AUTOMATIC:
   // nothing is silently promoted. A preference belongs to the user, and

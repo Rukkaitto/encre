@@ -246,14 +246,14 @@ TEST_CASE("the key is a hash of the NAME, so forgetting one network moves no oth
   // the way to say that is to ask for the same name from two lists that
   // disagree about where it sits.
   SavedNetworks first;
-  REQUIRE(first.remember("CAFE", true));
-  REQUIRE(first.remember("HOME", true));
-  REQUIRE(first.remember("BUREAU", true));
+  REQUIRE(first.remember("CAFE", true) == Remembered::Yes);
+  REQUIRE(first.remember("HOME", true) == Remembered::Yes);
+  REQUIRE(first.remember("BUREAU", true) == Remembered::Yes);
 
   SavedNetworks second;
-  REQUIRE(second.remember("HOME", true));
-  REQUIRE(second.remember("BUREAU", true));
-  REQUIRE(second.remember("CAFE", true));
+  REQUIRE(second.remember("HOME", true) == Remembered::Yes);
+  REQUIRE(second.remember("BUREAU", true) == Remembered::Yes);
+  REQUIRE(second.remember("CAFE", true) == Remembered::Yes);
   REQUIRE(second.forget("BUREAU"));
 
   // Position 0 in one list and position 1 in the other, and the key is the
@@ -268,18 +268,18 @@ TEST_CASE("the key is a hash of the NAME, so forgetting one network moves no oth
 TEST_CASE("THE FIRST NETWORK SAVED BECOMES THE PREFERRED ONE") {
   // Otherwise a one-network device shows a flag that reads as broken.
   SavedNetworks s;
-  REQUIRE(s.remember("HOME", true));
+  REQUIRE(s.remember("HOME", true) == Remembered::Yes);
   REQUIRE(s.automatic() != nullptr);
   CHECK(s.automatic()->ssid == "HOME");
   // A later one does not take it without being asked.
-  REQUIRE(s.remember("BUREAU", true));
+  REQUIRE(s.remember("BUREAU", true) == Remembered::Yes);
   CHECK(s.automatic()->ssid == "HOME");
 }
 
 TEST_CASE("at most one network is ever preferred") {
   SavedNetworks s;
-  REQUIRE(s.remember("HOME", true));
-  REQUIRE(s.remember("BUREAU", true));
+  REQUIRE(s.remember("HOME", true) == Remembered::Yes);
+  REQUIRE(s.remember("BUREAU", true) == Remembered::Yes);
   REQUIRE(s.makeAutomatic("BUREAU"));
   int autos = 0;
   for (const SavedNetwork& n : s.all()) autos += n.automatic ? 1 : 0;
@@ -317,8 +317,8 @@ TEST_CASE("SELECT toggles preferred on and off, and off is a legal resting state
     return k;
   };
   SavedNetworks s;
-  REQUIRE(s.remember("HOME", true));
-  REQUIRE(s.remember("BUREAU", true));
+  REQUIRE(s.remember("HOME", true) == Remembered::Yes);
+  REQUIRE(s.remember("BUREAU", true) == Remembered::Yes);
   CHECK(s.toggleAutomatic("HOME"));           // HOME was preferred
   CHECK(s.automatic() == nullptr);            // zero is legal
   CHECK(autos(s) == 0);
@@ -342,8 +342,8 @@ TEST_CASE("FORGETTING THE PREFERRED NETWORK PROMOTES NOTHING") {
   // nothing on the glass to say so is the false-claim shape this project
   // refuses for the battery gauge and the sleep badge.
   SavedNetworks s;
-  REQUIRE(s.remember("HOME", true));
-  REQUIRE(s.remember("BUREAU", true));
+  REQUIRE(s.remember("HOME", true) == Remembered::Yes);
+  REQUIRE(s.remember("BUREAU", true) == Remembered::Yes);
   REQUIRE(s.forget("HOME"));
   CHECK(s.size() == 1);
   CHECK(s.automatic() == nullptr);
@@ -355,12 +355,39 @@ TEST_CASE("the cap refuses the ninth rather than evicting the oldest") {
   // so.
   SavedNetworks s;
   for (int i = 0; i < kMaxSavedNetworks; ++i) {
-    REQUIRE(s.remember("N" + std::to_string(i), true));
+    REQUIRE(s.remember("N" + std::to_string(i), true) == Remembered::Yes);
   }
   CHECK(s.full());
-  CHECK_FALSE(s.remember("ONE-TOO-MANY", true));
+  CHECK(s.remember("ONE-TOO-MANY", true) == Remembered::ListFull);
   CHECK(s.size() == kMaxSavedNetworks);
   CHECK(s.indexOf("N0") == 0);  // the oldest is still here
+}
+
+TEST_CASE("the refusal NAMES ITSELF, because `false` was two different facts (#162)") {
+  // The ninth join that SUCCEEDED was silently not saved: the one caller read
+  // remember() as a statement, wrote the passphrase anyway and saved the
+  // unchanged eight. The fix has to reach the glass, and a dialog saying the
+  // list is full is a LIE about an SSID no list would have taken -- so the two
+  // refusals cannot arrive as the same answer.
+  SavedNetworks s;
+  for (int i = 0; i < kMaxSavedNetworks; ++i) {
+    REQUIRE(s.remember("N" + std::to_string(i), true) == Remembered::Yes);
+  }
+  REQUIRE(s.full());
+
+  // THE TWO REFUSALS ARE DISTINGUISHABLE, which is the whole point of the enum.
+  CHECK(s.remember("ONE-TOO-MANY", true) == Remembered::ListFull);
+  CHECK(s.remember("", true) == Remembered::BadSsid);
+  CHECK(s.remember(std::string(kSsidMaxBytes + 1, 'x'), true) == Remembered::BadSsid);
+
+  // AND A REFUSAL CHANGES NOTHING AT ALL. The caller's passphrase write is
+  // conditional on the answer, so a refusal that half-mutated would leave a
+  // network the next boot's dropLockedWithoutSecret has to clean up.
+  CHECK(s.size() == kMaxSavedNetworks);
+  CHECK(s.indexOf("ONE-TOO-MANY") == -1);
+  CHECK(s.indexOf("N0") == 0);  // the oldest is still here
+  REQUIRE(s.automatic() != nullptr);
+  CHECK(s.automatic()->ssid == "N0");  // and still the preferred one
 }
 
 TEST_CASE("a full list still accepts a network it already knows") {
@@ -368,18 +395,18 @@ TEST_CASE("a full list still accepts a network it already knows") {
   // and it may have been secured since, which is the flag that updates.
   SavedNetworks s;
   for (int i = 0; i < kMaxSavedNetworks; ++i) {
-    REQUIRE(s.remember("N" + std::to_string(i), false));
+    REQUIRE(s.remember("N" + std::to_string(i), false) == Remembered::Yes);
   }
   REQUIRE(s.full());
-  CHECK(s.remember("N3", true));
+  CHECK(s.remember("N3", true) == Remembered::Yes);
   CHECK(s.size() == kMaxSavedNetworks);
   CHECK(s.all()[3].locked);
 }
 
 TEST_CASE("an unusable SSID is refused rather than stored") {
   SavedNetworks s;
-  CHECK_FALSE(s.remember("", true));
-  CHECK_FALSE(s.remember(std::string(kSsidMaxBytes + 1, 'x'), true));
+  CHECK(s.remember("", true) == Remembered::BadSsid);
+  CHECK(s.remember(std::string(kSsidMaxBytes + 1, 'x'), true) == Remembered::BadSsid);
   CHECK(s.size() == 0);
 }
 
@@ -431,7 +458,7 @@ TEST_CASE("a network is matched by its WHOLE name, never by a prefix") {
   // HOMEOFFICE is saved would update the wrong network, and forgetting HOME
   // would forget it.
   SavedNetworks s;
-  REQUIRE(s.remember("HOMEOFFICE", true));
+  REQUIRE(s.remember("HOMEOFFICE", true) == Remembered::Yes);
   CHECK(s.indexOf("HOME") == -1);
   CHECK(s.indexOf("HOMEOFFICE") == 0);
   CHECK_FALSE(s.forget("HOME"));
@@ -478,9 +505,9 @@ TEST_CASE("an open network is never dropped for want of a secret") {
 TEST_CASE("the whole list survives a trip through the wire and back") {
   // The property that matters on a device: what is saved is what comes back.
   SavedNetworks s;
-  REQUIRE(s.remember("HOME", true));
-  REQUIRE(s.remember("a;b:c%d", false));
-  REQUIRE(s.remember("Le Fléau", true));
+  REQUIRE(s.remember("HOME", true) == Remembered::Yes);
+  REQUIRE(s.remember("a;b:c%d", false) == Remembered::Yes);
+  REQUIRE(s.remember("Le Fléau", true) == Remembered::Yes);
   REQUIRE(s.makeAutomatic("Le Fléau"));
 
   std::vector<SavedNetwork> decoded;

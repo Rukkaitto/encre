@@ -665,6 +665,15 @@
       "w": 480,
       "h": 800,
       "page": "page-4"
+    },
+    {
+      "file": "WifiErrorListFull.dc.html",
+      "title": "Joined · List Full",
+      "x": 0,
+      "y": 5400,
+      "w": 480,
+      "h": 800,
+      "page": "page-4"
     }
   ],
   "annotations": [

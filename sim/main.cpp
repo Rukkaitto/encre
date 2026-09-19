@@ -761,6 +761,11 @@ int main(int argc, char** argv) {
   const bool isWifiError = std::strcmp(argv[1], "wifi_error") == 0;
   const bool isWifiErrorNotFound = std::strcmp(argv[1], "wifi_error_not_found") == 0;
   const bool isWifiErrorFailed = std::strcmp(argv[1], "wifi_error_failed") == 0;
+  // THE FOURTH SHAPE, AND THE ONE WHERE THE JOIN WORKED (#162). Its own id
+  // rather than a variant folded into `wifi_error`, for its three siblings'
+  // reason: the sheet measures per screen, and this shape drops two slabs and
+  // changes the caption, so it is not their layout.
+  const bool isWifiErrorListFull = std::strcmp(argv[1], "wifi_error_list_full") == 0;
   const bool isWifiNetworkActions = std::strcmp(argv[1], "wifi_network_actions") == 0;
   // --- Articles over wallabag (V1.1) -------------------------------------
   //
@@ -789,7 +794,7 @@ int main(int argc, char** argv) {
   const bool isWifiAny = isWifiSettings || isWifiSettingsEmpty || isWifiPicker ||
                          isWifiPickerScrolled || isWifiPickerEmpty || isWifiPassword ||
                          isWifiConnect || isWifiError || isWifiErrorNotFound ||
-                         isWifiErrorFailed || isWifiNetworkActions;
+                         isWifiErrorFailed || isWifiErrorListFull || isWifiNetworkActions;
   if (!isHome && !isSdMissing && !isApp && !isLibrary && !isLibraryActions &&
       !isDeleteConfirm && !isBookDetails && !isSettings && !isSleep && !isHomeEmpty &&
       !isHomeUnopened && !isHomeCharging && !isHomeMissing && !isLibraryScrolled && !isReader &&
@@ -814,6 +819,7 @@ int main(int argc, char** argv) {
                  "'wifi_picker', 'wifi_picker_scrolled', 'wifi_picker_empty', "
                  "'wifi_password', 'wifi_connect', 'wifi_error', "
                  "'wifi_error_not_found', 'wifi_error_failed', "
+                 "'wifi_error_list_full', "
                  "'wifi_network_actions', 'articles', 'articles_setup', "
                  "'articles_sync_done', 'article_actions', 'article_end', "
                  "'wallabag_account', 'wallabag_connecting', 'wallabag_fetching', "
@@ -1401,16 +1407,18 @@ int main(int argc, char** argv) {
           return 1;
         }
       }
-    } else if (isWifiConnect || isWifiError || isWifiErrorNotFound || isWifiErrorFailed) {
+    } else if (isWifiConnect || isWifiError || isWifiErrorNotFound || isWifiErrorFailed ||
+               isWifiErrorListFull) {
       // THE CONNECTING DIALOG AND THE THREE FAILURE SHAPES SIT ON
       // WifiSettings, NOT ON THE PICKER, and that is the design rather than a
       // shortcut: Action::replace collapses the join stack, which is what
       // makes one veiled parent truthful for both entry paths. An open
       // network arrives here with no WifiPassword behind it at all.
-      if (isWifiError || isWifiErrorNotFound || isWifiErrorFailed) {
-        factory.setWifiFailure(isWifiErrorNotFound ? reader::JoinFailure::NotFound
-                               : isWifiErrorFailed ? reader::JoinFailure::Incomplete
-                                                   : reader::JoinFailure::BadPassword);
+      if (isWifiError || isWifiErrorNotFound || isWifiErrorFailed || isWifiErrorListFull) {
+        factory.setWifiFailure(isWifiErrorNotFound   ? reader::JoinFailure::NotFound
+                               : isWifiErrorFailed   ? reader::JoinFailure::Incomplete
+                               : isWifiErrorListFull ? reader::JoinFailure::ListFull
+                                                     : reader::JoinFailure::BadPassword);
       }
       // design/WifiConnect.dc.html names HOME and the error boards name
       // PENDRAGON -- a saved network being re-joined against one just picked
