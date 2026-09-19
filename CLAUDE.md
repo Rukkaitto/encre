@@ -36,6 +36,9 @@ make sim        # render Home to build/home.png
 make firmware   # build for the ESP32-C3
 make fonts      # regenerate the .rfnt type ramp and embedded headers
 make icons      # regenerate icon bitmaps from the design boards' SVG
+make version    # write reader/version.h's kVersion into every file that repeats
+                # it — the boards' `V <n>` slot, ReaderCore's manifest.
+                # `make version-check` says whether they agree; CI asks too.
 make compare    # design-vs-firmware contact sheet, all 60 boards (~5 min)
                 # ...`ok` means A FRAME WAS PRODUCED; the mismatch % beside it
                 # is the check. #41 added that figure and this line still said
@@ -301,6 +304,38 @@ boards say, and names what drifted.
   and truncate the canvas at that byte, and every board is HTML.
 - **Publishing is still a separate, human step**, with `contract: "0.1.31"` and
   the canvas's own `url` — publishing without it creates a stray duplicate.
+
+**AND ONE THING ON A BOARD IS NOT A PIXEL AT ALL, SO NO AMOUNT OF COMPARING
+FINDS IT: THE VERSION (#152).** `design/Settings.dc.html` states `V 0.2.0` and
+`core/include/reader/version.h` states `0.2.0`, separately — so when **both** are
+stale they agree exactly, Settings measures its usual ~2.3%, and the sheet is
+green about a screen that is lying. **v0.2.0 shipped drawing `V 0.1.0`** with the
+release gate run faithfully; the tag was deleted and re-cut within the hour
+because nothing had been downloaded, which is luck. The board's slot is
+**generated** from the header now (`make version`), `make version-check` refuses
+drift in under a second, and CI's `compare` job passes
+**`--require-version-current`** — `--require-canvas-current`'s bargain exactly,
+delegating to the generator rather than holding a second answer.
+
+- **IT WAS FOUR COPIES AND EVERY LIST OF THEM SAID THREE.** `design/Boot.dc.html`
+  states the version too, and had been stale since before v0.2.0 — missed by the
+  issue, by the release-gate step written for this, and by the comment in
+  `test_version.cpp` that enumerated the copies, because the boot screen is not
+  implemented so `make compare` draws a placeholder beside that board and
+  measures nothing. So `versionc.py` **scans `design/*.dc.html`** rather than
+  holding a list: a new board carrying a slot is covered by existing. Two boards
+  are named, and only to make **losing** a slot an error — with the slot gone
+  there is nothing left to disagree with, and a scan alone would call the tree
+  current.
+- **`test/unit/test_version.cpp` NO LONGER PINS THE STRING.** A pin that must be
+  hand-bumped beside the thing it pins is a second copy with a build failure
+  attached. What it asserts now is that the literal is one the generator's regex
+  can read — a version it cannot parse makes `versionc.py` refuse and every
+  generated copy silently stop being regenerated, and `make test` is the only
+  check of that shape which runs on a bare checkout with no Python.
+- **`core/library.json` is in the generated set too**, and had sat at `0.1.0`
+  through every release: one tag ships the firmware and the library inside it, so
+  there is no second cadence for a second number to track.
 
 ## The rule that governs COPY
 

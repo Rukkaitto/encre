@@ -22,7 +22,11 @@ names the panel's grey levels beside it, because a threshold-at-128 count over
 the four-level grayscale sequence is not comparable with a one-bit screen's.
 
 It is a reading, NOT A GATE. There is no blessed number to fail against, and
---require-implemented is still the only thing here that can fail a run.
+nothing here fails on the figure. What CAN fail a run is the three explicit
+flags: --require-implemented, --require-canvas-current and
+--require-version-current. (This line said --require-implemented was "still the
+only" one through both of the others landing -- a claim with an expiry date and
+no owner, which is the shape CLAUDE.md asks to be replaced by naming things.)
 
 Not part of the build. Requires Google Chrome and Pillow.
 
@@ -48,6 +52,7 @@ import re
 import shutil
 import socketserver
 import subprocess
+import sys
 import tempfile
 import threading
 
@@ -638,6 +643,16 @@ def main():
                          "rather than reimplementing the comparison, and is independent "
                          "of --only, because whether a board reached the canvas is not a "
                          "fact about the screens this run happens to have selected.")
+    ap.add_argument("--require-version-current", action="store_true",
+                    help="exit non-zero if a design board's version slot -- which is "
+                         "GENERATED from core/include/reader/version.h -- has drifted "
+                         "from it. THIS TOOL CANNOT SEE THAT ANY OTHER WAY: the board "
+                         "carries its own copy of the version, so a stale one is "
+                         "compared against a stale one and Settings measures green. "
+                         "v0.2.0 shipped drawing `V 0.1.0` that way. Off by default and "
+                         "passed by CI, exactly as --require-canvas-current is, and "
+                         "independent of --only for its reason. Delegates to "
+                         "`make version-check`'s generator rather than reimplementing it.")
     ap.add_argument("--export", metavar="DIR",
                     help="also write every render as a bare panel-size PNG into DIR, "
                          "named <screen>_<x4|x3>_<design|firmware>.png. No labels, "
@@ -781,6 +796,31 @@ def main():
             raise SystemExit(
                 "the published design canvas is not current:\n"
                 + (proc.stderr or proc.stdout).rstrip())
+        print(proc.stdout.rstrip())
+
+    # THE ONE THING ON THESE BOARDS THIS TOOL IS STRUCTURALLY BLIND TO. Every
+    # other pixel of a board is measured against the firmware's render of the
+    # same screen -- but the VERSION is a literal the board states and the
+    # firmware states separately, so when both are stale they agree exactly and
+    # Settings measures its usual ~2.3%. v0.2.0 shipped drawing `V 0.1.0` with
+    # this sheet green beside it (#152). The slot is generated now, and this is
+    # where the generator gets asked, because this is the tool whose green was
+    # believed.
+    #
+    # Delegated and off by default, for --require-canvas-current's reasons, and
+    # independent of --only for the same one: whether a board states the current
+    # version is not a fact about the screens a run happened to select.
+    if args.require_version_current:
+        versionc = ROOT / "tools" / "versionc.py"
+        if not versionc.exists():
+            raise SystemExit(
+                f"--require-version-current, but there is no generator at {versionc}. "
+                "The version is back to being hand-copied into every board, which is "
+                "what #152 was.")
+        proc = subprocess.run([sys.executable, str(versionc), "--check"],
+                              capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise SystemExit((proc.stderr or proc.stdout).rstrip())
         print(proc.stdout.rstrip())
 
     if CHROME is None or not pathlib.Path(CHROME).exists():

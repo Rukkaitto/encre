@@ -628,7 +628,7 @@ struct ContentsViewModel {
 
 struct SettingsViewModel {
   std::string title;    // "SETTINGS"
-  std::string version;  // the band's right slot: "V 0.1.0"
+  std::string version;  // the band's right slot: "V " + reader::kVersion
   std::vector<SettingsRow> rows;  // the VISIBLE window, not the whole list
   int focusedRow = -1;            // an index into `rows`, not into the whole list
   // The rail's two numbers, over the WHOLE list including headers. Not derivable

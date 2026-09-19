@@ -1,4 +1,4 @@
-.PHONY: test sim readme-images firmware probe probe-build fonts icons compare epubs epubs-bulk card-add card-remove zips conventions hooks canvas canvas-check canvas-test
+.PHONY: test sim readme-images firmware probe probe-build fonts icons compare epubs epubs-bulk card-add card-remove zips conventions hooks canvas canvas-check canvas-test version version-check
 # PlatformIO installs outside PATH by default; allow an override: make firmware PIO=/path/to/pio
 #
 # Invoked through its MODULE entry point rather than the `pio` launcher script,
@@ -237,6 +237,34 @@ zips:
 # nothing in the build runs this.
 entities:
 	$(PYTHON) tools/entities.py --out core/src/entity_table.h
+
+# THE VERSION THE DEVICE DRAWS IS ONE LITERAL, and every other statement of it
+# is generated from it -- `core/include/reader/version.h`'s kVersion, into the
+# design boards' version slot and ReaderCore's library manifest. Bump the header
+# and run `make version`; nothing else is hand-edited.
+#
+# IT USED TO BE FOUR HAND-EDITED COPIES AND `make compare` COULD NOT SEE ANY OF
+# THEM, because design/Settings.dc.html carries its own: bump neither and the
+# two agree exactly, so the sheet measures a stale version against a stale
+# version and reports Settings green. v0.2.0 shipped drawing `V 0.1.0` that way,
+# with the whole six-step release gate run faithfully. The fourth copy,
+# design/Boot.dc.html, was named by nobody -- not by the issue, not by the gate
+# step written for this -- and had been stale since before v0.2.0.
+#
+# `version-check` is the loud half, and it is `canvas-check`'s bargain exactly:
+# no Chrome, no simulator, well under a second, off by default and passed by CI
+# through `make compare COMPARE_ARGS=--require-version-current`. Its own tests
+# are `$(PYTHON) tools/test_versionc.py`, NOT wired into `make test` for
+# tools/test_compare_design.py's reason.
+#
+# A BOARD CHANGE STILL OWES A RESEED: design/*.dc.html is seeded into the
+# published canvas, so `make version` that moves a board is followed by
+# `make canvas`, and `make canvas-check` says so.
+version:
+	$(PYTHON) tools/versionc.py
+
+version-check:
+	$(PYTHON) tools/versionc.py --check
 
 epubs-bulk:
 	$(PYTHON) tools/mkepub.py --out $(EPUB_OUT) --bulk $(BULK_N)

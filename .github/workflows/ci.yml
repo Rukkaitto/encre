@@ -191,11 +191,21 @@ jobs:
       # mid-board-edit must not owe a 3 MB reseed), passed here. It needs `node`,
       # which ubuntu-latest has, and a missing node is an error rather than a pass.
       # `make canvas` is the fix, and the failure message says so.
+      #
+      # --require-version-current is the third of the same bargain, and it closes
+      # the one thing this job is STRUCTURALLY BLIND TO. The version is a literal
+      # that design/Settings.dc.html and core/include/reader/version.h each state,
+      # so when both are stale they agree exactly and Settings measures its usual
+      # ~2.3% -- there is no pixel anywhere for this job to have noticed. v0.2.0
+      # shipped drawing `V 0.1.0` with this sheet green beside it (#152). The
+      # board's slot is generated from the header now, and the flag asks the
+      # generator whether it still is. It needs no Chrome and runs in under a
+      # second, before any rendering. `make version` is the fix.
       - name: Compare
         env:
           CHROME: ${{ steps.chrome.outputs.chrome-path }}
           CHROME_FLAGS: --no-sandbox
-        run: make compare COMPARE_ARGS="--require-implemented --require-canvas-current"
+        run: make compare COMPARE_ARGS="--require-implemented --require-canvas-current --require-version-current"
 
       # Uploaded pass or fail: when it is red the sheet is the evidence, and when
       # it is green it is the only rendered look at all 30-odd boards beside their

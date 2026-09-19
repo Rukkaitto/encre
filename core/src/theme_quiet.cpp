@@ -2192,7 +2192,10 @@ void QuietTheme::renderSettings(Framebuffer& fb, const FontSet& fonts,
                                 const SettingsViewModel& vm, Plane plane) {
   fb.clear(true);
   // The band carries the version, not a battery: the board's right slot is
-  // `V 0.1.0`. Same band as Library's otherwise.
+  // `V <n>`, composed by syncVm from reader/version.h's one literal. This
+  // comment quoted `V 0.1.0` through the release that shipped saying exactly
+  // that, which is why it now names the shape rather than a number (#152).
+  // Same band as Library's otherwise.
   const int listTop = drawHeaderBand(fb, fonts, vm.title, vm.version, nullptr, plane);
   int y = listTop;
 
