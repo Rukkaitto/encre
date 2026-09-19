@@ -16,14 +16,6 @@ namespace {
 // a format that corrupts on the first book that uses it.
 constexpr char kSep = '\t';
 
-// WHAT THE OUTPUT IS RESERVED AT when there is an old index to carry across. The
-// file is not resident any more, so its size is not known without a stat -- and
-// asking for one would be a second read of the thing this stopped reading. 20 KB is
-// the measured index of a 1,400-page novel with an enormous cast, and `body` grows
-// past it if it must: the reserve is there to stop a doubling realloc on a tight
-// heap, not to cap the file.
-constexpr size_t kBodyGuess = 20 * 1024;
-
 void appendInt(std::string& out, int v) {
   char buf[16];
   const int n = std::snprintf(buf, sizeof buf, "%d", v);
@@ -63,8 +55,13 @@ bool parseU32(std::string_view s, uint32_t& out) {
 // on a heap with 32,752 bytes free.
 class LineReader {
  public:
-  LineReader(FileSystem& fs, const std::string& path) : fh_(fs.openRead(path)) {}
+  LineReader(FileSystem& fs, const std::string& path) : fh_(fs.openRead(path)) {
+    if (fh_ != nullptr) size_ = fh_->size();
+  }
   bool ok() const { return fh_ != nullptr; }
+  // THE FILE'S OWN SIZE, so a caller reserving an output the same shape as the input
+  // can ask for what it will actually need rather than for a worst case.
+  uint32_t size() const { return size_; }
 
   // The next line, or false at the end. The returned view is valid until the next
   // call, which is all a two-way merge needs: it consumes one side at a time.
@@ -111,6 +108,7 @@ class LineReader {
   }
 
   std::unique_ptr<FileHandle> fh_;
+  uint32_t size_ = 0;
   std::string buf_;
   std::string line_;
   size_t at_ = 0;
@@ -418,7 +416,15 @@ bool NameStore::mergeChapter(int spine, const std::vector<NameScanner::Run>& run
   LineReader in(fs_, indexPath());
   const bool readable = haveOld && in.ok();
   if (readable) in.skipHeader();
-  const size_t bodyWant = (haveOld ? kBodyGuess : 0) + runs.size() * 24;
+  // THE OLD FILE'S ACTUAL SIZE, NOT A GUESS AT THE WORST ONE.
+  //
+  // REPORTED OFF GLASS as backfill re-scanning chapter 0 for ever: this asked for a
+  // flat 20 KB -- the measured index of a 1,400-page novel -- whatever the index
+  // actually was. On a device whose largest block was under that, every merge
+  // refused, the scanned bit was never set, and the same chapter came round again
+  // two seconds later. A book three chapters in has an index of a few hundred bytes
+  // and was being refused a block eighty times bigger than it needed.
+  const size_t bodyWant = (readable ? in.size() : 0) + runs.size() * 24;
   if (!Heap::hasBlock(bodyWant)) return false;
   body.reserve(bodyWant);
   size_t i = 0;

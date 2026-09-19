@@ -12,6 +12,7 @@
 
 #include "doctest.h"
 #include "fake_fs.h"
+#include "reader/heapguard.h"
 #include "reader/name_store.h"
 #include "reader/names.h"
 
@@ -403,4 +404,62 @@ TEST_CASE("the store is deleted with its book") {
   REQUIRE(fs.exists(store.indexPath()));
   store.remove();
   CHECK(!fs.exists(store.indexPath()));
+}
+
+TEST_CASE("a chapter with no runs is still marked scanned, or backfill never advances") {
+  // REPORTED OFF GLASS as the log flooding with the same line: "[backfill] ch=0 of 60
+  // scanned runs=0 admitted=0 extracts=0" over and over. Chapter 0 of a real novel is
+  // a cover or a title page and yields NO runs at all -- and if that merge does not
+  // set the scanned bit, backfill picks the same chapter again for ever.
+  //
+  // It is also the case the shell was lying about: it ignored mergeChapter's return
+  // and logged "scanned" regardless, so a failed write looked exactly like a
+  // successful one.
+  FakeFileSystem fs;
+  NameStore store(fs, kBook, kBytes);
+
+  REQUIRE(store.mergeChapter(0, {}, nullptr));
+  NameIndexHeader h;
+  REQUIRE(store.loadHeader(h));
+  CHECK(h.isScanned(0));
+  CHECK(h.scannedCount() == 1);
+
+  SUBCASE("a merge reserves the OLD FILE'S size, not a guess at the worst one") {
+    // THE SPIN, PINNED. The reserve asked for a flat 20 KB -- the measured index of
+    // a 1,400-page novel -- whatever the index actually was, so on a device whose
+    // largest block was under that EVERY merge refused, the scanned bit was never
+    // set, and backfill picked the same chapter again two seconds later for ever.
+    //
+    // A store three chapters in is a few hundred bytes. A heap that can serve one
+    // kilobyte must be able to merge into it.
+    struct Guard {
+      ~Guard() { reader::Heap::install(nullptr); }
+    } restore;
+    Chapter small;
+    small.add("Amy", 4, 0, 4);
+    small.seal();
+    REQUIRE(store.mergeChapter(1, small.runs, &small.extracts));
+
+    reader::Heap::install([](size_t bytes) { return bytes <= 1024; });
+    Chapter more;
+    more.add("Bob", 4, 0, 4);
+    more.seal();
+    CHECK(store.mergeChapter(2, more.runs, &more.extracts));
+    NameIndexHeader h2;
+    REQUIRE(store.loadHeader(h2));
+    CHECK(h2.isScanned(2));
+  }
+
+  SUBCASE("...and the next chapter still merges on top of it") {
+    Chapter c;
+    c.add("Dorothea", 5, 0, 5);
+    c.seal();
+    REQUIRE(store.mergeChapter(1, c.runs, &c.extracts));
+    std::vector<NameIndexEntry> out;
+    REQUIRE(store.loadAll(h, out));
+    CHECK(h.isScanned(0));
+    CHECK(h.isScanned(1));
+    REQUIRE(out.size() == 1);
+    CHECK(out[0].text == "Dorothea");
+  }
 }

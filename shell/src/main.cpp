@@ -9644,10 +9644,11 @@ void loop() {
                 }
               }
             }
-            if (ok) {
-              gNameStore->mergeChapter(want, sc.runs(), &kept);
-              scanned = true;
-            }
+            // THE MERGE'S ANSWER IS THE ANSWER. This ignored it and set `scanned`
+            // regardless, so a refused write logged "scanned" and backfill picked
+            // the same chapter again two seconds later, for ever. A log that cannot
+            // report a failure is worse than no log.
+            if (ok) scanned = gNameStore->mergeChapter(want, sc.runs(), &kept);
           }
           // THE BACKFILL CHAPTER GOES BEFORE THE READER'S IS ASKED FOR, which is the
           // whole of why this is safe: the request below is then for a block of
@@ -9658,8 +9659,7 @@ void loop() {
       } else if (continueBackfill) {
         // An empty spine entry -- a cover, a nav document -- is nothing to scan and
         // is marked so the walk does not stop on it forever.
-        gNameStore->mergeChapter(want, {}, nullptr);
-        scanned = true;
+        scanned = gNameStore->mergeChapter(want, {}, nullptr);
       }
       // ALREADY REACQUIRED AND ALREADY EXPLAINED when the heap refused, so the
       // reacquire and the line below are skipped rather than done twice.
@@ -9669,6 +9669,15 @@ void loop() {
         // that cannot be repainted, and the cause is a heap that cannot find the
         // block -- a condition another attempt cannot improve.
         gBackfillStopped = true;
+      }
+      // NEITHER MUST A CHAPTER THAT WILL NOT WRITE. Retrying it costs a full decode
+      // every quiet window and produces the same refusal, which is what flooded a
+      // device's log with one line. The scanned bit is the only thing that advances
+      // the walk, so a merge that did not set it means this pass cannot make
+      // progress at all.
+      if (continueBackfill && !scanned) {
+        gBackfillStopped = true;
+        logf("[backfill] ch=%d would not merge; stopping for this book\n", want);
       }
       if (continueBackfill)
         logf("[backfill] ch=%d of %d %s runs=%d admitted=%d extracts=%d in %lums "
