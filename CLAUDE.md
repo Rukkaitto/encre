@@ -5,7 +5,7 @@ have exactly the UI/UX we want, so **design fidelity is a functional
 requirement**, not polish.
 
 **THIS FILE IS THE INDEX; `docs/notes/` HOLDS THE REST OF IT.** It outgrew the
-budget a session loads it into, so eighteen sections are files of their own — each
+budget a session loads it into, so nineteen sections are files of their own — each
 left here as its original heading, a few lines saying when you would want it, and
 the path. **A stub is not a summary and never supersedes the file it names.** A
 bold cross-reference (**Storage**, **Covers**, **The reader**) still resolves to a
@@ -24,7 +24,7 @@ the runtime, the invariants, the goldens, and how to edit this repo with scripts
 | `tools/` | Asset generators (`fontc.py`, `iconc.py`, `embed_font.py`) and the design comparison tool. |
 | `design/` | `*.dc.html` design boards — **the source of truth for the UI**. |
 | `docs/superpowers/` | The spec, the roadmap, and per-phase implementation plans. |
-| `docs/notes/` | **The rest of this file** — eighteen sections split out for size, each named by a stub under its own heading below. Plus the API notes (`wallabag-api.md`) and the verdicts (`strip-grayscale-verdict.md`). |
+| `docs/notes/` | **The rest of this file** — nineteen sections split out for size, each named by a stub under its own heading below. Plus the API notes (`wallabag-api.md`) and the verdicts (`strip-grayscale-verdict.md`). |
 | `docs/agents/` | The three agent-facing notes the **Agent skills** section names. |
 | `freeink-sdk/` | Submodule. MIT drivers for display/input/SD/battery. Never edit. |
 
@@ -960,6 +960,18 @@ or restores a wake** — including the rule that a screen reporting a focus acce
 one back, which shipped one-way on three screens before it was made structural.
 
 **`docs/notes/storage.md`.**
+
+## The caches
+
+Every cache in the firmware, in RAM and on the card, with what bounds it, what its
+eviction policy IS and why that one rather than the obvious one, and what it costs at
+its limit — plus the two stores that are deliberately unbounded and the reason each is.
+**Read it before adding anything that holds a derived answer**, and read it before
+reaching for #26: the Phase 5 "cache eviction" card meant the spec's `/.reader/cache/`,
+which is #19 and was never built, and everything that WAS built already evicts, refuses
+or is one-of by construction.
+
+**`docs/notes/caches.md`.**
 
 ## Type
 
