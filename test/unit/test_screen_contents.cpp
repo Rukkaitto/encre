@@ -609,13 +609,14 @@ TEST_CASE("the reader menu focuses Contents, and now nothing is skipped on the w
   CHECK(m.isOverlay());
   CHECK(m.focus() == reader::ReaderMenuScreen::kContents);
   CHECK(m.onEvent(kGo).kind == Action::Kind::Push);
-  // Down from Contents reaches Typography, which is the row next to it and is live.
+  // Down from Contents reaches Names, which is back (#159) and is LIVE -- it was
+  // drawn-and-skipped in the arrangement this test was first written for, and cut
+  // outright after that. Every row on this sheet is landable, so the gated walk and
+  // the ungated arithmetic still agree; the sheet is simply one row longer.
+  m.onEvent(kDown);
+  CHECK(m.focus() == reader::ReaderMenuScreen::kNames);
   m.onEvent(kDown);
   CHECK(m.focus() == reader::ReaderMenuScreen::kTypography);
-  // Down from Typography reaches About this book with NO row skipped between them.
-  // `Names` sat there and was skipped, and is cut (#73) -- so the gated walk and the
-  // ungated arithmetic now agree on this screen, which is why the wrap cases below are
-  // the only interesting movement left here.
   m.onEvent(kDown);
   CHECK(m.focus() == reader::ReaderMenuScreen::kAboutBook);
   // ...and wraps back round to Contents rather than sticking. About this book is the
@@ -641,7 +642,8 @@ TEST_CASE("the menu's Typography row opens the panel") {
   // before: this one answered none() behind a comment saying the screen did not
   // exist, and stayed that way after it did.
   reader::ReaderMenuScreen m("Middlemarch", "6%");
-  // Contents is row 0 and is live, so one Down reaches Typography.
+  // TWO Downs, not one: `Names` is back between Contents and here (#159) and is live.
+  m.onEvent(kDown);
   m.onEvent(kDown);
   REQUIRE(m.focus() == reader::ReaderMenuScreen::kTypography);
   const Action a = m.onEvent(kGo);
@@ -704,8 +706,12 @@ TEST_CASE("the menu draws its enum and nothing else, and no cut row came back") 
     CHECK(r.label.find("Go to page") == std::string::npos);
     CHECK(r.label.find("Close book") == std::string::npos);
     CHECK(r.label.find("Bookmarks") == std::string::npos);
-    CHECK(r.label.find("Names") == std::string::npos);
   }
+  // `Names` IS NO LONGER CUT, and this line asserted its absence until #159. It went
+  // when the family was V2 and returns with its screen in v0.3.0, which is the rule
+  // this test is really about: a row is cut for the RELEASE its screen lands in, not
+  // for taste. Bookmarks stays absent above, because its screen is still V1.1.
+  CHECK(rows[reader::ReaderMenuScreen::kNames].label == "Names");
   // The board's order, first and last, so the enum cannot be reordered silently.
   CHECK(rows.front().label == "Contents");
   CHECK(rows[reader::ReaderMenuScreen::kAboutBook].label == "About this book");
@@ -718,9 +724,10 @@ TEST_CASE("About this book opens Book details") {
   // is no Library on the stack. Making it focusable without fixing that would have been
   // a button that works only sometimes, which nobody can learn.
   reader::ReaderMenuScreen m("Middlemarch", "6%");
-  // TWO Downs, not one: Typography sits between Contents and here and is live. It is
-  // also exactly two now that `Names` is cut -- it was two before as well, because the
-  // gate skipped it, so this is the one movement the cut left numerically unchanged.
+  // THREE Downs. It was two while `Names` was cut and two before that while it was
+  // drawn-and-skipped -- the one movement the cut left numerically unchanged -- and
+  // it is three now that the row is back AND live.
+  m.onEvent(kDown);
   m.onEvent(kDown);
   m.onEvent(kDown);
   REQUIRE(m.focus() == reader::ReaderMenuScreen::kAboutBook);

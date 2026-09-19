@@ -1,0 +1,212 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap">
+  <style>
+    /* Chrome type ramp, in points at 150 DPI as CrossPoint does it:
+       ppem = pt * 150 / 72. The px values below are what a 220 PPI panel
+       actually renders; the pt value is the portable intent. Sizes below
+       ~10pt are not legible on this glass -- measured on X3 hardware. */
+    :root {
+      --t-meta:    21px;  /* 10pt - hint labels, row metadata */
+      --t-label:   23px;  /* 11pt - band labels, menu row labels */
+      --t-value:   25px;  /* 12pt - right-aligned values, cover strip */
+      --t-body:    29px;  /* 14pt - list item titles */
+      --t-title:   42px;  /* 20pt - screen and book titles */
+      --t-display: 67px;  /* 32pt - the dominant numeral */
+    }
+    body { margin: 0; background: #ffffff; }
+    a { color: #000000; } a:hover { color: #000000; }
+  </style>
+</helmet>
+
+<!-- WHERE THIS NAME HAS BEEN, so the reader can pick the sighting that will help.
+     One name's first eight mentions, each a short extract of the sentence it stood
+     in, oldest first. Confirm opens design/Peek.dc.html at that spot, over the page
+     you are on, and CLOSE brings you back to the book.
+
+     THE EXTRACT IS 64 BYTES CENTRED ON THE NAME, WHICH IS TWO LINES AND NOT ONE.
+     That was measured rather than estimated, and the estimate was wrong: this
+     column is 432px at 480x800, which holds about 30 characters at --t-body, 35 at
+     --t-value and 42 at --t-meta. 64 bytes of French is ~55 characters once accents
+     are counted, so it wraps at every size on the ramp. The consequence is that
+     EIGHT MENTIONS DO NOT FIT ONE SCREEN and this list scrolls -- which is why the
+     rail and its 14px gutter are here, on the Library's rule.
+
+     IT IS DRAWN AT --t-body BECAUSE IT IS THE CONTENT. Every list on this device
+     puts its primary line there -- a Library title, a name on Names.dc.html -- and
+     --t-meta is what those same rows use for the thing ABOUT the content. Shrinking
+     the extract to --t-meta would fit one more row and would be styling the reason
+     you opened the screen as though it were metadata. The two-line row is 97px and
+     a short sentence's extract is one line at 50px, so this screen has the same two
+     heights Names.dc.html does, drawn by the same primitive.
+
+     THE SLACK BELOW THE LAST ROW IS THE CHECK, and it is Names.dc.html's invariant
+     unchanged: SLACK < THE SHORTEST ROW HEIGHT, because 50px or more would mean
+     another row had fitted. Measured off this render, band 66px and hint bar 64px
+     give a 670px list box at 480x800 and 662px at 528x792; the six rows and two
+     headers drawn come to 645px, leaving 25px and 17px. Note the ROW is the unit a
+     ScrollWindow measures, and a chapter header is not one of them -- it belongs to
+     the first row of its group, so the smallest thing that could follow the last row
+     here is 147px of header-plus-row, not 50.
+
+     CENTRED ON THE NAME, NOT TAKEN FROM THE SENTENCE START, and that is the whole
+     reason the rule is stated: the mean sentence in a real novel is 124 bytes, so
+     64 bytes off the front frequently stops before the name appears, and the row
+     would not contain the word it is about. Every row below holds `Ladislaw`.
+
+     NO COUNT ANYWHERE ON THIS SCREEN. Will Ladislaw is mentioned some hundreds of
+     times in Middlemarch and eight of them are here; printing either number invites
+     a comparison that means nothing to a reader and reads as a database statistic.
+     The list's length is its own statement. `MENTIONS` in the band is the plural of
+     the thing, not a quantity of it. -->
+
+<div style="width: 480px; height: 800px; background: #ffffff; color: #000000; font-family: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;">
+
+  <!-- THE LABEL NAMES THE SCREEN, which is what every band on this device does:
+       NAMES, CONTENTS, LIBRARY, PASSWORD. It said `LADISLAW` in the first draft of
+       this board -- the name you had just pressed -- and that made the one band in
+       the firmware that does not say where you are.
+
+       THE RIGHT SLOT IS THE FULLEST FORM, and it is often most of the answer before
+       a single extract is read: a reader who could not place `Ladislaw` may need
+       nothing more than `WILL LADISLAW`. That is the slot's rule everywhere -- a
+       fact about the thing you are looking at -- and it is why Names.dc.html's
+       coverage badge could go while this one stays.
+
+       WHERE THERE IS NO FULLER FORM, THE SLOT CARRIES THE NAME ITSELF. A place, or
+       a name the book always writes in full, has nothing longer to reveal -- which
+       is exactly the case Names.dc.html draws as a one-line row -- so `Lowick` reads
+       `MENTIONS / LOWICK`. The slot is never empty, because with the label now
+       naming the screen it is the only thing on the band that says whose mentions
+       these are.
+
+       THE YIELDING QUESTION IS TRIVIAL NOW, AND IT WAS NOT BEFORE. With a name on
+       the left, this was Contents' case: two content runs, the left one naming the
+       screen and therefore never allowed to elide, the right one yielding. With a
+       LITERAL on the left it becomes the ordinary bare-band case -- the label always
+       fits, the value takes the remainder -- which is five of the seven band call
+       sites in this firmware. `min-width: 0` stays on the value because the value is
+       still CONTENT and a long fullest form must elide rather than wrap (#82, #134);
+       that is the question to ask of any band, not whether it declares the
+       attributes. -->
+  <div style="display: flex; justify-content: space-between; align-items: center; gap: 7px; padding: 18px 24px 14px 24px; border-bottom: 2px solid #000000;">
+    <div style="font-size: var(--t-label); letter-spacing: 0.22em; font-weight: 500; white-space: nowrap;">MENTIONS</div>
+    <div style="font-size: var(--t-value); font-weight: 700; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis;">WILL LADISLAW</div>
+  </div>
+
+  <!-- position: relative so the rail is placed against the LIST's own box, not the
+       panel's: the header band and the hint bar do not scroll. -->
+  <div style="position: relative; display: flex; flex-direction: column; flex-grow: 1;">
+    <div style="display: flex; flex-direction: column; flex-grow: 1; margin-right: 14px;">
+
+      <!-- THE CHAPTER IS SHOWN ONLY WHERE IT CHANGES, as Contents draws its parts:
+           tracked caps at --t-meta with 18/6 padding and NO RULE. A name's eight
+           mentions land in 1.94 chapters on average and 7 at worst, so a label on
+           every row would repeat its neighbour's more often than not.
+
+           NO RULE ON THE HEADER, AND NONE UNDER THE ROW ABOVE IT, which is
+           Contents.dc.html's pair of rules and its reasoning transfers exactly. A
+           chapter here is not a change of SUBJECT the way Settings' READING and
+           DEVICE are -- it is one continuous sequence of sightings of one person,
+           softly grouped -- so the separation is carried by the label's padding and
+           its caps. And with the header carrying no line, a rule under the last row
+           of a section would read as belonging to the header rather than the row,
+           which is the 3px full-width line #81 found on Contents.
+
+           THE HEADER IS NOT INDEPENDENTLY SCROLLABLE. It belongs to the first row of
+           its group, so the unit a ScrollWindow measures is 142px for a row that
+           opens a chapter and 97px for one that continues it. A header stranded at
+           the foot of the panel with its row below the fold would be a label for
+           nothing. -->
+      <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">CH. 09</div>
+
+      <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0;">Mr. Casaubon&rsquo;s young cousin, Will Ladislaw, was expected</div>
+      </div>
+
+      <!-- FOCUSED, and full-bleed inverted as every list on this device draws it --
+           to the edge of the 14px gutter, which the rail does not enter. -->
+      <div style="display: flex; align-items: center; padding: 11px 24px; background: #000000; color: #ffffff;">
+        <div style="font-size: var(--t-body); font-weight: 700; flex-grow: 1; min-width: 0;">Ladislaw had a sense of the ridiculous which was</div>
+      </div>
+
+      <!-- ONE LINE, and this is the second row height rather than a defect. The
+           extract is a WINDOW on the sentence, so a short sentence yields a short
+           extract: there is no 64th byte to show, and padding it to two lines would
+           be drawing blank space to make the list look regular. It is the same pair
+           of heights Names.dc.html has and the same primitive draws both, which is
+           the whole reason that primitive is shared rather than written twice. -->
+      <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0;">Ladislaw coloured.</div>
+      </div>
+
+      <!-- SECTION-FINAL: no border-bottom, because the CH. 19 header below carries
+           no line of its own. -->
+      <div style="display: flex; align-items: center; padding: 11px 24px;">
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0;">and Will Ladislaw, who had been standing by the window</div>
+      </div>
+
+      <div style="font-size: var(--t-meta); letter-spacing: 0.2em; font-weight: 500; padding: 18px 24px 6px 24px;">CH. 19</div>
+
+      <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0;">Dorothea saw Ladislaw again at the Lowick parsonage</div>
+      </div>
+
+      <!-- THE LAST ROW DRAWN KEEPS ITS RULE, because it is not section-final: what
+           follows it is CH. 26 and two more mentions, below the fold. Names.dc.html
+           draws its last row the same way. Only a section-final row drops the line,
+           and only because the header under it has none. -->
+      <div style="display: flex; align-items: center; padding: 11px 24px; border-bottom: 1px solid #000000;">
+        <div style="font-size: var(--t-body); font-weight: 500; flex-grow: 1; min-width: 0;">said Will Ladislaw, rising from his seat by the fire</div>
+      </div>
+
+    </div>
+
+    <!-- THE RAIL, the Library's exactly: an outlined 6px track in a 14px gutter the
+         rows do not enter, with a SOLID proportional thumb. Height is visible/total
+         and top is first/total, in percent so both survive the reflow to 528x792.
+
+         THE PROPORTION IS THE SPECIFICATION. Eight mentions in three chapters stack
+         to 879px against a 670px list box, so the thumb is 76.2% tall at the top --
+         big, because this list is barely longer than its panel. Names.dc.html's is
+         2.7% for the same reason in reverse, and neither figure was chosen: both are
+         what visible/total comes to. A rail that looked the same on both screens
+         would be telling the reader nothing. -->
+    <div style="position: absolute; top: 6px; bottom: 6px; right: 4px; width: 6px; border: 1px solid #000000; box-sizing: border-box;">
+      <div style="position: absolute; left: 0; right: 0; top: 0%; height: 76.2%; background: #000000;"></div>
+    </div>
+
+  </div>
+
+  <!-- PEEK, which on Names.dc.html's bar is where MENTIONS now sits. The word names
+       the immediate action on every screen that carries it: Names opens Mentions,
+       Mentions opens the peek. Naming the thing one screen away rather than the next
+       one is what that board did before this screen existed, and it is what made the
+       hint wrong the moment it did.
+
+       BACK returns to Names, which reopens on the name you came from. UP and DOWN
+       move through the extracts; there is no long press anywhere on this screen, so
+       no slot carries a hold ring. -->
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 16px 24px; border-top: 1px solid #000000;">
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4" stroke="#000000" stroke-width="1.6"></path><path d="M2 8h8a4 4 0 0 0 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">BACK</div></div>
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.2" fill="#000000"></circle></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">PEEK</div></div>
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 7l4-4 4 4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">UP</div></div>
+    <div style="display: flex; align-items: center; gap: 7px;"><svg width="25" height="25" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M4 9l4 4 4-4" stroke="#000000" stroke-width="1.6"></path></svg><div style="font-size: var(--t-meta); letter-spacing: 0.12em; white-space: nowrap;">DOWN</div></div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":480,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

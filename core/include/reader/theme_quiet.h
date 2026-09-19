@@ -63,6 +63,8 @@ class QuietTheme : public Theme {
                         Plane plane) override;
   void renderContents(Framebuffer& fb, const FontSet& fonts, const ContentsViewModel& vm,
                       Plane plane) override;
+  void renderNames(Framebuffer& fb, const FontSet& fonts, const NamesViewModel& vm,
+                   Plane plane) override;
   int contentsVisibleRows(int panelH, const FontSet& fonts) override;
 
   void settingsMetrics(int panelH, const FontSet& fonts, int& listH, int& rowH,

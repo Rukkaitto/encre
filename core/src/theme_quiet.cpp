@@ -148,6 +148,16 @@ constexpr const char* kDeviceName = "Encre";
 constexpr int kEmptyStripTop = 18;
 constexpr int kEmptyTopPad = 44;
 constexpr int kEmptyGap = 20;
+// design/NamesEmpty.dc.html's `padding: 0 40px` and `max-width: 400px`.
+//
+// THE 400 IS A NUMBER TO CHECK IN BOTH ENGINES, which the board says in as many
+// words. SdMissing's board had to go from 400 to 420 for this exact shape, because
+// the autohinted faces have whole-pixel advances and measure wider than Chrome, so
+// three lines there became four here. Kerning has since closed part of that gap and
+// not all of it. Measured for THIS paragraph at both geometries before it was left
+// at 400.
+constexpr int kNamesEmptyPadX = 40;
+constexpr int kNamesProseMaxW = 400;
 constexpr int kEmptyProseMaxW = 400;
 
 // Home's hint marks. Slot 0 is the BOOK, because Home's first hint is READ -- and
@@ -2114,6 +2124,74 @@ void QuietTheme::renderReaderMenu(Framebuffer& fb, const FontSet& fonts,
 // bar. The row is `drawDetailRow`, whose own comment was written anticipating this
 // screen -- "`focused` inverts it, which BookDetails never does and Contents does on
 // the chapter you are in".
+// design/NamesEmpty.dc.html -- and design/Names.dc.html, once there are names.
+//
+// ONE METHOD FOR BOTH BOARDS, because they are one screen with a variant. Only the
+// empty arm exists today: `NamesViewModel` carries no rows, because the store that
+// would fill them is #156 and the row primitive that would draw them is #167.
+//
+// IT IS renderSdMissing's COLUMN WITH A BAND ON TOP AND NO SLAB. The mark, the
+// title and the paragraph are centred together in whatever the band and the hint
+// bar leave -- so the column is centred in the AREA, not in the panel, which is
+// what `justify-content: center` on a `flex-grow: 1` child means. There is no
+// action slab, on HomeEmpty's stated reason: a primary action that cannot work is
+// worse than none, and the only thing that fills this list is reading.
+void QuietTheme::renderNames(Framebuffer& fb, const FontSet& fonts, const NamesViewModel& vm,
+                             Plane plane) {
+  fb.clear(true);
+
+  // Three of the four slots are the boards' empty 36px placeholder, and buildHints
+  // is what keeps them markless -- see its header comment.
+  Hint hints[4];
+  buildHints(kHintSlotMarks, vm.hints, vm.holds, hints);
+
+  // AN EMPTY VALUE, AND THE BAND KEEPS ITS HEIGHT, which is Typography's and
+  // BookEnd's call and not a new one: bandContentH takes max(Label500, Value700)
+  // unconditionally, so a band does not shrink when a screen leaves its slot empty.
+  // Both Names boards reserve the line box with an `&nbsp;` to match. The slot used
+  // to say `TO CH. 07`; backfill is what retired it.
+  const int bandH = drawHeaderBand(fb, fonts, vm.title, "", nullptr, plane);
+  const int areaH = fb.height() - bandH - hintBarHeight(fonts, hints);
+
+  // THE BOARD'S OWN PADDING, 40px, NOT kMargin. This column is inset further than a
+  // list row is -- `padding: 0 40px` on the board -- and taking the screen margin
+  // instead would widen the paragraph by 32px and rewrap it.
+  const int usableW = fb.width() - 2 * kNamesEmptyPadX;
+
+  const Icon& mark = icons::kBookLarge;
+  const Font& title = fonts[Role::Title700];
+  // Body400, not Body500: the board's paragraph is `font-size: var(--t-body)` with
+  // no font-weight, so it is CSS default 400 -- the same distinction that had Home's
+  // author line rendering 19% over the board's ink.
+  const Font& body = fonts[Role::Body400];
+
+  const int colW = usableW < kNamesProseMaxW ? usableW : kNamesProseMaxW;
+  const int colX = centreIn(kNamesEmptyPadX, usableW, colW);
+
+  // BOTH RUNS ARE WRAPPED BEFORE ANYTHING IS PLACED, because the column is centred
+  // on its own total height and neither height is known until it has wrapped. The
+  // title wraps too: a centred run that cannot wrap is an overflow waiting for a
+  // longer string, which is the defect Home's empty title was fixed for.
+  // THE TITLE'S LEAD IS THE FACE'S OWN LINE HEIGHT, not a 1.0em box -- the board
+  // leaves it at `line-height: normal`, which Chrome resolves to the face's metrics.
+  const Prose head = wrapProseLead(title, vm.emptyTitle, colW, pxToF26(title.lineHeight()));
+  const Prose prose = wrapProse(body, vm.emptyBody, colW, kProseLeadEm);
+
+  // Two gaps, not three: mark, title, paragraph, and no slab under them.
+  const int stackF26 =
+      pxToF26(mark.h + 2 * kEmptyGap) + head.heightF26() + prose.heightF26();
+  // Arithmetic shift rather than / 2, for renderSdMissing's stated reason.
+  int yF26 = pxToF26(bandH) + ((pxToF26(areaH) - stackF26) >> 1);
+
+  drawIcon(fb, mark, centreIn(kNamesEmptyPadX, usableW, mark.w), f26ToPx(yF26), Ink::Black,
+           plane);
+  yF26 += pxToF26(mark.h + kEmptyGap);
+  yF26 += drawProse(fb, title, head, colX, colW, yF26, Ink::Black, plane) + pxToF26(kEmptyGap);
+  drawProse(fb, body, prose, colX, colW, yF26, Ink::Black, plane);
+
+  drawHintBar(fb, fonts, hints, plane);
+}
+
 void QuietTheme::renderContents(Framebuffer& fb, const FontSet& fonts,
                                 const ContentsViewModel& vm, Plane plane) {
   fb.clear(true);

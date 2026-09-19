@@ -614,6 +614,33 @@ struct ReaderMenuViewModel {
 // DEPTH: an NCX's depth-1 entries become section headers and the rest become rows,
 // which is what draws the board's `BOOK I - MISS BROOKE` grouping. A flat NCX (two of
 // the four books measured) yields no headers at all and the screen is simply a list.
+// design/NamesEmpty.dc.html, and design/Names.dc.html for the same id.
+//
+// ONE VIEW MODEL FOR BOTH BOARDS, which is what makes the empty state a VARIANT
+// rather than a second screen -- HomeEmpty's rule, and the reason is the same: two
+// render branches would be two ways to spell one layout.
+//
+// IT CARRIES NO ROWS YET, AND THAT IS NOT AN OVERSIGHT. The card's name store is
+// #156 and the display-time grouping is #157, so `NamesScreen` has nothing to list
+// and this screen renders the empty variant always. The row fields arrive with the
+// shared stacked-row primitive (#167) that would draw them; adding them here first
+// would be a field nothing sets and a render branch nothing draws, which is the
+// shape this repo's own rule refuses -- the Typography panel's formatters were
+// extracted for a second caller that never came and had to be put back.
+//
+// THE BAND HAS NO RIGHT SLOT ON EITHER BOARD. It said `TO CH. 07` -- the coverage
+// boundary -- until backfill made that a temporary state rather than a standing
+// one. The slot's LINE BOX is still reserved, which is Typography's and BookEnd's
+// convention and why `drawHeaderBand` is passed an empty value rather than the band
+// being drawn some other way.
+struct NamesViewModel {
+  std::string title;       // "NAMES"
+  std::string emptyTitle;  // "NO NAMES YET"
+  std::string emptyBody;   // the paragraph under it
+  std::array<std::string, 4> hints{};
+  std::array<bool, 4> holds{};
+};
+
 struct ContentsViewModel {
   std::string title;      // "CONTENTS"
   std::string bookTitle;  // the band's right slot
