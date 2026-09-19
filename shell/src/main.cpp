@@ -9600,6 +9600,7 @@ void loop() {
               reader::ExtractPartWriter out(gSd, gNameStore->dir(), want);
               reader::ExtractCapture cap(wanted, quota, out);
               reader::NameScanner throwaway;
+              throwaway.setSinkOnly(true);
               reader::Block b2;
               int j = 0;
               while (cr.next(b2)) {

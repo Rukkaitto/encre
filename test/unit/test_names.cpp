@@ -16,6 +16,7 @@
 
 #include "doctest.h"
 #include "reader/document.h"
+#include "reader/heapguard.h"
 #include "reader/names.h"
 
 using reader::Block;
@@ -274,6 +275,50 @@ TEST_CASE("runs come out sorted by text, which is the merge's order and not the 
   REQUIRE(s.runs().size() >= 3);
   for (size_t i = 1; i < s.runs().size(); ++i) {
     CHECK(s.runs()[i - 1].text < s.runs()[i].text);
+  }
+}
+
+TEST_CASE("a heap that cannot grow the table drops runs rather than aborting") {
+  // REPORTED OFF GLASS AS A REBOOT TO HOME MID-BOOK, and the dump named findOrAdd:
+  // operator new threw inside _M_realloc_insert and -fno-exceptions turned it into
+  // a terminate. The device had 41,616 bytes free and a largest BLOCK of 14,324 --
+  // the free heap said yes and the only number that decides an allocation said no.
+  //
+  // THE DESKTOP CANNOT FAIL AN ALLOCATION NATURALLY, which is what Heap::install is
+  // for: failure is injected exactly as Profile injects a clock.
+  struct Guard {
+    ~Guard() { reader::Heap::install(nullptr); }
+  } restore;
+
+  // Room for a handful and no more.
+  reader::Heap::install([](size_t bytes) { return bytes <= 6 * sizeof(NameScanner::Run); });
+
+  NameScanner s;
+  std::string text;
+  for (int i = 0; i < 60; ++i) text += "Il vit Aa" + std::to_string(i) + "bb maintenant. ";
+  s.addBlock(para(text), 4);
+
+  // IT KEPT WHAT IT COULD AND SAID WHAT IT DID NOT. The table is already bounded and
+  // already reports drops, so a chapter scanned on a fragmented heap keeps fewer
+  // names -- where the alternative is losing the reader's page.
+  CHECK(!s.runs().empty());
+  CHECK(static_cast<int>(s.runs().size()) < 60);
+  CHECK(s.dropped() > 0);
+
+  SUBCASE("and a sink still sees every occurrence, table or no table") {
+    // The capture pass runs on the tightest heap there is and wants occurrences
+    // rather than counts, so it builds no table at all.
+    struct Sink : NameScanner::RunSink {
+      int n = 0;
+      void onRun(std::string_view, int, std::string_view, size_t, bool) override { ++n; }
+    } sink;
+    NameScanner t;
+    t.setSinkOnly(true);
+    t.addBlock(para(text), 4);
+    CHECK(t.runs().empty());   // nothing was kept...
+    t.addBlock(para(text), 4, &sink);
+    CHECK(sink.n > 0);         // ...and the sink was fed anyway
+    CHECK(t.runs().empty());
   }
 }
 

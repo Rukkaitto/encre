@@ -1,5 +1,6 @@
 #include "reader/names.h"
 
+#include "reader/heapguard.h"
 #include "reader/name_store.h"
 
 #include <algorithm>
@@ -256,9 +257,32 @@ NameScanner::Run* NameScanner::findOrAdd(std::string_view text) {
     ++dropped_;
     return nullptr;
   }
+  // ASK THE ALLOCATOR BEFORE GROWING, BECAUSE A VECTOR THAT CANNOT GROW IS abort().
+  //
+  // REPORTED OFF GLASS as a reboot to Home mid-book, and the dump named this line:
+  // operator new threw inside _M_realloc_insert and `-fno-exceptions` turned it into
+  // a terminate. The device had 41,616 bytes free and a largest BLOCK of 14,324 --
+  // so the free heap said yes and the only number that decides an allocation said
+  // no. A doubling realloc holds the old buffer AND the new one, which is the state
+  // this probe is documented to be asked in.
+  //
+  // REFUSING IS A REAL ANSWER HERE: the table is already bounded and already reports
+  // what it dropped, so a chapter scanned on a fragmented heap keeps fewer names and
+  // says so, where the alternative is losing the reader's page.
+  //
+  // AN INDEX, NOT THE ITERATOR, ACROSS THE PROBE. `ensureRoom` reserves, a reserve
+  // reallocates, and a reallocation invalidates every iterator into the vector --
+  // so inserting at `it` afterwards writes through a dangling pointer. It did: the
+  // whole unit binary died with SIGBUS and no output, which is what a dangling
+  // insert looks like when it happens during static test registration's first run.
+  const size_t at = static_cast<size_t>(it - runs_.begin());
+  if (!ensureRoom(runs_, runs_.size() + 1)) {
+    ++dropped_;
+    return nullptr;
+  }
   Run r;
   r.text.assign(text);
-  return &*runs_.insert(it, std::move(r));
+  return &*runs_.insert(runs_.begin() + static_cast<long>(at), std::move(r));
 }
 
 void NameScanner::addBlock(const Block& block, int blockInChapter, RunSink* sink) {
@@ -347,7 +371,8 @@ void NameScanner::addBlock(const Block& block, int blockInChapter, RunSink* sink
         // SENTENCE-INITIAL SUPPRESSION, the load-bearing rule. `i != 0` is position
         // and `!opener` is grammar; a mention needs both to count.
         const bool mid = (i != 0 && !toks[i].opener);
-        if (Run* r = findOrAdd(run)) {
+        Run* r = sinkOnly_ ? nullptr : findOrAdd(run);
+        if (r != nullptr) {
           ++r->total;
           if (mid) ++r->midSentence;
           if (blockInChapter <= 1) ++r->chapterOpening;

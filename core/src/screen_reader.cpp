@@ -366,6 +366,7 @@ bool ReaderScreen::captureNames(NameScanner::RunSink& sink, StopFn stop, void* c
   // counts it produces have already been merged from the first walk. Feeding them
   // again is exactly the double-count the scanned-spine bitmap exists to prevent.
   NameScanner throwaway;
+  throwaway.setSinkOnly(true);
   Block b;
   int i = 0;
   bool ok = true;

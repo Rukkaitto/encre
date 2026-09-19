@@ -92,6 +92,14 @@ class NameScanner {
   // counts away; the count pass passes none.
   void addBlock(const Block& block, int blockInChapter, RunSink* sink = nullptr);
 
+  // COUNT NOTHING, JUST FEED THE SINK. The capture pass wants occurrences and
+  // already has the counts -- they were merged from the first walk -- so building a
+  // second table costs ~7.8 KB for a result nobody reads, on the one path where the
+  // heap is tightest. Feeding them again would be the double-count the scanned-spine
+  // bitmap exists to prevent, so this is not an optimisation with a risk attached:
+  // the table was always going to be thrown away.
+  void setSinkOnly(bool on) { sinkOnly_ = on; }
+
   // This chapter's runs, SORTED BY TEXT. The order is the merge's, not the screen's.
   const std::vector<Run>& runs() const { return runs_; }
 
@@ -127,6 +135,7 @@ class NameScanner {
 
   std::vector<Run> runs_;
   int dropped_ = 0;
+  bool sinkOnly_ = false;
 };
 
 // --- Grouping ------------------------------------------------------------------
