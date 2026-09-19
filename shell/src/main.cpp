@@ -4538,6 +4538,10 @@ static void handleDelete() {
 // is identical either way, which is the point of there being one function.
 static bool namesHaveRoom(const char* what) {
   if (reader::Heap::hasBlock(kNamesHeadroom)) return true;
+  // NOTE WHICH JOB IT WAS. "The merge" runs with the reader's chapter held and
+  // backfill runs after releasing it, so the two ask the same question in very
+  // different conditions -- and a log that did not say which was asking made a
+  // refusal look like the whole feature giving up.
   if (!gNamesToldNoRoom) {
     gNamesToldNoRoom = true;
     logf("[names] %s needs %uB in one block and the heap cannot serve it "
@@ -9525,8 +9529,19 @@ void loop() {
   // warm's long gate for the warm's reason -- an interrupted backfill chapter loses
   // a whole decode -- and does ONE chapter per window, so a button is never more
   // than one chapter away.
+  // IT DOES NOT WAIT ON THE LIVE MERGE, and gating it on that was a bug of exactly
+  // the shape this feature already had once. `gNamesOwed` is a debt the LIVE path
+  // owes for the chapter the reader is on, and that path can refuse -- it runs with
+  // the reader's 37,056-byte chapter held, so on a tight heap `namesHaveRoom` says
+  // no and the debt sits for ever. Backfill was then blocked by a job that could not
+  // run, while being the one job that CAN: its first act frees that very block.
+  //
+  // Nothing is shared. Backfill uses its own scanner and its own ChapterReader, and
+  // `reacquireChapter` goes through `reopenChapter` rather than `walkToChapter`, so
+  // the live scan waiting in gNameScan survives the round trip and its merge still
+  // happens afterwards.
   if (gNameStore != nullptr && !gBackfillStopped && !gApp->dirty() &&
-      rawSamplesPending() == 0 && !gRefineOwed && gNamesOwed < 0 &&
+      rawSamplesPending() == 0 && !gRefineOwed &&
       static_cast<uint32_t>(millis() - gLastInputMs) >= kRefineQuietMs &&
       gApp->top().id() == reader::ScreenId::Reader) {
     auto* rd = static_cast<reader::ReaderScreen*>(&gApp->top());
