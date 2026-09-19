@@ -203,6 +203,12 @@ std::vector<std::string_view> sentences(std::string_view text) {
     }
     if (u >= end) sawSpace = true;
     if (!abbrev && sawSpace) {
+      // GUARDED LIKE EVERY OTHER GROWTH IN THIS FILE. A block is up to 8 KB of
+      // text and its sentence count is whatever the book says; an unguarded
+      // push_back here is abort() on a fragmented heap, which is the failure this
+      // feature has now shipped three times in three different containers.
+      // Returning what it has costs the tail of one block's names.
+      if (!ensureRoom(out, out.size() + 1)) return out;
       out.push_back(std::string_view(start, static_cast<size_t>(u - start)));
       start = u;
       p = u;
@@ -210,7 +216,8 @@ std::vector<std::string_view> sentences(std::string_view text) {
     }
     p = t;
   }
-  if (start < end) out.push_back(std::string_view(start, static_cast<size_t>(end - start)));
+  if (start < end && ensureRoom(out, out.size() + 1))
+    out.push_back(std::string_view(start, static_cast<size_t>(end - start)));
   return out;
 }
 
@@ -328,6 +335,16 @@ void NameScanner::addBlock(const Block& block, int blockInChapter, RunSink* sink
       }
       t.cand = tUp && tLow;
       if (p < end) t.comma = (classify(p, end).cls == Comma);
+      // THE ONE THAT CRASHED AT CHAPTER 29, twice. `toks` is cleared per sentence
+      // but keeps its capacity, so it only ever reallocates for a NEW longest
+      // sentence -- which is exactly the rare, unpredictable growth a fragmented
+      // heap refuses. A sentence that cannot be tokenised is abandoned whole rather
+      // than half: a partial token list would produce runs that are not in the book.
+      if (!ensureRoom(toks, toks.size() + 1)) {
+        ++dropped_;
+        toks.clear();
+        break;
+      }
       toks.push_back(std::move(t));
     }
 
@@ -362,12 +379,21 @@ void NameScanner::addBlock(const Block& block, int blockInChapter, RunSink* sink
       size_t j = i;
       while (j + 1 < toks.size() && toks[j + 1].cand && !toks[j].comma) ++j;
 
+      // BUILT TO THE CAP, NOT BUILT AND THEN MEASURED. This appended every token of
+      // the run and checked the length afterwards, so a pathological line of
+      // capitalised words allocated a string of any size before being rejected for
+      // being too long -- the check protected the TABLE and not the heap.
       std::string run = toks[i].text;
-      for (size_t k = i + 1; k <= j; ++k) {
+      bool overlong = run.size() > kMaxRunBytes;
+      for (size_t k = i + 1; k <= j && !overlong; ++k) {
+        if (run.size() + 1 + toks[k].text.size() > kMaxRunBytes) {
+          overlong = true;
+          break;
+        }
         run += ' ';
         run += toks[k].text;
       }
-      if (run.size() <= kMaxRunBytes) {
+      if (!overlong) {
         // SENTENCE-INITIAL SUPPRESSION, the load-bearing rule. `i != 0` is position
         // and `!opener` is grammar; a mention needs both to count.
         const bool mid = (i != 0 && !toks[i].opener);
@@ -460,9 +486,18 @@ std::vector<NameGroup> groupNames(const std::vector<NameIndexEntry>& entries,
     if (furnitureCutPercent > 0 && e.total > 0 &&
         e.chapterOpening * 100 / e.total >= furnitureCutPercent)
       continue;
+    // GUARDED, because this runs the moment a reader opens the Names screen -- the
+    // worst place there is for an abort. A list that cannot hold every name shows
+    // the ones it could, which is what every other bound in this feature does.
+    if (!ensureRoom(live, live.size() + 1)) break;
     live.push_back(&e);
   }
   const int n = static_cast<int>(live.size());
+  // THE TWO FIXED-SIZE VECTORS ARE ASKED FOR UP FRONT, because a constructor that
+  // cannot allocate is abort() with no way to refuse -- there is no nothrow spelling
+  // of `vector(n)`. An empty list is a real answer and the screen has a variant for
+  // it; a reboot is not.
+  if (!Heap::hasBlock(static_cast<size_t>(n) * sizeof(int) * 2)) return {};
   std::vector<int> parent(static_cast<size_t>(n));
   for (int i = 0; i < n; ++i) parent[static_cast<size_t>(i)] = i;
 
@@ -530,7 +565,7 @@ std::vector<NameGroup> groupNames(const std::vector<NameIndexEntry>& entries,
       for (const int k : ext) {
         if (firstToken(live[static_cast<size_t>(k)]->text) == ft) seen = true;
       }
-      if (!seen) ext.push_back(j);
+      if (!seen && ensureRoom(ext, ext.size() + 1)) ext.push_back(j);
     }
     if (ext.empty()) continue;
     std::sort(ext.begin(), ext.end(), [&](int a, int b) {
@@ -555,11 +590,13 @@ std::vector<NameGroup> groupNames(const std::vector<NameIndexEntry>& entries,
   for (int i = 0; i < n; ++i) {
     const int r = rootOf(parent, i);
     if (groupOf[static_cast<size_t>(r)] < 0) {
+      if (!ensureRoom(out, out.size() + 1)) break;
       groupOf[static_cast<size_t>(r)] = static_cast<int>(out.size());
       out.push_back(NameGroup{});
     }
     NameGroup& g = out[static_cast<size_t>(groupOf[static_cast<size_t>(r)])];
     g.midSentence += live[static_cast<size_t>(i)]->midSentence;
+    if (!ensureRoom(g.members, g.members.size() + 1)) continue;
     g.members.push_back(live[static_cast<size_t>(i)]->text);
   }
 

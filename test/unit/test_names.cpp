@@ -305,6 +305,34 @@ TEST_CASE("a heap that cannot grow the table drops runs rather than aborting") {
   CHECK(static_cast<int>(s.runs().size()) < 60);
   CHECK(s.dropped() > 0);
 
+  SUBCASE("a sentence that cannot be tokenised is abandoned whole, not half") {
+    // THE CONTAINER THAT ACTUALLY CRASHED THE DEVICE, twice, both times at chapter
+    // 29: `toks` is cleared per sentence but keeps its capacity, so it reallocates
+    // only for a NEW longest sentence -- exactly the rare, unpredictable growth a
+    // fragmented heap refuses. Guarding the runs table left this one open.
+    //
+    // ABANDONED WHOLE, because a partial token list produces runs that are not in
+    // the book: a maximal run is the span between two non-candidates, and cutting
+    // the list mid-sentence invents a boundary.
+    reader::Heap::install([](size_t bytes) { return bytes <= 4 * sizeof(void*); });
+    NameScanner t;
+    t.addBlock(para("Il vit Amy et Bob et Cal et Dan et Eve ensemble maintenant."), 4);
+    CHECK(t.dropped() > 0);
+    reader::Heap::install(nullptr);
+  }
+
+  SUBCASE("a run longer than the cap is never BUILT, not built and then measured") {
+    // The length check protected the TABLE and not the heap: the run string was
+    // assembled from every token first and rejected afterwards, so a line of
+    // capitalised words allocated a string of any size before being thrown away.
+    NameScanner t;
+    std::string line = "Il vit";
+    for (int i = 0; i < 40; ++i) line += " Abcdefghij";
+    line += " maintenant.";
+    t.addBlock(para(line), 4);
+    for (const auto& r : t.runs()) CHECK(r.text.size() <= NameScanner::kMaxRunBytes);
+  }
+
   SUBCASE("and a sink still sees every occurrence, table or no table") {
     // The capture pass runs on the tightest heap there is and wants occurrences
     // rather than counts, so it builds no table at all.
