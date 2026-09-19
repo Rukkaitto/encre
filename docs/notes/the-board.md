@@ -24,7 +24,7 @@ the paragraph goes in the roadmap and the card gets the line number.
 
 | Field | Holds |
 |---|---|
-| `Release` | `V1` / `V1.1` / `V1.2` / `V2` / `Someday`. What is left for each is the **Left to do** view, grouped by this |
+| `Release` | `v0.1.0` / `v0.2.0` / `v0.3.0` / `v0.4.0` / `V2` / `Someday` — **spelled as the tags**, since that is what a release here is. What is left for each is the **Left to do** view, grouped by this |
 | `Status` | the six stages below, with two entry doors |
 | `Kind` | `Screen` / `Engine` / `Fidelity` / `Perf` / `Hardware` / `Tooling` / `Docs` — **and it names the skill**: `Screen` goes through `implement-screen`, `Fidelity` through `design-change`, an `On glass` move through `flash-device` |
 | `Board` | which `.dc.html`, or empty |
@@ -107,7 +107,7 @@ it.
 
 **A PLANNED RELEASE IS ISSUES; V2 AND SOMEDAY ARE DRAFT ITEMS, DELIBERATELY.**
 An issue is what a commit can close, so everything anybody is working towards is
-one: **V1 47, V1.1 19, V1.2 24, and not a draft among them**. The eighteen parked
+one: **v0.1.0 47, v0.2.0 25, v0.3.0 8, v0.4.0 22, and not a draft among them**. The eighteen parked
 items stay drafts so the spec §8 shelf is not sitting in the tracker as open work
 nobody is doing. Same reasoning as `V2_SCREENS` in `tools/compare-design.py`:
 reachable, not counted. Promoting a draft is
@@ -123,6 +123,29 @@ A count that is right for a different reason is the shape this file keeps
 recording, so the composition is worth reading off the board rather than off
 this line — **V2 is 6 drafts beside 2 real issues now**, which the old sentence
 had no room for either.
+
+**THE OPTIONS ARE SPELLED AS TAGS NOW, BECAUSE THE MAPPING LIVED IN NOBODY'S
+HEAD** (2026-09-19). `V1` shipped as `v0.1.0` and `V1.1` as `v0.2.0`, and
+nothing anywhere wrote that down: the gate in `docs/releasing.md` takes a
+release NAME and what it clears is a TAG, so every run of it was a translation
+from memory. They are `v0.1.0`, `v0.2.0`, `v0.3.0`, `v0.4.0`, then `V2` and
+`Someday`, which keep their names because they are shelves and not releases.
+**The rename is `updateProjectV2Field` with each option's OWN id passed back**,
+which renames in place and leaves every card's value alone — the mutation takes
+the whole option list, so an omitted id creates a new option instead and drops
+that release's cards on the floor. Read the counts back before believing it
+landed: 118 cards in, 118 cards out, and `--release V1.2` now **errors** where
+before the rename it would have been the only spelling that worked.
+
+**AND v0.3.0 IS A SCOPE, WHERE `V1.2` WAS A BACKLOG WEARING A RELEASE NAME**
+(2026-09-19). It held 25 open cards — everything not yet done — so the gate's
+one question could only ever be answered `no`, and the release it named was
+whenever all the deferred work ran out. v0.3.0 is the Names family (#156, #157,
+#158) with the reader-menu row that gives it a door (#159), three technical
+cards (#152, #26, #105) and the tag (#160). The other 22 moved to `v0.4.0`
+untouched, which is the same bucket with an honest name on it: **the scope is
+the cards somebody means to finish, and the rest of the board is not a release
+just because it is next.**
 
 **`Todo` was missing from this table until 2026-08-28, and it is the entry door for
 every non-UI card** — so anyone following this section for a `Kind = Tooling` card
@@ -155,7 +178,7 @@ places is one that drifts in one of them.
 | `Kind` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUU` — `Screen` `fe704ca2`, `Engine` `e45425d2`, `Fidelity` `067a44e5`, `Perf` `3906b97c`, `Hardware` `8952abc2`, `Tooling` `09fcefaa`, `Docs` `ac2492c0` |
 | `Source` | `PVTF_lAHOAkvc3c4BhZ5gzhgVwX8` (text) |
 | `Phase` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgV6lo` — `1` `1af00faf`, `2A` `70d666b6`, `2A-2` `10dd1639`, `2B` `891e6f65`, `2C` `226e8a24`, `3A` `726ae204`, `3B` `e13f494d`, `3C` `edb93849`, `3C+` `40a66d57`, `3D` `8f1728ee`, `3E` `f7ea731c`, `4` `e7a6573a`, `5` `f00b8560` |
-| `Release` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUQ` — `V1` `88741031`, `V1.1` `0244a105`, **`V1.2` `f78ca656`**, `V2` `3a9bcb84`, `Someday` `4cd5509e`. **THIS ROW HAS NOW GONE STALE TWICE, THE SAME WAY BOTH TIMES: A RELEASE WAS ADDED AND NOTHING HERE NOTICED.** First `V1.1`, when all four recorded ids had also been rotated and the recorded ids answered `The single select option Id does not belong to the field` — **silently**, because `gh project item-edit` prints a GraphQL error and still **exits 0**, so a scripted `set -e` sweep reports success on the fields it did not set. Then `V1.2`, which is not an empty placeholder: it holds **24 issues**. That one cost nothing only because the missing option was one nobody had tried to set yet, which is luck rather than a property. **So the id is not the fragile part — the OPTION LIST is**, and it changes whenever the owner plans a release, which is not a moment anybody edits this file. Re-read the whole field from `field-list` rather than one id from this table, and verify by reading the item back: a write that failed and a write that landed look identical at the shell. **`Status`, `Kind` and `Phase` have never moved.** |
+| `Release` | `PVTSSF_lAHOAkvc3c4BhZ5gzhgVwUQ` — `v0.1.0` `88741031`, `v0.2.0` `0244a105`, `v0.3.0` `f78ca656`, **`v0.4.0` `088b0e9f`**, `V2` `3a9bcb84`, `Someday` `4cd5509e`. **The first three were RENAMED on 2026-09-19 and kept their ids**, so a recorded id outliving the name it was written beside is now a thing that has happened here. **THIS ROW HAS NOW GONE STALE TWICE, THE SAME WAY BOTH TIMES: A RELEASE WAS ADDED AND NOTHING HERE NOTICED.** First `V1.1`, when all four recorded ids had also been rotated and the recorded ids answered `The single select option Id does not belong to the field` — **silently**, because `gh project item-edit` prints a GraphQL error and still **exits 0**, so a scripted `set -e` sweep reports success on the fields it did not set. Then `V1.2`, which is not an empty placeholder: it holds **24 issues**. That one cost nothing only because the missing option was one nobody had tried to set yet, which is luck rather than a property. **So the id is not the fragile part — the OPTION LIST is**, and it changes whenever the owner plans a release, which is not a moment anybody edits this file. Re-read the whole field from `field-list` rather than one id from this table, and verify by reading the item back: a write that failed and a write that landed look identical at the shell. **`Status`, `Kind` and `Phase` have never moved.** |
 
 Moving one card is `gh project item-edit --id <item> --project-id <project>
 --field-id <field> --single-select-option-id <option>`; the item id comes from

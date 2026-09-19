@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What a release is waiting on, read live from the project board.
 
-    python3 tools/release_blockers.py --release V1.1
+    python3 tools/release_blockers.py --release v0.3.0
 
 Prints one TSV line per card in that release that is not `Done`, sorted:
 status, issue number (or `draft`), kind, title. docs/releasing.md's gate opens
@@ -25,9 +25,10 @@ pasteable pipeline at all, and the fourth is worse than useless in one:
   card filed between the two calls makes them disagree, and a gate that cannot
   tell a complete answer from a truncated one is the defect, not the number.
 
-  AN UNKNOWN RELEASE IS AN ERROR, NOT AN EMPTY ANSWER. `--release v1.1` against
-  a board spelling it `V1.1` selects nothing and exits 0, which reads exactly
-  like a release with no blockers left -- a false pass produced by a typo. The
+  AN UNKNOWN RELEASE IS AN ERROR, NOT AN EMPTY ANSWER. `--release V1.2` against
+  a board that now spells it `v0.3.0` selects nothing and exits 0, which reads
+  exactly like a release with no blockers left -- a false pass produced by a
+  name that was right last week. The
   name is checked against the Release field's own options, read live, for the
   reason compare-design.py's `--only` errors on an id it does not recognise
   rather than reporting `0/0`. Read live and not listed here because the option
