@@ -259,7 +259,7 @@ NameScanner::Run* NameScanner::findOrAdd(std::string_view text) {
   return &*runs_.insert(it, std::move(r));
 }
 
-void NameScanner::addBlock(const Block& block, int blockInChapter) {
+void NameScanner::addBlock(const Block& block, int blockInChapter, RunSink* sink) {
   // A HEADING IS NOT SKIPPED, and that is worth stating because skipping one is the
   // obvious fix and is a no-op. Two of three real EPUBs contain no h1-h6 at all and
   // the third's 32 of 3,241 changed the list not at all: real books put chapter
@@ -342,13 +342,18 @@ void NameScanner::addBlock(const Block& block, int blockInChapter) {
         run += toks[k].text;
       }
       if (run.size() <= kMaxRunBytes) {
+        // SENTENCE-INITIAL SUPPRESSION, the load-bearing rule. `i != 0` is position
+        // and `!opener` is grammar; a mention needs both to count.
+        const bool mid = (i != 0 && !toks[i].opener);
         if (Run* r = findOrAdd(run)) {
           ++r->total;
-          // SENTENCE-INITIAL SUPPRESSION, the load-bearing rule. `i != 0` is position
-          // and `!opener` is grammar; a mention needs both to count.
-          if (i != 0 && !toks[i].opener) ++r->midSentence;
+          if (mid) ++r->midSentence;
           if (blockInChapter <= 1) ++r->chapterOpening;
         }
+        // THE SINK SEES THE OCCURRENCE WHETHER OR NOT THE TABLE COULD HOLD IT. A
+        // chapter that overflowed kMaxRuns still has extracts worth capturing for
+        // the runs it did admit, and the sink is filtering by name anyway.
+        if (sink != nullptr) sink->onRun(run, blockInChapter, sv, toks[i].off, mid);
       }
       i = j + 1;
     }

@@ -61,13 +61,36 @@ class NameScanner {
   // thousand capitalised words would otherwise be a kilobyte on its own.
   static constexpr size_t kMaxRunBytes = 64;
 
+  // WHERE THE CAPTURE PASS HOOKS IN, so there is one walk and not two.
+  //
+  // The extracts have to be captured on a SECOND walk of the chapter -- admission is
+  // only decided at the end of the first, and holding candidate extracts for every
+  // run meanwhile is 28 KB beside the 37,056-byte inflate scratch that walk is using.
+  // But a second walk with its own tokeniser would be a second copy of the eleven
+  // rules, free to drift from the counts they produced. So it is THIS walk with a
+  // different consumer: the scanner tokenises, and the sink decides what to keep.
+  class RunSink {
+   public:
+    virtual ~RunSink() = default;
+    // `sentence` is the run's own sentence and `offset` is where the run starts in
+    // it, which is what an extract centred on the name needs. `midSentence` is
+    // whether this occurrence counted -- the sink sees suppressed ones too, because
+    // a name's first appearance in a chapter can legitimately open a sentence.
+    virtual void onRun(std::string_view run, int blockInChapter, std::string_view sentence,
+                       size_t offset, bool midSentence) = 0;
+  };
+
   // Start a chapter. Clears everything, so one scanner serves a whole book.
   void reset();
 
   // One block of the chapter, in order. `blockInChapter` is its index from 0 --
   // needed for the furniture cut, which is positional and not a tag: two of three
   // real EPUBs contain NO h1-h6 at all, so skipping Heading blocks is a no-op.
-  void addBlock(const Block& block, int blockInChapter);
+  //
+  // With a `sink` the counts are still kept, so a caller may do both in one pass on
+  // a chapter it has already admitted. The capture pass passes a sink and throws the
+  // counts away; the count pass passes none.
+  void addBlock(const Block& block, int blockInChapter, RunSink* sink = nullptr);
 
   // This chapter's runs, SORTED BY TEXT. The order is the merge's, not the screen's.
   const std::vector<Run>& runs() const { return runs_; }
