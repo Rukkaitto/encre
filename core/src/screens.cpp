@@ -832,7 +832,8 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       if (readerBody_ == nullptr) return nullptr;
       std::unique_ptr<PeekScreen> scr;
       if (peekPrimed_ && !readerBook_.path.empty() && fs_ != nullptr) {
-        scr = std::make_unique<PeekScreen>(*fs_, readerBook_, peekSpine_, readerBody_);
+        scr = std::make_unique<PeekScreen>(*fs_, readerBook_, peekSpine_, readerBody_,
+                                           peekAt_);
         // The chapter names, so the band says the chapter's NAME where the contents
         // supply one. Empty for a book with no contents, which falls back to `CH. NN`.
         scr->setChapterNames(contentsToc_);

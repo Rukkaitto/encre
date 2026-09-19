@@ -32,10 +32,20 @@ namespace reader {
 // what the reader can follow and past what they meant to look at. The Reader beneath
 // declares none for the same reason; a peek is a shorter excursion, not a laxer one.
 
-PeekScreen::PeekScreen(FileSystem& fs, OpenedBook book, int spine,
-                       const GlyphSource* body) {
+PeekScreen::PeekScreen(FileSystem& fs, OpenedBook book, int spine, const GlyphSource* body,
+                       Cursor at) {
   declareSplitMovers();
   inner_ = std::make_unique<ReaderScreen>(fs, std::move(book), spine, body);
+  // BEFORE setMetrics, WHICH IS THE WHOLE ORDERING RULE. restoreAt arms `startAt_`
+  // and `walkToChapter` consumes it on the first candidate it opens; armed after the
+  // walk it would be a cursor nothing reads, and the peek would silently land on
+  // page one while claiming to land on a sighting. `screens.cpp` already constructs
+  // in this order for the same reason.
+  //
+  // A ZERO CURSOR IS NOT A REQUEST, it is the absence of one: block 0 line 0 IS the
+  // start of the chapter, which is what Contents wants and what the walk does
+  // anyway. Arming it would cost an openAtCursor walk to reach where it already is.
+  if (at.block > 0 || at.line > 0) inner_->restoreAt(at);
   syncVm();
 }
 

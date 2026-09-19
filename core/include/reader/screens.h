@@ -439,6 +439,14 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // and an unused setter is a second way to reach a state only one path should own.
   void setPeek(int spine) {
     peekSpine_ = spine;
+    peekAt_ = Cursor{};
+    peekPrimed_ = true;
+  }
+  // WHERE IN THE CHAPTER, for a peek opened from a sighting rather than from a
+  // chapter. Contents keeps the overload above and keeps landing on page one.
+  void setPeekAt(int spine, Cursor at) {
+    peekSpine_ = spine;
+    peekAt_ = at;
     peekPrimed_ = true;
   }
 
@@ -695,6 +703,7 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   std::vector<std::string> mentionsChapterNames_;
   bool mentionsPrimed_ = false;
   int mentionsRows_ = 0;
+  Cursor peekAt_{};
   std::string menuTitle_, menuProgress_;
   int readerStartChapter_ = 0;
   Cursor readerStartAt_{};
