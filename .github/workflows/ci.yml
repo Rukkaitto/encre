@@ -217,3 +217,38 @@ jobs:
           name: design-vs-firmware
           path: build/design-vs-firmware.png
           if-no-files-found: ignore
+
+  # THE TOOLS' OWN TESTS, WHICH NOTHING RAN UNTIL #175. Five modules, 1,683
+  # lines, covering the tools the release gate reads -- and neither `make test`
+  # nor any job here invoked one of them.
+  #
+  # ITS OWN JOB RATHER THAN A STEP ON `compare`, which is where a currency check
+  # would otherwise land. That job already carries --require-implemented,
+  # --require-canvas-current and --require-version-current, takes three minutes,
+  # and a job that goes red for four unrelated reasons is a job people learn to
+  # re-run rather than read. This one is seconds and means exactly one thing: a
+  # tool's own tests broke.
+  #
+  # Pillow because compare-design.py and its tests build real images -- a
+  # four-pixel row at 126/127/128/129 is how the threshold boundary is pinned.
+  # Nothing here needs the submodule, the toolchain or a browser.
+  tool-tests:
+    name: Tool tests
+    runs-on: ubuntu-latest
+    steps:
+      # No fetch-depth: these drive throwaway repositories of their own rather
+      # than this one's history.
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Pillow
+        run: pip install pillow
+
+      # Through the Makefile rather than five `python3 tools/test_*.py` lines, so
+      # that what CI runs and what a developer runs cannot be two lists. The
+      # target globs, so a sixth module is covered the day it is written.
+      - name: Run the tool tests
+        run: make test-tools
