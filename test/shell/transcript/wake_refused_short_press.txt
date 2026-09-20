@@ -1,0 +1,23 @@
+<nvs> put encre_sess/slept 1B
+<serial> txbuf 4096
+<serial> begin 115200
+[stage] 150ms serial-up heap=180000 min=45840
+[boot] waited 150ms for USB CDC (cap 400, plugged=0, open=0)
+<board> detect verdict=1
+[detect] i2c verdict=X3Confirmed (pass scores 3/0) -> X3
+<board> selectDevice 1
+<board> displayProbe promoted=1
+[detect] controller probe valid=1 promoted=1 ver=00 00 00 00 00 flg=00
+<board> selectDevice 2
+[detect] promoted profile to XteinkX3Uc8279
+[detect] active controller=6
+<spi> begin sck=8 miso=7 mosi=10 ss=21
+<panel> setDisplayX3
+[stage] 150ms panel-profile-x3 heap=180000 min=45840
+<nvs> remove encre_sess/slept
+<gpio> pinMode pin=3 mode=5
+[wake] refused: power released by 150ms, needs 600ms (first sample at=150ms, refused=1). Sleeping again; nothing was painted
+<nvs> put encre_sess/slept 1B
+<power> railsDown
+<power> deepSleep
+<harness> scenario ended in deep sleep

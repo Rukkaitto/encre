@@ -12,8 +12,10 @@ where that evidence lives for `shell/`, which until #179 had no harness at all.
 | # | Change | Site | Scenarios that fail |
 |---|---|---|---|
 | 1 | delete `gApp->dispatch(ev)` | `main.cpp`, inside `loop()` | `press_down_on_home` |
-| 2 | `BTN_LEFT` maps to `Button::Left` instead of `Up` | the 7-entry switch in `loop()` | **none — see below** |
-| 3 | `display.skipInitialResync()` before the boot's `requestResync()` | `setup()` | all three |
+| 2 | `BTN_LEFT` maps to `Button::Left` instead of `Up` | the 7-entry switch in `loop()` | `every_button_maps` |
+| 3 | `display.skipInitialResync()` before the boot's `requestResync()` | `setup()` | every boot scenario |
+| 4 | the wake refusal does not call `markSleeping()` | `requireHeldPowerButtonOrSleepAgain` | `wake_refused_short_press` |
+| 5 | `kWakeHoldMs = 0` | the wake gate's constant | both wake scenarios |
 
 ### 1 — the recorded defect this epic exists for
 
@@ -21,15 +23,37 @@ A deleted `gApp->dispatch(ev)` made every button on every screen do nothing, and
 the firmware still built while all 803 desktop tests passed, because nothing on the
 desktop reached that loop. It now fails a scenario.
 
-### 2 — NOT CAUGHT, and the gap is in the SCENARIO SET rather than the harness
+### 2 — CLOSED by `every_button_maps`
 
-No scenario presses `BTN_LEFT`, so nothing can notice where it points. That is the
-same shape as the original defect: the side buttons did nothing for two phases
-while `test_gesture.cpp` never mentioned `Left` or `Right` at all.
+This row was a **known hole** when it was first written: no scenario pressed
+`BTN_LEFT`, so nothing could notice where it pointed — the same shape as the
+original defect, where the side buttons did nothing for two phases while
+`test_gesture.cpp` never mentioned `Left` or `Right` at all.
 
-The scenario that closes it is `every_button_maps` — seven presses, one per
-`BTN_*`, asserting seven distinct names in the `[i]` line. Until that exists this
-row is a **known hole**, written down rather than left to be rediscovered.
+`every_button_maps` presses six of the seven and asserts six distinct names in the
+`[i]` line. The mutation now fails it with `#3 UP` becoming `#3 LEFT`, and fails
+**nothing else** — `press_down_on_home` still passes, because it presses a
+different button. That discrimination is the point: a scenario set that failed
+everything on every mutation would say only that it runs.
+
+`BTN_POWER` is deliberately not in it. It sleeps, which ends the scenario; that is
+`power_press_sleeps`' job, and mixing them would make one transcript assert the
+mapping of six buttons and the sleep of a seventh.
+
+### 4 and 5 — the wake gate, which nothing on the desktop had ever executed
+
+CLAUDE.md: *"not one line of this gate is executed by the desktop suite — 1250
+green test cases say nothing about it"*, and the only way to exercise it was a
+finger on a device.
+
+`wake_refused_short_press` is 23 lines and pins all of it: `takeSleptFlag()`
+consuming the flag, the pin read as active-LOW, the refusal, the flag **given
+back**, and then sleeping again — with **no `<panel> begin` and no refresh
+anywhere**, because the gate sits before `display.begin()` and a refusal must
+spend no waveform.
+
+Both mutations discriminate correctly. Dropping the re-arm fails only the refusal
+scenario; dropping the dwell to zero fails both wake scenarios and neither boot.
 
 ### 3 — #94, and it is caught without modelling anything
 

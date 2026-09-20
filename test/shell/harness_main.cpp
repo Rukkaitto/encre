@@ -28,6 +28,7 @@
 #include "esp_system.h"     // HarnessRestarted -- so is esp_restart()
 #include "harness_state.h"
 #include "input_task.h"
+#include "session.h"   // markSleeping() -- the shipped writer, not a poked key
 
 void setup();
 void loop();
@@ -103,6 +104,108 @@ void pressDownOnHome() {
   for (int i = 0; i < 4; ++i) loop();
 }
 
+// EVERY BUTTON, ONE PRESS EACH, AND THE POINT IS THAT SEVEN NAMES COME BACK.
+//
+// This is the scenario MUTATIONS.md was written to demand. Swapping BTN_LEFT's
+// mapping passed all three of the first scenarios because none of them pressed it
+// -- the same shape as the original defect, where the side buttons did nothing for
+// two phases while test_gesture.cpp never mentioned Left or Right at all.
+//
+// THE SDK'S NAMES DESCRIBE ITS BAND ORDER, NOT THIS PANEL, and the mapping in
+// loop() is where that is reconciled: BTN_LEFT->Up, BTN_RIGHT->Down, BTN_UP->Left,
+// BTN_DOWN->Right. The last two ARE the side buttons. Reading the transcript is how
+// you check it, because the `[i]` line prints reader::buttonName rather than the
+// SDK index.
+//
+// BTN_POWER IS NOT HERE. It sleeps, which ends the scenario -- that is
+// power_press_sleeps' job, and mixing it in would make this one assert the mapping
+// of six buttons and the sleep of a seventh.
+void everyButtonMaps() {
+  giveCard("every-button");
+  setup();
+  const uint8_t order[] = {InputManager::BTN_BACK,  InputManager::BTN_CONFIRM,
+                           InputManager::BTN_LEFT,  InputManager::BTN_RIGHT,
+                           InputManager::BTN_UP,    InputManager::BTN_DOWN};
+  for (uint8_t b : order) {
+    harness::queueButton(b, true, harness::clock_().ms);
+    harness::queueButton(b, false, harness::clock_().ms + 40);
+    // Drained a few iterations at a time so each press resolves before the next is
+    // queued -- a real finger cannot overlap them and a transcript that did would
+    // pin the queue's behaviour rather than the mapping's.
+    for (int i = 0; i < 3; ++i) loop();
+  }
+}
+
+// POWER SLEEPS ON THE DOWN EDGE, and the scenario ends where the device does.
+//
+// The sleep order is display.deepSleep() -> powerDownRailsForSleep() ->
+// deepSleepUntilPowerButton(), and the last of those does not return -- here it
+// throws, which is what makes the branch observable rather than fatal. What the
+// transcript pins is that the Sleep screen is PAINTED first (a full waveform, so
+// the glass holds something while the chip is off), that `slept` is written to NVS
+// immediately before the call that does not come back, and the order of the three.
+void powerPressSleeps() {
+  giveCard("power-sleep");
+  setup();
+  harness::queueButton(InputManager::BTN_POWER, true, harness::clock_().ms);
+  harness::queueButton(InputManager::BTN_POWER, false, harness::clock_().ms + 40);
+  for (int i = 0; i < 4; ++i) loop();
+}
+
+// A WAKE THAT WAS NOT HELD LONG ENOUGH, AND THE GATE THAT REFUSES IT.
+//
+// The chip's wakeup source is LEVEL-triggered: the SoC resumes the instant the line
+// reaches its active level and there is no dwell anywhere on that path. So the
+// badge's `HOLD POWER TO WAKE` is made true AFTER the wake, by
+// requireHeldPowerButtonOrSleepAgain refusing one that was not held and sleeping
+// again.
+//
+// NOT ONE LINE OF THAT GATE IS EXECUTED BY THE DESKTOP SUITE -- 1250 green test
+// cases say nothing about it, and until this scenario the only way to exercise it
+// was a finger on a device. What it must show: a refusal spends NO waveform (the
+// gate sits before display.begin(), so the glass still holds the sleep screen that
+// named the hold), and the `slept` flag is GIVEN BACK, because a refused wake did
+// not spend it and without the re-arm the next wake reads as a cold start and the
+// reader loses their page.
+void wakeRefusedShortPress() {
+  harness::cardRoot() = cardRootFor("wake-refused");
+  std::filesystem::remove_all(harness::cardRoot());
+  std::filesystem::create_directories(harness::cardRoot() + "/books");
+  harness::cardPresent() = true;
+  // THE FLAG IS WRITTEN BY THE SHIPPED WRITER, not by poking a key this file
+  // guessed at: markSleeping() is what sleepNow() calls immediately before the
+  // sleep that does not return, so if its namespace or encoding ever changes, this
+  // setup follows rather than silently fabricating a record nothing would read.
+  markSleeping();
+  // And the reset reason a button resume produces. DEEPSLEEP is the plugged-in
+  // case; on battery the same sleep leaves the chip fully powered down, so pressing
+  // power gives POWERON -- indistinguishable from a first-ever boot, which is why
+  // the INTENT is recorded rather than inferred and why the gate accepts both.
+  harness::resetReason() = 8;  // ESP_RST_DEEPSLEEP
+  harness::wakeCause() = 7;    // ESP_SLEEP_WAKEUP_GPIO
+  harness::powerButtonDown() = false;  // ...and the finger is already off it
+  setup();
+}
+
+// THE SAME WAKE, HELD. The gate passes, boot continues, and the difference between
+// this transcript and the one above is the whole of what the gate does.
+void wakeHeldResumes() {
+  harness::cardRoot() = cardRootFor("wake-held");
+  std::filesystem::remove_all(harness::cardRoot());
+  std::filesystem::create_directories(harness::cardRoot() + "/books");
+  harness::cardPresent() = true;
+  markSleeping();
+  harness::resetReason() = 8;
+  harness::wakeCause() = 7;
+  harness::powerButtonDown() = true;  // held through the dwell
+  // NO SESSION STACK IS WRITTEN, only the flag. This scenario is about the GATE --
+  // that a held wake reaches display.begin(), paints, and asserts the baseline
+  // AFTER that paint rather than before it. The restore has its own record and its
+  // own scenario; conflating them would make this transcript move whenever either
+  // changed.
+  setup();
+}
+
 struct Scenario {
   const char* id;
   const char* what;
@@ -117,6 +220,10 @@ constexpr Scenario kScenarios[] = {
     {"boot_cold_card_present", "a first boot with a card and no books", bootColdCardPresent},
     {"boot_no_card", "no card at all: SdMissing is the root, not a degraded Home", bootNoCard},
     {"press_down_on_home", "one Down on Home: the [i] line and a FAST repaint", pressDownOnHome},
+    {"every_button_maps", "six presses, six distinct names in the [i] line", everyButtonMaps},
+    {"power_press_sleeps", "POWER on the down edge: paint, rails, sleep", powerPressSleeps},
+    {"wake_refused_short_press", "a tap does not wake: refused, no waveform", wakeRefusedShortPress},
+    {"wake_held_resumes", "the same wake, held: the gate passes", wakeHeldResumes},
 };
 
 int fail(const char* fmt, const char* arg = "") {
