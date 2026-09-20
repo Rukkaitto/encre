@@ -1,4 +1,4 @@
-.PHONY: test sim readme-images firmware probe probe-build fonts icons compare epubs epubs-bulk card-add card-remove zips conventions hooks canvas canvas-check canvas-test version version-check
+.PHONY: test test-tools sim readme-images firmware probe probe-build fonts icons compare epubs epubs-bulk card-add card-remove zips conventions hooks canvas canvas-check canvas-test version version-check
 # PlatformIO installs outside PATH by default; allow an override: make firmware PIO=/path/to/pio
 #
 # Invoked through its MODULE entry point rather than the `pio` launcher script,
@@ -29,6 +29,45 @@ test:
 # against throwaway repositories, so run them when the hook or the checker changes.
 conventions:
 	$(PYTHON) tools/check_conventions.py
+
+# THE TOOL TESTS, WHICH NOTHING RAN (#175). Five modules and 1,683 lines covering
+# the tools the release gate reads -- compare-design.py, versionc.py,
+# release_blockers.py, release_notes.py, check_conventions.py -- and until now
+# neither `make test` nor CI invoked one of them. They were all passing, so this
+# wires up a working check rather than repairing a rotted one.
+#
+# WHY NOT IN `make test`: that constraint is real and stays. The fast loop builds
+# on a bare checkout with no Python and no submodule, which is why every one of
+# these modules carries a comment declining to join it. What was wrong was the
+# conclusion that they therefore belong in NO target. This is a SECOND target,
+# and CI gives it a job of its own.
+#
+# GLOBBED RATHER THAN LISTED, which is versionc.py's own discipline: it scans
+# design/*.dc.html rather than holding a list, so a new board is covered by
+# existing. A sixth test module is covered here the day somebody writes it, and a
+# list in a Makefile is the caller list this project keeps finding.
+#
+# EVERY MODULE RUNS EVEN AFTER ONE FAILS. Stopping at the first would report on
+# less than the target claims, which is the exact shape compare-design.py was
+# bitten by five separate times.
+#
+# `[ -e ]` INSIDE THE LOOP IS WHAT MAKES THE EMPTY CASE REACHABLE. With no match,
+# sh leaves the PATTERN as the word, so the loop runs once on a file that does not
+# exist -- the first version of this counted that as a module, printed
+# "1 tool test module(s)" and failed only because python could not open it. The
+# zero-modules guard below was unreachable: a guard that cannot fire looks exactly
+# like a tree with nothing wrong, and selecting nothing must never read as a pass.
+test-tools:
+	@log=$$(mktemp); fail=0; ran=0; \
+	for t in tools/test_*.py; do \
+	  [ -e "$$t" ] || continue; \
+	  ran=$$((ran + 1)); printf '%-32s ' "$$t"; \
+	  if $(PYTHON) "$$t" >"$$log" 2>&1; then echo ok; \
+	  else echo FAILED; sed 's/^/    /' "$$log"; fail=1; fi; \
+	done; \
+	rm -f "$$log"; \
+	if [ "$$ran" -eq 0 ]; then echo "no tools/test_*.py found -- that is a failure, not a pass"; exit 1; fi; \
+	echo "$$ran tool test module(s)"; exit $$fail
 # Install the commit-msg and pre-push hooks. One `git config` -- the hooks
 # themselves are tracked in .githooks/, so they are reviewed like any other code
 # and cannot drift per clone. The config lives in the common .git/config, so this

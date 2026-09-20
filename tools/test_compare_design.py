@@ -111,6 +111,14 @@ def run(mod, argv, sim_status=None, chrome="/bin/echo"):
     captured = {}
 
     mod.CHROME = chrome
+    # AND THE SIMULATOR'S EXISTENCE, NOT ONLY ITS BEHAVIOUR. render_sim is stubbed
+    # below, but --require-implemented ALSO asks whether build/reader_sim is on
+    # disk -- correctly, since every screen would report unimplemented and the gate
+    # would pass on nothing having run. Left unstubbed, that made this file's
+    # result depend on whether the developer had built the simulator: green on a
+    # working tree, red on a clean checkout, and nobody noticed for as long as
+    # nothing but a developer ran it. `chrome` is any path that exists.
+    mod.SIM = pathlib.Path(chrome)
     mod.render_board = lambda bp, out, w, h: pathlib.Path(out)
 
     def fake_sim(sid, out, w, h):
