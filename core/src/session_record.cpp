@@ -49,9 +49,11 @@ constexpr const char* kNames[] = {
 // line of them was written, which is the guard doing its job at the moment it
 // was written for rather than one append later.
 static_assert(sizeof(kNames) / sizeof(kNames[0]) == static_cast<size_t>(ScreenId::Count),
-              "a ScreenId was added or removed; give it a row in kNames and a case in"
-              " sessionWireName. This names the Count SENTINEL, never a member -- a"
-              " named member does not move when a screen is appended, which is how"
+              "a ScreenId was added or removed; give it a row in kNames, IN ENUM"
+              " ORDER -- sessionWireName and decodeName both index this table by"
+              " ordinal, so a name at the wrong position encodes one screen as"
+              " another. This names the Count SENTINEL, never a member: a named"
+              " member does not move when a screen is appended, which is how"
               " Typography and then BookEnd each shipped serialising as `home`.");
 
 // Clamped so the encoded length is bounded. -1 is the floor rather than 0 because
@@ -123,86 +125,27 @@ bool decodeFocus(const char* start, size_t len, int& out) {
 }  // namespace
 
 const char* sessionWireName(ScreenId id) {
-  switch (id) {
-    case ScreenId::Home: return kNames[0];
-    case ScreenId::Library: return kNames[1];
-    case ScreenId::ItemActions: return kNames[2];
-    case ScreenId::DeleteConfirm: return kNames[3];
-    case ScreenId::BookDetails: return kNames[4];
-    case ScreenId::Settings: return kNames[5];
-    // The shell does not push the Sleep screen today -- sleepNow() paints
-    // nothing, because e-ink holds the frame -- so no record can name it. If one
-    // ever does, note that a restored SleepScreen takes no input: waking into it
-    // would be a screen with no way out. Make it unstorable before pushing it.
-    case ScreenId::Sleep: return kNames[6];
-    // Reader is NAMEABLE but not restorable, and the two are separate facts. It
-    // needs a name so this switch is exhaustive; it is not restorable because a
-    // reading position is a block and a line, which `focus` cannot carry -- so a
-    // restored Reader would reopen the chapter at page 1 and lose exactly what the
-    // session record exists to keep. ScreenFactory refuses to build one, which is
-    // what makes the refusal happen at the push rather than silently.
-    case ScreenId::Reader: return kNames[7];
-    // NAMEABLE, and restorable only as far as the Reader under them is. A wake that
-    // restored the menu or the contents would put a panel over a Reader the factory
-    // refuses to build without a book -- and App::restore stops at the screen that
-    // will not build, so the stack simply lands shorter. They need names so this
-    // switch is exhaustive and so a record cannot encode them as something else,
-    // which is the failure the name table exists to prevent: an id with no case
-    // returned kNames[0] and would have stored Contents as "home".
-    case ScreenId::ReaderMenu: return kNames[8];
-    case ScreenId::Contents: return kNames[9];
-    case ScreenId::SdMissing: return kNames[10];
-    // NAMEABLE AND GENUINELY RESTORABLE, unlike the two above it: the panel needs
-    // nothing from a book -- its band names none and its specimen is fixed -- so the
-    // factory builds it from the settings it already holds, and its focus is a row
-    // index that `focus` carries exactly.
-    case ScreenId::Typography: return kNames[11];
-    // NAMEABLE, and never actually restored: the factory refuses an unprimed peek
-    // exactly as it refuses an unprimed Reader or Contents, so App::restore stops
-    // short and leaves whatever is under it standing. It needs a name so this
-    // switch stays exhaustive and a record naming it cannot decode as something
-    // else.
-    case ScreenId::Peek: return kNames[12];
-    // NAMEABLE, and its restorability is Task 9's question rather than this
-    // function's. It needs a name for the reason every id above does: without a
-    // case it fell through to `return kNames[0]` and stored the end-of-book
-    // screen as "home", so a reader who idle-slept on it woke on Home -- which is
-    // the failure the note on ReaderMenu above says this table exists to prevent,
-    // having already happened once to Contents.
-    case ScreenId::BookEnd: return kNames[13];
-    // design/BookError.dc.html. Appended with the enum, which the static_assert on
-    // kNames above is what forces -- it names Count, so this table cannot be left
-    // short by an append the way it was for Typography and BookEnd.
-    case ScreenId::BookError: return kNames[14];
-    // NAMEABLE AND NEVER STORED, which is a third state again: the shell PAINTS this
-    // screen and never pushes it, on SleepScreen's argument -- the record names the
-    // top of the stack, so a pushed BatteryEmpty would wake the reader back into it.
-    // It needs a name so this switch stays exhaustive, because an id with no case
-    // falls through to `return kNames[0]` and stores the new screen as "home". That
-    // has already happened twice here.
-    case ScreenId::BatteryEmpty: return kNames[15];
-    case ScreenId::WifiSettings: return kNames[16];
-    case ScreenId::WifiPicker: return kNames[17];
-    case ScreenId::WifiPassword: return kNames[18];
-    case ScreenId::WifiConnect: return kNames[19];
-    case ScreenId::WifiError: return kNames[20];
-    case ScreenId::WifiNetworkActions: return kNames[21];
-    // Articles over wallabag. Every one of the six is NAMEABLE, and three of
-    // them are not restorable -- which are separate facts, as the Reader's own
-    // case above says. A name is what makes this switch exhaustive; whether a
-    // wake may put the screen back is kRestorability's answer.
-    case ScreenId::Articles: return kNames[22];
-    case ScreenId::ArticleActions: return kNames[23];
-    case ScreenId::ArticleEnd: return kNames[24];
-    case ScreenId::WallabagAccount: return kNames[25];
-    case ScreenId::WallabagConnecting: return kNames[26];
-    case ScreenId::WallabagError: return kNames[27];
-    case ScreenId::ArticlesRemoveConfirm: return kNames[28];
-    // NOT A SCREEN, so it has no name and must never reach the fall-through below,
-    // which is what silently made a missing case read as `home`.
-    case ScreenId::Count: break;
-  }
-  return kNames[0];
+  // AN INDEX, NOT A SWITCH, AND THE SWITCH IS WHERE THE FALL-THROUGH LIVED.
+  // Twenty-nine `case ScreenId::X: return kNames[N];` lines each carried a
+  // hand-written ordinal and ended in `return kNames[0]`, so a member with no
+  // case -- which is exactly what an append produces -- serialised as `home`.
+  // That happened twice, to Typography and then BookEnd, and `-Wswitch` is not
+  // what saves it: CMakeLists.txt:7 declines -Werror on purpose, so an
+  // unhandled case is a warning scrolling past.
+  //
+  // decodeName ALREADY indexes kNames by ordinal, so this is not a new coupling
+  // -- it is the same one, spelled the same way in both directions, and the two
+  // are now inverse by construction rather than by two lists agreeing. The
+  // static_assert above ties the table's length to the SENTINEL, and nothing
+  // here has to remember anything.
+  //
+  // OUT OF RANGE IS "" RATHER THAN A NAME. The sentinel is not a screen and
+  // neither is a value from a newer firmware, so there is nothing truthful to
+  // return. An empty name makes encodeSessionStack write a field decodeName
+  // refuses, which refuses the WHOLE record on the unknown-name rule -- a record
+  // that will not decode is the loud form of this, and `home` was the quiet one.
+  if (id >= ScreenId::Count) return "";
+  return kNames[static_cast<size_t>(id)];
 }
 
 std::string encodeSessionStack(const std::vector<StackEntry>& stack) {
