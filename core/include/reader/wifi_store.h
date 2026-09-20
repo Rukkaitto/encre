@@ -185,9 +185,19 @@ class SavedNetworks {
   // `[[nodiscard]]` IS THE FIX FOR #162 AND IT IS LOAD-BEARING. This returned a
   // bool that its ONE caller dropped as a statement, so a refused ninth network
   // was written to NVS anyway and the reader was told nothing. A refusal nobody
-  // can read is the eviction the cap exists to avoid. The compiler refuses the
-  // statement form now, on every build including the firmware's, which is the
-  // only check `shell/` has -- nothing on the desktop executes that branch.
+  // can read is the eviction the cap exists to avoid.
+  //
+  // IT WARNS, IT DOES NOT REFUSE, AND THIS LINE SAID IT REFUSED. There is no
+  // `-Werror` anywhere in this tree and CMakeLists.txt:7 declines one on purpose
+  // -- "a newer compiler must not be able to break the build" -- so the statement
+  // form compiles, emitting -Wunused-result, and exits 0. What the attribute buys
+  // is the warning landing in build output beside the diff that caused it, on
+  // every build including the firmware's, which is still the only check `shell/`
+  // has: nothing on the desktop executes that branch. That is the bargain
+  // `--require-canvas-current` and the mismatch percentage already take -- a
+  // reading in front of the one person who can still fix it, not a gate. An enum
+  // is what makes it hard to drop by accident; the attribute is what makes
+  // dropping it visible.
   [[nodiscard]] Remembered remember(std::string_view ssid, bool locked);
 
   // False when absent. FORGETTING THE AUTOMATIC NETWORK LEAVES ZERO AUTOMATIC:

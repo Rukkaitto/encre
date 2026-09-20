@@ -24,7 +24,7 @@ the runtime, the invariants, the goldens, and how to edit this repo with scripts
 | `tools/` | Asset generators (`fontc.py`, `iconc.py`, `embed_font.py`) and the design comparison tool. |
 | `design/` | `*.dc.html` design boards — **the source of truth for the UI**. |
 | `docs/superpowers/` | The spec, the roadmap, and per-phase implementation plans. |
-| `docs/notes/` | **The rest of this file** — nineteen sections split out for size, each named by a stub under its own heading below. Plus the API notes (`wallabag-api.md`) and the verdicts (`strip-grayscale-verdict.md`). |
+| `docs/notes/` | **The rest of this file** — nineteen sections split out for size, each named by a stub under its own heading below. Plus the API notes (`wallabag-api.md`), the verdicts (`strip-grayscale-verdict.md`) and the architecture audit (`architecture-audit.md`), which is the reasoning behind #174–#177 and records what it got wrong on the way. |
 | `docs/agents/` | The three agent-facing notes the **Agent skills** section names. |
 | `freeink-sdk/` | Submodule. MIT drivers for display/input/SD/battery. Never edit. |
 
