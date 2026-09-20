@@ -107,6 +107,12 @@ inline bool& cardPresent() {
   return present;
 }
 
+// QUEUE A BUTTON TRANSITION for input_task_host.cpp's scripted queue. A press is
+// TWO of these: a Short fires on the DOWN edge, and the release is what classifies
+// a press made entirely inside a repaint -- which a gray refresh makes possible,
+// since tick() only runs from the main loop.
+void queueButton(uint8_t button, bool down, uint32_t atMs);
+
 // RESET EVERY FAKE. One scenario per process is the rule (every piece of state in
 // main.cpp is a file-static with a boot-time initialiser and there is no reset
 // function; writing one would be a change to untested code before the net exists),

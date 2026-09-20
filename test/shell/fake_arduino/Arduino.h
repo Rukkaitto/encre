@@ -21,10 +21,13 @@ inline unsigned long micros() { return static_cast<unsigned long>(harness::clock
 
 // A delay MOVES THE CLOCK and does not sleep. A harness that really slept would
 // turn setup()'s CDC wait into two and a half seconds of test runtime for nothing.
-inline void delay(unsigned long ms) {
-  harness::clock_().advance(ms);
-  harness::record("<time> delay %lums", ms);
-}
+// A delay MOVES THE CLOCK AND RECORDS NOTHING. It does not sleep -- a harness that
+// really slept would spend two and a half seconds on setup()'s CDC wait for
+// nothing. And it emits no line: the wait alone called this fifteen times, the
+// firmware's own `[boot] waited 150ms` already says it, and the advance is visible
+// in every [stage] timestamp. A transcript that has to be read past is one nobody
+// reads.
+inline void delay(unsigned long ms) { harness::clock_().advance(ms); }
 
 constexpr int INPUT = 0x0;
 constexpr int OUTPUT = 0x1;

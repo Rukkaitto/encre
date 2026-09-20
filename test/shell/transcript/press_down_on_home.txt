@@ -1,0 +1,79 @@
+<serial> txbuf 4096
+<serial> begin 115200
+[stage] 150ms serial-up heap=180000 min=45840
+[boot] waited 150ms for USB CDC (cap 400, plugged=0, open=0)
+<board> detect verdict=1
+[detect] i2c verdict=X3Confirmed (pass scores 3/0) -> X3
+<board> selectDevice 1
+<board> displayProbe promoted=1
+[detect] controller probe valid=1 promoted=1 ver=00 00 00 00 00 flg=00
+<board> selectDevice 2
+[detect] promoted profile to XteinkX3Uc8279
+[detect] active controller=6
+<spi> begin sck=8 miso=7 mosi=10 ss=21
+<panel> setDisplayX3
+[stage] 150ms panel-profile-x3 heap=180000 min=45840
+<panel> begin 792x528
+[stage] 150ms display-begin-returned heap=180000 min=45840
+[boot] reset reason=1 POWERON; sleep wake cause=0; slept-flag=0 -> cold start
+<nvs> put encre_diag/prev 108B
+[boot] wake cause=0 -> cold boot, reseeding the controller's baseline (the panel keeps its last image until the first paint)
+<panel> requestResync settle=0
+[info] panel 792x528, buffer 52272 bytes
+[info] free heap 180000, largest block 61428
+[stage] 150ms fonts-ok heap=180000 min=45840
+[italic] ok ppem=32 line=48 init=0us cache=0/10240+3584
+[body] ppem=32 weight=400 ascent=38 descent=-10 line=48 init=0us glyph_a=17x18 raster=0us cache=90/16384+3584
+[stage] 150ms body-face-ok heap=180000 min=45840
+[info] frame 52272 bytes x1, the driver's own; free heap 180000, largest block 61428
+[frame] boot: viewing driver framebuffer <fb>, 52272 bytes, logical 528x792 CCW
+[stage] 150ms frame-bound heap=180000 min=45840
+[info] gray caps: combinesBase=0 busyStaging=0 strip=1
+[stage] 150ms sd-mount heap=180000 min=45840
+<card> mount live=1
+[sd] boot: storage usable (mount confirmed by a root-directory read)
+[boot] settings DEFAULTED: no file yet (first boot, or nothing has saved one)
+[boot] settings in force: sleepAfterMs=300000 fullRefreshEvery=0 fullOnTransition=1 ppem=32 margins=18 lead=1700 justify=1 logToCard=0
+[log] logToCard is off, so nothing is written to /encre.log and the boot buffer was discarded
+[wifi] 0 saved network(s)
+[sd] boot: no settings file on the card, so this build's defaults were written to /.reader/settings.json -- hand-editable from here on
+[sd] boot: no wallabag file on the card, so an empty /.reader/wallabag.json was written -- fill in the five values on a computer to enable Articles
+[sd] boot: fast probe reads /.reader/settings.json every 2000 ms. Opening it walks the root directory, then /.reader, then a data sector -- three sectors against SdFat's one 512-byte cache, so it cannot be answered from RAM
+[sd] boot: FAT-scan backstop NOT armed -- the fast probe reads a real file, which the device has confirmed detects a pull in ~2 s. The scan costs ~14 s on this card and is only worth that when the fast probe is degraded
+[boot] Articles fits 5 rows
+[boot] Library fits 7 rows on this 528x792 logical canvas (panel is 792x528 native)
+[boot] Settings list 662px: rows 55px, section headers 53px
+[boot] Reader column 492x668 at (18,69), body ppem 32
+<nvs> put encre_diag/prev 108B
+[library] counted 0 book(s) in /books in 0ms | folders held=0 hit=0 miss=0
+[boot] /books holds no readable book: Home shows the empty state
+[stage] 150ms root-home heap=180000 min=45840
+<nvs> clear encre_sess
+[session] cold boot: record cleared, nothing to restore
+<input> begin
+<input> startInputTask
+[stage] 150ms input-started heap=180000 min=45840
+<battery> read pct=72 charging=0
+[battery] supported pct=72 charging=no (I2C gauge backend)
+<spi> guard acquired
+<panel> refresh bank=GC seed=white mode=FULL
+<panel> refresh-complete
+[stage] 843ms mono-displayed heap=180000 min=45840
+[paint] done screen=HOME fidelity=mono mode=FULL sinceFull=0 total=693ms render=0ms (draw=0) panel=693ms (up=693 wave=0) scope=stack
+[render] total=0us other=0
+<spi> guard released
+<panel> baseline-asserted (after 1 refresh(es))
+[stage] 843ms first-paint-complete heap=180000 min=45840
+<nvs> put encre_diag/prev 108B
+<nvs> put encre_sess/stack 6B
+<nvs> put encre_sess/ver 1B
+[session] stored home:1; a wake will come back here
+<battery> read pct=72 charging=0
+<spi> guard acquired
+<panel> refresh bank=DU seed=none mode=FAST
+<panel> refresh-complete
+[stage] 1232ms mono-displayed heap=180000 min=45840
+[paint] done screen=HOME fidelity=mono mode=FAST sinceFull=1 total=389ms render=0ms (draw=0) panel=389ms (up=389 wave=0) scope=stack
+[render] total=0us other=0
+<spi> guard released
+[i] #1 DOWN SHORT from=HOME to=HOME ev=1 | wait=0 pre=0 disp=0 post=0 render=0 up=389 wave=0 | total=389ms ser=0 net=389
