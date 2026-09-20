@@ -4621,12 +4621,6 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   int articleId = 0;
   const bool isArticle = isArticlePath(path, &articleId);
 
-  // SET ON EVERY OPEN AND NOT ONLY WHEN IT CHANGES. The factory outlives every
-  // screen it builds, so a book opened after an article would otherwise end on a
-  // board about articles.
-  gFactory.setReaderEndScreen(isArticle ? reader::ScreenId::ArticleEnd
-                                        : reader::ScreenId::BookEnd);
-
   // WHAT A SAVE WILL NEED, captured now while it is all in hand.
   gReading.path = path;
   gReading.title = opened.title;
@@ -4706,10 +4700,11 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // Everything it needs is already in hand here: the title and the author came with the
   // OPF, and the count is the spine's length -- cover included, which is exactly the
   // number Home already says `OF` in `CH. 08 OF 92`.
-  reader::BookEndScreen::Facts endFacts;
-  endFacts.bookTitle = opened.title;
-  endFacts.author = opened.author;
-  endFacts.chapterCount = opened.chapterCount();
+  // THE TITLE, THE AUTHOR AND THE COUNT ARE NOT SET HERE ANY MORE. setReaderBook
+  // derives them from the same OpenedBook it is already being handed, so a Reader
+  // cannot exist without its end board's facts -- which is #177, and which this
+  // block's own note above had to argue for in prose because nothing enforced it.
+  // What is left is the one field that is NOT a fact about the book.
   // WHICH DECIDES THE LEAVING SLAB'S LABEL ONLY -- the action is popTo(Library) either
   // way, and that stops at the root when there is none. Scanned rather than tracked;
   // see appHasScreen.
@@ -4722,8 +4717,7 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // HOME and still lands on the Library. Corrected here rather than at the restore site
   // it would cost a second priming call, and this file's rule is that the second caller
   // is the extraction point rather than the first.
-  endFacts.libraryBeneath = appHasScreen(*gApp, reader::ScreenId::Library);
-  gFactory.setBookEndFacts(std::move(endFacts));
+  gFactory.setBookEndLibraryBeneath(appHasScreen(*gApp, reader::ScreenId::Library));
 
 
   if (isArticle) {
@@ -4755,7 +4749,10 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
       // nowhere.
       if (seenSelf && !af.hasNext) af.hasNext = true;
     }
-    gFactory.setArticleEndFacts(std::move(af));
+    // BOTH HALVES IN ONE CALL -- the facts, and that this Reader is on an article.
+    // setReaderBook above has already said BookEnd; this is what moves it, and it
+    // cannot move without the facts that make the board legal.
+    gFactory.setArticleEnd(std::move(af));
   }
 
   const bool pushed = push && gApp->pushScreen(reader::ScreenId::Reader);
