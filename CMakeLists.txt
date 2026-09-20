@@ -146,6 +146,10 @@ target_compile_definitions(shell_harness PRIVATE
 add_test(NAME shell_boot_cold COMMAND shell_harness boot_cold_card_present)
 add_test(NAME shell_boot_no_card COMMAND shell_harness boot_no_card)
 add_test(NAME shell_press_down COMMAND shell_harness press_down_on_home)
+add_test(NAME shell_every_button COMMAND shell_harness every_button_maps)
+add_test(NAME shell_power_sleeps COMMAND shell_harness power_press_sleeps)
+add_test(NAME shell_wake_refused COMMAND shell_harness wake_refused_short_press)
+add_test(NAME shell_wake_held COMMAND shell_harness wake_held_resumes)
 target_include_directories(shell_link_smoke BEFORE PRIVATE
   ${CMAKE_SOURCE_DIR}/test/shell/fake_arduino)
 target_include_directories(shell_link_smoke SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/test/vendor)
