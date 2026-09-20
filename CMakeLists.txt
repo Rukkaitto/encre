@@ -84,6 +84,59 @@ target_include_directories(shell_fake_surface SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}
 target_compile_options(shell_fake_surface PRIVATE ${READER_WARNINGS})
 add_test(NAME shell_fake_surface COMMAND shell_fake_surface)
 
+# THE SHELL UNDER TEST (#179, phase 1's second half). This is what makes
+# shell/src/main.cpp exist on the desktop at all -- 9,331 lines that until now no
+# test could reach, and where five recorded defects have hidden.
+#
+# NAMED SOURCES, for the fake surface's reason: a scenario that fell out of a glob
+# looks exactly like one that passes.
+#
+# THE FOUR TWINS replace shell files at seams that ALREADY EXIST rather than faking
+# what sits behind them -- input_task.h's five functions, and three classes that
+# each satisfy a reader:: interface. That is the rule that keeps the scaffolding
+# from doubling, and it is why sd_fs.cpp, wifi_radio_arduino.cpp and
+# http_transport_arduino.cpp are absent here rather than compiled against fakes.
+#
+# session.cpp, wifi_store_nvs.cpp, wallabag_store_nvs.cpp and card_file_sink.cpp
+# ARE compiled: they are thin adapters over Preferences and SdFat, both of which
+# the fake surface provides honestly.
+add_library(shell_under_test STATIC
+  ${CMAKE_SOURCE_DIR}/shell/src/main.cpp
+  ${CMAKE_SOURCE_DIR}/shell/src/session.cpp
+  ${CMAKE_SOURCE_DIR}/shell/src/wifi_store_nvs.cpp
+  ${CMAKE_SOURCE_DIR}/shell/src/wallabag_store_nvs.cpp
+  ${CMAKE_SOURCE_DIR}/shell/src/card_file_sink.cpp
+  # WITHOUT -DENCRE_FS_SELFTEST ITS WHOLE BODY IS `return -1;`, which is the
+  # honest answer on a desktop: the 27-clause contract it runs is meant for a REAL
+  # card, and -1 rather than 0 is what stops "did not run" reading as "passed".
+  # Compiled so main.cpp's one call to it resolves -- it was the ONLY undefined
+  # symbol in the whole 9,331-line file, which is a smaller number than expected.
+  ${CMAKE_SOURCE_DIR}/shell/src/sd_selftest.cpp
+  ${CMAKE_SOURCE_DIR}/test/shell/input_task_host.cpp
+  ${CMAKE_SOURCE_DIR}/test/shell/sd_fs_host.cpp
+  ${CMAKE_SOURCE_DIR}/test/shell/wifi_radio_host.cpp
+  ${CMAKE_SOURCE_DIR}/test/shell/http_transport_host.cpp
+  ${CMAKE_SOURCE_DIR}/test/shell/fake_arduino/harness_state.cpp)
+target_include_directories(shell_under_test BEFORE PRIVATE
+  ${CMAKE_SOURCE_DIR}/test/shell/fake_arduino
+  ${CMAKE_SOURCE_DIR}/shell/src)
+target_include_directories(shell_under_test SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/third_party)
+target_link_libraries(shell_under_test PRIVATE reader_core)
+target_compile_options(shell_under_test PRIVATE ${READER_WARNINGS})
+
+# THE LINK IS THE DELIVERABLE OF THIS STEP, so it gets a test that does nothing but
+# prove it. main.cpp defines no main() -- setup() at :6009 and loop() at :8071 are
+# its only entry points, and 86 of its 89 top-level definitions are file-static --
+# so the harness declares those two and owns main() itself. That static wall IS the
+# interface, and it is forced rather than chosen.
+add_executable(shell_link_smoke ${CMAKE_SOURCE_DIR}/test/shell/link_smoke.cpp)
+target_include_directories(shell_link_smoke BEFORE PRIVATE
+  ${CMAKE_SOURCE_DIR}/test/shell/fake_arduino)
+target_include_directories(shell_link_smoke SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/test/vendor)
+target_link_libraries(shell_link_smoke PRIVATE shell_under_test reader_core)
+target_compile_options(shell_link_smoke PRIVATE ${READER_WARNINGS})
+add_test(NAME shell_link_smoke COMMAND shell_link_smoke)
+
 # The NAMES probe (3E): does a capitalisation-and-frequency heuristic yield a list
 # worth reading on a real book? Not a test -- it needs a real novel, and the repo's
 # generated EPUBs are 1,400-word stubs where every threshold reports zero. The

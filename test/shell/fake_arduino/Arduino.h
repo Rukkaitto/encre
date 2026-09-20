@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 #include "harness_state.h"
 
@@ -112,6 +113,39 @@ struct EspClass {
   uint32_t getMaxAllocHeap() const { return harness::heap().block_; }
 };
 inline EspClass ESP;
+
+// THE LARGEST FREE BLOCK, which is a different number from the free heap and the
+// one that actually decides an allocation. On the device a single TLS handshake
+// takes it from 61,428 to 34,804 and it never returns above 36,852 -- while
+// getFreeHeap RECOVERS each time, which is exactly why nothing saw it for so long.
+// Modelled because the branches that read it must be reachable; the fragmentation
+// itself is not reproducible here and a scenario that wants it scripts the value.
+constexpr uint32_t MALLOC_CAP_8BIT = 1 << 2;
+constexpr uint32_t MALLOC_CAP_INTERNAL = 1 << 11;
+inline size_t heap_caps_get_largest_free_block(uint32_t caps) {
+  (void)caps;
+  return harness::heap().block_;
+}
+inline size_t heap_caps_get_free_size(uint32_t caps) {
+  (void)caps;
+  return harness::heap().free_;
+}
+
+// Arduino's String, as far as shell/ uses it: one numeric conversion for a log
+// line. Not a general implementation and not meant to become one.
+class String {
+ public:
+  String() = default;
+  String(const char* s) : s_(s != nullptr ? s : "") {}
+  explicit String(int v) : s_(std::to_string(v)) {}
+  explicit String(unsigned v) : s_(std::to_string(v)) {}
+  explicit String(long v) : s_(std::to_string(v)) {}
+  explicit String(unsigned long v) : s_(std::to_string(v)) {}
+  const char* c_str() const { return s_.c_str(); }
+
+ private:
+  std::string s_;
+};
 
 // A FILE-SCOPE MACRO WITH A TRAILING SEMICOLON at main.cpp:631, so it has to
 // expand to something a declaration terminator is legal after.

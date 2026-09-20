@@ -24,11 +24,26 @@ struct InputPins {
 
 class BoardConfig {
  public:
-  enum class Board : uint8_t { UNKNOWN, XTEINK_X3, XTEINK_X4 };
-  enum class DisplayController : uint8_t { UNKNOWN, UC8253, UC8279 };
+  // NAMES AND VALUES FROM THE REAL HEADER, not invented. The first draft of this
+  // file spelled them XTEINK_X3 / UC8253 and main.cpp would not compile -- the
+  // method census counted CALLS and could not see enumerator spellings.
+  //
+  // Only the three Xteink entries matter here; the rest of the real list is other
+  // people's boards. XteinkX3Uc8279 is the newer production run -- same board and
+  // glass, different controller -- which is what the display-bus probe promotes to.
+  enum class Board : uint8_t { XteinkX4, XteinkX3, XteinkX3Uc8279 };
+  enum class DisplayController : uint8_t {
+    SSD1677 = 0,
+    UC8253 = 2,
+    ED2208 = 3,
+    LgfxEpd = 4,
+    IT8951 = 5,
+    UC8279 = 6,
+    UC8179 = 7
+  };
 
   struct Profile {
-    Board board = Board::XTEINK_X3;
+    Board board = Board::XteinkX3;
     DisplayController displayController = DisplayController::UC8253;
     BatteryGaugeConfig batteryGauge{};
     InputPins input{};
@@ -38,11 +53,10 @@ class BoardConfig {
 
   static bool selectDevice(Board b) {
     ACTIVE.board = b;
-    ACTIVE.displayController =
-        b == Board::XTEINK_X4 ? DisplayController::UC8279 : DisplayController::UC8253;
-    harness::record("<board> selectDevice %s", b == Board::XTEINK_X3   ? "X3"
-                                               : b == Board::XTEINK_X4 ? "X4"
-                                                                       : "UNKNOWN");
+    ACTIVE.displayController = b == Board::XteinkX3Uc8279 ? DisplayController::UC8279
+                               : b == Board::XteinkX4     ? DisplayController::SSD1677
+                                                          : DisplayController::UC8253;
+    harness::record("<board> selectDevice %d", static_cast<int>(b));
     return true;
   }
 };

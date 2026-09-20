@@ -6,20 +6,6 @@
 #include "SdFat.h"
 #include "harness_state.h"
 
-namespace harness {
-// The scenario's card, as a directory on the host. Set before setup() runs.
-inline std::string& cardRoot() {
-  static std::string root;
-  return root;
-}
-// Whether the card is present at all. A scenario pulls it by clearing this, which
-// is what pollCardPresence is written to notice.
-inline bool& cardPresent() {
-  static bool present = true;
-  return present;
-}
-}  // namespace harness
-
 // THE CARD, OVER A HOST DIRECTORY.
 //
 // NOTE WHAT IS NOT MODELLED, because sd_fs.cpp is NOT compiled here -- it is

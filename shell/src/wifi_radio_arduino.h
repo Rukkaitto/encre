@@ -1,4 +1,11 @@
 #pragma once
+// `uint32_t` FOR joinStartedMs_, AND THIS HEADER WAS THE ONE THAT DID NOT SAY SO.
+// It compiled on the device because <WiFi.h> reaches <cstdint> transitively, and
+// on macOS because libc++ does. Ubuntu's libstdc++ does not, so the first build
+// of shell/ outside the firmware -- the desktop harness, #179 -- failed here.
+// Every other header in shell/ that uses a fixed-width type includes this; this
+// was the only one relying on somebody else having done it first.
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
