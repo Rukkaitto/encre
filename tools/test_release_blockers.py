@@ -133,7 +133,10 @@ def gh_stub(tmp, items, fields=None, broken=None, cap=None):
     # the live board at limits 5, 50, 100, 114 and 200, all reporting 114.
     gh.write_text(f"""#!/bin/sh
 if [ "$2" = "field-list" ]; then cat {tmp}/fields.json; exit 0; fi
-limit=${{@: -1}}
+# The LAST argument, POSIX. `${{@: -1}}` is a bash array slice: it works under
+# macOS's bash-as-sh and is `Bad substitution` under Ubuntu's dash, so this
+# file passed on every developer machine and failed the first time CI ran it.
+for limit; do :; done
 [ -n "{cap or ''}" ] && [ "$limit" -gt "{cap or 0}" ] && limit={cap or 0}
 python3 -c '
 import json,sys
