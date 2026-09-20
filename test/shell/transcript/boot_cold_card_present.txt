@@ -1,6 +1,6 @@
 <serial> txbuf 4096
 <serial> begin 115200
-[stage] 150ms serial-up heap=180000 min=45840
+[stage] 150ms serial-up heap=180000 min=45840 block=61428
 [boot] waited 150ms for USB CDC (cap 400, plugged=0, open=0)
 <board> detect verdict=1
 [detect] i2c verdict=X3Confirmed (pass scores 3/0) -> X3
@@ -12,24 +12,24 @@
 [detect] active controller=6
 <spi> begin sck=8 miso=7 mosi=10 ss=21
 <panel> setDisplayX3
-[stage] 150ms panel-profile-x3 heap=180000 min=45840
+[stage] 150ms panel-profile-x3 heap=180000 min=45840 block=61428
 <panel> begin 792x528
-[stage] 150ms display-begin-returned heap=180000 min=45840
+[stage] 150ms display-begin-returned heap=180000 min=45840 block=61428
 [boot] reset reason=1 POWERON; sleep wake cause=0; slept-flag=0 -> cold start
-<nvs> put encre_diag/prev 108B
+<nvs> put encre_diag/prev 120B
 [boot] wake cause=0 -> cold boot, reseeding the controller's baseline (the panel keeps its last image until the first paint)
 <panel> requestResync settle=0
 [info] panel 792x528, buffer 52272 bytes
 [info] free heap 180000, largest block 61428
-[stage] 150ms fonts-ok heap=180000 min=45840
+[stage] 150ms fonts-ok heap=180000 min=45840 block=61428
 [italic] ok ppem=32 line=48 init=0us cache=0/10240+3584
 [body] ppem=32 weight=400 ascent=38 descent=-10 line=48 init=0us glyph_a=17x18 raster=0us cache=90/16384+3584
-[stage] 150ms body-face-ok heap=180000 min=45840
+[stage] 150ms body-face-ok heap=180000 min=45840 block=61428
 [info] frame 52272 bytes x1, the driver's own; free heap 180000, largest block 61428
 [frame] boot: viewing driver framebuffer <fb>, 52272 bytes, logical 528x792 CCW
-[stage] 150ms frame-bound heap=180000 min=45840
+[stage] 150ms frame-bound heap=180000 min=45840 block=61428
 [info] gray caps: combinesBase=0 busyStaging=0 strip=1
-[stage] 150ms sd-mount heap=180000 min=45840
+[stage] 150ms sd-mount heap=180000 min=45840 block=61428
 <card> mount live=1
 [sd] boot: storage usable (mount confirmed by a root-directory read)
 [boot] settings DEFAULTED: no file yet (first boot, or nothing has saved one)
@@ -44,24 +44,24 @@
 [boot] Library fits 7 rows on this 528x792 logical canvas (panel is 792x528 native)
 [boot] Settings list 662px: rows 55px, section headers 53px
 [boot] Reader column 492x668 at (18,69), body ppem 32
-<nvs> put encre_diag/prev 108B
+<nvs> put encre_diag/prev 120B
 [library] counted 0 book(s) in /books in 0ms | folders held=0 hit=0 miss=0
 [boot] /books holds no readable book: Home shows the empty state
-[stage] 150ms root-home heap=180000 min=45840
+[stage] 150ms root-home heap=180000 min=45840 block=61428
 <nvs> clear encre_sess
 [session] cold boot: record cleared, nothing to restore
 <input> begin
 <input> startInputTask
-[stage] 150ms input-started heap=180000 min=45840
+[stage] 150ms input-started heap=180000 min=45840 block=61428
 <battery> read pct=72 charging=0
 [battery] supported pct=72 charging=no (I2C gauge backend)
 <spi> guard acquired
 <panel> refresh bank=GC seed=white mode=FULL
 <panel> refresh-complete
-[stage] 843ms mono-displayed heap=180000 min=45840
+[stage] 843ms mono-displayed heap=180000 min=45840 block=61428
 [paint] done screen=HOME fidelity=mono mode=FULL sinceFull=0 total=693ms render=0ms (draw=0) panel=693ms (up=693 wave=0) scope=stack
 [render] total=0us other=0
 <spi> guard released
 <panel> baseline-asserted (after 1 refresh(es))
-[stage] 843ms first-paint-complete heap=180000 min=45840
-<nvs> put encre_diag/prev 108B
+[stage] 843ms first-paint-complete heap=180000 min=45840 block=61428
+<nvs> put encre_diag/prev 120B
