@@ -130,6 +130,22 @@ target_compile_options(shell_under_test PRIVATE ${READER_WARNINGS})
 # so the harness declares those two and owns main() itself. That static wall IS the
 # interface, and it is forced rather than chosen.
 add_executable(shell_link_smoke ${CMAKE_SOURCE_DIR}/test/shell/link_smoke.cpp)
+
+add_executable(shell_harness ${CMAKE_SOURCE_DIR}/test/shell/harness_main.cpp)
+target_include_directories(shell_harness BEFORE PRIVATE
+  ${CMAKE_SOURCE_DIR}/test/shell/fake_arduino)
+target_link_libraries(shell_harness PRIVATE shell_under_test reader_core)
+target_include_directories(shell_harness BEFORE PRIVATE ${CMAKE_SOURCE_DIR}/shell/src)
+target_compile_options(shell_harness PRIVATE ${READER_WARNINGS})
+target_compile_definitions(shell_harness PRIVATE
+  TRANSCRIPT_DIR="${CMAKE_SOURCE_DIR}/test/shell/transcript"
+  BUILD_DIR="${CMAKE_BINARY_DIR}")
+
+# ONE add_test PER SCENARIO, because one scenario per process is the rule -- see
+# harness_main.cpp. This is reader_sim's own idiom, which has nine of them.
+add_test(NAME shell_boot_cold COMMAND shell_harness boot_cold_card_present)
+add_test(NAME shell_boot_no_card COMMAND shell_harness boot_no_card)
+add_test(NAME shell_press_down COMMAND shell_harness press_down_on_home)
 target_include_directories(shell_link_smoke BEFORE PRIVATE
   ${CMAKE_SOURCE_DIR}/test/shell/fake_arduino)
 target_include_directories(shell_link_smoke SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/test/vendor)
