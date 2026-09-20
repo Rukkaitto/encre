@@ -372,8 +372,27 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // because the factory is what constructs the screen -- `libraryVisibleRows`'
   // own reason -- and the shell sets it on EVERY open rather than only when it
   // changes, so a book opened after an article cannot inherit its board.
-  void setReaderEndScreen(ScreenId id) { readerEndScreen_ = id; }
+  // AN ARTICLE'S END BOARD AND ITS FACTS ARE ONE CALL, because they were never two
+  // things: ArticleEnd is reachable only from a Reader that is reading an article,
+  // and its facts come off the card in the same breath. This was
+  // `setReaderEndScreen(ArticleEnd)` plus `setArticleEndFacts(...)`, and nothing
+  // made the pair happen together -- the book's half of that is setReaderBook's
+  // note, and both halves are #177.
+  //
+  // THE BOARD IS DERIVED FROM THE FLAG rather than stored beside it, so the two
+  // cannot disagree and there is no ordering rule for a caller to keep: whichever
+  // of this and setReaderBook was called last is the one that meant it.
+  void setArticleEnd(ArticleEndScreen::Facts f) {
+    setArticleEndFacts(std::move(f));
+    readerEndScreen_ = ScreenId::ArticleEnd;
+  }
 
+  // THE BOARD'S FACTS WITHOUT THE CLAIM. setArticleEnd says the Reader is reading an
+  // article; this says only that ArticleEnd can be DRAWN, which is what a board
+  // specimen needs and what setArticlesDemo asks for with no reader in sight. Two
+  // facts rather than one setter with a flag, on the rule this file already applies
+  // to the log label and the wire name: two things that happen to agree are not one
+  // thing.
   void setArticleEndFacts(ArticleEndScreen::Facts f) {
     articleEndFacts_ = std::move(f);
     articleEndFactsSet_ = true;
@@ -542,10 +561,46 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // and Cursor{} means page one, which is both "no saved position" and "the top of
   // the chapter". The screen spends it on the first chapter it lands on.
   void setReaderBook(OpenedBook book, int startChapter, Cursor startAt = Cursor{}) {
+    // THE END SCREEN'S FACTS COME WITH THE BOOK, BECAUSE THEY ARE THE BOOK. The
+    // title and the author are the OPF's and the count is the spine's length --
+    // `chapterCount()` is `chapters.size()`, which is exactly the number Home
+    // already says `OF` in `CH. 08 OF 92`.
+    //
+    // They used to be a second call the shell made sixty lines later, and nothing
+    // made the two happen together. ReaderScreen pushes its end screen DIRECTLY
+    // from onGesture, so there is no press the shell sees first and no moment to
+    // prime it -- a Reader built without these is a book whose last page does
+    // nothing, three hundred pages after the mistake. That was #177, and it was
+    // safe only because openBookAt happened to be the single route to a Reader.
+    //
+    // ONLY `libraryBeneath` IS NOT THE BOOK'S. It is a fact about the STACK, it
+    // decides the leaving slab's label and nothing else, and the shell refines it
+    // with setBookEndLibraryBeneath. False is the honest default -- `BACK TO HOME`,
+    // and the action is popTo(Library) either way, which stops at the root when
+    // there is none, so the wrong label still lands on the right screen.
+    bookEndFacts_ = BookEndScreen::Facts{book.title, book.author, book.chapterCount(), false};
+    bookEndPrimed_ = true;
+    // AND A BOOK IS NOT AN ARTICLE. Saying so HERE is what closes the one-way hazard
+    // `setEndScreen`'s own header names -- the board outliving the article that set
+    // it. It used to be avoided by the shell setting it on every open, which is a
+    // caller remembering; now the call that says "a book now" says it itself.
+    //
+    // NOT DERIVED FROM `articleEndFactsSet_`, which was the first attempt here. That
+    // flag also means "the ArticleEnd BOARD can be drawn", which setArticlesDemo sets
+    // for a specimen with no reader anywhere -- two meanings on one flag, and the
+    // fixture that builds every screen would have handed a book ArticleEnd.
+    readerEndScreen_ = ScreenId::BookEnd;
     readerBook_ = std::move(book);
     readerStartChapter_ = startChapter;
     readerStartAt_ = startAt;
   }
+
+  // WHETHER A LIBRARY IS UNDER THE READER, which decides the leaving slab's LABEL
+  // and nothing else. Separate from setReaderBook because it is not a fact about
+  // the book: the shell scans the stack the Reader is about to be pushed onto, and
+  // on a WAKE there is no stack yet, so it is exact on a press and a guess on a
+  // wake. Its default is the safe half of that guess.
+  void setBookEndLibraryBeneath(bool beneath) { bookEndFacts_.libraryBeneath = beneath; }
   // The restored way back, or nothing. Separate from setReaderBook because it comes
   // from a DIFFERENT grade of the same record -- restoreFrom keeps the anchor only at
   // an Exact fit -- and folding it into the book call would invite a caller to pass
@@ -591,6 +646,7 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   AnchorPos readerAnchor_{};
   bool readerHasAnchor_ = false;
   PageMetrics readerMetrics_{};
+  ScreenId readerEndScreen_ = ScreenId::BookEnd;
   OpenedBook readerBook_{};
   bool readerDemo_ = false;
   bool peekDemo_ = false;
@@ -612,7 +668,6 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   bool articlesPrimed_ = false;
   FileSystem* articleFs_ = nullptr;
   int articlesRows_ = 0;
-  ScreenId readerEndScreen_ = ScreenId::BookEnd;
   ArticleActionsScreen::Facts articleActionFacts_;
   bool articleActionFactsSet_ = false;
   ArticleEndScreen::Facts articleEndFacts_;

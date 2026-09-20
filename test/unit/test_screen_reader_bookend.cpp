@@ -27,6 +27,7 @@
 #include "doctest.h"
 #include "reader/app.h"
 #include "reader/screen_reader.h"
+#include "reader/screens.h"
 #include "reader_fixture.h"
 
 using reader::Action;
@@ -196,4 +197,40 @@ TEST_CASE("an ARTICLE's last page opens ArticleEnd, and the default is unchanged
     const Action a = pageToTheEnd(*r.scr);
     CHECK(a.target == ScreenId::BookEnd);
   }
+}
+
+// WHICH BOARD THE FACTORY GIVES THE READER, and that it goes back.
+//
+// `setEndScreen`'s header names the one-way hazard: the factory outlives every
+// screen it builds, so a board set for an article leaves that board on every book
+// opened afterwards. It used to be avoided by the shell setting it on EVERY open --
+// a caller remembering, in the one function that happened to be the only route to a
+// Reader (#177). It is the factory's two priming calls that say it now, and this is
+// what holds them to it.
+TEST_CASE("an article says so with its facts, and the next book takes the board back") {
+  cardfix::CardReading r("<p>one</p>");
+  reader::DemoScreenFactory f(r.fs, "/books");
+  f.setReaderBody(&r.body.face);
+  f.setReaderMetrics(r.m);
+
+  const reader::ArticleEndScreen::Facts article{
+      1, "The Death and Life of the Great American Essay", "LONGREADS", 22, false, 2, true};
+
+  // A BOOK, THEN AN ARTICLE, THEN A BOOK -- the sequence the hazard needs. Nothing
+  // here calls a setter whose only job is the board; setReaderBook and setArticleEnd
+  // each carry it, which is the whole change.
+  f.setReaderBook(r.ob, 0);
+  f.setArticleEnd(article);
+  f.setReaderBook(r.ob, 0);
+
+  auto back = f.create(ScreenId::Reader);
+  REQUIRE(back != nullptr);
+  CHECK(static_cast<reader::ReaderScreen*>(back.get())->endScreen() == ScreenId::BookEnd);
+
+  // ...and the other direction still works from the same factory, so the reset is a
+  // reset and not a one-way door of its own.
+  f.setArticleEnd(article);
+  auto on = f.create(ScreenId::Reader);
+  REQUIRE(on != nullptr);
+  CHECK(static_cast<reader::ReaderScreen*>(on.get())->endScreen() == ScreenId::ArticleEnd);
 }

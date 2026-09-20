@@ -178,3 +178,38 @@ TEST_CASE("an unprimed factory refuses Articles rather than substituting a demo"
   CHECK(app.top().id() == ScreenId::Home);
   CHECK(app.depth() == 1);
 }
+
+TEST_CASE("a book's end screen is primed by the book, so the last page cannot be dead") {
+  // #177. ReaderScreen pushes its end screen DIRECTLY from onGesture, so there is
+  // no press the shell sees first and no moment to prime it: a Reader built with
+  // no end facts is a book whose last page does nothing, three hundred pages after
+  // the mistake. It was safe only because openBookAt happened to be the one route
+  // to a Reader, and nothing said so.
+  //
+  // THE FACTS TRAVEL WITH THE BOOK NOW. This fixture calls setReaderBook and NOTHING
+  // ELSE -- no setBookEndFacts anywhere -- which is exactly the state a second route
+  // to a Reader would leave the factory in.
+  DemoScreenFactory f;
+  OpenedBook book;
+  book.path = "/books/walden.epub";
+  book.title = "Walden";
+  book.author = "Henry David Thoreau";
+  book.chapters.resize(18);
+  f.setReaderBook(book, 0);
+
+  auto end = f.create(ScreenId::BookEnd);
+  REQUIRE(end != nullptr);
+  const auto& vm = static_cast<BookEndScreen*>(end.get())->vm();
+  CHECK(vm.byline == "Walden \xC2\xB7 Henry David Thoreau");
+  // chapterCount() is chapters.size() -- the spine's length, cover included, which
+  // is the number Home already says `OF`.
+  CHECK(vm.meta == "18 CHAPTERS");
+  // THE ONE FIELD THAT IS NOT THE BOOK'S defaults to the safe half of its guess.
+  // The action is popTo(Library) either way and stops at the root when there is
+  // none, so the label is all that is at stake and BACK TO HOME is where it lands.
+  CHECK(vm.leaveLabel == "BACK TO HOME");
+  f.setBookEndLibraryBeneath(true);
+  auto end2 = f.create(ScreenId::BookEnd);
+  REQUIRE(end2 != nullptr);
+  CHECK(static_cast<BookEndScreen*>(end2.get())->vm().leaveLabel == "BACK TO LIBRARY");
+}

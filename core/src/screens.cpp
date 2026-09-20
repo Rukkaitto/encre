@@ -714,6 +714,12 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // gestures are never dispatched -- so an end screen there would be a
       // setting with no reader, which is the producerless-field shape this
       // project keeps finding from the other direction.
+      // DERIVED, NOT STORED. An article's board is exactly "this factory was last
+      // told about an article", and setReaderBook clears that flag -- so the field
+      // this used to read cannot outlive the article that set it, which is the
+      // one-way hazard setEndScreen's own header names. Still set on EVERY path
+      // through this case including the demos, for that header's other reason: the
+      // factory outlives every screen it builds.
       scr->setEndScreen(readerEndScreen_);
       scr->setItalic(readerItalic_);
       // BEFORE setMetrics for the reason stated just above, and it applies more
