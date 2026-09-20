@@ -326,3 +326,37 @@ TEST_CASE("the read buffer the format derives holds the longest record it can wr
   const std::string wire = encodeSessionStack(worst);
   CHECK(wire.size() + 1 <= sessionStackMaxBytes());
 }
+
+TEST_CASE("a screen with no name refuses the whole record, where it used to be `home`") {
+  // THE ONE BEHAVIOUR THE EVERY-ID WALKS ABOVE CANNOT REACH. Both of them stop
+  // at `i < Count`, which is right -- the sentinel is not a screen -- and it
+  // left the out-of-range answer pinned by nothing at all. sessionWireName used
+  // to be a 29-case switch ending in `return kNames[0]`, so an id with no case
+  // serialised as `home`; that is #42, and it shipped twice, to Typography and
+  // then BookEnd.
+  //
+  // It is an index now, so the case cannot go missing -- but SOMETHING still has
+  // to say what an id past the table means, because a newer firmware's record
+  // can carry one and the sentinel itself is reachable by a cast.
+  CHECK(std::string(sessionWireName(ScreenId::Count)).empty());
+
+  // AND THE EMPTY NAME IS NOT MERELY DIFFERENT, IT IS REFUSED. encodeSessionStack
+  // writes the field anyway, so the record reads `:0` -- and decodeName rejects a
+  // zero-length name, which refuses the record. That is the whole point of the
+  // change: `home` was a wake landing on a screen nobody asked for, and a record
+  // that will not decode is a cold start, which is the honest failure.
+  const std::string alone = encodeSessionStack({{ScreenId::Count, 0}});
+  CHECK(alone == ":0");
+  std::vector<StackEntry> out;
+  CHECK_FALSE(decodeSessionStack(alone.c_str(), out));
+
+  // THE WHOLE RECORD, not the bad entry. A valid screen in front of it does not
+  // rescue the rest -- the file's unknown-name rule is that a record containing
+  // something this build cannot read was written by something that is not this
+  // format, so the entries around it may not mean what they say either.
+  const std::string mixed = encodeSessionStack({{ScreenId::Home, 0}, {ScreenId::Count, 0}});
+  CHECK(mixed == "home:0;:0");
+  std::vector<StackEntry> out2;
+  CHECK_FALSE(decodeSessionStack(mixed.c_str(), out2));
+  CHECK(out2.empty());
+}
