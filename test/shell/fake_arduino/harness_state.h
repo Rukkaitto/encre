@@ -95,6 +95,18 @@ inline bool& usbPlugged() {
   return plugged;
 }
 
+// THE CARD: a host directory, and whether it is present at all. Here rather than in
+// SDCardManager.h because sd_fs_host.cpp needs them and must NOT include that
+// header -- SdFat is precisely what the card twin exists to keep out of the build.
+inline std::string& cardRoot() {
+  static std::string root;
+  return root;
+}
+inline bool& cardPresent() {
+  static bool present = true;
+  return present;
+}
+
 // RESET EVERY FAKE. One scenario per process is the rule (every piece of state in
 // main.cpp is a file-static with a boot-time initialiser and there is no reset
 // function; writing one would be a change to untested code before the net exists),

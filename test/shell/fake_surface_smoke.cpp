@@ -75,10 +75,15 @@ TEST_CASE("every faked type instantiates and every faked method is callable") {
   CHECK(ESP.getMinFreeHeap() > 0);
   CHECK(ESP.getMaxAllocHeap() > 0);
 
-  BoardConfig::selectDevice(BoardConfig::Board::XTEINK_X3);
-  CHECK(detectXteinkVerdict() == XteinkVerdict::X3);
-  CHECK(applyXteinkDisplayController());
-  CHECK(getXteinkDisplayProbeDiag().ran);
+  // THE REAL SPELLINGS, and the first draft of this file had none of them right:
+  // `XTEINK_X3` for `XteinkX3`, a global `detectXteinkVerdict` for one in namespace
+  // `freeink`, `X3` for `X3Confirmed`, `ran` for `valid`. The 47-method census
+  // counted CALLS and could not see enumerator names, namespaces or struct fields --
+  // which is what PR2 was always going to discover and did.
+  BoardConfig::selectDevice(BoardConfig::Board::XteinkX3);
+  CHECK(freeink::detectXteinkVerdict() == freeink::XteinkVerdict::X3Confirmed);
+  CHECK(freeink::applyXteinkDisplayController());
+  CHECK(freeink::getXteinkDisplayProbeDiag().valid);
   // THE WRITE-THEN-READ detectAndSelectBoard depends on: the probe mutates ACTIVE
   // and the promotion branch reads it back.
   CHECK(BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8279);

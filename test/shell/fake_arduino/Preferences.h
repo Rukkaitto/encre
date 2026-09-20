@@ -62,6 +62,22 @@ class Preferences {
   size_t putString(const char* key, const char* value) {
     return putBytes(key, value, std::strlen(value));
   }
+  // THE READ-INTO-A-BUFFER OVERLOAD, which is the one every NVS adapter in shell/
+  // actually calls -- session.cpp, wifi_store_nvs.cpp and wallabag_store_nvs.cpp all
+  // read into a sized std::string rather than taking a copy. The first draft of this
+  // fake had only the returning form and none of the three compiled against it.
+  //
+  // NUL-TERMINATES AND RETURNS THE LENGTH WRITTEN, as the real one does: the callers
+  // size their buffer from sessionStackMaxBytes() and then trust the return.
+  size_t getString(const char* key, char* out, size_t maxLen) {
+    const size_t have = getBytesLength(key);
+    if (out == nullptr || maxLen == 0) return 0;
+    const size_t n = have < maxLen - 1 ? have : maxLen - 1;
+    getBytes(key, out, n);
+    out[n] = '\0';
+    return n;
+  }
+
   std::string getString(const char* key, const char* def = "") {
     const size_t n = getBytesLength(key);
     if (n == 0) return def;

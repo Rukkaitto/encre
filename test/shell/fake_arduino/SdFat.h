@@ -38,7 +38,9 @@ class FsFile {
   bool seekSet(uint64_t pos) {
     return f_ != nullptr && std::fseek(f_, static_cast<long>(pos), SEEK_SET) == 0;
   }
-  void sync() { if (f_ != nullptr) std::fflush(f_); }
+  // RETURNS bool, as the real SdFat does -- main.cpp chains it with &&, and a
+  // void here is a compile error rather than a silent difference.
+  bool sync() { return f_ != nullptr && std::fflush(f_) == 0; }
   int getWriteError() const { return f_ != nullptr && std::ferror(f_) ? 1 : 0; }
   void close() {
     if (f_ != nullptr) { std::fclose(f_); f_ = nullptr; }

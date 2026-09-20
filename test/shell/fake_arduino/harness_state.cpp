@@ -5,6 +5,27 @@
 #include "SDCardManager.h"
 #include "XteinkDetect.h"
 
+namespace freeink {
+
+const XteinkDisplayProbeDiag& getXteinkDisplayProbeDiag() { return harness::probeDiag(); }
+
+bool applyXteinkDisplayController() {
+  harness::probeDiag().valid = true;
+  harness::probeDiag().promoted = harness::promoteToUc8279();
+  if (harness::promoteToUc8279())
+    BoardConfig::ACTIVE.displayController = BoardConfig::DisplayController::UC8279;
+  harness::record("<board> displayProbe promoted=%d", harness::promoteToUc8279() ? 1 : 0);
+  return harness::promoteToUc8279();
+}
+
+bool selectXteinkDevice() {
+  return BoardConfig::selectDevice(harness::verdict() == XteinkVerdict::X3Confirmed
+                                       ? BoardConfig::Board::XteinkX3
+                                       : BoardConfig::Board::XteinkX4);
+}
+
+}  // namespace freeink
+
 namespace harness {
 
 // FOR THE FAKES' OWN TESTS, NOT FOR SCENARIOS. One scenario per process is the
@@ -25,9 +46,9 @@ void resetAll() {
   nvs().clear();
   cardPresent() = true;
   cardRoot().clear();
-  verdict() = XteinkVerdict::X3;
+  verdict() = freeink::XteinkVerdict::X3Confirmed;
   promoteToUc8279() = true;
-  probeDiag() = XteinkDisplayProbeDiag{};
+  probeDiag() = freeink::XteinkDisplayProbeDiag{};
   BoardConfig::ACTIVE = BoardConfig::Profile{};
 }
 
