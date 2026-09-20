@@ -58,6 +58,32 @@ target_compile_definitions(unit_tests PRIVATE
   TEST_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/test/unit/fixtures")
 add_test(NAME unit COMMAND unit_tests)
 
+# THE SHELL HARNESS'S FAKE HARDWARE SURFACE (#179, phase 1 of the #178 epic).
+#
+# NAMED SOURCES, NOT file(GLOB). This is the one target where the glob's silent
+# ignore is unacceptable: a scenario file that fell out of the build looks exactly
+# like a scenario that passes, which is the defect shape this whole epic exists to
+# close.
+#
+# PR1 compiles NONE of shell/src/main.cpp. That is the next step, whose deliverable
+# is a link rather than a test -- it is where every SDK dependency the 47-method
+# census missed gets discovered, and it cannot be split because a half-faked
+# surface does not link.
+#
+# BEFORE PRIVATE on the include path, so <Arduino.h> and the rest resolve to the
+# fakes for THIS TARGET ONLY. `make firmware` compiles the same sources against the
+# real headers on every PR, which is what checks the fakes' signatures. Nothing
+# checks their semantics; that is the honest limit and it is written at the top of
+# every one of them.
+add_executable(shell_fake_surface
+  ${CMAKE_SOURCE_DIR}/test/shell/fake_surface_smoke.cpp
+  ${CMAKE_SOURCE_DIR}/test/shell/fake_arduino/harness_state.cpp)
+target_include_directories(shell_fake_surface BEFORE PRIVATE
+  ${CMAKE_SOURCE_DIR}/test/shell/fake_arduino)
+target_include_directories(shell_fake_surface SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/test/vendor)
+target_compile_options(shell_fake_surface PRIVATE ${READER_WARNINGS})
+add_test(NAME shell_fake_surface COMMAND shell_fake_surface)
+
 # The NAMES probe (3E): does a capitalisation-and-frequency heuristic yield a list
 # worth reading on a real book? Not a test -- it needs a real novel, and the repo's
 # generated EPUBs are 1,400-word stubs where every threshold reports zero. The
