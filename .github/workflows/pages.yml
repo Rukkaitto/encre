@@ -1,0 +1,134 @@
+# The flasher page, published to GitHub Pages with the binaries it installs.
+#
+# WHY ONE WORKFLOW AND NOT A STEP IN release.yml, which is where this was first
+# going to live: **Pages has a single deployment**. A release-triggered deploy
+# carrying binaries and a push-to-main deploy carrying only the page would
+# overwrite each other, and whichever ran last would decide whether the site
+# could flash anything. So both events come here instead, and this job always
+# assembles the whole site: page, manifest and binaries together. One thing owns
+# both, which is the property that matters -- the page and the firmware it
+# offers cannot disagree about a version, because nothing else can write either.
+#
+# THE BINARIES ARE FETCHED HERE RATHER THAN LINKED FROM THE BROWSER, and that is
+# not a preference. GitHub release assets send **no CORS headers** on either hop
+# (`github.com/.../releases/download/...` 302s to
+# `release-assets.githubusercontent.com`, and neither response carries
+# `Access-Control-Allow-Origin`; the preflight 404s). A `fetch()` from
+# rukkaitto.github.io to a release asset therefore fails. A runner is not a
+# browser and has no such rule, so the download happens here and Pages serves
+# the result same-origin.
+#
+# WHAT IS DELIBERATELY NOT HERE: the .elf. It is published with every release
+# because a panic from a released build is undebuggable without the exact one,
+# and it is of no use to a browser -- it would be megabytes of Pages artifact
+# nothing fetches.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    # Everything the published site is made of. `partitions.csv` and
+    # `version.h` are here because the manifest is GENERATED from them: a
+    # partition move that never reached the page would leave it fingerprinting
+    # readers against a table nothing ships.
+    paths:
+      - 'web/**'
+      - 'tools/webmanifest.py'
+      - 'partitions.csv'
+      - 'core/include/reader/version.h'
+      - '.github/workflows/pages.yml'
+  # A new release is the other half: the page offers the latest one, so cutting
+  # a tag has to republish even though no file in the repository changed.
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read    # read the release assets
+  pages: write      # deploy
+  id-token: write   # what deploy-pages authenticates with
+
+# NOT cancel-in-progress. A cancelled Pages deployment can leave the site
+# mid-swap, and the thing being swapped is how somebody installs firmware. Two
+# runs queueing is the cheaper failure.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # BEFORE anything is downloaded, because this asks whether the COMMITTED
+      # manifest still matches partitions.csv, and the next step overwrites it.
+      # Running it afterwards would compare the file against itself.
+      - name: Refuse a manifest that has drifted from partitions.csv
+        run: python3 tools/webmanifest.py --check
+
+      # A FAILURE HERE FAILS THE DEPLOY, deliberately. Without a binary this
+      # site is a flasher that cannot flash, and publishing one quietly is the
+      # reports-on-less-than-it-claims shape this repository keeps finding. A
+      # failed deploy leaves the previous good site up, which is the better of
+      # the two wrong answers.
+      - name: Fetch the latest release's images
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          released=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+                       --json publishedAt --jq .publishedAt)
+          if [ -z "$tag" ]; then
+            echo "::error::no published release to offer. The page installs the" \
+                 "latest release, so there is nothing to deploy yet."
+            exit 1
+          fi
+          mkdir -p web/firmware
+          # Named by pattern rather than by a constructed filename: release.yml
+          # decides what these are called, and a second copy of that spelling
+          # here is a thing to keep in step.
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern '*-xteink.bin' --pattern '*-xteink-full.bin' \
+            --dir web/firmware
+          app=$(ls web/firmware/*-xteink.bin)
+          full=$(ls web/firmware/*-xteink-full.bin)
+          # `ls` on a glob that matched nothing would have left these empty and
+          # let the manifest step decide; it refuses too, but the message there
+          # is about a missing file rather than about a release that shipped
+          # without one.
+          if [ ! -f "$app" ] || [ ! -f "$full" ]; then
+            echo "::error::$tag does not carry both images. Expected one" \
+                 "*-xteink.bin and one *-xteink-full.bin."
+            exit 1
+          fi
+          echo "TAG=$tag"           >> "$GITHUB_ENV"
+          echo "RELEASED=$released" >> "$GITHUB_ENV"
+          echo "APP=$app"           >> "$GITHUB_ENV"
+          echo "FULL=$full"         >> "$GITHUB_ENV"
+          ls -l web/firmware
+
+      - name: Write the manifest for that release
+        run: |
+          set -euo pipefail
+          python3 tools/webmanifest.py \
+            --tag "$TAG" --released "$RELEASED" --app "$APP" --full "$FULL"
+          cat web/manifest.json
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

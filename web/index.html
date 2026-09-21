@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install Encre</title>
+<meta name="description" content="Put Encre on an Xteink X3 or X4 e-reader from your browser.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="encre.css">
+</head>
+<body>
+<div class="page">
+
+  <header class="band">
+    <div class="brand">
+      <div class="wordmark">ENCRE</div>
+      <nav class="tabs">
+        <a href="./" aria-current="page">INSTALL</a>
+        <a href="recovery.html">RECOVERY</a>
+      </nav>
+    </div>
+    <div class="band-meta"><span data-band-meta></span><span class="band-models"> &middot; XTEINK X3 &amp; X4</span></div>
+  </header>
+
+  <!-- design/WebFlash.dc.html -->
+  <main class="body" data-state-view="idle" hidden>
+    <div class="main">
+      <h1>PUT ENCRE ON YOUR READER</h1>
+      <ol class="steps-box">
+        <li>Plug the reader into this computer. Some cables only carry power. Those will not work.</li>
+        <li>Hold the power button until the screen changes. A sleeping reader does not show up in the list of devices.</li>
+      </ol>
+      <button class="slab" type="button" data-install disabled>CONNECT READER</button>
+      <p>Encre runs on the X3 and the X4 from one build. Screen rotation has only been checked on the X3.</p>
+      <p class="main-foot">Encre always goes into the reader's second firmware slot, so the firmware it
+        came with is never written over. Some readers are laid out differently. On those, installing
+        replaces everything, and the page saves a full copy of the reader first. That read takes about
+        25 minutes.</p>
+    </div>
+    <aside class="rail">
+      <div class="rail-label">STEPS</div>
+      <div class="rows rows--steps">
+        <div class="row" data-step="connect"><span class="mark"><i></i></span>CONNECT READER</div>
+        <div class="row" data-step="check"><span class="mark"><i></i></span>CHECK THE READER</div>
+        <div class="row" data-step="write"><span class="mark"><i></i></span>WRITE ENCRE</div>
+        <div class="row" data-step="start"><span class="mark"><i></i></span>START THE READER</div>
+      </div>
+      <div class="rail-foot">FLASHING OTHER FIRMWARE IS AT YOUR OWN RISK.</div>
+    </aside>
+  </main>
+
+  <!-- design/WebFlashUnsupported.dc.html -->
+  <main class="body" data-state-view="unsupported" hidden>
+    <div class="main">
+      <h1>THIS BROWSER CANNOT REACH THE READER</h1>
+      <p class="note">Flashing needs Web Serial, and this browser does not have it.</p>
+      <p>Open this page on a computer, in one of the browsers on the right.</p>
+      <p class="main-foot">The README has the commands for flashing from a terminal:<br>
+        <strong><a href="https://github.com/Rukkaitto/encre">github.com/Rukkaitto/encre</a></strong></p>
+    </div>
+    <aside class="rail">
+      <div class="rail-label">WEB SERIAL</div>
+      <dl class="rows">
+        <div class="row fact"><dt>CHROME</dt><dd>YES</dd></div>
+        <div class="row fact"><dt>EDGE</dt><dd>YES</dd></div>
+        <div class="row fact"><dt>FIREFOX</dt><dd>151 AND LATER</dd></div>
+        <div class="row fact"><dt>SAFARI</dt><dd>NO</dd></div>
+        <div class="row fact"><dt>PHONES &amp; TABLETS</dt><dd>NO</dd></div>
+      </dl>
+      <div class="rail-foot">FLASHING OTHER FIRMWARE IS AT YOUR OWN RISK.</div>
+    </aside>
+  </main>
+
+  <!-- design/WebFlashPhone.dc.html -->
+  <main class="body" data-state-view="phone" hidden>
+    <div class="main">
+      <h1>FLASHING NEEDS A COMPUTER</h1>
+      <p class="note">Encre is written to the reader over a USB cable from a computer. Phones and
+        tablets cannot do it.</p>
+      <p>Open this page on a computer running Chrome, Edge, or Firefox 151 and later.</p>
+      <p class="main-foot">The README has the commands for flashing from a terminal:<br>
+        <strong><a href="https://github.com/Rukkaitto/encre">github.com/Rukkaitto/encre</a></strong></p>
+    </div>
+  </main>
+
+  <!-- No release attached. Only a local checkout sees this: the Pages deploy
+       always regenerates the manifest with a release. -->
+  <main class="body" data-state-view="nobuild" hidden>
+    <div class="main">
+      <h1>NO BUILD TO INSTALL</h1>
+      <p class="note">This copy of the page has no firmware attached, so there is nothing to write to
+        a reader. The published page always carries the latest release.</p>
+      <p class="main-foot">Run the Pages workflow, or generate a manifest with
+        <code>tools/webmanifest.py --tag</code>.</p>
+    </div>
+  </main>
+
+  <main class="body" data-state-view="broken" hidden>
+    <div class="main">
+      <h1>THIS PAGE DID NOT LOAD PROPERLY</h1>
+      <p class="note" data-broken-detail></p>
+      <p class="main-foot">The README has the commands for flashing from a terminal:<br>
+        <strong><a href="https://github.com/Rukkaitto/encre">github.com/Rukkaitto/encre</a></strong></p>
+    </div>
+  </main>
+
+</div>
+<script src="encre.js"></script>
+</body>
+</html>
