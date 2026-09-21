@@ -674,6 +674,87 @@
       "w": 480,
       "h": 800,
       "page": "page-4"
+    },
+    {
+      "file": "WebFlash.dc.html",
+      "title": "Web · Install",
+      "x": 0,
+      "y": 720,
+      "w": 960,
+      "h": 620,
+      "page": "page-5"
+    },
+    {
+      "file": "WebFlashConnecting.dc.html",
+      "title": "Web · Install (checking)",
+      "x": 1060,
+      "y": 720,
+      "w": 960,
+      "h": 620,
+      "page": "page-5"
+    },
+    {
+      "file": "WebFlashBackup.dc.html",
+      "title": "Web · Install (saving a copy)",
+      "x": 2120,
+      "y": 720,
+      "w": 960,
+      "h": 620,
+      "page": "page-5"
+    },
+    {
+      "file": "WebFlashWriting.dc.html",
+      "title": "Web · Install (writing)",
+      "x": 3180,
+      "y": 720,
+      "w": 960,
+      "h": 620,
+      "page": "page-5"
+    },
+    {
+      "file": "WebFlashDone.dc.html",
+      "title": "Web · Install (done)",
+      "x": 0,
+      "y": 1440,
+      "w": 960,
+      "h": 620,
+      "page": "page-5"
+    },
+    {
+      "file": "WebFlashError.dc.html",
+      "title": "Web · Install (stopped)",
+      "x": 1060,
+      "y": 1440,
+      "w": 960,
+      "h": 620,
+      "page": "page-5"
+    },
+    {
+      "file": "WebFlashUnsupported.dc.html",
+      "title": "Web · Install (this browser)",
+      "x": 2120,
+      "y": 1440,
+      "w": 960,
+      "h": 620,
+      "page": "page-5"
+    },
+    {
+      "file": "WebRecovery.dc.html",
+      "title": "Web · Recovery",
+      "x": 3180,
+      "y": 1440,
+      "w": 960,
+      "h": 620,
+      "page": "page-5"
+    },
+    {
+      "file": "WebFlashPhone.dc.html",
+      "title": "Web · Install (phone)",
+      "x": 0,
+      "y": 2160,
+      "w": 390,
+      "h": 844,
+      "page": "page-5"
     }
   ],
   "annotations": [
