@@ -353,3 +353,26 @@ canvas-check:
 # the only specification the lost original left behind.
 canvas-test:
 	node tools/design-canvas/test_seed_canvas.mjs
+
+# WHAT THE FLASHER PAGE KNOWS ABOUT THE READER, generated rather than written
+# into JavaScript. web/manifest.json carries the partition table the page
+# fingerprints a reader against, and the slot Encre installs to -- both read
+# from partitions.csv, so a table change reaches the page without anybody
+# remembering it. `iconc.py` has the same relationship with the boards' SVG and
+# `versionc.py` with kVersion.
+#
+# ONLY THE LAYOUT HALF IS COMMITTED. The `firmware` half names an actual
+# release's binaries and their digests, which cannot be known until one exists,
+# so the committed copy is null and .github/workflows/pages.yml regenerates it
+# at deploy time with --tag. A committed copy would be stale the moment a
+# release was cut, and stale here means quietly offering something other than
+# the latest build.
+#
+# Its own tests are `$(PYTHON) tools/test_webmanifest.py`, NOT wired into
+# `make test` for tools/test_compare_design.py's reason. `make test-tools`
+# globs tools/test_*.py, so it is picked up with no list to edit.
+webmanifest:
+	$(PYTHON) tools/webmanifest.py
+
+webmanifest-check:
+	$(PYTHON) tools/webmanifest.py --check

@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Encre Recovery</title>
+<meta name="description" content="Save a copy of an Xteink reader, put its old firmware back, or write a saved copy over it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="encre.css">
+</head>
+<body>
+<div class="page">
+
+  <header class="band">
+    <div class="brand">
+      <div class="wordmark">ENCRE</div>
+      <nav class="tabs">
+        <a href="./">INSTALL</a>
+        <a href="recovery.html" aria-current="page">RECOVERY</a>
+      </nav>
+    </div>
+    <div class="band-meta"><span data-band-meta></span><span class="band-models"> &middot; XTEINK X3 &amp; X4</span></div>
+  </header>
+
+  <!-- design/WebRecovery.dc.html -->
+  <main class="body" data-state-view="idle" hidden>
+    <div class="main">
+      <section class="op">
+        <div>
+          <h2>BOOT THE OTHER SLOT</h2>
+          <p>Encre is always written to slot 2, so slot 1 still holds the firmware the reader came
+            with. This points the reader back at it. It takes a few seconds and erases nothing.</p>
+        </div>
+        <button class="slab" type="button" data-op="boot-other" disabled>BOOT SLOT 1</button>
+      </section>
+      <section class="op">
+        <div>
+          <h2>SAVE A COPY OF THE READER</h2>
+          <p>Reads all 16 MB and saves it to this computer. This takes about 25 minutes.</p>
+        </div>
+        <button class="slab slab--outline" type="button" data-op="backup" disabled>SAVE A COPY</button>
+      </section>
+      <section class="op">
+        <div>
+          <h2>WRITE A SAVED COPY BACK</h2>
+          <p>Writes a 16 MB copy you saved earlier. It replaces everything on the reader, Encre
+            included.</p>
+        </div>
+        <button class="slab slab--outline" type="button" data-op="restore" disabled>CHOOSE A FILE</button>
+      </section>
+      <p class="main-foot">A saved copy belongs to the reader it came from. Do not write one reader's
+        copy to another.</p>
+    </div>
+    <aside class="rail">
+      <div class="rail-label">READER</div>
+      <dl class="rows">
+        <div class="row fact"><dt>CHIP</dt><dd data-fact="chip">&mdash;</dd></div>
+        <div class="row fact"><dt>FLASH</dt><dd data-fact="flash">&mdash;</dd></div>
+        <div class="row fact"><dt>SLOT 1</dt><dd data-fact="slot1">&mdash;</dd></div>
+        <div class="row fact"><dt>SLOT 2</dt><dd data-fact="slot2">&mdash;</dd></div>
+        <div class="row fact"><dt>STARTS FROM</dt><dd data-fact="boots">&mdash;</dd></div>
+      </dl>
+      <div class="rail-foot">THE READER HAS TO BE AWAKE AND PLUGGED IN.</div>
+    </aside>
+  </main>
+
+  <main class="body" data-state-view="unsupported" hidden>
+    <div class="main">
+      <h1>THIS BROWSER CANNOT REACH THE READER</h1>
+      <p class="note">Recovery needs Web Serial, and this browser does not have it.</p>
+      <p>Open this page on a computer, in one of the browsers on the right.</p>
+      <p class="main-foot">The README has the commands for reading and writing flash from a terminal:<br>
+        <strong><a href="https://github.com/Rukkaitto/encre">github.com/Rukkaitto/encre</a></strong></p>
+    </div>
+    <aside class="rail">
+      <div class="rail-label">WEB SERIAL</div>
+      <dl class="rows">
+        <div class="row fact"><dt>CHROME</dt><dd>YES</dd></div>
+        <div class="row fact"><dt>EDGE</dt><dd>YES</dd></div>
+        <div class="row fact"><dt>FIREFOX</dt><dd>151 AND LATER</dd></div>
+        <div class="row fact"><dt>SAFARI</dt><dd>NO</dd></div>
+        <div class="row fact"><dt>PHONES &amp; TABLETS</dt><dd>NO</dd></div>
+      </dl>
+      <div class="rail-foot">THE READER HAS TO BE AWAKE AND PLUGGED IN.</div>
+    </aside>
+  </main>
+
+  <main class="body" data-state-view="phone" hidden>
+    <div class="main">
+      <h1>RECOVERY NEEDS A COMPUTER</h1>
+      <p class="note">Recovery talks to the reader over a USB cable from a computer. Phones and
+        tablets cannot do it.</p>
+      <p>Open this page on a computer running Chrome, Edge, or Firefox 151 and later.</p>
+      <p class="main-foot">The README has the commands for reading and writing flash from a terminal:<br>
+        <strong><a href="https://github.com/Rukkaitto/encre">github.com/Rukkaitto/encre</a></strong></p>
+    </div>
+  </main>
+
+  <main class="body" data-state-view="broken" hidden>
+    <div class="main">
+      <h1>THIS PAGE DID NOT LOAD PROPERLY</h1>
+      <p class="note" data-broken-detail></p>
+      <p class="main-foot">The README has the commands for reading and writing flash from a terminal:<br>
+        <strong><a href="https://github.com/Rukkaitto/encre">github.com/Rukkaitto/encre</a></strong></p>
+    </div>
+  </main>
+
+</div>
+<script src="encre.js"></script>
+</body>
+</html>
