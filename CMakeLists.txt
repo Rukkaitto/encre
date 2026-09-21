@@ -84,6 +84,19 @@ target_include_directories(shell_fake_surface SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}
 target_compile_options(shell_fake_surface PRIVATE ${READER_WARNINGS})
 add_test(NAME shell_fake_surface COMMAND shell_fake_surface)
 
+# THE PANEL CONTRACT AGAINST THE FAKE. Its other runner is
+# shell/src/panel_selftest.cpp, which drives the same clauses against the real
+# EInkDisplay on a real panel -- fs_contract.h's two-runner shape, for its reason.
+add_executable(shell_panel_contract
+  ${CMAKE_SOURCE_DIR}/test/shell/panel_contract_test.cpp
+  ${CMAKE_SOURCE_DIR}/test/shell/fake_arduino/harness_state.cpp)
+target_include_directories(shell_panel_contract BEFORE PRIVATE
+  ${CMAKE_SOURCE_DIR}/test/shell/fake_arduino)
+target_include_directories(shell_panel_contract SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/test/vendor)
+target_link_libraries(shell_panel_contract PRIVATE reader_core)
+target_compile_options(shell_panel_contract PRIVATE ${READER_WARNINGS})
+add_test(NAME shell_panel_contract COMMAND shell_panel_contract)
+
 # THE SHELL UNDER TEST (#179, phase 1's second half). This is what makes
 # shell/src/main.cpp exist on the desktop at all -- 9,331 lines that until now no
 # test could reach, and where five recorded defects have hidden.
@@ -112,6 +125,9 @@ add_library(shell_under_test STATIC
   # Compiled so main.cpp's one call to it resolves -- it was the ONLY undefined
   # symbol in the whole 9,331-line file, which is a smaller number than expected.
   ${CMAKE_SOURCE_DIR}/shell/src/sd_selftest.cpp
+  # Beside sd_selftest for its reason: without -DENCRE_PANEL_SELFTEST its whole
+  # body is `return -1;`, and main.cpp's one call to it has to resolve.
+  ${CMAKE_SOURCE_DIR}/shell/src/panel_selftest.cpp
   ${CMAKE_SOURCE_DIR}/test/shell/input_task_host.cpp
   ${CMAKE_SOURCE_DIR}/test/shell/sd_fs_host.cpp
   ${CMAKE_SOURCE_DIR}/test/shell/wifi_radio_host.cpp

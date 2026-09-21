@@ -95,6 +95,7 @@
 #include "reader/theme_quiet.h"
 #include "reader/viewmodel.h"
 #include "sd_fs.h"
+#include "panel_selftest.h"
 #include "sd_selftest.h"
 #include "session.h"
 
@@ -6462,6 +6463,21 @@ void setup() {
   // on rather than gated, exactly as the stage marks and the interaction line are.
   reader::Profile::install([]() -> uint32_t { return static_cast<uint32_t>(micros()); });
   mark("frame-bound");
+  // THE PANEL CONTRACT'S DEVICE-SIDE RUNNER, a stub returning -1 unless the
+  // firmware was built with -DENCRE_PANEL_SELFTEST=1 (see panel_selftest.h).
+  // Called from here for the reason the filesystem one is called at all: shell/ has
+  // no harness, and an on-device routine nothing invokes checks nothing.
+  //
+  // AFTER frame-bound, which is the earliest point the claims are true: begin() has
+  // run so the framebuffer exists, and the geometry is the one bindFrameToDriver
+  // has just agreed with. Before it, the framebuffer clause would assert the
+  // opposite of the truth.
+  const int panelFailures = runPanelContractSelfTest(display);
+  if (panelFailures >= 0) {
+    logf("[panel] contract self-test: %d failed assertion(s)\n", panelFailures);
+    logFlush();
+  }
+
 
   // Which grayscale path the selected driver actually offers. Logged because
   // the sequence below is only correct for a driver that does NOT combine the
