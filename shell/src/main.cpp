@@ -1126,6 +1126,18 @@ struct WakeCrumbs {
   uint32_t firstPaintMs;
   char lastStage[28];
   char lostBy[56];
+  // THE THREE HEAP FIGURES AT lastStage, because a failed allocation is abort()
+  // with no diagnostic and the RAM log dies with it -- so the boot AFTER a crash is
+  // the only place they can be read, and until now the record carried none of them.
+  //
+  // `block` IS THE ONE THAT SETTLES IT. getFreeHeap cannot see the largest
+  // allocation this firmware makes, and it RECOVERS after a TLS handshake while the
+  // block does not -- 73,344 / 73,076 / 72,760 across three connections with the
+  // block falling throughout. So free alone cannot tell "ran out" from
+  // "fragmented", which are different faults with different fixes.
+  uint32_t heapFree;
+  uint32_t heapMin;
+  uint32_t heapBlock;
 };
 static WakeCrumbs gCrumbs;
 static constexpr uint32_t kCrumbMagic = 0x454E4352u;  // "ENCR"
@@ -1175,6 +1187,12 @@ static void reportAndResetCrumbs(esp_reset_reason_t rst, esp_sleep_wakeup_cause_
                                           : (gCrumbs.probeFirstOk ? "ok" : "FAILED"),
                   (unsigned long)gCrumbs.probeFirstMs, (unsigned long)gCrumbs.firstPaintMs,
                   gCrumbs.lastStage[0] ? gCrumbs.lastStage : "(none)");
+    // THE FIGURES AT THAT STAGE. On a boot that follows a crash this is the whole
+    // report: a low `free` is a device that ran out, and a healthy `free` beside a
+    // small `block` is a fragmented one, which is the TLS case and a different fix.
+    logf("[prev] ...heap at that stage: free=%lu min=%lu block=%lu\n",
+         (unsigned long)gCrumbs.heapFree, (unsigned long)gCrumbs.heapMin,
+         (unsigned long)gCrumbs.heapBlock);
     if (gCrumbs.cardLostMs != 0)
       logf("[prev] ...and the card stopped answering at %lums, detected by: %s\n",
            (unsigned long)gCrumbs.cardLostMs, gCrumbs.lostBy);
@@ -1195,14 +1213,24 @@ static void mark(const char* s) {
   // flash writes a boot for a field that only matters at the decisive points
   // below, where it is flushed with the rest of the record.
   snprintf(gCrumbs.lastStage, sizeof(gCrumbs.lastStage), "%s", s);
+  // ...and the heap AT that stage, for the same reason: whatever is flushed next
+  // should describe the stage it names rather than the one the flush happened on.
+  gCrumbs.heapFree = ESP.getFreeHeap();
+  gCrumbs.heapMin = ESP.getMinFreeHeap();
+  gCrumbs.heapBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
   // millis() FIRST, because a stage line without one is how a boot cost gets
   // attributed to the wrong thing. These lines carried heap and no time, so the
   // only timestamps in a boot log came from the SDK -- and the first of those was
   // read as time zero, which put a 2.5 s delay in setup() down as the panel
   // detection's cost. Everything before the first timestamp is invisible, so
   // every stage gets one.
-  logf("[stage] %lums %s heap=%u min=%u\n", (unsigned long)millis(), s,
-       (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
+  // `block=` BECAUSE heap= AND min= CANNOT SEE FRAGMENTATION, which is the whole
+  // of the difference between a device that is short of memory and one that has
+  // plenty and cannot use it. [alive] gained this field for exactly that reason --
+  // "a fragmented heap and a healthy one read identically" -- and the stage trail,
+  // which this file's own rule calls the method ("read the marks"), did not.
+  logf("[stage] %lums %s heap=%u min=%u block=%u\n", (unsigned long)millis(), s,
+       (unsigned)gCrumbs.heapFree, (unsigned)gCrumbs.heapMin, (unsigned)gCrumbs.heapBlock);
   logFlush();
 }
 
@@ -4442,6 +4470,17 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // instead would have been three copies of it, and the third would have been added
   // late and differently.
   SlowOperation slow(reader::kStatusOpening);
+  // THE CRUMB IS FLUSHED HERE, AND THIS IS THE ONE PLACE ON THE READING PATH THAT
+  // FLUSHES IT. saveCrumbs() ran at four points before this -- two card events and
+  // two in boot -- and NONE after first-paint, so a device that aborted while
+  // opening a book reported `first-paint-complete` on the next boot rather than the
+  // stage it died at. That is the crash class that costs a reproduction session.
+  //
+  // ONE WRITE PER BOOK OPEN, not one per stage. The RAM-only rule on lastStage was
+  // written against "a dozen flash writes a boot", and that argument survives
+  // intact: this is the function that spends the reading floor, and opening a book
+  // is not a thing that happens a dozen times a boot.
+  saveCrumbs();
   const uint32_t t0 = millis();
   const uint32_t heapBefore = ESP.getFreeHeap();
   reader::OpenedBook opened;
