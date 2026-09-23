@@ -773,6 +773,24 @@
       "w": 960,
       "h": 620,
       "page": "page-5"
+    },
+    {
+      "file": "WebRecoveryDone.dc.html",
+      "title": "Web · Recovery (switched back)",
+      "x": 3180,
+      "y": 2160,
+      "w": 960,
+      "h": 620,
+      "page": "page-5"
+    },
+    {
+      "file": "WebRecoveryFailed.dc.html",
+      "title": "Web · Recovery (failed)",
+      "x": 0,
+      "y": 2880,
+      "w": 960,
+      "h": 620,
+      "page": "page-5"
     }
   ],
   "annotations": [
