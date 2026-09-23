@@ -81,12 +81,20 @@ check(by_name["app1"]["offset"] == "0x650000" and by_name["app1"]["size"] == "0x
       "offsets and sizes survive as hex strings")
 check(by_name["coredump"]["offset"] == "0xff0000",
       "an uppercase offset in the CSV is normalised, not passed through")
-check(m["layout"]["install"] == {"partition": "app1", "offset": "0x650000"},
-      "install names app1 and takes its offset from the table")
+check(m["layout"]["install"] == {"partition": "app1", "offset": "0x650000", "slot": 2},
+      "install names app1, its offset and its slot number, all from the table")
 check(m["layout"]["keeps"] == ["app0"],
       "the other app partition is what the install keeps")
 check(m["expects"] == "9.9.9", "the version comes from version.h")
 check(m["firmware"] is None, "a plain run attaches no firmware")
+
+swapped = STOCK_CSV.replace(
+    "app0,       app,  ota_0,    0x10000,  0x640000,\napp1,       app,  ota_1,    0x650000, 0x640000,",
+    "app1,       app,  ota_1,    0x650000, 0x640000,\napp0,       app,  ota_0,    0x10000,  0x640000,")
+d = tree(csv=swapped)
+run(d)
+check(manifest_of(d)["layout"]["install"]["slot"] == 1,
+      "the slot number is COUNTED in table order, not assumed to be 2")
 
 print("\nsizes in K/M mean what they mean")
 d = tree(csv=STOCK_CSV.replace("0x640000,", "6400K,", 1))

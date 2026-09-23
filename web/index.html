@@ -32,12 +32,92 @@
         <li>Plug the reader into this computer. Some cables only carry power. Those will not work.</li>
         <li>Hold the power button until the screen changes. A sleeping reader does not show up in the list of devices.</li>
       </ol>
-      <button class="slab" type="button" data-install disabled>CONNECT READER</button>
+      <button class="slab" type="button" data-connect disabled>CONNECT READER</button>
       <p>Encre runs on the X3 and the X4 from one build. Screen rotation has only been checked on the X3.</p>
       <p class="main-foot">Encre always goes into the reader's second firmware slot, so the firmware it
         came with is never written over. Some readers are laid out differently. On those, installing
         replaces everything, and the page saves a full copy of the reader first. That read takes about
         25 minutes.</p>
+    </div>
+    <aside class="rail">
+      <div class="rail-label">STEPS</div>
+      <div class="rows rows--steps">
+        <div class="row" data-step="connect"><span class="mark"><i></i></span>CONNECT READER</div>
+        <div class="row" data-step="check"><span class="mark"><i></i></span>CHECK THE READER</div>
+        <div class="row" data-step="write"><span class="mark"><i></i></span>WRITE ENCRE</div>
+        <div class="row" data-step="start"><span class="mark"><i></i></span>START THE READER</div>
+      </div>
+      <div class="rail-foot">FLASHING OTHER FIRMWARE IS AT YOUR OWN RISK.</div>
+    </aside>
+  </main>
+
+  <!-- design/WebFlashConnecting.dc.html -->
+  <main class="body" data-state-view="connecting" hidden>
+    <div class="main">
+      <h1>CHECKING THE READER</h1>
+      <dl class="rows">
+        <div class="row fact"><dt>CHIP</dt><dd data-fact="chip">&mdash;</dd></div>
+        <div class="row fact"><dt>FLASH</dt><dd data-fact="flash">&mdash;</dd></div>
+        <div class="row fact"><dt>LAYOUT</dt><dd data-fact="layout">&mdash;</dd></div>
+      </dl>
+      <p>Nothing has been written to the reader.</p>
+      <p class="main-foot">Encre always goes into the reader's second firmware slot, so the firmware
+        it came with is never written over. If the slots are not where Encre expects them, the next
+        screen says so before anything happens.</p>
+    </div>
+    <aside class="rail">
+      <div class="rail-label">STEPS</div>
+      <div class="rows rows--steps">
+        <div class="row" data-step="connect"><span class="mark"><i></i></span>CONNECT READER</div>
+        <div class="row" data-step="check"><span class="mark"><i></i></span>CHECK THE READER</div>
+        <div class="row" data-step="write"><span class="mark"><i></i></span>WRITE ENCRE</div>
+        <div class="row" data-step="start"><span class="mark"><i></i></span>START THE READER</div>
+      </div>
+      <div class="rail-foot">FLASHING OTHER FIRMWARE IS AT YOUR OWN RISK.</div>
+    </aside>
+  </main>
+
+  <!-- design/WebFlashChecked.dc.html. The board specimens the matching case;
+       the headline, the note and the LAYOUT row carry the other one. -->
+  <main class="body" data-state-view="checked" hidden>
+    <div class="main">
+      <h1 data-verdict-title>THE LAYOUT MATCHES</h1>
+      <p class="note" data-verdict></p>
+      <dl class="rows">
+        <div class="row fact"><dt>CHIP</dt><dd data-fact="result-chip">&mdash;</dd></div>
+        <div class="row fact"><dt>FLASH</dt><dd data-fact="result-flash">&mdash;</dd></div>
+        <div class="row fact"><dt>LAYOUT</dt><dd data-fact="result-layout">&mdash;</dd></div>
+        <div class="row fact"><dt data-verdict-target-label>WOULD WRITE TO</dt><dd data-fact="result-target">&mdash;</dd></div>
+      </dl>
+      <p data-verdict-detail></p>
+      <p class="main-foot">Installing from this page is not finished yet. Until it is, the README
+        has the commands for flashing from a terminal.</p>
+    </div>
+    <aside class="rail">
+      <div class="rail-label">STEPS</div>
+      <div class="rows rows--steps">
+        <div class="row" data-step="connect"><span class="mark"><i></i></span>CONNECT READER</div>
+        <div class="row" data-step="check"><span class="mark"><i></i></span>CHECK THE READER</div>
+        <div class="row" data-step="write"><span class="mark"><i></i></span>WRITE ENCRE</div>
+        <div class="row" data-step="start"><span class="mark"><i></i></span>START THE READER</div>
+      </div>
+      <div class="rail-foot">FLASHING OTHER FIRMWARE IS AT YOUR OWN RISK.</div>
+    </aside>
+  </main>
+
+  <!-- design/WebFlashCheckFailed.dc.html -->
+  <main class="body" data-state-view="failed" hidden>
+    <div class="main">
+      <h1>THE READER DID NOT ANSWER</h1>
+      <p class="note" data-failure-detail></p>
+      <dl class="rows">
+        <div class="row fact"><dt>STEP</dt><dd>CHECK THE READER</dd></div>
+        <div class="row fact"><dt>WRITTEN</dt><dd>NOTHING</dd></div>
+      </dl>
+      <p>Nothing was written to the reader.</p>
+      <p>Unplug the cable, plug it back in, hold the power button until the screen changes, and try
+        again.</p>
+      <button class="slab slab--outline" type="button" data-again style="margin-top: auto;">TRY AGAIN</button>
     </div>
     <aside class="rail">
       <div class="rail-label">STEPS</div>
@@ -107,6 +187,6 @@
   </main>
 
 </div>
-<script src="encre.js"></script>
+<script type="module" src="encre.js"></script>
 </body>
 </html>

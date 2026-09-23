@@ -8,7 +8,8 @@
     "tableSize": "0xc00",
     "install": {
       "partition": "app1",
-      "offset": "0x650000"
+      "offset": "0x650000",
+      "slot": 2
     },
     "keeps": [
       "app0"

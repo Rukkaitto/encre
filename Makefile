@@ -65,8 +65,18 @@ test-tools:
 	  if $(PYTHON) "$$t" >"$$log" 2>&1; then echo ok; \
 	  else echo FAILED; sed 's/^/    /' "$$log"; fail=1; fi; \
 	done; \
+	for t in tools/test_*.mjs; do \
+	  [ -e "$$t" ] || continue; \
+	  ran=$$((ran + 1)); printf '%-32s ' "$$t"; \
+	  if ! command -v node >/dev/null 2>&1; then \
+	    echo "NO NODE"; echo "    $$t needs node, which is not on PATH. That is a"; \
+	    echo "    module this target claims to run and did not -- fix the"; \
+	    echo "    environment rather than letting it read as a pass."; fail=1; \
+	  elif node "$$t" >"$$log" 2>&1; then echo ok; \
+	  else echo FAILED; sed 's/^/    /' "$$log"; fail=1; fi; \
+	done; \
 	rm -f "$$log"; \
-	if [ "$$ran" -eq 0 ]; then echo "no tools/test_*.py found -- that is a failure, not a pass"; exit 1; fi; \
+	if [ "$$ran" -eq 0 ]; then echo "no tools/test_*.py or tools/test_*.mjs found -- that is a failure, not a pass"; exit 1; fi; \
 	echo "$$ran tool test module(s)"; exit $$fail
 # Install the commit-msg and pre-push hooks. One `git config` -- the hooks
 # themselves are tracked in .githooks/, so they are reviewed like any other code
