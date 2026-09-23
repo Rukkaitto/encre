@@ -172,6 +172,13 @@ def build(args):
     install = next(p for p in partitions if p["name"] == INSTALL_PARTITION)
     keep = [p["name"] for p in partitions
             if p["type"] == "app" and p["name"] != INSTALL_PARTITION]
+    # WHICH SLOT, COUNTING FROM ONE, in table order. The boards say "slot 1" and
+    # "slot 2" and the table says app0 and app1, and something has to hold the
+    # correspondence. It goes here because it is a fact about the table -- the
+    # generator is already reading the order -- rather than a mapping typed into
+    # the page, which is where a second copy would start drifting.
+    apps = [p["name"] for p in partitions if p["type"] == "app"]
+    install_slot = apps.index(INSTALL_PARTITION) + 1
 
     firmware = None
     if args.tag:
@@ -197,7 +204,8 @@ def build(args):
         "layout": {
             "tableOffset": "0x%x" % TABLE_OFFSET,
             "tableSize": "0x%x" % TABLE_SIZE,
-            "install": {"partition": install["name"], "offset": install["offset"]},
+            "install": {"partition": install["name"], "offset": install["offset"],
+                        "slot": install_slot},
             "keeps": keep,
             "partitions": partitions,
         },

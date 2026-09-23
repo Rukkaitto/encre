@@ -755,6 +755,24 @@
       "w": 390,
       "h": 844,
       "page": "page-5"
+    },
+    {
+      "file": "WebFlashChecked.dc.html",
+      "title": "Web · Install (layout matches)",
+      "x": 1060,
+      "y": 2160,
+      "w": 960,
+      "h": 620,
+      "page": "page-5"
+    },
+    {
+      "file": "WebFlashCheckFailed.dc.html",
+      "title": "Web · Install (check failed)",
+      "x": 2120,
+      "y": 2160,
+      "w": 960,
+      "h": 620,
+      "page": "page-5"
     }
   ],
   "annotations": [
