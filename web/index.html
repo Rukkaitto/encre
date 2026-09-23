@@ -33,11 +33,10 @@
         <li>Hold the power button until the screen changes. A sleeping reader does not show up in the list of devices.</li>
       </ol>
       <button class="slab" type="button" data-connect disabled>CONNECT READER</button>
-      <p>Encre runs on the X3 and the X4 from one build. Screen rotation has only been checked on the X3.</p>
-      <p class="main-foot">Encre always goes into the reader's second firmware slot, so the firmware it
-        came with is never written over. Some readers are laid out differently. On those, installing
-        replaces everything, and the page saves a full copy of the reader first. That read takes about
-        25 minutes.</p>
+      <p class="note">The reader stops and its screen freezes while it is connected. That is normal.</p>
+      <p class="main-foot">Encre goes into the reader's second firmware slot and leaves the first alone. A reader
+        laid out differently is handled another way, and the page says so before it writes
+        anything.</p>
     </div>
     <aside class="rail">
       <div class="rail-label">STEPS</div>
@@ -61,8 +60,7 @@
         <div class="row fact"><dt>LAYOUT</dt><dd data-fact="layout">&mdash;</dd></div>
       </dl>
       <p>Nothing has been written to the reader.</p>
-      <p class="main-foot">Encre always goes into the reader's second firmware slot, so the firmware
-        it came with is never written over. If the slots are not where Encre expects them, the next
+      <p class="main-foot">Encre always goes into the reader's second firmware slot, so whatever is in the first one is never written over. If the slots are not where Encre expects them, the next
         screen says so before anything happens.</p>
     </div>
     <aside class="rail">
@@ -89,8 +87,8 @@
         <div class="row fact"><dt>LAYOUT</dt><dd data-fact="result-layout">&mdash;</dd></div>
         <div class="row fact"><dt data-verdict-target-label>WRITES TO</dt><dd data-fact="result-target">&mdash;</dd></div>
       </dl>
-      <p data-verdict-detail></p>
-      <button class="slab" type="button" data-install style="margin-top: auto;">INSTALL ENCRE</button>
+      <p data-verdict-detail style="margin-top: auto;"></p>
+      <button class="slab" type="button" data-install>INSTALL ENCRE</button>
       <p class="main-foot" data-no-install hidden>Installing over a reader laid out like this one is
         not finished yet. It would have to replace everything on the reader, and saving a copy first
         is not built. The README has the commands for flashing from a terminal.</p>
@@ -173,7 +171,7 @@
         <div class="row fact"><dt>WRITTEN TO</dt><dd data-fact="done-target">&mdash;</dd></div>
       </dl>
       <p>Put EPUB files in the /books folder on the SD card, and Encre lists them on Home.</p>
-      <p class="main-foot">The firmware your reader came with is still in slot 1. Recovery points the
+      <p class="main-foot">Whatever was in slot 1 before is still there. Recovery points the
         reader back at it.</p>
     </div>
     <aside class="rail">
