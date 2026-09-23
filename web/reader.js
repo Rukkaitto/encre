@@ -11,6 +11,7 @@ import {
   ESPRESSIF_VID,
   USB_JTAG_SERIAL_PID,
 } from './vendor/esptool-js/bundle.js';
+import { parseOtadata, activeSlot, selectSlot } from './otadata.js';
 
 /**
  * The chip every Xteink X3 and X4 carries.
@@ -154,6 +155,7 @@ export async function identify(port, manifest, onStage = () => {}) {
   const comparison = compareLayout(found, layout.partitions);
 
   return {
+    loader,
     chip,
     description,
     // esptool-js's own SPI-flash-id table, rather than a copy of it here. It
@@ -168,4 +170,101 @@ export async function identify(port, manifest, onStage = () => {}) {
       await transport.disconnect().catch(() => {});
     },
   };
+}
+
+
+/** SHA-256 of a buffer, as lowercase hex. */
+async function sha256Hex(buffer) {
+  const digest = await crypto.subtle.digest('SHA-256', buffer);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Write Encre into the install slot and point the bootloader at it.
+ *
+ * ORDER MATTERS AND IT IS THE SAFE ONE. The image goes in first and otadata
+ * second, so a write that is interrupted leaves a half-written slot the reader
+ * is not being told to boot from -- it still starts the firmware it already had.
+ * Flipping otadata first would mean an interrupted flash produces a reader
+ * pointed at an incomplete image.
+ *
+ * NOTHING IS WRITTEN TO THE SLOT THE READER CAME WITH. The target comes from the
+ * manifest, which takes it from partitions.csv, and `web/otadata.js` writes its
+ * entry into the otadata sector that is NOT currently in charge.
+ */
+export async function install(session, manifest, onProgress = () => {}) {
+  const { loader } = session;
+  const firmware = manifest.firmware;
+  const layout = manifest.layout;
+  if (!firmware) throw new Error('This page has no firmware attached to install.');
+
+  onProgress({ stage: 'fetching', written: 0, total: firmware.app.bytes });
+  const response = await fetch(firmware.app.path, { cache: 'no-cache' });
+  if (!response.ok) {
+    throw new Error('The firmware did not download (' + response.status + ').');
+  }
+  const buffer = await response.arrayBuffer();
+
+  // THE DIGEST IS CHECKED BEFORE A BYTE REACHES THE READER. The manifest records
+  // what the release workflow measured, so a download that is truncated, cached
+  // wrong or interfered with is refused here rather than written and discovered
+  // afterwards -- and "afterwards" on a flash write is a reader that will not
+  // boot.
+  const digest = await sha256Hex(buffer);
+  if (digest !== firmware.app.sha256) {
+    throw new Error('The firmware that downloaded is not the one this page expects. '
+                    + 'Nothing was written to the reader.');
+  }
+  const image = new Uint8Array(buffer);
+
+  onProgress({ stage: 'writing', written: 0, total: image.length });
+  await loader.writeFlash({
+    fileArray: [{ data: image, address: Number(layout.install.offset) }],
+    // "keep" leaves the image's own header alone. Rewriting mode, frequency or
+    // size is for an image written at the bootloader offset; this one is an app
+    // in a slot, and the values it was built with are the right ones.
+    flashMode: 'keep',
+    flashFreq: 'keep',
+    flashSize: 'keep',
+    // Erase only what is written. eraseAll would take the other slot, the
+    // settings in nvs and the reader's own firmware with it.
+    eraseAll: false,
+    compress: true,
+    reportProgress: (_i, written, total) => onProgress({ stage: 'writing', written, total }),
+  });
+
+  onProgress({ stage: 'selecting', written: image.length, total: image.length });
+  const otaPartition = layout.partitions.find((p) => p.name === 'otadata');
+  if (!otaPartition) {
+    throw new Error('This reader has no otadata partition, so nothing can choose '
+                    + 'which firmware it starts. Encre was written but not selected.');
+  }
+  const otaOffset = Number(otaPartition.offset);
+  const before = parseOtadata(await loader.readFlash(otaOffset, Number(otaPartition.size)));
+  const target = layout.install.slot - 1;          // the manifest counts from one
+  const pick = selectSlot(before, target);
+  await loader.writeFlash({
+    fileArray: [{ data: pick.bytes, address: otaOffset + pick.offsetInPartition }],
+    flashMode: 'keep', flashFreq: 'keep', flashSize: 'keep',
+    eraseAll: false, compress: false,
+  });
+
+  // READ IT BACK. The write can report success and still leave the bootloader
+  // reading the other entry -- a wrong sequence selects nothing new and looks
+  // exactly like a flash that worked. Eight kilobytes is about a second even at
+  // this chip's read speed, which is a cheap price for knowing.
+  const after = parseOtadata(await loader.readFlash(otaOffset, Number(otaPartition.size)));
+  if (activeSlot(after) !== target) {
+    throw new Error('Encre was written to slot ' + layout.install.slot
+                    + ', but the reader is still set to start the other one. '
+                    + 'Your original firmware is untouched.');
+  }
+
+  onProgress({ stage: 'done', written: image.length, total: image.length });
+  // A reset it cannot verify. esptool-js has no watchdog reset, and on this
+  // chip RTS is a core reset that does not re-sample the boot straps, so the
+  // reader may stay in download mode. The page tells the user to unplug and
+  // replug either way rather than claiming a reboot it cannot observe.
+  await loader.after('hard_reset').catch(() => {});
+  return { slot: layout.install.slot, seq: pick.seq, bytes: image.length };
 }

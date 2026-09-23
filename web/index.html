@@ -87,11 +87,13 @@
         <div class="row fact"><dt>CHIP</dt><dd data-fact="result-chip">&mdash;</dd></div>
         <div class="row fact"><dt>FLASH</dt><dd data-fact="result-flash">&mdash;</dd></div>
         <div class="row fact"><dt>LAYOUT</dt><dd data-fact="result-layout">&mdash;</dd></div>
-        <div class="row fact"><dt data-verdict-target-label>WOULD WRITE TO</dt><dd data-fact="result-target">&mdash;</dd></div>
+        <div class="row fact"><dt data-verdict-target-label>WRITES TO</dt><dd data-fact="result-target">&mdash;</dd></div>
       </dl>
       <p data-verdict-detail></p>
-      <p class="main-foot">Installing from this page is not finished yet. Until it is, the README
-        has the commands for flashing from a terminal.</p>
+      <button class="slab" type="button" data-install style="margin-top: auto;">INSTALL ENCRE</button>
+      <p class="main-foot" data-no-install hidden>Installing over a reader laid out like this one is
+        not finished yet. It would have to replace everything on the reader, and saving a copy first
+        is not built. The README has the commands for flashing from a terminal.</p>
     </div>
     <aside class="rail">
       <div class="rail-label">STEPS</div>
@@ -118,6 +120,61 @@
       <p>Unplug the cable, plug it back in, hold the power button until the screen changes, and try
         again.</p>
       <button class="slab slab--outline" type="button" data-again style="margin-top: auto;">TRY AGAIN</button>
+    </div>
+    <aside class="rail">
+      <div class="rail-label">STEPS</div>
+      <div class="rows rows--steps">
+        <div class="row" data-step="connect"><span class="mark"><i></i></span>CONNECT READER</div>
+        <div class="row" data-step="check"><span class="mark"><i></i></span>CHECK THE READER</div>
+        <div class="row" data-step="write"><span class="mark"><i></i></span>WRITE ENCRE</div>
+        <div class="row" data-step="start"><span class="mark"><i></i></span>START THE READER</div>
+      </div>
+      <div class="rail-foot">FLASHING OTHER FIRMWARE IS AT YOUR OWN RISK.</div>
+    </aside>
+  </main>
+
+  <!-- design/WebFlashWriting.dc.html -->
+  <main class="body" data-state-view="writing" hidden>
+    <div class="main">
+      <h1>WRITING ENCRE</h1>
+      <div class="bar"><span data-progress-bar></span></div>
+      <div class="rows"><div class="row fact" style="border-top: 0; padding-top: 0;">
+        <dt data-progress-text>&mdash;</dt><dd data-progress-percent>0%</dd>
+      </div></div>
+      <dl class="rows">
+        <div class="row fact"><dt>VERSION</dt><dd data-fact="write-version">&mdash;</dd></div>
+        <div class="row fact"><dt>WRITING TO</dt><dd data-fact="write-target">&mdash;</dd></div>
+        <div class="row fact"><dt>KEEPING</dt><dd data-fact="write-keeps">&mdash;</dd></div>
+      </dl>
+      <p class="main-foot">Do not unplug the reader.</p>
+    </div>
+    <aside class="rail">
+      <div class="rail-label">STEPS</div>
+      <div class="rows rows--steps">
+        <div class="row" data-step="connect"><span class="mark"><i></i></span>CONNECT READER</div>
+        <div class="row" data-step="check"><span class="mark"><i></i></span>CHECK THE READER</div>
+        <div class="row" data-step="write"><span class="mark"><i></i></span>WRITE ENCRE</div>
+        <div class="row" data-step="start"><span class="mark"><i></i></span>START THE READER</div>
+      </div>
+      <div class="rail-foot">FLASHING OTHER FIRMWARE IS AT YOUR OWN RISK.</div>
+    </aside>
+  </main>
+
+  <!-- design/WebFlashDone.dc.html -->
+  <main class="body" data-state-view="done" hidden>
+    <div class="main">
+      <h1>ENCRE IS ON THE READER</h1>
+      <ol class="steps-box">
+        <li>Unplug the cable.</li>
+        <li>Hold the power button until the screen changes.</li>
+      </ol>
+      <dl class="rows">
+        <div class="row fact"><dt>INSTALLED</dt><dd data-fact="done-version">&mdash;</dd></div>
+        <div class="row fact"><dt>WRITTEN TO</dt><dd data-fact="done-target">&mdash;</dd></div>
+      </dl>
+      <p>Put EPUB files in the /books folder on the SD card, and Encre lists them on Home.</p>
+      <p class="main-foot">The firmware your reader came with is still in slot 1. Recovery points the
+        reader back at it.</p>
     </div>
     <aside class="rail">
       <div class="rail-label">STEPS</div>
