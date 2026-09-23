@@ -203,7 +203,15 @@ p { margin: 0; font-size: 13px; line-height: 1.6; }
   font-size: 14px;
   font-weight: 500;
 }
-.slab[disabled] { cursor: not-allowed; opacity: 1; }
+/* A DISABLED SLAB HAS TO LOOK DISABLED, and it had `opacity: 1` -- so an
+ * action that cannot be taken was pixel-identical to one that can, and only the
+ * prose said otherwise. Strict black and white has no grey to reach for, so it
+ * borrows the dashed rule the upload board already uses for a target that is
+ * waiting rather than active. No board shows this, for the reason no board shows
+ * a focus ring: it is an interaction state of a component the boards do state,
+ * not a screen of its own. */
+.slab[disabled] { cursor: not-allowed; border-style: dashed; }
+.slab[disabled]:not(.slab--outline) { background: var(--paper); color: var(--ink); }
 
 /* Rows shared by the rail's step list and its fact tables. */
 .rows { display: flex; flex-direction: column; }

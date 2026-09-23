@@ -268,3 +268,88 @@ export async function install(session, manifest, onProgress = () => {}) {
   await loader.after('hard_reset').catch(() => {});
   return { slot: layout.install.slot, seq: pick.seq, bytes: image.length };
 }
+
+
+/** The ESP image magic: the first byte of anything the bootloader can start. */
+const IMAGE_MAGIC = 0xe9;
+
+/**
+ * What is on the reader right now, for Recovery's rail.
+ *
+ * Each app slot is probed with a ONE-BYTE read rather than measured. Nothing on
+ * the device records how much of a 6.4 MB slot is used, and deriving it means
+ * walking the image's segment headers -- about ten round trips at this chip's
+ * ~356 ms packet latency. Whether a slot holds firmware is the question that
+ * decides whether booting it is sensible, and one byte answers it.
+ */
+export async function readState(session, manifest) {
+  const { loader } = session;
+  const layout = manifest.layout;
+  const ota = layout.partitions.find((p) => p.name === 'otadata');
+  const apps = layout.partitions.filter((p) => p.name === 'app0' || p.name === 'app1');
+
+  const slots = [];
+  for (const partition of apps) {
+    const head = await loader.readFlash(Number(partition.offset), 1);
+    slots.push({ name: partition.name, hasFirmware: head[0] === IMAGE_MAGIC });
+  }
+
+  let starts = null;
+  if (ota) {
+    starts = activeSlot(parseOtadata(
+      await loader.readFlash(Number(ota.offset), Number(ota.size))));
+  }
+  // A bootloader with no valid otadata entry starts the first app partition.
+  return { slots, startsFrom: starts === null ? 0 : starts };
+}
+
+/**
+ * Point the bootloader at a different slot. Erases nothing.
+ *
+ * This is the whole un-install story and it is 32 bytes: Encre stays in its
+ * slot, the firmware the reader came with stays in its own, and only the choice
+ * between them changes. It is also the cheapest write this page makes, which is
+ * why it is the one worth trying on a device first.
+ */
+export async function bootSlot(session, manifest, slot) {
+  const { loader } = session;
+  const layout = manifest.layout;
+  const ota = layout.partitions.find((p) => p.name === 'otadata');
+  if (!ota) {
+    throw new Error('This reader has no otadata partition, so nothing chooses which '
+                    + 'firmware it starts.');
+  }
+  const apps = layout.partitions.filter((p) => p.name === 'app0' || p.name === 'app1');
+  const target = apps[slot];
+  if (!target) throw new Error('This reader has no slot ' + (slot + 1) + '.');
+
+  // REFUSE TO POINT AT AN EMPTY SLOT. Selecting a slot with no image is a reader
+  // that starts nothing, and it would look exactly like a successful switch
+  // until the next power-on.
+  const head = await loader.readFlash(Number(target.offset), 1);
+  if (head[0] !== IMAGE_MAGIC) {
+    throw new Error('Slot ' + (slot + 1) + ' has no firmware in it, so the reader would '
+                    + 'have nothing to start. Nothing was changed.');
+  }
+
+  const offset = Number(ota.offset);
+  const before = parseOtadata(await loader.readFlash(offset, Number(ota.size)));
+  if (activeSlot(before) === slot) {
+    return { slot: slot + 1, seq: null, alreadySelected: true };
+  }
+  const pick = selectSlot(before, slot);
+  await loader.writeFlash({
+    fileArray: [{ data: pick.bytes, address: offset + pick.offsetInPartition }],
+    flashMode: 'keep', flashFreq: 'keep', flashSize: 'keep',
+    eraseAll: false, compress: false,
+  });
+
+  // Read it back, for install()'s reason: a wrong sequence selects nothing new
+  // and looks exactly like a write that worked.
+  const after = parseOtadata(await loader.readFlash(offset, Number(ota.size)));
+  if (activeSlot(after) !== slot) {
+    throw new Error('The reader is still set to start the other slot. Nothing was erased.');
+  }
+  await loader.after('hard_reset').catch(() => {});
+  return { slot: slot + 1, seq: pick.seq, alreadySelected: false };
+}

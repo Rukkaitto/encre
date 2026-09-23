@@ -33,14 +33,14 @@
           <p>Encre is always written to slot 2, so slot 1 still holds the firmware the reader came
             with. This points the reader back at it. It takes a few seconds and erases nothing.</p>
         </div>
-        <button class="slab" type="button" data-op="boot-other" disabled>BOOT SLOT 1</button>
+        <button class="slab" type="button" data-op="boot-other">BOOT SLOT 1</button>
       </section>
       <section class="op">
         <div>
           <h2>SAVE A COPY OF THE READER</h2>
           <p>Reads all 16 MB and saves it to this computer. This takes about 25 minutes.</p>
         </div>
-        <button class="slab slab--outline" type="button" data-op="backup" disabled>SAVE A COPY</button>
+        <button class="slab slab--outline" type="button" data-op="backup" disabled title="Not built yet">SAVE A COPY</button>
       </section>
       <section class="op">
         <div>
@@ -48,10 +48,62 @@
           <p>Writes a 16 MB copy you saved earlier. It replaces everything on the reader, Encre
             included.</p>
         </div>
-        <button class="slab slab--outline" type="button" data-op="restore" disabled>CHOOSE A FILE</button>
+        <button class="slab slab--outline" type="button" data-op="restore" disabled title="Not built yet">CHOOSE A FILE</button>
       </section>
-      <p class="main-foot">A saved copy belongs to the reader it came from. Do not write one reader's
-        copy to another.</p>
+      <p class="main-foot">Saving a copy and writing one back are not built yet. A saved copy
+        belongs to the reader it came from, so when they are, do not write one reader's copy to
+        another.</p>
+    </div>
+    <aside class="rail">
+      <div class="rail-label">READER</div>
+      <dl class="rows">
+        <div class="row fact"><dt>CHIP</dt><dd data-fact="chip">&mdash;</dd></div>
+        <div class="row fact"><dt>FLASH</dt><dd data-fact="flash">&mdash;</dd></div>
+        <div class="row fact"><dt>SLOT 1</dt><dd data-fact="slot1">&mdash;</dd></div>
+        <div class="row fact"><dt>SLOT 2</dt><dd data-fact="slot2">&mdash;</dd></div>
+        <div class="row fact"><dt>STARTS FROM</dt><dd data-fact="boots">&mdash;</dd></div>
+      </dl>
+      <div class="rail-foot">THE READER HAS TO BE AWAKE AND PLUGGED IN.</div>
+    </aside>
+  </main>
+
+  <!-- design/WebRecoveryDone.dc.html -->
+  <main class="body" data-state-view="done" hidden>
+    <div class="main">
+      <h1 data-done-title>THE READER WILL START SLOT 1</h1>
+      <p class="note" data-done-note></p>
+      <ol class="steps-box">
+        <li>Unplug the cable.</li>
+        <li>Hold the power button until the screen changes.</li>
+      </ol>
+      <p class="main-foot">To start Encre again, come back here and boot the other slot.</p>
+    </div>
+    <aside class="rail">
+      <div class="rail-label">READER</div>
+      <dl class="rows">
+        <div class="row fact"><dt>CHIP</dt><dd data-fact="chip">&mdash;</dd></div>
+        <div class="row fact"><dt>FLASH</dt><dd data-fact="flash">&mdash;</dd></div>
+        <div class="row fact"><dt>SLOT 1</dt><dd data-fact="slot1">&mdash;</dd></div>
+        <div class="row fact"><dt>SLOT 2</dt><dd data-fact="slot2">&mdash;</dd></div>
+        <div class="row fact"><dt>STARTS FROM</dt><dd data-fact="boots">&mdash;</dd></div>
+      </dl>
+      <div class="rail-foot">THE READER HAS TO BE AWAKE AND PLUGGED IN.</div>
+    </aside>
+  </main>
+
+  <!-- design/WebRecoveryFailed.dc.html -->
+  <main class="body" data-state-view="failed" hidden>
+    <div class="main">
+      <h1>THE READER DID NOT ANSWER</h1>
+      <p class="note" data-failure-detail></p>
+      <dl class="rows">
+        <div class="row fact"><dt>STEP</dt><dd>BOOT THE OTHER SLOT</dd></div>
+        <div class="row fact"><dt>ERASED</dt><dd>NOTHING</dd></div>
+      </dl>
+      <p>Which firmware the reader starts was not changed.</p>
+      <p>Unplug the cable, plug it back in, hold the power button until the screen changes, and try
+        again.</p>
+      <button class="slab slab--outline" type="button" data-again style="margin-top: auto;">TRY AGAIN</button>
     </div>
     <aside class="rail">
       <div class="rail-label">READER</div>
