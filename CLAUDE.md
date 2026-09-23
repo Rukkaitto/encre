@@ -5,7 +5,7 @@ have exactly the UI/UX we want, so **design fidelity is a functional
 requirement**, not polish.
 
 **THIS FILE IS THE INDEX; `docs/notes/` HOLDS THE REST OF IT.** It outgrew the
-budget a session loads it into, so nineteen sections are files of their own — each
+budget a session loads it into, so twenty sections are files of their own — each
 left here as its original heading, a few lines saying when you would want it, and
 the path. **A stub is not a summary and never supersedes the file it names.** A
 bold cross-reference (**Storage**, **Covers**, **The reader**) still resolves to a
@@ -24,7 +24,7 @@ the runtime, the invariants, the goldens, and how to edit this repo with scripts
 | `tools/` | Asset generators (`fontc.py`, `iconc.py`, `embed_font.py`) and the design comparison tool. |
 | `design/` | `*.dc.html` design boards — **the source of truth for the UI**. |
 | `docs/superpowers/` | The spec, the roadmap, and per-phase implementation plans. |
-| `docs/notes/` | **The rest of this file** — nineteen sections split out for size, each named by a stub under its own heading below. Plus the API notes (`wallabag-api.md`), the verdicts (`strip-grayscale-verdict.md`) the architecture audit (`architecture-audit.md`), which is the reasoning behind #174–#177 and records what it got wrong on the way, and the shell harness design (`shell-harness.md`) behind the #178 epic. |
+| `docs/notes/` | **The rest of this file** — twenty sections split out for size, each named by a stub under its own heading below. Plus the API notes (`wallabag-api.md`), the verdicts (`strip-grayscale-verdict.md`) the architecture audit (`architecture-audit.md`), which is the reasoning behind #174–#177 and records what it got wrong on the way, and the shell harness design (`shell-harness.md`) behind the #178 epic. |
 | `docs/agents/` | The three agent-facing notes the **Agent skills** section names. |
 | `freeink-sdk/` | Submodule. MIT drivers for display/input/SD/battery. Never edit. |
 
@@ -1509,6 +1509,19 @@ sends a press, so on a latching screen it re-latches. **Read it before adding a
 screen that pushes directly from its own `onGesture`.**
 
 **`docs/notes/shell-owes-a-flow.md`.**
+
+## The web flasher
+
+The page that installs Encre from a browser over USB, at
+`https://rukkaitto.github.io/encre/`: why the binaries are fetched by the runner
+rather than the browser, why installs pin to `app1`, the mobile refusal that is
+complete by construction, and the four things one press on a real X3 confirmed
+that nothing on a desktop could. **Read it before touching `web/`, the Pages
+workflow or the manifest generator** — and read its first fact before booking
+device time for anything about partitions, because the stock flash image on disk
+has already answered several of those.
+
+**`docs/notes/web-flasher.md`.**
 
 ## Editing this repo with scripts
 
