@@ -327,6 +327,57 @@ export async function install(session, manifest, onProgress = () => {}) {
 const IMAGE_MAGIC = 0xe9;
 
 /**
+ * `esp_app_desc_t`: what a firmware says about itself.
+ *
+ * It sits a fixed 0x20 into an app partition -- past the 24-byte image header
+ * and the 8-byte header of its first segment -- and is 256 bytes. The offsets
+ * below are from esp-idf's esp_app_desc.h and were then checked against a real
+ * image: the stock X3's app0 reads back project_name `crossink-ui-theme-design-
+ * c69673`, version `v1.5.0-3-gcab4f249-dirty`, built Aug 19 2026.
+ *
+ * WHAT IT IS NOT GOOD FOR, and this is worth knowing before trusting it:
+ * **Encre's own builds do not identify themselves.** A released Encre image
+ * reports project_name `arduino-lib-builder` and version `8cabf2c`, because the
+ * descriptor comes from the Arduino framework's prebuilt libraries rather than
+ * from this project. So this can name CrossInk and it cannot name Encre, and
+ * the page must not pretend otherwise -- it prints what the descriptor says and
+ * makes no guess about which firmware that is.
+ */
+const APP_DESC_OFFSET = 0x20;
+const APP_DESC_BYTES = 256;
+const APP_DESC_MAGIC = 0xabcd5432;
+
+function cstring(bytes, from, to) {
+  let out = '';
+  for (let i = from; i < to; i += 1) {
+    const c = bytes[i];
+    if (c === 0) break;
+    // Anything outside printable ASCII means this is not a string field, and a
+    // descriptor that is half junk should not be shown as if it were read.
+    if (c < 0x20 || c > 0x7e) return null;
+    out += String.fromCharCode(c);
+  }
+  return out;
+}
+
+/** Parse an `esp_app_desc_t`, or null if there is not one here. */
+export function parseAppDescription(bytes) {
+  if (bytes.length < 144) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(0, true) !== APP_DESC_MAGIC) return null;
+  const version = cstring(bytes, 16, 48);
+  const projectName = cstring(bytes, 48, 80);
+  if (projectName === null || version === null) return null;
+  return {
+    version,
+    projectName,
+    time: cstring(bytes, 80, 96),
+    date: cstring(bytes, 96, 112),
+    idfVersion: cstring(bytes, 112, 144),
+  };
+}
+
+/**
  * What is on the reader right now, for Recovery's rail.
  *
  * Each app slot is probed with a ONE-BYTE read rather than measured. Nothing on
@@ -343,8 +394,19 @@ export async function readState(session, manifest) {
 
   const slots = [];
   for (const partition of apps) {
-    const head = await loader.readFlash(Number(partition.offset), 1);
-    slots.push({ name: partition.name, hasFirmware: head[0] === IMAGE_MAGIC });
+    const at = Number(partition.offset);
+    // One read covering the image header and the descriptor behind it, rather
+    // than two round trips: this chip charges ~356 ms of latency per packet, so
+    // the count of reads matters more than their size.
+    const head = await loader.readFlash(at, APP_DESC_OFFSET + APP_DESC_BYTES);
+    const hasFirmware = head[0] === IMAGE_MAGIC;
+    slots.push({
+      name: partition.name,
+      hasFirmware,
+      describes: hasFirmware
+        ? parseAppDescription(head.subarray(APP_DESC_OFFSET))
+        : null,
+    });
   }
 
   let starts = null;

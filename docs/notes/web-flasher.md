@@ -109,11 +109,27 @@ the page had no way to tell. It says "whatever is in the other slot" now. Same
 class as the `4.6 MB WRITTEN` row: **asserting something only the device
 knows**.
 
-The obvious better answer is to READ what is in each slot. `esp_app_desc_t` sits
-at a fixed `0x20` into an app partition, magic `0xABCD5432`, with `version` at
-+16 and `project_name` at +48 — so about 96 bytes would let the rail say
-`SLOT 1 / ENCRE 0.2.0` or name CrossInk outright. Not built; the honest wording
-came first.
+**THE SLOTS ARE READ NOW, AND THE ANSWER IS HALF OF WHAT WAS HOPED FOR.**
+`esp_app_desc_t` sits a fixed `0x20` into an app partition, magic `0xABCD5432`,
+`version` at +16 and `project_name` at +48. Checked against a producer rather
+than against this repository's idea of it: the stock X3's app0 reads back
+project_name `crossink-ui-theme-design-c69673`, version `v1.5.0-3-gcab4f249-
+dirty`, built Aug 19 2026. So Recovery's rail can name a factory reader's
+firmware outright.
+
+**BUT ENCRE'S OWN BUILDS DO NOT IDENTIFY THEMSELVES.** A released Encre image
+reports project_name **`arduino-lib-builder`** and version **`8cabf2c`** — the
+descriptor comes from the Arduino framework's prebuilt libraries rather than
+from this project, so it names the toolchain that produced the binary and not
+the binary. The rail therefore prints what the descriptor says and maps nothing:
+translating `arduino-lib-builder` back to "ENCRE" would be a guess, and guessing
+which firmware is in a slot is how somebody boots the wrong one. It is also why
+this cannot yet settle whether an install booted — two Encre slots are
+indistinguishable to it.
+
+**Worth its own card:** making a PlatformIO/Arduino build set its own app
+description would make every slot self-identifying, close that gap, and cost
+nothing at runtime. It is a firmware change, not a web one.
 
 **THE INSTALL ITSELF IS STILL UNCONFIRMED.** The reader already ran Encre
 v0.2.0, so what came up after the reset was indistinguishable from what was
