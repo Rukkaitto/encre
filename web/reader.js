@@ -37,6 +37,54 @@ const EXPECTED_CHIP = 'ESP32-C3';
  */
 const BAUD = 115200;
 
+/**
+ * ESP32-C3 RTC watchdog registers, and the only way out of download mode.
+ *
+ * CONNECTING RESETS THE CHIP INTO ITS ROM LOADER, which is what connecting
+ * means: the firmware stops, and on e-ink the panel keeps whatever was last
+ * painted. The reader looks frozen and its buttons do nothing because nothing
+ * is listening to them. That is expected -- what was NOT acceptable is leaving
+ * it that way.
+ *
+ * `hard_reset` does not help. esptool's own documentation: on USB-Serial/JTAG
+ * the peripheral "interprets the RTS serial control signal as a core reset",
+ * and that reset "does not re-sample the boot strapping pins", so a chip that
+ * entered download mode stays there. A WATCHDOG reset does re-sample them, which
+ * is why esptool has `--after watchdog-reset` at all.
+ *
+ * esptool-js exposes no such mode, but it does expose `writeReg`, so this is
+ * esptool's own `ESP32C3ROM.watchdog_reset()` written out: unlock the watchdog,
+ * set a 2000-tick timeout, enable it, lock again, and let it fire. Addresses and
+ * values are from esptool/targets/esp32c3.py rather than from memory.
+ */
+const RTC_CNTL_WDTCONFIG0_REG = 0x60008090;
+const RTC_CNTL_WDTCONFIG1_REG = 0x60008094;
+const RTC_CNTL_WDTWPROTECT_REG = 0x600080a8;
+const RTC_CNTL_WDT_WKEY = 0x50d83aa1;
+
+/**
+ * Reboot the reader out of download mode so it runs its firmware again.
+ *
+ * EVERY FAILURE HERE IS SWALLOWED, deliberately. The chip reboots part way
+ * through, so the transport can and does throw as the device goes away -- and a
+ * reset that worked is indistinguishable from one that failed at that layer.
+ * The page tells the user what to do if the reader stays put, which is the only
+ * honest position: this improves the odds, it does not guarantee them.
+ */
+export async function rebootOutOfDownloadMode(loader) {
+  try {
+    await loader.writeReg(RTC_CNTL_WDTWPROTECT_REG, RTC_CNTL_WDT_WKEY);
+    await loader.writeReg(RTC_CNTL_WDTCONFIG1_REG, 2000);
+    await loader.writeReg(RTC_CNTL_WDTCONFIG0_REG,
+                          ((1 << 31) | (5 << 28) | (1 << 8) | 2) >>> 0);
+    await loader.writeReg(RTC_CNTL_WDTWPROTECT_REG, 0);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
 /** ESP-IDF partition table entry layout. */
 const ENTRY_BYTES = 32;
 const ENTRY_MAGIC = 0x50aa;   // a real entry
@@ -166,7 +214,12 @@ export async function identify(port, manifest, onStage = () => {}) {
     // Where an install would go, if one were built yet. Straight from the
     // manifest, which takes it from partitions.csv.
     install: layout.install,
-    async close() {
+    async close({ reboot = true } = {}) {
+      // The reader goes back to running its firmware. Without this a check --
+      // which writes nothing at all -- still left the device stopped, with its
+      // last screen frozen and its buttons dead, until somebody found the reset
+      // button. Found on glass on the first real try.
+      if (reboot) await rebootOutOfDownloadMode(loader);
       await transport.disconnect().catch(() => {});
     },
   };
@@ -261,11 +314,11 @@ export async function install(session, manifest, onProgress = () => {}) {
   }
 
   onProgress({ stage: 'done', written: image.length, total: image.length });
-  // A reset it cannot verify. esptool-js has no watchdog reset, and on this
-  // chip RTS is a core reset that does not re-sample the boot straps, so the
-  // reader may stay in download mode. The page tells the user to unplug and
-  // replug either way rather than claiming a reboot it cannot observe.
-  await loader.after('hard_reset').catch(() => {});
+  // The watchdog reset, not `hard_reset`: on this chip RTS is a core reset that
+  // does not re-sample the boot straps, so the reader would stay in download
+  // mode looking frozen. The page still tells the user what to do if it does,
+  // because this improves the odds rather than guaranteeing them.
+  await rebootOutOfDownloadMode(loader);
   return { slot: layout.install.slot, seq: pick.seq, bytes: image.length };
 }
 
@@ -307,7 +360,7 @@ export async function readState(session, manifest) {
  * Point the bootloader at a different slot. Erases nothing.
  *
  * This is the whole un-install story and it is 32 bytes: Encre stays in its
- * slot, the firmware the reader came with stays in its own, and only the choice
+ * slot, whatever is in the other one stays there, and only the choice
  * between them changes. It is also the cheapest write this page makes, which is
  * why it is the one worth trying on a device first.
  */
@@ -350,6 +403,6 @@ export async function bootSlot(session, manifest, slot) {
   if (activeSlot(after) !== slot) {
     throw new Error('The reader is still set to start the other slot. Nothing was erased.');
   }
-  await loader.after('hard_reset').catch(() => {});
+  await rebootOutOfDownloadMode(loader);
   return { slot: slot + 1, seq: pick.seq, alreadySelected: false };
 }

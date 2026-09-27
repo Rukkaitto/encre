@@ -167,9 +167,9 @@ async function connectAndCheck(manifest) {
     if (verdict) {
       verdict.textContent = matches
         ? 'The reader has the layout Encre expects. Encre goes into slot '
-          + session.install.slot + ', and the firmware it came with stays where it is.'
+          + session.install.slot + ', and whatever is in the other slot stays there.'
         : 'Encre expects a different set of partitions on this reader. Installing would have to '
-          + 'replace everything on it, including the firmware it came with.';
+          + 'replace everything on it, the firmware it is running included.';
     }
     if (targetLabel) targetLabel.textContent = matches ? 'WRITES TO' : 'DIFFERENCES';
 
@@ -191,7 +191,7 @@ async function connectAndCheck(manifest) {
       : String(session.layout.differences.length));
     if (detail) {
       detail.textContent = matches
-        ? 'Nothing has been written to the reader.'
+        ? 'Nothing has been written to the reader. Screen rotation has only been checked on the X3.'
         : session.layout.differences.join('. ') + '.';
     }
   } catch (error) {

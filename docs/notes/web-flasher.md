@@ -70,12 +70,57 @@ expected. That confirms, in one press, the things nothing on a desktop could:
 **WHAT THAT DOES NOT REACH.** Nothing about the **X4**, whose table has never
 been read by anybody — the mismatch path exists for it and for readers already
 carrying CrossPoint or the KO fork, both of which CrossPoint's own flasher names
-as distinct layouts. Nothing about the **write** path. And nothing about whether
-a reader is left **stuck in download mode** afterwards: esptool-js has no
-`watchdog-reset`, esptool's own docs say RTS on USB-Serial/JTAG is a core reset
-that does not re-sample the boot straps, and CrossPoint's answer is to tell the
-user to unplug and replug. Ours says the same thing unconditionally rather than
-claiming a reboot the page cannot observe.
+as distinct layouts. Nothing about the **write** path, which the next section
+covers. And at the time this was written, nothing about whether a reader is left
+**stuck in download mode** afterwards — which is exactly what the first install
+then found, and what `rebootOutOfDownloadMode()` now answers.
+
+## The first install, and the two things it found
+
+**2026-09-23, X3, the first time anything was written.** The install ran to the
+end. Then the reader sat with its last screen showing, the power button did
+nothing, and only the physical reset button brought it back.
+
+**THAT IS NOT A FREEZE, AND THE PANEL IS WHY IT LOOKS LIKE ONE.** Connecting
+resets the chip into its ROM loader — that is what connecting *is* — so the
+firmware stops running and e-ink holds whatever was last painted. The buttons do
+nothing because nothing is listening to them. CLAUDE.md already records the
+shape: *"a frozen screen does not mean the firmware ran"*, and it has *"disguised
+a crash loop and a bootloader hang as nothing happened"*. It cost a real
+confusion anyway, because **the page never said so** — and worse, a CHECK, which
+writes nothing at all, left the reader stopped the same way.
+
+**`hard_reset` DOES NOT GET A C3 OUT OF DOWNLOAD MODE.** esptool's own docs: on
+USB-Serial/JTAG the peripheral interprets RTS as a core reset, and that reset
+**does not re-sample the boot strapping pins**. A watchdog reset does, which is
+why esptool has `--after watchdog-reset`. esptool-js exposes no such mode but it
+does expose `writeReg`, so `rebootOutOfDownloadMode()` is esptool's own
+`ESP32C3ROM.watchdog_reset()` written out — unlock, 2000-tick timeout, enable,
+lock, wait — with the addresses taken from `esptool/targets/esp32c3.py` rather
+than from memory. **Every session close now reboots the reader**, including a
+check's, and the idle screen says the screen will freeze, because the reset
+improves the odds rather than guaranteeing them.
+
+**AND THE PAGE WAS CLAIMING SOMETHING IT CANNOT KNOW.** Eight boards said slot 1
+holds "the firmware the reader came with". The reader this was first run on had
+**Encre already installed the old way** — `write-flash 0x0`, so the full image
+went to `app0` — which means slot 1 held Encre, not the factory firmware, and
+the page had no way to tell. It says "whatever is in the other slot" now. Same
+class as the `4.6 MB WRITTEN` row: **asserting something only the device
+knows**.
+
+The obvious better answer is to READ what is in each slot. `esp_app_desc_t` sits
+at a fixed `0x20` into an app partition, magic `0xABCD5432`, with `version` at
++16 and `project_name` at +48 — so about 96 bytes would let the rail say
+`SLOT 1 / ENCRE 0.2.0` or name CrossInk outright. Not built; the honest wording
+came first.
+
+**THE INSTALL ITSELF IS STILL UNCONFIRMED.** The reader already ran Encre
+v0.2.0, so what came up after the reset was indistinguishable from what was
+there before. The page's own otadata read-back passed, which is evidence the
+flip took, but nothing has yet proved the image in slot 2 is what boots. A
+reader with the factory firmware on it, or an `esp_app_desc_t` read, would
+settle it.
 
 ## Two costs worth knowing before touching Recovery
 
