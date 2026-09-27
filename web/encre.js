@@ -253,11 +253,25 @@ async function runInstall(session, manifest, button) {
 function fillReaderRail(state, session) {
   setFact('chip', session.chip);
   setFact('flash', session.flashSize ? session.flashSize.replace('MB', ' MB') : 'UNKNOWN');
+  // WHAT THE SLOT SAYS IT IS, WITH NO INTERPRETATION. The descriptor names the
+  // project that built the image, and that is all this prints. It happens to
+  // name CrossInk usefully and it does NOT name Encre -- a released Encre image
+  // reports `arduino-lib-builder`, because the descriptor comes from the Arduino
+  // framework rather than from this project. Mapping that back to "ENCRE" would
+  // be guessing, and guessing about which firmware is in a slot is how somebody
+  // boots the wrong one.
+  const held = (slot) => {
+    if (!slot) return '\u2014';
+    if (!slot.hasFirmware) return 'EMPTY';
+    if (!slot.describes) return 'HAS FIRMWARE';
+    const name = slot.describes.projectName.toUpperCase();
+    return name.length > 24 ? name.slice(0, 23) + '\u2026' : name;
+  };
+
   // Spelled out rather than built from an index. tools/test_webhooks.mjs can
   // only check a hook whose name appears literally, and a name assembled at run
   // time is precisely the kind it cannot see -- which is the hole that test was
   // written to close.
-  const held = (slot) => (slot ? (slot.hasFirmware ? 'HAS FIRMWARE' : 'EMPTY') : '\u2014');
   setFact('slot1', held(state.slots[0]));
   setFact('slot2', held(state.slots[1]));
   setFact('boots', 'SLOT ' + (state.startsFrom + 1));
