@@ -1076,3 +1076,51 @@ TEST_CASE("startAt: a builder that has not reached its cursor yet has NO page to
   CHECK(firstStart.block == kTarget);
   CHECK(firstStart.line == 0);
 }
+
+// --- French spacing ------------------------------------------------------------
+
+TEST_CASE("A FRENCH CHAPTER LAYS OUT WITH NO NOTDEF AND NO BREAK AT A NARROW SPACE") {
+  // U+202F before `!` and inside `« »`, and U+2005 before a colon: what `L'Avenir en
+  // commun` puts on almost every page. Neither is in Literata, so each one used to
+  // draw as a notdef box -- and either one turned into an ordinary space would let a
+  // line start with `!` or `»`, or end with `«`.
+  std::string xhtml = "<html><body><p>";
+  for (int i = 0; i < 6; ++i)
+    xhtml += "Il dit \xC2\xAB\xE2\x80\xAF" "mot\xE2\x80\xAF\xC2\xBB et oui\xE2\x80\xAF! "
+             "puis elle\xE2\x80\x85: rien du tout. ";
+  xhtml += "</p></body></html>";
+  Document d;
+  const char* why = "";
+  REQUIRE(reader::buildDocument(xhtml, d, &why));
+
+  Body b;
+  Italic it;
+  // EVERY column width over a range wider than a few words, so the narrow space
+  // falls at the end of a candidate line many times over. One width would test
+  // whichever line breaks that width happened to produce.
+  int lines = 0;
+  for (int w = 160; w <= 444; w += 3) {
+    PageMetrics m = boardMetrics(4000);
+    m.columnW = w;
+    const Page p = reader::layoutPage(d, b.face, m, Cursor{});
+    REQUIRE(p.lastPage);
+    for (const LaidLine& ln : p.lines) {
+      ++lines;
+      CAPTURE(w);
+      CAPTURE(ln.text);
+      const std::string_view t = ln.text;
+      for (size_t i = 0; i < t.size();) {
+        const char32_t cp = reader::utf8Next(t, i);
+        CAPTURE(static_cast<uint32_t>(cp));
+        CHECK(b.face.advance(cp).has_value());
+        CHECK(it.face.advance(cp).has_value());
+      }
+      CHECK_FALSE(t.substr(0, 1) == "!");
+      CHECK_FALSE(t.substr(0, 1) == ":");
+      CHECK_FALSE(t.substr(0, 2) == "\xC2\xBB");  // »
+      const bool endsOnOpenQuote = t.size() >= 2 && t.substr(t.size() - 2) == "\xC2\xAB";
+      CHECK_FALSE(endsOnOpenQuote);  // «
+    }
+  }
+  CHECK(lines > 100);
+}

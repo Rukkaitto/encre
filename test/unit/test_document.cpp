@@ -366,6 +366,67 @@ TEST_CASE("A PARAGRAPH OF NOTHING BUT NBSP IS DROPPED") {
   CHECK(flatten("<p>a\xC2\xA0" "b</p>") == "P[a\xC2\xA0" "b]");
 }
 
+// --- Spaces the body face cannot draw ----------------------------------------
+//
+// Each one used to reach the page as a notdef box. `L'Avenir en commun` has 321
+// U+202F and 250 U+2005, which is a box on almost every page.
+
+TEST_CASE("A NARROW NO-BREAK SPACE BECOMES A NO-BREAK SPACE") {
+  // French: before `: ; ! ?` and inside the guillemets.
+  CHECK(flatten("<p>\xC2\xAB\xE2\x80\xAF" "mot\xE2\x80\xAF\xC2\xBB oui\xE2\x80\xAF!</p>") ==
+        "P[\xC2\xAB\xC2\xA0" "mot\xC2\xA0\xC2\xBB oui\xC2\xA0!]");
+  // The numeric reference decodes to the same bytes, so it takes the same path.
+  CHECK(flatten("<p>oui&#8239;!</p>") == "P[oui\xC2\xA0!]");
+  CHECK(flatten("<p>oui&#x202F;?</p>") == "P[oui\xC2\xA0?]");
+}
+
+TEST_CASE("THE THIN SPACES THE FACE LACKS ARE NO-BREAK TOO") {
+  // U+2005 sits before a colon or inside `10 000` in the book that has it -- 210
+  // of its 250 before punctuation, 21 between digits -- so it must not break any
+  // more than U+202F may. U+2004 and U+2006 are its siblings.
+  CHECK(flatten("<p>elle\xE2\x80\x85: 10\xE2\x80\x85" "000</p>") ==
+        "P[elle\xC2\xA0: 10\xC2\xA0" "000]");
+  CHECK(flatten("<p>a\xE2\x80\x84" "b\xE2\x80\x86" "c</p>") == "P[a\xC2\xA0" "b\xC2\xA0" "c]");
+}
+
+TEST_CASE("THE SPACES THE FACE ALREADY DRAWS ARE LEFT ALONE") {
+  // U+2007, U+2008, U+2009 and U+200A have glyphs in Literata, and the wrap breaks
+  // at U+0020 alone, so they already draw as fixed no-break spaces. U+200A is in 87
+  // of the corpus's books, mostly between nested quotes: making it breakable would
+  // split `“ ‘` across lines.
+  const std::string kept =
+      "a\xE2\x80\x87" "b\xE2\x80\x88" "c\xE2\x80\x89" "d\xE2\x80\x8A" "e";
+  CHECK(flatten("<p>" + kept + "</p>") == "P[" + kept + "]");
+}
+
+TEST_CASE("AN EN OR EM SPACE IS AN ORDINARY ONE, AND COLLAPSES LIKE ONE") {
+  CHECK(flatten("<p>a\xE2\x80\x82" "b\xE2\x80\x83" "c</p>") == "P[a b c]");
+  // Next to an ASCII space it is one gap, not two, and at the edges it is trimmed.
+  CHECK(flatten("<p>\xE2\x80\x83" "a \xE2\x80\x82 b\xE2\x80\x83</p>") == "P[a b]");
+}
+
+TEST_CASE("ZERO-WIDTH JOINERS AND C1 CONTROLS ARE DROPPED") {
+  // U+FEFF and U+2060 glue a word to a dash in Standard Ebooks (60,441 of them in
+  // 96 books); the wrap only breaks at a space, so the glue is kept without them.
+  CHECK(flatten("<p>narrative\xEF\xBB\xBF\xE2\x80\x94" "and\xE2\x81\xA0" "x</p>") ==
+        "P[narrative\xE2\x80\x94" "andx]");
+  CHECK(flatten("<p>a\xC2\x80" "b\xC2\x9F" "c</p>") == "P[abc]");
+  // NEL is a line end, so it separates words rather than joining them.
+  CHECK(flatten("<p>soins.\xC2\x85" "Apr\xC3\xA8s</p>") == "P[soins. Apr\xC3\xA8s]");
+  CHECK(flatten("<p>soins.\xC2\x85 Apr\xC3\xA8s</p>") == "P[soins. Apr\xC3\xA8s]");
+}
+
+TEST_CASE("A SPACE SPLIT ACROSS TWO TEXT NODES IS STILL FOUND") {
+  // Xml hands a long run over in chunks, and raw UTF-8 can straddle the seam. Every
+  // offset across the 1 KB chunk size puts the seam inside the sequence at least
+  // twice.
+  for (size_t pad = 1000; pad < 1030; ++pad) {
+    const std::string body = std::string(pad, 'a') + "\xE2\x80\xAF!";
+    CAPTURE(pad);
+    CHECK(flatten("<p>" + body + "</p>") == "P[" + std::string(pad, 'a') + "\xC2\xA0!]");
+  }
+}
+
 // --- Inline emphasis ---------------------------------------------------------
 
 namespace {
@@ -394,6 +455,12 @@ std::string marked(std::string_view xhtml) {
 }
 
 }  // namespace
+
+TEST_CASE("A FOLDED SPACE MOVES THE EMPHASIS SPANS WITH THE BYTES") {
+  // Three bytes become two, or none: a span after it starts where its word starts.
+  CHECK(marked("<p>oui\xE2\x80\xAF<em>non</em></p>") == "[oui\xC2\xA0<non>]");
+  CHECK(marked("<p>a\xEF\xBB\xBF<em>b</em>\xEF\xBB\xBF" "c</p>") == "[a<b>c]");
+}
 
 TEST_CASE("em, i and cite are emphasis; strong and b are not") {
   CHECK(marked("<p>a <em>b</em> c</p>") == "[a <b> c]");
