@@ -89,7 +89,11 @@ class ContentsScreen : public FocusScreen {
   // `toc` is the book's whole table of contents and `spine` is the entry being read,
   // which is what marks a row `NOW`. `visibleRows` comes from the theme, as the
   // Library's does -- a row count depends on a panel height and `core/` cannot ask.
-  ContentsScreen(std::vector<TocEntry> toc, std::string bookTitle, int spine, int visibleRows);
+  //
+  // SHARED, NOT COPIED: Contents is the fourth holder of a list the shell, the factory
+  // and the Reader already hold, and a copy is what a long book cannot afford -- see
+  // `SharedToc` in toc.h. Null is read as an empty list.
+  ContentsScreen(SharedToc toc, std::string bookTitle, int spine, int visibleRows);
 
   ScreenId id() const override { return ScreenId::Contents; }
   Action onGesture(const GestureEvent& g) override;
@@ -108,6 +112,7 @@ class ContentsScreen : public FocusScreen {
   bool sectioned() const { return sectioned_; }
 
   int rowCount() const { return static_cast<int>(entries_.size()); }
+  const SharedToc& toc() const { return toc_; }
 
   // THE ONE ROW MARKED `NOW`, as an index into the whole list, or -1 for none. See the
   // paragraph above and `rowForSpine`.
@@ -121,7 +126,10 @@ class ContentsScreen : public FocusScreen {
   bool isHeaderAt(int index) const;
   int rowForSpine() const;
 
-  std::vector<TocEntry> entries_;
+  // The shared list, and a reference into it so the walks below read as the vector
+  // they are. Declared in this order because `entries_` is bound from `toc_`.
+  const SharedToc toc_;
+  const std::vector<TocEntry>& entries_;
   bool sectioned_ = false;
   ContentsViewModel vm_{};
   int spine_ = 0;

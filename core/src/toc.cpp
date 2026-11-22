@@ -296,6 +296,12 @@ size_t fillTocGaps(std::vector<TocEntry>& toc, int spineCount) {
   return added;
 }
 
+SharedToc shareToc(std::vector<TocEntry> toc) {
+  if (toc.capacity() > toc.size() && Heap::hasBlock(toc.size() * sizeof(TocEntry)))
+    toc.shrink_to_fit();
+  return std::make_shared<const std::vector<TocEntry>>(std::move(toc));
+}
+
 int tocIndexForSpine(const std::vector<TocEntry>& toc, int spine) {
   // THE FIRST MATCH. This kept the LAST for two phases -- see the header for why that
   // was the wrong end of the group, and for the corpus figures that say how common a

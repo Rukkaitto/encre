@@ -536,7 +536,10 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   // empty rather than guessing.
   void setContentsVisibleRows(int n) { contentsRows_ = n; }
 
-  void setContents(std::vector<TocEntry> toc, int spine) {
+  // SHARED: the Reader, Contents and the peek this builds all hold this one list
+  // rather than a copy each -- see `SharedToc` in toc.h for the book that made a copy
+  // unaffordable. Null is read as an empty list.
+  void setContents(SharedToc toc, int spine) {
     contentsToc_ = std::move(toc);
     contentsSpine_ = spine;
     // PRIMED IS ITS OWN FLAG, not "the list is non-empty". A real book with no NCX
@@ -682,7 +685,7 @@ class DemoScreenFactory : public ScreenFactory, public LibraryWatcher {
   bool bookErrorFactsSet_ = false;
   DeleteConfirmScreen::Facts deleteFacts_{};
   bool deleteFactsSet_ = false;
-  std::vector<TocEntry> contentsToc_;
+  SharedToc contentsToc_;
   int contentsSpine_ = 0;
   bool contentsPrimed_ = false;
   SavedNetworks wifiNets_;

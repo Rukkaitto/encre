@@ -630,7 +630,7 @@ std::unique_ptr<Screen> DemoScreenFactory::create(ScreenId id) {
       // A refused push leaves the menu standing, which is wrong in a way the reader can
       // see through, and the shell's own log says why. Same call the Reader makes.
       if (contentsDemo_)
-        return std::make_unique<ContentsScreen>(demoContents(), "Middlemarch",
+        return std::make_unique<ContentsScreen>(shareToc(demoContents()), "Middlemarch",
                                                 demoContentsSpine(), contentsRows_);
       // PRIMED, not non-empty: a real book with no NCX primes an empty list and still
       // builds, because it reads fine and simply cannot name its chapters. Only

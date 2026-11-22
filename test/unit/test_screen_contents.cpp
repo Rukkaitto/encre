@@ -118,22 +118,22 @@ TEST_CASE("a sectioned book draws headers; a flat one draws none") {
   // shapes are the common case and neither is an edge. Treating depth 1 as a header
   // unconditionally would render a flat book as nothing but headers -- no focusable
   // row, nothing to select.
-  ContentsScreen deep(sectioned(), "Le Fleau", 0, 8);
+  ContentsScreen deep(reader::shareToc(sectioned()), "Le Fleau", 0, 8);
   CHECK(deep.sectioned());
-  ContentsScreen plain(flat(), "Dexter", 0, 8);
+  ContentsScreen plain(reader::shareToc(flat()), "Dexter", 0, 8);
   CHECK_FALSE(plain.sectioned());
   for (const reader::ListRow& r : plain.vm().rows) CHECK_FALSE(r.isHeader);
 }
 
 TEST_CASE("the focus starts on the chapter being read, not at the top") {
   // What a reader opening this screen is looking for.
-  ContentsScreen s(sectioned(), "Le Fleau", 3, 8);
+  ContentsScreen s(reader::shareToc(sectioned()), "Le Fleau", 3, 8);
   CHECK(s.chosenSpine() == 3);
   CHECK(s.vm().rows[static_cast<size_t>(s.vm().focusedRow)].label == "Four");
 }
 
 TEST_CASE("a header cannot be focused, and the focus skips it") {
-  ContentsScreen s(sectioned(), "Le Fleau", 0, 8);
+  ContentsScreen s(reader::shareToc(sectioned()), "Le Fleau", 0, 8);
   // Row 0 is `PART ONE`; the focus lands on row 1.
   CHECK(s.focus() == 1);
   // Stepping down from the last row of part one crosses the `PART TWO` header without
@@ -148,7 +148,7 @@ TEST_CASE("a header cannot be focused, and the focus skips it") {
 TEST_CASE("a spine the contents do not mention lands as near as the list allows") {
   // `set` CLAMPS where `move` wraps, so a chapter with no entry does not throw the
   // focus to the far end of the list.
-  ContentsScreen s(sectioned(), "Le Fleau", 99, 8);
+  ContentsScreen s(reader::shareToc(sectioned()), "Le Fleau", 99, 8);
   CHECK(s.focus() >= 0);
   CHECK(s.chosenSpine() >= 0);
 }
@@ -156,7 +156,7 @@ TEST_CASE("a spine the contents do not mention lands as near as the list allows"
 TEST_CASE("GO pops back to the Reader and names the chapter") {
   // It does NOT push a Reader: one is already on the stack under the menu this was
   // opened from, and a second would leave the first below it with its own position.
-  ContentsScreen s(sectioned(), "Le Fleau", 0, 8);
+  ContentsScreen s(reader::shareToc(sectioned()), "Le Fleau", 0, 8);
   const Action a = s.onEvent(kGo);
   CHECK(a.kind == Action::Kind::PopTo);
   CHECK(a.target == ScreenId::Reader);
@@ -166,7 +166,7 @@ TEST_CASE("GO pops back to the Reader and names the chapter") {
 TEST_CASE("an empty contents offers nothing to go to and stays put") {
   // A book with no NCX. Dismissing the screen on a press that achieved nothing would
   // be worse than leaving it up.
-  ContentsScreen s({}, "No contents", 0, 8);
+  ContentsScreen s(reader::shareToc({}), "No contents", 0, 8);
   CHECK(s.rowCount() == 0);
   CHECK(s.chosenSpine() == -1);
   CHECK(s.onEvent(kGo).kind == Action::Kind::None);
@@ -183,7 +183,7 @@ TEST_CASE("A SECTIONED BOOK ALWAYS HAS A FOCUSABLE ROW, by construction") {
   // Checked over both shapes rather than argued, because the argument is the kind that
   // has been wrong here before.
   for (const std::vector<TocEntry>& toc : {sectioned(), flat()}) {
-    ContentsScreen s(toc, "Book", 0, 8);
+    ContentsScreen s(reader::shareToc(toc), "Book", 0, 8);
     int focusable = 0;
     for (const reader::ListRow& r : s.vm().rows)
       if (!r.isHeader) ++focusable;
@@ -208,7 +208,7 @@ TEST_CASE("A CHILDLESS TOP-LEVEL ENTRY IS A ROW, NOT A SECTION HEADER") {
   //
   // What decides a header is whether an entry GROUPS others, which in a list walked in
   // document order is "does the next entry sit deeper than this one".
-  ContentsScreen s(mixedDepths(), "Amusing Ourselves to Death", 0, 8);
+  ContentsScreen s(reader::shareToc(mixedDepths()), "Amusing Ourselves to Death", 0, 8);
   REQUIRE(s.sectioned());
   const auto& rows = s.vm().rows;
   REQUIRE(rows.size() == 7);
@@ -231,7 +231,7 @@ TEST_CASE("A CHILDLESS TOP-LEVEL ENTRY IS A ROW, NOT A SECTION HEADER") {
 
   // Stepping down from the last chapter of Part II crosses no header and lands on
   // `Notes`, the back matter that was unreachable.
-  ContentsScreen t(mixedDepths(), "Amusing Ourselves to Death", 5, 8);
+  ContentsScreen t(reader::shareToc(mixedDepths()), "Amusing Ourselves to Death", 5, 8);
   REQUIRE(t.focus() == 5);
   t.onEvent(kDown);
   CHECK(t.focus() == 6);
@@ -245,7 +245,7 @@ TEST_CASE("every entry of a sectioned book is reachable unless it groups others"
   // than indexed, because an off-by-one in the lookahead would still pass the case
   // above's hand-written expectations if it moved only the last entry.
   const std::vector<TocEntry> toc = mixedDepths();
-  ContentsScreen s(toc, "Book", 0, 16);
+  ContentsScreen s(reader::shareToc(toc), "Book", 0, 16);
   const auto& rows = s.vm().rows;
   REQUIRE(rows.size() == toc.size());
   for (size_t i = 0; i < rows.size(); ++i) {
@@ -306,7 +306,7 @@ TEST_CASE("no line at all above a mid-list section header") {
   auto check = [&](int w, int h) {
     const int rows = theme.contentsVisibleRows(h, ramp.fonts);
     REQUIRE(rows >= static_cast<int>(toc.size()));
-    ContentsScreen s(toc, "A book with parts", /*spine=*/3, rows);
+    ContentsScreen s(reader::shareToc(toc), "A book with parts", /*spine=*/3, rows);
     REQUIRE_FALSE(s.vm().scrollable);  // no rail, so a full-width run really is full width
 
     // THE FIXTURE IS THE RIGHT SHAPE, asserted rather than assumed -- a list whose
@@ -436,7 +436,7 @@ TEST_CASE("QuietTheme renders a mixed-depth chapter list to golden") {
     REQUIRE(rows >= static_cast<int>(toc.size()));
     // Spine 3 is the first chapter of Part I: a focused, inverted, `NOW`-marked row
     // sitting directly under a mid-list header.
-    ContentsScreen s(toc, "Amusing Ourselves to Death", 3, rows);
+    ContentsScreen s(reader::shareToc(toc), "Amusing Ourselves to Death", 3, rows);
     REQUIRE_FALSE(s.vm().scrollable);
     reader::Framebuffer fb(w, h);
     theme.renderContents(fb, ramp.fonts, s.vm(), reader::Plane::Bw);
@@ -463,7 +463,7 @@ TEST_CASE("a contents that OPENS on a section header still selects a row") {
   const std::vector<TocEntry> opensOnAPart = {
       {0, 1, "Part I"}, {1, 2, "Chapter 1"}, {2, 2, "Chapter 2"}};
   // A spine the contents do not mention, so nothing after the walk moves the focus.
-  ContentsScreen s(opensOnAPart, "Big Dummy's Guide", 99, 8);
+  ContentsScreen s(reader::shareToc(opensOnAPart), "Big Dummy's Guide", 99, 8);
   REQUIRE(s.sectioned());
   REQUIRE(s.vm().rows.size() == 3);
   REQUIRE(s.vm().rows[0].isHeader);
@@ -478,7 +478,7 @@ TEST_CASE("the visible slice never names a row that was not drawn") {
   // than the whole book: a 96-entry contents would otherwise hand the theme every row.
   std::vector<TocEntry> many;
   for (int i = 0; i < 40; ++i) many.push_back({i, 1, "Chapter " + std::to_string(i)});
-  ContentsScreen s(many, "Long", 0, 7);
+  ContentsScreen s(reader::shareToc(many), "Long", 0, 7);
   CHECK(static_cast<int>(s.vm().rows.size()) <= 7);
   CHECK(s.vm().scrollable);
   CHECK(s.vm().scrollTotal == 40);
@@ -488,12 +488,12 @@ TEST_CASE("the visible slice never names a row that was not drawn") {
 
 TEST_CASE("a list told no row count renders empty rather than guessing") {
   // The Library's own rule -- the shell must set it before the first paint.
-  ContentsScreen s(sectioned(), "Le Fleau", 0, 0);
+  ContentsScreen s(reader::shareToc(sectioned()), "Le Fleau", 0, 0);
   CHECK(s.vm().rows.empty());
 }
 
 TEST_CASE("the row being read is the only one marked NOW") {
-  ContentsScreen s(flat(), "Dexter", 2, 8);
+  ContentsScreen s(reader::shareToc(flat()), "Dexter", 2, 8);
   int marked = 0;
   for (const reader::ListRow& r : s.vm().rows)
     if (r.value.find("NOW") != std::string::npos) ++marked;
@@ -511,7 +511,7 @@ TEST_CASE("SEVERAL ENTRIES ON ONE SPINE ENTRY STILL MARK EXACTLY ONE ROW") {
   // legitimately resolve to one spine index -- 109 of the corpus's 206 books with a
   // usable NCX (52.9%) have at least one such group, 605 groups in all. Those rows are
   // real content and are kept; what may not be repeated is the MARKER.
-  ContentsScreen s(sharedSpine(), "Discourse on the Method", 1, 8);
+  ContentsScreen s(reader::shareToc(sharedSpine()), "Discourse on the Method", 1, 8);
   REQUIRE(s.rowCount() == 5);
   REQUIRE_FALSE(s.sectioned());  // flat, so no row here is a header
   int marked = 0;
@@ -535,7 +535,7 @@ TEST_CASE("the NOW row is decided over the WHOLE list, so scrolling cannot move 
   // it. Contents scrolls (it draws a rail), and the corpus's worst book puts 373
   // non-header rows on one spine entry, so this is reachable on a real card.
   const int rows = 5;
-  ContentsScreen s(manyInOneFile(), "One big file", 1, rows);
+  ContentsScreen s(reader::shareToc(manyInOneFile()), "One big file", 1, rows);
   REQUIRE(s.rowCount() == 17);
   REQUIRE(s.vm().scrollable);
   const int nowAt = s.nowRow();
@@ -570,7 +570,7 @@ TEST_CASE("a spine entry named only by a header marks nothing at all") {
   // label with no value slot -- so where `Part I` has a file of its own there is
   // nothing to mark, and an absent claim beats a false one. 108 spine entries across
   // 62 corpus books are shaped this way.
-  ContentsScreen s(headerOwnFile(), "Book", 1, 8);
+  ContentsScreen s(reader::shareToc(headerOwnFile()), "Book", 1, 8);
   REQUIRE(s.sectioned());
   REQUIRE(s.vm().rows[1].isHeader);
   int marked = 0;
@@ -592,10 +592,10 @@ TEST_CASE("the screen's NOW row is tocIndexForSpine's answer, gated on headers")
   // Pinned as an equivalence over lists with NO headers, which is the same device
   // test_focus.cpp uses to hold `Focus`'s gated walk to its ungated arithmetic.
   for (const std::vector<TocEntry>& toc : {flat(), sharedSpine(), manyInOneFile()}) {
-    ContentsScreen probe(toc, "Book", 0, 8);
+    ContentsScreen probe(reader::shareToc(toc), "Book", 0, 8);
     REQUIRE_FALSE(probe.sectioned());  // no headers, so the gate cannot bite
     for (int spine = -1; spine <= 8; ++spine) {
-      ContentsScreen s(toc, "Book", spine, 8);
+      ContentsScreen s(reader::shareToc(toc), "Book", spine, 8);
       CHECK(s.nowRow() == reader::tocIndexForSpine(toc, spine));
     }
   }
@@ -830,7 +830,7 @@ TEST_CASE("a real book with NO table of contents still builds, and builds empty"
   // chapters. The second must render honestly rather than be refused.
   reader::DemoScreenFactory f;
   f.setContentsVisibleRows(8);
-  f.setContents({}, 0);
+  f.setContents(reader::shareToc({}), 0);
   auto contents = f.create(ScreenId::Contents);
   REQUIRE(contents != nullptr);
   CHECK(static_cast<ContentsScreen*>(contents.get())->rowCount() == 0);
@@ -839,7 +839,7 @@ TEST_CASE("a real book with NO table of contents still builds, and builds empty"
 TEST_CASE("a real book's contents are the ones built, never the demo's") {
   reader::DemoScreenFactory f;
   f.setContentsVisibleRows(8);
-  f.setContents(sectioned(), 2);
+  f.setContents(reader::shareToc(sectioned()), 2);
   auto scr = f.create(ScreenId::Contents);
   REQUIRE(scr != nullptr);
   const auto& c = *static_cast<ContentsScreen*>(scr.get());
@@ -866,7 +866,7 @@ TEST_CASE("A LONG CHAPTER NAME ELIDES INSIDE THE ROW") {
     const int h = w == 480 ? 800 : 792;
     // The long name on an UNFOCUSED row: the focused one is full-bleed and its own
     // fill would mask an overflow rather than reveal it.
-    ContentsScreen s({{0, 1, "Short"}, {1, 1, kLong}}, "Book", 0, 8);
+    ContentsScreen s(reader::shareToc({{0, 1, "Short"}, {1, 1, kLong}}), "Book", 0, 8);
     reader::Framebuffer fb(w, h);
     theme.renderContents(fb, ramp.fonts, s.vm(), reader::Plane::Bw);
     // NO TEXT IS INKED IN THE RIGHT MARGIN. kMargin is the board's 24px, so the last
@@ -890,7 +890,7 @@ TEST_CASE("A LONG CHAPTER NAME ELIDES INSIDE THE ROW") {
 
 TEST_CASE("held UP or DOWN scrolls, as the Library's does") {
   // A 96-entry contents needs it: one row a press is ~570 ms of panel a row.
-  ContentsScreen s(flat(), "Dexter", 0, 8);
+  ContentsScreen s(reader::shareToc(flat()), "Dexter", 0, 8);
   const reader::ButtonMask repeats = s.autoRepeat();
   CHECK((repeats & reader::buttonBit(reader::Button::Down)) != 0);
   CHECK((repeats & reader::buttonBit(reader::Button::Up)) != 0);
@@ -899,7 +899,7 @@ TEST_CASE("held UP or DOWN scrolls, as the Library's does") {
   // was busy.
   std::vector<TocEntry> many;
   for (int i = 0; i < 40; ++i) many.push_back({i, 1, "Chapter " + std::to_string(i)});
-  ContentsScreen big(many, "Long", 0, 7);
+  ContentsScreen big(reader::shareToc(many), "Long", 0, 7);
   const int was = big.focus();
   big.onEvent(reader::InputEvent{reader::Button::Down, reader::PressKind::Repeat, 9});
   CHECK(big.focus() == was + 9);
@@ -917,7 +917,7 @@ TEST_CASE("a chapter the book's contents skip is reachable from the list") {
       {17, 1, "Notes"}};
   REQUIRE(reader::fillTocGaps(toc, 20) == 3);  // spines 12, 13 and 15
 
-  reader::ContentsScreen s(toc, "Digital Minimalism", 15, 12);
+  reader::ContentsScreen s(reader::shareToc(toc), "Digital Minimalism", 15, 12);
 
   // A ROW EXISTS FOR IT, in spine order, carrying the position -- and carrying the
   // SAME string the reader's header band and the sleep card put on this chapter,
@@ -957,7 +957,7 @@ TEST_CASE("the filled list still marks exactly one row NOW") {
       {0, 1, "Cover"}, {1, 1, "Intro"}, {4, 1, "Later"}, {4, 1, "Later, again"}};
   REQUIRE(reader::fillTocGaps(toc, 9) == 2);  // spines 2 and 3
   for (int spine = 0; spine < 9; ++spine) {
-    reader::ContentsScreen s(toc, "book", spine, 12);
+    reader::ContentsScreen s(reader::shareToc(toc), "book", spine, 12);
     int marked = 0;
     for (int i = 0; i < s.rowCount(); ++i)
       if (i == s.nowRow()) ++marked;
@@ -966,7 +966,7 @@ TEST_CASE("the filled list still marks exactly one row NOW") {
   // EVERY SPINE INSIDE THE NAMED RANGE NOW HAS A ROW, which is the fill's contract
   // read from the screen's side: 0, 1, 2, 3 and 4 all mark something.
   for (int spine = 0; spine <= 4; ++spine) {
-    reader::ContentsScreen s(toc, "book", spine, 12);
+    reader::ContentsScreen s(reader::shareToc(toc), "book", spine, 12);
     CHECK(s.nowRow() >= 0);
   }
 }

@@ -1074,7 +1074,7 @@ TEST_CASE("a cross-chapter way back is BOUNDED -- CH. NN, never a chapter's name
   std::vector<reader::TocEntry> toc;
   toc.push_back({0, 1, "PREMIERE PARTIE : A LIRE ABSOLUMENT AVANT L'ACHAT DU LIVRE"});
   toc.push_back({1, 1, "DEUXIEME PARTIE : ENCORE PLUS LONGUE QUE LA PREMIERE"});
-  rd.setChapterNames(toc);
+  rd.setChapterNames(reader::shareToc(toc));
   rd.setMetrics(m);
 
   const int first = rd.chapterIndex();

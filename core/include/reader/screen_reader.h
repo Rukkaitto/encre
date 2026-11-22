@@ -410,11 +410,15 @@ class ReaderScreen : public Screen {
   // chapter its contents does not mention, still falls back to the position -- one slot,
   // the best name available for it.
   //
-  // A COPY, and it costs ~1.2 KB for a 96-entry book (measured: 1,161 bytes of labels).
-  // The alternative is a reference into something the shell owns for exactly as long as
-  // the screen, which is a lifetime rule to enforce across a chapter crossing for a
-  // saving smaller than one page of laid-out text.
-  void setChapterNames(std::vector<TocEntry> toc);
+  // SHARED, NOT COPIED. This was a copy, priced here at "~1.2 KB for a 96-entry book"
+  // -- right for that book, and ~13 KB for `L'Avenir en commun`, whose 145 long
+  // labels are a heap block each. With the shell's and the factory's copies beside it
+  // that book spent the reading floor, and the glyph rasteriser was what ran out: white
+  // pages under a header band. See `SharedToc` in toc.h. A shared immutable list has
+  // no lifetime rule to enforce, which was the reason a copy was preferred to a
+  // reference. Null is read as "no contents".
+  void setChapterNames(SharedToc toc);
+  const SharedToc& chapterNames() const { return names_; }
 
   // LAND HERE WHEN THE METRICS ARRIVE, instead of on page one. Restoring a saved
   // reading position is the only caller.
@@ -793,7 +797,7 @@ class ReaderScreen : public Screen {
   ReaderViewModel vm_{};
   ScreenId endScreen_ = ScreenId::BookEnd;
   std::string bookTitle_, chapter_label_;
-  std::vector<TocEntry> names_;
+  SharedToc names_;
 
   // THE WHOLE BOOK'S GEOMETRY, read once. 12 bytes a spine entry, so 1,104 for a
   // 92-chapter book -- against the ~32 KB transient a re-parse of the central

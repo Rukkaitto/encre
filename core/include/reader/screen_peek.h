@@ -45,9 +45,11 @@ class GlyphSource;
 //   * EXTRACTING A `ChapterPager`. The right shape in the abstract, and a large
 //     refactor of the most performance-critical code in the firmware for the benefit of
 //     one screen that wants a fraction of it.
-//   * THIS. It costs ~2-3 KB -- the book's 12-bytes-a-spine-entry spans duplicated, and
-//     a second copy of the chapter names -- plus a `Screen` used as a model, which is
-//     an odd thing for a screen to be.
+//   * THIS. It costs ~2-3 KB -- the book's 12-bytes-a-spine-entry spans duplicated
+//     -- plus a `Screen` used as a model, which is an odd thing for a screen to be.
+//     It priced a second copy of the chapter names here too, until a book whose
+//     names ran to ~13 KB a copy showed what that cost; they are shared now (see
+//     `SharedToc` in toc.h).
 //
 // WHAT IT BUYS IS THE ONE PROPERTY THAT MATTERS: THE BLOCK THE PEEK COMMITS IS BY
 // CONSTRUCTION THE ONE THE READER RESTORES. Both sides are `ReaderScreen::currentCursor`
@@ -152,9 +154,11 @@ class PeekScreen : public Screen {
 
   void setItalic(const GlyphSource* italic);
 
-  // The book's chapter names, so the band can say `LIVRE I` instead of `CH. 08`. A
-  // COPY, as ReaderScreen's is, and this is the ~1.2 KB the class comment prices.
-  void setChapterNames(std::vector<TocEntry> toc);
+  // The book's chapter names, so the band can say `LIVRE I` instead of `CH. 08`.
+  // SHARED with the Reader underneath rather than copied -- see `SharedToc` in toc.h
+  // for the book whose contents a copy cost the reading floor.
+  void setChapterNames(SharedToc toc);
+  const SharedToc& chapterNames() const;
 
   const PeekViewModel& vm() const { return vm_; }
   const Page& page() const;

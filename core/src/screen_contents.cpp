@@ -27,10 +27,10 @@ bool hasDeeperEntries(const std::vector<TocEntry>& toc) {
 
 }  // namespace
 
-ContentsScreen::ContentsScreen(std::vector<TocEntry> toc, std::string bookTitle, int spine,
-                               int visibleRows)
-    : FocusScreen(static_cast<int>(toc.size()), visibleRows),
-      entries_(std::move(toc)),
+ContentsScreen::ContentsScreen(SharedToc toc, std::string bookTitle, int spine, int visibleRows)
+    : FocusScreen(toc != nullptr ? static_cast<int>(toc->size()) : 0, visibleRows),
+      toc_(toc != nullptr ? std::move(toc) : shareToc({})),
+      entries_(*toc_),
       sectioned_(hasDeeperEntries(entries_)),
       spine_(spine) {
   vm_.title = "CONTENTS";

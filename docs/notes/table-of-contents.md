@@ -224,3 +224,27 @@ and no hrefs, and matching an NCX target to a spine index needs the real paths o
 sides. One central-directory parse and one OPF inflate (~32 KB transient) when Contents
 opens, not when a book does. Measured 0.2–0.6 ms on the desktop for 28–96 entries, and
 labels total **1,161 bytes for 96 entries** (mean 12.1), so the resident cost is small.
+
+**SMALL FOR THAT BOOK, AND IT WAS HELD THREE TIMES.** `L'Avenir en commun` reported off
+the device as white pages under a header band: 144 NCX entries plus one gap row, labels
+averaging 51 bytes, and 144 of them past the 15-byte small-string buffer, so each label
+is a heap block of its own. That is ~13 KB a copy on the 32-bit heap, and the shell, the
+factory and the Reader each held one, with Contents and the peek adding a fourth while
+open. About 40 KB resident against a reading floor measured at **28,508** bytes. The
+first thing to run out was stb_truetype's transient raster allocation, which fails as an
+empty glyph rather than an abort (`ScalableFont::glyph` answers `nullopt`), so the page
+laid out, the chrome faces drew, and the body text did not. The desktop rendered every
+page of the book, through the real `ReaderScreen` and through the real shell under the
+harness, because neither has a floor.
+
+**It is ONE list now**: `SharedToc`, a `shared_ptr` to a `const` vector, built once by
+`shareToc` when the shell has finished reading it. Every holder takes a reference count,
+the list cannot be edited under a screen drawing from it, and the last holder frees it,
+so the "lifetime rule across a chapter crossing" that once argued for a copy over a
+reference does not arise. `shareToc` also trims the doubling growth `pushOrRefuse` left
+(145 entries in a 256-slot buffer, ~3.5 KB), guarded by `Heap::hasBlock`.
+`test_toc_shared.cpp` pins that the Reader, Contents and the peek hold the factory's
+object and not a copy. **CONFIRMED ON GLASS (2026-11-22): the book's text shows on an
+X3 with this change.** That confirms the symptom is gone. It does not confirm the
+heap figures above, which are arithmetic over the label lengths: the `[toc]` and
+`[open]` lines carry the heap either side of the load, and no log was taken.

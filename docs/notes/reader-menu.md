@@ -319,7 +319,10 @@ floor". Same window, same floor, one screen later.
 At OPEN there is room — `openBook` has released its archive and the Reader's own
 inflater does not exist yet, so the heap is ~133 KB — and it is cheap to keep: **1,161
 bytes of labels for a 96-entry book**, ~12 a row. So the shell reads it in `openBookAt`
-and hands over a copy when Contents opens, with no card work on that press at all.
+and hands it over when Contents opens, with no card work on that press at all. **It
+hands over a SHARED list, not a copy**: a book with long chapter names costs ~13 KB a
+copy, and three copies took `L'Avenir en commun` past the reading floor (see
+`table-of-contents.md`).
 
 **AND THE FACTORY MUST NOT SUBSTITUTE.** `contentsToc_.empty() ? demoContents() : …` is
 what turned a diagnosable allocation failure into a puzzle. The demo is asked for now
