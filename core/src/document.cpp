@@ -210,6 +210,56 @@ void glueDialogueDash(Block& b) {
   }
 }
 
+// WHAT A CHARACTER THE BODY FACE CANNOT DRAW BECOMES, for the ones a book really
+// uses as spacing. Each of these used to reach the page as a notdef box:
+// `L'Avenir en commun` has 321 U+202F and 250 U+2005, a box on almost every page,
+// and the corpus's Standard Ebooks titles carry 60,441 U+FEFF across 96 books.
+//
+// THE TEXT PATH AND NOT THE FONT, for two reasons. The space a line may break at
+// is decided by its BYTES -- `wrapProseLead`, `stretchFor` and `drawRunF26` all
+// key on U+0020 and nothing else -- so a glyph added to the face could make a
+// character visible and never breakable. And a C1 control or a zero-width joiner
+// should not be drawn at all, which no glyph can say.
+//
+// THE RULE IS "WHAT THE FIRMWARE ALREADY DOES FOR THE SPACES THE FACE HAS".
+// Literata carries U+2007..U+200A, and since the wrap breaks only at U+0020 they
+// already draw as fixed, unbreakable, unstretched spaces. The missing thin ones
+// join them as U+00A0, which the face has, which `onlyWhitespace` knows, and which
+// is that same treatment. Unicode would let U+2004..U+2006 break; the books do not
+// use them where a break is right -- U+2005 sits before `: ; ! ?` in 210 of its 250
+// and inside `10 000` in 21 more, the same places French puts U+202F.
+//
+// U+200A IS DELIBERATELY ABSENT. It is in 87 of the corpus's books, mostly between
+// nested quotes, and it already renders; turning it into a breakable space would
+// split `“ ‘` across two lines.
+enum class Fold : uint8_t { Keep, Drop, Space, NoBreak };
+
+Fold foldFor(char32_t cp) {
+  // C1 controls. NEL is a line END, so it separates words; the rest are noise --
+  // one is usually a Windows-1252 byte that was decoded as Latin-1.
+  if (cp >= 0x80 && cp <= 0x9F) return cp == 0x85 ? Fold::Space : Fold::Drop;
+  switch (cp) {
+    case 0x2060:  // WORD JOINER
+    case 0xFEFF:  // ZERO WIDTH NO-BREAK SPACE: the wrap needs no help to not break
+      return Fold::Drop;
+    case 0x1680:  // OGHAM SPACE MARK
+    case 0x2000:  // EN QUAD
+    case 0x2001:  // EM QUAD
+    case 0x2002:  // EN SPACE
+    case 0x2003:  // EM SPACE
+    case 0x3000:  // IDEOGRAPHIC SPACE
+      return Fold::Space;
+    case 0x2004:  // THREE-PER-EM SPACE
+    case 0x2005:  // FOUR-PER-EM SPACE
+    case 0x2006:  // SIX-PER-EM SPACE
+    case 0x202F:  // NARROW NO-BREAK SPACE
+    case 0x205F:  // MEDIUM MATHEMATICAL SPACE
+      return Fold::NoBreak;
+    default:
+      return Fold::Keep;
+  }
+}
+
 // The kind a block gets, read from the WHOLE STACK rather than from the tag that
 // started it -- outermost wins. `<blockquote><p>x</p></blockquote>` is a quoted
 // paragraph, not a paragraph that happens to sit inside a quote, and the same for
@@ -292,6 +342,41 @@ bool BlockReader::next(Block& out) {
   // and then rewriting it.
   const auto appendSpace = [&]() {
     if (!st.cur.text.empty() && st.cur.text.back() != ' ') st.cur.text.push_back(' ');
+  };
+
+  // Applies `foldFor` to the character the last byte COMPLETED, if it completed one.
+  // Called after every continuation byte, so it looks back no further than one
+  // sequence -- and it reads the block's text rather than the text node, because Xml
+  // hands a long run over in chunks and raw UTF-8 can straddle the seam.
+  //
+  // THE SPANS NEED NO MOVING, which is not true of `glueDialogueDash`: emphasis opens
+  // and closes at a TAG, and a tag cannot sit inside a character, so every span
+  // offset is at or before the first byte being replaced. The two clamps are for
+  // markup that breaks that rule, where a span past the end would be read past it.
+  const auto foldTail = [&]() {
+    std::string& t = st.cur.text;
+    const size_t n = t.size();
+    char32_t cp = 0;
+    size_t len = 0;
+    const auto b = [&](size_t back) { return static_cast<unsigned char>(t[n - back]); };
+    if (n >= 2 && (b(2) & 0xE0) == 0xC0) {
+      cp = (static_cast<char32_t>(b(2) & 0x1F) << 6) | (b(1) & 0x3F);
+      len = 2;
+    } else if (n >= 3 && (b(3) & 0xF0) == 0xE0 && (b(2) & 0xC0) == 0x80) {
+      cp = (static_cast<char32_t>(b(3) & 0x0F) << 12) |
+           (static_cast<char32_t>(b(2) & 0x3F) << 6) | (b(1) & 0x3F);
+      len = 3;
+    } else {
+      return;
+    }
+    const Fold f = foldFor(cp);
+    if (f == Fold::Keep) return;
+    t.resize(n - len);
+    if (f == Fold::Space) appendSpace();
+    else if (f == Fold::NoBreak) t.append("\xC2\xA0");
+    if (st.emDepth > 0 && st.emStart > t.size()) st.emStart = t.size();
+    if (!st.cur.emphasis.empty() && st.cur.emphasis.back().end() > t.size())
+      st.cur.emphasis = clipTo(st.cur.emphasis, 0, t.size());
   };
 
   // Closes the emphasis span that is open, if one is, at the text's current end.
@@ -637,6 +722,9 @@ bool BlockReader::next(Block& out) {
         cutHere = cutHere || have;
       }
       st.cur.text.push_back(c);
+      // Only a continuation byte can complete a multibyte character, so ASCII --
+      // nearly every byte of a book -- pays one comparison.
+      if ((static_cast<unsigned char>(c) & 0xC0) == 0x80) foldTail();
     }
     if (cutHere) return true;
   }
