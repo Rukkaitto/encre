@@ -244,5 +244,7 @@ so the "lifetime rule across a chapter crossing" that once argued for a copy ove
 reference does not arise. `shareToc` also trims the doubling growth `pushOrRefuse` left
 (145 entries in a 256-slot buffer, ~3.5 KB), guarded by `Heap::hasBlock`.
 `test_toc_shared.cpp` pins that the Reader, Contents and the peek hold the factory's
-object and not a copy. **What only the glass can confirm** is that this book now reads:
-the `[toc]` and `[open]` lines carry the heap either side of the load.
+object and not a copy. **CONFIRMED ON GLASS (2026-11-22): the book's text shows on an
+X3 with this change.** That confirms the symptom is gone. It does not confirm the
+heap figures above, which are arithmetic over the label lengths: the `[toc]` and
+`[open]` lines carry the heap either side of the load, and no log was taken.
