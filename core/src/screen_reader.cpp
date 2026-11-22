@@ -159,7 +159,7 @@ void ReaderScreen::relayout(const PageMetrics& m) {
   setMetrics(m);
 }
 
-void ReaderScreen::setChapterNames(std::vector<TocEntry> toc) {
+void ReaderScreen::setChapterNames(SharedToc toc) {
   names_ = std::move(toc);
   updateChapterLabel();  // whatever is open now gets its name immediately
   syncVm();
@@ -178,9 +178,9 @@ void ReaderScreen::updateChapterLabel() {
   // phases -- and this label is computed when a chapter OPENS, which is its first page
   // on a jump and on a forward crossing, so the last was wrong at the one moment it
   // was asked. See toc.h for the argument and the corpus figures.
-  const int at = tocIndexForSpine(names_, chapterAt_);
-  if (at >= 0 && !names_[static_cast<size_t>(at)].label.empty()) {
-    chapter_label_ = names_[static_cast<size_t>(at)].label;
+  const int at = names_ != nullptr ? tocIndexForSpine(*names_, chapterAt_) : -1;
+  if (at >= 0 && !(*names_)[static_cast<size_t>(at)].label.empty()) {
+    chapter_label_ = (*names_)[static_cast<size_t>(at)].label;
     return;
   }
   // THE POSITION IS STILL THE FALLBACK, for a book with NO contents at all -- and

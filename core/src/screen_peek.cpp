@@ -70,7 +70,9 @@ void PeekScreen::setMetrics(const PageMetrics& m) {
 
 void PeekScreen::setItalic(const GlyphSource* italic) { inner_->setItalic(italic); }
 
-void PeekScreen::setChapterNames(std::vector<TocEntry> toc) {
+const SharedToc& PeekScreen::chapterNames() const { return inner_->chapterNames(); }
+
+void PeekScreen::setChapterNames(SharedToc toc) {
   inner_->setChapterNames(std::move(toc));
   // The label the band draws comes from the inner reader's own view model, so it only
   // becomes the book's name for the chapter once the names have arrived.

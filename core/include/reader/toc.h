@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -85,6 +86,35 @@ inline constexpr size_t kMaxTocEntries = 1024;
 // under 40 bytes, and `Xml` hands a longer run over in several pieces so an
 // unbounded accumulation is a file's choice rather than a document's property.
 inline constexpr size_t kMaxTocLabelBytes = 128;
+
+// ONE LIST, HOWEVER MANY SCREENS DRAW FROM IT.
+//
+// The shell reads the contents once, at open, and four things want them: the shell
+// itself (to hand them over again when the menu opens Contents), the factory, the
+// Reader's header band, and -- while open -- Contents and the peek. Each used to hold
+// a COPY, which the Reader's own comment priced at "~1.2 KB for a 96-entry book".
+//
+// `L'Avenir en commun` is 145 entries averaging 51 bytes of label, nearly all past
+// the small-string buffer and so a heap block each: ~13 KB a copy on the device,
+// three copies resident while reading, ~40 KB against a reading floor measured at
+// 28,508 bytes. What ran out was stb_truetype's transient raster allocation, which
+// fails as an empty glyph rather than an abort -- so the book opened, laid out, and
+// drew white pages under a header band that is a pre-built face and needs no heap.
+//
+// IMMUTABLE AND SHARED, so a holder costs a reference count. `const` is the part that
+// makes sharing safe without a lifetime rule: nothing can edit a list another screen
+// is drawing from, and the last holder to go frees it.
+using SharedToc = std::shared_ptr<const std::vector<TocEntry>>;
+
+// Wraps a finished list for sharing. Never null -- an empty book has an empty list,
+// so no holder needs a null check that one of them would forget.
+//
+// AND IT GIVES BACK THE GROWTH SLACK. loadToc and fillTocGaps grow by doubling, so a
+// 145-entry list sits in a 256-slot buffer; once the list is immutable that slack is
+// memory nothing will ever use. Trimmed only when the heap can serve the exact size
+// while the old buffer is still held -- otherwise it keeps the slack, which costs
+// memory and nothing else.
+SharedToc shareToc(std::vector<TocEntry> toc);
 
 // Reads `bookPath`'s table of contents.
 //

@@ -188,18 +188,18 @@ TEST_CASE("the header shows the chapter's NAME when the contents supply one") {
   // an order and no names. toc.h supplies them.
   Reading r(longChapter(10));
   // The in-memory chapter is spine 0 as far as the screen is concerned.
-  r.scr->setChapterNames({{0, 1, "LE CERCLE S'OUVRE"}});
+  r.scr->setChapterNames(reader::shareToc({{0, 1, "LE CERCLE S'OUVRE"}}));
   CHECK(r.scr->vm().chapter == "LE CERCLE S'OUVRE");
 }
 
 TEST_CASE("the position is the fallback, for a book or a chapter with no name") {
   Reading r(longChapter(10));
   // No contents at all -- a book with no NCX still reads.
-  r.scr->setChapterNames({});
+  r.scr->setChapterNames(reader::shareToc({}));
   CHECK(r.scr->vm().chapter == "CH. 01");
   // ...and a contents that does not mention THIS chapter. Spine entry 0 of a real book
   // is its cover, and nothing names that.
-  r.scr->setChapterNames({{7, 1, "LIVRE I"}});
+  r.scr->setChapterNames(reader::shareToc({{7, 1, "LIVRE I"}}));
   CHECK(r.scr->vm().chapter == "CH. 01");
 }
 
@@ -207,7 +207,7 @@ TEST_CASE("an empty label falls back rather than showing nothing") {
   // A malformed NCX can carry an entry with a target and no text -- toc.h skips those,
   // but the screen must not depend on that to avoid an empty header.
   Reading r(longChapter(10));
-  r.scr->setChapterNames({{0, 1, ""}});
+  r.scr->setChapterNames(reader::shareToc({{0, 1, ""}}));
   CHECK(r.scr->vm().chapter == "CH. 01");
 }
 
@@ -222,7 +222,7 @@ TEST_CASE("the FIRST entry naming a chapter wins, and the band agrees with Conte
   // It is one rule with Contents' `NOW` marker rather than two, because a band naming
   // one entry over a list marking another is two spellings of one fact.
   Reading r(longChapter(10));
-  r.scr->setChapterNames({{0, 1, "PART ONE"}, {0, 2, "Section two"}});
+  r.scr->setChapterNames(reader::shareToc({{0, 1, "PART ONE"}, {0, 2, "Section two"}}));
   CHECK(r.scr->vm().chapter == "PART ONE");
 }
 

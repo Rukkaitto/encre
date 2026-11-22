@@ -695,7 +695,13 @@ static struct {
   // At OPEN there is room -- openBook has released its archive and the Reader's own
   // inflater does not exist yet, so the heap is ~133 KB. And it is cheap to keep:
   // measured 1,161 bytes of labels for a 96-entry book, ~12 a row.
-  std::vector<reader::TocEntry> toc;
+  //
+  // ...AND ~13 KB FOR `L'Avenir en commun`, whose 145 labels are long enough to be a
+  // heap block each. Held as a copy here, in the factory and in the Reader, that book
+  // spent the reading floor and the glyph rasteriser failed silently: white pages
+  // under a header band. SHARED now, one list for every holder -- see `SharedToc` in
+  // toc.h. Null until a book has been opened.
+  reader::SharedToc toc;
   // AN ARTICLE'S `finished` MARK, READ AT OPEN. A BOOK HAS NO SUCH FIELD HERE, AND
   // THE ASYMMETRY IS THE SAME ONE THAT DECIDES THE DOT.
   //
@@ -4616,7 +4622,9 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
   // THE CONTENTS, HERE AND NOWHERE ELSE -- see gReading.toc for why this cannot happen
   // when the list is opened. A book with no NCX yields an empty list, which is a book
   // that reads fine and cannot name its chapters, so a failure is logged and dropped.
-  gReading.toc.clear();
+  // Released here so the previous book's list goes as soon as its last holder does --
+  // the factory keeps its handle until setContents below, as it kept its copy before.
+  gReading.toc.reset();
   {
     const uint32_t tocT = millis();
     const uint32_t tocHeap = ESP.getFreeHeap();
@@ -4626,9 +4634,10 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
     // for it -- openBook has released its own and the Reader's inflater does not
     // exist yet. A second open would be ~100 ms and a second directory parse.
     std::vector<std::string> italicClasses;
-    const bool tocOk = reader::loadToc(gSd, path, gReading.toc, &tocWhy, &italicClasses);
+    std::vector<reader::TocEntry> toc;
+    const bool tocOk = reader::loadToc(gSd, path, toc, &tocWhy, &italicClasses);
     logf("[toc] %s: %u entries in %lums, heap %u -> %u, min %u%s%s\n",
-         tocOk ? "read" : "REFUSED", (unsigned)gReading.toc.size(),
+         tocOk ? "read" : "REFUSED", (unsigned)toc.size(),
          (unsigned long)(millis() - tocT), (unsigned)tocHeap,
          (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
          tocWhy[0] != '\0' ? " -- " : "", tocWhy);
@@ -4641,9 +4650,12 @@ static bool openBookAt(const std::string& path, uint32_t bookBytes, bool push) {
     // what the book AUTHORED and this adds rows the book did not write. It needs the
     // spine's length, which `opened` has in hand one scope up and the archive read
     // does not.
-    const size_t filled = reader::fillTocGaps(gReading.toc, opened.chapterCount());
+    const size_t filled = reader::fillTocGaps(toc, opened.chapterCount());
     if (filled != 0)
       logf("[toc] %u chapter(s) the contents skip, given a row\n", (unsigned)filled);
+    // FINISHED, SO SHARED: from here the list is immutable, and the factory, the Reader,
+    // Contents and the peek hold this one rather than a copy each.
+    gReading.toc = reader::shareToc(std::move(toc));
 
     // NAMED IN THE LOG, because a book whose italics do not render has three
     // explanations and this is the one that used to be invisible. `[markup]` says
@@ -8397,7 +8409,7 @@ void loop() {
           }
           gFactory.setContents(gReading.toc, spine);
           logf("[toc] handing over %u entries, marking spine %d\n",
-               (unsigned)gReading.toc.size(), spine);
+               gReading.toc != nullptr ? (unsigned)gReading.toc->size() : 0u, spine);
           logFlush();
         }
       }
